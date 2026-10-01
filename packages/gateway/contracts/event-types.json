@@ -1,0 +1,20 @@
+{
+  "run.state": "Run",
+  "message.created": "Message",
+  "assistant.delta": "AssistantDelta",
+  "assistant.settled": "AssistantSettled",
+  "activity.upsert": "Activity",
+  "source.upsert": "Source",
+  "interaction.requested": "Interaction",
+  "interaction.resolved": "Interaction",
+  "artifact.upsert": "Artifact",
+  "run.artifact": "RunArtifact",
+  "usage.updated": "Usage",
+  "run.error": "RunError",
+  "goal.updated": "ProjectionPayload",
+  "progress.updated": "ProjectionPayload",
+  "runtime.outcome": "ProjectionPayload",
+  "checkpoint.upsert": "ProjectionPayload",
+  "delivery.upsert": "ProjectionPayload",
+  "response.upsert": "ProjectionPayload"
+}

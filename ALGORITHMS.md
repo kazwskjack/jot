@@ -32,7 +32,7 @@ Request admission also checks the conversation's unfinished runs inside an immed
 
 The gateway runs bounded polling slots. Its coordinator claims queued work in creation order, prioritizing queued rows before reclaiming expired active leases. A queued run cannot be claimed while another run in its conversation is starting, running, waiting or cancelling. This is ordered database scheduling, rather than a guarantee of strict global FIFO completion across processes.
 
-**Source:** [`src/agent.mjs`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/src/agent.mjs), [`src/store.mjs`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/src/store.mjs), [`worker-pool.ts`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/packages/gateway/src/harness/worker-pool.ts), [`coordinator.ts`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/packages/gateway/src/harness/coordinator.ts).
+**Source:** [`src/agent.mjs`](src/agent.mjs), [`src/store.mjs`](src/store.mjs), [`worker-pool.ts`](packages/gateway/src/harness/worker-pool.ts), [`coordinator.ts`](packages/gateway/src/harness/coordinator.ts).
 
 ## 2. Idempotent admission and tool-call deduplication
 
@@ -44,7 +44,7 @@ This result cache is in memory for that run. It does not promise exactly-once ex
 
 The gateway also hashes request material for its HTTP idempotency ledger. The scope includes the owner and operation. A completed duplicate returns its recorded response; changed input conflicts, and an unfinished duplicate reports that it is still in progress. Separate message identities prevent duplicate conversation messages. These admission guarantees do not establish exactly-once behavior for a remote website or delivery provider.
 
-**Source:** [`src/store.mjs`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/src/store.mjs), [`src/agent.mjs`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/src/agent.mjs), [`gateway server`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/packages/gateway/src/server.ts), [`run repository`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/packages/gateway/src/runs/repository.ts).
+**Source:** [`src/store.mjs`](src/store.mjs), [`src/agent.mjs`](src/agent.mjs), [`gateway server`](packages/gateway/src/server.ts), [`run repository`](packages/gateway/src/runs/repository.ts).
 
 ## 3. WAL and transaction boundaries
 
@@ -54,7 +54,7 @@ The gateway's transaction helper commits state changes or rolls them back. Its e
 
 WAL allows readers to coexist with a writer. It does not turn SQLite into a distributed database or eliminate its single-writer limitation. The portable runtime also does not wrap every later state mutation and event append in a shared transaction.
 
-**Source:** [`src/store.mjs`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/src/store.mjs), [`database.ts`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/packages/gateway/src/db/database.ts), [`event-store.ts`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/packages/gateway/src/events/event-store.ts), [`repository.ts`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/packages/gateway/src/runs/repository.ts).
+**Source:** [`src/store.mjs`](src/store.mjs), [`database.ts`](packages/gateway/src/db/database.ts), [`event-store.ts`](packages/gateway/src/events/event-store.ts), [`repository.ts`](packages/gateway/src/runs/repository.ts).
 
 ## 4. Approval is bound to an operation
 
@@ -66,7 +66,7 @@ The gateway verifies interaction ownership, pending status, expected version and
 
 Neither approval mechanism authorizes unrelated future actions. An approval ID is also not a replacement for authentication.
 
-**Source:** [`src/agent.mjs`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/src/agent.mjs), [`src/tools.mjs`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/src/tools.mjs), [`src/server.mjs`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/src/server.mjs), [`interaction service`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/packages/gateway/src/interactions/service.ts), [`Session dispatcher`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/packages/gateway/src/harness/command-dispatcher.ts).
+**Source:** [`src/agent.mjs`](src/agent.mjs), [`src/tools.mjs`](src/tools.mjs), [`src/server.mjs`](src/server.mjs), [`interaction service`](packages/gateway/src/interactions/service.ts), [`Session dispatcher`](packages/gateway/src/harness/command-dispatcher.ts).
 
 ## 5. Cursor-based progress and settled answers
 
@@ -78,7 +78,7 @@ The Session runner chooses a live or durable assistant stream source rather than
 
 These mechanisms provide replayable state. They do not guarantee that every upstream external service retains events indefinitely.
 
-**Source:** [`src/store.mjs`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/src/store.mjs), [`src/server.mjs`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/src/server.mjs), [`event-store.ts`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/packages/gateway/src/events/event-store.ts), [`coordinator.ts`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/packages/gateway/src/harness/coordinator.ts), [`official-session-runner.ts`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/packages/gateway/src/harness/official-session-runner.ts).
+**Source:** [`src/store.mjs`](src/store.mjs), [`src/server.mjs`](src/server.mjs), [`event-store.ts`](packages/gateway/src/events/event-store.ts), [`coordinator.ts`](packages/gateway/src/harness/coordinator.ts), [`official-session-runner.ts`](packages/gateway/src/harness/official-session-runner.ts).
 
 ## 6. Failure classification and bounded recovery
 
@@ -90,7 +90,7 @@ The gateway includes a classification function that can return continue, wait, s
 
 This function currently has no caller in the included worker. Its decision rules are available for integration, not a claim that automatic retries or tool switching are enabled. Other included polling loops and adapters have their own behavior and should not be described as governed by that policy.
 
-**Source:** [`src/provider.mjs`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/src/provider.mjs), [`src/agent.mjs`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/src/agent.mjs), [`src/tools.mjs`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/src/tools.mjs), [`decision-policy.ts`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/packages/gateway/src/harness/decision-policy.ts).
+**Source:** [`src/provider.mjs`](src/provider.mjs), [`src/agent.mjs`](src/agent.mjs), [`src/tools.mjs`](src/tools.mjs), [`decision-policy.ts`](packages/gateway/src/harness/decision-policy.ts).
 
 ## 7. Hashes, versions and artifact evidence
 
@@ -100,7 +100,7 @@ The gateway includes version-and-hash checks for file jobs. A job's base version
 
 Hash equality verifies byte identity. It does not verify the factual correctness of generated prose or a document's visual quality. Rendering and file-engine execution require their configured supporting adapters.
 
-**Source:** [`src/tools.mjs`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/src/tools.mjs), [`src/store.mjs`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/src/store.mjs), [`file jobs`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/packages/gateway/src/file-engine/jobs.ts), [`templates`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/packages/gateway/src/file-engine/templates.ts), [`archive service`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/packages/gateway/src/artifacts/archive-service.ts).
+**Source:** [`src/tools.mjs`](src/tools.mjs), [`src/store.mjs`](src/store.mjs), [`file jobs`](packages/gateway/src/file-engine/jobs.ts), [`templates`](packages/gateway/src/file-engine/templates.ts), [`archive service`](packages/gateway/src/artifacts/archive-service.ts).
 
 ## 8. Cancellation and lease fencing
 
@@ -112,7 +112,7 @@ Cancel commands take priority over steer commands in the included dispatcher. An
 
 Fencing protects product state writes. It cannot undo an external action or guarantee that every external adapter applies the same generation checks.
 
-**Source:** [`src/agent.mjs`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/src/agent.mjs), [`src/store.mjs`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/src/store.mjs), [`run commands`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/packages/gateway/src/runs/commands.ts), [`coordinator.ts`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/packages/gateway/src/harness/coordinator.ts), [`worker.ts`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/packages/gateway/src/harness/worker.ts), [`command-dispatcher.ts`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/packages/gateway/src/harness/command-dispatcher.ts).
+**Source:** [`src/agent.mjs`](src/agent.mjs), [`src/store.mjs`](src/store.mjs), [`run commands`](packages/gateway/src/runs/commands.ts), [`coordinator.ts`](packages/gateway/src/harness/coordinator.ts), [`worker.ts`](packages/gateway/src/harness/worker.ts), [`command-dispatcher.ts`](packages/gateway/src/harness/command-dispatcher.ts).
 
 ## 9. Model and operation budgets
 
@@ -122,7 +122,7 @@ These are execution guards, not a monetary budget. The portable runtime does not
 
 The gateway Session runner bounds automatic continuation of an already-started batch, with a default of eight continuations and a maximum of sixteen. A continuation polls the existing batch rather than starting it again. The runner accepts an optional total timeout, but the included worker entry point does not set one. Model-token, context and cost policies belong to the external Agent runtime unless additional integration is supplied.
 
-**Source:** [`src/agent.mjs`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/src/agent.mjs), [`src/provider.mjs`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/src/provider.mjs), [`src/tools.mjs`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/src/tools.mjs), [`official-session-runner.ts`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/packages/gateway/src/harness/official-session-runner.ts), [`worker entry point`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/packages/gateway/src/harness/main.ts).
+**Source:** [`src/agent.mjs`](src/agent.mjs), [`src/provider.mjs`](src/provider.mjs), [`src/tools.mjs`](src/tools.mjs), [`official-session-runner.ts`](packages/gateway/src/harness/official-session-runner.ts), [`worker entry point`](packages/gateway/src/harness/main.ts).
 
 ## Optional decision and multi-Agent integrations
 
@@ -134,7 +134,7 @@ Likewise, a shared browser pool with numbered slots, per-origin throttling, tab 
 
 Suggested extensions should preserve the same boundaries: one planner owns the task goal, executors return verifiable results, advisory decision models cannot override permissions, and state publication rejects stale ownership or generation.
 
-**Source:** [`emotion-advisor.ts`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/packages/gateway/src/harness/emotion-advisor.ts), [`session-event-projector.ts`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/packages/gateway/src/harness/session-event-projector.ts), [`batch projection service`](https://github.com/kazwskjack/jot/blob/feat/standalone-agent/packages/gateway/src/crawl-batch/service.ts).
+**Source:** [`emotion-advisor.ts`](packages/gateway/src/harness/emotion-advisor.ts), [`session-event-projector.ts`](packages/gateway/src/harness/session-event-projector.ts), [`batch projection service`](packages/gateway/src/crawl-batch/service.ts).
 
 ## Verification scope
 

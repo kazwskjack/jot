@@ -1,0 +1,4617 @@
+openapi: 3.1.0
+info:
+  title: General Agent Web Product API（建议新建，非 DeepSeek 官方原生 API）
+  version: 1.0.0
+  description: 基于 DeepSeek Harness + 现有 Runtime 的产品边界接口设计稿。HTTP/SSE 协议、字段与错误规则供开发实现；不表示仓库已经提供这些路由。快照和事件使用统一投影；OpenAPI
+    描述 REST，AgentEvent schema 描述 SSE 载荷。
+servers:
+- url: https://agent.example.com
+  description: 示例域名，部署时替换
+security:
+- SessionCookie: []
+paths:
+  /v1/capabilities:
+    get:
+      operationId: getCapabilities
+      summary: 读取能力、模型和限制
+      description: 前端由能力集合决定是否展示开关。reasoning_output 与 reasoning_effort 分离；不保证所有模型都返回 reasoning。 workspaces只返回当前用户授权范围的标识与显示名，不返回服务器绝对路径。
+      tags:
+      - capabilities
+      parameters: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Capabilities'
+        '400':
+          description: 参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 未登录或会话失效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: 无权限/CSRF 校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 资源不存在或不允许披露
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 版本/运行状态/幂等冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410':
+          description: 交互、上传或事件游标已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 请求/文件超过限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 能力不支持或业务参数不可执行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 并发、速率或预算限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Worker 不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/projects:
+    get:
+      operationId: listProjects
+      summary: 列出操作者的项目
+      tags: [projects]
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectPage'
+    post:
+      operationId: createProject
+      summary: 创建项目
+      tags: [projects]
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProject'
+      responses:
+        '201':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+  /v1/projects/{project_id}:
+    patch:
+      operationId: updateProject
+      summary: 重命名项目
+      tags: [projects]
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/CsrfToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProject'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+  /v1/conversations:
+    get:
+      operationId: listConversations
+      summary: 列出可访问会话
+      description: ''
+      tags:
+      - conversations
+      parameters:
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+        description: ''
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 30
+        description: ''
+      - name: project_id
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: state
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [active, archived, all]
+          default: active
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationPage'
+        '400':
+          description: 参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 未登录或会话失效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: 无权限/CSRF 校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 资源不存在或不允许披露
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 版本/运行状态/幂等冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410':
+          description: 交互、上传或事件游标已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 请求/文件超过限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 能力不支持或业务参数不可执行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 并发、速率或预算限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Worker 不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      operationId: createConversation
+      summary: 创建会话并绑定工作区
+      description: 仅允许选择用户已授权的 workspace_id；不接受用户传任意 cwd 或服务器绝对路径。
+      tags:
+      - conversations
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conversation'
+        '400':
+          description: 参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 未登录或会话失效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: 无权限/CSRF 校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 资源不存在或不允许披露
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 版本/运行状态/幂等冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410':
+          description: 交互、上传或事件游标已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 请求/文件超过限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 能力不支持或业务参数不可执行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 并发、速率或预算限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Worker 不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateConversation'
+  /v1/conversations/{conversation_id}:
+    get:
+      operationId: getConversation
+      summary: 读取会话元数据
+      description: ''
+      tags:
+      - conversations
+      parameters:
+      - name: conversation_id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conversation'
+        '400':
+          description: 参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 未登录或会话失效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: 无权限/CSRF 校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 资源不存在或不允许披露
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 版本/运行状态/幂等冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410':
+          description: 交互、上传或事件游标已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 请求/文件超过限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 能力不支持或业务参数不可执行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 并发、速率或预算限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Worker 不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      operationId: updateConversation
+      summary: 更改标题或模型
+      description: 乐观锁 expected_version；更改模型要求无活动运行，否则 409。仅改标题不影响运行。
+      tags:
+      - conversations
+      parameters:
+      - name: conversation_id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+      - $ref: '#/components/parameters/CsrfToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conversation'
+        '400':
+          description: 参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 未登录或会话失效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: 无权限/CSRF 校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 资源不存在或不允许披露
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 版本/运行状态/幂等冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410':
+          description: 交互、上传或事件游标已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 请求/文件超过限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 能力不支持或业务参数不可执行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 并发、速率或预算限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Worker 不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateConversation'
+  /v1/conversations/{conversation_id}/snapshot:
+    get:
+      operationId: getSnapshot
+      summary: 读取一致性会话快照
+      description: as_of_seq 与投影来自同一一致性水位。包含活动运行、全部待办和所返回尾部消息的关联对象。首次最多尾部200条；history_complete=false 时用 next_history_cursor
+        取更早消息。stream_cursors 用于恢复增量索引。不得把快照替换成新任务。
+      tags:
+      - conversations
+      parameters:
+      - name: conversation_id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Snapshot'
+        '400':
+          description: 参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 未登录或会话失效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: 无权限/CSRF 校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 资源不存在或不允许披露
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 版本/运行状态/幂等冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410':
+          description: 交互、上传或事件游标已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 请求/文件超过限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 能力不支持或业务参数不可执行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 并发、速率或预算限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Worker 不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/conversations/{conversation_id}/messages:
+    get:
+      operationId: listMessages
+      summary: 分页读取更早消息
+      description: 仅加载旧历史；按 message_id 合并，旧版本不得覆盖当前流式消息。活动过程与待办始终以 snapshot + events 为准。
+      tags:
+      - conversations
+      parameters:
+      - name: conversation_id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+        description: ''
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 50
+        description: ''
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessagePage'
+        '400':
+          description: 参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 未登录或会话失效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: 无权限/CSRF 校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 资源不存在或不允许披露
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 版本/运行状态/幂等冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410':
+          description: 交互、上传或事件游标已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 请求/文件超过限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 能力不支持或业务参数不可执行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 并发、速率或预算限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Worker 不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      operationId: sendMessage
+      summary: 发送普通消息，创建排队运行
+      description: 每条普通消息创建独立 run_id；同会话单运行串行，忙时进入 queued。附件必须已完成上传、属于同会话且 ready。client_message_id 作为客户端去重键，不充当完成结果。
+      tags:
+      - conversations
+      parameters:
+      - name: conversation_id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+      - $ref: '#/components/parameters/CsrfToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '202':
+          description: 成功；202 仅表示已接受，最终结果见运行状态与事件流。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageReceipt'
+        '400':
+          description: 参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 未登录或会话失效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: 无权限/CSRF 校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 资源不存在或不允许披露
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 版本/运行状态/幂等冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410':
+          description: 交互、上传或事件游标已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 请求/文件超过限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 能力不支持或业务参数不可执行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 并发、速率或预算限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Worker 不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMessage'
+  /v1/conversations/{conversation_id}/voice/transcriptions:
+    post:
+      operationId: createVoiceTranscription
+      summary: 上传完整录音并排队转写
+      description: 先校验会话归属，再接受规范 16 kHz 单声道 PCM16 WAV；同一用户、会话和 client_request_id 幂等。音频只保存在进程内存，转写不会创建会话消息或自动发送。
+      tags: [voice]
+      parameters:
+      - name: conversation_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                client_request_id:
+                  type: string
+                  minLength: 8
+                  maxLength: 128
+                language:
+                  type: string
+                  maxLength: 64
+                audio:
+                  type: string
+                  format: binary
+              required: [client_request_id, audio]
+              additionalProperties: false
+      responses:
+        '202':
+          description: 已接受，可用 transcription_id 查询
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoiceTranscription'
+        '403':
+          description: Origin 或 CSRF 校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 会话不存在或不允许披露
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 同一请求 ID 的内容不一致
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 录音超过 2 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: WAV、语言或请求字段无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 当前有另一个语音识别任务
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: DSH 语音 provider 尚未就绪
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/conversations/{conversation_id}/voice/transcriptions/{transcription_id}:
+    get:
+      operationId: getVoiceTranscription
+      summary: 查询转写状态或结果
+      tags: [voice]
+      parameters:
+      - name: conversation_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: transcription_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: 状态或短期保存在进程内存中的识别文本
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoiceTranscription'
+        '404':
+          description: 任务不存在或不允许披露
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      operationId: cancelVoiceTranscription
+      summary: 取消转写并等待 provider 停止
+      tags: [voice]
+      parameters:
+      - name: conversation_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: transcription_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: provider 已停止或任务已结束
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoiceTranscription'
+        '404':
+          description: 任务不存在或不允许披露
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/conversations/{conversation_id}/events:
+    get:
+      operationId: followEvents
+      summary: 订阅会话 SSE 事件
+      description: 先重放 seq>游标，再追随实时事件，无缝切换。Last-Event-ID 若存在则优先于 after；未来游标返回409，过期游标410。心跳注释不分配seq。只断流不取消任务。每条
+        agent_event 的 data 必须符合 AgentEvent；stream_reset 为独立控制帧。
+      tags:
+      - conversations
+      parameters:
+      - name: conversation_id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+      - name: after
+        in: query
+        required: false
+        schema:
+          type: string
+          pattern: ^(0|[1-9][0-9]*)$
+        description: 初次使用 snapshot.as_of_seq。
+      - name: Last-Event-ID
+        in: header
+        required: false
+        schema:
+          type: string
+          pattern: ^(0|[1-9][0-9]*)$
+      responses:
+        '200':
+          description: 成功
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              example: 'id: 42
+
+                event: agent_event
+
+                data: {"schema_version":"1.0","seq":"42","type":"activity.upsert","...":"完整字段见事件 Schema"}
+
+
+                '
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+              description: private, no-cache, no-transform
+            X-Accel-Buffering:
+              schema:
+                type: string
+              description: 'no'
+        '400':
+          description: 参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 未登录或会话失效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: 无权限/CSRF 校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 资源不存在或不允许披露
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 版本/运行状态/幂等冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410':
+          description: 交互、上传或事件游标已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 请求/文件超过限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 能力不支持或业务参数不可执行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 并发、速率或预算限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Worker 不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/runs/{run_id}:
+    get:
+      operationId: getRun
+      summary: 查询运行状态
+      description: ''
+      tags:
+      - runs
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Run'
+        '400':
+          description: 参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 未登录或会话失效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: 无权限/CSRF 校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 资源不存在或不允许披露
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 版本/运行状态/幂等冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410':
+          description: 交互、上传或事件游标已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 请求/文件超过限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 能力不支持或业务参数不可执行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 并发、速率或预算限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Worker 不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/runs/{run_id}/artifacts:
+    get:
+      operationId: listRunArtifacts
+      summary: 读取指定运行已产生的文件成果
+      description: 按固定 artifact_id 和 version 返回。即使任务最终 interrupted 或 failed，已经登记且仍可访问的成果也会列出。
+      tags:
+      - runs
+      - artifacts
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunArtifactPage'
+        '401':
+          description: 未登录或会话失效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 运行不存在或不允许披露
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/runs/{run_id}/steer:
+    post:
+      operationId: steerRun
+      summary: 向当前运行插话
+      description: 仅 running 状态接受；在 Harness 下一 step 安全边界生效，不保证中止正在执行的工具。waiting_user/approval 时返回409并提示对应 interaction。不得创建新
+        run。
+      tags:
+      - runs
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+      - $ref: '#/components/parameters/CsrfToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '202':
+          description: 成功；202 仅表示已接受，最终结果见运行状态与事件流。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandReceipt'
+        '400':
+          description: 参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 未登录或会话失效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: 无权限/CSRF 校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 资源不存在或不允许披露
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 版本/运行状态/幂等冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410':
+          description: 交互、上传或事件游标已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 请求/文件超过限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 能力不支持或业务参数不可执行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 并发、速率或预算限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Worker 不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SteerRequest'
+  /v1/runs/{run_id}/cancel:
+    post:
+      operationId: cancelRun
+      summary: 请求取消指定运行
+      description: queued 可直接取消该排队输入；running/等待状态先进入 cancelling，清理执行资源、撤回待办后收敛为 cancelled。保留其他 run 的排队消息。终态重复取消按幂等返回既有结果或409，不承诺回滚已经发生的写操作。
+      tags:
+      - runs
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+      - $ref: '#/components/parameters/CsrfToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '202':
+          description: 成功；202 仅表示已接受，最终结果见运行状态与事件流。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandReceipt'
+        '400':
+          description: 参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 未登录或会话失效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: 无权限/CSRF 校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 资源不存在或不允许披露
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 版本/运行状态/幂等冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410':
+          description: 交互、上传或事件游标已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 请求/文件超过限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 能力不支持或业务参数不可执行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 并发、速率或预算限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Worker 不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelRequest'
+  /v1/runs/{run_id}/resume:
+    post:
+      operationId: resumeRun
+      summary: 从安全检查点创建续接运行
+      description: 只允许 interrupted/failed 且检查点可恢复。新 run_id 的 continuation_of 指向原运行。副作用结果未对账时409 RECONCILIATION_REQUIRED；不恢复旧
+        Promise、不盲重放工具。
+      tags:
+      - runs
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+      - $ref: '#/components/parameters/CsrfToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '202':
+          description: 成功；202 仅表示已接受，最终结果见运行状态与事件流。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResumeReceipt'
+        '400':
+          description: 参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 未登录或会话失效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: 无权限/CSRF 校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 资源不存在或不允许披露
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 版本/运行状态/幂等冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410':
+          description: 交互、上传或事件游标已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 请求/文件超过限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 能力不支持或业务参数不可执行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 并发、速率或预算限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Worker 不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResumeRequest'
+  /v1/conversations/{conversation_id}/interactions:
+    get:
+      operationId: listInteractions
+      summary: 查询交互待办
+      description: 默认pending。刷新恢复按钮与问卷，不依赖浏览器本地缓存或文字问号识别。
+      tags:
+      - conversations
+      parameters:
+      - name: conversation_id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - pending
+          - all
+        description: ''
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InteractionPage'
+        '400':
+          description: 参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 未登录或会话失效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: 无权限/CSRF 校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 资源不存在或不允许披露
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 版本/运行状态/幂等冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410':
+          description: 交互、上传或事件游标已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 请求/文件超过限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 能力不支持或业务参数不可执行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 并发、速率或预算限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Worker 不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/interactions/{interaction_id}/response:
+    post:
+      operationId: answerQuestion
+      summary: 提交问题答案
+      description: 只处理 question。校验版本、状态、问题ID、选项ID、多选规则和有效期；在同一事务写入答案与续跑命令。产品选项ID映射回官方答案label。失败不得自动转为普通聊天。
+      tags:
+      - interactions
+      parameters:
+      - name: interaction_id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+      - $ref: '#/components/parameters/CsrfToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '202':
+          description: 成功；202 仅表示已接受，最终结果见运行状态与事件流。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InteractionReceipt'
+        '400':
+          description: 参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 未登录或会话失效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: 无权限/CSRF 校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 资源不存在或不允许披露
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 版本/运行状态/幂等冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410':
+          description: 交互、上传或事件游标已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 请求/文件超过限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 能力不支持或业务参数不可执行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 并发、速率或预算限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Worker 不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuestionResponse'
+  /v1/interactions/{interaction_id}/decision:
+    post:
+      operationId: decideApproval
+      summary: 审批或拒绝单次操作
+      description: 只处理approval，绑定action_digest、主体、目标版本、过期时间。拒绝写入denied，不执行操作。目标改变需新审批；按钮隐藏不能替代后端权限。
+      tags:
+      - interactions
+      parameters:
+      - name: interaction_id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+      - $ref: '#/components/parameters/CsrfToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '202':
+          description: 成功；202 仅表示已接受，最终结果见运行状态与事件流。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InteractionReceipt'
+        '400':
+          description: 参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 未登录或会话失效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: 无权限/CSRF 校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 资源不存在或不允许披露
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 版本/运行状态/幂等冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410':
+          description: 交互、上传或事件游标已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 请求/文件超过限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 能力不支持或业务参数不可执行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 并发、速率或预算限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Worker 不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalDecision'
+  /v1/conversations/{conversation_id}/uploads:
+    post:
+      operationId: initUpload
+      summary: 申请上传槽位
+      description: 校验配额、文件名和类型。名称仅作显示，不决定服务器路径。返回upload_id；上传目标固定为本API的 content 路由。
+      tags:
+      - conversations
+      parameters:
+      - name: conversation_id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+      - $ref: '#/components/parameters/CsrfToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadReceipt'
+        '400':
+          description: 参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 未登录或会话失效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: 无权限/CSRF 校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 资源不存在或不允许披露
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 版本/运行状态/幂等冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410':
+          description: 交互、上传或事件游标已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 请求/文件超过限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 能力不支持或业务参数不可执行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 并发、速率或预算限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Worker 不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadInit'
+  /v1/uploads/{upload_id}/content:
+    put:
+      operationId: putUploadContent
+      summary: 上传文件字节
+      description: 只接受声明大小范围内的原始字节，默认完整文件上传；同幂等键/同摘要重复写入返回相同结果。超长、摘要不符、已封存后写入均拒绝。前端不得直传任意文件系统路径。
+      tags:
+      - uploads
+      parameters:
+      - name: upload_id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+      - $ref: '#/components/parameters/CsrfToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: 成功
+        '400':
+          description: 参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 未登录或会话失效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: 无权限/CSRF 校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 资源不存在或不允许披露
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 版本/运行状态/幂等冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410':
+          description: 交互、上传或事件游标已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 请求/文件超过限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 能力不支持或业务参数不可执行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 并发、速率或预算限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Worker 不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+  /v1/uploads/{upload_id}/complete:
+    post:
+      operationId: completeUpload
+      summary: 校验并封存上传
+      description: 核对声明大小、SHA-256及内容检测，先隔离后变为ready或rejected。同步不完可返回quarantined并由artifact.upsert更新；ready前不能送入模型。
+      tags:
+      - uploads
+      parameters:
+      - name: upload_id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+      - $ref: '#/components/parameters/CsrfToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Artifact'
+        '400':
+          description: 参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 未登录或会话失效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: 无权限/CSRF 校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 资源不存在或不允许披露
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 版本/运行状态/幂等冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410':
+          description: 交互、上传或事件游标已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 请求/文件超过限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 能力不支持或业务参数不可执行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 并发、速率或预算限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Worker 不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadComplete'
+  /v1/artifacts/{artifact_id}:
+    get:
+      operationId: getArtifact
+      summary: 读取成果元数据
+      description: 无version时取当前版本；下载引用应固定version避免拿到变动后的文件。
+      tags:
+      - artifacts
+      parameters:
+      - name: artifact_id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+      - name: version
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+        description: ''
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Artifact'
+        '400':
+          description: 参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 未登录或会话失效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: 无权限/CSRF 校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 资源不存在或不允许披露
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 版本/运行状态/幂等冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410':
+          description: 交互、上传或事件游标已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 请求/文件超过限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 能力不支持或业务参数不可执行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 并发、速率或预算限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Worker 不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/artifacts/{artifact_id}/download:
+    get:
+      operationId: downloadArtifact
+      summary: 下载授权的固定版本文件
+      description: Cookie身份+工件所属工作区鉴权。响应attachment、安全filename和nosniff；不允许绝对path查询。v1不承诺Range；必须流式传输、不整文件加载到内存。
+      tags:
+      - artifacts
+      parameters:
+      - name: artifact_id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+      - name: version
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+        description: ''
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: 参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 未登录或会话失效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: 无权限/CSRF 校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 资源不存在或不允许披露
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 版本/运行状态/幂等冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410':
+          description: 交互、上传或事件游标已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 请求/文件超过限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 能力不支持或业务参数不可执行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 并发、速率或预算限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Worker 不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/artifacts/{artifact_id}/preview:
+    get:
+      operationId: previewArtifact
+      summary: 读取受限安全预览
+      description: 文本返回转义后由前端textContent渲染；图片仅返回服务端认可的同源鉴权路径；HTML/SVG等活跃内容不内联到主站。大文本截断，unsupported只给下载。
+      tags:
+      - artifacts
+      parameters:
+      - name: artifact_id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+      - name: version
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+        description: ''
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Preview'
+        '400':
+          description: 参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 未登录或会话失效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: 无权限/CSRF 校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 资源不存在或不允许披露
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 版本/运行状态/幂等冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410':
+          description: 交互、上传或事件游标已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 请求/文件超过限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 能力不支持或业务参数不可执行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 并发、速率或预算限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Worker 不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/artifacts/{artifact_id}/diff:
+    get:
+      operationId: getArtifactDiff
+      summary: 比较两个文本文件版本
+      description: 两版都必须属于同一工件且可访问；二进制类型422。限制差异字节/行数，超限truncated=true。
+      tags:
+      - artifacts
+      parameters:
+      - name: artifact_id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+      - name: from_version
+        in: query
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      - name: to_version
+        in: query
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Diff'
+        '400':
+          description: 参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 未登录或会话失效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: 无权限/CSRF 校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 资源不存在或不允许披露
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 版本/运行状态/幂等冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410':
+          description: 交互、上传或事件游标已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 请求/文件超过限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 能力不支持或业务参数不可执行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 并发、速率或预算限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Worker 不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/sources/{source_id}:
+    get:
+      operationId: getSource
+      summary: 读取引用来源和访问证据
+      description: 仅显示授权来源记录。搜索结果命中不代表抓取正文；access=read/fetched必须有真实执行证据。该接口不将任意URL变成服务器请求代理。
+      tags:
+      - sources
+      parameters:
+      - name: source_id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Source'
+        '400':
+          description: 参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 未登录或会话失效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: 无权限/CSRF 校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 资源不存在或不允许披露
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 版本/运行状态/幂等冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410':
+          description: 交互、上传或事件游标已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 请求/文件超过限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 能力不支持或业务参数不可执行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 并发、速率或预算限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Worker 不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+components:
+  securitySchemes:
+    SessionCookie:
+      type: apiKey
+      in: cookie
+      name: agent_session
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            retryable:
+              type: boolean
+            details:
+              type: object
+              additionalProperties: true
+          required:
+          - code
+          - message
+          - retryable
+          additionalProperties: false
+        request_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+      required:
+      - error
+      - request_id
+      additionalProperties: false
+    ModelSelection:
+      type: object
+      properties:
+        provider:
+          type: string
+        model:
+          type: string
+        reasoning_effort:
+          type: string
+      required:
+      - provider
+      - model
+      additionalProperties: false
+    CapabilitySet:
+      type: object
+      properties:
+        search:
+          type: boolean
+        fetch:
+          type: boolean
+        browser_interaction:
+          type: boolean
+        file_read:
+          type: boolean
+        file_edit:
+          type: boolean
+        command_execution:
+          type: boolean
+        questions:
+          type: boolean
+        approvals:
+          type: boolean
+        artifact_download:
+          type: boolean
+        resume_checkpoint:
+          type: boolean
+      required:
+      - search
+      - fetch
+      - browser_interaction
+      - file_read
+      - file_edit
+      - command_execution
+      - questions
+      - approvals
+      - artifact_download
+      - resume_checkpoint
+      additionalProperties: false
+    Capabilities:
+      type: object
+      properties:
+        api_version:
+          type: string
+        event_schema_version:
+          type: string
+        adapter_version:
+          type: string
+        capabilities:
+          $ref: '#/components/schemas/CapabilitySet'
+        models:
+          type: array
+          items:
+            type: object
+            properties:
+              provider:
+                type: string
+              model:
+                type: string
+              reasoning_output:
+                type: string
+                enum:
+                - provider
+                - summary
+                - none
+              supported_reasoning_efforts:
+                type: array
+                items:
+                  type: string
+            required:
+            - provider
+            - model
+            - reasoning_output
+            - supported_reasoning_efforts
+            additionalProperties: false
+        limits:
+          type: object
+          properties:
+            max_upload_bytes:
+              type: integer
+              minimum: 1
+            max_active_runs_per_conversation:
+              type: integer
+              const: 1
+            max_concurrent_sessions:
+              type: integer
+              const: 5
+            replay_retention_hours:
+              type: integer
+              minimum: 1
+            idempotency_retention_hours:
+              type: integer
+              minimum: 1
+          required:
+          - max_upload_bytes
+          - max_active_runs_per_conversation
+          - max_concurrent_sessions
+          - replay_retention_hours
+          - idempotency_retention_hours
+          additionalProperties: false
+        voice:
+          type: object
+          properties:
+            enabled:
+              type: boolean
+            status:
+              type: string
+              enum:
+              - disabled
+              - unavailable
+              - preparing
+              - ready
+            max_duration_ms:
+              type: integer
+              minimum: 1
+            max_bytes:
+              type: integer
+              minimum: 1
+            accepted_mime_types:
+              type: array
+              items:
+                type: string
+            languages:
+              type: array
+              items:
+                type: string
+          required:
+          - enabled
+          - status
+          - max_duration_ms
+          - max_bytes
+          - accepted_mime_types
+          - languages
+          additionalProperties: false
+        workspaces:
+          type: array
+          items:
+            type: object
+            properties:
+              workspace_id:
+                type: string
+              title:
+                type: string
+              can_read:
+                type: boolean
+              can_write:
+                type: boolean
+            required:
+            - workspace_id
+            - title
+            - can_read
+            - can_write
+            additionalProperties: false
+      required:
+      - api_version
+      - event_schema_version
+      - adapter_version
+      - capabilities
+      - models
+      - limits
+      - workspaces
+      additionalProperties: false
+    VoiceTranscription:
+      type: object
+      properties:
+        transcription_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [queued, transcribing, succeeded, failed, cancelled]
+        text:
+          type: string
+          maxLength: 100000
+        language:
+          type: string
+          maxLength: 64
+        error_code:
+          type: string
+          enum: [transcription_failed, result_expired, worker_restarted]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [transcription_id, status, created_at]
+      additionalProperties: false
+    Conversation:
+      type: object
+      properties:
+        conversation_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        title:
+          type: string
+        workspace_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        model:
+          $ref: '#/components/schemas/ModelSelection'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        version:
+          type: integer
+          minimum: 1
+        project_id:
+          type: string
+        pinned:
+          type: boolean
+        pinned_at:
+          oneOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+        archived:
+          type: boolean
+        archived_at:
+          oneOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+      required:
+      - conversation_id
+      - title
+      - workspace_id
+      - model
+      - created_at
+      - updated_at
+      - version
+      - project_id
+      - pinned
+      - pinned_at
+      - archived
+      - archived_at
+      additionalProperties: false
+    CreateConversation:
+      type: object
+      properties:
+        title:
+          type: string
+          maxLength: 120
+        workspace_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        model:
+          $ref: '#/components/schemas/ModelSelection'
+        project_id:
+          type: string
+      required:
+      - workspace_id
+      - model
+      additionalProperties: false
+    UpdateConversation:
+      type: object
+      properties:
+        expected_version:
+          type: integer
+          minimum: 1
+        title:
+          type: string
+          maxLength: 120
+        model:
+          $ref: '#/components/schemas/ModelSelection'
+        project_id:
+          type: string
+        pinned:
+          type: boolean
+        archived:
+          type: boolean
+      required:
+      - expected_version
+      additionalProperties: false
+      anyOf:
+      - required:
+        - title
+      - required:
+        - model
+      - required:
+        - project_id
+      - required:
+        - pinned
+      - required:
+        - archived
+    Project:
+      type: object
+      properties:
+        project_id: { type: string }
+        title: { type: string }
+        is_default: { type: boolean }
+        version: { type: integer, minimum: 1 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        active_conversation_count: { type: integer, minimum: 0 }
+        archived_conversation_count: { type: integer, minimum: 0 }
+      required: [project_id, title, is_default, version, created_at, updated_at]
+      additionalProperties: false
+    ProjectPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Project'
+      required: [items]
+      additionalProperties: false
+    CreateProject:
+      type: object
+      properties:
+        title: { type: string, minLength: 1, maxLength: 100 }
+      required: [title]
+      additionalProperties: false
+    UpdateProject:
+      type: object
+      properties:
+        expected_version: { type: integer, minimum: 1 }
+        title: { type: string, minLength: 1, maxLength: 100 }
+      required: [expected_version, title]
+      additionalProperties: false
+    ConversationPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Conversation'
+        next_cursor:
+          type: string
+      required:
+      - items
+      additionalProperties: false
+    Run:
+      type: object
+      properties:
+        run_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        conversation_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        input_message_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        status:
+          type: string
+          enum:
+          - queued
+          - starting
+          - running
+          - waiting_user
+          - waiting_approval
+          - cancelling
+          - succeeded
+          - partial
+          - failed
+          - cancelled
+          - interrupted
+        version:
+          type: integer
+          minimum: 1
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        continuation_of:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        checkpoint_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        error_code:
+          type: string
+      required:
+      - run_id
+      - conversation_id
+      - input_message_id
+      - status
+      - version
+      - created_at
+      - updated_at
+      additionalProperties: false
+    InputBlock:
+      oneOf:
+      - type: object
+        properties:
+          type:
+            const: text
+          text:
+            type: string
+            minLength: 1
+            maxLength: 100000
+        required:
+        - type
+        - text
+        additionalProperties: false
+      - type: object
+        properties:
+          type:
+            const: file
+          artifact_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        required:
+        - type
+        - artifact_id
+        additionalProperties: false
+    SendMessage:
+      type: object
+      properties:
+        client_message_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/InputBlock'
+          minItems: 1
+          maxItems: 32
+        client_time_zone:
+          type: string
+      required:
+      - client_message_id
+      - content
+      additionalProperties: false
+    MessageReceipt:
+      type: object
+      properties:
+        accepted:
+          const: true
+        message_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        run_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        conversation_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+      required:
+      - accepted
+      - message_id
+      - run_id
+      - conversation_id
+      additionalProperties: false
+    SteerRequest:
+      type: object
+      properties:
+        client_message_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        expected_run_version:
+          type: integer
+          minimum: 1
+        text:
+          type: string
+          minLength: 1
+          maxLength: 100000
+      required:
+      - client_message_id
+      - expected_run_version
+      - text
+      additionalProperties: false
+    CancelRequest:
+      type: object
+      properties:
+        expected_run_version:
+          type: integer
+          minimum: 1
+        reason:
+          type: string
+          maxLength: 512
+      required:
+      - expected_run_version
+      additionalProperties: false
+    ResumeRequest:
+      type: object
+      properties:
+        expected_run_version:
+          type: integer
+          minimum: 1
+        checkpoint_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+      required:
+      - expected_run_version
+      - checkpoint_id
+      additionalProperties: false
+    CommandReceipt:
+      type: object
+      properties:
+        accepted:
+          const: true
+        command_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        run_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+      required:
+      - accepted
+      - command_id
+      - run_id
+      additionalProperties: false
+    ResumeReceipt:
+      type: object
+      properties:
+        accepted:
+          const: true
+        run_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        continuation_of:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+      required:
+      - accepted
+      - run_id
+      - continuation_of
+      additionalProperties: false
+    ContentBlock:
+      type: object
+      properties:
+        block_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        kind:
+          type: string
+          enum:
+          - text
+          - reasoning
+          - summary
+        text:
+          type: string
+        source_ids:
+          type: array
+          items:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        exposure:
+          type: string
+          enum:
+          - provider
+          - summary
+          - public
+      required:
+      - block_id
+      - kind
+      - text
+      additionalProperties: false
+    Message:
+      type: object
+      properties:
+        message_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        run_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        role:
+          type: string
+          enum:
+          - user
+          - assistant
+        status:
+          type: string
+          enum:
+          - streaming
+          - complete
+          - partial
+          - failed
+        blocks:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContentBlock'
+        attachments:
+          type: array
+          items:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        created_at:
+          type: string
+          format: date-time
+      required:
+      - message_id
+      - run_id
+      - role
+      - status
+      - blocks
+      - created_at
+      additionalProperties: false
+    Source:
+      type: object
+      properties:
+        source_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        activity_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        url:
+          type: string
+          format: uri
+        title:
+          type: string
+        host:
+          type: string
+        access:
+          type: string
+          enum:
+          - discovered
+          - snippet
+          - fetched
+          - read
+          - failed
+        retrieved_at:
+          type: string
+          format: date-time
+        excerpt:
+          type: string
+          maxLength: 8000
+        error_code:
+          type: string
+      required:
+      - source_id
+      - activity_id
+      - url
+      - title
+      - host
+      - access
+      - retrieved_at
+      additionalProperties: false
+    Activity_search:
+      type: object
+      properties:
+        activity_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        run_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        tool_call_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        attempt_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        parent_activity_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        status:
+          type: string
+          enum:
+          - pending
+          - running
+          - waiting
+          - succeeded
+          - failed
+          - cancelled
+          - unknown
+        title:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+        error_code:
+          type: string
+        kind:
+          const: search
+        detail:
+          type: object
+          properties:
+            queries:
+              type: array
+              items:
+                type: string
+            provider:
+              type: string
+            source_ids:
+              type: array
+              items:
+                type: string
+                pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          required:
+          - queries
+          - source_ids
+          additionalProperties: false
+      required:
+      - activity_id
+      - run_id
+      - tool_call_id
+      - status
+      - title
+      - started_at
+      - kind
+      - detail
+      additionalProperties: false
+    Activity_browse: {"type":"object","properties":{"activity_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"},"run_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"},"tool_call_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"},"attempt_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"},"parent_activity_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"},"status":{"type":"string","enum":["pending","running","waiting","succeeded","failed","cancelled","unknown","partial"]},"title":{"type":"string"},"started_at":{"type":"string","format":"date-time"},"ended_at":{"type":"string","format":"date-time"},"error_code":{"type":"string"},"kind":{"const":"browse"},"detail":{"type":"object","properties":{"operation":{"type":"string","enum":["open","fetch","click","type","scroll","capture","navigate","interact","execute","web_operation"]},"url":{"type":"string"},"source_ids":{"type":"array","items":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"}},"screenshot_artifact_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"},"tool_name":{"type":"string"},"action":{"type":"string"},"urls":{"type":"array","items":{"type":"string"}},"operation_kind":{"type":"string","enum":["read_page","browse","execute","unknown"]},"request_id":{"type":"string"},"generation":{"type":"integer","minimum":1},"operation_id":{"type":"string"},"operation_status":{"type":"string"},"revision":{"type":"integer","minimum":1},"event_cursor":{"type":"integer","minimum":0},"accepted_count":{"type":"integer","minimum":0},"counts":{"type":"object","additionalProperties":{"type":"integer","minimum":0}},"items":{"type":"array","maxItems":100,"items":{"type":"object","properties":{"item_id":{"type":"string"},"position":{"type":"integer","minimum":0},"url":{"type":"string"},"status":{"type":"string"},"attempt":{"type":"integer","minimum":0},"reason_code":{"type":"string"},"result_ref":{"type":"string"},"action_label":{"type":"string"}},"required":["item_id","position","status"],"additionalProperties":false}},"requested_action_types":{"type":"array","maxItems":12,"uniqueItems":true,"items":{"type":"string","enum":["click","expand","next_page","scroll","wait","fill"]}},"browse_outcome":{"type":"string","enum":["success","pause","failure","unknown"]},"action_trace_count":{"type":"integer","minimum":0,"maximum":12},"traced_action_types":{"type":"array","maxItems":12,"uniqueItems":true,"items":{"type":"string","enum":["click","expand","next_page","scroll","wait","fill"]}},"verification_statuses":{"type":"array","maxItems":12,"uniqueItems":true,"items":{"type":"string","enum":["ACTION_NO_EFFECT","ACTION_ROLE_DISALLOWED","ACTION_UNAVAILABLE","AMBIGUOUS_FRAME","AMBIGUOUS_TARGET","AUTH_REQUIRED","BLOCKED","BOUND","BUSINESS_LOOP","BUSINESS_REJECTED","BUSINESS_SUCCESS","CAPTCHA_REQUIRED","CONSTRAINT_MISMATCH","DISABLED","FIELD_VALUE_MISMATCH","HUMAN_REQUIRED","INTERACTABLE","INVISIBLE","LOGIN_REQUIRED","NO_EFFECT","NON_INTERACTABLE","PLANNER_SHADOW_NOT_EXECUTED","PROVIDER_INVALID_RESPONSE","RECOVERED","REQUIRED_FIELD_MISSING","RESULT_NOT_FOUND","RESULT_UNCERTAIN","SELECTED","SETTLED","STALE_BINDING","STATE_UNCERTAIN","STABLE","TIMEOUT","WRONG_ENTITY","WRONG_PAGE_TYPE","WRONG_SURFACE","UNKNOWN"]}},"verified_action_types":{"type":"array","maxItems":12,"uniqueItems":true,"items":{"type":"string","enum":["click","expand","next_page","scroll","wait","fill"]}}},"required":["operation","source_ids"],"additionalProperties":false}},"required":["activity_id","run_id","tool_call_id","status","title","started_at","kind","detail"],"additionalProperties":false}
+    properties:
+        activity_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        run_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        tool_call_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        attempt_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        parent_activity_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        status:
+          type: string
+          enum:
+          - pending
+          - running
+          - waiting
+          - succeeded
+          - failed
+          - cancelled
+          - unknown
+        title:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+        error_code:
+          type: string
+        kind:
+          const: browse
+        detail:
+          type: object
+          properties:
+            operation:
+              type: string
+              enum:
+              - open
+              - fetch
+              - click
+              - type
+              - scroll
+              - capture
+              - navigate
+            url:
+              type: string
+              format: uri
+            source_ids:
+              type: array
+              items:
+                type: string
+                pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+            screenshot_artifact_id:
+              type: string
+              pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          required:
+          - operation
+          - source_ids
+          additionalProperties: false
+      required:
+      - activity_id
+      - run_id
+      - tool_call_id
+      - status
+      - title
+      - started_at
+      - kind
+      - detail
+      additionalProperties: false
+    Activity_file_edit:
+      type: object
+      properties:
+        activity_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        run_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        tool_call_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        attempt_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        parent_activity_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        status:
+          type: string
+          enum:
+          - pending
+          - running
+          - waiting
+          - succeeded
+          - failed
+          - cancelled
+          - unknown
+        title:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+        error_code:
+          type: string
+        kind:
+          const: file_edit
+        detail:
+          type: object
+          properties:
+            artifact_id:
+              type: string
+              pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+            display_path:
+              type: string
+            operation:
+              type: string
+              enum:
+              - create
+              - edit
+              - delete
+            change_status:
+              type: string
+              enum:
+              - proposed
+              - staging
+              - applied
+              - failed
+              - unknown
+            before_version:
+              type: integer
+              minimum: 1
+            after_version:
+              type: integer
+              minimum: 1
+            before_sha256:
+              type: string
+              pattern: ^[a-f0-9]{64}$
+            after_sha256:
+              type: string
+              pattern: ^[a-f0-9]{64}$
+            diff_artifact_id:
+              type: string
+              pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          required:
+          - display_path
+          - operation
+          - change_status
+          additionalProperties: false
+      required:
+      - activity_id
+      - run_id
+      - tool_call_id
+      - status
+      - title
+      - started_at
+      - kind
+      - detail
+      additionalProperties: false
+    Activity_file_read:
+      type: object
+      properties:
+        activity_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        run_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        tool_call_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        attempt_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        parent_activity_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        status:
+          type: string
+          enum:
+          - pending
+          - running
+          - waiting
+          - succeeded
+          - failed
+          - cancelled
+          - unknown
+        title:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+        error_code:
+          type: string
+        kind:
+          const: file_read
+        detail:
+          type: object
+          properties:
+            artifact_id:
+              type: string
+              pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+            display_path:
+              type: string
+            version:
+              type: integer
+              minimum: 1
+          required:
+          - display_path
+          additionalProperties: false
+      required:
+      - activity_id
+      - run_id
+      - tool_call_id
+      - status
+      - title
+      - started_at
+      - kind
+      - detail
+      additionalProperties: false
+    Activity_command:
+      type: object
+      properties:
+        activity_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        run_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        tool_call_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        attempt_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        parent_activity_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        status:
+          type: string
+          enum:
+          - pending
+          - running
+          - waiting
+          - succeeded
+          - failed
+          - cancelled
+          - unknown
+        title:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+        error_code:
+          type: string
+        kind:
+          const: command
+        detail:
+          type: object
+          properties:
+            display_command:
+              type: string
+            exit_code:
+              type: integer
+            output_artifact_id:
+              type: string
+              pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          required:
+          - display_command
+          additionalProperties: false
+      required:
+      - activity_id
+      - run_id
+      - tool_call_id
+      - status
+      - title
+      - started_at
+      - kind
+      - detail
+      additionalProperties: false
+    Activity_subagent:
+      type: object
+      properties:
+        activity_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        run_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        tool_call_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        attempt_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        parent_activity_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        status:
+          type: string
+          enum:
+          - pending
+          - running
+          - waiting
+          - succeeded
+          - failed
+          - cancelled
+          - unknown
+        title:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+        error_code:
+          type: string
+        kind:
+          const: subagent
+        detail:
+          type: object
+          properties:
+            child_run_id:
+              type: string
+              pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+            summary:
+              type: string
+          required:
+          - child_run_id
+          additionalProperties: false
+      required:
+      - activity_id
+      - run_id
+      - tool_call_id
+      - status
+      - title
+      - started_at
+      - kind
+      - detail
+      additionalProperties: false
+    Activity_crawl:
+      type: object
+      properties:
+        activity_id:
+          type: string
+        run_id:
+          type: string
+        tool_call_id:
+          type: string
+        status:
+          type: string
+          enum:
+          - pending
+          - running
+          - waiting
+          - succeeded
+          - partial
+          - failed
+          - cancelled
+          - unknown
+        title:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+        error_code:
+          type: string
+        kind:
+          const: crawl
+        detail:
+          type: object
+          properties:
+            tool_name:
+              type: string
+            action:
+              type: string
+            urls:
+              type: array
+              items:
+                type: string
+            operation:
+              type: string
+              enum: [open, fetch, read, cancel]
+            batch_id:
+              type: string
+            requested_count:
+              type: integer
+            completed_count:
+              type: integer
+            failed_count:
+              type: integer
+          required: [batch_id, requested_count, completed_count, failed_count]
+          additionalProperties: false
+      required: [activity_id, run_id, tool_call_id, status, title, started_at, kind, detail]
+      additionalProperties: false
+    Activity:
+      oneOf:
+      - $ref: '#/components/schemas/Activity_search'
+      - $ref: '#/components/schemas/Activity_browse'
+      - $ref: '#/components/schemas/Activity_file_edit'
+      - $ref: '#/components/schemas/Activity_file_read'
+      - $ref: '#/components/schemas/Activity_command'
+      - $ref: '#/components/schemas/Activity_subagent'
+      - $ref: '#/components/schemas/Activity_crawl'
+    Question:
+      type: object
+      properties:
+        question_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        prompt:
+          type: string
+        description:
+          type: string
+        options:
+          type: array
+          items:
+            type: object
+            properties:
+              option_id:
+                type: string
+                pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+              label:
+                type: string
+              description:
+                type: string
+            required:
+            - option_id
+            - label
+            additionalProperties: false
+        multiple:
+          type: boolean
+        allow_custom:
+          type: boolean
+      required:
+      - question_id
+      - prompt
+      - options
+      - multiple
+      - allow_custom
+      additionalProperties: false
+    QuestionAnswer:
+      type: object
+      properties:
+        question_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        selected_option_ids:
+          type: array
+          items:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          uniqueItems: true
+        custom_text:
+          type: string
+          maxLength: 10000
+      required:
+      - question_id
+      - selected_option_ids
+      additionalProperties: false
+    QuestionInteraction:
+      type: object
+      properties:
+        interaction_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        run_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        tool_call_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        version:
+          type: integer
+          minimum: 1
+        status:
+          type: string
+          enum:
+          - pending
+          - answered
+          - denied
+          - cancelled
+          - expired
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        kind:
+          const: question
+        questions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Question'
+          minItems: 1
+        answers:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuestionAnswer'
+      required:
+      - interaction_id
+      - run_id
+      - tool_call_id
+      - version
+      - status
+      - created_at
+      - expires_at
+      - kind
+      - questions
+      additionalProperties: false
+    ApprovalInteraction:
+      type: object
+      properties:
+        interaction_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        run_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        tool_call_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        version:
+          type: integer
+          minimum: 1
+        status:
+          type: string
+          enum:
+          - pending
+          - answered
+          - denied
+          - cancelled
+          - expired
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        kind:
+          const: approval
+        action_digest:
+          type: string
+          pattern: ^sha256:[a-f0-9]{64}$
+        action_summary:
+          type: string
+        risk:
+          type: string
+          enum:
+          - low
+          - medium
+          - high
+        decision:
+          type: string
+          enum:
+          - approve
+          - deny
+      required:
+      - interaction_id
+      - run_id
+      - tool_call_id
+      - version
+      - status
+      - created_at
+      - expires_at
+      - kind
+      - action_digest
+      - action_summary
+      - risk
+      additionalProperties: false
+    Interaction:
+      oneOf:
+      - $ref: '#/components/schemas/QuestionInteraction'
+      - $ref: '#/components/schemas/ApprovalInteraction'
+    QuestionResponse:
+      type: object
+      properties:
+        expected_version:
+          type: integer
+          minimum: 1
+        answers:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuestionAnswer'
+          minItems: 1
+      required:
+      - expected_version
+      - answers
+      additionalProperties: false
+    ApprovalDecision:
+      type: object
+      properties:
+        expected_version:
+          type: integer
+          minimum: 1
+        action_digest:
+          type: string
+          pattern: ^sha256:[a-f0-9]{64}$
+        decision:
+          type: string
+          enum:
+          - approve
+          - deny
+      required:
+      - expected_version
+      - action_digest
+      - decision
+      additionalProperties: false
+    InteractionReceipt:
+      type: object
+      properties:
+        accepted:
+          const: true
+        interaction_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        run_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        status:
+          type: string
+          enum:
+          - answered
+          - denied
+        version:
+          type: integer
+          minimum: 1
+      required:
+      - accepted
+      - interaction_id
+      - run_id
+      - status
+      - version
+      additionalProperties: false
+    Artifact:
+      type: object
+      properties:
+        artifact_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        conversation_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        run_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        file_name:
+          type: string
+        media_type:
+          type: string
+        size_bytes:
+          type: integer
+          minimum: 0
+        sha256:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        version:
+          type: integer
+          minimum: 1
+        status:
+          type: string
+          enum:
+          - quarantined
+          - ready
+          - rejected
+          - deleted
+        created_at:
+          type: string
+          format: date-time
+        preview_kind:
+          type: string
+          enum:
+          - text
+          - image
+          - unsupported
+        origin:
+          type: string
+          enum:
+          - upload
+          - generated
+          - edited
+        local_state:
+          type: string
+          enum:
+          - present
+          - deleted
+          - restoring
+        backup_status:
+          type: string
+          enum:
+          - pending
+          - retry
+          - verified
+          - failed
+        remote_path:
+          type: string
+        restorable:
+          type: boolean
+      required:
+      - artifact_id
+      - conversation_id
+      - file_name
+      - media_type
+      - size_bytes
+      - sha256
+      - version
+      - status
+      - created_at
+      - preview_kind
+      - origin
+      additionalProperties: false
+    RunArtifact:
+      type: object
+      properties:
+        run_id:
+          type: string
+        conversation_id:
+          type: string
+        artifact_id:
+          type: string
+        version:
+          type: integer
+          minimum: 1
+        file_name:
+          type: string
+        media_type:
+          type: string
+        size_bytes:
+          type: integer
+          minimum: 0
+        sha256:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        status:
+          type: string
+        local_state:
+          type: string
+          enum: [present, deleted, restoring]
+        backup_status:
+          type: string
+          enum: [pending, retry, verified, failed]
+        created_at:
+          type: string
+          format: date-time
+        download_url:
+          type: string
+      required:
+      - run_id
+      - conversation_id
+      - artifact_id
+      - version
+      - file_name
+      - media_type
+      - size_bytes
+      - sha256
+      - status
+      - created_at
+      - download_url
+      additionalProperties: false
+    RunArtifactPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunArtifact'
+      required:
+      - items
+      additionalProperties: false
+    UploadInit:
+      type: object
+      properties:
+        file_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        media_type:
+          type: string
+        size_bytes:
+          type: integer
+          minimum: 1
+        sha256:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+      required:
+      - file_name
+      - media_type
+      - size_bytes
+      - sha256
+      additionalProperties: false
+    UploadReceipt:
+      type: object
+      properties:
+        upload_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        expires_at:
+          type: string
+          format: date-time
+        max_bytes:
+          type: integer
+          minimum: 1
+      required:
+      - upload_id
+      - expires_at
+      - max_bytes
+      additionalProperties: false
+    UploadComplete:
+      type: object
+      properties:
+        sha256:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+      required:
+      - sha256
+      additionalProperties: false
+    Preview:
+      type: object
+      properties:
+        artifact_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        version:
+          type: integer
+          minimum: 1
+        kind:
+          type: string
+          enum:
+          - text
+          - image
+          - unsupported
+        text:
+          type: string
+          maxLength: 200000
+        image_path:
+          type: string
+        truncated:
+          type: boolean
+      required:
+      - artifact_id
+      - version
+      - kind
+      - truncated
+      additionalProperties: false
+    Diff:
+      type: object
+      properties:
+        artifact_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        from_version:
+          type: integer
+          minimum: 1
+        to_version:
+          type: integer
+          minimum: 1
+        unified_diff:
+          type: string
+        truncated:
+          type: boolean
+      required:
+      - artifact_id
+      - from_version
+      - to_version
+      - unified_diff
+      - truncated
+      additionalProperties: false
+    Usage:
+      type: object
+      properties:
+        run_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        input_tokens:
+          type: integer
+          minimum: 0
+        output_tokens:
+          type: integer
+          minimum: 0
+        reasoning_tokens:
+          type: integer
+          minimum: 0
+        cache_read_tokens:
+          type: integer
+          minimum: 0
+        measured_at:
+          type: string
+          format: date-time
+      required:
+      - run_id
+      - measured_at
+      additionalProperties: false
+    AssistantDelta:
+      type: object
+      properties:
+        message_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        block_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        kind:
+          type: string
+          enum:
+          - text
+          - reasoning
+          - summary
+        attempt_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        delta_index:
+          type: integer
+          minimum: 0
+        text:
+          type: string
+      required:
+      - message_id
+      - block_id
+      - kind
+      - attempt_id
+      - delta_index
+      - text
+      additionalProperties: false
+    AssistantSettled:
+      type: object
+      properties:
+        message:
+          $ref: '#/components/schemas/Message'
+        attempt_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+      required:
+      - message
+      - attempt_id
+      additionalProperties: false
+    RunError:
+      type: object
+      properties:
+        run_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        code:
+          type: string
+        message:
+          type: string
+        retryable:
+          type: boolean
+        reconciliation_required:
+          type: boolean
+      required:
+      - run_id
+      - code
+      - message
+      - retryable
+      - reconciliation_required
+      additionalProperties: false
+    AgentEvent:
+      oneOf:
+      - type: object
+        properties:
+          schema_version:
+            const: '1.0'
+          event_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          conversation_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          run_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          seq:
+            type: string
+            pattern: ^(0|[1-9][0-9]*)$
+          at:
+            type: string
+            format: date-time
+          type:
+            const: run.state
+          payload:
+            $ref: '#/components/schemas/Run'
+        required:
+        - schema_version
+        - event_id
+        - conversation_id
+        - run_id
+        - seq
+        - at
+        - type
+        - payload
+        additionalProperties: false
+      - type: object
+        properties:
+          schema_version:
+            const: '1.0'
+          event_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          conversation_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          run_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          seq:
+            type: string
+            pattern: ^(0|[1-9][0-9]*)$
+          at:
+            type: string
+            format: date-time
+          type:
+            const: message.created
+          payload:
+            $ref: '#/components/schemas/Message'
+        required:
+        - schema_version
+        - event_id
+        - conversation_id
+        - run_id
+        - seq
+        - at
+        - type
+        - payload
+        additionalProperties: false
+      - type: object
+        properties:
+          schema_version:
+            const: '1.0'
+          event_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          conversation_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          run_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          seq:
+            type: string
+            pattern: ^(0|[1-9][0-9]*)$
+          at:
+            type: string
+            format: date-time
+          type:
+            const: assistant.delta
+          payload:
+            $ref: '#/components/schemas/AssistantDelta'
+        required:
+        - schema_version
+        - event_id
+        - conversation_id
+        - run_id
+        - seq
+        - at
+        - type
+        - payload
+        additionalProperties: false
+      - type: object
+        properties:
+          schema_version:
+            const: '1.0'
+          event_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          conversation_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          run_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          seq:
+            type: string
+            pattern: ^(0|[1-9][0-9]*)$
+          at:
+            type: string
+            format: date-time
+          type:
+            const: assistant.settled
+          payload:
+            $ref: '#/components/schemas/AssistantSettled'
+        required:
+        - schema_version
+        - event_id
+        - conversation_id
+        - run_id
+        - seq
+        - at
+        - type
+        - payload
+        additionalProperties: false
+      - type: object
+        properties:
+          schema_version:
+            const: '1.0'
+          event_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          conversation_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          run_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          seq:
+            type: string
+            pattern: ^(0|[1-9][0-9]*)$
+          at:
+            type: string
+            format: date-time
+          type:
+            const: activity.upsert
+          payload:
+            $ref: '#/components/schemas/Activity'
+        required:
+        - schema_version
+        - event_id
+        - conversation_id
+        - run_id
+        - seq
+        - at
+        - type
+        - payload
+        additionalProperties: false
+      - type: object
+        properties:
+          schema_version:
+            const: '1.0'
+          event_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          conversation_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          run_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          seq:
+            type: string
+            pattern: ^(0|[1-9][0-9]*)$
+          at:
+            type: string
+            format: date-time
+          type:
+            const: source.upsert
+          payload:
+            $ref: '#/components/schemas/Source'
+        required:
+        - schema_version
+        - event_id
+        - conversation_id
+        - run_id
+        - seq
+        - at
+        - type
+        - payload
+        additionalProperties: false
+      - type: object
+        properties:
+          schema_version:
+            const: '1.0'
+          event_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          conversation_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          run_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          seq:
+            type: string
+            pattern: ^(0|[1-9][0-9]*)$
+          at:
+            type: string
+            format: date-time
+          type:
+            const: interaction.requested
+          payload:
+            $ref: '#/components/schemas/Interaction'
+        required:
+        - schema_version
+        - event_id
+        - conversation_id
+        - run_id
+        - seq
+        - at
+        - type
+        - payload
+        additionalProperties: false
+      - type: object
+        properties:
+          schema_version:
+            const: '1.0'
+          event_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          conversation_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          run_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          seq:
+            type: string
+            pattern: ^(0|[1-9][0-9]*)$
+          at:
+            type: string
+            format: date-time
+          type:
+            const: interaction.resolved
+          payload:
+            $ref: '#/components/schemas/Interaction'
+        required:
+        - schema_version
+        - event_id
+        - conversation_id
+        - run_id
+        - seq
+        - at
+        - type
+        - payload
+        additionalProperties: false
+      - type: object
+        properties:
+          schema_version:
+            const: '1.0'
+          event_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          conversation_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          run_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          seq:
+            type: string
+            pattern: ^(0|[1-9][0-9]*)$
+          at:
+            type: string
+            format: date-time
+          type:
+            const: artifact.upsert
+          payload:
+            $ref: '#/components/schemas/Artifact'
+        required:
+        - schema_version
+        - event_id
+        - conversation_id
+        - run_id
+        - seq
+        - at
+        - type
+        - payload
+        additionalProperties: false
+      - type: object
+        properties:
+          schema_version:
+            const: '1.0'
+          event_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          conversation_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          run_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          seq:
+            type: string
+            pattern: ^(0|[1-9][0-9]*)$
+          at:
+            type: string
+            format: date-time
+          type:
+            const: usage.updated
+          payload:
+            $ref: '#/components/schemas/Usage'
+        required:
+        - schema_version
+        - event_id
+        - conversation_id
+        - run_id
+        - seq
+        - at
+        - type
+        - payload
+        additionalProperties: false
+      - type: object
+        properties:
+          schema_version:
+            const: '1.0'
+          event_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          conversation_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          run_id:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+          seq:
+            type: string
+            pattern: ^(0|[1-9][0-9]*)$
+          at:
+            type: string
+            format: date-time
+          type:
+            const: run.error
+          payload:
+            $ref: '#/components/schemas/RunError'
+        required:
+        - schema_version
+        - event_id
+        - conversation_id
+        - run_id
+        - seq
+        - at
+        - type
+        - payload
+        additionalProperties: false
+    StreamReset:
+      type: object
+      properties:
+        reason:
+          type: string
+          enum:
+          - cursor_expired
+          - schema_changed
+          - authorization_changed
+        snapshot_required:
+          const: true
+      required:
+      - reason
+      - snapshot_required
+      additionalProperties: false
+    StreamCursor:
+      type: object
+      properties:
+        attempt_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        block_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$
+        next_delta_index:
+          type: integer
+          minimum: 0
+      required:
+      - attempt_id
+      - block_id
+      - next_delta_index
+      additionalProperties: false
+    CrawlBatchSummary:
+      type: object
+      properties:
+        batch_id:
+          type: string
+        run_id:
+          type: string
+        status:
+          type: string
+        requested_count:
+          type: integer
+        completed_count:
+          type: integer
+        failed_count:
+          type: integer
+        cancel_requested:
+          type: boolean
+        last_event_seq:
+          type: integer
+        generation:
+          type: integer
+        created_at:
+          type: string
+        updated_at:
+          type: string
+      required: [batch_id, run_id, status, requested_count, completed_count, failed_count, cancel_requested, last_event_seq, generation, created_at, updated_at]
+      additionalProperties: false
+    Snapshot:
+      type: object
+      properties:
+        conversation:
+          $ref: '#/components/schemas/Conversation'
+        as_of_seq:
+          type: string
+          pattern: ^(0|[1-9][0-9]*)$
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/Message'
+        runs:
+          type: array
+          items:
+            $ref: '#/components/schemas/Run'
+        activities:
+          type: array
+          items:
+            $ref: '#/components/schemas/Activity'
+        sources:
+          type: array
+          items:
+            $ref: '#/components/schemas/Source'
+        interactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Interaction'
+        artifacts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Artifact'
+        crawl_batches:
+          type: array
+          items:
+            $ref: '#/components/schemas/CrawlBatchSummary'
+        stream_cursors:
+          type: array
+          items:
+            $ref: '#/components/schemas/StreamCursor'
+        history_complete:
+          type: boolean
+        next_history_cursor:
+          type: string
+      required:
+      - conversation
+      - as_of_seq
+      - messages
+      - runs
+      - activities
+      - sources
+      - interactions
+      - artifacts
+      - stream_cursors
+      - history_complete
+      additionalProperties: false
+    MessagePage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Message'
+        next_cursor:
+          type: string
+      required:
+      - items
+      additionalProperties: false
+    InteractionPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Interaction'
+      required:
+      - items
+      additionalProperties: false
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 128
+      description: 在租户+用户+方法+规范化路径内幂等；同键同体重放原响应，不同体 409。保留时长由 capabilities 返回。
+    CsrfToken:
+      name: X-CSRF-Token
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 16
+      description: 同源 Cookie 登录的变更请求必须验证 CSRF Token 与 Origin。

@@ -1,0 +1,34 @@
+{
+  "catalog_version": "1.0.0",
+  "templates": [
+    {
+      "template_id": "report-v1",
+      "version": "1.0.0",
+      "format": "docx",
+      "file": "report.docx",
+      "sha256": "b4cf57097206afdfa60736d44d58780d05d3940d5a21c290e5a29944a8c40af7",
+      "fields": {
+        "report_title": {
+          "token": "[[DSH:report_title]]",
+          "max_chars": 6000
+        },
+        "summary": {
+          "token": "[[DSH:summary]]",
+          "max_chars": 6000
+        },
+        "findings": {
+          "token": "[[DSH:findings]]",
+          "max_chars": 6000
+        },
+        "recommendation": {
+          "token": "[[DSH:recommendation]]",
+          "max_chars": 6000
+        },
+        "sources": {
+          "token": "[[DSH:sources]]",
+          "max_chars": 6000
+        }
+      }
+    }
+  ]
+}

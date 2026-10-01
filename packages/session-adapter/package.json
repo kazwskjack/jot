@@ -1,0 +1,12 @@
+{
+  "name": "jot-session-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "files": ["index.js", "voice.js"],
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-api-session-controller": "0.1.7-alpha.2"
+  }
+}

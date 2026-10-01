@@ -1,0 +1,30 @@
+{
+  "name": "@jot/gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test test/**/*.test.mjs",
+    "test:contracts": "node --test test/contracts/contracts.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "build:templates": "python scripts/create-template.py",
+    "build": "npm run build:templates && tsc -p tsconfig.json && node scripts/copy-assets.mjs",
+    "start": "node --env-file-if-exists=.env dist/src/main.js",
+    "start:worker": "node --env-file-if-exists=.env dist/src/harness/main.js",
+    "start:file-worker": "node --env-file-if-exists=.env dist/src/file-engine/main.js",
+    "gate": "npm run test && npm run typecheck"
+  },
+  "dependencies": {
+    "@fastify/multipart": "9.4.0",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "fastify": "5.12.5"
+  },
+  "devDependencies": {
+    "@types/node": "24.3.0",
+    "typescript": "5.9.2"
+  }
+}
