@@ -1,61 +1,67 @@
 # Jot
 
-**An open agent workspace, designed to turn a goal into verified work.**
+**A lightweight AI bot for conversations, web tasks and file work.**
 
-[中文](README.zh-CN.md) · [Product plan](PLAN.md) · [Research](RESEARCH.md) · [Benchmarks](BENCHMARKS.md) · [Contributing](CONTRIBUTING.md)
+[中文](README.zh-CN.md) · [Technology](TECH_STACK.md) · [Deployment](DEPLOYMENT.md) · [Agent](agent/README.md) · [Integrations](INTEGRATIONS.md)
 
-> **Status: planning and public research.** This repository currently contains product design, a roadmap, and an evaluation protocol. It does not yet ship an installable agent application. All functionality below is a target until supported by a release and reproducible evidence.
+Jot puts a small interface around useful Agent work: ask a question, follow the steps, review an action and receive a file. Dark by default, with a light theme available.
 
-## Product direction
+## Included
 
-Jot benchmarks its product direction against **OpenAI Dots (a personal dot)** and **Meta Muse**: persistent responsibilities, useful tools, human control, and results that people can review. Jot is an independent project, with no affiliation or endorsement. It does not claim feature parity or superior speed.
+- A runnable local Agent with a configurable model endpoint and a bounded tool loop.
+- Separate conversations, SQLite persistence and replayable progress events.
+- Live text updates, task cancellation and explicit action approval.
+- Allowlisted web reading, optional JSON search and isolated browser actions.
+- Text, Markdown, JSON and CSV uploads and new downloadable files without overwriting uploads.
+- A demo mode with clearly labelled synthetic responses.
+- An extended TypeScript gateway and Session adapter for projects, ownership, batch progress, document jobs, event recovery and optional voice services.
 
-The focus is functionality and efficiency, rather than an avatar:
+The local runtime runs without the extended services. Extended integrations require their own configured runtime, models and tool endpoints. Bundled interfaces do not imply that external services are installed.
 
-- **Research to deliverable:** search multiple sources, read pages, extract structured facts, and deliver a sourced report or table.
-- **Authorized browser work:** navigate, filter, fill, and submit, verify the outcome, and ask for help when access or approval is required.
-- **File work:** read and revise documents, preserve originals, and deliver actual downloadable versions.
-- **Persistent responsibilities:** follow changes, resume work, and notify the user when there is something meaningful to review.
-- **Visible control:** see progress, approve actions, change direction, cancel, and recover without repeating side effects.
+## Start
 
-## What should make Jot useful?
+Requires **Node.js 24+**. The extended document worker also uses Python 3.12+.
 
-1. Complete workflows, from the user's request to a verifiable result.
-2. Measurable time and cost, including failures, retries, and waiting.
-3. Self-hosting and configurable models, without a mandatory proprietary deployment.
-4. Clear permission boundaries and traceable task outcomes.
+```sh
+git clone --branch feat/standalone-agent https://github.com/kazwskjack/jot.git
+cd jot
+npm ci
+npm run build
+npm run demo
+```
 
-These are design commitments, not benchmark results. We will publish comparisons before making performance claims.
+Open `http://127.0.0.1:3030`. Demo mode does not contact a model or external website.
 
-## Initial workflows
+For real tasks, copy `.env.example` to `.env`, configure `JOT_MODEL_URL`, `JOT_MODEL` and a provider key if required, then run `npm start`. The endpoint must support streaming Chat Completions and function tools. Explicitly allow HTTPS origins before reading pages. Optional browser support requires `npx playwright install chromium` and `JOT_BROWSER=true`.
 
-| Workflow | Example | Completion evidence |
-|---|---|---|
-| Research | Compare options from multiple public sources | Checked facts, accessible citations, downloadable table |
-| Browser action | Fill a synthetic form and inspect the result | Verified field values and exactly one authorized submission |
-| Document revision | Update specified sections without overwriting the original | A new file version with the requested changes |
-| Ongoing task | Watch a public source for meaningful changes | Persistent configuration, change evidence, user-controlled notifications |
+The first code release is maintained on `feat/standalone-agent`; switch to that branch if the default branch contains documentation only.
 
-## Roadmap
+## Structure
 
-- [ ] Define the public contracts and portable runtime boundaries.
-- [ ] Deliver a self-hosted vertical slice for research, browser work, and file delivery.
-- [ ] Make approval, cancellation, replay, and recovery reliable.
-- [ ] Publish reproducible functionality, latency, and cost comparisons.
-- [ ] Add persistent tasks, user-controlled memory, and tested connectors.
+| Path | Responsibility |
+|---|---|
+| `web/` | React interface, themes, progress, approvals and downloads |
+| `src/` | Self-contained local runtime, model adapter and tools |
+| `packages/gateway/` | Extended API, durable tasks, replay and document jobs |
+| `packages/session-adapter/` | Session and optional speech integration |
+| `agent/README.md` | Agent behavior and integration boundaries |
+| `TECH_STACK.md` | Engineering choices, strengths and trade-offs |
+| `DEPLOYMENT.md` | Configuration, resource sizing and recovery |
+| `INTEGRATIONS.md` | DSH extensions, proposed Agent adapters and decision services |
+| `TROUBLESHOOTING.md` | Entry-specific failures and diagnostic steps |
+| `FEATURE_MATRIX.md` | What is included, external, scaffolded or proposed |
+| `DEVELOPMENT.md` | Engineering history and lessons from implementation |
+| `ALGORITHMS.md` | Scheduling, transactions, replay, approvals and execution guards |
 
-See [PLAN.md](PLAN.md) for milestones and acceptance criteria.
+## Check
 
-## Efficiency
+```sh
+npm test
+npm run build
+```
 
-We measure end-to-end completion time, success rate, cost per successful task, and human intervention. First-token latency or configured concurrency alone is not a productivity result.
-
-No measured performance comparison has been published in this repository yet. See [BENCHMARKS.md](BENCHMARKS.md) for the protocol.
-
-## Community goal
-
-The long-term community goal is **10,000 GitHub stars**, supported by useful software, reproducible evidence, and external contributions. It is an aspiration, not a delivery date or guaranteed outcome. Stars do not unlock functionality.
+For extended module checks, follow [DEPLOYMENT.md](DEPLOYMENT.md). Performance depends on the model, external pages and enabled workers. Resource sizes are starting recommendations, not measured capacity guarantees.
 
 ## License
 
-Original materials in this repository are provided under the [MIT License](LICENSE). External products, names, code, models, and assets retain their own terms. No external implementation or proprietary product assets are bundled here.
+Original code and prose are MIT licensed. Dependencies retain their own licenses. The technical explanation is written for Jot and does not imply ownership of dependency implementations.

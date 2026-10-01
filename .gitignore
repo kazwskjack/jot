@@ -12,3 +12,6 @@ sessions/
 private/
 node_modules/
 dist/
+.data/
+.cache/
+test-results/
