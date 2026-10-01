@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.sqlite*
+*.db
+*.log
+cookies*
+sessions/
+private/
+node_modules/
+dist/
