@@ -61,7 +61,7 @@ bytes, not against files left at the source. Limits are 100,000 inventory entrie
 100 directory levels and a 16 MiB manifest; no source is silently truncated.
 
 Restore verifies the trusted digest and all copied bytes before creating targets.
-Every configured root must be absent and match its original recorded location.
+Every full-tree root must be absent and match its original recorded location.
 It preserves absolute paths rather than rewriting immutable artifact metadata.
 Move a deployment to another machine only when those same absolute paths can be
 provided there. Existing data is never overwritten or removed. Failed operations
@@ -86,3 +86,44 @@ missing data classes, existing-target refusal, corruption, omitted external
 references, junctions, uncheckpointed runtime files, the CLI, and the actual
 Gateway's role/file/upload download with owner isolation. They make no model calls
 and do not constitute a production or remote-storage recovery drill.
+
+## Shared directories and explicit entries
+
+A data class can specify a bounded list of literal relative entries when its
+parent directory also contains unrelated applications:
+
+```json
+{
+  "kind": "database",
+  "path": "private/shared-state",
+  "entries": ["product.sqlite", "legacy-uploads"]
+}
+```
+
+Each entry selects that file or complete subtree. Empty lists, duplicates,
+overlapping entries, traversal, absolute paths and wildcards are not selection
+patterns. All entries must exist during creation. The primary database must be
+selected, and known stored references must still fall inside a selected entry
+or another full data-class root. Selection cannot be used to omit an artifact
+referenced by the product database. Ancestor directories and empty directories
+are recorded; copied content retains its original relative path.
+
+Bundles using explicit entries have a version 2 manifest bound to a trusted
+SHA-256 digest, not a digital signature. The verifier
+and restore command still accept original version 1 full-tree bundles. Version
+2 constrains every manifest file and directory to its recorded selection, and
+does not follow selected links, including dangling links. Unrelated siblings
+are neither copied nor removed.
+
+Restore may retain an existing shared parent only for an explicit-entry root.
+Every selected target must be absent before any restore writes; the primary
+database and its WAL, SHM and journal targets must also be absent. Full-tree
+roots keep their original absent-root requirement. Existing unrelated parent
+contents and permissions are preserved. Never remove a database sidecar while
+its writer is running to satisfy this check.
+
+Runtime dependency aliases can remain outside a product-data selection only
+when the matching immutable software release, link mapping and configuration
+are separately preserved and verified. Do not silently omit linked data or
+treat a product-data backup as a complete operating-system/software image.
+The offline acknowledgement and stop-all-writers procedure remain required.
