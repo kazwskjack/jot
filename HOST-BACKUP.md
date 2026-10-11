@@ -152,3 +152,35 @@ private bundle modes and unchanged shared parents. A separate Linux deployment
 probe must also verify that the actual unprivileged service account can open
 the restored database and group-readable configuration. Synthetic probes are
 not production data recovery acceptance.
+
+
+## Operational quiescence and migration rehearsal
+
+A successful application test does not establish that a host is offline. Inventory
+all processes that hold the selected database, artifact or Session trees, plus
+logical producers and the timers that can restart them. Distinguish enabled
+periodic monitors from an in-flight execution, and historical outbox records from
+the authoritative run queue. Do not delete history to obtain an empty counter.
+
+Record original service/timer states privately. Admit a maintenance window only
+with no active foreground runs or execution leases. Stop the writers and their
+trigger sources, then inspect file descriptors again before creating a snapshot.
+Restore original service states in a failure-safe cleanup path and verify fresh
+health checks. Failed or incomplete bundles without a validated manifest are
+not recovery points.
+
+Size execution deadlines for the database and every verification pass. The
+[Node backup API](https://nodejs.org/api/sqlite.html#sqlitebackupsource-db-path-options)
+works in batches and exposes progress callbacks. A copied database file alone
+does not prove that the application bundle and integrity checks completed. For a
+long operation, retain an exact process/start identity and bounded phase records;
+observation timeouts must not trigger a duplicate maintenance job.
+
+On Linux, a private mount namespace can rehearse restoration at the original
+absolute paths without replacing live host data. Bind private empty parent trees,
+restore the verified snapshot, and run the candidate under the actual service
+UID/GID. Verify legacy records, schema migration, new owned roles and tasks,
+shared workspace access, and unrelated-owner denial. Confirm the host namespace
+and its health remained unchanged after the rehearsal. This validates a recovery
+candidate; it is not an actual service cutover, host rollback, notification or
+provider-execution acceptance. Retain those as separate release gates.
