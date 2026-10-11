@@ -419,3 +419,13 @@ Python candidates with the application's interpreter before replacing files;
 the SSH shell's default interpreter may be a different version. Use the
 application's registered health route in rollback gates, and record failed
 attempts separately from successful deployment and real-provider acceptance.
+
+Before stopping a transport service, inspect its reverse service dependencies
+and snapshot which dependents are active. A systemd `Requires` chain can stop
+the Session host and then its worker when the bridge stops; starting the bridge
+alone does not restart that chain. Restore previously active services in
+dependency order on both success and rollback. Preserve services that were
+already inactive, and verify the Session adapter's readiness as well as the
+Gateway health endpoint. A healthy Gateway with a stopped worker cannot serve
+chat requests. Avoid restarting an already running instance solely because its
+first readiness observation was too early.

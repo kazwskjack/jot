@@ -90,3 +90,18 @@ node --test voice.test.mjs
 ```
 
 Mocked protocol tests do not establish that a real model, speech provider or browser action works in your host. Validate the complete chain after installing your providers.
+
+## Runtime compatibility
+
+The peer range includes the legacy `0.1.7-alpha.2` controller and the
+`0.2.0-rc.2` controller. This is not a promise of identical features: budgeted
+role execution requires the newer Session-local model selection and native
+goal/checkpoint capabilities. The adapter checks those capabilities and fails
+closed when they are missing. Do not enable budgeted tasks solely because the
+package manager accepts the peer version.
+
+When a profile declares explicit dependency injection, include
+`sessionController`, `fileUploads`, `agents`, `sessions`, `sessionPersistence`
+and `llm` for the complete budgeted adapter. Preserve the existing host, port,
+authentication environment reference and ordinary provider configuration.
+Compose the complete profile with the installed SDK before restarting it.
