@@ -4,7 +4,17 @@
   "private": true,
   "type": "module",
   "main": "index.js",
-  "files": ["index.js", "voice.js", "workbench.js", "workbench-goal.js", "model-budget-stream.js", "checkpoint.js", "web-budget-context.js", "web-budget-tool.js"],
+  "files": [
+    "index.js",
+    "voice.js",
+    "workbench.js",
+    "workbench-goal.js",
+    "model-budget-stream.js",
+    "checkpoint.js",
+    "web-budget-context.js",
+    "web-budget-tool.js",
+    "image-output.js"
+  ],
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
     "@deepseek-ai/dsh-api-session-controller": "0.1.7-alpha.2"
