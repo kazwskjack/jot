@@ -284,3 +284,21 @@ root budgets. Local injected gateway tests prove the gateway boundary only.
 They use synthetic worker leases and model routes, make no real model request,
 and do not establish Controller, Python, resource attribution or production
 acceptance.
+
+
+## Fixed cross-host callback transport
+
+`ticket_client` accepts only loopback HTTP and ignores environment proxies. When browser decisions run on a separate host, preserve that contract with a fixed SSH local-forwarding tunnel. The optional examples are `config-examples/web-budget-tunnel.service`, its `.env.example`, and `web-budget-sshd-match.conf`. They are templates, not installed or enabled services.
+
+On the Gateway host, create a dedicated unprivileged relay account and authorize a dedicated application public key. It must have no password login, interactive shell session, agent forwarding or arbitrary destinations. Apply the Match policy only to that account: local forwarding is limited to `127.0.0.1:18831`. Review existing Match order, validate with `sshd -t`, and inspect effective settings with `sshd -T -C user=jot-budget-relay,host=example.invalid,addr=203.0.113.7` before reloading. A directory of drop-ins has no effect unless the main configuration includes it. Preserve a tested administrative connection and the exact original configuration for rollback.
+
+On the decision host, generate a dedicated key under the service account and pin the Gateway host key through an already trusted channel. Keep the private key there with restricted permissions; do not copy a management key into this service. Configure the example with your private target, key and known-hosts file, and run the service as an unprivileged account. The service listens only on `127.0.0.1:18833` and forwards only to the Gateway loopback port. Use that fixed local origin in trusted host configuration. Neither a model argument nor ticket metadata may supply the destination. No public budget port is needed, and strict host checking must remain enabled.
+
+Verify the complete route with an isolated owned run and short-lived grant. Check reserve, dispatch, response journaling, settlement, exact replay, changed-payload rejection, wrong-ticket rejection, and denial after lease replacement. Run the real MCP metadata boundary too; it must not add ticket fields to tool schemas. Check the original root ledger rather than creating another balance. Use synthetic provider results for transport tests and report them separately from real supplier usage or pricing. Tunnel reachability alone is insufficient for production readiness. A temporary relay through an operator workstation is suitable for a bounded test and cannot satisfy unattended server availability.
+
+The regression `packages/gateway/test/vertical/web-budget-python-http.test.mjs` starts a real loopback Gateway HTTP server and invokes the optional Python client, including replay and replacement-lease denial. It uses synthetic usage and never calls an external model. Run with Python 3.11+ and Node 24+; `JOT_PYTHON` can select your interpreter.
+
+
+Startup failures close the opened database and Fastify instance before rethrowing the original error. The startup-cleanup regression uses a real SQLite file; it does not simulate closure with a no-op database.
+
+Conversation supplements are accepted for queued, starting and running runs with the current run version. They remain durable pending commands until the existing Session can receive them. Repeating the same command key returns the original command, and an accepted supplement does not create another run. Cancellation and terminal-state checks remain in force. The command-dispatcher regression verifies that the startup window holds the supplement and delivers it once when ready.

@@ -13,6 +13,15 @@ function fixture(){
  db.prepare('INSERT INTO ga_harness_session_bindings(conversation_id,owner_id,session_id,created_at,updated_at) VALUES(?,?,?,?,?)').run('c','u','s','now','now');
  return {db,events,runs,receipt,commands:new RunCommandService(db,events)};
 }
+test('supplement is durable during startup and waits for the session delivery window',async()=>{
+ const x=fixture();try{
+  x.db.prepare("UPDATE ga_runs SET status='starting' WHERE id=?").run(x.receipt.run_id);
+  x.commands.steer(x.receipt.run_id,'u',{text:'more',client_message_id:'startup',expected_run_version:1},'startup');
+  let ready=false,calls=0;const dispatcher=new SessionCommandDispatcher(x.db,x.events,{prompt:async()=>{calls++;return {accepted:true}},cancel:async()=>({settled:true})},()=>ready);
+  await dispatcher.processNext();assert.equal(calls,0);
+  ready=true;await dispatcher.processNext();assert.equal(calls,1);assert.equal(x.db.prepare('SELECT status FROM ga_run_commands').get().status,'applied');
+ }finally{x.db.close()}
+});
 test('steer reaches official prompt exactly once and is persisted as user message',async()=>{
  const x=fixture();try{const calls=[];x.commands.steer(x.receipt.run_id,'u',{text:'more',client_message_id:'more-1',expected_run_version:1},'key');
  const d=new SessionCommandDispatcher(x.db,x.events,{prompt:async(...args)=>(calls.push(args),{accepted:true}),cancel:async()=>({accepted:true,settled:true})},()=>true);

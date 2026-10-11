@@ -75,6 +75,7 @@ export async function buildServer(config: {
   const app = Fastify({ logger: false, bodyLimit: 1024 * 1024 });
   await app.register(multipart, { limits: { fileSize: VOICE_MAX_BYTES, files: 1, fields: 2, parts: 3, fieldSize: 256 } });
   const db = openProductDatabase(config.databasePath);
+  try {
   const budgetPolicy = config.modelBudgetPolicy === undefined ? undefined : new WorkbenchBudgetPolicy(db,config.modelBudgetPolicy);
   const modelBudgets = budgetPolicy?.ledger ?? (config.modelBudgetRoutes === undefined ? undefined : new ModelBudgetLedger(db,{routes: config.modelBudgetRoutes}));
   const events = new EventStore(db);
@@ -690,4 +691,11 @@ export async function buildServer(config: {
   app.addHook('onClose', async () => voiceTranscriptions.close());
   return { app, db, events, projects, conversations, runs, commands, interactions, artifacts, sources, fileJobs, crawlBatches,
     voiceTranscriptions, workbench, persistentTasks, modelBudgets };
+  } catch (error) {
+    const cleanupErrors: unknown[] = [];
+    try { await app.close(); } catch (failure) { cleanupErrors.push(failure); }
+    try { if (db.isOpen) db.close(); } catch (failure) { cleanupErrors.push(failure); }
+    if (cleanupErrors.length) throw new AggregateError([error, ...cleanupErrors], 'server_initialization_cleanup_failed');
+    throw error;
+  }
 }

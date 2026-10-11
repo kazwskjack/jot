@@ -19,3 +19,6 @@ test-results/
 notification-archives/
 notification-backups/
 *.json.gz
+
+__pycache__/
+*.py[cod]

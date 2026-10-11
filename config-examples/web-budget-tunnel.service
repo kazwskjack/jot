@@ -1,0 +1,20 @@
+[Unit]
+Description=Jot fixed loopback budget callback tunnel
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=jot
+Group=jot
+EnvironmentFile=/etc/jot/web-budget-tunnel.env
+ExecStart=/usr/bin/ssh -N -T -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${JOT_BUDGET_KNOWN_HOSTS} -o ServerAliveInterval=20 -o ServerAliveCountMax=3 -i ${JOT_BUDGET_IDENTITY_FILE} -L 127.0.0.1:18833:127.0.0.1:18831 ${JOT_BUDGET_SSH_TARGET}
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -27,7 +27,7 @@ export class RunCommandService {
 
   steer(runId: string, ownerId: string, input: Record<string, unknown>, key: string) {
     const row = this.row(runId, ownerId);
-    if (row.status !== 'running') throw new Error('run_state_conflict');
+    if (!['queued','starting','running'].includes(String(row.status))) throw new Error('run_state_conflict');
     if (Number(row.version) !== Number(input.expected_run_version)) throw new Error('run_version_conflict');
     const commandId = withImmediateTransaction(this.db, () => this.insert(runId, 'steer', input, key, new Date().toISOString()));
     return { accepted: true, command_id: commandId, run_id: runId };
