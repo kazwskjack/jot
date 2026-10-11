@@ -392,3 +392,30 @@ rows from currently executing tasks when preparing a restart. Keep task
 activation off until the matching host, Gateway policy, fixed callback, real
 provider accounting and recovery/rollback pass together. An isolated candidate
 using deployed contracts is useful evidence, but is not a production rollout.
+
+### Audit the actual transport, including saved-login operations
+
+Follow the installed native tool through its local bridge and remote transport.
+A native HTTP entry may forward a WebSocket MCP call rather than invoke the
+remote HTTP gateway. Add accounting at the actual dispatch boundary; do not
+replace the routing architecture to match an assumed path.
+
+Validate host ticket metadata before dispatching into special branches.
+Discovery, saved-login browsing and visual-window operations must carry the
+same request's ticket when they invoke a decision provider. Keep the ticket in
+a request-local closure, separate from model arguments and browser evidence;
+never mutate shared login configuration to attach it. Ordinary unticketed
+requests retain their explicit optional behavior.
+
+Exercise two concurrent owners with distinct tickets through the real local
+HTTP-to-WebSocket bridge and verify the resulting MCP metadata. Include a
+malformed ticket that must reach no downstream invocation, followed by an
+ordinary request that must inherit neither previous ticket. Owner and human
+login permission checks remain independent of accounting authority.
+
+Hash the bytes actually uploaded. Windows newline conversion can otherwise
+make a correct source-level patch differ from its release manifest. Compile
+Python candidates with the application's interpreter before replacing files;
+the SSH shell's default interpreter may be a different version. Use the
+application's registered health route in rollback gates, and record failed
+attempts separately from successful deployment and real-provider acceptance.
