@@ -108,7 +108,7 @@ or another full data-class root. Selection cannot be used to omit an artifact
 referenced by the product database. Ancestor directories and empty directories
 are recorded; copied content retains its original relative path.
 
-Bundles using explicit entries have a version 2 manifest bound to a trusted
+Windows bundles using explicit entries have a version 2 manifest bound to a trusted
 SHA-256 digest, not a digital signature. The verifier
 and restore command still accept original version 1 full-tree bundles. Version
 2 constrains every manifest file and directory to its recorded selection, and
@@ -127,3 +127,28 @@ when the matching immutable software release, link mapping and configuration
 are separately preserved and verified. Do not silently omit linked data or
 treat a product-data backup as a complete operating-system/software image.
 The offline acknowledgement and stop-all-writers procedure remain required.
+
+
+## POSIX ownership and permissions
+
+New POSIX backups use a version 3 manifest recording the numeric UID, GID and
+all owner/group/other permission bits for every directory and file, including
+the original database file rather than the newly created SQLite snapshot.
+Private bundle copies remain restricted to the administrator. Restore applies
+source ownership before file permissions, then applies directory permissions
+from children to parents. Existing shared ancestor directories retain their
+current ownership and permissions.
+
+Use this restore on the same host or verify identical account/group mappings
+before moving to another host. A POSIX bundle cannot be restored on Windows;
+insufficient ownership privileges are rejected before writes. Special mode
+bits (setuid, setgid and sticky) are rejected at backup creation rather than
+silently changed. Versions 1 and 2 remain readable but do not contain original
+POSIX ownership: their successful verification cannot prove service-user access.
+A legacy recovery needs an explicitly reviewed ownership procedure.
+
+The regression coverage checks group-readable files, database source modes,
+private bundle modes and unchanged shared parents. A separate Linux deployment
+probe must also verify that the actual unprivileged service account can open
+the restored database and group-readable configuration. Synthetic probes are
+not production data recovery acceptance.

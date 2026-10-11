@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,renameSync,rmSync,existsSync,symlinkSync,rmdirSync,unlinkSync} from 'node:fs';import {resolve,join,sep} from 'node:path';import {DatabaseSync} from 'node:sqlite';import {execFileSync} from 'node:child_process';
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,renameSync,rmSync,existsSync,symlinkSync,rmdirSync,unlinkSync,chmodSync,statSync} from 'node:fs';import {resolve,join,sep} from 'node:path';import {DatabaseSync} from 'node:sqlite';import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import * as host from '../../src/maintenance/host-backup.ts';
 import {createHash} from 'node:crypto';import {buildServer} from '../../src/server.ts';
@@ -51,4 +51,13 @@ test('restored actual Gateway serves original role, shared file and verified upl
  await gateway.app.close();gateway.db.close();open=false;const receipt=await host.createHostBackup({database:f.database,roots:f.roots,offline:true},f.bundle);renameSync(f.source,join(f.root,'old-source'));host.restoreHostBackup(f.bundle,receipt.backup_id,{roots:f.roots,offline:true});gateway=await buildServer(options);open=true;
  assert.equal(gateway.workbench.getAgent('owner',role.agent_id).conversation_id,role.conversation_id);assert.equal(gateway.workbench.readFile('owner','shared',role.project_id,'notes/report.md').content,'original owned report');const download=await gateway.app.inject({url:'/v1/artifacts/'+artifact.artifact_id+'/download?version=1',headers:{'x-user-id':'owner'}});assert.equal(download.statusCode,200);assert.deepEqual(download.rawPayload,bytes);assert.throws(()=>gateway.artifacts.download(artifact.artifact_id,'other-owner',1),/artifact_not_found/);assert.equal(gateway.workbench.listAgents('other-owner').items.length,0);assert.equal(gateway.db.prepare('SELECT count(*) n FROM ga_runs').get().n,0);
  await gateway.app.close();gateway.db.close();open=false;
+});
+
+
+test('POSIX restore preserves source modes and ownership while selected parents remain unchanged',{skip:process.platform==='win32'},async t=>{
+ const f=fixture(t),parent=f.roots.find(root=>root.kind==='database');parent.entries=['product.sqlite'];chmodSync(parent.path,0o750);chmodSync(f.database,0o640);chmodSync(join(f.source,'host-config','settings.json'),0o640);chmodSync(join(f.source,'workspaces'),0o750);
+ const receipt=await host.createHostBackup({database:f.database,roots:f.roots,offline:true},f.bundle),manifest=JSON.parse(readFileSync(join(f.bundle,'manifest.json'),'utf8'));assert.equal(manifest.schema_version,3);const metadata=statSync(f.database);
+ assert.equal(statSync(join(f.bundle,'trees','database','product.sqlite')).mode&0o777,0o600);
+ renameSync(f.database,f.database+'.parked');for(const root of f.roots.filter(root=>root.kind!=='database'))renameSync(root.path,root.path+'-parked');chmodSync(parent.path,0o755);
+ host.restoreHostBackup(f.bundle,receipt.backup_id,{roots:f.roots,offline:true});assert.equal(statSync(parent.path).mode&0o777,0o755);assert.equal(statSync(f.database).uid,metadata.uid);assert.equal(statSync(f.database).gid,metadata.gid);assert.equal(statSync(f.database).mode&0o777,0o640);assert.equal(statSync(join(f.source,'host-config','settings.json')).mode&0o777,0o640);assert.equal(statSync(join(f.source,'workspaces')).mode&0o777,0o750);
 });
