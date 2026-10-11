@@ -15926,7 +15926,10 @@
             "maximum": 9007199254740991
           },
           "nano_usd": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "minimum": 0,
             "maximum": 9007199254740991
           },
@@ -15956,7 +15959,7 @@
             ]
           },
           "limits": {
-            "$ref": "#/components/schemas/ModelBudgetAmounts"
+            "$ref": "#/components/schemas/ModelBudgetAmountLimits"
           },
           "used": {
             "$ref": "#/components/schemas/ModelBudgetAmounts"
@@ -15965,7 +15968,7 @@
             "$ref": "#/components/schemas/ModelBudgetAmounts"
           },
           "remaining": {
-            "$ref": "#/components/schemas/ModelBudgetAmounts"
+            "$ref": "#/components/schemas/ModelBudgetAmountLimits"
           },
           "starts_at": {
             "type": [
@@ -16031,7 +16034,7 @@
             "$ref": "#/components/schemas/ModelBudgetSummary"
           },
           "ceiling": {
-            "$ref": "#/components/schemas/ModelBudgetAmounts"
+            "$ref": "#/components/schemas/ModelBudgetAmountLimits"
           },
           "shared": {
             "type": "array",
@@ -17306,6 +17309,32 @@
           "items",
           "has_more",
           "next_cursor"
+        ],
+        "additionalProperties": false
+      },
+      "ModelBudgetAmountLimits": {
+        "type": "object",
+        "properties": {
+          "tokens": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)$"
+          },
+          "nano_usd": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^(0|[1-9][0-9]*)$"
+          },
+          "model_calls": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)$"
+          }
+        },
+        "required": [
+          "tokens",
+          "nano_usd",
+          "model_calls"
         ],
         "additionalProperties": false
       }

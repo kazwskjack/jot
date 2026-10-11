@@ -49,9 +49,10 @@ export function normalizeModelBudgetPolicy(input: unknown): ModelBudgetPolicyCon
     for (const category of categories) {
       const item = object(limits[category],['tokens','nano_usd','model_calls']);
       for (const key of ['tokens','nano_usd','model_calls']) {
+        if(key==='nano_usd' && item[key]===null)continue;
         if (!Number.isSafeInteger(item[key]) || Number(item[key]) < 0) throw new Error();
       }
-      normalized[category] = {tokens: Number(item.tokens),nano_usd: Number(item.nano_usd),model_calls: Number(item.model_calls)};
+      normalized[category] = {tokens: Number(item.tokens),nano_usd: item.nano_usd===null?null:Number(item.nano_usd),model_calls: Number(item.model_calls)};
     }
     return {revision: Number(value.revision),admission_route: {provider: String(admission.provider),model: String(admission.model)},routes,limits: normalized};
   } catch { throw new Error('budget_policy_invalid'); }

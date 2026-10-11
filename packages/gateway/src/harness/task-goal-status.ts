@@ -6,7 +6,7 @@ export interface TaskGoalStatus {
   task: { run_status: string; business_state: string;
     steps: { total: number; completed: number; evidence_verified: number; all_completed: boolean; all_execution_evidence_verified: boolean };
     budget: { configured: boolean; balances: Array<{ scope_id: string;
-      limits: Amounts; used: Amounts; held: Amounts }>;
+      limits: Omit<Amounts,'nano_usd'> & {nano_usd:string|null}; used: Amounts; held: Amounts }>;
       pending_unknown: number | null; pending_in_flight: number | null } };
 }
 type Amounts = { tokens: string; nano_usd: string; model_calls: string };
@@ -57,7 +57,7 @@ export function validateTaskGoalStatus(response: unknown, prior?: TaskGoalStatus
       for (const key of ['limits', 'used', 'held']) {
         const amounts = balance[key];
         if (!record(amounts, ['tokens', 'nano_usd', 'model_calls'])
-          || !Object.values(amounts).every(value => typeof value === 'string' && /^(0|[1-9][0-9]{0,127})$/.test(value))) return invalid();
+          || !Object.entries(amounts).every(([field,value]) => (key==='limits'&&field==='nano_usd'&&value===null)||typeof value === 'string' && /^(0|[1-9][0-9]{0,127})$/.test(value))) return invalid();
       }
     }
   }
@@ -93,7 +93,7 @@ export function taskGoalStopReason(state: TaskGoalStatus, managed: boolean): str
   if (state.host_status === 'idle' && goal.rounds_started >= goal.max_goal_rounds) return 'SESSION_GOAL_ROUND_LIMIT';
   for (const balance of task.budget.balances) {
     for (const key of ['tokens', 'nano_usd', 'model_calls'] as const) {
-      if (BigInt(balance.used[key]) + BigInt(balance.held[key]) >= BigInt(balance.limits[key])) return 'SESSION_GOAL_BUDGET_EXHAUSTED';
+      if (balance.limits[key]!==null && BigInt(balance.used[key]) + BigInt(balance.held[key]) >= BigInt(balance.limits[key]!)) return 'SESSION_GOAL_BUDGET_EXHAUSTED';
     }
   }
   if (goal.activation === 'disarmed' && state.host_status === 'idle') return 'SESSION_GOAL_DISARMED';

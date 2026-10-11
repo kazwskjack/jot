@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {dollarsToNano,nanoToDollars,budgetLimitInput,budgetReason,budgetError} from './budget-ui.mjs';
+test('explicit unlimited money is displayed and submitted without a fake numeric ceiling',()=>{
+ assert.equal(nanoToDollars(null),'不限额');assert.deepEqual(budgetLimitInput({tokens:'200',dollars:'不限额',model_calls:'2'}),{tokens:200,nano_usd:null,model_calls:2});
+ for(const value of ['Infinity','无限','null',''])assert.throws(()=>budgetLimitInput({tokens:'200',dollars:value,model_calls:'2'}));
+});
 test('budget dollars preserve every nano-dollar without floating point rounding',()=>{
  assert.equal(dollarsToNano('0.000000001'),1);assert.equal(dollarsToNano('0.29'),290000000);
  assert.equal(nanoToDollars('9007199254740991'),'9007199.254740991');assert.equal(dollarsToNano('9007199.254740991'),Number.MAX_SAFE_INTEGER);

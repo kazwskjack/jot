@@ -337,6 +337,23 @@ An isolated SDK test verified one bounded real model call, exact usage settlemen
 
 ## Session-local model routing
 
+### Unlimited monetary ceilings
+
+Trusted budget policies may set a scope's `nano_usd` limit to `null` for an
+explicit unlimited monetary ceiling. Public budget views keep that value as
+`null` in limits, remaining allowance and the host ceiling; used and held
+amounts remain exact numeric strings. The task form displays `不限额` and can
+submit the same explicit value. Large placeholder numbers and JSON `Infinity`
+are not accepted substitutes.
+
+An unlimited monetary ceiling does not disable accounting, route checks,
+ownership, worker fencing, cancellation or unknown-usage reconciliation. Token
+and call-count ceilings remain finite. A user's adjustment can choose unlimited
+money only when the trusted host ceiling allows it; a finite host ceiling still
+bounds that adjustment. Lowering a finite amount below committed use or holds
+is rejected. Existing scope identities and consumption are preserved when the
+host policy changes.
+
 The worker selects the dedicated `jot-workbench-budgeted` preset only for an owned role with an original ledger binding. Set `GENERAL_AGENT_WORKBENCH_DSH_AGENT_PRESET` explicitly; missing configuration blocks budgeted execution. Ordinary sessions retain `jot-general` by default.
 
 For DSH 0.2, configure the Session adapter's `workbenchModel` with only `provider` and `model`. The adapter resolves that host-owned route and rechecks the live budget binding before recording a Session-local model selection. It uses the installed controller's Agent model-selection domain, without saving the global model default. Step admission reads the same effective Session selection, rather than stale Agent options. Missing capabilities, route drift, cancellation or revocation block selection and subsequent prompts.

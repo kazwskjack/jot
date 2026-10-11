@@ -8,10 +8,11 @@ export function dollarsToNano(value){
  if(nano>BigInt(Number.MAX_SAFE_INTEGER))throw new Error('费用超过可设置范围');return Number(nano);
 }
 export function nanoToDollars(value){
+ if(value===null)return '不限额';
  const nano=BigInt(value),whole=nano/1000000000n,fraction=String(nano%1000000000n).padStart(9,'0').replace(/0+$/,'');
  return `${whole}${fraction?'.'+fraction:''}`;
 }
-export function budgetLimitInput(value){return {tokens:integer(value.tokens),nano_usd:dollarsToNano(value.dollars),model_calls:integer(value.model_calls)};}
+export function budgetLimitInput(value){return {tokens:integer(value.tokens),nano_usd:value.dollars==='不限额'?null:dollarsToNano(value.dollars),model_calls:integer(value.model_calls)};}
 export function budgetReason(reason){
  if(reason==='usage_unknown')return '上次模型用量尚待确认，预留额度继续保留';
  const [scope,field]=reason.split(':'),names={task_total:'任务',owner_daily:'每日总',project_daily:'项目每日',agent_daily:'角色每日',occurrence:'单次执行'};

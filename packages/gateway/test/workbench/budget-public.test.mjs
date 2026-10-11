@@ -181,3 +181,11 @@ test('creation exposes server-owned defaults, keeps omitted limits backward comp
  assert.equal(f.db.prepare('SELECT count(*) n FROM wb_model_budget_limit_revisions').get().n,0);
  assert.equal((await createRequest(f,newTask(f,{...ceiling}),'foreign-create','bob')).statusCode,404);
 });
+
+test('unlimited monetary ceilings are null in public contract while usage stays numeric',async t=>{
+ const cfg=config();for(const value of Object.values(cfg.limits))value.nano_usd=null;
+ const f=await fixture(t,true,cfg),view=await f.get();assert.equal(view.root.limits.nano_usd,null);assert.equal(view.root.remaining.nano_usd,null);assert.equal(view.root.used.nano_usd,'0');assert.equal(view.ceiling.nano_usd,null);assert.equal(view.can_start_next_call,true);
+ const v=new ContractValidator();assert.equal(v.validateResponse(v.operationFor('GET','/v1/persistent-tasks/{task_id}/model-budget'),200,view).valid,true);
+ const changed=await f.update({tokens:5000,nano_usd:null,model_calls:50});assert.equal(changed.statusCode,200,changed.body);
+ assert.equal(v.validateResponse(v.operationFor('GET','/v1/persistent-tasks/{task_id}/model-budget'),200,{...view,root:{...view.root,used:{...view.root.used,nano_usd:null}}}).valid,false);
+});

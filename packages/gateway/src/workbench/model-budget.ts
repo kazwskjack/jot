@@ -10,7 +10,7 @@ export interface ModelBudgetRoute {
   /** Host charge/quota per dispatch, not an invoice or token measurement. */
   billing?: {unit:'dispatched_call';nano_usd:number};
 }
-export interface ModelBudgetLimits { tokens: number; nano_usd: number; model_calls: number }
+export interface ModelBudgetLimits { tokens: number; nano_usd: number | null; model_calls: number }
 export interface ModelBudgetRequest { attempt_id: string; provider: string; model: string; max_tokens?: number; purpose?: 'compaction' | 'session-title' | 'emotion' | 'web-decision' | 'reply-verification' }
 type ObjectValue = Record<string, unknown>;
 type Row = Record<string, string>;
@@ -25,6 +25,8 @@ function count(value: unknown, code: string, minimum = 0): number {
   if (!Number.isSafeInteger(value) || Number(value) < minimum) throw new Error(code);
   return Number(value);
 }
+function moneyLimit(value: unknown,code: string): number | null { return value === null ? null : count(value,code); }
+function lesserMoney(a:number|null,b:number|null):number|null { return a===null?b:b===null?a:Math.min(a,b); }
 function record(value: unknown, keys: string[], code: string): ObjectValue {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !keys.includes(key))) throw new Error(code);
   return value as ObjectValue;
@@ -120,7 +122,7 @@ export class ModelBudgetLedger {
   createScope(owner: string, key: string, input: ModelBudgetLimits, window: {starts_at?: string; ends_at?: string} = {}) {
     if (!identifier(owner) || !identifier(key)) throw new Error('budget_scope_invalid');
     const value = record(input,['tokens','nano_usd','model_calls'],'budget_scope_invalid');
-    const limits = { tokens: count(value.tokens,'budget_scope_invalid'),nano_usd: count(value.nano_usd,'budget_scope_invalid'),model_calls: count(value.model_calls,'budget_scope_invalid') };
+    const limits = { tokens: count(value.tokens,'budget_scope_invalid'),nano_usd: moneyLimit(value.nano_usd,'budget_scope_invalid'),model_calls: count(value.model_calls,'budget_scope_invalid') };
     record(window,['starts_at','ends_at'],'budget_scope_invalid');
     function date(value: unknown) {
       if (value === undefined) return null;
@@ -183,7 +185,7 @@ export class ModelBudgetLedger {
   }
   balance(owner: string, id: string) {
     const row = this.scope(owner,id), limits = this.effectiveLimits(row), used = this.readAmounts(row,'used'), held = this.readAmounts(row,'held');
-    return {scope_id: id,limits: amounts({tokens: BigInt(limits.tokens),nano_usd: BigInt(limits.nano_usd),model_calls: BigInt(limits.model_calls)}),used: amounts(used),held: amounts(held)};
+    return {scope_id: id,limits: {tokens:String(limits.tokens),nano_usd:limits.nano_usd===null?null:String(limits.nano_usd),model_calls:String(limits.model_calls)},used: amounts(used),held: amounts(held)};
   }
   /** Observation only: no reservation, release, reconciliation or authority. */
   balancesForRun(owner: string, runId: string) {
@@ -232,7 +234,7 @@ export class ModelBudgetLedger {
         if((row.starts_at&&now<row.starts_at)||(row.ends_at&&now>=row.ends_at))throw new Error('budget_window_closed');
         for(const key of ['tokens','nano_usd','model_calls'] as const){
           if(reserved[key]<credit[key])throw new Error('budget_accounting_corrupt');
-          if(used[key]+reserved[key]-credit[key]+held[key]>BigInt(limits[key]))throw new Error('model_budget_exhausted');
+          if(limits[key]!==null && used[key]+reserved[key]-credit[key]+held[key]>BigInt(limits[key]!))throw new Error('model_budget_exhausted');
         }
       }
       return {provider:route.provider,model:route.model,pricing_revision:route.revision,reserved:amounts(held),queue_credit:amounts(credit)};
@@ -241,7 +243,7 @@ export class ModelBudgetLedger {
   limitPolicy(owner: string, key: string, fallback: ModelBudgetLimits) {
     const row = this.db.prepare('SELECT version,limits_json FROM wb_model_budget_limit_revisions WHERE owner_id=? AND scope_key=? ORDER BY version DESC LIMIT 1').get(owner,key) as Row | undefined;
     const desired=row?JSON.parse(row.limits_json!) as ModelBudgetLimits:fallback;
-    const limits={tokens:Math.min(desired.tokens,fallback.tokens),nano_usd:Math.min(desired.nano_usd,fallback.nano_usd),model_calls:Math.min(desired.model_calls,fallback.model_calls)};
+    const limits={tokens:Math.min(desired.tokens,fallback.tokens),nano_usd:lesserMoney(desired.nano_usd,fallback.nano_usd),model_calls:Math.min(desired.model_calls,fallback.model_calls)};
     return {version: row ? Number(row.version) : 0,limits};
   }
   private effectiveLimits(row: Row): ModelBudgetLimits {
@@ -252,7 +254,7 @@ export class ModelBudgetLedger {
     if (!identifier(owner) || !identifier(key)) throw new Error('budget_scope_invalid');
     count(expectedVersion,'budget_limit_invalid');
     const raw=record(input,['tokens','nano_usd','model_calls'],'budget_limit_invalid');
-    const limits={tokens:count(raw.tokens,'budget_limit_invalid'),nano_usd:count(raw.nano_usd,'budget_limit_invalid'),model_calls:count(raw.model_calls,'budget_limit_invalid')};
+    const limits={tokens:count(raw.tokens,'budget_limit_invalid'),nano_usd:moneyLimit(raw.nano_usd,'budget_limit_invalid'),model_calls:count(raw.model_calls,'budget_limit_invalid')};
     return withImmediateTransaction(this.db,()=>{
       this.admissionGuard();
       const previous=this.limitPolicy(owner,key,ceiling);
@@ -260,9 +262,9 @@ export class ModelBudgetLedger {
       if(previous.version===Number.MAX_SAFE_INTEGER)throw new Error('budget_limit_invalid');
       const row=this.db.prepare('SELECT * FROM wb_model_budget_scopes WHERE owner_id=? AND scope_key=?').get(owner,key) as Row|undefined;
       for(const field of ['tokens','nano_usd','model_calls'] as const){
-        count(ceiling[field],'budget_limit_invalid');
-        if(limits[field]>ceiling[field])throw new Error('budget_ceiling_exceeded');
-        if(row && BigInt(limits[field])<BigInt(row[`used_${field}`]!)+BigInt(row[`held_${field}`]!))throw new Error('budget_limit_below_commitment');
+        if(ceiling[field]!==null)count(ceiling[field],'budget_limit_invalid');
+        if(ceiling[field]!==null&&(limits[field]===null||limits[field]!>ceiling[field]!))throw new Error('budget_ceiling_exceeded');
+        if(row && limits[field]!==null && BigInt(limits[field]!)<BigInt(row[`used_${field}`]!)+BigInt(row[`held_${field}`]!))throw new Error('budget_limit_below_commitment');
       }
       this.db.prepare('INSERT INTO wb_model_budget_limit_revisions VALUES(?,?,?,?,?,?,?)').run(owner,key,previous.version+1,JSON.stringify(limits),JSON.stringify(ceiling),'owner_adjustment',this.now().toISOString());
       return {version:previous.version+1,limits};
@@ -353,7 +355,7 @@ export class ModelBudgetLedger {
       for (const id of ids) {
         const row = this.scope(owner,id), limits = this.effectiveLimits(row), a = this.readAmounts(row,'used'), b = this.readAmounts(row,'held');
         if ((row.starts_at && now < row.starts_at) || (row.ends_at && now >= row.ends_at)) throw new Error('budget_window_closed');
-        for (const key of ['tokens','nano_usd','model_calls'] as const) if (a[key] + b[key] + held[key] > BigInt(limits[key])) throw new Error('model_budget_exhausted');
+        for (const key of ['tokens','nano_usd','model_calls'] as const) if (limits[key]!==null && a[key] + b[key] + held[key] > BigInt(limits[key]!)) throw new Error('model_budget_exhausted');
       }
       this.adjust(owner,ids,held);
       this.db.prepare('INSERT INTO wb_model_budget_attempts(run_id,attempt_id,request_json,route_json,state,held_tokens,held_nano_usd,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)')
@@ -376,7 +378,7 @@ export class ModelBudgetLedger {
       for (const id of this.binding(owner,runId)) {
         const scope = this.scope(owner,id), limits = this.effectiveLimits(scope), used = this.readAmounts(scope,'used'), held = this.readAmounts(scope,'held');
         if ((scope.starts_at && now < scope.starts_at) || (scope.ends_at && now >= scope.ends_at)) throw new Error('budget_window_closed');
-        for (const key of ['tokens','nano_usd','model_calls'] as const) if (used[key] + held[key] > BigInt(limits[key])) throw new Error('model_budget_exhausted');
+        for (const key of ['tokens','nano_usd','model_calls'] as const) if (limits[key]!==null && used[key] + held[key] > BigInt(limits[key]!)) throw new Error('model_budget_exhausted');
       }
       this.db.prepare("UPDATE wb_model_budget_attempts SET state='in_flight',updated_at=? WHERE run_id=? AND attempt_id=? AND state='reserved'").run(this.now().toISOString(),runId,attemptId);
       this.event(runId,attemptId,'in_flight');return this.receipt(this.attempt(owner,runId,attemptId));

@@ -5,7 +5,7 @@ import {dailyBudgetDefinitions,taskBudgetKey,type WorkbenchBudgetPolicy} from '.
 import type {ModelBudgetLimits} from './model-budget.ts';
 
 const fields=['tokens','nano_usd','model_calls'] as const;
-const strings=(value:ModelBudgetLimits)=>Object.fromEntries(fields.map(key=>[key,String(value[key])]));
+const strings=(value:ModelBudgetLimits)=>Object.fromEntries(fields.map(key=>[key,value[key]===null?null:String(value[key])]));
 const zero=()=>({tokens:'0',nano_usd:'0',model_calls:'0'});
 type TaskRow={task_id:string;agent_id:string;workspace_id:string;project_id:string};
 /** User projection has no model routes, native sessions, scope identities or machine paths. */
@@ -26,8 +26,8 @@ export class TaskBudgetService {
     const settings=this.policy.budgetSettings(),key=taskBudgetKey(task.task_id),ledger=this.policy.ledger;
     const revision=ledger.limitPolicy(owner,key,settings.limits.task_total);
     const daily=dailyBudgetDefinitions(task.workspace_id,task.project_id,task.agent_id,settings.instant);
-    function remaining(limits:Record<string,string>,used:Record<string,string>,held:Record<string,string>){
-      return Object.fromEntries(fields.map(field=>{const n=BigInt(limits[field]!)-BigInt(used[field]!)-BigInt(held[field]!);return [field,String(n>0n?n:0n)];}));
+    function remaining(limits:Record<string,string|null>,used:Record<string,string>,held:Record<string,string>){
+      return Object.fromEntries(fields.map(field=>{if(limits[field]===null)return [field,null];const n=BigInt(limits[field]!)-BigInt(used[field]!)-BigInt(held[field]!);return [field,String(n>0n?n:0n)];}));
     }
     const summary=(kind:string,scopeKey:string,base:ModelBudgetLimits,window?:{starts_at:string;ends_at:string})=>{
       const row=this.db.prepare('SELECT scope_id FROM wb_model_budget_scopes WHERE owner_id=? AND scope_key=?').get(owner,scopeKey) as {scope_id:string}|undefined;
@@ -45,9 +45,9 @@ export class TaskBudgetService {
       JOIN task_runs r ON r.run_id=a.run_id WHERE b.owner_id=?`).get(task.task_id,task.task_id,owner,owner) as {unknown_calls:number;unmetered_calls:number};
     const blocking_reasons:string[]=[];
     for(const scope of [root,...shared])for(const field of fields){
-      if(BigInt(scope.remaining[field]!)<settings.nextCall[field])blocking_reasons.push(`${scope.kind}:${field}`);
+      if(scope.remaining[field]!==null&&BigInt(scope.remaining[field]!)<settings.nextCall[field])blocking_reasons.push(`${scope.kind}:${field}`);
     }
-    for(const field of fields)if(BigInt(settings.limits.occurrence[field])<settings.nextCall[field])blocking_reasons.push(`occurrence:${field}`);
+    for(const field of fields)if(settings.limits.occurrence[field]!==null&&BigInt(settings.limits.occurrence[field]!)<settings.nextCall[field])blocking_reasons.push(`occurrence:${field}`);
     if(usage.unknown_calls)blocking_reasons.push('usage_unknown');
     return {configured:true as const,task_id:task.task_id,version:revision.version,root,ceiling:strings(settings.limits.task_total),shared,
       can_start_next_call:blocking_reasons.length===0,blocking_reasons,pending_unknown:Number(usage.unknown_calls),

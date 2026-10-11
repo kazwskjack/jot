@@ -282,3 +282,24 @@ test('durable thread and chat roots share unknown fences but daily-only siblings
   }finally{f.close();}
  }
 });
+
+test('explicit unlimited money keeps actual accounting and finite token/call limits',async()=>{
+ const f=await fixture();try{
+  const root=f.scope('unlimited-money',200,null,2),run=f.run();f.ledger.bindRun('alice',run,[root.scope_id]);
+  for(const id of ['first','second']){f.ledger.previewCall('alice',run,{provider:route.provider,model:route.model});f.ledger.reserve('alice',run,f.request(id));f.ledger.dispatch('alice',run,id);f.ledger.settle('alice',run,id,usage);}
+  const balance=f.ledger.balance('alice',root.scope_id);assert.equal(balance.limits.nano_usd,null);assert.equal(balance.used.nano_usd,'230');assert.equal(balance.used.model_calls,'2');assert.equal(balance.held.nano_usd,'0');
+  assert.throws(()=>f.ledger.reserve('alice',run,f.request('third')),/model_budget_exhausted/);
+ }finally{f.close();}
+});
+
+test('unlimited owner adjustment requires an unlimited host ceiling and retains commitments',async()=>{
+ const f=await fixture();try{
+  const root=f.scope('adjust-unlimited',500,null,5),run=f.run();f.ledger.bindRun('alice',run,[root.scope_id]);f.ledger.reserve('alice',run,f.request());
+  const ceiling={tokens:500,nano_usd:null,model_calls:5};
+  assert.throws(()=>f.ledger.setLimits('alice','adjust-unlimited',0,{...ceiling,nano_usd:999},ceiling),/budget_limit_below_commitment/);
+  assert.equal(f.ledger.setLimits('alice','adjust-unlimited',0,{...ceiling,nano_usd:1000},ceiling).version,1);
+  assert.equal(f.ledger.setLimits('alice','adjust-unlimited',1,ceiling,ceiling).limits.nano_usd,null);
+  assert.equal(f.ledger.balance('alice',root.scope_id).held.nano_usd,'1000');
+  assert.throws(()=>f.ledger.setLimits('alice','adjust-unlimited',2,ceiling,{...ceiling,nano_usd:2000}),/budget_ceiling_exceeded/);
+ }finally{f.close();}
+});

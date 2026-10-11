@@ -291,3 +291,9 @@ test('policy file loading is strict, bounded and shared by the API and worker re
  writeFileSync(path,' '.repeat(262145));assert.throws(()=>f.mod.loadModelBudgetPolicy(path),/budget_policy_invalid/);
  writeFileSync(path,'{bad json');assert.throws(()=>f.mod.loadModelBudgetPolicy(path),/budget_policy_invalid/);
 });
+
+test('host policy preserves explicit unlimited money in every shared category',async t=>{
+ const candidate=config();for(const value of Object.values(candidate.limits))value.nano_usd=null;
+ const f=await fixture(t,candidate);const a=f.agent(),task=f.task(a),run=f.tasks.runNow('alice',task.task_id,crypto.randomUUID());
+ f.settle(run.run_id);for(const item of f.policy.ledger.balancesForRun('alice',run.run_id)){assert.equal(item.limits.nano_usd,null);assert.equal(item.used.nano_usd,'90');}
+});

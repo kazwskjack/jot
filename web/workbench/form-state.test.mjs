@@ -110,3 +110,7 @@ test('server limits initialize an opt-in creation form and task editing cannot s
  const edit=formState.taskFormFromTask({title:'Task',agent_id:'a',objective:'Controlled',trigger:{kind:'once'},budget:{max_runs:5}});
  assert.equal(edit.model_budget_enabled,false);assert.equal(Object.hasOwn(taskInput(edit,undefined,true),'model_budget'),false);
 });
+test('new task form preserves an unlimited server monetary default through explicit opt-in submission',()=>{
+ const form=formState.blankTaskForm('a',undefined,{tokens:5000,nano_usd:null,model_calls:50});assert.equal(form.model_dollars,'不限额');
+ const input=taskInput({...valid,...form,title:'Owned task',objective:'Read controlled source',model_budget_enabled:true},undefined,true);assert.equal(input.model_budget.nano_usd,null);
+});
