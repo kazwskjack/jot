@@ -144,3 +144,12 @@ Collect only authorized, validated examples: objective, bounded page observation
 For each new adapter or decision provider, publish a synthetic scenario matrix: text reply, allowed page read, denied action, approved synthetic form, file delivery, cancellation, reconnect, duplicate message, uncertain outcome and provider outage. Measure successful end-to-end completion, human intervention, latency and cost; configuration alone is not proof of speed or accuracy.
 
 Prefer adapters and stable event contracts over forks of upstream internals. Keep one authoritative planner for a task. Independent workers can execute bounded reads or conversions; they should not compete to publish the final answer. See [Agent behavior](agent/README.md), [Deployment](DEPLOYMENT.md) and [Benchmark protocol](BENCHMARKS.md).
+
+
+## On-demand webpage images
+
+The Session adapter includes `image-output.js`, an optional output helper for a host-owned browser-image backend. It does not enable image capture on every page read or supply a browser-login service. A custom tool can call `commitImageResult(result, attachments)` in its asynchronous executor and `renderNativeResult(result)` in its output renderer. The executor must first check that the current model declares image input, and use the Harness attachment service to save images. This preserves actual image content blocks rather than passing Base64 as text.
+
+Keep normal reads text-only. When text cannot answer an image-based question, inspect loaded image dimensions first, then read an observed image identifier from the same owner-bound page snapshot. An image URL or page text must never confer permission. Navigation, expiry and changed image sources invalidate identifiers. For long images, use bounded overlapping tiles and a continuation cursor; cache only within the owning snapshot. A source-image failure may fall back to the observed element screenshot, with its method clearly recorded.
+
+The helper accepts at most three JPEG tiles and 1.5 MB of decoded bytes per result. The browser backend remains responsible for source limits, verified image decoding, capture, tile order and owner isolation. Persist attachment references without Base64; omit private storage references from model-visible metadata. Never publish internal file paths as image links. Jev/Laya action advice stays separate from the Agent's visual interpretation. This helper's tests cover output conversion and privacy; they do not prove that an external browser backend or a user's chosen model is deployed and ready.
