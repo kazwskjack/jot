@@ -13,7 +13,8 @@
     "checkpoint.js",
     "web-budget-context.js",
     "web-budget-tool.js",
-    "image-output.js"
+    "image-output.js",
+    "budget-model-selection.js"
   ],
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",

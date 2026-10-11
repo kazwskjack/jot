@@ -333,3 +333,17 @@ Budget-enforced sessions carry the original worker lease owner and generation th
 Accounting survives revocation: already dispatched usage can settle against the original owned attempt, settlement replay cannot charge twice, and an unsent reservation can be released. Recovery-only session attachment does not grant fresh execution. Deploy matching Gateway and session-adapter versions together; older callers without a fence are denied for new spending. Keep task activation off until the production preset, shared budget lineage, recovery and rollback have been verified together.
 
 An isolated SDK test verified one bounded real model call, exact usage settlement, no duplicate charge, no new dispatch after pause, and rejection of the old worker generation. This is evidence for the accounting/fencing path, not blanket acceptance of every continuous-task workflow or an invoice-price claim.
+
+
+## Session-local model routing
+
+The worker selects the dedicated `jot-workbench-budgeted` preset only for an owned role with an original ledger binding. Set `GENERAL_AGENT_WORKBENCH_DSH_AGENT_PRESET` explicitly; missing configuration blocks budgeted execution. Ordinary sessions retain `jot-general` by default.
+
+For DSH 0.2, configure the Session adapter's `workbenchModel` with only `provider` and `model`. The adapter resolves that host-owned route and rechecks the live budget binding before recording a Session-local model selection. It uses the installed controller's Agent model-selection domain, without saving the global model default. Step admission reads the same effective Session selection, rather than stale Agent options. Missing capabilities, route drift, cancellation or revocation block selection and subsequent prompts.
+
+Preset composition and model selection are separate concerns. DSH overlay patches need `insert` for new provider rows; a replacement `config` must preserve the complete existing adapter configuration. Use the official boot composer to compare all existing rows before deployment. Register the budgeted provider separately so ordinary provider configuration remains intact.
+
+At the Python MCP boundary, keep ordinary optional traffic separate from ticketed role traffic. The dedicated native-tool preset requires host metadata; supplied malformed or invalid tickets must fail before provider submission. Tool arguments never carry the ticket or a callback URL. Official MCP 1.12 and 1.29 isolated transport checks cover concurrent ordinary and two independently ticketed requests with worker-thread context propagation. Providers and accounting in those checks are synthetic, so they are not production acceptance.
+
+
+The optional SDK probe is `packages/web-decision/verification/verify_budget_mcp_sdk.py`. Run it with `packages/web-decision` on `PYTHONPATH` and the intended MCP SDK installed in an isolated environment. It uses the official memory transport and synthetic provider receipts; it does not connect to a production callback. It checks unchanged tool schemas, missing-ticket denial in required mode, mixed ordinary/ticketed traffic in optional mode, malformed/wrong-ticket rejection, and exact request-to-ticket context matching.

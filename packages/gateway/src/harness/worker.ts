@@ -30,6 +30,7 @@ export interface DshRunner {
     deferCompletionProbe: true; attachments?: ResolvedAttachment[]; universeSessionRef?: string;
     workbenchRunId?: string;
     workbenchExecutionLease?:Readonly<{owner:string;generation:number}>;
+    workbenchBudgetEnforced?:boolean;
     checkpointTask?:boolean;
     onCheckpoint?:(receipt:SessionCheckpoint)=>Promise<void>|void;
     onReady?: () => void;
@@ -130,7 +131,7 @@ export class HarnessWorker {
         }
       };
       result = await this.runner.run({ enabled: true, taskRequestId: lease.run_id, message, attachments,
-        ...(workbenchContext ? { workbenchRunId: lease.run_id,workbenchExecutionLease:Object.freeze({owner:lease.owner,generation:lease.generation}) } : {}),
+        ...(workbenchContext ? { workbenchRunId: lease.run_id,workbenchExecutionLease:Object.freeze({owner:lease.owner,generation:lease.generation}),workbenchBudgetEnforced:!!(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_model_budget_bindings'").get()&&this.db.prepare('SELECT 1 FROM wb_model_budget_bindings WHERE owner_id=? AND run_id=?').get(input.ownerId,lease.run_id)) } : {}),
         ...(backgroundTask
           ?{checkpointTask:true,onCheckpoint:(receipt:SessionCheckpoint)=>{this.executionGuard?.assertRunActive(lease.run_id);this.coordinator.recordCheckpoint(lease,controllerSessionRef,receipt);}}:{}),
         sessionRef: controllerSessionRef, universeSessionRef: controllerSessionRef, deferCompletionProbe: true,

@@ -505,3 +505,11 @@ test('Workbench RPC retains the original deep-frozen Worker fence instead of cal
 test('a budget-enforced role cannot attach fresh execution without its Worker fence',async()=>{
  const h=host();const bridge=new WorkbenchBridge({origin:'http://127.0.0.1:7654',token:'test-token-32-characters-fixture',fetchImpl:async()=>Response.json({context:{...context(),model_budget:{protocol:1,enforced:true}}})});await assert.rejects(bridge.attach(h.agent,{runId:binding.runId,sessionRef:binding.sessionRef}),/workbench_binding_lease_required/);assert.equal(h.tools.size,0);
 });
+
+test('step admission reads official effective Session selection instead of stale Agent options',()=>{
+ let selected={provider:'budget-fixture',model:'pinned-fixture'};const bridge=new WorkbenchBridge({origin:'http://127.0.0.1:7654',token:'test-token-32-characters-fixture',modelRouteFor:()=>selected});
+ const agent={options:{provider:'ordinary-fixture',model:'ordinary',maxTokens:20}};
+ assert.deepEqual(bridge.effectiveModelRoute(agent),{provider:'budget-fixture',model:'pinned-fixture',max_tokens:20});selected={provider:'budget-fixture',model:'next-pinned'};assert.equal(bridge.effectiveModelRoute(agent).model,'next-pinned');
+ selected={};assert.throws(()=>bridge.effectiveModelRoute(agent),/workbench_model_host_incompatible/);
+ assert.throws(()=>new WorkbenchBridge({origin:'http://127.0.0.1:7654',token:'test-token-32-characters-fixture',modelRouteFor:1}),/workbench_bridge_config_invalid/);
+});

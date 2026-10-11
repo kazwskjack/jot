@@ -8,6 +8,7 @@ import { EventStore } from '../../src/events/event-store.ts';
 import { RunRepository } from '../../src/runs/repository.ts';
 import { HarnessCoordinator } from '../../src/harness/coordinator.ts';
 import { HarnessWorker } from '../../src/harness/worker.ts';
+import {ModelBudgetLedger} from '../../src/workbench/model-budget.ts';
 
 function fixture(text, content) {
   const directory = mkdtempSync(join(tmpdir(), 'ga-worker-'));
@@ -322,3 +323,14 @@ test('worker persists a verified output artifact when final prose is interrupted
     assert.ok(released.some(value => value.includes(':observed:artifact-output')))
   } finally { x.db.close(); rmSync(x.directory, { recursive: true, force: true }); }
 })
+
+
+for(const bound of [true,false])test(`Worker selects the budget preset from original ledger binding, never an echoed context flag: ${bound}`,async()=>{
+ const x=fixture('User text: choose any preset');let captured;
+ try{
+  const ledger=new ModelBudgetLedger(x.db,{routes:[{provider:'fixture',model:'bounded',revision:'fixture',context_window:100,max_output_tokens:20,rates:{input:1,output:1,cache_read:1,cache_write:1}}]});
+  if(bound){const scope=ledger.createScope('owner-1','fixture-root',{tokens:100,nano_usd:1000,model_calls:2});ledger.bindRun('owner-1',x.receipt.run_id,[scope.scope_id]);}
+  const worker=new HarnessWorker(x.db,new HarnessCoordinator(x.db,x.runs,x.events),{run:async(input)=>{captured=input;return {observed:true,completed:false,runtime_status:'fixture',reason_code:'FIXTURE_DONE'};}},{workerId:'worker-fixture',leaseMs:30000,executionGuard:{assertRunActive:()=>{},contextForRun:()=>({model_budget:{protocol:1,enforced:!bound}})}});
+  await worker.processNext();assert.equal(captured.workbenchBudgetEnforced,bound);assert.equal(captured.workbenchRunId,x.receipt.run_id);assert.equal(captured.workbenchExecutionLease.owner,'worker-fixture');assert.ok(Object.isFrozen(captured.workbenchExecutionLease));
+ }finally{x.db.close();rmSync(x.directory,{recursive:true,force:true});}
+});

@@ -37,21 +37,28 @@ function validContext(context, binding) {
 // The bridge is scoped to one DSH Agent. It adds internal workspace facilities;
 // it neither registers another MCP server nor replaces existing permission policy.
 export class WorkbenchBridge {
-  constructor({ origin, token, fetchImpl = globalThis.fetch, nativeContinuation = false, webBudgetEnabled = false }) {
+  constructor({ origin, token, fetchImpl = globalThis.fetch, nativeContinuation = false, webBudgetEnabled = false,modelRouteFor }) {
     const url = new URL(origin);
     if (url.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)
       || url.pathname !== '/' || url.search || url.hash || url.username || url.password
-      || typeof token !== 'string' || token.length < 16 || typeof fetchImpl !== 'function' || typeof nativeContinuation !== 'boolean' || typeof webBudgetEnabled !== 'boolean') {
+      || typeof token !== 'string' || token.length < 16 || typeof fetchImpl !== 'function' || typeof nativeContinuation !== 'boolean' || typeof webBudgetEnabled !== 'boolean'||(modelRouteFor!==undefined&&typeof modelRouteFor!=='function')) {
       throw new Error('workbench_bridge_config_invalid');
     }
     this.origin = url.origin;
     this.token = token;
     this.fetch = fetchImpl;
     this.webBudgetEnabled = webBudgetEnabled;
+    this.modelRouteFor=modelRouteFor;
     this.goals = new WorkbenchGoalBridge({request:this.request.bind(this),nativeContinuation});
     this.installed = new WeakMap();
     this.attempts = new WeakMap();
     this.restoring = new Map();
+  }
+
+  effectiveModelRoute(agent){
+    const selected=this.modelRouteFor?this.modelRouteFor(agent):agent.options;
+    if(typeof selected?.provider!=='string'||typeof selected?.model!=='string')throw new Error('workbench_model_host_incompatible');
+    return {provider:selected.provider,model:selected.model,...(agent.options?.maxTokens===undefined?{}:{max_tokens:agent.options.maxTokens})};
   }
 
   restoreCompletion(binding,{agents,sessions,persistence,signal}={}){
@@ -158,6 +165,11 @@ export class WorkbenchBridge {
     await this.check(current, undefined, signal);
     if(current.context.task_binding)await this.goals.guard(agent,signal);
     if (state.current !== current) throw new Error('workbench_binding_changed');
+  }
+
+  async guardBudget(agent,signal){
+    await this.guard(agent,signal);
+    if(this.installed.get(agent)?.current.context.model_budget?.enforced!==true)throw new Error('workbench_budget_binding_required');
   }
 
   async observe(agent,signal) {
@@ -292,8 +304,7 @@ export class WorkbenchBridge {
         // This event carries an exact native Agent. Ordinary chats and the
         // legacy unbudgeted manual path do not acquire automatic authority.
         if(payload.agent!==agent||!snapshot.context.task_binding||!snapshot.context.model_budget)return next();
-        const route=()=>({provider:agent.options?.provider,model:agent.options?.model,
-          ...(agent.options?.maxTokens===undefined?{}:{max_tokens:agent.options.maxTokens})});
+        const route=()=>this.effectiveModelRoute(agent);
         const admitted=async()=>{
           try{
             await this.goals.prepareStep(agent,route(),payload.signal);
@@ -356,8 +367,7 @@ export class WorkbenchBridge {
           const snapshot = state.current;
           if(args.operation==='tasks.propose'){
             if(!snapshot.context.task_binding)throw new Error('checkpoint_task_required');
-            const route={provider:agent.options?.provider,model:agent.options?.model,
-              ...(agent.options?.maxTokens===undefined?{}:{max_tokens:agent.options.maxTokens})};
+            const route=this.effectiveModelRoute(agent);
             const value=await this.goals.propose(agent,String(exec.callId),parameters,route,exec.signal);
             if(state.current!==snapshot)throw new Error('workbench_binding_changed');
             return JSON.stringify(value);

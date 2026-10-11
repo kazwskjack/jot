@@ -36,7 +36,7 @@ const adapterBaseUrl = process.env.GENERAL_AGENT_SESSION_ADAPTER_URL?.trim() || 
 const adapterTokenFile = process.env.GENERAL_AGENT_SESSION_ADAPTER_TOKEN_FILE?.trim()
   || '/etc/jot/dsh-session-adapter.token';
 const harnessCwd = process.env.GENERAL_AGENT_HARNESS_CWD?.trim() || '/opt/jot';
-const agentPreset = process.env.GENERAL_AGENT_DSH_AGENT_PRESET?.trim() || 'universe-general-shadow';
+const agentPreset = process.env.GENERAL_AGENT_DSH_AGENT_PRESET?.trim() || 'jot-general';
 const sessionPrefix = process.env.GENERAL_AGENT_DSH_SESSION_PREFIX?.trim() || 'jot-ugs1';
 const fileRoot = process.env.GENERAL_AGENT_FILE_ROOT?.trim()
   || process.env.GENERAL_AGENT_UPLOAD_ROOT?.trim() || '/var/lib/jot/jot-files';
@@ -72,7 +72,7 @@ const runtimeClient = runtimeBaseUrl && runtimeSecretFile
 const sessionClient = new SessionControllerClient(adapterBaseUrl, readFileSync(adapterTokenFile, 'utf8').trim(),
   globalThis.fetch, leafBridgeBaseUrl);
 const runner = new OfficialSessionRunner(sessionClient, {
-  cwd: harnessCwd, agentPreset,
+  cwd: harnessCwd, agentPreset,...(process.env.GENERAL_AGENT_WORKBENCH_DSH_AGENT_PRESET?.trim()?{workbenchAgentPreset:process.env.GENERAL_AGENT_WORKBENCH_DSH_AGENT_PRESET.trim()}:{}),
 });
 const worker = new HarnessWorker(db, coordinator, runner, {
   workerId, leaseMs,

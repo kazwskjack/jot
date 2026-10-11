@@ -179,8 +179,8 @@ async function attachmentText(attachment: ResolvedAttachment): Promise<string> {
 
 export class OfficialSessionRunner implements DshRunner {
   private readonly client: OfficialSessionClient
-  private readonly options: { cwd: string; timeoutMs?: number; agentPreset: string; deltaFlushMs: number; deltaMaxChars: number; maxCrawlAutoContinues: number; webOperationPollIntervalMs: number }
-  constructor(client: OfficialSessionClient, options: { cwd: string; timeoutMs?: number; agentPreset: string;
+  private readonly options: { cwd: string; timeoutMs?: number; agentPreset: string;workbenchAgentPreset?:string; deltaFlushMs: number; deltaMaxChars: number; maxCrawlAutoContinues: number; webOperationPollIntervalMs: number }
+  constructor(client: OfficialSessionClient, options: { cwd: string; timeoutMs?: number; agentPreset: string;workbenchAgentPreset?:string;
     deltaFlushMs?: number; deltaMaxChars?: number; maxCrawlAutoContinues?: number; webOperationPollIntervalMs?: number }) {
     this.client = client; this.options = { ...options, deltaFlushMs: Math.max(50, options.deltaFlushMs ?? 250),
       deltaMaxChars: Math.max(32, options.deltaMaxChars ?? 256),
@@ -192,6 +192,7 @@ export class OfficialSessionRunner implements DshRunner {
     deferCompletionProbe: true; attachments?: ResolvedAttachment[];
     workbenchRunId?: string;
     workbenchExecutionLease?:Readonly<{owner:string;generation:number}>;
+    workbenchBudgetEnforced?:boolean;
     checkpointTask?:boolean;
     onCheckpoint?:(receipt:SessionCheckpoint)=>Promise<void>|void;
     /** Trusted DSH Session scope used by C to look up Universe operations; never the Runtime session_ref. */
@@ -208,7 +209,10 @@ export class OfficialSessionRunner implements DshRunner {
       ? setTimeout(() => controller.abort(new Error('session_follow_timeout')), this.options.timeoutMs)
       : undefined
     try {
-      await this.client.create(input.sessionRef, this.options.cwd, this.options.agentPreset, controller.signal, input.workbenchRunId,input.workbenchExecutionLease)
+      if(input.workbenchBudgetEnforced!==undefined&&typeof input.workbenchBudgetEnforced!=='boolean')throw new Error('workbench_preset_binding_invalid');
+      const preset=input.workbenchBudgetEnforced?this.options.workbenchAgentPreset:this.options.agentPreset;
+      if(input.workbenchBudgetEnforced&&(!input.workbenchRunId||!input.workbenchExecutionLease||typeof preset!=='string'||!preset.trim()))throw new Error('workbench_budget_preset_required');
+      await this.client.create(input.sessionRef, this.options.cwd, preset!, controller.signal, input.workbenchRunId,input.workbenchExecutionLease)
       let iterator = this.client.follow(input.sessionRef, controller.signal)[Symbol.asyncIterator]()
       let opening = await iterator.next()
       if (opening.done || opening.value.type !== 'snapshot') throw new Error('session_follow_snapshot_missing')

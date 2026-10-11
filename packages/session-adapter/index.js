@@ -2,13 +2,15 @@ import { createServer } from 'node:http'
 import { timingSafeEqual } from 'node:crypto'
 import { isAbsolute } from 'node:path'
 import { createVoiceAdapterHandler } from './voice.js'
+import {createBudgetModelSelector} from './budget-model-selection.js'
 import { WorkbenchBridge,normalizeHostExecutionLease } from './workbench.js'
 
 export const name = 'jot-jot-session-adapter'
-export const inject = ['sessionController', 'fileUploads', 'agents','sessions','sessionPersistence']
+export const inject = ['sessionController', 'fileUploads', 'agents','sessions','sessionPersistence','llm']
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/
 const ALLOWED_AGENT_PRESETS = new Set([
+  'jot-workbench-budgeted',
   'jot-general',
   'jot-general-batch50',
   'jot-general-batch',
@@ -123,7 +125,7 @@ function decodeFilename(headers) {
   return value && Buffer.byteLength(value, 'utf8') <= 255 && !/[\u0000\/\\]/.test(value) ? value : null
 }
 
-export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge }) {
+export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector }) {
   const voiceHandler = voiceEnabled ? createVoiceAdapterHandler({ speechController, token }) : null
   const workbenchSessions = new Set()
   const blockedWorkbenchSessions = new Set()
@@ -152,11 +154,17 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
         workbenchSessions.add(sessionId)
         blockedWorkbenchSessions.add(sessionId)
       }
+      if(requestedPreset==='jot-workbench-budgeted'&&(!workbenchRunId||!workbenchExecutionLease))return json(422,{error:'workbench_budget_binding_required'})
+      if(requestedPreset==='jot-workbench-budgeted'&&(typeof budgetModelSelector!=='function'||typeof workbenchBridge?.guardBudget!=='function'))return json(503,{error:'workbench_model_unavailable'})
       if (requestedPreset !== undefined) request.agentPreset = requestedPreset
       const value = await controller.create(request)
       if (workbenchRunId !== undefined) {
         try { await workbenchBridge.attach(agents.get(sessionId), { runId: String(workbenchRunId), sessionRef: sessionId,...(workbenchExecutionLease?{executionLease:workbenchExecutionLease}:{}) },{sessions,persistence,signal}) }
         catch { return json(503, { error: 'workbench_bridge_unavailable' }) }
+        if(requestedPreset==='jot-workbench-budgeted'){
+          try{const agent=agents.get(sessionId);await budgetModelSelector(agent,()=>workbenchBridge.guardBudget(agent,signal),signal)}
+          catch{return json(503,{error:'workbench_bridge_unavailable'})}
+        }
         blockedWorkbenchSessions.delete(sessionId)
       }
       return json(201, value)
@@ -298,10 +306,12 @@ export function apply(ctx, config = {}) {
     origin: config.workbenchOrigin || 'http://127.0.0.1:18831', token: workbenchToken,
     webBudgetEnabled:config.webBudgetEnabled===true,
     nativeContinuation: config.nativeContinuation ?? false,
+    modelRouteFor:config.workbenchModel?agent=>ctx.sessionController.agents.selectionFor(agent).current:undefined,
   }) : undefined
   const handler = createAdapterHandler({ controller: ctx.sessionController, fileUploads: ctx.fileUploads, agents: ctx.agents,
     sessions:ctx.sessions,persistence:ctx.sessionPersistence,
-    speechController, voiceEnabled, token, workbenchBridge })
+    speechController, voiceEnabled, token, workbenchBridge,
+    budgetModelSelector:createBudgetModelSelector({route:config.workbenchModel,llm:ctx.llm,agents:ctx.sessionController.agents}) })
   const server = createServer(async (req, res) => {
     const abort = new AbortController()
     req.once('aborted', () => abort.abort())

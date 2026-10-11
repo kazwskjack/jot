@@ -588,3 +588,15 @@ test('runner reports context overflow precisely and exposes an artifact before f
   assert.equal(result.final_text, undefined)
   assert.equal(result.reason_code, 'SESSION_CONTEXT_WINDOW_EXCEEDED')
 })
+
+
+test('only trusted budget-enforced roles select the dedicated preset; missing configuration denies before create',async()=>{
+ const creates=[];const client={create:async(...args)=>{creates.push(args);return{};},async *follow(){yield {type:'snapshot',cursor:0,records:[]};},prompt:async()=>({})};
+ const input={enabled:true,taskRequestId:'run-fixture',message:'Fixture',sessionRef:'session-fixture',deferCompletionProbe:true};
+ const runner=new OfficialSessionRunner(client,{cwd:'/fixture',agentPreset:'jot-general',workbenchAgentPreset:'jot-workbench-budgeted'});
+ await runner.run(input);assert.equal(creates.at(-1)[2],'jot-general');
+ await runner.run({...input,workbenchRunId:'run-fixture',workbenchExecutionLease:{owner:'worker-fixture',generation:1},workbenchBudgetEnforced:true});assert.equal(creates.at(-1)[2],'jot-workbench-budgeted');
+ const count=creates.length;const missing=new OfficialSessionRunner(client,{cwd:'/fixture',agentPreset:'jot-general'});
+ await assert.rejects(missing.run({...input,workbenchRunId:'run-fixture',workbenchExecutionLease:{owner:'worker-fixture',generation:1},workbenchBudgetEnforced:true}),/workbench_budget_preset_required/);assert.equal(creates.length,count);
+ for(const extra of [{workbenchBudgetEnforced:true},{workbenchBudgetEnforced:true,workbenchRunId:'run-fixture'},{workbenchBudgetEnforced:'true'}])await assert.rejects(runner.run({...input,...extra}),/workbench_.*(?:required|invalid)/);assert.equal(creates.length,count);
+});
