@@ -347,3 +347,31 @@ At the Python MCP boundary, keep ordinary optional traffic separate from tickete
 
 
 The optional SDK probe is `packages/web-decision/verification/verify_budget_mcp_sdk.py`. Run it with `packages/web-decision` on `PYTHONPATH` and the intended MCP SDK installed in an isolated environment. It uses the official memory transport and synthetic provider receipts; it does not connect to a production callback. It checks unchanged tool schemas, missing-ticket denial in required mode, mixed ordinary/ticketed traffic in optional mode, malformed/wrong-ticket rejection, and exact request-to-ticket context matching.
+
+## Upgrading an existing decision service
+
+Compare the deployed source with the release candidate before replacing it. A
+budget upgrade needs the metadata intake, provider accounting, bounded response
+journal and context propagation together. Preserve unrelated browser behavior,
+request serialization and provider validation. Do not bundle unrelated timing or
+emotion changes merely because they exist in a newer local checkout.
+
+Carry each request's context across every asynchronous boundary: MCP dispatch to
+an executor, queued decision jobs and a local model worker thread. A shared
+provider object is not an appropriate place to store a request's grant. Delayed
+jobs must retain their own original grant, including when ordinary and ticketed
+requests share a worker pool.
+
+Test the deployed baseline first and require the budget regressions to reproduce
+the missing accounting or lost context. Run the same regressions against the
+minimal candidate, along with existing provider contracts. Keep HTTP payload,
+privacy, timeout, overload, routing, replay and preflight-denial assertions. Tests
+for unrelated features absent from the baseline need a separate scope; record
+that distinction rather than claiming an unmodified full suite passed.
+
+Before installation, recheck each original file's hash and the policy registry.
+Stop on drift, retain exact private backups and distinguish historical event
+rows from currently executing tasks when preparing a restart. Keep task
+activation off until the matching host, Gateway policy, fixed callback, real
+provider accounting and recovery/rollback pass together. An isolated candidate
+using deployed contracts is useful evidence, but is not a production rollout.
