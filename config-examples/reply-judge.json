@@ -1,0 +1,9 @@
+{
+  "provider": "compatible",
+  "model": "configured-judge",
+  "base_url": "https://api.example.test/v1",
+  "api_key_file": "/etc/jot/reply-judge.key",
+  "max_input_bytes": 16000,
+  "timeout_ms": 20000,
+  "cache_write_policy": "explicit"
+}

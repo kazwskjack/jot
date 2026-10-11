@@ -1,0 +1,40 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
+import {writeFileSync,mkdirSync} from 'node:fs';
+import {join} from 'node:path';
+import {completionFixture} from './task-completion-fixture.mjs';
+
+test('generated document registration commits exact immutable part provenance to its original run and never rebinds a reused reference',async t=>{
+ let artifact;
+ const f=await completionFixture(t,{prepare:f=>{
+  const root=f.workbench.projectRoot('alice','ws',f.workbench.contextForRun(f.runId).project_id);mkdirSync(root,{recursive:true});
+  const one=join(root,'renderer-fixture-1.md'),two=join(root,'renderer-fixture-2.md');writeFileSync(one,'First actual bytes');writeFileSync(two,'Second actual bytes');
+  artifact=f.artifacts.registerGenerated(f.runId,'fixture-generated-provenance',[{path:one,display_name:'first.md'},{path:two,display_name:'second.md'}]);
+ }});
+ const row=f.db.prepare('SELECT * FROM ga_artifact_producers WHERE artifact_id=? AND version=1').get(artifact.artifact_ref);
+ assert.equal(row.run_id,f.runId);assert.equal(row.owner_id,'alice');assert.equal(row.conversation_id,f.occurrence.conversation_id);
+ const parts=JSON.parse(row.content_manifest_json);assert.equal(parts.length,2);
+ assert.equal(parts[0].sha256,createHash('sha256').update('First actual bytes').digest('hex'));
+ assert.equal(parts[0].size_bytes,Buffer.byteLength('First actual bytes'));assert.equal(parts[0].display_name,'first.md');
+ assert.equal(parts[1].sha256,createHash('sha256').update('Second actual bytes').digest('hex'));
+ assert.ok(parts.every(part=>!('server_path' in part)),'provenance does not record private physical paths');
+ const read=f.artifacts.readProducedGroup('alice',f.runId,artifact.artifact_ref,1);
+ assert.equal(read.parts[0].content.toString(),'First actual bytes');assert.equal(read.parts[1].content.toString(),'Second actual bytes');
+ assert.equal(read.sha256,artifact.sha256);assert.equal(read.size_bytes,artifact.size_bytes);
+ f.db.prepare('UPDATE ga_artifact_parts SET display_name=? WHERE artifact_id=? AND part_index=1').run('Unreviewed name.md',artifact.artifact_ref);
+ assert.throws(()=>f.artifacts.readProducedGroup('alice',f.runId,artifact.artifact_ref,1),/generated_artifact_content_mismatch/);
+ f.db.prepare('UPDATE ga_artifact_parts SET display_name=? WHERE artifact_id=? AND part_index=1').run('first.md',artifact.artifact_ref);
+ assert.throws(()=>f.artifacts.readProducedGroup('bob',f.runId,artifact.artifact_ref,1),/generated_artifact_producer_unverified/);
+ assert.throws(()=>f.artifacts.readProducedGroup('alice',f.runId,artifact.artifact_ref,2),/generated_artifact_producer_unverified/);
+ assert.equal(f.artifacts.registerGenerated(f.runId,'fixture-generated-provenance',[]).artifact_ref,artifact.artifact_ref);
+ assert.throws(()=>f.db.prepare('UPDATE ga_artifact_producers SET run_id=? WHERE artifact_id=?').run(f.runId,artifact.artifact_ref),/artifact_producer_immutable/);
+ assert.throws(()=>f.db.prepare('DELETE FROM ga_artifact_producers WHERE artifact_id=?').run(artifact.artifact_ref),/artifact_producer_immutable/);
+ const conversation=f.conversations.create('bob',{workspace_id:'ws',model:{provider:'fixture',model:'bounded'}});
+ const other=f.runs.enqueue(conversation.conversation_id,'bob',{client_message_id:'foreign-generated-ref',content:[{type:'text',text:'Different run'}]});
+ assert.throws(()=>f.artifacts.registerGenerated(other.run_id,'fixture-generated-provenance',[]),/generated_artifact_producer_conflict/);
+ assert.equal(f.db.prepare('SELECT count(*) n FROM ga_artifact_producers').get().n,1);
+ const physical=f.db.prepare('SELECT server_path FROM ga_artifact_parts WHERE artifact_id=? AND part_index=2').get(artifact.artifact_ref);
+ writeFileSync(physical.server_path,'Changed source bytes');
+ assert.throws(()=>f.artifacts.readProducedGroup('alice',f.runId,artifact.artifact_ref,1),/generated_artifact_content_mismatch/);
+});

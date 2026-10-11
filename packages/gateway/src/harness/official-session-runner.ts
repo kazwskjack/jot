@@ -2,14 +2,19 @@ import { readFile } from 'node:fs/promises'
 import type { DshRunner, DshRunResult } from './worker.ts'
 import type { ResolvedAttachment } from '../artifacts/resolver.ts'
 import type { SessionPromptPart } from './session-controller-client.ts'
+import {validateCheckpoint,type SessionCheckpoint} from './session-checkpoints.ts'
+import {validateTaskGoalStatus,taskGoalStopReason,type TaskGoalStatus} from './task-goal-status.ts'
 import { projectSessionFrame, type JotProjection, type ProjectionContext } from './session-event-projector.ts'
 
 interface OfficialSessionClient {
-  create(sessionId: string, cwd: string, agentPreset: string, signal?: AbortSignal): Promise<Record<string, unknown>>
+  create(sessionId: string, cwd: string, agentPreset: string, signal?: AbortSignal, workbenchRunId?: string): Promise<Record<string, unknown>>
   prompt(sessionId: string, requestId: string, content: string | SessionPromptPart[], mode?: 'queue' | 'steer', signal?: AbortSignal): Promise<Record<string, unknown>>
   stageFile?(sessionId: string, path: string, displayName: string, signal?: AbortSignal): Promise<{ receipt_id: string }>
   follow(sessionId: string, signal?: AbortSignal): AsyncGenerator<Record<string, unknown>>
   nativeTool?(tool: string, args: Record<string, unknown>, execution: Record<string, string>, signal?: AbortSignal): Promise<Record<string, unknown>>
+  checkpoint?(sessionId:string,afterSeq:number,signal?:AbortSignal):Promise<Record<string,unknown>>
+  goalStatus?(sessionId:string,signal?:AbortSignal):Promise<Record<string,unknown>>
+  goalStop?(sessionId:string,ref:{goal_id:string;goal_revision:number},signal?:AbortSignal):Promise<Record<string,unknown>>
 }
 
 function row(value: unknown): Record<string, unknown> | null {
@@ -185,6 +190,9 @@ export class OfficialSessionRunner implements DshRunner {
 
   async run(input: { enabled: true; taskRequestId: string; message: string; sessionRef: string;
     deferCompletionProbe: true; attachments?: ResolvedAttachment[];
+    workbenchRunId?: string;
+    checkpointTask?:boolean;
+    onCheckpoint?:(receipt:SessionCheckpoint)=>Promise<void>|void;
     /** Trusted DSH Session scope used by C to look up Universe operations; never the Runtime session_ref. */
     universeSessionRef?: string;
     onArtifactRef?: (artifactRef: string) => Promise<void> | void;
@@ -199,7 +207,7 @@ export class OfficialSessionRunner implements DshRunner {
       ? setTimeout(() => controller.abort(new Error('session_follow_timeout')), this.options.timeoutMs)
       : undefined
     try {
-      await this.client.create(input.sessionRef, this.options.cwd, this.options.agentPreset, controller.signal)
+      await this.client.create(input.sessionRef, this.options.cwd, this.options.agentPreset, controller.signal, input.workbenchRunId)
       let iterator = this.client.follow(input.sessionRef, controller.signal)[Symbol.asyncIterator]()
       let opening = await iterator.next()
       if (opening.done || opening.value.type !== 'snapshot') throw new Error('session_follow_snapshot_missing')
@@ -232,6 +240,10 @@ export class OfficialSessionRunner implements DshRunner {
       let finalText = ''; let finalBlocks: Array<{ kind: 'text' | 'reasoning'; text: string }> = []
       let observationOrdinal = 0; let lastSettledOrdinal = 0; let lastUnsettledAssistantOrdinal = 0
       let turnCompleted = false
+      let turnEndSeq=-1
+      let nativeGoalManaged=false,goalStopped=false;
+      let goalState:TaskGoalStatus|undefined;
+      let taskStop:DshRunResult['task_stop'];
       let turnReasonCode = 'SESSION_FINAL_TEXT_MISSING'
       const settledSteps = new Set<string>(); const attemptSteps = new Map<string, string>()
       const outputArtifactRefs = new Set<string>()
@@ -401,7 +413,10 @@ export class OfficialSessionRunner implements DshRunner {
       while (true) {
         while (true) {
           const next = await iterator.next()
-          if (next.done) break
+          if (next.done) {
+            if(nativeGoalManaged){goalStopped=true;turnReasonCode='SESSION_GOAL_STREAM_ENDED';}
+            break
+          }
           observationOrdinal += 1
           const frame = row(next.value)
           if (!frame) continue
@@ -488,6 +503,7 @@ export class OfficialSessionRunner implements DshRunner {
             await emit(projectSessionFrame(frame, projectionContext()))
           }
           if (event.type === 'turn/end') {
+            turnEndSeq=Number(event.seq)
             await flushAll()
             const finishedAt = Date.now() / 1000
             for (const [batchId, state] of crawlTimingStates) {
@@ -501,10 +517,24 @@ export class OfficialSessionRunner implements DshRunner {
             const error = row(reason?.error)
             if (!turnCompleted) turnReasonCode = error?.code === 'CONTEXT_WINDOW_EXCEEDED'
               ? 'SESSION_CONTEXT_WINDOW_EXCEEDED' : 'SESSION_TURN_INTERRUPTED'
+            if(input.checkpointTask && this.client.goalStatus){
+              goalState=validateTaskGoalStatus(await this.client.goalStatus(input.sessionRef,controller.signal),goalState);
+              nativeGoalManaged ||= goalState.goal.activation==='armed' || goalState.goal.rounds_started>0;
+              const stopped=taskGoalStopReason(goalState,nativeGoalManaged);
+              if(stopped){goalStopped=true;turnReasonCode=stopped;}
+              else if(nativeGoalManaged && turnCompleted){
+                // The native driver owns admission and scheduling. Keep this
+                // exact iterator/cursor: replacing it could lose the next
+                // round between turn/end and a newly opened snapshot.
+                turnCompleted=false;finalText='';finalBlocks=[];
+                turnReasonCode='SESSION_GOAL_CONTINUING';
+                continue;
+              }
+            }
             break
           }
         }
-        if (!turnCompleted || pendingCrawlBatches.size === 0
+        if (goalStopped || nativeGoalManaged || !turnCompleted || pendingCrawlBatches.size === 0
           || crawlAutoContinueCount >= this.options.maxCrawlAutoContinues) break
         crawlAutoContinueCount += 1
         const batchIds = [...pendingCrawlBatches.keys()].join(', ')
@@ -521,11 +551,45 @@ export class OfficialSessionRunner implements DshRunner {
         cursor = Number(opening.value.cursor ?? cursor)
       }
       await flushAll()
-      const settled = turnCompleted && Boolean(finalText) && lastSettledOrdinal >= lastUnsettledAssistantOrdinal
+      if(goalStopped&&goalState){
+        if(!this.client.goalStop)throw new Error('goal_stop_channel_unavailable');
+        let receipt:Record<string,unknown>|undefined;
+        for(let attempt=0;attempt<2;attempt++){
+          try{receipt=await this.client.goalStop(input.sessionRef,{goal_id:goalState.goal.goal_id,goal_revision:goalState.goal.goal_revision},controller.signal);break;}
+          catch(error){
+            controller.signal.throwIfAborted();
+            if(attempt===1||!this.client.goalStatus)throw error;
+            // A failed acknowledgement may still have paused the native Goal.
+            // Refresh its CAS ref; never resubmit the original task/message.
+            goalState=validateTaskGoalStatus(await this.client.goalStatus(input.sessionRef,controller.signal),goalState);
+          }
+        }
+        if(!receipt||Object.keys(receipt).length!==2||!Number.isSafeInteger(receipt.turn_end_seq)
+          ||Number(receipt.turn_end_seq)<turnEndSeq)throw new Error('goal_stop_invalid');
+        goalState=validateTaskGoalStatus({state:receipt.state},goalState);
+        if(goalState.host_status!=='idle'||goalState.goal.activation!=='disarmed'||goalState.goal.phase==='active')throw new Error('goal_stop_invalid');
+        turnEndSeq=Number(receipt.turn_end_seq);
+        taskStop={goal_id:goalState.goal.goal_id,goal_revision:goalState.goal.goal_revision,phase:goalState.goal.phase,turn_end_seq:turnEndSeq};
+      }
+      const unresolvedUsage=goalState?.task.budget.configured
+        && (goalState.task.budget.pending_unknown!>0||goalState.task.budget.pending_in_flight!>0);
+      if(unresolvedUsage)turnReasonCode=goalState!.task.budget.pending_unknown!>0?'SESSION_GOAL_USAGE_UNKNOWN':'SESSION_GOAL_USAGE_PENDING';
+      // A stopped Agent is not a certificate that provider usage is settled.
+      // Keep its factual stop result, but do not register a safe checkpoint.
+      if(input.checkpointTask&&!unresolvedUsage){
+        if(!this.client.checkpoint||!input.onCheckpoint||turnEndSeq<0)throw new Error('checkpoint_channel_unavailable')
+        const checkpoint=validateCheckpoint((await this.client.checkpoint(input.sessionRef,turnEndSeq,controller.signal)).checkpoint)
+        if(checkpoint.session_ref!==input.sessionRef||checkpoint.turn_end_seq!==turnEndSeq)throw new Error('checkpoint_invalid')
+        if(goalState&&(checkpoint.goal_id!==goalState.goal.goal_id||checkpoint.goal_revision<goalState.goal.goal_revision))throw new Error('checkpoint_invalid')
+        await input.onCheckpoint(checkpoint)
+      }
+      const settled = !goalStopped && !nativeGoalManaged && turnCompleted && Boolean(finalText) && lastSettledOrdinal >= lastUnsettledAssistantOrdinal
       return { observed: true, completed: settled,
         reason_code: settled ? 'SESSION_TURN_COMPLETED' : turnReasonCode,
         runtime_status: toolMarker ? 'runtime_observed' : 'not_required',
         ...(settled ? { final_text: finalText, final_blocks: finalBlocks } : {}),
+        ...(taskStop?{task_stop:taskStop}:{}),
+        ...(taskStop&&!unresolvedUsage&&finalText?{task_candidate:{text:finalText,blocks:finalBlocks}}:{}),
         ...(outputArtifactRefs.size ? { output_artifact_refs: [...outputArtifactRefs] } : {}),
         ...(outputFiles.size ? { presented_files: [...outputFiles.values()] } : {}), tool_marker: toolMarker }
     } finally {

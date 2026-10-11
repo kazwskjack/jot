@@ -8,7 +8,7 @@ export type ModelSelection = { provider: string; model: string; reasoning_effort
 
 export type CapabilitySet = { search: boolean; fetch: boolean; browser_interaction: boolean; file_read: boolean; file_edit: boolean; command_execution: boolean; questions: boolean; approvals: boolean; artifact_download: boolean; resume_checkpoint: boolean };
 
-export type Capabilities = { api_version: string; event_schema_version: string; adapter_version: string; capabilities: CapabilitySet; models: Array<{ provider: string; model: string; reasoning_output: "provider" | "summary" | "none"; supported_reasoning_efforts: Array<string> }>; limits: { max_upload_bytes: number; max_active_runs_per_conversation: 1; max_concurrent_sessions: 5; replay_retention_hours: number; idempotency_retention_hours: number }; voice?: { enabled: boolean; status: "disabled" | "unavailable" | "preparing" | "ready"; max_duration_ms: number; max_bytes: number; accepted_mime_types: string[]; languages: string[] }; workspaces: Array<{ workspace_id: string; title: string; can_read: boolean; can_write: boolean }> };
+export type Capabilities = { api_version: string; event_schema_version: string; adapter_version: string; capabilities: CapabilitySet; models: Array<{ provider: string; model: string; reasoning_output: "provider" | "summary" | "none"; supported_reasoning_efforts: Array<string> }>; limits: { max_upload_bytes: number; max_active_runs_per_conversation: 1; max_concurrent_sessions: 5; replay_retention_hours: number; idempotency_retention_hours: number }; voice?: { enabled: boolean; status: "disabled" | "unavailable" | "preparing" | "ready"; max_duration_ms: number; max_bytes: number; accepted_mime_types: string[]; languages: string[] }; workbench?: WorkbenchCapabilities; workspaces: Array<{ workspace_id: string; title: string; can_read: boolean; can_write: boolean }> };
 
 export type VoiceTranscriptionRequest = { client_request_id: string; language?: string; audio: Blob };
 export type VoiceTranscription = { transcription_id: string; status: "queued" | "transcribing" | "succeeded" | "failed" | "cancelled"; text?: string; language?: string; error_code?: "transcription_failed" | "result_expired" | "worker_restarted"; created_at: string; updated_at?: string };
@@ -46,7 +46,7 @@ export type ResumeReceipt = { accepted: true; run_id: string; continuation_of: s
 
 export type ContentBlock = { block_id: string; kind: "text" | "reasoning" | "summary"; text: string; source_ids?: Array<string>; exposure?: "provider" | "summary" | "public" };
 
-export type Message = { message_id: string; run_id: string; role: "user" | "assistant"; status: "streaming" | "complete" | "partial" | "failed"; blocks: Array<ContentBlock>; attachments?: Array<string>; created_at: string };
+export type Message = { message_id: string; run_id: string | null; role: "user" | "assistant"; status: "streaming" | "complete" | "partial" | "failed"; blocks: Array<ContentBlock>; attachments?: Array<string>; created_at: string };
 
 export type Source = { source_id: string; activity_id: string; url: string; title: string; host: string; access: "discovered" | "snippet" | "fetched" | "read" | "failed"; retrieved_at: string; excerpt?: string; error_code?: string };
 
@@ -69,9 +69,9 @@ export type Question = { question_id: string; prompt: string; description?: stri
 
 export type QuestionAnswer = { question_id: string; selected_option_ids: Array<string>; custom_text?: string };
 
-export type QuestionInteraction = { interaction_id: string; run_id: string; tool_call_id: string; version: number; status: "pending" | "answered" | "denied" | "cancelled" | "expired"; created_at: string; expires_at: string; kind: "question"; questions: Array<Question>; answers?: Array<QuestionAnswer> };
+export type QuestionInteraction = { interaction_id: string; run_id: string; tool_call_id: string; version: number; status: "pending" | "answered" | "denied" | "cancelled" | "expired"; created_at: string; expires_at: string; kind: "question"; purpose?: "task_input" | "task_acceptance_review"; questions: Array<Question>; answers?: Array<QuestionAnswer> };
 
-export type ApprovalInteraction = { interaction_id: string; run_id: string; tool_call_id: string; version: number; status: "pending" | "answered" | "denied" | "cancelled" | "expired"; created_at: string; expires_at: string; kind: "approval"; action_digest: string; action_summary: string; risk: "low" | "medium" | "high"; decision?: "approve" | "deny" };
+export type ApprovalInteraction = { interaction_id: string; run_id: string; tool_call_id: string; version: number; status: "pending" | "answered" | "denied" | "cancelled" | "expired"; created_at: string; expires_at: string; kind: "approval"; purpose?: "task_review" | "task_completion_review" | "task_reply_review"; action_digest: string; action_summary: string; risk: "low" | "medium" | "high"; decision?: "approve" | "deny" };
 
 export type Interaction = (QuestionInteraction) | (ApprovalInteraction);
 
@@ -113,7 +113,7 @@ export type RunError = { run_id: string; code: string; message: string; retryabl
 
 export type ProjectionEventType = "goal.updated" | "progress.updated" | "runtime.outcome" | "checkpoint.upsert" | "delivery.upsert" | "response.upsert";
 export interface ProjectionPayload { revision: number; value: Record<string, unknown> }
-export type AgentEvent = ({ schema_version: "1.0"; event_id: string; conversation_id: string; run_id: string; seq: string; at: string; type: "run.state"; payload: Run }) | ({ schema_version: "1.0"; event_id: string; conversation_id: string; run_id: string; seq: string; at: string; type: "message.created"; payload: Message }) | ({ schema_version: "1.0"; event_id: string; conversation_id: string; run_id: string; seq: string; at: string; type: "assistant.delta"; payload: AssistantDelta }) | ({ schema_version: "1.0"; event_id: string; conversation_id: string; run_id: string; seq: string; at: string; type: "assistant.settled"; payload: AssistantSettled }) | ({ schema_version: "1.0"; event_id: string; conversation_id: string; run_id: string; seq: string; at: string; type: "activity.upsert"; payload: Activity }) | ({ schema_version: "1.0"; event_id: string; conversation_id: string; run_id: string; seq: string; at: string; type: "source.upsert"; payload: Source }) | ({ schema_version: "1.0"; event_id: string; conversation_id: string; run_id: string; seq: string; at: string; type: "interaction.requested"; payload: Interaction }) | ({ schema_version: "1.0"; event_id: string; conversation_id: string; run_id: string; seq: string; at: string; type: "interaction.resolved"; payload: Interaction }) | ({ schema_version: "1.0"; event_id: string; conversation_id: string; run_id: string; seq: string; at: string; type: "artifact.upsert"; payload: Artifact }) | ({ schema_version: "1.0"; event_id: string; conversation_id: string; run_id: string; seq: string; at: string; type: "run.artifact"; payload: RunArtifact }) | ({ schema_version: "1.0"; event_id: string; conversation_id: string; run_id: string; seq: string; at: string; type: "usage.updated"; payload: Usage }) | ({ schema_version: "1.0"; event_id: string; conversation_id: string; run_id: string; seq: string; at: string; type: "run.error"; payload: RunError }) | ({ schema_version: "1.0"; event_id: string; conversation_id: string; run_id: string; seq: string; at: string; type: ProjectionEventType; payload: ProjectionPayload });
+export type AgentEvent = ({ schema_version: "1.0"; event_id: string; conversation_id: string; run_id: string; seq: string; at: string; type: "run.state"; payload: Run }) | ({ schema_version: "1.0"; event_id: string; conversation_id: string; run_id: string | null; seq: string; at: string; type: "message.created"; payload: Message }) | ({ schema_version: "1.0"; event_id: string; conversation_id: string; run_id: string; seq: string; at: string; type: "assistant.delta"; payload: AssistantDelta }) | ({ schema_version: "1.0"; event_id: string; conversation_id: string; run_id: string; seq: string; at: string; type: "assistant.settled"; payload: AssistantSettled }) | ({ schema_version: "1.0"; event_id: string; conversation_id: string; run_id: string; seq: string; at: string; type: "activity.upsert"; payload: Activity }) | ({ schema_version: "1.0"; event_id: string; conversation_id: string; run_id: string; seq: string; at: string; type: "source.upsert"; payload: Source }) | ({ schema_version: "1.0"; event_id: string; conversation_id: string; run_id: string; seq: string; at: string; type: "interaction.requested"; payload: Interaction }) | ({ schema_version: "1.0"; event_id: string; conversation_id: string; run_id: string; seq: string; at: string; type: "interaction.resolved"; payload: Interaction }) | ({ schema_version: "1.0"; event_id: string; conversation_id: string; run_id: string; seq: string; at: string; type: "artifact.upsert"; payload: Artifact }) | ({ schema_version: "1.0"; event_id: string; conversation_id: string; run_id: string; seq: string; at: string; type: "run.artifact"; payload: RunArtifact }) | ({ schema_version: "1.0"; event_id: string; conversation_id: string; run_id: string; seq: string; at: string; type: "usage.updated"; payload: Usage }) | ({ schema_version: "1.0"; event_id: string; conversation_id: string; run_id: string; seq: string; at: string; type: "run.error"; payload: RunError }) | ({ schema_version: "1.0"; event_id: string; conversation_id: string; run_id: string; seq: string; at: string; type: ProjectionEventType; payload: ProjectionPayload });
 
 export type StreamReset = { reason: "cursor_expired" | "schema_changed" | "authorization_changed"; snapshot_required: true };
 
@@ -125,3 +125,106 @@ export type Snapshot = { conversation: Conversation; as_of_seq: string; messages
 export type MessagePage = { items: Array<Message>; next_cursor?: string };
 
 export type InteractionPage = { items: Array<Interaction> };
+
+/** Workbench and persistent task DTOs mirror registered owner-scoped routes. */
+export type WorkbenchCollaborationMode = ({ id: "single"; enabled: true }) | ({ id: "independent_team"; enabled: true }) | ({ id: "subagents"; enabled: false; reason: "HOST_ADAPTER_NOT_READY" }) | ({ id: "team"; enabled: false; reason: "DSH_EXPERIMENTAL_TEAM_NOT_READY" }) | ({ id: "handoff"; enabled: false; reason: "HOST_ADAPTER_NOT_READY" });
+export type WorkbenchCapabilities = { enabled: boolean; agent_roles: boolean; independent_teams: boolean; agent_messages: boolean; shared_workspace: boolean; memory_scopes: Array<"project" | "private">; collaboration_modes: Array<WorkbenchCollaborationMode>; task_triggers: Array<"once" | "interval" | "page_change" | "daily" | "weekly" | "conversation_message" | "conversation_result">; task_schedule_limits?: WorkbenchTaskScheduleLimits; notification_channels: Array<"in_app">; allowed_tools: Array<"universe_capabilities" | "universe_search">; execution_ready: boolean; memory_lifecycle?: boolean; memory_retrieval?: "local_keyword"; task_readiness?: boolean; model_budget?: boolean; task_model_budget_limits?: ModelBudgetLimits; task_reply_policy?: boolean; task_reply_execution?: false; task_create_delivery?: boolean; task_notifications?: boolean; channel_bindings?: boolean; email_bindings?: boolean; wecom_bindings?: boolean;task_notification_events?:TaskNotificationEventKind[] };
+export type AgentRole = { agent_id: string; name: string; instructions: string; workspace_id: string; project_id: string; conversation_id: string; status: "active" | "disabled" | "deleting" | "deleted"; version: number; capability_epoch: number; allowed_tools: Array<"universe_capabilities" | "universe_search">; created_at: string; updated_at: string };
+export type AgentRolePage = { items: Array<AgentRole> };
+export type CreateAgentRole = { name: string; instructions?: string; workspace_id?: string; project_id?: string; allowed_tools?: Array<"universe_capabilities" | "universe_search"> };
+export type UpdateAgentRole = { name?: string; instructions?: string; workspace_id?: string; project_id?: string; allowed_tools?: Array<"universe_capabilities" | "universe_search">; expected_version: number; status?: "active" | "disabled" };
+export type AgentDeletionPreview = { agent_id: string; version: number; active_runs: Array<{ run_id: string; status: "queued" | "starting" | "running" | "waiting_user" | "waiting_approval" | "cancelling" }>; persistent_tasks: Array<{ task_id: string; status: "active" | "paused" | "budget_exhausted" }>; private_memory_count: number; pending_message_count: number };
+export type AgentDeletionReceipt = { agent_id: string; status: "deleting" | "deleted" };
+export type ExpectedVersion = { expected_version: number };
+export type SendAgentRoleMessage = { text: string; client_message_id: string };
+export type IndependentTeam = { team_id: string; name: string; workspace_id: string; project_id: string; status: "active" | "deleted"; version: number; created_at: string; updated_at: string; member_ids: Array<string> };
+export type IndependentTeamPage = { items: Array<IndependentTeam> };
+export type CreateIndependentTeam = { name: string; workspace_id?: string; project_id?: string; member_ids?: Array<string> };
+export type UpdateIndependentTeam = { name?: string; member_ids?: Array<string>; expected_version: number };
+export type IndependentTeamDeletion = { team_id: string; status: "deleted" };
+export type WorkbenchWorkspace = { workspace_id: string; agents: Array<AgentRole>; teams: Array<IndependentTeam> };
+export type AgentMailboxMessage = { message_id: string; workspace_id: string; project_id: string; sender_agent_id: string; recipient_agent_id: string; thread_id: string; root_causation_id: string; reply_to: string | null; text: string; initiator: "user" | "agent"; status: "pending" | "processing" | "completed" | "failed" | "outcome_unknown" | "recipient_deleted" | "sender_deleted" | "budget_exhausted" | "delivered" | "task_revoked"; auto_reply: boolean; run_id: string | null; created_at: string; updated_at: string };
+export type AgentMailboxMessagePage = { items: Array<AgentMailboxMessage> };
+export type CreateChannelBinding = {channel:'wecom'};
+export type RevokeChannelBinding = {expected_version:number};
+export type ChannelBinding = {channel_binding_id:string;channel:'wecom'|'email';status:'pending'|'verified'|'revoked'|'expired';version:number;created_at:string;verified_at:string|null;revoked_at:string|null;expires_at?:string};
+export type ChannelBindingPage = {items:ChannelBinding[]};
+export type ChannelBindingChallenge = {channel_binding_id:string;channel:'wecom';status:'pending';version:number;expires_at:string;requires_new_code:boolean;code?:string};
+export type NotificationDeliveryPolicy = {min_interval_seconds:number;max_per_24_hours:number;quiet_hours:null|{start:string;end:string;timezone:string}};
+export type TaskNotificationEventKind = 'changed'|'completed'|'failed'|'needs_confirmation';
+export type TaskNotificationSettings = {task_id:string;version:number;channel_binding_ids:string[];events:TaskNotificationEventKind[];delivery_policy:NotificationDeliveryPolicy};
+export type UpdateTaskNotifications = {expected_version:number;channel_binding_ids:string[];delivery_policy?:NotificationDeliveryPolicy;events?:TaskNotificationEventKind[]};
+export type TaskNotificationDelivery = {delivery_id:string;channel:'wecom';status:'pending'|'sending'|'receipt_pending'|'delivered'|'outcome_unknown'|'cancelled'|'failed';reason:string|null;digest_size?:number;created_at:string;updated_at:string};
+export type TaskNotificationDeliveryPage = {items:TaskNotificationDelivery[]};
+export type TaskNotificationHistoryItem = TaskNotificationDelivery & {source:'execution'|'monitor';occurrence_id:string|null};
+export type TaskNotificationHistoryPage = {items:TaskNotificationHistoryItem[];has_more:boolean;next_cursor:string|null};
+export type SendAgentMailboxMessage = { sender_agent_id: string; recipient_agent_id: string; text: string; client_message_id: string; auto_reply?: boolean; max_replies?: number; task_run_id?: string };
+export type WorkbenchMemory = { memory_id: string; workspace_id: string; project_id: string; scope: "project" | "private"; agent_id: string | null; content: string; verified: boolean; version: number; created_at: string; updated_at: string; provenance?: Array<WorkbenchMemoryProvenance>; source_revision?: string | null; expires_at?: string | null; supersedes?: string | null; verified_at?: string | null; status?: "active" | "superseded" | "deleted"; expired?: boolean; history?: Array<WorkbenchMemoryVersion> };
+export type WorkbenchMemoryPage = { items: Array<WorkbenchMemory> };
+export type SaveWorkbenchMemory = { scope: "project" | "private"; agent_id?: string; project_id?: string; content: string; verified?: boolean; memory_id?: string; expected_version?: number; provenance?: Array<WorkbenchMemoryProvenance>; source_revision?: string | null; expires_at?: string | null; supersedes?: string | null };
+export type WorkbenchMemoryDeletion = { memory_id: string; status: "deleted" };
+export type WorkbenchFile = { path: string; version: number; sha256: string; size: number; updated_at: string };
+export type WorkbenchFilePage = { items: Array<WorkbenchFile> };
+export type WorkbenchFileContent = { path: string; version: number; sha256: string; size: number; updated_at: string; content: string };
+export type WriteWorkbenchFile = { project_id: string; path: string; content: string; expected_version: number };
+export type PersistentTaskTrigger = ({ kind: "once"; run_at?: string }) | ({ kind: "interval"; interval_seconds?: number }) | ({ kind: "page_change"; interval_seconds?: number; url: string }) | ({ kind: "daily"; time: string; timezone: string }) | ({ kind: "weekly"; time: string; timezone: string; weekdays: Array<number> }) | ({ kind: "conversation_message" | "conversation_result"; conversation_id: string });
+export type PersistentTaskBudget = { max_runs: number };
+export type CreatePersistentTask = { reply_policy?: TaskReplyPolicy; notification_settings?: CreateTaskNotificationSettings; source?: { conversation_id: string; message_id: string }; title: string; agent_id: string; objective: string; trigger: PersistentTaskTrigger; priority?: number; budget?: PersistentTaskBudget; model_budget?: ModelBudgetLimits };
+export type UpdatePersistentTask = { title?: string; agent_id?: string; objective?: string; trigger?: PersistentTaskTrigger; priority?: number; budget?: PersistentTaskBudget; expected_version: number };
+export type PersistentTask = { source?: { conversation_id: string; message_id: string; content_sha256: string }; task_id: string; title: string; agent_id: string; objective: string; trigger: PersistentTaskTrigger; priority: number; budget: PersistentTaskBudget; status: "active" | "paused" | "archived" | "budget_exhausted"; version: number; generation: number; schedule_revision: number; runs_used: number; next_due_at: string | null; last_error: string | null; projection_pending: boolean; created_at: string; updated_at: string };
+export type PersistentTaskPage = { items: Array<PersistentTask> };
+export type TaskEvidence = { kind: string; reference: string; hash?: string };
+export type TaskOccurrence = { occurrence_id: string; task_id: string; trigger_key: string; scheduled_for: string; generation: number; conversation_id: string; run_id: string; status: "queued" | "starting" | "running" | "waiting_user" | "waiting_approval" | "cancelling" | "succeeded" | "partial" | "failed" | "cancelled" | "interrupted" | "outcome_unknown"; business_state: "queued" | "starting" | "running" | "waiting_user" | "waiting_approval" | "cancelling" | "succeeded" | "partial" | "failed" | "cancelled" | "interrupted" | "outcome_unknown" | "waiting_review" | "waiting_evidence" | "evidence_recorded" | "input_requested" | "approval_requested" | "acceptance_confirmed" | "acceptance_rejected" | "completed"; completion_state?: "awaiting_completion" | "finalizing" | "reconciliation_pending" | "completed"; evidence: Array<TaskEvidence>; created_at: string; updated_at: string };
+export type TaskOccurrencePage = { items: Array<TaskOccurrence> };
+export type RunPersistentTaskNow = { client_message_id?: string };
+export type CancelTaskOccurrence = { expected_run_version: number; client_message_id?: string };
+export type TaskSubtask = { subtask_id: string; task_id: string; title: string; acceptance: string; status: "pending" | "running" | "blocked" | "completed" | "failed" | "cancelled"; priority: number; dependencies: Array<string>; evidence: Array<TaskEvidence>; version: number; created_at: string; updated_at: string };
+export type TaskSubtaskPage = { items: Array<TaskSubtask> };
+export type UpsertTaskSubtask = { subtask_id?: string; expected_version?: number; title?: string; acceptance?: string; status?: "pending" | "running" | "blocked" | "completed" | "failed" | "cancelled"; priority?: number; dependencies?: Array<string>; evidence?: Array<TaskEvidence> };
+export type WorkbenchTaskScheduleLimits = { default_interval_seconds: 300; min_interval_seconds: 60; max_interval_seconds: 31536000; dst_gap: "next_valid_time"; dst_fold: "first_only"; missed_triggers: "coalesce" };
+export type PreviewPersistentTask = { trigger: PersistentTaskTrigger };
+export type PersistentTaskPreview = { next_due_at: string | null; timezone: string | null };
+export type WorkbenchMemoryProvenance = { kind: string; reference: string };
+export type WorkbenchMemoryVersion = { version: number; content: string; verified: boolean; provenance: Array<WorkbenchMemoryProvenance>; source_revision: string | null; expires_at: string | null; supersedes: string | null; verified_at: string | null; status: "active" | "superseded" | "deleted"; created_at: string; updated_at: string };
+export type WorkbenchMemoryExport = { schema_version: 1; workspace_id: string; exported_at: string; items: Array<WorkbenchMemory> };
+export type TaskReadinessDisplay = { label: string; readiness_score: number | null; business_status: string; evidence_count: number; completion_confirmed: boolean };
+export type TaskReadinessAssessment = { revision: number; assessed_at: string; expires_at: string; scorer_version: string; calibration_version: null; model_raw_score: number | null; readiness_score: number; understanding: number; prerequisites: number; evidence_coverage: number; target_uniqueness: number; capability_health: number; uncertainty_reasons: Array<string> };
+export type TaskReadinessView = { display: TaskReadinessDisplay; fresh: boolean; stale_reasons: Array<string>; latest: TaskReadinessAssessment | null };
+export type TaskSubtaskReadiness = { subtask_id: string; subtask_version: number; display: TaskReadinessDisplay; fresh: boolean; stale_reasons: Array<string>; latest: TaskReadinessAssessment | null };
+export type TaskReadinessCandidate = { task_id: string; subtask_id: string; title: string; priority: number; readiness_score: number; waiting_compensation: number; assessment_revision: number; observation_revision: string; next_action: "execute" | "gather_evidence" | "resolve_uncertainty"; uncertainty_reasons: Array<string> };
+export type TaskReadiness = { task_id: string; parent: TaskReadinessView; subtasks: Array<TaskSubtaskReadiness>; next: { items: Array<TaskReadinessCandidate>; blocked: Array<{ subtask_id: string; title: string; reasons: Array<string> }> } };
+export type ModelBudgetAmounts = { tokens: string; nano_usd: string; model_calls: string };
+export type ModelBudgetLimits = { tokens: number; nano_usd: number; model_calls: number };
+export type ModelBudgetSummary = { kind: "task_total" | "owner_daily" | "project_daily" | "agent_daily"; limits: ModelBudgetAmounts; used: ModelBudgetAmounts; held: ModelBudgetAmounts; remaining: ModelBudgetAmounts; starts_at: string | null; ends_at: string | null };
+export type TaskModelBudgetUnavailable = { configured: false; task_id: string; reason: "BUDGET_POLICY_NOT_CONFIGURED" };
+export type TaskModelBudgetView = { configured: true; task_id: string; version: number; root: ModelBudgetSummary; ceiling: ModelBudgetAmounts; shared: Array<ModelBudgetSummary>; can_start_next_call: boolean; blocking_reasons: Array<string>; pending_unknown: number; token_accounting: "metered_routes_only"; unmetered_token_calls: number; cost_basis: "configured_rates"; currency: "USD"; as_of: string };
+export type TaskModelBudget = TaskModelBudgetUnavailable | TaskModelBudgetView;
+export type UpdateTaskModelBudget = { expected_version: number; limits: ModelBudgetLimits };
+export type TaskSubtaskQuery = { occurrence_id?: string };
+
+export type FileOperationRequest = { conversation_id: string; operation: "document.inspect" | "document.read" | "writer.replace_text" | "writer.set_table_cell" | "calc.set_cells" | "calc.recalculate" | "pdf.reorder_pages" | "pdf.rotate_pages"; base_version: number; base_sha256: string; target?: Record<string, unknown>; expected?: Record<string, unknown>; change?: Record<string, unknown>; save_as?: { format: "docx" | "xlsx" | "xls" | "pdf"; new_version: true } };
+
+export type FileJob = { job_id: string; artifact_ref: string; operation: string; status: "queued" | "running" | "completed" | "failed"; base_version: number; output_version: number | null; result: Record<string, unknown> | null; error_code: string | null; created_at: string; updated_at: string };
+
+export type WorkbenchFileReadQuery = { project_id: string; path: string; version?: number };
+
+
+export type CreateTaskDelegation = { occurrence_id: string; subtask_id: string; expected_subtask_version: number; recipient_agent_id: string; client_message_id: string };
+export type TaskDelegationReceipt = { delegation_id: string; message_id: string; occurrence_id: string; subtask_id: string; subtask_version: number; recipient_agent_id: string };
+
+export type SaveTaskCollaboration = {expected_version:number;enabled:false} | {expected_version:number;enabled:true;team_id:string;member_ids:string[];max_delegations:number;max_active:1|2};
+export type TaskCollaboration = {version:number;enabled:boolean;team_id:string|null;member_ids:string[];max_delegations:number;max_active:number};
+
+export type CreateEmailBinding = {address:string};
+export type ConfirmEmailBinding = {code:string};
+export type EmailBindingChallenge = {channel_binding_id:string;channel:'email';status:'pending'|'consumed'|'verified'|'replaced';delivery_status:'sending'|'accepted'|'outcome_unknown';expires_at:string};
+export type EmailBindingVerified = {channel_binding_id:string;channel:'email';status:'verified';version:number};
+
+export type CreateTaskNotificationSettings = {channel_binding_ids:string[];delivery_policy?:NotificationDeliveryPolicy;events?:TaskNotificationEventKind[]};
+
+export type TaskReplyPolicy = {mode:"report"}|{mode:"draft"|"review"|"bounded_auto_reply";target:{kind:"conversation";conversation_id:string}|{kind:"channel";channel_binding_id:string};direction:{topic:string;tone:string;evidence_required:true;forbidden:string[]};limits:{max_per_24_hours:number;min_interval_seconds:number;expires_at:string};quiet_hours:NotificationDeliveryPolicy["quiet_hours"]};
+export type TaskReplyPolicySettings = {task_id:string;version:number;policy:TaskReplyPolicy};
+export type UpdateTaskReplyPolicy = {expected_version:number;policy:TaskReplyPolicy};
+
+export type TaskReplyHistoryItem = {draft_id:string;run_id:string;conversation_id:string;occurrence_id:string;mode:"draft"|"review"|"bounded_auto_reply";text:string;target:{kind:"conversation";conversation_id:string}|{kind:"channel";channel_binding_id:string};status:"draft"|"pending_review"|"review_expired"|"review_denied"|"waiting_dispatch"|"deferred"|"queued"|"sending"|"receipt_pending"|"delivered"|"cancelled"|"outcome_unknown"|"blocked";reason:string|null;not_before:string|null;interaction_id:string|null;message_id:string|null;delivery_id:string|null;created_at:string;updated_at:string};
+export type TaskReplyHistoryPage = {items:TaskReplyHistoryItem[];has_more:boolean;next_cursor:string|null};

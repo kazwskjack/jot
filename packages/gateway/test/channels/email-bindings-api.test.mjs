@@ -1,0 +1,25 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdirSync,mkdtempSync,rmSync} from 'node:fs';
+import {join,resolve} from 'node:path';
+import {buildServer} from '../../src/server.ts';
+const base=resolve('.test-tmp/email-binding-api');mkdirSync(base,{recursive:true});
+test('email binding API enforces CSRF and owner, never caches the proof, and deduplicates sends',async t=>{
+ const dir=mkdtempSync(join(base,'case-')),sent=[];
+ const f=await buildServer({databasePath:join(dir,'db.sqlite'),workspaces:['ws'],workbenchRoot:join(dir,'workspace'),csrfToken:'fixture-csrf-123456',allowedOrigins:['https://fixture.invalid'],emailBindingSend:async(text,to)=>{sent.push({text,to});return {provider_message_id:'accepted'};}});
+ t.after(async()=>{await f.app.close();f.db.close();rmSync(dir,{recursive:true,force:true,maxRetries:5,retryDelay:20});});
+ const headers={'x-user-id':'alice',origin:'https://fixture.invalid','x-csrf-token':'fixture-csrf-123456','idempotency-key':'email-create-key'};
+ const request={method:'POST',url:'/v1/channel-bindings/email',headers,payload:{address:'alice@example.test'}};
+ assert.equal((await f.app.inject({...request,headers:{...headers,'x-csrf-token':'wrong'}})).statusCode,403);assert.equal(sent.length,0);
+ const created=await f.app.inject(request);assert.equal(created.statusCode,201,created.body);const challenge=created.json();assert.equal(challenge.code,undefined);assert.equal(challenge.address,undefined);
+ const replay=await f.app.inject(request);assert.deepEqual(replay.json(),challenge);assert.equal(sent.length,1);
+ const pending=await f.app.inject({url:'/v1/channel-bindings',headers:{'x-user-id':'alice'}});assert.equal(pending.json().items[0].channel_binding_id,challenge.channel_binding_id);assert.equal(pending.json().items[0].status,'pending');
+ const code=sent[0].text.match(/[A-Za-z0-9_-]{43}/)[0];
+ const confirm={method:'POST',url:`/v1/channel-bindings/email/${challenge.channel_binding_id}/confirm`,headers:{...headers,'idempotency-key':'email-confirm-key'},payload:{code}};
+ assert.equal((await f.app.inject({...confirm,headers:{...confirm.headers,'x-user-id':'bob'}})).statusCode,422);
+ const verified=await f.app.inject(confirm);assert.equal(verified.statusCode,200,verified.body);assert.equal(verified.json().status,'verified');
+ assert.deepEqual((await f.app.inject(confirm)).json(),verified.json());
+ assert.equal(JSON.stringify(f.db.prepare('SELECT * FROM ga_idempotency').all()).includes(code),false);
+ const list=await f.app.inject({url:'/v1/channel-bindings',headers:{'x-user-id':'alice'}});assert.equal(list.json().items[0].channel,'email');assert.equal(list.json().items[0].principal,undefined);
+ const capabilities=await f.app.inject({url:'/v1/capabilities',headers:{'x-user-id':'alice'}});assert.equal(capabilities.json().workbench.email_bindings,true);
+});

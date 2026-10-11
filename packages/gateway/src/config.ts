@@ -1,3 +1,5 @@
+import { dirname, join } from 'node:path';
+import { workbenchExecutionConfiguration } from './workbench/model-budget-policy.ts';
 function required(name: string): string {
   const value = String(process.env[name] ?? '').trim();
   if (!value) throw new Error(`config_${name.toLowerCase()}_required`);
@@ -8,10 +10,11 @@ export function loadBffConfig() {
   const csrfToken = required('GENERAL_AGENT_CSRF_TOKEN');
   if (csrfToken.length < 16) throw new Error('config_csrf_token_too_short');
   const allowedOrigins = required('GENERAL_AGENT_ALLOWED_ORIGINS').split(',').map(item => item.trim()).filter(Boolean);
+  const databasePath = process.env.GENERAL_AGENT_DB?.trim() || '/var/lib/jot/jot.db';
   return {
     host: process.env.GENERAL_AGENT_HOST?.trim() || '127.0.0.1',
     port: Number(process.env.GENERAL_AGENT_PORT || 18831),
-    databasePath: process.env.GENERAL_AGENT_DB?.trim() || '/var/lib/jot/jot.db',
+    databasePath,
     uploadRoot: process.env.GENERAL_AGENT_FILE_ROOT?.trim()
       || process.env.GENERAL_AGENT_UPLOAD_ROOT?.trim()
       || '/var/lib/jot/jot-files',
@@ -22,6 +25,8 @@ export function loadBffConfig() {
     templateRoot: process.env.GENERAL_AGENT_TEMPLATE_ROOT?.trim()
       || '/opt/jot/general-agent-web/current/file-engine/templates',
     voiceEnabled: process.env.GENERAL_AGENT_VOICE_ENABLED === 'true',
+    workbenchRoot: process.env.GENERAL_AGENT_WORKBENCH_ROOT?.trim() || join(dirname(databasePath), 'jot-workspaces'),
+    ...workbenchExecutionConfiguration(process.env),
     voiceAdapterUrl: process.env.GENERAL_AGENT_VOICE_ADAPTER_URL?.trim() || 'http://127.0.0.1:18841',
     voiceAdapterTokenFile: process.env.GENERAL_AGENT_VOICE_ADAPTER_TOKEN_FILE?.trim() || '',
   };

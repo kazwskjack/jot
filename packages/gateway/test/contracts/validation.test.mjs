@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { ContractValidator } from '../../src/contracts/validator.ts';
@@ -9,7 +8,7 @@ import { buildServer } from '../../src/server.ts';
 
 test('all declared JSON request and success response schemas compile', () => {
   const contracts = new ContractValidator();
-  assert.equal(contracts.operationCount, 33);
+  assert.equal(contracts.operationCount,JSON.parse(readFileSync(new URL('../../contracts/operations.json',import.meta.url),'utf8')).length);
   assert.deepEqual(contracts.compilationErrors, []);
 });
 
@@ -37,7 +36,7 @@ test('response validation applies the operation status schema', () => {
 });
 
 test('server rejects an invalid JSON request before business handlers run', async () => {
-  const directory = mkdtempSync(join(tmpdir(), 'ga-contract-server-'));
+  const base='.test-tmp';mkdirSync(base,{recursive:true});const directory = mkdtempSync(join(base, 'ga-contract-server-'));
   const service = await buildServer({ databasePath: join(directory, 'db.sqlite'), workspaces: ['ws'] });
   try {
     const response = await service.app.inject({ method: 'POST', url: '/v1/conversations',
@@ -48,7 +47,7 @@ test('server rejects an invalid JSON request before business handlers run', asyn
 });
 
 test('server blocks a handler response that violates its OpenAPI success schema', async () => {
-  const directory = mkdtempSync(join(tmpdir(), 'ga-contract-response-'));
+  const base='.test-tmp';mkdirSync(base,{recursive:true});const directory = mkdtempSync(join(base, 'ga-contract-response-'));
   const service = await buildServer({ databasePath: join(directory, 'db.sqlite'), workspaces: ['ws'] });
   service.conversations.create = () => ({ invalid: true });
   try {

@@ -1,0 +1,36 @@
+import assert from 'node:assert/strict';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import test from 'node:test';
+import Fastify from 'fastify';
+import { openProductDatabase } from '../../src/db/database.ts';
+import { WorkbenchService } from '../../src/workbench/service.ts';
+import { registerWorkbenchRoutes } from '../../src/workbench/routes.ts';
+
+const base = resolve('../../.test-tmp/workbench-routes');
+mkdirSync(base, { recursive: true });
+test('routes validate resource inputs and preserve owner boundaries through the real service', async t => {
+  const dir = mkdtempSync(join(base, 'case-'));
+  const db = openProductDatabase(join(dir, 'fixture.sqlite'));
+  const service = new WorkbenchService(db, { workspaceIds: ['ws'], root: join(dir, 'shared') });
+  const app = Fastify();
+  app.setErrorHandler((error, _request, reply) => reply.code(error.message.includes('not_found') ? 404 : 400).send({ error: error.message }));
+  registerWorkbenchRoutes(app, service, request => String(request.headers['x-user-id'] ?? ''));
+  t.after(async () => { await app.close(); db.close(); rmSync(dir, { recursive: true, force: true }); });
+  const headers = { 'x-user-id': 'a' };
+  const created = await app.inject({ method: 'POST', url: '/v1/agents', headers, payload: { name: 'A', instructions: 'Research' } });
+  assert.equal(created.statusCode, 201);
+  const agent = created.json();
+  assert.equal((await app.inject({ method: 'GET', url: `/v1/agents/${agent.agent_id}`, headers: { 'x-user-id': 'b' } })).statusCode, 404);
+  assert.equal((await app.inject({ method: 'POST', url: '/v1/agents', headers, payload: { name: 'bad', owner_id: 'b' } })).statusCode, 400);
+  const queued = await app.inject({ method: 'POST', url: `/v1/agents/${agent.agent_id}/messages`, headers, payload: { text: 'Do research', client_message_id: 'chat-1' } });
+  assert.equal(queued.statusCode, 202);
+  assert.equal(service.contextForRun(queued.json().run_id).agent_id, agent.agent_id);
+  const memory = await app.inject({ method: 'POST', url: '/v1/workspaces/ws/memory', headers, payload: { scope: 'project', project_id: agent.project_id, content: 'fact' } });
+  assert.equal(memory.statusCode, 201);
+  const file = await app.inject({ method: 'PUT', url: '/v1/workspaces/ws/files', headers, payload: { project_id: agent.project_id, path: 'notes/a.txt', content: 'fact', expected_version: 0 } });
+  assert.equal(file.statusCode, 200);
+  assert.equal((await app.inject({ method: 'GET', url: `/v1/workspaces/ws/files/content?project_id=${agent.project_id}&path=notes%2Fa.txt`, headers })).json().content, 'fact');
+  assert.equal((await app.inject({ method: 'GET', url: `/v1/agents/${agent.agent_id}/deletion-preview`, headers })).json().active_runs.length, 1);
+  assert.equal((await app.inject({ method: 'DELETE', url: `/v1/agents/${agent.agent_id}`, headers, payload: { expected_version: 1 } })).json().status, 'deleted');
+});

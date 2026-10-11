@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 
@@ -8,8 +7,8 @@ import { buildServer } from '../../src/server.ts';
 
 test('every OpenAPI operation is registered by the backend router', async () => {
   const spec = JSON.parse(readFileSync(new URL('../../contracts/openapi.json', import.meta.url), 'utf8'));
-  const directory = mkdtempSync(join(tmpdir(), 'ga-routes-'));
-  const service = await buildServer({ databasePath: join(directory, 'db.sqlite'), workspaces: ['ws'] });
+  const base='.test-tmp';mkdirSync(base,{recursive:true});const directory = mkdtempSync(join(base, 'ga-routes-'));
+  const service = await buildServer({ databasePath: join(directory, 'db.sqlite'), workspaces: ['ws'],workbenchRoot:join(directory,'workbench') });
   try {
     const missing = [];
     let operations = 0;
@@ -21,7 +20,7 @@ test('every OpenAPI operation is registered by the backend router', async () => 
         if (!service.app.hasRoute({ method: method.toUpperCase(), url })) missing.push(`${method.toUpperCase()} ${path}`);
       }
     }
-    assert.equal(operations, 33);
+    assert.equal(operations,JSON.parse(readFileSync(new URL('../../contracts/operations.json',import.meta.url),'utf8')).length);
     assert.deepEqual(missing, []);
   } finally { await service.app.close(); service.db.close(); rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }); }
 });

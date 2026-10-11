@@ -14,7 +14,7 @@ export interface StoredAgentEvent {
   schema_version: '1.0';
   event_id: string;
   conversation_id: string;
-  run_id: string;
+  run_id: string | null;
   seq: string;
   at: string;
   type: string;
@@ -31,7 +31,7 @@ export class EventStore {
 
   append(
     conversationId: string,
-    runId: string,
+    runId: string | null,
     type: string,
     payload: Record<string, unknown>,
   ): StoredAgentEvent {
@@ -84,7 +84,7 @@ export class EventStore {
     ).all(conversationId, Math.max(0, afterSeq), Math.max(1, Math.min(limit, 1000))) as Array<Record<string, unknown>>;
     return rows.map(row => ({
       schema_version: '1.0', event_id: String(row.event_id), conversation_id: conversationId,
-      run_id: String(row.run_id ?? ''), seq: String(row.seq), at: String(row.created_at),
+      run_id: row.run_id===null?null:String(row.run_id), seq: String(row.seq), at: String(row.created_at),
       type: String(row.type), payload: JSON.parse(String(row.payload_json)) as Record<string, unknown>,
     }));
   }

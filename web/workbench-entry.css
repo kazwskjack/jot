@@ -1,0 +1,11 @@
+.workbench-application{max-width:1280px;margin:auto;padding:0 24px 40px;--jot-glass-bg:var(--panel);--jot-glass-border:var(--line)}
+.workbench-application header{position:relative;padding:20px 0;display:flex;justify-content:space-between}
+.workbench-application .wb-layout{min-width:0;--wb-surface:var(--panel);--wb-border:var(--line);--wb-muted:var(--muted);font-family:inherit}
+.workbench-application .wb-content{min-width:0}
+.workbench-application form button{width:auto;min-width:0;white-space:nowrap}
+.workbench-application input,.workbench-application textarea,.workbench-application select{color:var(--text);background:var(--panel);border:1px solid var(--line)}
+.workbench-application .wb-content>h2{font-size:28px;letter-spacing:-.5px}
+.workbench-conversation{max-width:850px;margin:auto;padding:24px 0}.workbench-conversation article p{white-space:pre-wrap}
+.jot-message-files{display:flex;flex-wrap:wrap;gap:4px}.jot-message-files.uploaded{flex-direction:row-reverse}.jot-upload-entry{display:flex;flex-wrap:wrap;align-items:center;gap:8px}.jot-upload-entry span{overflow-wrap:anywhere}.jot-file-preview{max-width:100%;overflow:hidden}.jot-file-preview img{max-width:100%;height:auto}.jot-file-preview pre{max-height:360px;overflow:auto}.jot-message-files button{max-width:100%;overflow-wrap:anywhere}
+.workbench-conversation form{position:relative;display:grid;gap:12px}.workbench-conversation textarea{display:block;width:100%;min-height:90px;padding:12px;border-radius:12px}.workbench-conversation article{max-width:none;margin:20px 0}.workbench-conversation pre{overflow:auto}.workbench-conversation table{display:block;overflow:auto}.workbench-conversation button{margin:4px;padding:10px;border:1px solid var(--line);border-radius:10px}.workbench-conversation .jot-interaction{padding:16px;border:1px solid var(--line);border-radius:12px}
+@media(max-width:700px){.workbench-application{padding:0 16px 24px}.workbench-application .wb-layout{display:block}.workbench-application .wb-nav{display:flex;flex-wrap:wrap;gap:8px}.workbench-application .wb-content{padding-top:18px}}

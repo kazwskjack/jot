@@ -62,7 +62,7 @@ CREATE INDEX IF NOT EXISTS idx_ga_candidate_answers_run ON ga_candidate_answers(
 
 CREATE TABLE IF NOT EXISTS ga_channel_deliveries (
   effect_id TEXT PRIMARY KEY,
-  run_id TEXT NOT NULL REFERENCES ga_runs(id) ON DELETE CASCADE,
+  run_id TEXT REFERENCES ga_runs(id) ON DELETE CASCADE,
   message_id TEXT NOT NULL,
   destination TEXT NOT NULL,
   recipient TEXT NOT NULL,
@@ -120,6 +120,16 @@ CREATE TABLE IF NOT EXISTS ga_artifact_versions (
   mime_type TEXT NOT NULL, metadata_json TEXT NOT NULL, created_at TEXT NOT NULL,
   PRIMARY KEY(artifact_id,version)
 );
+CREATE TABLE IF NOT EXISTS ga_artifact_producers (
+  artifact_id TEXT NOT NULL,version INTEGER NOT NULL,run_id TEXT NOT NULL REFERENCES ga_runs(id),
+  owner_id TEXT NOT NULL,conversation_id TEXT NOT NULL REFERENCES ga_conversations(id),
+  content_manifest_json TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(artifact_id,version),
+  FOREIGN KEY(artifact_id,version) REFERENCES ga_artifact_versions(artifact_id,version)
+);
+CREATE TRIGGER IF NOT EXISTS ga_artifact_producers_no_update BEFORE UPDATE ON ga_artifact_producers
+BEGIN SELECT RAISE(ABORT,'artifact_producer_immutable'); END;
+CREATE TRIGGER IF NOT EXISTS ga_artifact_producers_no_delete BEFORE DELETE ON ga_artifact_producers
+BEGIN SELECT RAISE(ABORT,'artifact_producer_immutable'); END;
 CREATE TABLE IF NOT EXISTS ga_artifact_parts (
   artifact_id TEXT NOT NULL REFERENCES ga_artifacts(id) ON DELETE CASCADE,
   part_index INTEGER NOT NULL,

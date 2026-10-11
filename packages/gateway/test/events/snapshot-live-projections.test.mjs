@@ -49,7 +49,7 @@ test('snapshot contract accepts typed browse evidence from Session projection an
     const context = { runId: 'run-browse', attemptId: 'attempt-run-browse', messageId: 'message-1',
       blockId: 'block-1', deltaIndex: 0, at: now, knownTools: new Map() }
     const call = projectSessionFrame({ type: 'event', event: { type: 'tool/call', data: { id: 'call-browse',
-      name: 'universe_browse', arguments: JSON.stringify({ url: 'https://www.example.invalid/__stability__/n02.html',
+      name: 'universe_browse', arguments: JSON.stringify({ url: 'https://www.example.com/__stability__/n02.html',
         actions: [{ type: 'click', target: 'Show details' }] }) } } }, context)
     assert.equal(call?.type, 'activity.upsert')
     const resultProjection = projectSessionFrame({ type: 'event', event: { type: 'tool/result', data: { id: 'call-browse',

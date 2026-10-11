@@ -1,0 +1,27 @@
+{
+  "template_id": "evidence-table-v1",
+  "sheet": "Evidence",
+  "header_row": 5,
+  "row_start": 6,
+  "row_end": 25,
+  "capacity": 20,
+  "natural_key": [
+    "entity_id",
+    "metric",
+    "period"
+  ],
+  "columns": {
+    "entity_id": "A",
+    "metric": "B",
+    "value": "C",
+    "unit": "D",
+    "period": "E",
+    "source_url": "F",
+    "observed_at": "G",
+    "evidence_ref": "H",
+    "verification": "I",
+    "note": "J"
+  },
+  "duplicate_key_policy": "reject",
+  "literal_text_policy": "never_convert_untrusted_text_to_formula"
+}

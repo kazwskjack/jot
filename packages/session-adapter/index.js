@@ -1,9 +1,11 @@
 import { createServer } from 'node:http'
 import { timingSafeEqual } from 'node:crypto'
+import { isAbsolute } from 'node:path'
 import { createVoiceAdapterHandler } from './voice.js'
+import { WorkbenchBridge } from './workbench.js'
 
-export const name = 'jot-session-adapter'
-export const inject = ['sessionController', 'fileUploads', 'agents']
+export const name = 'jot-jot-session-adapter'
+export const inject = ['sessionController', 'fileUploads', 'agents','sessions','sessionPersistence']
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/
 const ALLOWED_AGENT_PRESETS = new Set([
@@ -121,8 +123,10 @@ function decodeFilename(headers) {
   return value && Buffer.byteLength(value, 'utf8') <= 255 && !/[\u0000\/\\]/.test(value) ? value : null
 }
 
-export function createAdapterHandler({ controller, fileUploads, agents, speechController, voiceEnabled = false, token }) {
+export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge }) {
   const voiceHandler = voiceEnabled ? createVoiceAdapterHandler({ speechController, token }) : null
+  const workbenchSessions = new Set()
+  const blockedWorkbenchSessions = new Set()
   return async ({ method, url, headers, body, signal = new AbortController().signal }) => {
     if (!authorized(headers.authorization, token)) return json(401, { error: 'unauthorized' })
     if (method !== 'POST') return json(405, { error: 'method_not_allowed' })
@@ -132,16 +136,78 @@ export function createAdapterHandler({ controller, fileUploads, agents, speechCo
     }
     if (url.pathname === '/v1/sessions') {
       const sessionId = String(body?.session_id ?? '')
-      const cwd = String(body?.cwd ?? '')
-      if (!ID.test(sessionId) || !cwd.startsWith('/')) return json(422, { error: 'session_input_invalid' })
+      const cwd = body?.cwd
+      if (!ID.test(sessionId) || typeof cwd !== 'string' || cwd.includes('\u0000') || !isAbsolute(cwd)) return json(422, { error: 'session_input_invalid' })
       const requestedPreset = body?.agent_preset
       if (requestedPreset !== undefined && !ALLOWED_AGENT_PRESETS.has(requestedPreset)) {
         return json(422, { error: 'agent_preset_not_allowed' })
       }
       const request = { sessionId, cwd }
+      const workbenchRunId = body?.workbench_context?.run_id
+      if (body?.workbench_context !== undefined) {
+        if (!ID.test(String(workbenchRunId ?? ''))) return json(422, { error: 'workbench_binding_invalid' })
+        if (!workbenchBridge?.attach || !agents?.get) return json(503, { error: 'workbench_bridge_unavailable' })
+        workbenchSessions.add(sessionId)
+        blockedWorkbenchSessions.add(sessionId)
+      }
       if (requestedPreset !== undefined) request.agentPreset = requestedPreset
       const value = await controller.create(request)
+      if (workbenchRunId !== undefined) {
+        try { await workbenchBridge.attach(agents.get(sessionId), { runId: String(workbenchRunId), sessionRef: sessionId },{sessions,persistence,signal}) }
+        catch { return json(503, { error: 'workbench_bridge_unavailable' }) }
+        blockedWorkbenchSessions.delete(sessionId)
+      }
       return json(201, value)
+    }
+    const goalStatus=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/goal-status$/)
+    if(goalStatus){
+      const sessionId=decodeURIComponent(goalStatus[1])
+      if(!ID.test(sessionId)||!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).length)return json(422,{error:'goal_status_input_invalid'})
+      if(!workbenchSessions.has(sessionId)||blockedWorkbenchSessions.has(sessionId)||!workbenchBridge?.observe||!agents?.get)return json(503,{error:'goal_status_unavailable'})
+      try{return json(200,{state:await workbenchBridge.observe(agents.get(sessionId),signal)})}
+      catch{return json(409,{error:'goal_status_unavailable'})}
+    }
+    const goalStop=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/goal-stop$/)
+    if(goalStop){
+      const sessionId=decodeURIComponent(goalStop[1])
+      if(!ID.test(sessionId)||!body||typeof body!=='object'||Array.isArray(body)
+        ||Object.keys(body).length!==2||typeof body.goal_id!=='string'||!ID.test(body.goal_id)
+        ||!Number.isSafeInteger(body.goal_revision)||body.goal_revision<1)return json(422,{error:'goal_stop_input_invalid'})
+      if(!workbenchSessions.has(sessionId)||blockedWorkbenchSessions.has(sessionId)||!workbenchBridge?.suspend||!agents?.get)return json(503,{error:'goal_stop_unavailable'})
+      try{return json(200,await workbenchBridge.suspend(agents.get(sessionId),body,signal))}
+      catch{return json(409,{error:'goal_stop_unavailable'})}
+    }
+    const goalRestore=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/goal-restore$/)
+    if(goalRestore){
+      const sessionId=decodeURIComponent(goalRestore[1])
+      if(!ID.test(sessionId)||!body||typeof body!=='object'||Array.isArray(body)
+        ||typeof body.run_id!=='string'||!ID.test(body.run_id)
+        ||(Object.hasOwn(body,'intent_id')&&(typeof body.intent_id!=='string'||!ID.test(body.intent_id)))
+        ||!Object.keys(body).every(key=>['run_id','intent_id'].includes(key)))return json(422,{error:'goal_restore_input_invalid'})
+      if(!workbenchBridge?.restoreCompletion||!agents?.get)return json(503,{error:'goal_restore_unavailable'})
+      blockedWorkbenchSessions.add(sessionId)
+      try{
+        const result=await workbenchBridge.restoreCompletion({runId:body.run_id,sessionRef:sessionId,...(body.intent_id===undefined?{}:{intentId:body.intent_id})},{agents,sessions,persistence,signal})
+        workbenchSessions.add(sessionId);blockedWorkbenchSessions.delete(sessionId)
+        return json(200,result)
+      }catch{return json(409,{error:'goal_restore_unconfirmed'})}
+    }
+    const goalComplete=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/goal-complete$/)
+    if(goalComplete){
+      const sessionId=decodeURIComponent(goalComplete[1])
+      if(!ID.test(sessionId)||!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).length!==1
+        ||typeof body.intent_id!=='string'||!ID.test(body.intent_id))return json(422,{error:'goal_complete_input_invalid'})
+      if(!workbenchSessions.has(sessionId)||blockedWorkbenchSessions.has(sessionId)||!workbenchBridge?.complete||!agents?.get)return json(503,{error:'goal_complete_unavailable'})
+      try{return json(200,await workbenchBridge.complete(agents.get(sessionId),{intentId:body.intent_id,sessions,persistence,signal}))}
+      catch{return json(409,{error:'goal_complete_unconfirmed'})}
+    }
+    const checkpoint=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/checkpoint$/)
+    if(checkpoint){
+      const sessionId=decodeURIComponent(checkpoint[1])
+      if(!ID.test(sessionId)||!body||Object.keys(body).some(k=>k!=='after_seq')||!Number.isSafeInteger(body.after_seq)||body.after_seq<0)return json(422,{error:'checkpoint_input_invalid'})
+      if(!workbenchSessions.has(sessionId)||blockedWorkbenchSessions.has(sessionId)||!workbenchBridge?.checkpoint||!agents?.get)return json(503,{error:'checkpoint_unavailable'})
+      try{return json(200,{checkpoint:await workbenchBridge.checkpoint(agents.get(sessionId),{afterSeq:body.after_seq,sessions,persistence,signal})})}
+      catch{return json(409,{error:'checkpoint_unavailable'})}
     }
     const cancel = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/cancel$/)
     if (cancel) {
@@ -151,6 +217,7 @@ export function createAdapterHandler({ controller, fileUploads, agents, speechCo
       const agent = agents.get(sessionId)
       // No attached driver exists after a Host restart; there is no live turn to stop.
       if (!agent) return json(202, { accepted: true, settled: true, attached: false })
+      if(workbenchSessions.has(sessionId))await workbenchBridge?.revoke?.(agent)
       const value = await controller.cancel({ sessionId })
       await agent.whenIdle()
       return json(202, { ...value, settled: true, attached: true })
@@ -162,6 +229,11 @@ export function createAdapterHandler({ controller, fileUploads, agents, speechCo
       const content = promptContent(body)
       const mode = body?.mode === 'steer' ? 'steer' : 'queue'
       if (!ID.test(sessionId) || !ID.test(requestId) || !content) return json(422, { error: 'prompt_input_invalid' })
+      if (workbenchSessions.has(sessionId)) {
+        if (blockedWorkbenchSessions.has(sessionId) || !workbenchBridge?.guard || !agents?.get) return json(503, { error: 'workbench_bridge_unavailable' })
+        try { await workbenchBridge.guard(agents.get(sessionId), signal) }
+        catch { return json(409, { error: 'workbench_run_forbidden' }) }
+      }
       let value
       try {
         value = await controller.prompt({ requestId, sessionId, mode, content }, signal)
@@ -211,13 +283,23 @@ export function apply(ctx, config = {}) {
   const port = Number(config.port || 18841)
   const token = String(process.env[config.tokenEnv || 'JOT_SESSION_ADAPTER_TOKEN'] || '')
   const voiceEnabled = config.voiceEnabled === true
-  if (host !== '127.0.0.1' || !Number.isInteger(port) || port < 1024 || token.length < 32) {
+  const workbenchToken = String(process.env[config.workbenchTokenEnv || 'GENERAL_AGENT_INTERNAL_CHANNEL_TOKEN'] || '')
+  if (host !== '127.0.0.1' || !Number.isInteger(port) || port < 1024 || token.length < 32
+    || (config.nativeContinuation !== undefined && typeof config.nativeContinuation !== 'boolean')
+    || (config.webBudgetEnabled !== undefined && typeof config.webBudgetEnabled !== 'boolean')
+    || ((config.nativeContinuation === true || config.webBudgetEnabled === true) && workbenchToken.length < 16)) {
     throw new Error('jot_session_adapter_config_invalid')
   }
   const speechController = voiceEnabled ? ctx.speechController : undefined
   if (voiceEnabled && !speechController) throw new Error('jot_voice_speech_service_unavailable')
+  const workbenchBridge = workbenchToken.length >= 16 ? new WorkbenchBridge({
+    origin: config.workbenchOrigin || 'http://127.0.0.1:18831', token: workbenchToken,
+    webBudgetEnabled:config.webBudgetEnabled===true,
+    nativeContinuation: config.nativeContinuation ?? false,
+  }) : undefined
   const handler = createAdapterHandler({ controller: ctx.sessionController, fileUploads: ctx.fileUploads, agents: ctx.agents,
-    speechController, voiceEnabled, token })
+    sessions:ctx.sessions,persistence:ctx.sessionPersistence,
+    speechController, voiceEnabled, token, workbenchBridge })
   const server = createServer(async (req, res) => {
     const abort = new AbortController()
     req.once('aborted', () => abort.abort())
@@ -236,7 +318,7 @@ export function apply(ctx, config = {}) {
       res.writeHead(result.status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
       res.end(JSON.stringify(result.value))
     } catch (error) {
-      console.error('[jot-session-adapter] request failed', JSON.stringify(adapterErrorSummary(error)))
+      console.error('[jot-jot-session-adapter] request failed', JSON.stringify(adapterErrorSummary(error)))
       if (res.headersSent) return res.destroy()
       res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
       res.end(JSON.stringify({ error: 'adapter_internal_error' }))

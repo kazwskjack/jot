@@ -1,15 +1,18 @@
+import {TaskReplyDrafts} from './persistent-tasks/reply-drafts.ts';
 import Fastify from 'fastify';
 import multipart from '@fastify/multipart';
-import { createHash } from 'node:crypto';
-import { openProductDatabase } from './db/database.ts';
+import { createHash, createHmac } from 'node:crypto';
+import { openProductDatabase, withImmediateTransaction } from './db/database.ts';
+import {canonicalJson} from './db/canonical-json.ts';
 import { ConversationRepository } from './conversations/repository.ts';
 import { ProjectRepository } from './projects/repository.ts';
 import { EventStore, ExpiredCursorError, FutureCursorError } from './events/event-store.ts';
 import { RunRepository } from './runs/repository.ts';
 import { buildSnapshot } from './events/snapshot.ts';
-import { EmotionAdvisor, taskEmotionEvent, userEmotionSignal } from './harness/emotion-advisor.ts';
+import { EmotionAdvisor, taskEmotionEvent, userEmotionSignal, emotionAccountingRoutesFromPolicy, type EmotionAccounting } from './harness/emotion-advisor.ts';
 import { RunCommandService } from './runs/commands.ts';
 import { InteractionService } from './interactions/service.ts';
+import {TaskWaitResponder} from './persistent-tasks/task-wait.ts';
 import { ArtifactService } from './artifacts/service.ts';
 import { createReadStream } from 'node:fs';
 import { PassThrough } from 'node:stream';
@@ -17,6 +20,8 @@ import { dirname, join, resolve } from 'node:path';
 import { SourceRepository } from './sources/repository.ts';
 import { ContractValidator } from './contracts/validator.ts';
 import { ChannelIntakeService } from './channels/intake.ts';
+import {OwnerChannelBindings} from './channels/owner-bindings.ts';
+import {EmailChannelBindings} from './channels/email-bindings.ts';
 import { FileJobService } from './file-engine/jobs.ts';
 import { TemplateCatalog, TemplateContractError } from './file-engine/templates.ts';
 import { CrawlBatchService } from './crawl-batch/service.ts';
@@ -24,21 +29,28 @@ import { ChannelDeliveryService } from './channels/delivery.ts';
 import { VoiceTranscriptionService } from './voice/service.ts';
 import type { VoiceAdapter } from './voice/adapter-client.ts';
 import { VOICE_MAX_BYTES, validateVoiceWave } from './voice/wav.ts';
+import { WorkbenchService } from './workbench/service.ts';
+import {configureTaskOutputReader} from './persistent-tasks/output-content.ts';
+import {configureTaskOutputDelivery} from './persistent-tasks/output-delivery.ts';
+import { registerWorkbenchRoutes } from './workbench/routes.ts';
+import { PersistentTaskService } from './persistent-tasks/service.ts';
+import {TaskNotifications} from './persistent-tasks/notifications.ts';
+import {TaskReplyPolicies} from './persistent-tasks/reply-policy.ts';
+import {TaskReplyHistory} from './persistent-tasks/reply-history.ts';
+import { registerPersistentTaskRoutes } from './persistent-tasks/routes.ts';
+import {TaskDelegationService} from './workbench/task-delegation.ts';
+import {TaskCollaborationService} from './workbench/task-collaboration.ts';
+import { registerWorkbenchExecution, WORKBENCH_TOOL_IDS } from './workbench/execution.ts';
+import type {ReplyJudgeClient} from './persistent-tasks/reply-judge-client.ts';
+import { ModelBudgetLedger, type ModelBudgetRoute } from './workbench/model-budget.ts';
+import { WorkbenchBudgetPolicy, type ModelBudgetPolicyConfig } from './workbench/model-budget-policy.ts';
+import { TaskBudgetService, registerTaskBudgetRoutes } from './workbench/budget-public.ts';
+import {createAuxiliaryRunGuard} from './workbench/auxiliary-run-guard.ts';
 
 function actor(request: { headers: Record<string, unknown> }) {
   const id = String(request.headers['x-user-id'] || '');
   if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(id)) throw new Error('unauthorized');
   return id;
-}
-
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  if (value && typeof value === 'object' && !Buffer.isBuffer(value)) {
-    const row = value as Record<string, unknown>;
-    return `{${Object.keys(row).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(row[key])}`).join(',')}}`;
-  }
-  if (Buffer.isBuffer(value)) return JSON.stringify(value.toString('base64'));
-  return JSON.stringify(value) ?? 'null';
 }
 
 export async function buildServer(config: {
@@ -48,30 +60,80 @@ export async function buildServer(config: {
   csrfToken?: string;
   allowedOrigins?: string[];
   internalChannelToken?: string;
+  emailBindingSend?: (text:string,recipient:string)=>Promise<Record<string,unknown>>;
   templateRoot?: string;
   voiceEnabled?: boolean;
   voiceAdapter?: VoiceAdapter;
+  workbenchRoot?: string;
+  workbenchExecutionReady?: boolean;
+  modelBudgetRoutes?: ModelBudgetRoute[];
+  modelBudgetPolicy?: ModelBudgetPolicyConfig | undefined;
+  replyJudge?: ReplyJudgeClient;
+  /** Server-only trusted provider configuration; never populated from request bodies. */
+  emotion?: {env?:NodeJS.ProcessEnv;transport?:typeof fetch;accountingRoutes?:EmotionAccounting['routes']};
 }) {
   const app = Fastify({ logger: false, bodyLimit: 1024 * 1024 });
   await app.register(multipart, { limits: { fileSize: VOICE_MAX_BYTES, files: 1, fields: 2, parts: 3, fieldSize: 256 } });
   const db = openProductDatabase(config.databasePath);
+  const budgetPolicy = config.modelBudgetPolicy === undefined ? undefined : new WorkbenchBudgetPolicy(db,config.modelBudgetPolicy);
+  const modelBudgets = budgetPolicy?.ledger ?? (config.modelBudgetRoutes === undefined ? undefined : new ModelBudgetLedger(db,{routes: config.modelBudgetRoutes}));
   const events = new EventStore(db);
   const projects = new ProjectRepository(db);
   const conversations = new ConversationRepository(db, projects);
   const runs = new RunRepository(db, events);
   const commands = new RunCommandService(db, events);
-  const interactions = new InteractionService(db, events);
   const artifacts = new ArtifactService(db, config.uploadRoot ?? join(dirname(config.databasePath), 'general-agent-uploads'));
   const sources = new SourceRepository(db);
   const contracts = new ContractValidator();
   const channelIntake = new ChannelIntakeService(db, runs, config.workspaces[0] ?? 'jot');
+  const ownerChannels=new OwnerChannelBindings(db,{enabled:config.internalChannelToken?['wecom']:[]});
+  const emailBindings=new EmailChannelBindings(db,config.emailBindingSend?{send:config.emailBindingSend}:{});
   const fileJobs = new FileJobService(db);
   const templates = new TemplateCatalog(config.templateRoot ?? resolve(process.cwd(), 'file-engine/templates'));
   const channelDelivery = new ChannelDeliveryService(db);
   const crawlBatches = new CrawlBatchService(db, events, channelDelivery);
   const voiceTranscriptions = new VoiceTranscriptionService(db,
     config.voiceEnabled ? config.voiceAdapter : undefined);
+  const workbenchRoot = config.workbenchRoot ?? join(dirname(config.databasePath), 'jot-workspaces');
+  const workbench = new WorkbenchService(db, { workspaceIds: config.workspaces,
+    root: workbenchRoot, allowedToolIds: WORKBENCH_TOOL_IDS, ...(budgetPolicy ? {modelBudgetPolicy: budgetPolicy} : {}) });
+  configureTaskOutputReader(db,({owner,workspace,project,path,version,runId})=>workbench.readFileVersion(owner,workspace,project,path,version,runId));
+  configureTaskOutputDelivery(db,artifacts,events);
+  const taskWaitResponder=new TaskWaitResponder(db,workbench,commands);
+
+  const persistentTasks = new PersistentTaskService(db, workbench, {
+    projectionRoot: join(workbenchRoot, 'tasks'), events,
+    ...(budgetPolicy?{modelBudgetPolicy:budgetPolicy}:{}),
+  });
+  const taskNotifications=new TaskNotifications(db);
+  const taskReplyPolicies=new TaskReplyPolicies(db);
+  const replyDrafts=new TaskReplyDrafts(db,events);
+  const replyHistory=new TaskReplyHistory(db);
+  const taskInteractionResponder={
+    resolve:(row:Record<string,unknown>,owner:string,status:string,input:Record<string,unknown>,key:string)=>replyDrafts.resolve(row,owner,status,input,key)||taskWaitResponder.resolve(row,owner,status,input,key),
+    recordReceipt:(row:Record<string,unknown>,input:unknown,key:string,operation:string,receipt:Record<string,unknown>)=>replyDrafts.owns(String(row.id))?replyDrafts.recordReceipt(row,input,key,operation,receipt):taskWaitResponder.recordReceipt(row,input,key,operation,receipt),
+  };
+  const interactions = new InteractionService(db,events,taskInteractionResponder);
   const idempotencyRequests = new WeakMap<object, { owner: string; operation: string; key: string }>();
+  const isUploadRoute=(request:any)=>['/v1/conversations/:conversationId/uploads','/v1/uploads/:uploadId/content','/v1/uploads/:uploadId/complete'].includes(request.routeOptions.url);
+  // Receipt protocol is reserved with the original request. Legacy pending rows
+  // have no proof of an atomic business boundary and must not be re-executed.
+  const uploadCommand=<T>(request:any,status:number,operation:()=>T):T=>{
+    const pending=idempotencyRequests.get(request);
+    const value=withImmediateTransaction(db,()=>{
+      if(pending){
+        const cached=db.prepare('SELECT response_status,response_json,receipt_protocol FROM ga_idempotency WHERE owner_id=? AND operation=? AND idempotency_key=?').get(pending.owner,pending.operation,pending.key) as Record<string,unknown>|undefined;
+        if(!cached||cached.receipt_protocol!=='upload-atomic-v1')throw new Error('idempotency_in_progress');
+        if(cached.response_status!==null){if(cached.response_status!==status)throw new Error('idempotency_conflict');return JSON.parse(String(cached.response_json)) as T;}
+      }
+      const result=operation(),operationId=contracts.operationFor(request.method,request.routeOptions.url);
+      if(!operationId||!contracts.validateResponse(operationId,status,result??null).valid)throw new Error('contract_response_invalid');
+      if(pending&&db.prepare('UPDATE ga_idempotency SET response_status=?,response_json=? WHERE owner_id=? AND operation=? AND idempotency_key=? AND response_status IS NULL AND receipt_protocol=?')
+        .run(status,JSON.stringify(result??null),pending.owner,pending.operation,pending.key,'upload-atomic-v1').changes!==1)throw new Error('idempotency_in_progress');
+      return result;
+    });
+    idempotencyRequests.delete(request);return value;
+  };
   app.addContentTypeParser('application/octet-stream', (_request, stream, done) => done(null, stream));
 
   app.addHook('preValidation', async request => {
@@ -80,20 +142,27 @@ export async function buildServer(config: {
     const operationId = contracts.operationFor(request.method, request.routeOptions.url ?? request.url.split('?')[0]!);
     if (!operationId) return;
     const result = contracts.validateRequest(operationId, request.body);
-    if (!result.valid) throw new Error('contract_request_invalid');
+    if (!result.valid) throw new Error(operationId==='updateTaskNotifications'?'invalid_task_notification_settings':['createOwnerChannelBinding','revokeOwnerChannelBinding'].includes(operationId)?'invalid_channel_binding_request':operationId==='updateTaskModelBudget'?'budget_limit_invalid':'contract_request_invalid');
   });
 
   app.addHook('preHandler', async (request, reply) => {
-    if (['/internal/v1/channel/messages', '/internal/v1/file-tools', '/internal/v1/crawl-batches/bind', '/internal/v1/crawl-batches/events'].includes(request.url.split('?')[0]!)) return;
+    if (['/internal/v1/channel/messages', '/internal/v1/file-tools', '/internal/v1/crawl-batches/bind', '/internal/v1/crawl-batches/events', '/internal/v1/workbench/guard', '/internal/v1/workbench/tool', '/internal/v1/workbench/goal-binding', '/internal/v1/workbench/model-budget','/internal/v1/workbench/web-budget-grant','/internal/v1/workbench/web-budget-grant/close','/internal/v1/workbench/web-model-budget','/internal/v1/workbench/checkpoint','/internal/v1/workbench/task-state','/internal/v1/workbench/step-admission','/internal/v1/workbench/goal-proposal','/internal/v1/workbench/completion-intent','/internal/v1/workbench/completion-confirm','/internal/v1/workbench/completion-recovery'].includes(request.url.split('?')[0]!)) return;
     if (!config.csrfToken || request.method === 'GET' || request.method === 'HEAD' || request.method === 'OPTIONS') return;
     actor(request as any);
     const origin = String(request.headers.origin ?? '');
     if (!(config.allowedOrigins ?? []).includes(origin)) throw new Error('origin_forbidden');
     const csrf = String(request.headers['x-csrf-token'] ?? '');
     if (config.csrfToken.length < 16 || csrf !== config.csrfToken) throw new Error('csrf_invalid');
+    // Preview only computes a schedule; retain authentication and CSRF without persisting requests.
+    if (request.method === 'POST' && request.url.split('?')[0] === '/v1/persistent-tasks/preview') return;
     if ((request.routeOptions.url ?? request.url).includes('/voice/transcriptions')) return;
     const idempotencyKey = String(request.headers['idempotency-key'] ?? '');
     if (!/^[\x21-\x7E]{8,128}$/.test(idempotencyKey)) throw new Error('idempotency_key_invalid');
+    // Binding codes are one-time secrets: the service deduplicates this request
+    // by a hash, and a replay returns the challenge ID without redisclosing code.
+    if(request.method==='POST'&&request.url.split('?')[0]==='/v1/channel-bindings')return;
+    // Mailbox proof must not enter the generic idempotency request cache.
+    if(request.method==='POST'&&/^\/v1\/channel-bindings\/email(?:\/[^/]+\/confirm)?$/.test(request.url.split('?')[0]!))return;
     const owner = actor(request as any);
     const operation = `${request.method} ${request.url.split('?')[0]}`;
     let requestMaterial: string;
@@ -105,18 +174,48 @@ export async function buildServer(config: {
     } else requestMaterial = canonicalJson(request.body);
     const requestHash = createHash('sha256').update(requestMaterial).digest('hex');
     const existing = db.prepare(
-      'SELECT request_sha256,response_status,response_json FROM ga_idempotency WHERE owner_id=? AND operation=? AND idempotency_key=?',
+      'SELECT request_sha256,response_status,response_json,receipt_protocol FROM ga_idempotency WHERE owner_id=? AND operation=? AND idempotency_key=?',
     ).get(owner, operation, idempotencyKey) as Record<string, unknown> | undefined;
     if (existing) {
       if (existing.request_sha256 !== requestHash) throw new Error('idempotency_conflict');
-      if (existing.response_status === null) throw new Error('idempotency_in_progress');
+      if (existing.response_status === null) {
+        if(isUploadRoute(request)&&existing.receipt_protocol==='upload-atomic-v1'){
+          if(request.method==='PUT'){
+            const upload=db.prepare('SELECT status,declared_size,received_size,declared_sha256,actual_sha256,writer_token,writer_lease_until FROM ga_uploads WHERE id=? AND owner_id=?').get(String((request.params as Record<string,unknown>).uploadId),owner) as Record<string,unknown>|undefined;
+            if(upload&&['uploaded','completed'].includes(String(upload.status))&&upload.received_size===upload.declared_size&&upload.actual_sha256===upload.declared_sha256){
+              idempotencyRequests.set(request,{owner,operation,key:idempotencyKey});uploadCommand(request,204,()=>undefined);return reply.code(204).send();
+            }
+            // Only an expired, identified generation can be replaced. Its old
+            // stream writes another path and cannot commit or delete the new one.
+            const expired=upload?.status==='uploading'&&typeof upload.writer_token==='string'&&typeof upload.writer_lease_until==='string'&&Date.parse(upload.writer_lease_until)<=Date.now();
+            if(!upload||(upload.status!=='created'&&!expired))throw new Error('idempotency_in_progress');
+          }
+          idempotencyRequests.set(request,{owner,operation,key:idempotencyKey});return;
+        }
+        const route=request.routeOptions.url,kind=request.method==='POST'&&route==='/v1/interactions/:interactionId/response'?'interaction_response'
+          :request.method==='POST'&&route==='/v1/interactions/:interactionId/decision'?'interaction_decision':undefined;
+        if(kind){
+          const recovered=withImmediateTransaction(db,()=>{
+            const interactionId=String((request.params as Record<string,unknown>).interactionId);
+            const receipt=replyDrafts.recoverReceipt(owner,interactionId,kind,idempotencyKey,requestHash)??taskWaitResponder.recoverReceipt(owner,interactionId,kind,idempotencyKey,requestHash);
+            if(!receipt)return;
+            const operationId=contracts.operationFor(request.method,route!);
+            if(!operationId||!contracts.validateResponse(operationId,202,receipt).valid)throw new Error('task_wait_receipt_state_conflict');
+            db.prepare('UPDATE ga_idempotency SET response_status=202,response_json=? WHERE owner_id=? AND operation=? AND idempotency_key=? AND request_sha256=? AND response_status IS NULL')
+              .run(JSON.stringify(receipt),owner,operation,idempotencyKey,requestHash);
+            return receipt;
+          });
+          if(recovered)return reply.code(202).send(recovered);
+        }
+        throw new Error('idempotency_in_progress');
+      }
       const responseBody = existing.response_json === null ? null : JSON.parse(String(existing.response_json));
       return reply.code(Number(existing.response_status)).send(responseBody);
     }
     const now = Date.now();
     db.prepare(
-      'INSERT INTO ga_idempotency(owner_id,operation,idempotency_key,request_sha256,response_status,response_json,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?)',
-    ).run(owner, operation, idempotencyKey, requestHash, null, null, new Date(now).toISOString(), new Date(now + 86_400_000).toISOString());
+      'INSERT INTO ga_idempotency(owner_id,operation,idempotency_key,request_sha256,response_status,response_json,created_at,expires_at,receipt_protocol) VALUES(?,?,?,?,?,?,?,?,?)',
+    ).run(owner, operation, idempotencyKey, requestHash, null, null, new Date(now).toISOString(), new Date(now + 86_400_000).toISOString(),isUploadRoute(request)?'upload-atomic-v1':null);
     idempotencyRequests.set(request, { owner, operation, key: idempotencyKey });
   });
 
@@ -133,6 +232,9 @@ export async function buildServer(config: {
     }
     const pending = idempotencyRequests.get(request);
     if (!pending) return payload;
+    // An error response must not replace a recoverable reservation or another
+    // writer's success. Successful upload receipts already committed atomically.
+    if(isUploadRoute(request)&&reply.statusCode>=400)return payload;
     db.prepare(
       'UPDATE ga_idempotency SET response_status=?,response_json=? WHERE owner_id=? AND operation=? AND idempotency_key=?',
     ).run(reply.statusCode, JSON.stringify(responseValue), pending.owner, pending.operation, pending.key);
@@ -141,15 +243,43 @@ export async function buildServer(config: {
 
   app.setErrorHandler((error, _request, reply) => {
     const code = error instanceof Error ? error.message : 'internal_error';
+    if(['channel_binding_rate_limited','email_binding_rate_limited'].includes(code))return reply.code(429).send({error:{code:code.toUpperCase()}});
+    if(code==='channel_binding_unavailable')return reply.code(503).send({error:{code:code.toUpperCase()}});
+    if(['channel_binding_proof_invalid','email_binding_proof_invalid','email_address_invalid'].includes(code))return reply.code(422).send({error:{code:code.toUpperCase()}});
+    if(code==='channel_principal_already_bound'||code==='channel_binding_not_verified')return reply.code(409).send({error:{code:code.toUpperCase()}});
+    if(code==='task_completion_handshake_invalid')return reply.code(422).send({error:{code:code.toUpperCase()}});
+    if(code==='task_completion_handshake_conflict')return reply.code(409).send({error:{code:code.toUpperCase()}});
+    if(code==='task_mailbox_binding_invalid')return reply.code(422).send({error:{code:code.toUpperCase()}});
+    if(code==='task_auxiliary_pending')return reply.code(409).send({error:{code:code.toUpperCase()}});
+    if(code==='task_assignment_revoked')return reply.code(409).send({error:{code:code.toUpperCase()}});
+    if(code==='task_collaboration_exhausted')return reply.code(429).send({error:{code:code.toUpperCase()}});
+    if(code==='task_reply_target_invalid')return reply.code(422).send({error:{code:code.toUpperCase()}});
+    if(code==='task_reply_run_active')return reply.code(409).send({error:{code:code.toUpperCase()}});
+    if(code==='task_notification_run_active')return reply.code(409).send({error:{code:code.toUpperCase()}});
+    if (code.startsWith('budget_') && code.endsWith('_invalid')) return reply.code(422).send({error:{code:code.toUpperCase()}});
+    if (code === 'model_budget_exhausted') return reply.code(429).send({error:{code:'MODEL_BUDGET_EXHAUSTED'}});
+    if (code === 'budget_ceiling_exceeded') return reply.code(422).send({error:{code:'BUDGET_CEILING_EXCEEDED'}});
+    if (code === 'budget_limit_below_commitment') return reply.code(409).send({error:{code:'BUDGET_LIMIT_BELOW_COMMITMENT'}});
+    if (['budget_route_unavailable','budget_service_unavailable'].includes(code)) return reply.code(503).send({error:{code:code.toUpperCase()}});
+    if (code.startsWith('budget_') && (code.endsWith('_conflict') || ['budget_binding_missing','budget_run_inactive','budget_usage_unknown','budget_usage_pending','budget_window_closed','budget_policy_stale'].includes(code))) return reply.code(409).send({error:{code:code.toUpperCase()}});
     if (Number((error as { statusCode?: number }).statusCode) === 413) {
       return reply.code(413).send({ error: { code: 'VOICE_AUDIO_TOO_LARGE' } });
     }
     if (error instanceof TemplateContractError) {
       return reply.code(422).send({ error: { code, details: error.details } });
     }
+    if ((error as { validation?: unknown }).validation) return reply.code(422).send({ error: { code: 'INVALID_WORKBENCH_REQUEST' } });
+    if (code.startsWith('invalid_') || code === 'unsupported_trigger' || code === 'idempotency_key_required') return reply.code(422).send({ error: { code: code.toUpperCase() } });
+    if (['evidence_required','dependency_cycle'].includes(code)) return reply.code(422).send({error:{code:code.toUpperCase()}});
+    if (['assessment_revision_conflict','observation_revision_conflict','dependency_not_completed','dependency_evidence_unverified','task_completion_evidence_required','task_acceptance_outputs_unverified'].includes(code)) return reply.code(409).send({error:{code:code.toUpperCase()}});
+    if (code.endsWith('_forbidden') || code.endsWith('_path_escape') || code.endsWith('_scope_mismatch') || code.endsWith('_workspace_mismatch')) return reply.code(403).send({ error: { code: code.toUpperCase() } });
+    if (code.endsWith('_revoked') || code.endsWith('_state_conflict') || ['agent_not_active', 'agent_unavailable', 'run_binding_conflict', 'memory_verification_required', 'task_not_active', 'task_budget_exhausted', 'task_active_occurrence', 'task_conversation_read_only', 'task_continuation_unsupported','task_continuation_conflict','task_checkpoint_unavailable','task_continuation_limit'].includes(code)) return reply.code(409).send({ error: { code: code.toUpperCase() } });
+    if (code === 'mailbox_queue_full') return reply.code(429).send({ error: { code: code.toUpperCase() } });
+    if (code === 'unsafe_page_url') return reply.code(403).send({error:{code:'UNSAFE_PAGE_URL'}});
+    if (code.startsWith('page_')) return reply.code(502).send({error:{code:code.toUpperCase()}});
     if (code.endsWith('_not_found')) return reply.code(404).send({ error: { code: code.toUpperCase() } });
-    if (['version_conflict', 'active_run_model_change', 'run_state_conflict', 'run_version_conflict', 'checkpoint_invalid', 'reconciliation_required', 'interaction_kind_conflict', 'interaction_state_conflict', 'interaction_version_conflict', 'interaction_expired', 'action_digest_mismatch', 'idempotency_conflict', 'idempotency_in_progress', 'voice_idempotency_conflict', 'STALE_FILE_VERSION', 'IDEMPOTENCY_CONFLICT', 'crawl_batch_owner_mismatch'].includes(code)) return reply.code(409).send({ error: { code: code.toUpperCase() } });
-    if (['interaction_answer_invalid', 'interaction_decision_invalid', 'upload_size_invalid', 'upload_sha256_invalid', 'upload_filename_invalid', 'upload_size_mismatch', 'upload_sha256_mismatch', 'artifact_diff_unsupported', 'source_evidence_required', 'source_url_invalid', 'invalid_project_title', 'invalid_conversation_state', 'FILE_REQUEST_INVALID', 'TEMPLATE_CONTENT_INVALID', 'UNSUPPORTED_FORMAT_OPERATION', 'requested_count_invalid', 'event_seq_invalid', 'input_index_invalid', 'item_id_invalid', 'owner_id_invalid', 'run_id_invalid', 'batch_id_invalid', 'conversation_id_invalid', 'crawl_url_invalid'].includes(code)) return reply.code(422).send({ error: { code: code.toUpperCase() } });
+    if (['reply_review_mode_conflict','reply_draft_corrupt','reply_review_state_conflict','task_wait_response_required','version_conflict', 'active_run_model_change', 'run_state_conflict', 'run_version_conflict', 'checkpoint_invalid', 'reconciliation_required', 'interaction_kind_conflict', 'interaction_state_conflict', 'interaction_version_conflict', 'interaction_expired', 'action_digest_mismatch', 'idempotency_conflict', 'idempotency_in_progress', 'voice_idempotency_conflict', 'STALE_FILE_VERSION', 'IDEMPOTENCY_CONFLICT', 'crawl_batch_owner_mismatch'].includes(code)) return reply.code(409).send({ error: { code: code.toUpperCase() } });
+    if (['reply_evidence_unverified','interaction_answer_invalid', 'interaction_decision_invalid', 'upload_size_invalid', 'upload_sha256_invalid', 'upload_filename_invalid', 'upload_size_mismatch', 'upload_sha256_mismatch', 'artifact_diff_unsupported', 'source_evidence_required', 'source_url_invalid', 'invalid_project_title', 'invalid_conversation_state', 'FILE_REQUEST_INVALID', 'TEMPLATE_CONTENT_INVALID', 'UNSUPPORTED_FORMAT_OPERATION', 'requested_count_invalid', 'event_seq_invalid', 'input_index_invalid', 'item_id_invalid', 'owner_id_invalid', 'run_id_invalid', 'batch_id_invalid', 'conversation_id_invalid', 'crawl_url_invalid'].includes(code)) return reply.code(422).send({ error: { code: code.toUpperCase() } });
     if (['upload_state_conflict'].includes(code)) return reply.code(409).send({ error: { code: code.toUpperCase() } });
     if (code === 'origin_forbidden' || code === 'csrf_invalid') return reply.code(403).send({ error: { code: code.toUpperCase() } });
     if (code === 'idempotency_key_invalid') return reply.code(400).send({ error: { code: 'IDEMPOTENCY_KEY_INVALID' } });
@@ -165,6 +295,44 @@ export async function buildServer(config: {
   });
 
   app.get('/healthz', async () => ({ ok: true, service: 'jot-general-agent-bff' }));
+  app.get('/v1/channel-bindings',async request=>ownerChannels.list(actor(request as any)));
+  app.post('/v1/channel-bindings/email',async(request,reply)=>{
+    const input=request.body as Record<string,unknown>;
+    if(!input||typeof input.address!=='string'||Object.keys(input).some(key=>key!=='address'))throw new Error('invalid_channel_binding_request');
+    return reply.code(201).send(await emailBindings.begin(actor(request as any),input.address,String(request.headers['idempotency-key']??'')));
+  });
+  app.post('/v1/channel-bindings/email/:bindingId/confirm',async request=>{
+    const input=request.body as Record<string,unknown>;
+    if(!input||typeof input.code!=='string'||Object.keys(input).some(key=>key!=='code'))throw new Error('invalid_channel_binding_request');
+    return emailBindings.confirm(actor(request as any),String((request.params as {bindingId:string}).bindingId),input.code);
+  });
+  app.post('/v1/channel-bindings',async(request,reply)=>{
+    const input=request.body as Record<string,unknown>|undefined;
+    if(!input||typeof input.channel!=='string'||Object.keys(input).some(key=>key!=='channel'))throw new Error('invalid_channel_binding_request');
+    return reply.code(201).send(ownerChannels.create(actor(request as any),input.channel,String(request.headers['idempotency-key']??'')));
+  });
+  app.post('/v1/channel-bindings/:bindingId/revoke',async request=>{
+    const input=request.body as Record<string,unknown>|undefined;
+    if(!input||Object.keys(input).some(key=>key!=='expected_version')||!Number.isSafeInteger(input.expected_version)||Number(input.expected_version)<1)throw new Error('invalid_channel_binding_request');
+    return ownerChannels.revoke(actor(request as any),String((request.params as {bindingId:string}).bindingId),Number(input.expected_version));
+  });
+  app.get('/v1/persistent-tasks/:taskId/reply-policy',async request=>taskReplyPolicies.get(actor(request as any),String((request.params as {taskId:string}).taskId)));
+  app.get('/v1/persistent-tasks/:taskId/replies',async request=>replyHistory.history(actor(request as any),String((request.params as {taskId:string}).taskId),(request.query as {cursor?:string}).cursor));
+  app.patch('/v1/persistent-tasks/:taskId/reply-policy',async request=>taskReplyPolicies.update(actor(request as any),String((request.params as {taskId:string}).taskId),(request.body??{}) as Record<string,unknown>));
+  app.get('/v1/persistent-tasks/:taskId/notifications',async request=>taskNotifications.get(actor(request as any),String((request.params as {taskId:string}).taskId)));
+  app.patch('/v1/persistent-tasks/:taskId/notifications',async request=>taskNotifications.update(actor(request as any),String((request.params as {taskId:string}).taskId),(request.body??{}) as Record<string,unknown>));
+  app.get('/v1/persistent-tasks/:taskId/occurrences/:occurrenceId/deliveries',async request=>{const params=request.params as {taskId:string;occurrenceId:string};return taskNotifications.deliveries(actor(request as any),params.taskId,params.occurrenceId);});
+  app.get('/v1/persistent-tasks/:taskId/deliveries',async request=>{
+    const query=request.query as Record<string,unknown>;
+    if(Object.keys(query).some(key=>key!=='cursor')||(query.cursor!==undefined&&(typeof query.cursor!=='string'||!query.cursor||query.cursor.length>200)))throw new Error('invalid_task_notification_settings');
+    return taskNotifications.history(actor(request as any),String((request.params as {taskId:string}).taskId),query.cursor as string|undefined);
+  });
+  registerWorkbenchRoutes(app, workbench, actor);
+  const taskDelegations=new TaskDelegationService(db,workbench,persistentTasks);
+  const taskCollaboration=new TaskCollaborationService(db,workbench,persistentTasks,taskDelegations);
+  registerPersistentTaskRoutes(app, persistentTasks, actor,taskDelegations,taskCollaboration);
+  registerTaskBudgetRoutes(app,new TaskBudgetService(db,budgetPolicy),actor);
+  registerWorkbenchExecution(app, db, workbench, persistentTasks, config.internalChannelToken, modelBudgets,taskCollaboration,config.replyJudge);
 
   app.post('/internal/v1/channel/messages', async (request, reply) => {
     const expected = String(config.internalChannelToken ?? '');
@@ -247,6 +415,7 @@ export async function buildServer(config: {
     const voice = await voiceTranscriptions.capability();
     if (config.csrfToken && request.headers['sec-fetch-site'] !== 'cross-site') {
       reply.header('x-csrf-token', config.csrfToken).header('cache-control', 'no-store');
+      reply.header('x-workbench-draft-scope', createHmac('sha256', config.csrfToken).update(`workbench-draft/v1/${ownerId}`).digest('hex'));
     }
     return {
       api_version: '1.0', event_schema_version: '1.0', adapter_version: '0.1.0',
@@ -257,6 +426,18 @@ export async function buildServer(config: {
         max_concurrent_sessions: 5,
         replay_retention_hours: 168, idempotency_retention_hours: 24 },
       voice,
+      workbench: { enabled: true, agent_roles: true, independent_teams: true, agent_messages: true,
+        shared_workspace: true, memory_scopes: ['project', 'private'], memory_lifecycle: true, memory_retrieval: 'local_keyword',task_readiness:true,model_budget:budgetPolicy!==undefined,
+        task_reply_policy:true,task_reply_execution:false,task_create_delivery:true,task_notifications:true,channel_bindings:!!config.internalChannelToken||!!config.emailBindingSend,email_bindings:!!config.emailBindingSend,wecom_bindings:!!config.internalChannelToken,task_notification_events:['changed','completed','failed','needs_confirmation'],
+        ...(budgetPolicy?{task_model_budget_limits:budgetPolicy.budgetSettings().limits.task_total}:{}),
+        collaboration_modes: [{ id: 'single', enabled: true }, { id: 'independent_team', enabled: true },
+          { id: 'subagents', enabled: false, reason: 'HOST_ADAPTER_NOT_READY' },
+          { id: 'team', enabled: false, reason: 'DSH_EXPERIMENTAL_TEAM_NOT_READY' },
+          { id: 'handoff', enabled: false, reason: 'HOST_ADAPTER_NOT_READY' }],
+        task_triggers: ['once', 'interval', 'page_change', 'daily', 'weekly','conversation_message','conversation_result'], notification_channels: ['in_app'],
+        task_schedule_limits: { default_interval_seconds: 300, min_interval_seconds: 60, max_interval_seconds: 31536000,
+          dst_gap: 'next_valid_time', dst_fold: 'first_only', missed_triggers: 'coalesce' },
+        allowed_tools: WORKBENCH_TOOL_IDS, execution_ready: config.workbenchExecutionReady === true },
       workspaces: config.workspaces.map(workspace_id => ({ workspace_id, title: workspace_id, can_read: true, can_write: true, owner_id: ownerId }))
         .map(({ owner_id: _ignored, ...workspace }) => workspace),
     };
@@ -268,10 +449,11 @@ export async function buildServer(config: {
     projects.update((request.params as { projectId: string }).projectId, actor(request as any), request.body as Record<string, unknown>));
 
   app.get('/v1/conversations', async request => {
-    const query = request.query as { limit?: string; project_id?: string; state?: string };
-    const options: { limit: number; project_id?: string; state?: string } = { limit: Number(query.limit ?? 50) };
+    const query = request.query as { limit?: string; project_id?: string; state?: string;cursor?:string };
+    const options: { limit: number; project_id?: string; state?: string;cursor?:string } = { limit: Number(query.limit ?? 50) };
     if (query.project_id !== undefined) options.project_id = query.project_id;
     if (query.state !== undefined) options.state = query.state;
+    if (query.cursor !== undefined) options.cursor = query.cursor;
     return conversations.list(actor(request as any), options);
   });
 
@@ -291,13 +473,25 @@ export async function buildServer(config: {
   });
   app.post('/v1/conversations/:conversationId/messages', async (request, reply) => {
     const id = (request.params as { conversationId: string }).conversationId;
-    return reply.code(202).send(runs.enqueue(id, actor(request as any), request.body as Record<string, unknown>));
+    const owner = actor(request as any);
+    const result = withImmediateTransaction(db, () => {
+      const agent = workbench.agentForConversation(owner, id);
+      if (agent && agent.conversation_id !== id) throw new Error('task_conversation_read_only');
+      const run = runs.enqueue(id, owner, request.body as Record<string, unknown>);
+      if (agent) workbench.bindRun(owner, agent.agent_id, String(run.run_id), 'chat');
+      return run;
+    });
+    return reply.code(202).send(result);
   });
   app.get('/v1/runs/:runId', async request => runs.get((request.params as { runId: string }).runId, actor(request as any)));
-  app.post('/v1/runs/:runId/steer', async (request, reply) => reply.code(202).send(commands.steer(
-    (request.params as { runId: string }).runId, actor(request as any), request.body as Record<string, unknown>,
-    String(request.headers['idempotency-key'] || ''),
-  )));
+  app.post('/v1/runs/:runId/steer', async (request, reply) => {
+    const runId = (request.params as {runId: string}).runId;
+    const owner = actor(request as any); runs.get(runId, owner);
+    return reply.code(202).send(withImmediateTransaction(db, () => {
+      workbench.assertRunActive(runId); persistentTasks.assertRunActive(runId);
+      return commands.steer(runId, owner, request.body as Record<string, unknown>, String(request.headers['idempotency-key'] || ''));
+    }));
+  });
   app.post('/v1/runs/:runId/cancel', async (request, reply) => {
     const runId = (request.params as { runId: string }).runId;
     const ownerId = actor(request as any);
@@ -308,13 +502,18 @@ export async function buildServer(config: {
     try { crawlBatches.cancel(ownerId, runId, String(input.reason ?? 'USER_CANCELLED')); } catch { /* no active batch is valid */ }
     return reply.code(202).send(receipt);
   });
-  app.post('/v1/runs/:runId/resume', async (request, reply) => reply.code(202).send(commands.resume(
-    (request.params as { runId: string }).runId, actor(request as any), request.body as Record<string, unknown>,
-    String(request.headers['idempotency-key'] || ''),
-  )));
+  app.post('/v1/runs/:runId/resume', async (request, reply) => {
+    const runId = (request.params as {runId: string}).runId, owner = actor(request as any);
+    return reply.code(202).send(withImmediateTransaction(db, () => {
+      runs.get(runId, owner); workbench.contextForRun(runId);
+      const result = commands.resume(runId, owner, request.body as Record<string, unknown>, String(request.headers['idempotency-key'] || ''));
+      workbench.inheritCheckpointRun(owner, runId, result.run_id);
+      return result;
+    }));
+  });
   app.get('/v1/runs/:runId/artifacts', async request =>
     artifacts.listForRun((request.params as { runId: string }).runId, actor(request as any)));
-  const emotionAdvisor = new EmotionAdvisor();
+  const emotionAdvisor = new EmotionAdvisor(config.emotion?.env,config.emotion?.transport);
   app.get('/v1/conversations/:conversationId/emotion', async (request, reply) => {
     if(request.headers['sec-fetch-site']==='cross-site')return reply.code(403).send({error:{code:'ORIGIN_FORBIDDEN'}});
     const cid=(request.params as {conversationId:string}).conversationId;
@@ -331,10 +530,20 @@ export async function buildServer(config: {
     if(!run&&!interaction)return reply.code(400).send({error:{code:'RUN_REQUIRED'}});
     const snapshot=buildSnapshot(db,cid,owner);
     const event=interaction?'interaction':taskEmotionEvent(run!,snapshot.activities,snapshot.messages.some((m:any)=>m.run_id===run!.run_id&&m.role==='assistant'&&m.status==='streaming'));
+    const accountingRunId=String(run?.run_id??'');
+    const roleConversation=workbench.agentForConversation(owner,cid);
+    const budgetScoped=run&&(roleConversation||db.prepare('SELECT 1 FROM wb_run_bindings WHERE run_id=? AND owner_id=?').get(accountingRunId,owner)
+      ||(modelBudgets&&db.prepare('SELECT 1 FROM wb_model_budget_bindings WHERE run_id=? AND owner_id=?').get(accountingRunId,owner)));
+    if((!run&&roleConversation)||(budgetScoped&&!modelBudgets))
+      return {status:'abstain',reason_code:'ACCOUNTING_UNAVAILABLE',run_id:run?.run_id??'',conversation_id:cid,event};
+    const accounting:EmotionAccounting|undefined=budgetScoped&&modelBudgets?{
+      ledger:modelBudgets,owner,runId:accountingRunId,routes:config.emotion?.accountingRoutes??emotionAccountingRoutesFromPolicy(config.modelBudgetPolicy?.routes??config.modelBudgetRoutes??[]),
+      ...createAuxiliaryRunGuard(db,workbench,persistentTasks,owner,accountingRunId),
+    }:undefined;
     const userMessage=run?snapshot.messages.filter((m:any)=>m.run_id===run.run_id&&m.role==='user').at(-1) as any:undefined;
     const userText=(userMessage?.blocks??[]).map((b:any)=>typeof b.text==='string'?b.text:'').join(' ');
     const signal=userEmotionSignal(userText);
-    const suggestion=await emotionAdvisor.select(owner+'|'+cid+'|'+(run?.run_id??''),event,signal,userText,interaction);
+    const suggestion=await emotionAdvisor.select(owner+'|'+cid+'|'+(run?.run_id??''),event,signal,userText,interaction,accounting);
     return {...suggestion as Record<string,unknown>,run_id:run?.run_id??'',conversation_id:cid,event};
   });
   app.get('/v1/conversations/:conversationId/snapshot', async request =>
@@ -351,16 +560,16 @@ export async function buildServer(config: {
     (request.params as { interactionId: string }).interactionId, actor(request as any), request.body as Record<string, unknown>,
     String(request.headers['idempotency-key'] || ''),
   )));
-  app.post('/v1/conversations/:conversationId/uploads', async (request, reply) => reply.code(201).send(artifacts.initUpload(
+  app.post('/v1/conversations/:conversationId/uploads', async (request, reply) => reply.code(201).send(uploadCommand(request,201,()=>artifacts.initUpload(
     (request.params as { conversationId: string }).conversationId, actor(request as any), request.body as Record<string, unknown>,
-  )));
+  ))));
   app.put('/v1/uploads/:uploadId/content', { bodyLimit: 104857600 }, async (request, reply) => {
-    await artifacts.writeContent((request.params as { uploadId: string }).uploadId, actor(request as any), request.body as AsyncIterable<Uint8Array>);
+    await artifacts.writeContent((request.params as { uploadId: string }).uploadId, actor(request as any), request.body as AsyncIterable<Uint8Array>,()=>uploadCommand(request,204,()=>undefined));
     return reply.code(204).send();
   });
-  app.post('/v1/uploads/:uploadId/complete', async (request, reply) => reply.code(201).send(artifacts.complete(
+  app.post('/v1/uploads/:uploadId/complete', async (request, reply) => reply.code(201).send(uploadCommand(request,201,()=>artifacts.complete(
     (request.params as { uploadId: string }).uploadId, actor(request as any), request.body as Record<string, unknown>,
-  )));
+  ))));
   app.post('/v1/artifacts/:artifactId/file-operations', async (request, reply) => {
     const input = request.body as Record<string, unknown>;
     return reply.code(202).send(fileJobs.enqueue(actor(request as any), String(input.conversation_id || ''),
@@ -390,7 +599,7 @@ export async function buildServer(config: {
     const meta = JSON.parse(String(row.metadata_json));
     const asciiName = String(meta.file_name).replace(/[^A-Za-z0-9._-]/g, '_');
     return reply.header('content-type', String(row.mime_type)).header('x-content-type-options', 'nosniff')
-      .header('content-disposition', `attachment; filename="${asciiName}"`).send(createReadStream(String(row.server_path)));
+      .header('content-disposition', `attachment; filename="${asciiName}"`).send(row.verified_content instanceof Buffer?row.verified_content:createReadStream(String(row.server_path)));
   });
   app.get('/v1/sources/:sourceId', async request =>
     sources.get((request.params as { sourceId: string }).sourceId, actor(request as any)));
@@ -480,5 +689,5 @@ export async function buildServer(config: {
   });
   app.addHook('onClose', async () => voiceTranscriptions.close());
   return { app, db, events, projects, conversations, runs, commands, interactions, artifacts, sources, fileJobs, crawlBatches,
-    voiceTranscriptions };
+    voiceTranscriptions, workbench, persistentTasks, modelBudgets };
 }

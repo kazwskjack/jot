@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { ConversationRepository } from '../conversations/repository.ts';
 import { decodeStoredContent } from '../messages/content.ts';
+import {publicInteractionValue} from '../interactions/service.ts';
 
 export function buildSnapshot(db: DatabaseSync, conversationId: string, ownerId: string) {
   db.exec('BEGIN');
@@ -68,6 +69,13 @@ export function buildSnapshot(db: DatabaseSync, conversationId: string, ownerId:
     messages.push(...transient.values());
     messages.sort((a:any,b:any)=>a.created_at.localeCompare(b.created_at));
     const artifacts = db.prepare(`SELECT a.id,a.conversation_id,a.kind,a.runtime_ref,a.created_at,
+      COALESCE(
+        (SELECT p.run_id FROM ga_artifact_producers p JOIN ga_runs r ON r.id=p.run_id AND r.conversation_id=a.conversation_id
+          WHERE p.artifact_id=a.id AND p.version=v.version AND p.owner_id=a.owner_id AND p.conversation_id=a.conversation_id),
+        (SELECT ra.run_id FROM ga_run_artifacts ra JOIN ga_runs r ON r.id=ra.run_id AND r.conversation_id=a.conversation_id
+          WHERE ra.artifact_id=a.id AND ra.version=v.version ORDER BY ra.created_at DESC,ra.run_id DESC LIMIT 1),
+        (SELECT r.id FROM ga_runs r WHERE r.id=a.runtime_ref AND r.conversation_id=a.conversation_id)
+      ) artifact_run_id,
       v.mime_type,v.size_bytes,v.sha256,v.version,v.metadata_json,ar.backup_status,ar.local_state,ar.remote_path
       FROM ga_artifacts a JOIN ga_artifact_versions v ON v.artifact_id=a.id AND v.version=a.current_version
       LEFT JOIN ga_artifact_archives ar ON ar.artifact_id=a.id
@@ -76,7 +84,7 @@ export function buildSnapshot(db: DatabaseSync, conversationId: string, ownerId:
         const metadata = JSON.parse(String(row.metadata_json || '{}'))
         const origin = metadata.origin === 'upload' ? 'upload' : 'generated'
         return { artifact_id: row.id, conversation_id: row.conversation_id,
-          ...(row.runtime_ref ? { run_id: row.runtime_ref } : {}), file_name: metadata.file_name || row.id,
+          ...(row.artifact_run_id ? { run_id: row.artifact_run_id } : {}), file_name: metadata.file_name || row.id,
           media_type: row.mime_type, size_bytes: Number(row.size_bytes), sha256: row.sha256,
           version: Number(row.version), status: metadata.status || 'ready', created_at: row.created_at,
           preview_kind: metadata.preview_kind || (String(row.mime_type).startsWith('image/') ? 'image' : 'unsupported'),
@@ -97,8 +105,10 @@ export function buildSnapshot(db: DatabaseSync, conversationId: string, ownerId:
       failed_count: Number(row.failed_count), cancel_requested: Boolean(row.cancel_requested),
       last_event_seq: Number(row.last_event_seq), generation: Number(row.generation),
     }));
+    const interactions=db.prepare("SELECT * FROM ga_interactions WHERE conversation_id=? AND status='pending' ORDER BY created_at,id")
+      .all(conversationId).map(row=>publicInteractionValue(row));
     const value = { conversation, as_of_seq: String(asOf.seq), messages, runs,
-      activities: [...activitiesById.values()].reverse(), sources, interactions: [], artifacts, crawl_batches,
+      activities: [...activitiesById.values()].reverse(), sources, interactions, artifacts, crawl_batches,
       stream_cursors: [...cursorByBlock.values()], history_complete: messages.length < 200 };
     db.exec('COMMIT');
     return value;

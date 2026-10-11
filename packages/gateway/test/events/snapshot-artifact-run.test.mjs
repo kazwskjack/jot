@@ -1,0 +1,21 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdirSync,writeFileSync} from 'node:fs';
+import {resolve,join} from 'node:path';
+import {randomUUID} from 'node:crypto';
+import {buildServer} from '../../src/server.ts';
+import {buildSnapshot} from '../../src/events/snapshot.ts';
+test('artifact snapshots use the owned producer or published link, never an internal runtime reference',async t=>{
+ const root=resolve('.test-tmp',`snapshot-artifact-${randomUUID()}`);mkdirSync(root,{recursive:true});
+ const service=await buildServer({databasePath:':memory:',workspaces:['shared'],uploadRoot:join(root,'uploads'),templateRoot:resolve('file-engine/templates')});t.after(async()=>{await service.app.close();service.db.close();});
+ const chat=service.conversations.create('test-owner',{workspace_id:'shared',model:{provider:'fixture',model:'fixture'}}),run=service.runs.enqueue(chat.conversation_id,'test-owner',{client_message_id:'test-source',content:[{type:'text',text:'Fixture report'}]});
+ const source=join(root,'report.md');writeFileSync(source,'# Synthetic report');
+ const group=service.artifacts.registerGenerated(run.run_id,'test-internal-runtime-ref',[{path:source,display_name:'report.md'}]);
+ let snapshot=buildSnapshot(service.db,chat.conversation_id,'test-owner');assert.equal(snapshot.artifacts[0].run_id,run.run_id);assert.notEqual(snapshot.artifacts[0].run_id,'test-internal-runtime-ref');
+ const plain=service.artifacts.get(group.artifact_ref,'test-owner',1),now=new Date().toISOString();
+ service.db.prepare('INSERT INTO ga_artifacts(id,conversation_id,owner_id,kind,current_version,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run('test-linked-output',chat.conversation_id,'test-owner','task_output_file',1,now,now);
+ service.db.prepare('INSERT INTO ga_artifact_versions VALUES(?,?,?,?,?,?,?,?)').run('test-linked-output',1,source,plain.sha256,plain.size_bytes,'text/markdown',JSON.stringify({origin:'generated',status:'ready',file_name:'linked.md'}),now);
+ service.db.prepare('INSERT INTO ga_run_artifacts VALUES(?,?,?,?)').run(run.run_id,'test-linked-output',1,now);
+ snapshot=buildSnapshot(service.db,chat.conversation_id,'test-owner');assert.equal(snapshot.artifacts.find(file=>file.artifact_id==='test-linked-output').run_id,run.run_id);
+ assert.throws(()=>buildSnapshot(service.db,chat.conversation_id,'other-owner'),/conversation_not_found/);
+});

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { RunRepository } from '../runs/repository.ts';
 import { withImmediateTransaction } from '../db/database.ts';
+import {OwnerChannelBindings} from './owner-bindings.ts';
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
@@ -22,6 +23,11 @@ export class ChannelIntakeService {
     const text = String(input.text ?? '').trim();
     if (!ID.test(channel) || !ID.test(principal) || !ID.test(messageId) || !text || text.length > 4000) {
       throw new Error('channel_message_invalid');
+    }
+    if(channel==='wecom'&&text.startsWith('/jot-bind')){
+      const match=/^\/jot-bind ([A-Za-z0-9_-]{43})$/.exec(text);
+      if(!match)throw new Error('channel_binding_proof_invalid');
+      return new OwnerChannelBindings(this.db).acceptProof(channel,principal,match[1]!);
     }
     const ownerId = `channel:${channel}:${principal}`;
     const conversationId = this.conversation(channel, principal, ownerId);

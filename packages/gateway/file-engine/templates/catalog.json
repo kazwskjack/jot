@@ -2,18 +2,30 @@
   "catalog_version": "1.0.0",
   "templates": [
     {
-      "template_id": "report-v1",
+      "template_id": "technical-report-v1",
       "version": "1.0.0",
       "format": "docx",
-      "file": "report.docx",
-      "sha256": "b4cf57097206afdfa60736d44d58780d05d3940d5a21c290e5a29944a8c40af7",
+      "file": "technical-report-v1.docx",
+      "sha256": "65fe64ae11b96d8b164e79b9a3bb59e40155ea5a3fb9ddcf2edf6d8a81e31c89",
       "fields": {
         "report_title": {
           "token": "[[DSH:report_title]]",
           "max_chars": 6000
         },
+        "subtitle": {
+          "token": "[[DSH:subtitle]]",
+          "max_chars": 6000
+        },
+        "date": {
+          "token": "[[DSH:date]]",
+          "max_chars": 6000
+        },
         "summary": {
           "token": "[[DSH:summary]]",
+          "max_chars": 6000
+        },
+        "scope": {
+          "token": "[[DSH:scope]]",
           "max_chars": 6000
         },
         "findings": {
@@ -24,11 +36,65 @@
           "token": "[[DSH:recommendation]]",
           "max_chars": 6000
         },
+        "limitations": {
+          "token": "[[DSH:limitations]]",
+          "max_chars": 6000
+        },
         "sources": {
           "token": "[[DSH:sources]]",
           "max_chars": 6000
         }
       }
+    },
+    {
+      "template_id": "copy-brief-v1",
+      "version": "1.0.0",
+      "format": "docx",
+      "file": "copy-brief-v1.docx",
+      "sha256": "eedd354c8b771800372591b1ff670fed6213facfdc8c37aa07bfce718c310298",
+      "fields": {
+        "title": {
+          "token": "[[DSH:title]]",
+          "max_chars": 6000
+        },
+        "date": {
+          "token": "[[DSH:date]]",
+          "max_chars": 6000
+        },
+        "audience_channel": {
+          "token": "[[DSH:audience_channel]]",
+          "max_chars": 6000
+        },
+        "facts": {
+          "token": "[[DSH:facts]]",
+          "max_chars": 6000
+        },
+        "message": {
+          "token": "[[DSH:message]]",
+          "max_chars": 6000
+        },
+        "draft": {
+          "token": "[[DSH:draft]]",
+          "max_chars": 6000
+        },
+        "sources": {
+          "token": "[[DSH:sources]]",
+          "max_chars": 6000
+        },
+        "limitations": {
+          "token": "[[DSH:limitations]]",
+          "max_chars": 6000
+        }
+      }
+    },
+    {
+      "template_id": "evidence-table-v1",
+      "version": "1.0.0",
+      "format": "xlsx",
+      "file": "evidence-table-v1.xlsx",
+      "sha256": "80e5eab0300077d1962fe2483a7a16ea9bd88af7630db0c3f13fb50f69f1b72e",
+      "fields": {},
+      "mapping": "evidence-table-v1.mapping.json"
     }
   ]
 }

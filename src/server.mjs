@@ -7,6 +7,7 @@ import {Store} from './store.mjs';
 import {Agent} from './agent.mjs';
 import {createTools,safeName,readArtifact} from './tools.mjs';
 import {modelProvider} from './provider.mjs';
+import {workbenchConfig,registerWorkbenchProxy} from './workbench-proxy.mjs';
 const publicRoot=fileURLToPath(new URL('../dist/',import.meta.url));
 const string={type:'string',minLength:1,maxLength:8000};
 const object=(properties,required)=>({type:'object',properties,required,additionalProperties:false});
@@ -14,6 +15,8 @@ const sameToken=(a,b)=>typeof a==='string'&&Buffer.byteLength(a)===Buffer.byteLe
 
 export async function buildServer(options={}){
   const demo=options.demo??false,csrf=randomBytes(24).toString('hex');
+  const staticRoot=resolve(options.publicRoot??publicRoot);
+  const workbench=workbenchConfig(options.workbench??{url:process.env.JOT_WORKBENCH_URL,owner:process.env.JOT_WORKBENCH_OWNER,csrf:process.env.JOT_WORKBENCH_CSRF_TOKEN});
   const root=resolve(options.root??'.data/files'),store=new Store(options.database??'.data/jot.db');store.recover();
   const origins=new Set((process.env.JOT_WEB_ORIGINS??'').split(',').map(x=>x.trim()).filter(Boolean));
   const tools=createTools({store,root,origins,searchUrl:process.env.JOT_SEARCH_URL??'',browserEnabled:process.env.JOT_BROWSER==='true'&&!demo});
@@ -28,9 +31,11 @@ export async function buildServer(options={}){
     if(!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host))return reply.code(403).send({error:'invalid_host'});
     if(req.headers['sec-fetch-site']==='cross-site'||(req.headers.origin&&req.headers.origin!==`http://${host}`))return reply.code(403).send({error:'origin_denied'});
     if(req.url.startsWith('/api/')&&req.url.split('?')[0]!=='/api/capabilities'&&!sameToken(req.headers['x-jot-token'],csrf))return reply.code(403).send({error:'token_required'});
+    if(req.url.startsWith('/workbench-api/')&&!['GET','HEAD'].includes(req.method)&&!sameToken(req.headers['x-csrf-token'],csrf))return reply.code(403).send({error:'token_required'});
     reply.header('Cache-Control','no-store').header('X-Content-Type-Options','nosniff').header('Referrer-Policy','no-referrer');
   });
-  app.setErrorHandler((error,req,reply)=>{const status=error.validation?400:reply.statusCode>=400?reply.statusCode:500;reply.code(status).send({error:error.validation?'invalid_input':status===500?'request_failed':error.message});});
+  app.setErrorHandler((error,req,reply)=>{const frameworkStatus=typeof error.code==='string'&&error.code.startsWith('FST_ERR_')&&Number.isInteger(error.statusCode)&&error.statusCode>=400&&error.statusCode<500?error.statusCode:500;const status=error.validation?400:reply.statusCode>=400?reply.statusCode:frameworkStatus;reply.code(status).send({error:error.validation?'invalid_input':status===500?'request_failed':error.message});});
+  registerWorkbenchProxy(app,workbench,csrf);
   app.get('/api/capabilities',async()=>({mode:demo?'demo':'agent',csrf,model_configured:Boolean(process.env.JOT_MODEL_URL&&process.env.JOT_MODEL)||Boolean(options.provider),tools:tools.definitions.map(t=>t.function.name),limits:{max_message_chars:8000,max_file_bytes:1000000,workers:agent.maxWorkers,per_conversation:1,max_steps:agent.maxSteps,approval_timeout_ms:agent.approvalTimeoutMs}}));
   app.get('/api/conversations',async()=>store.conversations());
   app.post('/api/conversations',{schema:{body:object({title:{type:'string',maxLength:100}},[])}},async req=>store.createConversation(req.body.title||'New chat'));
@@ -59,9 +64,9 @@ export async function buildServer(options={}){
     try {const bytes=await readArtifact(a.path,root);return reply.header('Content-Type','application/octet-stream').header('Content-Disposition',`attachment; filename*=UTF-8''${encodeURIComponent(a.name)}`).send(bytes);}catch{return reply.code(410).send({error:'artifact_expired'});}
   });
   app.get('/*',async(req,reply)=>{
-    const pathname=new URL(req.url,'http://localhost').pathname;const path=resolve(publicRoot,pathname==='/'?'index.html':'.'+pathname);
-    if(!path.startsWith(publicRoot+sep))return reply.code(404).send('Not found');
-    try {const data=await readFile(path);const ext=path.split('.').pop();const types={html:'text/html',js:'application/javascript',css:'text/css',svg:'image/svg+xml'};return reply.header('Content-Type',types[ext]??'application/octet-stream').header('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'").send(data);}catch{return reply.code(404).send('Run npm run build before opening the interface.');}
+    const pathname=new URL(req.url,'http://localhost').pathname;const path=resolve(staticRoot,pathname==='/'?'index.html':'.'+pathname);
+    if(!path.startsWith(staticRoot+sep))return reply.code(404).send('Not found');
+    try {const data=await readFile(path);const ext=path.split('.').pop();const types={html:'text/html',js:'application/javascript',css:'text/css',svg:'image/svg+xml'};return reply.header('Content-Type',types[ext]??'application/octet-stream').header('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; object-src 'none'; frame-ancestors 'none'").send(data);}catch{return reply.code(404).send('Run npm run build before opening the interface.');}
   });
   let closing;
   return {app,agent,store,close:()=>closing??=(async()=>{for(const stream of streams)stream.destroy();await agent.close();await app.close();store.close();})()};

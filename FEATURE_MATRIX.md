@@ -5,7 +5,9 @@ This inventory distinguishes code availability from end-to-end readiness. The po
 | Module | Included | External requirement or limitation |
 | --- | --- | --- |
 | Conversations | Portable create/list/snapshot/messages; extended metadata | Portable UI has no project/pin/archive management |
-| Projects | Gateway owner-scoped projects and conversation assignment | Separate gateway frontend required |
+| Projects | Gateway owner-scoped projects and conversation assignment; optional bundled workbench | Configure the workbench's authenticated gateway proxy; portable root chat remains separate |
+| Agent roles | Workbench creation/editing/copy/status/delete and owner-scoped role conversations | A verified execution host is required to run roles; management availability does not prove model readiness |
+| Persistent tasks | Bounded schedules, dialogue triggers, calendar, task wizard and shared workspace/memory APIs | Host execution, external notification accounts and business acceptance require deployment validation |
 | Task workers | Bounded runs, one active task per conversation, up to five workers | Does not imply five Agents or a multi-page browser pool |
 | Models | Portable streaming/function-tool adapter; DSH Session delegation | Supply a model; gateway per-conversation model execution switching remains scaffolding |
 | Search | Optional JSON endpoint, bounded result list | Search engines, routing and provider quotas are not bundled |
@@ -16,12 +18,12 @@ This inventory distinguishes code availability from end-to-end readiness. The po
 | Events | SQLite events, SSE, snapshots and cursors | Extended snapshot does not restore pending interaction records in every path |
 | Approvals | Portable exact-operation approvals | Gateway interaction contracts need complete host dispatch |
 | Identity | Local loopback boundary; gateway owner/CSRF/internal token checks | Trusted authenticated proxy for remote users; identity headers are not login |
-| Recovery | Portable interrupted-on-restart; extended leases/event recovery | No portable action replay; extended checkpoint execution resume is not complete |
-| Storage | SQLite/artifact storage, archive and retention inventory source | No bundled automatic deletion schedule or external archive account |
+| Recovery | Portable interrupted-on-restart; extended leases and worker-fenced Session checkpoints | Local installed-SDK checks include abrupt exit with a started tool: exact prefix survives, the SDK repairs the result as unknown, and checkpoints refuse it without replay. Byte-level torn writes, full worker crash accounting, remote/provider outcomes and production remain unproven; no portable action replay |
+| Storage | SQLite/artifacts, notification archive/restore CLI, default-off archive maintenance and offline six-class host backup CLI | Private backup roots and remote destination must be configured; no automatic deletion of protected live data or bundled archive account |
 | Decision advice | Optional OpenJev-first/Laya-fallback expression client | Active webpage decision service and learning pipeline are not bundled |
-| Interface | React dark/light chat, progress, approvals, delivery and synthetic samples | No complete PWA safe-area, mascot or extended project/speech UI |
+| Interface | React dark/light portable chat plus optional role/task workbench, uploads, previews and output downloads | No complete PWA safe-area/mascot or portable speech UI; workbench uses the extended gateway rather than the root API |
 | Agent adapters | DSH Session plugin; external leaf-runtime client contract | pi and other Agent SDK adapters are proposals, not tested implementations |
-| Delivery services | Extension source for reporting, channels and archival | Exporter, channel provider and archive CLI must be supplied |
-| Validation | Portable deterministic tests, gateway contract/store tests, voice protocol tests | Not complete live-model/browser/Office/batch/channel acceptance |
+| Delivery services | Frozen notification/reply outbox, verified owner bindings, WeCom/email transport and archive/backup commands | Configure external providers and authorization; unknown sends are not blindly retried, SMTP receipt is not inbox delivery |
+| Validation | Portable/store/protocol tests and local actual DSH Controller/HTTP/Worker/Runner/checkpoint checks | Local runs use scripted providers and an empty preset declaration; not complete live-model/browser/Office/batch/channel/production acceptance |
 
 See [Deployment](DEPLOYMENT.md) for installation, [Integrations](INTEGRATIONS.md) for adapter designs and [Algorithms](ALGORITHMS.md) for exact mechanisms. Capability flags and healthy HTTP responses do not establish external service readiness.

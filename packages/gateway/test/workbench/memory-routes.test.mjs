@@ -1,0 +1,25 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdirSync,mkdtempSync,rmSync} from 'node:fs';
+import {join} from 'node:path';
+import Fastify from 'fastify';
+import {openProductDatabase} from '../../src/db/database.ts';
+import {WorkbenchService} from '../../src/workbench/service.ts';
+import {registerWorkbenchRoutes} from '../../src/workbench/routes.ts';
+const base='.test-tmp/memory-routes';mkdirSync(base,{recursive:true});
+test('authenticated routes accept lifecycle metadata and export only current owner and selected member',async t=>{
+ const dir=mkdtempSync(join(base,'case-')),db=openProductDatabase(join(dir,'fixture.sqlite')),service=new WorkbenchService(db,{workspaceIds:['ws'],root:join(dir,'shared')}),app=Fastify();
+ app.setErrorHandler((error,_request,reply)=>reply.code(error.message.includes('not_found')?404:400).send({error:error.message}));
+ registerWorkbenchRoutes(app,service,request=>String(request.headers['x-user-id']??''));
+ t.after(async()=>{await app.close();db.close();rmSync(dir,{recursive:true,force:true,maxRetries:5,retryDelay:20});});
+ const a=service.createAgent('alice',{name:'Reader'}),b=service.createAgent('alice',{name:'Writer'}),other=service.createAgent('bob',{name:'Other'}),headers={'x-user-id':'alice'};
+ service.saveMemory('alice','ws',{scope:'private',agent_id:b.agent_id,content:'Do not export another member'});
+ service.saveMemory('bob','ws',{scope:'private',agent_id:other.agent_id,content:'Do not export another owner'});
+ const created=await app.inject({method:'POST',url:'/v1/workspaces/ws/memory',headers,payload:{scope:'private',agent_id:a.agent_id,content:'Source fact',provenance:[{kind:'document',reference:'notes/source.md'}],source_revision:'rev-1',expires_at:'2020-01-01T08:00:00+08:00'}});
+ assert.equal(created.statusCode,201,created.body);assert.deepEqual(created.json().provenance,[{kind:'document',reference:'notes/source.md'}]);assert.equal(created.json().expires_at,'2020-01-01T00:00:00.000Z');
+ const query=`?scope=private&agent_id=${a.agent_id}&include_expired=true&q=Source`;
+ const exported=await app.inject({method:'GET',url:'/v1/workspaces/ws/memory/export'+query,headers});assert.equal(exported.statusCode,200,exported.body);const value=exported.json();assert.equal(value.schema_version,1);assert.equal(value.items.length,1);assert.equal(value.items[0].memory_id,created.json().memory_id);assert.equal(value.items[0].expired,true);assert.equal(value.items[0].owner_id,undefined);
+ const excluded=await app.inject({method:'GET',url:`/v1/workspaces/ws/memory/export?scope=private&agent_id=${a.agent_id}`,headers});assert.equal(excluded.json().items.length,0);
+ assert.equal((await app.inject({method:'GET',url:'/v1/workspaces/ws/memory/export'+query,headers:{'x-user-id':'bob'}})).statusCode,404);
+ const spoof=await app.inject({method:'POST',url:'/v1/workspaces/ws/memory',headers,payload:{scope:'project',project_id:a.project_id,content:'Fact',verified_at:'2026-10-02T00:00:00Z'}});assert.equal(spoof.statusCode,400);
+});

@@ -4,6 +4,10 @@ import type { EventStore } from '../events/event-store.ts';
 import type { RunRepository } from '../runs/repository.ts';
 import type { JotProjection } from './session-event-projector.ts';
 import type { ResolvedAttachment } from '../artifacts/resolver.ts';
+import {recordSessionCheckpoint} from './session-checkpoints.ts';
+import {requestTaskWaitInteraction} from '../persistent-tasks/task-wait.ts';
+import {freezeTaskCompletionCandidate,type TaskCompletionCandidate} from '../persistent-tasks/completion-candidates.ts';
+import {finalizeReviewedTask} from '../persistent-tasks/finalization.ts';
 import {
   safeWebOperationCounts, safeWebOperationId, safeWebOperationItems,
   safeWebOperationKind, safeWebOperationStatus, webOperationPresentation,
@@ -22,28 +26,53 @@ export class FenceRejectedError extends Error {
   constructor() { super('worker_fence_rejected'); }
 }
 
+export interface BackgroundRunOptions {
+  maxBackgroundRuns: number;
+  allowBackgroundRuns: boolean;
+}
+
 export class HarnessCoordinator {
   private readonly db: DatabaseSync;
   private readonly runs: RunRepository;
   private readonly events: EventStore;
   private readonly now: () => number;
+  private readonly backgroundOptions: BackgroundRunOptions;
 
-  constructor(db: DatabaseSync, runs: RunRepository, events: EventStore, now: () => number = Date.now) {
+  constructor(db: DatabaseSync, runs: RunRepository, events: EventStore, now: () => number = Date.now,
+    options: BackgroundRunOptions = { maxBackgroundRuns: 1, allowBackgroundRuns: true }) {
     this.db = db; this.runs = runs; this.events = events; this.now = now;
+    if (!Number.isSafeInteger(options.maxBackgroundRuns) || options.maxBackgroundRuns < 0 || typeof options.allowBackgroundRuns !== 'boolean') throw new Error('invalid_background_run_options');
+    this.backgroundOptions = options;
   }
 
   claimNext(workerId: string, leaseMs: number): RunLease | null {
     const now = this.now();
     return withImmediateTransaction(this.db, () => {
+      const hasBindings=Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_run_bindings'").get());
+      const hasTaskPriority=hasBindings && Number((this.db.prepare("SELECT count(*) n FROM sqlite_master WHERE type='table' AND name IN ('wb_task_occurrences','wb_persistent_tasks')").get() as {n:number}).n)===2;
+      const joins=hasBindings ? `JOIN ga_conversations c ON c.id=r.conversation_id LEFT JOIN wb_run_bindings b ON b.run_id=r.id
+        ${hasTaskPriority ? 'LEFT JOIN wb_task_run_occurrences o ON o.run_id=r.id LEFT JOIN wb_persistent_tasks t ON t.task_id=o.task_id' : ''}` : '';
+      const activeBackground=`SELECT count(*) FROM ga_runs ar JOIN ga_worker_leases al ON al.resource_id=ar.id
+        JOIN wb_run_bindings ab ON ab.run_id=ar.id JOIN ga_conversations ac ON ac.id=ar.conversation_id
+        WHERE ab.kind IN ('task','internal_mailbox') AND ar.status IN ('starting','running','waiting_user','waiting_approval','cancelling') AND CAST(al.expires_at AS INTEGER)>?`;
+      const admission=!hasBindings ? '' : !this.backgroundOptions.allowBackgroundRuns ? 'AND b.run_id IS NULL' :
+        `AND (b.kind IS NULL OR b.kind NOT IN ('task','internal_mailbox') OR
+          ((${activeBackground})<? AND (${activeBackground} AND ac.owner_id=c.owner_id)<?))`;
+      const order=hasBindings ? `CASE WHEN b.kind IN ('task','internal_mailbox') THEN 1 ELSE 0 END,
+        ${hasTaskPriority ? 'COALESCE(t.priority,50)' : 'CAST(50 AS INTEGER)'} DESC,` : '';
+      const parameters:Array<number>=[now];
+      if(hasBindings && this.backgroundOptions.allowBackgroundRuns)parameters.push(now,this.backgroundOptions.maxBackgroundRuns,now,this.backgroundOptions.maxBackgroundRuns);
       const row = this.db.prepare(
         `SELECT r.id,r.conversation_id,r.input_message_id,r.status,l.generation
          FROM ga_runs r LEFT JOIN ga_worker_leases l ON l.resource_id=r.id
-         WHERE (r.status='queued' AND NOT EXISTS (
+         ${joins}
+         WHERE ((r.status='queued' AND NOT EXISTS (
            SELECT 1 FROM ga_runs active WHERE active.conversation_id=r.conversation_id
            AND active.id<>r.id AND active.status IN ('starting','running','waiting_user','waiting_approval','cancelling')
-         )) OR (r.status IN ('starting','running') AND (l.resource_id IS NULL OR CAST(l.expires_at AS INTEGER)<=?))
-         ORDER BY CASE r.status WHEN 'queued' THEN 0 ELSE 1 END,r.created_at,r.id LIMIT 1`,
-      ).get(now) as Record<string, unknown> | undefined;
+         )) OR (r.status IN ('starting','running') AND (l.resource_id IS NULL OR CAST(l.expires_at AS INTEGER)<=?)))
+         ${admission}
+         ORDER BY ${order} CASE r.status WHEN 'queued' THEN 0 ELSE 1 END,r.created_at,r.id LIMIT 1`,
+      ).get(...parameters) as Record<string, unknown> | undefined;
       if (!row) return null;
       const runId = String(row.id);
       const conversationId = String(row.conversation_id);
@@ -76,6 +105,16 @@ export class HarnessCoordinator {
         const run = this.db.prepare('SELECT * FROM ga_runs WHERE id=?').get(lease.run_id) as Record<string, unknown>;
         this.events.append(String(row.conversation_id), lease.run_id, 'run.state', this.runValue(run));
       }
+    });
+  }
+
+  recordCheckpoint(lease:RunLease,sessionRef:string,receipt:unknown):string {
+    return withImmediateTransaction(this.db,()=>{
+      this.assertLease(lease);
+      const checkpointId=recordSessionCheckpoint(this.db,lease.run_id,lease.conversation_id,sessionRef,receipt);
+      const run=this.db.prepare('SELECT * FROM ga_runs WHERE id=?').get(lease.run_id) as Record<string,unknown>;
+      this.events.append(lease.conversation_id,lease.run_id,'run.state',{...this.runValue(run),checkpoint_id:checkpointId});
+      return checkpointId;
     });
   }
 
@@ -220,6 +259,7 @@ export class HarnessCoordinator {
         artifact_id: artifact.artifactId, version, file_name: artifact.displayName,
         media_type: artifact.mediaType, size_bytes: artifact.sizeBytes, sha256: artifact.sha256,
         status: 'ready', download_url: `/v1/artifacts/${artifact.artifactId}/download?version=${version}`,
+        created_at:now,
       });
     });
   }
@@ -242,7 +282,15 @@ export class HarnessCoordinator {
     withImmediateTransaction(this.db, () => {
       this.assertLease(lease);
       this.runs.finalizePublication(lease.run_id, status, reasonCode);
+      if(status!=='running')this.db.prepare('DELETE FROM ga_worker_leases WHERE resource_id=? AND owner=? AND generation=?')
+        .run(lease.run_id,lease.owner,lease.generation);
     });
+  }
+
+  /** Stopped tasks have no execution lease. Their owned certificate and
+   * confirmed native completion provide the stronger finalization boundary. */
+  finalizeReviewedTask(owner:string,runId:string,intentId:string){
+    return withImmediateTransaction(this.db,()=>finalizeReviewedTask(this.db,this.runs,owner,runId,intentId));
   }
 
   bindSession(lease: RunLease, sessionRef: string): void {
@@ -292,6 +340,46 @@ export class HarnessCoordinator {
       this.events.append(lease.conversation_id, lease.run_id, 'run.state', this.runValue(updated));
       this.db.prepare('DELETE FROM ga_worker_leases WHERE resource_id=? AND owner=? AND generation=?')
         .run(lease.run_id, lease.owner, lease.generation);
+    });
+  }
+
+  /** A waiting state retains its occurrence and safe checkpoint but owns no
+   * worker lease. Only the authenticated resume command can create its child. */
+  waitForTask(lease:RunLease,stop:{goal_id:string;goal_revision:number;phase:string;turn_end_seq:number},reasonCode:string,candidate?:TaskCompletionCandidate):void {
+    const userReasons=['SESSION_GOAL_WAITING_USER','SESSION_GOAL_PAUSED','SESSION_GOAL_BLOCKED','SESSION_GOAL_DISARMED',
+      'SESSION_GOAL_ROUND_LIMIT','SESSION_GOAL_BUDGET_EXHAUSTED','SESSION_GOAL_BUDGET_UNCONFIGURED','SESSION_GOAL_STREAM_ENDED'];
+    const reviewReasons=['SESSION_GOAL_WAITING_APPROVAL','SESSION_GOAL_REVIEW_REQUIRED'];
+    if(!stop||typeof stop!=='object'||Object.keys(stop).length!==4||typeof stop.goal_id!=='string'
+      ||!Number.isSafeInteger(stop.goal_revision)||stop.goal_revision<1||!Number.isSafeInteger(stop.turn_end_seq)||stop.turn_end_seq<0
+      ||!['paused','blocked','complete'].includes(stop.phase)||![...userReasons,...reviewReasons].includes(reasonCode))throw new Error('task_wait_invalid');
+    withImmediateTransaction(this.db,()=>{
+      this.assertLease(lease);
+      const proof=this.db.prepare(`SELECT o.occurrence_id,o.task_id FROM ga_runs r
+        JOIN ga_conversations c ON c.id=r.conversation_id
+        JOIN ga_session_checkpoints cp ON cp.checkpoint_id=r.checkpoint_id AND cp.run_id=r.id AND cp.conversation_id=c.id
+        JOIN ga_harness_session_bindings s ON s.conversation_id=c.id AND s.owner_id=c.owner_id AND s.session_id=cp.session_ref
+        JOIN wb_run_bindings b ON b.run_id=r.id AND b.owner_id=c.owner_id AND b.kind='task'
+        JOIN wb_agents a ON a.agent_id=b.agent_id AND a.owner_id=b.owner_id AND a.status='active' AND a.capability_epoch=b.epoch
+        JOIN wb_task_current_occurrences o ON o.run_id=r.id
+        JOIN wb_persistent_tasks t ON t.task_id=o.task_id AND t.owner_id=c.owner_id AND t.generation=o.generation
+        JOIN wb_native_goal_bindings g ON g.run_id=o.root_run_id AND g.occurrence_id=o.occurrence_id
+          AND g.goal_id=cp.goal_id AND g.goal_revision=cp.goal_revision
+        WHERE r.id=? AND r.status='running' AND t.status IN ('active','budget_exhausted')
+          AND cp.goal_id=? AND cp.goal_revision=? AND cp.turn_end_seq=?`)
+        .get(lease.run_id,stop.goal_id,stop.goal_revision,stop.turn_end_seq) as {occurrence_id:string;task_id:string}|undefined;
+      if(!proof)throw new Error('task_wait_unconfirmed');
+      if(this.db.prepare(`SELECT 1 FROM wb_model_budget_attempts a JOIN wb_task_run_occurrences o ON o.run_id=a.run_id
+        WHERE o.occurrence_id=? AND a.state IN ('unknown','in_flight') LIMIT 1`).get(proof.occurrence_id))throw new Error('budget_usage_unknown');
+      const status=stop.phase==='complete'||reviewReasons.includes(reasonCode)?'waiting_approval':'waiting_user';
+      const now=new Date(this.now()).toISOString();
+      this.db.prepare('UPDATE ga_runs SET status=?,reason_code=?,version=version+1,updated_at=? WHERE id=?').run(status,reasonCode,now,lease.run_id);
+      this.db.prepare('UPDATE wb_task_occurrences SET status=?,business_state=?,updated_at=? WHERE occurrence_id=?').run(status,status,now,proof.occurrence_id);
+      this.db.prepare('UPDATE wb_persistent_tasks SET projection_pending=1 WHERE task_id=?').run(proof.task_id);
+      const updated=this.db.prepare('SELECT * FROM ga_runs WHERE id=?').get(lease.run_id) as Record<string,unknown>;
+      this.events.append(lease.conversation_id,lease.run_id,'run.state',this.runValue(updated));
+      if(candidate)freezeTaskCompletionCandidate(this.db,lease.run_id,candidate);
+      requestTaskWaitInteraction(this.db,this.events,lease.run_id);
+      this.db.prepare('DELETE FROM ga_worker_leases WHERE resource_id=? AND owner=? AND generation=?').run(lease.run_id,lease.owner,lease.generation);
     });
   }
 

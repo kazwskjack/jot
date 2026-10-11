@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { ChannelDeliveryService } from './delivery.ts';
 
-interface DeliveryProvider {
+export interface DeliveryProvider {
   sendFile(path: string, recipient: string, displayName: string):
     Promise<Record<string, unknown> & { provider_message_id?: unknown }>;
   send(text: string, recipient: string):
@@ -22,29 +22,34 @@ interface DeliveryResolvers {
 
 export class ChannelDeliveryWorker {
   private readonly store: ChannelDeliveryService;
-  private readonly provider: DeliveryProvider;
+  private readonly providers: Record<string,DeliveryProvider>;
   private readonly runtime: DeliveryRuntime;
   private readonly resolvers: DeliveryResolvers;
   private readonly owner: string;
-  constructor(store: ChannelDeliveryService, provider: DeliveryProvider,
+  constructor(store: ChannelDeliveryService, provider: DeliveryProvider|{providers:Record<string,DeliveryProvider>},
     runtime: DeliveryRuntime, resolvers: DeliveryResolvers,
     owner = 'general-agent-delivery-j') {
-    this.store = store; this.provider = provider; this.runtime = runtime;
+    this.store = store; this.providers = 'providers' in provider?provider.providers:{wecom:provider}; this.runtime = runtime;
     this.resolvers = resolvers; this.owner = owner;
   }
 
   async processNext(): Promise<boolean> {
-    const item = this.store.claim(this.owner, 90);
+    const item = this.store.claim(this.owner, 90,Object.keys(this.providers));
     if (!item) return false;
     let receipt = item.provider_receipt as Record<string, unknown> | null;
     if (item.phase === 'send') {
+      const provider=this.providers[String(item.destination)];if(!provider)throw new Error('delivery_channel_not_configured');
+      if(!this.store.authorizeSend(String(item.effect_id),Number(item.generation)))return true;
       const payload = item.payload_json ? JSON.parse(String(item.payload_json)) as Record<string, unknown> : null;
       if (payload?.kind === 'text') {
-        const text = typeof payload.text === 'string' ? payload.text.trim() : '';
+        const text = this.store.prepareTextDelivery(String(item.effect_id),Number(item.generation));
         if (!text) throw new Error('delivery_text_invalid');
+        // Digest membership freezes under a transaction, then every member's
+        // authorization is checked again immediately before the one send call.
+        if(!this.store.authorizeSend(String(item.effect_id),Number(item.generation)))return true;
         let sent: Record<string, unknown> & { provider_message_id?: unknown };
         try {
-          sent = await this.provider.send(text, String(item.recipient));
+          sent = await provider.send(text, String(item.recipient));
         } catch (error) {
           if (/timeout|abort|socket|network/i.test(String(error instanceof Error ? error.message : error))) {
             this.store.recordProviderUnknown(String(item.effect_id), Number(item.generation));
@@ -54,7 +59,7 @@ export class ChannelDeliveryWorker {
         }
         if (typeof sent.provider_message_id === 'string' && sent.provider_message_id) {
           receipt = sent;
-        } else if (sent.ok === true) {
+        } else if (sent.ok === true && item.destination==='wecom') {
           // The deployed legacy WeCom adapter reports errcode=0 as {ok:true}
           // but has no msgid for application text. The API has already accepted
           // the message, so persist a deterministic local receipt rather than
@@ -73,9 +78,10 @@ export class ChannelDeliveryWorker {
         const providerIds: string[] = [];
         for (let index = 0; index < artifacts.length; index += 1) {
           const artifact = artifacts[index]!;
+          if(!this.store.authorizeSend(String(item.effect_id),Number(item.generation)))return true;
           let partReceipt: Record<string, unknown>;
           try {
-            partReceipt = await this.provider.sendFile(
+            partReceipt = await provider.sendFile(
               artifact.path, String(item.recipient), artifact.displayName
             );
           } catch (error) {
@@ -110,7 +116,7 @@ export class ChannelDeliveryWorker {
         const binding = this.resolvers.resolveRuntime(String(item.run_id));
         const runtimeReceipt = await this.runtime.registerDeliveryReceipt(
           binding.runtimeRunId, binding.clientRunId,
-          `wecom:${receipt.provider_message_id}`, String(item.recipient), 'delivered');
+          `${String(item.destination)}:${receipt.provider_message_id}`, String(item.recipient), 'delivered');
         if (runtimeReceipt.ok !== true) throw new Error('RUNTIME_RECEIPT_REJECTED');
       }
       if (payload?.kind !== 'text' && this.resolvers.cleanupArtifact) {

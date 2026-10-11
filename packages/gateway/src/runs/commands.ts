@@ -51,18 +51,35 @@ export class RunCommandService {
     });
   }
 
-  resume(runId: string, ownerId: string, input: Record<string, unknown>, key: string) {
+  resume(runId: string, ownerId: string, input: Record<string, unknown>, key: string, resolvedInteractionId?:string) {
     const row = this.row(runId, ownerId);
-    if (!['failed', 'interrupted'].includes(String(row.status))) throw new Error('run_state_conflict');
+    const waiting=['waiting_user','waiting_approval'].includes(String(row.status));
+    const taskWait=waiting && /^SESSION_GOAL_[A-Z_]+$/.test(String(row.reason_code))
+      && !!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_run_bindings'").get()
+      && !!this.db.prepare("SELECT 1 FROM wb_run_bindings WHERE run_id=? AND owner_id=? AND kind='task'").get(runId,ownerId);
+    if (!['failed', 'interrupted'].includes(String(row.status))&&!taskWait) throw new Error('run_state_conflict');
     if (Number(row.version) !== Number(input.expected_run_version)) throw new Error('run_version_conflict');
     if (!row.checkpoint_id || row.checkpoint_id !== input.checkpoint_id) throw new Error('checkpoint_invalid');
     if (row.reason_code === 'OUTCOME_UNKNOWN') throw new Error('reconciliation_required');
+    const wait=this.db.prepare('SELECT * FROM wb_task_wait_interactions WHERE run_id=?').get(runId) as Record<string,unknown>|undefined;
+    if(taskWait&&(wait||row.status==='waiting_approval')){
+      const answered=resolvedInteractionId&&wait&&this.db.prepare("SELECT 1 FROM ga_interactions WHERE id=? AND run_id=? AND status='answered'").get(resolvedInteractionId,runId);
+      if(!answered||wait!.interaction_id!==resolvedInteractionId||wait!.checkpoint_id!==row.checkpoint_id||wait!.expected_run_version!==row.version)throw new Error('task_wait_response_required');
+    }
     const newRunId = `run-${randomUUID()}`;
     const now = new Date().toISOString();
     const conversationId = String(row.conversation_id);
     const inputMessageId = String(row.input_message_id);
     const checkpointId = String(row.checkpoint_id);
     return withImmediateTransaction(this.db, () => {
+      if(taskWait){
+        // The waiting parent must leave the active conversation slot before
+        // the owned continuation can enter it. The route wraps this and all
+        // lineage/budget checks in one transaction, so a failed bind rolls back.
+        this.db.prepare("UPDATE ga_runs SET status='interrupted',version=version+1,updated_at=? WHERE id=?").run(now,runId);
+        this.events.append(conversationId,runId,'run.state',{run_id:runId,conversation_id:conversationId,input_message_id:inputMessageId,
+          status:'interrupted',version:Number(row.version)+1,created_at:row.created_at,updated_at:now});
+      }
       this.db.prepare('INSERT INTO ga_runs(id,conversation_id,input_message_id,status,continuation_of,checkpoint_id,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)')
         .run(newRunId, conversationId, inputMessageId, 'queued', runId, checkpointId, 1, now, now);
       this.db.prepare('INSERT INTO ga_outbox(conversation_id,aggregate_type,aggregate_id,event_type,payload_json,created_at) VALUES(?,?,?,?,?,?)')

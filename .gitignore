@@ -15,3 +15,7 @@ dist/
 .data/
 .cache/
 test-results/
+.test-tmp/
+notification-archives/
+notification-backups/
+*.json.gz

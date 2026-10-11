@@ -1,0 +1,35 @@
+import assert from 'node:assert/strict';
+import {mkdirSync,mkdtempSync,rmSync} from 'node:fs';
+import {resolve,join,relative,isAbsolute} from 'node:path';
+import {buildServer} from '../../src/server.ts';
+import {HarnessCoordinator} from '../../src/harness/coordinator.ts';
+const limit={tokens:5000,nano_usd:50000,model_calls:50};
+const route={provider:'fixture',model:'bounded',revision:'rates-1',context_window:100,max_output_tokens:20,rates:{input:2,output:10,cache_read:1,cache_write:3}};
+const policy={revision:1,admission_route:{provider:'fixture',model:'bounded'},routes:[route],limits:Object.fromEntries(['owner_daily','project_daily','agent_daily','task_total','occurrence','chat_root','mailbox_thread'].map(key=>[key,limit]))};
+export async function fixture(t,intent='wait_user',options={}){
+ const base=resolve('.test-tmp/task-wait-interactions');mkdirSync(base,{recursive:true});const root=mkdtempSync(join(base,'case-'));
+ const fixtureConfig={databasePath:join(root,'db.sqlite'),workspaces:['ws'],workbenchRoot:join(root,'files'),uploadRoot:join(root,'uploads'),templateRoot:resolve('file-engine/templates'),internalChannelToken:'test-b99992d64419ae59',modelBudgetPolicy:policy,csrfToken:'test-dcbf055943f33d8a',allowedOrigins:['https://fixture.invalid']};
+ const f=await buildServer(fixtureConfig);
+ t.after(async()=>{await f.app.close();f.db.close();const child=relative(base,root);assert.ok(child&&!child.startsWith('..')&&!isAbsolute(child));rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:20});});
+ const a=f.workbench.createAgent('alice',{name:'Reader',instructions:'Frozen role permissions'});
+ const task=f.persistentTasks.create('alice',{title:'Task needing input',agent_id:a.agent_id,objective:'Produce the authorized report',trigger:{kind:'once',run_at:'2099-01-01T00:00:00Z'}});
+ if(options.beforeRun)await options.beforeRun({...f,task,a});
+ const occurrence=f.persistentTasks.runNow('alice',task.task_id,'original'),runId=occurrence.run_id;
+ const coordinator=new HarnessCoordinator(f.db,f.runs,f.events),lease=coordinator.claimNext('wait-worker',30000);coordinator.start(lease);
+ const now=new Date().toISOString();f.db.prepare('INSERT INTO ga_harness_session_bindings VALUES(?,?,?,?,?)').run(occurrence.conversation_id,'alice','session-fixture',now,now);
+ const goal={goal_id:'goal-fixture',goal_revision:7},identity={run_id:runId,session_ref:'session-fixture'};
+ const internal=(name,payload)=>f.app.inject({method:'POST',url:`/internal/v1/workbench/${name}`,headers:{authorization:'Bearer test-b99992d64419ae59'},payload});
+ assert.equal((await internal('goal-binding',{...identity,action:'save',...goal})).statusCode,200);
+ f.modelBudgets.reserve('alice',runId,{attempt_id:'spent',provider:'fixture',model:'bounded'});f.modelBudgets.dispatch('alice',runId,'spent');f.modelBudgets.settle('alice',runId,'spent',{inputTokens:5,outputTokens:5,totalTokens:10});
+ if(options.prepare)await options.prepare({...f,task,runId,occurrence,internal,identity,goal});
+ const proposal=await internal('goal-proposal',{...identity,...goal,call_id:'wait-proposal',intent,summary:'Which report format should I use?'});assert.equal(proposal.statusCode,200,proposal.body);assert.equal(proposal.json().proposal.accepted,true);
+ if(options.afterProposal)await options.afterProposal({...f,task,runId,occurrence,internal,identity,goal,coordinator,lease});
+ await internal('goal-binding',{...identity,action:'save',...goal,goal_revision:8});
+ const checkpointId=coordinator.recordCheckpoint(lease,'session-fixture',{session_ref:'session-fixture',seq_exclusive:3,turn_end_seq:2,goal_id:goal.goal_id,goal_revision:8,log_sha256:'a'.repeat(64)});
+ const reason=intent==='wait_user'?'SESSION_GOAL_WAITING_USER':'SESSION_GOAL_WAITING_APPROVAL';
+ coordinator.waitForTask(lease,{goal_id:goal.goal_id,goal_revision:8,phase:'paused',turn_end_seq:2},reason,options.candidate);
+ const headers={'x-user-id':'alice',origin:'https://fixture.invalid','x-csrf-token':'test-dcbf055943f33d8a','idempotency-key':'wait-response-key'};
+ const send=(url,payload,extra={})=>f.app.inject({method:'POST',url,headers:{...headers,...extra},payload});
+ const list=async()=>{const response=await f.app.inject({url:`/v1/conversations/${occurrence.conversation_id}/interactions`,headers:{'x-user-id':'alice'}});assert.equal(response.statusCode,200,response.body);return response.json().items;};
+ return {...f,fixtureConfig,task,a,runId,occurrence,coordinator,lease,checkpointId,headers,send,list};
+}

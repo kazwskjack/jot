@@ -1,0 +1,20 @@
+[
+  {
+    "provider": "openjev",
+    "model": "openjev",
+    "revision": "example-call-quota-v1",
+    "context_window": 16384,
+    "max_output_tokens": 1,
+    "rates": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0},
+    "billing": {"unit": "dispatched_call", "nano_usd": 0}
+  },
+  {
+    "provider": "laya",
+    "model": "emotion",
+    "revision": "example-call-quota-v1",
+    "context_window": 16384,
+    "max_output_tokens": 1,
+    "rates": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0},
+    "billing": {"unit": "dispatched_call", "nano_usd": 0}
+  }
+]

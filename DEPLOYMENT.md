@@ -1,5 +1,13 @@
 # Deployment and tuning
 
+For private offline database, workspace, artifact, session and host configuration
+recovery, see [host backup](HOST-BACKUP.md). It does not upload data or activate
+restored services; keep all backup artifacts outside the public repository.
+
+For owned, read-only auxiliary-call timing and process-resource evidence, see
+[host resource observations](HOST-RESOURCES.md). These shared-process samples
+are separate from token accounting and remote inference/GPU usage.
+
 Jot has two runnable entry points. Choose the one whose execution and identity model fits your deployment; their databases, routes and environment variables are separate.
 
 | Entry point | Runs what | Dependencies | Intended boundary |
@@ -7,9 +15,9 @@ Jot has two runnable entry points. Choose the one whose execution and identity m
 | Repository root | Portable Agent loop, local web interface, conversations, tools, approvals and file delivery | Node.js 24+, a compatible streaming model endpoint; optional Playwright/search service | Local single-user application |
 | `packages/gateway` | Extended product API and workers around a DSH Session host | Node.js, Python, DSH/Cordis host, registered presets/tools, session adapter and a trusted authentication proxy | Operator-managed session backend |
 
-The root application can run without DSH. The gateway cannot execute queued tasks without its DSH host. The root interface is a demonstration of the portable Agent's API; it is not wired to the gateway API. Installing all folders does not automatically combine the two runtimes.
+The root application can run without DSH. The gateway cannot execute queued tasks without its DSH host. The root chat uses the portable Agent API. The optional `/workbench.html` interface uses the gateway through an explicitly configured loopback proxy; see [Workbench setup](WORKBENCH.md). Installing all folders does not automatically combine the two runtimes or their conversations.
 
-The gateway's static capability response is not a provider-readiness check. Interaction-response persistence, selected-model storage and checkpoint references have contracts, but their complete host dispatch is not included in every path. Treat gateway approvals, per-conversation model switching and checkpoint execution resume as integration work until independently verified. The portable runtime's operation-specific approval path is separate and tested.
+Gateway management can save roles and task rules before an execution host is ready. Its execution readiness flag must reflect a verified host; local fixture flags are not production evidence. The workbench role chat supports snapshot/SSE recovery, message queues, cancellation, interaction responses and output-file downloads. From a completed role message, task creation preserves server-validated source IDs independently of the trigger conversation. The five-step task wizard reviews role/goal, triggers, budgets, delivery and a final confirmation before saving. When `task_create_delivery` is advertised, selected verified owner bindings and the task save atomically; invalid or revoked bindings roll back the entire creation. Unselected external delivery stays application-local. With a configured gateway CSRF token, an opaque authenticated-owner namespace separates same-tab drafts and unknown save receipts; navigation or reload restores the confirmation view without sending a request. An explicit retry uses the original payload and request key. Browser storage must accept the receipt before a network save starts. Closing the tab or rotating the authentication secret changes this recovery boundary. The workbench can also open owned gateway conversations and convert a completed ordinary-chat message into a task after an explicit role selection. The gateway rechecks source ownership and workspace/project compatibility; the portable root chat remains a separate runtime. The picker currently exposes the most recent 100 active gateway conversations, without claiming full list pagination. Bounded autonomous reply and formal host acceptance remain integration work. SMTP acceptance proves transport receipt, not recipient inbox arrival. The portable runtime's operation-specific approval path is separate.
 
 ## Resource planning
 
@@ -69,8 +77,8 @@ Local product data defaults to `.data/jot.db` and `.data/files` relative to the 
 
 ## Extended gateway: staged startup
 
-1. Provide an existing DSH host with a real model, tool permissions and registered Agent presets. Install/register `packages/session-adapter` in that host; see its [README](packages/session-adapter/README.md). The host adapter requires a POSIX absolute working directory, so use Linux or WSL for this chain.
-2. Install Node.js 24 and Python. In `packages/gateway`, run `npm ci` and `npm run build`. The build generates a neutral original DOCX template; no private document is copied into the repository. A `python` executable must be on PATH during build.
+1. Provide an existing DSH host with a real model, tool permissions and registered Agent presets. Install/register `packages/session-adapter` in that host; see its [README](packages/session-adapter/README.md). Use a working directory that is absolute on the host operating system, such as a Windows drive path or a Linux path. Relative and drive-relative paths are rejected. This path support does not establish that every optional Office, browser or inference backend runs on Windows; validate those separately.
+2. Install Node.js 24 and Python. In `packages/gateway`, run `npm ci` and `npm run build`. The build generates three neutral original templates (two DOCX files and one XLSX file); no private document is copied into the repository. A `python` executable must be on PATH during build.
 3. Copy the gateway `.env.example` to `.env`. Replace paths with your own paths. Create a writable database parent and file root. Use the same database and file root for API and workers. Generate fresh CSRF, internal channel and adapter tokens; never reuse deployment credentials from another service.
 4. Put the adapter token in a private file and in the DSH host's explicitly configured token environment. Set `GENERAL_AGENT_SESSION_ADAPTER_TOKEN_FILE` to that file. Keep the adapter on loopback; the client rejects public adapter URLs.
 5. Start the DSH host, gateway API (`npm start`) and harness worker (`npm run start:worker`) as separate supervised processes. Only start `npm run start:file-worker` after its processing dependencies are installed.
@@ -134,4 +142,54 @@ Supervise processes, collect redacted operational metrics and preserve the data 
 
 The gateway's retention inventory flags seven-day events and ninety-day inactive conversations but marks them protected until complete checkpoint/restore evidence exists. It is not an automatic deletion schedule. Archive cleanup requires a verified remote copy, absence of active leases and successful restore checks. Do not infer that an expired UI download permits deleting the only remaining artifact copy.
 
+Artifact cleanup also checks the current registered file set against the verified
+manifest, including sizes, SHA-256 content and the manifest's MD5. It validates
+every part before removing any. Changed bytes, a newer current version, incorrect
+paths or incomplete manifests preserve local files instead of marking them
+deleted. Content hashing runs outside SQLite writer admission; a short removal
+transaction rechecks the manifest, references, leases and file identities.
+This does not supply a remote backup account, a deletion schedule or a guarantee
+that an independently removed remote object is still available. Configure and
+validate the actual private backup destination and restore procedure separately.
+
 Release checks cover source/build/contracts and controlled fixtures. They do not replace provider reachability, authenticated host validation, model-backed actions or sustained deployment load testing.
+# Optional email transport (integration in progress)
+
+The gateway delivery worker supports an explicit `GENERAL_AGENT_DELIVERY_CHANNELS`
+selection: `wecom` (default), `email`, or `wecom,email`. An email-only worker
+does not load the WeCom module or require the runtime receipt client for text
+notifications. Run the built worker with `node dist/src/channels/main.js` and
+server-provided environment configuration.
+
+SMTP requires an authenticated sender, port 465 with implicit TLS or port 587
+with required STARTTLS, and certificate verification. Set the SMTP host, port,
+user, sender, and password **file** using the gateway environment example.
+Keep the password file outside the checkout and do not put credentials in
+browser settings or task descriptions. Delivery fixes the sender and a single
+recipient; it accepts plain text only and does not fetch URLs or local files.
+An ambiguous SMTP outcome is recorded as unknown and is not automatically resent.
+
+The task creation wizard supports combined delivery confirmation and atomic
+task/binding selection when the gateway advertises `task_create_delivery`.
+Live provider-to-inbox acceptance remains pending. The task detail's notification panel can apply
+for mailbox verification, confirm a received code, select verified bindings,
+save task notification settings and revoke a channel. Lost application or
+confirmation responses require an explicit retry of the frozen original
+request. Codes stay in component memory and are never persisted in browser
+storage; reload recovers pending binding IDs from the authenticated API.
+The backend mailbox-verification API is available behind
+`GENERAL_AGENT_EMAIL_BINDINGS_ENABLED=true`, with the same server-only SMTP
+configuration. `POST /v1/channel-bindings/email` takes only an address and mails
+a ten-minute proof code. Its response omits the code and address. Repeat the
+same request key to recover its challenge without sending a second message.
+`POST /v1/channel-bindings/email/{binding_id}/confirm` accepts the received code
+for the authenticated owner. Both mutations require the normal Origin, CSRF
+and request-key checks. Wrong codes are limited to five attempts; revoked
+bindings cannot be restored by replaying a consumed code. Only verified binding
+IDs can be saved in task notification settings. Completion, event and monitor
+notifications retain their existing frozen authorization and revocation checks.
+SMTP acceptance does not prove mailbox arrival.
+The local transport verification used a loopback TLS fixture and no external
+recipient. Do not enable email through a public unverified recipient endpoint.
+
+Transport reference: [Nodemailer SMTP documentation](https://nodemailer.com/smtp).

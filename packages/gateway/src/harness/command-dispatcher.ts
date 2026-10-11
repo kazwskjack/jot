@@ -7,10 +7,16 @@ interface ControlClient {
  prompt(sessionId:string,requestId:string,text:string,mode:'steer',signal?:AbortSignal):Promise<Record<string,unknown>>;
  cancel(sessionId:string):Promise<Record<string,unknown>>;
 }
+interface ExecutionGuard {
+ assertRunActive(runId:string):void;
+ contextForRun(runId:string):unknown;
+ inheritChatRun(owner:string,originalRunId:string,newRunId:string):void;
+}
 /** Single dispatcher in the owning Worker process; official request IDs make retries idempotent. */
 export class SessionCommandDispatcher {
  private db:DatabaseSync;private events:EventStore;private client:ControlClient;private ready:(runId:string)=>boolean;
- constructor(db:DatabaseSync,events:EventStore,client:ControlClient,ready:(runId:string)=>boolean){this.db=db;this.events=events;this.client=client;this.ready=ready;}
+ private executionGuard:ExecutionGuard|undefined;
+ constructor(db:DatabaseSync,events:EventStore,client:ControlClient,ready:(runId:string)=>boolean,executionGuard?:ExecutionGuard){this.db=db;this.events=events;this.client=client;this.ready=ready;this.executionGuard=executionGuard;}
  async processNext():Promise<boolean>{
   const rows=this.db.prepare(`SELECT c.*,r.status run_status,r.conversation_id,r.input_message_id,
    r.created_at run_created_at,r.version,b.session_id,l.expires_at
@@ -23,8 +29,18 @@ export class SessionCommandDispatcher {
    if(terminal){
     if(row.kind==='steer'){
      const p=JSON.parse(row.payload_json);const owner=this.db.prepare('SELECT owner_id FROM ga_conversations WHERE id=?').get(row.conversation_id) as {owner_id:string};
-     new RunRepository(this.db,this.events).enqueue(row.conversation_id,owner.owner_id,{client_message_id:p.client_message_id,content:[{type:'text',text:p.text}]});
-     this.applied(row.id);
+     try {
+      withImmediateTransaction(this.db,()=>{
+       this.executionGuard?.contextForRun(row.run_id);
+       const next=new RunRepository(this.db,this.events).enqueue(row.conversation_id,owner.owner_id,{client_message_id:p.client_message_id,content:[{type:'text',text:p.text}]});
+       this.executionGuard?.inheritChatRun(owner.owner_id,row.run_id,String(next.run_id));
+       this.applied(row.id);
+      });
+     } catch(error) {
+      const code=error instanceof Error?error.message:'';
+      if(code.endsWith('_revoked')||code==='task_continuation_unsupported') this.superseded(row.id);
+      else throw error;
+     }
     }else this.db.prepare("UPDATE ga_run_commands SET status='superseded',applied_at=? WHERE id=? AND status='pending'").run(new Date().toISOString(),row.id);
     continue;
    }
@@ -47,6 +63,8 @@ export class SessionCommandDispatcher {
     });
    }else{
     if(!row.session_id)continue;
+    try { this.executionGuard?.assertRunActive(row.run_id); }
+    catch { this.superseded(row.id); continue; }
     await this.client.prompt(row.session_id,row.id,String(payload.text),'steer',AbortSignal.timeout(20_000));
     withImmediateTransaction(this.db,()=>{
      const now=new Date().toISOString();const messageId=`message-${row.id}`;
@@ -62,4 +80,5 @@ export class SessionCommandDispatcher {
   return false;
  }
  private applied(id:string){this.db.prepare("UPDATE ga_run_commands SET status='applied',applied_at=? WHERE id=?").run(new Date().toISOString(),id);}
+ private superseded(id:string){this.db.prepare("UPDATE ga_run_commands SET status='superseded',applied_at=? WHERE id=? AND status='pending'").run(new Date().toISOString(),id);}
 }

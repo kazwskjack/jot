@@ -28,7 +28,31 @@ The included application layer adds:
 - **File lifecycle:** upload and generated-artifact records, conversation/run association, separate document jobs and download readiness. External exporters and office dependencies are documented rather than silently assumed available.
 - **Optional speech and display advice:** guarded capability/transcription routes and separate expression recommendations, without granting them permission to perform tools.
 
-Some extended capabilities are protocol/storage scaffolding. The included gateway records interaction responses, a selected model and checkpoint references, but the released worker does not yet complete every corresponding host dispatch. Do not advertise end-to-end gateway approvals, per-conversation model switching or checkpoint execution resume based only on route/schema existence or its static capability response. Portable operation-scoped approval is independently implemented and tested.
+The extended worker includes interaction-response continuation, versioned
+cancellation, worker-fenced checkpoint recovery and bounded member execution.
+Local installed-SDK checks cover the original Controller, adapter HTTP and
+Worker/Runner with scripted providers. These are implementation checks, not
+live-model or production acceptance. Per-conversation model execution switching
+still requires integration validation. Capability responses and route/schema
+existence alone cannot establish any host feature's readiness. Portable
+operation-scoped approval uses its own independently tested runtime.
+
+### Teams and execution identities
+
+Jot's persistent teams organize owned roles and shared project material. Its
+task-specific member grants and durable mailbox use the gateway's original
+Worker/Runner. Upstream experimental Team tools are a separate integration and
+remain disabled until their host binding, ownership and budget checks pass.
+
+Installed Team packages can be imported without establishing deployment
+readiness. Local domain and scoped read-tool probes verify exact live Agent
+identity, separate root task boards, revision conflicts and normal JSONL
+restoration. They do not exercise model-directed teammate spawning, task-owner
+authorization, interrupted-writer recovery or production. Upstream task IDs are
+local to a Team; an integration must retain the owning root execution and product
+owner rather than authorizing a task ID by itself. Never expose internal Session
+identities as browser conversation IDs or assume an upstream view method exists
+in every version.
 
 Relevant implementation: `conversations/`, `projects/`, `runs/`, `events/`, `harness/official-session-runner.ts`, `harness/session-event-projector.ts`, `harness/command-dispatcher.ts`, `artifacts/`, `file-engine/` and `voice/` in the gateway.
 

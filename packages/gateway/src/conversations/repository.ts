@@ -2,11 +2,14 @@ import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { decodeStoredContent } from '../messages/content.ts';
 import { ProjectRepository } from '../projects/repository.ts';
+import {ConversationListCursor} from './list-cursor.ts';
+import {withImmediateTransaction} from '../db/database.ts';
 
 export class ConversationRepository {
   private readonly db: DatabaseSync;
   private readonly projects: ProjectRepository;
-  constructor(db: DatabaseSync, projects = new ProjectRepository(db)) { this.db = db; this.projects = projects; }
+  private readonly cursor:ConversationListCursor;
+  constructor(db: DatabaseSync, projects = new ProjectRepository(db)) { this.db = db; this.projects = projects;this.cursor=new ConversationListCursor(db); }
 
   create(ownerId: string, input: Record<string, unknown>) {
     const id = `conv-${randomUUID()}`;
@@ -35,10 +38,13 @@ export class ConversationRepository {
     };
   }
 
-  list(ownerId: string, query: number | { limit?: number; project_id?: string; state?: string } = {}) {
+  list(ownerId: string, query: number | { limit?: number; project_id?: string; state?: string;cursor?:string } = {}) {
+    return withImmediateTransaction(this.db,()=>this.listInside(ownerId,query));
+  }
+  private listInside(ownerId: string, query: number | { limit?: number; project_id?: string; state?: string;cursor?:string }) {
     this.projects.ensureDefault(ownerId);
     const options = typeof query === 'number' ? { limit: query } : query;
-    const limit = Math.max(1, Math.min(Number(options.limit ?? 50), 100));
+    const requested=Number(options.limit??50);if(!Number.isSafeInteger(requested))throw new Error('invalid_conversation_limit');const limit = Math.max(1, Math.min(requested, 100));
     const state = options.state ?? 'active';
     if (!['active', 'archived', 'all'].includes(state)) throw new Error('invalid_conversation_state');
     if (options.project_id) this.projects.assertOwned(options.project_id, ownerId);
@@ -47,11 +53,12 @@ export class ConversationRepository {
     if (options.project_id) { clauses.push('project_id=?'); parameters.push(options.project_id); }
     if (state === 'active') clauses.push('archived_at IS NULL');
     if (state === 'archived') clauses.push('archived_at IS NOT NULL');
-    parameters.push(limit);
-    const rows = this.db.prepare(`SELECT id FROM ga_conversations WHERE ${clauses.join(' AND ')}
-      ORDER BY CASE WHEN pinned_at IS NULL THEN 1 ELSE 0 END,pinned_at DESC,updated_at DESC,id DESC LIMIT ?`)
-      .all(...parameters) as Array<{ id: string }>;
-    return { items: rows.map(row => this.get(row.id, ownerId)) };
+    if(options.cursor!==undefined){const boundary=this.cursor.decode(ownerId,options.project_id,state,options.cursor);clauses.push("(CASE WHEN pinned_at IS NULL THEN 1 ELSE 0 END > ? OR (CASE WHEN pinned_at IS NULL THEN 1 ELSE 0 END = ? AND (COALESCE(pinned_at,'') < ? OR (COALESCE(pinned_at,'') = ? AND (updated_at < ? OR (updated_at = ? AND id < ?))))))");parameters.push(boundary.rank,boundary.rank,boundary.pin,boundary.pin,boundary.updated,boundary.updated,boundary.id);}
+    parameters.push(limit+1);
+    const rows = this.db.prepare(`SELECT id,pinned_at,updated_at FROM ga_conversations WHERE ${clauses.join(' AND ')}
+      ORDER BY CASE WHEN pinned_at IS NULL THEN 1 ELSE 0 END,COALESCE(pinned_at,'') DESC,updated_at DESC,id DESC LIMIT ?`)
+      .all(...parameters) as Array<{ id: string;pinned_at:string|null;updated_at:string }>;
+    const selected=rows.slice(0,limit),last=selected.at(-1);return { items: selected.map(row => this.get(row.id, ownerId)),...(rows.length>limit&&last?{next_cursor:this.cursor.encode(ownerId,options.project_id,state,{rank:last.pinned_at===null?1:0,pin:last.pinned_at??'',updated:last.updated_at,id:last.id})}:{}) };
   }
 
   update(id: string, ownerId: string, input: Record<string, unknown>) {

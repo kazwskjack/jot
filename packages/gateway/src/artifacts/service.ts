@@ -1,10 +1,15 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { basename, join } from 'node:path';
-import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync } from 'node:fs';
+import { basename, join,dirname,resolve,sep } from 'node:path';
+import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync,writeFileSync,lstatSync } from 'node:fs';
 import { once } from 'node:events';
 import type { DatabaseSync } from 'node:sqlite';
 import { withImmediateTransaction } from '../db/database.ts';
 import { detectContentType } from './content-type.ts';
+
+function rejectTaskOutputSymlinks(path:string):void {
+  let current=resolve(path);
+  for(;;){if(existsSync(current)&&lstatSync(current).isSymbolicLink())throw new Error('task_output_path_unsafe');const parent=dirname(current);if(parent===current)return;current=parent;}
+}
 
 export class ArtifactService {
   private readonly db: DatabaseSync;
@@ -24,6 +29,84 @@ export class ArtifactService {
       join(root, 'sessions'), join(root, 'restore-cache'), join(root, 'quarantine')]) {
       mkdirSync(directory, { recursive: true });
     }
+    db.exec(`CREATE TRIGGER IF NOT EXISTS ga_task_output_no_identity_update BEFORE UPDATE ON ga_artifacts
+      WHEN OLD.kind='task_output_file' AND (NEW.id!=OLD.id OR NEW.owner_id!=OLD.owner_id OR NEW.conversation_id!=OLD.conversation_id OR NEW.kind!=OLD.kind OR NEW.current_version!=OLD.current_version)
+      BEGIN SELECT RAISE(ABORT,'task_output_artifact_immutable'); END;
+      CREATE TRIGGER IF NOT EXISTS ga_task_output_no_content_update BEFORE UPDATE ON ga_artifact_versions
+      WHEN EXISTS(SELECT 1 FROM ga_artifacts a WHERE a.id=OLD.artifact_id AND a.kind='task_output_file')
+       AND (NEW.artifact_id!=OLD.artifact_id OR NEW.version!=OLD.version OR NEW.server_path!=OLD.server_path OR NEW.sha256!=OLD.sha256 OR NEW.size_bytes!=OLD.size_bytes OR NEW.mime_type!=OLD.mime_type
+        OR json_extract(NEW.metadata_json,'$.file_name') IS NOT json_extract(OLD.metadata_json,'$.file_name')
+        OR json_extract(NEW.metadata_json,'$.origin') IS NOT json_extract(OLD.metadata_json,'$.origin')
+        OR json_extract(NEW.metadata_json,'$.task_file') IS NOT json_extract(OLD.metadata_json,'$.task_file'))
+      BEGIN SELECT RAISE(ABORT,'task_output_artifact_immutable'); END;`);
+  }
+
+  /** Copies only a trusted task write receipt's exact UTF8 bytes. Publication
+   * is still the caller's separate business/Goal transaction, never this API. */
+  registerTaskFileVersion(input:{runId:string;receiptId:string;content:string}):ReturnType<ArtifactService['get']>{
+    if(!this.db.isTransaction)throw new Error('task_output_transaction_required');
+    const source=this.db.prepare(`SELECT e.*,r.conversation_id FROM wb_task_file_execution_receipts e
+      JOIN ga_runs r ON r.id=e.run_id JOIN ga_conversations c ON c.id=r.conversation_id AND c.owner_id=e.owner_id
+      JOIN wb_task_run_occurrences o ON o.run_id=e.run_id
+      JOIN wb_file_versions v ON v.owner_id=e.owner_id AND v.workspace_id=e.workspace_id AND v.project_id=e.project_id
+       AND v.path=e.path AND v.version=e.version AND v.sha256=e.sha256 AND v.size=e.size
+      WHERE e.run_id=? AND e.receipt_id=?`).get(input.runId,input.receiptId) as Record<string,string|number>|undefined;
+    if(!source)throw new Error('task_output_source_unverified');
+    if(typeof input.content!=='string')throw new Error('task_output_content_mismatch');
+    const raw=Buffer.from(input.content,'utf8'),digest=createHash('sha256').update(raw).digest('hex');
+    if(digest!==source.sha256||raw.length!==source.size)throw new Error('task_output_content_mismatch');
+    const id=`artifact-${createHash('sha256').update(`task-file:${input.runId}:${input.receiptId}`).digest('hex').slice(0,32)}`;
+    const prior=this.db.prepare('SELECT * FROM ga_artifacts WHERE id=?').get(id) as Record<string,unknown>|undefined;
+    if(prior){
+      if(prior.owner_id!==source.owner_id||prior.conversation_id!==source.conversation_id||prior.kind!=='task_output_file'||prior.current_version!==1)throw new Error('task_output_artifact_conflict');
+      this.download(id,String(source.owner_id),1);return this.get(id,String(source.owner_id),1);
+    }
+    const directory=join(this.generatedRoot,id),destination=join(directory,'version-1.data');
+    rejectTaskOutputSymlinks(destination);mkdirSync(directory,{recursive:true,mode:0o700});rejectTaskOutputSymlinks(destination);
+    if(existsSync(destination)){
+      const previous=readFileSync(destination);if(previous.length!==raw.length||createHash('sha256').update(previous).digest('hex')!==digest)throw new Error('task_output_content_mismatch');
+    }else{
+      const pending=join(directory,`pending-${randomUUID()}.data`);
+      try{writeFileSync(pending,raw,{flag:'wx',mode:0o600});renameSync(pending,destination);}finally{if(existsSync(pending))unlinkSync(pending);}
+    }
+    const now=new Date().toISOString(),name=basename(String(source.path)),mime=name.endsWith('.md')?'text/markdown':'text/plain';
+    this.db.prepare('INSERT INTO ga_artifacts(id,conversation_id,owner_id,kind,current_version,created_at,updated_at) VALUES(?,?,?,?,?,?,?)')
+      .run(id,source.conversation_id!,source.owner_id!,'task_output_file',1,now,now);
+    this.db.prepare('INSERT INTO ga_artifact_versions VALUES(?,?,?,?,?,?,?,?)').run(id,1,destination,digest,raw.length,mime,
+      JSON.stringify({file_name:name,status:'ready',origin:'generated',preview_kind:'text',task_file:{run_id:input.runId,receipt_id:input.receiptId,path:source.path,version:source.version,sha256:digest}}),now);
+    this.db.prepare('INSERT INTO ga_artifact_archives(artifact_id,backup_status,local_state,last_used_at,created_at,updated_at) VALUES(?,?,?,?,?,?)')
+      .run(id,'pending','present',now,now,now);
+    return this.get(id,String(source.owner_id),1);
+  }
+
+  /** Materialize one reviewed binary part. Group hashes are never used as
+   * individual file hashes. Caller commits message/link/event in the same TX. */
+  registerTaskGeneratedPart(input:{owner:string;runId:string;artifactId:string;version:number;partIndex:number}):ReturnType<ArtifactService['get']>{
+    if(!this.db.isTransaction)throw new Error('task_output_transaction_required');
+    const source=this.readProducedGroup(input.owner,input.runId,input.artifactId,input.version);
+    const part=source.parts.find(value=>value.part_index===input.partIndex);if(!part)throw new Error('task_output_source_unverified');
+    const id=`artifact-${createHash('sha256').update(`task-generated:${input.runId}:${input.artifactId}:${input.version}:${input.partIndex}`).digest('hex').slice(0,32)}`;
+    const prior=this.db.prepare('SELECT * FROM ga_artifacts WHERE id=?').get(id) as Record<string,unknown>|undefined;
+    if(prior){
+      if(prior.owner_id!==input.owner||prior.conversation_id!==source.conversation_id||prior.kind!=='task_output_file'||prior.current_version!==1)throw new Error('task_output_artifact_conflict');
+      this.download(id,input.owner,1);return this.get(id,input.owner,1);
+    }
+    const directory=join(this.generatedRoot,id),destination=join(directory,'version-1.data');
+    rejectTaskOutputSymlinks(destination);mkdirSync(directory,{recursive:true,mode:0o700});rejectTaskOutputSymlinks(destination);
+    if(existsSync(destination)){
+      const previous=readFileSync(destination);if(previous.length!==part.size_bytes||createHash('sha256').update(previous).digest('hex')!==part.sha256)throw new Error('task_output_content_mismatch');
+    }else{
+      const pending=join(directory,`pending-${randomUUID()}.data`);
+      try{writeFileSync(pending,part.content,{flag:'wx',mode:0o600});renameSync(pending,destination);}finally{if(existsSync(pending))unlinkSync(pending);}
+    }
+    const now=new Date().toISOString();
+    this.db.prepare('INSERT INTO ga_artifacts(id,conversation_id,owner_id,kind,current_version,created_at,updated_at) VALUES(?,?,?,?,?,?,?)')
+      .run(id,source.conversation_id,input.owner,'task_output_file',1,now,now);
+    this.db.prepare('INSERT INTO ga_artifact_versions VALUES(?,?,?,?,?,?,?,?)').run(id,1,destination,part.sha256,part.size_bytes,part.mime_type,
+      JSON.stringify({file_name:part.display_name,status:'ready',origin:'generated',preview_kind:part.mime_type.startsWith('text/')?'text':'unsupported',task_file:{run_id:input.runId,artifact_id:input.artifactId,version:input.version,part_index:input.partIndex,sha256:part.sha256}}),now);
+    this.db.prepare('INSERT INTO ga_artifact_archives(artifact_id,backup_status,local_state,last_used_at,created_at,updated_at) VALUES(?,?,?,?,?,?)')
+      .run(id,'pending','present',now,now,now);
+    return this.get(id,input.owner,1);
   }
 
   registerEditedVersion(input: { artifactId: string; ownerId: string; conversationId: string;
@@ -142,49 +225,89 @@ export class ArtifactService {
     return { upload_id: id, expires_at: new Date(now.getTime() + 3600000).toISOString(), max_bytes: this.maxBytes };
   }
 
-  async writeContent(uploadId: string, ownerId: string, content: AsyncIterable<Uint8Array>): Promise<void> {
+  async writeContent(uploadId: string, ownerId: string, content: AsyncIterable<Uint8Array>, commitReceipt?:()=>void): Promise<void> {
     const row = this.upload(uploadId, ownerId);
-    if (row.status !== 'created') throw new Error('upload_state_conflict');
-    if (this.db.prepare("UPDATE ga_uploads SET status='uploading' WHERE id=? AND status='created'").run(uploadId).changes !== 1) {
+    const writer=randomUUID(),now=new Date().toISOString(),leaseMs=300000,path=join(this.incomingRoot,`${uploadId}.${writer}.part`);
+    if (this.db.prepare(`UPDATE ga_uploads SET status='uploading',writer_token=?,writer_lease_until=?,server_path=?,received_size=0,actual_sha256=NULL
+      WHERE id=? AND owner_id=? AND (status='created' OR (status='uploading' AND writer_token IS NOT NULL AND writer_lease_until<=?))`)
+      .run(writer,new Date(Date.now()+leaseMs).toISOString(),path,uploadId,ownerId,now).changes !== 1) {
       throw new Error('upload_state_conflict');
     }
-    const path = String(row.server_path); const declared = Number(row.declared_size);
+    const declared = Number(row.declared_size);
+    let lost=false;
+    const owned=()=>{
+      if(lost||!this.db.prepare("SELECT 1 FROM ga_uploads WHERE id=? AND owner_id=? AND status='uploading' AND writer_token=? AND writer_lease_until>?")
+        .get(uploadId,ownerId,writer,new Date().toISOString()))throw new Error('upload_writer_lost');
+    };
+    const heartbeat=setInterval(()=>{try{
+      const time=new Date().toISOString();
+      if(this.db.prepare("UPDATE ga_uploads SET writer_lease_until=? WHERE id=? AND owner_id=? AND status='uploading' AND writer_token=? AND writer_lease_until>?")
+        .run(new Date(Date.now()+leaseMs).toISOString(),uploadId,ownerId,writer,time).changes!==1)lost=true;
+    }catch{lost=true;}},20000);heartbeat.unref();
     const digest = createHash('sha256'); const output = createWriteStream(path, { flags: 'wx', mode: 0o600 });
+    let streamError:Error|undefined;
+    // A fenced writer can still have buffered writes when it is destroyed.
+    // Keep errors observed until close, then remove only its own generation.
+    output.on('error',error=>{streamError=error;});
     let received = 0;
     try {
       for await (const value of content) {
+        owned();
+        if(streamError)throw streamError;
         const chunk = Buffer.from(value); received += chunk.length;
         if (received > declared || received > this.maxBytes) throw new Error('upload_size_mismatch');
         digest.update(chunk);
         if (!output.write(chunk)) await once(output, 'drain');
       }
       if (received !== declared) throw new Error('upload_size_mismatch');
+      if(streamError)throw streamError;
       output.end();
       await once(output, 'finish');
-      this.db.prepare("UPDATE ga_uploads SET status='uploaded',received_size=?,actual_sha256=? WHERE id=?")
-        .run(received, digest.digest('hex'), uploadId);
+      const sha=digest.digest('hex');
+      withImmediateTransaction(this.db,()=>{
+        owned();
+        if(this.db.prepare("UPDATE ga_uploads SET status='uploaded',received_size=?,actual_sha256=?,writer_token=NULL,writer_lease_until=NULL WHERE id=? AND writer_token=? AND status='uploading'")
+          .run(received,sha,uploadId,writer).changes!==1)throw new Error('upload_writer_lost');
+        commitReceipt?.();
+      });
     } catch (error) {
       output.destroy();
+      if(!output.closed)await new Promise<void>(resolve=>output.once('close',()=>resolve()));
       try { unlinkSync(path); } catch {}
-      this.db.prepare("UPDATE ga_uploads SET status='created',received_size=0,actual_sha256=NULL WHERE id=?").run(uploadId);
+      this.db.prepare("UPDATE ga_uploads SET status='created',received_size=0,actual_sha256=NULL,writer_token=NULL,writer_lease_until=NULL WHERE id=? AND writer_token=? AND status='uploading'").run(uploadId,writer);
       throw error;
-    }
+    }finally{clearInterval(heartbeat);}
   }
 
   complete(uploadId: string, ownerId: string, input: Record<string, unknown>) {
     const row = this.upload(uploadId, ownerId);
-    if (row.status !== 'uploaded') throw new Error('upload_state_conflict');
+    if (!['uploaded','completed'].includes(String(row.status))) throw new Error('upload_state_conflict');
     const requested = String(input.sha256 || '');
     if (requested !== row.declared_sha256 || requested !== row.actual_sha256) throw new Error('upload_sha256_mismatch');
     if (Number(row.received_size) !== Number(row.declared_size)) throw new Error('upload_size_mismatch');
-    const artifactId = `artifact-${randomUUID()}`; const now = new Date().toISOString();
+    // Stable destination survives a crash after rename but before DB commit.
+    // Old uploads without this mapping remain conflicts, never guessed matches.
+    const artifactId = `artifact-${createHash('sha256').update(`upload:${uploadId}`).digest('hex').slice(0,32)}`; const now = new Date().toISOString();
+    if(row.status==='completed'){
+      const prior=this.db.prepare('SELECT id FROM ga_artifacts WHERE id=? AND owner_id=? AND conversation_id=? AND kind=?').get(artifactId,ownerId,String(row.conversation_id),'upload');
+      if(!prior)throw new Error('upload_state_conflict');
+      const artifact=this.get(artifactId,ownerId,1);
+      if(artifact.sha256!==requested||artifact.size_bytes!==Number(row.declared_size))throw new Error('upload_content_mismatch');
+      return artifact;
+    }
     const conversationId = String(row.conversation_id);
     const receivedSize = Number(row.received_size);
     const finalPath = join(this.uploadRoot, artifactId);
-    const detected = detectContentType(String(row.server_path), String(row.mime_type));
+    const sourcePath=existsSync(finalPath)?finalPath:String(row.server_path);
+    rejectTaskOutputSymlinks(sourcePath);rejectTaskOutputSymlinks(finalPath);
+    const sourceStat=lstatSync(sourcePath);
+    if(!sourceStat.isFile()||sourceStat.size!==receivedSize||sourceStat.size>this.maxBytes)throw new Error('upload_content_mismatch');
+    const sourceBytes=readFileSync(sourcePath);
+    if(sourceBytes.length!==receivedSize||createHash('sha256').update(sourceBytes).digest('hex')!==requested)throw new Error('upload_content_mismatch');
+    const detected = detectContentType(sourcePath, String(row.mime_type));
     const mediaType = detected.mediaType;
     const previewKind = detected.previewKind;
-    renameSync(String(row.server_path), finalPath);
+    if(sourcePath!==finalPath)renameSync(sourcePath, finalPath);
     const metadata = { file_name: row.filename, status: 'ready', preview_kind: previewKind, origin: 'upload' };
     withImmediateTransaction(this.db, () => {
       this.db.prepare('INSERT INTO ga_artifacts(id,conversation_id,owner_id,kind,current_version,created_at,updated_at) VALUES(?,?,?,?,?,?,?)')
@@ -206,7 +329,15 @@ export class ArtifactService {
     }
     const existing = this.db.prepare('SELECT id FROM ga_artifacts WHERE runtime_ref=?')
       .get(runtimeRef) as { id?: string } | undefined;
-    if (existing?.id) return this.generatedGroup(existing.id);
+    if (existing?.id) {
+      const producer=this.db.prepare(`SELECT p.run_id FROM ga_artifact_producers p
+        JOIN ga_runs r ON r.id=p.run_id AND r.conversation_id=p.conversation_id
+        JOIN ga_conversations c ON c.id=p.conversation_id AND c.owner_id=p.owner_id
+        WHERE p.artifact_id=? AND p.version=1`).get(existing.id) as {run_id:string}|undefined;
+      if(!producer)throw new Error('generated_artifact_producer_unverified');
+      if(producer.run_id!==runId)throw new Error('generated_artifact_producer_conflict');
+      return this.generatedGroup(existing.id);
+    }
     if (!Array.isArray(documents) || documents.length < 1 || documents.length > 50) {
       throw new Error('generated_artifact_documents_invalid');
     }
@@ -269,6 +400,8 @@ export class ArtifactService {
         for (const part of parts) insert.run(artifactId, part.part_index, part.server_path,
           part.display_name, part.sha256, part.size_bytes, part.mime_type,
           JSON.stringify({ status: 'ready', origin: 'runtime' }), now);
+        this.db.prepare('INSERT INTO ga_artifact_producers VALUES(?,?,?,?,?,?,?)').run(artifactId,1,runId,ownerId,conversationId,
+          JSON.stringify(parts.map(({part_index,display_name,sha256,size_bytes,mime_type})=>({part_index,display_name,sha256,size_bytes,mime_type}))),now);
         this.db.prepare(`INSERT INTO ga_artifact_archives(
           artifact_id,backup_status,local_state,last_used_at,created_at,updated_at
         ) VALUES(?,?,?,?,?,?)`).run(artifactId, 'pending', 'present', now, now, now);
@@ -278,6 +411,45 @@ export class ArtifactService {
       for (const part of parts) { try { unlinkSync(String(part.server_path)); } catch {} }
       throw error;
     }
+  }
+
+  /** Internal fixed-version content reader. A producer receipt is mandatory;
+   * existing files and caller supplied IDs alone never grant task provenance. */
+  readProducedGroup(owner:string,runId:string,artifactId:string,version:number){
+    if(!Number.isSafeInteger(version)||version<1)throw new Error('generated_artifact_producer_unverified');
+    const source=this.db.prepare(`SELECT p.content_manifest_json,p.conversation_id,v.sha256,v.size_bytes,v.server_path,v.mime_type,
+      v.metadata_json,COALESCE(ar.local_state,'present') local_state FROM ga_artifact_producers p
+      JOIN ga_artifacts a ON a.id=p.artifact_id AND a.owner_id=p.owner_id AND a.conversation_id=p.conversation_id
+      JOIN ga_artifact_versions v ON v.artifact_id=p.artifact_id AND v.version=p.version
+      JOIN ga_runs r ON r.id=p.run_id AND r.conversation_id=p.conversation_id
+      JOIN ga_conversations c ON c.id=p.conversation_id AND c.owner_id=p.owner_id
+      LEFT JOIN ga_artifact_archives ar ON ar.artifact_id=p.artifact_id
+      WHERE p.artifact_id=? AND p.version=? AND p.run_id=? AND p.owner_id=? AND a.kind='generated_document_group'`)
+      .get(artifactId,version,runId,owner) as Record<string,unknown>|undefined;
+    if(!source)throw new Error('generated_artifact_producer_unverified');
+    try{
+      const manifest=JSON.parse(String(source.content_manifest_json)) as Array<{part_index:number;display_name:string;sha256:string;size_bytes:number;mime_type:string}>;
+      const rows=this.db.prepare('SELECT * FROM ga_artifact_parts WHERE artifact_id=? ORDER BY part_index').all(artifactId) as Array<Record<string,unknown>>;
+      if(!manifest.length||manifest.length>50||rows.length!==manifest.length||source.local_state!=='present'
+        ||!['ready','delivered'].includes(JSON.parse(String(source.metadata_json)).status))throw new Error('source_invalid');
+      let total=0;const root=resolve(this.generatedRoot);
+      const parts=manifest.map((part,index)=>{
+        const row=rows[index]!,path=resolve(String(row.server_path));
+        if(part.part_index!==index+1||row.part_index!==part.part_index||row.display_name!==part.display_name
+          ||row.sha256!==part.sha256||row.size_bytes!==part.size_bytes||row.mime_type!==part.mime_type
+          ||!path.startsWith(root+sep)||path===root)throw new Error('source_invalid');
+        rejectTaskOutputSymlinks(path);
+        const stat=statSync(path);total+=stat.size;
+        if(!stat.isFile()||stat.size!==part.size_bytes||part.size_bytes<1||part.size_bytes>19*1024*1024||total>this.maxBytes)throw new Error('source_invalid');
+        const content=readFileSync(path);
+        if(content.length!==part.size_bytes||createHash('sha256').update(content).digest('hex')!==part.sha256)throw new Error('content_mismatch');
+        return {...part,content};
+      });
+      const sha256=createHash('sha256').update(JSON.stringify(manifest.map(part=>[part.part_index,part.sha256,part.size_bytes]))).digest('hex');
+      if(total!==source.size_bytes||sha256!==source.sha256||resolve(String(source.server_path))!==resolve(String(rows[0]!.server_path))
+        ||source.mime_type!==manifest[0]!.mime_type)throw new Error('content_mismatch');
+      return {artifact_id:artifactId,version,run_id:runId,conversation_id:String(source.conversation_id),sha256,size_bytes:total,parts};
+    }catch{throw new Error('generated_artifact_content_mismatch');}
   }
 
   generatedGroup(artifactId: string): Record<string, any> {
@@ -365,13 +537,22 @@ export class ArtifactService {
   download(id: string, ownerId: string, version?: number) {
     const archive = this.db.prepare('SELECT local_state FROM ga_artifact_archives WHERE artifact_id=?').get(id) as { local_state?: string } | undefined
     if (archive?.local_state && archive.local_state !== 'present') throw new Error('artifact_restore_required')
-    return this.version(id, ownerId, version)
+    const row=this.version(id,ownerId,version);
+    const artifact=this.db.prepare('SELECT kind FROM ga_artifacts WHERE id=?').get(id) as {kind:string};
+    if(artifact.kind==='task_output_file'){
+      rejectTaskOutputSymlinks(String(row.server_path));
+      const content=readFileSync(String(row.server_path));
+      if(content.length!==Number(row.size_bytes)||createHash('sha256').update(content).digest('hex')!==row.sha256)throw new Error('task_output_content_mismatch');
+      return {...row,verified_content:content};
+    }
+    return row;
   }
 
   preview(id: string, ownerId: string, version?: number) {
-    const row = this.version(id, ownerId, version); const meta = JSON.parse(String(row.metadata_json));
+    const kind=this.db.prepare('SELECT kind FROM ga_artifacts WHERE id=?').get(id) as {kind:string}|undefined;
+    const row = kind?.kind==='task_output_file'?this.download(id,ownerId,version):this.version(id, ownerId, version); const meta = JSON.parse(String(row.metadata_json));
     if (meta.preview_kind === 'text') {
-      const content = readFileSync(String(row.server_path), 'utf8');
+      const content = row.verified_content instanceof Buffer?row.verified_content.toString('utf8'):readFileSync(String(row.server_path), 'utf8');
       return { artifact_id: id, version: Number(row.version), kind: 'text', text: content.slice(0, 200000), truncated: content.length > 200000 };
     }
     if (meta.preview_kind === 'image') return { artifact_id: id, version: Number(row.version), kind: 'image', image_path: `/v1/artifacts/${id}/download?version=${row.version}`, truncated: false };

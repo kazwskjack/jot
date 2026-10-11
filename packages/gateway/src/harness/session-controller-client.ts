@@ -74,9 +74,10 @@ export class SessionControllerClient {
     return value
   }
 
-  async create(sessionId: string, cwd: string, agentPreset: string, signal?: AbortSignal) {
+  async create(sessionId: string, cwd: string, agentPreset: string, signal?: AbortSignal, workbenchRunId?: string) {
     return await this.post('/v1/sessions', {
       session_id: sessionId, cwd, agent_preset: agentPreset,
+      ...(workbenchRunId ? { workbench_context: { run_id: workbenchRunId } } : {}),
     }, signal)
   }
 
@@ -120,6 +121,26 @@ export class SessionControllerClient {
 
   async cancel(sessionId: string) {
     return await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/cancel`, {}, AbortSignal.timeout(20_000))
+  }
+
+  async checkpoint(sessionId:string,afterSeq:number,signal?:AbortSignal){
+    return this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/checkpoint`,{after_seq:afterSeq},signal);
+  }
+  /** Private host observation only; not a model tool or public conversation API. */
+  async goalStatus(sessionId:string,signal?:AbortSignal){
+    return this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/goal-status`,{},signal);
+  }
+  async goalStop(sessionId:string,ref:{goal_id:string;goal_revision:number},signal?:AbortSignal){
+    const timeout=AbortSignal.timeout(20_000);
+    return this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/goal-stop`,ref,signal?AbortSignal.any([signal,timeout]):timeout);
+  }
+  async goalComplete(sessionId:string,intentId:string,signal?:AbortSignal){
+    const timeout=AbortSignal.timeout(20_000);
+    return this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/goal-complete`,{intent_id:intentId},signal?AbortSignal.any([signal,timeout]):timeout);
+  }
+  async goalRestore(sessionId:string,runId:string,intentId?:string,signal?:AbortSignal){
+    const timeout=AbortSignal.timeout(20_000);
+    return this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/goal-restore`,{run_id:runId,...(intentId===undefined?{}:{intent_id:intentId})},signal?AbortSignal.any([signal,timeout]):timeout);
   }
 
   async *follow(sessionId: string, signal?: AbortSignal): AsyncGenerator<Record<string, unknown>> {

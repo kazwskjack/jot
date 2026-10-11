@@ -15,7 +15,7 @@ Jot separates a small interface, durable task state and independently configured
 | SQLite, WAL, immediate transactions | Conversations, tasks, events, file records | Durable local state without another database service | Atomic acceptance and simple backups; writer contention must stay bounded |
 | SSE over fetch | Reply deltas, progress, replay | Update clients with saved cursors and cancellation | Ordinary HTTP; expired history requires a snapshot |
 | AbortController / idempotency keys | Requests and task controls | Bound waits and prevent duplicate submissions | An aborted connection does not undo remote actions |
-| DSH Session controller / Cordis | Optional extended planning runtime | Keep planning and lifecycle under one controller | Session, queue, steer and file receipts; some approval/resume routes remain scaffolding; external packages required |
+| DSH Session controller / Cordis | Optional extended planning runtime | Keep planning and lifecycle under one controller | Session, queue, steer, file receipts and worker-fenced continuation; configured-host and live-model acceptance remain required |
 | Playwright | Optional browser tools | Inspect and operate isolated real pages | Unique targets and state checks; browsers need additional RAM |
 | Python 3.12+, OOXML ZIP/XML | Document worker | Manipulate structured file containers and versions | Preserves structure; visual fidelity needs rendering verification |
 | LibreOffice / UNO | Optional rich editing/conversion | Use a real document layout engine | DOCX/XLSX/PDF operations; isolate processes and enforce timeouts |

@@ -2,7 +2,7 @@
 
 **A lightweight AI bot for conversations, web tasks and file work.**
 
-[中文](README.zh-CN.md) · [Technology](TECH_STACK.md) · [Deployment](DEPLOYMENT.md) · [Agent](agent/README.md) · [Integrations](INTEGRATIONS.md)
+[中文](README.zh-CN.md) · [Technology](TECH_STACK.md) · [Deployment](DEPLOYMENT.md) · [Agent](agent/README.md) · [Integrations](INTEGRATIONS.md) · [Workbench](WORKBENCH.md)
 
 Jot puts a small interface around useful Agent work: ask a question, follow the steps, review an action and receive a file. Dark by default, with a light theme available.
 
@@ -15,6 +15,7 @@ Jot puts a small interface around useful Agent work: ask a question, follow the 
 - Text, Markdown, JSON and CSV uploads and new downloadable files without overwriting uploads.
 - A demo mode with clearly labelled synthetic responses.
 - An extended TypeScript gateway and Session adapter for projects, ownership, batch progress, document jobs, event recovery and optional voice services.
+- An optional workbench for Agent roles, scheduled and event-triggered tasks, task-specific teams, shared workspace files and memory proposals. It uses the extended gateway and a configured execution host.
 
 The local runtime runs without the extended services. Extended integrations require their own configured runtime, models and tool endpoints. Bundled interfaces do not imply that external services are installed.
 

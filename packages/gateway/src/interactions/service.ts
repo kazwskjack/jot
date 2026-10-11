@@ -3,10 +3,22 @@ import type { DatabaseSync } from 'node:sqlite';
 import { withImmediateTransaction } from '../db/database.ts';
 import type { EventStore } from '../events/event-store.ts';
 
+type TaskResponder={resolve(row:Record<string,unknown>,owner:string,status:string,input:Record<string,unknown>,key:string):boolean;
+  recordReceipt(row:Record<string,unknown>,input:unknown,key:string,operation:string,receipt:Record<string,unknown>):void};
+
+export function publicInteractionValue(row:Record<string,unknown>){
+ const value=JSON.parse(String(row.request_json)) as Record<string,unknown>;
+ value.status=row.status;value.version=Number(row.version);
+ if(row.response_json){const response=JSON.parse(String(row.response_json));
+  if(row.kind==='question')value.answers=response.answers;else value.decision=response.decision;}
+ return value;
+}
+
 export class InteractionService {
   private readonly db: DatabaseSync;
   private readonly events: EventStore;
-  constructor(db: DatabaseSync, events: EventStore) { this.db = db; this.events = events; }
+  private readonly taskResponder:TaskResponder|undefined;
+  constructor(db: DatabaseSync, events: EventStore,taskResponder?:TaskResponder) { this.db = db; this.events = events;this.taskResponder=taskResponder; }
 
   list(conversationId: string, ownerId: string, status = 'pending') {
     const owner = this.db.prepare('SELECT 1 FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId, ownerId);
@@ -59,22 +71,24 @@ export class InteractionService {
   private resolve(row: Record<string, unknown>, status: string, payload: unknown, key: string, commandKind: string) {
     const now = new Date().toISOString(); const commandId = `cmd-${randomUUID()}`;
     return withImmediateTransaction(this.db, () => {
+      const owner=this.ownerFor(String(row.conversation_id));
+      this.assertPending(this.row(String(row.id),owner),payload as Record<string,unknown>);
       this.db.prepare('UPDATE ga_interactions SET status=?,version=version+1,response_json=?,resolved_at=? WHERE id=? AND status=\'pending\'')
         .run(status, JSON.stringify(payload), now, String(row.id));
-      this.db.prepare('INSERT INTO ga_run_commands(id,run_id,kind,payload_json,status,idempotency_key,created_at) VALUES(?,?,?,?,?,?,?)')
+      const handled=this.taskResponder?.resolve(row,owner,status,payload as Record<string,unknown>,key)??false;
+      if(!handled)this.db.prepare('INSERT INTO ga_run_commands(id,run_id,kind,payload_json,status,idempotency_key,created_at) VALUES(?,?,?,?,?,?,?)')
         .run(commandId, String(row.run_id), commandKind, JSON.stringify({ interaction_id: row.id, ...payload as object }), 'pending', `${commandKind}:${key}`, now);
       const updated = this.row(String(row.id), this.ownerFor(String(row.conversation_id)));
       this.events.append(String(row.conversation_id), String(row.run_id), 'interaction.resolved', this.value(updated));
-      return { accepted: true, interaction_id: row.id, run_id: row.run_id, status, version: Number(updated.version) };
+      const receipt={accepted:true,interaction_id:row.id,run_id:row.run_id,status,version:Number(updated.version)};
+      if(handled)this.taskResponder!.recordReceipt(row,payload,key,commandKind,receipt);
+      return receipt;
     });
   }
   private ownerFor(conversationId: string) {
     return String((this.db.prepare('SELECT owner_id FROM ga_conversations WHERE id=?').get(conversationId) as { owner_id: string }).owner_id);
   }
   private value(row: Record<string, unknown>) {
-    const value = JSON.parse(String(row.request_json)) as Record<string, unknown>;
-    value.status = row.status; value.version = Number(row.version);
-    if (row.response_json) Object.assign(value, JSON.parse(String(row.response_json)));
-    return value;
+    return publicInteractionValue(row);
   }
 }

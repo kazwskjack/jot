@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { openProductDatabase } from '../db/database.ts';
 import { EventStore } from '../events/event-store.ts';
 import { RunRepository } from '../runs/repository.ts';
@@ -11,26 +12,54 @@ import { SessionBindingRepository } from './session-bindings.ts';
 import { AttachmentResolver } from '../artifacts/resolver.ts';
 import { parseWorkerConcurrency, runWorkerPool } from './worker-pool.ts';
 import { SessionCommandDispatcher } from './command-dispatcher.ts';
+import { TaskCompletionPump } from './task-completion-pump.ts';
 import { ChannelDeliveryService } from '../channels/delivery.ts';
+import {NotificationArchiveMaintenance,notificationArchiveMaintenanceConfig} from '../channels/notification-maintenance.ts';
+import { WorkbenchService } from '../workbench/service.ts';
+import {configureTaskOutputReader} from '../persistent-tasks/output-content.ts';
+import {configureTaskOutputDelivery} from '../persistent-tasks/output-delivery.ts';
+import {ArtifactService} from '../artifacts/service.ts';
+import { WORKBENCH_TOOL_IDS } from '../workbench/execution.ts';
+import { PersistentTaskService } from '../persistent-tasks/service.ts';
+import {TaskReplyDispatch,taskReplyDispatchEnabled} from '../persistent-tasks/reply-dispatch.ts';
+import { maintainWorkbench } from '../persistent-tasks/scheduler.ts';
+import { WorkbenchBudgetPolicy, workbenchExecutionConfiguration } from '../workbench/model-budget-policy.ts';
 
 const databasePath = process.env.GENERAL_AGENT_DB?.trim() || '/var/lib/jot/jot.db';
 const workerId = process.env.GENERAL_AGENT_WORKER_ID?.trim() || `worker-${process.pid}`;
 const leaseMs = Math.max(60_000, Number(process.env.GENERAL_AGENT_WORKER_LEASE_MS || 900_000));
 const pollMs = Math.max(250, Number(process.env.GENERAL_AGENT_WORKER_POLL_MS || 1000));
 const concurrency = parseWorkerConcurrency(process.env.GENERAL_AGENT_WORKER_CONCURRENCY);
+const {workbenchExecutionReady,modelBudgetPolicy:budgetConfig} = workbenchExecutionConfiguration(process.env);
+const replyExecutionRequested=taskReplyDispatchEnabled(process.env);
 const adapterBaseUrl = process.env.GENERAL_AGENT_SESSION_ADAPTER_URL?.trim() || 'http://127.0.0.1:18841';
 const adapterTokenFile = process.env.GENERAL_AGENT_SESSION_ADAPTER_TOKEN_FILE?.trim()
   || '/etc/jot/dsh-session-adapter.token';
 const harnessCwd = process.env.GENERAL_AGENT_HARNESS_CWD?.trim() || '/opt/jot';
-const agentPreset = process.env.GENERAL_AGENT_DSH_AGENT_PRESET?.trim() || 'jot-general';
+const agentPreset = process.env.GENERAL_AGENT_DSH_AGENT_PRESET?.trim() || 'universe-general-shadow';
 const sessionPrefix = process.env.GENERAL_AGENT_DSH_SESSION_PREFIX?.trim() || 'jot-ugs1';
 const fileRoot = process.env.GENERAL_AGENT_FILE_ROOT?.trim()
   || process.env.GENERAL_AGENT_UPLOAD_ROOT?.trim() || '/var/lib/jot/jot-files';
 const db = openProductDatabase(databasePath);
 const events = new EventStore(db);
 const runs = new RunRepository(db, events);
-const coordinator = new HarnessCoordinator(db, runs, events);
+const workbenchRoot = process.env.GENERAL_AGENT_WORKBENCH_ROOT?.trim() || join(dirname(databasePath), 'jot-workspaces');
+const budgetPolicy=budgetConfig?new WorkbenchBudgetPolicy(db,budgetConfig):undefined;
+const workbench = new WorkbenchService(db, {
+  workspaceIds: String(process.env.GENERAL_AGENT_WORKSPACES || 'jot').split(',').map(value => value.trim()).filter(Boolean),
+  root: workbenchRoot, allowedToolIds: WORKBENCH_TOOL_IDS,
+  ...(budgetPolicy ? {modelBudgetPolicy:budgetPolicy} : {}),
+});
+const persistentTasks = new PersistentTaskService(db, workbench, { projectionRoot: join(workbenchRoot, 'tasks'), events,...(budgetPolicy?{modelBudgetPolicy:budgetPolicy}:{}) });
+configureTaskOutputReader(db,({owner,workspace,project,path,version,runId})=>workbench.readFileVersion(owner,workspace,project,path,version,runId));
+configureTaskOutputDelivery(db,new ArtifactService(db,fileRoot),events);
+const coordinator = new HarnessCoordinator(db, runs, events, Date.now, {
+  maxBackgroundRuns: Math.max(0, concurrency - 1), allowBackgroundRuns: workbenchExecutionReady,
+});
 const channelDelivery = new ChannelDeliveryService(db);
+const archiveMaintenanceConfig=notificationArchiveMaintenanceConfig(process.env);
+const archiveMaintenance=archiveMaintenanceConfig?new NotificationArchiveMaintenance(db,archiveMaintenanceConfig):undefined;
+const replyDispatch=new TaskReplyDispatch(db,events,{enabled:workbenchExecutionReady&&replyExecutionRequested});
 const sessionBindings = new SessionBindingRepository(db, sessionPrefix);
 const attachmentResolver = new AttachmentResolver(db, fileRoot);
 const runtimeBaseUrl = process.env.GENERAL_AGENT_RUNTIME_BASE_URL?.trim();
@@ -50,21 +79,44 @@ const worker = new HarnessWorker(db, coordinator, runner, {
   sessionResolver: conversationId => sessionBindings.getOrCreateForConversation(conversationId).session_id,
   attachmentResolver,
   channelDelivery,
+  executionGuard: { assertRunActive(runId) { workbench.assertRunActive(runId); persistentTasks.assertRunActive(runId); },
+    contextForRun: runId => workbench.contextForRun(runId) },
   ...(runtimeClient ? { contextStager: {
     stageContext: input => runtimeClient.stageContext(input, leafBridgeBaseUrl),
   } } : {}),
 });
 let stopping = false;
-const commands = new SessionCommandDispatcher(db,events,sessionClient,runId=>worker.isReady(runId));
+const completions=new TaskCompletionPump(db,coordinator,sessionClient,{workerId:`${workerId}:completion`});
+const completionLoop=async()=>{
+ while(!stopping){
+  if(workbenchExecutionReady){try{await completions.processNext();}catch{process.stderr.write('task_completion_dispatch_retry\n');}}
+  if(!stopping)await new Promise(resolve=>setTimeout(resolve,1000));
+ }
+};
+const commands = new SessionCommandDispatcher(db,events,sessionClient,runId=>worker.isReady(runId), {
+  assertRunActive(runId) {workbench.assertRunActive(runId); persistentTasks.assertRunActive(runId);},
+  contextForRun: runId => workbench.contextForRun(runId),
+  inheritChatRun: (owner, original, next) => workbench.inheritChatRun(owner, original, next),
+});
 const commandLoop = async()=>{
  while(!stopping){
   try{await commands.processNext()}catch{process.stderr.write('session_command_dispatch_retry\n')}
   if(!stopping)await new Promise(resolve=>setTimeout(resolve,500));
  }
 };
+const workbenchLoop = async () => {
+  while (!stopping) {
+    try{archiveMaintenance?.processNext();}catch{process.stderr.write('notification_archive_maintenance_retry\n');}
+    try { replyDispatch.processNext(); } catch { process.stderr.write('task_reply_dispatch_retry\n'); }
+    try {
+      await maintainWorkbench(workbench, persistentTasks, workbenchExecutionReady);
+    } catch { process.stderr.write('workbench_dispatch_retry\n'); }
+    if (!stopping) await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+};
 
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, () => { stopping = true; });
-await Promise.all([commandLoop(),runWorkerPool({
+await Promise.all([completionLoop(),commandLoop(),workbenchLoop(),runWorkerPool({
   concurrency,
   pollMs,
   shouldStop: () => stopping,

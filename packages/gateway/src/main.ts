@@ -2,6 +2,9 @@ import { buildServer } from './server.ts';
 import { loadBffConfig } from './config.ts';
 import { readFileSync } from 'node:fs';
 import { VoiceAdapterClient } from './voice/adapter-client.ts';
+import {createEmailProvider} from './channels/email-provider.ts';
+import {emailConfiguration} from './channels/provider-config.ts';
+import {loadReplyJudgeClient} from './persistent-tasks/reply-judge-client.ts';
 
 const config = loadBffConfig();
 let voiceAdapter: VoiceAdapterClient | undefined;
@@ -10,7 +13,9 @@ if (config.voiceEnabled) {
   voiceAdapter = new VoiceAdapterClient(config.voiceAdapterUrl,
     readFileSync(config.voiceAdapterTokenFile, 'utf8').trim());
 }
-const service = await buildServer({ ...config, ...(voiceAdapter ? { voiceAdapter } : {}) });
+const emailProvider=process.env.GENERAL_AGENT_EMAIL_BINDINGS_ENABLED==='true'?await createEmailProvider(emailConfiguration(process.env)):undefined;
+const replyJudge=loadReplyJudgeClient(process.env,config.modelBudgetPolicy?.routes??[]);
+const service = await buildServer({ ...config, ...(voiceAdapter ? { voiceAdapter } : {}),...(emailProvider?{emailBindingSend:emailProvider.send.bind(emailProvider)}:{}),...(replyJudge?{replyJudge}:{}) });
 await service.app.listen({ host: config.host, port: config.port });
 
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, async () => {

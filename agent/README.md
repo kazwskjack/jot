@@ -16,7 +16,27 @@ Tools: `read_page`, `file_read`, `file_write`, optional `search` and optional `b
 
 ## Extended runtime
 
-The gateway owns conversations, projects, task leases, events, files and owner checks. It has interaction records/contracts, but complete external approval dispatch, per-conversation model switching and checkpoint execution resume remain integration work. The Session adapter connects to the configured controller and optional speech service. The runtime plans; tools produce execution evidence. Client routes use conversation IDs, while internal session identifiers stay server-side.
+The gateway owns conversations, projects, roles, persistent task occurrences,
+worker leases, events, files and owner checks. It includes versioned interaction
+responses, worker-fenced checkpoints and same-occurrence continuation. The
+Session adapter connects to the configured controller and optional speech
+service. Per-conversation model switching still needs integration validation.
+Client routes use conversation IDs; internal Session identifiers stay server-side.
+
+The lead runtime plans and reviews results. A task-specific grant can authorize
+bounded members from an owned team. The durable mailbox queues their work,
+and the original Worker/Runner executes each member in a distinct Session.
+Members share the authorized project workspace and memory proposals, retain
+the original task-total budget, and return supporting material for lead review.
+They do not acquire the parent's Goal or independently accept its business
+criteria. A completed member cannot keep using its ended run's capabilities.
+
+Local actual-SDK checks exercise Controller/adapter HTTP, Worker/Runner,
+checkpoints, user-response continuation, cancellation and bounded member
+execution with scripted providers and empty preset fixtures. These checks do
+not establish real-provider quality, production readiness or native upstream
+Team/Handoff compatibility. Configure and validate the actual host and tool
+services before enabling deployment features.
 
 Batch status differs from final answer settlement. An SSE disconnect does not mean task cancellation or completion. Preserve deduplication during replay and retries.
 

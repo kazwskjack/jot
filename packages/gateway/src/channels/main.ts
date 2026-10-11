@@ -2,14 +2,20 @@ import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { openProductDatabase } from '../db/database.ts';
 import { ChannelDeliveryService } from './delivery.ts';
-import { ChannelDeliveryWorker } from './worker.ts';
+import { ChannelDeliveryWorker, type DeliveryProvider } from './worker.ts';
+import { deliveryChannels, emailConfiguration } from './provider-config.ts';
+import { createEmailProvider } from './email-provider.ts';
 import { RuntimeEventClient } from '../harness/runtime-events.ts';
 import { ArtifactService } from '../artifacts/service.ts';
 
 const databasePath = process.env.GENERAL_AGENT_DB?.trim() || '/var/lib/jot/jot.db';
 const runtimeBaseUrl = String(process.env.GENERAL_AGENT_RUNTIME_BASE_URL || '').trim();
 const runtimeSecretFile = String(process.env.GENERAL_AGENT_RUNTIME_SECRET_FILE || '').trim();
-if (!runtimeBaseUrl || !runtimeSecretFile) throw new Error('delivery_runtime_config_required');
+const channels = deliveryChannels(process.env);
+if (channels.includes('wecom') && (!runtimeBaseUrl || !runtimeSecretFile)) throw new Error('delivery_runtime_config_required');
+const providers: Record<string, DeliveryProvider> = {};
+if (channels.includes('email')) providers.email = await createEmailProvider(emailConfiguration(process.env));
+if (channels.includes('wecom')) {
 const modulePath = process.env.GENERAL_AGENT_WECOM_MODULE?.trim()
   || '/opt/jot/services/monitor/wecom-app.mjs';
 const module = await import(pathToFileURL(modulePath).href) as {
@@ -25,18 +31,21 @@ const wecom = module.createWecomApp({
   touser: process.env.jot_WECOM_APP_TOUSER,
   sendMode: process.env.jot_WECOM_SEND_MODE,
 });
-const provider = {
+providers.wecom = {
   sendFile: wecom.sendFile.bind(wecom),
   send: (text: string, recipient: string) => wecom.send(text, 'text', recipient),
 };
+}
 const db = openProductDatabase(databasePath);
 const store = new ChannelDeliveryService(db);
-const runtime = new RuntimeEventClient(runtimeBaseUrl, readFileSync(runtimeSecretFile));
+const runtime = runtimeBaseUrl && runtimeSecretFile
+  ? new RuntimeEventClient(runtimeBaseUrl, readFileSync(runtimeSecretFile))
+  : { async registerDeliveryReceipt(): Promise<Record<string, unknown>> { throw new Error('delivery_runtime_config_required'); } };
 const artifactRoot = process.env.GENERAL_AGENT_FILE_ROOT?.trim()
   || process.env.GENERAL_AGENT_ARTIFACT_ROOT?.trim()
   || '/var/lib/jot/jot-files';
 const artifacts = new ArtifactService(db, artifactRoot);
-const worker = new ChannelDeliveryWorker(store, provider, runtime, {
+const worker = new ChannelDeliveryWorker(store, {providers}, runtime, {
   resolveArtifact(artifactRef) {
     const row = db.prepare(`SELECT v.server_path,v.metadata_json FROM ga_artifacts a
       JOIN ga_artifact_versions v ON v.artifact_id=a.id AND v.version=a.current_version

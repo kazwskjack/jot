@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto'
-import { createReadStream, existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from 'node:fs'
+import { createReadStream, existsSync, mkdirSync, mkdtempSync, rmSync, statSync,lstatSync,openSync,closeSync,readSync,fstatSync,type Stats } from 'node:fs'
 import { dirname, join, resolve, sep } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
+import {withImmediateTransaction} from '../db/database.ts'
 
 export interface RemoteFileMeta { size: number; md5: string }
 export interface ArtifactArchiveClient {
@@ -18,10 +19,31 @@ function safeName(value: string): string {
   return (cleaned || 'file').slice(0, 120)
 }
 
-async function md5(path: string): Promise<string> {
-  const digest = createHash('md5')
+async function fileHash(path: string,algorithm='md5'): Promise<string> {
+  const digest = createHash(algorithm)
   for await (const chunk of createReadStream(path)) digest.update(chunk)
   return digest.digest('hex')
+}
+const md5=(path:string)=>fileHash(path)
+const signature=(value:Stats)=>({dev:value.dev,ino:value.ino,size:value.size,mtimeMs:value.mtimeMs,ctimeMs:value.ctimeMs})
+function currentFileHashes(path:string){
+ const fd=openSync(path,'r');try{
+  const before=fstatSync(fd);if(!before.isFile())return null
+  const sha=createHash('sha256'),legacy=createHash('md5'),buffer=Buffer.alloc(64*1024)
+  for(;;){const count=readSync(fd,buffer,0,buffer.length,null);if(!count)break;sha.update(buffer.subarray(0,count));legacy.update(buffer.subarray(0,count))}
+  const after=fstatSync(fd),named=lstatSync(path)
+  if(!named.isFile()||named.isSymbolicLink()||JSON.stringify(signature(before))!==JSON.stringify(signature(after))
+   ||JSON.stringify(signature(named))!==JSON.stringify(signature(after)))return null
+  return {size:after.size,sha256:sha.digest('hex'),md5:legacy.digest('hex'),signature:signature(after)}
+ }finally{closeSync(fd)}
+}
+function assertArchivePath(path:string,root:string):void{
+ const absolute=resolve(path),boundary=resolve(root);
+ if(absolute===boundary||!absolute.startsWith(boundary+sep))throw new Error('archive_path_denied')
+ for(let current=absolute;;){
+  if(existsSync(current)&&lstatSync(current).isSymbolicLink())throw new Error('archive_path_unsafe')
+  const parent=dirname(current);if(parent===current)break;current=parent
+ }
 }
 
 export class ArtifactArchiveService {
@@ -81,6 +103,7 @@ export class ArtifactArchiveService {
     // Baidu multipart metadata may not contain the hash of the actual bytes.
     // Never waive verification: download an isolated copy and hash it locally.
     const stagingRoot = join(this.root, 'sessions', 'archive-verify')
+    assertArchivePath(stagingRoot,this.root)
     mkdirSync(stagingRoot, { recursive: true, mode: 0o700 })
     const stage = mkdtempSync(join(stagingRoot, 'verify-'))
     const downloaded = join(stage, 'content')
@@ -101,20 +124,37 @@ export class ArtifactArchiveService {
       .all(cutoff, now.toISOString()) as Array<Record<string, unknown>>
     let deleted = 0; const root = resolve(this.root)
     for (const row of rows) {
-      const manifest = JSON.parse(String(row.remote_md5 || '[]')) as Array<{ local_path: string }>
-      if (!Array.isArray(manifest) || !manifest.length) continue
-      for (const item of manifest) {
-        const path = resolve(item.local_path)
-        if (path === root || !path.startsWith(root + sep)) throw new Error('archive_cleanup_path_denied')
-        if (existsSync(path)) rmSync(path, { force: true })
-        const parent = dirname(path); if (parent !== root && parent.startsWith(root + sep)) {
-          try { rmSync(parent, { recursive: false }) } catch { /* shared or non-empty directory */ }
+      // Hash complete content outside SQLite writer admission. Frozen references
+      // and file identities are rechecked in the short removal transaction.
+      const proof=this.verifiedCleanupPaths(String(row.artifact_id),String(row.remote_md5))
+      if(!proof)continue
+      const didDelete=withImmediateTransaction(this.db,()=>{
+        // The earlier candidate/content read is not deletion authority.
+        const current=this.db.prepare(`SELECT ar.remote_md5 FROM ga_artifact_archives ar
+          JOIN ga_artifacts a ON a.id=ar.artifact_id WHERE ar.artifact_id=?
+          AND ar.backup_status='verified' AND ar.local_state='present' AND a.created_at<=?
+          AND NOT EXISTS(SELECT 1 FROM ga_artifact_leases l WHERE l.artifact_id=ar.artifact_id AND l.expires_at>?)`)
+          .get(String(row.artifact_id),cutoff,now.toISOString()) as {remote_md5:string}|undefined
+        if(!current||current.remote_md5!==row.remote_md5
+          ||JSON.stringify(this.fileRows(String(row.artifact_id)))!==proof.references)return false
+        for(const file of proof.files){
+          assertArchivePath(file.path,this.root)
+          const now=lstatSync(file.path)
+          if(!now.isFile()||now.isSymbolicLink()||JSON.stringify(signature(now))!==JSON.stringify(file.signature))return false
         }
-      }
-      const stamp = now.toISOString()
-      this.db.prepare(`UPDATE ga_artifact_archives SET local_state='deleted',local_deleted_at=?,updated_at=? WHERE artifact_id=?`)
-        .run(stamp, stamp, String(row.artifact_id))
-      deleted += 1
+        for (const {path} of proof.files) {
+          if (path === root || !path.startsWith(root + sep)) throw new Error('archive_cleanup_path_denied')
+          rmSync(path, { force: true })
+          const parent = dirname(path); if (parent !== root && parent.startsWith(root + sep)) {
+            try { rmSync(parent, { recursive: false }) } catch { /* shared or non-empty directory */ }
+          }
+        }
+        const stamp = now.toISOString()
+        this.db.prepare(`UPDATE ga_artifact_archives SET local_state='deleted',local_deleted_at=?,updated_at=? WHERE artifact_id=?`)
+          .run(stamp, stamp, String(row.artifact_id))
+        return true
+      })
+      if(didDelete)deleted += 1
     }
     this.db.prepare('DELETE FROM ga_artifact_leases WHERE expires_at<=?').run(now.toISOString())
     return { eligible: rows.length, deleted }
@@ -133,7 +173,10 @@ export class ArtifactArchiveService {
         for (const item of manifest) {
           const localPath = resolve(item.local_path); const root = resolve(this.root)
           if (localPath === root || !localPath.startsWith(root + sep)) throw new Error('archive_restore_path_denied')
+          assertArchivePath(localPath,this.root)
+          if(!item.remote_name||item.remote_name.includes('/')||item.remote_name.includes('\\')||['.','..'].includes(item.remote_name))throw new Error('archive_restore_manifest_invalid')
           mkdirSync(dirname(localPath), { recursive: true, mode: 0o700 })
+          assertArchivePath(localPath,this.root)
           await this.client.download(`${directory}/${item.remote_name}`, localPath)
           if (!existsSync(localPath) || statSync(localPath).size !== item.size || await md5(localPath) !== item.md5) {
             throw new Error('archive_restore_verification_failed')
@@ -150,18 +193,48 @@ export class ArtifactArchiveService {
     return { attempted: rows.length, restored, failed }
   }
 
-  private async files(artifactId: string): Promise<ArchiveFile[]> {
-    const partRows = this.db.prepare(`SELECT server_path,display_name,size_bytes FROM ga_artifact_parts
+  private fileRows(artifactId:string):Array<Record<string,unknown>>{
+    const partRows = this.db.prepare(`SELECT server_path,display_name,size_bytes,sha256 FROM ga_artifact_parts
       WHERE artifact_id=? ORDER BY part_index`).all(artifactId) as Array<Record<string, unknown>>
-    const rows = partRows.length ? partRows : this.db.prepare(`SELECT v.server_path,v.size_bytes,
+    return partRows.length ? partRows : this.db.prepare(`SELECT v.server_path,v.size_bytes,v.sha256,
       json_extract(v.metadata_json,'$.file_name') display_name FROM ga_artifact_versions v
       JOIN ga_artifacts a ON a.id=v.artifact_id AND a.current_version=v.version WHERE v.artifact_id=?`)
       .all(artifactId) as Array<Record<string, unknown>>
+  }
+
+  private verifiedCleanupPaths(artifactId:string,encoded:string):{files:Array<{path:string;signature:ReturnType<typeof signature>}>;references:string}|null{
+    let manifest:any;try{manifest=JSON.parse(encoded)}catch{return null}
+    const rows=this.fileRows(artifactId)
+    if(!Array.isArray(manifest)||!rows.length||manifest.length!==rows.length)return null
+    const expected=new Map<string,{size:number;sha256:string}>()
+    for(const row of rows){
+      const path=resolve(String(row.server_path)),size=Number(row.size_bytes),sha=String(row.sha256)
+      if(expected.has(path)||!Number.isSafeInteger(size)||size<0||!/^[a-f0-9]{64}$/.test(sha))return null
+      expected.set(path,{size,sha256:sha})
+    }
+    const files:Array<{path:string;signature:ReturnType<typeof signature>}>=[],seen=new Set<string>()
+    for(const item of manifest){
+      if(!item||typeof item.local_path!=='string'||!Number.isSafeInteger(item.size)||item.size<0
+        ||typeof item.md5!=='string'||!/^[a-f0-9]{32}$/i.test(item.md5))return null
+      const path=resolve(item.local_path),reference=expected.get(path)
+      assertArchivePath(path,this.root)
+      if(!reference||seen.has(path)||reference.size!==item.size||!existsSync(path))return null
+      const hash=currentFileHashes(path)
+      if(!hash||hash.size!==reference.size||hash.sha256!==reference.sha256||hash.md5!==item.md5.toLowerCase())return null
+      seen.add(path);files.push({path,signature:hash.signature})
+    }
+    return {files,references:JSON.stringify(rows)}
+  }
+
+  private async files(artifactId: string): Promise<ArchiveFile[]> {
+    const rows=this.fileRows(artifactId)
     if (!rows.length) throw new Error('archive_files_missing')
     const names = new Set<string>(); const result: ArchiveFile[] = []
     for (const [index, row] of rows.entries()) {
       const localPath = resolve(String(row.server_path)); const root = resolve(this.root)
       if (localPath === root || !localPath.startsWith(root + sep) || !existsSync(localPath)) throw new Error('archive_local_file_missing')
+      assertArchivePath(localPath,this.root)
+      if(statSync(localPath).size!==Number(row.size_bytes)||await fileHash(localPath,'sha256')!==row.sha256)throw new Error('archive_local_content_mismatch')
       let remoteName = safeName(String(row.display_name || `part-${index+1}`))
       if (names.has(remoteName)) remoteName = `${String(index+1).padStart(3,'0')}-${remoteName}`
       names.add(remoteName)
