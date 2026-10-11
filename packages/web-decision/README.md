@@ -8,7 +8,7 @@ planner, or an automatically connected MCP server.
 Run the local tests from this directory:
 
 ```powershell
-python -m unittest test_web_decision_budget test_web_budget_metadata test_web_response_recovery
+python -m unittest test_web_decision_budget test_web_budget_metadata test_web_response_recovery test_model_route_pin
 ```
 
 Trusted host code first obtains an opaque grant from the existing owned run.
@@ -92,3 +92,14 @@ acknowledgement, then restores that result for two concurrent Python clients,
 including an HTTP body larger than 64 KiB. Each uses one synthetic provider call
 and one charge. Cross-machine callback and complete native/real-provider recovery
 still require acceptance before production enablement.
+
+
+## Optional model-route pins
+
+`web_decision.model_route_pin` provides a standard-library-only guard for a trusted model proxy. It is separate from web-decision tickets and does not connect or authenticate a supplier. `route_fingerprint(manifest)` hashes the trusted deployment's routing fields. `pinned_model_id(manifest)` returns an immutable `jot-pinned:<digest>:<model>` wire name, bounded to 256 characters. Configure this same name in the SDK model catalog and Gateway budget route, and configure the matching `x-jot-route-pin` header on a separate provider profile. Keep the ordinary dynamic provider separate.
+
+The proxy must authenticate the caller first, select its manifest itself, and reject a pinned wire name if the header is missing. It then calls `verify_route_pin(manifest, request, header)` **before** loading upstream credentials or submitting the request. After validation it copies the request and replaces the wire name with the manifest's actual supplier model. Duplicate or malformed pin headers must be rejected. Neither the fingerprint header nor any internal authorization should be forwarded upstream.
+
+A pin is not authorization. It cannot expand browser permissions or a role's tools. Do not expose a manifest, its routing fields or credentials to a model, and do not let user/model arguments supply a callback destination or refresh a route. An upstream switch invalidates an existing pin; fail closed rather than silently selecting the new supplier. Changing a trusted pinned provider profile requires the normal deployment/recovery process; do not hot-rewrite it to make an existing run continue under a different budget route.
+
+Pins do not establish supplier pricing. Keep the Gateway's server-defined rate revision with the attempt and use real SDK/supplier usage for settlement. A conservative peak-rate budget is an estimate, not a supplier invoice. Missing usage or a lost submission acknowledgement must retain its unresolved hold.

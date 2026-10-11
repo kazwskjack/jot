@@ -319,3 +319,8 @@ After deployment, verify each boundary independently:
 7. Separately verify an owned run with a real budget grant and the original root ledger. Include exact replay, changed-payload denial, replacement-lease denial and provider usage settlement. The preceding tunnel checks do not substitute for this test.
 
 For rollback, first disable the dedicated tunnel and remove its application key authorization. Restore the saved SSH configuration only when the current hash still matches the recorded installed version; if it has drifted, preserve both versions and reconcile the change instead of overwriting someone else's configuration. Validate syntax and scoped effective policy before reloading, then verify a fresh administrative connection. Remove only the specifically recorded new account and files. Never reuse a management private key or recursively delete an inferred home directory as part of cleanup.
+
+
+## Dynamic model aliases
+
+A budget route cannot safely stand for an alias that chooses a different supplier on each request. Use a separate immutable provider/model route for budgeted tasks. The optional Python [route-pin guard](packages/web-decision/README.md#optional-model-route-pins) supplies manifest fingerprints and bounded wire model names for host integrations. The actual proxy integration must require the pin for its reserved wire namespace, verify it before reading supplier credentials, and convert the validated wire model into the manifest's real model. Ordinary dynamic aliases may remain available for unbudgeted chat. This helper does not automatically modify a proxy, SDK profile, preset or Gateway rate policy, and its unit tests do not establish production billing coverage.
