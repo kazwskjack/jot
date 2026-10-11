@@ -302,3 +302,20 @@ The regression `packages/gateway/test/vertical/web-budget-python-http.test.mjs` 
 Startup failures close the opened database and Fastify instance before rethrowing the original error. The startup-cleanup regression uses a real SQLite file; it does not simulate closure with a no-op database.
 
 Conversation supplements are accepted for queued, starting and running runs with the current run version. They remain durable pending commands until the existing Session can receive them. Repeating the same command key returns the original command, and an accepted supplement does not create another run. Cancellation and terminal-state checks remain in force. The command-dispatcher regression verifies that the startup window holds the supplement and delivers it once when ready.
+
+
+### Tunnel acceptance and rollback
+
+Treat application identities and long-running forwarding services as explicit deployment changes. Keep the original SSH configuration and its hash, the installed configuration hash, and the created-file/account inventory in a private deployment record. Generate the application private key on the decision host and transfer only its public key. Obtain the Gateway host public key through an already authenticated management connection. Do not use an unverified network key scan as trust establishment.
+
+After deployment, verify each boundary independently:
+
+1. Open a fresh administrative connection and compare its effective SSH policy with the saved original. A successful existing connection is insufficient.
+2. Confirm the forwarding listener binds only loopback, then check the intended Gateway health route through it. This proves connectivity, not budget accounting.
+3. With the same application identity, try a different forwarding destination and require an explicit administrative-policy denial. Authentication failure does not prove destination confinement.
+4. Try a harmless interactive command and verify that it cannot execute. A `nologin` shell may emit its standard unavailable-account message; do not require empty stdout or count that message as successful command execution.
+5. Terminate only the dedicated tunnel's main process. Check that the service restarts with a new PID and the original fixed target becomes reachable again.
+6. Stop only the dedicated tunnel and run a bound budget-client probe with a synthetic provider callback. Require a budget failure and zero callback invocations. Restore the service in `finally`, and verify it is enabled and healthy. Do not release an already dispatched model hold merely because the network is unavailable.
+7. Separately verify an owned run with a real budget grant and the original root ledger. Include exact replay, changed-payload denial, replacement-lease denial and provider usage settlement. The preceding tunnel checks do not substitute for this test.
+
+For rollback, first disable the dedicated tunnel and remove its application key authorization. Restore the saved SSH configuration only when the current hash still matches the recorded installed version; if it has drifted, preserve both versions and reconcile the change instead of overwriting someone else's configuration. Validate syntax and scoped effective policy before reloading, then verify a fresh administrative connection. Remove only the specifically recorded new account and files. Never reuse a management private key or recursively delete an inferred home directory as part of cleanup.
