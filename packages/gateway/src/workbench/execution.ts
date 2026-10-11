@@ -2,6 +2,7 @@ import {TaskReplyDrafts} from '../persistent-tasks/reply-drafts.ts';
 import {TaskReplySemanticChecks} from '../persistent-tasks/reply-semantic.ts';
 import type {ReplyJudgeClient} from '../persistent-tasks/reply-judge-client.ts';
 import {createAuxiliaryRunGuard} from './auxiliary-run-guard.ts';
+import {assertExecutionLease,normalizeExecutionLease} from './execution-lease.ts';
 import {WebDecisionBudgetService} from './web-decision-budget.ts';
 import { createHash, timingSafeEqual, randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
@@ -32,7 +33,8 @@ function object(value: unknown): Input {
   return value as Input;
 }
 function fields(input: Input, keys: string[]) {
-  if (Object.keys(input).some(key => !keys.includes(key))) throw new Error('workbench_identity_forbidden');
+  if (Object.keys(input).some(key => key!=='execution_lease'&&!keys.includes(key))) throw new Error('workbench_identity_forbidden');
+  if(input.execution_lease!==undefined)normalizeExecutionLease(input.execution_lease);
 }
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
@@ -149,6 +151,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       JOIN ga_runs r ON r.conversation_id=b.conversation_id WHERE b.session_id=? AND r.id=?`)
       .get(input.session_ref, input.run_id) as {owner_id: string; conversation_id: string} | undefined;
     if (!binding) throw new Error('workbench_identity_forbidden');
+    if(input.execution_lease!==undefined)assertExecutionLease(db,input.run_id,input.execution_lease);
     workbench.assertRunActive(input.run_id); tasks.assertRunActive(input.run_id);
     const saved = workbench.contextForRun(input.run_id);
     const resolved = saved ? {...saved, allowed_tools: saved.allowed_tools.filter(tool => WORKBENCH_TOOL_IDS.includes(tool))} : null;
@@ -169,7 +172,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
   const webBudgets=modelBudgets&&token&&token.length>=16?new WebDecisionBudgetService(db,{ledger:modelBudgets,secret:token,guard:(owner,run)=>createAuxiliaryRunGuard(db,workbench,tasks,owner,run)}):undefined;
   app.post('/internal/v1/workbench/web-budget-grant',async request=>{
     authorized(request.headers.authorization);const input=object(request.body);fields(input,['run_id','session_ref','call_id','tool_name','request_hash']);if(typeof input.call_id!=='string'||typeof input.request_hash!=='string')throw new Error('invalid_web_budget_request');if(!webBudgets)throw new Error('budget_service_unavailable');
-    return withImmediateTransaction(db,()=>{const identity=context(input);if(!identity.model_budget||typeof input.tool_name!=='string'||!identity.allowed_tools.includes(input.tool_name))throw new Error('workbench_tool_forbidden');if(identity.task_binding)assertTaskModelAccounting(identity.task_binding);return webBudgets.mint(identity.owner_id,identity.run_id,String(input.session_ref),String(input.call_id),input.tool_name,String(input.request_hash));});
+    return withImmediateTransaction(db,()=>{assertExecutionLease(db,String(input.run_id),input.execution_lease);const identity=context(input);if(!identity.model_budget||typeof input.tool_name!=='string'||!identity.allowed_tools.includes(input.tool_name))throw new Error('workbench_tool_forbidden');if(identity.task_binding)assertTaskModelAccounting(identity.task_binding);return webBudgets.mint(identity.owner_id,identity.run_id,String(input.session_ref),String(input.call_id),input.tool_name,String(input.request_hash));});
   });
   app.post('/internal/v1/workbench/web-budget-grant/close',async request=>{
     authorized(request.headers.authorization);const input=object(request.body);fields(input,['run_id','session_ref','call_id']);if(typeof input.call_id!=='string')throw new Error('invalid_web_budget_request');if(!webBudgets)throw new Error('budget_service_unavailable');return webBudgets.close(accountingOwner(input),String(input.run_id),input.call_id);
@@ -187,6 +190,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
     return withImmediateTransaction(db,()=>{
       const owner=accountingOwner(input),runId=String(input.run_id);
       if(action==='reserve'||action==='dispatch'){
+        assertExecutionLease(db,runId,input.execution_lease);
         const identity=context(input);
         if(identity.task_binding)assertTaskModelAccounting(identity.task_binding);
       }

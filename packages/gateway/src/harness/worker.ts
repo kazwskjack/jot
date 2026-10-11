@@ -29,6 +29,7 @@ export interface DshRunner {
   run(input: { enabled: true; taskRequestId: string; message: string; sessionRef: string;
     deferCompletionProbe: true; attachments?: ResolvedAttachment[]; universeSessionRef?: string;
     workbenchRunId?: string;
+    workbenchExecutionLease?:Readonly<{owner:string;generation:number}>;
     checkpointTask?:boolean;
     onCheckpoint?:(receipt:SessionCheckpoint)=>Promise<void>|void;
     onReady?: () => void;
@@ -129,7 +130,7 @@ export class HarnessWorker {
         }
       };
       result = await this.runner.run({ enabled: true, taskRequestId: lease.run_id, message, attachments,
-        ...(workbenchContext ? { workbenchRunId: lease.run_id } : {}),
+        ...(workbenchContext ? { workbenchRunId: lease.run_id,workbenchExecutionLease:Object.freeze({owner:lease.owner,generation:lease.generation}) } : {}),
         ...(backgroundTask
           ?{checkpointTask:true,onCheckpoint:(receipt:SessionCheckpoint)=>{this.executionGuard?.assertRunActive(lease.run_id);this.coordinator.recordCheckpoint(lease,controllerSessionRef,receipt);}}:{}),
         sessionRef: controllerSessionRef, universeSessionRef: controllerSessionRef, deferCompletionProbe: true,

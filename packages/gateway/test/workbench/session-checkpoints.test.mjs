@@ -80,7 +80,7 @@ test('step-admission rejects unresolved or out-of-bound parent accounting after 
   const response=await f.app.inject({method:'POST',url:'/internal/v1/workbench/step-admission',headers:{authorization:'Bearer test-b99992d64419ae59'},payload:{run_id:leaf.run_id,session_ref:'session-fixture',route:{provider:'fixture',model:'bounded'}}});
   assert.equal(response.statusCode,condition==='bound'?429:409,response.body);
   assert.equal(response.json().error.code,condition==='bound'?'MODEL_BUDGET_EXHAUSTED':condition==='unknown'?'BUDGET_USAGE_UNKNOWN':'BUDGET_USAGE_PENDING');
-  const reserve=await f.app.inject({method:'POST',url:'/internal/v1/workbench/model-budget',headers:{authorization:'Bearer test-b99992d64419ae59'},payload:{run_id:leaf.run_id,session_ref:'session-fixture',action:'reserve',request:{attempt_id:'must-not-dispatch',provider:'fixture',model:'bounded'}}});
+  const reserve=await f.app.inject({method:'POST',url:'/internal/v1/workbench/model-budget',headers:{authorization:'Bearer test-b99992d64419ae59'},payload:{run_id:leaf.run_id,session_ref:'session-fixture',execution_lease:{owner:leaf.owner,generation:leaf.generation},action:'reserve',request:{attempt_id:'must-not-dispatch',provider:'fixture',model:'bounded'}}});
   assert.equal(reserve.statusCode,condition==='bound'?429:409,reserve.body);
   assert.equal(reserve.json().error.code,response.json().error.code,'actual dispatch cannot bypass the preliminary lineage guard');
   assert.deepEqual(f.modelBudgets.balancesForRun('alice',leaf.run_id),balances);assert.equal(f.db.prepare('SELECT count(*) n FROM wb_model_budget_events').get().n,events);
@@ -195,7 +195,7 @@ for(const restored of ['valid','paused','waiting','usage_unknown','changed_prefi
   async *follow(){const cursor=events.length-1;yield {type:'snapshot',cursor,records:[]};for(const event of events.slice(cursor+1))yield {type:'event',event};}};
  const token='a'.repeat(32),handler=createAdapterHandler({controller,agents:{get:()=>agent},sessions:{flush:async()=>true},persistence,token,workbenchBridge:bridge});
  const request=async(path,body)=>{const response=await handler({method:'POST',url:new URL('http://127.0.0.1'+path),headers:{authorization:'Bearer '+token},body});assert.ok(response.status<400,JSON.stringify(response));return response;};
- const client={create:async(id,cwd,preset,signal,runId)=>(await request('/v1/sessions',{session_id:id,cwd,agent_preset:preset,workbench_context:{run_id:runId}})).value,
+ const client={create:async(id,cwd,preset,signal,runId,executionLease)=>(await request('/v1/sessions',{session_id:id,cwd,agent_preset:preset,workbench_context:{run_id:runId,execution_lease:executionLease}})).value,
   prompt:async(id,requestId,content)=>(await request(`/v1/sessions/${id}/prompts`,{request_id:requestId,content})).value,
   checkpoint:async(id,seq)=>(await request(`/v1/sessions/${id}/checkpoint`,{after_seq:seq})).value,
   ...(['waiting','usage_unknown'].includes(restored)?{goalStatus:async id=>(await request(`/v1/sessions/${id}/goal-status`,{})).value,goalStop:async(id,ref)=>(await request(`/v1/sessions/${id}/goal-stop`,ref)).value}:{}),

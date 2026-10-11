@@ -226,3 +226,10 @@ test('client decodes ordered follow frames without parsing terminal output', asy
   for await (const frame of client.follow('jot-1')) received.push(frame)
   assert.deepEqual(received, lines)
 })
+
+
+test('trusted Session creation carries the exact claimed Worker fence',async()=>{
+ let body;const client=new SessionControllerClient('http://127.0.0.1:18841','a'.repeat(32),async(url,init)=>{body=JSON.parse(init.body);return Response.json({sessionId:'lease-session'},{status:201})});
+ await client.create('lease-session','/fixture','universe-general-shadow',undefined,'run-1',{owner:'worker-1',generation:3});
+ assert.deepEqual(body.workbench_context,{run_id:'run-1',execution_lease:{owner:'worker-1',generation:3}});
+});

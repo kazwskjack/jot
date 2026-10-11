@@ -2,7 +2,7 @@ import { createServer } from 'node:http'
 import { timingSafeEqual } from 'node:crypto'
 import { isAbsolute } from 'node:path'
 import { createVoiceAdapterHandler } from './voice.js'
-import { WorkbenchBridge } from './workbench.js'
+import { WorkbenchBridge,normalizeHostExecutionLease } from './workbench.js'
 
 export const name = 'jot-jot-session-adapter'
 export const inject = ['sessionController', 'fileUploads', 'agents','sessions','sessionPersistence']
@@ -144,8 +144,10 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       }
       const request = { sessionId, cwd }
       const workbenchRunId = body?.workbench_context?.run_id
+      let workbenchExecutionLease
       if (body?.workbench_context !== undefined) {
         if (!ID.test(String(workbenchRunId ?? ''))) return json(422, { error: 'workbench_binding_invalid' })
+        try{if(body.workbench_context.execution_lease!==undefined)workbenchExecutionLease=normalizeHostExecutionLease(body.workbench_context.execution_lease)}catch{return json(422,{error:'workbench_binding_invalid'})}
         if (!workbenchBridge?.attach || !agents?.get) return json(503, { error: 'workbench_bridge_unavailable' })
         workbenchSessions.add(sessionId)
         blockedWorkbenchSessions.add(sessionId)
@@ -153,7 +155,7 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       if (requestedPreset !== undefined) request.agentPreset = requestedPreset
       const value = await controller.create(request)
       if (workbenchRunId !== undefined) {
-        try { await workbenchBridge.attach(agents.get(sessionId), { runId: String(workbenchRunId), sessionRef: sessionId },{sessions,persistence,signal}) }
+        try { await workbenchBridge.attach(agents.get(sessionId), { runId: String(workbenchRunId), sessionRef: sessionId,...(workbenchExecutionLease?{executionLease:workbenchExecutionLease}:{}) },{sessions,persistence,signal}) }
         catch { return json(503, { error: 'workbench_bridge_unavailable' }) }
         blockedWorkbenchSessions.delete(sessionId)
       }

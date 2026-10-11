@@ -44,7 +44,7 @@ test('actual Python ticket client settles through Gateway HTTP and denies replay
   db.prepare('INSERT INTO ga_worker_leases VALUES(?,?,?,?,?)').run(run.run_id,'fixture-worker',1,String(Date.now()+120000),now);
   db.prepare('INSERT INTO ga_harness_session_bindings VALUES(?,?,?,?,?)').run(run.conversation_id,owner,'fixture-session',now,now);
   const scope=modelBudgets.createScope(owner,'http-fixture',{tokens:1000,nano_usd:1000,model_calls:3});modelBudgets.bindRun(owner,run.run_id,[scope.scope_id]);
-  const minted=await app.inject({method:'POST',url:'/internal/v1/workbench/web-budget-grant',headers:{authorization:'Bearer '+secret},payload:{run_id:run.run_id,session_ref:'fixture-session',call_id:'fixture-call',tool_name:'universe_search',request_hash:'a'.repeat(64)}});assert.equal(minted.statusCode,200);
+  const minted=await app.inject({method:'POST',url:'/internal/v1/workbench/web-budget-grant',headers:{authorization:'Bearer '+secret},payload:{run_id:run.run_id,session_ref:'fixture-session',execution_lease:{owner:'fixture-worker',generation:1},call_id:'fixture-call',tool_name:'universe_search',request_hash:'a'.repeat(64)}});assert.equal(minted.statusCode,200);
   await app.listen({host:'127.0.0.1',port:0});const config={origin:'http://127.0.0.1:'+app.server.address().port,grant:minted.json().grant,mode:'positive'};
   assert.deepEqual(await client(config),{calls:1,replayed:true,invalid_grant_denied:true,changed_payload_denied:true});
   db.prepare('UPDATE ga_worker_leases SET generation=generation+1').run();assert.deepEqual(await client({...config,mode:'negative'}),{calls:0,revoked_lease_denied:true});

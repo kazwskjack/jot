@@ -7,7 +7,7 @@ import {validateTaskGoalStatus,taskGoalStopReason,type TaskGoalStatus} from './t
 import { projectSessionFrame, type JotProjection, type ProjectionContext } from './session-event-projector.ts'
 
 interface OfficialSessionClient {
-  create(sessionId: string, cwd: string, agentPreset: string, signal?: AbortSignal, workbenchRunId?: string): Promise<Record<string, unknown>>
+  create(sessionId: string, cwd: string, agentPreset: string, signal?: AbortSignal, workbenchRunId?: string,workbenchExecutionLease?:Readonly<{owner:string;generation:number}>): Promise<Record<string, unknown>>
   prompt(sessionId: string, requestId: string, content: string | SessionPromptPart[], mode?: 'queue' | 'steer', signal?: AbortSignal): Promise<Record<string, unknown>>
   stageFile?(sessionId: string, path: string, displayName: string, signal?: AbortSignal): Promise<{ receipt_id: string }>
   follow(sessionId: string, signal?: AbortSignal): AsyncGenerator<Record<string, unknown>>
@@ -191,6 +191,7 @@ export class OfficialSessionRunner implements DshRunner {
   async run(input: { enabled: true; taskRequestId: string; message: string; sessionRef: string;
     deferCompletionProbe: true; attachments?: ResolvedAttachment[];
     workbenchRunId?: string;
+    workbenchExecutionLease?:Readonly<{owner:string;generation:number}>;
     checkpointTask?:boolean;
     onCheckpoint?:(receipt:SessionCheckpoint)=>Promise<void>|void;
     /** Trusted DSH Session scope used by C to look up Universe operations; never the Runtime session_ref. */
@@ -207,7 +208,7 @@ export class OfficialSessionRunner implements DshRunner {
       ? setTimeout(() => controller.abort(new Error('session_follow_timeout')), this.options.timeoutMs)
       : undefined
     try {
-      await this.client.create(input.sessionRef, this.options.cwd, this.options.agentPreset, controller.signal, input.workbenchRunId)
+      await this.client.create(input.sessionRef, this.options.cwd, this.options.agentPreset, controller.signal, input.workbenchRunId,input.workbenchExecutionLease)
       let iterator = this.client.follow(input.sessionRef, controller.signal)[Symbol.asyncIterator]()
       let opening = await iterator.next()
       if (opening.done || opening.value.type !== 'snapshot') throw new Error('session_follow_snapshot_missing')

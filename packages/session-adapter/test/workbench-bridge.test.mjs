@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { WorkbenchBridge } from '../workbench.js';
 import {nativeBudgetForExecution} from '../web-budget-context.js';
 
-const binding = { runId: 'run-1', sessionRef: 'session-1' };
+const binding = { runId: 'run-1', sessionRef: 'session-1',executionLease:Object.freeze({owner:'worker-fixture',generation:1}) };
 test('enabled web budget wraps the installed native tools event with original authority',async()=>{
   const h=host();h.agent.id=binding.sessionRef;const paths=[];
   const bridge=new WorkbenchBridge({origin:'http://127.0.0.1:7654',token:'test-token-32-characters-fixture',webBudgetEnabled:true,
@@ -301,7 +301,7 @@ test('workspace tool dispatch uses Gateway result and frozen trusted run identit
   mutable.runId = 'run-victim'; mutable.sessionRef = 'session-victim';
   const output = await f.host.execute('jot_workspace', { operation: 'files.read', arguments_json: JSON.stringify({ path: 'notes/a.txt' }) });
   assert.deepEqual(JSON.parse(output), { items: ['real-gateway-response'] });
-  assert.deepEqual(f.requests.at(-1).body, { operation: 'files.read', arguments: { path: 'notes/a.txt' }, call_id: 'call-1', run_id: 'run-1', session_ref: 'session-1' });
+  assert.deepEqual(f.requests.at(-1).body, { operation: 'files.read', arguments: { path: 'notes/a.txt' }, call_id: 'call-1', run_id: 'run-1', session_ref: 'session-1',execution_lease:binding.executionLease });
   assert.equal(f.requests.at(-1).init.redirect, 'error');
   assert.ok(f.requests.at(-1).init.signal instanceof AbortSignal);
 });
@@ -446,7 +446,7 @@ test('changing an attached binding during a native guard cannot execute the old 
 test('scoped workspace forwards an occurrence only for read-only task history, never for task mutation',async()=>{
  const f=fixture();await f.bridge.attach(f.host.agent,{...binding});
  await f.host.execute('jot_workspace',{operation:'tasks.subtasks',arguments_json:'{"occurrence_id":"occurrence-old"}'});
- assert.deepEqual(f.requests.at(-1).body,{run_id:'run-1',session_ref:'session-1',operation:'tasks.subtasks',arguments:{occurrence_id:'occurrence-old'},call_id:'call-1'});
+ assert.deepEqual(f.requests.at(-1).body,{run_id:'run-1',session_ref:'session-1',operation:'tasks.subtasks',arguments:{occurrence_id:'occurrence-old'},call_id:'call-1',execution_lease:binding.executionLease});
  const before=f.requests.filter(request=>request.url.endsWith('/tool')).length;
  await assert.rejects(f.host.execute('jot_workspace',{operation:'tasks.upsert',arguments_json:'{"occurrence_id":"occurrence-old","status":"running"}'}),/workbench_arguments_invalid/);
  assert.equal(f.requests.filter(request=>request.url.endsWith('/tool')).length,before);
@@ -491,4 +491,17 @@ test('role allowlist never overrides an existing scoped permission denial', asyn
   await f.bridge.attach(f.host.agent, { ...binding });
   await assert.rejects(f.host.execute('universe_search', {}, async () => { calls++; }), /HOST_PERMISSION_DENIED/);
   assert.equal(calls, 0);
+});
+
+
+test('Workbench RPC retains the original deep-frozen Worker fence instead of caller mutations',async()=>{
+ const h=host(),sent=[];const lease={owner:'worker-1',generation:3};const scoped={...binding,executionLease:lease};
+ const bridge=new WorkbenchBridge({origin:'http://127.0.0.1:7654',token:'test-token-32-characters-fixture',fetchImpl:async(url,init)=>{sent.push(JSON.parse(init.body));return Response.json({context:context()})}});
+ await bridge.attach(h.agent,scoped);lease.generation=4;await bridge.check(bridge.installed.get(h.agent).current);
+ assert.ok(sent.length>=2);for(const request of sent)assert.deepEqual(request.execution_lease,{owner:'worker-1',generation:3});
+ assert.ok(Object.isFrozen(bridge.installed.get(h.agent).current.binding.executionLease));
+});
+
+test('a budget-enforced role cannot attach fresh execution without its Worker fence',async()=>{
+ const h=host();const bridge=new WorkbenchBridge({origin:'http://127.0.0.1:7654',token:'test-token-32-characters-fixture',fetchImpl:async()=>Response.json({context:{...context(),model_budget:{protocol:1,enforced:true}}})});await assert.rejects(bridge.attach(h.agent,{runId:binding.runId,sessionRef:binding.sessionRef}),/workbench_binding_lease_required/);assert.equal(h.tools.size,0);
 });

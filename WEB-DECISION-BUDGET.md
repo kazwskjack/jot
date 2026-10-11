@@ -324,3 +324,12 @@ For rollback, first disable the dedicated tunnel and remove its application key 
 ## Dynamic model aliases
 
 A budget route cannot safely stand for an alias that chooses a different supplier on each request. Use a separate immutable provider/model route for budgeted tasks. The optional Python [route-pin guard](packages/web-decision/README.md#optional-model-route-pins) supplies manifest fingerprints and bounded wire model names for host integrations. The actual proxy integration must require the pin for its reserved wire namespace, verify it before reading supplier credentials, and convert the validated wire model into the manifest's real model. Ordinary dynamic aliases may remain available for unbudgeted chat. This helper does not automatically modify a proxy, SDK profile, preset or Gateway rate policy, and its unit tests do not establish production billing coverage.
+
+
+## Worker execution fencing
+
+Budget-enforced sessions carry the original worker lease owner and generation through the authenticated session adapter. The bridge copies and freezes this metadata; the model cannot select or renew the lease. New model reservations, dispatches and web grants require a matching, unexpired lease in the authoritative Gateway database. Replacing a worker revokes its previous session's ability to spend, even when the run remains active.
+
+Accounting survives revocation: already dispatched usage can settle against the original owned attempt, settlement replay cannot charge twice, and an unsent reservation can be released. Recovery-only session attachment does not grant fresh execution. Deploy matching Gateway and session-adapter versions together; older callers without a fence are denied for new spending. Keep task activation off until the production preset, shared budget lineage, recovery and rollback have been verified together.
+
+An isolated SDK test verified one bounded real model call, exact usage settlement, no duplicate charge, no new dispatch after pause, and rejection of the old worker generation. This is evidence for the accounting/fencing path, not blanket acceptance of every continuous-task workflow or an invoice-price claim.

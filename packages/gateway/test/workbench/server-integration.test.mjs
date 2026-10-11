@@ -209,6 +209,8 @@ test('protected model budget derives owner and scopes from the real run and perm
  const missingConfig=await restarted.inject({method:'POST',url:'/internal/v1/workbench/guard',headers:{authorization:`Bearer ${token}`},payload:identity});
  assert.ok(missingConfig.statusCode>=400,'a restarted host cannot erase budget enforcement by omitting pricing configuration');
  assert.match(missingConfig.body,/budget_service_unavailable/);
+ f.db.prepare('INSERT INTO ga_worker_leases VALUES(?,?,?,?,?)').run(run.run_id,'fixture-worker',1,String(Date.now()+60000),'now');
+ identity.execution_lease={owner:'fixture-worker',generation:1};
  const request={attempt_id:'model-controlled-1',provider:'fixture',model:'bounded',max_tokens:20};
  const invoke=(action,payload={},auth)=>f.internal('model-budget',{...identity,action,...payload},auth);
  assert.equal((await invoke('reserve',{request},'')).statusCode,401);

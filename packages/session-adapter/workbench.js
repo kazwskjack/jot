@@ -17,6 +17,11 @@ const ARGUMENT_KEYS = {
   'tasks.assessment': ['subtask_id','observations'], 'tasks.observe': ['subtask_id','observations'],
   'tasks.assess': ['subtask_id','expected_task_version','expected_subtask_version','expected_assessment_revision','expected_observation_revision','observations','expires_at'], 'tasks.next': [],
 };
+export function normalizeHostExecutionLease(value){
+  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!['owner','generation'].includes(key))
+    ||typeof value.owner!=='string'||!ID.test(value.owner)||!Number.isSafeInteger(value.generation)||value.generation<1)throw new Error('workbench_binding_invalid');
+  return Object.freeze({owner:value.owner,generation:value.generation});
+}
 function validContext(context, binding) {
   if (!context || context.run_id !== binding.runId || !['owner_id', 'agent_id', 'workspace_id', 'project_id'].every(key => typeof context[key] === 'string' && ID.test(context[key]))
     || !Number.isSafeInteger(context.capability_epoch) || context.capability_epoch < 1
@@ -104,7 +109,8 @@ export class WorkbenchBridge {
     const response = await this.fetch(`${this.origin}/internal/v1/workbench/${path}`, {
       method: 'POST', redirect: 'error',
       headers: { authorization: `Bearer ${this.token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ ...payload, run_id: binding.runId, session_ref: binding.sessionRef }),
+      body: JSON.stringify({ ...payload, run_id: binding.runId, session_ref: binding.sessionRef,
+        ...(binding.executionLease?{execution_lease:binding.executionLease}:{}) }),
       signal: signal ? AbortSignal.any([signal, timed]) : timed,
     });
     if (!response.ok) {
@@ -212,7 +218,8 @@ export class WorkbenchBridge {
   async attach(agent, binding, {sessions,persistence,signal,completionIntentId,readOnlyCompletion=false}={}) {
     if (!binding || typeof binding.runId !== 'string' || typeof binding.sessionRef !== 'string'
       || !ID.test(binding.runId) || !ID.test(binding.sessionRef)) throw new Error('workbench_binding_invalid');
-    const trustedBinding = Object.freeze({ runId: binding.runId, sessionRef: binding.sessionRef });
+    const trustedBinding = Object.freeze({ runId: binding.runId, sessionRef: binding.sessionRef,
+      ...(binding.executionLease!==undefined?{executionLease:normalizeHostExecutionLease(binding.executionLease)}:{}) });
     const scope = agent?.ctx;
     if (typeof scope?.tools?.guard !== 'function' || typeof scope?.tools?.register !== 'function'
       || typeof scope?.tools?.presentAs !== 'function' || typeof scope?.systemPrompt?.section !== 'function' || typeof scope?.on !== 'function') {
@@ -224,6 +231,7 @@ export class WorkbenchBridge {
     // Frozen host configuration is obtained from the Gateway, never from the
     // browser or the Session creation body's persona/owner/path fields.
     const frozen = validContext(response.context, trustedBinding);
+    if(frozen.model_budget&&!trustedBinding.executionLease&&!readOnlyCompletion&&completionIntentId===undefined)throw new Error('workbench_binding_lease_required');
     if (this.attempts.get(agent) !== attempt) throw new Error('workbench_attach_superseded');
     if(typeof readOnlyCompletion!=='boolean'||readOnlyCompletion&&completionIntentId!==undefined)throw new Error('workbench_completion_forbidden');
     if(completionIntentId!==undefined||readOnlyCompletion){

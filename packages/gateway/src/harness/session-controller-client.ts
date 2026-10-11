@@ -1,3 +1,4 @@
+import {normalizeExecutionLease,type ExecutionLease} from '../workbench/execution-lease.ts'
 import { createReadStream } from 'node:fs'
 import { Readable } from 'node:stream'
 
@@ -74,10 +75,10 @@ export class SessionControllerClient {
     return value
   }
 
-  async create(sessionId: string, cwd: string, agentPreset: string, signal?: AbortSignal, workbenchRunId?: string) {
+  async create(sessionId: string, cwd: string, agentPreset: string, signal?: AbortSignal, workbenchRunId?: string, workbenchExecutionLease?: ExecutionLease) {
     return await this.post('/v1/sessions', {
       session_id: sessionId, cwd, agent_preset: agentPreset,
-      ...(workbenchRunId ? { workbench_context: { run_id: workbenchRunId } } : {}),
+      ...(workbenchRunId ? { workbench_context: { run_id: workbenchRunId, ...(workbenchExecutionLease?{execution_lease:normalizeExecutionLease(workbenchExecutionLease)}:{}) } } : {}),
     }, signal)
   }
 

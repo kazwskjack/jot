@@ -94,7 +94,8 @@ test('a real Gateway-backed member bridge reads the shared workspace, cannot mut
  const bridge=new WorkbenchBridge({origin:'http://127.0.0.1:7654',token:'test-b99992d64419ae59',fetchImpl:async(url,init)=>{
   requests.push(JSON.parse(init.body));const result=await f.app.inject({method:'POST',url:new URL(url).pathname,headers:init.headers,payload:init.body});return new Response(result.body,{status:result.statusCode,headers:{'content-type':'application/json'}});
  }});
- await bridge.attach(agent,{runId:child,sessionRef:'member-session'});
+ f.db.prepare('INSERT INTO ga_worker_leases VALUES(?,?,?,?,?)').run(child,'fixture-member',1,String(Date.now()+60000),'now');
+ await bridge.attach(agent,{runId:child,sessionRef:'member-session',executionLease:{owner:'fixture-member',generation:1}});
  assert.ok(sections.get('jot:agent-role').text().includes(f.step.title));
  assert.match(sections.get('jot:agent-role').text(),/不得编辑父任务账本/);
  const execute=(operation,args,key)=>tools.get('jot_workspace').execute({operation,arguments_json:JSON.stringify(args)},{callId:key,signal:new AbortController().signal});
