@@ -67,6 +67,11 @@ function authorized(actual, expected) {
 
 function json(status, value) { return { status, value } }
 
+const BINDING_FAILURE_CODES=new Set(['workbench_run_forbidden','workbench_goal_binding_changed','workbench_host_incompatible','workbench_goal_unavailable','workbench_goal_context_invalid','workbench_goal_identity_conflict','workbench_goal_stopped','workbench_context_invalid','workbench_binding_lease_required','workbench_model_host_incompatible','workbench_model_route_changed','workbench_budget_binding_required','workbench_binding_missing','workbench_binding_changed','workbench_goal_native_driver_unavailable']);
+export function bindingFailureSummary(stage,error){
+  return {stage:stage==='model-select'?'model-select':'attach',code:BINDING_FAILURE_CODES.has(error?.message)?error.message:'workbench_binding_failed'};
+}
+
 export function adapterErrorSummary(error) {
   const messages = []
   const seen = new Set()
@@ -160,10 +165,10 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       const value = await controller.create(request)
       if (workbenchRunId !== undefined) {
         try { await workbenchBridge.attach(agents.get(sessionId), { runId: String(workbenchRunId), sessionRef: sessionId,...(workbenchExecutionLease?{executionLease:workbenchExecutionLease}:{}) },{sessions,persistence,signal}) }
-        catch { return json(503, { error: 'workbench_bridge_unavailable' }) }
+        catch (error) { console.error('[jot-workbench-binding]',JSON.stringify(bindingFailureSummary('attach',error)));return json(503, { error: 'workbench_bridge_unavailable' }) }
         if(requestedPreset==='jot-workbench-budgeted'){
           try{const agent=agents.get(sessionId);await budgetModelSelector(agent,()=>workbenchBridge.guardBudget(agent,signal),signal)}
-          catch{return json(503,{error:'workbench_bridge_unavailable'})}
+          catch(error){console.error('[jot-workbench-binding]',JSON.stringify(bindingFailureSummary('model-select',error)));return json(503,{error:'workbench_bridge_unavailable'})}
         }
         blockedWorkbenchSessions.delete(sessionId)
       }

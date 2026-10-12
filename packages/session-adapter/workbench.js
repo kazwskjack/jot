@@ -5,6 +5,8 @@ import {captureSessionCheckpoint,verifySessionCheckpoint} from './checkpoint.js'
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 const OPERATIONS = ['agents.list', 'messages.list', 'messages.send', 'memory.list', 'memory.save', 'files.list', 'files.read', 'files.write', 'web.read','tasks.get','tasks.subtasks','tasks.upsert','tasks.delegate','tasks.evidence','tasks.assessment','tasks.observe','tasks.assess','tasks.next','tasks.propose','tasks.reply_draft','tasks.reply_drafts'];
 const SAFE_TOOLS = new Set(['universe_capabilities', 'universe_search']);
+const STEP_FAILURE_CODES=new Set(['budget_route_unavailable','model_budget_exhausted','budget_usage_unknown','budget_usage_pending','budget_window_closed','budget_policy_stale','budget_service_unavailable','workbench_model_host_incompatible','workbench_run_forbidden','workbench_goal_unavailable','workbench_goal_stopped','workbench_goal_identity_conflict','workbench_goal_binding_changed','workbench_step_admission_invalid']);
+export function stepFailureCode(error){return STEP_FAILURE_CODES.has(error?.message)?error.message:'workbench_step_failed';}
 const ARGUMENT_KEYS = {
   'agents.list': [], 'messages.list': [], 'messages.send': ['recipient_agent_id', 'text', 'client_message_id'],
   'memory.list': ['q'], 'memory.save': ['scope', 'content', 'memory_id', 'expected_version', 'provenance', 'source_revision', 'expires_at', 'supersedes'],
@@ -310,7 +312,7 @@ export class WorkbenchBridge {
             await this.goals.prepareStep(agent,route(),payload.signal);
             if(state.current!==snapshot)throw new Error('workbench_binding_changed');
             return true;
-          }catch{return false;}
+          }catch(error){console.error('[jot-workbench-step]',JSON.stringify({code:stepFailureCode(error)}));return false;}
         };
         if(payload.messages.length&&!await admitted())return {kind:'reject'};
         const decision=await next();

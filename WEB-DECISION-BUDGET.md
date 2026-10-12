@@ -438,3 +438,13 @@ Reference the existing channel identity through the service's standard environme
 Verify auxiliary settlement separately from queue admission. A completed auxiliary call may coexist with a reserved main-model admission when the main model has not run. Close the original grant, stop the isolated canary, and release only its undispatched admission through the ledger API. Verify every bound scope has zero remaining holds while the settled call remains charged. Never refund dispatched or unknown work to make a test pass.
 
 A synthetic predictor can prove fixed-origin callbacks, shared accounting and replay without duplicate invocation. It does not prove provider quality, native Session execution or end-to-end Jot behavior. Keep production task activation separate until those acceptance gates pass.
+
+### Provider composition and role catalogs
+
+Register a budgeted agent preset in the Profile's preset registry; placing its composition file on disk alone does not register it. Pin its policy to the installed SDK version and validate it through an actual Session creation request.
+
+Add the budget provider to the existing Pi adapter's provider map. A second Pi adapter declaration can conflict with its configurable-provider directory. Include every launch overlay in composition checks: an active-model overlay may replace the Profile's provider map. Its generator must preserve the budget route across ordinary model switches while leaving the ordinary route and default selection unchanged.
+
+A budgeted role may have a smaller tool catalog than an ordinary preset. Configure that preset's catalog policy for the approved inherited tools and its late-registered workspace tool. Retain exact catalog checks, native descriptor checks and execution guards; do not disable policy checks to accommodate the role. Keep the ordinary preset's catalog unchanged. Verify the workspace tool becomes visible before the first model step and disallowed tools remain denied.
+
+After deployment, distinguish a created Session, an accepted prompt, an entered model step and a settled provider call. A pre-step catalog failure can terminate a turn before the model budget records any attempt. Binding and step diagnostics emit only fixed allow-listed codes; unknown messages, nested causes and page contents are excluded. Finally verify usage arithmetic, all shared scopes, cancellation and zero residual holds using the original ledger. Report configured-rate accounting separately from supplier billing.
