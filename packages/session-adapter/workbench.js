@@ -1,5 +1,5 @@
 import { WorkbenchGoalBridge, nativeGoalsFor } from './workbench-goal.js';
-import { budgetedModelStream } from './model-budget-stream.js';
+import { budgetedModelStream,BudgetedModelStreamQueue } from './model-budget-stream.js';
 import {runNativeBudgetedTool} from './web-budget-tool.js';
 import {captureSessionCheckpoint,verifySessionCheckpoint} from './checkpoint.js';
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
@@ -271,7 +271,7 @@ export class WorkbenchBridge {
     // Scoped registrations stay installed once. A failed validation or a failed
     // later attach cannot remove the previously active monotonic protection.
     if (prior) { prior.current = current; return; }
-    const state = { current };
+    const state = { current,modelStreams:new BudgetedModelStreamQueue() };
     const disposers = [];
     try {
       // Code presentation would expose only run_code, which this role denies.
@@ -345,12 +345,12 @@ export class WorkbenchBridge {
         // dispatched on LlmRuntime, not a scopeTarget(agent) carrier. Route by
         // its native Session stamp before applying this Agent's budget.
         if (options?.sessionId !== snapshot.binding.sessionRef || !snapshot.context.model_budget) return next();
-        return budgetedModelStream({binding: snapshot.binding, options, next, request: this.request.bind(this),
+        return state.modelStreams.run(options.signal,()=>budgetedModelStream({binding: snapshot.binding, options, next, request: this.request.bind(this),
           check: async signal => {
             await this.check(snapshot, undefined, signal);
             if (snapshot.context.task_binding) await this.goals.guard(agent,signal);
             if (state.current !== snapshot) throw new Error('workbench_binding_changed');
-          }});
+          }}),options.purpose==='session-title'?{ready:()=>agent.whenIdle()}:{});
       }));
       disposers.push(scope.tools.register({
         name: 'jot_workspace',

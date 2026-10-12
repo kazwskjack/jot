@@ -448,3 +448,10 @@ Add the budget provider to the existing Pi adapter's provider map. A second Pi a
 A budgeted role may have a smaller tool catalog than an ordinary preset. Configure that preset's catalog policy for the approved inherited tools and its late-registered workspace tool. Retain exact catalog checks, native descriptor checks and execution guards; do not disable policy checks to accommodate the role. Keep the ordinary preset's catalog unchanged. Verify the workspace tool becomes visible before the first model step and disallowed tools remain denied.
 
 After deployment, distinguish a created Session, an accepted prompt, an entered model step and a settled provider call. A pre-step catalog failure can terminate a turn before the model budget records any attempt. Binding and step diagnostics emit only fixed allow-listed codes; unknown messages, nested causes and page contents are excluded. Finally verify usage arithmetic, all shared scopes, cancellation and zero residual holds using the original ledger. Report configured-rate accounting separately from supplier billing.
+
+
+### Main requests and auxiliary title generation
+
+The adapter serializes budgeted model streams within each Session until accounting closes. Automatic titles wait for the native Agent to become idle before joining that queue, so they cannot compete with the main turn's tools or subsequent steps. Cancellation while waiting does not invoke a provider. Sessions retain independent queues; unknown or in-flight accounting still blocks new authorization.
+
+Acceptance must identify request purpose explicitly. A settled title request is not evidence that the main answer succeeded. Verify main settlement, the real tool result, closed tool grants, and zero held balances separately; do not treat this gate as proof of Team/Handoff or external decision-provider integration.
