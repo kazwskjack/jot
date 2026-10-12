@@ -429,3 +429,12 @@ already inactive, and verify the Session adapter's readiness as well as the
 Gateway health endpoint. A healthy Gateway with a stopped worker cannot serve
 chat requests. Avoid restarting an already running instance solely because its
 first readiness observation was too early.
+### Joint release and callback acceptance
+
+Build the Gateway on the deployment workstation. Before switching the Gateway and Session adapter together, stop database writers and confirm they have released the database, WAL and SHM files. Initialize migrations and register the budget policy once, under the application account, before restoring services. Starting multiple services against a pending schema migration can produce SQLite lock failures even when each service passes its individual checks.
+
+Reference the existing channel identity through the service's standard environment file. Do not assume the Gateway environment file also contains the internal channel identity, and do not copy credential values into release archives.
+
+Verify auxiliary settlement separately from queue admission. A completed auxiliary call may coexist with a reserved main-model admission when the main model has not run. Close the original grant, stop the isolated canary, and release only its undispatched admission through the ledger API. Verify every bound scope has zero remaining holds while the settled call remains charged. Never refund dispatched or unknown work to make a test pass.
+
+A synthetic predictor can prove fixed-origin callbacks, shared accounting and replay without duplicate invocation. It does not prove provider quality, native Session execution or end-to-end Jot behavior. Keep production task activation separate until those acceptance gates pass.
