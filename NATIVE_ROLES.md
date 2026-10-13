@@ -116,3 +116,13 @@ With the same explicit SDK setting, this scenario cancels the original task occu
 After the execution fence settles the two dispatched model requests, the scenario drives the original worker `SessionCommandDispatcher`. It calls the actual authenticated adapter Session `/cancel` endpoint, checks its attached-Agent idle receipt, and then verifies the original run becomes `cancelled` with `USER_CANCELLED`, the command is applied and exactly one cancellation event is saved. Processing again sends no second cancellation, and the accounting rows are unchanged. An unauthenticated adapter cancel request is rejected.
 
 This verifies the in-flight execution fence and the worker command dispatcher's subsequent final run projection. It does not exercise the complete worker scheduling loop, transport abort during an unfinished model stream, cancellation during every external tool, or process-kill recovery. The adapter Session `/cancel` route and persistent-task occurrence cancellation have different scopes; callers must use the appropriate owner-checked gateway operation.
+
+## Abrupt member process exit and unknown usage
+
+```sh
+node --test packages/session-adapter/verification/native-task-crash-runtime.mjs
+```
+
+With the installed SDK setting, the first isolated OS process starts an actual native member model request, verifies its committed `in_flight` accounting row, flushes the Session prefix and exits directly without disposing the host or returning usage. A second OS process reopens the same database. Recovery under the original lease is rejected; a replacement lease can classify the lost member request as `unknown`. Repeating classification changes nothing.
+
+The probe verifies the original budget balances and held amounts remain unchanged, the dispatched request cannot be released as an undispatched hold, a new parent request is blocked by unknown usage, and there is still exactly one member reservation with no closure, file write or legacy delegation. Recovery does not invent usage or completion. This tests abrupt process exit at a specific member-stream boundary with synthetic responses, not a power loss, byte-torn persistence, real-provider reconciliation or automatic production worker takeover.
