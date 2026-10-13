@@ -3,6 +3,7 @@ import {TaskReplySemanticChecks} from '../persistent-tasks/reply-semantic.ts';
 import type {ReplyJudgeClient} from '../persistent-tasks/reply-judge-client.ts';
 import {createAuxiliaryRunGuard} from './auxiliary-run-guard.ts';
 import {assertExecutionLease,normalizeExecutionLease} from './execution-lease.ts';
+import {assertTaskHandoffOperation} from './task-handoff-admission.ts';
 import {WebDecisionBudgetService} from './web-decision-budget.ts';
 import { createHash, timingSafeEqual, randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
@@ -225,6 +226,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
     if (!resolved || resolved.owner_id !== binding.owner_id) throw new Error('workbench_identity_forbidden');
     if (input.tool_name !== undefined && (typeof input.tool_name !== 'string'
       || !(resolved.allowed_tools.includes(input.tool_name) || input.tool_name === 'jot_workspace'))) throw new Error('workbench_tool_forbidden');
+    if(input.tool_name!==undefined)assertTaskHandoffOperation(db,resolved,input.session_ref);
     if(resolved.kind==='task'&&input.tool_name!==undefined&&input.tool_name!=='jot_workspace')
       assertTaskDependenciesReady(db,executionEvidence,resolved.owner_id,requireTask(resolved).task_id,resolved.run_id);
     return {...resolved,...(resolved.kind==='task'?{task_binding:requireTask(resolved)}:{}),...budgetContext(resolved.owner_id,resolved.run_id)};

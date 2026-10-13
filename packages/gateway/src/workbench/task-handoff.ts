@@ -1,7 +1,7 @@
 import {createHash} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
 import {withImmediateTransaction} from '../db/database.ts';
-type Authority={owner:string;root_run:string;lease_generation:number;lead:string;members:string[]};
+type Authority={owner:string;root_run:string;lease_generation:number;lead:string;members:string[];lease_owner?:string;policy_version?:number};
 type State={revision:number;controller:string;phase:'active'|'returned'|'stopped';hops:number;max_hops:number;route:string[]};
 type Row={authority_json:string;state_json:string};
 const id=(v:unknown):v is string=>typeof v==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(v);
@@ -20,7 +20,8 @@ export class TaskHandoffController {
  private authority(owner:string,root:string){
   if(!id(owner)||!id(root))throw new Error('handoff_identity_invalid');const a=this.authorize(owner,root);
   if(!a||a.owner!==owner||a.root_run!==root||!id(a.lead)||!Array.isArray(a.members)||!a.members.length||a.members.some(v=>!id(v)||v===a.lead)||new Set(a.members).size!==a.members.length||!Number.isSafeInteger(a.lease_generation)||a.lease_generation<1)throw new Error('handoff_authority_invalid');
-  return {owner,root_run:root,lease_generation:a.lease_generation,lead:a.lead,members:[...a.members].sort()};
+  if(a.lease_owner!==undefined&&!id(a.lease_owner)||a.policy_version!==undefined&&(!Number.isSafeInteger(a.policy_version)||a.policy_version<1))throw new Error('handoff_authority_invalid');
+  return {owner,root_run:root,lease_generation:a.lease_generation,lead:a.lead,members:[...a.members].sort(),...(a.lease_owner===undefined?{}:{lease_owner:a.lease_owner}),...(a.policy_version===undefined?{}:{policy_version:a.policy_version})};
  }
  private row(owner:string,root:string,a:Authority){const r=this.db.prepare('SELECT authority_json,state_json FROM wb_task_handoff_control WHERE owner_id=? AND root_run_id=?').get(owner,root) as Row|undefined;if(r&&r.authority_json!==JSON.stringify(a))throw new Error('handoff_lease_changed');return r;}
  get(owner:string,root:string):State {const a=this.authority(owner,root),r=this.row(owner,root,a);if(!r)throw new Error('handoff_not_started');return JSON.parse(r.state_json);}

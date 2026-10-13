@@ -21,7 +21,7 @@ export function createTaskHandoffHost(options:{db:DatabaseSync;workbench:Workben
   if(!policy.enabled||policy.version!==policyVersion)throw new Error('task_collaboration_revoked');
   for(const member of policy.member_ids)collaboration.authorizeNativeMember(owner,rootRun,member,policyVersion);
   if(!ledger.isBound(owner,rootRun))throw new Error('budget_binding_missing');
-  return {owner,root_run:rootRun,lease_generation:lease.generation,lead:context.agent_id,members:policy.member_ids};
+  return {owner,root_run:rootRun,lease_generation:lease.generation,lease_owner:lease.owner,policy_version:policyVersion,lead:context.agent_id,members:policy.member_ids};
  };
  const control=new TaskHandoffController(db,authorize);
  db.exec(`CREATE TABLE IF NOT EXISTS wb_task_handoff_executions(owner_id TEXT NOT NULL,root_run_id TEXT NOT NULL,revision INTEGER NOT NULL,run_id TEXT NOT NULL,session_ref TEXT NOT NULL,PRIMARY KEY(owner_id,root_run_id,revision));
