@@ -45,3 +45,9 @@ The model-callable `tasks.delegate` path is not yet switched to this native Team
 ## Local release checks
 
 On Windows with Node 24, this change passed 163 Session adapter tests, 31 portable runtime tests, 105 workbench UI tests and 934 gateway tests. Six gateway cases were skipped for unavailable POSIX/Office conditions. Both web and gateway builds passed, and the packed adapter imported independently. These are local release checks, not external-provider or production acceptance.
+
+## Native delegation intent journal
+
+`NativeTaskIntents` and the authenticated internal `native-task-intent` endpoint prepare an immutable assignment plan from a lead's existing task step. They bind the request to the owner, current occurrence, role grant and step revision. The endpoint also validates the original worker fence. Retries revalidate permission and return the same plan; changed arguments conflict, and edited steps or revoked grants reject replay.
+
+Planning does not reserve a child, enqueue the legacy mailbox, change a step to running, invoke a model or prove completion. `execution_authorized: false` is intentional. The model-callable `tasks.delegate` path still uses the existing implementation until intent-to-reservation binding, member assignment/evidence guards and native publication dispatch are completed and verified together. Do not call both dispatch paths for one request.

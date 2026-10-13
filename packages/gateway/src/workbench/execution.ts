@@ -19,6 +19,7 @@ import {occurrenceSubtaskRows} from '../persistent-tasks/subtask-state.ts';
 import type { ModelBudgetLedger, ModelBudgetRequest } from './model-budget.ts';
 import type {TaskCollaborationService} from './task-collaboration.ts';
 import {NativeChildReservations} from './native-child-reservations.ts';
+import {NativeTaskIntents} from './native-task-intents.ts';
 import {savedSessionCheckpoint} from '../harness/session-checkpoints.ts';
 import {installTaskCompletionCandidates} from '../persistent-tasks/completion-candidates.ts';
 import {installTaskBusinessReviews,currentTaskBusinessCertificate} from '../persistent-tasks/business-review.ts';
@@ -75,6 +76,19 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
   installTaskCompletionHandshake(db);
   installTaskFinalizations(db);
   const nativeChildren=collaboration?new NativeChildReservations(db,collaboration):undefined;
+  const nativeTaskIntents=collaboration?new NativeTaskIntents(db,workbench,tasks,collaboration):undefined;
+  app.post('/internal/v1/workbench/native-task-intent',async request=>{
+    authorized(request.headers.authorization);const input=object(request.body);
+    fields(input,['run_id','session_ref','request_id','subtask_id','expected_subtask_version','recipient_agent_id']);
+    if(!nativeTaskIntents)throw new Error('task_collaboration_forbidden');
+    return withImmediateTransaction(db,()=>{
+      assertExecutionLease(db,String(input.run_id),input.execution_lease);
+      const identity=context(input);requireTask(identity);
+      return {plan:nativeTaskIntents.prepare(identity.owner_id,identity.run_id,{
+        request_id:input.request_id as string,subtask_id:input.subtask_id as string,
+        expected_subtask_version:input.expected_subtask_version as number,recipient_agent_id:input.recipient_agent_id as string})};
+    });
+  });
   app.post('/internal/v1/workbench/native-child-reservation',async request=>{
     authorized(request.headers.authorization);
     if(!nativeChildren)throw new Error('task_collaboration_forbidden');

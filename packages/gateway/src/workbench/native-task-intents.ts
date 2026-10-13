@@ -1,0 +1,47 @@
+import {createHash} from 'node:crypto';
+import type {DatabaseSync} from 'node:sqlite';
+import {withImmediateTransaction} from '../db/database.ts';
+import type {WorkbenchService} from './service.ts';
+import type {PersistentTaskService} from '../persistent-tasks/service.ts';
+import type {TaskCollaborationService} from './task-collaboration.ts';
+type Input={request_id:string;subtask_id:string;expected_subtask_version:number;recipient_agent_id:string};
+const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
+/** Planning journal only. No child admission, mailbox dispatch or completion. */
+export class NativeTaskIntents {
+ private db:DatabaseSync;private workbench:WorkbenchService;private tasks:PersistentTaskService;private collaboration:TaskCollaborationService;
+ constructor(db:DatabaseSync,workbench:WorkbenchService,tasks:PersistentTaskService,collaboration:TaskCollaborationService){
+  this.db=db;this.workbench=workbench;this.tasks=tasks;this.collaboration=collaboration;
+  db.exec(`CREATE TABLE IF NOT EXISTS wb_native_task_intents(
+    owner_id TEXT NOT NULL,root_run_id TEXT NOT NULL REFERENCES ga_runs(id),request_id TEXT NOT NULL,
+    input_hash TEXT NOT NULL,plan_json TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(owner_id,root_run_id,request_id));
+    CREATE TRIGGER IF NOT EXISTS wb_native_task_intent_no_update BEFORE UPDATE ON wb_native_task_intents BEGIN SELECT RAISE(ABORT,'native_task_intent_immutable'); END;
+    CREATE TRIGGER IF NOT EXISTS wb_native_task_intent_no_delete BEFORE DELETE ON wb_native_task_intents BEGIN SELECT RAISE(ABORT,'native_task_intent_immutable'); END;`);
+ }
+ prepare(owner:string,runId:string,input:Input){
+  if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(k=>!['request_id','subtask_id','expected_subtask_version','recipient_agent_id'].includes(k))
+    ||['request_id','subtask_id','recipient_agent_id'].some(k=>typeof input[k as keyof Input]!=='string'||!ID.test(String(input[k as keyof Input])))
+    ||!Number.isSafeInteger(input.expected_subtask_version)||input.expected_subtask_version<1)throw new Error('native_task_intent_invalid');
+  return withImmediateTransaction(this.db,()=>{
+   const context=this.workbench.contextForRun(runId);
+   if(!context||context.owner_id!==owner||context.kind!=='task')throw new Error('task_collaboration_forbidden');
+   const current=this.db.prepare('SELECT task_id,occurrence_id FROM wb_task_current_occurrences WHERE run_id=?').get(runId) as {task_id:string;occurrence_id:string}|undefined;
+   if(!current)throw new Error('task_execution_revoked');
+   const prior=this.db.prepare('SELECT input_hash,plan_json FROM wb_native_task_intents WHERE owner_id=? AND root_run_id=? AND request_id=?').get(owner,runId,input.request_id) as {input_hash:string;plan_json:string}|undefined;
+   const policy=this.collaboration.get(owner,current.task_id),saved=prior?JSON.parse(prior.plan_json):undefined;
+   this.collaboration.authorizeNativeMember(owner,runId,input.recipient_agent_id,saved?.expected_policy_version??policy.version);
+   if(!this.db.prepare('SELECT 1 FROM wb_model_budget_bindings WHERE owner_id=? AND run_id=?').get(owner,runId))throw new Error('budget_service_unavailable');
+   const digest=createHash('sha256').update(JSON.stringify([input.request_id,input.subtask_id,input.expected_subtask_version,input.recipient_agent_id])).digest('hex');
+   if(prior&&prior.input_hash!==digest)throw new Error('idempotency_conflict');
+   const step=this.tasks.subtasks(owner,current.task_id).items.find(s=>s.subtask_id===input.subtask_id);
+   if(!step||step.version!==input.expected_subtask_version||!['pending','blocked'].includes(step.status))throw new Error('task_assignment_revoked');
+   if(saved)return saved;
+   const role=this.workbench.getAgent(owner,input.recipient_agent_id);
+   const plan={protocol:1,request_id:input.request_id,role_ref:role.agent_id,expected_policy_version:policy.version,
+     task_id:current.task_id,occurrence_id:current.occurrence_id,subtask_id:step.subtask_id,expected_subtask_version:step.version,
+     dependencies:step.dependencies,name:role.name,description:`Task member: ${role.name}`,
+     text:`Execute the assigned step: ${step.title}\nAcceptance: ${step.acceptance}\nReturn materials, source references and remaining limitations to the lead. Do not declare the parent task complete, delegate more members or expand authorization.`,execution_authorized:false};
+   this.db.prepare('INSERT INTO wb_native_task_intents VALUES(?,?,?,?,?,?)').run(owner,runId,input.request_id,digest,JSON.stringify(plan),new Date().toISOString());
+   return plan;
+  });
+ }
+}
