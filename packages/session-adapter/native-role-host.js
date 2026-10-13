@@ -31,7 +31,7 @@ export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistenc
    return {roleRef:source.role_ref,binding:response.binding};
   }:undefined,
   attach:async(child,binding,{signal,parent})=>{
-   await bridge.attach(child,binding,{sessions,persistence,signal});
+   await bridge.attach(child,binding,{sessions,persistence,signal,parentGuard:checkSignal=>bridge.guardBudget(parent,checkSignal)});
    await selectModel(child,()=>bridge.guardBudget(child,signal),signal);
    let ids=published.get(parent);if(!ids)published.set(parent,ids=new Set());ids.add(child.id);
   }});

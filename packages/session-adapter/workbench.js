@@ -148,7 +148,9 @@ export class WorkbenchBridge {
   }
 
   async check(current, toolName, signal) {
+    if(current.parentGuard)await current.parentGuard(signal);
     const response = await this.request('guard', current.binding, toolName ? { tool_name: toolName } : {}, signal);
+    if(current.parentGuard)await current.parentGuard(signal);
     const context = validContext(response.context, current.binding);
     if (['owner_id', 'agent_id', 'workspace_id', 'project_id', 'capability_epoch'].some(key => context[key] !== current.context[key])) {
       throw new Error('workbench_run_forbidden');
@@ -231,7 +233,8 @@ export class WorkbenchBridge {
     return result;
   }
 
-  async attach(agent, binding, {sessions,persistence,signal,completionIntentId,readOnlyCompletion=false}={}) {
+  async attach(agent, binding, {sessions,persistence,signal,completionIntentId,readOnlyCompletion=false,parentGuard}={}) {
+    if(parentGuard!==undefined&&typeof parentGuard!=='function')throw new Error('workbench_parent_guard_invalid');
     if (!binding || typeof binding.runId !== 'string' || typeof binding.sessionRef !== 'string'
       || !ID.test(binding.runId) || !ID.test(binding.sessionRef)) throw new Error('workbench_binding_invalid');
     const trustedBinding = Object.freeze({ runId: binding.runId, sessionRef: binding.sessionRef,
@@ -268,8 +271,8 @@ export class WorkbenchBridge {
       }catch(error){await this.goals.revoke(agent);throw error;}
     }
     if (this.attempts.get(agent) !== attempt) throw new Error('workbench_attach_superseded');
-    const current = { binding: trustedBinding, context: frozen, allowed: new Set([...frozen.allowed_tools, 'jot_workspace']) };
     const prior = this.installed.get(agent);
+    const current = { binding: trustedBinding, context: frozen, allowed: new Set([...frozen.allowed_tools, 'jot_workspace']),parentGuard:parentGuard??prior?.current.parentGuard };
     // Scoped registrations stay installed once. A failed validation or a failed
     // later attach cannot remove the previously active monotonic protection.
     if (prior) { prior.current = current; return; }

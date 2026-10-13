@@ -536,3 +536,24 @@ test('native task dispatcher cannot be invoked by a child or ordinary role conve
  await assert.rejects(h.execute('jot_workspace',{operation:'tasks.delegate',arguments_json:JSON.stringify({subtask_id:'step',expected_subtask_version:1,recipient_agent_id:'member'})}),/workbench_task_scope_forbidden/);
  assert.equal(calls,0);
 });
+
+test('native member boundaries recheck a host-owned parent guard before tools and model dispatch',async()=>{
+ const f=fixture();f.setContext({...context(),kind:'native_team',model_budget:{protocol:1,enforced:true}});let paused=false,parentChecks=0;
+ await f.bridge.attach(f.host.agent,binding,{parentGuard:async()=>{parentChecks++;if(paused)throw Error('parent_goal_paused');}});
+ paused=true;
+ await assert.rejects(f.host.execute('jot_workspace',{operation:'files.write',arguments_json:'{"path":"notes.txt","content":"No write after pause","expected_version":0}'}),/parent_goal_paused/);
+ let invoked=0;const consume=async()=>{for await(const _ of f.host.stream({sessionId:binding.sessionRef,provider:'fixture',model:'bounded'},()=>{invoked++;return(async function*(){yield {type:'finish',reason:{kind:'stop'}};})()})){};};
+ await assert.rejects(consume(),/parent_goal_paused/);
+ assert.ok(parentChecks>=2);assert.equal(invoked,0);
+ assert.equal(f.requests.some(r=>r.body.operation==='files.write'||r.url.endsWith('/model-budget')),false);
+});
+
+test('reattachment cannot drop a native parent guard and pause during gateway reads still denies effects',async()=>{
+ const f=fixture();let paused=false;
+ await f.bridge.attach(f.host.agent,binding,{parentGuard:async()=>{if(paused)throw Error('parent_paused');}});
+ await f.bridge.attach(f.host.agent,binding);
+ await assert.rejects(f.bridge.attach(f.host.agent,binding,{parentGuard:null}),/workbench_parent_guard_invalid/);
+ const original=f.bridge.fetch;f.bridge.fetch=async(...args)=>{const response=await original(...args);paused=true;return response;};
+ await assert.rejects(f.host.execute('jot_workspace',{operation:'files.write',arguments_json:'{"path":"denied.txt","content":"none","expected_version":0}'}),/parent_paused/);
+ assert.equal(f.requests.some(r=>r.body.operation==='files.write'),false);
+});

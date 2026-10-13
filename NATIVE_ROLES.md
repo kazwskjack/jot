@@ -44,7 +44,7 @@ When `nativeRoles` is explicitly enabled, the model-callable `tasks.delegate` pa
 
 ## Local release checks
 
-On Windows with Node 24, the native-dispatch change passed 169 Session adapter tests, 31 portable runtime tests and 40 focused gateway tests. The actual SDK verification also passed with the configured local scripted provider. The most recent full gateway check passed 945 tests, with six POSIX/Office cases skipped; its source was unchanged by this dispatcher change. Both web and gateway builds passed, and the packed dispatcher imported independently. These are local release checks, not external-provider or production acceptance.
+On Windows with Node 24, the native-dispatch change passed 172 Session adapter tests, 31 portable runtime tests and 40 focused gateway tests. The actual SDK verification also passed with the configured local scripted provider. The most recent full gateway check passed 945 tests, with six POSIX/Office cases skipped; its source was unchanged by this dispatcher change. Both web and gateway builds passed, and the packed dispatcher imported independently. These are local release checks, not external-provider or production acceptance.
 
 ## Native delegation intent journal
 
@@ -75,3 +75,19 @@ node --test packages/session-adapter/verification/native-task-delegate-runtime.m
 Without that explicit SDK path the optional test is skipped. With it, the test mounts the actual SDK, formal adapter `apply`, Session Controller, native Team and isolated gateway, then emits a real model tool call using a local scripted provider. It verifies one intent/reservation/publication, a member file write and owned receipt, no legacy task, and a successful native tool result delivered to the lead. Upload and archive leaves are inert test facades; this is not their acceptance or a live-provider test.
 
 Native internal handles are stable lowercase identifiers derived from role and request identity, satisfying Team name constraints. Human role names, including Chinese names, remain in the saved role context; the handle does not change its permissions or identity. Packaging includes the dispatcher runtime module.
+
+
+## Parent pause and lost-receipt recovery
+
+Native Host admission installs a parent authority callback on every child binding. Each model/tool boundary checks it before and after the gateway guard read. Reattachment cannot remove it. Pausing the native lead Goal rejects the member's next model/tool dispatch; already dispatched usage still settles through the original accounting path. A pause does not fabricate failed usage or automatically release every undispatched admission hold; the original worker/checkpoint lifecycle owns those holds.
+
+The optional SDK checks also cover:
+
+```sh
+node --test packages/session-adapter/verification/native-task-pause-runtime.mjs
+node --test packages/session-adapter/verification/native-task-restart-runtime.mjs
+```
+
+They require the same explicit `JOT_DSH_RUNTIME_MODULES` setting. The pause test changes the actual native Goal during a member's first scripted model call: no file is written, neither Agent dispatches a second model, and the two already sent calls remain settled. The restart test runs two separate OS processes: the first creates a member but loses the publication acknowledgement before persistence; the second recovers that exact member without another model call, then cold-activates the original Session with its assignment and shared accounting intact.
+
+The normal scenario tests model-callable tool dispatch; the restart scenario invokes the same host dispatcher directly to isolate metadata recovery. They do not prove automatic recovery of every interrupted model tool call, hard-kill unknown usage, all parallel/cancellation paths, or production integrations.

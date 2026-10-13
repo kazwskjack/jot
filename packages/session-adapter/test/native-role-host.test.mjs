@@ -35,3 +35,12 @@ test('an unresolved durable reservation never creates another native member',asy
  await assert.rejects(f.host.spawn(f.root,{roleRef:'role',policyVersion:1,requestId:'request'},f.request),/native_role_publication_pending/);
  assert.equal(f.entries.size,1);assert.equal(f.events.length,0);await f.host.dispose();
 });
+
+test('native admission installs the exact parent authority check on each child binding',async()=>{
+ const f=fixture();let parentGuard;const original=f.bridge.attach;
+ f.bridge.attach=async(a,b,options)=>{parentGuard=options.parentGuard;return original(a,b,options);};
+ await f.host.spawn(f.root,{roleRef:'role',policyVersion:1,requestId:'guarded-member'},f.request);
+ assert.equal(typeof parentGuard,'function');
+ f.bridge.guardBudget=async parent=>{assert.equal(parent,f.root);throw Error('parent_stopped');};
+ await assert.rejects(parentGuard(new AbortController().signal),/parent_stopped/);await f.host.dispose();
+});
