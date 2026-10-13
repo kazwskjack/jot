@@ -557,3 +557,15 @@ test('reattachment cannot drop a native parent guard and pause during gateway re
  await assert.rejects(f.host.execute('jot_workspace',{operation:'files.write',arguments_json:'{"path":"denied.txt","content":"none","expected_version":0}'}),/parent_paused/);
  assert.equal(f.requests.some(r=>r.body.operation==='files.write'),false);
 });
+
+test('only enabled native delegation declares SDK concurrency safety; workspace writes remain exclusive',async()=>{
+ const f=fixture();await f.bridge.attach(f.host.agent,binding);
+ const tool=f.host.tools.get('jot_workspace');
+ assert.equal(typeof tool.isConcurrencySafe,'function');
+ const delegate={operation:'tasks.delegate',arguments_json:'{"subtask_id":"step","expected_subtask_version":1,"recipient_agent_id":"role"}'};
+ assert.equal(tool.isConcurrencySafe(delegate),false);
+ f.bridge.nativeDelegate=async()=>{};
+ assert.equal(tool.isConcurrencySafe(delegate),true);
+ for(const operation of ['files.write','memory.save','messages.send','tasks.upsert','tasks.propose'])assert.equal(tool.isConcurrencySafe({operation,arguments_json:'{}'}),false);
+ assert.equal(tool.isConcurrencySafe(null),false);
+});

@@ -359,6 +359,9 @@ export class WorkbenchBridge {
       }));
       disposers.push(scope.tools.register({
         name: 'jot_workspace',
+        // Only assignment-bound native dispatch overlaps; CAS, capacity and
+        // permission remain fenced by the original gateway transactions.
+        isConcurrencySafe:args=>!!this.nativeDelegate&&args?.operation==='tasks.delegate',
         description: 'Use this Agent’s authorized shared workspace, memory, durable peer mailbox, or safe public HTTP reader. arguments_json is a JSON object. agents.list, messages.list and files.list use {}. memory.list accepts an optional q keyword query and only returns authorized, current records. messages.send uses recipient_agent_id/text/client_message_id. memory.save uses scope (private or project)/content, optional provenance [{kind,reference}], source_revision, expires_at (UTC/offset timestamp or null), supersedes, and memory_id/expected_version for correction. These are proposals; verified facts require user confirmation before replacement. files.read uses path. files.write uses path/content/expected_version (0 for new file). web.read uses url and supports only public HTTP pages, no login/private network/browser scripts. Never provide owner, sender, Agent, project or Session identity, automatic reply rules, or verified status.',
         parameters: { type: 'object', additionalProperties: false, required: ['operation', 'arguments_json'],
           properties: { operation: { type: 'string', enum: OPERATIONS }, arguments_json: { type: 'string', maxLength: 131072 } } },

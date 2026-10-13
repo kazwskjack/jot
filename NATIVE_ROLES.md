@@ -44,7 +44,7 @@ When `nativeRoles` is explicitly enabled, the model-callable `tasks.delegate` pa
 
 ## Local release checks
 
-On Windows with Node 24, the native-dispatch change passed 172 Session adapter tests, 31 portable runtime tests and 40 focused gateway tests. The actual SDK verification also passed with the configured local scripted provider. The most recent full gateway check passed 945 tests, with six POSIX/Office cases skipped; its source was unchanged by this dispatcher change. Both web and gateway builds passed, and the packed dispatcher imported independently. These are local release checks, not external-provider or production acceptance.
+On Windows with Node 24, the current native-dispatch release passed 173 Session adapter tests, 31 portable runtime tests and five actual SDK runtime scenarios without skips. The web build passed. The prior focused gateway check passed 40 tests; its most recent full check passed 945 tests with six POSIX/Office cases skipped. Gateway source is unchanged by this release. These are local release checks with scripted model responses, not external-provider or production acceptance.
 
 ## Native delegation intent journal
 
@@ -91,3 +91,16 @@ node --test packages/session-adapter/verification/native-task-restart-runtime.mj
 They require the same explicit `JOT_DSH_RUNTIME_MODULES` setting. The pause test changes the actual native Goal during a member's first scripted model call: no file is written, neither Agent dispatches a second model, and the two already sent calls remain settled. The restart test runs two separate OS processes: the first creates a member but loses the publication acknowledgement before persistence; the second recovers that exact member without another model call, then cold-activates the original Session with its assignment and shared accounting intact.
 
 The normal scenario tests model-callable tool dispatch; the restart scenario invokes the same host dispatcher directly to isolate metadata recovery. They do not prove automatic recovery of every interrupted model tool call, hard-kill unknown usage, all parallel/cancellation paths, or production integrations.
+
+## Parallel assignment and Goal stop
+
+With native delegation enabled, only `jot_workspace` calls whose operation is `tasks.delegate` declare SDK concurrency safety. The SDK can overlap those dispatches; the gateway still validates each assignment, step revision, role permission and configured capacity transactionally. Other workspace operations, including file writes and memory changes, retain exclusive tool execution. This declaration does not increase configured limits or enable native roles by default.
+
+```sh
+node --test packages/session-adapter/verification/native-task-parallel-runtime.mjs
+node --test packages/session-adapter/verification/native-task-stop-runtime.mjs
+```
+
+Both require the explicit installed SDK path described above. The parallel scenario emits two delegation calls in one actual model tool batch and waits until both member models are in flight. It verifies a peak of two, two assignment-bound publications, separate file writes and receipts belonging to the original task, and no legacy queued delegation. The lead still needs to review the materials; the running steps are not reported as completed.
+
+The stop scenario performs the native Goal pause-and-clear sequence while a member model call is in flight. Neither Agent dispatches another model call, the member's following file write is rejected, and already dispatched usage settles normally. This verifies Goal stop, not every HTTP turn-cancel or worker interruption path. Upload/archive leaves remain inert in these probes. Full production provider/tool acceptance, abrupt-crash unknown usage, Handoff/fork/Swarm and broader cancellation remain separate gates.
