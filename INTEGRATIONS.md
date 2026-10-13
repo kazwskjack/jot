@@ -45,10 +45,12 @@ Worker/Runner. Upstream experimental Team tools are a separate integration and
 remain disabled until their host binding, ownership and budget checks pass.
 
 Installed Team packages can be imported without establishing deployment
-readiness. Local domain and scoped read-tool probes verify exact live Agent
-identity, separate root task boards, revision conflicts and normal JSONL
-restoration. They do not exercise model-directed teammate spawning, task-owner
-authorization, interrupted-writer recovery or production. Upstream task IDs are
+readiness. Local scripted-provider SDK probes now verify model-directed saved-role
+dispatch, two overlapping member requests, original task receipt ownership,
+parent Goal pause/stop, occurrence cancellation and publication recovery across
+processes. A separate abrupt-exit probe verifies unknown costs remain held. See
+[native role verification](NATIVE_ROLES.md) for each scenario's exact scope.
+These probes do not establish live-provider or production readiness. Upstream task IDs are
 local to a Team; an integration must retain the owning root execution and product
 owner rather than authorizing a task ID by itself. Never expose internal Session
 identities as browser conversation IDs or assume an upstream view method exists
