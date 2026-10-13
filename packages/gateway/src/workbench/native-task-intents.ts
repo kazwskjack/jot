@@ -1,11 +1,21 @@
 import {createHash} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
 import {withImmediateTransaction} from '../db/database.ts';
+import {TaskExecutionEvidence} from '../persistent-tasks/execution-evidence.ts';
+import {taskDependencyReasons,assertDependencyReasons} from '../persistent-tasks/execution-eligibility.ts';
 import type {WorkbenchService} from './service.ts';
 import type {PersistentTaskService} from '../persistent-tasks/service.ts';
 import type {TaskCollaborationService} from './task-collaboration.ts';
 type Input={request_id:string;subtask_id:string;expected_subtask_version:number;recipient_agent_id:string};
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
+export type NativeTaskAssignment={task_id:string;occurrence_id:string;subtask_id:string;subtask_version:number;title:string;acceptance:string;dependencies:string[]};
+export function assertNativeTaskAssignment(db:DatabaseSync,owner:string,assignment:NativeTaskAssignment){
+ const step=db.prepare(`SELECT s.version,s.status,s.dependencies_json FROM wb_task_subtasks s JOIN wb_persistent_tasks t ON t.task_id=s.task_id
+   WHERE t.owner_id=? AND s.task_id=? AND s.subtask_id=?`).get(owner,assignment.task_id,assignment.subtask_id) as {version:number;status:string;dependencies_json:string}|undefined;
+ if(!step||step.version!==assignment.subtask_version||step.status!=='running')throw new Error('task_assignment_revoked');
+ assertDependencyReasons(taskDependencyReasons(db,new TaskExecutionEvidence(db),owner,assignment.task_id,JSON.parse(step.dependencies_json),assignment.occurrence_id));
+ return assignment;
+}
 /** Planning journal only. No child admission, mailbox dispatch or completion. */
 export class NativeTaskIntents {
  private db:DatabaseSync;private workbench:WorkbenchService;private tasks:PersistentTaskService;private collaboration:TaskCollaborationService;
@@ -33,6 +43,10 @@ export class NativeTaskIntents {
    const digest=createHash('sha256').update(JSON.stringify([input.request_id,input.subtask_id,input.expected_subtask_version,input.recipient_agent_id])).digest('hex');
    if(prior&&prior.input_hash!==digest)throw new Error('idempotency_conflict');
    const step=this.tasks.subtasks(owner,current.task_id).items.find(s=>s.subtask_id===input.subtask_id);
+   const bound=prior&&this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_native_child_reservations'").get()&&this.db.prepare('SELECT snapshot_json FROM wb_native_child_reservations WHERE owner_id=? AND root_run_id=? AND request_id=?').get(owner,runId,input.request_id) as {snapshot_json:string}|undefined;
+   if(bound){const reservation=JSON.parse(bound.snapshot_json);
+     if(reservation.role_id!==input.recipient_agent_id||reservation.task_assignment?.subtask_id!==input.subtask_id)throw new Error('task_assignment_revoked');
+     assertNativeTaskAssignment(this.db,owner,reservation.task_assignment);return saved;}
    if(!step||step.version!==input.expected_subtask_version||!['pending','blocked'].includes(step.status))throw new Error('task_assignment_revoked');
    if(saved)return saved;
    const role=this.workbench.getAgent(owner,input.recipient_agent_id);
@@ -44,4 +58,16 @@ export class NativeTaskIntents {
    return plan;
   });
  }
+ bind(owner:string,runId:string,requestId:string,roleRef:string,policyVersion:number):NativeTaskAssignment|undefined{
+  if(!this.db.isTransaction)throw new Error('native_assignment_transaction_required');
+  const row=this.db.prepare('SELECT plan_json FROM wb_native_task_intents WHERE owner_id=? AND root_run_id=? AND request_id=?').get(owner,runId,requestId) as {plan_json:string}|undefined;
+  if(!row)return;
+  const plan=JSON.parse(row.plan_json);
+  if(plan.role_ref!==roleRef||plan.expected_policy_version!==policyVersion)throw new Error('task_assignment_revoked');
+  this.prepare(owner,runId,{request_id:requestId,subtask_id:plan.subtask_id,expected_subtask_version:plan.expected_subtask_version,recipient_agent_id:roleRef});
+  const assigned=this.tasks.upsertSubtask(owner,plan.task_id,{subtask_id:plan.subtask_id,expected_version:plan.expected_subtask_version,status:'running'},runId);
+  return {task_id:plan.task_id,occurrence_id:plan.occurrence_id,subtask_id:assigned.subtask_id,subtask_version:assigned.version,
+    title:assigned.title,acceptance:assigned.acceptance,dependencies:assigned.dependencies};
+ }
+
 }

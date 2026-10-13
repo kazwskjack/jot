@@ -50,4 +50,15 @@ On Windows with Node 24, this change passed 163 Session adapter tests, 31 portab
 
 `NativeTaskIntents` and the authenticated internal `native-task-intent` endpoint prepare an immutable assignment plan from a lead's existing task step. They bind the request to the owner, current occurrence, role grant and step revision. The endpoint also validates the original worker fence. Retries revalidate permission and return the same plan; changed arguments conflict, and edited steps or revoked grants reject replay.
 
-Planning does not reserve a child, enqueue the legacy mailbox, change a step to running, invoke a model or prove completion. `execution_authorized: false` is intentional. The model-callable `tasks.delegate` path still uses the existing implementation until intent-to-reservation binding, member assignment/evidence guards and native publication dispatch are completed and verified together. Do not call both dispatch paths for one request.
+Planning does not reserve a child, enqueue the legacy mailbox, change a step to running, invoke a model or prove completion. `execution_authorized: false` is intentional. The model-callable `tasks.delegate` path still uses the existing implementation until native publication dispatch and complete host integration are verified together. Intent-to-reservation binding and member assignment/evidence guards are now implemented in the gateway. Do not call both dispatch paths for one request.
+
+
+## Bound member assignments and evidence
+
+When a reservation matches a saved native task intent, the gateway validates the role/policy and step revision, verifies prerequisite evidence, transitions the step to running through the original task service and saves its frozen assignment in the same transaction as the reservation. A failed reservation write rolls back the transition. Retrying cannot consume another slot or change the assignment. A host with a matching plan cannot omit the assignment service.
+
+Child model/tool admission rechecks the current running step and revision as well as the original native owner, role, parent lease and budget. Editing or blocking a step revokes its member's new execution. Cold activations retain the same assignment; they do not reset task progress or grant fresh permission.
+
+Actual member workspace operations return persisted execution receipts. Assigned-member receipts can be verified against the original owner/task/occurrence and result hash. Generic native roles without a task assignment do not contribute parent-task evidence. Receipts remain historical evidence after a step changes; they do not keep execution authority alive or prove that acceptance criteria were met. The member cannot update the parent task ledger; the lead must review materials and update the original step.
+
+These gateway boundaries do not yet switch the model-callable dispatcher to native Team. Keep native flags off until the full dispatch/recovery path and required production tools are accepted together.

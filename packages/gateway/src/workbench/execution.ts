@@ -75,8 +75,8 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
   installTaskBusinessReviews(db);
   installTaskCompletionHandshake(db);
   installTaskFinalizations(db);
-  const nativeChildren=collaboration?new NativeChildReservations(db,collaboration):undefined;
   const nativeTaskIntents=collaboration?new NativeTaskIntents(db,workbench,tasks,collaboration):undefined;
+  const nativeChildren=collaboration?new NativeChildReservations(db,collaboration,nativeTaskIntents):undefined;
   app.post('/internal/v1/workbench/native-task-intent',async request=>{
     authorized(request.headers.authorization);const input=object(request.body);
     fields(input,['run_id','session_ref','request_id','subtask_id','expected_subtask_version','recipient_agent_id']);
@@ -409,12 +409,13 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       const args = object(input.arguments); fields(args, ['url']);
       if (typeof args.url !== 'string' || args.url.length > 2048) throw new Error('invalid_page_url');
       const task = identity.task_binding;
-      if (task && !validCallId(input.call_id)) throw new Error('invalid_call_id');
+      const attested=!!task||(identity.kind==='native_team'&&!!identity.task_assignment);
+      if (attested && !validCallId(input.call_id)) throw new Error('invalid_call_id');
       const digest = createHash('sha256').update(canonical({operation: 'web.read', args})).digest('hex');
-      if (task) {
+      if (attested) {
         const prior = savedCall(identity.run_id, String(input.call_id), digest);
         if (prior !== undefined) return prior;
-        assertTaskDependenciesReady(db,executionEvidence,identity.owner_id,task.task_id,identity.run_id);
+        if(task)assertTaskDependenciesReady(db,executionEvidence,identity.owner_id,task.task_id,identity.run_id);
       }
       // This HTTP reader pins a public address at every redirect. It never
       // inherits browser cookies, private network access or script execution.
@@ -423,10 +424,10 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
         context({...input, tool_name: 'jot_workspace'});
         const result = {url: page.url, text: page.text.slice(0, 12000), truncated: page.text.length > 12000,
           mode: 'public_http', trusted: false};
-        if (!task) return result;
+        if (!attested) return result;
         const prior = savedCall(identity.run_id, String(input.call_id), digest);
         if (prior !== undefined) return prior;
-        assertTaskDependenciesReady(db,executionEvidence,identity.owner_id,task.task_id,identity.run_id);
+        if(task)assertTaskDependenciesReady(db,executionEvidence,identity.owner_id,task.task_id,identity.run_id);
         const response = {...result, execution_receipt: executionEvidence.record(identity.run_id, String(input.call_id), 'web.read', result)};
         saveCall(identity.run_id, String(input.call_id), digest, response);
         return response;
@@ -453,7 +454,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       if (!keys[operation]) throw new Error('invalid_workspace_operation');
       fields(args, keys[operation]!);
       const mutating = ['messages.send', 'memory.save', 'files.write','tasks.upsert','tasks.evidence','tasks.assess','tasks.delegate','tasks.reply_draft'].includes(operation);
-      const attested = !!identity.task_binding && !operation.startsWith('tasks.');
+      const attested = (!!identity.task_binding||(identity.kind==='native_team'&&!!identity.task_assignment)) && !operation.startsWith('tasks.');
       const receipted = mutating || attested;
       const callId = input.call_id;
       if (receipted && !validCallId(callId)) throw new Error('invalid_call_id');

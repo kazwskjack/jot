@@ -27,6 +27,7 @@ export interface Agent {
 export interface AgentRunContext {
   run_id: string; agent_id: string; owner_id: string; workspace_id: string; project_id: string; instructions: string;
   name: string; capability_epoch: number; allowed_tools: string[]; memories: Input[]; kind: string;
+  task_assignment?:{subtask_id:string;subtask_version:number;title:string;acceptance:string;dependencies:string[]};
 }
 export interface WorkbenchOptions {
   workspaceIds: string[]; root: string; allowedToolIds?: string[]; maxMailboxRunsPerDay?: number;
@@ -434,6 +435,7 @@ export class WorkbenchService {
     if(row.kind==='native_team'){
       const saved=assertNativeRun(this.db,String(row.owner_id),runId);
       if(saved.role_id!==agent.agent_id||saved.role_epoch!==agent.capability_epoch)throw new Error('task_collaboration_revoked');
+      if(saved.task_assignment)Object.assign(context,{task_assignment:saved.task_assignment});
     }
     if(row.kind==='internal_mailbox'){
       const msg=this.db.prepare('SELECT message_id,thread_id FROM wb_agent_messages WHERE run_id=? AND owner_id=?').get(runId,String(row.owner_id)) as Row|undefined;

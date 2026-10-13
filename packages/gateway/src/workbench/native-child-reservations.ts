@@ -4,6 +4,7 @@ import {withImmediateTransaction} from '../db/database.ts';
 import {assertExecutionLease} from './execution-lease.ts';
 import type {TaskCollaborationService} from './task-collaboration.ts';
 import {taskMemberCapacityAvailable} from './task-mailbox.ts';
+import {assertNativeTaskAssignment,type NativeTaskIntents} from './native-task-intents.ts';
 import {installNativeChildRuns} from './native-child-identity.ts';
 type Input=Record<string,unknown>;
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
@@ -13,8 +14,9 @@ const canonical=(value:unknown)=>JSON.stringify(value,(_key,item)=>item&&typeof 
  */
 export class NativeChildReservations {
  private readonly db:DatabaseSync;private readonly collaboration:TaskCollaborationService;
- constructor(db:DatabaseSync,collaboration:TaskCollaborationService){
-  this.db=db;this.collaboration=collaboration;
+ private intents:NativeTaskIntents|undefined;
+ constructor(db:DatabaseSync,collaboration:TaskCollaborationService,intents?:NativeTaskIntents){
+  this.db=db;this.collaboration=collaboration;this.intents=intents;
   installNativeChildRuns(db);
   db.exec(`CREATE TABLE IF NOT EXISTS wb_native_spawn_publications(
     reservation_id TEXT PRIMARY KEY REFERENCES wb_native_child_reservations(reservation_id),publication_json TEXT NOT NULL,created_at TEXT NOT NULL);
@@ -37,15 +39,19 @@ export class NativeChildReservations {
    if(!budget)throw new Error('budget_service_unavailable');
    const digest=createHash('sha256').update(JSON.stringify([runId,input.session_ref,input.child_session_ref,input.role_ref,input.expected_policy_version,lease,...(input.spawn_request_hash===undefined?[]:[input.spawn_request_hash])])).digest('hex');
    const prior=this.db.prepare('SELECT input_hash,snapshot_json FROM wb_native_child_reservations WHERE root_run_id=? AND request_id=?').get(runId,String(input.request_id)) as {input_hash:string;snapshot_json:string}|undefined;
-   if(prior){if(prior.input_hash!==digest)throw new Error('idempotency_conflict');return JSON.parse(prior.snapshot_json);}
+   if(prior){if(prior.input_hash!==digest)throw new Error('idempotency_conflict');const saved=JSON.parse(prior.snapshot_json);if(saved.task_assignment)assertNativeTaskAssignment(this.db,parent.owner_id,saved.task_assignment);return saved;}
    if(this.db.prepare('SELECT 1 FROM ga_harness_session_bindings WHERE session_id=? UNION ALL SELECT 1 FROM wb_native_child_reservations WHERE child_session_ref=?').get(String(input.child_session_ref),String(input.child_session_ref)))throw new Error('native_child_identity_conflict');
    const native=this.db.prepare('SELECT count(*) n FROM wb_native_child_reservations WHERE owner_id=? AND occurrence_id=?').get(parent.owner_id,authorization.occurrence_id) as {n:number};
    const delegated=this.db.prepare(`SELECT count(*) n FROM wb_task_delegation_authorizations a JOIN wb_task_delegations d ON d.delegation_id=a.delegation_id WHERE d.owner_id=? AND d.occurrence_id=?`).get(parent.owner_id,authorization.occurrence_id) as {n:number};
    // Until lifecycle settlement is connected every reservation stays active.
    // Do not recycle an uncertain slot or replay a native creation on restart.
    if(!taskMemberCapacityAvailable(this.db,parent.owner_id,authorization.occurrence_id,authorization.max_active)||native.n+delegated.n>=authorization.max_delegations)throw new Error('task_collaboration_exhausted');
+   const planned=this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_native_task_intents'").get()
+     &&this.db.prepare('SELECT 1 FROM wb_native_task_intents WHERE owner_id=? AND root_run_id=? AND request_id=?').get(parent.owner_id,runId,String(input.request_id));
+   if(planned&&!this.intents)throw new Error('native_assignment_service_unavailable');
+   const assignment=this.intents?.bind(parent.owner_id,runId,String(input.request_id),String(input.role_ref),Number(input.expected_policy_version));
    const receipt={reservation_id:`native-${randomUUID()}`,...authorization,parent_session_ref:String(input.session_ref),child_session_ref:String(input.child_session_ref),
-    execution_lease:lease,root_budget_scope_ids:JSON.parse(budget.scopes_json),state:'reserved',execution_authorized:false,...(input.spawn_request_hash===undefined?{}:{spawn_request_hash:input.spawn_request_hash})};
+    execution_lease:lease,root_budget_scope_ids:JSON.parse(budget.scopes_json),state:'reserved',execution_authorized:false,...(assignment?{task_assignment:assignment}:{}),...(input.spawn_request_hash===undefined?{}:{spawn_request_hash:input.spawn_request_hash})};
    this.db.prepare('INSERT INTO wb_native_child_reservations VALUES(?,?,?,?,?,?,?,?,?,?)').run(receipt.reservation_id,parent.owner_id,runId,authorization.task_id,authorization.occurrence_id,String(input.child_session_ref),String(input.request_id),digest,JSON.stringify(receipt),new Date().toISOString());
    return receipt;
   });

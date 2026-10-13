@@ -1,9 +1,10 @@
 import type {DatabaseSync} from 'node:sqlite';
 import {assertExecutionLease,type ExecutionLease} from './execution-lease.ts';
+import {assertNativeTaskAssignment,type NativeTaskAssignment} from './native-task-intents.ts';
 import {assertNativeCollaborationPolicy} from './task-collaboration.ts';
 export type NativeReservation={reservation_id:string;owner_id:string;root_run_id:string;task_id:string;occurrence_id:string;generation:number;
  role_id:string;role_version:number;role_epoch:number;policy_version:number;parent_session_ref:string;child_session_ref:string;
- workspace_id:string;project_id:string;execution_lease:ExecutionLease;root_budget_scope_ids:string[]};
+ workspace_id:string;project_id:string;execution_lease:ExecutionLease;root_budget_scope_ids:string[];task_assignment?:NativeTaskAssignment};
 export function installNativeChildRuns(db:DatabaseSync){
  db.exec(`CREATE TABLE IF NOT EXISTS wb_native_child_reservations(
    reservation_id TEXT PRIMARY KEY,owner_id TEXT NOT NULL,root_run_id TEXT NOT NULL REFERENCES ga_runs(id),
@@ -80,5 +81,6 @@ export function assertNativeSnapshot(db:DatabaseSync,owner:string,saved:NativeRe
     UNION ALL SELECT run_id,occurrence_id FROM wb_task_auxiliary_runs) o ON o.run_id=a.run_id
   WHERE o.occurrence_id=? AND (a.state='unknown' OR a.bound_exceeded=1) LIMIT 1`).get(saved.occurrence_id);
  if(unresolved)throw new Error(unresolved.state==='unknown'?'budget_usage_unknown':'model_budget_exhausted');
+ if(saved.task_assignment)assertNativeTaskAssignment(db,owner,saved.task_assignment);
  return saved;
 }

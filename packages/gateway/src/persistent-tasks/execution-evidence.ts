@@ -91,10 +91,19 @@ export class TaskExecutionEvidence {
 
   verified(owner: string, taskId: string, ref: ExecutionEvidence, occurrenceId?: string): boolean {
     if (ref.kind !== 'tool_receipt' || typeof ref.reference !== 'string') return false;
-    const row = this.db.prepare(`SELECT e.result_hash,o.occurrence_id FROM wb_task_execution_receipts e
+    let row = this.db.prepare(`SELECT e.result_hash,o.occurrence_id FROM wb_task_execution_receipts e
       JOIN wb_task_run_occurrences o ON o.run_id=e.run_id JOIN wb_persistent_tasks t ON t.task_id=o.task_id
       WHERE e.receipt_id=? AND t.owner_id=? AND t.task_id=?`).get(ref.reference, owner, taskId) as
       {result_hash: string; occurrence_id: string} | undefined;
+    // Immutable execution lineage attests member material, not parent completion.
+    // This read remains valid after the lead changes a step; active authority is
+    // checked at execution, and historical receipts must not be rewritten.
+    if(!row&&this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_native_child_runs'").get()){
+      row=this.db.prepare(`SELECT e.result_hash,n.occurrence_id FROM wb_task_execution_receipts e
+        JOIN wb_native_execution_runs n ON n.run_id=e.run_id JOIN wb_persistent_tasks t ON t.task_id=n.task_id AND t.owner_id=n.owner_id
+        WHERE e.receipt_id=? AND n.owner_id=? AND t.task_id=? AND json_type(n.snapshot_json,'$.task_assignment.subtask_id')='text'`)
+        .get(ref.reference,owner,taskId) as {result_hash:string;occurrence_id:string}|undefined;
+    }
     return !!row && (occurrenceId === undefined || occurrenceId === row.occurrence_id)
       && (ref.hash === undefined || ref.hash === row.result_hash);
   }
