@@ -104,3 +104,13 @@ node --test packages/session-adapter/verification/native-task-stop-runtime.mjs
 Both require the explicit installed SDK path described above. The parallel scenario emits two delegation calls in one actual model tool batch and waits until both member models are in flight. It verifies a peak of two, two assignment-bound publications, separate file writes and receipts belonging to the original task, and no legacy queued delegation. The lead still needs to review the materials; the running steps are not reported as completed.
 
 The stop scenario performs the native Goal pause-and-clear sequence while a member model call is in flight. Neither Agent dispatches another model call, the member's following file write is rejected, and already dispatched usage settles normally. This verifies Goal stop, not every HTTP turn-cancel or worker interruption path. Upload/archive leaves remain inert in these probes. Full production provider/tool acceptance, abrupt-crash unknown usage, Handoff/fork/Swarm and broader cancellation remain separate gates.
+
+## Owner cancellation of a task occurrence
+
+```sh
+node --test packages/session-adapter/verification/native-task-cancel-runtime.mjs
+```
+
+With the same explicit SDK setting, this scenario cancels the original task occurrence through the actual gateway HTTP route during a member's first scripted model request. A different owner is rejected without changing the run. The owner request and its idempotent replay are accepted, persist exactly one cancel command and transition the original run to `cancelling`. Neither the lead nor the member dispatches another model request; the following member file write is rejected. Already dispatched usage settles without invented refunds, and no legacy delegation is created.
+
+This verifies the cancellation fence while execution is in flight. It does not prove the worker's final `cancelled` projection, all adapter turn-cancel behavior, cancellation during every external tool, or process-kill recovery. The adapter Session `/cancel` route and persistent-task occurrence cancellation have different scopes; callers must use the appropriate owner-checked gateway operation.
