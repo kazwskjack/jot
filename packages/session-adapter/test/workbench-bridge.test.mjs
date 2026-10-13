@@ -513,3 +513,26 @@ test('step admission reads official effective Session selection instead of stale
  selected={};assert.throws(()=>bridge.effectiveModelRoute(agent),/workbench_model_host_incompatible/);
  assert.throws(()=>new WorkbenchBridge({origin:'http://127.0.0.1:7654',token:'test-token-32-characters-fixture',modelRouteFor:1}),/workbench_bridge_config_invalid/);
 });
+
+// The same model-visible tool must choose exactly one host-authorized dispatcher.
+test('native delegate callback replaces the legacy tool request and failure never falls back',async()=>{
+ const h=host(),requests=[];let fail=false,called=0;
+ const bridge=new WorkbenchBridge({origin:'http://127.0.0.1:7654',token:'a'.repeat(32),nativeDelegate:async(agent,exact,callId,args)=>{
+  assert.equal(agent,h.agent);assert.equal(exact,bridge.bindingFor(h.agent));assert.equal(callId,'call-1');assert.equal(args.subtask_id,'step');called++;
+  if(fail)throw Error('native_publication_pending');return {runtime:'native_team',member:{id:'child'}};
+ },fetchImpl:async(url,init)=>{requests.push(JSON.parse(init.body));return new Response(JSON.stringify({context:{...context(),kind:'task',task_binding:{task_id:'task',occurrence_id:'occurrence',root_run_id:'run-1',task_version:1,generation:1,title:'Task',objective:'Inspect sources'}}}),{status:200});}});
+ // Routing-only fixture; Goal behavior is covered by the native lifecycle tests above.
+ bridge.goals.attach=async()=>{};bridge.goals.guard=async()=>{};
+ await bridge.attach(h.agent,binding);
+ const args={operation:'tasks.delegate',arguments_json:JSON.stringify({subtask_id:'step',expected_subtask_version:1,recipient_agent_id:'member'})};
+ assert.equal(JSON.parse(await h.execute('jot_workspace',args)).runtime,'native_team');
+ fail=true;await assert.rejects(h.execute('jot_workspace',args),/native_publication_pending/);
+ assert.equal(called,2);assert.equal(requests.some(r=>r.operation==='tasks.delegate'),false);
+});
+test('native task dispatcher cannot be invoked by a child or ordinary role conversation',async()=>{
+ const h=host();let calls=0;
+ const bridge=new WorkbenchBridge({origin:'http://127.0.0.1:7654',token:'a'.repeat(32),nativeDelegate:async()=>{calls++;},fetchImpl:async()=>new Response(JSON.stringify({context:{...context(),kind:'native_team',task_assignment:{subtask_id:'step'}}}),{status:200})});
+ await bridge.attach(h.agent,binding);
+ await assert.rejects(h.execute('jot_workspace',{operation:'tasks.delegate',arguments_json:JSON.stringify({subtask_id:'step',expected_subtask_version:1,recipient_agent_id:'member'})}),/workbench_task_scope_forbidden/);
+ assert.equal(calls,0);
+});

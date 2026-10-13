@@ -3,6 +3,7 @@ import { timingSafeEqual } from 'node:crypto'
 import { isAbsolute } from 'node:path'
 import { createVoiceAdapterHandler } from './voice.js'
 import {createBudgetModelSelector} from './budget-model-selection.js'
+import {createNativeTaskDispatcher} from './native-task-dispatch.js'
 import {createNativeRoleHost} from './native-role-host.js'
 import {conversationGoal} from './conversation-goal.js'
 import { WorkbenchBridge,normalizeHostExecutionLease } from './workbench.js'
@@ -339,8 +340,10 @@ export function apply(ctx, config = {}) {
   }
   const speechController = voiceEnabled ? ctx.speechController : undefined
   if (voiceEnabled && !speechController) throw new Error('jot_voice_speech_service_unavailable')
+  let nativeTaskDispatcher
   const workbenchBridge = workbenchToken.length >= 16 ? new WorkbenchBridge({
     origin: config.workbenchOrigin || 'http://127.0.0.1:18831', token: workbenchToken,
+    nativeDelegate:config.nativeRoles===true?(...args)=>{if(!nativeTaskDispatcher)throw new Error('native_task_dispatch_unavailable');return nativeTaskDispatcher(...args)}:undefined,
     webBudgetEnabled:config.webBudgetEnabled===true,
     nativeContinuation: config.nativeContinuation ?? false,
     modelRouteFor:config.workbenchModel?agent=>ctx.sessionController.agents.selectionFor(agent).current:undefined,
@@ -348,7 +351,7 @@ export function apply(ctx, config = {}) {
   const budgetModelSelector=createBudgetModelSelector({route:config.workbenchModel,llm:ctx.llm,agents:ctx.sessionController.agents})
   const nativeRoleHost=config.nativeRoles===true?createNativeRoleHost({ctx,bridge:workbenchBridge,selectModel:budgetModelSelector,
     sessions:ctx.sessions,persistence:ctx.sessionPersistence,automaticClosures:true,durableSpawns:true,nativeRecovery:config.nativeRoleRecovery===true}):undefined
-  if(nativeRoleHost)ctx.effect(()=>()=>nativeRoleHost.dispose())
+  if(nativeRoleHost){nativeTaskDispatcher=createNativeTaskDispatcher({bridge:workbenchBridge,host:nativeRoleHost});ctx.effect(()=>()=>nativeRoleHost.dispose())}
   const handler = createAdapterHandler({ controller: ctx.sessionController, fileUploads: ctx.fileUploads, agents: ctx.agents,
     sessions:ctx.sessions,persistence:ctx.sessionPersistence,
     speechController, voiceEnabled, token, workbenchBridge,

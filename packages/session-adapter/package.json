@@ -19,7 +19,8 @@
     "native-child-admission.js",
     "native-child-closure.js",
     "native-role-host.js",
-    "native-role-provider.js"
+    "native-role-provider.js",
+    "native-task-dispatch.js"
   ],
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",

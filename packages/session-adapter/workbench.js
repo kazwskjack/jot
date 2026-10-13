@@ -39,11 +39,11 @@ function validContext(context, binding) {
 // The bridge is scoped to one DSH Agent. It adds internal workspace facilities;
 // it neither registers another MCP server nor replaces existing permission policy.
 export class WorkbenchBridge {
-  constructor({ origin, token, fetchImpl = globalThis.fetch, nativeContinuation = false, webBudgetEnabled = false,modelRouteFor }) {
+  constructor({ origin, token, fetchImpl = globalThis.fetch, nativeContinuation = false, webBudgetEnabled = false,modelRouteFor,nativeDelegate }) {
     const url = new URL(origin);
     if (url.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)
       || url.pathname !== '/' || url.search || url.hash || url.username || url.password
-      || typeof token !== 'string' || token.length < 16 || typeof fetchImpl !== 'function' || typeof nativeContinuation !== 'boolean' || typeof webBudgetEnabled !== 'boolean'||(modelRouteFor!==undefined&&typeof modelRouteFor!=='function')) {
+      || typeof token !== 'string' || token.length < 16 || typeof fetchImpl !== 'function' || typeof nativeContinuation !== 'boolean' || typeof webBudgetEnabled !== 'boolean'||(modelRouteFor!==undefined&&typeof modelRouteFor!=='function')||(nativeDelegate!==undefined&&typeof nativeDelegate!=='function')) {
       throw new Error('workbench_bridge_config_invalid');
     }
     this.origin = url.origin;
@@ -51,6 +51,7 @@ export class WorkbenchBridge {
     this.fetch = fetchImpl;
     this.webBudgetEnabled = webBudgetEnabled;
     this.modelRouteFor=modelRouteFor;
+    this.nativeDelegate=nativeDelegate;
     this.goals = new WorkbenchGoalBridge({request:this.request.bind(this),nativeContinuation});
     this.installed = new WeakMap();
     this.attempts = new WeakMap();
@@ -368,6 +369,12 @@ export class WorkbenchBridge {
           if (!parameters || typeof parameters !== 'object' || Array.isArray(parameters)
             || Object.keys(parameters).some(key => !ARGUMENT_KEYS[args.operation].includes(key))) throw new Error('workbench_arguments_invalid');
           const snapshot = state.current;
+          if(args.operation==='tasks.delegate'&&this.nativeDelegate){
+            if(snapshot.context.kind!=='task'||!snapshot.context.task_binding)throw new Error('workbench_task_scope_forbidden');
+            const value=await this.nativeDelegate(agent,snapshot.binding,String(exec.callId),parameters,exec.signal);
+            if(state.current!==snapshot)throw new Error('workbench_binding_changed');
+            return JSON.stringify(value);
+          }
           if(args.operation==='tasks.propose'){
             if(!snapshot.context.task_binding)throw new Error('checkpoint_task_required');
             const route=this.effectiveModelRoute(agent);

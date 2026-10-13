@@ -40,17 +40,17 @@ The repository includes fixture tests for admission, ownership, revocation, idem
 
 Before deployment, verify both normal restart and abrupt exit, two concurrent members, cancellation and permission revocation. Confirm no duplicate member, model request or tool execution; preserve unknown usage; reject stale revisions and leases. Then test a real configured model and tools in an isolated owner account.
 
-The model-callable `tasks.delegate` path is not yet switched to this native Team host. Full Handoff/fork/Swarm behavior and business acceptance remain separate work. Enabling a host flag does not complete these paths. Keep the integration off until your required path has been wired and accepted.
+When `nativeRoles` is explicitly enabled, the model-callable `tasks.delegate` path now dispatches through the original native Team host. Full Handoff/fork/Swarm behavior and business acceptance remain separate work. Enabling a host flag does not complete these paths. Keep the integration off until your required path has been wired and accepted.
 
 ## Local release checks
 
-On Windows with Node 24, this change passed 163 Session adapter tests, 31 portable runtime tests, 105 workbench UI tests and 934 gateway tests. Six gateway cases were skipped for unavailable POSIX/Office conditions. Both web and gateway builds passed, and the packed adapter imported independently. These are local release checks, not external-provider or production acceptance.
+On Windows with Node 24, the native-dispatch change passed 169 Session adapter tests, 31 portable runtime tests and 40 focused gateway tests. The actual SDK verification also passed with the configured local scripted provider. The most recent full gateway check passed 945 tests, with six POSIX/Office cases skipped; its source was unchanged by this dispatcher change. Both web and gateway builds passed, and the packed dispatcher imported independently. These are local release checks, not external-provider or production acceptance.
 
 ## Native delegation intent journal
 
 `NativeTaskIntents` and the authenticated internal `native-task-intent` endpoint prepare an immutable assignment plan from a lead's existing task step. They bind the request to the owner, current occurrence, role grant and step revision. The endpoint also validates the original worker fence. Retries revalidate permission and return the same plan; changed arguments conflict, and edited steps or revoked grants reject replay.
 
-Planning does not reserve a child, enqueue the legacy mailbox, change a step to running, invoke a model or prove completion. `execution_authorized: false` is intentional. The model-callable `tasks.delegate` path still uses the existing implementation until native publication dispatch and complete host integration are verified together. Intent-to-reservation binding and member assignment/evidence guards are now implemented in the gateway. Do not call both dispatch paths for one request.
+Planning does not reserve a child, enqueue the legacy mailbox, change a step to running, invoke a model or prove completion. `execution_authorized: false` is intentional. With `nativeRoles: true`, the model-callable `tasks.delegate` path uses the immutable intent, assignment-bound reservation and native Host publication. With the flag disabled, it retains the original queue implementation. A native failure is surfaced without legacy fallback; never call both dispatch paths for one request.
 
 
 ## Bound member assignments and evidence
@@ -61,4 +61,17 @@ Child model/tool admission rechecks the current running step and revision as wel
 
 Actual member workspace operations return persisted execution receipts. Assigned-member receipts can be verified against the original owner/task/occurrence and result hash. Generic native roles without a task assignment do not contribute parent-task evidence. Receipts remain historical evidence after a step changes; they do not keep execution authority alive or prove that acceptance criteria were met. The member cannot update the parent task ledger; the lead must review materials and update the original step.
 
-These gateway boundaries do not yet switch the model-callable dispatcher to native Team. Keep native flags off until the full dispatch/recovery path and required production tools are accepted together.
+The adapter now composes these boundaries with native dispatch. Keep native flags off until the required restart, production-provider and tool paths are accepted in your environment.
+
+
+## Reproduce the model-callable path
+
+Provide an installed DSH `0.2.0-rc.2` host module directory through `JOT_DSH_RUNTIME_MODULES` (the directory containing the `@deepseek-ai` packages), then run:
+
+```sh
+node --test packages/session-adapter/verification/native-task-delegate-runtime.mjs
+```
+
+Without that explicit SDK path the optional test is skipped. With it, the test mounts the actual SDK, formal adapter `apply`, Session Controller, native Team and isolated gateway, then emits a real model tool call using a local scripted provider. It verifies one intent/reservation/publication, a member file write and owned receipt, no legacy task, and a successful native tool result delivered to the lead. Upload and archive leaves are inert test facades; this is not their acceptance or a live-provider test.
+
+Native internal handles are stable lowercase identifiers derived from role and request identity, satisfying Team name constraints. Human role names, including Chinese names, remain in the saved role context; the handle does not change its permissions or identity. Packaging includes the dispatcher runtime module.
