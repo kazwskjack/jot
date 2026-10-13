@@ -10,6 +10,7 @@ import {captureNativeChildClosure} from '../native-child-closure.js';
 import {apply} from '../index.js';
 import {TaskExecutionEvidence} from '../../gateway/src/persistent-tasks/execution-evidence.ts';
 import {createServer as portProbe} from 'node:http';
+import {SessionCommandDispatcher} from '../../gateway/src/harness/command-dispatcher.ts';
 import {createBudgetModelSelector} from '../budget-model-selection.js';
 
 test('actual owner occurrence cancellation fences native members and preserves sent usage',{timeout:60000,skip:!process.env.JOT_DSH_RUNTIME_MODULES},async t=>{
@@ -60,5 +61,13 @@ test('actual owner occurrence cancellation fences native members and preserves s
  assert.equal(service.db.prepare('SELECT count(*) n FROM wb_task_file_execution_receipts').get().n,0);
  assert.equal(service.db.prepare('SELECT count(*) n FROM wb_task_delegations').get().n,0);
  const attempts=service.db.prepare('SELECT state,actual_tokens FROM wb_model_budget_attempts').all();const spent=attempts.filter(a=>a.state==='settled');assert.equal(spent.length,2);assert.ok(spent.every(a=>a.actual_tokens==='10'));assert.ok(attempts.every(a=>!['in_flight','unknown'].includes(a.state)),'known completed calls must remain settled; undispatched admission holds are not invented model calls');
- assert.equal(coordinator.claimNext('legacy-worker',30000),null);t.diagnostic(JSON.stringify({formalApply:true,actualHttp:true,actualSessionController:true,actualNativeTeam:true,occurrenceCancellation:true,actualOwnerCancelHttp:true,foreignOwnerDenied:true,idempotentReplay:true,newMemberWriteDenied:true,dispatchedUsageRetained:true,legacyRuns:0,modelCalls:calls,provider:'local scripted',inertLeaves:['upload','workspace archive'],production:false}));
+ let adapterCancels=0;
+ const dispatcher=new SessionCommandDispatcher(service.db,service.events,{prompt:async()=>{throw new Error('cancel must not prompt');},cancel:async id=>{adapterCancels++;assert.equal(id,sessionRef);const denied=await post('/v1/sessions/'+id+'/cancel',{},false);assert.notEqual(denied.status,202);const receipt=await post('/v1/sessions/'+id+'/cancel',{});assert.equal(receipt.status,202);assert.equal(receipt.value.attached,true);assert.equal(receipt.value.settled,true);return receipt.value;}},()=>true);
+ assert.equal(await dispatcher.processNext(),true);assert.equal(service.runs.get(occurrence.run_id,owner).status,'cancelled');assert.equal(service.runs.get(occurrence.run_id,owner).error_code,'USER_CANCELLED');
+ assert.equal(await dispatcher.processNext(),false);assert.equal(adapterCancels,1);
+ assert.equal(service.db.prepare("SELECT status FROM ga_run_commands WHERE run_id=? AND kind='cancel'").get(occurrence.run_id).status,'applied');
+ assert.equal(service.db.prepare("SELECT count(*) n FROM ga_events WHERE run_id=? AND type='run.state' AND json_extract(payload_json,'$.status')='cancelled'").get(occurrence.run_id).n,1);
+ assert.deepEqual(service.db.prepare('SELECT state,actual_tokens FROM wb_model_budget_attempts').all(),attempts);
+ assert.equal(calls.lead,1);assert.equal(calls.child,1);
+ assert.equal(coordinator.claimNext('legacy-worker',30000),null);t.diagnostic(JSON.stringify({formalApply:true,actualHttp:true,actualSessionController:true,actualNativeTeam:true,occurrenceCancellation:true,actualWorkerCommandDispatcher:true,adapterIdleConfirmed:true,finalCancelled:true,actualOwnerCancelHttp:true,foreignOwnerDenied:true,idempotentReplay:true,newMemberWriteDenied:true,dispatchedUsageRetained:true,legacyRuns:0,modelCalls:calls,provider:'local scripted',inertLeaves:['upload','workspace archive'],production:false}));
 });
