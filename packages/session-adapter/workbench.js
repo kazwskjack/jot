@@ -173,6 +173,7 @@ export class WorkbenchBridge {
     await this.guard(agent,signal);
     if(this.installed.get(agent)?.current.context.model_budget?.enforced!==true)throw new Error('workbench_budget_binding_required');
   }
+  bindingFor(agent){return this.installed.get(agent)?.current.binding;}
 
   async observe(agent,signal) {
     const state=this.installed.get(agent),current=state?.current;

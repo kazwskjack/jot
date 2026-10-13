@@ -263,3 +263,7 @@ The gateway has a host-only [web-decision budget grant foundation](WEB-DECISION-
 It preserves original-run accounting and role authority but does not yet connect
 the official MCP transport and external Python providers. Gateway tests alone
 must not be used to claim that those provider calls are budget-enforced.
+
+## Optional native Team bridge
+
+[Native role integration](NATIVE_ROLES.md) documents the saved-role lifecycle, shared workspace and accounting, default-off deployment gates and remaining model-callable dispatch work. The lead retains planning and final-answer responsibility.

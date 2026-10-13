@@ -14,6 +14,8 @@ import {installTaskRunLineage,bindTaskContinuation} from '../persistent-tasks/ta
 import {installTaskMailbox,bindTaskMailbox,currentTaskMailbox,taskMemberCapacityAvailable} from './task-mailbox.ts';
 import {taskAssignmentForMessage} from './task-delegation.ts';
 import {automaticDelegationLimit} from './task-collaboration.ts';
+import {installNativeChildRuns,assertNativeReservation,assertNativeRun,assertNativeSnapshot,type NativeReservation} from './native-child-identity.ts';
+import {assertExecutionLease} from './execution-lease.ts';
 
 type Input = Record<string, unknown>;
 type Row = Record<string, string | number | null>;
@@ -67,6 +69,7 @@ export class WorkbenchService {
     this.db = db; this.options = options;
     installTaskRunLineage(db);
     installTaskMailbox(db);
+    installNativeChildRuns(db);
     this.projects = new ProjectRepository(db);
     this.conversations = new ConversationRepository(db, this.projects);
     this.events = new EventStore(db); this.runs = new RunRepository(db, this.events);
@@ -234,6 +237,124 @@ export class WorkbenchService {
       this.options.modelBudgetPolicy?.allocate(owner,runId);
     });
   }
+  /** Authenticated native host only. Preparing records never starts a driver. */
+  prepareNativeChild(owner:string,reservationId:string){
+    return this.transaction(()=>{
+      const saved=assertNativeReservation(this.db,owner,reservationId);
+      const prior=this.db.prepare('SELECT run_id FROM wb_native_child_runs WHERE reservation_id=? AND owner_id=?').get(reservationId,owner) as {run_id:string}|undefined;
+      if(prior){this.assertRunActive(prior.run_id);const run=this.runs.get(prior.run_id,owner);return {run_id:prior.run_id,conversation_id:String(run.conversation_id),session_ref:saved.child_session_ref};}
+      const role=this.active(owner,saved.role_id);
+      if(role.version!==saved.role_version||role.capability_epoch!==saved.role_epoch)throw new Error('task_collaboration_revoked');
+      const model=this.conversations.get(role.conversation_id,owner).model;
+      const conversation=this.conversations.create(owner,{workspace_id:saved.workspace_id,project_id:saved.project_id,title:`Team：${role.name}`,model});
+      const now=timestamp();this.db.prepare('UPDATE ga_conversations SET archived_at=? WHERE id=?').run(now,conversation.conversation_id);
+      const run=this.runs.enqueue(conversation.conversation_id,owner,{client_message_id:`native:${reservationId}`,content:[{type:'text',text:'原生Team成员运行；使用已保存角色和同一工作区，只在父任务权限内处理成员消息。'}]},{executionMode:'native'});
+      this.db.prepare('INSERT INTO wb_native_child_runs VALUES(?,?,?,?,?,?,?,?,?)').run(String(run.run_id),reservationId,owner,saved.root_run_id,saved.task_id,saved.occurrence_id,saved.role_id,saved.child_session_ref,now);
+      this.bindRun(owner,saved.role_id,String(run.run_id),'native_team');
+      this.db.prepare('INSERT INTO ga_harness_session_bindings VALUES(?,?,?,?,?)').run(conversation.conversation_id,owner,saved.child_session_ref,now,now);
+      return {run_id:String(run.run_id),conversation_id:conversation.conversation_id,session_ref:saved.child_session_ref};
+    });
+  }
+  /** A new fenced root worker may classify lost native streams as unknown.
+   * Never infer failure from a timeout or classify a still-authorized driver. */
+  reconcileNativeInterruptedCalls(owner:string,rootRunId:string,expectedLease:unknown){
+    return this.transaction(()=>{
+      const current=assertExecutionLease(this.db,rootRunId,expectedLease);
+      const parent=this.db.prepare(`SELECT b.kind FROM wb_run_bindings b JOIN ga_runs r ON r.id=b.run_id JOIN ga_conversations c ON c.id=r.conversation_id
+        WHERE b.run_id=? AND b.owner_id=? AND c.owner_id=?`).get(rootRunId,owner,owner);
+      if(parent?.kind!=='task')throw new Error('workbench_identity_forbidden');
+      const ledger=this.options.modelBudgetPolicy?.ledger;if(!ledger)throw new Error('budget_service_unavailable');
+      const attempts=this.db.prepare(`SELECT a.run_id,a.attempt_id,n.snapshot_json FROM wb_model_budget_attempts a
+        JOIN wb_native_execution_runs n ON n.run_id=a.run_id WHERE n.owner_id=? AND n.root_run_id=? AND a.state='in_flight'`).all(owner,rootRunId);
+      for(const row of attempts){const saved=JSON.parse(String(row.snapshot_json)) as NativeReservation;
+        if(current.generation<=saved.execution_lease.generation)throw new Error('native_recovery_fence_live');}
+      for(const row of attempts)ledger.markUnknown(owner,String(row.run_id),String(row.attempt_id),'stream_incomplete');
+      return {marked_unknown:attempts.length};
+    });
+  }
+  /** Resolve durable recovery metadata. This is not execution admission. */
+  nativeChildSource(owner:string,input:Input){
+    return this.transaction(()=>{
+      const child=String(input.child_session_ref??'');if(!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(child))throw new Error('native_activation_invalid');
+      const row=this.db.prepare(`SELECT n.run_id,n.snapshot_json,c.receipt_json FROM wb_native_execution_runs n
+        LEFT JOIN wb_native_execution_closures c ON c.run_id=n.run_id WHERE n.owner_id=? AND n.child_session_ref=?
+        AND NOT EXISTS (SELECT 1 FROM wb_native_child_activations next WHERE next.previous_run_id=n.run_id)`).get(owner,child) as Row|undefined;
+      if(!row)throw new Error('workbench_identity_forbidden');
+      const saved=JSON.parse(String(row.snapshot_json)) as NativeReservation;
+      if(saved.parent_session_ref!==input.session_ref)throw new Error('workbench_identity_forbidden');
+      const lease=assertExecutionLease(this.db,String(input.run_id),input.execution_lease);
+      const budget=this.db.prepare('SELECT scopes_json FROM wb_model_budget_bindings WHERE owner_id=? AND run_id=?').get(owner,String(input.run_id)) as Row|undefined;
+      if(!budget)throw new Error('budget_binding_invalid');
+      assertNativeSnapshot(this.db,owner,{...saved,root_run_id:String(input.run_id),execution_lease:lease,root_budget_scope_ids:JSON.parse(String(budget.scopes_json))});
+      const role=this.active(owner,saved.role_id);if(role.version!==saved.role_version||role.capability_epoch!==saved.role_epoch)throw new Error('task_collaboration_revoked');
+      if(!row.receipt_json)throw new Error('native_activation_source_pending');
+      return {previous_run_id:String(row.run_id),role_ref:saved.role_id,proof:JSON.parse(String(row.receipt_json))};
+    });
+  }
+  /** Prepare a new execution identity for the same durable native Session.
+   * This does not deliver messages or start an SDK driver. */
+  prepareNativeActivation(owner:string,input:Input){
+    const keys=['run_id','session_ref','child_session_ref','previous_run_id','previous_log_sha256','previous_seq_exclusive','execution_lease'];
+    if(!input||Object.keys(input).some(key=>!keys.includes(key))||keys.slice(0,4).some(key=>typeof input[key]!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(String(input[key])))
+      ||typeof input.previous_log_sha256!=='string'||!/^[a-f0-9]{64}$/.test(input.previous_log_sha256)||!Number.isSafeInteger(input.previous_seq_exclusive)||Number(input.previous_seq_exclusive)<1)throw new Error('native_activation_invalid');
+    return this.transaction(()=>{
+      const previous=this.db.prepare(`SELECT n.*,r.conversation_id FROM wb_native_execution_runs n JOIN ga_runs r ON r.id=n.run_id
+        WHERE n.run_id=? AND n.owner_id=? AND n.child_session_ref=?`).get(String(input.previous_run_id),owner,String(input.child_session_ref)) as Row|undefined;
+      if(!previous)throw new Error('workbench_identity_forbidden');
+      const saved=JSON.parse(String(previous.snapshot_json)) as NativeReservation;
+      if(saved.parent_session_ref!==input.session_ref)throw new Error('workbench_identity_forbidden');
+      const priorClosure=this.db.prepare('SELECT receipt_json FROM wb_native_execution_closures WHERE run_id=?').get(String(input.previous_run_id)) as Row|undefined;
+      if(!priorClosure)throw new Error('native_activation_source_pending');
+      const proof=JSON.parse(String(priorClosure.receipt_json));
+      if(proof.log_sha256!==input.previous_log_sha256||proof.seq_exclusive!==input.previous_seq_exclusive)throw new Error('native_activation_source_changed');
+      const lease=assertExecutionLease(this.db,String(input.run_id),input.execution_lease);
+      const budget=this.db.prepare('SELECT scopes_json FROM wb_model_budget_bindings WHERE owner_id=? AND run_id=?').get(owner,String(input.run_id)) as Row|undefined;
+      if(!budget)throw new Error('budget_binding_invalid');
+      const snapshot={...saved,root_run_id:String(input.run_id),execution_lease:lease,root_budget_scope_ids:JSON.parse(String(budget.scopes_json)),
+        previous_run_id:String(input.previous_run_id),source_log_sha256:input.previous_log_sha256,source_seq_exclusive:input.previous_seq_exclusive};
+      assertNativeSnapshot(this.db,owner,snapshot);
+      const role=this.active(owner,saved.role_id);if(role.version!==saved.role_version||role.capability_epoch!==saved.role_epoch)throw new Error('task_collaboration_revoked');
+      const digest=hash(JSON.stringify(snapshot));
+      const existing=this.db.prepare('SELECT run_id,snapshot_json FROM wb_native_child_activations WHERE previous_run_id=?').get(String(input.previous_run_id)) as Row|undefined;
+      if(existing){if(hash(String(existing.snapshot_json))!==digest)throw new Error('native_activation_source_changed');this.assertRunActive(String(existing.run_id));return {run_id:String(existing.run_id),conversation_id:String(previous.conversation_id),session_ref:saved.child_session_ref};}
+      const policy=this.db.prepare('SELECT max_active FROM wb_task_collaboration_grants WHERE owner_id=? AND task_id=? AND version=?').get(owner,saved.task_id,saved.policy_version) as Row|undefined;
+      if(!policy||!taskMemberCapacityAvailable(this.db,owner,saved.occurrence_id,Number(policy.max_active)))throw new Error('task_collaboration_exhausted');
+      const activationId=`activation-${randomUUID()}`,now=timestamp();
+      const run=this.runs.enqueue(String(previous.conversation_id),owner,{client_message_id:activationId,content:[{type:'text',text:'原生Team成员恢复；同一会话中的新执行身份，仅处理原生邮箱消息。'}]},{executionMode:'native'});
+      this.db.prepare('INSERT INTO wb_native_child_activations VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').run(String(run.run_id),activationId,saved.reservation_id,String(input.previous_run_id),owner,snapshot.root_run_id,saved.task_id,saved.occurrence_id,saved.role_id,saved.child_session_ref,JSON.stringify(snapshot),now);
+      this.bindRun(owner,saved.role_id,String(run.run_id),'native_team');
+      return {run_id:String(run.run_id),conversation_id:String(previous.conversation_id),session_ref:saved.child_session_ref};
+    });
+  }
+  /** Trusted native host persistence readback, never model/user completion. */
+  closeNativeChild(owner:string,runId:string,proof:Input){
+    const keys=['protocol','session_ref','parent_session_ref','seq_exclusive','turn_end_seq','log_sha256','driver_nonresident','inbox_pending'];
+    if(!proof||Array.isArray(proof)||Object.keys(proof).some(key=>!keys.includes(key))||proof.protocol!==1||proof.driver_nonresident!==true||proof.inbox_pending!==0
+      ||typeof proof.session_ref!=='string'||typeof proof.parent_session_ref!=='string'||!Number.isSafeInteger(proof.seq_exclusive)||Number(proof.seq_exclusive)<1
+      ||!Number.isSafeInteger(proof.turn_end_seq)||Number(proof.turn_end_seq)<0||Number(proof.turn_end_seq)>=Number(proof.seq_exclusive)
+      ||typeof proof.log_sha256!=='string'||!/^[a-f0-9]{64}$/.test(proof.log_sha256))throw new Error('native_child_closure_invalid');
+    return this.transaction(()=>{
+      const native=this.db.prepare(`SELECT n.reservation_id,n.activation_id,n.child_session_ref,n.snapshot_json,r.conversation_id,r.reason_code FROM wb_native_execution_runs n
+        JOIN ga_runs r ON r.id=n.run_id
+        JOIN wb_run_bindings b ON b.run_id=n.run_id AND b.owner_id=n.owner_id AND b.kind='native_team' WHERE n.run_id=? AND n.owner_id=?`).get(runId,owner) as Row|undefined;
+      if(!native||native.child_session_ref!==proof.session_ref||JSON.parse(String(native.snapshot_json)).parent_session_ref!==proof.parent_session_ref)throw new Error('workbench_identity_forbidden');
+      const receiptJson=JSON.stringify(Object.fromEntries(keys.map(key=>[key,proof[key]]))),digest=hash(receiptJson);
+      const prior=this.db.prepare('SELECT receipt_sha256 FROM wb_native_execution_closures WHERE run_id=?').get(runId) as Row|undefined;
+      if(prior){if(prior.receipt_sha256!==digest)throw new Error('native_child_closure_conflict');return {closed:true,run_id:runId,reservation_id:String(native.reservation_id)};}
+      if(native.reason_code==='OUTCOME_UNKNOWN'||this.db.prepare("SELECT 1 FROM wb_model_budget_attempts WHERE run_id=? AND state IN ('in_flight','unknown') LIMIT 1").get(runId))throw new Error('native_child_closure_pending');
+      const ledger=this.options.modelBudgetPolicy?.ledger;if(!ledger)throw new Error('budget_service_unavailable');
+      const reserved=this.db.prepare("SELECT attempt_id FROM wb_model_budget_attempts WHERE run_id=? AND state='reserved'").all(runId);
+      for(const row of reserved)ledger.releaseUndispatched(owner,runId,String(row.attempt_id));
+      const now=timestamp();
+      if(native.activation_id)this.db.prepare('INSERT INTO wb_native_activation_closures VALUES(?,?,?,?)').run(runId,digest,receiptJson,now);
+      else this.db.prepare('INSERT INTO wb_native_child_closures VALUES(?,?,?,?,?)').run(String(native.reservation_id),runId,digest,receiptJson,now);
+      // Parking is an execution observation, not business success or permission
+      // to cold-resume. A new activation needs a new durable authorization.
+      this.db.prepare("UPDATE ga_runs SET status='interrupted',reason_code='NATIVE_CHILD_QUIESCENT',version=version+1,updated_at=? WHERE id=?").run(now,runId);
+      this.events.append(String(native.conversation_id),runId,'run.state',this.runs.get(runId,owner));
+      return {closed:true,run_id:runId,reservation_id:String(native.reservation_id)};
+    });
+  }
   /** Continuations may not lose their frozen role or escape an occurrence budget. */
   inheritCheckpointRun(owner:string,originalRunId:string,newRunId:string):void {
     const context=this.contextForRun(originalRunId);
@@ -310,6 +431,10 @@ export class WorkbenchService {
     const agent = this.active(String(row.owner_id), String(row.agent_id));
     if (agent.capability_epoch !== Number(row.epoch)) throw new Error('agent_capability_revoked');
     const context = { ...JSON.parse(String(row.context_json)), run_id: runId } as AgentRunContext;
+    if(row.kind==='native_team'){
+      const saved=assertNativeRun(this.db,String(row.owner_id),runId);
+      if(saved.role_id!==agent.agent_id||saved.role_epoch!==agent.capability_epoch)throw new Error('task_collaboration_revoked');
+    }
     if(row.kind==='internal_mailbox'){
       const msg=this.db.prepare('SELECT message_id,thread_id FROM wb_agent_messages WHERE run_id=? AND owner_id=?').get(runId,String(row.owner_id)) as Row|undefined;
       if(msg){currentTaskMailbox(this.db,String(row.owner_id),String(msg.thread_id));

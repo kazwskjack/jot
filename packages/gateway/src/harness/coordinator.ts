@@ -56,7 +56,7 @@ export class HarnessCoordinator {
         JOIN wb_run_bindings ab ON ab.run_id=ar.id JOIN ga_conversations ac ON ac.id=ar.conversation_id
         WHERE ab.kind IN ('task','internal_mailbox') AND ar.status IN ('starting','running','waiting_user','waiting_approval','cancelling') AND CAST(al.expires_at AS INTEGER)>?`;
       const admission=!hasBindings ? '' : !this.backgroundOptions.allowBackgroundRuns ? 'AND b.run_id IS NULL' :
-        `AND (b.kind IS NULL OR b.kind NOT IN ('task','internal_mailbox') OR
+        `AND (b.kind IS NULL OR b.kind <> 'native_team') AND (b.kind IS NULL OR b.kind NOT IN ('task','internal_mailbox') OR
           ((${activeBackground})<? AND (${activeBackground} AND ac.owner_id=c.owner_id)<?))`;
       const order=hasBindings ? `CASE WHEN b.kind IN ('task','internal_mailbox') THEN 1 ELSE 0 END,
         ${hasTaskPriority ? 'COALESCE(t.priority,50)' : 'CAST(50 AS INTEGER)'} DESC,` : '';

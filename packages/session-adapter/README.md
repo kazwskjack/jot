@@ -7,7 +7,7 @@ A Cordis plugin that connects the extended Jot gateway to an existing DSH Sessio
 The package declares these peer dependencies:
 
 - `@deepseek-ai/cordis` `^4.0.2`
-- `@deepseek-ai/dsh-api-session-controller` `0.1.7-alpha.2`
+- `@deepseek-ai/dsh-api-session-controller` `0.1.7-alpha.2` or `0.2.0-rc.2`
 
 The host must provide `sessionController`, `fileUploads`, `agents`, `sessions` and `sessionPersistence`. When voice is enabled it must also provide `speechController` and a configured speech provider. These services, model credentials, Agent presets and actual tool backends are configured in the host; copying this directory does not create them.
 
@@ -105,3 +105,7 @@ When a profile declares explicit dependency injection, include
 and `llm` for the complete budgeted adapter. Preserve the existing host, port,
 authentication environment reference and ordinary provider configuration.
 Compose the complete profile with the installed SDK before restarting it.
+
+## Optional native roles and Goal controls
+
+See [Native role integration](../../NATIVE_ROLES.md) for host requirements, default-off flags, durable publication and cold activation. The ordinary native Goal control endpoint is authenticated and revision checked. Native Team support requires the newer host APIs; the older transport peer version is not a Team compatibility claim.

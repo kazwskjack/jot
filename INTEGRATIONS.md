@@ -153,3 +153,7 @@ The Session adapter includes `image-output.js`, an optional output helper for a 
 Keep normal reads text-only. When text cannot answer an image-based question, inspect loaded image dimensions first, then read an observed image identifier from the same owner-bound page snapshot. An image URL or page text must never confer permission. Navigation, expiry and changed image sources invalidate identifiers. For long images, use bounded overlapping tiles and a continuation cursor; cache only within the owning snapshot. A source-image failure may fall back to the observed element screenshot, with its method clearly recorded.
 
 The helper accepts at most three JPEG tiles and 1.5 MB of decoded bytes per result. The browser backend remains responsible for source limits, verified image decoding, capture, tile order and owner isolation. Persist attachment references without Base64; omit private storage references from model-visible metadata. Never publish internal file paths as image links. Jev/Laya action advice stays separate from the Agent's visual interpretation. This helper's tests cover output conversion and privacy; they do not prove that an external browser backend or a user's chosen model is deployed and ready.
+
+## Optional native Team bridge
+
+[Native role integration](NATIVE_ROLES.md) documents the saved-role lifecycle, shared workspace and accounting, default-off deployment gates and remaining model-callable dispatch work. The lead retains planning and final-answer responsibility.

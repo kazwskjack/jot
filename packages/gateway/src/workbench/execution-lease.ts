@@ -15,6 +15,15 @@ export function normalizeExecutionLease(value:unknown):ExecutionLease {
 
 export function assertExecutionLease(db:DatabaseSync,runId:string,expected:unknown,now:()=>number=Date.now):ExecutionLease {
   const original=normalizeExecutionLease(expected);
+  if(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_native_child_runs'").get()){
+    const child=db.prepare('SELECT root_run_id,snapshot_json FROM wb_native_execution_runs WHERE run_id=?').get(runId) as {root_run_id:string;snapshot_json:string}|undefined;
+    if(child){
+      const saved=normalizeExecutionLease(JSON.parse(child.snapshot_json).execution_lease);
+      if(child.root_run_id===runId||saved.owner!==original.owner||saved.generation!==original.generation
+        ||db.prepare('SELECT 1 FROM wb_native_execution_runs WHERE run_id=?').get(child.root_run_id))throw rejected();
+      return assertExecutionLease(db,child.root_run_id,original,now);
+    }
+  }
   const current=db.prepare('SELECT owner,generation,expires_at FROM ga_worker_leases WHERE resource_id=?').get(runId);
   const expiry=Number(current?.expires_at);
   if(!current||current.owner!==original.owner||current.generation!==original.generation

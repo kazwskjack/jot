@@ -18,6 +18,7 @@ import {assertTaskDependenciesReady,eligibleTaskOccurrence} from '../persistent-
 import {occurrenceSubtaskRows} from '../persistent-tasks/subtask-state.ts';
 import type { ModelBudgetLedger, ModelBudgetRequest } from './model-budget.ts';
 import type {TaskCollaborationService} from './task-collaboration.ts';
+import {NativeChildReservations} from './native-child-reservations.ts';
 import {savedSessionCheckpoint} from '../harness/session-checkpoints.ts';
 import {installTaskCompletionCandidates} from '../persistent-tasks/completion-candidates.ts';
 import {installTaskBusinessReviews,currentTaskBusinessCertificate} from '../persistent-tasks/business-review.ts';
@@ -73,6 +74,58 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
   installTaskBusinessReviews(db);
   installTaskCompletionHandshake(db);
   installTaskFinalizations(db);
+  const nativeChildren=collaboration?new NativeChildReservations(db,collaboration):undefined;
+  app.post('/internal/v1/workbench/native-child-reservation',async request=>{
+    authorized(request.headers.authorization);
+    if(!nativeChildren)throw new Error('task_collaboration_forbidden');
+    return {reservation:nativeChildren.reserve(object(request.body))};
+  });
+  app.post('/internal/v1/workbench/native-child-request',async request=>{
+    authorized(request.headers.authorization);if(!nativeChildren)throw new Error('task_collaboration_forbidden');
+    const input=object(request.body);fields(input,['run_id','session_ref','request_id','spawn_request_hash']);
+    context(input);return {reservation:nativeChildren.lookup(input)};
+  });
+  app.post('/internal/v1/workbench/native-child-published',async request=>{
+    authorized(request.headers.authorization);if(!nativeChildren)throw new Error('task_collaboration_forbidden');
+    const input=object(request.body);fields(input,['run_id','session_ref','request_id','spawn_request_hash','publication']);
+    context(input);return {publication:nativeChildren.publish(input)};
+  });
+  app.post('/internal/v1/workbench/native-child-bind',async request=>{
+    authorized(request.headers.authorization);const input=object(request.body);
+    fields(input,['run_id','session_ref','reservation_id']);
+    if(typeof input.reservation_id!=='string')throw new Error('native_child_request_invalid');
+    const reservationId=input.reservation_id;
+    return withImmediateTransaction(db,()=>{
+      const identity=context(input);assertExecutionLease(db,identity.run_id,input.execution_lease);
+      if(!db.prepare('SELECT 1 FROM wb_native_child_reservations WHERE reservation_id=? AND owner_id=? AND root_run_id=?').get(reservationId,identity.owner_id,identity.run_id))throw new Error('workbench_identity_forbidden');
+      const child=workbench.prepareNativeChild(identity.owner_id,reservationId);
+      return {binding:{runId:child.run_id,sessionRef:child.session_ref,executionLease:normalizeExecutionLease(input.execution_lease)}};
+    });
+  });
+  app.post('/internal/v1/workbench/native-child-close',async request=>{
+    authorized(request.headers.authorization);const input=object(request.body);fields(input,['run_id','session_ref','proof']);
+    return workbench.closeNativeChild(accountingOwner(input),String(input.run_id),object(input.proof));
+  });
+  app.post('/internal/v1/workbench/native-child-activate',async request=>{
+    authorized(request.headers.authorization);const input=object(request.body);
+    fields(input,['run_id','session_ref','child_session_ref','previous_run_id','previous_log_sha256','previous_seq_exclusive']);
+    return withImmediateTransaction(db,()=>{
+      assertExecutionLease(db,String(input.run_id),input.execution_lease);const parent=context(input);requireTask(parent);
+      const child=workbench.prepareNativeActivation(parent.owner_id,input);
+      return {binding:{runId:child.run_id,sessionRef:child.session_ref,executionLease:normalizeExecutionLease(input.execution_lease)}};
+    });
+  });
+  app.post('/internal/v1/workbench/native-child-source',async request=>{
+    authorized(request.headers.authorization);const input=object(request.body);fields(input,['run_id','session_ref','child_session_ref']);
+    return withImmediateTransaction(db,()=>{
+      assertExecutionLease(db,String(input.run_id),input.execution_lease);const parent=context(input);requireTask(parent);
+      return {source:workbench.nativeChildSource(parent.owner_id,input)};
+    });
+  });
+  app.post('/internal/v1/workbench/native-model-recovery',async request=>{
+    authorized(request.headers.authorization);const input=object(request.body);fields(input,['run_id','session_ref']);
+    return workbench.reconcileNativeInterruptedCalls(accountingOwner(input),String(input.run_id),input.execution_lease);
+  });
   app.post('/internal/v1/workbench/completion-recovery',async request=>{
     authorized(request.headers.authorization);
     const input=object(request.body);fields(input,['run_id','session_ref']);
@@ -162,17 +215,32 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       assertTaskDependenciesReady(db,executionEvidence,resolved.owner_id,requireTask(resolved).task_id,resolved.run_id);
     return {...resolved,...(resolved.kind==='task'?{task_binding:requireTask(resolved)}:{}),...budgetContext(resolved.owner_id,resolved.run_id)};
   }
-  function assertTaskModelAccounting(task:TaskBinding) {
+  function assertTaskModelAccounting(task:TaskBinding,pendingRunId?:string) {
     const unresolved=db.prepare(`SELECT a.state,a.bound_exceeded FROM wb_model_budget_attempts a
-      JOIN wb_task_run_occurrences o ON o.run_id=a.run_id
-      WHERE o.occurrence_id=? AND (a.state IN ('unknown','in_flight') OR a.bound_exceeded=1)
-      ORDER BY CASE a.state WHEN 'unknown' THEN 0 WHEN 'in_flight' THEN 1 ELSE 2 END LIMIT 1`).get(task.occurrence_id) as {state:string;bound_exceeded:number}|undefined;
+      JOIN (SELECT run_id,occurrence_id FROM wb_task_run_occurrences UNION ALL SELECT run_id,occurrence_id FROM wb_native_execution_runs) o ON o.run_id=a.run_id
+      WHERE o.occurrence_id=? AND (a.state='unknown' OR a.bound_exceeded=1
+        OR (a.state='in_flight' AND (? IS NULL OR a.run_id=?
+          OR NOT EXISTS (SELECT 1 FROM wb_native_execution_runs peer WHERE peer.run_id=a.run_id))))
+      ORDER BY CASE a.state WHEN 'unknown' THEN 0 WHEN 'in_flight' THEN 1 ELSE 2 END LIMIT 1`).get(task.occurrence_id,pendingRunId??null,pendingRunId??null) as {state:string;bound_exceeded:number}|undefined;
     if(unresolved)throw new Error(unresolved.state==='unknown'?'budget_usage_unknown':unresolved.state==='in_flight'?'budget_usage_pending':'model_budget_exhausted');
+  }
+  function assertIdentityAccounting(identity:ReturnType<typeof context>){
+    // Admission serializes one execution identity. Distinct native members
+    // reserve shared scope capacity atomically in the original ledger; known
+    // peer holds do not serialize the whole Team. Non-native ancestor holds
+    // still block a continuation. Completion retains the
+    // default occurrence-wide wait, and unknown/exceeded spend blocks all.
+    if(identity.task_binding){assertTaskModelAccounting(identity.task_binding,identity.run_id);return;}
+    if(identity.kind==='native_team'){
+      const native=db.prepare('SELECT root_run_id FROM wb_native_execution_runs WHERE run_id=? AND owner_id=?').get(identity.run_id,identity.owner_id) as {root_run_id:string}|undefined;
+      if(!native)throw new Error('workbench_identity_forbidden');
+      assertTaskModelAccounting(requireTask(workbench.contextForRun(native.root_run_id)!),identity.run_id);
+    }
   }
   const webBudgets=modelBudgets&&token&&token.length>=16?new WebDecisionBudgetService(db,{ledger:modelBudgets,secret:token,guard:(owner,run)=>createAuxiliaryRunGuard(db,workbench,tasks,owner,run)}):undefined;
   app.post('/internal/v1/workbench/web-budget-grant',async request=>{
     authorized(request.headers.authorization);const input=object(request.body);fields(input,['run_id','session_ref','call_id','tool_name','request_hash']);if(typeof input.call_id!=='string'||typeof input.request_hash!=='string')throw new Error('invalid_web_budget_request');if(!webBudgets)throw new Error('budget_service_unavailable');
-    return withImmediateTransaction(db,()=>{assertExecutionLease(db,String(input.run_id),input.execution_lease);const identity=context(input);if(!identity.model_budget||typeof input.tool_name!=='string'||!identity.allowed_tools.includes(input.tool_name))throw new Error('workbench_tool_forbidden');if(identity.task_binding)assertTaskModelAccounting(identity.task_binding);return webBudgets.mint(identity.owner_id,identity.run_id,String(input.session_ref),String(input.call_id),input.tool_name,String(input.request_hash));});
+    return withImmediateTransaction(db,()=>{assertExecutionLease(db,String(input.run_id),input.execution_lease);const identity=context(input);if(!identity.model_budget||typeof input.tool_name!=='string'||!identity.allowed_tools.includes(input.tool_name))throw new Error('workbench_tool_forbidden');assertIdentityAccounting(identity);return webBudgets.mint(identity.owner_id,identity.run_id,String(input.session_ref),String(input.call_id),input.tool_name,String(input.request_hash));});
   });
   app.post('/internal/v1/workbench/web-budget-grant/close',async request=>{
     authorized(request.headers.authorization);const input=object(request.body);fields(input,['run_id','session_ref','call_id']);if(typeof input.call_id!=='string')throw new Error('invalid_web_budget_request');if(!webBudgets)throw new Error('budget_service_unavailable');return webBudgets.close(accountingOwner(input),String(input.run_id),input.call_id);
@@ -192,7 +260,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       if(action==='reserve'||action==='dispatch'){
         assertExecutionLease(db,runId,input.execution_lease);
         const identity=context(input);
-        if(identity.task_binding)assertTaskModelAccounting(identity.task_binding);
+        assertIdentityAccounting(identity);
       }
       if(action==='reserve')return {receipt:modelBudgets.reserve(owner,runId,input.request as ModelBudgetRequest)};
       if(!validCallId(input.attempt_id))throw new Error('budget_request_invalid');
@@ -242,9 +310,9 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       const run=db.prepare('SELECT status FROM ga_runs WHERE id=?').get(identity.run_id) as {status:string}|undefined;
       if(!run||!['starting','running'].includes(run.status))throw new Error('budget_run_inactive');
       if(!identity.model_budget||!modelBudgets)throw new Error('budget_service_unavailable');
-      // Check the whole continuation lineage, not just the current leaf. A
-      // checkpoint or child run cannot erase an unresolved parent's spend.
-      assertTaskModelAccounting(task);
+      // Unknown costs anywhere in the lineage remain fenced; known member
+      // reservations permit the lead's next guarded model step.
+      assertTaskModelAccounting(task,identity.run_id);
       const route=modelBudgets.previewCall(identity.owner_id,identity.run_id,input.route as {provider:string;model:string;max_tokens?:number});
       return {context:identity,admission:{protocol:1,allowed:true,route}};
     });
@@ -293,7 +361,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       const native=db.prepare('SELECT goal_id,goal_revision FROM wb_native_goal_bindings WHERE run_id=? AND occurrence_id=?').get(task.root_run_id,task.occurrence_id) as {goal_id:string;goal_revision:number}|undefined;
       if(!native||native.goal_id!==input.goal_id||native.goal_revision!==input.goal_revision)throw new Error('goal_binding_state_conflict');
       if(!identity.model_budget||!modelBudgets)throw new Error('budget_service_unavailable');
-      assertTaskModelAccounting(task);
+      assertTaskModelAccounting(task,input.intent==='continue'?identity.run_id:undefined);
       if(input.intent==='continue')modelBudgets.previewCall(identity.owner_id,identity.run_id,input.route as {provider:string;model:string;max_tokens?:number});
       const steps=occurrenceSubtaskRows(db,task.task_id,task.occurrence_id);
       if(input.intent==='complete'&&(!steps.length||steps.some(step=>step.status!=='completed'

@@ -147,7 +147,7 @@ export async function buildServer(config: {
   });
 
   app.addHook('preHandler', async (request, reply) => {
-    if (['/internal/v1/channel/messages', '/internal/v1/file-tools', '/internal/v1/crawl-batches/bind', '/internal/v1/crawl-batches/events', '/internal/v1/workbench/guard', '/internal/v1/workbench/tool', '/internal/v1/workbench/goal-binding', '/internal/v1/workbench/model-budget','/internal/v1/workbench/web-budget-grant','/internal/v1/workbench/web-budget-grant/close','/internal/v1/workbench/web-model-budget','/internal/v1/workbench/checkpoint','/internal/v1/workbench/task-state','/internal/v1/workbench/step-admission','/internal/v1/workbench/goal-proposal','/internal/v1/workbench/completion-intent','/internal/v1/workbench/completion-confirm','/internal/v1/workbench/completion-recovery'].includes(request.url.split('?')[0]!)) return;
+    if (['/internal/v1/channel/messages', '/internal/v1/file-tools', '/internal/v1/crawl-batches/bind', '/internal/v1/crawl-batches/events', '/internal/v1/workbench/guard', '/internal/v1/workbench/native-child-reservation', '/internal/v1/workbench/native-child-request', '/internal/v1/workbench/native-child-published', '/internal/v1/workbench/native-child-bind', '/internal/v1/workbench/native-child-close', '/internal/v1/workbench/native-child-activate', '/internal/v1/workbench/native-child-source', '/internal/v1/workbench/native-model-recovery', '/internal/v1/workbench/tool', '/internal/v1/workbench/goal-binding', '/internal/v1/workbench/model-budget','/internal/v1/workbench/web-budget-grant','/internal/v1/workbench/web-budget-grant/close','/internal/v1/workbench/web-model-budget','/internal/v1/workbench/checkpoint','/internal/v1/workbench/task-state','/internal/v1/workbench/step-admission','/internal/v1/workbench/goal-proposal','/internal/v1/workbench/completion-intent','/internal/v1/workbench/completion-confirm','/internal/v1/workbench/completion-recovery'].includes(request.url.split('?')[0]!)) return;
     if (!config.csrfToken || request.method === 'GET' || request.method === 'HEAD' || request.method === 'OPTIONS') return;
     actor(request as any);
     const origin = String(request.headers.origin ?? '');
@@ -245,6 +245,10 @@ export async function buildServer(config: {
   app.setErrorHandler((error, _request, reply) => {
     const code = error instanceof Error ? error.message : 'internal_error';
     if(['channel_binding_rate_limited','email_binding_rate_limited'].includes(code))return reply.code(429).send({error:{code:code.toUpperCase()}});
+    if(code==='native_child_request_invalid')return reply.code(422).send({error:{code:code.toUpperCase()}});
+    if(code==='native_child_identity_conflict')return reply.code(409).send({error:{code:code.toUpperCase()}});
+    if(['native_child_closure_invalid','native_activation_invalid','native_spawn_publication_invalid'].includes(code))return reply.code(422).send({error:{code:code.toUpperCase()}});
+    if(['native_child_closure_pending','native_child_closure_conflict','native_child_closed','native_activation_source_pending','native_activation_source_changed','native_recovery_fence_live','native_spawn_publication_unbound'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
     if(code==='channel_binding_unavailable')return reply.code(503).send({error:{code:code.toUpperCase()}});
     if(['channel_binding_proof_invalid','email_binding_proof_invalid','email_address_invalid'].includes(code))return reply.code(422).send({error:{code:code.toUpperCase()}});
     if(code==='channel_principal_already_bound'||code==='channel_binding_not_verified')return reply.code(409).send({error:{code:code.toUpperCase()}});

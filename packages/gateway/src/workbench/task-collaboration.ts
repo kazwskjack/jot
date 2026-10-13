@@ -19,6 +19,12 @@ function validateGrant(db:DatabaseSync,row:Row,beforeDispatch=false){
   if(!role||role.status!=='active'||role.capability_epoch!==saved.epoch||(beforeDispatch&&role.version!==saved.version))throw new Error('task_collaboration_revoked');
  }
 }
+export function assertNativeCollaborationPolicy(db:DatabaseSync,owner:string,taskId:string,version:number,roleId:string){
+ const grant=latest(db,owner,taskId);
+ if(!grant||grant.version!==version)throw new Error('task_collaboration_revoked');
+ validateGrant(db,grant,true);
+ if(!(JSON.parse(grant.member_ids_json) as string[]).includes(roleId))throw new Error('task_collaboration_forbidden');
+}
 export function automaticDelegationLimit(db:DatabaseSync,owner:string,messageId:string):number {
  if(!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_task_delegation_authorizations'").get())return 2;
  const bound=db.prepare(`SELECT d.task_id,a.policy_version FROM wb_task_delegation_authorizations a
@@ -43,6 +49,22 @@ export class TaskCollaborationService {
     CREATE TRIGGER IF NOT EXISTS wb_delegation_authorization_no_delete BEFORE DELETE ON wb_task_delegation_authorizations BEGIN SELECT RAISE(ABORT,'task_collaboration_immutable'); END;`);
  }
  get(owner:string,taskId:string){this.tasks.get(owner,taskId);return publicPolicy(latest(this.db,owner,taskId));}
+ authorizeNativeMember(owner:string,runId:string,memberId:string,expectedVersion:number){
+  this.workbench.assertRunActive(runId);this.tasks.assertRunActive(runId);
+  const context=this.workbench.contextForRun(runId);
+  const current=this.db.prepare(`SELECT o.task_id,o.occurrence_id,o.generation FROM wb_task_current_occurrences c
+   JOIN wb_task_run_occurrences o ON o.run_id=c.run_id WHERE c.run_id=?`).get(runId) as {task_id:string;occurrence_id:string;generation:number}|undefined;
+  if(!current||context?.kind!=='task'||context.owner_id!==owner||!this.db.prepare("SELECT 1 FROM ga_runs WHERE id=? AND status IN ('starting','running')").get(runId))throw new Error('task_collaboration_forbidden');
+  const grant=latest(this.db,owner,current.task_id);
+  if(!grant||grant.version!==expectedVersion)throw new Error('task_collaboration_revoked');
+  validateGrant(this.db,grant,true);
+  if(!(JSON.parse(grant.member_ids_json) as string[]).includes(memberId))throw new Error('task_collaboration_forbidden');
+  const role=this.workbench.getAgent(owner,memberId);
+  if(role.workspace_id!==context.workspace_id||role.project_id!==context.project_id)throw new Error('task_collaboration_forbidden');
+  return {owner_id:owner,root_run_id:runId,...current,team_id:grant.team_id!,policy_version:grant.version,
+   max_active:grant.max_active,max_delegations:grant.max_delegations,role_id:role.agent_id,role_version:role.version,role_epoch:role.capability_epoch,
+   workspace_id:context.workspace_id,project_id:context.project_id};
+ }
  save(owner:string,taskId:string,input:Record<string,unknown>){
   if(!input||Object.keys(input).some(k=>!['expected_version','enabled','team_id','member_ids','max_delegations','max_active'].includes(k))
    ||!Number.isSafeInteger(input.expected_version)||Number(input.expected_version)<0||typeof input.enabled!=='boolean')throw new Error('invalid_task_collaboration');
@@ -85,7 +107,9 @@ export class TaskCollaborationService {
    if(prior){if(!this.db.prepare('SELECT 1 FROM wb_task_delegation_authorizations WHERE delegation_id=? AND policy_version=?').get(prior.delegation_id,grant.version))throw new Error('task_collaboration_revoked');}
    else{
     const spent=this.db.prepare(`SELECT COUNT(*) n FROM wb_task_delegation_authorizations a JOIN wb_task_delegations d ON d.delegation_id=a.delegation_id WHERE d.owner_id=? AND d.task_id=? AND d.occurrence_id=?`).get(owner,current.task_id,current.occurrence_id) as {n:number};
-    if(spent.n>=grant.max_delegations)throw new Error('task_collaboration_exhausted');
+    const native=this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_native_child_reservations'").get()
+      ?(this.db.prepare('SELECT count(*) n FROM wb_native_child_reservations WHERE owner_id=? AND occurrence_id=?').get(owner,current.occurrence_id) as {n:number}).n:0;
+    if(spent.n+native>=grant.max_delegations)throw new Error('task_collaboration_exhausted');
    }
    const receipt=this.delegations.delegate(owner,current.task_id,{...input,client_message_id:key,occurrence_id:current.occurrence_id});
    this.db.prepare('INSERT INTO wb_task_delegation_authorizations VALUES(?,?) ON CONFLICT DO NOTHING').run(receipt.delegation_id,grant.version);

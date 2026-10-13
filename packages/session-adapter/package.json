@@ -14,7 +14,12 @@
     "web-budget-context.js",
     "web-budget-tool.js",
     "image-output.js",
-    "budget-model-selection.js"
+    "budget-model-selection.js",
+    "conversation-goal.js",
+    "native-child-admission.js",
+    "native-child-closure.js",
+    "native-role-host.js",
+    "native-role-provider.js"
   ],
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",

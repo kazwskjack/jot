@@ -3,6 +3,8 @@ import { timingSafeEqual } from 'node:crypto'
 import { isAbsolute } from 'node:path'
 import { createVoiceAdapterHandler } from './voice.js'
 import {createBudgetModelSelector} from './budget-model-selection.js'
+import {createNativeRoleHost} from './native-role-host.js'
+import {conversationGoal} from './conversation-goal.js'
 import { WorkbenchBridge,normalizeHostExecutionLease } from './workbench.js'
 
 export const name = 'jot-jot-session-adapter'
@@ -130,7 +132,7 @@ function decodeFilename(headers) {
   return value && Buffer.byteLength(value, 'utf8') <= 255 && !/[\u0000\/\\]/.test(value) ? value : null
 }
 
-export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector }) {
+export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector,nativeRoleHost }) {
   const voiceHandler = voiceEnabled ? createVoiceAdapterHandler({ speechController, token }) : null
   const workbenchSessions = new Set()
   const blockedWorkbenchSessions = new Set()
@@ -173,6 +175,30 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
         blockedWorkbenchSessions.delete(sessionId)
       }
       return json(201, value)
+    }
+    const nativeMembers=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/native-members$/)
+    if(nativeMembers){
+      const sessionId=decodeURIComponent(nativeMembers[1]),keys=['role_ref','expected_policy_version','request_id','name','description','text'];
+      if(!ID.test(sessionId)||!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).some(key=>!keys.includes(key))
+        ||typeof body.role_ref!=='string'||!ID.test(body.role_ref)||typeof body.request_id!=='string'||!ID.test(body.request_id)||!Number.isSafeInteger(body.expected_policy_version)||body.expected_policy_version<1
+        ||typeof body.name!=='string'||!body.name.trim()||body.name.length>80||typeof body.description!=='string'||!body.description.trim()||body.description.length>2000
+        ||typeof body.text!=='string'||!body.text.trim()||body.text.length>32000)return json(422,{error:'native_member_input_invalid'});
+      if(!nativeRoleHost?.spawn)return json(503,{error:'native_member_unavailable'});
+      const parent=agents?.get?.(sessionId);
+      if(parent?.id!==sessionId||blockedWorkbenchSessions.has(sessionId)||workbenchBridge?.bindingFor?.(parent)?.sessionRef!==sessionId)return json(409,{error:'native_member_parent_unavailable'});
+      try{
+        await workbenchBridge.guardBudget(parent,signal);
+        const result=await nativeRoleHost.spawn(parent,{roleRef:body.role_ref,policyVersion:body.expected_policy_version,requestId:body.request_id},
+          {name:body.name,description:body.description,prompt:[{type:'text',text:body.text}],context:'fresh',signal});
+        return json(201,result);
+      }catch{return json(409,{error:'native_member_unavailable'});}
+    }
+    const chatGoal=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/conversation-goal$/)
+    if(chatGoal){
+      const sessionId=decodeURIComponent(chatGoal[1]);
+      if(!ID.test(sessionId)||workbenchSessions.has(sessionId)||blockedWorkbenchSessions.has(sessionId))return json(422,{error:'conversation_goal_scope_invalid'});
+      try{return json(200,conversationGoal(agents?.get?.(sessionId),body))}
+      catch(error){return json(409,{error:error.message==='goal_revision_changed'?'goal_revision_changed':'conversation_goal_unavailable'})}
     }
     const goalStatus=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/goal-status$/)
     if(goalStatus){
@@ -251,6 +277,8 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       }
       let value
       try {
+        // Admission passes human content unchanged. Login operations are only
+        // executed through explicit tools with trusted scope and consent checks.
         value = await controller.prompt({ requestId, sessionId, mode, content }, signal)
       } catch (error) {
         // Keep protocol-visible diagnostics stable and allow-listed. Remote error
@@ -302,7 +330,11 @@ export function apply(ctx, config = {}) {
   if (host !== '127.0.0.1' || !Number.isInteger(port) || port < 1024 || token.length < 32
     || (config.nativeContinuation !== undefined && typeof config.nativeContinuation !== 'boolean')
     || (config.webBudgetEnabled !== undefined && typeof config.webBudgetEnabled !== 'boolean')
-    || ((config.nativeContinuation === true || config.webBudgetEnabled === true) && workbenchToken.length < 16)) {
+    || (config.nativeRoles !== undefined && typeof config.nativeRoles !== 'boolean')
+    || (config.nativeRoleRecovery !== undefined && typeof config.nativeRoleRecovery !== 'boolean')
+    || (config.nativeRoleRecovery===true&&config.nativeRoles!==true)
+    || (config.nativeRoles===true&&(config.nativeContinuation!==true||config.workbenchModel===undefined))
+    || ((config.nativeContinuation === true || config.webBudgetEnabled === true || config.nativeRoles===true) && workbenchToken.length < 16)) {
     throw new Error('jot_session_adapter_config_invalid')
   }
   const speechController = voiceEnabled ? ctx.speechController : undefined
@@ -313,10 +345,14 @@ export function apply(ctx, config = {}) {
     nativeContinuation: config.nativeContinuation ?? false,
     modelRouteFor:config.workbenchModel?agent=>ctx.sessionController.agents.selectionFor(agent).current:undefined,
   }) : undefined
+  const budgetModelSelector=createBudgetModelSelector({route:config.workbenchModel,llm:ctx.llm,agents:ctx.sessionController.agents})
+  const nativeRoleHost=config.nativeRoles===true?createNativeRoleHost({ctx,bridge:workbenchBridge,selectModel:budgetModelSelector,
+    sessions:ctx.sessions,persistence:ctx.sessionPersistence,automaticClosures:true,durableSpawns:true,nativeRecovery:config.nativeRoleRecovery===true}):undefined
+  if(nativeRoleHost)ctx.effect(()=>()=>nativeRoleHost.dispose())
   const handler = createAdapterHandler({ controller: ctx.sessionController, fileUploads: ctx.fileUploads, agents: ctx.agents,
     sessions:ctx.sessions,persistence:ctx.sessionPersistence,
     speechController, voiceEnabled, token, workbenchBridge,
-    budgetModelSelector:createBudgetModelSelector({route:config.workbenchModel,llm:ctx.llm,agents:ctx.sessionController.agents}) })
+    budgetModelSelector,nativeRoleHost })
   const server = createServer(async (req, res) => {
     const abort = new AbortController()
     req.once('aborted', () => abort.abort())
@@ -341,6 +377,7 @@ export function apply(ctx, config = {}) {
       res.end(JSON.stringify({ error: 'adapter_internal_error' }))
     }
   })
+  server.once('listening',()=>ctx.emit('jot-session-adapter/ready',{host,port}))
   server.listen(port, host)
   ctx.effect(() => () => server.close())
 }

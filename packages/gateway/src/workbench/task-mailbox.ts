@@ -45,5 +45,11 @@ export function taskMemberCapacityAvailable(db:DatabaseSync,owner:string,occurre
    WHERE a.owner_id=? AND a.occurrence_id=? AND
    (r.status IN ('queued','starting','running','waiting_user','waiting_approval','cancelling') OR r.reason_code='OUTCOME_UNKNOWN')`)
    .get(owner,occurrenceId) as {n:number};
- return usage.n<maximum;
+ const native=db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_native_child_reservations'").get()
+  ?(db.prepare(`SELECT count(*) n FROM wb_native_child_reservations q WHERE q.owner_id=? AND q.occurrence_id=?
+    AND NOT EXISTS (SELECT 1 FROM wb_native_child_closures c WHERE c.reservation_id=q.reservation_id)`).get(owner,occurrenceId) as {n:number}).n:0;
+ const activations=db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_native_child_activations'").get()
+  ?(db.prepare(`SELECT count(*) n FROM wb_native_child_activations a WHERE a.owner_id=? AND a.occurrence_id=?
+    AND NOT EXISTS (SELECT 1 FROM wb_native_activation_closures c WHERE c.run_id=a.run_id)`).get(owner,occurrenceId) as {n:number}).n:0;
+ return usage.n+native+activations<maximum;
 }

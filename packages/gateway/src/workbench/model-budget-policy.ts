@@ -5,6 +5,7 @@ import { withImmediateTransaction } from '../db/database.ts';
 import { parseWorkerConcurrency } from '../harness/worker-pool.ts';
 import { ModelBudgetLedger, normalizeModelBudgetRoutes, type ModelBudgetLimits, type ModelBudgetRoute } from './model-budget.ts';
 import {installTaskMailbox,currentTaskMailbox} from './task-mailbox.ts';
+import {assertNativeRun} from './native-child-identity.ts';
 
 const categories = ['owner_daily','project_daily','agent_daily','task_total','occurrence','chat_root','mailbox_thread'] as const;
 type Category = typeof categories[number];
@@ -193,6 +194,11 @@ export class WorkbenchBudgetPolicy {
           JOIN wb_model_budget_bindings b ON b.run_id=a.run_id WHERE o.task_id=? AND b.owner_id=? AND a.state='unknown' LIMIT 1`).get(task.task_id!,owner))throw new Error('budget_usage_unknown');
         definitions.push({key:taskBudgetKey(String(task.task_id)),category:'task_total'},
           {key:`occurrence:${hash(String(task.occurrence_id))}`,category:'occurrence'});
+      } else if (binding.kind === 'native_team') {
+        const saved=assertNativeRun(this.db,owner,runId);
+        if(saved.role_id!==binding.agent_id||saved.workspace_id!==run.workspace_id||saved.project_id!==run.project_id)throw new Error('budget_binding_invalid');
+        definitions.push({key:taskBudgetKey(saved.task_id),category:'task_total'},
+          {key:`occurrence:${hash(saved.occurrence_id)}`,category:'occurrence'});
       } else if (binding.kind === 'internal_mailbox') {
         const thread = this.db.prepare(`SELECT m.recipient_agent_id,m.owner_id,m.workspace_id,m.project_id,t.thread_id,t.owner_id AS thread_owner
           FROM wb_agent_messages m JOIN wb_message_threads t ON t.thread_id=m.thread_id WHERE m.run_id=?`).get(runId) as Row | undefined;

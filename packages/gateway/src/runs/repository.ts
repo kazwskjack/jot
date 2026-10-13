@@ -29,7 +29,7 @@ export class RunRepository {
   private readonly events: EventStore;
   constructor(db: DatabaseSync, events: EventStore) { this.db = db; this.events = events; }
 
-  enqueue(conversationId: string, ownerId: string, input: Record<string, unknown>) {
+  enqueue(conversationId: string, ownerId: string, input: Record<string, unknown>,options:{executionMode?:'native'}={}) {
     const conversation = this.db.prepare('SELECT id,title FROM ga_conversations WHERE id=? AND owner_id=?')
       .get(conversationId, ownerId) as { id: string; title: string } | undefined;
     if (!conversation) throw new Error('conversation_not_found');
@@ -55,11 +55,11 @@ export class RunRepository {
       this.db.prepare('INSERT INTO ga_messages(id,conversation_id,run_id,role,status,content_json,client_message_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)')
         .run(messageId, conversationId, runId, 'user', 'complete', JSON.stringify(content), String(input.client_message_id), now, now);
       this.db.prepare('INSERT INTO ga_runs(id,conversation_id,input_message_id,status,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?)')
-        .run(runId, conversationId, messageId, 'queued', 1, now, now);
+        .run(runId, conversationId, messageId, options.executionMode==='native'?'starting':'queued', 1, now, now);
       this.events.append(conversationId, runId, 'message.created', this.message(messageId));
       this.events.append(conversationId, runId, 'run.state', this.get(runId, ownerId));
       this.db.prepare('INSERT INTO ga_outbox(conversation_id,aggregate_type,aggregate_id,event_type,payload_json,created_at) VALUES(?,?,?,?,?,?)')
-        .run(conversationId, 'run', runId, 'run.queued', JSON.stringify({ run_id: runId }), now);
+        .run(conversationId, 'run', runId, options.executionMode==='native'?'native.run.prepared':'run.queued', JSON.stringify({ run_id: runId }), now);
     });
     return { accepted: true, message_id: messageId, run_id: runId, conversation_id: conversationId };
   }
