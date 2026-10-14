@@ -60,7 +60,7 @@ export class NativeChildAdmission {
   }
   const binding=recovered?recovered.binding:await this.authorize({parent,child:agent,roleRef:entry.roleRef,parentBinding:entry.binding,signal});check();
   if(binding?.sessionRef!==agent.id||typeof binding.runId!=='string'||!ID.test(binding.runId))throw new Error('native_child_binding_invalid');
-  await this.attach(agent,binding,{signal,parent});check();
+  await this.attach(agent,binding,{signal,parent,roleRef:entry.roleRef});check();
   const installed=this.bindingFor(agent);
   if(installed?.runId!==binding.runId||installed?.sessionRef!==binding.sessionRef
     ||installed?.executionLease?.owner!==binding.executionLease?.owner||installed?.executionLease?.generation!==binding.executionLease?.generation)throw new Error('native_child_binding_not_installed');

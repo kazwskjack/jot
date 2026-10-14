@@ -7,6 +7,7 @@
 - Migrate older operation cursors without assuming that their work completed; ignore stale observations.
 - Require explicit accepted counts and complete unique item manifests before an observed operation can release a handoff barrier.
 - Add an authenticated original-task handoff management transport with atomic receiver binding, rollback and fixed conflict receipts; native execution orchestration remains pending.
+- Add optional trusted handoff admission before native member model selection, with an actual installed-SDK task-step and return-to-lead verification probe.
 
 Native-host orchestration and provider-side effect reconciliation are still required before enabling production handoff.
 

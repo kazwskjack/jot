@@ -163,3 +163,17 @@ The trusted host can POST to `/internal/v1/workbench/handoff` through its existi
 Returning to the lead requires the original run/Session and uses the existing final-answer admission. Transfer retries retain immutable request receipts and cannot substitute another Session of the same role. Fixed error codes distinguish malformed input (422), forbidden identity (403), and unresolved usage/operations or revision conflicts (409); raw exception details are not published.
 
 This transport does not create a member, interrupt its predecessor, discover all external effects, or prompt a receiver. The native host must still establish quiescence and reconcile provider/tool outcomes before using it. The capability remains unavailable in public UI, and production handoff is not enabled by this code change.
+
+## Member admission before execution
+
+Explicit `createNativeRoleHost` composition accepts an optional trusted `handoffAdmission` function. It runs in the official serial member-creation barrier, after the original task binding and guards are installed and before member model selection or publication. The callback receives the original parent, child, saved role reference, parent binding and a frozen child binding. It must return the authenticated management receipt: active state, matching controller role and revision, and the exact child run/Session binding. A wrong receipt or changed parent binding aborts admission without selecting a model. Ordinary Team composition omits the callback and retains its existing behavior.
+
+This is a trusted host composition seam, not a model-selected callback or a JSON configuration switch. Formal `apply` does not automatically activate it. The host remains responsible for predecessor quiescence and external-effect reconciliation.
+
+With `JOT_DSH_RUNTIME_MODULES` pointing to installed `0.2.0-rc.2` modules, run:
+
+```sh
+node --test packages/session-adapter/verification/native-task-handoff-runtime.mjs
+```
+
+The isolated actual SDK probe starts from an idle original lead, binds an existing task-step intent, transfers through the authenticated gateway before the member's first model request, rejects the old lead's workspace tool, verifies the member's shared-file receipt, settles calls, drains the official child and returns control to the original lead. It waits for the actual queued lead model request before checking idle; an earlier `whenIdle` observation alone does not prove future Team notifications have been processed. Calls use local scripted providers. This does not prove remote-effect discovery, production providers, automatic formal-host orchestration, or multi-hop crash recovery.

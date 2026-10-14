@@ -6,12 +6,13 @@ const canonical=value=>JSON.stringify(value,(_key,item)=>item&&typeof item==='ob
 /** Explicit candidate composition. Does not alter default Host configuration.
  * Native Team and Subagent services retain their original runtime ownership.
  */
-export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistence,providerName='jot-native-role',automaticClosures=false,nativeRecovery=false,durableSpawns=false}){
+export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistence,providerName='jot-native-role',automaticClosures=false,nativeRecovery=false,durableSpawns=false,handoffAdmission}){
  if(!ctx?.agents||typeof ctx?.subagents?.registerProvider!=='function'||typeof ctx?.subagents?.drainContinuableChildren!=='function'||typeof ctx?.agentTeams?.spawnTeammate!=='function'
   ||typeof bridge?.bindingFor!=='function'||typeof bridge?.guardBudget!=='function'||typeof bridge?.attach!=='function'||typeof selectModel!=='function')throw new Error('native_role_host_incompatible');
  if(typeof automaticClosures!=='boolean'||automaticClosures&&(typeof persistence?.flush!=='function'||typeof persistence?.open!=='function'||typeof ctx.sessionProjections?.stateOf!=='function'))throw new Error('native_role_closure_host_incompatible');
  if(typeof nativeRecovery!=='boolean'||nativeRecovery&&!automaticClosures)throw new Error('native_role_recovery_host_incompatible');
  if(typeof durableSpawns!=='boolean')throw new Error('native_role_host_incompatible');
+ if(handoffAdmission!==undefined&&typeof handoffAdmission!=='function')throw new Error('native_role_host_incompatible');
  const spawnRequests=new Map();
  const prepared=new Map(),pending=new Set(),published=new Map(),closing=new Map(),closed=new Map(),observations=new Set(),closureFailures=new Set(),shutdown=new AbortController();let disposed=false,disposal;
  const admission=new NativeChildAdmission({registry:ctx.agents,bindingFor:agent=>disposed?undefined:bridge.bindingFor(agent),
@@ -30,8 +31,18 @@ export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistenc
    if(response?.binding?.sessionRef!==child.id||response.binding.runId===source.previous_run_id)throw new Error('native_role_recovery_invalid');
    return {roleRef:source.role_ref,binding:response.binding};
   }:undefined,
-  attach:async(child,binding,{signal,parent})=>{
+  attach:async(child,binding,{signal,parent,roleRef})=>{
    await bridge.attach(child,binding,{sessions,persistence,signal,parentGuard:checkSignal=>bridge.guardBudget(parent,checkSignal)});
+   if(handoffAdmission){
+    const parentBinding=bridge.bindingFor(parent);
+    const frozen=Object.freeze({...binding,...(binding.executionLease?{executionLease:Object.freeze({...binding.executionLease})}:{})});
+    const receipt=await handoffAdmission({parent,child,roleRef,binding:frozen,parentBinding,signal});
+    signal?.throwIfAborted();
+    if(bridge.bindingFor(parent)!==parentBinding||receipt?.state?.phase!=='active'||receipt.state.controller!==roleRef
+      ||!Number.isSafeInteger(receipt.state.revision)||receipt.state.revision<1
+      ||receipt.binding?.revision!==receipt.state.revision||receipt.binding.run_id!==binding.runId||receipt.binding.session_ref!==child.id)
+      throw new Error('native_handoff_admission_invalid');
+   }
    await selectModel(child,()=>bridge.guardBudget(child,signal),signal);
    let ids=published.get(parent);if(!ids)published.set(parent,ids=new Set());ids.add(child.id);
   }});
