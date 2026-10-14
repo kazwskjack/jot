@@ -14,4 +14,34 @@ test('durable log mismatch refuses closure and still closes the handle',async()=
 test('unresolved tool prevents quiescent closure',async()=>{const f=fixture();f.events.splice(1,0,{seq:1,type:'tool/call',data:{callId:'pending'}});f.events[2].seq=2;f.input.agent.session.seq=3;await assert.rejects(captureNativeChildClosure(f.input),/native_child_log_not_quiescent/);assert.equal(f.closed(),1);});
 test('unknown tool outcome cannot produce a closure receipt',async()=>{const f=fixture();f.events.splice(1,0,{seq:1,type:'tool/result',data:{error:{code:'TOOL_OUTCOME_UNKNOWN'}}});f.events[2].seq=2;f.input.agent.session.seq=3;await assert.rejects(captureNativeChildClosure(f.input),/native_child_tool_unknown/);assert.equal(f.closed(),1);});
 
+function batchFixture(){const f=fixture();f.events.splice(1,0,
+ {seq:1,type:'tool/call',data:{callId:'remote-call',name:'universe_read_page',arguments:{urls:['https://example.com/a','https://example.org/b']}}},
+ {seq:2,type:'tool/result',data:{message:{source:{kind:'tool',callId:'remote-call'},content:[{type:'text',text:'Accepted for background processing'}]}}});
+ f.events[3].seq=3;f.input.agent.session.seq=4;return f;}
+const settledOperation=()=>({session_ref:'child',request_id:'remote-call',operation_id:'web-'+ 'a'.repeat(32),revision:2,status:'succeeded',accepted_count:2,items:[{item_id:'one',position:0,status:'succeeded'},{item_id:'two',position:1,status:'succeeded'}]});
+
+test('a returned batch tool cannot close a member without original operation reconciliation',async()=>{
+ const f=batchFixture();await assert.rejects(captureNativeChildClosure(f.input),/native_child_remote_effects_unresolved/);assert.equal(f.closed(),1);
+});
+
+test('only a complete terminal operation from the exact original Session and call permits closure',async()=>{
+ for(const change of [proof=>({...proof,status:'running'}),proof=>({...proof,session_ref:'other'}),proof=>({...proof,request_id:'other'}),proof=>({...proof,accepted_count:undefined}),proof=>({...proof,items:proof.items.slice(0,1)}),proof=>({...proof,items:[proof.items[0],proof.items[0]]})]){
+  const f=batchFixture();f.input.reconcileOperations=async()=>change(settledOperation());await assert.rejects(captureNativeChildClosure(f.input),/native_child_remote_effects_unresolved/);
+ }
+ const f=batchFixture();f.input.reconcileOperations=async input=>{assert.equal(input.sessionRef,'child');assert.equal(input.callId,'remote-call');assert.equal(input.toolName,'universe_read_page');assert.equal(Object.isFrozen(input),true);return settledOperation();};
+ assert.equal((await captureNativeChildClosure(f.input)).driver_nonresident,true);assert.equal(f.closed(),1);
+});
+
+test('batch syntax requires reconciliation even for one item and JSON-encoded arguments',async()=>{
+ for(const [name,args] of [['universe_read_page',{urls:['https://example.com']}],['universe_execute',{inputs:{items:[{action:'click'}]}}],['universe_browse',{inputs:{items:[{url:'https://example.com'}]}}]]){
+  const f=batchFixture();f.events[1].data.name=name;f.events[1].data.arguments=JSON.stringify(args);
+  await assert.rejects(captureNativeChildClosure(f.input),/native_child_remote_effects_unresolved/);
+ }
+});
+
+test('an operation observation cannot mask a Session change during reconciliation',async()=>{
+ const f=batchFixture();f.input.reconcileOperations=async()=>{f.input.agent.session.seq++;return settledOperation();};
+ await assert.rejects(captureNativeChildClosure(f.input),/native_child_live_changed/);
+});
+
 test('resumed Session must match the full recorded durable prefix before model admission',async()=>{const f=fixture(),proof=await captureNativeChildClosure(f.input);f.input.registry.get=()=>f.input.agent;await verifyNativeChildPrefix({...f.input,proof});f.events[0]={...f.events[0],data:{tampered:true}};await assert.rejects(verifyNativeChildPrefix({...f.input,proof}),/native_child_prefix_changed/);});

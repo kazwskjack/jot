@@ -68,3 +68,11 @@ test('the documented default token environment admits host setup without opening
     else process.env.jot_SESSION_ADAPTER_TOKEN = legacy
   }
 })
+
+test('formal setup rejects malformed operation observers and observers without native roles',()=>{
+ const prior=process.env.JOT_SESSION_ADAPTER_TOKEN;process.env.JOT_SESSION_ADAPTER_TOKEN=token;
+ try{
+  const ctx=Object.defineProperty({},'sessionController',{get(){throw Error('controller_must_not_be_reached');}});
+  for(const reconcileOperations of [{},async()=>{}])assert.throws(()=>apply(ctx,{reconcileOperations}),/jot_session_adapter_config_invalid/);
+ }finally{if(prior===undefined)delete process.env.JOT_SESSION_ADAPTER_TOKEN;else process.env.JOT_SESSION_ADAPTER_TOKEN=prior;}
+});

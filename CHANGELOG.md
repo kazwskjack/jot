@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Refuse native member closure for acknowledged background web batches until a trusted observer provides complete terminal outcomes for the original Session and tool call.
+- Validate optional operation observers in formal native-role setup; single-item batches require reconciliation too.
+
 - Persist validated web-operation status and item outcomes alongside progress revisions.
 - Prevent task handoff while an observed web operation is running or has unresolved item outcomes.
 - Migrate older operation cursors without assuming that their work completed; ignore stale observations.

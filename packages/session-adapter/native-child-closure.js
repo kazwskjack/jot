@@ -2,6 +2,21 @@ import {createHash} from 'node:crypto';
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 const json=value=>JSON.stringify(value,(_key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item);
 const headerJson=header=>json({...header,delegationDepth:header?.delegationDepth??0});
+function batchWebCall(data){
+ const name=data?.name??data?.tool;if(!['universe_read_page','universe_browse','universe_execute'].includes(name))return null;
+ let args=data?.arguments;try{if(typeof args==='string')args=JSON.parse(args);}catch{return {name};}
+ if(!args||typeof args!=='object'||Array.isArray(args))return {name};
+ if(name==='universe_read_page')return Object.hasOwn(args,'urls')?{name}:null;
+ return args.inputs&&Object.hasOwn(args.inputs,'items')?{name}:null;
+}
+function settledWebOperation(proof,sessionRef,callId){
+ if(proof?.session_ref!==sessionRef||proof.request_id!==callId||!/^web-[A-Za-z0-9-]{8,128}$/.test(proof.operation_id)
+   ||!Number.isSafeInteger(proof.revision)||proof.revision<1||!['succeeded','partial','failed','cancelled'].includes(proof.status)
+   ||!Number.isSafeInteger(proof.accepted_count)||proof.accepted_count<0||!Array.isArray(proof.items)||proof.items.length!==proof.accepted_count)return false;
+ const count=proof.accepted_count;
+ return new Set(proof.items.map(item=>item?.item_id)).size===count&&new Set(proof.items.map(item=>item?.position)).size===count
+  &&proof.items.every(item=>typeof item?.item_id==='string'&&ID.test(item.item_id)&&Number.isSafeInteger(item.position)&&item.position>=0&&item.position<count&&['succeeded','failed','cancelled'].includes(item.status));
+}
 /** Recover publication metadata only, never resume or admit an Agent. The
  * official active edge follows durable acceptance of the initial message. */
 export async function recoverNativePublication({parent,childId,request,providerName,persistence,teams,signal}){
@@ -68,7 +83,7 @@ export async function verifyNativeChildPrefix({agent,parentSessionRef,persistenc
 /** Read back the exact durable child log after native runtime detachment.
  * This is a host observation, not an LLM completion or business verdict.
  */
-export async function captureNativeChildClosure({agent,parentSessionRef,registry,persistence,projections,signal}){
+export async function captureNativeChildClosure({agent,parentSessionRef,registry,persistence,projections,signal,reconcileOperations}){
  if(!agent||typeof agent.whenIdle!=='function'||typeof registry?.get!=='function'||typeof persistence?.flush!=='function'||typeof persistence?.open!=='function'||typeof projections?.stateOf!=='function'
   ||!ID.test(parentSessionRef)||agent.session?.id!==agent.id||agent.session.header.parentSession!==parentSessionRef)throw new Error('native_child_closure_host_invalid');
  await agent.whenIdle();signal?.throwIfAborted();
@@ -76,7 +91,7 @@ export async function captureNativeChildClosure({agent,parentSessionRef,registry
  const session=agent.session,count=session.seq,inbox=projections.stateOf(session,'inbox');
  if(!Number.isSafeInteger(count)||count<1||!Array.isArray(inbox?.['next-turn'])||!Array.isArray(inbox?.['next-step'])||inbox['next-turn'].length||inbox['next-step'].length)throw new Error('native_child_pending_inbox');
  await persistence.flush();signal?.throwIfAborted();const handle=await persistence.open(agent.id,'read',{signal});
- let openTurn=false,lastEnd=-1;const tools=new Set(),hash=createHash('sha256').update(headerJson(session.header)+'\n');
+ let openTurn=false,lastEnd=-1;const tools=new Set(),remoteCalls=new Map(),hash=createHash('sha256').update(headerJson(session.header)+'\n');
  try{
   if(handle.id!==agent.id||handle.access!=='read'||headerJson(handle.header)!==headerJson(session.header))throw new Error('native_child_storage_changed');
   for(let offset=0;offset<count;){
@@ -87,7 +102,10 @@ export async function captureNativeChildClosure({agent,parentSessionRef,registry
     hash.update(json(event)+'\n');
     if(event.type==='turn/start')openTurn=true;
     if(event.type==='turn/end'){openTurn=false;lastEnd=event.seq;}
-    if(event.type==='tool/call')tools.add(event.data?.callId);
+    if(event.type==='tool/call'){
+     tools.add(event.data?.callId);const batch=batchWebCall(event.data);
+     if(batch){const callId=event.data?.callId;if(typeof callId!=='string'||!ID.test(callId)||remoteCalls.has(callId))throw new Error('native_child_remote_effects_unresolved');remoteCalls.set(callId,batch.name);}
+    }
     if(event.type==='tool/result'){
      if(event.data?.error?.code==='TOOL_OUTCOME_UNKNOWN')throw new Error('native_child_tool_unknown');
      tools.delete(event.data?.message?.source?.callId??event.data?.message?.toolCallId??event.data?.callId);
@@ -97,6 +115,13 @@ export async function captureNativeChildClosure({agent,parentSessionRef,registry
   }
   if((await handle.read(count,1,{signal})).events?.length!==0||openTurn||tools.size||lastEnd<0)throw new Error('native_child_log_not_quiescent');
  }finally{await handle.close();}
+ for(const [callId,toolName] of remoteCalls){
+  if(typeof reconcileOperations!=='function')throw new Error('native_child_remote_effects_unresolved');
+  signal?.throwIfAborted();let proof;
+  try{proof=await reconcileOperations(Object.freeze({sessionRef:agent.id,callId,toolName,signal}));}
+  catch{signal?.throwIfAborted();throw new Error('native_child_remote_effects_unresolved');}
+  if(!settledWebOperation(proof,agent.id,callId))throw new Error('native_child_remote_effects_unresolved');
+ }
  signal?.throwIfAborted();
  if(registry.get(agent.id)!==undefined||session.seq!==count||agent.session!==session||agent.status!=='idle')throw new Error('native_child_live_changed');
  const fresh=projections.stateOf(session,'inbox');if(fresh?.['next-turn']?.length!==0||fresh?.['next-step']?.length!==0)throw new Error('native_child_pending_inbox');

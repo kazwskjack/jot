@@ -6,13 +6,14 @@ const canonical=value=>JSON.stringify(value,(_key,item)=>item&&typeof item==='ob
 /** Explicit candidate composition. Does not alter default Host configuration.
  * Native Team and Subagent services retain their original runtime ownership.
  */
-export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistence,providerName='jot-native-role',automaticClosures=false,nativeRecovery=false,durableSpawns=false,handoffAdmission}){
+export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistence,providerName='jot-native-role',automaticClosures=false,nativeRecovery=false,durableSpawns=false,handoffAdmission,reconcileOperations}){
  if(!ctx?.agents||typeof ctx?.subagents?.registerProvider!=='function'||typeof ctx?.subagents?.drainContinuableChildren!=='function'||typeof ctx?.agentTeams?.spawnTeammate!=='function'
   ||typeof bridge?.bindingFor!=='function'||typeof bridge?.guardBudget!=='function'||typeof bridge?.attach!=='function'||typeof selectModel!=='function')throw new Error('native_role_host_incompatible');
  if(typeof automaticClosures!=='boolean'||automaticClosures&&(typeof persistence?.flush!=='function'||typeof persistence?.open!=='function'||typeof ctx.sessionProjections?.stateOf!=='function'))throw new Error('native_role_closure_host_incompatible');
  if(typeof nativeRecovery!=='boolean'||nativeRecovery&&!automaticClosures)throw new Error('native_role_recovery_host_incompatible');
  if(typeof durableSpawns!=='boolean')throw new Error('native_role_host_incompatible');
  if(handoffAdmission!==undefined&&typeof handoffAdmission!=='function')throw new Error('native_role_host_incompatible');
+ if(reconcileOperations!==undefined&&typeof reconcileOperations!=='function')throw new Error('native_role_host_incompatible');
  const spawnRequests=new Map();
  const prepared=new Map(),pending=new Set(),published=new Map(),closing=new Map(),closed=new Map(),observations=new Set(),closureFailures=new Set(),shutdown=new AbortController();let disposed=false,disposal;
  const admission=new NativeChildAdmission({registry:ctx.agents,bindingFor:agent=>disposed?undefined:bridge.bindingFor(agent),
@@ -69,7 +70,7 @@ export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistenc
     // Never run this from a child's own disposal hook: native drain waits for
     // that hook. This host entry point owns teardown, then reads durable proof.
     await ctx.subagents.drainContinuableChildren(parent,[id]);
-    const proof=await captureNativeChildClosure({agent:accepted.agent,parentSessionRef:parent.id,registry:ctx.agents,persistence,projections:ctx.sessionProjections,signal});
+    const proof=await captureNativeChildClosure({agent:accepted.agent,parentSessionRef:parent.id,registry:ctx.agents,persistence,projections:ctx.sessionProjections,signal,reconcileOperations});
     const receipt=await bridge.request('native-child-close',accepted.binding,{proof},signal);
     if(receipt?.closed!==true||receipt.run_id!==accepted.binding.runId)throw new Error('native_role_closure_invalid');
     closed.set(key,Object.freeze({...receipt}));closureFailures.delete(key);return closed.get(key);
