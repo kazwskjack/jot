@@ -67,6 +67,40 @@ test('planning endpoint authenticates before allocation and binds the original w
 });
 
 import {NativeChildReservations} from '../../src/workbench/native-child-reservations.ts';
+test('durable intent enumeration survives reopening, pages deterministically and never allocates execution',async t=>{
+ const f=await setup(t);const plan=f.intents.prepare('alice',f.runId,f.input);
+ const second=f.intents.prepare('alice',f.runId,{...f.input,request_id:'call-2'});
+ const runs=f.db.prepare('SELECT count(*) n FROM ga_runs').get().n;
+ const reopened=new NativeTaskIntents(f.db,f.workbench,f.persistentTasks,f.collaboration);
+ const first=reopened.list('alice',f.runId,{limit:1});
+ assert.equal(first.items.length,1);assert.deepEqual(first.items[0],{plan,state:'pending',execution_authorized:false});assert.equal(first.next_request_id,plan.request_id);
+ const next=reopened.list('alice',f.runId,{limit:1,after_request_id:first.next_request_id});
+ assert.deepEqual(next.items,[{plan:second,state:'pending',execution_authorized:false}]);assert.equal(next.next_request_id,null);
+ const service=new NativeChildReservations(f.db,f.collaboration,f.intents);service.reserve(reservationInput(f));
+ const page=reopened.list('alice',f.runId,{limit:1});assert.equal(page.items[0].state,'reserved');
+ assert.equal(f.db.prepare('SELECT count(*) n FROM ga_runs').get().n,runs);assert.equal(f.db.prepare('SELECT count(*) n FROM wb_task_delegations').get().n,0);
+ assert.equal(f.db.prepare('SELECT count(*) n FROM wb_native_task_intents').get().n,2);
+});
+test('intent enumeration refuses foreign scope, stale assignment and revoked policy',async t=>{
+ const f=await setup(t);f.intents.prepare('alice',f.runId,f.input);
+ assert.throws(()=>f.intents.list('bob',f.runId,{}));
+ assert.throws(()=>f.intents.list('alice',f.runId,{limit:0}),/native_task_intent_invalid/);
+ assert.throws(()=>f.intents.list('alice',f.runId,{after_request_id:'unknown'}),/native_task_intent_invalid/);
+ f.persistentTasks.upsertSubtask('alice',f.task.task_id,{subtask_id:f.step.subtask_id,expected_version:f.step.version,title:'Revised work'},f.runId);
+ assert.throws(()=>f.intents.list('alice',f.runId,{}),/task_assignment_revoked/);
+ f.collaboration.save('alice',f.task.task_id,{expected_version:f.policy.version,enabled:false});
+ assert.throws(()=>f.intents.list('alice',f.runId,{}),/task_collaboration_revoked/);
+});
+test('intent enumeration HTTP endpoint requires original lease, Session and authentication',async t=>{
+ const f=await setup(t);f.intents.prepare('alice',f.runId,f.input);
+ const url='/internal/v1/workbench/native-task-intents',headers={authorization:'Bearer '+f.fixtureConfig.internalChannelToken};
+ const payload={run_id:f.runId,session_ref:'session-fixture',execution_lease:{owner:f.lease.owner,generation:f.lease.generation},limit:1};
+ assert.equal((await f.app.inject({method:'POST',url,payload})).statusCode,401);
+ const ok=await f.app.inject({method:'POST',url,headers,payload});assert.equal(ok.statusCode,200,ok.body);assert.equal(ok.json().items[0].plan.request_id,f.input.request_id);
+ for(const patch of [{session_ref:'foreign-session'},{execution_lease:{owner:'foreign',generation:1}},{limit:51},{owner_id:'bob'}])assert.notEqual((await f.app.inject({method:'POST',url,headers,payload:{...payload,...patch}})).statusCode,200);
+ f.db.prepare('UPDATE ga_worker_leases SET generation=generation+1 WHERE resource_id=?').run(f.runId);
+ assert.notEqual((await f.app.inject({method:'POST',url,headers,payload})).statusCode,200);
+});
 function reservationInput(f){return {run_id:f.runId,session_ref:'session-fixture',child_session_ref:'native-assignee',role_ref:f.member.agent_id,request_id:f.input.request_id,expected_policy_version:f.policy.version,execution_lease:{owner:f.lease.owner,generation:f.lease.generation}};}
 test('reservation assigns a planned step atomically and child guards retain the exact assignment',async t=>{
  const f=await setup(t);const plan=f.intents.prepare('alice',f.runId,f.input);

@@ -128,6 +128,18 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
         expected_subtask_version:input.expected_subtask_version as number,recipient_agent_id:input.recipient_agent_id as string})};
     });
   });
+  app.post('/internal/v1/workbench/native-task-intents',async request=>{
+    authorized(request.headers.authorization);const input=object(request.body);
+    fields(input,['run_id','session_ref','limit','after_request_id']);
+    if(!nativeTaskIntents)throw Error('task_collaboration_forbidden');
+    return withImmediateTransaction(db,()=>{
+      assertExecutionLease(db,String(input.run_id),input.execution_lease);
+      const identity=context(input);requireTask(identity);
+      return nativeTaskIntents.list(identity.owner_id,identity.run_id,{
+        ...(input.limit===undefined?{}:{limit:input.limit as number}),
+        ...(input.after_request_id===undefined?{}:{after_request_id:input.after_request_id as string})});
+    });
+  });
   app.post('/internal/v1/workbench/native-child-reservation',async request=>{
     authorized(request.headers.authorization);
     if(!nativeChildren)throw new Error('task_collaboration_forbidden');

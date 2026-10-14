@@ -1,5 +1,11 @@
 # Code preview verification
 
+## Durable task-intent enumeration follow-up
+
+The authenticated enumeration change passed the full gateway suite with 971 passes, zero failures and six platform-related skips (977 total). Three new scenarios cover reopening the original immutable journal, deterministic pagination, reserved-state observation without another run or mailbox dispatch, stale step/policy and foreign-scope refusal, and the actual HTTP endpoint's authentication, Session and worker-lease checks. The same 14-test focused suite and typecheck passed in the internal candidate. Both local builds and 31 portable tests passed.
+
+The HTTP test first exposed a missing internal-route registration; registering this exact route resolved it without bypassing its own channel authentication. These tests use isolated fixtures and establish a host scheduling prerequisite, not automatic deferred execution, hard-exit recovery or production acceptance.
+
 ## Native maintenance handoff follow-up
 
 The maintenance ownership follow-up passed 209 adapter tests, 31 portable tests and six actual installed-SDK scenarios, with zero failures or skips; the local web build passed. The added SDK scenario holds actual native maintenance, queues an official user message, verifies no model request starts during the hold, refuses the changed source and then verifies the original Agent consumes that same message. It also verifies native cancellation reaches the transition without a caller-provided cancellation signal. Unit checks cover unavailable/already-owned maintenance, cleanup and management-request signal propagation.

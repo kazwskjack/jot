@@ -202,6 +202,10 @@ Recovery reads the immutable closure and matches the remote entries against ever
 
 ## Original lead barrier during a host handoff
 
+The trusted host can read `/internal/v1/workbench/native-task-intents` under the same original run, Session and worker lease. Optional `limit` (1–50, default 20) and `after_request_id` page the existing immutable journal by creation time and request ID. The cursor must belong to that original owner/run. Each item returns its original plan, `pending` or `reserved` state and `execution_authorized:false`; a reservation is never treated as completed publication.
+
+Reads recheck the current active original task, role grant and policy version. A changed unreserved step refuses the read instead of silently rewriting its frozen assignment. Already reserved rows remain historical scheduling facts; this endpoint does not reopen them, grant model/tool authority, select another role or resume a paused task. Existing reservation/admission checks are still required at execution time. Enumeration is a prerequisite for deferred host scheduling; automatic scheduling is not enabled by this endpoint.
+
 The transition now acquires the original Agent's native `runMaintenance` phase. Public `idle` status alone does not establish phase ownership. Missing native maintenance support or an already owned phase refuses admission; there is no fallback to an ordinary idle check. Log capture inside the owned phase does not await that maintenance task's own `whenIdle()` promise. The operation callback receives the combined native/request cancellation signal, which the admission factory propagates to its management and predecessor-evidence requests.
 
 New user input during maintenance stays in the original native inbox. Changed input or Session evidence refuses the handoff rather than transferring a stale source. When maintenance exits, the native loop may wake that queued input. This does not roll back a management transfer that already committed; that case still requires receipt reconciliation. A busy lead is refused, not automatically scheduled for later.

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add authenticated, paginated enumeration of the existing immutable native task-intent journal for host scheduling and recovery.
+- Revalidate original task, lease, Session, role policy and pending-step version without creating another run or dispatching a member.
+
 - Own host handoff transitions through native `runMaintenance`, retaining queued user input in the original Agent.
 - Propagate native cancellation into handoff management and avoid waiting on a maintenance task's own idle promise.
 - Verify real SDK inbox wakeup and cancellation with an isolated scripted provider.

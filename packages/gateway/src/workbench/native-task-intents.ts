@@ -58,6 +58,39 @@ export class NativeTaskIntents {
    return plan;
   });
  }
+ /** Read the existing immutable journal under the current original authority.
+  * A pending row is a scheduling hint, never child/model execution permission. */
+ list(owner:string,runId:string,input:{limit?:number;after_request_id?:string}={}){
+  if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(k=>!['limit','after_request_id'].includes(k))
+    ||input.limit!==undefined&&(!Number.isSafeInteger(input.limit)||input.limit<1||input.limit>50)
+    ||input.after_request_id!==undefined&&(typeof input.after_request_id!=='string'||!ID.test(input.after_request_id)))throw Error('native_task_intent_invalid');
+  return withImmediateTransaction(this.db,()=>{
+   const context=this.workbench.contextForRun(runId);
+   if(!context||context.owner_id!==owner||context.kind!=='task')throw Error('task_collaboration_forbidden');
+   this.workbench.assertRunActive(runId);this.tasks.assertRunActive(runId);
+   const current=this.db.prepare('SELECT task_id,occurrence_id FROM wb_task_current_occurrences WHERE run_id=?').get(runId) as {task_id:string;occurrence_id:string}|undefined;
+   if(!current||!this.db.prepare("SELECT 1 FROM ga_runs WHERE id=? AND status IN ('starting','running')").get(runId))throw Error('task_execution_revoked');
+   if(!this.collaboration.get(owner,current.task_id).enabled)throw Error('task_collaboration_revoked');
+   if(!this.db.prepare('SELECT 1 FROM wb_model_budget_bindings WHERE owner_id=? AND run_id=?').get(owner,runId))throw Error('budget_service_unavailable');
+   const after=input.after_request_id===undefined?undefined:this.db.prepare('SELECT created_at,request_id FROM wb_native_task_intents WHERE owner_id=? AND root_run_id=? AND request_id=?').get(owner,runId,input.after_request_id) as {created_at:string;request_id:string}|undefined;
+   if(input.after_request_id!==undefined&&!after)throw Error('native_task_intent_invalid');
+   const limit=input.limit??20;
+   const rows=this.db.prepare(`SELECT request_id,plan_json FROM wb_native_task_intents WHERE owner_id=? AND root_run_id=?
+     ${after?'AND (created_at>? OR (created_at=? AND request_id>?))':''} ORDER BY created_at,request_id LIMIT ?`)
+     .all(owner,runId,...(after?[after.created_at,after.created_at,after.request_id]:[]),limit+1) as {request_id:string;plan_json:string}[];
+   const hasReservations=!!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_native_child_reservations'").get();
+   const items=rows.slice(0,limit).map(row=>{
+    const plan=JSON.parse(row.plan_json);
+    if(plan.task_id!==current.task_id||plan.occurrence_id!==current.occurrence_id||plan.request_id!==row.request_id||plan.execution_authorized!==false)throw Error('task_assignment_revoked');
+    this.collaboration.authorizeNativeMember(owner,runId,plan.role_ref,plan.expected_policy_version);
+    const reserved=hasReservations&&!!this.db.prepare('SELECT 1 FROM wb_native_child_reservations WHERE owner_id=? AND root_run_id=? AND request_id=?').get(owner,runId,row.request_id);
+    if(!reserved){const step=this.tasks.subtasks(owner,current.task_id).items.find(s=>s.subtask_id===plan.subtask_id);
+     if(!step||step.version!==plan.expected_subtask_version||!['pending','blocked'].includes(step.status))throw Error('task_assignment_revoked');}
+    return {plan,state:reserved?'reserved':'pending',execution_authorized:false};
+   });
+   return {items,next_request_id:rows.length>limit?rows[limit-1]!.request_id:null};
+  });
+ }
  bind(owner:string,runId:string,requestId:string,roleRef:string,policyVersion:number):NativeTaskAssignment|undefined{
   if(!this.db.isTransaction)throw new Error('native_assignment_transaction_required');
   const row=this.db.prepare('SELECT plan_json FROM wb_native_task_intents WHERE owner_id=? AND root_run_id=? AND request_id=?').get(owner,runId,requestId) as {plan_json:string}|undefined;
