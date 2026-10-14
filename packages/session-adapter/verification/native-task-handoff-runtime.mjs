@@ -1,3 +1,4 @@
+import {withNativeHandoffBarrier} from '../native-handoff-barrier.js';
 // Actual installed Team/Subagent/AgentLoop + isolated Gateway/SQLite.
 // The LLM adapter is scripted locally: no external provider or production proof.
 import test from 'node:test';import assert from 'node:assert/strict';
@@ -41,15 +42,17 @@ for(const automaticClosures of [false])test('actual native handoff binds before 
  await bridge.request('native-task-intent',bridge.bindingFor(leadHandle.agent),{request_id:'native-role-runtime',subtask_id:step.subtask_id,expected_subtask_version:step.version,recipient_agent_id:member.agent_id});
  const controlRequest=(parentBinding,action,request,signal)=>bridge.request('handoff',parentBinding,{action,request,expected_policy_version:1,route:{provider:route.provider,model:route.model}},signal);
  let admitted;
- host=createNativeRoleHost({ctx,bridge,automaticClosures,handoffAdmission:async({parent,child,roleRef,binding,parentBinding,signal})=>{
+ host=createNativeRoleHost({ctx,bridge,automaticClosures,handoffAdmission:async({parent,child,roleRef,binding,parentBinding,signal})=>withNativeHandoffBarrier({agent:parent,registry:ctx.agents,persistence:ctx.sessionPersistence,projections:ctx.sessionProjections,signal},async(proof,check)=>{
+  assert.equal(proof.session_ref,parent.id);assert.equal(proof.driver_idle,true);
   assert.equal(parent.status,'idle','original lead is quiescent before this isolated handoff');assert.equal(calls.child,0);
   await controlRequest(parentBinding,'start',{request_id:'handoff-start',max_hops:2},signal);
-  const receipt=await controlRequest(parentBinding,'transfer',{request_id:'handoff-transfer',expected_revision:1,from:lead.agent_id,to:roleRef,execution_run_id:binding.runId,execution_session_ref:child.id},signal);
+  check();const receipt=await controlRequest(parentBinding,'transfer',{request_id:'handoff-transfer',expected_revision:1,from:lead.agent_id,to:roleRef,execution_run_id:binding.runId,execution_session_ref:child.id},signal);
   assert.equal(receipt.state.controller,member.agent_id);assert.equal(receipt.binding.session_ref,child.id);
   await assert.rejects(bridge.request('guard',parentBinding,{tool_name:'jot_workspace'},signal),/workbench_run_forbidden/);
   admitted=child.id;return receipt;
- },durableSpawns:true,sessions:ctx.sessions,persistence:ctx.sessionPersistence,selectModel:async(agent,check)=>{assert.equal(agent.options.provider,route.provider);assert.equal(agent.options.model,route.model);await check();}});
+ }),durableSpawns:true,sessions:ctx.sessions,persistence:ctx.sessionPersistence,selectModel:async(agent,check)=>{assert.equal(agent.options.provider,route.provider);assert.equal(agent.options.model,route.model);await check();}});
  let publishedChild,childGoalAtPublication;ctx.on('agent/created',({agent})=>{if(agent.session.header.parentSession===leadHandle.agent.id){assert.equal(ctx.agents.isOwnedBy(agent.id,leadHandle.agent),true);childGoalAtPublication=ctx.goals.get(agent);publishedChild=agent;}});
+ t.diagnostic(JSON.stringify({leadSeedTypes:Array.from({length:leadHandle.agent.session.seq},(_,i)=>leadHandle.agent.session.eventAt(i).type)}));
  const spawned=await host.spawn(leadHandle.agent,{roleRef:member.agent_id,policyVersion:1,requestId:'native-role-runtime'},{name:'reviewer',description:'Review source material',context:'fresh',prompt:[{type:'text',text:'Save the shared source notes.'}],signal:new AbortController().signal});
  const child=publishedChild;assert.ok(child,'official registry published the child');assert.equal(child.id,spawned.member.id);await child.whenIdle();
  await leadHandle.agent.whenIdle();assert.equal(calls.child,2,JSON.stringify(requests));assert.ok(seenSessions.every(id=>id===child.id||id===sessionRef));assert.ok(ctx.agentTeams.listMembers(leadHandle.agent).some(row=>row.id===child.id&&row.role==='teammate'));assert.equal(child.session.header.parentSession,leadHandle.agent.id);assert.equal(childGoalAtPublication,undefined);

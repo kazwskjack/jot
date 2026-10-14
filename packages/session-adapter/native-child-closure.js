@@ -87,15 +87,17 @@ export async function verifyNativeChildPrefix({agent,parentSessionRef,persistenc
 /** Read back the exact durable child log after native runtime detachment.
  * This is a host observation, not an LLM completion or business verdict.
  */
-export async function captureNativeChildClosure({agent,parentSessionRef,registry,persistence,projections,signal,reconcileOperations}){
+export async function captureNativeChildClosure(input){return captureNativeQuiescence(input,false);}
+export async function captureNativeHandoffQuiescence(input){return captureNativeQuiescence(input,true);}
+async function captureNativeQuiescence({agent,parentSessionRef,registry,persistence,projections,signal,reconcileOperations},resident){
  if(!agent||typeof agent.whenIdle!=='function'||typeof registry?.get!=='function'||typeof persistence?.flush!=='function'||typeof persistence?.open!=='function'||typeof projections?.stateOf!=='function'
-  ||!ID.test(parentSessionRef)||agent.session?.id!==agent.id||agent.session.header.parentSession!==parentSessionRef)throw new Error('native_child_closure_host_invalid');
+  ||!ID.test(agent.id)||agent.session?.id!==agent.id||(!resident&&(!ID.test(parentSessionRef)||agent.session.header.parentSession!==parentSessionRef)))throw new Error('native_child_closure_host_invalid');
  await agent.whenIdle();signal?.throwIfAborted();
- if(registry.get(agent.id)!==undefined||agent.status!=='idle')throw new Error('native_child_not_detached');
+ if((resident?registry.get(agent.id)!==agent:registry.get(agent.id)!==undefined)||agent.status!=='idle')throw new Error('native_child_not_detached');
  const session=agent.session,count=session.seq,inbox=projections.stateOf(session,'inbox');
- if(!Number.isSafeInteger(count)||count<1||!Array.isArray(inbox?.['next-turn'])||!Array.isArray(inbox?.['next-step'])||inbox['next-turn'].length||inbox['next-step'].length)throw new Error('native_child_pending_inbox');
+ if(!Number.isSafeInteger(count)||count<(resident?0:1)||!Array.isArray(inbox?.['next-turn'])||!Array.isArray(inbox?.['next-step'])||inbox['next-turn'].length||inbox['next-step'].length)throw new Error('native_child_pending_inbox');
  await persistence.flush();signal?.throwIfAborted();const handle=await persistence.open(agent.id,'read',{signal});
- let openTurn=false,lastEnd=-1;const tools=new Set(),remoteCalls=new Map(),hash=createHash('sha256').update(headerJson(session.header)+'\n');
+ let openTurn=false,lastEnd=-1,executionSeen=false;const tools=new Set(),remoteCalls=new Map(),hash=createHash('sha256').update(headerJson(session.header)+'\n');
  try{
   if(handle.id!==agent.id||handle.access!=='read'||headerJson(handle.header)!==headerJson(session.header))throw new Error('native_child_storage_changed');
   for(let offset=0;offset<count;){
@@ -104,6 +106,7 @@ export async function captureNativeChildClosure({agent,parentSessionRef,registry
    for(const event of result.events){
     if(event.seq!==offset||json(event)!==json(session.eventAt(offset)))throw new Error('native_child_storage_changed');
     hash.update(json(event)+'\n');
+    if(event.type.startsWith('turn/')||event.type.startsWith('tool/')||event.type.startsWith('llm/'))executionSeen=true;
     if(event.type==='turn/start')openTurn=true;
     if(event.type==='turn/end'){openTurn=false;lastEnd=event.seq;}
     if(event.type==='tool/call'){
@@ -117,7 +120,7 @@ export async function captureNativeChildClosure({agent,parentSessionRef,registry
     offset++;
    }
   }
-  if((await handle.read(count,1,{signal})).events?.length!==0||openTurn||tools.size||lastEnd<0)throw new Error('native_child_log_not_quiescent');
+  if((await handle.read(count,1,{signal})).events?.length!==0||openTurn||tools.size||(lastEnd<0&&(!resident||executionSeen)))throw new Error('native_child_log_not_quiescent');
  }finally{await handle.close();}
  const remoteOperations=[];
  for(const [callId,toolName] of remoteCalls){
@@ -129,7 +132,8 @@ export async function captureNativeChildClosure({agent,parentSessionRef,registry
   remoteOperations.push({session_ref:agent.id,request_id:callId,tool_name:toolName,operation_id:proof.operation_id,revision:proof.revision,status:proof.status,accepted_count:proof.accepted_count,items:proof.items.map(item=>({item_id:item.item_id,position:item.position,status:item.status}))});
  }
  signal?.throwIfAborted();
- if(registry.get(agent.id)!==undefined||session.seq!==count||agent.session!==session||agent.status!=='idle')throw new Error('native_child_live_changed');
+ if((resident?registry.get(agent.id)!==agent:registry.get(agent.id)!==undefined)||session.seq!==count||agent.session!==session||agent.status!=='idle')throw new Error('native_child_live_changed');
  const fresh=projections.stateOf(session,'inbox');if(fresh?.['next-turn']?.length!==0||fresh?.['next-step']?.length!==0)throw new Error('native_child_pending_inbox');
- return {protocol:1,session_ref:agent.id,parent_session_ref:parentSessionRef,seq_exclusive:count,turn_end_seq:lastEnd,log_sha256:hash.digest('hex'),driver_nonresident:true,inbox_pending:0,...(remoteOperations.length?{remote_operations:remoteOperations}:{})};
+ const facts={protocol:1,session_ref:agent.id,seq_exclusive:count,turn_end_seq:lastEnd,log_sha256:hash.digest('hex'),inbox_pending:0,...(remoteOperations.length?{remote_operations:remoteOperations}:{})};
+ return resident?{...facts,driver_idle:true}:{...facts,parent_session_ref:parentSessionRef,driver_nonresident:true};
 }

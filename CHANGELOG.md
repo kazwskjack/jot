@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Freeze new original-lead model/tool calls while a trusted host verifies durable quiescence and transfers control.
+- Expose the existing trusted handoff admission hook in formal native-role setup without enabling it by default.
+
 - Store terminal batch-operation facts atomically in native child closure receipts and reject conflicting retries.
 - Require stored operation evidence to match every recognized batch call before native recovery.
 

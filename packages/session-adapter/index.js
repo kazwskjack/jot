@@ -335,6 +335,7 @@ export function apply(ctx, config = {}) {
     || (config.nativeRoleRecovery !== undefined && typeof config.nativeRoleRecovery !== 'boolean')
     || (config.reconcileOperations !== undefined && (typeof config.reconcileOperations !== 'function' || config.nativeRoles !== true))
     || (config.nativeOperationOrigin !== undefined && (typeof config.nativeOperationOrigin !== 'string' || config.nativeRoles !== true || config.reconcileOperations !== undefined))
+    || (config.handoffAdmission !== undefined && (typeof config.handoffAdmission !== 'function' || config.nativeRoles !== true))
     || (config.nativeRoleRecovery===true&&config.nativeRoles!==true)
     || (config.nativeRoles===true&&(config.nativeContinuation!==true||config.workbenchModel===undefined))
     || ((config.nativeContinuation === true || config.webBudgetEnabled === true || config.nativeRoles===true) && workbenchToken.length < 16)) {
@@ -352,7 +353,7 @@ export function apply(ctx, config = {}) {
   }) : undefined
   const budgetModelSelector=createBudgetModelSelector({route:config.workbenchModel,llm:ctx.llm,agents:ctx.sessionController.agents})
   const nativeRoleHost=config.nativeRoles===true?createNativeRoleHost({ctx,bridge:workbenchBridge,selectModel:budgetModelSelector,
-    sessions:ctx.sessions,persistence:ctx.sessionPersistence,automaticClosures:true,durableSpawns:true,nativeRecovery:config.nativeRoleRecovery===true,reconcileOperations:config.reconcileOperations,nativeOperationOrigin:config.nativeOperationOrigin}):undefined
+    sessions:ctx.sessions,persistence:ctx.sessionPersistence,automaticClosures:true,durableSpawns:true,nativeRecovery:config.nativeRoleRecovery===true,reconcileOperations:config.reconcileOperations,nativeOperationOrigin:config.nativeOperationOrigin,handoffAdmission:config.handoffAdmission}):undefined
   if(nativeRoleHost){nativeTaskDispatcher=createNativeTaskDispatcher({bridge:workbenchBridge,host:nativeRoleHost});ctx.effect(()=>()=>nativeRoleHost.dispose())}
   const handler = createAdapterHandler({ controller: ctx.sessionController, fileUploads: ctx.fileUploads, agents: ctx.agents,
     sessions:ctx.sessions,persistence:ctx.sessionPersistence,
