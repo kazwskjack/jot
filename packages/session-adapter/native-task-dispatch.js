@@ -1,7 +1,7 @@
 import {createHash} from 'node:crypto';
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 /** One host-owned dispatch path. Failed native work is never reissued to legacy. */
-export function createNativeTaskDispatcher({bridge,host}){
+export function createNativeTaskDispatcher({bridge,host,scheduler}){
  if(typeof bridge?.bindingFor!=='function'||typeof bridge?.guardBudget!=='function'||typeof bridge?.request!=='function'||typeof host?.spawn!=='function')throw new Error('native_task_dispatch_unavailable');
  return async(agent,binding,callId,args,signal)=>{
   signal?.throwIfAborted();
@@ -16,6 +16,7 @@ export function createNativeTaskDispatcher({bridge,host}){
     ||plan.subtask_id!==frozen.subtask_id||plan.expected_subtask_version!==frozen.expected_subtask_version||!Number.isSafeInteger(plan.expected_policy_version)||plan.expected_policy_version<1
     ||typeof plan.name!=='string'||!plan.name.trim()||plan.name.length>80||typeof plan.description!=='string'||!plan.description.trim()||plan.description.length>2000
     ||typeof plan.text!=='string'||!plan.text.trim()||plan.text.length>32000)throw new Error('native_task_plan_invalid');
+  if(scheduler){if(typeof scheduler.submit!=='function')throw Error('native_task_scheduler_unavailable');return scheduler.submit(agent,binding,plan,signal);}
   const result=await host.spawn(agent,{roleRef:plan.role_ref,policyVersion:plan.expected_policy_version,requestId},
     {name:'role-'+createHash('sha256').update(JSON.stringify([plan.role_ref,requestId])).digest('hex').slice(0,20),description:plan.description,prompt:[{type:'text',text:plan.text}],context:'fresh',signal});
   check();

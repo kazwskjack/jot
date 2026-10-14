@@ -23,7 +23,8 @@
     "native-handoff-admission.js",
     "native-operation-observer.js",
     "native-role-provider.js",
-    "native-task-dispatch.js"
+    "native-task-dispatch.js",
+    "native-task-scheduler.js"
   ],
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",

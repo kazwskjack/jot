@@ -202,6 +202,18 @@ Recovery reads the immutable closure and matches the remote entries against ever
 
 ## Original lead barrier during a host handoff
 
+### Deferred model-callable handoff
+
+Formal `apply` can explicitly enable `nativeDeferredHandoff:true` together with native roles and a trusted `handoffAdmission` function. The ordinary Team path remains unchanged when this option is absent. Model `tasks.delegate` first prepares the existing immutable intent and returns `{runtime:'native_team',state:'pending',request_id,subtask_id,execution_authorized:false}`. It does not wait for its own running lead turn to become idle.
+
+The host watches the original native `agent/status` idle event and starts at most one queued transition per wake. Before spawning it checks exact live Agent/binding, cancellation, existing budget authority, the original paginated journal and the unchanged plan. It then uses the same request ID and native host admission path. Duplicate submissions with changed contents conflict. Already reserved rows, missing/changed plans and revoked authority become blocked local observations rather than new executions. The trusted `jot-native-task-scheduler/result` event reports published, blocked or cancelled state; it never sends raw exception text or grants model authority. Host disposal removes the observer, aborts pending/active dispatch and waits for the active promises before disposing the role host.
+
+The queue is process-local coordination over durable original intents. Restart restoration, automatic uncertain-publication reconciliation, multi-role continuation and automatic final return are not established by this option. The SDK verification below uses a scripted model and explicitly returns control through the existing management API after child closure; it is not production or complete autonomous task acceptance.
+
+```sh
+node --test packages/session-adapter/verification/native-task-deferred-handoff-runtime.mjs
+```
+
 The trusted host can read `/internal/v1/workbench/native-task-intents` under the same original run, Session and worker lease. Optional `limit` (1–50, default 20) and `after_request_id` page the existing immutable journal by creation time and request ID. The cursor must belong to that original owner/run. Each item returns its original plan, `pending` or `reserved` state and `execution_authorized:false`; a reservation is never treated as completed publication.
 
 Reads recheck the current active original task, role grant and policy version. A changed unreserved step refuses the read instead of silently rewriting its frozen assignment. Already reserved rows remain historical scheduling facts; this endpoint does not reopen them, grant model/tool authority, select another role or resume a paused task. Existing reservation/admission checks are still required at execution time. Enumeration is a prerequisite for deferred host scheduling; automatic scheduling is not enabled by this endpoint.

@@ -1,5 +1,11 @@
 # Code preview verification
 
+## Deferred formal-host handoff follow-up
+
+The deferred scheduler passed 217 public adapter tests, 248 internal adapter tests, seven actual installed-SDK scripted-provider scenarios and 31 portable tests, all with zero failures/skips. The local web build passed. Unit checks cover busy-lead pending receipts, exact request replay/conflicts, journal pagination, changed plans/bindings, prior reservations, cancellation, revoked authority and active-shutdown draining; actual packed-module imports include the scheduler.
+
+The new formal HTTP/SessionController scenario invokes `tasks.delegate` from a genuinely running native lead. Its tool result is pending, the lead completes its original turn, and the native idle event triggers journal lookup and handoff before the member's first model. The member writes a file with a verified original occurrence receipt; one original intent/reservation/publication and zero legacy dispatches are recorded. Child closure is drained and control is explicitly returned through the existing authenticated management API. A diagnostic initially tried to serialize the official Agent proxy; reporting only receipt state fixed that probe error without changing assertions. Gateway source was unchanged in this follow-up. Restart restoration and production acceptance remain pending.
+
 ## Durable task-intent enumeration follow-up
 
 The authenticated enumeration change passed the full gateway suite with 971 passes, zero failures and six platform-related skips (977 total). Three new scenarios cover reopening the original immutable journal, deterministic pagination, reserved-state observation without another run or mailbox dispatch, stale step/policy and foreign-scope refusal, and the actual HTTP endpoint's authentication, Session and worker-lease checks. The same 14-test focused suite and typecheck passed in the internal candidate. Both local builds and 31 portable tests passed.

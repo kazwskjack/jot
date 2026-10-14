@@ -19,6 +19,7 @@ test('packed adapter loads independently with every runtime module included',asy
  const native=await import(pathToFileURL(join(root,'package/native-role-host.js')).href);
  assert.equal(typeof native.createNativeRoleHost,'function');
  const handoff=await import(pathToFileURL(join(root,'package/native-handoff-admission.js')).href);assert.equal(typeof handoff.createNativeHandoffAdmission,'function');
+ const scheduler=await import(pathToFileURL(join(root,'package/native-task-scheduler.js')).href);assert.equal(typeof scheduler.createNativeTaskScheduler,'function');assert.ok(files.includes('native-task-scheduler.js'));
  assert.equal(typeof entry.createAdapterHandler,'function');assert.equal(typeof entry.apply,'function');
  for(const name of ['workbench-goal.js','model-budget-stream.js','checkpoint.js','native-child-admission.js','native-role-provider.js','native-role-host.js','native-handoff-admission.js','native-handoff-barrier.js','native-child-closure.js','native-operation-observer.js'])assert.ok(files.includes(name),name);
  assert.equal(readFileSync(join(root,'package/package.json'),'utf8').includes('"private": true'),true);

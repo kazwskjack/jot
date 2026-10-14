@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add optional formal-host deferred handoff dispatch: a busy lead returns the original durable pending intent and an idle event triggers revalidation before native member creation.
+- Preserve cancellation, request identity and shutdown draining; uncertain prior reservations require reconciliation rather than another execution.
+- Verify model-callable deferred handoff, actual member file receipts and explicit return to the original lead with the installed SDK.
+
 - Add authenticated, paginated enumeration of the existing immutable native task-intent journal for host scheduling and recovery.
 - Revalidate original task, lease, Session, role policy and pending-step version without creating another run or dispatching a member.
 

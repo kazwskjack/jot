@@ -10,6 +10,11 @@ function fixture(){
  const host={spawn:async(a,intent,request)=>{assert.equal(a,agent);calls.push({intent,request});return {member:{id:'child'}};}};
  return {agent,binding,calls,bridge,host,args:{subtask_id:'step',expected_subtask_version:1,recipient_agent_id:'role'},changeBinding:()=>current={...binding},mutatePlan:fn=>mutate=fn};
 }
+
+test('deferred dispatch returns only the stored pending receipt without invoking immediate spawn',async()=>{
+ const f=fixture(),scheduler={submit:async(a,b,plan,signal)=>{assert.equal(a,f.agent);assert.equal(b,f.binding);assert.equal(plan.execution_authorized,false);return {runtime:'native_team',state:'pending',request_id:plan.request_id,execution_authorized:false};}};
+ const result=await createNativeTaskDispatcher({...f,scheduler})(f.agent,f.binding,'call',f.args,new AbortController().signal);assert.equal(result.state,'pending');assert.equal(f.calls.some(x=>typeof x==='object'),false);
+});
 test('native dispatcher carries only server-frozen intent to original Host and stable call identity',async()=>{
  const f=fixture(),dispatch=createNativeTaskDispatcher(f);const result=await dispatch(f.agent,f.binding,'call-1',f.args,new AbortController().signal);
  assert.equal(result.runtime,'native_team');assert.equal(result.subtask_id,'step');assert.equal(result.member.id,'child');

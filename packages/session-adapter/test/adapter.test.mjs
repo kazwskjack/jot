@@ -88,3 +88,9 @@ test('formal handoff admission requires a trusted function and native roles',()=
  try{const ctx=Object.defineProperty({},'sessionController',{get(){throw Error('controller_must_not_be_reached');}});for(const handoffAdmission of [{},async()=>{}])assert.throws(()=>apply(ctx,{handoffAdmission}),/jot_session_adapter_config_invalid/);}
  finally{if(prior===undefined)delete process.env.JOT_SESSION_ADAPTER_TOKEN;else process.env.JOT_SESSION_ADAPTER_TOKEN=prior;}
 });
+
+test('deferred handoff scheduling requires native roles and explicit handoff admission',()=>{
+ const prior=process.env.JOT_SESSION_ADAPTER_TOKEN;process.env.JOT_SESSION_ADAPTER_TOKEN=token;
+ try{const ctx=Object.defineProperty({},'sessionController',{get(){throw Error('controller_must_not_be_reached');}});for(const nativeDeferredHandoff of [true,'yes'])assert.throws(()=>apply(ctx,{nativeDeferredHandoff}),/jot_session_adapter_config_invalid/);}
+ finally{if(prior===undefined)delete process.env.JOT_SESSION_ADAPTER_TOKEN;else process.env.JOT_SESSION_ADAPTER_TOKEN=prior;}
+});

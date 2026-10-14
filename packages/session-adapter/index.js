@@ -4,6 +4,7 @@ import { isAbsolute } from 'node:path'
 import { createVoiceAdapterHandler } from './voice.js'
 import {createBudgetModelSelector} from './budget-model-selection.js'
 import {createNativeTaskDispatcher} from './native-task-dispatch.js'
+import {createNativeTaskScheduler} from './native-task-scheduler.js'
 import {createNativeRoleHost} from './native-role-host.js'
 import {conversationGoal} from './conversation-goal.js'
 import { WorkbenchBridge,normalizeHostExecutionLease } from './workbench.js'
@@ -336,6 +337,8 @@ export function apply(ctx, config = {}) {
     || (config.reconcileOperations !== undefined && (typeof config.reconcileOperations !== 'function' || config.nativeRoles !== true))
     || (config.nativeOperationOrigin !== undefined && (typeof config.nativeOperationOrigin !== 'string' || config.nativeRoles !== true || config.reconcileOperations !== undefined))
     || (config.handoffAdmission !== undefined && (typeof config.handoffAdmission !== 'function' || config.nativeRoles !== true))
+    || (config.nativeDeferredHandoff !== undefined && typeof config.nativeDeferredHandoff !== 'boolean')
+    || (config.nativeDeferredHandoff === true && (config.nativeRoles !== true || typeof config.handoffAdmission !== 'function'))
     || (config.nativeRoleRecovery===true&&config.nativeRoles!==true)
     || (config.nativeRoles===true&&(config.nativeContinuation!==true||config.workbenchModel===undefined))
     || ((config.nativeContinuation === true || config.webBudgetEnabled === true || config.nativeRoles===true) && workbenchToken.length < 16)) {
@@ -354,7 +357,11 @@ export function apply(ctx, config = {}) {
   const budgetModelSelector=createBudgetModelSelector({route:config.workbenchModel,llm:ctx.llm,agents:ctx.sessionController.agents})
   const nativeRoleHost=config.nativeRoles===true?createNativeRoleHost({ctx,bridge:workbenchBridge,selectModel:budgetModelSelector,
     sessions:ctx.sessions,persistence:ctx.sessionPersistence,automaticClosures:true,durableSpawns:true,nativeRecovery:config.nativeRoleRecovery===true,reconcileOperations:config.reconcileOperations,nativeOperationOrigin:config.nativeOperationOrigin,handoffAdmission:config.handoffAdmission}):undefined
-  if(nativeRoleHost){nativeTaskDispatcher=createNativeTaskDispatcher({bridge:workbenchBridge,host:nativeRoleHost});ctx.effect(()=>()=>nativeRoleHost.dispose())}
+  if(nativeRoleHost){
+    const scheduler=config.nativeDeferredHandoff===true?createNativeTaskScheduler({ctx,bridge:workbenchBridge,host:nativeRoleHost}):undefined
+    nativeTaskDispatcher=createNativeTaskDispatcher({bridge:workbenchBridge,host:nativeRoleHost,scheduler})
+    ctx.effect(()=>async()=>{await scheduler?.dispose();await nativeRoleHost.dispose()})
+  }
   const handler = createAdapterHandler({ controller: ctx.sessionController, fileUploads: ctx.fileUploads, agents: ctx.agents,
     sessions:ctx.sessions,persistence:ctx.sessionPersistence,
     speechController, voiceEnabled, token, workbenchBridge,
