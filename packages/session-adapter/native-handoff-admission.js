@@ -16,9 +16,11 @@ export function createNativeHandoffAdmission({bridge,registry,persistence,projec
    ||binding?.sessionRef!==child.id||!valid(binding.runId)||binding.runId===parentBinding.runId||!valid(roleRef))throw Error('native_handoff_identity_invalid');
   const root=Object.freeze({...parentBinding,...(parentBinding.executionLease?{executionLease:Object.freeze({...parentBinding.executionLease})}:{})});
   const target=Object.freeze({runId:binding.runId,sessionRef:binding.sessionRef,roleRef});
-  const manage=(action,request)=>bridge.request('handoff',root,{action,request,expected_policy_version:policyVersion,route:model},signal);
-  return withNativeHandoffBarrier({agent:parent,registry,persistence,projections,reconcileOperations,signal},async(_proof,check)=>{
-   const supplied=await previousExecutionFor?.({parent,child,roleRef,binding:target,parentBinding:root,signal});const previous=supplied===undefined?undefined:Object.freeze({agent:supplied?.agent,runId:supplied?.runId,roleRef:supplied?.roleRef});check();
+  let transitionSignal=signal;
+  const manage=(action,request)=>bridge.request('handoff',root,{action,request,expected_policy_version:policyVersion,route:model},transitionSignal);
+  return withNativeHandoffBarrier({agent:parent,registry,persistence,projections,reconcileOperations,signal},async(_proof,check,nativeSignal)=>{
+   transitionSignal=nativeSignal;
+   const supplied=await previousExecutionFor?.({parent,child,roleRef,binding:target,parentBinding:root,signal:transitionSignal});const previous=supplied===undefined?undefined:Object.freeze({agent:supplied?.agent,runId:supplied?.runId,roleRef:supplied?.roleRef});check();
    let revision,from,sourceFence=()=>{};
    if(previous===undefined){
     const started=await manage('start',{request_id:requestId('handoff-start',[root.runId,root.sessionRef]),max_hops:maxHops});check();
@@ -30,10 +32,10 @@ export function createNativeHandoffAdmission({bridge,registry,persistence,projec
     const sourceCheck=()=>{check();if(!valid(source?.id)||!valid(previous.runId)||!valid(previous.roleRef)||source.id===parent.id||source.id===child.id
      ||sourceSession?.id!==source.id||source.status!=='idle'||registry.get(source.id)!==undefined||source.session!==sourceSession||sourceSession.seq!==sourceCount)throw Error('native_handoff_predecessor_not_closed');};
     sourceFence=sourceCheck;sourceCheck();
-    const {source:saved}=await bridge.request('native-child-source',root,{child_session_ref:source.id,purpose:'handoff'},signal);sourceCheck();
+    const {source:saved}=await bridge.request('native-child-source',root,{child_session_ref:source.id,purpose:'handoff'},transitionSignal);sourceCheck();
     if(saved?.previous_run_id!==previous.runId||saved.role_ref!==previous.roleRef)throw Error('native_handoff_predecessor_changed');
-    await verifyNativeChildPrefix({agent:source,parentSessionRef:parent.id,persistence,proof:saved.proof,signal});sourceCheck();
-    const fresh=await captureNativeChildClosure({agent:source,parentSessionRef:parent.id,registry,persistence,projections,signal,
+    await verifyNativeChildPrefix({agent:source,parentSessionRef:parent.id,persistence,proof:saved.proof,signal:transitionSignal});sourceCheck();
+    const fresh=await captureNativeChildClosure({agent:source,parentSessionRef:parent.id,registry,persistence,projections,signal:transitionSignal,
      reconcileOperations:async scope=>saved.proof.remote_operations?.find(p=>p.request_id===scope.callId)});sourceCheck();
     const canonical=value=>JSON.stringify(value,(_key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item);
     if(canonical(fresh)!==canonical(saved.proof))throw Error('native_handoff_predecessor_changed');

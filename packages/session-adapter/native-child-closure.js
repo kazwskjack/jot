@@ -88,11 +88,14 @@ export async function verifyNativeChildPrefix({agent,parentSessionRef,persistenc
  * This is a host observation, not an LLM completion or business verdict.
  */
 export async function captureNativeChildClosure(input){return captureNativeQuiescence(input,false);}
-export async function captureNativeHandoffQuiescence(input){return captureNativeQuiescence(input,true);}
-async function captureNativeQuiescence({agent,parentSessionRef,registry,persistence,projections,signal,reconcileOperations},resident){
+export async function captureNativeHandoffQuiescence(input,maintenanceSignal){
+ if(maintenanceSignal!==undefined&&(input.signal!==maintenanceSignal||typeof maintenanceSignal.throwIfAborted!=='function'))throw Error('native_handoff_maintenance_invalid');
+ return captureNativeQuiescence(input,true,maintenanceSignal!==undefined);
+}
+async function captureNativeQuiescence({agent,parentSessionRef,registry,persistence,projections,signal,reconcileOperations},resident,idleClaimed=false){
  if(!agent||typeof agent.whenIdle!=='function'||typeof registry?.get!=='function'||typeof persistence?.flush!=='function'||typeof persistence?.open!=='function'||typeof projections?.stateOf!=='function'
   ||!ID.test(agent.id)||agent.session?.id!==agent.id||(!resident&&(!ID.test(parentSessionRef)||agent.session.header.parentSession!==parentSessionRef)))throw new Error('native_child_closure_host_invalid');
- await agent.whenIdle();signal?.throwIfAborted();
+ if(!idleClaimed)await agent.whenIdle();signal?.throwIfAborted();
  if((resident?registry.get(agent.id)!==agent:registry.get(agent.id)!==undefined)||agent.status!=='idle')throw new Error('native_child_not_detached');
  const session=agent.session,count=session.seq,inbox=projections.stateOf(session,'inbox');
  if(!Number.isSafeInteger(count)||count<(resident?0:1)||!Array.isArray(inbox?.['next-turn'])||!Array.isArray(inbox?.['next-step'])||inbox['next-turn'].length||inbox['next-step'].length)throw new Error('native_child_pending_inbox');

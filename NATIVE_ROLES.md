@@ -202,6 +202,10 @@ Recovery reads the immutable closure and matches the remote entries against ever
 
 ## Original lead barrier during a host handoff
 
+The transition now acquires the original Agent's native `runMaintenance` phase. Public `idle` status alone does not establish phase ownership. Missing native maintenance support or an already owned phase refuses admission; there is no fallback to an ordinary idle check. Log capture inside the owned phase does not await that maintenance task's own `whenIdle()` promise. The operation callback receives the combined native/request cancellation signal, which the admission factory propagates to its management and predecessor-evidence requests.
+
+New user input during maintenance stays in the original native inbox. Changed input or Session evidence refuses the handoff rather than transferring a stale source. When maintenance exits, the native loop may wake that queued input. This does not roll back a management transfer that already committed; that case still requires receipt reconciliation. A busy lead is refused, not automatically scheduled for later.
+
 `withNativeHandoffBarrier(input, operation)` is a trusted-host transition helper. It requires the exact resident original Agent to be idle before entering, rejects pending native inbox messages, and installs temporary tool and Session-local model gates. It reads back the original persistent log and reconciles recognized batch calls using the same closure rules. Before, between (through the supplied check function) and after management requests, the caller can verify that the original Agent, Session sequence, residency and inbox remain unchanged. All temporary gates unwind on success, cancellation and failure.
 
 The helper does not wait for a running lead from its own tool callback; that would wait on itself. An idle fresh lead may have only official Goal metadata and no completed turn. The reader allows that initialization state while still rejecting unfinished execution, missing tool outcomes and unresolved background batches. Member closure continues to require a completed turn and native detachment.

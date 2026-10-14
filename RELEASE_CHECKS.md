@@ -1,5 +1,11 @@
 # Code preview verification
 
+## Native maintenance handoff follow-up
+
+The maintenance ownership follow-up passed 209 adapter tests, 31 portable tests and six actual installed-SDK scenarios, with zero failures or skips; the local web build passed. The added SDK scenario holds actual native maintenance, queues an official user message, verifies no model request starts during the hold, refuses the changed source and then verifies the original Agent consumes that same message. It also verifies native cancellation reaches the transition without a caller-provided cancellation signal. Unit checks cover unavailable/already-owned maintenance, cleanup and management-request signal propagation.
+
+The SDK providers are local scripts and use isolated state. These results do not establish production behavior, automatic deferred-intent scheduling, unknown-commit recovery or external-effect coverage. Gateway source was unchanged in this follow-up, so its preceding suite is not counted as a new run.
+
 These checks apply to the first standalone code preview. Historical engineering results are described separately and are not reused as this release's test counts.
 
 | Check | Result | What it establishes |

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Own host handoff transitions through native `runMaintenance`, retaining queued user input in the original Agent.
+- Propagate native cancellation into handoff management and avoid waiting on a maintenance task's own idle promise.
+- Verify real SDK inbox wakeup and cancellation with an isolated scripted provider.
+
 - Admit subsequent roles only from the exact controller execution and verified detached predecessor closure.
 - Separate read-only handoff evidence from cold-resume authority so completed steps can pass material to the next role.
 - Verify formal two-role handoff and actual shared-file read/write receipts with the installed SDK.
