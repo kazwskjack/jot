@@ -210,6 +210,17 @@ export class HarnessCoordinator {
       const items = safeWebOperationItems(rows, operationKind, operationPresentation.itemActionLabel);
       const urls = [...new Set(items.map(item => item.url).filter(Boolean))];
       const terminal = ['succeeded', 'partial', 'failed', 'cancelled'].includes(operationStatus);
+      // Presentation may infer a display count; execution cannot infer that
+      // an absent or truncated acceptance manifest represents all effects.
+      const acceptedCount = value.accepted_count;
+      const itemsSettled = terminal && operationKind !== 'unknown'
+        && typeof acceptedCount === 'number' && Number.isSafeInteger(acceptedCount) && acceptedCount >= 0
+        && rows.length === acceptedCount && items.length === acceptedCount
+        && new Set(rows.map(item => item.item_id)).size === acceptedCount
+        && new Set(rows.map(item => item.position)).size === acceptedCount
+        && rows.every(item => typeof item.item_id === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(item.item_id)
+          && Number.isSafeInteger(item.position) && item.position >= 0 && item.position < acceptedCount
+          && typeof item.status === 'string' && ['succeeded', 'failed', 'cancelled'].includes(item.status));
       const activityStatus = operationStatus === 'partial' ? 'partial'
         : operationStatus === 'succeeded' ? 'succeeded'
           : operationStatus === 'failed' ? 'failed'
@@ -241,7 +252,7 @@ export class HarnessCoordinator {
         VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(run_id,tool_call_id) DO UPDATE SET
         last_revision=excluded.last_revision,updated_at=excluded.updated_at,last_status=excluded.last_status,items_settled=excluded.items_settled`)
         .run(lease.run_id, toolCallId, sessionRef, operationId, eventCursor, startedAt, now, operationStatus,
-          Number(terminal && items.length===activity.detail.accepted_count && items.every(item=>typeof item.status==='string'&&['succeeded','failed','cancelled'].includes(item.status))));
+          Number(itemsSettled));
       return eventCursor;
     });
   }

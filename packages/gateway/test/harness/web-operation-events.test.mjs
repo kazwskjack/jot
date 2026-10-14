@@ -77,6 +77,31 @@ test('C batch revisions project once into the durable Jot activity stream and re
     assert.equal(db.prepare('SELECT last_revision FROM ga_web_operation_cursors WHERE run_id=? AND tool_call_id=?')
       .get(receipt.run_id, 'dsh-call-1').last_revision, 4)
 
+    const terminalItems = finalSnapshot.items
+    const incompleteEvidence = [
+      { accepted_count: undefined, items: terminalItems },
+      { accepted_count: null, items: terminalItems },
+      { accepted_count: '2', items: terminalItems },
+      { accepted_count: 3, items: terminalItems },
+      { accepted_count: 2, items: [terminalItems[0], terminalItems[0]] },
+      { accepted_count: 2, items: [terminalItems[0], { ...terminalItems[1], position: 0 }] },
+    ]
+    for (const [index, evidence] of incompleteEvidence.entries()) {
+      const callId = `incomplete-${index}`
+      coordinator.recordWebOperationSnapshot(lease, sessionRef, callId, {
+        ...finalSnapshot, ...evidence, revision: 1, event_cursor: 1,
+        events: [{ revision: 1, event_type: 'item.updated', payload: {} }],
+      })
+      assert.equal(db.prepare('SELECT items_settled FROM ga_web_operation_cursors WHERE tool_call_id=?')
+        .get(callId).items_settled, 0, `incomplete evidence ${index} cannot release handoff`)
+      coordinator.recordWebOperationSnapshot(lease, sessionRef, callId, {
+        ...finalSnapshot, revision: 2, event_cursor: 2,
+        events: [{ revision: 2, event_type: 'item.updated', payload: {} }],
+      })
+      assert.equal(db.prepare('SELECT items_settled FROM ga_web_operation_cursors WHERE tool_call_id=?')
+        .get(callId).items_settled, 1, 'new complete evidence releases the observation barrier')
+    }
+
     const taintedSnapshot = { ...snapshot, operation_id: `web-${'b'.repeat(32)}`, status: 'private status',
       revision: 1, event_cursor: 1, events: [{ revision: 1, event_type: 'item.updated', payload: {} }],
       counts: { succeeded: 1, private_count: 88 },
@@ -119,7 +144,7 @@ test('C batch revisions project once into the durable Jot activity stream and re
       ...snapshot, operation_id: `web-${'3'.repeat(32)}`, revision: 1, event_cursor: 1,
       events: [{ revision: '1', event_type: 'item.updated', payload: {} }],
     }), /web_operation_event_invalid/)
-    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM ga_web_operation_cursors').get().n, 2)
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM ga_web_operation_cursors').get().n, 2 + incompleteEvidence.length)
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM ga_events WHERE run_id=? AND type='activity.upsert'")
       .get(receipt.run_id).n, beforeInvalid)
   } finally {
