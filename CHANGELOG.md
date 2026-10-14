@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Restore pending original task intents on trusted root Session reattachment without another model planning turn.
+- Inspect existing reservations with the exact spawn digest; recorded publication is observed without executing again, while unknown publication remains blocked.
+- Stage complete recovery pages before queue changes, preserve paused Goals and keep the original Session available when dispatch recovery is blocked.
+
 - Add optional formal-host deferred handoff dispatch: a busy lead returns the original durable pending intent and an idle event triggers revalidation before native member creation.
 - Preserve cancellation, request identity and shutdown draining; uncertain prior reservations require reconciliation rather than another execution.
 - Verify model-callable deferred handoff, actual member file receipts and explicit return to the original lead with the installed SDK.

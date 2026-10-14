@@ -1,5 +1,11 @@
 # Code preview verification
 
+## Original intent restoration follow-up
+
+The restoration change passed 222 public adapter tests, 255 internal adapter tests, eight actual installed-SDK scripted-provider scenarios and 31 portable tests, with zero failures or skips; the local web build passed. New checks cover new-host pending restoration, exact reserved-publication observation without another spawn, failed-page atomic staging, paused Goals and formal Session attachment with safe blocked-recovery reporting. Internal composition retains its private defaults; a previously absent model-admission test file was added rather than overwriting unrelated internal tests.
+
+The new formal HTTP/SessionController probe begins with an original plan already stored in isolated SQLite before the adapter starts. Reattachment restores that exact request; child admission happens without another lead planning call, the member produces its verified original file receipt, and the probe explicitly drains and returns control. It checks one original intent/reservation/publication and zero legacy dispatches. This is new-host adoption evidence, not a hard-kill recovery test or production-provider acceptance. Gateway source was unchanged in this follow-up.
+
 ## Deferred formal-host handoff follow-up
 
 The deferred scheduler passed 217 public adapter tests, 248 internal adapter tests, seven actual installed-SDK scripted-provider scenarios and 31 portable tests, all with zero failures/skips. The local web build passed. Unit checks cover busy-lead pending receipts, exact request replay/conflicts, journal pagination, changed plans/bindings, prior reservations, cancellation, revoked authority and active-shutdown draining; actual packed-module imports include the scheduler.

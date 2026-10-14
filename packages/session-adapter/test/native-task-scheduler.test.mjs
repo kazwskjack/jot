@@ -39,3 +39,26 @@ test('dispose cancels and awaits an active original spawn rather than dropping i
  f.host.spawn=async(_agent,_intent,request)=>{started();await new Promise(done=>request.signal.addEventListener('abort',done,{once:true}));finished=true;request.signal.throwIfAborted();};
  await scheduler.submit(f.agent,f.binding,f.plan,new AbortController().signal);f.agent.status='idle';f.hooks.get('agent/status')({agent:f.agent,status:'idle'});await ready;await scheduler.dispose();assert.equal(finished,true);assert.equal(f.hooks.size,0);
 });
+
+test('a new host restores pending original intents and dispatches without another planning request',async()=>{
+ const f=fixture(),old=createNativeTaskScheduler(f);await old.submit(f.agent,f.binding,f.plan,new AbortController().signal);await old.dispose();
+ const restored=createNativeTaskScheduler(f),summary=await restored.restore(f.agent,f.binding,new AbortController().signal);assert.equal(summary.items[0].state,'pending');assert.equal(f.spawned.length,0);
+ f.agent.status='idle';f.hooks.get('agent/status')({agent:f.agent,status:'idle'});await restored.flush();assert.equal(f.spawned.length,1);assert.equal(f.spawned[0].intent.requestId,'request');await restored.dispose();
+});
+test('reserved restoration reads exact durable publication and never recreates an unknown member',async()=>{
+ for(const published of [false,true]){const f=fixture();f.rows[0].state='reserved';let inspected=0;
+  f.bridge.request=async(path,_binding,args)=>{if(path==='native-task-intents')return {items:structuredClone(f.rows),next_request_id:null};assert.equal(path,'native-child-request');assert.match(args.spawn_request_hash,/^[a-f0-9]{64}$/);inspected++;return {reservation:{child_session_ref:'known-child',role_ref:'reviewer',execution_authorized:false,...(published?{publication:{member:{id:'known-child'}}}:{})}};};
+  const scheduler=createNativeTaskScheduler(f),receipt=await scheduler.restore(f.agent,f.binding,new AbortController().signal);assert.equal(receipt.items[0].state,published?'published':'blocked');assert.equal(inspected,1);f.agent.status='idle';f.hooks.get('agent/status')({agent:f.agent,status:'idle'});await scheduler.flush();assert.equal(f.spawned.length,0);await scheduler.dispose();
+ }
+});
+test('a failed or changed recovery page cannot partially enqueue pending work',async()=>{
+ const f=fixture(),scheduler=createNativeTaskScheduler(f);let reads=0;
+ f.bridge.request=async()=>{if(++reads===1)return {items:structuredClone(f.rows),next_request_id:'next'};throw Error('revoked');};
+ await assert.rejects(scheduler.restore(f.agent,f.binding,new AbortController().signal),/revoked/);assert.equal(scheduler.result(f.agent,'request'),undefined);
+ f.agent.status='idle';await scheduler.flush();assert.equal(f.spawned.length,0);await scheduler.dispose();
+});
+
+test('a paused native Goal remains inactive without reading or restoring pending work',async()=>{
+ const f=fixture();f.ctx.goals={get:()=>({phase:'paused'})};f.bridge.request=async()=>{throw Error('must not read paused task');};const scheduler=createNativeTaskScheduler(f);
+ assert.deepEqual(await scheduler.restore(f.agent,f.binding,new AbortController().signal),{state:'inactive',items:[]});assert.equal(f.spawned.length,0);await scheduler.dispose();
+});

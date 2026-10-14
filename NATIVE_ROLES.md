@@ -208,10 +208,22 @@ Formal `apply` can explicitly enable `nativeDeferredHandoff:true` together with 
 
 The host watches the original native `agent/status` idle event and starts at most one queued transition per wake. Before spawning it checks exact live Agent/binding, cancellation, existing budget authority, the original paginated journal and the unchanged plan. It then uses the same request ID and native host admission path. Duplicate submissions with changed contents conflict. Already reserved rows, missing/changed plans and revoked authority become blocked local observations rather than new executions. The trusted `jot-native-task-scheduler/result` event reports published, blocked or cancelled state; it never sends raw exception text or grants model authority. Host disposal removes the observer, aborts pending/active dispatch and waits for the active promises before disposing the role host.
 
-The queue is process-local coordination over durable original intents. Restart restoration, automatic uncertain-publication reconciliation, multi-role continuation and automatic final return are not established by this option. The SDK verification below uses a scripted model and explicitly returns control through the existing management API after child closure; it is not production or complete autonomous task acceptance.
+The queue is process-local coordination over durable original intents. Trusted root Session reattachment now restores pending records from that journal. Automatic uncertain-publication recovery, active-member reattachment, multi-role continuation and automatic final return remain pending. The SDK verification below uses a scripted model and explicitly returns control through the existing management API after child closure; it is not production or complete autonomous task acceptance.
 
 ```sh
 node --test packages/session-adapter/verification/native-task-deferred-handoff-runtime.mjs
+```
+
+### Original intent restoration
+
+When deferred handoff is configured, formal Session creation first attaches the existing workbench identity. Only a trusted context whose task root matches that exact run is eligible for scheduler restoration; chat contexts and member bindings are not treated as task roots. The scheduler reads all journal pages and checks cancellation, live Agent/binding, budget/Goal authority and frozen plans before changing the queue. A failed page cannot partially enqueue work. A paused Goal returns `inactive` without reading or restarting its intents.
+
+Pending entries retain their original request IDs and launch through the normal native admission after idle. Reserved entries are queried through the existing `native-child-request` lookup with the exact digest of the original intent and spawn request. A matching immutable publication restores only the `published` observation; no member is started or recreated. A reservation without publication remains `blocked` for reconciliation. Conflicting identities, digests or publication IDs refuse recovery. This does not prove that a recorded published member is currently resident or that its external effects completed.
+
+The Session response includes `native_dispatch_recovery` with `restored`, `inactive` or `blocked` state when applicable. Dispatch-recovery failures do not hide the original Session or reveal exception text; subsequent prompts still pass the original workbench permission checks. Host shutdown cancels and drains both recovery and active dispatch. The new-host SDK probe reads a preexisting SQLite intent through actual authenticated HTTP without a new lead delegation/model-planning turn. It does not simulate a process kill during an external side effect.
+
+```sh
+node --test packages/session-adapter/verification/native-task-deferred-restore-runtime.mjs
 ```
 
 The trusted host can read `/internal/v1/workbench/native-task-intents` under the same original run, Session and worker lease. Optional `limit` (1–50, default 20) and `after_request_id` page the existing immutable journal by creation time and request ID. The cursor must belong to that original owner/run. Each item returns its original plan, `pending` or `reserved` state and `execution_authorized:false`; a reservation is never treated as completed publication.

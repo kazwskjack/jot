@@ -177,6 +177,7 @@ export class WorkbenchBridge {
     if(this.installed.get(agent)?.current.context.model_budget?.enforced!==true)throw new Error('workbench_budget_binding_required');
   }
   bindingFor(agent){return this.installed.get(agent)?.current.binding;}
+  taskRootBindingFor(agent){const current=this.installed.get(agent)?.current;return current?.context.kind==='task'&&current.context.task_binding?.root_run_id===current.binding.runId?current.binding:undefined;}
 
   async observe(agent,signal) {
     const state=this.installed.get(agent),current=state?.current;
