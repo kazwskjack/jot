@@ -245,6 +245,8 @@ CREATE TABLE IF NOT EXISTS ga_web_operation_cursors (
   session_ref TEXT NOT NULL,
   operation_id TEXT NOT NULL,
   last_revision INTEGER NOT NULL DEFAULT 0,
+  last_status TEXT,
+  items_settled INTEGER NOT NULL DEFAULT 0,
   started_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   PRIMARY KEY(run_id,tool_call_id)

@@ -22,6 +22,8 @@ export function openProductDatabase(path: string): DatabaseSync {
   ensureColumn(db, 'ga_uploads', 'writer_lease_until', 'TEXT');
   migrateHostDeliveries(db);
   ensureColumn(db, 'ga_crawl_batches', 'summary_delivery_effect_id', 'TEXT');
+  ensureColumn(db, 'ga_web_operation_cursors', 'last_status', 'TEXT');
+  ensureColumn(db, 'ga_web_operation_cursors', 'items_settled', 'INTEGER NOT NULL DEFAULT 0');
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_ga_conversations_project_state
       ON ga_conversations(owner_id,project_id,archived_at,pinned_at DESC,updated_at DESC,id DESC);

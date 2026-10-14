@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Persist validated web-operation status and item outcomes alongside progress revisions.
+- Prevent task handoff while an observed web operation is running or has unresolved item outcomes.
+- Migrate older operation cursors without assuming that their work completed; ignore stale observations.
+
+Native-host orchestration and provider-side effect reconciliation are still required before enabling production handoff.
+
 ## 0.1.0 code preview
 
 - Portable local Agent with streaming model calls, bounded workers and tool rounds.

@@ -237,10 +237,11 @@ export class HarnessCoordinator {
       };
       this.events.append(lease.conversation_id, lease.run_id, 'activity.upsert', activity);
       this.db.prepare(`INSERT INTO ga_web_operation_cursors
-        (run_id,tool_call_id,session_ref,operation_id,last_revision,started_at,updated_at)
-        VALUES(?,?,?,?,?,?,?) ON CONFLICT(run_id,tool_call_id) DO UPDATE SET
-        last_revision=excluded.last_revision,updated_at=excluded.updated_at`)
-        .run(lease.run_id, toolCallId, sessionRef, operationId, eventCursor, startedAt, now);
+        (run_id,tool_call_id,session_ref,operation_id,last_revision,started_at,updated_at,last_status,items_settled)
+        VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(run_id,tool_call_id) DO UPDATE SET
+        last_revision=excluded.last_revision,updated_at=excluded.updated_at,last_status=excluded.last_status,items_settled=excluded.items_settled`)
+        .run(lease.run_id, toolCallId, sessionRef, operationId, eventCursor, startedAt, now, operationStatus,
+          Number(terminal && items.length===activity.detail.accepted_count && items.every(item=>typeof item.status==='string'&&['succeeded','failed','cancelled'].includes(item.status))));
       return eventCursor;
     });
   }

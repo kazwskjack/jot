@@ -36,6 +36,7 @@ test('C batch revisions project once into the durable Jot activity stream and re
   try {
     const cursor = coordinator.recordWebOperationSnapshot(lease, sessionRef, 'dsh-call-1', snapshot)
     assert.equal(cursor, 3)
+    assert.deepEqual({...db.prepare('SELECT last_status,items_settled FROM ga_web_operation_cursors').get()}, {last_status:'running',items_settled:0})
     let rows = db.prepare("SELECT payload_json FROM ga_events WHERE run_id=? AND type='activity.upsert'").all(receipt.run_id)
     assert.equal(rows.length, 1)
     let activity = JSON.parse(rows[0].payload_json)
@@ -62,6 +63,9 @@ test('C batch revisions project once into the durable Jot activity stream and re
       counts: { succeeded: 1, failed: 1 },
       items: snapshot.items.map((item, index) => index ? { ...item, status: 'failed', reason_code: 'PAGE_TIMEOUT' } : item) }
     assert.equal(coordinator.recordWebOperationSnapshot(lease, sessionRef, 'dsh-call-1', finalSnapshot), 4)
+    assert.deepEqual({...db.prepare('SELECT last_status,items_settled FROM ga_web_operation_cursors').get()}, {last_status:'partial',items_settled:1})
+    coordinator.recordWebOperationSnapshot(lease, sessionRef, 'dsh-call-1', snapshot)
+    assert.equal(db.prepare('SELECT items_settled FROM ga_web_operation_cursors').get().items_settled,1)
     rows = db.prepare("SELECT payload_json FROM ga_events WHERE run_id=? AND type='activity.upsert' ORDER BY seq").all(receipt.run_id)
     assert.equal(rows.length, 2)
     activity = JSON.parse(rows[1].payload_json)

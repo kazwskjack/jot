@@ -16,3 +16,11 @@ These checks apply to the first standalone code preview. Historical engineering 
 The document build used Python 3.12.14. Node may report its built-in SQLite API as experimental. Neither that notice nor a successful health response establishes external runtime readiness.
 
 See [Feature status](FEATURE_MATRIX.md) for incomplete host dispatch paths and [Deployment](DEPLOYMENT.md) for post-installation acceptance. Do not infer production parity, browser-pool capacity or performance superiority from these results.
+
+## Follow-up verification: 2026-10-14
+
+The operation-outcome handoff barrier passed 16 focused gateway tests, including older-schema migration, stale observations, unknown item outcomes and exact execution authority. The portable runtime passed 31 tests; workbench UI helpers passed 105 tests. The full extended gateway suite completed with 963 passed, 0 failed and 6 skipped tests (969 total). Both the web build and extended gateway build completed locally. Skipped checks are not counted as passes.
+
+The public worktree review scanned 509 source and documentation files. Reachable-history review covered 42 existing commits and 703 objects with no text or private-identity findings; five binary objects matched previously reviewed neutral template hashes. The final index and commit receive a separate publication review. These checks do not establish live provider reconciliation or production handoff readiness.
+
+The first portable test run under a restricted Windows account encountered denied loopback connections and test-directory access. Running the unchanged suite in the normal user context passed. The focused gateway checks also used isolated fixtures in that context. No production accounts, browser profiles or user conversations were used.

@@ -49,6 +49,12 @@ export function createTaskHandoffHost(options:{db:DatabaseSync;workbench:Workben
    UNION ALL SELECT run_id,occurrence_id FROM wb_task_auxiliary_runs) o ON o.run_id=a.run_id
    WHERE o.occurrence_id=(SELECT occurrence_id FROM wb_task_current_occurrences WHERE run_id=?) AND a.state IN ('in_flight','unknown') LIMIT 1`).get(rootRun);
   if(pending)throw new Error('handoff_usage_unresolved');ledger.previewCall(owner,rootRun,model);
+  const operations=db.prepare(`SELECT 1 FROM ga_web_operation_cursors c JOIN (
+   SELECT run_id,occurrence_id FROM wb_task_run_occurrences UNION ALL SELECT run_id,occurrence_id FROM wb_native_execution_runs
+   UNION ALL SELECT run_id,occurrence_id FROM wb_task_auxiliary_runs) o ON o.run_id=c.run_id
+   WHERE o.occurrence_id=(SELECT occurrence_id FROM wb_task_current_occurrences WHERE run_id=?)
+   AND (c.last_status IS NULL OR c.last_status NOT IN ('succeeded','partial','failed','cancelled') OR c.items_settled<>1) LIMIT 1`).get(rootRun);
+  if(operations)throw new Error('handoff_operation_unresolved');
  };
  return Object.freeze({
   get:()=>control.get(owner,rootRun),
