@@ -69,14 +69,18 @@ export async function verifyNativeChildPrefix({agent,parentSessionRef,persistenc
   ||!Number.isSafeInteger(count)||count<1||count>session.seq||!Number.isSafeInteger(proof.turn_end_seq)||proof.turn_end_seq<0||proof.turn_end_seq>=count
   ||typeof proof.log_sha256!=='string'||!/^[a-f0-9]{64}$/.test(proof.log_sha256)||typeof persistence?.flush!=='function'||typeof persistence?.open!=='function')throw new Error('native_child_prefix_invalid');
  await persistence.flush();signal?.throwIfAborted();const handle=await persistence.open(agent.id,'read',{signal});
+ const remoteCalls=new Map();
  const hash=createHash('sha256').update(headerJson(session.header)+'\n');
  try{
   if(handle.id!==agent.id||handle.access!=='read'||headerJson(handle.header)!==headerJson(session.header))throw new Error('native_child_prefix_changed');
   for(let offset=0;offset<count;){const length=Math.min(256,count-offset),result=await handle.read(offset,length,{signal});
    if(result?.events?.length!==length)throw new Error('native_child_prefix_changed');
-   for(const event of result.events){if(event.seq!==offset||json(event)!==json(session.eventAt(offset)))throw new Error('native_child_prefix_changed');hash.update(json(event)+'\n');offset++;}
+   for(const event of result.events){if(event.seq!==offset||json(event)!==json(session.eventAt(offset)))throw new Error('native_child_prefix_changed');hash.update(json(event)+'\n');if(event.type==='tool/call'){const batch=batchWebCall(event.data);if(batch){const callId=event.data?.callId;if(typeof callId!=='string'||!ID.test(callId)||remoteCalls.has(callId))throw Error('native_child_prefix_remote_unresolved');remoteCalls.set(callId,batch.name);}}offset++;}
   }
   if(hash.digest('hex')!==proof.log_sha256||session.eventAt(proof.turn_end_seq)?.type!=='turn/end')throw new Error('native_child_prefix_changed');
+  const operations=proof.remote_operations??[];
+  if(!Array.isArray(operations)||operations.length!==remoteCalls.size||new Set(operations.map(p=>p?.request_id)).size!==remoteCalls.size
+   ||operations.some(p=>!p||typeof p!=='object'||p.tool_name!==remoteCalls.get(p?.request_id)||!settledWebOperation(p,agent.id,p.request_id)))throw Error('native_child_prefix_remote_unresolved');
  }finally{await handle.close();}
  signal?.throwIfAborted();if(agent.session!==session)throw new Error('native_child_prefix_changed');
 }
@@ -115,15 +119,17 @@ export async function captureNativeChildClosure({agent,parentSessionRef,registry
   }
   if((await handle.read(count,1,{signal})).events?.length!==0||openTurn||tools.size||lastEnd<0)throw new Error('native_child_log_not_quiescent');
  }finally{await handle.close();}
+ const remoteOperations=[];
  for(const [callId,toolName] of remoteCalls){
   if(typeof reconcileOperations!=='function')throw new Error('native_child_remote_effects_unresolved');
   signal?.throwIfAborted();let proof;
   try{proof=await reconcileOperations(Object.freeze({sessionRef:agent.id,callId,toolName,signal}));}
   catch{signal?.throwIfAborted();throw new Error('native_child_remote_effects_unresolved');}
   if(!settledWebOperation(proof,agent.id,callId))throw new Error('native_child_remote_effects_unresolved');
+  remoteOperations.push({session_ref:agent.id,request_id:callId,tool_name:toolName,operation_id:proof.operation_id,revision:proof.revision,status:proof.status,accepted_count:proof.accepted_count,items:proof.items.map(item=>({item_id:item.item_id,position:item.position,status:item.status}))});
  }
  signal?.throwIfAborted();
  if(registry.get(agent.id)!==undefined||session.seq!==count||agent.session!==session||agent.status!=='idle')throw new Error('native_child_live_changed');
  const fresh=projections.stateOf(session,'inbox');if(fresh?.['next-turn']?.length!==0||fresh?.['next-step']?.length!==0)throw new Error('native_child_pending_inbox');
- return {protocol:1,session_ref:agent.id,parent_session_ref:parentSessionRef,seq_exclusive:count,turn_end_seq:lastEnd,log_sha256:hash.digest('hex'),driver_nonresident:true,inbox_pending:0};
+ return {protocol:1,session_ref:agent.id,parent_session_ref:parentSessionRef,seq_exclusive:count,turn_end_seq:lastEnd,log_sha256:hash.digest('hex'),driver_nonresident:true,inbox_pending:0,...(remoteOperations.length?{remote_operations:remoteOperations}:{})};
 }

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Store terminal batch-operation facts atomically in native child closure receipts and reject conflicting retries.
+- Require stored operation evidence to match every recognized batch call before native recovery.
+
 - Add an explicit scoped read-only leaf observer for native member closure, with permission checks before and after the original operation lookup.
 - Include the observer in the adapter package and test actual packed-module loading.
 

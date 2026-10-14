@@ -154,3 +154,19 @@ test('native successful publication is immutable and lookup replays the original
  assert.deepEqual(f.service.publish({...identity,publication}),publication);assert.deepEqual(f.service.publish({...identity,publication}),publication);assert.deepEqual(f.service.lookup(identity).publication,publication);
  assert.throws(()=>f.service.publish({...identity,publication:{member:{...publication.member,name:'changed'}}}),/idempotency_conflict/);assert.throws(()=>f.db.prepare('DELETE FROM wb_native_spawn_publications').run(),/native_spawn_publication_immutable/);assert.equal(f.db.prepare('SELECT count(*) n FROM wb_native_spawn_publications').get().n,1);
 });
+
+test('native closure persists exact terminal operation evidence and immutable retries',async t=>{
+ const f=await setup(t),reservation=f.service.reserve(f.input),child=f.workbench.prepareNativeChild('alice',reservation.reservation_id);
+ const remote={session_ref:child.session_ref,request_id:'remote-call',tool_name:'universe_read_page',operation_id:'web-'+ 'c'.repeat(32),revision:3,status:'succeeded',accepted_count:1,items:[{item_id:'one',position:0,status:'succeeded'}]};
+ const proof={...closureProof(child.session_ref),remote_operations:[remote]};
+ const result=f.workbench.closeNativeChild('alice',child.run_id,proof);assert.equal(result.closed,true);
+ const stored=f.db.prepare('SELECT receipt_json FROM wb_native_child_closures WHERE run_id=?').get(child.run_id);assert.deepEqual(JSON.parse(stored.receipt_json).remote_operations,[remote]);
+ assert.deepEqual(f.workbench.closeNativeChild('alice',child.run_id,proof),result);
+ assert.throws(()=>f.workbench.closeNativeChild('alice',child.run_id,{...proof,remote_operations:[{...remote,revision:4}]}),/native_child_closure_conflict/);
+});
+test('invalid or foreign remote outcome facts cannot release a native member',async t=>{
+ const f=await setup(t),reservation=f.service.reserve(f.input),child=f.workbench.prepareNativeChild('alice',reservation.reservation_id);
+ const remote={session_ref:child.session_ref,request_id:'remote-call',tool_name:'universe_execute',operation_id:'web-'+ 'c'.repeat(32),revision:3,status:'succeeded',accepted_count:1,items:[{item_id:'one',position:0,status:'succeeded'}]};
+ for(const facts of [[{...remote,session_ref:'foreign'}],[{...remote,status:'running'}],[{...remote,accepted_count:'1'}],[{...remote,items:[]}],[remote,remote],[{...remote,private_input:'omit'}]])assert.throws(()=>f.workbench.closeNativeChild('alice',child.run_id,{...closureProof(child.session_ref),remote_operations:facts}),/native_child_closure_invalid/);
+ assert.equal(f.db.prepare('SELECT count(*) n FROM wb_native_child_closures').get().n,0);
+});

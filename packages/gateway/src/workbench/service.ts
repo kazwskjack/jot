@@ -1,3 +1,4 @@
+import {validateNativeOperationProofs} from './native-operation-proof.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -329,11 +330,12 @@ export class WorkbenchService {
   }
   /** Trusted native host persistence readback, never model/user completion. */
   closeNativeChild(owner:string,runId:string,proof:Input){
-    const keys=['protocol','session_ref','parent_session_ref','seq_exclusive','turn_end_seq','log_sha256','driver_nonresident','inbox_pending'];
+    const keys=['protocol','session_ref','parent_session_ref','seq_exclusive','turn_end_seq','log_sha256','driver_nonresident','inbox_pending','remote_operations'];
     if(!proof||Array.isArray(proof)||Object.keys(proof).some(key=>!keys.includes(key))||proof.protocol!==1||proof.driver_nonresident!==true||proof.inbox_pending!==0
       ||typeof proof.session_ref!=='string'||typeof proof.parent_session_ref!=='string'||!Number.isSafeInteger(proof.seq_exclusive)||Number(proof.seq_exclusive)<1
       ||!Number.isSafeInteger(proof.turn_end_seq)||Number(proof.turn_end_seq)<0||Number(proof.turn_end_seq)>=Number(proof.seq_exclusive)
       ||typeof proof.log_sha256!=='string'||!/^[a-f0-9]{64}$/.test(proof.log_sha256))throw new Error('native_child_closure_invalid');
+    validateNativeOperationProofs(proof.remote_operations,proof.session_ref);
     return this.transaction(()=>{
       const native=this.db.prepare(`SELECT n.reservation_id,n.activation_id,n.child_session_ref,n.snapshot_json,r.conversation_id,r.reason_code FROM wb_native_execution_runs n
         JOIN ga_runs r ON r.id=n.run_id

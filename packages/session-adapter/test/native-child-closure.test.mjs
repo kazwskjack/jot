@@ -45,3 +45,14 @@ test('an operation observation cannot mask a Session change during reconciliatio
 });
 
 test('resumed Session must match the full recorded durable prefix before model admission',async()=>{const f=fixture(),proof=await captureNativeChildClosure(f.input);f.input.registry.get=()=>f.input.agent;await verifyNativeChildPrefix({...f.input,proof});f.events[0]={...f.events[0],data:{tampered:true}};await assert.rejects(verifyNativeChildPrefix({...f.input,proof}),/native_child_prefix_changed/);});
+
+test('validated external closure facts are retained without arbitrary observer data',async()=>{
+ const f=batchFixture();f.input.reconcileOperations=async()=>({...settledOperation(),private_input:'omit'});const proof=await captureNativeChildClosure(f.input);
+ assert.deepEqual(proof.remote_operations,[{...settledOperation(),tool_name:'universe_read_page'}]);assert.equal(proof.remote_operations[0].private_input,undefined);
+});
+
+test('recovery requires stored terminal proofs for exactly the batch calls in the recorded prefix',async()=>{
+ const f=batchFixture();f.input.reconcileOperations=async()=>settledOperation();const proof=await captureNativeChildClosure(f.input);
+ await verifyNativeChildPrefix({...f.input,proof});
+ for(const remote_operations of [undefined,[],[{...proof.remote_operations[0],request_id:'foreign'}],[{...proof.remote_operations[0],tool_name:'universe_execute'}],[{...proof.remote_operations[0],status:'running'}],[proof.remote_operations[0],proof.remote_operations[0]]])await assert.rejects(verifyNativeChildPrefix({...f.input,proof:{...proof,remote_operations}}),/native_child_prefix_remote_unresolved/);
+});
