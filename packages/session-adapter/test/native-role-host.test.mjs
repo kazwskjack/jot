@@ -72,3 +72,15 @@ test('native admission installs the exact parent authority check on each child b
  f.bridge.guardBudget=async parent=>{assert.equal(parent,f.root);throw Error('parent_stopped');};
  await assert.rejects(parentGuard(new AbortController().signal),/parent_stopped/);await f.host.dispose();
 });
+
+test('host reads original batch through the real loopback bridge and guards the detached member before closure',async()=>{
+ const {createServer}=await import('node:http');const f=fixture();await f.host.dispose();let reads=0,guards=0,closed=0;
+ const server=createServer(async(req,res)=>{let body='';for await(const chunk of req)body+=chunk;const data=JSON.parse(body);assert.equal(req.url,'/v2/native/tool');assert.equal(data.tool,'universe_get_state');assert.equal(data.arguments.request_id,'batch-call');assert.equal(data.execution.session_ref,'child-1');reads++;res.setHeader('content-type','application/json');res.end(JSON.stringify({kind:'read_page',operation_id:'web-'+ 'b'.repeat(32),revision:1,status:'succeeded',accepted_count:1,items:[{item_id:'one',position:0,status:'succeeded'}]}));});
+ await new Promise(done=>server.listen(0,'127.0.0.1',done));const prior=f.bridge.request;f.bridge.guard=async agent=>{assert.equal(agent.id,'child-1');guards++;};f.bridge.request=async(path,b,p)=>{if(path==='native-child-close'){assert.equal(reads,1);assert.equal(guards,2);closed++;return {closed:true,run_id:b.runId};}return prior(path,b,p);};
+ const events=[{seq:0,type:'turn/start',data:{}},{seq:1,type:'tool/call',data:{callId:'batch-call',name:'universe_read_page',arguments:{urls:['https://example.com']}}},{seq:2,type:'tool/result',data:{message:{source:{callId:'batch-call'}}}},{seq:3,type:'turn/end',data:{}}];let child;
+ const persistence={flush:async()=>{},open:async()=>({id:child.id,access:'read',header:child.session.header,read:async(offset,count)=>({events:events.slice(offset,offset+count)}),close:async()=>{}})};
+ f.ctx.sessionProjections={stateOf:()=>({'next-turn':[],'next-step':[]})};
+ const host=createNativeRoleHost({ctx:f.ctx,bridge:f.bridge,selectModel:async()=>{},persistence,nativeOperationOrigin:'http://127.0.0.1:'+server.address().port});
+ try{const result=await host.spawn(f.root,{roleRef:'role',policyVersion:1,requestId:'request'},f.request);child=f.entries.get(result.member.id);child.status='idle';child.whenIdle=async()=>{};Object.assign(child.session,{seq:4,eventAt:i=>events[i]});f.ctx.subagents.drainContinuableChildren=async()=>{f.entries.delete(child.id);};assert.equal((await host.closeMember(f.root,child.id)).closed,true);assert.equal(closed,1);}
+ finally{await host.dispose();server.closeAllConnections();await new Promise(done=>server.close(done));}
+});

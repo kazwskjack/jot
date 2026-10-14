@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add an explicit scoped read-only leaf observer for native member closure, with permission checks before and after the original operation lookup.
+- Include the observer in the adapter package and test actual packed-module loading.
+
 - Refuse native member closure for acknowledged background web batches until a trusted observer provides complete terminal outcomes for the original Session and tool call.
 - Validate optional operation observers in formal native-role setup; single-item batches require reconciliation too.
 
