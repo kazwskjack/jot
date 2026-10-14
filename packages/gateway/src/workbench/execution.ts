@@ -95,7 +95,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       const host=createTaskHandoffHost({db,workbench,tasks,collaboration,ledger:modelBudgets,owner:identity.owner_id,
         rootRun:identity.run_id,policyVersion:input.expected_policy_version as number,executionLease:input.execution_lease,
         model:{provider:route.provider as string,model:route.model as string}});
-      if(action==='get'){fields(args,[]);return {state:host.get()};}
+      if(action==='get'){fields(args,[]);const state=host.get();const binding=db.prepare('SELECT revision,run_id,session_ref FROM wb_task_handoff_executions WHERE owner_id=? AND root_run_id=? AND revision=?').get(identity.owner_id,identity.run_id,state.revision);return {state,binding:binding??null};}
       if(action==='stop'){fields(args,['request_id','expected_revision']);return {state:host.stop(args as Parameters<typeof host.stop>[0])};}
       if(action==='start'){
         fields(args,['request_id','max_hops']);const state=host.start(args as Parameters<typeof host.start>[0]);
@@ -169,7 +169,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
     });
   });
   app.post('/internal/v1/workbench/native-child-source',async request=>{
-    authorized(request.headers.authorization);const input=object(request.body);fields(input,['run_id','session_ref','child_session_ref']);
+    authorized(request.headers.authorization);const input=object(request.body);fields(input,['run_id','session_ref','child_session_ref','purpose']);
     return withImmediateTransaction(db,()=>{
       assertExecutionLease(db,String(input.run_id),input.execution_lease);const parent=context(input);requireTask(parent);
       return {source:workbench.nativeChildSource(parent.owner_id,input)};

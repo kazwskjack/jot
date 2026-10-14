@@ -277,6 +277,7 @@ export class WorkbenchService {
   /** Resolve durable recovery metadata. This is not execution admission. */
   nativeChildSource(owner:string,input:Input){
     return this.transaction(()=>{
+      if(input.purpose!==undefined&&input.purpose!=='handoff')throw new Error('native_activation_invalid');
       const child=String(input.child_session_ref??'');if(!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(child))throw new Error('native_activation_invalid');
       const row=this.db.prepare(`SELECT n.run_id,n.snapshot_json,c.receipt_json FROM wb_native_execution_runs n
         LEFT JOIN wb_native_execution_closures c ON c.run_id=n.run_id WHERE n.owner_id=? AND n.child_session_ref=?
@@ -284,6 +285,15 @@ export class WorkbenchService {
       if(!row)throw new Error('workbench_identity_forbidden');
       const saved=JSON.parse(String(row.snapshot_json)) as NativeReservation;
       if(saved.parent_session_ref!==input.session_ref)throw new Error('workbench_identity_forbidden');
+      if(input.purpose==='handoff'){
+        const parent=this.contextForRun(String(input.run_id));
+        if(saved.root_run_id!==input.run_id||!parent||parent.owner_id!==owner||parent.kind!=='task')throw new Error('workbench_identity_forbidden');
+        this.assertRunActive(String(input.run_id));assertExecutionLease(this.db,String(input.run_id),input.execution_lease);
+        if(!row.receipt_json)throw new Error('native_activation_source_pending');
+        // Immutable accounting evidence only; completed predecessor work cannot
+        // acquire cold-resume authority through this read purpose.
+        return {previous_run_id:String(row.run_id),role_ref:saved.role_id,proof:JSON.parse(String(row.receipt_json))};
+      }
       const lease=assertExecutionLease(this.db,String(input.run_id),input.execution_lease);
       const budget=this.db.prepare('SELECT scopes_json FROM wb_model_budget_bindings WHERE owner_id=? AND run_id=?').get(owner,String(input.run_id)) as Row|undefined;
       if(!budget)throw new Error('budget_binding_invalid');

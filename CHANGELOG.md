@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Admit subsequent roles only from the exact controller execution and verified detached predecessor closure.
+- Separate read-only handoff evidence from cold-resume authority so completed steps can pass material to the next role.
+- Verify formal two-role handoff and actual shared-file read/write receipts with the installed SDK.
+
 - Assemble reusable initial native handoff admission with stable request IDs and exact receipt checks.
 - Verify formal HTTP member creation, guarded model dispatch, idempotent replay and original-task material receipts against the installed SDK.
 
