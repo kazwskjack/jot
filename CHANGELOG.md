@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Assemble reusable initial native handoff admission with stable request IDs and exact receipt checks.
+- Verify formal HTTP member creation, guarded model dispatch, idempotent replay and original-task material receipts against the installed SDK.
+
 - Freeze new original-lead model/tool calls while a trusted host verifies durable quiescence and transfers control.
 - Expose the existing trusted handoff admission hook in formal native-role setup without enabling it by default.
 
