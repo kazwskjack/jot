@@ -6,6 +6,43 @@ import {NativeChildReservations} from '../../src/workbench/native-child-reservat
 import {openProductDatabase} from '../../src/db/database.ts';
 async function setup(t){const f=await fixture(t);const member=f.workbench.createAgent('alice',{name:'Reviewer',workspace_id:'ws',project_id:f.a.project_id});const team=f.workbench.createTeam('alice',{name:'Team',workspace_id:'ws',project_id:f.a.project_id,member_ids:[f.a.agent_id,member.agent_id]});const collaboration=new TaskCollaborationService(f.db,f.workbench,f.persistentTasks,new TaskDelegationService(f.db,f.workbench,f.persistentTasks));collaboration.save('alice',f.task.task_id,{expected_version:0,enabled:true,team_id:team.team_id,member_ids:[member.agent_id],max_delegations:2,max_active:2});f.db.prepare("UPDATE ga_runs SET status='running' WHERE id=?").run(f.runId);f.db.prepare('INSERT INTO ga_worker_leases VALUES(?,?,?,?,?) ON CONFLICT(resource_id) DO UPDATE SET owner=excluded.owner,generation=excluded.generation,expires_at=excluded.expires_at').run(f.runId,'handoff-worker',1,String(Date.now()+60000),'now');const host=createTaskHandoffHost({db:f.db,workbench:f.workbench,tasks:f.persistentTasks,collaboration,ledger:f.modelBudgets,owner:'alice',rootRun:f.runId,policyVersion:1,executionLease:{owner:'handoff-worker',generation:1},model:{provider:'fixture',model:'bounded'}});return {...f,host,member,collaboration};}
 test('host binds original role policy, root run and budget without allocating a child',async t=>{const f=await setup(t);const balances=f.modelBudgets.balancesForRun('alice',f.runId);f.host.start({request_id:'start',max_hops:2});const next=f.host.transfer({request_id:'transfer',expected_revision:1,from:f.a.agent_id,to:f.member.agent_id});assert.equal(next.controller,f.member.agent_id);assert.deepEqual(f.modelBudgets.balancesForRun('alice',f.runId),balances);assert.equal(f.db.prepare('SELECT count(*) n FROM wb_native_child_reservations').get().n,0);});
+
+test('authenticated handoff transport binds the original lead and atomically rejects a bad receiver',async t=>{
+ const f=await setup(t),identity={run_id:f.runId,session_ref:'session-fixture',execution_lease:{owner:'handoff-worker',generation:1}};
+ const invoke=(action,request={},extra={},auth=true)=>f.app.inject({method:'POST',url:'/internal/v1/workbench/handoff',headers:auth?{authorization:'Bearer '+f.fixtureConfig.internalChannelToken}:{},payload:{...identity,action,expected_policy_version:1,route:{provider:'fixture',model:'bounded'},request,...extra}});
+ const balances=f.modelBudgets.balancesForRun('alice',f.runId);
+ assert.notEqual((await invoke('start',{request_id:'start',max_hops:2},{},false)).statusCode,200);
+ const started=await invoke('start',{request_id:'start',max_hops:2});assert.equal(started.statusCode,200,started.body);assert.equal(started.json().state.revision,1);
+ assert.equal(f.host.assertExecution({expected_revision:1,run_id:f.runId,session_ref:'session-fixture'}).run_id,f.runId);
+ assert.equal((await invoke('start',{request_id:'start',max_hops:2})).json().state.revision,1);
+ const bad=await invoke('transfer',{request_id:'bad-receiver',expected_revision:1,from:f.a.agent_id,to:f.member.agent_id,execution_run_id:f.runId,execution_session_ref:'session-fixture'});assert.notEqual(bad.statusCode,200);assert.equal(f.host.get().revision,1);assert.equal(f.db.prepare("SELECT count(*) n FROM wb_task_handoff_requests WHERE request_id='bad-receiver'").get().n,0);
+ assert.notEqual((await invoke('get',{}, {owner_id:'mallory'})).statusCode,200);
+ assert.notEqual((await invoke('get',{}, {session_ref:'foreign-session'})).statusCode,200);
+ assert.notEqual((await invoke('get',{}, {execution_lease:{owner:'handoff-worker',generation:2}})).statusCode,200);
+ assert.notEqual((await invoke('get',{execution_lease:{owner:'handoff-worker',generation:1}})).statusCode,200);
+ assert.deepEqual(f.modelBudgets.balancesForRun('alice',f.runId),balances);
+ f.modelBudgets.reserve('alice',f.runId,{attempt_id:'handoff-api-pending',provider:'fixture',model:'bounded'});f.modelBudgets.dispatch('alice',f.runId,'handoff-api-pending');
+ const pending=await invoke('transfer',{request_id:'pending',expected_revision:1,from:f.a.agent_id,to:f.member.agent_id,execution_run_id:f.runId,execution_session_ref:'session-fixture'});assert.equal(pending.statusCode,409);assert.equal(pending.json().error.code,'HANDOFF_USAGE_UNRESOLVED');assert.equal(f.host.get().revision,1);
+ assert.equal((await invoke('stop',{request_id:'stop',expected_revision:1})).json().state.phase,'stopped');
+ assert.equal(f.db.prepare("SELECT state FROM wb_model_budget_attempts WHERE attempt_id='handoff-api-pending'").get().state,'in_flight');
+ assert.equal((await invoke('get')).json().state.phase,'stopped');
+});
+
+test('handoff HTTP transfer and replay bind one exact native execution and return final control to the lead',async t=>{
+ const f=await setup(t),identity={run_id:f.runId,session_ref:'session-fixture',execution_lease:{owner:'handoff-worker',generation:1}};
+ const invoke=(action,request)=>f.app.inject({method:'POST',url:'/internal/v1/workbench/handoff',headers:{authorization:'Bearer '+f.fixtureConfig.internalChannelToken},payload:{...identity,action,request,expected_policy_version:1,route:{provider:'fixture',model:'bounded'}}});
+ const reservations=new NativeChildReservations(f.db,f.collaboration),reserve=(id)=>f.workbench.prepareNativeChild('alice',reservations.reserve({...identity,child_session_ref:id,role_ref:f.member.agent_id,request_id:'spawn-'+id,expected_policy_version:1}).reservation_id);
+ const child=reserve('http-child-one'),other=reserve('http-child-two');
+ assert.equal((await invoke('start',{request_id:'start',max_hops:2})).statusCode,200);
+ const request={request_id:'transfer',expected_revision:1,from:f.a.agent_id,to:f.member.agent_id,execution_run_id:child.run_id,execution_session_ref:'http-child-one'};
+ const transferred=await invoke('transfer',request);assert.equal(transferred.statusCode,200,transferred.body);assert.equal(transferred.json().state.controller,f.member.agent_id);
+ assert.deepEqual((await invoke('transfer',request)).json(),transferred.json());
+ assert.notEqual((await invoke('transfer',{...request,execution_run_id:other.run_id,execution_session_ref:'http-child-two'})).statusCode,200);assert.equal(f.host.get().revision,2);
+ const guard=(run_id,session_ref)=>f.app.inject({method:'POST',url:'/internal/v1/workbench/guard',headers:{authorization:'Bearer '+f.fixtureConfig.internalChannelToken},payload:{run_id,session_ref,tool_name:'jot_workspace'}});
+ assert.notEqual((await guard(f.runId,'session-fixture')).statusCode,200);assert.equal((await guard(child.run_id,'http-child-one')).statusCode,200);assert.notEqual((await guard(other.run_id,'http-child-two')).statusCode,200);
+ const returned=await invoke('transfer',{request_id:'return',expected_revision:2,from:f.member.agent_id,to:f.a.agent_id,execution_run_id:f.runId,execution_session_ref:'session-fixture'});assert.equal(returned.statusCode,200,returned.body);assert.equal(returned.json().state.phase,'returned');
+ assert.equal((await guard(f.runId,'session-fixture')).statusCode,200);assert.notEqual((await guard(child.run_id,'http-child-one')).statusCode,200);
+});
 test('changed policy rejects old request replay and status access',async t=>{const f=await setup(t);f.host.start({request_id:'start',max_hops:2});f.collaboration.save('alice',f.task.task_id,{expected_version:1,enabled:false});assert.throws(()=>f.host.start({request_id:'start',max_hops:2}),/task_collaboration_revoked/);assert.throws(()=>f.host.get(),/task_collaboration_revoked/);});
 test('unsettled model usage blocks transfer while stop remains possible',async t=>{const f=await setup(t);f.host.start({request_id:'start',max_hops:2});f.modelBudgets.reserve('alice',f.runId,{attempt_id:'pending',provider:'fixture',model:'bounded'});f.modelBudgets.dispatch('alice',f.runId,'pending');assert.throws(()=>f.host.transfer({request_id:'transfer',expected_revision:1,from:f.a.agent_id,to:f.member.agent_id}),/handoff_usage_unresolved/);assert.equal(f.host.get().revision,1);assert.equal(f.host.stop({request_id:'stop',expected_revision:1}).phase,'stopped');assert.equal(f.db.prepare("SELECT state FROM wb_model_budget_attempts WHERE attempt_id='pending'").get().state,'in_flight');});
 test('worker replacement revokes host control',async t=>{const f=await setup(t);f.host.start({request_id:'start',max_hops:2});f.db.prepare('UPDATE ga_worker_leases SET generation=generation+1 WHERE resource_id=?').run(f.runId);assert.throws(()=>f.host.get(),/workbench_execution_lease_revoked/);});

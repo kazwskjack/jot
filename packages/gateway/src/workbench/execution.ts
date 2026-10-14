@@ -4,6 +4,7 @@ import type {ReplyJudgeClient} from '../persistent-tasks/reply-judge-client.ts';
 import {createAuxiliaryRunGuard} from './auxiliary-run-guard.ts';
 import {assertExecutionLease,normalizeExecutionLease} from './execution-lease.ts';
 import {assertTaskHandoffOperation} from './task-handoff-admission.ts';
+import {createTaskHandoffHost} from './task-handoff-host.ts';
 import {WebDecisionBudgetService} from './web-decision-budget.ts';
 import { createHash, timingSafeEqual, randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
@@ -78,6 +79,43 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
   installTaskFinalizations(db);
   const nativeTaskIntents=collaboration?new NativeTaskIntents(db,workbench,tasks,collaboration):undefined;
   const nativeChildren=collaboration?new NativeChildReservations(db,collaboration,nativeTaskIntents):undefined;
+  app.post('/internal/v1/workbench/handoff',async request=>{
+    authorized(request.headers.authorization);const input=object(request.body);
+    fields(input,['run_id','session_ref','action','expected_policy_version','route','request']);
+    if(!collaboration||!modelBudgets)throw new Error('task_collaboration_forbidden');
+    if(!Number.isSafeInteger(input.expected_policy_version)||Number(input.expected_policy_version)<1)throw new Error('handoff_request_invalid');
+    const route=object(input.route);fields(route,['provider','model']);
+    if(Object.keys(route).some(key=>!['provider','model'].includes(key)))throw new Error('handoff_request_invalid');
+    if(typeof route.provider!=='string'||!route.provider||typeof route.model!=='string'||!route.model)throw new Error('handoff_request_invalid');
+    const action=input.action,args=object(input.request);
+    if(Object.hasOwn(args,'execution_lease'))throw new Error('handoff_request_invalid');
+    return withImmediateTransaction(db,()=>{
+      const identity=context(input),task=requireTask(identity);
+      if(identity.kind!=='task'||identity.run_id!==task.root_run_id)throw new Error('handoff_identity_forbidden');
+      const host=createTaskHandoffHost({db,workbench,tasks,collaboration,ledger:modelBudgets,owner:identity.owner_id,
+        rootRun:identity.run_id,policyVersion:input.expected_policy_version as number,executionLease:input.execution_lease,
+        model:{provider:route.provider as string,model:route.model as string}});
+      if(action==='get'){fields(args,[]);return {state:host.get()};}
+      if(action==='stop'){fields(args,['request_id','expected_revision']);return {state:host.stop(args as Parameters<typeof host.stop>[0])};}
+      if(action==='start'){
+        fields(args,['request_id','max_hops']);const state=host.start(args as Parameters<typeof host.start>[0]);
+        const binding=host.bindExecution({expected_revision:state.revision,run_id:identity.run_id,session_ref:input.session_ref as string});
+        return {state,binding};
+      }
+      if(action==='transfer'){
+        fields(args,['request_id','expected_revision','from','to','execution_run_id','execution_session_ref']);
+        if(typeof args.execution_run_id!=='string'||typeof args.execution_session_ref!=='string')throw new Error('handoff_execution_forbidden');
+        const state=host.transfer({request_id:args.request_id as string,expected_revision:args.expected_revision as number,from:args.from as string,to:args.to as string});
+        if(state.phase==='returned'){
+          if(args.execution_run_id!==identity.run_id||args.execution_session_ref!==input.session_ref)throw new Error('handoff_execution_forbidden');
+          return {state};
+        }
+        const binding=host.bindExecution({expected_revision:state.revision,run_id:args.execution_run_id,session_ref:args.execution_session_ref});
+        return {state,binding};
+      }
+      throw new Error('handoff_request_invalid');
+    });
+  });
   app.post('/internal/v1/workbench/native-task-intent',async request=>{
     authorized(request.headers.authorization);const input=object(request.body);
     fields(input,['run_id','session_ref','request_id','subtask_id','expected_subtask_version','recipient_agent_id']);
