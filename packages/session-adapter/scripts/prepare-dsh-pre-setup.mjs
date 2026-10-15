@@ -149,7 +149,7 @@ function collectPackageFiles(packageRoot) {
 
   files.set('package.json', Buffer.from(`${JSON.stringify({
     ...manifest,
-    jotCompatibilityPatch: {protocol: 1, upstreamVersion: manifest.version},
+    jotCompatibilityPatch: {protocol: 2, upstreamVersion: manifest.version},
   }, null, 2)}\n`, 'utf8'));
   files.set('LICENSE', readRegularFile(join(packageRoot, 'LICENSE'), 'dsh_pre_setup_package_license'));
 
@@ -222,7 +222,7 @@ export function prepareDshPreSetupRuntime(sourcePackage, outputPackage) {
   // Read, validate, and patch the complete permitted file set before creating anything.
   const files = collectPackageFiles(canonicalSource);
   writePreparedPackage(files, canonicalOutput);
-  return Object.freeze({protocol: 1, upstreamVersion: supportedVersion});
+  return Object.freeze({protocol: 2, upstreamVersion: supportedVersion});
 }
 
 function cli() {
@@ -234,7 +234,7 @@ function cli() {
   }
   try {
     prepareDshPreSetupRuntime(args[0], args[1]);
-    process.stdout.write('Prepared DSH rc.2 compatibility package (protocol 1).\n');
+    process.stdout.write('Prepared DSH rc.2 compatibility package (protocol 2).\n');
   } catch (error) {
     const code = error instanceof Error && /^dsh_pre_setup_[a-z0-9_]+$/.test(error.message)
       ? error.message

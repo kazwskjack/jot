@@ -423,8 +423,10 @@ The formal HTTP multi-hop probe executes two different saved roles in one worksp
 This optional integration retains the original official SessionController,
 its model selection and preset mounting. The pinned rc.2 Controller does not
 expose a host setup callback for Remote create/resume. Jot supplies a small,
-explicit compatibility delta in AgentLoop: a serial `agent/before-setup` event
-before the original setup, inside the original maintenance/rollback boundary.
+explicit compatibility delta in AgentLoop (hook protocol 2): serial
+`agent/before-setup` and `agent/after-setup` events around the original setup,
+inside the original maintenance/rollback boundary. The second check completes
+before the original setup's synchronous commit and registry publication.
 This is a Jot extension, not an existing upstream API. No private Controller
 method, replacement factory, second planner or runtime monkey patch is used.
 
@@ -441,6 +443,9 @@ existing/overlapping targets, source symlinks and source drift. It neither
 installs dependencies nor activates a profile. Compose the copied package with
 its normal installed dependencies in an isolated host first. Never overwrite a
 running runtime. A version or artifact change requires fresh review.
+Protocol 1 copies are not accepted by the current composer: prepare a new
+protocol 2 copy from the unmodified pinned upstream package. Existing source
+receipts are not silently migrated or rewritten when code/profile hashes change.
 
 `createNativeReplayProfile` requires absolute artifact paths, expected SHA-256
 hashes, an audit ID, an exact preset ID (or explicitly no preset), and a trusted
@@ -450,6 +455,14 @@ Use immutable, versioned, operator-owned deployment directories outside Agent
 workspaces. Hashes establish continuity, not safety. The callback must independently verify
 that these are the reviewed loaded artifacts and that pre-step replay has no
 unresolved side effects. A permissive callback is not production acceptance.
+The callback receives the exact host-only `agent` and `phase`. In `prepared`,
+verify the reviewed standing Registry generation and loaded sources; the Agent
+has not mounted its preset yet. In `bound`, read back the Agent's actual preset,
+standing scope, effective capabilities and model route. Both checks must return
+the same approved profile fingerprint. Pass the explicit preset ID in Session
+requests when the Registry has a default; a declared no-preset profile cannot
+silently adopt that default. Idempotent resident-Agent adoption also checks its
+bound source and original provenance before calling the Controller.
 
 `createNativeReplayProvenance({root})` stores write-once, synced host receipts
 outside the conversation log and model context. Configure an operator-owned
@@ -495,8 +508,13 @@ are supported; a rejected setup may have flushed that marker before retry.
 
 Creation/recovery has a 30-second cancellation deadline, independent of task
 turn/token budgets. Request cancellation and host disposal abort waiting policy
-callbacks. The hook binds that cancellation to the original factory's serial
-hook/setup wait and rollback. If a Controller read has not settled, a disposed
+callbacks. The hook binds that cancellation to the original factory's own
+lifecycle AbortController until setup, suffix persistence and publication end.
+It does not abandon a pending storage append. After that append settles,
+cancellation prevents publication. Already durable metadata or restored Inbox
+records stay in the append-only log; cancellation does not truncate history or
+promise zero disk writes. A retry must preserve that exact prefix and consume
+original input only once. If a Controller read has not settled, a disposed
 composer retains its rejection fence until that original operation ends, rather
 than permitting a late publication. Reads themselves may remain outstanding
 where the official API offers no cancellation; their results cannot mutate the
@@ -511,8 +529,22 @@ before any model call. New workers reject a wrong lease and changed profile
 without publication, then restore the original RPC/message IDs successfully.
 Goal remains disarmed and model calls stay zero until an explicit continuation.
 Official queue semantics consume the restored message and new continuation in
-two turns, each once. This is a scripted local model/core composition test;
-production presets, live providers, lease succession, concurrent writers and
+two turns, each once. A second case uses the actual official Registry and Loader
+with a local deterministic preset: it checks exact scoped tool identity, root
+tool isolation, mounted instructions, original model selection, one successful
+tool and one permission-denied call. It rejects an unreviewed generation between
+setup and publication, including a first-create failure followed by a retry.
+After restart, the new host checks its own actual standing-scope identity against
+the reviewed source fingerprint; native JavaScript scope objects are not
+serialized across processes. The preset case has three scripted model calls
+after explicit continuation because its first turn includes a tool step.
+Separate factory cases cancel while the rc.2 append API is pending and just
+after it completes, inspect the durable suffix and retry the same Session ID
+without duplicate title events or a model call. Storage is a real rc.2 JSONL
+backend with a test-only timing wrapper, not a synthetic persistence result.
+These are mechanism tests; their self-measured fixture hashes are not an
+operator-approved production manifest. Production presets, live providers,
+lease succession, concurrent writers and
 external side-effect recovery remain separate acceptance work.
 
 ```sh

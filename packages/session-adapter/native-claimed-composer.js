@@ -6,6 +6,7 @@ import {verifyNativeTaskResumeGoal} from './workbench-goal.js';
 const valid=value=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(value);
 const canonical=value=>JSON.stringify(value,(_key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item);
 const digest=value=>createHash('sha256').update(canonical(value)).digest('hex');
+function validateProfile(value,presetId){if(value?.protocol!==1||!valid(value.profile_id)||!valid(value.audit_id)||value.preset_id!==presetId||!/^[a-f0-9]{64}$/.test(value.fingerprint??''))throw Error('native_claim_composer_profile_invalid');return value;}
 function waitFor(operation,signal){
  signal.throwIfAborted();
  return new Promise((resolve,reject)=>{
@@ -20,20 +21,20 @@ function waitFor(operation,signal){
  * original Controller and its original preset/model setup remain in control. */
 export function createNativeClaimedSessionComposer({ctx,bridge,Session,agents,sessions,query,projections,validateLog,profile,provenance}){
  const loop=typeof ctx?.get==='function'?ctx.get('agentLoop'):ctx?.agentLoop;
- if(loop?.jotPreSetupHookProtocol!==1||typeof ctx?.on!=='function'||typeof ctx?.effect!=='function'||typeof bridge?.authorizeNativeResume!=='function'||typeof agents?.get!=='function'||typeof sessions?.get!=='function'||typeof projections?.snapshot!=='function'||typeof Session?.create!=='function'||typeof query?.readSession!=='function'||typeof provenance?.read!=='function'||typeof provenance?.create!=='function'||typeof profile?.read!=='function'||typeof validateLog!=='function')throw Error('native_claim_composer_unavailable');
+ if(loop?.jotPreSetupHookProtocol!==2||typeof ctx?.on!=='function'||typeof ctx?.effect!=='function'||typeof bridge?.authorizeNativeResume!=='function'||typeof agents?.get!=='function'||typeof sessions?.get!=='function'||typeof projections?.snapshot!=='function'||typeof Session?.create!=='function'||typeof query?.readSession!=='function'||typeof provenance?.read!=='function'||typeof provenance?.create!=='function'||typeof profile?.read!=='function'||typeof validateLog!=='function')throw Error('native_claim_composer_unavailable');
  const storage=new AsyncLocalStorage(),pending=new Set(),operations=new Set(),shutdown=new AbortController();let disposed=false,disposal,cleaned=false;
  const remove=ctx.on('agent/before-setup',async({agent,source,signal:nativeSignal,bindAbortSignal})=>{
-  const record=storage.getStore();if(!record)return;if(record.closed)throw Error('native_claim_composer_scope_changed');
+  const record=storage.getStore();if(!record)return;if(record.closed||record.observed)throw Error('native_claim_composer_scope_changed');
   // Couple the original factory's setup wait/rollback to caller cancellation.
   if(typeof bindAbortSignal!=='function')throw Error('native_claim_composer_abort_binding_missing');
   bindAbortSignal(record.signal);
   const signal=AbortSignal.any([record.signal,nativeSignal,shutdown.signal]);
-  const check=()=>{signal.throwIfAborted();if(record.closed||disposed||agent?.id!==record.sessionId||agent.session?.id!==record.sessionId||agent.session.header.cwd!==record.cwd||agent.session.header.parentSession!==undefined||agent.session.header.origin==='subagent'||agents.get(agent.id)!==undefined||sessions.get(agent.id)!==undefined||record.observed)throw Error('native_claim_composer_scope_changed');};
+  const check=()=>{signal.throwIfAborted();if(record.closed||disposed||agent?.id!==record.sessionId||agent.session?.id!==record.sessionId||agent.session.header.cwd!==record.cwd||(agent.session.header.agentPreset??null)!==record.presetId||agent.session.header.parentSession!==undefined||agent.session.header.origin==='subagent'||agents.get(agent.id)!==undefined||sessions.get(agent.id)!==undefined)throw Error('native_claim_composer_scope_changed');};
   check();if(!['startup','resume'].includes(source))throw Error('native_claim_composer_scope_changed');
   const authorize=async()=>{check();const current=await waitFor(()=>bridge.authorizeNativeResume(record.binding,signal),signal);check();if(canonical(current)!==record.authority)throw Error('native_claim_composer_authority_changed');if(source==='resume')verifyNativeTaskResumeGoal(agent,current.scope,current.mapping,projections);return {authorized:true};};
-  const readProfile=()=>waitFor(()=>profile.read({presetId:record.presetId,signal}),signal);
+  const readProfile=()=>waitFor(()=>profile.read({presetId:record.presetId,signal,agent,phase:'prepared'}),signal);
   await authorize();const currentProfile=await readProfile();check();
-  if(currentProfile?.protocol!==1||!valid(currentProfile.profile_id)||!valid(currentProfile.audit_id)||currentProfile.preset_id!==record.presetId||!/^[a-f0-9]{64}$/.test(currentProfile.fingerprint??''))throw Error('native_claim_composer_profile_invalid');
+  validateProfile(currentProfile,record.presetId);
   const stamp=Object.freeze({...currentProfile,binding_sha256:record.bindingHash});
   if(source==='startup'){
    if(record.original.mapping!==null||agent.session.seq!==0)throw Error('native_claim_composer_history_missing');
@@ -46,9 +47,17 @@ export function createNativeClaimedSessionComposer({ctx,bridge,Session,agents,se
     confirmReplaySafety:async()=>{await authorize();const latest=await readProfile();check();return {safe:canonical(latest)===canonical(currentProfile)};}});
    await waitFor(()=>setup(agent.ctx,agent),signal);check();record.report=setup.resultFor(agent);
   }
-  record.observed=true;
+  record.observed=true;record.agent=agent;record.source=source;record.recheck=authorize;record.profile=currentProfile;
  },{prepend:true});
- const cleanup=()=>{if(!cleaned&&disposed&&!operations.size){cleaned=true;remove();storage.disable();}};
+ const removeAfter=ctx.on('agent/after-setup',async({agent,source,signal:nativeSignal})=>{
+  const record=storage.getStore();if(!record)return;
+  if(record.closed||!record.observed||record.finalized||record.agent!==agent||record.source!==source)throw Error('native_claim_composer_scope_changed');
+  const signal=AbortSignal.any([record.signal,nativeSignal,shutdown.signal]);await record.recheck();
+  const bound=await waitFor(()=>profile.read({presetId:record.presetId,signal,agent,phase:'bound'}),signal);signal.throwIfAborted();
+  if(canonical(bound)!==canonical(record.profile))throw Error('native_claim_composer_profile_changed');
+  await record.recheck();record.finalized=true;
+ },{prepend:true});
+ const cleanup=()=>{if(!cleaned&&disposed&&!operations.size){cleaned=true;removeAfter();remove();storage.disable();}};
  const api={
   withCreation({sessionId,cwd,presetId=null,binding,signal=new AbortController().signal},operation){
    const task=(async()=>{
@@ -59,9 +68,16 @@ export function createNativeClaimedSessionComposer({ctx,bridge,Session,agents,se
     const original=await waitFor(()=>bridge.authorizeNativeResume(binding,combined),combined);combined.throwIfAborted();
     const record={sessionId,cwd,presetId,binding:original.binding,original,authority:canonical(original),bindingHash:digest({scope:original.scope,lease:original.binding.executionLease}),signal:combined,closed:false,observed:false,report:undefined};
     const resident=agents.get(sessionId);
+    if(resident){
+     const check=()=>{combined.throwIfAborted();if(disposed||agents.get(sessionId)!==resident||sessions.get(sessionId)!==resident.session||resident.id!==sessionId||resident.session?.id!==sessionId||resident.session.header.cwd!==cwd||(resident.session.header.agentPreset??null)!==presetId||resident.session.header.parentSession!==undefined||resident.session.header.origin==='subagent')throw Error('native_claim_composer_scope_changed');};
+     check();const bound=validateProfile(await waitFor(()=>profile.read({presetId,signal:combined,agent:resident,phase:'bound'}),combined),presetId);check();
+     const saved=await waitFor(()=>provenance.read(resident.session,{signal:combined}),combined);check();
+     if(canonical(saved)!==canonical({...bound,binding_sha256:record.bindingHash}))throw Error('native_claim_composer_profile_changed');
+     const current=await waitFor(()=>bridge.authorizeNativeResume(record.binding,combined),combined);check();if(canonical(current)!==record.authority)throw Error('native_claim_composer_authority_changed');
+    }
     try{return await storage.run(record,async()=>{
      const originalOperation=()=>{const promise=Promise.resolve().then(operation);operations.add(promise);promise.finally(()=>{operations.delete(promise);cleanup();}).catch(()=>{});return promise;};
-     const value=await waitFor(originalOperation,combined);combined.throwIfAborted();if(!resident&&!record.observed)throw Error('native_claim_composer_hook_missing');return {value,...(record.report?{recovery:record.report}:{})};
+     const value=await waitFor(originalOperation,combined);combined.throwIfAborted();if(!resident&&(!record.observed||!record.finalized))throw Error('native_claim_composer_hook_missing');return {value,...(record.report?{recovery:record.report}:{})};
     });}
     finally{record.closed=true;}
    })();pending.add(task);task.finally(()=>pending.delete(task)).catch(()=>{});return task;

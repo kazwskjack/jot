@@ -129,4 +129,9 @@ It also requires native continuation, a configured budget model and authenticate
 Workbench access. Include `agentLoop` and `sessionQuery` in explicit host injection.
 This option requires the separately prepared rc.2 compatibility copy described
 in [Native roles](../../NATIVE_ROLES.md#formal-controller-claimed-input-recovery).
-It is absent by default; enabling it on an unpatched runtime fails at startup.
+It is absent by default; enabling it without hook protocol 2 fails at startup.
+The profile callback receives `{agent, phase}` for both `prepared` and `bound`
+checks. Validate the actual mounted Registry generation in the second phase;
+pre-reading a source file alone is insufficient. Regenerate an isolated copy
+from the pinned original package rather than updating an existing protocol 1
+copy in place. Source receipt migration remains explicit and unimplemented.

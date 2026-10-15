@@ -110,12 +110,12 @@ test('prepares a fully patched package in a new directory without modifying the 
 
   const result = prepareDshPreSetupRuntime(sourcePackage, outputPackage);
 
-  assert.deepEqual(result, {protocol: 1, upstreamVersion: '0.2.0-rc.2'});
+  assert.deepEqual(result, {protocol: 2, upstreamVersion: '0.2.0-rc.2'});
   assert.equal(hashTree(sourcePackage), sourceHash);
   const outputManifest = JSON.parse(readFileSync(join(outputPackage, 'package.json'), 'utf8'));
   assert.equal(outputManifest.name, '@deepseek-ai/dsh-agent-loop');
   assert.equal(outputManifest.version, '0.2.0-rc.2');
-  assert.deepEqual(outputManifest.jotCompatibilityPatch, {protocol: 1, upstreamVersion: '0.2.0-rc.2'});
+  assert.deepEqual(outputManifest.jotCompatibilityPatch, {protocol: 2, upstreamVersion: '0.2.0-rc.2'});
   assert.equal(readFileSync(join(outputPackage, 'lib/index.js'), 'utf8'), patch.runtimeSource);
   assert.equal(readFileSync(join(outputPackage, 'lib/types/index.d.ts'), 'utf8'), patch.declarationSource);
 
