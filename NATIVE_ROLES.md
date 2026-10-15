@@ -202,6 +202,62 @@ Recovery reads the immutable closure and matches the remote entries against ever
 
 ## Original lead barrier during a host handoff
 
+### Original Inbox protection and composed final-return lifecycle
+
+Trusted hosts can opt into `nativeHandoff: { policyVersion, maxHops,
+validateLog }` alongside `nativeRoles`, `nativeContinuation` and a configured
+`workbenchModel`. Set `nativeDeferredHandoff` for model-created task intents.
+`validateLog` must be the official isolated invariant validator described below.
+These are server-side functions and policy values, never browser/model inputs.
+The composed lifecycle creates one shared Inbox gate and supplies admission,
+final return and recovery using the adapter's actual bridge and native services.
+Mixing this option with manual handoff callbacks is rejected at startup.
+The option remains absent by default; it does not enable a production profile.
+
+The gate arms during the original lead's idle maintenance admission. The official
+AgentLoop claims messages before `agent/pre-step`; at that hook the gate holds
+the original driver before model dispatch while its child owns control. Native
+Inbox changes and exact child publication metadata are permitted; unrelated
+business-log changes block the boundary. Final return verifies child closure and
+the authenticated management receipt before releasing that same driver. It does
+not wait for its own `whenIdle`, create a replacement message or synthesize a
+user wake. An idle protected lead still uses native maintenance.
+
+Cancellation restores the original non-Goal message objects and IDs into the
+official Inbox, deduplicating both pending queues. Goal-sourced prompts remain
+owned by the official Goal driver. Cancellation does not wake the lead or resume
+a paused Goal. A trusted exact-scope reconciliation can clear protection after a
+verified return, or re-arm the same execution after explicit Goal resume. A new
+binding, child, role or revision cannot redirect an existing gate. Detected
+business-log corruption cannot be erased by re-arming it. Cancellation audits
+the full tail from the original cut, including explicitly known held-turn
+terminals and the original Goal's consecutive pause/resume/block revisions.
+It never advances the cut past unchecked events. Binding revocation can abort
+only the stored original local wait, without releasing permission. If the
+Session or Inbox itself was replaced, original input is retained in memory
+instead of being injected into the replacement; this is not durable recovery.
+
+After a lost transfer response the live helper makes one read-only
+`recover_return` check, requiring the original request, exact child proof and
+immutable returned receipt. It does not blindly retry execution. Unconfirmed
+return failures end the held wait, preserve input and retain a queryable blocked
+gate for explicit reconciliation. They do not silently release model or tool
+permission. The trusted lifecycle's gate exposes `statusFor` without user text.
+
+```sh
+node --test packages/session-adapter/verification/native-prestep-inbox-runtime.mjs packages/session-adapter/verification/native-task-inbox-return-runtime.mjs
+```
+
+The probes use the installed SDK, its real Goal/Inbox lifecycle and isolated
+Gateway/SQLite with scripted local models. The normal vertical scenario starts
+the composed configuration from an unpacked npm package. The uncertain-response
+scenario verifies a single committed return and original user-message identities.
+This is process-local hold/release evidence, not recovery from a hard kill after
+claim but before message commitment. Lease succession, automatic multi-role
+choice, live providers and production/browser acceptance remain separate work.
+The composed option implements final return to the original lead, not a new
+planner or a successor-role policy.
+
 ### Optional final return after durable member closure
 
 The natural-disposal observer waits only for the pending publication matching the member's exact original parent Agent and child Session. Host-owned async scope records the SDK's child identity before preparation awaits backend work; recovery binds the validated original reservation identity before reading and publishing its durable evidence. An already-saved publication remains a pure replay. This preserves that member's roster-publication ordering without coupling closure to another slow spawn, including another member under the same parent. Host shutdown still waits for all pending spawns before removing the admission hooks. This wait is not a global quiescence guarantee or a lock against later publications.
@@ -210,7 +266,7 @@ The official continuation runtime already owns natural child settlement and rele
 
 Formal `apply` accepts an optional trusted `handoffReturn` function only with native roles and an explicit `handoffAdmission`. `createNativeHandoffReturn` provides a final-return implementation: it verifies the exact closed run/Session/role, fetches the immutable handoff-purpose source, compares the full stored log and operation facts, waits outside the lead's own tool for native idle, and enters the existing maintenance barrier. The authenticated management read must still bind the controller to that exact child execution. A deterministic return request then targets the original lead run/Session; current policy, lease, model-usage and operation checks remain gateway-owned. Changed or malformed routes and same-role alternate executions are refused. A post-commit cancellation cannot undo the transfer; an explicit retry uses the same request identity and original receipt.
 
-This is a final return: the current gateway state machine closes the chain when it returns to the lead. A trusted orchestrator must choose a successor instead when a multi-role route is still in progress. This hook does not supply that choice or complete all pending intents. The live notification hook has no durable outbox; recovery of an already committed closure on root reattachment is described below. Official Team notices can also wake a lead planning turn before the closure/return observer finishes; this implementation does not hold all such messages until returned. Ordinary tool/finalization admission remains enforced, but queued-message release ordering and production lifecycle acceptance remain open work.
+This is a final return: the current gateway state machine closes the chain when it returns to the lead. A trusted orchestrator must choose a successor instead when a multi-role route is still in progress. This hook does not supply that choice or complete all pending intents. The live notification hook has no durable outbox; recovery of an already committed closure on root reattachment is described below. Manual callbacks without a shared Inbox gate can still let Team notices wake lead planning before return; use the composed lifecycle above for the tested hold/release ordering. Production lifecycle acceptance remains open.
 
 ```sh
 node --test packages/session-adapter/verification/native-task-auto-return-runtime.mjs
@@ -234,7 +290,7 @@ After proof validation the host reads the same recovery state again and uses the
 node --test packages/session-adapter/verification/native-task-return-recovery-runtime.mjs packages/session-adapter/verification/native-offline-invariant-runtime.mjs
 ```
 
-The actual installed-SDK probe disposes one host and attaches the original lead in a new host while the member remains absent. It verifies the original file receipt, unchanged model-call counts, one child and one final-return receipt. It retains the same valid lease; it does not prove worker-generation succession, hard-kill recovery before closure, cross-process writer isolation, pending-message release order or production providers. Two matching log reads are a race check, not a write lock. A changed lease or unresolved original source must remain blocked until separately authorized recovery is implemented.
+The actual installed-SDK recovery probe disposes one host and attaches the original lead in a new host while the member remains absent. It verifies the original file receipt, unchanged model-call counts, one child and one final-return receipt. It retains the same valid lease; it does not prove worker-generation succession, hard-kill recovery before closure, cross-process writer isolation or production providers. The separate Inbox probe above covers process-local message release order. Two matching log reads are a race check, not a write lock. A changed lease or unresolved original source must remain blocked until separately authorized recovery is implemented.
 
 ### Deferred model-callable handoff
 

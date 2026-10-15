@@ -6,10 +6,10 @@ const valid=value=>typeof value==='string'&&ID.test(value);
 const requestId=(kind,scope)=>kind+'-'+createHash('sha256').update(JSON.stringify(scope)).digest('hex');
 /** Task-to-member and closed-member transitions. Gateway authority remains decisive.
  * The trusted host chooses the successor; this does not queue a busy lead. */
-export function createNativeHandoffAdmission({bridge,registry,persistence,projections,policyVersion,maxHops,route,reconcileOperations,previousExecutionFor}){
+export function createNativeHandoffAdmission({bridge,registry,persistence,projections,policyVersion,maxHops,route,reconcileOperations,previousExecutionFor,inboxGate}){
  if(typeof bridge?.request!=='function'||!Number.isSafeInteger(policyVersion)||policyVersion<1||!Number.isSafeInteger(maxHops)||maxHops<1||maxHops>20
   ||!route||Object.keys(route).some(key=>!['provider','model'].includes(key))||typeof route.provider!=='string'||!route.provider.trim()||typeof route.model!=='string'||!route.model.trim()
-  ||reconcileOperations!==undefined&&typeof reconcileOperations!=='function'||previousExecutionFor!==undefined&&typeof previousExecutionFor!=='function')throw Error('native_handoff_config_invalid');
+  ||reconcileOperations!==undefined&&typeof reconcileOperations!=='function'||previousExecutionFor!==undefined&&typeof previousExecutionFor!=='function'||inboxGate!==undefined&&typeof inboxGate?.arm!=='function')throw Error('native_handoff_config_invalid');
  const model=Object.freeze({...route});
  return async function admit({parent,child,roleRef,binding,parentBinding,signal}){
   if(!valid(parent?.id)||parentBinding?.sessionRef!==parent.id||!valid(parentBinding.runId)||!valid(child?.id)||child.session?.id!==child.id
@@ -46,7 +46,8 @@ export function createNativeHandoffAdmission({bridge,registry,persistence,projec
     else throw Error('native_handoff_predecessor_changed');
     from=previous.roleRef;
    }
-   sourceFence();const receipt=await manage('transfer',{request_id:requestId('handoff-transfer',[root.runId,root.sessionRef,target.runId,target.sessionRef]),
+   sourceFence();inboxGate?.arm({parent,parentBinding,childRunId:target.runId,childSessionRef:target.sessionRef,roleRef:target.roleRef,activeRevision:revision+1});
+   const receipt=await manage('transfer',{request_id:requestId('handoff-transfer',[root.runId,root.sessionRef,target.runId,target.sessionRef]),
     expected_revision:revision,from,to:target.roleRef,execution_run_id:target.runId,execution_session_ref:target.sessionRef});check();sourceFence();
    if(receipt?.state?.phase!=='active'||receipt.state.revision!==revision+1||receipt.state.controller!==target.roleRef||receipt.binding?.revision!==revision+1
     ||receipt.binding.run_id!==target.runId||receipt.binding.session_ref!==target.sessionRef)throw Error('native_handoff_transfer_invalid');

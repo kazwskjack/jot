@@ -6,11 +6,12 @@ import {createBudgetModelSelector} from './budget-model-selection.js'
 import {createNativeTaskDispatcher} from './native-task-dispatch.js'
 import {createNativeTaskScheduler} from './native-task-scheduler.js'
 import {createNativeRoleHost} from './native-role-host.js'
+import {createNativeHandoffLifecycle} from './native-handoff-lifecycle.js'
 import {conversationGoal} from './conversation-goal.js'
 import { WorkbenchBridge,normalizeHostExecutionLease } from './workbench.js'
 
 export const name = 'jot-jot-session-adapter'
-export const inject = ['sessionController', 'fileUploads', 'agents','sessions','sessionPersistence','llm']
+export const inject = ['sessionController', 'fileUploads', 'agents','sessions','sessionPersistence','sessionProjections','llm']
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/
 const ALLOWED_AGENT_PRESETS = new Set([
@@ -36,6 +37,15 @@ const IMAGE_FAILURE_CODES = Object.freeze({
   UNSUPPORTED_IMAGE_TYPE: 'DSH_IMAGE_TYPE_UNSUPPORTED',
   ATTACHMENT_PROJECTION_UNSUPPORTED: 'DSH_IMAGE_PROJECTION_UNSUPPORTED',
 })
+
+function isTrustedNativeHandoffConfig(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const keys = Reflect.ownKeys(value)
+  return keys.length === 3 && keys.includes('policyVersion') && keys.includes('maxHops') && keys.includes('validateLog')
+    && Number.isSafeInteger(value.policyVersion) && value.policyVersion >= 1
+    && Number.isSafeInteger(value.maxHops) && value.maxHops >= 1 && value.maxHops <= 20
+    && typeof value.validateLog === 'function'
+}
 
 function promptFailureReasonCode(error) {
   const code = typeof error?.code === 'string' ? error.code : ''
@@ -351,8 +361,11 @@ export function apply(ctx, config = {}) {
     || (config.handoffAdmission !== undefined && (typeof config.handoffAdmission !== 'function' || config.nativeRoles !== true))
     || (config.handoffReturn !== undefined && (typeof config.handoffReturn !== 'function' || config.nativeRoles !== true || typeof config.handoffAdmission !== 'function'))
     || (config.handoffRecovery !== undefined && (typeof config.handoffRecovery !== 'function' || config.nativeRoles !== true || typeof config.handoffAdmission !== 'function'))
+    || (config.nativeHandoff !== undefined && (!isTrustedNativeHandoffConfig(config.nativeHandoff) || config.nativeRoles !== true))
+    || (config.nativeHandoff !== undefined && (config.handoffAdmission !== undefined || config.handoffReturn !== undefined || config.handoffRecovery !== undefined))
     || (config.nativeDeferredHandoff !== undefined && typeof config.nativeDeferredHandoff !== 'boolean')
-    || (config.nativeDeferredHandoff === true && (config.nativeRoles !== true || typeof config.handoffAdmission !== 'function'))
+    || (config.nativeDeferredHandoff === true && (config.nativeRoles !== true
+      || config.nativeHandoff === undefined && typeof config.handoffAdmission !== 'function'))
     || (config.nativeRoleRecovery===true&&config.nativeRoles!==true)
     || (config.nativeRoles===true&&(config.nativeContinuation!==true||config.workbenchModel===undefined))
     || ((config.nativeContinuation === true || config.webBudgetEnabled === true || config.nativeRoles===true) && workbenchToken.length < 16)) {
@@ -369,8 +382,19 @@ export function apply(ctx, config = {}) {
     modelRouteFor:config.workbenchModel?agent=>ctx.sessionController.agents.selectionFor(agent).current:undefined,
   }) : undefined
   const budgetModelSelector=createBudgetModelSelector({route:config.workbenchModel,llm:ctx.llm,agents:ctx.sessionController.agents})
+  const nativeHandoffLifecycle=config.nativeHandoff===undefined?undefined:createNativeHandoffLifecycle({
+    ctx,bridge:workbenchBridge,registry:ctx.agents,sessions:ctx.sessions,
+    persistence:ctx.sessionPersistence,projections:ctx.sessionProjections,
+    route:config.workbenchModel,reconcileOperations:config.reconcileOperations,
+    policyVersion:config.nativeHandoff.policyVersion,
+    maxHops:config.nativeHandoff.maxHops,
+    validateLog:config.nativeHandoff.validateLog,
+  })
+  const handoffAdmission=nativeHandoffLifecycle?.handoffAdmission??config.handoffAdmission
+  const handoffReturn=nativeHandoffLifecycle?.handoffReturn??config.handoffReturn
+  const handoffRecovery=nativeHandoffLifecycle?.handoffRecovery??config.handoffRecovery
   const nativeRoleHost=config.nativeRoles===true?createNativeRoleHost({ctx,bridge:workbenchBridge,selectModel:budgetModelSelector,
-    sessions:ctx.sessions,persistence:ctx.sessionPersistence,automaticClosures:true,durableSpawns:true,nativeRecovery:config.nativeRoleRecovery===true,reconcileOperations:config.reconcileOperations,nativeOperationOrigin:config.nativeOperationOrigin,handoffAdmission:config.handoffAdmission,onMemberClosed:config.handoffReturn}):undefined
+    sessions:ctx.sessions,persistence:ctx.sessionPersistence,automaticClosures:true,durableSpawns:true,nativeRecovery:config.nativeRoleRecovery===true,reconcileOperations:config.reconcileOperations,nativeOperationOrigin:config.nativeOperationOrigin,handoffAdmission,onMemberClosed:handoffReturn}):undefined
   let nativeTaskScheduler
   if(nativeRoleHost){
     nativeTaskScheduler=config.nativeDeferredHandoff===true?createNativeTaskScheduler({ctx,bridge:workbenchBridge,host:nativeRoleHost}):undefined
@@ -380,7 +404,7 @@ export function apply(ctx, config = {}) {
   const handler = createAdapterHandler({ controller: ctx.sessionController, fileUploads: ctx.fileUploads, agents: ctx.agents,
     sessions:ctx.sessions,persistence:ctx.sessionPersistence,
     speechController, voiceEnabled, token, workbenchBridge,
-    budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:config.handoffRecovery })
+    budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery })
   const server = createServer(async (req, res) => {
     const abort = new AbortController()
     req.once('aborted', () => abort.abort())
@@ -409,3 +433,5 @@ export function apply(ctx, config = {}) {
   server.listen(port, host)
   ctx.effect(() => () => server.close())
 }
+
+export { createNativeHandoffLifecycle }

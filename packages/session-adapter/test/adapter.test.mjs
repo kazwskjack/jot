@@ -89,7 +89,7 @@ test('formal handoff admission requires a trusted function and native roles',()=
  finally{if(prior===undefined)delete process.env.JOT_SESSION_ADAPTER_TOKEN;else process.env.JOT_SESSION_ADAPTER_TOKEN=prior;}
 });
 
-test('deferred handoff scheduling requires native roles and explicit handoff admission',()=>{
+test('deferred handoff scheduling requires native roles and a trusted admission entry',()=>{
  const prior=process.env.JOT_SESSION_ADAPTER_TOKEN;process.env.JOT_SESSION_ADAPTER_TOKEN=token;
  try{const ctx=Object.defineProperty({},'sessionController',{get(){throw Error('controller_must_not_be_reached');}});for(const nativeDeferredHandoff of [true,'yes'])assert.throws(()=>apply(ctx,{nativeDeferredHandoff}),/jot_session_adapter_config_invalid/);}
  finally{if(prior===undefined)delete process.env.JOT_SESSION_ADAPTER_TOKEN;else process.env.JOT_SESSION_ADAPTER_TOKEN=prior;}
@@ -105,4 +105,47 @@ test('durable final-return recovery requires trusted native handoff configuratio
  const prior=process.env.JOT_SESSION_ADAPTER_TOKEN;process.env.JOT_SESSION_ADAPTER_TOKEN=token;
  try{const ctx=Object.defineProperty({},'sessionController',{get(){throw Error('controller_must_not_be_reached');}});for(const handoffRecovery of [{},async()=>{}])assert.throws(()=>apply(ctx,{handoffRecovery}),/jot_session_adapter_config_invalid/);}
  finally{if(prior===undefined)delete process.env.JOT_SESSION_ADAPTER_TOKEN;else process.env.JOT_SESSION_ADAPTER_TOKEN=prior;}
+});
+
+test('trusted native handoff rejects malformed configuration and all manual callback mixing',()=>{
+ const priorToken=process.env.JOT_SESSION_ADAPTER_TOKEN,priorBridge=process.env.JOT_NATIVE_HANDOFF_CONFIG_TEST;
+ process.env.JOT_SESSION_ADAPTER_TOKEN=token;process.env.JOT_NATIVE_HANDOFF_CONFIG_TEST='b'.repeat(32);
+ try{
+  const ctx=Object.defineProperty({},'sessionController',{get(){throw Error('controller_must_not_be_reached');}});
+  const roleConfig={nativeContinuation:true,nativeRoles:true,workbenchModel:{provider:'fixture',model:'bounded'},workbenchTokenEnv:'JOT_NATIVE_HANDOFF_CONFIG_TEST'};
+  const valid={policyVersion:1,maxHops:2,validateLog:async()=>({validated:true})};
+  for(const nativeHandoff of [null,[],{},
+   {policyVersion:0,maxHops:2,validateLog:valid.validateLog},
+   {policyVersion:1,maxHops:0,validateLog:valid.validateLog},
+   {policyVersion:1,maxHops:21,validateLog:valid.validateLog},
+   {policyVersion:1,maxHops:2,validateLog:{}},
+   {...valid,unexpected:true}]){
+   assert.throws(()=>apply(ctx,{...roleConfig,nativeHandoff}),/jot_session_adapter_config_invalid/);
+  }
+  assert.throws(()=>apply(ctx,{...roleConfig,nativeHandoff:valid,nativeRoles:false}),/jot_session_adapter_config_invalid/);
+  for(const manual of [
+   {handoffAdmission:async()=>{}},
+   {handoffAdmission:async()=>{},handoffReturn:async()=>{}},
+   {handoffAdmission:async()=>{},handoffRecovery:async()=>{}},
+  ])assert.throws(()=>apply(ctx,{...roleConfig,nativeHandoff:valid,...manual}),/jot_session_adapter_config_invalid/);
+ }finally{
+  if(priorToken===undefined)delete process.env.JOT_SESSION_ADAPTER_TOKEN;else process.env.JOT_SESSION_ADAPTER_TOKEN=priorToken;
+  if(priorBridge===undefined)delete process.env.JOT_NATIVE_HANDOFF_CONFIG_TEST;else process.env.JOT_NATIVE_HANDOFF_CONFIG_TEST=priorBridge;
+ }
+});
+
+test('nativeDeferredHandoff accepts the trusted nativeHandoff composition without manual callbacks',()=>{
+ const priorToken=process.env.JOT_SESSION_ADAPTER_TOKEN,priorBridge=process.env.JOT_NATIVE_HANDOFF_CONFIG_TEST;
+ process.env.JOT_SESSION_ADAPTER_TOKEN=token;process.env.JOT_NATIVE_HANDOFF_CONFIG_TEST='b'.repeat(32);
+ try{
+  const ctx=Object.defineProperty({},'sessionController',{get(){throw Error('native_handoff_config_accepted');}});
+  assert.throws(()=>apply(ctx,{
+   nativeContinuation:true,nativeRoles:true,nativeDeferredHandoff:true,
+   workbenchModel:{provider:'fixture',model:'bounded'},workbenchTokenEnv:'JOT_NATIVE_HANDOFF_CONFIG_TEST',
+   nativeHandoff:{policyVersion:1,maxHops:2,validateLog:async()=>({validated:true})},
+  }),/native_handoff_config_accepted/);
+ }finally{
+  if(priorToken===undefined)delete process.env.JOT_SESSION_ADAPTER_TOKEN;else process.env.JOT_SESSION_ADAPTER_TOKEN=priorToken;
+  if(priorBridge===undefined)delete process.env.JOT_NATIVE_HANDOFF_CONFIG_TEST;else process.env.JOT_NATIVE_HANDOFF_CONFIG_TEST=priorBridge;
+ }
 });

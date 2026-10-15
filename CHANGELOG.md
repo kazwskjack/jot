@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+- Compose native handoff admission, final return and recovery around one shared Inbox gate through an optional trusted host configuration.
+- Hold the original claimed pre-step until control return is confirmed; preserve user-message identities through cancellation without a synthetic wake or automatic Goal resume.
+- Reconcile a lost return acknowledgement through its immutable receipt; terminate failed holds in a queryable blocked state and audit cancellation history from the original log cut.
+- Verify the composed npm package with the installed SDK and isolated Gateway, including explicit Goal resume and unchanged original task permissions.
+
 - Recover final control on trusted root reattachment from the existing immutable child closure and handoff request journals, without another child or model execution.
 - Verify the closed member's read-only log twice, replay the official session invariant in an isolated context and rebuild the official inbox projection before transferring control.
 - Keep unresolved recovery blocked before restoring dispatch; reconcile an already committed return through its exact immutable request receipt.

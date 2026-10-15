@@ -1,5 +1,37 @@
 # Code preview verification
 
+## Claimed Inbox ordering and final-return composition
+
+This follow-up passed 275 public adapter tests, 308 internal candidate tests,
+21 actual installed-SDK scenarios and 31 portable tests, with zero final
+failures or skips in those suites. The Windows web build and six public-review
+tests passed; the source scanner reviewed 539 files without findings. Gateway
+source was unchanged in this follow-up, so earlier full Gateway suite counts
+are not presented as a fresh run.
+
+The added SDK evidence covers official claim-before-pre-step behavior, original
+input preservation on cancellation/failure, a paused Goal remaining paused,
+explicit Goal resume followed by original-scope control reconciliation, and
+normal release without a synthetic user wake. A real local Gateway/Controller/
+Team scenario starts the formal composition from an npm-packed adapter. Lead
+model requests after member execution occur only after the committed returned
+state. A separate uncertain-response scenario retains one return request and
+the exact two original HTTP user prompts.
+
+Review regressions reproduced cancellation before the next log fence hiding
+unchecked events, and binding revocation preventing local hold cleanup. The
+fixes audit from the original cut and allow exact-scope local abort without
+granting permission or writing old input to a replacement Session. An initial
+internal rerun passed 307 of 308 tests; its remaining fixture used the public
+token environment name instead of the internal default. Correcting that test
+configuration produced the final 308/308 run. A restricted-account loopback
+failure observed during composition work is not counted as a passing run.
+
+The gate is process-local. Hard-kill recovery between claim and message
+commitment, replaced worker leases, automatic successor-role selection, live
+providers and production/browser/UI acceptance remain unverified. Production
+switches remain disabled; this is a code preview with explicit opt-in.
+
 ## Recovery of an already closed member
 
 The closed-member recovery follow-up passed 252 public adapter tests, 285 internal adapter tests, 11 actual installed-SDK scripted-provider scenarios and 31 portable tests. The normal Windows Gateway run passed 980 tests with zero failures and six platform skips (986 total). Both public builds and both Gateway typechecks passed; the internal handoff transport suite passed 22 tests. An initial restricted-account Gateway run had 17 permission/loopback-related failures; it is retained as a failed run, and the successful full rerun used the authorized Windows context with temporary files under the workspace.

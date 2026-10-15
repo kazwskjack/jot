@@ -16,17 +16,21 @@ function validateManagement({bridge,policyVersion,route}){
  if(typeof bridge?.request!=='function'||typeof bridge.bindingFor!=='function'||!Number.isSafeInteger(policyVersion)||policyVersion<1
   ||!route||Object.keys(route).some(k=>!['provider','model'].includes(k))||typeof route.provider!=='string'||!route.provider.trim()||typeof route.model!=='string'||!route.model.trim())throw Error('native_handoff_config_invalid');
 }
-export function createNativeHandoffReturn({bridge,registry,persistence,projections,policyVersion,route,reconcileOperations}){
+export function createNativeHandoffReturn({bridge,registry,persistence,projections,policyVersion,route,reconcileOperations,inboxGate}){
  validateManagement({bridge,policyVersion,route});
+ if(inboxGate!==undefined&&['transition','complete'].some(key=>typeof inboxGate?.[key]!=='function'))throw Error('native_handoff_config_invalid');
  const model=Object.freeze({...route});
  return async function returnControl({parent,child,parentBinding,binding,roleRef,receipt,signal}){
+  const gateScope={parent,parentBinding,childRunId:binding?.runId,childSessionRef:child?.id,roleRef,signal};
+  try{
   if(!valid(parent?.id)||parentBinding?.sessionRef!==parent.id||bridge.bindingFor(parent)!==parentBinding||!valid(parentBinding.runId)
    ||!valid(child?.id)||child.id===parent.id||child.session?.id!==child.id||binding?.sessionRef!==child.id||!valid(binding.runId)||binding.runId===parentBinding.runId
    ||!valid(roleRef)||receipt?.closed!==true||receipt.run_id!==binding.runId)throw Error('native_handoff_return_invalid');
   const root=Object.freeze({...parentBinding,...(parentBinding.executionLease?{executionLease:Object.freeze({...parentBinding.executionLease})}:{})}),runId=binding.runId,sourceSession=child.session,count=sourceSession.seq;
   const fence=()=>{signal?.throwIfAborted();if(bridge.bindingFor(parent)!==parentBinding||child.session!==sourceSession||sourceSession.seq!==count||child.status!=='idle'||registry.get(child.id)!==undefined||sourceSession.header.parentSession!==parent.id)throw Error('native_handoff_return_changed');};
-  fence();await waitForLead(parent,signal);fence();
-  return withNativeHandoffBarrier({agent:parent,registry,persistence,projections,reconcileOperations,signal},async(_proof,check,nativeSignal)=>{
+  fence();if(!inboxGate)await waitForLead(parent,signal);fence();
+  const boundary=operation=>inboxGate?inboxGate.transition(gateScope,operation):withNativeHandoffBarrier({agent:parent,registry,persistence,projections,reconcileOperations,signal},operation);
+  const returned=await boundary(async(_proof,check,nativeSignal)=>{
    const guard=()=>{check();fence();};
    const {source:saved}=await bridge.request('native-child-source',root,{child_session_ref:child.id,purpose:'handoff'},nativeSignal);guard();
    if(saved?.previous_run_id!==runId||saved.role_ref!==roleRef)throw Error('native_handoff_return_changed');
@@ -42,9 +46,24 @@ export function createNativeHandoffReturn({bridge,registry,persistence,projectio
    else if(state.phase==='returned'&&state.controller===lead&&state.revision>=3&&state.route.at(-2)===roleRef&&state.route.at(-1)===lead)revision=state.revision-1;
    else throw Error('native_handoff_return_changed');
    const request_id='handoff-return-'+createHash('sha256').update(JSON.stringify([root.runId,root.sessionRef,runId,child.id])).digest('hex');
-   const result=await manage('transfer',{request_id,expected_revision:revision,from:roleRef,to:lead,execution_run_id:root.runId,execution_session_ref:root.sessionRef});guard();
+   let result;
+   try{result=await manage('transfer',{request_id,expected_revision:revision,from:roleRef,to:lead,execution_run_id:root.runId,execution_session_ref:root.sessionRef});}
+   catch(error){
+    if(!inboxGate||nativeSignal.aborted)throw error;guard();
+    // One read-only reconciliation after an uncertain response. Never retry
+    // execution or release the held driver from a bare controller label.
+    const {recovery}=await manage('recover_return',{});guard();
+    const expected=state.phase==='returned'?state:{...state,phase:'returned',controller:lead,revision:revision+1,route:[...state.route,lead]};
+    if(recovery?.state!=='returned'||recovery.execution_authorized!==false||recovery.request_id!==request_id||recovery.revision!==revision+1
+     ||recovery.child_run_id!==runId||recovery.child_session_ref!==child.id||recovery.role_ref!==roleRef||recovery.lead_role_ref!==lead
+     ||canonical(recovery.proof)!==canonical(saved.proof)||canonical(recovery.receipt?.state)!==canonical(expected))throw Error('native_handoff_return_unconfirmed');
+    result=recovery.receipt;
+   }
+   guard();
    if(result?.state?.phase!=='returned'||result.state.controller!==lead||result.state.revision!==revision+1)throw Error('native_handoff_return_invalid');return result;
   });
+  inboxGate?.complete({...gateScope,receipt:returned.state});return returned;
+  }catch(error){try{inboxGate?.fail?.(gateScope);}catch{}throw error;}
  };
 }
 
@@ -52,9 +71,11 @@ export function createNativeHandoffReturn({bridge,registry,persistence,projectio
  * from authenticated durable evidence; never restart that execution. */
 export function createNativeHandoffRecovery(options){
  validateManagement(options);
- const {bridge,registry,sessions,persistence,projections,policyVersion,reconcileOperations,validateLog}=options,model=Object.freeze({...options.route});
+ const {bridge,registry,sessions,persistence,projections,policyVersion,reconcileOperations,validateLog,inboxGate}=options,model=Object.freeze({...options.route});
  if(typeof validateLog!=='function'||typeof sessions?.get!=='function'||typeof projections?.snapshot!=='function')throw Error('native_handoff_config_invalid');
+ if(inboxGate!==undefined&&['arm','transition','complete','confirmUntransferred'].some(key=>typeof inboxGate?.[key]!=='function'))throw Error('native_handoff_config_invalid');
  return async function recoverControl({parent,parentBinding,signal}){
+  try{
   if(!valid(parent?.id)||parentBinding?.sessionRef!==parent.id||!valid(parentBinding.runId)||bridge.bindingFor(parent)!==parentBinding)throw Error('native_handoff_recovery_invalid');
   const root=Object.freeze({...parentBinding,...(parentBinding.executionLease?{executionLease:Object.freeze({...parentBinding.executionLease})}:{})});
   const fence=()=>{signal?.throwIfAborted();if(bridge.bindingFor(parent)!==parentBinding||registry.get(parent.id)!==parent)throw Error('native_handoff_recovery_changed');const goal=nativeGoalsFor(parent)?.get?.(parent);if(goal&&goal.phase!=='active')throw Error('native_handoff_recovery_goal_inactive');};
@@ -73,16 +94,21 @@ export function createNativeHandoffRecovery(options){
    }
   };
   fence();const {recovery}=await manage('recover_return');fence();validate(recovery);
-  if(['none','blocked'].includes(recovery.state))return {state:recovery.state};
+  if(['none','blocked'].includes(recovery.state)){if(recovery.state==='none')inboxGate?.confirmUntransferred({parent,parentBinding});return {state:recovery.state};}
   const result={state:'returned',request_id:recovery.request_id,revision:recovery.state==='returned'?recovery.revision:recovery.revision+1};
-  if(recovery.state==='returned')return result;
-  const snapshot=canonical(recovery);await waitForLead(parent,signal);fence();
-  return withNativeHandoffBarrier({agent:parent,registry,persistence,projections,reconcileOperations,signal},async(_proof,check,ownedSignal)=>{
+  const gateScope={parent,parentBinding,childRunId:recovery.child_run_id,childSessionRef:recovery.child_session_ref,roleRef:recovery.role_ref,activeRevision:recovery.state==='returned'?recovery.revision-1:recovery.revision,signal};
+  if(recovery.state==='returned'){inboxGate?.complete({...gateScope,receipt:recovery.receipt.state});return result;}
+  inboxGate?.arm(gateScope);const snapshot=canonical(recovery);if(!inboxGate)await waitForLead(parent,signal);fence();let releaseReceipt;
+  const boundary=operation=>inboxGate?inboxGate.transition(gateScope,operation):withNativeHandoffBarrier({agent:parent,registry,persistence,projections,reconcileOperations,signal},operation);
+  try{const recovered=await boundary(async(_proof,check,ownedSignal)=>{
    const guard=()=>{check();fence();if(registry.get(recovery.child_session_ref)!==undefined||sessions.get(recovery.child_session_ref)!==undefined)throw Error('native_handoff_recovery_changed');};
    const reread=async()=>{const current=await manage('recover_return',{},ownedSignal);guard();validate(current.recovery);if(canonical(current.recovery)!==snapshot)throw Error('native_handoff_recovery_changed');};
    await reread();await verifyOfflineNativeClosure({parentSessionRef:parent.id,proof:recovery.proof,registry,sessions,projections,persistence,validateLog,signal:ownedSignal});guard();await reread();
    const returned=await manage('transfer',{request_id:recovery.request_id,expected_revision:recovery.revision,from:recovery.role_ref,to:recovery.lead_role_ref,execution_run_id:root.runId,execution_session_ref:root.sessionRef},ownedSignal);guard();
-   const state=returned?.state;if(state?.phase!=='returned'||state.controller!==recovery.lead_role_ref||state.revision!==result.revision)throw Error('native_handoff_recovery_invalid');return result;
+   const state=returned?.state;if(state?.phase!=='returned'||state.controller!==recovery.lead_role_ref||state.revision!==result.revision)throw Error('native_handoff_recovery_invalid');releaseReceipt=state;return result;
   });
+  inboxGate?.complete({...gateScope,receipt:releaseReceipt});return recovered;
+  }catch(error){try{inboxGate?.fail?.(gateScope);}catch{}throw error;}
+  }catch(error){try{const protectedScope=inboxGate?.statusFor?.(parent,parentBinding);if(protectedScope)inboxGate.fail({...protectedScope,parent,parentBinding});}catch{}throw error;}
  };
 }

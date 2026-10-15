@@ -9,6 +9,26 @@ async function fixture(){const headers={lead:{},child:{parentSession:'lead'}},ev
  return {parent,child,requests,options,input:{parent,child,parentBinding,binding,roleRef:'reviewer',receipt:{closed:true,run_id:'child-run'}},changeState:value=>state=value};
 }
 test('closed member automatically returns exact original control and retries the same management identity',async()=>{const f=await fixture(),ret=createNativeHandoffReturn(f.options);assert.equal((await ret(f.input)).state.phase,'returned');await ret(f.input);const transfers=f.requests.filter(x=>x.p.action==='transfer');assert.equal(transfers.length,2);assert.deepEqual(transfers[0],transfers[1]);assert.equal(transfers[0].p.request.execution_run_id,'root-run');assert.equal(transfers[0].p.request.expected_revision,2);});
+test('a protected held lead returns through its owned boundary before releasing the original step',async()=>{const f=await fixture();let entered=0,released=0;f.parent.whenIdle=()=>{throw Error('self wait');};f.options.inboxGate={transition:async(scope,fn)=>{assert.equal(scope.parentBinding,f.input.parentBinding);assert.equal(scope.childRunId,'child-run');entered++;return fn(undefined,()=>{},new AbortController().signal);},complete:scope=>{assert.equal(scope.receipt.phase,'returned');assert.equal(scope.childRunId,'child-run');released++;}};assert.equal((await createNativeHandoffReturn(f.options)(f.input)).state.phase,'returned');assert.equal(entered,1);assert.equal(released,1);});
+test('uncertain return responses cannot release held input from a mismatched immutable receipt',async()=>{
+ for(const alter of [r=>({...r,child_run_id:'other-run'}),r=>({...r,request_id:'other-request'}),r=>({...r,proof:{...r.proof,log_sha256:'f'.repeat(64)}}),r=>({...r,receipt:{state:{...r.receipt.state,controller:'other-role'}}})]){
+  const f=await fixture(),request=f.options.bridge.request;let saved,transfer,released=0;
+  f.options.inboxGate={transition:(_scope,fn)=>fn(undefined,()=>{},new AbortController().signal),complete:()=>released++};
+  f.options.bridge.request=async(...args)=>{if(args[2].action==='recover_return')return {recovery:alter({state:'returned',execution_authorized:false,revision:3,lead_role_ref:'lead-role',role_ref:'reviewer',child_run_id:'child-run',child_session_ref:'child',proof:saved,request_id:transfer.p.request.request_id,receipt:transfer.receipt})};const reply=await request(...args);if(args[0]==='native-child-source')saved=reply.source.proof;if(args[2].action==='transfer'){transfer={p:args[2],receipt:reply};throw Error('response lost');}return reply;};
+  await assert.rejects(createNativeHandoffReturn(f.options)(f.input),/native_handoff_return_unconfirmed/);assert.equal(released,0);assert.equal(f.requests.filter(x=>x.p.action==='transfer').length,1);
+ }
+});
+test('unconfirmed return notifies the exact protective gate instead of leaving its step waiting',async()=>{
+ const f=await fixture();let failed=0,released=0;
+ f.options.inboxGate={transition:(_scope,fn)=>fn(undefined,()=>{},new AbortController().signal),complete:()=>released++,fail:scope=>{assert.equal(scope.parentBinding,f.input.parentBinding);assert.equal(scope.childRunId,'child-run');failed++;}};
+ const request=f.options.bridge.request;f.options.bridge.request=(...args)=>{if(['transfer','recover_return'].includes(args[2].action))throw Error('unavailable');return request(...args);};
+ await assert.rejects(createNativeHandoffReturn(f.options)(f.input),/unavailable/);assert.equal(failed,1);assert.equal(released,0);
+});
+
+test('binding revocation before return validation still aborts its original local hold',async()=>{
+ const f=await fixture();let failed=0;f.options.inboxGate={transition:()=>{throw Error('must not execute');},complete:()=>{throw Error('must not release');},fail:scope=>{assert.equal(scope.parentBinding,f.input.parentBinding);assert.equal(scope.childRunId,'child-run');failed++;}};f.options.bridge.bindingFor=()=>undefined;await assert.rejects(createNativeHandoffReturn(f.options)(f.input),/return_invalid/);assert.equal(failed,1);assert.equal(f.requests.length,0);
+});
+
 test('unclosed or substituted member evidence cannot return another execution',async()=>{const f=await fixture(),ret=createNativeHandoffReturn(f.options);await assert.rejects(ret({...f.input,receipt:{closed:false,run_id:'child-run'}}));assert.equal(f.requests.length,0);f.changeState({revision:2,phase:'active',controller:'other-role',route:['lead-role','other-role']});await assert.rejects(ret(f.input),/native_handoff_return_changed/);assert.equal(f.requests.some(x=>x.p.action==='transfer'),false);});
 test('shutdown cancellation interrupts waiting for the original lead without issuing management',async()=>{const f=await fixture(),abort=new AbortController();let entered;const ready=new Promise(done=>entered=done);f.parent.whenIdle=()=>{entered();return new Promise(()=>{});};const op=createNativeHandoffReturn(f.options)({...f.input,signal:abort.signal});await ready;abort.abort();await assert.rejects(op,{name:'AbortError'});assert.equal(f.requests.length,0);});
 

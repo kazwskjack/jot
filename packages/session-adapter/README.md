@@ -101,7 +101,7 @@ closed when they are missing. Do not enable budgeted tasks solely because the
 package manager accepts the peer version.
 
 When a profile declares explicit dependency injection, include
-`sessionController`, `fileUploads`, `agents`, `sessions`, `sessionPersistence`
+`sessionController`, `fileUploads`, `agents`, `sessions`, `sessionPersistence`, `sessionProjections`
 and `llm` for the complete budgeted adapter. Preserve the existing host, port,
 authentication environment reference and ordinary provider configuration.
 Compose the complete profile with the installed SDK before restarting it.
@@ -109,3 +109,9 @@ Compose the complete profile with the installed SDK before restarting it.
 ## Optional native roles and Goal controls
 
 See [Native role integration](../../NATIVE_ROLES.md) for host requirements, default-off flags, durable publication and cold activation. The ordinary native Goal control endpoint is authenticated and revision checked. Native Team support requires the newer host APIs; the older transport peer version is not a Team compatibility claim.
+
+For the tested final-return Inbox ordering, use the optional trusted
+`nativeHandoff: { policyVersion, maxHops, validateLog }` composition. It creates
+one shared gate for admission, return and recovery with the actual native
+services. Do not mix it with manual handoff callbacks. This is a server-side
+opt-in and does not activate a production profile or select successor roles.

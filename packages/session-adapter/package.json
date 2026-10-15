@@ -23,6 +23,8 @@
     "native-handoff-barrier.js",
     "native-handoff-admission.js",
     "native-handoff-return.js",
+    "native-handoff-inbox.js",
+    "native-handoff-lifecycle.js",
     "native-operation-observer.js",
     "native-role-provider.js",
     "native-task-dispatch.js",
