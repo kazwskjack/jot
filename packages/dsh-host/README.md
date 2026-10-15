@@ -185,17 +185,35 @@ native turn or successful business delivery. Intermediate text stays provisional
 in the public snapshot rather than being marked as a completed reply. Usage is
 settled before a safe wait is accepted, and retry does not launch another run.
 
-This is not persistent-task business approval or a real provider inference/quality
-test. Resuming after user input, multiple automatic Goal rounds, native Team
-dispatch and final business review remain separate acceptance targets.
-The tests enable none of these options on a deployment.
-It uses a synthetic owner header inside its private loopback boundary; production
-identity-proxy authentication and browser Origin/CSRF checks are not exercised
-by this integration case.
+Further cases exercise input and review replies, the original native Goal driver,
+and a complete file task. Input and review replies create one continuation per
+confirmed answer, keep the same occurrence and Goal, preserve cumulative budget
+and do not replay the original request. Duplicate answers return the same receipt.
+The automatic case arms the original driver, crosses a completed native turn and
+observes another native round without another Gateway run or competing prompt.
+
+The file case actually writes `acceptance.md` through the workspace tool. The
+scripted model consumes the returned execution receipt to complete its criterion
+and requests business review. Before owner acceptance there is no published
+answer or business certificate; a foreign owner and an untrusted Origin cannot
+approve it. After the owner accepts the frozen criterion, the original worker
+completion pump records native Goal completion and publishes exactly one answer,
+without another model call or task run. These checks use real file/receipt,
+checkpoint, review and completion services, not fabricated native proofs.
+
+This proves the synthetic task's local lifecycle, not external provider quality,
+arbitrary business correctness or native Team dispatch in this host profile.
+The tests enable none of these options on a deployment. Gateway Origin/CSRF and
+idempotency middleware are enabled, but the fixture uses a synthetic owner header
+inside its private loopback boundary; production identity-proxy authentication
+and a real browser session are not exercised.
 
 Passing these cases proves the local official composition, upload, ordinary chat,
-saved-role execution and a persistent task's confirmed waiting checkpoint.
-It does not prove real model inference, external tools, complete persistent-task delivery,
+saved-role execution and the synthetic persistent tasks' wait, resume, automatic
+round and reviewed final-answer publication for a file-writing task.
+File-as-attachment delivery remains a separate end-to-end acceptance target;
+writing a workspace file alone is not proof that a downloadable attachment reached
+the conversation. These cases do not prove real model inference, external tools,
 notification delivery, target-machine ACLs or power-loss durability. Full
 claimed-input recovery additionally requires a reviewed immutable release
 manifest, actual loaded source / permissions / model-route validation and

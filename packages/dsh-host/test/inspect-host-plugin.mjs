@@ -10,7 +10,7 @@ export async function apply(ctx,{receipt,sessionPrefix}){
  const {standingMountFor}=await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-agent-preset-registry')).href);
  const matches=id=>id==='host-canary'||typeof sessionPrefix==='string'&&id.startsWith(sessionPrefix);
  let facts,events=[];const save=()=>writeFileSync(receipt,JSON.stringify({...facts,events}));
- ctx.on('session/event',(session,event)=>{if(!matches(session.id))return;events.push({seq:event.seq,type:event.type,...(event.data?.reason?{reason:event.data.reason}:{}),...(event.type==='user/message'&&event.data?.source?.rpcId?{sourceRpcId:event.data.source.rpcId}:{})});save();});
+ ctx.on('session/event',(session,event)=>{if(!matches(session.id))return;events.push({seq:event.seq,type:event.type,...(event.data?.reason?{reason:event.data.reason}:{}),...(event.type==='goal/change'&&Number.isSafeInteger(event.data?.roundsStarted)?{goalRound:event.data.roundsStarted}:{}),...(event.type==='user/message'&&event.data?.source?.rpcId?{sourceRpcId:event.data.source.rpcId}:{})});save();});
  ctx.on('agent/created',({agent})=>{
   if(!matches(agent.id))return;
   facts={sessionId:agent.id,
