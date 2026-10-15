@@ -10,6 +10,7 @@ export async function fixture(t,intent='wait_user',options={}){
  const base=resolve('.test-tmp/task-wait-interactions');mkdirSync(base,{recursive:true});const root=mkdtempSync(join(base,'case-'));
  const fixtureConfig={databasePath:join(root,'db.sqlite'),workspaces:['ws'],workbenchRoot:join(root,'files'),uploadRoot:join(root,'uploads'),templateRoot:resolve('file-engine/templates'),internalChannelToken:'test-b99992d64419ae59',modelBudgetPolicy:policy,csrfToken:'test-dcbf055943f33d8a',allowedOrigins:['https://fixture.invalid']};
  const f=await buildServer(fixtureConfig);
+ if(options.configureApp)options.configureApp(f);
  t.after(async()=>{await f.app.close();f.db.close();const child=relative(base,root);assert.ok(child&&!child.startsWith('..')&&!isAbsolute(child));rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:20});});
  const a=f.workbench.createAgent('alice',{name:'Reader',instructions:'Frozen role permissions'});
  const task=f.persistentTasks.create('alice',{title:'Task needing input',agent_id:a.agent_id,objective:'Produce the authorized report',trigger:{kind:'once',run_at:'2099-01-01T00:00:00Z'}});

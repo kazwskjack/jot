@@ -101,10 +101,28 @@ publisher creates the Artifact attachment from the frozen bytes. Replays neither
 follow later file replacements nor create a second publication. The local host
 acceptance covers this path using a scripted model, not real model quality.
 
-The review card currently exposes frozen version/hash metadata. A complete
-general-purpose preview of frozen files before acceptance, including large and
-binary files, remains a separate UI acceptance item. Native Team child-file
-lineage also needs its own official-host integration coverage.
+The acceptance card now lists and downloads exact frozen output versions before
+acceptance through `GET /v1/interactions/{interaction_id}/outputs` and its
+`/{output_index}` content route. These are authenticated, owner-only pending
+review reads; no path/version query, final Artifact publication, lease renewal
+or model call is accepted. State, authority, receipts and bytes are reverified
+on each request. A later edit never substitutes the latest version. Expiry,
+resolution, revocation and integrity failures close the read path.
+
+Small text (including HTML/SVG as literal text) and PNG/JPEG/GIF/WebP can be
+previewed; Office and other files are downloaded. The client verifies size/hash
+before displaying or downloading supported outputs. Native Team child-file
+lineage still needs its own official-host integration coverage.
+
+Review requests use a deferred WAL snapshot, not a reserved writer lock.
+Generated-group bytes are retained only within one request, up to 100 MiB in
+aggregate. One review response per Gateway process may be in flight; another
+receives `429 TASK_REVIEW_OUTPUT_BUSY`. Disconnect or a 30-second response
+deadline releases the slot. This is a conservative memory bound, not a fair
+multi-user download queue. Listing still verifies all frozen output bytes and
+can incur disk/hash work; over-limit groups remain unavailable rather than
+being partially reviewed. Large-group latency and multi-user capacity are not
+production acceptance claims.
 
 `src/artifacts/main.ts` expects a separately supplied document exporter and runtime bridge; the fallback exporter path is not a bundled executable. `src/channels/main.ts` expects a separately supplied enterprise messaging provider module and runtime bridge. `src/artifacts/archive-main.ts` needs a configured external archive CLI and credentials. These extension points are source code, not ready-to-run bundled providers. Do not enable them merely because the gateway builds successfully.
 

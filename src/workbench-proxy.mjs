@@ -30,9 +30,10 @@ export function registerWorkbenchProxy(app,config,localCsrf){
    const response=await config.fetch(config.url+suffix+path.search,{method:req.method,headers,body:req.body===undefined?undefined:binary?req.body:JSON.stringify(req.body),signal:controller.signal,redirect:'error'});
    reply.code(response.status);const type=response.headers.get('content-type')??'application/json';reply.type(type);
    if(suffix==='/v1/capabilities'&&response.ok){reply.header('x-csrf-token',localCsrf);const scope=response.headers.get('x-workbench-draft-scope');if(/^[a-f0-9]{64}$/.test(scope??''))reply.header('x-workbench-draft-scope',scope);}
-   if(type.startsWith('text/event-stream')&&response.body){clearTimeout(timer);return reply.send(Readable.fromWeb(response.body));}
-   if(response.status===204)return reply.send();
    for(const name of ['content-disposition']){const value=response.headers.get(name);if(value)reply.header(name,value);}
+   const reviewDownload=req.method==='GET'&&/^\/v1\/interactions\/[^/]+\/outputs\/(?:0|[1-9][0-9]{0,3})$/.test(suffix)&&type.startsWith('application/octet-stream');
+   if((type.startsWith('text/event-stream')||reviewDownload)&&response.body){clearTimeout(timer);return reply.send(Readable.fromWeb(response.body));}
+   if(response.status===204)return reply.send();
    return reply.send(Buffer.from(await response.arrayBuffer()));
   }catch{return reply.code(502).send({error:{code:'WORKBENCH_UNAVAILABLE',message:'The local workbench gateway did not respond.'}});}
   finally{clearTimeout(timer);}

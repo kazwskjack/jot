@@ -111,3 +111,6 @@ export type MessagePage = { items: Array<Message>; next_cursor?: string };
 
 export type InteractionPage = { items: Array<Interaction> };
 
+
+export type TaskReviewOutput = {output_index:number;source:"workspace"|"native"|"generated";file_name:string;version:number;size_bytes:number;sha256:string;mime_type:string;download_url:string};
+export type TaskReviewOutputPage = {items:TaskReviewOutput[]};

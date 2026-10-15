@@ -5,6 +5,14 @@ import {mkdir,mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {resolve,join} from 'node:path';
 import {createHash} from 'node:crypto';
 
+test('frozen review downloads stream verified bytes through the BFF without an extra whole-file buffer',async t=>{
+ const service=await buildServer({demo:true,database:':memory:',root:'.test-tmp/proxy-files',workbench:{url:'http://127.0.0.1:18831',owner:'local-user',csrf:'test-upstream-auth',fetch:async()=>{
+  const response=new Response('Frozen reviewed content',{headers:{'content-type':'application/octet-stream','content-disposition':'attachment; filename="review.md"'}});
+  response.arrayBuffer=async()=>{throw new Error('must_stream_the_original_body');};return response;
+ }}});t.after(()=>service.close());
+ const result=await service.app.inject({url:'/workbench-api/v1/interactions/int-1/outputs/0'});assert.equal(result.statusCode,200,result.body);assert.equal(result.body,'Frozen reviewed content');assert.match(result.headers['content-disposition'],/^attachment;/);assert.match(result.headers['cache-control'],/no-store/);
+});
+
 test('static application roots normalize trailing separators on Windows',async t=>{
  const base=resolve('.test-tmp/static-tests');await mkdir(base,{recursive:true});const folder=await mkdtemp(join(base,'case-'));
  const service=await buildServer({demo:true,database:':memory:',root:'.test-tmp/proxy-files',publicRoot:folder+'/'});

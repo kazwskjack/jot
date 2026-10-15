@@ -13,9 +13,10 @@ import { EmotionAdvisor, taskEmotionEvent, userEmotionSignal, emotionAccountingR
 import { RunCommandService } from './runs/commands.ts';
 import { InteractionService } from './interactions/service.ts';
 import {TaskWaitResponder} from './persistent-tasks/task-wait.ts';
+import {TaskReviewOutputs} from './persistent-tasks/review-outputs.ts';
 import { ArtifactService } from './artifacts/service.ts';
 import { createReadStream } from 'node:fs';
-import { PassThrough } from 'node:stream';
+import { PassThrough, Readable } from 'node:stream';
 import { dirname, join, resolve } from 'node:path';
 import { SourceRepository } from './sources/repository.ts';
 import { ContractValidator } from './contracts/validator.ts';
@@ -244,6 +245,9 @@ export async function buildServer(config: {
 
   app.setErrorHandler((error, _request, reply) => {
     const code = error instanceof Error ? error.message : 'internal_error';
+    if(code==='task_review_output_not_found')return reply.code(404).send({error:{code:'TASK_REVIEW_OUTPUT_NOT_FOUND'}});
+    if(code==='task_review_output_unavailable')return reply.code(409).send({error:{code:'TASK_REVIEW_OUTPUT_UNAVAILABLE'}});
+    if(code==='task_review_output_expired')return reply.code(410).send({error:{code:'TASK_REVIEW_OUTPUT_EXPIRED'}});
     if(['handoff_request_invalid','handoff_identity_invalid'].includes(code))return reply.code(422).send({error:{code:code.toUpperCase()}});
     if(['handoff_identity_forbidden','handoff_execution_forbidden','handoff_role_forbidden'].includes(code))return reply.code(403).send({error:{code:code.toUpperCase()}});
     if(['handoff_usage_unresolved','handoff_operation_unresolved','handoff_lease_changed','handoff_revision_conflict','handoff_execution_conflict','handoff_execution_unbound','handoff_already_started','handoff_not_started','handoff_closed','handoff_controller_changed','handoff_route_repeated','handoff_hop_exhausted'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
@@ -565,6 +569,24 @@ export async function buildServer(config: {
     (request.params as { interactionId: string }).interactionId, actor(request as any), request.body as Record<string, unknown>,
     String(request.headers['idempotency-key'] || ''),
   )));
+  const reviewOutputs=new TaskReviewOutputs(db);let reviewReadBusy=false;
+  const reviewRead=(request:any,reply:any,content:boolean)=>{
+    reply.header('cache-control','private, no-store').header('x-content-type-options','nosniff').header('referrer-policy','no-referrer');
+    if(Object.keys(request.query??{}).length)throw new Error('invalid_task_review_output_query');
+    if(reviewReadBusy)return reply.code(429).send({error:{code:'TASK_REVIEW_OUTPUT_BUSY'}});
+    reviewReadBusy=true;let released=false;const deadline=setTimeout(()=>reply.raw.destroy(),30000);deadline.unref();
+    const release=()=>{if(!released){released=true;clearTimeout(deadline);reviewReadBusy=false;}};
+    reply.raw.once('finish',release);reply.raw.once('close',release);
+    try{
+      const params=request.params as {interactionId:string;outputIndex?:string},owner=actor(request);
+      if(!content)return reply.send(reviewOutputs.list(owner,params.interactionId));
+      const value=reviewOutputs.content(owner,params.interactionId,params.outputIndex!);
+      const filename=value.file_name.split(/[\\/]/).at(-1)!.replace(/[^A-Za-z0-9._-]/g,'_')||'review-output';
+      return reply.header('content-type','application/octet-stream').header('content-disposition',`attachment; filename="${filename}"`).send(Readable.from([value.content]));
+    }catch(error){release();throw error;}
+  };
+  app.get('/v1/interactions/:interactionId/outputs',(request,reply)=>reviewRead(request,reply,false));
+  app.get('/v1/interactions/:interactionId/outputs/:outputIndex',(request,reply)=>reviewRead(request,reply,true));
   app.post('/v1/interactions/:interactionId/decision', async (request, reply) => reply.code(202).send(interactions.decide(
     (request.params as { interactionId: string }).interactionId, actor(request as any), request.body as Record<string, unknown>,
     String(request.headers['idempotency-key'] || ''),

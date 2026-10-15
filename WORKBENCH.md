@@ -1,5 +1,13 @@
 # Persistent tasks and shared workspaces
 
+Task acceptance cards include frozen-file review: inspect a small text/image or
+download the verified version before accepting. HTML/SVG remain literal text.
+Changing the current workspace file does not change that version; accepting,
+rejecting, expiry or authority revocation closes the old review route. This read
+does not publish a final attachment or approve the task. See the
+[Gateway review limits](packages/gateway/README.md#reviewed-workspace-attachments)
+for size, concurrency and response-deadline behavior.
+
 The extended gateway provides owned Agent roles, teams, durable task occurrences,
 shared files, memory proposals, member mailboxes and an execution evidence ledger.
 These APIs belong to `packages/gateway`. The root demo runtime is a separate entry

@@ -229,3 +229,6 @@ export type UpdateTaskReplyPolicy = {expected_version:number;policy:TaskReplyPol
 
 export type TaskReplyHistoryItem = {draft_id:string;run_id:string;conversation_id:string;occurrence_id:string;mode:"draft"|"review"|"bounded_auto_reply";text:string;target:{kind:"conversation";conversation_id:string}|{kind:"channel";channel_binding_id:string};status:"draft"|"pending_review"|"review_expired"|"review_denied"|"waiting_dispatch"|"deferred"|"queued"|"sending"|"receipt_pending"|"delivered"|"cancelled"|"outcome_unknown"|"blocked";reason:string|null;not_before:string|null;interaction_id:string|null;message_id:string|null;delivery_id:string|null;created_at:string;updated_at:string};
 export type TaskReplyHistoryPage = {items:TaskReplyHistoryItem[];has_more:boolean;next_cursor:string|null};
+
+export type TaskReviewOutput = {output_index:number;source:"workspace"|"native"|"generated";file_name:string;version:number;size_bytes:number;sha256:string;mime_type:string;download_url:string};
+export type TaskReviewOutputPage = {items:TaskReviewOutput[]};

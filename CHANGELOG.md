@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- Add owner-only frozen-file previews and verified downloads to task acceptance cards. Later edits cannot replace the reviewed version; expired, resolved, revoked or corrupted candidates cannot be downloaded.
+- Keep review reads in a WAL read snapshot without reserving the Worker writer lock. Bound generated preview caching to 100 MiB per request and one in-flight read per Gateway, with a 30-second response deadline and release on disconnect.
+
 - Add an optional pre-publication resume setup that restores eligible original claimed input through the official SessionQuery/Inbox APIs, retaining IDs and order without waking a Goal.
 - Refuse cancelled, conflicting or already-started replay; require trusted owner/lease and pre-step safety policies rather than inferring permission from a missing message.
 - Verify the missing-input crash window and recovery with actual killed Node workers, durable-before-publication readback and explicit later user continuation.

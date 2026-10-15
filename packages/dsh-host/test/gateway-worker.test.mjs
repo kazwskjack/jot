@@ -106,11 +106,16 @@ async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=
    assert.equal(service.artifacts.listForRun(run_id,'acceptance-owner').items.length,0);
    // A later authorized owner edit must not replace the already reviewed version.
    service.workbench.writeFile(file.owner_id,file.workspace_id,{project_id:file.project_id,path:file.path,content:'Later owner replacement',expected_version:1});
+   const reviewUrl=gatewayUrl+'/v1/interactions/'+card.interaction_id+'/outputs';
+   const previewList=await fetch(reviewUrl,{headers});assert.equal(previewList.status,200);const previewFiles=(await previewList.json()).items;assert.equal(previewFiles.length,1);assert.equal(previewFiles[0].version,1);
+   const previewBytes=await fetch(reviewUrl+'/0',{headers});assert.equal(previewBytes.status,200);assert.equal(await previewBytes.text(),'ACCEPTANCE-OK');assert.equal(previewFiles[0].sha256,createHash('sha256').update('ACCEPTANCE-OK').digest('hex'));
+   assert.equal((await fetch(reviewUrl+'/0',{headers:{...headers,'x-user-id':'foreign-owner'}})).status,404);assert.equal(service.artifacts.listForRun(run_id,'acceptance-owner').items.length,0);
    assert.equal(service.db.prepare('SELECT count(*) n FROM wb_task_execution_receipts').get().n,1);assert.equal(service.db.prepare('SELECT count(*) n FROM wb_task_business_certificates').get().n,0);
    const post=(extraHeaders={})=>fetch(gatewayUrl+'/v1/interactions/'+card.interaction_id+'/response',{method:'POST',headers:{...headers,'idempotency-key':'accept-business-criteria',...extraHeaders},body:JSON.stringify({expected_version:card.version,answers:card.questions.map(question=>({question_id:question.question_id,selected_option_ids:['accept'],custom_text:''}))})});
    assert.equal((await post({'x-user-id':'foreign-owner'})).status,404);assert.equal((await post({origin:'https://untrusted.invalid'})).status,403);
    assert.equal(service.db.prepare('SELECT count(*) n FROM wb_task_business_certificates').get().n,0);assert.equal(service.db.prepare("SELECT count(*) n FROM ga_messages WHERE role='assistant'").get().n,0);
    const acceptedReview=await post(),review=await acceptedReview.json();assert.equal(acceptedReview.status,202,JSON.stringify(review));
+   assert.equal((await fetch(reviewUrl+'/0',{headers})).status,409);
    const finished=await until(async()=>{const value=await (await fetch(gatewayUrl+'/v1/runs/'+run_id,{headers})).json();return value.status==='succeeded'&&value;});assert.equal(finished.status,'succeeded');assert.equal(requests.length,3);
    const retriedReview=await post();assert.equal(retriedReview.status,202);assert.deepEqual(await retriedReview.json(),review);
    const delivered=await (await fetch(gatewayUrl+'/v1/conversations/'+conversation_id+'/snapshot',{headers})).json();const published=delivered.messages.filter(message=>message.role==='assistant'&&message.status==='complete');assert.equal(published.length,1);assert.ok(JSON.stringify(published[0].blocks).includes('ACCEPTANCE-OK'));checkBudget(run_id,3);

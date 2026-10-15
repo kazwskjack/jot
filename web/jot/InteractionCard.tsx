@@ -1,5 +1,6 @@
 import React,{useEffect,useRef,useState} from 'react';
 import type {Interaction} from './types';
+import TaskReviewFiles from './TaskReviewFiles';
 
 /** A stable request survives receipt loss. A different answer is a new request. */
 export default function InteractionCard({value,disabled,submit,onRefresh}:{value:Interaction;disabled:boolean;submit:(body:unknown,key:string,signal:AbortSignal)=>Promise<{accepted:boolean;interaction_id:string}>;onRefresh:()=>Promise<void>}){
@@ -28,6 +29,7 @@ export default function InteractionCard({value,disabled,submit,onRefresh}:{value
  const replyReview=value.kind==='approval'&&value.purpose==='task_reply_review';
  const acceptance=value.kind==='question'&&value.purpose==='task_acceptance_review';
  return <section className="jot-interaction"><h3>{replyReview?'确认这份回复':acceptance?'逐项验收结果':review?'确认继续核验':value.kind==='approval'?'需要你的确认':'补充一下信息'}</h3>
+ {acceptance&&<TaskReviewFiles id={value.interaction_id} version={value.version} disabled={blocked} onRefresh={onRefresh}/>}
  {value.kind==='approval'?<><p style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{value.action_summary}</p>{!review&&<small>风险：{value.risk}</small>}
  <button disabled={blocked} onClick={()=>void send({expected_version:value.version,action_digest:value.action_digest,decision:'approve'})}>{replyReview?'确认这份回复':review?'确认并继续核验':'批准本次操作'}</button>
  <button disabled={blocked} onClick={()=>void send({expected_version:value.version,action_digest:value.action_digest,decision:'deny'})}>{replyReview?'拒绝这份回复':review?'暂不继续':'拒绝'}</button></>:<>

@@ -1,5 +1,28 @@
 # Code preview verification
 
+## Frozen acceptance-file review
+
+On Windows, 1,003 Gateway tests passed with zero failures and one POSIX-only
+restore skip (1,004 total); Python file-engine cases ran. The final preview
+safety subset passed eight cases after the response-deadline change, and Gateway
+typecheck/build passed. Portable root tests passed 32 cases and workbench/Jot UI
+tests passed 109 cases.
+
+The installed original DSH host suite passed 14 cases. Its actual file-task case
+was rerun after the final read changes: the real Gateway, separate Worker and
+official launcher returned the original frozen version before acceptance, denied
+foreign access and the old review route after acceptance, then published exactly
+one matching final attachment. Only model Messages HTTP/SSE and the loopback
+owner fixture were synthetic; this is not external model-quality or production
+authentication acceptance.
+
+An isolated Edge/Playwright check of the actual React component with synthetic
+review HTTP verified literal HTML, hash-checked downloads, image preview/object
+URL cleanup, interaction switching, disabled state and expired-state cleanup.
+This does not replace a production browser/provider test. Review reads remain a
+conservative single response per Gateway with a 100 MiB generated aggregate cap;
+large-group performance and fair multi-user queues remain outside this result.
+
 ## Pre-publication recovery of claimed human input
 
 This follow-up passed 286 public adapter tests, 319 internal adapter tests,

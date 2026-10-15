@@ -772,5 +772,23 @@
     "TaskReplyHistoryPage",
     "200",
     "仅限任务owner；读取不会触发派发。外部队列状态不等于送达；不返回principal或provider回执。"
+  ],
+  [
+    "GET",
+    "/v1/interactions/{interaction_id}/outputs",
+    "Read frozen owner review outputs",
+    null,
+    "TaskReviewOutputPage",
+    "200",
+    "Read-only; no publication or model call."
+  ],
+  [
+    "GET",
+    "/v1/interactions/{interaction_id}/outputs/{output_index}",
+    "Download a frozen review output",
+    null,
+    null,
+    "200",
+    "Attachment bytes; no path/version query."
   ]
 ]
