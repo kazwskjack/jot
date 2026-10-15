@@ -1,3 +1,4 @@
+import {MemoryCaptureService} from './memory-capture.ts';
 import {MemoryRetrievalLog,type RetrievalData} from './memory-retrievals.ts';
 import {MemoryConsolidationService} from './memory-consolidation.ts';
 import {validateNativeOperationProofs} from './native-operation-proof.ts';
@@ -71,6 +72,7 @@ export class WorkbenchService {
   private readonly memoryLifecycle: MemoryLifecycle;
   readonly memoryConsolidations: MemoryConsolidationService;
   readonly memoryRetrievals: MemoryRetrievalLog;
+  readonly memoryCapture: MemoryCaptureService;
   constructor(db: DatabaseSync, options: WorkbenchOptions) {
     this.db = db; this.options = options;
     installTaskRunLineage(db);
@@ -148,6 +150,11 @@ export class WorkbenchService {
         BEGIN SELECT RAISE(ABORT,'file_write_run_immutable'); END;
     `);
     this.memoryLifecycle = new MemoryLifecycle(db);
+    this.memoryCapture=new MemoryCaptureService(db,{
+      agent:(owner,agentId)=>{const agent=this.active(owner,agentId);this.projects.assertOwned(agent.project_id,owner);return agent;},
+      assertRun:(owner,agentId,runId)=>{const agent=this.active(owner,agentId),context=this.runIdentity(owner,agent.workspace_id,runId);if(context.agent_id!==agentId||context.project_id!==agent.project_id)throw new Error('memory_scope_forbidden');},
+      save:(owner,workspace,input)=>this.saveMemory(owner,workspace,input),
+    });
     this.memoryRetrievals=new MemoryRetrievalLog(db,(owner,workspaceId,agentId)=>{
       const workspace=this.workspace(workspaceId),agent=this.active(owner,agentId);
       if(agent.workspace_id!==workspace)throw new Error('memory_scope_forbidden');
@@ -258,6 +265,7 @@ export class WorkbenchService {
         allowed_tools: agent.allowed_tools, memories: recalled.items, kind };
       this.db.prepare('INSERT INTO wb_run_bindings VALUES(?,?,?,?,?,?,?)').run(runId, owner, agentId, agent.capability_epoch, kind, JSON.stringify(context), timestamp());
       this.recordMemorySnapshot(owner,agent,runId,recalled.items,recalled.candidate_count,recalled.excluded);
+      this.memoryCapture.register(owner,agentId,runId);
       this.options.modelBudgetPolicy?.allocate(owner,runId);
     });
   }
@@ -403,6 +411,7 @@ export class WorkbenchService {
       const row=this.db.prepare('SELECT epoch FROM wb_run_bindings WHERE run_id=? AND owner_id=?').get(originalRunId,owner) as Row;
       this.db.prepare('INSERT INTO wb_run_bindings VALUES(?,?,?,?,?,?,?)').run(newRunId,owner,context.agent_id,Number(row.epoch),'task',JSON.stringify({...context,run_id:newRunId}),timestamp());
       this.recordMemorySnapshot(owner,this.active(owner,context.agent_id),newRunId,context.memories,context.memories.length,undefined,originalRunId);
+      this.memoryCapture.register(owner,context.agent_id,newRunId);
       this.options.modelBudgetPolicy?.allocate(owner,newRunId);
       this.assertRunActive(newRunId);
       this.db.prepare('UPDATE wb_persistent_tasks SET projection_pending=1 WHERE task_id=(SELECT task_id FROM wb_task_run_occurrences WHERE run_id=?)').run(newRunId);
@@ -426,6 +435,7 @@ export class WorkbenchService {
       this.db.prepare('INSERT INTO wb_run_bindings VALUES(?,?,?,?,?,?,?)').run(newRunId, owner,
         context.agent_id, Number(row.epoch), 'chat', JSON.stringify({...context, run_id: newRunId}), timestamp());
       this.recordMemorySnapshot(owner,this.active(owner,context.agent_id),newRunId,context.memories,context.memories.length,undefined,originalRunId);
+      this.memoryCapture.register(owner,context.agent_id,newRunId);
       this.options.modelBudgetPolicy?.inheritChatRun(owner,originalRunId,newRunId);
       this.assertRunActive(newRunId);
     });
@@ -514,6 +524,7 @@ export class WorkbenchService {
     if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_model_budget_policy_registry'").get()
       && this.db.prepare('SELECT 1 FROM wb_model_budget_policy_registry WHERE singleton=1').get()) throw new Error('budget_service_unavailable');
   }
+  collectMemoryCaptures(){return this.memoryCapture.collect();}
   reconcileBudgets() {
     const ledger=this.options.modelBudgetPolicy?.ledger;
     ledger?.reconcileDispatchedCalls();

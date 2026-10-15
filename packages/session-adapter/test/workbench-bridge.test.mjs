@@ -578,3 +578,13 @@ test('the installed native workspace tool exposes staged memory proposals withou
  for(const operation of ['memory.apply','memory.rollback'])await assert.rejects(f.host.execute('jot_workspace',{operation,arguments_json:'{}'}),/workbench_arguments_invalid/);
  for(const key of ['owner_id','project_id','agent_id','run_id'])await assert.rejects(f.host.execute('jot_workspace',{operation:'memory.stage',arguments_json:JSON.stringify({scope:'private',memory_ids:['memory-a'],[key]:'forged'})}),/workbench_arguments_invalid/);
 });
+
+test('capture tools expose only pending source reads and grounded proposals',async()=>{
+ const f=fixture();await f.bridge.attach(f.host.agent,binding);
+ for(const [operation,args] of [['memory.capture.pending',{}],['memory.capture.read',{capture_id:'capture-a'}],['memory.capture.propose',{capture_id:'capture-a',expected_version:2,summary:'Preference',notes:[{content:'Concise answers',source_ids:['source-a']}]}]]){
+  await f.host.execute('jot_workspace',{operation,arguments_json:JSON.stringify(args)});assert.equal(f.requests.at(-1).body.operation,operation);assert.deepEqual(f.requests.at(-1).body.arguments,args);
+ }
+ for(const operation of ['memory.capture.apply','memory.capture.policy'])await assert.rejects(f.host.execute('jot_workspace',{operation,arguments_json:'{}'}),/workbench_arguments_invalid/);
+ for(const key of ['owner_id','project_id','agent_id','verified'])await assert.rejects(f.host.execute('jot_workspace',{operation:'memory.capture.read',arguments_json:JSON.stringify({capture_id:'capture-a',[key]:'forged'})}),/workbench_arguments_invalid/);
+ assert.equal(f.host.tools.get('jot_workspace').isConcurrencySafe({operation:'memory.capture.propose',arguments_json:'{}'}),false);
+});

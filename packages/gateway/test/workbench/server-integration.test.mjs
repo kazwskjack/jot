@@ -725,6 +725,36 @@ test('native memory consolidation only stages and proposes in its original run a
  const applied=f.workbench.memoryConsolidations.apply('alice','main',stage.consolidation_id,2);assert.equal(applied.status,'applied');assert.equal(f.workbench.memoryHistory('alice','main',first.memory_id).current_version,2);
 });
 
+test('native capture reads current public sources and proposes once without granting apply',async t=>{
+ const f=await fixture(t),a=await f.agent('Capture reader');f.workbench.memoryCapture.setPolicy('alice',a.agent_id,{expected_version:0,mode:'suggest'});
+ const source=await f.chat(a);f.db.prepare("UPDATE ga_runs SET status='succeeded' WHERE id=?").run(source.run_id);f.workbench.collectMemoryCaptures();
+ const processor=await f.chat(a),identity={run_id:processor.run_id,session_ref:f.bind('alice',a.conversation_id)},call=(operation,args,call_id=randomUUID())=>f.internal('tool',{...identity,operation,arguments:args,call_id});
+ const pending=await call('memory.capture.pending',{});assert.equal(pending.statusCode,200,pending.body);assert.equal(pending.json().items.length,1);const id=pending.json().items[0].capture_id;
+ const read=await call('memory.capture.read',{capture_id:id},'read-source');assert.equal(read.statusCode,200,read.body);const batch=read.json();assert.equal(batch.sources[0].origin,'human');
+ const args={capture_id:id,expected_version:2,summary:'A durable candidate',notes:[{content:'A candidate from this conversation',source_ids:[batch.sources[0].source_id]}]};
+ const proposed=await call('memory.capture.propose',args,'propose-capture');assert.equal(proposed.statusCode,200,proposed.body);assert.equal(proposed.json().status,'proposed');assert.deepEqual((await call('memory.capture.propose',args,'propose-capture')).json(),proposed.json());
+ assert.equal(f.workbench.listMemory('alice','main',{agent_id:a.agent_id}).items.length,0);assert.equal((await call('memory.capture.apply',{capture_id:id,expected_version:3})).statusCode,422);
+ assert.equal((await call('memory.capture.read',{capture_id:id,owner_id:'bob'})).statusCode,403);
+ f.db.prepare("UPDATE ga_messages SET content_json='[]' WHERE id=?").run(batch.sources[0].message_id);
+ const stale=await call('memory.capture.read',{capture_id:id},'read-source');assert.notEqual(stale.statusCode,200,'cached tool receipt must not revive removed source text');assert.doesNotMatch(stale.body,/A candidate from this conversation/);
+});
+
+test('owner capture policy and approval routes enforce atomic receipts and source freshness',async t=>{
+ const f=await fixture(t),a=await f.agent('Capture owner'),base=`/v1/agents/${a.agent_id}`,policyUrl=base+'/memory-capture-policy';
+ assert.equal((await f.json('GET',policyUrl)).mode,'off');
+ const enabled=await f.json('PATCH',policyUrl,{expected_version:0,mode:'suggest'},200,'alice','enable-capture');assert.equal(enabled.version,1);assert.deepEqual(await f.json('PATCH',policyUrl,{expected_version:0,mode:'suggest'},200,'alice','enable-capture'),enabled);
+ assert.equal((await f.http('GET',policyUrl,undefined,'bob')).statusCode,404);
+ const source=await f.chat(a);f.db.prepare("UPDATE ga_runs SET status='succeeded' WHERE id=?").run(source.run_id);
+ assert.equal((await f.json('GET',base+'/memory-captures')).items[0].status,'watching','GET does not collect');
+ assert.equal((await f.json('POST',policyUrl+'/collect',{},200)).ready,1);const item=(await f.json('GET',base+'/memory-captures')).items[0],url=base+'/memory-captures/'+item.capture_id;
+ const batch=await f.json('GET',url),processor=await f.chat(a);f.workbench.memoryCapture.propose('alice',a.agent_id,item.capture_id,{expected_version:2,summary:'Durable note',notes:[{content:'Remember the approved preference',source_ids:[batch.sources[0].source_id]}]},processor.run_id);
+ f.db.exec("CREATE TEMP TRIGGER fail_capture_apply BEFORE INSERT ON wb_memories BEGIN SELECT RAISE(ABORT,'synthetic_capture_apply_failure'); END;");
+ assert.equal((await f.http('POST',url+'/apply',{expected_version:3},'alice','apply-capture')).statusCode,500);assert.equal(f.workbench.listMemory('alice','main',{agent_id:a.agent_id}).items.length,0);
+ f.db.exec('DROP TRIGGER fail_capture_apply');const applied=await f.json('POST',url+'/apply',{expected_version:3},200,'alice','apply-capture');assert.equal(applied.status,'applied');assert.deepEqual(await f.json('POST',url+'/apply',{expected_version:3},200,'alice','apply-capture'),applied);
+ assert.equal(f.workbench.listMemory('alice','main',{agent_id:a.agent_id}).items.length,1);assert.equal((await f.http('GET',url,undefined,'bob')).statusCode,404);
+ assert.equal((await f.http('PATCH',policyUrl,{expected_version:1,mode:'suggest',owner_id:'bob'})).statusCode,400);
+});
+
 test('owner consolidation routes validate contracts and recover the same atomic command after failure or lost response',async t=>{
  const f=await fixture(t);let lose=true,lostUrl=null;
  f.app.addHook('onSend',async(req,reply,payload)=>{if(lose&&req.url===lostUrl&&reply.statusCode===200){lose=false;reply.code(503);return JSON.stringify({error:{code:'fixture_lost_response'}});}return payload;});

@@ -536,6 +536,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
         'messages.send': ['recipient_agent_id', 'text', 'client_message_id'],
         'memory.list': ['q'], 'memory.save': ['scope', 'content', 'memory_id', 'expected_version', 'provenance', 'source_revision', 'expires_at', 'supersedes'],
         'memory.stage':['scope','memory_ids'],'memory.propose':['consolidation_id','expected_version','summary','changes'],'memory.consolidation':['consolidation_id'],
+        'memory.capture.pending':[], 'memory.capture.read':['capture_id'], 'memory.capture.propose':['capture_id','expected_version','summary','notes'],
         'files.list': [], 'files.read': ['path'], 'files.write': ['path', 'content', 'expected_version'],
         'tasks.get': [],'tasks.subtasks': ['occurrence_id'],
         'tasks.upsert': ['subtask_id','expected_version','title','acceptance','priority','status','dependencies','evidence'],
@@ -548,7 +549,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       };
       if (!keys[operation]) throw new Error('invalid_workspace_operation');
       fields(args, keys[operation]!);
-      const mutating = ['messages.send', 'memory.save', 'memory.stage', 'memory.propose', 'files.write','tasks.upsert','tasks.evidence','tasks.assess','tasks.delegate','tasks.reply_draft'].includes(operation);
+      const mutating = ['messages.send', 'memory.save', 'memory.stage', 'memory.propose', 'memory.capture.propose', 'files.write','tasks.upsert','tasks.evidence','tasks.assess','tasks.delegate','tasks.reply_draft'].includes(operation);
       const attested = (!!identity.task_binding||(identity.kind==='native_team'&&!!identity.task_assignment)) && !operation.startsWith('tasks.');
       const receipted = mutating || attested;
       const callId = input.call_id;
@@ -559,6 +560,10 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
         if(prior!==undefined&&operation==='memory.list'){
           const cached=object(prior),items=workbench.filterCurrentMemoryResult(owner,workspace,runId,cached.items);
           if(items.length!==(cached.items as unknown[]).length)return {items,...(typeof cached.retrieval_id==='string'?{retrieval_id:cached.retrieval_id}:{}),invalidated_result:true};
+        }
+        if(prior!==undefined&&operation==='memory.capture.read'){
+          if(typeof args.capture_id!=='string')throw new Error('invalid_memory_capture');
+          workbench.memoryCapture.read(owner,identity.agent_id,args.capture_id,runId);
         }
         if (prior !== undefined && operation!=='tasks.delegate') return prior;
       }
@@ -572,6 +577,15 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
           {...args, client_message_id: `tool-${createHash('sha256').update(`${runId}\0${String(callId)}`).digest('hex')}`}, runId); break;
         case 'memory.list': result = validCallId(callId)?workbench.retrieveMemory(owner,workspace,args,runId,String(callId)):workbench.listMemory(owner,workspace,args,runId); break;
         case 'memory.save': result = workbench.saveMemory(owner, workspace, {...args, project_id: project, verified: false}, runId); break;
+        case 'memory.capture.pending': result=workbench.memoryCapture.pending(owner,identity.agent_id);break;
+        case 'memory.capture.read':
+          if(typeof args.capture_id!=='string')throw new Error('invalid_memory_capture');
+          result=workbench.memoryCapture.read(owner,identity.agent_id,args.capture_id,runId);break;
+        case 'memory.capture.propose': {
+          const {capture_id,...proposal}=args;if(typeof capture_id!=='string')throw new Error('invalid_memory_capture');
+          const value=workbench.memoryCapture.propose(owner,identity.agent_id,capture_id,proposal,runId);
+          result={capture_id:value.capture_id,status:value.status,version:value.version,source_count:value.source_count,notes_count:value.notes_count};break;
+        }
         case 'memory.stage': result=workbench.memoryConsolidations.stage(owner,workspace,{...args,project_id:project,...(args.scope==='private'?{agent_id:identity.agent_id}:{})},runId);break;
         case 'memory.propose': {
           const {consolidation_id,...proposal}=args;

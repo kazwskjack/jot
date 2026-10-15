@@ -2,6 +2,18 @@
 
 Jot's original source and documentation use the repository MIT license. Third-party software retains its own license and authorship. No complete third-party Agent runtime distribution, model weights or private browser profiles are vendored here.
 
+`BRAIN.md`, its CLI-generated project scaffolding and the marked Agent guidance
+originate from [mindmuxai/brain.md](https://github.com/mindmuxai/brain.md),
+version 0.3.0, Apache-2.0. Project-specific page bodies have been adapted for
+Jot. The upstream license is retained at
+`licenses/BRAIN-MD-APACHE-2.0.txt`; the local CLI is a pinned development
+dependency. These files are not represented as an original Jot protocol.
+
+The separately evaluated `haitang1/dsh-memory` 0.5.0 extraction plugin is MIT
+software. It is not vendored or automatically installed by this release.
+Its local initialization tests do not imply production activation; see
+`MEMORY-AUTOMATION.md` for the integration boundary.
+
 The optional `packages/session-adapter/dsh-pre-setup-patch.js` contains small
 matching anchors and a compatibility delta for the separately installed
 `@deepseek-ai/dsh-agent-loop` 0.2.0-rc.2 MIT distribution. Its upstream notice is

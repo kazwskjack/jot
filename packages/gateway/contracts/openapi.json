@@ -11243,6 +11243,836 @@
           }
         }
       }
+    },
+    "/v1/agents/{agent_id}/memory-capture-policy": {
+      "get": {
+        "operationId": "getMemoryCapturePolicy",
+        "summary": "getMemoryCapturePolicy",
+        "tags": [
+          "workbench"
+        ],
+        "description": "Owner-scoped automatic public-message capture and reviewed candidate application. No model call in these endpoints; GET never captures sources.",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryCapturePolicy"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未登录或会话失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权限/CSRF 校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "资源不存在或不允许披露",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "版本/运行状态/幂等冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Worker 不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid history cursor or source revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateMemoryCapturePolicy",
+        "summary": "updateMemoryCapturePolicy",
+        "tags": [
+          "workbench"
+        ],
+        "description": "Owner-scoped automatic public-message capture and reviewed candidate application. No model call in these endpoints; GET never captures sources.",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMemoryCapturePolicy"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryCapturePolicy"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未登录或会话失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权限/CSRF 校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "资源不存在或不允许披露",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "版本/运行状态/幂等冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Worker 不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid history cursor or source revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agents/{agent_id}/memory-capture-policy/collect": {
+      "post": {
+        "operationId": "collectMemoryCaptures",
+        "summary": "collectMemoryCaptures",
+        "tags": [
+          "workbench"
+        ],
+        "description": "Owner-scoped automatic public-message capture and reviewed candidate application. No model call in these endpoints; GET never captures sources.",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyObject"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryCaptureCollection"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未登录或会话失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权限/CSRF 校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "资源不存在或不允许披露",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "版本/运行状态/幂等冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Worker 不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid history cursor or source revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agents/{agent_id}/memory-captures": {
+      "get": {
+        "operationId": "listMemoryCaptures",
+        "summary": "listMemoryCaptures",
+        "tags": [
+          "workbench"
+        ],
+        "description": "Owner-scoped automatic public-message capture and reviewed candidate application. No model call in these endpoints; GET never captures sources.",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "before_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryCapturePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未登录或会话失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权限/CSRF 校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "资源不存在或不允许披露",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "版本/运行状态/幂等冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Worker 不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid history cursor or source revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agents/{agent_id}/memory-captures/{capture_id}": {
+      "get": {
+        "operationId": "getMemoryCapture",
+        "summary": "getMemoryCapture",
+        "tags": [
+          "workbench"
+        ],
+        "description": "Owner-scoped automatic public-message capture and reviewed candidate application. No model call in these endpoints; GET never captures sources.",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "capture_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryCapture"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未登录或会话失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权限/CSRF 校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "资源不存在或不允许披露",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "版本/运行状态/幂等冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Worker 不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid history cursor or source revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agents/{agent_id}/memory-captures/{capture_id}/apply": {
+      "post": {
+        "operationId": "applyMemoryCapture",
+        "summary": "applyMemoryCapture",
+        "tags": [
+          "workbench"
+        ],
+        "description": "Owner-scoped automatic public-message capture and reviewed candidate application. No model call in these endpoints; GET never captures sources.",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "capture_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryCaptureCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryCapture"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未登录或会话失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权限/CSRF 校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "资源不存在或不允许披露",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "版本/运行状态/幂等冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Worker 不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid history cursor or source revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agents/{agent_id}/memory-captures/{capture_id}/reject": {
+      "post": {
+        "operationId": "rejectMemoryCapture",
+        "summary": "rejectMemoryCapture",
+        "tags": [
+          "workbench"
+        ],
+        "description": "Owner-scoped automatic public-message capture and reviewed candidate application. No model call in these endpoints; GET never captures sources.",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "capture_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryCaptureCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryCapture"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未登录或会话失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权限/CSRF 校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "资源不存在或不允许披露",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "版本/运行状态/幂等冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Worker 不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid history cursor or source revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -15193,6 +16023,9 @@
             "type": "boolean"
           },
           "memory_retrieval_traces": {
+            "type": "boolean"
+          },
+          "memory_capture": {
             "type": "boolean"
           }
         },
@@ -19964,6 +20797,559 @@
           "items",
           "next_before_id"
         ],
+        "additionalProperties": false
+      },
+      "MemoryCapturePolicy": {
+        "type": "object",
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "mode": {
+            "enum": [
+              "off",
+              "suggest"
+            ]
+          },
+          "include_assistant": {
+            "type": "boolean"
+          },
+          "include_automation": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "current": {
+            "type": "boolean"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "agent_id",
+          "mode",
+          "include_assistant",
+          "include_automation",
+          "version",
+          "current",
+          "updated_at"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateMemoryCapturePolicy": {
+        "type": "object",
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "mode": {
+            "enum": [
+              "off",
+              "suggest"
+            ]
+          },
+          "include_assistant": {
+            "type": "boolean"
+          },
+          "include_automation": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "expected_version",
+          "mode"
+        ],
+        "additionalProperties": false
+      },
+      "MemoryCaptureCollection": {
+        "type": "object",
+        "properties": {
+          "ready": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "skipped": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "ready",
+          "skipped"
+        ],
+        "additionalProperties": false
+      },
+      "MemoryCaptureCommand": {
+        "type": "object",
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "expected_version"
+        ],
+        "additionalProperties": false
+      },
+      "MemoryCaptureSummary": {
+        "type": "object",
+        "properties": {
+          "capture_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "agent_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "project_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "source_run_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "source_conversation_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "run_kind": {
+            "enum": [
+              "chat",
+              "task",
+              "native_team",
+              "internal_mailbox"
+            ]
+          },
+          "policy_version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "policy_current": {
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "watching",
+              "ready",
+              "proposed",
+              "applied",
+              "rejected",
+              "no_notes",
+              "no_source",
+              "source_failed",
+              "stale"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "source_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 20
+          },
+          "notes_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "capture_id",
+          "agent_id",
+          "workspace_id",
+          "project_id",
+          "source_run_id",
+          "source_conversation_id",
+          "run_kind",
+          "policy_version",
+          "policy_current",
+          "status",
+          "version",
+          "source_count",
+          "notes_count",
+          "created_at",
+          "updated_at"
+        ],
+        "additionalProperties": false
+      },
+      "MemoryCaptureSource": {
+        "type": "object",
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "message_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "block_id": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "block_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "role": {
+            "enum": [
+              "user",
+              "assistant"
+            ]
+          },
+          "origin": {
+            "enum": [
+              "human",
+              "agent",
+              "automation"
+            ]
+          },
+          "content_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 20000
+          }
+        },
+        "required": [
+          "source_id",
+          "message_id",
+          "block_id",
+          "block_index",
+          "role",
+          "origin",
+          "content_sha256",
+          "truncated",
+          "available"
+        ],
+        "additionalProperties": false
+      },
+      "MemoryCapture": {
+        "type": "object",
+        "properties": {
+          "capture_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "agent_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "project_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "source_run_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "source_conversation_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "run_kind": {
+            "enum": [
+              "chat",
+              "task",
+              "native_team",
+              "internal_mailbox"
+            ]
+          },
+          "policy_version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "policy_current": {
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "watching",
+              "ready",
+              "proposed",
+              "applied",
+              "rejected",
+              "no_notes",
+              "no_source",
+              "source_failed",
+              "stale"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "source_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 20
+          },
+          "notes_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "info": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "captured_chars": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "truncated_blocks": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "omitted_blocks": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "excluded_blocks": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "source_status": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "captured_chars",
+                  "truncated_blocks",
+                  "omitted_blocks",
+                  "excluded_blocks",
+                  "source_status"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sources": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "$ref": "#/components/schemas/MemoryCaptureSource"
+            }
+          },
+          "proposal": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "summary": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000
+                  },
+                  "notes": {
+                    "type": "array",
+                    "maxItems": 10,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "content": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 3000
+                        },
+                        "source_ids": {
+                          "type": "array",
+                          "maxItems": 20,
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "minItems": 1,
+                          "uniqueItems": true
+                        }
+                      },
+                      "required": [
+                        "content",
+                        "source_ids"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "summary",
+                  "notes"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "proposal_unavailable": {
+            "type": "boolean"
+          },
+          "results": {
+            "anyOf": [
+              {
+                "type": "array",
+                "maxItems": 10,
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "memory_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "version": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "reused": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "memory_id",
+                    "version",
+                    "reused"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "capture_id",
+          "agent_id",
+          "workspace_id",
+          "project_id",
+          "source_run_id",
+          "source_conversation_id",
+          "run_kind",
+          "policy_version",
+          "policy_current",
+          "status",
+          "version",
+          "source_count",
+          "notes_count",
+          "created_at",
+          "updated_at",
+          "info",
+          "sources",
+          "proposal",
+          "proposal_unavailable",
+          "results"
+        ],
+        "additionalProperties": false
+      },
+      "MemoryCapturePage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 25,
+            "items": {
+              "$ref": "#/components/schemas/MemoryCaptureSummary"
+            }
+          },
+          "next_before_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_before_id"
+        ],
+        "additionalProperties": false
+      },
+      "EmptyObject": {
+        "type": "object",
+        "properties": {},
+        "required": [],
         "additionalProperties": false
       }
     },

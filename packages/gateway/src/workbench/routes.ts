@@ -27,6 +27,12 @@ export function registerWorkbenchRoutes(app: FastifyInstance, service: Workbench
   app.get('/v1/agents', async request => service.listAgents(actor(request)));
   app.post('/v1/agents', async (request, reply) => reply.code(201).send(service.createAgent(actor(request), body(request, agentFields))));
   app.get('/v1/agents/:agentId', async request => service.getAgent(actor(request), param(request, 'agentId')));
+  app.get('/v1/agents/:agentId/memory-capture-policy',async request=>service.memoryCapture.policy(actor(request),param(request,'agentId')));
+  app.patch('/v1/agents/:agentId/memory-capture-policy',async request=>restoreCommand(request,()=>service.memoryCapture.setPolicy(actor(request),param(request,'agentId'),body(request,['expected_version','mode','include_assistant','include_automation']))));
+  app.post('/v1/agents/:agentId/memory-capture-policy/collect',async request=>restoreCommand(request,()=>{body(request,[]);return service.memoryCapture.collect(actor(request),param(request,'agentId'));}));
+  app.get('/v1/agents/:agentId/memory-captures',async request=>{const input=query(request);if(Object.keys(input).some(key=>key!=='before_id')||(input.before_id!==undefined&&(typeof input.before_id!=='string'||!input.before_id||input.before_id.length>128)))throw new Error('invalid_memory_capture');return service.memoryCapture.list(actor(request),param(request,'agentId'),input.before_id as string|undefined);});
+  app.get('/v1/agents/:agentId/memory-captures/:captureId',async request=>{if(Object.keys(query(request)).length)throw new Error('invalid_memory_capture');return service.memoryCapture.get(actor(request),param(request,'agentId'),param(request,'captureId'));});
+  for(const action of ['apply','reject'] as const)app.post(`/v1/agents/:agentId/memory-captures/:captureId/${action}`,async request=>restoreCommand(request,()=>service.memoryCapture[action](actor(request),param(request,'agentId'),param(request,'captureId'),version(body(request,['expected_version'])))));
   app.patch('/v1/agents/:agentId', async request => service.updateAgent(actor(request), param(request, 'agentId'), body(request, [...agentFields, 'expected_version', 'status'])));
   app.get('/v1/agents/:agentId/deletion-preview', async request => service.deletionPreview(actor(request), param(request, 'agentId')));
   app.delete('/v1/agents/:agentId', async request => service.deleteAgent(actor(request), param(request, 'agentId'), version(body(request, ['expected_version']))));

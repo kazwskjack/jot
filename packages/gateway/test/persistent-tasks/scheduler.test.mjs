@@ -10,6 +10,13 @@ import { buildServer } from '../../src/server.ts';
 const moduleUrl=new URL('../../src/persistent-tasks/scheduler.ts',import.meta.url);
 function directory(){const base=resolve('.test-tmp');mkdirSync(base,{recursive:true});return mkdtempSync(join(base,'workbench-scheduler-'));}
 test('workbench maintenance scheduler is exported',async()=>{const m=await import(moduleUrl).catch(()=>({}));assert.equal(typeof m.maintainWorkbench,'function');});
+
+test('completed memory sources are collected while model execution is unavailable',async()=>{
+ const {maintainWorkbench}=await import(moduleUrl);const calls=[];
+ const workbench={resumeDeletions(){calls.push('cleanup');return [];},reconcileBudgets(){calls.push('budgets');},collectMemoryCaptures(){calls.push('capture');return {ready:1,skipped:0};},processMailbox(){throw new Error('must not execute');}};
+ const tasks={maintainNotifications(){calls.push('notifications');},tick(){throw new Error('must not execute');}};
+ const result=await maintainWorkbench(workbench,tasks,false);assert.deepEqual(result.memory_capture,{ready:1,skipped:0});assert.deepEqual(calls,['cleanup','budgets','capture','notifications']);
+});
 test('not-ready maintenance performs revocation cleanup without enqueueing mailbox or scheduled tasks',async()=>{
   const {maintainWorkbench}=await import(moduleUrl);const root=directory();const db=openProductDatabase(join(root,'fixture.sqlite'));
   try{

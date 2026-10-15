@@ -324,3 +324,23 @@ node --test packages/session-adapter/verification/native-memory-retrieval-runtim
 ```
 
 As with the consolidation probe, set `JOT_DSH_RUNTIME_MODULES` to the installed locked rc2 packages. The local scripted model verifies tool wiring and original budget settlement, not real-provider retrieval quality. Runtime query logs and user data are excluded from the public source release.
+
+## Public-source capture and reviewed candidates
+
+The memory toolbar includes **Automatic memory** for the selected role. Its
+future-run source policy is off by default. Completed public text can be
+collected into source-backed batches; the original DSH workspace tool can
+read these batches and propose notes. The owner reviews and applies or rejects
+them. A collection receipt is not proof that a model extracted facts.
+
+See [memory automation](MEMORY-AUTOMATION.md) for the API, isolation, BRAIN.md
+publication boundary, storage behavior and remaining idle-worker work. The
+separate installed-SDK canary is:
+
+```sh
+node --test packages/session-adapter/verification/native-memory-capture-runtime.mjs
+```
+
+It uses a scripted local model, proves original budget settlement and keeps
+live memory unchanged until an explicit owner apply. It does not test the
+upstream plugin's autonomous extraction or a real model's quality.

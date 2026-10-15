@@ -889,5 +889,68 @@
     "MemoryRetrieval",
     "200",
     "Owner-only retrieval references and algorithm statistics. Read-only; unavailable memory versions return no content or provenance. Snapshot selection does not prove Provider use."
+  ],
+  [
+    "GET",
+    "/v1/agents/{agent_id}/memory-capture-policy",
+    "getMemoryCapturePolicy",
+    null,
+    "MemoryCapturePolicy",
+    "200",
+    "Owner-scoped automatic public-message capture and reviewed candidate application. No model call in these endpoints; GET never captures sources."
+  ],
+  [
+    "PATCH",
+    "/v1/agents/{agent_id}/memory-capture-policy",
+    "updateMemoryCapturePolicy",
+    "UpdateMemoryCapturePolicy",
+    "MemoryCapturePolicy",
+    "200",
+    "Owner-scoped automatic public-message capture and reviewed candidate application. No model call in these endpoints; GET never captures sources."
+  ],
+  [
+    "POST",
+    "/v1/agents/{agent_id}/memory-capture-policy/collect",
+    "collectMemoryCaptures",
+    "EmptyObject",
+    "MemoryCaptureCollection",
+    "200",
+    "Owner-scoped automatic public-message capture and reviewed candidate application. No model call in these endpoints; GET never captures sources."
+  ],
+  [
+    "GET",
+    "/v1/agents/{agent_id}/memory-captures",
+    "listMemoryCaptures",
+    null,
+    "MemoryCapturePage",
+    "200",
+    "Owner-scoped automatic public-message capture and reviewed candidate application. No model call in these endpoints; GET never captures sources."
+  ],
+  [
+    "GET",
+    "/v1/agents/{agent_id}/memory-captures/{capture_id}",
+    "getMemoryCapture",
+    null,
+    "MemoryCapture",
+    "200",
+    "Owner-scoped automatic public-message capture and reviewed candidate application. No model call in these endpoints; GET never captures sources."
+  ],
+  [
+    "POST",
+    "/v1/agents/{agent_id}/memory-captures/{capture_id}/apply",
+    "applyMemoryCapture",
+    "MemoryCaptureCommand",
+    "MemoryCapture",
+    "200",
+    "Owner-scoped automatic public-message capture and reviewed candidate application. No model call in these endpoints; GET never captures sources."
+  ],
+  [
+    "POST",
+    "/v1/agents/{agent_id}/memory-captures/{capture_id}/reject",
+    "rejectMemoryCapture",
+    "MemoryCaptureCommand",
+    "MemoryCapture",
+    "200",
+    "Owner-scoped automatic public-message capture and reviewed candidate application. No model call in these endpoints; GET never captures sources."
   ]
 ]

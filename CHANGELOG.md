@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- Add opt-in, role-scoped future-run public-message capture, immutable source batches, native pending/read/propose tools and owner-reviewed atomic application. Preserve source freshness, request receipts and original model budgeting.
+- Add the automatic-memory workbench view and a pinned local BRAIN.md project-knowledge workflow. The separate extraction plugin's idle worker and real-provider/production acceptance remain incomplete; no duplicate prompt injection or memory authority is enabled.
+
 - Record an immutable, internal-only pre-create abort when the original provider preparation fails and its reservation has no child binding or publication. Preserve request/Session/lease identity, cumulative quota and the original error; bound or uncertain outcomes remain pending.
 - Verify lost reservation and bind acknowledgements against the actual installed native manager without creating duplicate Sessions or running child inference.
 
