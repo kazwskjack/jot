@@ -95,3 +95,17 @@ test('list pages expose bounded summaries, not repeated source and proposal bodi
  for(const field of ['sources','proposal','results','rollback_results','owner_id','run_id'])assert.equal(Object.hasOwn(page.items[0],field),false);
  assert.equal(f.c.get('alice','ws',stage.consolidation_id).proposal.changes.length,2);
 });
+
+test('staged inputs, applied receipts and rollback remain valid after closing and reopening SQLite',t=>{
+ const base=resolve('.test-tmp/memory-consolidation-restart');mkdirSync(base,{recursive:true});const root=mkdtempSync(join(base,'case-')),path=join(root,'restart.sqlite'),options={workspaceIds:['ws'],root:join(root,'files')};let db=openProductDatabase(path);
+ t.after(()=>{db.close();rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:20});});
+ let service=new WorkbenchService(db,options);const agent=service.createAgent('alice',{name:'Restart curator'}),note=service.saveMemory('alice','ws',{scope:'private',agent_id:agent.agent_id,content:'Before restart',verified:true});
+ const stage=service.memoryConsolidations.stage('alice','ws',{scope:'private',agent_id:agent.agent_id,project_id:agent.project_id,memory_ids:[note.memory_id]});
+ service.memoryConsolidations.propose('alice','ws',stage.consolidation_id,{expected_version:1,summary:'Persisted candidate',changes:[{action:'rewrite',memory_id:note.memory_id,content:'After restart'}]});
+ db.close();db=openProductDatabase(path);service=new WorkbenchService(db,options);assert.equal(service.memoryConsolidations.get('alice','ws',stage.consolidation_id).status,'proposed');
+ service.memoryConsolidations.apply('alice','ws',stage.consolidation_id,2);db.close();db=openProductDatabase(path);service=new WorkbenchService(db,options);
+ assert.equal(service.memoryConsolidations.get('alice','ws',stage.consolidation_id).results[0].version,2);assert.equal(service.memoryHistory('alice','ws',note.memory_id).current_version,2);
+ service.memoryConsolidations.rollback('alice','ws',stage.consolidation_id,3);assert.equal(service.listMemory('alice','ws',{scope:'private',agent_id:agent.agent_id}).items[0].content,'Before restart');
+ db.close();db=openProductDatabase(path);service=new WorkbenchService(db,options);assert.equal(service.memoryConsolidations.get('alice','ws',stage.consolidation_id).status,'rolled_back');
+ assert.throws(()=>db.prepare('DELETE FROM wb_memory_consolidations WHERE consolidation_id=?').run(stage.consolidation_id),/memory_consolidation_immutable/);
+});
