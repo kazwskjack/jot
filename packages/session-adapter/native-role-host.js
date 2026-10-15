@@ -7,16 +7,17 @@ const canonical=value=>JSON.stringify(value,(_key,item)=>item&&typeof item==='ob
 /** Explicit candidate composition. Does not alter default Host configuration.
  * Native Team and Subagent services retain their original runtime ownership.
  */
-export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistence,providerName='jot-native-role',automaticClosures=false,nativeRecovery=false,durableSpawns=false,handoffAdmission,reconcileOperations,nativeOperationOrigin}){
+export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistence,providerName='jot-native-role',automaticClosures=false,nativeRecovery=false,durableSpawns=false,handoffAdmission,onMemberClosed,reconcileOperations,nativeOperationOrigin}){
  if(!ctx?.agents||typeof ctx?.subagents?.registerProvider!=='function'||typeof ctx?.subagents?.drainContinuableChildren!=='function'||typeof ctx?.agentTeams?.spawnTeammate!=='function'
   ||typeof bridge?.bindingFor!=='function'||typeof bridge?.guardBudget!=='function'||typeof bridge?.attach!=='function'||typeof selectModel!=='function')throw new Error('native_role_host_incompatible');
  if(typeof automaticClosures!=='boolean'||automaticClosures&&(typeof persistence?.flush!=='function'||typeof persistence?.open!=='function'||typeof ctx.sessionProjections?.stateOf!=='function'))throw new Error('native_role_closure_host_incompatible');
  if(typeof nativeRecovery!=='boolean'||nativeRecovery&&!automaticClosures)throw new Error('native_role_recovery_host_incompatible');
  if(typeof durableSpawns!=='boolean')throw new Error('native_role_host_incompatible');
  if(handoffAdmission!==undefined&&typeof handoffAdmission!=='function')throw new Error('native_role_host_incompatible');
+ if(onMemberClosed!==undefined&&typeof onMemberClosed!=='function')throw new Error('native_role_host_incompatible');
  if(reconcileOperations!==undefined&&typeof reconcileOperations!=='function')throw new Error('native_role_host_incompatible');
  if(nativeOperationOrigin!==undefined){if(reconcileOperations!==undefined||typeof bridge.guard!=='function')throw Error('native_role_host_incompatible');createNativeOperationObserver({origin:nativeOperationOrigin,authorize:async()=>{}});}
- const spawnRequests=new Map();
+ const spawnRequests=new Map(),notifying=new Map(),notified=new Set();
  const prepared=new Map(),pending=new Set(),published=new Map(),closing=new Map(),closed=new Map(),observations=new Set(),closureFailures=new Set(),shutdown=new AbortController();let disposed=false,disposal;
  const admission=new NativeChildAdmission({registry:ctx.agents,bindingFor:agent=>disposed?undefined:bridge.bindingFor(agent),
   authorize:async({parent,child,roleRef,parentBinding,signal})=>{
@@ -60,14 +61,25 @@ export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistenc
   prepared.set(childId,{parent,parentBinding,roleRef,requestId,binding:response.binding});return {};
  }});
  const removeAdmission=admission.install(ctx),removeProvider=ctx.subagents.registerProvider(provider);
+ const notifyClosed=async(parent,accepted,receipt,signal)=>{
+  const key=accepted.binding.runId;
+  if(disposed||!onMemberClosed||notified.has(key))return receipt;
+  if(notifying.has(key)){await notifying.get(key);return receipt;}
+  const operation=Promise.resolve().then(()=>onMemberClosed({parent,child:accepted.agent,roleRef:accepted.roleRef,
+   parentBinding:accepted.parentBinding,binding:Object.freeze({...accepted.binding}),receipt:Object.freeze({...receipt}),signal:signal?AbortSignal.any([signal,shutdown.signal]):shutdown.signal}));
+  notifying.set(key,operation);
+  try{await operation;notified.add(key);closureFailures.delete(key);return receipt;}
+  catch(error){closureFailures.add(key);throw error;}
+  finally{notifying.delete(key);}
+ };
  const closeMember=async(parent,id,{signal}={},expectedAccepted)=>{
    const accepted=admission.accepted.get(id);
    if(expectedAccepted&&accepted!==expectedAccepted){if(closed.has(expectedAccepted.binding.runId))return closed.get(expectedAccepted.binding.runId);throw new Error('native_role_closure_identity_changed');}
    if(!accepted||accepted.parent!==parent||!published.get(parent)?.has(id))throw new Error('native_role_member_unknown');
    signal?.throwIfAborted();
    const key=accepted.binding.runId;
-   if(closed.has(key))return closed.get(key);
-   if(closing.has(key))return closing.get(key);
+   if(closed.has(key))return notifyClosed(parent,accepted,closed.get(key),signal);
+   if(closing.has(key)){const receipt=await closing.get(key);return notifyClosed(parent,accepted,receipt,signal);}
    const operation=(async()=>{
     // Never run this from a child's own disposal hook: native drain waits for
     // that hook. This host entry point owns teardown, then reads durable proof.
@@ -82,7 +94,7 @@ export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistenc
     if(receipt?.closed!==true||receipt.run_id!==accepted.binding.runId)throw new Error('native_role_closure_invalid');
     closed.set(key,Object.freeze({...receipt}));closureFailures.delete(key);return closed.get(key);
    })();closing.set(key,operation);
-   try{return await operation;}finally{closing.delete(key);}
+   try{return await notifyClosed(parent,accepted,await operation,signal);}finally{closing.delete(key);}
  };
  const removeObservation=automaticClosures?ctx.on('session/disposed',session=>{
   const accepted=admission.accepted.get(session?.id);if(!accepted||accepted.agent.session!==session)return;
@@ -94,7 +106,7 @@ export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistenc
  }):()=>{};
  return {provider,admission,
   async closeMember(parent,id,options){if(disposed)throw new Error('native_role_host_disposed');return closeMember(parent,id,options);},
-  async flushClosures(){await Promise.allSettled([...observations]);await Promise.allSettled([...closing.values()]);if(closureFailures.size)throw new Error('native_role_closure_pending');},
+  async flushClosures(){await Promise.allSettled([...observations]);await Promise.allSettled([...closing.values()]);await Promise.allSettled([...notifying.values()]);if(closureFailures.size)throw new Error('native_role_closure_pending');},
   spawn(parent,intent,request){
    let requestHash,requestKey,parentBinding,snapshot;
    if(durableSpawns){
@@ -161,6 +173,7 @@ export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistenc
    return disposal=(async()=>{
     await Promise.allSettled([...pending]);
     await Promise.allSettled([...observations]);
+    await Promise.allSettled([...notifying.values()]);
     const closures=await Promise.allSettled([...closing.values()]);
     if(closures.some(result=>result.status==='rejected'))throw new Error('native_role_closure_failed');
     // Keep admission installed while creation drains. Removing it immediately
@@ -172,7 +185,7 @@ export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistenc
      if(finalClosures.some(result=>result.status==='rejected'))throw new Error('native_role_closure_failed');
     }
     await Promise.allSettled([...observations]);removeObservation();
-    removeProvider();removeAdmission();prepared.clear();published.clear();closed.clear();admission.accepted.clear();
+    removeProvider();removeAdmission();prepared.clear();published.clear();closed.clear();notified.clear();admission.accepted.clear();
    })();
   }
  };

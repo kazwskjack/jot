@@ -65,6 +65,6 @@ export class NativeChildAdmission {
   if(installed?.runId!==binding.runId||installed?.sessionRef!==binding.sessionRef
     ||installed?.executionLease?.owner!==binding.executionLease?.owner||installed?.executionLease?.generation!==binding.executionLease?.generation)throw new Error('native_child_binding_not_installed');
   removeModel();removeTool();this.entering.delete(agent);
-  this.accepted.set(agent.id,Object.freeze({agent,parent,binding:installed,roleRef:entry.roleRef}));return true;
+  this.accepted.set(agent.id,Object.freeze({agent,parent,parentBinding:entry.binding,binding:installed,roleRef:entry.roleRef}));return true;
  }
 }

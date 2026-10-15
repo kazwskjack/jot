@@ -343,6 +343,7 @@ export function apply(ctx, config = {}) {
     || (config.reconcileOperations !== undefined && (typeof config.reconcileOperations !== 'function' || config.nativeRoles !== true))
     || (config.nativeOperationOrigin !== undefined && (typeof config.nativeOperationOrigin !== 'string' || config.nativeRoles !== true || config.reconcileOperations !== undefined))
     || (config.handoffAdmission !== undefined && (typeof config.handoffAdmission !== 'function' || config.nativeRoles !== true))
+    || (config.handoffReturn !== undefined && (typeof config.handoffReturn !== 'function' || config.nativeRoles !== true || typeof config.handoffAdmission !== 'function'))
     || (config.nativeDeferredHandoff !== undefined && typeof config.nativeDeferredHandoff !== 'boolean')
     || (config.nativeDeferredHandoff === true && (config.nativeRoles !== true || typeof config.handoffAdmission !== 'function'))
     || (config.nativeRoleRecovery===true&&config.nativeRoles!==true)
@@ -362,7 +363,7 @@ export function apply(ctx, config = {}) {
   }) : undefined
   const budgetModelSelector=createBudgetModelSelector({route:config.workbenchModel,llm:ctx.llm,agents:ctx.sessionController.agents})
   const nativeRoleHost=config.nativeRoles===true?createNativeRoleHost({ctx,bridge:workbenchBridge,selectModel:budgetModelSelector,
-    sessions:ctx.sessions,persistence:ctx.sessionPersistence,automaticClosures:true,durableSpawns:true,nativeRecovery:config.nativeRoleRecovery===true,reconcileOperations:config.reconcileOperations,nativeOperationOrigin:config.nativeOperationOrigin,handoffAdmission:config.handoffAdmission}):undefined
+    sessions:ctx.sessions,persistence:ctx.sessionPersistence,automaticClosures:true,durableSpawns:true,nativeRecovery:config.nativeRoleRecovery===true,reconcileOperations:config.reconcileOperations,nativeOperationOrigin:config.nativeOperationOrigin,handoffAdmission:config.handoffAdmission,onMemberClosed:config.handoffReturn}):undefined
   let nativeTaskScheduler
   if(nativeRoleHost){
     nativeTaskScheduler=config.nativeDeferredHandoff===true?createNativeTaskScheduler({ctx,bridge:workbenchBridge,host:nativeRoleHost}):undefined

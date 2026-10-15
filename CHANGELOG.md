@@ -2,12 +2,16 @@
 
 ## Unreleased
 
+- Add an optional trusted final-return hook after a member's exact durable closure receipt; official natural settlement retains ownership of child teardown.
+- Revalidate the detached member's persisted log, exact current controller execution and original lease/policy before returning control with a stable management request ID.
+- Verify natural child release and automatic final return through formal HTTP and the installed SDK without probe-driven drain or transfer.
+
 - Restore pending original task intents on trusted root Session reattachment without another model planning turn.
 - Inspect existing reservations with the exact spawn digest; recorded publication is observed without executing again, while unknown publication remains blocked.
 - Stage complete recovery pages before queue changes, preserve paused Goals and keep the original Session available when dispatch recovery is blocked.
 
 - Add optional formal-host deferred handoff dispatch: a busy lead returns the original durable pending intent and an idle event triggers revalidation before native member creation.
-- Preserve cancellation, request identity and shutdown draining; uncertain prior reservations require reconciliation rather than another execution.
+- Propagate host cancellation, preserve request identity and drain active work on shutdown; a scheduler-local cancelled observation does not cancel the durable task intent, whose restoration remains governed by task/Goal authority. Uncertain prior reservations require reconciliation rather than another execution.
 - Verify model-callable deferred handoff, actual member file receipts and explicit return to the original lead with the installed SDK.
 
 - Add authenticated, paginated enumeration of the existing immutable native task-intent journal for host scheduling and recovery.
@@ -40,10 +44,10 @@
 - Prevent task handoff while an observed web operation is running or has unresolved item outcomes.
 - Migrate older operation cursors without assuming that their work completed; ignore stale observations.
 - Require explicit accepted counts and complete unique item manifests before an observed operation can release a handoff barrier.
-- Add an authenticated original-task handoff management transport with atomic receiver binding, rollback and fixed conflict receipts; native execution orchestration remains pending.
+- Add an authenticated original-task handoff management transport with atomic receiver binding, rollback and fixed conflict receipts; at this transport milestone, native execution orchestration was still pending.
 - Add optional trusted handoff admission before native member model selection, with an actual installed-SDK task-step and return-to-lead verification probe.
 
-Native-host orchestration and provider-side effect reconciliation are still required before enabling production handoff.
+Production Handoff remains gated on end-to-end lifecycle acceptance and provider-side effect reconciliation.
 
 ## 0.1.0 code preview
 

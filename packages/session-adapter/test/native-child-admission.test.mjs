@@ -1,4 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
+test('accepted members retain their original parent binding after the parent is rebound',async()=>{const f=fixture(),original=f.bindings.get(f.root);f.gate.reserve(f.root,'bound-child','saved-role');const child=f.agent('bound-child',f.root);await f.gate.created({agent:child});f.bindings.set(f.root,{...original,runId:'new-parent-run'});assert.equal(f.gate.accepted.get(child.id).parentBinding,original);assert.notEqual(f.gate.accepted.get(child.id).parentBinding,f.bindings.get(f.root));});
 import {NativeChildAdmission} from '../native-child-admission.js';
 function fixture(){
  const entries=new Map(),owners=new Map(),bindings=new WeakMap(),events=[];
