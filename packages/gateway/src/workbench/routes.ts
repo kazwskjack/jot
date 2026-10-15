@@ -43,6 +43,15 @@ export function registerWorkbenchRoutes(app: FastifyInstance, service: Workbench
     return service.listMessages(actor(request),param(request,'workspaceId'),undefined,input.occurrence_id as string|undefined);
   });
   app.post('/v1/workspaces/:workspaceId/agent-messages', async (request, reply) => reply.code(201).send(service.sendMessage(actor(request), param(request, 'workspaceId'), body(request, ['sender_agent_id', 'recipient_agent_id', 'text', 'client_message_id', 'auto_reply', 'max_replies', 'task_run_id']))));
+  app.get('/v1/workspaces/:workspaceId/memory-retrievals',async request=>{
+    const input=query(request);
+    if(Object.keys(input).some(key=>!['agent_id','before_id'].includes(key))||typeof input.agent_id!=='string'||!input.agent_id||input.agent_id.length>128||(input.before_id!==undefined&&(typeof input.before_id!=='string'||!input.before_id||input.before_id.length>128)))throw new Error('invalid_memory_retrieval_query');
+    return service.memoryRetrievals.list(actor(request),param(request,'workspaceId'),input.agent_id,input.before_id as string|undefined);
+  });
+  app.get('/v1/workspaces/:workspaceId/memory-retrievals/:retrievalId',async request=>{
+    if(Object.keys(query(request)).length)throw new Error('invalid_memory_retrieval_query');
+    return service.memoryRetrievals.get(actor(request),param(request,'workspaceId'),param(request,'retrievalId'));
+  });
   app.get('/v1/workspaces/:workspaceId/memory-consolidations',async request=>{
     const input=query(request);if(Object.keys(input).some(key=>!['project_id','scope','agent_id'].includes(key)))throw new Error('invalid_memory_consolidation');
     return service.memoryConsolidations.list(actor(request),param(request,'workspaceId'),input);

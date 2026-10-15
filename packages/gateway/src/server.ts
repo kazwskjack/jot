@@ -446,7 +446,7 @@ export async function buildServer(config: {
         replay_retention_hours: 168, idempotency_retention_hours: 24 },
       voice,
       workbench: { enabled: true, agent_roles: true, independent_teams: true, agent_messages: true,
-        shared_workspace: true, memory_scopes: ['project', 'private'], memory_lifecycle: true, memory_restore: true, memory_consolidation: true, memory_retrieval: 'local_keyword',task_readiness:true,model_budget:budgetPolicy!==undefined,
+        shared_workspace: true, memory_scopes: ['project', 'private'], memory_lifecycle: true, memory_restore: true, memory_consolidation: true, memory_retrieval_traces: true, memory_retrieval: 'local_keyword',task_readiness:true,model_budget:budgetPolicy!==undefined,
         task_reply_policy:true,task_reply_execution:false,task_create_delivery:true,task_notifications:true,channel_bindings:!!config.internalChannelToken||!!config.emailBindingSend,email_bindings:!!config.emailBindingSend,wecom_bindings:!!config.internalChannelToken,task_notification_events:['changed','completed','failed','needs_confirmation'],
         ...(budgetPolicy?{task_model_budget_limits:budgetPolicy.budgetSettings().limits.task_total}:{}),
         collaboration_modes: [{ id: 'single', enabled: true }, { id: 'independent_team', enabled: true },

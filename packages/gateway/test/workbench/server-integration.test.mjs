@@ -746,3 +746,36 @@ test('owner consolidation routes validate contracts and recover the same atomic 
  assert.equal((await f.json('GET',base+`?project_id=${a.project_id}&scope=project`)).items.length,1);
  assert.equal((await f.http('GET',base+`?project_id=${a.project_id}&scope=project&owner_id=alice`)).statusCode,422);
 });
+
+test('native memory query traces expose actual ranking through owner-only read routes without logging every guard',async t=>{
+ const f=await fixture(t),a=await f.agent('Trace reader'),b=await f.agent('Other trace reader');
+ f.workbench.saveMemory('alice','main',{scope:'private',agent_id:a.agent_id,content:'Park lake note',provenance:[{kind:'document',reference:'notes.md'}]});f.workbench.saveMemory('alice','main',{scope:'private',agent_id:b.agent_id,content:'Other role hidden note'});
+ const run=await f.chat(a),identity={run_id:run.run_id,session_ref:f.bind('alice',a.conversation_id)},input={...identity,operation:'memory.list',arguments:{q:'park lake'},call_id:'trace-query-once'};
+ const response=await f.internal('tool',input);assert.equal(response.statusCode,200,response.body);assert.equal(typeof response.json().retrieval_id,'string');assert.equal(response.json().items.length,1);assert.doesNotMatch(response.body,/Other role hidden note/);
+ const retried=await f.internal('tool',input);assert.deepEqual(retried.json(),response.json());
+ const base='/v1/workspaces/main/memory-retrievals',list=await f.json('GET',base+'?agent_id='+a.agent_id);assert.equal(list.items.length,2);
+ const trace=await f.json('GET',base+'/'+response.json().retrieval_id);assert.equal(trace.kind,'tool_query');assert.equal(trace.method,'keyword');assert.equal(trace.references[0].keyword_score,2);assert.equal(trace.references[0].content_preview,'Park lake note');assert.doesNotMatch(JSON.stringify(trace),/owner_id|session_ref|Other role hidden note/);
+ const count=f.db.prepare('SELECT count(*) n FROM wb_memory_retrievals').get().n;for(let i=0;i<3;i++){await f.internal('guard',identity);await f.json('GET',base+'?agent_id='+a.agent_id);await f.json('GET',base+'/'+trace.retrieval_id);}assert.equal(f.db.prepare('SELECT count(*) n FROM wb_memory_retrievals').get().n,count);
+ assert.equal((await f.http('GET',base+'/'+trace.retrieval_id,undefined,'bob')).statusCode,404);assert.equal((await f.http('GET',base+'?agent_id='+a.agent_id+'&owner_id=alice')).statusCode,422);
+ assert.equal((await f.http('POST',base,{owner_id:'alice'})).statusCode,404);
+});
+
+test('resumed context traces identify their original run and retain only still-valid frozen versions',async t=>{
+ const f=await fixture(t),a=await f.agent('Continuing reader');
+ const first=f.workbench.saveMemory('alice','main',{scope:'private',agent_id:a.agent_id,content:'Original source'}),second=f.workbench.saveMemory('alice','main',{scope:'private',agent_id:a.agent_id,content:'Retained source'}),run=await f.chat(a);
+ f.workbench.saveMemory('alice','main',{scope:'private',agent_id:a.agent_id,memory_id:first.memory_id,expected_version:1,content:'Later correction'});
+ f.db.prepare("UPDATE ga_runs SET status='failed',checkpoint_id='checkpoint-fixture',reason_code=NULL WHERE id=?").run(run.run_id);
+ const resumed=await f.json('POST',`/v1/runs/${run.run_id}/resume`,{expected_run_version:1,checkpoint_id:'checkpoint-fixture'},202),context=f.workbench.contextForRun(resumed.run_id);assert.deepEqual(context.memories.map(x=>x.memory_id),[second.memory_id]);
+ const log=f.workbench.memoryRetrievals,list=log.list('alice','main',a.agent_id),entry=list.items.find(x=>x.run_id===resumed.run_id);assert.equal(entry.kind,'continuation_snapshot');assert.equal(entry.source_run_id,run.run_id);assert.equal(entry.method,'inherited');assert.equal(entry.result_count,1);assert.equal(log.get('alice','main',entry.retrieval_id).references[0].memory_id,second.memory_id);
+});
+
+test('a cached task memory read cannot replay deleted text or its stale execution proof',async t=>{
+ const f=await fixture(t),a=await f.agent('Cached trace reader'),note=f.workbench.saveMemory('alice','main',{scope:'private',agent_id:a.agent_id,content:'Park cached source'});
+ const task=await f.json('POST','/v1/persistent-tasks',{title:'Read current memory',agent_id:a.agent_id,objective:'Read notes',trigger:{kind:'once',run_at:'2099-01-01T00:00:00Z'}},201),run=await f.json('POST',`/v1/persistent-tasks/${task.task_id}/run-now`,{},202);
+ const input={run_id:run.run_id,session_ref:f.bind('alice',run.conversation_id),operation:'memory.list',arguments:{q:'park'},call_id:'cached-memory-read'};
+ const first=await f.internal('tool',input);assert.equal(first.statusCode,200,first.body);assert.equal(first.json().items.length,1);assert.ok(first.json().execution_receipt);
+ assert.deepEqual((await f.internal('tool',input)).json(),first.json());
+ f.workbench.deleteMemory('alice','main',note.memory_id,1);
+ const stale=await f.internal('tool',input);assert.equal(stale.statusCode,200,stale.body);assert.deepEqual(stale.json().items,[]);assert.equal(stale.json().invalidated_result,true);assert.equal(stale.json().execution_receipt,undefined);assert.equal(stale.json().retrieval_id,first.json().retrieval_id);assert.doesNotMatch(stale.body,/Park cached source/);
+ assert.equal(f.workbench.memoryRetrievals.list('alice','main',a.agent_id).items.length,2);
+});

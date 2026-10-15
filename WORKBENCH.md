@@ -310,3 +310,17 @@ Run the reproducible SDK probe after installing the locked DSH host and setting 
 ```sh
 node --test packages/session-adapter/verification/native-memory-consolidation-runtime.mjs
 ```
+
+### Memory retrieval evidence
+
+**Shared workspace → Memory → View retrieval records** shows the selected role's initial snapshots, continuation snapshots and explicit `memory.list` queries. It records the actual authorized candidate count, ordering method, keyword matches and selection exclusions. Keywords use the existing substring matcher; an adapter's ordering is not a confidence score. Empty queries preserve the existing scope order. This feature adds no model connection or per-guard RPC.
+
+The log stores queries, immutable version references and algorithm statistics instead of another copy of the memory body. Detail reads recheck owner, project, role, active status, expiry and exact version before showing a short preview and source references. Corrected, deleted or expired versions return no body or provenance through this view. Reads and repeated guards do not create new log entries. Lists use 25-record opaque-cursor pages without exposing a cross-user sequence.
+
+A **conversation snapshot** is evidence of what the Gateway selected for that binding; it is not proof that a Provider received or used every item on every model call. The installed SDK probe checks its first scripted model input separately. Explicit query records describe actual tool execution; duplicate observations reuse their trace, and changed results are retained as new observations. Ordinary memory administration remains read-only. Automatic message extraction, semantic/reasoning retrieval and idle-triggered Dream execution are not completed by this trace feature.
+
+```sh
+node --test packages/session-adapter/verification/native-memory-retrieval-runtime.mjs
+```
+
+As with the consolidation probe, set `JOT_DSH_RUNTIME_MODULES` to the installed locked rc2 packages. The local scripted model verifies tool wiring and original budget settlement, not real-provider retrieval quality. Runtime query logs and user data are excluded from the public source release.

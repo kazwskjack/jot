@@ -49,22 +49,35 @@ export function serializeMemory(row: MemoryRow): MemoryValue {
     supersedes: row.supersedes ?? null, verified_at: row.verified_at ?? null, expired: memoryExpired(row), created_at: row.created_at, updated_at: row.updated_at };
 }
 
-export function rankMemory(candidates: MemoryValue[], query: string, adapter?: MemoryRankAdapter): MemoryValue[] {
-  if (!query) return candidates;
-  const terms = query.toLocaleLowerCase().split(/\s+/).filter(Boolean);
-  const keyword = () => candidates.map((entry, position) => ({ entry, position,
-    score: terms.reduce((sum, term) => sum + (String(entry.content).toLocaleLowerCase().includes(term) ? 1 : 0), 0) }))
-    .filter(entry => entry.score > 0).sort((a, b) => b.score - a.score || a.position - b.position).map(entry => entry.entry);
-  if (!adapter) return keyword();
-  try {
-    // Clone the adapter boundary; adapter mutation can never change database-derived output.
-    const result = adapter.rank({ query, candidates: structuredClone(candidates) });
-    const authorized = new Map(candidates.map(entry => [String(entry.memory_id), entry]));
-    if (!Array.isArray(result) || result.some(value => typeof value !== 'string' || !authorized.has(value)) || new Set(result).size !== result.length) return keyword();
-    const ids = result as string[];
-    return [...ids.map(value => authorized.get(value)!), ...candidates.filter(entry => !ids.includes(String(entry.memory_id)))];
-  } catch { return keyword(); }
+export interface MemoryRankReference {
+  memory_id:string;version:number;rank:number;reason:'scope_order'|'keyword_match'|'adapter_rank'|'adapter_tail'|'inherited';
+  keyword_score:number|null;matched_terms:string[];
 }
+export interface MemoryRankResult {
+  items:MemoryValue[];method:'scope_order'|'keyword'|'adapter'|'inherited';fallback_reason:'adapter_failed'|'invalid_adapter_result'|null;
+  candidate_count:number;references:MemoryRankReference[];
+}
+export function rankMemoryDetailed(candidates:MemoryValue[],query:string,adapter?:MemoryRankAdapter):MemoryRankResult {
+  const terms=query.toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  const matches=(entry:MemoryValue)=>terms.filter(term=>String(entry.content).toLocaleLowerCase().includes(term));
+  const explain=(items:MemoryValue[],method:MemoryRankResult['method'],fallback_reason:MemoryRankResult['fallback_reason'],adapterIds:string[]=[]):MemoryRankResult=>({
+    items,method,fallback_reason,candidate_count:candidates.length,
+    references:items.map((entry,position)=>({memory_id:String(entry.memory_id),version:Number(entry.version),rank:position+1,
+      reason:method==='keyword'?'keyword_match':method==='adapter'?(adapterIds.includes(String(entry.memory_id))?'adapter_rank':'adapter_tail'):'scope_order',
+      keyword_score:method==='keyword'?matches(entry).length:null,matched_terms:matches(entry)})),
+  });
+  if(!query)return explain(candidates,'scope_order',null);
+  const keyword=(reason:MemoryRankResult['fallback_reason'])=>explain(candidates.map((entry,position)=>({entry,position,score:matches(entry).length}))
+    .filter(entry=>entry.score>0).sort((a,b)=>b.score-a.score||a.position-b.position).map(entry=>entry.entry),'keyword',reason);
+  if(!adapter)return keyword(null);
+  try{
+    const result=adapter.rank({query,candidates:structuredClone(candidates)}),authorized=new Map(candidates.map(entry=>[String(entry.memory_id),entry]));
+    if(!Array.isArray(result)||result.some(value=>typeof value!=='string'||!authorized.has(value))||new Set(result).size!==result.length)return keyword('invalid_adapter_result');
+    const ids=result as string[];
+    return explain([...ids.map(value=>authorized.get(value)!),...candidates.filter(entry=>!ids.includes(String(entry.memory_id)))],'adapter',null,ids);
+  }catch{return keyword('adapter_failed');}
+}
+export function rankMemory(candidates:MemoryValue[],query:string,adapter?:MemoryRankAdapter):MemoryValue[]{return rankMemoryDetailed(candidates,query,adapter).items;}
 
 /** SQLite is authoritative; index jobs are version claims, never copies that can resurrect data. */
 export class MemoryLifecycle {

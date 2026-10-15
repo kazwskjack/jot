@@ -556,6 +556,10 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       const digest = createHash('sha256').update(canonical({operation, args})).digest('hex');
       if (receipted) {
         const prior = savedCall(runId, String(callId), digest);
+        if(prior!==undefined&&operation==='memory.list'){
+          const cached=object(prior),items=workbench.filterCurrentMemoryResult(owner,workspace,runId,cached.items);
+          if(items.length!==(cached.items as unknown[]).length)return {items,...(typeof cached.retrieval_id==='string'?{retrieval_id:cached.retrieval_id}:{}),invalidated_result:true};
+        }
         if (prior !== undefined && operation!=='tasks.delegate') return prior;
       }
       if(identity.task_binding&&!operation.startsWith('tasks.'))
@@ -566,7 +570,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
         case 'messages.list': result = workbench.listMessages(owner, workspace, runId); break;
         case 'messages.send': result = workbench.sendMessage(owner, workspace,
           {...args, client_message_id: `tool-${createHash('sha256').update(`${runId}\0${String(callId)}`).digest('hex')}`}, runId); break;
-        case 'memory.list': result = workbench.listMemory(owner, workspace, args, runId); break;
+        case 'memory.list': result = validCallId(callId)?workbench.retrieveMemory(owner,workspace,args,runId,String(callId)):workbench.listMemory(owner,workspace,args,runId); break;
         case 'memory.save': result = workbench.saveMemory(owner, workspace, {...args, project_id: project, verified: false}, runId); break;
         case 'memory.stage': result=workbench.memoryConsolidations.stage(owner,workspace,{...args,project_id:project,...(args.scope==='private'?{agent_id:identity.agent_id}:{})},runId);break;
         case 'memory.propose': {

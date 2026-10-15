@@ -1,3 +1,4 @@
+import {MemoryRetrievalLog,type RetrievalData} from './memory-retrievals.ts';
 import {MemoryConsolidationService} from './memory-consolidation.ts';
 import {validateNativeOperationProofs} from './native-operation-proof.ts';
 import { createHash, randomUUID } from 'node:crypto';
@@ -10,7 +11,7 @@ import { ProjectRepository } from '../projects/repository.ts';
 import { EventStore } from '../events/event-store.ts';
 import { RunRepository } from '../runs/repository.ts';
 import { RunCommandService } from '../runs/commands.ts';
-import { MemoryLifecycle, memoryExpired, memoryMetadata, rankMemory, serializeMemory, type MemoryRankAdapter } from './memory-lifecycle.ts';
+import { MemoryLifecycle, memoryExpired, memoryMetadata, rankMemory, rankMemoryDetailed, serializeMemory, type MemoryRankAdapter } from './memory-lifecycle.ts';
 import type { WorkbenchBudgetPolicy } from './model-budget-policy.ts';
 import {installTaskRunLineage,bindTaskContinuation} from '../persistent-tasks/task-runs.ts';
 import {installTaskMailbox,bindTaskMailbox,currentTaskMailbox,taskMemberCapacityAvailable} from './task-mailbox.ts';
@@ -69,6 +70,7 @@ export class WorkbenchService {
   private readonly canonicalRoot: string;
   private readonly memoryLifecycle: MemoryLifecycle;
   readonly memoryConsolidations: MemoryConsolidationService;
+  readonly memoryRetrievals: MemoryRetrievalLog;
   constructor(db: DatabaseSync, options: WorkbenchOptions) {
     this.db = db; this.options = options;
     installTaskRunLineage(db);
@@ -146,6 +148,11 @@ export class WorkbenchService {
         BEGIN SELECT RAISE(ABORT,'file_write_run_immutable'); END;
     `);
     this.memoryLifecycle = new MemoryLifecycle(db);
+    this.memoryRetrievals=new MemoryRetrievalLog(db,(owner,workspaceId,agentId)=>{
+      const workspace=this.workspace(workspaceId),agent=this.active(owner,agentId);
+      if(agent.workspace_id!==workspace)throw new Error('memory_scope_forbidden');
+      this.projects.assertOwned(agent.project_id,owner);return {project_id:agent.project_id};
+    });
     this.memoryConsolidations = new MemoryConsolidationService(db,this.memoryLifecycle,(owner,workspaceId,scope,runId)=>{
       const workspace=this.workspace(workspaceId);this.projects.assertOwned(scope.project_id,owner);
       if(scope.scope==='private'){
@@ -245,10 +252,12 @@ export class WorkbenchService {
         if (existing.agent_id !== agentId || existing.owner_id !== owner || existing.kind !== kind) throw new Error('run_binding_conflict');
         this.assertRunActive(runId); return;
       }
+      const recalled=this.recalledMemory(owner,agent);
       const context: AgentRunContext = { run_id: runId, agent_id: agentId, owner_id: owner, name: agent.name, instructions: agent.instructions,
         workspace_id: agent.workspace_id, project_id: agent.project_id, capability_epoch: agent.capability_epoch,
-        allowed_tools: agent.allowed_tools, memories: this.recalledMemory(owner, agent), kind };
+        allowed_tools: agent.allowed_tools, memories: recalled.items, kind };
       this.db.prepare('INSERT INTO wb_run_bindings VALUES(?,?,?,?,?,?,?)').run(runId, owner, agentId, agent.capability_epoch, kind, JSON.stringify(context), timestamp());
+      this.recordMemorySnapshot(owner,agent,runId,recalled.items,recalled.candidate_count,recalled.excluded);
       this.options.modelBudgetPolicy?.allocate(owner,runId);
     });
   }
@@ -393,6 +402,7 @@ export class WorkbenchService {
       bindTaskContinuation(this.db,owner,originalRunId,newRunId);
       const row=this.db.prepare('SELECT epoch FROM wb_run_bindings WHERE run_id=? AND owner_id=?').get(originalRunId,owner) as Row;
       this.db.prepare('INSERT INTO wb_run_bindings VALUES(?,?,?,?,?,?,?)').run(newRunId,owner,context.agent_id,Number(row.epoch),'task',JSON.stringify({...context,run_id:newRunId}),timestamp());
+      this.recordMemorySnapshot(owner,this.active(owner,context.agent_id),newRunId,context.memories,context.memories.length,undefined,originalRunId);
       this.options.modelBudgetPolicy?.allocate(owner,newRunId);
       this.assertRunActive(newRunId);
       this.db.prepare('UPDATE wb_persistent_tasks SET projection_pending=1 WHERE task_id=(SELECT task_id FROM wb_task_run_occurrences WHERE run_id=?)').run(newRunId);
@@ -415,18 +425,21 @@ export class WorkbenchService {
       const row = this.db.prepare('SELECT * FROM wb_run_bindings WHERE run_id=?').get(originalRunId) as Row;
       this.db.prepare('INSERT INTO wb_run_bindings VALUES(?,?,?,?,?,?,?)').run(newRunId, owner,
         context.agent_id, Number(row.epoch), 'chat', JSON.stringify({...context, run_id: newRunId}), timestamp());
+      this.recordMemorySnapshot(owner,this.active(owner,context.agent_id),newRunId,context.memories,context.memories.length,undefined,originalRunId);
       this.options.modelBudgetPolicy?.inheritChatRun(owner,originalRunId,newRunId);
       this.assertRunActive(newRunId);
     });
   }
-  private recalledMemory(owner: string, agent: Agent): Input[] {
+  private recalledMemory(owner: string, agent: Agent) {
     let remaining = 12_000 - 2; // Includes the serialized array delimiters and every metadata field.
     const result: Input[] = [];
-    const seen = new Set<string>();
-    for (const entry of this.listMemory(owner, agent.workspace_id, { agent_id: agent.agent_id }).items) {
-      if (remaining <= 0 || result.length >= 30) break;
+    const seen = new Set<string>(),search=this.memorySearch(owner,agent.workspace_id,{agent_id:agent.agent_id});
+    const entries=search.items.slice(0,200),excluded={query_miss:0,result_limit:search.items.length-entries.length,context_limit:0,duplicate:0,context_budget:0};
+    for (const entry of entries) {
+      if(result.length>=30){excluded.context_limit++;continue;}
+      if(remaining<=0){excluded.context_budget++;continue;}
       const normalized = String(entry.content).trim().replace(/\s+/g, ' ').toLocaleLowerCase();
-      if (seen.has(normalized)) continue;
+      if (seen.has(normalized)){excluded.duplicate++;continue;}
       seen.add(normalized);
       const content = String(entry.content);
       const sources = entry.provenance as Array<{ kind: string; reference: string }>;
@@ -444,12 +457,18 @@ export class WorkbenchService {
           else high = middle - 1;
         }
         candidate.content = content.slice(0, low);
-        if (!low || JSON.stringify(candidate).length > allowance) continue;
+        if (!low || JSON.stringify(candidate).length > allowance){excluded.context_budget++;continue;}
       }
       const cost = JSON.stringify(candidate).length + (result.length ? 1 : 0);
       result.push(candidate); remaining -= cost;
     }
-    return result;
+    return {items:result,candidate_count:search.candidate_count,excluded};
+  }
+  private recordMemorySnapshot(owner:string,agent:Agent,runId:string,items:Input[],candidateCount:number,excluded:RetrievalData['excluded']={query_miss:0,result_limit:0,context_limit:0,duplicate:0,context_budget:0},sourceRunId:string|null=null){
+    return this.memoryRetrievals.record(owner,agent.workspace_id,agent.agent_id,runId,sourceRunId?'continuation_snapshot':'context_snapshot','', sourceRunId?'continuation_snapshot:'+sourceRunId:'context_snapshot',{
+      method:sourceRunId?'inherited':'scope_order',fallback_reason:null,candidate_count:candidateCount,excluded,context_chars:JSON.stringify(items).length,
+      references:items.map((entry,index)=>({memory_id:String(entry.memory_id),version:Number(entry.version),rank:index+1,scope:entry.scope as 'project'|'private',reason:sourceRunId?'inherited':'scope_order',keyword_score:null,matched_terms:[],content_chars:String(entry.content).length,truncated:entry.truncated===true,provenance_truncated:entry.provenance_truncated===true})),
+    },sourceRunId);
   }
   contextForRun(runId: string): AgentRunContext | null {
     const row = this.db.prepare('SELECT * FROM wb_run_bindings WHERE run_id=?').get(runId) as Row | undefined;
@@ -652,11 +671,30 @@ export class WorkbenchService {
     if (context || !includeExpired) { clauses.push('(expires_at IS NULL OR expires_at>?)'); params.push(timestamp()); }
     return this.db.prepare(`SELECT * FROM wb_memories WHERE ${clauses.join(' AND ')} ORDER BY created_at,memory_id`).all(...params) as Row[];
   }
-  listMemory(owner: string, workspaceId: string, query: Input = {}, runId?: string) {
-    const rows = this.memoryRows(owner, workspaceId, query, runId);
-    // Management may inspect expired records; those never enter a semantic adapter's candidate set.
-    const adapter = rows.some(row => memoryExpired(row)) ? undefined : this.options.memoryRankAdapter;
-    return { items: rankMemory(rows.map(row => this.memoryValue(row)), this.memoryQuery(query), adapter).slice(0, 200) };
+  private memorySearch(owner:string,workspaceId:string,query:Input={},runId?:string){
+    const q=this.memoryQuery(query),rows=this.memoryRows(owner,workspaceId,query,runId);
+    const adapter=rows.some(row=>memoryExpired(row))?undefined:this.options.memoryRankAdapter;
+    return rankMemoryDetailed(rows.map(row=>this.memoryValue(row)),q,adapter);
+  }
+  listMemory(owner:string,workspaceId:string,query:Input={},runId?:string){return {items:this.memorySearch(owner,workspaceId,query,runId).items.slice(0,200)};}
+  filterCurrentMemoryResult(owner:string,workspaceId:string,runId:string,value:unknown):Input[]{
+    const context=this.runIdentity(owner,workspaceId,runId);
+    if(!Array.isArray(value)||value.some(entry=>!entry||typeof entry!=='object'||typeof entry.memory_id!=='string'||!Number.isSafeInteger(entry.version)||typeof entry.content!=='string'))throw new Error('cached_memory_result_invalid');
+    return (value as Input[]).filter(entry=>{
+      const current=this.db.prepare(`SELECT * FROM wb_memories WHERE owner_id=? AND workspace_id=? AND project_id=? AND memory_id=? AND version=? AND status='active' AND (scope='project' OR (scope='private' AND agent_id=?))`)
+        .get(owner,workspaceId,context.project_id,String(entry.memory_id),Number(entry.version),context.agent_id) as Row|undefined;
+      return current&&!memoryExpired(current)&&current.content===entry.content;
+    });
+  }
+  retrieveMemory(owner:string,workspaceId:string,query:Input,runId:string,callId:string){
+    return this.transaction(()=>{
+      const context=this.runIdentity(owner,workspaceId,runId),search=this.memorySearch(owner,workspaceId,query,runId),items=search.items.slice(0,200);
+      const retrieval_id=this.memoryRetrievals.record(owner,workspaceId,context.agent_id,runId,'tool_query',this.memoryQuery(query),callId,{
+        method:search.method,fallback_reason:search.fallback_reason,candidate_count:search.candidate_count,context_chars:null,
+        excluded:{query_miss:search.candidate_count-search.items.length,result_limit:search.items.length-items.length,context_limit:0,duplicate:0,context_budget:0},
+        references:search.references.slice(0,200).map((reference,index)=>({...reference,scope:items[index]!.scope as 'project'|'private',content_chars:String(items[index]!.content).length,truncated:false,provenance_truncated:false})),
+      });return {items,retrieval_id};
+    });
   }
   private memoryQuery(query: Input): string {
     if (query.q !== undefined && (typeof query.q !== 'string' || query.q.length > 2000)) throw new Error('invalid_memory_query');

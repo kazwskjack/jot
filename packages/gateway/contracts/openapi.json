@@ -11005,6 +11005,244 @@
           }
         }
       }
+    },
+    "/v1/workspaces/{workspace_id}/memory-retrievals": {
+      "get": {
+        "operationId": "listMemoryRetrievals",
+        "summary": "listMemoryRetrievals",
+        "tags": [
+          "workbench"
+        ],
+        "description": "Owner-only retrieval references and algorithm statistics. Read-only; unavailable memory versions return no content or provenance. Snapshot selection does not prove Provider use.",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "before_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryRetrievalPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未登录或会话失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权限/CSRF 校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "资源不存在或不允许披露",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "版本/运行状态/幂等冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Worker 不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid retrieval cursor or query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/workspaces/{workspace_id}/memory-retrievals/{retrieval_id}": {
+      "get": {
+        "operationId": "getMemoryRetrieval",
+        "summary": "getMemoryRetrieval",
+        "tags": [
+          "workbench"
+        ],
+        "description": "Owner-only retrieval references and algorithm statistics. Read-only; unavailable memory versions return no content or provenance. Snapshot selection does not prove Provider use.",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "retrieval_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryRetrieval"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未登录或会话失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权限/CSRF 校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "资源不存在或不允许披露",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "版本/运行状态/幂等冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Worker 不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid retrieval cursor or query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -14952,6 +15190,9 @@
             "type": "boolean"
           },
           "memory_consolidation": {
+            "type": "boolean"
+          },
+          "memory_retrieval_traces": {
             "type": "boolean"
           }
         },
@@ -19318,6 +19559,410 @@
         },
         "required": [
           "items"
+        ],
+        "additionalProperties": false
+      },
+      "MemoryRetrievalSummary": {
+        "type": "object",
+        "properties": {
+          "retrieval_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "agent_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "project_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "run_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "source_run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 128
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "context_snapshot",
+              "continuation_snapshot",
+              "tool_query"
+            ]
+          },
+          "query": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "scope_order",
+              "keyword",
+              "adapter",
+              "inherited"
+            ]
+          },
+          "fallback_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "adapter_failed",
+              "invalid_adapter_result",
+              null
+            ]
+          },
+          "candidate_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "context_chars": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 12000
+          },
+          "excluded": {
+            "type": "object",
+            "properties": {
+              "query_miss": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "result_limit": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "context_limit": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "duplicate": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "context_budget": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "query_miss",
+              "result_limit",
+              "context_limit",
+              "duplicate",
+              "context_budget"
+            ],
+            "additionalProperties": false
+          },
+          "result_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 200
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "retrieval_id",
+          "workspace_id",
+          "agent_id",
+          "project_id",
+          "run_id",
+          "source_run_id",
+          "kind",
+          "query",
+          "method",
+          "fallback_reason",
+          "candidate_count",
+          "context_chars",
+          "excluded",
+          "result_count",
+          "created_at"
+        ],
+        "additionalProperties": false
+      },
+      "MemoryRetrievalReference": {
+        "type": "object",
+        "properties": {
+          "memory_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "rank": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "scope_order",
+              "keyword_match",
+              "adapter_rank",
+              "adapter_tail",
+              "inherited"
+            ]
+          },
+          "keyword_score": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "matched_terms": {
+            "type": "array",
+            "maxItems": 2000,
+            "items": {
+              "type": "string",
+              "maxLength": 2000
+            }
+          },
+          "content_chars": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 20000
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "provenance_truncated": {
+            "type": "boolean"
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "content_preview": {
+            "type": "string",
+            "maxLength": 800
+          },
+          "provenance": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "$ref": "#/components/schemas/WorkbenchMemoryProvenance"
+            }
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "project",
+              "private"
+            ]
+          }
+        },
+        "required": [
+          "memory_id",
+          "version",
+          "rank",
+          "reason",
+          "keyword_score",
+          "matched_terms",
+          "content_chars",
+          "truncated",
+          "provenance_truncated",
+          "available",
+          "scope"
+        ],
+        "additionalProperties": false
+      },
+      "MemoryRetrieval": {
+        "type": "object",
+        "properties": {
+          "retrieval_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "agent_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "project_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "run_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "source_run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 128
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "context_snapshot",
+              "continuation_snapshot",
+              "tool_query"
+            ]
+          },
+          "query": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "scope_order",
+              "keyword",
+              "adapter",
+              "inherited"
+            ]
+          },
+          "fallback_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "adapter_failed",
+              "invalid_adapter_result",
+              null
+            ]
+          },
+          "candidate_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "context_chars": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 12000
+          },
+          "excluded": {
+            "type": "object",
+            "properties": {
+              "query_miss": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "result_limit": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "context_limit": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "duplicate": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "context_budget": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "query_miss",
+              "result_limit",
+              "context_limit",
+              "duplicate",
+              "context_budget"
+            ],
+            "additionalProperties": false
+          },
+          "result_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 200
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "references": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "$ref": "#/components/schemas/MemoryRetrievalReference"
+            }
+          }
+        },
+        "required": [
+          "retrieval_id",
+          "workspace_id",
+          "agent_id",
+          "project_id",
+          "run_id",
+          "source_run_id",
+          "kind",
+          "query",
+          "method",
+          "fallback_reason",
+          "candidate_count",
+          "context_chars",
+          "excluded",
+          "result_count",
+          "created_at",
+          "references"
+        ],
+        "additionalProperties": false
+      },
+      "MemoryRetrievalPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 25,
+            "items": {
+              "$ref": "#/components/schemas/MemoryRetrievalSummary"
+            }
+          },
+          "next_before_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "items",
+          "next_before_id"
         ],
         "additionalProperties": false
       }

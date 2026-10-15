@@ -871,5 +871,23 @@
     "MemoryConsolidation",
     "200",
     "Owner-scoped staged memory consolidation. DSH may propose; only the user can apply or roll back. No model is called by these endpoints."
+  ],
+  [
+    "GET",
+    "/v1/workspaces/{workspace_id}/memory-retrievals",
+    "listMemoryRetrievals",
+    null,
+    "MemoryRetrievalPage",
+    "200",
+    "Owner-only retrieval references and algorithm statistics. Read-only; unavailable memory versions return no content or provenance. Snapshot selection does not prove Provider use."
+  ],
+  [
+    "GET",
+    "/v1/workspaces/{workspace_id}/memory-retrievals/{retrieval_id}",
+    "getMemoryRetrieval",
+    null,
+    "MemoryRetrieval",
+    "200",
+    "Owner-only retrieval references and algorithm statistics. Read-only; unavailable memory versions return no content or provenance. Snapshot selection does not prove Provider use."
   ]
 ]
