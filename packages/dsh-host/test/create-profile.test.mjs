@@ -13,6 +13,11 @@ test('creates a real official profile without secrets or automatic activation',(
  assert.equal(manifest.dependencies['@deepseek-ai/dsh'],'0.2.0-rc.2');
  assert.deepEqual(manifest.dsh.profile.bundles,['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app']);
  assert.equal(manifest.dsh.profile.patchReload,'startup');
+ const lock=JSON.parse(await readFile(join(result.directory,'package-lock.json'),'utf8'));
+ assert.equal(lock.name,manifest.name);assert.equal(lock.version,manifest.version);assert.equal(lock.lockfileVersion,3);
+ assert.deepEqual(lock.packages[''].dependencies,manifest.dependencies);
+ assert.equal(lock.packages['node_modules/@deepseek-ai/dsh'].version,'0.2.0-rc.2');
+ for(const [path,entry] of Object.entries(lock.packages)){if(!path)continue;assert.match(entry.resolved,/^https:\/\/registry\.npmjs\.org\//);assert.match(entry.integrity,/^sha512-/);assert.equal(entry.link,undefined);}
  const source=await readFile(join(result.directory,'cordis.patch.yml'),'utf8');
  assert.match(source,/!!js process\.cwd\(\)/);
  const patch=JSON.parse(source.replace('!!js process.cwd()','null'));

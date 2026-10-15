@@ -14,12 +14,17 @@ In PowerShell, replace the example absolute paths with your own paths:
 $env:DSH_HOME = 'D:/private/jot-host'
 node packages/dsh-host/create-profile.mjs $env:DSH_HOME jot
 Set-Location "$env:DSH_HOME/profiles/jot"
-npm install
+npm ci
 ```
 
 The preparation command refuses an existing profile, installs nothing, reads no
-credentials and starts no services. Keep the generated `package-lock.json` for
-your reviewed installation; use `npm ci` on subsequent deployments of that lock.
+credentials and starts no services. It copies the reviewed `runtime-package-lock.json`
+as `package-lock.json`: the complete dependency graph is fixed, rather than
+resolving transitive ranges again on each installation. All 607 dependency entries
+use the npm registry, carry SHA-512 integrity and contain no local file links.
+Keep that lock unchanged for repeatable installs. Native installation scripts,
+optional platform packages and the resulting binaries still depend on the target
+OS and must be checked there; the lock is not a binary-release attestation.
 Writes are exclusive but not a multi-file transaction. If preparation fails,
 inspect the partial dedicated profile before manually removing/recreating it;
 do not delete an existing operator profile blindly. The script does not set or

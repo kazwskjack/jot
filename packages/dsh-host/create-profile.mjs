@@ -1,4 +1,4 @@
-import {mkdir,stat,writeFile} from 'node:fs/promises';
+import {mkdir,readFile,stat,writeFile} from 'node:fs/promises';
 import {isAbsolute,join,resolve} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 
@@ -24,9 +24,11 @@ export async function createHostProfile({home,name='jot',adapter=fileURLToPath(n
  // Preserve the official lazy expression. JSON is valid YAML; this one value
  // must remain a Loader expression, never a stale preparation-time directory.
  const yaml=JSON.stringify(patch,null,2).replace('"mode": "workspace-write"','"mode": "workspace-write",\n      "workspaceRoot": !!js process.cwd()')+'\n';
- const manifest={name:'jot-dsh-host-profile',private:true,type:'module',dependencies:{'@deepseek-ai/dsh':'0.2.0-rc.2'},dsh:{profile:{bundles:['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app'],patchReload:'startup'}}};
+ const manifest={name:'jot-dsh-host-profile',version:'0.1.0',private:true,type:'module',dependencies:{'@deepseek-ai/dsh':'0.2.0-rc.2'},dsh:{profile:{bundles:['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app'],patchReload:'startup'}}};
+ const lock=await readFile(new URL('./runtime-package-lock.json',import.meta.url),'utf8');
  const parent=join(home,'profiles');await mkdir(parent,{recursive:true});const directory=join(parent,name);await mkdir(directory);
  await writeFile(join(directory,'package.json'),JSON.stringify(manifest,null,2)+'\n',{flag:'wx'});
+ await writeFile(join(directory,'package-lock.json'),lock,{flag:'wx'});
  await writeFile(join(directory,'cordis.yml'),'[]\n',{flag:'wx'});
  await writeFile(join(directory,'cordis.patch.yml'),yaml,{flag:'wx'});
  await writeFile(join(directory,'.gitignore'),'.env\nnode_modules/\n',{flag:'wx'});
