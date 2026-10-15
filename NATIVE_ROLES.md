@@ -258,6 +258,72 @@ choice, live providers and production/browser acceptance remain separate work.
 The composed option implements final return to the original lead, not a new
 planner or a successor-role policy.
 
+### Recover input claimed immediately before a process crash
+
+The installed rc2 driver durably removes input from its Inbox before calling
+`agent/pre-step`. A process killed there leaves neither pending input nor a
+committed `user/message`. Official resume repairs the open turn with an
+`interrupted` ending; it does not put that input back. A restored active Goal
+starts disarmed, so restoring its phase is not execution authorization.
+
+`createNativeClaimedInputRecoverySetup` is an optional trusted callback for
+the official `agents.resume({ resumeSessionId, setup })` boundary. It runs
+before Agent/Session publication and before other setup callbacks append
+events. Supply the installed SDK's `Session` class, the actual `agents`, `sessions`, `query: sessionQuery` and
+`projections: sessionProjections` services, the official isolated `validateLog`,
+and two host functions: `authorize` must recheck the exact original owner's
+run/Session/lease and return `{ authorized: true }`; `confirmReplaySafety` must
+verify that the interrupted profile's pre-step hooks were side-effect free or
+idempotent by original message identity and return `{ safe: true }`. Neither
+function is supplied by a model or browser. Authorize the stored Session before
+opening it as well. A service token or missing `user/message` alone is not proof
+that arbitrary pre-step hooks are safe to replay.
+
+The helper currently accepts only the Controller's explicit human `user`
+source. Approval, question-reply, scheduling, internal-agent and other sources
+are refused until their own replay/authorization contracts are implemented.
+The policy callbacks receive frozen candidate IDs, targets and source metadata,
+without message text.
+
+The helper uses the official `sessionQuery.readSession` logical log, checks the
+factory's `firstLiveSeq` and end-seed marker, and rechecks the source before
+mutation. It does not add calls to deprecated synchronous live-Session event
+readers. Candidate messages come from the official Inbox projection immediately
+before each exact non-cancelled claim splice, using a real detached
+`Session.create` instance and `snapshot(..., ['inbox'])`. Constructor end-seed
+markers are checked and remain local; this is neither a structural stand-in
+for a Session nor a registered Agent/writer. The original target, position,
+ID and content are retained through insert-only native Inbox splices. Partial
+prior restoration is deduplicated; conflicting content, later work, explicit
+removal/replacement, started steps, inherited history and changed authority are
+refused. Goal prompts remain owned by the Goal driver. Uncertain provider/tool
+effects cannot be turned into successful or unexecuted work by this helper.
+
+The callback only repairs input. It never sends a new prompt, wakes the driver,
+resumes a Goal or grants model/tool permission. The SDK flushes setup changes
+before publication. `setup.resultFor(agent)` reports fixed counts and
+`execution_authorized: false`, without exposing user text. Compose it before the
+host's existing setup, preserving the original preset/model/permission setup.
+The ordinary HTTP Controller and default `apply` profile do not automatically
+install it; audited preset/host wiring remains necessary. Do not replace the
+original Controller just to install this callback.
+
+```sh
+node --test packages/session-adapter/verification/native-claimed-crash-runtime.mjs
+```
+
+The real subprocess probe kills only its own reported Node worker after both
+durability flush and exact storage readback. Ordinary input and human input
+alongside a Goal are restored and durable before the new Agent is announced.
+No model runs until a subsequent explicit user continuation; each recovered
+human ID then commits once, and the old Goal prompt is not replayed. A
+second kill after durable restoration verifies the next resume inserts no
+duplicate input. The two recovery scenarios use six separate processes in total.
+A control confirms unmodified SDK resume leaves claimed input absent. Models and
+authorization in these probes are local fixtures. This does not establish
+Gateway lease succession, production preset policy, cross-process writer
+exclusion, torn-write recovery, or a complete crash-and-final-return lifecycle.
+
 ### Optional final return after durable member closure
 
 The natural-disposal observer waits only for the pending publication matching the member's exact original parent Agent and child Session. Host-owned async scope records the SDK's child identity before preparation awaits backend work; recovery binds the validated original reservation identity before reading and publishing its durable evidence. An already-saved publication remains a pure replay. This preserves that member's roster-publication ordering without coupling closure to another slow spawn, including another member under the same parent. Host shutdown still waits for all pending spawns before removing the admission hooks. This wait is not a global quiescence guarantee or a lock against later publications.

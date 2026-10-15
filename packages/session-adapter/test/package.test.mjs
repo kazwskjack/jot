@@ -23,6 +23,7 @@ test('packed adapter loads independently with every runtime module included',asy
  const closure=await import(pathToFileURL(join(root,'package/native-child-closure.js')).href);assert.equal(typeof closure.verifyOfflineNativeClosure,'function');
  const replay=await import(pathToFileURL(join(root,'package/native-invariant-replay.js')).href);assert.equal(typeof replay.createNativeInvariantReplay,'function');
  const inbox=await import(pathToFileURL(join(root,'package/native-handoff-inbox.js')).href);assert.equal(typeof inbox.createNativeHandoffInboxGate,'function');
+ const claimed=await import(pathToFileURL(join(root,'package/native-claimed-input.js')).href);assert.equal(typeof claimed.createNativeClaimedInputRecoverySetup,'function');assert.equal(entry.createNativeClaimedInputRecoverySetup,claimed.createNativeClaimedInputRecoverySetup);assert.ok(files.includes('native-claimed-input.js'));
  const lifecycle=await import(pathToFileURL(join(root,'package/native-handoff-lifecycle.js')).href);assert.equal(typeof lifecycle.createNativeHandoffLifecycle,'function');assert.ok(files.includes('native-handoff-lifecycle.js'));
  const scheduler=await import(pathToFileURL(join(root,'package/native-task-scheduler.js')).href);assert.equal(typeof scheduler.createNativeTaskScheduler,'function');assert.ok(files.includes('native-task-scheduler.js'));
  assert.equal(typeof entry.createAdapterHandler,'function');assert.equal(typeof entry.apply,'function');assert.equal(typeof entry.createNativeHandoffLifecycle,'function');

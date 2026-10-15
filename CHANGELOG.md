@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+- Add an optional pre-publication resume setup that restores eligible original claimed input through the official SessionQuery/Inbox APIs, retaining IDs and order without waking a Goal.
+- Refuse cancelled, conflicting or already-started replay; require trusted owner/lease and pre-step safety policies rather than inferring permission from a missing message.
+- Verify the missing-input crash window and recovery with actual killed Node workers, durable-before-publication readback and explicit later user continuation.
+
 - Compose native handoff admission, final return and recovery around one shared Inbox gate through an optional trusted host configuration.
 - Hold the original claimed pre-step until control return is confirmed; preserve user-message identities through cancellation without a synthetic wake or automatic Goal resume.
 - Reconcile a lost return acknowledgement through its immutable receipt; terminate failed holds in a queryable blocked state and audit cancellation history from the original log cut.

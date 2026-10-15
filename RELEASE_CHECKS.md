@@ -1,5 +1,40 @@
 # Code preview verification
 
+## Pre-publication recovery of claimed human input
+
+This follow-up passed 286 public adapter tests, 319 internal adapter tests,
+23 installed-SDK scenarios, 31 portable tests, the local Windows web build
+and six public-review tests. Source review covered 543 files without findings.
+The final crash probe was additionally rerun after strengthening it with a
+second hard kill following durable restoration; both scenarios passed.
+Gateway source and production configuration were unchanged.
+
+The new baseline kills a reported test worker after official claim deletion,
+flush and exact durable readback. Ordinary and Goal input remain absent under
+unmodified resume, with zero model calls and the restored Goal disarmed.
+The opt-in setup recovers human input before publication using the official
+SessionQuery log and Inbox projection on real detached SDK Sessions. A second
+process exit after restoration leaves exactly one pending copy on the next
+resume. An explicit subsequent user continuation commits the original human
+ID once; the helper creates no wake message and does not replay a Goal prompt.
+All models and authorization in this probe are fixtures, not real Gateway
+owner/lease acceptance.
+
+Regression checks reject approval/question/schedule/internal sources, cancelled
+input, later work, started steps, invalid publication identity, conflicting
+pending IDs and changed logs. They also cover an event prefix between the two
+claim deletions, partially restored positions, immutable validator input and
+same-length source rewrites. Review led to removing new deprecated live-log
+reads and structural Session stand-ins. A failed intermediate query test
+revealed that SessionQuery includes the logical end-seed marker; final checks
+use that documented factory boundary and pass the real SDK scenarios.
+
+The setup is exported and packaged, but is not installed in the default HTTP
+Controller or production preset. Audited host composition, real authorization,
+worker-lease succession, unknown provider effects, cross-process writer
+exclusion and torn-write recovery remain outstanding. These tests establish
+input repair in the specified pre-step window, not complete crash recovery.
+
 ## Claimed Inbox ordering and final-return composition
 
 This follow-up passed 275 public adapter tests, 308 internal candidate tests,

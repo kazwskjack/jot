@@ -115,3 +115,10 @@ For the tested final-return Inbox ordering, use the optional trusted
 one shared gate for admission, return and recovery with the actual native
 services. Do not mix it with manual handoff callbacks. This is a server-side
 opt-in and does not activate a production profile or select successor roles.
+
+The package also exports `createNativeClaimedInputRecoverySetup` for an audited
+host's official pre-publication resume setup. It restores eligible original
+Inbox input after a crash, using SessionQuery and the native projection;
+mandatory host authorization and pre-step replay-safety checks remain external.
+It does not wake execution or install itself in the default HTTP Controller.
+See the recovery boundary and subprocess evidence in [Native roles](../../NATIVE_ROLES.md).

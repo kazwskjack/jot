@@ -24,6 +24,7 @@
     "native-handoff-admission.js",
     "native-handoff-return.js",
     "native-handoff-inbox.js",
+    "native-claimed-input.js",
     "native-handoff-lifecycle.js",
     "native-operation-observer.js",
     "native-role-provider.js",

@@ -435,3 +435,4 @@ export function apply(ctx, config = {}) {
 }
 
 export { createNativeHandoffLifecycle }
+export {createNativeClaimedInputRecoverySetup} from './native-claimed-input.js'
