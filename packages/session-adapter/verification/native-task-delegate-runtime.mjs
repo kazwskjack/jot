@@ -12,8 +12,9 @@ import {TaskExecutionEvidence} from '../../gateway/src/persistent-tasks/executio
 import {createServer as portProbe} from 'node:http';
 import {createBudgetModelSelector} from '../budget-model-selection.js';
 import {SessionCommandDispatcher} from '../../gateway/src/harness/command-dispatcher.ts';
+import {TaskCompletionPump} from '../../gateway/src/harness/task-completion-pump.ts';
 
-async function nativeDelegation(t,{failBeforeBind=false,lostAck,cancelBeforeBind=false}={}){
+async function nativeDelegation(t,{failBeforeBind=false,lostAck,cancelBeforeBind=false,fileDelivery=false}={}){
 
  const runtime=resolve(process.env.JOT_DSH_RUNTIME_MODULES);
  const names=['cordis','dsh-session','dsh-session-projection','dsh-session-persistence-jsonl','dsh-session-query','dsh-agent','dsh-llm','dsh-tools','dsh-system-prompt','dsh-agent-loop','dsh-goal','dsh-goal-round-driver','dsh-subagent','dsh-experimental-agent-team','dsh-typert-registry','dsh-fs','dsh-attachment','dsh-file-reference','dsh-agent-default-model'];
@@ -38,7 +39,13 @@ async function nativeDelegation(t,{failBeforeBind=false,lostAck,cancelBeforeBind
  const controllerModule=await import(pathToFileURL(join(runtime,'dsh-api-session-controller/lib/index.js')).href);await ctx.plugin(controllerModule.default,{nativeOpen:false});assert.ok(ctx.sessionController,'actual SessionController is mounted');
  const sessionRef=new SessionBindingRepository(service.db).getOrCreate(owner,occurrence.conversation_id).session_id;
  const requests=[],runtimeErrors=[];ctx.on('agent/error',({agent,error})=>{runtimeErrors.push({session_id:agent.id,code:error?.code??null,message:String(error?.message??error)});});
- const calls={lead:0,child:0};class Scripted extends modules['dsh-llm'].LlmAdapter{async *stream(options){const phase=options.sessionId===sessionRef?'lead':'child',n=++calls[phase];assert.ok(n<=(phase==='lead'?5:2));assert.equal(options.provider,route.provider);assert.equal(options.model,route.model);const runId=phase==='lead'?occurrence.run_id:service.db.prepare('SELECT run_id FROM wb_native_execution_runs WHERE child_session_ref=?').get(options.sessionId).run_id;assert.equal(service.workbench.contextForRun(runId).agent_id,phase==='lead'?lead.agent_id:member.agent_id);
+ let deliveryProof,deliveryVersion,deliveryPhase=0;
+ const calls={lead:0,child:0};class Scripted extends modules['dsh-llm'].LlmAdapter{async *stream(options){const phase=options.sessionId===sessionRef?'lead':'child',n=++calls[phase];assert.ok(n<=(phase==='lead'?(fileDelivery?8:5):2));assert.equal(options.provider,route.provider);assert.equal(options.model,route.model);const runId=phase==='lead'?occurrence.run_id:service.db.prepare('SELECT run_id FROM wb_native_execution_runs WHERE child_session_ref=?').get(options.sessionId).run_id;assert.equal(service.workbench.contextForRun(runId).agent_id,phase==='lead'?lead.agent_id:member.agent_id);
+ if(phase==='lead'&&deliveryProof){
+  const d=++deliveryPhase,operation=d===1?'tasks.upsert':'tasks.propose',parameters=d===1?{subtask_id:step.subtask_id,expected_version:deliveryVersion,status:'completed',evidence:[deliveryProof]}:{intent:'complete',summary:'The member source report is ready for owner review.',files:[{path:'http-notes.md'}]};
+  if(d<=2){yield {type:'block-start',index:0,blockType:'tool-call'};yield {type:'block-end',index:0,block:{type:'tool-call',id:'delivery-'+d,name:'jot_workspace',arguments:JSON.stringify({operation,arguments_json:JSON.stringify(parameters)})}};}else yield {type:'text-delta',index:0,text:'The member report is ready.'};
+  yield {type:'usage',usage:{inputTokens:5,outputTokens:5,totalTokens:10}};yield {type:'finish',reason:{kind:d<=2?'tool-calls':'stop'}};return;
+ }
  const tool=n===1;if(tool){yield {type:'block-start',index:0,blockType:'tool-call'};yield {type:'block-end',index:0,block:{type:'tool-call',id:'http-write',name:'jot_workspace',arguments:JSON.stringify(phase==='lead'?{operation:'tasks.delegate',arguments_json:JSON.stringify({subtask_id:step.subtask_id,expected_subtask_version:step.version,recipient_agent_id:member.agent_id})}:{operation:'files.write',arguments_json:JSON.stringify({path:'http-notes.md',content:'Material produced through the actual HTTP adapter.',expected_version:0})})}};}else yield {type:'text-delta',index:0,text:'Saved material; lead verification pending.'};yield {type:'usage',usage:{inputTokens:5,outputTokens:5,totalTokens:10}};yield {type:'finish',reason:{kind:tool?'tool-calls':'stop'}};}}
  ctx.llm.registerAdapter([route.provider],new Scripted());leadHandle=await ctx.agents.create({sessionId:sessionRef,meta:{cwd:root},agentOptions:{provider:route.provider,model:route.model}});
  let closed;const closureReady=new Promise(resolve=>closed=resolve);service.app.addHook('onResponse',async(request,response)=>{requests.push({path:request.url,status:response.statusCode});if(request.url==='/internal/v1/workbench/native-child-close'&&response.statusCode===200)closed();});
@@ -92,9 +99,29 @@ async function nativeDelegation(t,{failBeforeBind=false,lostAck,cancelBeforeBind
  assert.equal(service.persistentTasks.subtasks(owner,task.task_id).items[0].status,'running','member cannot mark parent step complete');
  const events=Array.from({length:child.session.seq},(_,i)=>child.session.eventAt(i)),selection=events.find(event=>event.type==='model/selection'),header=events.find(event=>event.type==='request/header');assert.ok(selection&&header&&selection.seq<header.seq);assert.equal(selection.data.provider,route.provider);assert.equal(header.data.header.config.provider,route.provider);
  assert.equal(coordinator.claimNext('legacy-worker',30000),null);t.diagnostic(JSON.stringify({formalApply:true,actualHttp:true,actualSessionController:true,actualNativeTeam:true,modelCallableDelegation:true,legacyRuns:0,memberReceiptVerified:true,modelCalls:calls,provider:'local scripted',inertLeaves:['upload','workspace archive'],production:false}));
+ if(fileDelivery){
+  deliveryProof={kind:'tool_receipt',reference:proof.receipt_id,hash:proof.result_hash};deliveryVersion=service.persistentTasks.subtasks(owner,task.task_id).items[0].version;
+  const reviewPrompt=await post('/v1/sessions/'+sessionRef+'/prompts',{request_id:'native-file-review',text:'Verify the delegated source step, attach its real receipt, and propose the saved report for review.'});assert.equal(reviewPrompt.status,202,JSON.stringify(reviewPrompt));await leadHandle.agent.whenIdle();
+  const observed=await post('/v1/sessions/'+sessionRef+'/goal-status',{});assert.equal(observed.status,200,JSON.stringify(observed));assert.equal(observed.value.state.goal.phase,'paused',JSON.stringify({observed,runtimeErrors,deliveryPhase}));
+  const lastTurnEnd=Array.from({length:leadHandle.agent.session.seq},(_,i)=>leadHandle.agent.session.eventAt(i)).filter(event=>event.type==='turn/end').at(-1);assert.ok(lastTurnEnd);
+  const checkpoint=await post('/v1/sessions/'+sessionRef+'/checkpoint',{after_seq:lastTurnEnd.seq});assert.equal(checkpoint.status,200,JSON.stringify(checkpoint));const cp=checkpoint.value.checkpoint;coordinator.recordCheckpoint(lease,sessionRef,cp);
+  coordinator.waitForTask(lease,{goal_id:cp.goal_id,goal_revision:cp.goal_revision,phase:'paused',turn_end_seq:cp.turn_end_seq},'SESSION_GOAL_WAITING_APPROVAL',{text:'The member report is ready.'});
+  const cards=await service.app.inject({url:'/v1/conversations/'+occurrence.conversation_id+'/interactions',headers:{'x-user-id':owner}});assert.equal(cards.statusCode,200,cards.body);const card=cards.json().items[0];assert.ok(card);
+  assert.equal(service.db.prepare('SELECT count(*) n FROM ga_artifacts').get().n,0);
+  const accepted=await service.app.inject({method:'POST',url:'/v1/interactions/'+card.interaction_id+'/response',headers:{'x-user-id':owner,'idempotency-key':'native-file-acceptance'},payload:{expected_version:card.version,answers:card.questions.map(q=>({question_id:q.question_id,selected_option_ids:['accept'],custom_text:''}))}});assert.equal(accepted.statusCode,202,accepted.body);
+  const nativeRequest=async(session,action,body)=>{const response=await post('/v1/sessions/'+session+'/'+action,body);assert.equal(response.status,200,JSON.stringify({action,response}));return response.value;};
+  const pump=new TaskCompletionPump(service.db,coordinator,{goalStatus:session=>nativeRequest(session,'goal-status',{}),goalRestore:(session,run,intent)=>nativeRequest(session,'goal-restore',{run_id:run,...(intent===undefined?{}:{intent_id:intent})}),goalComplete:(session,intent)=>nativeRequest(session,'goal-complete',{intent_id:intent})},{workerId:'native-file-completion-worker'});
+  const result=await pump.processNext();assert.equal(result?.status,'succeeded',JSON.stringify({result,requests,runtimeErrors}));assert.equal(await pump.processNext(),null);
+  const outputs=service.artifacts.listForRun(occurrence.run_id,owner).items;assert.equal(outputs.length,1);assert.equal(service.artifacts.listForRun(childRun,owner).items.length,0);
+  const downloaded=await service.app.inject({url:'/v1/artifacts/'+outputs[0].artifact_id+'/download?version=1',headers:{'x-user-id':owner}});assert.equal(downloaded.statusCode,200);assert.equal(downloaded.body,'Material produced through the actual HTTP adapter.');
+  const snapshot=await service.app.inject({url:'/v1/conversations/'+occurrence.conversation_id+'/snapshot',headers:{'x-user-id':owner}});assert.equal(snapshot.statusCode,200,snapshot.body);assert.ok(snapshot.json().messages.some(message=>message.role==='assistant'&&message.attachments?.includes(outputs[0].artifact_id)));
+  assert.equal((await service.app.inject({url:'/v1/artifacts/'+outputs[0].artifact_id+'/download?version=1',headers:{'x-user-id':'foreign-owner'}})).statusCode,404);
+  t.diagnostic(JSON.stringify({actualNativeChildFile:true,actualNativeGoalCompletion:true,actualPersistedCheckpoint:true,parentReviewedAttachment:true,scriptedModel:true,syntheticOwner:true,production:false}));
+ }
 }
 test('formal apply executes a model-callable native delegation and member receipt without legacy dispatch',{timeout:60000,skip:!process.env.JOT_DSH_RUNTIME_MODULES},t=>nativeDelegation(t));
 test('actual native manager never materializes a child after a recorded provider prepare failure',{timeout:60000,skip:!process.env.JOT_DSH_RUNTIME_MODULES},t=>nativeDelegation(t,{failBeforeBind:true}));
 test('lost reservation acknowledgement terminates the same unbound identity before native creation',{timeout:60000,skip:!process.env.JOT_DSH_RUNTIME_MODULES},t=>nativeDelegation(t,{lostAck:'reservation'}));
 test('lost bind acknowledgement remains pending and cannot be mistaken for an unbound abort',{timeout:60000,skip:!process.env.JOT_DSH_RUNTIME_MODULES},t=>nativeDelegation(t,{lostAck:'bind'}));
 test('actual owner cancellation drains pre-create cleanup before finalizing cancellation',{timeout:60000,skip:!process.env.JOT_DSH_RUNTIME_MODULES},t=>nativeDelegation(t,{cancelBeforeBind:true}));
+test('an actual native member file reaches the parent reviewed attachment',{timeout:60000,skip:!process.env.JOT_DSH_RUNTIME_MODULES},t=>nativeDelegation(t,{fileDelivery:true}));

@@ -392,7 +392,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       if(!current)throw new Error('task_execution_revoked');
       const steps=occurrenceSubtaskRows(db,task.task_id,task.occurrence_id);
       const completed=steps.filter(step=>step.status==='completed');
-      const verified=completed.filter(step=>executionEvidence.completionVerified(identity.owner_id,task.task_id,JSON.parse(step.evidence_json),task.occurrence_id));
+      const verified=completed.filter(step=>executionEvidence.completionVerified(identity.owner_id,task.task_id,JSON.parse(step.evidence_json),task.occurrence_id,step.subtask_id));
       const unresolved=identity.model_budget?db.prepare(`SELECT
         SUM(CASE WHEN a.state='unknown' THEN 1 ELSE 0 END) AS pending_unknown,
         SUM(CASE WHEN a.state='in_flight' THEN 1 ELSE 0 END) AS pending_in_flight
@@ -471,7 +471,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       if(input.intent==='continue')modelBudgets.previewCall(identity.owner_id,identity.run_id,input.route as {provider:string;model:string;max_tokens?:number});
       const steps=occurrenceSubtaskRows(db,task.task_id,task.occurrence_id);
       if(input.intent==='complete'&&(!steps.length||steps.some(step=>step.status!=='completed'
-        ||!executionEvidence.completionVerified(identity.owner_id,task.task_id,JSON.parse(step.evidence_json),task.occurrence_id)))){
+        ||!executionEvidence.completionVerified(identity.owner_id,task.task_id,JSON.parse(step.evidence_json),task.occurrence_id,step.subtask_id)))){
         const result={context:identity,proposal:{accepted:false,reason:'execution_evidence_required'}};
         saveCall(identity.run_id,String(input.call_id),digest,result);return result;
       }

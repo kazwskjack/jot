@@ -108,8 +108,24 @@ export class TaskExecutionEvidence {
       && (ref.hash === undefined || ref.hash === row.result_hash);
   }
 
-  completionVerified(owner:string,taskId:string,refs:ExecutionEvidence[],occurrenceId?:string):boolean {
-    const verified=(ref:ExecutionEvidence)=>this.verified(owner,taskId,ref,occurrenceId);
+  completionVerified(owner:string,taskId:string,refs:ExecutionEvidence[],occurrenceId?:string,subtaskId?:string):boolean {
+    const verified=(ref:ExecutionEvidence)=>this.verified(owner,taskId,ref,occurrenceId)
+      &&(subtaskId===undefined||this.assignedToStep(owner,taskId,ref,subtaskId));
     return refs.some(verified) && !refs.some(ref=>ref.kind==='tool_receipt'&&!verified(ref));
+  }
+
+  /** Historical assignment proof, not current running authority. Completing a
+   * step legitimately advances its version and closes the member execution. */
+  private assignedToStep(owner:string,taskId:string,ref:ExecutionEvidence,subtaskId:string):boolean {
+    if(!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='view' AND name='wb_native_execution_runs'").get())return true;
+    const row=this.db.prepare(`SELECT n.snapshot_json,n.occurrence_id FROM wb_task_execution_receipts e
+      JOIN wb_native_execution_runs n ON n.run_id=e.run_id WHERE e.receipt_id=? AND n.owner_id=?`).get(ref.reference,owner) as {snapshot_json:string;occurrence_id:string}|undefined;
+    if(!row)return true;
+    const assignment=JSON.parse(row.snapshot_json).task_assignment;
+    if(!assignment||assignment.task_id!==taskId||assignment.occurrence_id!==row.occurrence_id||assignment.subtask_id!==subtaskId||!Number.isSafeInteger(assignment.subtask_version))return false;
+    const history=this.db.prepare('SELECT snapshot_json FROM wb_task_subtask_states WHERE occurrence_id=? AND subtask_id=? AND version=?').get(row.occurrence_id,subtaskId,assignment.subtask_version) as {snapshot_json:string}|undefined;
+    if(!history)return false;const step=JSON.parse(history.snapshot_json);
+    return step.task_id===taskId&&step.subtask_id===subtaskId&&step.version===assignment.subtask_version&&step.status==='running'
+      &&step.title===assignment.title&&step.acceptance===assignment.acceptance&&JSON.stringify(JSON.parse(step.dependencies_json))===JSON.stringify(assignment.dependencies);
   }
 }

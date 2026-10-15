@@ -180,7 +180,7 @@ export class PersistentTaskAssessmentService {
     return { latest, history, fresh, stale_reasons: reasons, observation_revision: revision,
       display: { label: '执行准备度，供参考', readiness_score: fresh ? latest!.readiness_score : null,
         business_status: String(subject.status), evidence_count: refs.length,
-        completion_confirmed: subject.status === 'completed' && occurrenceId!==null && this.executionEvidence.completionVerified(owner,taskId,refs,occurrenceId) } };
+        completion_confirmed: subject.status === 'completed' && occurrenceId!==null && this.executionEvidence.completionVerified(owner,taskId,refs,occurrenceId,subtaskId) } };
   }
   nextActions(owner: string, taskId: string, currentObservations?: Record<string, AssessmentObservations>, executionRunId?:string): { items: AssessmentCandidate[]; blocked: { subtask_id: string; title: string; reasons: string[] }[] } {
     const task = this.task(owner, taskId);

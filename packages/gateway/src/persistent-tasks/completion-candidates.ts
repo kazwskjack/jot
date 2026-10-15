@@ -6,6 +6,7 @@ import {TaskExecutionEvidence} from './execution-evidence.ts';
 import {assertDependencyReasons,taskDependencyReasons} from './execution-eligibility.ts';
 import {verifyTaskOutputContent} from './output-content.ts';
 import {freezeGeneratedOutputs,type GeneratedOutput} from './generated-output-content.ts';
+import {taskFileSource,type TaskFileScope,type TaskFileSource} from './task-file-source.ts';
 
 export type TaskCompletionCandidate={text:string;blocks?:Array<{kind:'text'|'reasoning';text:string}>;
  artifact_refs?:string[];presented_files?:Array<{path:string;description?:string}>;workspace_files?:Array<{path:string;description?:string}>};
@@ -14,7 +15,7 @@ type CompletionScope={owner_id:string;task_id:string;objective:string;task_versi
  goal_id:string;goal_revision:number;turn_end_seq:number;seq_exclusive:number};
 type FileOutput={path:string;verified:boolean;content_verified?:true;version?:number;sha256?:string;size?:number;receipt_id?:string};
 type PresentedFile={path:string;description?:string};
-type FileScope={task_id:string;occurrence_id:string;owner_id:string;frozen_context:string;steps:Array<{evidence:Array<{kind:string;reference:string}>}>};
+type FileScope=TaskFileScope;
 
 export function validateProposedFiles(value:unknown):PresentedFile[]{
  if(!Array.isArray(value)||!value.length||value.length>8||new Set(value.map(file=>file?.path)).size!==value.length
@@ -37,22 +38,16 @@ function fileOutputs(db:DatabaseSync,snapshot:FileScope,files:Array<{path:string
  if(files.length>100)throw new Error('task_completion_candidate_invalid');
  const context=JSON.parse(snapshot.frozen_context) as {workspace_id:string;project_id:string};
  const references=new Set(snapshot.steps.flatMap(step=>step.evidence as Array<{kind:string;reference:string}>).filter(ref=>ref.kind==='tool_receipt').map(ref=>ref.reference));
+ const sources=[...references].map(reference=>taskFileSource(db,snapshot,reference,runId)).filter((value):value is TaskFileSource=>!!value)
+  .sort((a,b)=>b.version-a.version||a.receipt_id.localeCompare(b.receipt_id));
  return files.map((file,index)=>{
   if(!file||typeof file.path!=='string'||!file.path.length||file.path.length>1000)throw new Error('task_completion_candidate_invalid');
   const prior=pinned?.[index];
   if(pinned&&(!prior||prior.path!==file.path))throw new Error('task_completion_state_conflict');
   if(prior?.verified===false)return prior;
-  const rows=db.prepare(`SELECT e.receipt_id,e.version,e.sha256,e.size FROM wb_task_file_execution_receipts e
-    JOIN wb_task_execution_receipts r ON r.receipt_id=e.receipt_id AND r.run_id=e.run_id AND r.operation='files.write'
-    JOIN wb_task_run_occurrences o ON o.run_id=e.run_id
-    JOIN wb_file_write_runs w ON w.run_id=e.run_id AND w.path=e.path AND w.version=e.version
-      AND w.owner_id=e.owner_id AND w.workspace_id=e.workspace_id AND w.project_id=e.project_id AND w.sha256=e.sha256 AND w.size=e.size
-    JOIN wb_file_versions v ON v.owner_id=e.owner_id AND v.workspace_id=e.workspace_id AND v.project_id=e.project_id
-      AND v.path=e.path AND v.version=e.version AND v.sha256=e.sha256 AND v.size=e.size
-    WHERE o.task_id=? AND o.occurrence_id=? AND e.owner_id=? AND e.workspace_id=? AND e.project_id=? AND e.path=?
-    ORDER BY e.version DESC,e.receipt_id`).all(snapshot.task_id,snapshot.occurrence_id,snapshot.owner_id,context.workspace_id,context.project_id,file.path) as Array<{receipt_id:string;version:number;sha256:string;size:number}>;
-  const row=rows.find(row=>references.has(row.receipt_id)&&(!prior||row.receipt_id===prior.receipt_id));
-  if(!row){if(prior?.verified)throw new Error('task_completion_state_conflict');return {path:file.path,verified:false};}
+  const source=sources.find(row=>row.path===file.path&&(!prior||row.receipt_id===prior.receipt_id));
+  if(!source){if(prior?.verified)throw new Error('task_completion_state_conflict');return {path:file.path,verified:false};}
+  const row={receipt_id:source.receipt_id,version:source.version,sha256:source.sha256,size:source.size};
   verifyTaskOutputContent(db,{owner:snapshot.owner_id,workspace:context.workspace_id,project:context.project_id,path:file.path,version:row.version,runId},row);
   const output={path:file.path,verified:true,content_verified:true as const,...row};
   if(prior&&canonicalJson(output)!==canonicalJson(prior))throw new Error('task_completion_state_conflict');
@@ -103,7 +98,7 @@ function completionSnapshot(db:DatabaseSync,runId:string) {
  if(db.prepare(`SELECT 1 FROM wb_mailbox_task_roots t JOIN wb_agent_messages m ON m.thread_id=t.thread_id
   WHERE t.occurrence_id=? AND (m.status IN ('processing','outcome_unknown') OR (m.status='pending' AND m.auto_reply=1)) LIMIT 1`).get(scope.occurrence_id!))throw new Error('task_auxiliary_pending');
  const proof=new TaskExecutionEvidence(db),steps=occurrenceSubtaskRows(db,String(scope.task_id),String(scope.occurrence_id));
- if(!steps.length||steps.some(step=>step.status!=='completed'||!proof.completionVerified(String(scope.owner_id),String(scope.task_id),JSON.parse(step.evidence_json),String(scope.occurrence_id))))throw new Error('task_completion_evidence_required');
+ if(!steps.length||steps.some(step=>step.status!=='completed'||!proof.completionVerified(String(scope.owner_id),String(scope.task_id),JSON.parse(step.evidence_json),String(scope.occurrence_id),String(step.subtask_id))))throw new Error('task_completion_evidence_required');
  assertDependencyReasons(taskDependencyReasons(db,proof,String(scope.owner_id),String(scope.task_id),steps.flatMap(step=>JSON.parse(step.dependencies_json) as string[]),String(scope.occurrence_id)));
  // Bind this occurrence's exact receipt set, including auxiliary calls and
  // inherited parent runs. Other tasks' shared scope balances must not make a

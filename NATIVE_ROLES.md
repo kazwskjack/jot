@@ -120,6 +120,32 @@ Actual member workspace operations return persisted execution receipts. Assigned
 
 The adapter now composes these boundaries with native dispatch. Keep native flags off until the required restart, production-provider and tool paths are accepted in your environment.
 
+## Reviewed member workspace files
+
+A lead can now propose an assigned member's receipted workspace text file for
+owner review. Completion checks each receipt against that member's immutable
+running assignment for the specific step. A receipt from another step cannot
+close it, even within the same task occurrence. Historical receipt verification
+remains separate from permission to execute another action.
+
+The candidate freezes the referenced version and verifies its bytes. A later
+edit does not change the review preview or the delivered file. After owner
+acceptance and the original native Goal completion handshake, the existing
+finalizer registers one attachment in the parent conversation, retaining the
+actual child run and receipt as provenance. It does not claim the parent wrote
+the file. Replays verify the frozen provenance and content, and finalization
+requires the message attachments to match the published set. Foreign owners,
+different occurrences, wrong-step references and mismatched stored provenance
+are rejected.
+
+This covers workspace text files written through `jot_workspace files.write`.
+It does not add native child-generated binary artifact groups or certify live
+browser/provider behavior. The installed-SDK probe below exercises an actual
+member write, lead ledger update and proposal, persisted native checkpoint,
+owner acceptance, the production completion pump and native Goal CAS, then
+parent snapshot and downloaded bytes. Its model is locally scripted and its
+owner identity is a test fixture; upload/archive leaves remain inert.
+
 
 ## Reproduce the model-callable path
 

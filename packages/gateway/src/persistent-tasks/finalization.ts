@@ -64,6 +64,7 @@ export function finalizeReviewedTask(db:DatabaseSync,runs:RunRepository,owner:st
  // reasoning/unreviewed alternative blocks do not become a final answer.
  const attachmentIds=publishTaskOutputs(db,frozen,runId,String(run.conversation_id));
  const message=runs.appendAssistant(runId,frozen.candidate.text,undefined,attachmentIds);
+ if(canonicalJson(message.attachments??[])!==canonicalJson(attachmentIds))throw new Error('task_output_attachment_conflict');
  runs.finalizePublication(runId,'succeeded',null);
  const delivery_effect_ids:string[]=[];
  for(const channel of channels){

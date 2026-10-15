@@ -28,7 +28,7 @@ export function taskDependencyReasons(db:DatabaseSync,evidence:TaskExecutionEvid
   else{
    const refs=JSON.parse(dependency.evidence_json) as ExecutionEvidence[];
    if(!refs.length)reasons.push(`dependency_evidence_missing:${id}`);
-   else if(!evidence.completionVerified(owner,taskId,refs,occurrenceId))reasons.push(`dependency_evidence_unverified:${id}`);
+   else if(!evidence.completionVerified(owner,taskId,refs,occurrenceId,id))reasons.push(`dependency_evidence_unverified:${id}`);
   }
   if(dependency)for(const parent of JSON.parse(dependency.dependencies_json) as string[])visit(parent);
   visiting.delete(id);visited.add(id);

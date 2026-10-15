@@ -4,6 +4,7 @@ import type {EventStore} from '../events/event-store.ts';
 import type {currentTaskCompletionCandidate} from './completion-candidates.ts';
 import {verifyTaskOutputContent} from './output-content.ts';
 import {configureGeneratedOutputReader} from './generated-output-content.ts';
+import {taskFileSource} from './task-file-source.ts';
 
 type Frozen=ReturnType<typeof currentTaskCompletionCandidate>;
 const publishers=new WeakMap<DatabaseSync,{artifacts:ArtifactService;events:EventStore}>();
@@ -37,20 +38,21 @@ export function publishTaskOutputs(db:DatabaseSync,frozen:Frozen,runId:string,co
  const ids:string[]=[];
  const link=(artifact:ReturnType<ArtifactService['get']>)=>{
   const id=String(artifact.artifact_id),version=Number(artifact.version);
+  if(!db.prepare(`SELECT 1 FROM ga_artifacts a JOIN ga_artifact_versions v ON v.artifact_id=a.id AND v.version=?
+   JOIN ga_runs r ON r.id=? JOIN ga_conversations c ON c.id=r.conversation_id
+   WHERE a.id=? AND a.owner_id=? AND a.conversation_id=? AND a.current_version=v.version
+    AND r.conversation_id=a.conversation_id AND c.owner_id=a.owner_id`).get(version,runId,id,frozen.snapshot.owner_id,conversationId))throw new Error('task_output_source_unverified');
   const changed=db.prepare('INSERT OR IGNORE INTO ga_run_artifacts(run_id,artifact_id,version,created_at) VALUES(?,?,?,?)')
    .run(runId,id,version,new Date().toISOString()).changes;
   if(changed)publisher.events.append(conversationId,runId,'artifact.upsert',{...artifact,run_id:runId});
   if(!ids.includes(id))ids.push(id);
  };
  for(const output of outputs){
-  const source=db.prepare(`SELECT e.run_id FROM wb_task_file_execution_receipts e
-   JOIN wb_task_run_occurrences o ON o.run_id=e.run_id JOIN ga_runs r ON r.id=e.run_id
-   WHERE e.receipt_id=? AND e.owner_id=? AND o.occurrence_id=? AND r.conversation_id=?`).get(
-    output.receipt_id!,frozen.snapshot.owner_id,frozen.snapshot.occurrence_id,conversationId) as {run_id:string}|undefined;
-  if(!source)throw new Error('task_output_source_unverified');
+  const source=taskFileSource(db,frozen.snapshot,output.receipt_id!,runId);
+  if(!source||source.conversation_id!==conversationId||source.path!==output.path||source.version!==output.version||source.sha256!==output.sha256||source.size!==output.size)throw new Error('task_output_source_unverified');
   const content=verifyTaskOutputContent(db,{owner:frozen.snapshot.owner_id,workspace:context.workspace_id,
    project:context.project_id,path:output.path,version:output.version!,runId},{sha256:output.sha256!,size:output.size!});
-  const artifact=publisher.artifacts.registerTaskFileVersion({runId:source.run_id,receiptId:output.receipt_id!,content:content.content});
+  const artifact=publisher.artifacts.registerTaskFileVersion({runId:source.run_id,receiptId:output.receipt_id!,content:content.content,...(source.native?{deliveryRunId:runId}:{})});
   link(artifact);
  }
  for(const group of groups){
