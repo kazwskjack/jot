@@ -172,6 +172,17 @@ function proposalFixture(enabled=false){
  };
  return {...f,accept(value){accepted=value;},afterRequest(value){effect=value;}};
 }
+test('a complete proposal forwards logical output declarations without granting file identity or publication',async()=>{
+ const f=proposalFixture();await f.bridge.attach(f.host.agent,binding);const request=f.bridge.request;let sent;
+ f.bridge.request=async(path,binding,payload,...rest)=>{if(path==='goal-proposal')sent=payload;return request(path,binding,payload,...rest);};
+ const files=[{path:'report.md',description:'Reviewed report'}];const result=await f.bridge.propose(f.host.agent,'file-proposal',{intent:'complete',summary:'Review the report',files});
+ assert.deepEqual(sent.files,files);assert.equal(result.decision,'waiting_approval');assert.equal(f.host.goal.phase,'paused');
+});
+test('output declarations cannot accompany other intents or inject owner/version authority',async()=>{
+ for(const input of [{intent:'continue',summary:'Continue',files:[{path:'report.md'}]},{intent:'wait_user',summary:'Wait',files:[{path:'report.md'}]},{intent:'complete',summary:'Review',files:[{path:'report.md',owner:'other'}]},{intent:'complete',summary:'Review',files:[{path:'report.md',version:1}]}]){
+  const f=proposalFixture(true);await f.bridge.attach(f.host.agent,binding);const before=f.host.goal;await assert.rejects(f.bridge.propose(f.host.agent,'invalid-files',input),/workbench_goal_proposal_invalid/);assert.deepEqual(f.host.goal,before);
+ }
+});
 test('automatic Goal continuation is unavailable by default and cannot be enabled by model proposal fields',async()=>{
  const f=proposalFixture();await f.bridge.attach(f.host.agent,binding);
  assert.deepEqual(await f.bridge.propose(f.host.agent,'call-1',{intent:'continue',summary:'Continue the original task'},{provider:'fixture',model:'bounded'}),{accepted:false,reason:'automatic_continuation_unavailable'});

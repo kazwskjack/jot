@@ -8,13 +8,32 @@ import {verifyTaskOutputContent} from './output-content.ts';
 import {freezeGeneratedOutputs,type GeneratedOutput} from './generated-output-content.ts';
 
 export type TaskCompletionCandidate={text:string;blocks?:Array<{kind:'text'|'reasoning';text:string}>;
- artifact_refs?:string[];presented_files?:Array<{path:string;description?:string}>};
+ artifact_refs?:string[];presented_files?:Array<{path:string;description?:string}>;workspace_files?:Array<{path:string;description?:string}>};
 type CompletionScope={owner_id:string;task_id:string;objective:string;task_version:number;generation:number;
  occurrence_id:string;root_run_id:string;checkpoint_id:string;run_version:number;agent_id:string;frozen_context:string;epoch:number;
  goal_id:string;goal_revision:number;turn_end_seq:number;seq_exclusive:number};
 type FileOutput={path:string;verified:boolean;content_verified?:true;version?:number;sha256?:string;size?:number;receipt_id?:string};
+type PresentedFile={path:string;description?:string};
+type FileScope={task_id:string;occurrence_id:string;owner_id:string;frozen_context:string;steps:Array<{evidence:Array<{kind:string;reference:string}>}>};
 
-function fileOutputs(db:DatabaseSync,snapshot:ReturnType<typeof completionSnapshot>,files:Array<{path:string}>,runId:string,pinned?:FileOutput[]):FileOutput[]{
+export function validateProposedFiles(value:unknown):PresentedFile[]{
+ if(!Array.isArray(value)||!value.length||value.length>8||new Set(value.map(file=>file?.path)).size!==value.length
+  ||!value.every(file=>file&&typeof file==='object'&&!Array.isArray(file)&&Object.keys(file).every(key=>['path','description'].includes(key))
+   &&typeof file.path==='string'&&file.path.length>0&&file.path.length<=400&&!/[\\:\u0000-\u001f\u007f]/.test(file.path)
+   &&file.path===file.path.trim()&&file.path.split('/').every((part:string)=>part&&!part.startsWith('.')&&!/[. ]$|[<>"|?*]/.test(part)&&!/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(part))
+   &&(file.description===undefined||typeof file.description==='string'&&file.description.length<=1000)))throw new Error('invalid_goal_files');
+ return structuredClone(value) as PresentedFile[];
+}
+
+/** Pin real occurrence-owned versions before the native Goal pauses. */
+export function prepareTaskPresentedFiles(db:DatabaseSync,scope:FileScope,value:unknown,runId:string){
+ if(!db.isTransaction)throw new Error('task_completion_state_conflict');
+ const workspace_files=validateProposedFiles(value),workspace_file_outputs=fileOutputs(db,scope,workspace_files,runId);
+ if(workspace_file_outputs.some(output=>!output.verified))throw new Error('task_completion_evidence_required');
+ return {workspace_files,workspace_file_outputs};
+}
+
+function fileOutputs(db:DatabaseSync,snapshot:FileScope,files:Array<{path:string}>,runId:string,pinned?:FileOutput[]):FileOutput[]{
  if(files.length>100)throw new Error('task_completion_candidate_invalid');
  const context=JSON.parse(snapshot.frozen_context) as {workspace_id:string;project_id:string};
  const references=new Set(snapshot.steps.flatMap(step=>step.evidence as Array<{kind:string;reference:string}>).filter(ref=>ref.kind==='tool_receipt').map(ref=>ref.reference));
@@ -103,11 +122,26 @@ export function freezeTaskCompletionCandidate(db:DatabaseSync,runId:string,candi
   ||Number(snapshot.goal_revision)<Number(proposal.goal_revision)||snapshot.objective!==proposed.objective
   ||snapshot.task_version!==proposed.task_version||snapshot.generation!==proposed.generation
   ||canonicalJson(steps)!==canonicalJson(proposed.steps))throw new Error('task_completion_state_conflict');
- const value={...candidate,text:candidate.text.trim()},candidateJson=canonicalJson(value);
+ let workspaceFiles:PresentedFile[]=[];
+ const pins=new Map<string,FileOutput>();
+ if(proposed.workspace_files!==undefined||proposed.workspace_file_outputs!==undefined){
+  const declared=validateProposedFiles(proposed.workspace_files),outputs=proposed.workspace_file_outputs;
+  if(candidate.presented_files?.length)throw new Error('task_output_sources_conflict');
+  if(!Array.isArray(outputs)||outputs.length!==declared.length)throw new Error('task_completion_state_conflict');
+  for(const [index,file] of declared.entries()){
+   const output=outputs[index] as FileOutput|undefined;
+   if(!output||output.path!==file.path||!output.verified||output.content_verified!==true)throw new Error('task_completion_state_conflict');
+   pins.set(file.path,output);
+  }
+  workspaceFiles=declared;
+ }
+ if(candidate.workspace_files!==undefined&&canonicalJson(candidate.workspace_files)!==canonicalJson(workspaceFiles))throw new Error('task_completion_state_conflict');
+ const value={...candidate,text:candidate.text.trim(),...(workspaceFiles.length?{workspace_files:workspaceFiles}:{})},candidateJson=canonicalJson(value);
  const candidateHash=createHash('sha256').update(candidateJson).digest('hex');
  const prior=db.prepare('SELECT candidate_id,candidate_hash,snapshot_json FROM wb_task_completion_candidates WHERE run_id=?').get(runId) as {candidate_id:string;candidate_hash:string;snapshot_json:string}|undefined;
  const artifactOutputs=candidate.artifact_refs?.length?freezeGeneratedOutputs(db,snapshot,runId,candidate.artifact_refs):undefined;
  const snapshotJson=canonicalJson({...snapshot,...(candidate.presented_files?.length?{file_outputs:fileOutputs(db,snapshot,candidate.presented_files,runId)}:{}),
+  ...(workspaceFiles.length?{workspace_file_outputs:workspaceFiles.flatMap(file=>fileOutputs(db,snapshot,[file],runId,[pins.get(file.path)!]))}:{}),
   ...(artifactOutputs?{artifact_outputs:artifactOutputs}:{})});
  if(prior){if(prior.candidate_hash!==candidateHash||prior.snapshot_json!==snapshotJson)throw new Error('task_completion_state_conflict');return prior.candidate_id;}
  const id=`task-candidate-${randomUUID()}`;
@@ -127,11 +161,21 @@ export function currentTaskCompletionCandidate(db:DatabaseSync,owner:string,runI
   JOIN ga_conversations c ON c.id=r.conversation_id WHERE f.run_id=? AND c.owner_id=?`).get(runId,owner) as Record<string,string>|undefined;
  if(!row)throw new Error('task_completion_candidate_not_found');
  const current=completionSnapshot(db,runId),candidate=JSON.parse(row.candidate_json!) as TaskCompletionCandidate;
- const saved=JSON.parse(row.snapshot_json!) as {file_outputs?:FileOutput[];artifact_outputs?:GeneratedOutput[]};
+ const saved=JSON.parse(row.snapshot_json!) as {file_outputs?:FileOutput[];workspace_file_outputs?:FileOutput[];artifact_outputs?:GeneratedOutput[]};
+ const proposal=db.prepare("SELECT snapshot_json FROM wb_task_goal_proposals WHERE proposal_id=? AND run_id=? AND intent='complete'").get(row.proposal_id!,runId) as {snapshot_json:string}|undefined;
+ if(!proposal)throw new Error('task_completion_state_conflict');
+ const declared=JSON.parse(proposal.snapshot_json) as {workspace_files?:PresentedFile[];workspace_file_outputs?:FileOutput[]};
+ if(candidate.workspace_files?.length||declared.workspace_files!==undefined||declared.workspace_file_outputs!==undefined){
+  if(candidate.presented_files?.length)throw new Error('task_output_sources_conflict');
+  validateProposedFiles(declared.workspace_files);
+  if(!Array.isArray(candidate.workspace_files)||!saved.workspace_file_outputs||canonicalJson(candidate.workspace_files)!==canonicalJson(declared.workspace_files)
+    ||canonicalJson(saved.workspace_file_outputs)!==canonicalJson(declared.workspace_file_outputs))throw new Error('task_completion_state_conflict');
+ }
  // Never backfill an old frozen candidate from today's latest file metadata.
  if(candidate.presented_files?.length&&!saved.file_outputs)throw new Error('task_completion_state_conflict');
  if(candidate.artifact_refs?.length&&!saved.artifact_outputs)throw new Error('task_completion_state_conflict');
  const snapshot={...current,...(candidate.presented_files?.length?{file_outputs:fileOutputs(db,current,candidate.presented_files,runId,saved.file_outputs)}:{}),
+  ...(candidate.workspace_files?.length?{workspace_file_outputs:fileOutputs(db,current,candidate.workspace_files,runId,saved.workspace_file_outputs)}:{}),
   ...(candidate.artifact_refs?.length?{artifact_outputs:freezeGeneratedOutputs(db,current,runId,candidate.artifact_refs,saved.artifact_outputs)}:{})};
  if(row.snapshot_json!==canonicalJson(snapshot)||row.candidate_hash!==createHash('sha256').update(row.candidate_json!).digest('hex'))throw new Error('task_completion_state_conflict');
  return {candidate_id:row.candidate_id!,snapshot,candidate};

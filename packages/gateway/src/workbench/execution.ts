@@ -23,7 +23,7 @@ import type {TaskCollaborationService} from './task-collaboration.ts';
 import {NativeChildReservations} from './native-child-reservations.ts';
 import {NativeTaskIntents} from './native-task-intents.ts';
 import {savedSessionCheckpoint} from '../harness/session-checkpoints.ts';
-import {installTaskCompletionCandidates} from '../persistent-tasks/completion-candidates.ts';
+import {installTaskCompletionCandidates,prepareTaskPresentedFiles,validateProposedFiles} from '../persistent-tasks/completion-candidates.ts';
 import {installTaskBusinessReviews,currentTaskBusinessCertificate} from '../persistent-tasks/business-review.ts';
 import {installTaskCompletionHandshake,preparedTaskCompletion,confirmTaskCompletion} from '../persistent-tasks/completion-handshake.ts';
 import {installTaskFinalizations} from '../persistent-tasks/finalization.ts';
@@ -446,7 +446,8 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
   });
   app.post('/internal/v1/workbench/goal-proposal',async request=>{
     authorized(request.headers.authorization);
-    const input=object(request.body);fields(input,['run_id','session_ref','call_id','goal_id','goal_revision','intent','summary','route']);
+    const input=object(request.body);fields(input,['run_id','session_ref','call_id','goal_id','goal_revision','intent','summary','route','files']);
+    if(Object.hasOwn(input,'files')){if(input.intent!=='complete')throw new Error('invalid_goal_files');validateProposedFiles(input.files);}
     if(!validCallId(input.call_id)||!validCallId(input.goal_id)||!Number.isSafeInteger(input.goal_revision)||Number(input.goal_revision)<1
       || typeof input.intent!=='string'||!['continue','wait_user','wait_approval','complete'].includes(input.intent)
       || typeof input.summary!=='string'||!input.summary.trim()||input.summary.length>2000
@@ -474,7 +475,9 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       const proposalId=`goal-proposal-${randomUUID()}`;
       const snapshot={objective:task.objective,task_version:task.task_version,generation:task.generation,
         steps:steps.map(step=>({subtask_id:step.subtask_id,version:step.version,acceptance:step.acceptance,status:step.status,evidence:JSON.parse(step.evidence_json)}))};
-      db.prepare('INSERT INTO wb_task_goal_proposals VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(proposalId,identity.run_id,task.occurrence_id,String(input.call_id),String(input.goal_id),Number(input.goal_revision),String(input.intent),summary,action,JSON.stringify(snapshot),new Date().toISOString());
+      const outputs=input.files===undefined?{}:prepareTaskPresentedFiles(db,{...task,owner_id:identity.owner_id,
+        frozen_context:JSON.stringify({workspace_id:identity.workspace_id,project_id:identity.project_id}),steps:snapshot.steps},input.files,identity.run_id);
+      db.prepare('INSERT INTO wb_task_goal_proposals VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(proposalId,identity.run_id,task.occurrence_id,String(input.call_id),String(input.goal_id),Number(input.goal_revision),String(input.intent),summary,action,JSON.stringify({...snapshot,...outputs}),new Date().toISOString());
       if(action!=='resume'){
         // This is a request for input/review, not proof of a stopped Agent or
         // business completion. The existing stop/checkpoint/worker handshake

@@ -3,6 +3,13 @@ import { createHash } from 'node:crypto';
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 const NATIVE_GOAL_TOOLS = new Set(['get_goal', 'create_goal', 'update_goal']);
 const positive = value => Number.isSafeInteger(value) && value > 0;
+function validOutputFiles(files){
+ return Array.isArray(files)&&files.length>0&&files.length<=8&&new Set(files.map(file=>file?.path)).size===files.length
+  &&files.every(file=>file&&typeof file==='object'&&!Array.isArray(file)&&Object.keys(file).every(key=>['path','description'].includes(key))
+   &&typeof file.path==='string'&&file.path.length>0&&file.path.length<=400&&!/[\\:\u0000-\u001f\u007f]/.test(file.path)
+   &&file.path===file.path.trim()&&file.path.split('/').every(part=>part&&!part.startsWith('.')&&!/[. ]$|[<>"|?*]/.test(part)&&!/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(part))
+   &&(file.description===undefined||typeof file.description==='string'&&file.description.length<=1000));
+}
 
 // Cordis Agent contexts inherit the loop's required services, which do not
 // include goals. Optional property access still throws on that native proxy.
@@ -296,8 +303,9 @@ export class WorkbenchGoalBridge {
   }
 
   propose(agent,callId,input,route,signal) {
-    if(typeof callId!=='string'||!ID.test(callId)||!exactRecord(input,['intent','summary'])
+    if(typeof callId!=='string'||!ID.test(callId)||!exactRecord(input,Object.hasOwn(input??{},'files')?['intent','summary','files']:['intent','summary'])
       ||!['continue','wait_user','wait_approval','complete'].includes(input.intent)
+      ||Object.hasOwn(input,'files')&&(input.intent!=='complete'||!validOutputFiles(input.files))
       ||typeof input.summary!=='string'||!input.summary.trim()||input.summary.length>2000)
       return Promise.reject(new Error('workbench_goal_proposal_invalid'));
     const previous=this.proposing.get(agent)??Promise.resolve();
@@ -317,6 +325,7 @@ export class WorkbenchGoalBridge {
     if(input.intent==='continue')await this.prepareStep(agent,route,signal);
     try{
       const response=await this.request('goal-proposal',binding,{call_id:callId,intent:input.intent,summary:input.summary,
+        ...(input.files===undefined?{}:{files:input.files}),
         goal_id:before.id,goal_revision:before.revision,...(input.intent==='continue'?{route}:{})},signal);
       await this.guard(agent,signal);
       if(state.binding!==binding||JSON.stringify(trustedScope(response.context,binding))!==JSON.stringify(state.scope))throw new Error('workbench_goal_binding_changed');

@@ -194,11 +194,14 @@ observes another native round without another Gateway run or competing prompt.
 
 The file case actually writes `acceptance.md` through the workspace tool. The
 scripted model consumes the returned execution receipt to complete its criterion
-and requests business review. Before owner acceptance there is no published
+and requests business review with a logical workspace file declaration. Before owner acceptance there is no published
 answer or business certificate; a foreign owner and an untrusted Origin cannot
 approve it. After the owner accepts the frozen criterion, the original worker
 completion pump records native Goal completion and publishes exactly one answer,
-without another model call or task run. These checks use real file/receipt,
+without another model call or task run. The final message contains one owned
+Artifact attachment; downloading it returns the exact reviewed version and hash,
+even after a later owner edit replaces the logical file. A foreign owner cannot
+download it. These checks use real file/receipt,
 checkpoint, review and completion services, not fabricated native proofs.
 
 This proves the synthetic task's local lifecycle, not external provider quality,
@@ -210,10 +213,9 @@ and a real browser session are not exercised.
 
 Passing these cases proves the local official composition, upload, ordinary chat,
 saved-role execution and the synthetic persistent tasks' wait, resume, automatic
-round and reviewed final-answer publication for a file-writing task.
-File-as-attachment delivery remains a separate end-to-end acceptance target;
-writing a workspace file alone is not proof that a downloadable attachment reached
-the conversation. These cases do not prove real model inference, external tools,
+round and reviewed workspace-file attachment delivery. Writing a workspace file
+alone still does not publish it: the declaration, evidence, owner acceptance and
+native completion gates all apply. These cases do not prove real model inference, external tools,
 notification delivery, target-machine ACLs or power-loss durability. Full
 claimed-input recovery additionally requires a reviewed immutable release
 manifest, actual loaded source / permissions / model-route validation and

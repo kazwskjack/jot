@@ -19,17 +19,19 @@ export function taskOutputsDeliverable(db:DatabaseSync,frozen:Frozen):boolean {
   group.reference===refs[index]&&group.verified&&group.content_verified===true&&typeof group.artifact_id==='string'
   &&typeof group.run_id==='string'&&Number.isSafeInteger(group.version)&&Number(group.version)>0
   &&typeof group.sha256==='string'&&Number.isSafeInteger(group.size_bytes)&&!!group.parts?.length)))return false;
- const files=frozen.candidate.presented_files??[],outputs=frozen.snapshot.file_outputs??[];
- if(!files.length)return true;
- return publishers.has(db)&&outputs.length===files.length&&outputs.every((output,index)=>
-  output.path===files[index]?.path&&output.verified&&output.content_verified===true
-  &&Number.isSafeInteger(output.version)&&Number(output.version)>0&&typeof output.receipt_id==='string'
-  &&typeof output.sha256==='string'&&Number.isSafeInteger(output.size));
+ for(const [files,outputs] of [[frozen.candidate.presented_files??[],frozen.snapshot.file_outputs??[]],
+   [frozen.candidate.workspace_files??[],frozen.snapshot.workspace_file_outputs??[]]] as const){
+  if(files.length&&(!publishers.has(db)||outputs.length!==files.length||!outputs.every((output,index)=>
+   output.path===files[index]?.path&&output.verified&&output.content_verified===true
+   &&Number.isSafeInteger(output.version)&&Number(output.version)>0&&typeof output.receipt_id==='string'
+   &&typeof output.sha256==='string'&&Number.isSafeInteger(output.size))))return false;
+ }
+ return true;
 }
 export function publishTaskOutputs(db:DatabaseSync,frozen:Frozen,runId:string,conversationId:string):string[]{
  if(!db.isTransaction)throw new Error('task_output_transaction_required');
  if(!taskOutputsDeliverable(db,frozen))throw new Error('task_acceptance_outputs_unverified');
- const outputs=frozen.snapshot.file_outputs??[],groups=frozen.snapshot.artifact_outputs??[];if(!outputs.length&&!groups.length)return [];
+ const outputs=[...(frozen.snapshot.file_outputs??[]),...(frozen.snapshot.workspace_file_outputs??[])],groups=frozen.snapshot.artifact_outputs??[];if(!outputs.length&&!groups.length)return [];
  const publisher=publishers.get(db)!;
  const context=JSON.parse(frozen.snapshot.frozen_context) as {workspace_id:string;project_id:string};
  const ids:string[]=[];

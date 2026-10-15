@@ -22,7 +22,7 @@ export async function fixture(t,intent='wait_user',options={}){
  assert.equal((await internal('goal-binding',{...identity,action:'save',...goal})).statusCode,200);
  f.modelBudgets.reserve('alice',runId,{attempt_id:'spent',provider:'fixture',model:'bounded'});f.modelBudgets.dispatch('alice',runId,'spent');f.modelBudgets.settle('alice',runId,'spent',{inputTokens:5,outputTokens:5,totalTokens:10});
  if(options.prepare)await options.prepare({...f,task,runId,occurrence,internal,identity,goal});
- const proposal=await internal('goal-proposal',{...identity,...goal,call_id:'wait-proposal',intent,summary:'Which report format should I use?'});assert.equal(proposal.statusCode,200,proposal.body);assert.equal(proposal.json().proposal.accepted,true);
+ const proposal=await internal('goal-proposal',{...identity,...goal,call_id:'wait-proposal',intent,summary:'Which report format should I use?',...(options.proposalFiles===undefined?{}:{files:options.proposalFiles})});assert.equal(proposal.statusCode,200,proposal.body);assert.equal(proposal.json().proposal.accepted,true);
  if(options.afterProposal)await options.afterProposal({...f,task,runId,occurrence,internal,identity,goal,coordinator,lease});
  await internal('goal-binding',{...identity,action:'save',...goal,goal_revision:8});
  const checkpointId=coordinator.recordCheckpoint(lease,'session-fixture',{session_ref:'session-fixture',seq_exclusive:3,turn_end_seq:2,goal_id:goal.goal_id,goal_revision:8,log_sha256:'a'.repeat(64)});

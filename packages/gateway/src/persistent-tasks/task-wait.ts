@@ -28,7 +28,7 @@ export function requestTaskWaitInteraction(db:DatabaseSync,events:EventStore,run
   const id=`int-${randomUUID()}`,kind=purpose==='task_input'||frozen?'question':'approval';
   const digest=kind==='approval'?`sha256:${createHash('sha256').update(JSON.stringify([id,runId,row.checkpoint_id,row.version,proposal.proposal_id,purpose])).digest('hex')}`:null;
   const base={interaction_id:id,run_id:runId,tool_call_id:`task-wait-${randomUUID()}`,version:1,status:'pending',created_at:now,expires_at:expires,kind,purpose};
-  const outputLines=frozen?[...(frozen.snapshot.file_outputs??[]).map(file=>file.verified?`${file.path} · v${file.version} · SHA256 ${file.sha256}`:`${file.path} · 未绑定任务文件版本`),
+  const outputLines=frozen?[...[...(frozen.snapshot.file_outputs??[]),...(frozen.snapshot.workspace_file_outputs??[])].map(file=>file.verified?`${file.path} · v${file.version} · SHA256 ${file.sha256}`:`${file.path} · 未绑定任务文件版本`),
     ...(frozen.snapshot.artifact_outputs??[]).flatMap(group=>group.verified?group.parts!.map(part=>`${part.display_name} · v${group.version} · SHA256 ${part.sha256}`):[`${group.reference} · 未绑定任务产物版本`])]:[];
   const description=frozen?frozen.candidate.text+(outputLines.length?`\n\n文件版本（审核通过并确认任务完成后交付）：\n${outputLines.join('\n')}`:''):undefined;
   const request=kind==='question'?{...base,questions:frozen?frozen.snapshot.steps.map((step,index)=>({question_id:step.subtask_id,prompt:step.acceptance,

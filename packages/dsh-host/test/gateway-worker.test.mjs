@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {spawn} from 'node:child_process';
-import {randomBytes} from 'node:crypto';
+import {randomBytes,createHash} from 'node:crypto';
 import {mkdtemp,mkdir,readFile,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -39,6 +39,7 @@ async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=
   let operation='tasks.propose',argumentsValue={intent:complete?'complete':automatic&&ordinal===1?'continue':resume&&ordinal===2?'wait_approval':'wait_user',summary:ordinal===2?'Please review the next step.':'Please confirm the next step.'};
   if(complete&&ordinal===1){operation='files.write';argumentsValue={path:'acceptance.md',content:'ACCEPTANCE-OK',expected_version:0};}
   if(complete&&ordinal===2){operation='tasks.upsert';const evidence=executionReceipt(input.messages);assert.ok(evidence,'the model must consume a real file operation receipt');argumentsValue={title:'Write the acceptance file',acceptance:'acceptance.md contains exactly ACCEPTANCE-OK.',status:'completed',evidence:[evidence]};}
+  if(complete&&ordinal===3)argumentsValue.files=[{path:'acceptance.md',description:'Reviewed report'}];
   const toolEvents=persistent&&!(automatic&&ordinal===2)?[
    {type:'content_block_start',index:1,content_block:{type:'tool_use',id:'synthetic-wait-call-'+ordinal,name:'jot_workspace',input:{operation,arguments_json:JSON.stringify(argumentsValue)}}},
    {type:'content_block_stop',index:1},
@@ -102,6 +103,9 @@ async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=
   if(complete){
    const card=(await (await fetch(gatewayUrl+'/v1/conversations/'+conversation_id+'/interactions',{headers})).json()).items[0];assert.equal(card.purpose,'task_acceptance_review');assert.equal(card.questions.length,1);
    const file=service.db.prepare('SELECT owner_id,workspace_id,project_id,path FROM wb_files WHERE path=?').get('acceptance.md');assert.ok(file);assert.equal(service.workbench.readFile(file.owner_id,file.workspace_id,file.project_id,file.path).content,'ACCEPTANCE-OK');
+   assert.equal(service.artifacts.listForRun(run_id,'acceptance-owner').items.length,0);
+   // A later authorized owner edit must not replace the already reviewed version.
+   service.workbench.writeFile(file.owner_id,file.workspace_id,{project_id:file.project_id,path:file.path,content:'Later owner replacement',expected_version:1});
    assert.equal(service.db.prepare('SELECT count(*) n FROM wb_task_execution_receipts').get().n,1);assert.equal(service.db.prepare('SELECT count(*) n FROM wb_task_business_certificates').get().n,0);
    const post=(extraHeaders={})=>fetch(gatewayUrl+'/v1/interactions/'+card.interaction_id+'/response',{method:'POST',headers:{...headers,'idempotency-key':'accept-business-criteria',...extraHeaders},body:JSON.stringify({expected_version:card.version,answers:card.questions.map(question=>({question_id:question.question_id,selected_option_ids:['accept'],custom_text:''}))})});
    assert.equal((await post({'x-user-id':'foreign-owner'})).status,404);assert.equal((await post({origin:'https://untrusted.invalid'})).status,403);
@@ -110,6 +114,10 @@ async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=
    const finished=await until(async()=>{const value=await (await fetch(gatewayUrl+'/v1/runs/'+run_id,{headers})).json();return value.status==='succeeded'&&value;});assert.equal(finished.status,'succeeded');assert.equal(requests.length,3);
    const retriedReview=await post();assert.equal(retriedReview.status,202);assert.deepEqual(await retriedReview.json(),review);
    const delivered=await (await fetch(gatewayUrl+'/v1/conversations/'+conversation_id+'/snapshot',{headers})).json();const published=delivered.messages.filter(message=>message.role==='assistant'&&message.status==='complete');assert.equal(published.length,1);assert.ok(JSON.stringify(published[0].blocks).includes('ACCEPTANCE-OK'));checkBudget(run_id,3);
+   assert.equal(delivered.artifacts.length,1);const artifact=delivered.artifacts[0];assert.deepEqual(published[0].attachments,[artifact.artifact_id]);assert.equal(artifact.run_id,run_id);assert.equal(artifact.version,1);assert.equal(artifact.sha256,createHash('sha256').update('ACCEPTANCE-OK').digest('hex'));
+   const downloaded=await fetch(gatewayUrl+'/v1/artifacts/'+artifact.artifact_id+'/download?version=1',{headers});assert.equal(downloaded.status,200);assert.equal(await downloaded.text(),'ACCEPTANCE-OK');
+   assert.equal((await fetch(gatewayUrl+'/v1/artifacts/'+artifact.artifact_id+'/download?version=1',{headers:{...headers,'x-user-id':'foreign-owner'}})).status,404);
+   assert.equal(service.db.prepare('SELECT count(*) n FROM ga_run_artifacts WHERE run_id=?').get(run_id).n,1);
    assert.equal(service.db.prepare('SELECT count(*) n FROM ga_runs').get().n,1);assert.equal(service.db.prepare('SELECT count(*) n FROM wb_task_finalizations').get().n,1);
    const proof=JSON.parse(service.db.prepare('SELECT proof_json FROM wb_task_native_completions').get().proof_json);assert.equal(proof.goal.phase,'complete');assert.equal(proof.goal.activation,'disarmed');assert.equal(proof.checkpoint.session_ref,composition.sessionId);
   }

@@ -75,6 +75,37 @@ See [DEPLOYMENT.md](../../DEPLOYMENT.md) for resource estimates, startup checks 
 
 ## Optional integration boundaries
 
+### Reviewed workspace attachments
+
+For a persistent task, `jot_workspace` supports a narrow completion declaration:
+
+```json
+{"operation":"tasks.propose","arguments_json":"{\"intent\":\"complete\",\"summary\":\"Review the report\",\"files\":[{\"path\":\"reports/result.md\",\"description\":\"Report\"}]}"}
+```
+
+Only `complete` may carry `files` (one to eight canonical relative Workbench paths,
+up to 400 characters each). Entries accept only `path` and an optional description.
+The task must actually write the file and reference its operation receipt in a
+completed step. The server pins the highest file version referenced by those
+completed steps, verifies its owner/project/occurrence and content, and shows its
+version/hash in the acceptance card. Declaring a path never supplies authority,
+replaces an execution receipt or grants acceptance.
+
+Workspace declarations use `workspace_files` / `workspace_file_outputs` in the
+frozen journal, separate from native DSH filesystem `presented_files`. Mixing
+these two file sources in one candidate is rejected before a review card is
+created, even when their paths differ. The original DSH `present` tool
+still validates DSH filesystem files; no fake native presentation event is emitted.
+After owner acceptance and confirmed native Goal completion, the existing output
+publisher creates the Artifact attachment from the frozen bytes. Replays neither
+follow later file replacements nor create a second publication. The local host
+acceptance covers this path using a scripted model, not real model quality.
+
+The review card currently exposes frozen version/hash metadata. A complete
+general-purpose preview of frozen files before acceptance, including large and
+binary files, remains a separate UI acceptance item. Native Team child-file
+lineage also needs its own official-host integration coverage.
+
 `src/artifacts/main.ts` expects a separately supplied document exporter and runtime bridge; the fallback exporter path is not a bundled executable. `src/channels/main.ts` expects a separately supplied enterprise messaging provider module and runtime bridge. `src/artifacts/archive-main.ts` needs a configured external archive CLI and credentials. These extension points are source code, not ready-to-run bundled providers. Do not enable them merely because the gateway builds successfully.
 
 Event retention reports are read-only inventories. A seven-day event cutoff and ninety-day cold-conversation cutoff do not authorize deletion: the included retention planner marks candidates protected while complete restore evidence is absent.
