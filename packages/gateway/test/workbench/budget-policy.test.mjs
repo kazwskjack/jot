@@ -38,6 +38,19 @@ async function fixture(t,custom=config()){
  return {mod,db,root,policy,service,tasks,runs,agent,task,settle,allocation,scope,balance,now:value=>{now=new Date(value);}};
 }
 
+test('completed role message retry returns its original receipt without rebinding execution or reserving budget',async t=>{
+ const f=await fixture(t),agent=f.agent(),input={text:'Original request',client_message_id:'completed-retry'};
+ const original=f.service.enqueueAgentMessage('alice',agent.agent_id,input);f.settle(original.run_id);
+ f.db.prepare("UPDATE ga_runs SET status='succeeded' WHERE id=?").run(original.run_id);
+ const binding=f.db.prepare('SELECT * FROM wb_run_bindings WHERE run_id=?').get(original.run_id);
+ const attempts=f.db.prepare('SELECT * FROM wb_model_budget_attempts WHERE run_id=?').all(original.run_id);
+ assert.deepEqual(f.service.enqueueAgentMessage('alice',agent.agent_id,input),original);
+ assert.deepEqual(f.db.prepare('SELECT * FROM wb_run_bindings WHERE run_id=?').get(original.run_id),binding);
+ assert.deepEqual(f.db.prepare('SELECT * FROM wb_model_budget_attempts WHERE run_id=?').all(original.run_id),attempts);
+ assert.equal(f.db.prepare('SELECT count(*) n FROM ga_runs').get().n,1);
+ assert.throws(()=>f.service.bindRun('alice',agent.agent_id,original.run_id,'chat'));
+});
+
 test('task enqueue atomically holds the first call across owner, project, member, lifetime root and occurrence',async t=>{
  const f=await fixture(t),a=f.agent(),task=f.task(a),o=f.tasks.runNow('alice',task.task_id,'one');
  assert.equal(f.policy.ledger.isBound('alice',o.run_id),true);

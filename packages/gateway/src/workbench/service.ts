@@ -499,6 +499,10 @@ export class WorkbenchService {
     return this.transaction(() => {
       const agent = this.active(owner, agentId);
       const result = this.runs.enqueue(agent.conversation_id, owner, { client_message_id: clientId, content: [{ type: 'text', text: value }] });
+      // Returning an existing receipt is not execution admission. Keep bindRun's
+      // active-run fence for actual binding/dispatch, including terminal runs.
+      const bound=this.db.prepare('SELECT owner_id,agent_id,kind FROM wb_run_bindings WHERE run_id=?').get(String(result.run_id)) as Row|undefined;
+      if(bound){if(bound.owner_id!==owner||bound.agent_id!==agentId||bound.kind!=='chat')throw new Error('run_binding_conflict');return result;}
       this.bindRun(owner, agentId, String(result.run_id), 'chat'); return result;
     });
   }

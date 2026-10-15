@@ -89,9 +89,9 @@ function authorized(actual, expected) {
 
 function json(status, value) { return { status, value } }
 
-const BINDING_FAILURE_CODES=new Set(['workbench_run_forbidden','workbench_goal_binding_changed','workbench_host_incompatible','workbench_goal_unavailable','workbench_goal_context_invalid','workbench_goal_identity_conflict','workbench_goal_stopped','workbench_context_invalid','workbench_binding_lease_required','workbench_model_host_incompatible','workbench_model_route_changed','workbench_budget_binding_required','workbench_binding_missing','workbench_binding_changed','workbench_goal_native_driver_unavailable']);
+const BINDING_FAILURE_CODES=new Set(['workbench_run_forbidden','workbench_goal_binding_changed','workbench_host_incompatible','workbench_goal_unavailable','workbench_goal_context_invalid','workbench_goal_identity_conflict','workbench_goal_stopped','workbench_context_invalid','workbench_binding_lease_required','workbench_model_host_incompatible','workbench_model_route_changed','workbench_budget_binding_required','workbench_binding_missing','workbench_binding_changed','workbench_goal_native_driver_unavailable','workbench_task_state_invalid','workbench_goal_host_state_invalid','workbench_goal_binding_missing','workbench_goal_revoked']);
 export function bindingFailureSummary(stage,error){
-  return {stage:stage==='model-select'?'model-select':'attach',code:BINDING_FAILURE_CODES.has(error?.message)?error.message:'workbench_binding_failed'};
+  return {stage:['model-select','goal-status'].includes(stage)?stage:'attach',code:BINDING_FAILURE_CODES.has(error?.message)?error.message:'workbench_binding_failed'};
 }
 
 export function adapterErrorSummary(error) {
@@ -250,7 +250,7 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       if(!ID.test(sessionId)||!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).length)return json(422,{error:'goal_status_input_invalid'})
       if(!workbenchSessions.has(sessionId)||blockedWorkbenchSessions.has(sessionId)||!workbenchBridge?.observe||!agents?.get)return json(503,{error:'goal_status_unavailable'})
       try{return json(200,{state:await workbenchBridge.observe(agents.get(sessionId),signal)})}
-      catch{return json(409,{error:'goal_status_unavailable'})}
+      catch(error){console.error('[jot-goal-status]',JSON.stringify(bindingFailureSummary('goal-status',error)));return json(409,{error:'goal_status_unavailable'})}
     }
     const goalStop=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/goal-stop$/)
     if(goalStop){

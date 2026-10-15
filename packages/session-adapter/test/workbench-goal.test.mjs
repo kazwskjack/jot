@@ -7,6 +7,14 @@ try { ({ WorkbenchGoalBridge } = await import('../workbench-goal.js')); } catch 
 }
 
 const binding = { runId: 'run-1', sessionRef: 'session-1' };
+test('Goal observation preserves unlimited money limits but rejects null usage or non-money limits',async()=>{
+ const f=fixture();f.host.agent.session={id:binding.sessionRef};f.host.agent.status='idle';await f.bridge.attach(f.host.agent,binding);
+ const amounts={tokens:'100',nano_usd:'0',model_calls:'10'};
+ const task={run_status:'running',business_state:'queued',steps:{total:0,completed:0,evidence_verified:0,all_completed:false,all_execution_evidence_verified:false},budget:{configured:true,balances:[{scope_id:'scope-fixture',limits:{...amounts,nano_usd:null},used:{...amounts},held:{...amounts}}],pending_unknown:0,pending_in_flight:0}};
+ f.bridge.request=async()=>({context:context(),task});
+ assert.equal((await f.bridge.observe(f.host.agent)).task.budget.balances[0].limits.nano_usd,null);
+ for(const [section,field] of [['used','nano_usd'],['held','nano_usd'],['limits','tokens'],['limits','model_calls']]){const prior=task.budget.balances[0][section][field];task.budget.balances[0][section][field]=null;await assert.rejects(f.bridge.observe(f.host.agent),/workbench_task_state_invalid/);task.budget.balances[0][section][field]=prior;}
+});
 function context() {
   return { run_id: 'run-1', owner_id: 'owner-a', agent_id: 'agent-a', workspace_id: 'workspace-a', project_id: 'project-a',
     capability_epoch: 1, task_binding: { task_id: 'task-a', occurrence_id: 'occurrence-a', task_version: 3,

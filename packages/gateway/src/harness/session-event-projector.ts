@@ -15,6 +15,8 @@ export interface ProjectionContext {
   blockId: string
   deltaIndex: number
   at: string
+  /** Background task text is provisional until the business review publishes it. */
+  deferCompletion?: boolean
   knownTools?: Map<string, ToolPresentation>
 }
 
@@ -328,7 +330,7 @@ function settledAssistant(data: Record<string, unknown>, context: ProjectionCont
   })
   if (!blocks.length) return null
   return { type: 'assistant.settled', payload: { attempt_id: context.attemptId, message: {
-    message_id: messageId, run_id: context.runId, role: 'assistant', status: 'complete', blocks,
+    message_id: messageId, run_id: context.runId, role: 'assistant', status: context.deferCompletion ? 'streaming' : 'complete', blocks,
     created_at: context.at,
   } } }
 }

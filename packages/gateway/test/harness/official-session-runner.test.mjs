@@ -47,7 +47,7 @@ test('native Goal turns share one follow stream and do not start a competing cra
 });
 
 for(const scenario of ['complete','waiting_user','waiting_approval','unknown','exhausted','ended','budget_unconfigured','usage_pending','budget_exhausted','blocked','disarmed','input_requested','approval_requested'])test(`native Goal ${scenario} cannot publish an intermediate answer as task completion`,async()=>{
- let reachedTail=false,prompts=0;
+ let reachedTail=false,prompts=0;const projections=[];
  const state=scenario.endsWith('_requested')?goalFacts({phase:'paused',activation:'disarmed'},{business_state:scenario})
   :scenario==='complete'?goalFacts({phase:'complete',activation:'disarmed'}):scenario.startsWith('waiting_')?goalFacts({}, {run_status:scenario})
   :scenario==='unknown'?goalFacts({}, {budget:{...goalFacts().state.task.budget,pending_unknown:1}})
@@ -61,8 +61,10 @@ for(const scenario of ['complete','waiting_user','waiting_approval','unknown','e
  const client={create:async()=>({}),prompt:async()=>{prompts++;return {};},goalStatus:async()=>state,goalStop:async()=>({state:{...state.state,goal:{...state.state.goal,phase:state.state.goal.phase==='active'?'paused':state.state.goal.phase,activation:'disarmed',goal_revision:2}},turn_end_seq:2}),
   checkpoint:async(_id,seq)=>({checkpoint:{session_ref:'session-fixture',seq_exclusive:seq+1,turn_end_seq:seq,goal_id:'goal-fixture',goal_revision:2,log_sha256:'a'.repeat(64)}}),
   async *follow(){yield {type:'snapshot',cursor:0,records:[]};yield {type:'event',event:{type:'assistant/message',seq:1,data:{message:{content:[{type:'text',text:'Intermediate result'}]}}}};yield {type:'event',event:{type:'turn/end',seq:2,data:{reason:{kind:'completed'}}}};reachedTail=true;}};
- const result=await new OfficialSessionRunner(client,{cwd:'/fixture',agentPreset:'jot-general'}).run({enabled:true,taskRequestId:'run-fixture',message:'Task',sessionRef:'session-fixture',checkpointTask:true,deferCompletionProbe:true,onCheckpoint:()=>{}});
+ const result=await new OfficialSessionRunner(client,{cwd:'/fixture',agentPreset:'jot-general'}).run({enabled:true,taskRequestId:'run-fixture',message:'Task',sessionRef:'session-fixture',checkpointTask:true,deferCompletionProbe:true,onCheckpoint:()=>{},onProjection:value=>{projections.push(value);}});
  assert.equal(prompts,1);assert.equal(result.completed,false);assert.equal(result.final_text,undefined);assert.equal(result.reason_code,codes[scenario]);assert.equal(reachedTail,scenario==='ended');
+ const message=projections.find(value=>value.type==='assistant.settled').payload.message;
+ assert.equal(message.status,'streaming');assert.equal(message.blocks[0].text,'Intermediate result');
 });
 
 test('native Goal observation rejects malformed host facts and changed identity before publishing or checkpointing',async()=>{

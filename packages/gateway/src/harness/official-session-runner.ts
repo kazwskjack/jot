@@ -268,6 +268,7 @@ export class OfficialSessionRunner implements DshRunner {
       const projectionContext = (attemptId = activeAttemptId, blockIndex = 0, deltaIndex = 0): ProjectionContext => ({
         runId: input.taskRequestId, attemptId, messageId: `stream-${input.taskRequestId}`,
         blockId: `stream-${input.taskRequestId}:${blockIndex}`, deltaIndex, at: new Date().toISOString(), knownTools,
+        deferCompletion: input.checkpointTask === true,
       })
       const emit = async (projection: JotProjection | null) => { if (projection && input.onProjection) await input.onProjection(projection) }
       const startWebOperationPolling = (meta: SessionToolCallMeta) => {

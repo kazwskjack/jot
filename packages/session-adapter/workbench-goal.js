@@ -112,7 +112,7 @@ function validTaskFacts(task) {
       for(const key of ['limits','used','held']){
         const amounts=balance[key];
         if(!exactRecord(amounts,['tokens','nano_usd','model_calls'])
-          || !Object.values(amounts).every(value=>typeof value==='string'&&/^(0|[1-9][0-9]{0,127})$/.test(value)))invalid();
+          || !Object.entries(amounts).every(([field,value])=>(key==='limits'&&field==='nano_usd'&&value===null)||typeof value==='string'&&/^(0|[1-9][0-9]{0,127})$/.test(value)))invalid();
       }
     }
   }

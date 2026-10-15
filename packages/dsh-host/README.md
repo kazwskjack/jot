@@ -86,10 +86,62 @@ separate: the official picker may use a native dialog for a local Windows
 operator. Neither setting grants an Agent permission to open applications.
 
 Voice, native continuation, native roles, web budget and claimed-input recovery
-are not automatically enabled. Configure their real backend contracts and run
+are not enabled in the default profile. Configure their real backend contracts and run
 their acceptance tests before opting in. This profile does not implement a new
 browser/search server or automatically register private tool backends. Its
 official `web` tool is distinct from an operator's external batch/browser service.
+
+## Opt in to Workbench roles and persistent tasks
+
+Prepare a **new**, dedicated profile with a private route file as the third
+argument. The file accepts only `provider`, `model` and an optional HTTP loopback
+`origin`; it must contain no credentials:
+
+```json
+{"provider":"deepseek-official","model":"deepseek-flash","origin":"http://127.0.0.1:18831"}
+```
+
+Treat this file, checkout and generated profile as trusted operator configuration:
+only the service operator may write them. The configured loopback origin receives
+the internal Bearer credential; loopback alone does not authenticate the listener.
+Approve its port and process ownership before launch. Never accept this file or
+its path from an Agent, web request or another untrusted user.
+
+```powershell
+node packages/dsh-host/create-profile.mjs $env:DSH_HOME jot-workbench 'D:/private/workbench-route.json'
+```
+
+Launch with `--profile jot-workbench` after installing its lock with `npm ci`.
+This explicit option registers `jot-workbench-budgeted` alongside `jot-general`,
+pins the trusted Workbench model route and enables the adapter's native Goal
+continuation bridge. Both presets reuse the full official standard declaration.
+It does **not** enable native Team/role-child dispatch, web budget, voice or
+claimed-input recovery. A saved Gateway role is distinct from a native Team child.
+The original DSH planner, permissions and tool lifecycle remain in charge.
+The existing authenticated Workbench context bridge remains configured in the
+default profile; default-off refers to the budgeted preset/model binding and
+native continuation, not removal of that bridge.
+
+The Gateway API, worker and host must share the same fresh, private
+`GENERAL_AGENT_INTERNAL_CHANNEL_TOKEN`, independent of the adapter token and model
+credential. Configure the actual budget policy file on both API and worker, with
+the same route as the host. Worker settings also include:
+
+```powershell
+$env:GENERAL_AGENT_MODEL_BUDGET_POLICY_FILE = 'D:/private/budget-policy.json'
+$env:GENERAL_AGENT_WORKBENCH_EXECUTION_READY = 'true'
+$env:GENERAL_AGENT_WORKER_CONCURRENCY = '2'
+$env:GENERAL_AGENT_WORKBENCH_DSH_AGENT_PRESET = 'jot-workbench-budgeted'
+```
+
+Use the existing [Gateway deployment guide](../gateway/README.md) for API and
+worker startup and budget-policy schema. Readiness is an operator declaration
+after configuring the backend, not something the preparation script proves.
+Without it, the original worker admission gate leaves Workbench-bound runs queued.
+Retain owner, capability epoch, lease and budget checks; do not remove those gates
+to get a run started. An unlimited monetary cap is represented by
+`limits.nano_usd: null`; actual and reserved usage must still be nonnegative
+integer strings. Token and call limits remain independently enforced.
 
 ## Verification and remaining acceptance
 
@@ -122,16 +174,28 @@ an explicit version because the official DeepSeek request inventory requires
 both name and version for every named active package; missing metadata rejects
 the request before HTTP dispatch. No inventory/permission checks are bypassed.
 
-This is ordinary-chat acceptance, not persistent-task business approval or a
-real provider inference/quality test. Native Team/Goal dispatch, background task
-review and their distinct Gateway policy/lease gates remain separate acceptance
-targets. The test enables none of them on a deployment.
+Additional cases use the explicit Workbench profile to run a saved role and a
+persistent task through the same real services and synthetic model transport.
+The role checks one settled budget attempt and an idempotent retry after success.
+The task invokes the real workspace tool to request user input: the original
+Goal becomes paused/disarmed, the worker records a durable checkpoint and pending
+interaction, and Gateway reports `waiting_user`. Native `turn/end` reports the
+expected `workbench_goal_stopped` guard error; it is not claimed as a completed
+native turn or successful business delivery. Intermediate text stays provisional
+in the public snapshot rather than being marked as a completed reply. Usage is
+settled before a safe wait is accepted, and retry does not launch another run.
+
+This is not persistent-task business approval or a real provider inference/quality
+test. Resuming after user input, multiple automatic Goal rounds, native Team
+dispatch and final business review remain separate acceptance targets.
+The tests enable none of these options on a deployment.
 It uses a synthetic owner header inside its private loopback boundary; production
 identity-proxy authentication and browser Origin/CSRF checks are not exercised
 by this integration case.
 
-Passing these cases proves the local official composition, upload and ordinary
-Gateway/Worker message path. It does not prove real model inference, external tools, persistent-task execution,
+Passing these cases proves the local official composition, upload, ordinary chat,
+saved-role execution and a persistent task's confirmed waiting checkpoint.
+It does not prove real model inference, external tools, complete persistent-task delivery,
 notification delivery, target-machine ACLs or power-loss durability. Full
 claimed-input recovery additionally requires a reviewed immutable release
 manifest, actual loaded source / permissions / model-route validation and

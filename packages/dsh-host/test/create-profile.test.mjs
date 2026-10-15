@@ -55,3 +55,15 @@ test('host plugin package has the identity required by the official request inve
  const manifest=JSON.parse(await readFile(new URL('../package.json',import.meta.url),'utf8'));
  assert.equal(manifest.name,'jot-dsh-host-preparation');assert.equal(manifest.version,'0.1.0');
 });
+test('explicit workbench opt-in pins the route and budgeted preset without enabling native roles',()=>isolated(async root=>{
+ const result=await createHostProfile({home:root,workbench:{provider:'deepseek-official',model:'deepseek-flash'}});
+ const patch=JSON.parse((await readFile(join(result.directory,'cordis.patch.yml'),'utf8')).replace('!!js process.cwd()','null'));
+ const rows=patch.find(row=>row.insert).insert,config=rows.find(row=>row.id==='jot-session-adapter').config;
+ assert.deepEqual(config.workbenchModel,{provider:'deepseek-official',model:'deepseek-flash'});
+ assert.equal(config.nativeContinuation,true);assert.equal(config.nativeRoles,false);
+ assert.deepEqual(rows.find(row=>row.id==='preset-jot-general').config,{budgeted:true});
+}));
+test('invalid workbench configuration cannot silently downgrade or create a profile',()=>isolated(async root=>{
+ const credentialOrigin=new URL('http://127.0.0.1');credentialOrigin.username='test-user';credentialOrigin.password='test-password';
+ for(const workbench of [{},{provider:'x',model:''},{provider:'x',model:'y',token:'forbidden'},{provider:'x',model:'y',origin:'https://example.com'},{provider:'x',model:'y',origin:String(credentialOrigin)}])await assert.rejects(createHostProfile({home:root,workbench}),/host_profile_workbench_invalid/);
+}));
