@@ -4,7 +4,7 @@ title: One memory authority with separate extraction and publication
 category: decision
 status: active
 created: "2026-10-15T21:00:42"
-updated: "2026-10-15T21:22:29"
+updated: "2026-10-15T21:35:01"
 ---
 
 <!-- compiled_truth -->
@@ -34,5 +34,11 @@ Integration is incomplete until owner isolation, source freshness, original budg
 - time: 2026-10-15T21:22:29
   kind: decision
   summary: "Correct source reference: earlier docs/WORKBENCH.md meant root WORKBENCH.md; add current integration evidence"
+  source: MEMORY-AUTOMATION.md
+  affects: [memory-authority]
+
+- time: 2026-10-15T21:35:01
+  kind: evidence
+  summary: "Scoped capture, owner review and original DSH budgeted proposal wiring passed local regression and isolated browser checks; idle plugin dispatch remains open"
   source: MEMORY-AUTOMATION.md
   affects: [memory-authority]
