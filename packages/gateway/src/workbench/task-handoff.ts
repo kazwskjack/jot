@@ -24,11 +24,18 @@ export class TaskHandoffController {
   return {owner,root_run:root,lease_generation:a.lease_generation,lead:a.lead,members:[...a.members].sort(),...(a.lease_owner===undefined?{}:{lease_owner:a.lease_owner}),...(a.policy_version===undefined?{}:{policy_version:a.policy_version})};
  }
  private row(owner:string,root:string,a:Authority){const r=this.db.prepare('SELECT authority_json,state_json FROM wb_task_handoff_control WHERE owner_id=? AND root_run_id=?').get(owner,root) as Row|undefined;if(r&&r.authority_json!==JSON.stringify(a))throw new Error('handoff_lease_changed');return r;}
+ private digest(action:string,input:Record<string,unknown>){return createHash('sha256').update(JSON.stringify([action,Object.entries(input).sort(([a],[b])=>a.localeCompare(b))])).digest('hex');}
  get(owner:string,root:string):State {const a=this.authority(owner,root),r=this.row(owner,root,a);if(!r)throw new Error('handoff_not_started');return JSON.parse(r.state_json);}
+ getIfStarted(owner:string,root:string):State|null {const a=this.authority(owner,root),r=this.row(owner,root,a);return r?JSON.parse(r.state_json):null;}
+ readReceipt(owner:string,root:string,action:string,input:Record<string,unknown>){
+  if(!id(input.request_id))throw new Error('handoff_request_invalid');const a=this.authority(owner,root);this.row(owner,root,a);
+  const prior=this.db.prepare('SELECT digest,response_json FROM wb_task_handoff_requests WHERE owner_id=? AND root_run_id=? AND request_id=?').get(owner,root,input.request_id) as {digest:string;response_json:string}|undefined;
+  if(!prior)return {found:false as const};return {found:true as const,digest_matches:prior.digest===this.digest(action,input),response:JSON.parse(prior.response_json) as unknown};
+ }
  assertController(owner:string,root:string,role:string,revision:number){const s=this.get(owner,root);if(s.revision!==revision)throw new Error('handoff_revision_conflict');if(s.phase!=='active')throw new Error('handoff_closed');if(s.controller!==role)throw new Error('handoff_controller_changed');return s;}
  private mutate(owner:string,root:string,action:string,input:Record<string,unknown>,change:(a:Authority,r:Row|undefined)=>State){
   if(!id(input.request_id))throw new Error('handoff_request_invalid');return withImmediateTransaction(this.db,()=>{
-   const a=this.authority(owner,root),r=this.row(owner,root,a);const digest=createHash('sha256').update(JSON.stringify([action,Object.entries(input).sort(([a],[b])=>a.localeCompare(b))])).digest('hex');
+   const a=this.authority(owner,root),r=this.row(owner,root,a);const digest=this.digest(action,input);
    const prior=this.db.prepare('SELECT digest,response_json FROM wb_task_handoff_requests WHERE owner_id=? AND root_run_id=? AND request_id=?').get(owner,root,input.request_id as string) as {digest:string;response_json:string}|undefined;
    if(prior){if(prior.digest!==digest)throw new Error('handoff_request_conflict');return JSON.parse(prior.response_json) as State;}
    const next=change(a,r);this.db.prepare('INSERT INTO wb_task_handoff_control VALUES(?,?,?,?) ON CONFLICT(owner_id,root_run_id) DO UPDATE SET state_json=excluded.state_json').run(owner,root,JSON.stringify(a),JSON.stringify(next));

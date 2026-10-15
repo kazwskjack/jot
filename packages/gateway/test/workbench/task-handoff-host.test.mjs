@@ -1,10 +1,19 @@
 import test from 'node:test';import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import {fixture} from './task-wait-fixture.mjs';
+import {buildServer} from '../../src/server.ts';
 import {TaskCollaborationService} from '../../src/workbench/task-collaboration.ts';import {TaskDelegationService} from '../../src/workbench/task-delegation.ts';
 import {createTaskHandoffHost} from '../../src/workbench/task-handoff-host.ts';
 import {NativeChildReservations} from '../../src/workbench/native-child-reservations.ts';
 import {openProductDatabase} from '../../src/db/database.ts';
 async function setup(t){const f=await fixture(t);const member=f.workbench.createAgent('alice',{name:'Reviewer',workspace_id:'ws',project_id:f.a.project_id});const team=f.workbench.createTeam('alice',{name:'Team',workspace_id:'ws',project_id:f.a.project_id,member_ids:[f.a.agent_id,member.agent_id]});const collaboration=new TaskCollaborationService(f.db,f.workbench,f.persistentTasks,new TaskDelegationService(f.db,f.workbench,f.persistentTasks));collaboration.save('alice',f.task.task_id,{expected_version:0,enabled:true,team_id:team.team_id,member_ids:[member.agent_id],max_delegations:2,max_active:2});f.db.prepare("UPDATE ga_runs SET status='running' WHERE id=?").run(f.runId);f.db.prepare('INSERT INTO ga_worker_leases VALUES(?,?,?,?,?) ON CONFLICT(resource_id) DO UPDATE SET owner=excluded.owner,generation=excluded.generation,expires_at=excluded.expires_at').run(f.runId,'handoff-worker',1,String(Date.now()+60000),'now');const host=createTaskHandoffHost({db:f.db,workbench:f.workbench,tasks:f.persistentTasks,collaboration,ledger:f.modelBudgets,owner:'alice',rootRun:f.runId,policyVersion:1,executionLease:{owner:'handoff-worker',generation:1},model:{provider:'fixture',model:'bounded'}});return {...f,host,member,collaboration};}
+const identityFor=f=>({run_id:f.runId,session_ref:'session-fixture',execution_lease:{owner:'handoff-worker',generation:1}});
+const handoffRequest=(f,action,request={},extra={})=>f.app.inject({method:'POST',url:'/internal/v1/workbench/handoff',headers:{authorization:'Bearer '+f.fixtureConfig.internalChannelToken},payload:{...identityFor(f),action,request,expected_policy_version:1,route:{provider:'fixture',model:'bounded'},...extra}});
+const internalRequest=(f,path,payload)=>f.app.inject({method:'POST',url:'/internal/v1/workbench/'+path,headers:{authorization:'Bearer '+f.fixtureConfig.internalChannelToken},payload});
+function prepareNativeChild(f,session,requestId){const reservation=new NativeChildReservations(f.db,f.collaboration).reserve({run_id:f.runId,session_ref:'session-fixture',child_session_ref:session,role_ref:f.member.agent_id,request_id:requestId,expected_policy_version:1,execution_lease:identityFor(f).execution_lease});return f.workbench.prepareNativeChild('alice',reservation.reservation_id);}
+const closureProof=session=>({protocol:1,session_ref:session,parent_session_ref:'session-fixture',seq_exclusive:10,turn_end_seq:9,log_sha256:'a'.repeat(64),driver_nonresident:true,inbox_pending:0});
+const closeNativeChild=async(f,child)=>internalRequest(f,'native-child-close',{run_id:child.run_id,session_ref:child.session_ref,proof:closureProof(child.session_ref)});
+async function transferToChild(f,child){const started=await handoffRequest(f,'start',{request_id:'recovery-start',max_hops:2});assert.equal(started.statusCode,200,started.body);return handoffRequest(f,'transfer',{request_id:'recovery-transfer',expected_revision:1,from:f.a.agent_id,to:f.member.agent_id,execution_run_id:child.run_id,execution_session_ref:child.session_ref});}
 test('host binds original role policy, root run and budget without allocating a child',async t=>{const f=await setup(t);const balances=f.modelBudgets.balancesForRun('alice',f.runId);f.host.start({request_id:'start',max_hops:2});const next=f.host.transfer({request_id:'transfer',expected_revision:1,from:f.a.agent_id,to:f.member.agent_id});assert.equal(next.controller,f.member.agent_id);assert.deepEqual(f.modelBudgets.balancesForRun('alice',f.runId),balances);assert.equal(f.db.prepare('SELECT count(*) n FROM wb_native_child_reservations').get().n,0);});
 
 test('authenticated handoff transport binds the original lead and atomically rejects a bad receiver',async t=>{
@@ -42,6 +51,97 @@ test('handoff HTTP transfer and replay bind one exact native execution and retur
  assert.notEqual((await guard(f.runId,'session-fixture')).statusCode,200);assert.equal((await guard(child.run_id,'http-child-one')).statusCode,200);assert.notEqual((await guard(other.run_id,'http-child-two')).statusCode,200);
  const returned=await invoke('transfer',{request_id:'return',expected_revision:2,from:f.member.agent_id,to:f.a.agent_id,execution_run_id:f.runId,execution_session_ref:'session-fixture'});assert.equal(returned.statusCode,200,returned.body);assert.equal(returned.json().state.phase,'returned');
  assert.equal((await guard(f.runId,'session-fixture')).statusCode,200);assert.notEqual((await guard(child.run_id,'http-child-one')).statusCode,200);
+});
+
+test('authorized return recovery reports none before start and while the lead controls the task',async t=>{
+ const f=await setup(t),identity={run_id:f.runId,session_ref:'session-fixture',execution_lease:{owner:'handoff-worker',generation:1}};
+ const invoke=(action,request={})=>f.app.inject({method:'POST',url:'/internal/v1/workbench/handoff',headers:{authorization:'Bearer '+f.fixtureConfig.internalChannelToken},payload:{...identity,action,request,expected_policy_version:1,route:{provider:'fixture',model:'bounded'}}});
+ const before=await invoke('recover_return');assert.equal(before.statusCode,200,before.body);assert.deepEqual(before.json(),{recovery:{state:'none',execution_authorized:false}});
+ assert.equal(f.db.prepare('SELECT count(*) n FROM wb_task_handoff_requests').get().n,0);
+ assert.equal((await invoke('start',{request_id:'start',max_hops:2})).statusCode,200);
+ const lead=await invoke('recover_return');assert.equal(lead.statusCode,200,lead.body);assert.deepEqual(lead.json(),{recovery:{state:'none',execution_authorized:false}});
+ assert.equal(f.host.get().revision,1);assert.equal(f.host.get().controller,f.a.agent_id);
+ const current=await invoke('get');assert.equal(current.statusCode,200,current.body);assert.equal(current.json().state.revision,1,'existing get semantics remain unchanged');
+});
+test('return recovery treats every stopped handoff as blocked, never as a fresh lead state',async t=>{
+ const f=await setup(t);
+ const started=await handoffRequest(f,'start',{request_id:'stopped-start',max_hops:2});assert.equal(started.statusCode,200,started.body);
+ const stopped=await handoffRequest(f,'stop',{request_id:'stopped-stop',expected_revision:1});assert.equal(stopped.statusCode,200,stopped.body);
+ const state=f.db.prepare('SELECT state_json FROM wb_task_handoff_control WHERE owner_id=? AND root_run_id=?').get('alice',f.runId).state_json;
+ const count=f.db.prepare('SELECT count(*) n FROM wb_task_handoff_requests WHERE owner_id=? AND root_run_id=?').get('alice',f.runId).n;
+ const response=await handoffRequest(f,'recover_return');assert.equal(response.statusCode,200,response.body);
+ assert.deepEqual(response.json(),{recovery:{state:'blocked',execution_authorized:false,reason:'handoff_stopped'}});
+ assert.equal(f.db.prepare('SELECT state_json FROM wb_task_handoff_control WHERE owner_id=? AND root_run_id=?').get('alice',f.runId).state_json,state);
+ assert.equal(f.db.prepare('SELECT count(*) n FROM wb_task_handoff_requests WHERE owner_id=? AND root_run_id=?').get('alice',f.runId).n,count);
+});
+test('return recovery blocks an unclosed bound child and never substitutes another run of the same role',async t=>{
+ const f=await setup(t),bound=prepareNativeChild(f,'bound-child','bound-spawn'),decoy=prepareNativeChild(f,'decoy-child','decoy-spawn');
+ const transferred=await transferToChild(f,bound);assert.equal(transferred.statusCode,200,transferred.body);
+ const closed=await closeNativeChild(f,decoy);assert.equal(closed.statusCode,200,closed.body);
+ const before=f.db.prepare('SELECT state_json FROM wb_task_handoff_control').get().state_json,requestCount=f.db.prepare('SELECT count(*) n FROM wb_task_handoff_requests').get().n;
+ const response=await handoffRequest(f,'recover_return');assert.equal(response.statusCode,200,response.body);
+ assert.deepEqual(response.json(),{recovery:{state:'blocked',execution_authorized:false,reason:'child_closure_unavailable'}});
+ assert.equal(f.db.prepare('SELECT state_json FROM wb_task_handoff_control').get().state_json,before);
+ assert.equal(f.db.prepare('SELECT count(*) n FROM wb_task_handoff_requests').get().n,requestCount);
+});
+test('return recovery reports pending only for the exact bound latest child and verified immutable proof',async t=>{
+ const f=await setup(t),child=prepareNativeChild(f,'pending-child','pending-spawn');
+ const transferred=await transferToChild(f,child);assert.equal(transferred.statusCode,200,transferred.body);
+ const closed=await closeNativeChild(f,child);assert.equal(closed.statusCode,200,closed.body);
+ const requestCount=f.db.prepare('SELECT count(*) n FROM wb_task_handoff_requests').get().n;
+ const response=await handoffRequest(f,'recover_return');assert.equal(response.statusCode,200,response.body);
+ const requestId='handoff-return-'+createHash('sha256').update(JSON.stringify([f.runId,'session-fixture',child.run_id,child.session_ref])).digest('hex');
+ assert.deepEqual(response.json(),{recovery:{state:'pending',execution_authorized:false,revision:2,lead_role_ref:f.a.agent_id,role_ref:f.member.agent_id,child_run_id:child.run_id,child_session_ref:child.session_ref,proof:closureProof(child.session_ref),request_id:requestId}});
+ assert.equal(f.db.prepare('SELECT count(*) n FROM wb_task_handoff_requests').get().n,requestCount);
+ assert.equal(f.db.prepare('SELECT revision,run_id,session_ref FROM wb_task_handoff_executions WHERE owner_id=? AND root_run_id=? AND revision=2').get('alice',f.runId).run_id,child.run_id);
+});
+test('return recovery refuses a native closure whose persisted digest does not verify',async t=>{
+ const f=await setup(t),child=prepareNativeChild(f,'tampered-proof-child','tampered-proof-spawn');
+ const transferred=await transferToChild(f,child);assert.equal(transferred.statusCode,200,transferred.body);
+ const closed=await closeNativeChild(f,child);assert.equal(closed.statusCode,200,closed.body);
+ f.db.exec('DROP TRIGGER wb_native_child_closure_no_update');f.db.prepare('UPDATE wb_native_child_closures SET receipt_sha256=? WHERE run_id=?').run('f'.repeat(64),child.run_id);
+ const response=await handoffRequest(f,'recover_return');assert.equal(response.statusCode,200,response.body);
+ assert.deepEqual(response.json(),{recovery:{state:'blocked',execution_authorized:false,reason:'native_child_proof_unverified'}});
+});
+test('return recovery reconstructs a committed lost return from durable receipt after reopening the database',async t=>{
+ const f=await setup(t),child=prepareNativeChild(f,'returned-child','returned-spawn');
+ const transferred=await transferToChild(f,child);assert.equal(transferred.statusCode,200,transferred.body);
+ const closed=await closeNativeChild(f,child);assert.equal(closed.statusCode,200,closed.body);
+ const expectedRequestId='handoff-return-'+createHash('sha256').update(JSON.stringify([f.runId,'session-fixture',child.run_id,child.session_ref])).digest('hex');
+ const returned=await handoffRequest(f,'transfer',{request_id:expectedRequestId,expected_revision:2,from:f.member.agent_id,to:f.a.agent_id,execution_run_id:f.runId,execution_session_ref:'session-fixture'});
+ assert.equal(returned.statusCode,200,returned.body);assert.equal(returned.json().state.phase,'returned');
+ const storedReceipt=f.host.readReceipt('transfer',{request_id:expectedRequestId,expected_revision:2,from:f.member.agent_id,to:f.a.agent_id});assert.equal(storedReceipt.found,true);assert.equal(storedReceipt.digest_matches,true,JSON.stringify(storedReceipt));assert.deepEqual(storedReceipt.response,returned.json().state);
+ const reopened=await buildServer(f.fixtureConfig);let response;
+ try{response=await reopened.app.inject({method:'POST',url:'/internal/v1/workbench/handoff',headers:{authorization:'Bearer '+f.fixtureConfig.internalChannelToken},payload:{...identityFor(f),action:'recover_return',request:{},expected_policy_version:1,route:{provider:'fixture',model:'bounded'}}});}finally{await reopened.app.close();reopened.db.close();}
+ assert.equal(response.statusCode,200,response.body);
+ const requestId='handoff-return-'+createHash('sha256').update(JSON.stringify([f.runId,'session-fixture',child.run_id,child.session_ref])).digest('hex');
+ assert.deepEqual(response.json(),{recovery:{state:'returned',execution_authorized:false,revision:3,lead_role_ref:f.a.agent_id,role_ref:f.member.agent_id,child_run_id:child.run_id,child_session_ref:child.session_ref,proof:closureProof(child.session_ref),request_id:requestId,receipt:{state:returned.json().state}}});
+ assert.equal(f.db.prepare('SELECT count(*) n FROM wb_task_handoff_requests').get().n,3);
+});
+test('return recovery rejects an immutable return receipt with a mismatched request digest',async t=>{
+ const f=await setup(t),child=prepareNativeChild(f,'tampered-return-child','tampered-return-spawn');
+ const transferred=await transferToChild(f,child);assert.equal(transferred.statusCode,200,transferred.body);
+ const closed=await closeNativeChild(f,child);assert.equal(closed.statusCode,200,closed.body);
+ const requestId='handoff-return-'+createHash('sha256').update(JSON.stringify([f.runId,'session-fixture',child.run_id,child.session_ref])).digest('hex');
+ const returned=await handoffRequest(f,'transfer',{request_id:requestId,expected_revision:2,from:f.member.agent_id,to:f.a.agent_id,execution_run_id:f.runId,execution_session_ref:'session-fixture'});assert.equal(returned.statusCode,200,returned.body);
+ const receipt=f.db.prepare('SELECT digest,response_json FROM wb_task_handoff_requests WHERE owner_id=? AND root_run_id=? AND request_id=?').get('alice',f.runId,requestId);
+ f.db.exec('DROP TRIGGER wb_task_handoff_request_no_update');f.db.prepare('UPDATE wb_task_handoff_requests SET digest=? WHERE owner_id=? AND root_run_id=? AND request_id=?').run('0'.repeat(64),'alice',f.runId,requestId);
+ const badDigest=await handoffRequest(f,'recover_return');assert.equal(badDigest.statusCode,200,badDigest.body);assert.deepEqual(badDigest.json(),{recovery:{state:'blocked',execution_authorized:false,reason:'handoff_return_receipt_unverified'}});
+ f.db.exec('DROP TRIGGER wb_task_handoff_request_no_update');
+ f.db.prepare('UPDATE wb_task_handoff_requests SET digest=?,response_json=? WHERE owner_id=? AND root_run_id=? AND request_id=?').run(receipt.digest,JSON.stringify({...returned.json().state,revision:99}),'alice',f.runId,requestId);
+ const badResponse=await handoffRequest(f,'recover_return');assert.equal(badResponse.statusCode,200,badResponse.body);assert.deepEqual(badResponse.json(),{recovery:{state:'blocked',execution_authorized:false,reason:'handoff_return_receipt_unverified'}});
+});
+test('return recovery preserves existing authorization rejection for stale lease, revoked policy, and task cancellation',async t=>{
+ const f=await setup(t);
+ assert.notEqual((await handoffRequest(f,'recover_return',{}, {session_ref:'foreign-session'})).statusCode,200);
+ assert.notEqual((await handoffRequest(f,'recover_return',{}, {execution_lease:{owner:'handoff-worker',generation:2}})).statusCode,200);
+ f.collaboration.save('alice',f.task.task_id,{expected_version:1,enabled:false});
+ const revoked=await handoffRequest(f,'recover_return');assert.notEqual(revoked.statusCode,200);assert.notEqual(revoked.json().recovery?.state,'blocked');
+});
+test('return recovery rejects cancelled task instead of disguising cancellation as blocked',async t=>{
+ const f=await setup(t),run=f.runs.get(f.runId,'alice');
+ f.persistentTasks.cancelOccurrence('alice',f.task.task_id,f.occurrence.occurrence_id,run.version,'cancel-recovery');
+ const response=await handoffRequest(f,'recover_return');assert.notEqual(response.statusCode,200);assert.notEqual(response.json().recovery?.state,'blocked');
 });
 test('changed policy rejects old request replay and status access',async t=>{const f=await setup(t);f.host.start({request_id:'start',max_hops:2});f.collaboration.save('alice',f.task.task_id,{expected_version:1,enabled:false});assert.throws(()=>f.host.start({request_id:'start',max_hops:2}),/task_collaboration_revoked/);assert.throws(()=>f.host.get(),/task_collaboration_revoked/);});
 test('unsettled model usage blocks transfer while stop remains possible',async t=>{const f=await setup(t);f.host.start({request_id:'start',max_hops:2});f.modelBudgets.reserve('alice',f.runId,{attempt_id:'pending',provider:'fixture',model:'bounded'});f.modelBudgets.dispatch('alice',f.runId,'pending');assert.throws(()=>f.host.transfer({request_id:'transfer',expected_revision:1,from:f.a.agent_id,to:f.member.agent_id}),/handoff_usage_unresolved/);assert.equal(f.host.get().revision,1);assert.equal(f.host.stop({request_id:'stop',expected_revision:1}).phase,'stopped');assert.equal(f.db.prepare("SELECT state FROM wb_model_budget_attempts WHERE attempt_id='pending'").get().state,'in_flight');});

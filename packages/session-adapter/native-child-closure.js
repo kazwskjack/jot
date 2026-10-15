@@ -88,6 +88,59 @@ export async function verifyNativeChildPrefix({agent,parentSessionRef,persistenc
  * This is a host observation, not an LLM completion or business verdict.
  */
 export async function captureNativeChildClosure(input){return captureNativeQuiescence(input,false);}
+/** Verify an already committed closure from read-only durable data. Never
+ * resume an Agent or synthesize a closure for an unaccounted crashed run. */
+export async function verifyOfflineNativeClosure({parentSessionRef,proof,registry,sessions,projections,persistence,validateLog,signal}){
+ const fail=()=>{throw Error('native_offline_closure_invalid');},keys=['protocol','session_ref','parent_session_ref','seq_exclusive','turn_end_seq','log_sha256','driver_nonresident','inbox_pending','remote_operations'];
+ if(!proof||typeof proof!=='object'||Array.isArray(proof)||Object.keys(proof).some(key=>!keys.includes(key))||proof.protocol!==1||proof.driver_nonresident!==true||proof.inbox_pending!==0
+  ||typeof parentSessionRef!=='string'||!ID.test(parentSessionRef)||proof.parent_session_ref!==parentSessionRef||typeof proof.session_ref!=='string'||!ID.test(proof.session_ref)||proof.session_ref===parentSessionRef
+  ||!Number.isSafeInteger(proof.seq_exclusive)||proof.seq_exclusive<1||!Number.isSafeInteger(proof.turn_end_seq)||proof.turn_end_seq<0||proof.turn_end_seq>=proof.seq_exclusive
+  ||typeof proof.log_sha256!=='string'||!/^[a-f0-9]{64}$/.test(proof.log_sha256)||typeof validateLog!=='function'||typeof registry?.get!=='function'||typeof sessions?.get!=='function'||typeof projections?.snapshot!=='function'||typeof persistence?.flush!=='function'||typeof persistence?.open!=='function')fail();
+ const saved=JSON.parse(json(proof)),id=saved.session_ref,count=saved.seq_exclusive;
+ const check=()=>{signal?.throwIfAborted();if(registry.get(id)!==undefined||sessions.get(id)!==undefined)throw Error('native_offline_child_resident');};
+ for(let pass=0;pass<2;pass++){
+  check();await persistence.flush();check();const handle=await persistence.open(id,'read',{signal});
+  try{
+   check();if(handle.id!==id||handle.access!=='read'||handle.header?.parentSession!==parentSessionRef||handle.header.isSeeded!==false||handle.inheritedEventCount!==0)fail();
+   const hash=createHash('sha256').update(headerJson(handle.header)+'\n'),tools=new Set(),remoteCalls=new Map(),inbox={'next-turn':[],'next-step':[]},events=[];let openTurn=false,lastEnd=-1;
+   for(let offset=0;offset<count;){const length=Math.min(256,count-offset),result=await handle.read(offset,length,{signal});check();if(result?.events?.length!==length)fail();
+    events.push(...result.events);
+    for(const event of result.events){if(event?.seq!==offset||typeof event.type!=='string')fail();hash.update(json(event)+'\n');offset++;
+     if(event.type==='turn/start'){if(openTurn)fail();openTurn=true;}
+     if(event.type==='turn/end'){if(!openTurn)fail();openTurn=false;lastEnd=event.seq;}
+     if(event.type==='agent/inbox/spliced'){
+      const splice=event.data,target=splice?.target,removed=splice?.removedCount??0,items=inbox[target];
+      if(!Array.isArray(items)||!Number.isSafeInteger(splice.start)||splice.start<0||splice.start>items.length||!Number.isSafeInteger(removed)||removed<0||splice.start+removed>items.length||!Array.isArray(splice.inserted))fail();
+      items.splice(splice.start,removed,...splice.inserted);const ids=new Set();for(const message of [...inbox['next-turn'],...inbox['next-step']]){if(typeof message?.id!=='string'||!message.id||ids.has(message.id))fail();ids.add(message.id);}
+     }
+     if(event.type==='tool/call'){
+      const callId=event.data?.callId;if(!openTurn||typeof callId!=='string'||!ID.test(callId)||tools.has(callId))fail();tools.add(callId);
+      const batch=batchWebCall(event.data);if(batch){if(remoteCalls.has(callId))fail();remoteCalls.set(callId,batch.name);}
+     }
+     if(event.type==='tool/result'){
+      if(event.data?.error?.code==='TOOL_OUTCOME_UNKNOWN')fail();const callId=event.data?.message?.source?.callId??event.data?.message?.toolCallId??event.data?.callId;
+      if(!openTurn)fail();if(event.surfaceOp!==undefined&&event.surfaceOp!=='append')continue;
+      if(!tools.delete(callId)&&!(event.data?.message?.isError===true&&event.data?.error?.code==='TOOL_NOT_STARTED'))fail();
+     }
+    }
+   }
+   const suffix=await handle.read(count,1,{signal});check();
+   if(!Array.isArray(suffix?.events)||suffix.events.length||openTurn||tools.size||lastEnd!==saved.turn_end_seq||inbox['next-turn'].length||inbox['next-step'].length||hash.digest('hex')!==saved.log_sha256)fail();
+   // A new immutable read view gets cold projection cells, never the live
+   // Session's cache or a writer. Select only inbox wire output: unrelated
+   // optional domain views may legitimately be absent on this child.
+   const view=Object.freeze({id,header:handle.header,inheritedEventCount:0,seq:count,eventAt:index=>events[index],snapshotEvents:(start=0,end=count)=>events.slice(start,end)});
+   const validated=await validateLog(view,{signal});check();if(validated?.validated!==true)fail();
+   const projection=projections.snapshot(view,['inbox']),pending=projection?.values?.inbox;check();
+   if(projection?.asOfSeq!==count-1||!Array.isArray(pending?.['next-turn'])||!Array.isArray(pending?.['next-step'])||pending['next-turn'].length||pending['next-step'].length)fail();
+   const operations=saved.remote_operations??[];
+   if(!Array.isArray(operations)||operations.length!==remoteCalls.size||new Set(operations.map(p=>p?.request_id)).size!==remoteCalls.size
+    ||operations.some(p=>!p||p.tool_name!==remoteCalls.get(p.request_id)||!settledWebOperation(p,id,p.request_id)))fail();
+  }finally{await handle.close();}
+  check();
+ }
+ return {verified:true,session_ref:id,seq_exclusive:count,log_sha256:saved.log_sha256};
+}
 export async function captureNativeHandoffQuiescence(input,maintenanceSignal){
  if(maintenanceSignal!==undefined&&(input.signal!==maintenanceSignal||typeof maintenanceSignal.throwIfAborted!=='function'))throw Error('native_handoff_maintenance_invalid');
  return captureNativeQuiescence(input,true,maintenanceSignal!==undefined);

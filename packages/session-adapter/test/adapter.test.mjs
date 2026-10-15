@@ -100,3 +100,9 @@ test('automatic final return requires a trusted callback and native handoff admi
  try{const ctx=Object.defineProperty({},'sessionController',{get(){throw Error('controller_must_not_be_reached');}});for(const handoffReturn of [{},async()=>{}])assert.throws(()=>apply(ctx,{handoffReturn}),/jot_session_adapter_config_invalid/);}
  finally{if(prior===undefined)delete process.env.JOT_SESSION_ADAPTER_TOKEN;else process.env.JOT_SESSION_ADAPTER_TOKEN=prior;}
 });
+
+test('durable final-return recovery requires trusted native handoff configuration',()=>{
+ const prior=process.env.JOT_SESSION_ADAPTER_TOKEN;process.env.JOT_SESSION_ADAPTER_TOKEN=token;
+ try{const ctx=Object.defineProperty({},'sessionController',{get(){throw Error('controller_must_not_be_reached');}});for(const handoffRecovery of [{},async()=>{}])assert.throws(()=>apply(ctx,{handoffRecovery}),/jot_session_adapter_config_invalid/);}
+ finally{if(prior===undefined)delete process.env.JOT_SESSION_ADAPTER_TOKEN;else process.env.JOT_SESSION_ADAPTER_TOKEN=prior;}
+});

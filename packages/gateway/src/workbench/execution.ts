@@ -96,6 +96,41 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
         rootRun:identity.run_id,policyVersion:input.expected_policy_version as number,executionLease:input.execution_lease,
         model:{provider:route.provider as string,model:route.model as string}});
       if(action==='get'){fields(args,[]);const state=host.get();const binding=db.prepare('SELECT revision,run_id,session_ref FROM wb_task_handoff_executions WHERE owner_id=? AND root_run_id=? AND revision=?').get(identity.owner_id,identity.run_id,state.revision);return {state,binding:binding??null};}
+      if(action==='recover_return'){
+        fields(args,[]);const none=()=>({recovery:{state:'none',execution_authorized:false as const}}),blocked=(reason:string)=>({recovery:{state:'blocked',execution_authorized:false as const,reason}});
+        const state=host.getIfStarted();if(!state)return none();const lead=identity.agent_id;
+        if(state.route?.[0]!==lead||state.controller!==state.route.at(-1)||!Number.isSafeInteger(state.revision)||state.revision<1)return blocked('handoff_state_unverified');
+        if(state.phase==='stopped')return blocked('handoff_stopped');
+        if(state.phase==='active'&&state.controller===lead&&state.route.length===1)return none();
+        const sourceFor=(revision:number,role:string)=>{
+          const binding=db.prepare('SELECT run_id,session_ref FROM wb_task_handoff_executions WHERE owner_id=? AND root_run_id=? AND revision=?').get(identity.owner_id,identity.run_id,revision) as {run_id:string;session_ref:string}|undefined;
+          if(!binding||binding.run_id===identity.run_id)return {blocked:'handoff_execution_unbound' as const};
+          const native=db.prepare(`SELECT n.run_id,n.root_run_id,n.owner_id,n.role_id,n.child_session_ref,n.snapshot_json,c.receipt_sha256,c.receipt_json
+            FROM wb_native_execution_runs n LEFT JOIN wb_native_execution_closures c ON c.run_id=n.run_id
+            WHERE n.run_id=? AND n.root_run_id=? AND n.owner_id=? AND n.role_id=? AND n.child_session_ref=?`).get(binding.run_id,identity.run_id,identity.owner_id,role,binding.session_ref) as {run_id:string;root_run_id:string;owner_id:string;role_id:string;child_session_ref:string;snapshot_json:string;receipt_sha256:string|null;receipt_json:string|null}|undefined;
+          if(!native)return {blocked:'handoff_execution_mismatch' as const};if(!native.receipt_json||!native.receipt_sha256)return {blocked:'child_closure_unavailable' as const};
+          let source:{previous_run_id:string;role_ref:string;proof:unknown};
+          try{source=workbench.nativeChildSource(identity.owner_id,{run_id:identity.run_id,session_ref:input.session_ref,child_session_ref:binding.session_ref,purpose:'handoff',execution_lease:input.execution_lease});}
+          catch(error){const code=error instanceof Error?error.message:'';if(code==='native_activation_source_pending')return {blocked:'child_closure_unavailable' as const};if(code==='workbench_identity_forbidden')return {blocked:'native_child_source_mismatch' as const};throw error;}
+          const saved=JSON.parse(native.snapshot_json) as {root_run_id?:string;parent_session_ref?:string;role_id?:string};
+          const proofJson=JSON.stringify(source.proof),proofHash=createHash('sha256').update(String(native.receipt_json)).digest('hex');
+          if(source.previous_run_id!==binding.run_id||source.role_ref!==role||saved.root_run_id!==identity.run_id||saved.parent_session_ref!==input.session_ref||saved.role_id!==role
+            ||native.child_session_ref!==binding.session_ref||native.receipt_sha256!==proofHash||proofJson!==native.receipt_json)return {blocked:'native_child_proof_unverified' as const};
+          return {binding,proof:source.proof};
+        };
+        const requestId=(run:string,session:string)=>'handoff-return-'+createHash('sha256').update(JSON.stringify([identity.run_id,input.session_ref,run,session])).digest('hex');
+        const leadRoleRef=String(state.route[0]);
+        if(state.phase==='active'){
+          if(state.controller===lead)return blocked('handoff_state_unverified');const role=String(state.controller),bound=sourceFor(state.revision,role);if('blocked'in bound)return blocked(bound.blocked);
+          return {recovery:{state:'pending',execution_authorized:false,revision:state.revision,lead_role_ref:leadRoleRef,role_ref:role,child_run_id:bound.binding.run_id,child_session_ref:bound.binding.session_ref,proof:bound.proof,request_id:requestId(bound.binding.run_id,bound.binding.session_ref)}};
+        }
+        if(state.phase!=='returned'||state.controller!==lead||state.revision<3||state.route.length<3)return blocked('handoff_return_unverified');
+        const role=String(state.route.at(-2)),bound=sourceFor(state.revision-1,role);if('blocked'in bound)return blocked(bound.blocked);
+        const id=requestId(bound.binding.run_id,bound.binding.session_ref),receiptInput={request_id:id,expected_revision:state.revision-1,from:role,to:leadRoleRef};
+        const receipt=host.readReceipt('transfer',receiptInput);
+        if(!receipt.found||!receipt.digest_matches||JSON.stringify(receipt.response)!==JSON.stringify(state))return blocked('handoff_return_receipt_unverified');
+        return {recovery:{state:'returned',execution_authorized:false,revision:state.revision,lead_role_ref:leadRoleRef,role_ref:role,child_run_id:bound.binding.run_id,child_session_ref:bound.binding.session_ref,proof:bound.proof,request_id:id,receipt:{state:receipt.response}}};
+      }
       if(action==='stop'){fields(args,['request_id','expected_revision']);return {state:host.stop(args as Parameters<typeof host.stop>[0])};}
       if(action==='start'){
         fields(args,['request_id','max_hops']);const state=host.start(args as Parameters<typeof host.start>[0]);

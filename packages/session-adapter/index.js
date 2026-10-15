@@ -134,7 +134,7 @@ function decodeFilename(headers) {
   return value && Buffer.byteLength(value, 'utf8') <= 255 && !/[\u0000\/\\]/.test(value) ? value : null
 }
 
-export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector,nativeRoleHost,nativeTaskScheduler }) {
+export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery }) {
   const voiceHandler = voiceEnabled ? createVoiceAdapterHandler({ speechController, token }) : null
   const workbenchSessions = new Set()
   const blockedWorkbenchSessions = new Set()
@@ -167,7 +167,7 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       if(requestedPreset==='jot-workbench-budgeted'&&(typeof budgetModelSelector!=='function'||typeof workbenchBridge?.guardBudget!=='function'))return json(503,{error:'workbench_model_unavailable'})
       if (requestedPreset !== undefined) request.agentPreset = requestedPreset
       const value = await controller.create(request)
-      let nativeRecovery
+      let nativeRecovery,handoffRecovery
       if (workbenchRunId !== undefined) {
         try { await workbenchBridge.attach(agents.get(sessionId), { runId: String(workbenchRunId), sessionRef: sessionId,...(workbenchExecutionLease?{executionLease:workbenchExecutionLease}:{}) },{sessions,persistence,signal}) }
         catch (error) { console.error('[jot-workbench-binding]',JSON.stringify(bindingFailureSummary('attach',error)));return json(503, { error: 'workbench_bridge_unavailable' }) }
@@ -176,13 +176,19 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
           catch(error){console.error('[jot-workbench-binding]',JSON.stringify(bindingFailureSummary('model-select',error)));return json(503,{error:'workbench_bridge_unavailable'})}
         }
         const taskRoot=workbenchBridge.taskRootBindingFor?.(agents.get(sessionId))
-        if(nativeTaskScheduler&&taskRoot){
+        if(nativeHandoffRecovery&&taskRoot){
+          try{const recovered=await nativeHandoffRecovery({parent:agents.get(sessionId),parentBinding:taskRoot,signal});
+            if(!['none','blocked','returned'].includes(recovered?.state)||recovered.state==='returned'&&(typeof recovered.request_id!=='string'||!ID.test(recovered.request_id)||!Number.isSafeInteger(recovered.revision)||recovered.revision<3))throw Error('native_handoff_recovery_invalid');
+            handoffRecovery=recovered.state==='returned'?{state:'returned',request_id:recovered.request_id,revision:recovered.revision}:{state:recovered.state};
+          }catch{handoffRecovery={state:'blocked'}}
+        }
+        if(nativeTaskScheduler&&taskRoot&&handoffRecovery?.state!=='blocked'){
           try{nativeRecovery=await nativeTaskScheduler.restore(agents.get(sessionId),taskRoot,signal)}
           catch{nativeRecovery={state:'blocked'}}
         }
-        blockedWorkbenchSessions.delete(sessionId)
+        if(handoffRecovery?.state!=='blocked')blockedWorkbenchSessions.delete(sessionId)
       }
-      return json(201, nativeRecovery?{...value,native_dispatch_recovery:nativeRecovery}:value)
+      return json(201,{...value,...(nativeRecovery?{native_dispatch_recovery:nativeRecovery}:{}),...(handoffRecovery?{native_handoff_recovery:handoffRecovery}:{})})
     }
     const nativeMembers=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/native-members$/)
     if(nativeMembers){
@@ -344,6 +350,7 @@ export function apply(ctx, config = {}) {
     || (config.nativeOperationOrigin !== undefined && (typeof config.nativeOperationOrigin !== 'string' || config.nativeRoles !== true || config.reconcileOperations !== undefined))
     || (config.handoffAdmission !== undefined && (typeof config.handoffAdmission !== 'function' || config.nativeRoles !== true))
     || (config.handoffReturn !== undefined && (typeof config.handoffReturn !== 'function' || config.nativeRoles !== true || typeof config.handoffAdmission !== 'function'))
+    || (config.handoffRecovery !== undefined && (typeof config.handoffRecovery !== 'function' || config.nativeRoles !== true || typeof config.handoffAdmission !== 'function'))
     || (config.nativeDeferredHandoff !== undefined && typeof config.nativeDeferredHandoff !== 'boolean')
     || (config.nativeDeferredHandoff === true && (config.nativeRoles !== true || typeof config.handoffAdmission !== 'function'))
     || (config.nativeRoleRecovery===true&&config.nativeRoles!==true)
@@ -373,7 +380,7 @@ export function apply(ctx, config = {}) {
   const handler = createAdapterHandler({ controller: ctx.sessionController, fileUploads: ctx.fileUploads, agents: ctx.agents,
     sessions:ctx.sessions,persistence:ctx.sessionPersistence,
     speechController, voiceEnabled, token, workbenchBridge,
-    budgetModelSelector,nativeRoleHost,nativeTaskScheduler })
+    budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:config.handoffRecovery })
   const server = createServer(async (req, res) => {
     const abort = new AbortController()
     req.once('aborted', () => abort.abort())

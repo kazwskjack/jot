@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+- Recover final control on trusted root reattachment from the existing immutable child closure and handoff request journals, without another child or model execution.
+- Verify the closed member's read-only log twice, replay the official session invariant in an isolated context and rebuild the official inbox projection before transferring control.
+- Keep unresolved recovery blocked before restoring dispatch; reconcile an already committed return through its exact immutable request receipt.
+
 - Add an optional trusted final-return hook after a member's exact durable closure receipt; official natural settlement retains ownership of child teardown.
 - Revalidate the detached member's persisted log, exact current controller execution and original lease/policy before returning control with a stable management request ID.
 - Verify natural child release and automatic final return through formal HTTP and the installed SDK without probe-driven drain or transfer.

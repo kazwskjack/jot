@@ -1,4 +1,13 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {createAdapterHandler} from '../index.js';
+test('formal reattachment recovers original control before restoring dispatch and keeps unresolved return blocked',async()=>{
+ const agent={id:'root'},binding={runId:'run',sessionRef:'root'},calls=[];let blocked=false;
+ const options={token:'a'.repeat(32),controller:{create:async()=>({session_id:'root'}),prompt:async()=>{calls.push('prompt');return {accepted:true};}},agents:{get:()=>agent},workbenchBridge:{attach:async()=>calls.push('attach'),taskRootBindingFor:()=>binding,guard:async()=>{}},nativeTaskScheduler:{restore:async()=>{calls.push('dispatch');return {state:'restored',items:[]};}},nativeHandoffRecovery:async scope=>{assert.equal(scope.parent,agent);assert.equal(scope.parentBinding,binding);calls.push('return');if(blocked)throw Error('private recovery detail');return {state:'returned',request_id:'original-return',revision:3};}};
+ const handler=createAdapterHandler(options),request=(path,body)=>handler({method:'POST',url:new URL('http://127.0.0.1'+path),headers:{authorization:'Bearer '+'a'.repeat(32)},body}),body={session_id:'root',cwd:'/fixture',workbench_context:{run_id:'run'}};
+ const restored=await request('/v1/sessions',body);assert.equal(restored.status,201);assert.deepEqual(calls,['attach','return','dispatch']);assert.equal(restored.value.native_handoff_recovery.state,'returned');
+ calls.length=0;blocked=true;const pending=await request('/v1/sessions',body);assert.deepEqual(calls,['attach','return']);assert.deepEqual(pending.value.native_handoff_recovery,{state:'blocked'});assert.equal(JSON.stringify(pending).includes('private recovery detail'),false);
+ assert.equal((await request('/v1/sessions/root/prompts',{request_id:'blocked-message',text:'continue'})).status,503);assert.equal(calls.includes('prompt'),false);
+ blocked=false;assert.equal((await request('/v1/sessions',body)).value.native_handoff_recovery.state,'returned');assert.equal((await request('/v1/sessions/root/prompts',{request_id:'resumed-message',text:'continue'})).status,202);
+});
 test('formal Session attachment restores only the trusted task root and reports blocked recovery without hiding the original Session',async()=>{
  const agent={id:'root'},binding={runId:'run',sessionRef:'root'},calls=[];
  const bridge={attach:async()=>calls.push('attach'),taskRootBindingFor:()=>binding,guard:async()=>{}};

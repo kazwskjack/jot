@@ -58,6 +58,8 @@ export function createTaskHandoffHost(options:{db:DatabaseSync;workbench:Workben
  };
  return Object.freeze({
   get:()=>control.get(owner,rootRun),
+  getIfStarted:()=>control.getIfStarted(owner,rootRun),
+  readReceipt:(action:string,input:Record<string,unknown>)=>control.readReceipt(owner,rootRun,action,input),
   start:(input:Parameters<TaskHandoffController['start']>[2])=>withImmediateTransaction(db,()=>{ready();return control.start(owner,rootRun,input);}),
   transfer:(input:Parameters<TaskHandoffController['transfer']>[2])=>withImmediateTransaction(db,()=>{ready();return control.transfer(owner,rootRun,input);}),
   stop:(input:Parameters<TaskHandoffController['stop']>[2])=>control.stop(owner,rootRun,input),
