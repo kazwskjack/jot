@@ -44,6 +44,63 @@ test('published children drain under their exact native parent before the admiss
 test('native idle eviction before spawn returns retains completed admission without granting cold-resume authority',async()=>{const f=fixture(),spawn=f.ctx.agentTeams.spawnTeammate;f.ctx.agentTeams.spawnTeammate=async(...args)=>{const result=await spawn(...args);f.entries.delete(result.member.id);return result;};const result=await f.host.spawn(f.root,{roleRef:'role',policyVersion:1,requestId:'request'},f.request);assert.equal(result.member.id,'child-1');assert.equal(f.entries.get(result.member.id),undefined);assert.equal(f.host.admission.accepted.get(result.member.id).parent,f.root);await f.host.dispose();});
 test('automatic lifecycle closure requires official persistence and inbox services before installing hooks',async()=>{const f=fixture();assert.throws(()=>createNativeRoleHost({ctx:f.ctx,bridge:f.bridge,selectModel:async()=>{},automaticClosures:true}),/native_role_closure_host_incompatible/);await f.host.dispose();});
 
+for(const sameParent of [false,true])test(sameParent?'another member pending spawn under the same parent does not hold closure':'another parent pending spawn does not hold a disposed member closure',async()=>{
+ const f=fixture();await f.host.dispose();let child,writes=0,release,entered,recorded,deadline;
+ const closureRecorded=new Promise(resolve=>recorded=resolve);
+ const gate=new Promise(resolve=>release=resolve),ready=new Promise(resolve=>entered=resolve),spawn=f.ctx.agentTeams.spawnTeammate,request=f.bridge.request;
+ f.ctx.agentTeams.spawnTeammate=async(parent,args)=>{if(args.name==='Slow role'){if(sameParent)await host.provider.prepareContinuable({parent,sessionId:'slow-child',signal:args.signal});entered();await gate;throw Error('slow spawn stopped');}return spawn(parent,args);};
+ f.bridge.request=async(path,b,args)=>{if(path==='native-child-close'){assert.equal(b.sessionRef,child.id);assert.equal(args.proof.parent_session_ref,f.root.id);writes++;recorded();return {closed:true,run_id:b.runId};}return request(path,b,args);};
+ const events=[{seq:0,type:'turn/start',data:{}},{seq:1,type:'turn/end',data:{}}];
+ const persistence={flush:async()=>{},open:async()=>({id:child.id,access:'read',header:child.session.header,read:async(offset,count)=>({events:events.slice(offset,offset+count)}),close:async()=>{}})};
+ f.ctx.sessionProjections={stateOf:()=>({'next-turn':[],'next-step':[]})};
+ const host=createNativeRoleHost({ctx:f.ctx,bridge:f.bridge,selectModel:async()=>{},persistence,automaticClosures:true});let slow;
+ try{
+  const created=await host.spawn(f.root,{roleRef:'role',policyVersion:1,requestId:'finished'},f.request);child=f.entries.get(created.member.id);child.status='idle';child.whenIdle=async()=>{};Object.assign(child.session,{seq:2,eventAt:i=>events[i]});
+  const parent=sameParent?f.root:f.make('other-root');if(!sameParent)f.bindings.set(parent,Object.freeze({runId:'other-root-run',sessionRef:parent.id}));
+  slow=host.spawn(parent,{roleRef:'slow-role',policyVersion:1,requestId:'slow'}, {...f.request,name:'Slow role'});const stopped=assert.rejects(slow,/slow spawn stopped/);await ready;
+  f.entries.delete(child.id);f.hooks.get('session/disposed')(child.session);
+  await Promise.race([closureRecorded,new Promise((_,reject)=>deadline=setTimeout(()=>reject(Error('unrelated spawn blocked closure')),1000))]);clearTimeout(deadline);
+  assert.equal(writes,1,'closure must wait only for its own member publication');
+  release();await stopped;await host.flushClosures();assert.equal(writes,1);
+ }finally{clearTimeout(deadline);release();await Promise.allSettled([slow]);await host.dispose();}
+});
+
+test('a disposed member waits for its own pending publication before closure',async()=>{
+ const f=fixture();await f.host.dispose();let child,writes=0,release,entered;
+ const gate=new Promise(resolve=>release=resolve),ready=new Promise(resolve=>entered=resolve),spawn=f.ctx.agentTeams.spawnTeammate,request=f.bridge.request;
+ const events=[{seq:0,type:'turn/start',data:{}},{seq:1,type:'turn/end',data:{}}];
+ f.ctx.sessionProjections={stateOf:()=>({'next-turn':[],'next-step':[]})};
+ const persistence={flush:async()=>{},open:async()=>({id:child.id,access:'read',header:child.session.header,read:async(offset,count)=>({events:events.slice(offset,offset+count)}),close:async()=>{}})};
+ f.bridge.request=async(path,b,args)=>{if(path==='native-child-close'){writes++;return {closed:true,run_id:b.runId};}return request(path,b,args);};
+ const host=createNativeRoleHost({ctx:f.ctx,bridge:f.bridge,selectModel:async()=>{},persistence,automaticClosures:true});let publishing;
+ f.ctx.agentTeams.spawnTeammate=async(...args)=>{const result=await spawn(...args);child=f.entries.get(result.member.id);child.status='idle';child.whenIdle=async()=>{};Object.assign(child.session,{seq:2,eventAt:i=>events[i]});f.entries.delete(child.id);f.hooks.get('session/disposed')(child.session);entered();await gate;return result;};
+ try{publishing=host.spawn(f.root,{roleRef:'role',policyVersion:1,requestId:'own-publication'},f.request);await ready;
+  await new Promise(resolve=>setImmediate(resolve));await new Promise(resolve=>setImmediate(resolve));assert.equal(writes,0);
+  release();await publishing;await host.flushClosures();assert.equal(writes,1);
+ }finally{release();await Promise.allSettled([publishing]);await host.dispose();}
+});
+
+test('closure waits for recovery publication of the same durable reserved member',async()=>{
+ const f=fixture();await f.host.dispose();let child,childId,attempts=0,writes=0,release,entered;
+ const gate=new Promise(resolve=>release=resolve),ready=new Promise(resolve=>entered=resolve),request=f.bridge.request,spawn=f.ctx.agentTeams.spawnTeammate;
+ const member={id:'child-1',name:'Saved role',description:'Review',provider:'jot-native-role',context:'fresh',phase:'active'};
+ const parentEvents=[{seq:0,type:'team/member',data:{version:2,teamId:'root',member}}],events=[{seq:0,type:'subagent/descriptor',data:{version:3,mode:'continuable',provider:member.provider,label:member.description}},{seq:1,type:'user/message',data:{id:'initial',source:{kind:'user'},content:f.request.prompt}},{seq:2,type:'turn/start',data:{}},{seq:3,type:'turn/end',data:{}}];
+ const persistence={flush:async()=>{},open:async id=>({id,access:'read',header:id==='root'?f.root.session.header:child.session.header,read:async(offset,count)=>({events:(id==='root'?parentEvents:events).slice(offset,offset+count)}),close:async()=>{}})};
+ f.ctx.sessionProjections={stateOf:()=>({'next-turn':[],'next-step':[]})};f.ctx.agentTeams.listMembers=()=>[{...member,role:'teammate',status:'inactive',diagnostics:[]}];
+ f.ctx.agentTeams.spawnTeammate=async(...args)=>{const result=await spawn(...args);child=f.entries.get(result.member.id);child.status='idle';child.whenIdle=async()=>{};Object.assign(child.session,{seq:4,eventAt:i=>events[i]});Object.assign(f.root.session,{seq:1,eventAt:i=>parentEvents[i]});return result;};
+ f.bridge.request=async(path,b,args)=>{
+  if(path==='native-child-request')return {reservation:childId?{child_session_ref:childId}:null};
+  if(path==='native-child-reservation')childId=args.child_session_ref;
+  if(path==='native-child-published'){if(++attempts===1)throw Error('publication not committed');entered();await gate;return {publication:args.publication};}
+  if(path==='native-child-close'){writes++;return {closed:true,run_id:b.runId};}return request(path,b,args);
+ };
+ const host=createNativeRoleHost({ctx:f.ctx,bridge:f.bridge,selectModel:async()=>{},persistence,automaticClosures:true,durableSpawns:true}),intent={roleRef:'role',policyVersion:1,requestId:'recovered-publication'};let recovering;
+ try{await assert.rejects(host.spawn(f.root,intent,f.request),/publication not committed/);recovering=host.spawn(f.root,intent,f.request);await ready;
+  f.entries.delete(child.id);f.hooks.get('session/disposed')(child.session);await new Promise(resolve=>setImmediate(resolve));await new Promise(resolve=>setImmediate(resolve));assert.equal(writes,0,'the exact recovered publication must settle first');
+  release();assert.equal((await recovering).member.id,'child-1');await host.flushClosures();assert.equal(writes,1);assert.equal(f.events.filter(event=>event==='published').length,1);
+ }finally{release();await Promise.allSettled([recovering]);await host.dispose();}
+});
+
 test('trusted close notification follows durable closure and can retry without closing or spawning again',async()=>{
  const f=fixture();await f.host.dispose();let child,writes=0,notified=0;const original=f.bridge.request;
  f.bridge.request=async(path,b,p)=>{if(path==='native-child-close'){writes++;return {closed:true,run_id:b.runId};}return original(path,b,p);};

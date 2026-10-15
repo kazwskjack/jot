@@ -1,5 +1,9 @@
 # Code preview verification
 
+## Member-scoped closure publication wait
+
+The closure-isolation follow-up passed 235 public adapter tests, 268 internal adapter tests and nine actual installed-SDK scripted-provider scenarios, with zero failures or skips. New regressions first reproduced unrelated blocked spawns preventing a disposed member's durable closure, both under another parent and under the same parent. The observer now waits only for that exact member's publication. Paired cases verify that a member which finishes before its own spawn returns, or during recovery of its original reserved publication, still waits for that publication. Recovery reuses the original child without another spawn. Host shutdown continues to await every pending spawn before removing the admission hooks. These are local host/runtime checks, not production concurrency acceptance; Gateway and web source were unchanged.
+
 ## Optional automatic final-return follow-up
 
 The final-return change passed 231 public adapter tests, 264 internal adapter tests, nine actual installed-SDK scripted-provider scenarios and 31 portable tests with zero failures/skips; the local web build passed. New tests verify callback execution only after durable closure, callback retry without another closure or spawn, original parent-binding retention after rebinding, exact source/current execution checks, malformed-route refusal before transfer, cancellation while waiting for the lead and stable retry after a committed return. The helper is included in an actual independent packed-module import. Internal source was synchronized without overwriting its additional tests or private defaults.

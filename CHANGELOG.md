@@ -1,5 +1,7 @@
 # Changelog
 
+- Native member closure now waits only for its own pending publication, matched by exact parent Agent and child Session. Other slow spawns cannot hold that closure; host shutdown still drains all pending spawns before removing admission hooks.
+
 ## Unreleased
 
 - Add an optional trusted final-return hook after a member's exact durable closure receipt; official natural settlement retains ownership of child teardown.

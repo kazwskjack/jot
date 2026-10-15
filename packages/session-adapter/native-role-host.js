@@ -3,6 +3,7 @@ import {NativeChildAdmission} from './native-child-admission.js';
 import {NativeRoleProvider} from './native-role-provider.js';
 import {captureNativeChildClosure,verifyNativeChildPrefix,recoverNativePublication} from './native-child-closure.js';
 import {createHash} from 'node:crypto';
+import {AsyncLocalStorage} from 'node:async_hooks';
 const canonical=value=>JSON.stringify(value,(_key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item);
 /** Explicit candidate composition. Does not alter default Host configuration.
  * Native Team and Subagent services retain their original runtime ownership.
@@ -17,8 +18,8 @@ export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistenc
  if(onMemberClosed!==undefined&&typeof onMemberClosed!=='function')throw new Error('native_role_host_incompatible');
  if(reconcileOperations!==undefined&&typeof reconcileOperations!=='function')throw new Error('native_role_host_incompatible');
  if(nativeOperationOrigin!==undefined){if(reconcileOperations!==undefined||typeof bridge.guard!=='function')throw Error('native_role_host_incompatible');createNativeOperationObserver({origin:nativeOperationOrigin,authorize:async()=>{}});}
- const spawnRequests=new Map(),notifying=new Map(),notified=new Set();
- const prepared=new Map(),pending=new Set(),published=new Map(),closing=new Map(),closed=new Map(),observations=new Set(),closureFailures=new Set(),shutdown=new AbortController();let disposed=false,disposal;
+ const spawnRequests=new Map(),notifying=new Map(),notified=new Set(),spawnScope=new AsyncLocalStorage();
+ const prepared=new Map(),pending=new Map(),published=new Map(),closing=new Map(),closed=new Map(),observations=new Set(),closureFailures=new Set(),shutdown=new AbortController();let disposed=false,disposal;
  const admission=new NativeChildAdmission({registry:ctx.agents,bindingFor:agent=>disposed?undefined:bridge.bindingFor(agent),
   authorize:async({parent,child,roleRef,parentBinding,signal})=>{
    const entry=prepared.get(child.id);
@@ -51,6 +52,7 @@ export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistenc
    let ids=published.get(parent);if(!ids)published.set(parent,ids=new Set());ids.add(child.id);
   }});
  const provider=new NativeRoleProvider({name:providerName,admission,prepare:async({parent,childId,roleRef,policyVersion,requestId,requestHash,signal})=>{
+  const scope=spawnScope.getStore();if(!scope||scope.parent!==parent||scope.childId!==undefined)throw Error('native_role_scope_missing');scope.childId=childId;
   const parentBinding=bridge.bindingFor(parent);await bridge.guardBudget(parent,signal);
   const receipt=await bridge.request('native-child-reservation',parentBinding,{child_session_ref:childId,role_ref:roleRef,expected_policy_version:policyVersion,request_id:requestId,...(requestHash===undefined?{}:{spawn_request_hash:requestHash})},signal);
   if(receipt?.reservation?.child_session_ref!==childId||receipt.reservation.role_id!==roleRef||typeof receipt.reservation.reservation_id!=='string')throw new Error('native_role_reservation_invalid');
@@ -81,8 +83,7 @@ export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistenc
    if(closed.has(key))return notifyClosed(parent,accepted,closed.get(key),signal);
    if(closing.has(key)){const receipt=await closing.get(key);return notifyClosed(parent,accepted,receipt,signal);}
    const operation=(async()=>{
-    // Never run this from a child's own disposal hook: native drain waits for
-    // that hook. This host entry point owns teardown, then reads durable proof.
+    // Run outside the child's disposal stack, then drain before reading proof.
     await ctx.subagents.drainContinuableChildren(parent,[id]);
     const observer=nativeOperationOrigin===undefined?reconcileOperations:createNativeOperationObserver({origin:nativeOperationOrigin,authorize:async scope=>{
      if(scope.sessionRef!==accepted.agent.id||bridge.bindingFor(accepted.agent)!==accepted.binding)throw Error('native_role_closure_identity_changed');
@@ -100,7 +101,7 @@ export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistenc
   const accepted=admission.accepted.get(session?.id);if(!accepted||accepted.agent.session!==session)return;
   // The observer returns synchronously. Teardown must leave this hook before
   // drain can be awaited, and Team spawn may still be publishing its roster.
-  const observation=(async()=>{await new Promise(resolve=>setImmediate(resolve));await Promise.allSettled([...pending]);if(disposed)return;
+  const observation=(async()=>{await new Promise(resolve=>setImmediate(resolve));await Promise.allSettled([...pending].filter(([,scope])=>scope.parent===accepted.parent&&scope.childId===session.id).map(([operation])=>operation));if(disposed)return;
    try{await closeMember(accepted.parent,session.id,{},accepted);}catch{closureFailures.add(accepted.binding.runId);}
   })();observations.add(observation);observation.finally(()=>observations.delete(observation)).catch(()=>{});
  }):()=>{};
@@ -127,7 +128,7 @@ export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistenc
      if(existing){if(existing.parent!==parent||existing.hash!==requestHash)throw new Error('idempotency_conflict');return existing.operation;}
     }catch(error){return Promise.reject(error);}
    }
-   const operation=(async()=>{
+   const scope={parent,childId:undefined};const operation=spawnScope.run(scope,async()=>{
    if(disposed)throw new Error('native_role_host_disposed');
    if(request?.context!=='fresh'||typeof request.signal?.throwIfAborted!=='function'||Object.keys(request).some(key=>!['name','description','prompt','context','signal'].includes(key)))throw new Error('native_role_spawn_invalid');
    const signal=AbortSignal.any([request.signal,shutdown.signal]);
@@ -139,7 +140,9 @@ export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistenc
      signal.throwIfAborted();
      if(response?.reservation){
       const saved=response.reservation;
+      if(typeof saved.child_session_ref!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(saved.child_session_ref))throw Error('native_role_publication_invalid');
       if(saved.publication?.member?.id===saved.child_session_ref)return saved.publication;
+      scope.childId=saved.child_session_ref;
       const publication=await recoverNativePublication({parent,childId:saved.child_session_ref,request:snapshot,providerName,persistence,teams:ctx.agentTeams,signal});
       if(bridge.bindingFor(parent)!==parentBinding)throw new Error('native_child_parent_changed');
       const receipt=await bridge.request('native-child-published',parentBinding,{request_id:intent.requestId,spawn_request_hash:requestHash,publication},signal);
@@ -164,14 +167,14 @@ export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistenc
     return result;
    }
    finally{for(const [id,entry] of prepared)if(entry.parent===parent&&entry.requestId===intent.requestId)prepared.delete(id);}
-   })();pending.add(operation);
+   });pending.set(operation,scope);
    if(durableSpawns)spawnRequests.set(requestKey,{parent,hash:requestHash,operation});
    operation.finally(()=>{pending.delete(operation);if(durableSpawns&&spawnRequests.get(requestKey)?.operation===operation)spawnRequests.delete(requestKey);}).catch(()=>{});return operation;
   },
   dispose(){
    if(disposal)return disposal;disposed=true;shutdown.abort(new Error('native_role_host_disposed'));
    return disposal=(async()=>{
-    await Promise.allSettled([...pending]);
+    await Promise.allSettled([...pending.keys()]);
     await Promise.allSettled([...observations]);
     await Promise.allSettled([...notifying.values()]);
     const closures=await Promise.allSettled([...closing.values()]);
