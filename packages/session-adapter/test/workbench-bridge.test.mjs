@@ -569,3 +569,12 @@ test('only enabled native delegation declares SDK concurrency safety; workspace 
  for(const operation of ['files.write','memory.save','messages.send','tasks.upsert','tasks.propose'])assert.equal(tool.isConcurrencySafe({operation,arguments_json:'{}'}),false);
  assert.equal(tool.isConcurrencySafe(null),false);
 });
+
+test('the installed native workspace tool exposes staged memory proposals without apply or identity arguments',async()=>{
+ const f=fixture();await f.bridge.attach(f.host.agent,binding);
+ for(const [operation,args] of [['memory.stage',{scope:'private',memory_ids:['memory-a']}],['memory.propose',{consolidation_id:'consolidation-a',expected_version:1,summary:'Combine repeated findings',changes:[]}],['memory.consolidation',{consolidation_id:'consolidation-a'}]]){
+  await f.host.execute('jot_workspace',{operation,arguments_json:JSON.stringify(args)});assert.equal(f.requests.at(-1).body.operation,operation);assert.deepEqual(f.requests.at(-1).body.arguments,args);
+ }
+ for(const operation of ['memory.apply','memory.rollback'])await assert.rejects(f.host.execute('jot_workspace',{operation,arguments_json:'{}'}),/workbench_arguments_invalid/);
+ for(const key of ['owner_id','project_id','agent_id','run_id'])await assert.rejects(f.host.execute('jot_workspace',{operation:'memory.stage',arguments_json:JSON.stringify({scope:'private',memory_ids:['memory-a'],[key]:'forged'})}),/workbench_arguments_invalid/);
+});

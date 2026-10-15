@@ -535,6 +535,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
         'agents.list': [], 'messages.list': [],
         'messages.send': ['recipient_agent_id', 'text', 'client_message_id'],
         'memory.list': ['q'], 'memory.save': ['scope', 'content', 'memory_id', 'expected_version', 'provenance', 'source_revision', 'expires_at', 'supersedes'],
+        'memory.stage':['scope','memory_ids'],'memory.propose':['consolidation_id','expected_version','summary','changes'],'memory.consolidation':['consolidation_id'],
         'files.list': [], 'files.read': ['path'], 'files.write': ['path', 'content', 'expected_version'],
         'tasks.get': [],'tasks.subtasks': ['occurrence_id'],
         'tasks.upsert': ['subtask_id','expected_version','title','acceptance','priority','status','dependencies','evidence'],
@@ -547,7 +548,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       };
       if (!keys[operation]) throw new Error('invalid_workspace_operation');
       fields(args, keys[operation]!);
-      const mutating = ['messages.send', 'memory.save', 'files.write','tasks.upsert','tasks.evidence','tasks.assess','tasks.delegate','tasks.reply_draft'].includes(operation);
+      const mutating = ['messages.send', 'memory.save', 'memory.stage', 'memory.propose', 'files.write','tasks.upsert','tasks.evidence','tasks.assess','tasks.delegate','tasks.reply_draft'].includes(operation);
       const attested = (!!identity.task_binding||(identity.kind==='native_team'&&!!identity.task_assignment)) && !operation.startsWith('tasks.');
       const receipted = mutating || attested;
       const callId = input.call_id;
@@ -567,6 +568,16 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
           {...args, client_message_id: `tool-${createHash('sha256').update(`${runId}\0${String(callId)}`).digest('hex')}`}, runId); break;
         case 'memory.list': result = workbench.listMemory(owner, workspace, args, runId); break;
         case 'memory.save': result = workbench.saveMemory(owner, workspace, {...args, project_id: project, verified: false}, runId); break;
+        case 'memory.stage': result=workbench.memoryConsolidations.stage(owner,workspace,{...args,project_id:project,...(args.scope==='private'?{agent_id:identity.agent_id}:{})},runId);break;
+        case 'memory.propose': {
+          const {consolidation_id,...proposal}=args;
+          if(typeof consolidation_id!=='string')throw new Error('invalid_memory_consolidation');
+          const value=workbench.memoryConsolidations.propose(owner,workspace,consolidation_id,proposal,runId);
+          result={consolidation_id:value.consolidation_id,status:value.status,version:value.version,source_count:value.sources.length,summary:value.proposal.summary};break;
+        }
+        case 'memory.consolidation':
+          if(typeof args.consolidation_id!=='string')throw new Error('invalid_memory_consolidation');
+          result=workbench.memoryConsolidations.get(owner,workspace,args.consolidation_id,runId);break;
         case 'files.list': result = workbench.listFiles(owner, workspace, project, runId); break;
         case 'files.read':
           if (typeof args.path !== 'string') throw new Error('invalid_file_path');

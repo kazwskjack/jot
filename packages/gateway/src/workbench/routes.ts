@@ -43,6 +43,14 @@ export function registerWorkbenchRoutes(app: FastifyInstance, service: Workbench
     return service.listMessages(actor(request),param(request,'workspaceId'),undefined,input.occurrence_id as string|undefined);
   });
   app.post('/v1/workspaces/:workspaceId/agent-messages', async (request, reply) => reply.code(201).send(service.sendMessage(actor(request), param(request, 'workspaceId'), body(request, ['sender_agent_id', 'recipient_agent_id', 'text', 'client_message_id', 'auto_reply', 'max_replies', 'task_run_id']))));
+  app.get('/v1/workspaces/:workspaceId/memory-consolidations',async request=>{
+    const input=query(request);if(Object.keys(input).some(key=>!['project_id','scope','agent_id'].includes(key)))throw new Error('invalid_memory_consolidation');
+    return service.memoryConsolidations.list(actor(request),param(request,'workspaceId'),input);
+  });
+  app.post('/v1/workspaces/:workspaceId/memory-consolidations',async request=>restoreCommand(request,()=>service.memoryConsolidations.stage(actor(request),param(request,'workspaceId'),body(request,['project_id','scope','agent_id','memory_ids']))));
+  app.get('/v1/workspaces/:workspaceId/memory-consolidations/:consolidationId',async request=>service.memoryConsolidations.get(actor(request),param(request,'workspaceId'),param(request,'consolidationId')));
+  app.post('/v1/workspaces/:workspaceId/memory-consolidations/:consolidationId/propose',async request=>restoreCommand(request,()=>service.memoryConsolidations.propose(actor(request),param(request,'workspaceId'),param(request,'consolidationId'),body(request,['expected_version','summary','changes']))));
+  for(const action of ['apply','rollback','reject'] as const)app.post(`/v1/workspaces/:workspaceId/memory-consolidations/:consolidationId/${action}`,async request=>restoreCommand(request,()=>service.memoryConsolidations[action](actor(request),param(request,'workspaceId'),param(request,'consolidationId'),version(body(request,['expected_version'])))));
   app.get('/v1/workspaces/:workspaceId/memory', async request => service.listMemory(actor(request), param(request, 'workspaceId'), query(request)));
   app.get('/v1/workspaces/:workspaceId/memory/export', async request => service.exportMemory(actor(request), param(request, 'workspaceId'), query(request)));
   app.get('/v1/workspaces/:workspaceId/memory/:memoryId/history',async request=>{

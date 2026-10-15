@@ -119,7 +119,8 @@ export async function buildServer(config: {
   const idempotencyRequests = new WeakMap<object, { owner: string; operation: string; key: string }>();
   const isUploadRoute=(request:any)=>['/v1/conversations/:conversationId/uploads','/v1/uploads/:uploadId/content','/v1/uploads/:uploadId/complete'].includes(request.routeOptions.url);
   const isMemoryRestoreRoute=(request:any)=>request.method==='POST'&&request.routeOptions.url==='/v1/workspaces/:workspaceId/memory/:memoryId/restore';
-  const atomicProtocol=(request:any)=>isUploadRoute(request)?'upload-atomic-v1':isMemoryRestoreRoute(request)?'memory-restore-atomic-v1':null;
+  const isMemoryConsolidationRoute=(request:any)=>request.method==='POST'&&['/v1/workspaces/:workspaceId/memory-consolidations',...['propose','apply','rollback','reject'].map(action=>`/v1/workspaces/:workspaceId/memory-consolidations/:consolidationId/${action}`)].includes(request.routeOptions.url);
+  const atomicProtocol=(request:any)=>isUploadRoute(request)?'upload-atomic-v1':isMemoryRestoreRoute(request)?'memory-restore-atomic-v1':isMemoryConsolidationRoute(request)?'memory-consolidation-atomic-v1':null;
   // Receipt protocol is reserved with the original request. Legacy pending rows
   // have no proof of an atomic business boundary and must not be re-executed.
   const atomicCommand=<T>(request:any,status:number,operation:()=>T):T=>{
@@ -183,7 +184,7 @@ export async function buildServer(config: {
     if (existing) {
       if (existing.request_sha256 !== requestHash) throw new Error('idempotency_conflict');
       if (existing.response_status === null) {
-        if(isMemoryRestoreRoute(request)&&existing.receipt_protocol==='memory-restore-atomic-v1'){idempotencyRequests.set(request,{owner,operation,key:idempotencyKey});return;}
+        if((isMemoryRestoreRoute(request)||isMemoryConsolidationRoute(request))&&existing.receipt_protocol===atomicProtocol(request)){idempotencyRequests.set(request,{owner,operation,key:idempotencyKey});return;}
         if(isUploadRoute(request)&&existing.receipt_protocol==='upload-atomic-v1'){
           if(request.method==='PUT'){
             const upload=db.prepare('SELECT status,declared_size,received_size,declared_sha256,actual_sha256,writer_token,writer_lease_until FROM ga_uploads WHERE id=? AND owner_id=?').get(String((request.params as Record<string,unknown>).uploadId),owner) as Record<string,unknown>|undefined;
@@ -248,7 +249,7 @@ export async function buildServer(config: {
 
   app.setErrorHandler((error, _request, reply) => {
     const code = error instanceof Error ? error.message : 'internal_error';
-    if(['memory_restore_expired','memory_restore_source_conflict'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
+    if(['memory_restore_expired','memory_restore_source_conflict','memory_consolidation_state_conflict','memory_consolidation_source_conflict','memory_consolidation_pending_limit','memory_consolidation_source_limit'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
     if(['native_creation_aborted','native_creation_outcome_unknown'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
     if(code==='task_review_output_not_found')return reply.code(404).send({error:{code:'TASK_REVIEW_OUTPUT_NOT_FOUND'}});
     if(code==='task_review_output_unavailable')return reply.code(409).send({error:{code:'TASK_REVIEW_OUTPUT_UNAVAILABLE'}});
@@ -445,7 +446,7 @@ export async function buildServer(config: {
         replay_retention_hours: 168, idempotency_retention_hours: 24 },
       voice,
       workbench: { enabled: true, agent_roles: true, independent_teams: true, agent_messages: true,
-        shared_workspace: true, memory_scopes: ['project', 'private'], memory_lifecycle: true, memory_restore: true, memory_retrieval: 'local_keyword',task_readiness:true,model_budget:budgetPolicy!==undefined,
+        shared_workspace: true, memory_scopes: ['project', 'private'], memory_lifecycle: true, memory_restore: true, memory_consolidation: true, memory_retrieval: 'local_keyword',task_readiness:true,model_budget:budgetPolicy!==undefined,
         task_reply_policy:true,task_reply_execution:false,task_create_delivery:true,task_notifications:true,channel_bindings:!!config.internalChannelToken||!!config.emailBindingSend,email_bindings:!!config.emailBindingSend,wecom_bindings:!!config.internalChannelToken,task_notification_events:['changed','completed','failed','needs_confirmation'],
         ...(budgetPolicy?{task_model_budget_limits:budgetPolicy.budgetSettings().limits.task_total}:{}),
         collaboration_modes: [{ id: 'single', enabled: true }, { id: 'independent_team', enabled: true },

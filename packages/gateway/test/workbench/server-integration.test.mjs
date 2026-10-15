@@ -705,3 +705,44 @@ test('internal side effects roll back if storing their call receipt fails',async
  assert.equal(Number(f.db.prepare('SELECT count(*) n FROM wb_tool_receipts WHERE call_id=?').get(input.call_id).n),1);
  const replayed=await f.internal('tool',input);assert.equal(replayed.statusCode,200,replayed.body);assert.deepEqual(replayed.json(),retried.json());
 });
+
+test('native memory consolidation only stages and proposes in its original run and cannot apply',async t=>{
+ const f=await fixture(t),a=await f.agent('Memory curator'),b=await f.agent('Other curator');
+ const first=f.workbench.saveMemory('alice','main',{scope:'private',agent_id:a.agent_id,content:'Original verified finding',verified:true});
+ const receipt=await f.chat(a),identity={run_id:receipt.run_id,session_ref:f.bind('alice',a.conversation_id)};
+ const call=(operation,args,callId=randomUUID(),binding=identity)=>f.internal('tool',{...binding,operation,arguments:args,call_id:callId});
+ const staged=await call('memory.stage',{scope:'private',memory_ids:[first.memory_id]},'stage-once');assert.equal(staged.statusCode,200,staged.body);const stage=staged.json();assert.equal(stage.status,'draft');assert.equal(stage.sources[0].content,first.content);assert.doesNotMatch(staged.body,/owner_id|session_ref|sources_json/);
+ assert.deepEqual((await call('memory.stage',{scope:'private',memory_ids:[first.memory_id]},'stage-once')).json(),stage);
+ assert.equal(f.db.prepare('SELECT count(*) n FROM wb_memory_consolidations').get().n,1);
+ const args={consolidation_id:stage.consolidation_id,expected_version:1,summary:'Remove repeated wording',changes:[{action:'rewrite',memory_id:first.memory_id,content:'Concise finding'}]};
+ const proposal=await call('memory.propose',args,'propose-once');assert.equal(proposal.statusCode,200,proposal.body);assert.equal(proposal.json().status,'proposed');assert.deepEqual((await call('memory.propose',args,'propose-once')).json(),proposal.json());
+ assert.equal(f.workbench.memoryHistory('alice','main',first.memory_id).current_version,1);
+ for(const operation of ['memory.apply','memory.rollback'])assert.equal((await call(operation,{consolidation_id:stage.consolidation_id,expected_version:2})).statusCode,422);
+ assert.equal((await call('memory.stage',{scope:'private',memory_ids:[first.memory_id],owner_id:'alice'})).statusCode,403);
+ const otherReceipt=await f.chat(b),otherIdentity={run_id:otherReceipt.run_id,session_ref:f.bind('alice',b.conversation_id)};
+ assert.equal((await call('memory.consolidation',{consolidation_id:stage.consolidation_id},randomUUID(),otherIdentity)).statusCode,403);
+ assert.equal((await call('memory.consolidation',{consolidation_id:stage.consolidation_id})).json().status,'proposed');
+ const applied=f.workbench.memoryConsolidations.apply('alice','main',stage.consolidation_id,2);assert.equal(applied.status,'applied');assert.equal(f.workbench.memoryHistory('alice','main',first.memory_id).current_version,2);
+});
+
+test('owner consolidation routes validate contracts and recover the same atomic command after failure or lost response',async t=>{
+ const f=await fixture(t);let lose=true,lostUrl=null;
+ f.app.addHook('onSend',async(req,reply,payload)=>{if(lose&&req.url===lostUrl&&reply.statusCode===200){lose=false;reply.code(503);return JSON.stringify({error:{code:'fixture_lost_response'}});}return payload;});
+ const a=await f.agent('Memory reviewer'),note=f.workbench.saveMemory('alice','main',{scope:'project',project_id:a.project_id,content:'Original reviewed finding',verified:true});
+ const base='/v1/workspaces/main/memory-consolidations',input={scope:'project',project_id:a.project_id,memory_ids:[note.memory_id]};
+ f.db.exec("CREATE TRIGGER synthetic_stage_failure BEFORE INSERT ON wb_memory_consolidations BEGIN SELECT RAISE(ABORT,'synthetic_stage_failure'); END;");
+ assert.equal((await f.http('POST',base,input,'alice','same-stage')).statusCode,500);assert.equal(f.db.prepare('SELECT count(*) n FROM wb_memory_consolidations').get().n,0);
+ f.db.exec('DROP TRIGGER synthetic_stage_failure');
+ const stage=await f.json('POST',base,input,200,'alice','same-stage');assert.deepEqual(await f.json('POST',base,input,200,'alice','same-stage'),stage);
+ const url=base+'/'+stage.consolidation_id;
+ assert.equal((await f.http('GET',url,undefined,'bob')).statusCode,404);
+ assert.equal((await f.app.inject({method:'POST',url:url+'/apply',headers:{'x-user-id':'alice',origin,'idempotency-key':'missing-csrf'},payload:{expected_version:1}})).statusCode,403);
+ assert.equal((await f.http('POST',url+'/propose',{expected_version:1,summary:'Forbidden self verification',changes:[{action:'rewrite',memory_id:note.memory_id,content:'Revised',verified:true}]})).statusCode,400);
+ const proposal=await f.json('POST',url+'/propose',{expected_version:1,summary:'Consolidated finding',changes:[{action:'rewrite',memory_id:note.memory_id,content:'Revised'}]});assert.equal(proposal.version,2);
+ lostUrl=url+'/apply';
+ assert.equal((await f.http('POST',url+'/apply',{expected_version:2},'alice','apply-once')).statusCode,503);
+ const applied=await f.json('POST',url+'/apply',{expected_version:2},200,'alice','apply-once');assert.equal(applied.status,'applied');assert.equal(f.workbench.memoryHistory('alice','main',note.memory_id).current_version,2);
+ assert.equal((await f.json('POST',url+'/rollback',{expected_version:3})).status,'rolled_back');
+ assert.equal((await f.json('GET',base+`?project_id=${a.project_id}&scope=project`)).items.length,1);
+ assert.equal((await f.http('GET',base+`?project_id=${a.project_id}&scope=project&owner_id=alice`)).statusCode,422);
+});

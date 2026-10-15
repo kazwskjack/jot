@@ -296,3 +296,17 @@ must not be used to claim that those provider calls are budget-enforced.
 ### Complete PilotDeck reference scope
 
 See the [full capability and implementation checklist](docs/PILOTDECK-PARITY.md). All modules and recovery mechanisms remain in scope. Memory revision restoration does not claim full Dream consolidation parity. An unreleased preview database missing a required restore-audit compound foreign key fails startup with `memory_restore_schema_migration_required`; back it up and perform a reviewed offline migration instead of silently recreating its audit history.
+
+### Reviewed memory consolidation
+
+The workbench now exposes staged consolidation records for the selected project or private role. In the original DSH role conversation, ask the Agent to organize its memory: `memory.stage` freezes up to 25 current records and `memory.propose` submits bounded rewrite/duplicate-merge changes. The Agent cannot apply or roll back a batch. Open **Shared workspace → Memory → View consolidation** to inspect frozen sources and before/after changes, explicitly apply/reject, or safely roll back its exact resulting versions.
+
+Staging and proposing leave live memory unchanged. Apply revalidates every frozen input in one SQLite transaction; any changed, deleted, expired or unauthorized source blocks the entire batch. Rewrites clear verification. Rollback creates new unverified revisions, never extends expiry and cannot overwrite later edits or revive another operation's deletion. Immutable snapshots, proposal/result receipts, original request keys and the existing DSH budget/lease guards survive backend restarts. Browser retry recovery remains current-page only; a forced reload requires inspecting actual recorded state.
+
+Lists return at most 50 compact summaries, not repeated full source/proposal bodies. Individual record reads expose their frozen source trace. Each scope admits at most 10 pending drafts/proposals; reject obsolete proposals to release that capacity. There is no extra model provider or background planner. The installed rc2 SDK verification uses a local scripted model, so it proves wiring and accounting, not provider reasoning quality. Automatic message extraction, retrieval explanations and idle-triggered Dream execution remain separate unfinished capabilities.
+
+Run the reproducible SDK probe after installing the locked DSH host and setting `JOT_DSH_RUNTIME_MODULES`:
+
+```sh
+node --test packages/session-adapter/verification/native-memory-consolidation-runtime.mjs
+```

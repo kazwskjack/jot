@@ -1,3 +1,4 @@
+import {MemoryConsolidationService} from './memory-consolidation.ts';
 import {validateNativeOperationProofs} from './native-operation-proof.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -67,6 +68,7 @@ export class WorkbenchService {
   private readonly commands: RunCommandService;
   private readonly canonicalRoot: string;
   private readonly memoryLifecycle: MemoryLifecycle;
+  readonly memoryConsolidations: MemoryConsolidationService;
   constructor(db: DatabaseSync, options: WorkbenchOptions) {
     this.db = db; this.options = options;
     installTaskRunLineage(db);
@@ -144,6 +146,17 @@ export class WorkbenchService {
         BEGIN SELECT RAISE(ABORT,'file_write_run_immutable'); END;
     `);
     this.memoryLifecycle = new MemoryLifecycle(db);
+    this.memoryConsolidations = new MemoryConsolidationService(db,this.memoryLifecycle,(owner,workspaceId,scope,runId)=>{
+      const workspace=this.workspace(workspaceId);this.projects.assertOwned(scope.project_id,owner);
+      if(scope.scope==='private'){
+        const agent=this.active(owner,scope.agent_id!);
+        if(agent.workspace_id!==workspace||agent.project_id!==scope.project_id)throw new Error('memory_scope_forbidden');
+      }
+      if(runId){
+        const context=this.runIdentity(owner,workspace,runId);
+        if(context.project_id!==scope.project_id||(scope.scope==='private'&&context.agent_id!==scope.agent_id))throw new Error('memory_scope_forbidden');
+      }
+    });
   }
   private transaction<T>(fn: () => T): T { return withImmediateTransaction(this.db, fn); }
   private workspace(value: unknown): string {

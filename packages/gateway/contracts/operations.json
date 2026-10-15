@@ -808,5 +808,68 @@
     "WorkbenchMemory",
     "200",
     "Owner-only; CAS restore creates a new unverified version without extending expiry."
+  ],
+  [
+    "GET",
+    "/v1/workspaces/{workspace_id}/memory-consolidations",
+    "listMemoryConsolidations",
+    null,
+    "MemoryConsolidationPage",
+    "200",
+    "Owner-scoped staged memory consolidation. DSH may propose; only the user can apply or roll back. No model is called by these endpoints."
+  ],
+  [
+    "POST",
+    "/v1/workspaces/{workspace_id}/memory-consolidations",
+    "stageMemoryConsolidation",
+    "StageMemoryConsolidation",
+    "MemoryConsolidation",
+    "200",
+    "Owner-scoped staged memory consolidation. DSH may propose; only the user can apply or roll back. No model is called by these endpoints."
+  ],
+  [
+    "GET",
+    "/v1/workspaces/{workspace_id}/memory-consolidations/{consolidation_id}",
+    "getMemoryConsolidation",
+    null,
+    "MemoryConsolidation",
+    "200",
+    "Owner-scoped staged memory consolidation. DSH may propose; only the user can apply or roll back. No model is called by these endpoints."
+  ],
+  [
+    "POST",
+    "/v1/workspaces/{workspace_id}/memory-consolidations/{consolidation_id}/propose",
+    "proposeMemoryConsolidation",
+    "ProposeMemoryConsolidation",
+    "MemoryConsolidation",
+    "200",
+    "Owner-scoped staged memory consolidation. DSH may propose; only the user can apply or roll back. No model is called by these endpoints."
+  ],
+  [
+    "POST",
+    "/v1/workspaces/{workspace_id}/memory-consolidations/{consolidation_id}/apply",
+    "applyMemoryConsolidation",
+    "MemoryConsolidationCommand",
+    "MemoryConsolidation",
+    "200",
+    "Owner-scoped staged memory consolidation. DSH may propose; only the user can apply or roll back. No model is called by these endpoints."
+  ],
+  [
+    "POST",
+    "/v1/workspaces/{workspace_id}/memory-consolidations/{consolidation_id}/rollback",
+    "rollbackMemoryConsolidation",
+    "MemoryConsolidationCommand",
+    "MemoryConsolidation",
+    "200",
+    "Owner-scoped staged memory consolidation. DSH may propose; only the user can apply or roll back. No model is called by these endpoints."
+  ],
+  [
+    "POST",
+    "/v1/workspaces/{workspace_id}/memory-consolidations/{consolidation_id}/reject",
+    "rejectMemoryConsolidation",
+    "MemoryConsolidationCommand",
+    "MemoryConsolidation",
+    "200",
+    "Owner-scoped staged memory consolidation. DSH may propose; only the user can apply or roll back. No model is called by these endpoints."
   ]
 ]
