@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- Block task acceptance candidates until native reservations and activations close; include their settled/released model receipts in one distinct owner/occurrence cost journal and reject unresolved or exceeded spend.
+- Verify real native lifecycle services, sibling-occurrence isolation, duplicate ledger membership and post-review admission refusal. Keep unresolved unbound spawns blocked and native roles default-off pending trusted recovery.
+
 - Add owner-only frozen-file previews and verified downloads to task acceptance cards. Later edits cannot replace the reviewed version; expired, resolved, revoked or corrupted candidates cannot be downloaded.
 - Keep review reads in a WAL read snapshot without reserving the Worker writer lock. Bound generated preview caching to 100 MiB per request and one in-flight read per Gateway, with a 30-second response deadline and release on disconnect.
 

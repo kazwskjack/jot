@@ -1,5 +1,27 @@
 # Code preview verification
 
+## Native completion and cost accounting
+
+Gateway tests passed 1,009 cases with zero failures and one POSIX-only restore
+skip (1,010 total), including Python file-engine execution. Gateway build passed.
+The final six native completion cases separately verify unclosed reservation,
+unclosed activation, settled child/activation costs, isolated injected pending
+cost faults after genuine closure, same-database sibling isolation, distinct
+ledger membership and refused post-review admission. The independent fault
+injection inserts a new test receipt; it does not weaken immutable settled
+records or claim that the normal closure API admits unresolved costs.
+
+The original CLI host suite passed 14 cases. Two installed-SDK scenarios passed
+with real SessionController/Team/Subagent/AgentLoop and Gateway HTTP: one member
+delegation and two overlapping members (measured peak two). Models are local
+scripted adapters; upload/archive leaves are inert, and production was not
+accessed. The earlier intermittent delegation observation remains unproven in
+cause despite these passes; this result does not close that historical issue.
+
+Unbound reservation abort/recovery, precise native child-file delivery and the
+complete official CLI multi-role composition remain open. Passing accounting
+tests does not enable native roles or satisfy those separate release gates.
+
 ## Frozen acceptance-file review
 
 On Windows, 1,003 Gateway tests passed with zero failures and one POSIX-only

@@ -88,9 +88,17 @@ function completionSnapshot(db:DatabaseSync,runId:string) {
    AND g.goal_id=cp.goal_id AND g.goal_revision=cp.goal_revision
   WHERE r.id=? AND r.status='waiting_approval' AND t.status IN ('active','budget_exhausted')`).get(runId) as CompletionScope|undefined;
  if(!scope)throw new Error('task_completion_state_conflict');
- const occurrenceRuns=`(SELECT run_id,occurrence_id FROM wb_task_run_occurrences UNION ALL SELECT run_id,occurrence_id FROM wb_task_auxiliary_runs)`;
+ if(db.prepare(`SELECT 1 FROM wb_native_child_reservations q WHERE q.owner_id=? AND q.occurrence_id=?
+  AND NOT EXISTS (SELECT 1 FROM wb_native_child_closures c WHERE c.reservation_id=q.reservation_id) LIMIT 1`).get(scope.owner_id,scope.occurrence_id))throw new Error('task_auxiliary_pending');
+ if(db.prepare(`SELECT 1 FROM wb_native_child_activations a WHERE a.owner_id=? AND a.occurrence_id=?
+  AND NOT EXISTS (SELECT 1 FROM wb_native_activation_closures c WHERE c.run_id=a.run_id) LIMIT 1`).get(scope.owner_id,scope.occurrence_id))throw new Error('task_auxiliary_pending');
+ // One identity can be visible through more than one bookkeeping relation.
+ // Freeze and check the same distinct run set, including closed activations.
+ const occurrenceRuns=`(SELECT o.run_id,o.occurrence_id,t.owner_id FROM wb_task_run_occurrences o JOIN wb_persistent_tasks t ON t.task_id=o.task_id
+  UNION SELECT run_id,occurrence_id,owner_id FROM wb_task_auxiliary_runs
+  UNION SELECT run_id,occurrence_id,owner_id FROM wb_native_execution_runs)`;
  if(db.prepare(`SELECT 1 FROM wb_model_budget_attempts a JOIN ${occurrenceRuns} o ON o.run_id=a.run_id
-  WHERE o.occurrence_id=? AND (a.state IN ('reserved','unknown','in_flight') OR a.bound_exceeded=1) LIMIT 1`).get(scope.occurrence_id!))throw new Error('budget_usage_unknown');
+  WHERE o.owner_id=? AND o.occurrence_id=? AND (a.state IN ('reserved','unknown','in_flight') OR a.bound_exceeded=1) LIMIT 1`).get(scope.owner_id,scope.occurrence_id!))throw new Error('budget_usage_unknown');
  if(db.prepare(`SELECT 1 FROM wb_mailbox_task_roots t JOIN wb_agent_messages m ON m.thread_id=t.thread_id
   WHERE t.occurrence_id=? AND (m.status IN ('processing','outcome_unknown') OR (m.status='pending' AND m.auto_reply=1)) LIMIT 1`).get(scope.occurrence_id!))throw new Error('task_auxiliary_pending');
  const proof=new TaskExecutionEvidence(db),steps=occurrenceSubtaskRows(db,String(scope.task_id),String(scope.occurrence_id));
@@ -102,7 +110,7 @@ function completionSnapshot(db:DatabaseSync,runId:string) {
  const budget_attempts=db.prepare(`SELECT a.run_id,a.attempt_id,a.request_json,a.route_json,a.state,
   a.held_tokens,a.held_nano_usd,a.usage_json,a.actual_tokens,a.actual_nano_usd,a.bound_exceeded
   FROM wb_model_budget_attempts a JOIN ${occurrenceRuns} o ON o.run_id=a.run_id
-  WHERE o.occurrence_id=? ORDER BY a.run_id,a.attempt_id`).all(scope.occurrence_id);
+  WHERE o.owner_id=? AND o.occurrence_id=? ORDER BY a.run_id,a.attempt_id`).all(scope.owner_id,scope.occurrence_id);
  return {...scope,budget_attempts,steps:steps.map(step=>({subtask_id:String(step.subtask_id),version:Number(step.version),title:String(step.title),
   acceptance:String(step.acceptance),status:String(step.status),dependencies:JSON.parse(step.dependencies_json) as string[],
   evidence:JSON.parse(step.evidence_json),business_verdict:'unreviewed' as const}))};

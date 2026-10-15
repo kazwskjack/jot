@@ -1,5 +1,33 @@
 # Native role integration
 
+## Completion and cost boundaries
+
+A task cannot create its acceptance candidate while an owned native reservation
+or activation in that occurrence has no closure. A closed original child does
+not close a later activation. Pending, in-flight, unknown or exceeded native
+model usage also blocks the candidate independently of closure checks.
+
+The frozen cost journal includes task, mailbox and native executions through
+one owner/occurrence-scoped distinct run set. It retains released reservations
+as audit records, records actual settled child/activation usage exactly once,
+and rechecks the same set before owner acceptance. Another occurrence's open
+native work does not contaminate this review. Freezing relinquishes the root
+worker lease; the existing native admission rules reject later creation or
+reactivation rather than extending that review's authority.
+
+These checks do not solve an unresolved spawn: a durable reservation without a
+bound child run is still pending. There is no reservation-level abort API in
+this release. Preserve the original request/Session identity for trusted host
+reconciliation; do not delete records, fabricate closure, retry with a new ID or
+release uncertain capacity merely because a timeout elapsed. Proven
+not-created recovery and end-user recovery controls remain required before
+treating the optional native-role integration as generally enabled. The
+generated official host profile continues to set `nativeRoles: false`.
+
+Native child-file delivery still requires precise step-assignment/receipt
+lineage and parent-conversation publication. The cost union above grants no
+file access or blanket acceptance of child outputs.
+
 Jot can bridge saved roles to a DSH native Team host while keeping the lead Agent responsible for planning and the final answer. This is an optional extended gateway integration; the portable root runtime is independently runnable.
 
 ## Runtime and configuration
