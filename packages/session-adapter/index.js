@@ -7,6 +7,7 @@ import {createNativeTaskDispatcher} from './native-task-dispatch.js'
 import {createNativeTaskScheduler} from './native-task-scheduler.js'
 import {createNativeRoleHost} from './native-role-host.js'
 import {createNativeHandoffLifecycle} from './native-handoff-lifecycle.js'
+import {createNativeClaimedSessionComposer} from './native-claimed-composer.js'
 import {conversationGoal} from './conversation-goal.js'
 import { WorkbenchBridge,normalizeHostExecutionLease } from './workbench.js'
 
@@ -45,6 +46,13 @@ function isTrustedNativeHandoffConfig(value) {
     && Number.isSafeInteger(value.policyVersion) && value.policyVersion >= 1
     && Number.isSafeInteger(value.maxHops) && value.maxHops >= 1 && value.maxHops <= 20
     && typeof value.validateLog === 'function'
+}
+
+function isTrustedNativeClaimedConfig(value) {
+  if(!value||typeof value!=='object'||Array.isArray(value))return false
+  const keys=Reflect.ownKeys(value)
+  return keys.length===4&&keys.includes('Session')&&keys.includes('validateLog')&&keys.includes('profile')&&keys.includes('provenance')
+    &&typeof value.Session?.create==='function'&&typeof value.validateLog==='function'&&typeof value.profile?.read==='function'&&typeof value.provenance?.read==='function'&&typeof value.provenance?.create==='function'
 }
 
 function promptFailureReasonCode(error) {
@@ -144,7 +152,7 @@ function decodeFilename(headers) {
   return value && Buffer.byteLength(value, 'utf8') <= 255 && !/[\u0000\/\\]/.test(value) ? value : null
 }
 
-export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery }) {
+export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer }) {
   const voiceHandler = voiceEnabled ? createVoiceAdapterHandler({ speechController, token }) : null
   const workbenchSessions = new Set()
   const blockedWorkbenchSessions = new Set()
@@ -174,9 +182,21 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
         blockedWorkbenchSessions.add(sessionId)
       }
       if(requestedPreset==='jot-workbench-budgeted'&&(!workbenchRunId||!workbenchExecutionLease))return json(422,{error:'workbench_budget_binding_required'})
+      if(nativeClaimedComposer&&(!workbenchRunId||!workbenchExecutionLease))return json(422,{error:'native_input_recovery_binding_required'})
       if(requestedPreset==='jot-workbench-budgeted'&&(typeof budgetModelSelector!=='function'||typeof workbenchBridge?.guardBudget!=='function'))return json(503,{error:'workbench_model_unavailable'})
       if (requestedPreset !== undefined) request.agentPreset = requestedPreset
-      const value = await controller.create(request)
+      let value,inputRecovery
+      if(nativeClaimedComposer){
+        try{
+          const created=await nativeClaimedComposer.withCreation({sessionId,cwd,presetId:requestedPreset??null,
+            binding:{runId:String(workbenchRunId),sessionRef:sessionId,executionLease:workbenchExecutionLease},signal},()=>controller.create(request))
+          value=created.value;inputRecovery=created.recovery
+        }catch(error){
+          const code=/^(?:native_claim_composer|native_claim_recovery|native_replay_profile)_[a-z_]+$/.test(error?.message??'')?error.message:'native_input_recovery_failed'
+          console.error('[jot-native-input-recovery]',JSON.stringify({code}))
+          return json(503,{error:'native_input_recovery_unavailable'})
+        }
+      }else value=await controller.create(request)
       let nativeRecovery,handoffRecovery
       if (workbenchRunId !== undefined) {
         try { await workbenchBridge.attach(agents.get(sessionId), { runId: String(workbenchRunId), sessionRef: sessionId,...(workbenchExecutionLease?{executionLease:workbenchExecutionLease}:{}) },{sessions,persistence,signal}) }
@@ -198,7 +218,7 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
         }
         if(handoffRecovery?.state!=='blocked')blockedWorkbenchSessions.delete(sessionId)
       }
-      return json(201,{...value,...(nativeRecovery?{native_dispatch_recovery:nativeRecovery}:{}),...(handoffRecovery?{native_handoff_recovery:handoffRecovery}:{})})
+      return json(201,{...value,...(inputRecovery?{native_input_recovery:inputRecovery}:{}),...(nativeRecovery?{native_dispatch_recovery:nativeRecovery}:{}),...(handoffRecovery?{native_handoff_recovery:handoffRecovery}:{})})
     }
     const nativeMembers=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/native-members$/)
     if(nativeMembers){
@@ -367,6 +387,8 @@ export function apply(ctx, config = {}) {
     || (config.nativeDeferredHandoff === true && (config.nativeRoles !== true
       || config.nativeHandoff === undefined && typeof config.handoffAdmission !== 'function'))
     || (config.nativeRoleRecovery===true&&config.nativeRoles!==true)
+    || (config.nativeClaimedInputRecovery!==undefined&&(!isTrustedNativeClaimedConfig(config.nativeClaimedInputRecovery)
+      ||config.nativeContinuation!==true||config.workbenchModel===undefined||workbenchToken.length<16))
     || (config.nativeRoles===true&&(config.nativeContinuation!==true||config.workbenchModel===undefined))
     || ((config.nativeContinuation === true || config.webBudgetEnabled === true || config.nativeRoles===true) && workbenchToken.length < 16)) {
     throw new Error('jot_session_adapter_config_invalid')
@@ -382,6 +404,11 @@ export function apply(ctx, config = {}) {
     modelRouteFor:config.workbenchModel?agent=>ctx.sessionController.agents.selectionFor(agent).current:undefined,
   }) : undefined
   const budgetModelSelector=createBudgetModelSelector({route:config.workbenchModel,llm:ctx.llm,agents:ctx.sessionController.agents})
+  const nativeClaimedComposer=config.nativeClaimedInputRecovery===undefined?undefined:createNativeClaimedSessionComposer({
+    ctx,bridge:workbenchBridge,agents:ctx.agents,sessions:ctx.sessions,
+    query:typeof ctx.get==='function'?ctx.get('sessionQuery'):ctx.sessionQuery,projections:ctx.sessionProjections,
+    ...config.nativeClaimedInputRecovery,
+  })
   const nativeHandoffLifecycle=config.nativeHandoff===undefined?undefined:createNativeHandoffLifecycle({
     ctx,bridge:workbenchBridge,registry:ctx.agents,sessions:ctx.sessions,
     persistence:ctx.sessionPersistence,projections:ctx.sessionProjections,
@@ -404,7 +431,7 @@ export function apply(ctx, config = {}) {
   const handler = createAdapterHandler({ controller: ctx.sessionController, fileUploads: ctx.fileUploads, agents: ctx.agents,
     sessions:ctx.sessions,persistence:ctx.sessionPersistence,
     speechController, voiceEnabled, token, workbenchBridge,
-    budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery })
+    budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery,nativeClaimedComposer })
   const server = createServer(async (req, res) => {
     const abort = new AbortController()
     req.once('aborted', () => abort.abort())
@@ -436,3 +463,6 @@ export function apply(ctx, config = {}) {
 
 export { createNativeHandoffLifecycle }
 export {createNativeClaimedInputRecoverySetup} from './native-claimed-input.js'
+export {createNativeClaimedSessionComposer}
+export {createNativeReplayProfile} from './native-replay-profile.js'
+export {createNativeReplayProvenance} from './native-replay-provenance.js'

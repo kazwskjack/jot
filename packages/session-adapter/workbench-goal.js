@@ -45,6 +45,23 @@ function objectiveFor(scope) {
   return `${scope.objective}\n\n[jot-occurrence:${marker}]`;
 }
 
+/** Trusted pre-publication identity checks; neither function arms a Goal. */
+export function nativeTaskResumeScope(context,binding){
+ const scope=trustedScope(context,binding);
+ if(context?.kind!=='task'||context.task_binding?.root_run_id!==binding.runId||context.task_binding.continuation_of!==null||scope?.run_id!==binding.runId)throw Error('workbench_resume_scope_invalid');
+ return scope;
+}
+export function verifyNativeTaskResumeGoal(agent,scope,mapping,projections){
+ const saved=validMapping(mapping);if(!saved)throw Error('workbench_resume_goal_missing');
+ // GoalService.get intentionally accepts only published Agents. Read its pure
+ // durable projection here; do not invent a live Agent or activation authority.
+ const state=projections?.stateOf?.(agent.session,'goal'),goal=state?.current?.goal;
+ if(state?.failure!==null||!goal||goal.id!==saved.goal_id||!positive(goal.revision)||goal.revision<saved.goal_revision
+   ||goal.objective!==objectiveFor(scope)||!positive(goal.maxGoalRounds))throw Error('workbench_resume_goal_invalid');
+ if(goal.phase!=='active')throw Error('workbench_resume_goal_inactive');
+ return Object.freeze({goal_id:goal.id,goal_revision:goal.revision});
+}
+
 function validMapping(value) {
   if (value === null) return null;
   if (!value || typeof value.goal_id !== 'string' || !ID.test(value.goal_id) || !positive(value.goal_revision)) {

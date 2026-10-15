@@ -19,8 +19,10 @@ export function createNativeClaimedInputRecoverySetup({Session,agents,sessions,q
   // SessionQuery exposes the complete logical cold log, including rc2's
   // end-seed marker. Match that marker to this factory lifecycle; reject
   // prior setup mutations instead of reading the live Session synchronously.
+  // A failed prior setup can have durably flushed the neutral trailing marker;
+  // then the constructor reuses it and firstLiveSeq equals count.
   const normalized=value=>canonical({...value,delegationDepth:value?.delegationDepth??0});
-  if(!Array.isArray(events)||loaded?.session?.id!==agent.id||loaded.inheritedEventCount!==0||normalized(loaded.session)!==normalized(session.header)||session.firstLiveSeq!==count-1||liveCount!==count||events.at(-1)?.type!=='session/end-seed'||canonical(events.at(-1)?.data)!=='{}')throw Error('claim_recovery_history_invalid');
+  if(!Array.isArray(events)||loaded?.session?.id!==agent.id||loaded.inheritedEventCount!==0||normalized(loaded.session)!==normalized(session.header)||![count-1,count].includes(session.firstLiveSeq)||liveCount!==count||events.at(-1)?.type!=='session/end-seed'||canonical(events.at(-1)?.data)!=='{}')throw Error('claim_recovery_history_invalid');
   const check=()=>{identity();if(session.seq!==liveCount||canonical(session.header)!==header)throw Error('claim_recovery_history_changed');};
   if(!Array.isArray(events)||events.length!==count||events.some((event,index)=>event?.seq!==index||typeof event.type!=='string'))throw Error('claim_recovery_history_invalid');
   const cold=(end=count)=>{

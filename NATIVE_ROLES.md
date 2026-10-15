@@ -417,3 +417,112 @@ A handoff state read now includes the immutable current `binding` (or null where
 The handoff-only source purpose is an accounting read restricted to the original owner, task root, parent Session and current lease. It can read a completed predecessor's closure without granting activation. Default source reads and cold activation retain their original running-assignment requirements. This prevents legitimate step completion from blocking the next role while preserving revocation of the old execution. No new MCP tool or public route was added.
 
 The formal HTTP multi-hop probe executes two different saved roles in one workspace. The first writes a file and its step is marked complete through the existing task service with the real file receipt. The second actually reads that file, records its own read/write receipts and closes its separate native execution. Both closures, exact controller revisions and shared budget settlement are checked before control returns to the original lead. Models are scripted, upload/archive services are inert, and the probe explicitly schedules and drains members. Automatic scheduling, automatic final acceptance, hard-exit recovery, live external effects and production remain separate unfinished checks.
+
+## Formal Controller claimed-input recovery
+
+This optional integration retains the original official SessionController,
+its model selection and preset mounting. The pinned rc.2 Controller does not
+expose a host setup callback for Remote create/resume. Jot supplies a small,
+explicit compatibility delta in AgentLoop: a serial `agent/before-setup` event
+before the original setup, inside the original maintenance/rollback boundary.
+This is a Jot extension, not an existing upstream API. No private Controller
+method, replacement factory, second planner or runtime monkey patch is used.
+
+Prepare an **isolated** package from the exact installed distribution:
+
+```sh
+node packages/session-adapter/scripts/prepare-dsh-pre-setup.mjs /absolute/source/dsh-agent-loop /absolute/new/compatibility-package
+```
+
+The script verifies package name, exact `0.2.0-rc.2` version and the pinned
+15-file SHA-256 manifest for every copied upstream file, including the package
+manifest and secondary entry points, then applies the two-file delta. It refuses
+existing/overlapping targets, source symlinks and source drift. It neither
+installs dependencies nor activates a profile. Compose the copied package with
+its normal installed dependencies in an isolated host first. Never overwrite a
+running runtime. A version or artifact change requires fresh review.
+
+`createNativeReplayProfile` requires absolute artifact paths, expected SHA-256
+hashes, an audit ID, an exact preset ID (or explicitly no preset), and a trusted
+`verifyComposition` callback. Include all loaded host plugins, recovery modules,
+configuration and preset sources relevant to pre-step effects in that audit.
+Use immutable, versioned, operator-owned deployment directories outside Agent
+workspaces. Hashes establish continuity, not safety. The callback must independently verify
+that these are the reviewed loaded artifacts and that pre-step replay has no
+unresolved side effects. A permissive callback is not production acceptance.
+
+`createNativeReplayProvenance({root})` stores write-once, synced host receipts
+outside the conversation log and model context. Configure an operator-owned
+directory outside all Agent workspaces; enforce the host's directory ACLs.
+Complete records are written and synced in unique temporary files, then
+published by an atomic, non-overwriting hard link. The filesystem must support
+this operation; unsupported storage fails closed. POSIX directory metadata is
+synced; Windows crash durability and ACLs require platform acceptance. Abandoned
+temporary files are never interpreted as receipts and do not block later writes;
+remove them only during an operator-controlled offline cleanup. No automatic
+deletion of live records is implemented.
+Receipts bind Session ID and creation timestamp to the reviewed profile and a
+hash of the original Gateway task/owner/lease scope. They grant no permissions.
+Their lookup key hashes both fields, so an abandoned pre-publication Session
+incarnation cannot poison a later fresh incarnation. Reads verify the opened
+file's identity and use that handle. Missing, damaged, changed or conflicting
+receipts fail closed. DSH rc.2 rejects
+unknown non-ignorable events, so Jot does not append custom provenance events or
+change the official Session format. Back up this directory with Session storage.
+
+Enable only via trusted host code:
+
+```js
+nativeClaimedInputRecovery: {Session, validateLog, profile, provenance}
+```
+
+The adapter requires native continuation, a budget model and authenticated
+Workbench access. Every Session creation in this opt-in profile requires an
+exact task-root run/Session and current fenced execution lease. Gateway checks
+occur **before** the original Controller may read stored Session content, and
+again before restoration. Child runs, ordinary chats, different task versions,
+leases, capability epochs, objectives and source profiles are not adopted.
+Worker-generation succession is deliberately not implemented by this helper.
+
+Inside the unpublished setup, Goal identity, phase and objective are read from
+the official pure Goal projection: `GoalService.get` requires a live published
+Agent and must not be used here. The original setup remains in control. Recovery
+preserves only original eligible human messages, including the actual Controller
+RPC source `{kind:'user', rpcId:...}`. The source-map key `user-rpc` is not its
+runtime discriminator. Goal rounds and internal sources are not human replay.
+Both a newly appended and an already durable neutral `session/end-seed` marker
+are supported; a rejected setup may have flushed that marker before retry.
+
+Creation/recovery has a 30-second cancellation deadline, independent of task
+turn/token budgets. Request cancellation and host disposal abort waiting policy
+callbacks. The hook binds that cancellation to the original factory's serial
+hook/setup wait and rollback. If a Controller read has not settled, a disposed
+composer retains its rejection fence until that original operation ends, rather
+than permitting a late publication. Reads themselves may remain outstanding
+where the official API offers no cancellation; their results cannot mutate the
+closed recovery. Failures expose only a fixed error response; task prompts remain
+blocked. No restoration sends a message, activates a Goal, executes a tool or
+calls a model. Existing default profiles remain unchanged.
+
+The actual installed-SDK probe uses the original Controller over adapter HTTP,
+real Gateway/SQLite authorization and budget accounting, and the isolated
+compatibility copy. It kills only its own worker after durable native claim and
+before any model call. New workers reject a wrong lease and changed profile
+without publication, then restore the original RPC/message IDs successfully.
+Goal remains disarmed and model calls stay zero until an explicit continuation.
+Official queue semantics consume the restored message and new continuation in
+two turns, each once. This is a scripted local model/core composition test;
+production presets, live providers, lease succession, concurrent writers and
+external side-effect recovery remain separate acceptance work.
+
+```sh
+node --experimental-strip-types --test packages/session-adapter/verification/native-claimed-controller-runtime.mjs
+```
+
+One parallel run of the older model-callable delegation probe observed one
+child model call where two were expected. Its historical failure lacks the
+child event/budget evidence needed to establish a cause. Isolated diagnostics
+and a later complete run passed; that does not establish a fix. The original
+assertion is retained, and a future mismatch now preserves the synthetic
+Session log, budget rows and isolated database for diagnosis. This remains an
+open verification issue, separate from the default-off recovery integration.

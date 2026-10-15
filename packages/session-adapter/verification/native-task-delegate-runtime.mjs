@@ -2,7 +2,7 @@
 // The LLM adapter is scripted locally: no external provider or production proof.
 import test from 'node:test';import assert from 'node:assert/strict';
 import {randomBytes} from 'node:crypto';
-import {mkdirSync,mkdtempSync,readFileSync,rmSync} from 'node:fs';import {resolve,join,relative,isAbsolute} from 'node:path';import {pathToFileURL,fileURLToPath} from 'node:url';
+import {mkdirSync,mkdtempSync,readFileSync,rmSync,writeFileSync} from 'node:fs';import {resolve,join,relative,isAbsolute} from 'node:path';import {pathToFileURL,fileURLToPath} from 'node:url';
 import {buildServer} from '../../gateway/src/server.ts';import {HarnessCoordinator} from '../../gateway/src/harness/coordinator.ts';import {SessionBindingRepository} from '../../gateway/src/harness/session-bindings.ts';
 import {TaskCollaborationService} from '../../gateway/src/workbench/task-collaboration.ts';import {TaskDelegationService} from '../../gateway/src/workbench/task-delegation.ts';
 import {WorkbenchBridge} from '../workbench.js';import {createNativeRoleHost} from '../native-role-host.js';
@@ -17,8 +17,8 @@ test('formal apply executes a model-callable native delegation and member receip
  const runtime=resolve(process.env.JOT_DSH_RUNTIME_MODULES);
  const names=['cordis','dsh-session','dsh-session-projection','dsh-session-persistence-jsonl','dsh-session-query','dsh-agent','dsh-llm','dsh-tools','dsh-system-prompt','dsh-agent-loop','dsh-goal','dsh-goal-round-driver','dsh-subagent','dsh-experimental-agent-team','dsh-typert-registry','dsh-fs','dsh-attachment','dsh-file-reference','dsh-agent-default-model'];
  const modules={};for(const name of names){const manifest=JSON.parse(readFileSync(join(runtime,name,'package.json'),'utf8'));if(name!=='cordis')assert.equal(manifest.version,'0.2.0-rc.2');modules[name]=await import(pathToFileURL(join(runtime,name,'lib/index.js')).href);}
- const base=resolve('.test-tmp/native-task-runtime');mkdirSync(base,{recursive:true});const root=mkdtempSync(join(base,'case-'));let service,ctx,leadHandle,host;const tokenEnv='JOT_HTTP_ADAPTER_TEST_'+process.pid,bridgeEnv='JOT_HTTP_BRIDGE_TEST_'+process.pid;
- t.after(async()=>{if(host)await host.dispose();if(ctx)await ctx.fiber.dispose();if(leadHandle)await leadHandle.dispose();delete process.env[tokenEnv];delete process.env[bridgeEnv];if(service){await service.app.close();service.db.close();}const child=relative(base,root);assert.ok(child&&!child.startsWith('..')&&!isAbsolute(child));rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:20});});
+ const base=resolve('.test-tmp/native-task-runtime');mkdirSync(base,{recursive:true});const root=mkdtempSync(join(base,'case-'));let service,ctx,leadHandle,host,preserveFailure=false;const tokenEnv='JOT_HTTP_ADAPTER_TEST_'+process.pid,bridgeEnv='JOT_HTTP_BRIDGE_TEST_'+process.pid;
+ t.after(async()=>{if(host)await host.dispose();if(ctx)await ctx.fiber.dispose();if(leadHandle)await leadHandle.dispose();delete process.env[tokenEnv];delete process.env[bridgeEnv];if(service){await service.app.close();service.db.close();}const child=relative(base,root);assert.ok(child&&!child.startsWith('..')&&!isAbsolute(child));if(!preserveFailure)rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:20});});
  const owner='native-role-fixture',token=randomBytes(32).toString('hex'),route={provider:'local-scripted',model:'scripted',revision:'fixture-rates',context_window:100,max_output_tokens:20,rates:{input:2,output:10,cache_read:1,cache_write:3}},limits={tokens:5000,nano_usd:50000,model_calls:50};
  service=await buildServer({databasePath:join(root,'gateway.sqlite'),workspaces:['ws'],workbenchRoot:join(root,'files'),uploadRoot:join(root,'uploads'),templateRoot:fileURLToPath(new URL('../../gateway/file-engine/templates/',import.meta.url)),internalChannelToken:token,modelBudgetPolicy:{revision:1,admission_route:{provider:route.provider,model:route.model},routes:[route],limits:Object.fromEntries(['owner_daily','project_daily','agent_daily','task_total','occurrence','chat_root','mailbox_thread'].map(key=>[key,limits]))}});
  const lead=service.workbench.createAgent(owner,{name:'Lead',workspace_id:'ws'}),member=service.workbench.createAgent(owner,{name:'Reviewer',instructions:'Use only shared material and save source notes.',workspace_id:'ws',project_id:lead.project_id});
@@ -35,7 +35,7 @@ test('formal apply executes a model-callable native delegation and member receip
  await ctx.plugin(Uploads);await ctx.plugin(Workspace);
  const controllerModule=await import(pathToFileURL(join(runtime,'dsh-api-session-controller/lib/index.js')).href);await ctx.plugin(controllerModule.default,{nativeOpen:false});assert.ok(ctx.sessionController,'actual SessionController is mounted');
  const sessionRef=new SessionBindingRepository(service.db).getOrCreate(owner,occurrence.conversation_id).session_id;
- const requests=[];
+ const requests=[],runtimeErrors=[];ctx.on('agent/error',({agent,error})=>{runtimeErrors.push({session_id:agent.id,code:error?.code??null,message:String(error?.message??error)});});
  const calls={lead:0,child:0};class Scripted extends modules['dsh-llm'].LlmAdapter{async *stream(options){const phase=options.sessionId===sessionRef?'lead':'child',n=++calls[phase];assert.ok(n<=(phase==='lead'?5:2));assert.equal(options.provider,route.provider);assert.equal(options.model,route.model);const runId=phase==='lead'?occurrence.run_id:service.db.prepare('SELECT run_id FROM wb_native_execution_runs WHERE child_session_ref=?').get(options.sessionId).run_id;assert.equal(service.workbench.contextForRun(runId).agent_id,phase==='lead'?lead.agent_id:member.agent_id);
  const tool=n===1;if(tool){yield {type:'block-start',index:0,blockType:'tool-call'};yield {type:'block-end',index:0,block:{type:'tool-call',id:'http-write',name:'jot_workspace',arguments:JSON.stringify(phase==='lead'?{operation:'tasks.delegate',arguments_json:JSON.stringify({subtask_id:step.subtask_id,expected_subtask_version:step.version,recipient_agent_id:member.agent_id})}:{operation:'files.write',arguments_json:JSON.stringify({path:'http-notes.md',content:'Material produced through the actual HTTP adapter.',expected_version:0})})}};}else yield {type:'text-delta',index:0,text:'Saved material; lead verification pending.'};yield {type:'usage',usage:{inputTokens:5,outputTokens:5,totalTokens:10}};yield {type:'finish',reason:{kind:tool?'tool-calls':'stop'}};}}
  ctx.llm.registerAdapter([route.provider],new Scripted());leadHandle=await ctx.agents.create({sessionId:sessionRef,meta:{cwd:root},agentOptions:{provider:route.provider,model:route.model}});
@@ -49,6 +49,13 @@ test('formal apply executes a model-callable native delegation and member receip
  let child;ctx.on('agent/created',({agent})=>{if(agent.session.header.parentSession===sessionRef)child=agent;});
  const prompted=await post('/v1/sessions/'+sessionRef+'/prompts',{request_id:'native-delegate-lead',text:'Delegate the existing source review step to the authorized Reviewer.'});assert.equal(prompted.status,202,JSON.stringify(prompted));
  await leadHandle.agent.whenIdle();assert.ok(child,JSON.stringify({calls,requests}));await closureReady;await child.whenIdle();
+ if(calls.child!==2){
+  // Preserve the actual failing synthetic lifecycle instead of hiding it behind
+  // a retry or weakening the expected native two-step execution.
+  preserveFailure=true;const childRunId=service.db.prepare('SELECT run_id FROM wb_native_execution_runs WHERE child_session_ref=?').get(child.id).run_id;
+  const diagnostic={calls,requests,runtimeErrors,status:child.status,resident:ctx.agents.get(child.id)!==undefined,events:(await ctx.sessionQuery.readSession(child.id)).events,budget:service.db.prepare('SELECT * FROM wb_model_budget_attempts WHERE run_id=?').all(childRunId)};
+  writeFileSync(join(root,'failure-diagnostic.json'),JSON.stringify(diagnostic,null,2));t.diagnostic(JSON.stringify({failure:'native-child-model-count',calls,diagnostic:join(root,'failure-diagnostic.json')}));
+ }
  assert.ok(calls.lead>=2);assert.equal(calls.child,2);
  const leadEvents=Array.from({length:leadHandle.agent.session.seq},(_,i)=>leadHandle.agent.session.eventAt(i));
  const reply=leadEvents.find(e=>e.type==='tool/result'&&e.data.message?.toolCallId==='http-write');

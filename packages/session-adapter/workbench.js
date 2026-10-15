@@ -1,4 +1,4 @@
-import { WorkbenchGoalBridge, nativeGoalsFor } from './workbench-goal.js';
+import { WorkbenchGoalBridge, nativeGoalsFor, nativeTaskResumeScope } from './workbench-goal.js';
 import { budgetedModelStream,BudgetedModelStreamQueue } from './model-budget-stream.js';
 import {runNativeBudgetedTool} from './web-budget-tool.js';
 import {captureSessionCheckpoint,verifySessionCheckpoint} from './checkpoint.js';
@@ -175,6 +175,15 @@ export class WorkbenchBridge {
   async guardBudget(agent,signal){
     await this.guard(agent,signal);
     if(this.installed.get(agent)?.current.context.model_budget?.enforced!==true)throw new Error('workbench_budget_binding_required');
+  }
+  async authorizeNativeResume(binding,signal){
+    if(!binding||!['runId','sessionRef'].every(key=>typeof binding[key]==='string'&&ID.test(binding[key])))throw Error('workbench_resume_scope_invalid');
+    const owned=Object.freeze({runId:binding.runId,sessionRef:binding.sessionRef,executionLease:normalizeHostExecutionLease(binding.executionLease)});
+    signal?.throwIfAborted();const response=await this.request('guard',owned,{},signal),context=validContext(response.context,owned);
+    const scope=nativeTaskResumeScope(context,owned);if(context.model_budget?.protocol!==1||context.model_budget.enforced!==true)throw Error('workbench_budget_binding_required');
+    const {binding:saved}=await this.request('goal-binding',owned,{action:'get'},signal);signal?.throwIfAborted();
+    if(saved!==null&&(!saved||Object.keys(saved).some(key=>!['goal_id','goal_revision'].includes(key))||typeof saved.goal_id!=='string'||!ID.test(saved.goal_id)||!Number.isSafeInteger(saved.goal_revision)||saved.goal_revision<1))throw Error('workbench_resume_goal_invalid');
+    return Object.freeze({binding:owned,scope,mapping:saved===null?null:Object.freeze({...saved})});
   }
   bindingFor(agent){return this.installed.get(agent)?.current.binding;}
   taskRootBindingFor(agent){const current=this.installed.get(agent)?.current;return current?.context.kind==='task'&&current.context.task_binding?.root_run_id===current.binding.runId?current.binding:undefined;}

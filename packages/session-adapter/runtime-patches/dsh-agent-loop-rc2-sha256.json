@@ -1,0 +1,17 @@
+{
+  "LICENSE": "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be",
+  "README.i18n.yaml": "a4b6816ac2a1c5f6cf84593d553e26ec501f0db15c4da47d7d759f29bdf737d9",
+  "README.md": "7e85b7d46c17e5351455821e70441080214e249c2bf19ea356239bb09749e033",
+  "README.zh.md": "b2df762bb642f23a6fd8e378aa498f31f9c76bfd3f8c93087f9c88fc171ccef3",
+  "lib/index.js": "00c4814d63f3d1e2754eb09144832d19b30499d6ea444730473f740b587948c2",
+  "lib/invariant.js": "c577dcdde278b761b5810d9a941131d423de40c22ff57f98a3982681ed3bf772",
+  "lib/types/agent.d.ts": "66131a86c5f024fabb77e99103f3f07cdca5818cbce7d6aaecb058197c66589e",
+  "lib/types/assistant-stream.d.ts": "e81ae829fe3f4cf470fd18c7dee019d0643c13b6df5a2b620698b62f1f809b8d",
+  "lib/types/constants.d.ts": "e57529f7cc7e9e4200b8a6c2c4bd48a927872d490a5c40163d9ba34b1278b466",
+  "lib/types/inbox.d.ts": "171b98369d8562c15133d5355ea1764643f832a3e4f3f35a202dd7bbdf24ec1b",
+  "lib/types/index.d.ts": "906f202b859b11f7b0a399d8c4921c47384dd6177c990d59b8a93026a9875e8e",
+  "lib/types/invariant.d.ts": "adf6e9725c37cecf470745403026927d9bb2f341a94df9081d435e90e0a36165",
+  "lib/types/runtime-context.d.ts": "a19ba3e5f5e2f1c1ef6ef1f1b508967ed71d42bad7210abd82e8f5dc2848ad35",
+  "lib/types/tool-calls.d.ts": "b0e76195f04a2163f6c201cf6ea3afa7ccaf3e9da0b227c4072b7311cd01884a",
+  "package.json": "341ca7d03c75d0c04803516479267cec1067229361e01a3ee87d7fcdbf50f0ae"
+}

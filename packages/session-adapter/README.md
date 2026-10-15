@@ -122,3 +122,11 @@ Inbox input after a crash, using SessionQuery and the native projection;
 mandatory host authorization and pre-step replay-safety checks remain external.
 It does not wake execution or install itself in the default HTTP Controller.
 See the recovery boundary and subprocess evidence in [Native roles](../../NATIVE_ROLES.md).
+
+An audited host can opt into formal Controller composition using
+`nativeClaimedInputRecovery: {Session, validateLog, profile, provenance}`.
+It also requires native continuation, a configured budget model and authenticated
+Workbench access. Include `agentLoop` and `sessionQuery` in explicit host injection.
+This option requires the separately prepared rc.2 compatibility copy described
+in [Native roles](../../NATIVE_ROLES.md#formal-controller-claimed-input-recovery).
+It is absent by default; enabling it on an unpatched runtime fails at startup.
