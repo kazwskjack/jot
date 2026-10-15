@@ -53,6 +53,7 @@ The first code release is maintained on `feat/standalone-agent`; switch to that 
 | `FEATURE_MATRIX.md` | What is included, external, scaffolded or proposed |
 | `DEVELOPMENT.md` | Engineering history and lessons from implementation |
 | `ALGORITHMS.md` | Scheduling, transactions, replay, approvals and execution guards |
+| `docs/PILOTDECK-PARITY.md` | Full PilotDeck reference scope, integration boundaries and acceptance checklist |
 
 ## Check
 

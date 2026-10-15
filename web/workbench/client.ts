@@ -1,4 +1,5 @@
 import {request} from '../jot/client';
+import type {MemoryHistoryPage} from './types';
 import type {Agent,Caps,Task,Occurrence,Team,Memory,MemoryExport,AgentMessage} from './types';
 import type {TaskReadiness,TaskSubtask} from './types';
 import type {CreateTaskDelegation,TaskDelegationReceipt} from './types';
@@ -39,6 +40,7 @@ export const workbenchApi={
  taskMessages:(workspace:string,occurrenceId:string,signal?:AbortSignal)=>request<{items:AgentMessage[]}>(`/workspaces/${pathId(workspace)}/agent-messages?occurrence_id=${pathId(occurrenceId)}`,'GET',undefined,undefined,signal),
  sendMessage:(workspace:string,input:unknown,key:string)=>request(`/workspaces/${pathId(workspace)}/agent-messages`,'POST',input,key),
  memories:(workspace:string,query:string,signal?:AbortSignal)=>request<{items:Memory[]}>(`/workspaces/${pathId(workspace)}/memory${query}`,'GET',undefined,undefined,signal),
+ memoryHistory:(workspace:string,memoryId:string,signal?:AbortSignal,beforeVersion?:number)=>request<MemoryHistoryPage>(`/workspaces/${pathId(workspace)}/memory/${pathId(memoryId)}/history${beforeVersion===undefined?'':`?before_version=${beforeVersion}`}`,'GET',undefined,undefined,signal),
  exportMemory:(workspace:string,query:string,signal?:AbortSignal)=>request<MemoryExport>(`/workspaces/${pathId(workspace)}/memory/export${query}`,'GET',undefined,undefined,signal),
  saveMemory:(workspace:string,input:unknown,memoryId?:string)=>request<Memory>(`/workspaces/${pathId(workspace)}/memory`,'POST',{...input as object,...(memoryId?{memory_id:memoryId}:{})}),
  deleteMemory:(workspace:string,memory:Memory)=>request(`/workspaces/${pathId(workspace)}/memory/${pathId(memory.memory_id)}`,'DELETE',{expected_version:memory.version}),

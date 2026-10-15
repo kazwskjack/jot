@@ -39,3 +39,10 @@ test('download creates scoped JSON Blob and revokes its object URL without exter
  assert.equal(blob.type,'application/json');assert.deepEqual(JSON.parse(await blob.text()),value);assert.equal(anchor.href,'blob:local');assert.match(anchor.download,/private.*\.json$/);assert.equal(clicked,1);assert.equal(removed,1);assert.deepEqual(revoked,['blob:local']);
  assert.throws(()=>helper.downloadMemoryExport({...value,items:[{memory_id:'other',scope:'private',agent_id:'b'}]},{scope:'private',agent_id:'a'},env));
 });
+test('memory selection never renders a prior private role or another project during reload',()=>{
+ const selection={scope:'private',agent_id:'agent-b',project_id:'project',lifecycle:true};
+ assert.equal(helper.memoryMatchesSelection({scope:'private',agent_id:'agent-a',project_id:'project'},selection),false);
+ assert.equal(helper.memoryMatchesSelection({scope:'private',agent_id:'agent-b',project_id:'project'},selection),true);
+ assert.equal(helper.memoryMatchesSelection({scope:'private',agent_id:'agent-b',project_id:'other'},selection),false);
+ assert.equal(helper.memoryMatchesSelection({scope:'project',project_id:'other'},{scope:'project',project_id:'project',lifecycle:true}),false);
+});

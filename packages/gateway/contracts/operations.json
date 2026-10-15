@@ -790,5 +790,23 @@
     null,
     "200",
     "Attachment bytes; no path/version query."
+  ],
+  [
+    "GET",
+    "/v1/workspaces/{workspace_id}/memory/{memory_id}/history",
+    "Read memory revision history",
+    null,
+    "WorkbenchMemoryHistory",
+    "200",
+    "Owner-only; CAS restore creates a new unverified version without extending expiry."
+  ],
+  [
+    "POST",
+    "/v1/workspaces/{workspace_id}/memory/{memory_id}/restore",
+    "Restore historical memory",
+    "RestoreWorkbenchMemory",
+    "WorkbenchMemory",
+    "200",
+    "Owner-only; CAS restore creates a new unverified version without extending expiry."
   ]
 ]

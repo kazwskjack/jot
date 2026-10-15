@@ -1,4 +1,8 @@
 export function blankMemoryForm(){return {content:'',verified:false,provenance:[],source_revision:'',expires_at:'',supersedes:''};}
+export function memoryMatchesSelection(memory,selection){
+ return memory.scope===selection.scope&&(selection.scope!=='private'||memory.agent_id===selection.agent_id)
+  &&(!selection.lifecycle||memory.project_id===selection.project_id);
+}
 export function memoryFormFromMemory(memory){
  return {...blankMemoryForm(),content:memory.content,verified:!!memory.verified,provenance:(memory.provenance??[]).map(item=>({...item})),source_revision:memory.source_revision??'',expires_at:memory.expires_at??'',supersedes:memory.supersedes??''};
 }

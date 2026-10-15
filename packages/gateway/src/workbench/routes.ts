@@ -23,7 +23,7 @@ function version(input: Input): number {
 }
 const agentFields = ['name', 'instructions', 'workspace_id', 'project_id', 'allowed_tools'];
 const teamFields = ['name', 'workspace_id', 'project_id', 'member_ids'];
-export function registerWorkbenchRoutes(app: FastifyInstance, service: WorkbenchService, actor: Actor): void {
+export function registerWorkbenchRoutes(app: FastifyInstance, service: WorkbenchService, actor: Actor,restoreCommand:(request:FastifyRequest,operation:()=>unknown)=>unknown=(_request,operation)=>operation()): void {
   app.get('/v1/agents', async request => service.listAgents(actor(request)));
   app.post('/v1/agents', async (request, reply) => reply.code(201).send(service.createAgent(actor(request), body(request, agentFields))));
   app.get('/v1/agents/:agentId', async request => service.getAgent(actor(request), param(request, 'agentId')));
@@ -45,6 +45,13 @@ export function registerWorkbenchRoutes(app: FastifyInstance, service: Workbench
   app.post('/v1/workspaces/:workspaceId/agent-messages', async (request, reply) => reply.code(201).send(service.sendMessage(actor(request), param(request, 'workspaceId'), body(request, ['sender_agent_id', 'recipient_agent_id', 'text', 'client_message_id', 'auto_reply', 'max_replies', 'task_run_id']))));
   app.get('/v1/workspaces/:workspaceId/memory', async request => service.listMemory(actor(request), param(request, 'workspaceId'), query(request)));
   app.get('/v1/workspaces/:workspaceId/memory/export', async request => service.exportMemory(actor(request), param(request, 'workspaceId'), query(request)));
+  app.get('/v1/workspaces/:workspaceId/memory/:memoryId/history',async request=>{
+    const input=query(request);
+    if(Object.keys(input).some(key=>key!=='before_version'))throw new Error('invalid_workbench_request');
+    if(input.before_version!==undefined&&(typeof input.before_version!=='string'||!/^[1-9][0-9]{0,15}$/.test(input.before_version)||!Number.isSafeInteger(Number(input.before_version))))throw new Error('invalid_memory_history_cursor');
+    return service.memoryHistory(actor(request),param(request,'workspaceId'),param(request,'memoryId'),input.before_version===undefined?undefined:Number(input.before_version));
+  });
+  app.post('/v1/workspaces/:workspaceId/memory/:memoryId/restore',async request=>restoreCommand(request,()=>service.restoreMemory(actor(request),param(request,'workspaceId'),param(request,'memoryId'),body(request,['expected_version','source_version']))));
   app.post('/v1/workspaces/:workspaceId/memory', async (request, reply) => reply.code(201).send(service.saveMemory(actor(request), param(request, 'workspaceId'), body(request, ['scope', 'agent_id', 'project_id', 'content', 'verified', 'memory_id', 'expected_version', 'provenance', 'source_revision', 'expires_at', 'supersedes']))));
   app.delete('/v1/workspaces/:workspaceId/memory/:memoryId', async request => service.deleteMemory(actor(request), param(request, 'workspaceId'), param(request, 'memoryId'), version(body(request, ['expected_version']))));
   app.get('/v1/workspaces/:workspaceId/files', async request => {

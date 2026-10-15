@@ -712,6 +712,39 @@ export class WorkbenchService {
       return this.memoryValue(saved);
     });
   }
+  private managedMemory(owner:string,workspaceId:string,memoryId:string):Row {
+    const workspace=this.workspace(workspaceId),row=this.db.prepare("SELECT * FROM wb_memories WHERE owner_id=? AND workspace_id=? AND memory_id=? AND status='active'").get(owner,workspace,memoryId) as Row|undefined;
+    if(!row)throw new Error('memory_not_found');
+    this.projects.assertOwned(String(row.project_id),owner);
+    if(row.scope==='private'){
+      const agent=this.active(owner,String(row.agent_id));
+      if(agent.workspace_id!==workspace||agent.project_id!==row.project_id)throw new Error('memory_scope_forbidden');
+    }
+    return row;
+  }
+  memoryHistory(owner:string,workspaceId:string,memoryId:string,beforeVersion?:number){
+    const row=this.managedMemory(owner,workspaceId,memoryId);
+    if(beforeVersion!==undefined&&(!Number.isSafeInteger(beforeVersion)||beforeVersion<1))throw new Error('invalid_memory_history_cursor');
+    return {memory_id:memoryId,current_version:Number(row.version),...this.memoryLifecycle.historyPage(owner,memoryId,beforeVersion)};
+  }
+  restoreMemory(owner:string,workspaceId:string,memoryId:string,input:Input){
+    return this.transaction(()=>{
+      if(Object.keys(input).length!==2||!Object.hasOwn(input,'expected_version')||!Object.hasOwn(input,'source_version'))throw new Error('invalid_memory_restore');
+      const row=this.managedMemory(owner,workspaceId,memoryId);
+      if(integer(input.expected_version)!==Number(row.version))throw new Error('version_conflict');
+      if(!Number.isSafeInteger(input.source_version)||Number(input.source_version)<1||Number(input.source_version)>=Number(row.version))throw new Error('invalid_memory_source_version');
+      const history=this.db.prepare('SELECT snapshot_json FROM wb_memory_revisions WHERE owner_id=? AND memory_id=? AND version=?').get(owner,memoryId,Number(input.source_version)) as {snapshot_json:string}|undefined;
+      if(!history)throw new Error('memory_revision_not_found');
+      const source=JSON.parse(history.snapshot_json) as Row;
+      if(source.memory_id!==memoryId||source.workspace_id!==row.workspace_id||source.project_id!==row.project_id||source.scope!==row.scope||source.agent_id!==row.agent_id||source.version!==input.source_version||source.status!=='active')throw new Error('memory_restore_source_conflict');
+      if(memoryExpired(row)||memoryExpired(source))throw new Error('memory_restore_expired');
+      const expiry=row.expires_at==null?source.expires_at:source.expires_at==null?row.expires_at:String(row.expires_at)<String(source.expires_at)?row.expires_at:source.expires_at;
+      const saved=this.saveMemory(owner,workspaceId,{memory_id:memoryId,expected_version:row.version,scope:row.scope,agent_id:row.agent_id,project_id:row.project_id,content:source.content,
+        provenance:source.provenance,source_revision:source.source_revision,expires_at:expiry??null,verified:false});
+      this.memoryLifecycle.recordRestore(owner,memoryId,Number(row.version),Number(input.source_version),Number(saved.version));
+      return saved;
+    });
+  }
   deleteMemory(owner: string, workspaceId: string, memoryId: string, expectedVersion: number, runId?: string) {
     const workspace = this.workspace(workspaceId);
     return this.transaction(() => {

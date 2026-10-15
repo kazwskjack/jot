@@ -82,7 +82,26 @@ export class MemoryLifecycle {
       if (!columns.has('verified_at')) db.exec('UPDATE wb_memories SET verified_at=updated_at WHERE verified=1');
       db.exec(`CREATE INDEX IF NOT EXISTS wb_memory_scope ON wb_memories(owner_id,workspace_id,project_id,scope,agent_id,status,expires_at);
         CREATE TABLE IF NOT EXISTS wb_memory_revisions(memory_id TEXT NOT NULL,version INTEGER NOT NULL,owner_id TEXT NOT NULL,snapshot_json TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(memory_id,version));
-        CREATE TABLE IF NOT EXISTS wb_memory_index_jobs(memory_id TEXT PRIMARY KEY,owner_id TEXT NOT NULL,revision INTEGER NOT NULL,tombstone INTEGER NOT NULL,status TEXT NOT NULL,updated_at TEXT NOT NULL);`);
+        CREATE TABLE IF NOT EXISTS wb_memory_index_jobs(memory_id TEXT PRIMARY KEY,owner_id TEXT NOT NULL,revision INTEGER NOT NULL,tombstone INTEGER NOT NULL,status TEXT NOT NULL,updated_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS wb_memory_restores(memory_id TEXT NOT NULL,owner_id TEXT NOT NULL,from_version INTEGER NOT NULL,source_version INTEGER NOT NULL,result_version INTEGER NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(memory_id,result_version),
+          FOREIGN KEY(memory_id,source_version) REFERENCES wb_memory_revisions(memory_id,version),FOREIGN KEY(memory_id,from_version) REFERENCES wb_memory_revisions(memory_id,version),FOREIGN KEY(memory_id,result_version) REFERENCES wb_memory_revisions(memory_id,version));
+        CREATE TRIGGER IF NOT EXISTS wb_memory_restores_no_replace BEFORE INSERT ON wb_memory_restores
+          WHEN EXISTS(SELECT 1 FROM wb_memory_restores WHERE memory_id=NEW.memory_id AND result_version=NEW.result_version)
+          BEGIN SELECT RAISE(ABORT,'memory_restore_immutable'); END;
+        CREATE TRIGGER IF NOT EXISTS wb_memory_revisions_no_replace BEFORE INSERT ON wb_memory_revisions
+          WHEN EXISTS(SELECT 1 FROM wb_memory_revisions WHERE memory_id=NEW.memory_id AND version=NEW.version)
+          BEGIN SELECT RAISE(ABORT,'memory_revision_immutable'); END;
+        CREATE TRIGGER IF NOT EXISTS wb_memory_restores_no_update BEFORE UPDATE ON wb_memory_restores BEGIN SELECT RAISE(ABORT,'memory_restore_immutable'); END;
+        CREATE TRIGGER IF NOT EXISTS wb_memory_restores_no_delete BEFORE DELETE ON wb_memory_restores BEGIN SELECT RAISE(ABORT,'memory_restore_immutable'); END;
+        CREATE TRIGGER IF NOT EXISTS wb_memory_revisions_no_update BEFORE UPDATE ON wb_memory_revisions BEGIN SELECT RAISE(ABORT,'memory_revision_immutable'); END;
+        CREATE TRIGGER IF NOT EXISTS wb_memory_revisions_no_delete BEFORE DELETE ON wb_memory_revisions BEGIN SELECT RAISE(ABORT,'memory_revision_immutable'); END;`);
+      const restoreKeys = db.prepare('PRAGMA foreign_key_list(wb_memory_restores)').all() as Array<{ id: number; table: string; from: string; to: string }>;
+      for (const versionColumn of ['from_version', 'source_version', 'result_version']) {
+        const versionKey = restoreKeys.find(key => key.table === 'wb_memory_revisions' && key.from === versionColumn && key.to === 'version');
+        if (!versionKey || !restoreKeys.some(key => key.id === versionKey.id && key.table === 'wb_memory_revisions' && key.from === 'memory_id' && key.to === 'memory_id')) {
+          throw new Error('memory_restore_schema_migration_required');
+        }
+      }
       for (const row of db.prepare('SELECT * FROM wb_memories').all() as MemoryRow[]) {
         if (!db.prepare('SELECT 1 FROM wb_memory_revisions WHERE memory_id=? AND version=?').get(String(row.memory_id), Number(row.version))) this.record(row);
         else this.queue(row);
@@ -104,12 +123,28 @@ export class MemoryLifecycle {
       .run(String(row.memory_id), String(row.owner_id), Number(row.version), tombstone, 'pending', new Date().toISOString());
   }
   history(owner: string, memoryId: string): MemoryValue[] {
-    return (this.db.prepare('SELECT snapshot_json FROM wb_memory_revisions WHERE owner_id=? AND memory_id=? ORDER BY version').all(owner, memoryId) as MemoryRow[])
-      .map(row => {
+    return this.historyValues(this.db.prepare(`SELECT r.snapshot_json,a.source_version AS restored_from_version,a.from_version AS restored_over_version FROM wb_memory_revisions r
+      LEFT JOIN wb_memory_restores a ON a.memory_id=r.memory_id AND a.owner_id=r.owner_id AND a.result_version=r.version
+      WHERE r.owner_id=? AND r.memory_id=? ORDER BY r.version`).all(owner, memoryId) as MemoryRow[]);
+  }
+  historyPage(owner:string,memoryId:string,beforeVersion?:number){
+    const rows=this.db.prepare(`SELECT r.version AS revision,r.snapshot_json,a.source_version AS restored_from_version,a.from_version AS restored_over_version FROM wb_memory_revisions r
+      LEFT JOIN wb_memory_restores a ON a.memory_id=r.memory_id AND a.owner_id=r.owner_id AND a.result_version=r.version
+      WHERE r.owner_id=? AND r.memory_id=? AND (? IS NULL OR r.version<?) ORDER BY r.version DESC LIMIT 51`).all(owner,memoryId,beforeVersion??null,beforeVersion??null) as MemoryRow[];
+    const page=rows.slice(0,50);
+    return {items:this.historyValues(page.reverse()),next_before_version:rows.length>50?Number(page[0]!.revision):null};
+  }
+  private historyValues(rows:MemoryRow[]):MemoryValue[]{
+    return rows.map(row => {
         const snapshot = JSON.parse(String(row.snapshot_json)) as MemoryValue;
         const { version, content, verified, provenance, source_revision, expires_at, supersedes, verified_at, status, created_at, updated_at } = snapshot;
-        return { version, content, verified, provenance, source_revision, expires_at, supersedes, verified_at, status, created_at, updated_at };
+        return { version, content, verified, provenance, source_revision, expires_at, supersedes, verified_at, status, created_at, updated_at,
+          ...(row.restored_from_version==null?{}:{restored_from_version:Number(row.restored_from_version),restored_over_version:Number(row.restored_over_version)}) };
       });
+  }
+  recordRestore(owner:string,memoryId:string,fromVersion:number,sourceVersion:number,resultVersion:number):void {
+    if(!this.db.isTransaction)throw new Error('memory_restore_transaction_required');
+    this.db.prepare('INSERT INTO wb_memory_restores VALUES(?,?,?,?,?,?)').run(memoryId,owner,fromVersion,sourceVersion,resultVersion,new Date().toISOString());
   }
   /** Restart/rebuild rechecks live state and expires tombstones before making any index claim. */
   rebuild(): void {

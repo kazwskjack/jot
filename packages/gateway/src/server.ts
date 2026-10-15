@@ -118,20 +118,22 @@ export async function buildServer(config: {
   const interactions = new InteractionService(db,events,taskInteractionResponder);
   const idempotencyRequests = new WeakMap<object, { owner: string; operation: string; key: string }>();
   const isUploadRoute=(request:any)=>['/v1/conversations/:conversationId/uploads','/v1/uploads/:uploadId/content','/v1/uploads/:uploadId/complete'].includes(request.routeOptions.url);
+  const isMemoryRestoreRoute=(request:any)=>request.method==='POST'&&request.routeOptions.url==='/v1/workspaces/:workspaceId/memory/:memoryId/restore';
+  const atomicProtocol=(request:any)=>isUploadRoute(request)?'upload-atomic-v1':isMemoryRestoreRoute(request)?'memory-restore-atomic-v1':null;
   // Receipt protocol is reserved with the original request. Legacy pending rows
   // have no proof of an atomic business boundary and must not be re-executed.
-  const uploadCommand=<T>(request:any,status:number,operation:()=>T):T=>{
-    const pending=idempotencyRequests.get(request);
+  const atomicCommand=<T>(request:any,status:number,operation:()=>T):T=>{
+    const pending=idempotencyRequests.get(request),protocol=atomicProtocol(request);
     const value=withImmediateTransaction(db,()=>{
       if(pending){
         const cached=db.prepare('SELECT response_status,response_json,receipt_protocol FROM ga_idempotency WHERE owner_id=? AND operation=? AND idempotency_key=?').get(pending.owner,pending.operation,pending.key) as Record<string,unknown>|undefined;
-        if(!cached||cached.receipt_protocol!=='upload-atomic-v1')throw new Error('idempotency_in_progress');
+        if(!protocol||!cached||cached.receipt_protocol!==protocol)throw new Error('idempotency_in_progress');
         if(cached.response_status!==null){if(cached.response_status!==status)throw new Error('idempotency_conflict');return JSON.parse(String(cached.response_json)) as T;}
       }
       const result=operation(),operationId=contracts.operationFor(request.method,request.routeOptions.url);
       if(!operationId||!contracts.validateResponse(operationId,status,result??null).valid)throw new Error('contract_response_invalid');
       if(pending&&db.prepare('UPDATE ga_idempotency SET response_status=?,response_json=? WHERE owner_id=? AND operation=? AND idempotency_key=? AND response_status IS NULL AND receipt_protocol=?')
-        .run(status,JSON.stringify(result??null),pending.owner,pending.operation,pending.key,'upload-atomic-v1').changes!==1)throw new Error('idempotency_in_progress');
+        .run(status,JSON.stringify(result??null),pending.owner,pending.operation,pending.key,protocol).changes!==1)throw new Error('idempotency_in_progress');
       return result;
     });
     idempotencyRequests.delete(request);return value;
@@ -181,11 +183,12 @@ export async function buildServer(config: {
     if (existing) {
       if (existing.request_sha256 !== requestHash) throw new Error('idempotency_conflict');
       if (existing.response_status === null) {
+        if(isMemoryRestoreRoute(request)&&existing.receipt_protocol==='memory-restore-atomic-v1'){idempotencyRequests.set(request,{owner,operation,key:idempotencyKey});return;}
         if(isUploadRoute(request)&&existing.receipt_protocol==='upload-atomic-v1'){
           if(request.method==='PUT'){
             const upload=db.prepare('SELECT status,declared_size,received_size,declared_sha256,actual_sha256,writer_token,writer_lease_until FROM ga_uploads WHERE id=? AND owner_id=?').get(String((request.params as Record<string,unknown>).uploadId),owner) as Record<string,unknown>|undefined;
             if(upload&&['uploaded','completed'].includes(String(upload.status))&&upload.received_size===upload.declared_size&&upload.actual_sha256===upload.declared_sha256){
-              idempotencyRequests.set(request,{owner,operation,key:idempotencyKey});uploadCommand(request,204,()=>undefined);return reply.code(204).send();
+              idempotencyRequests.set(request,{owner,operation,key:idempotencyKey});atomicCommand(request,204,()=>undefined);return reply.code(204).send();
             }
             // Only an expired, identified generation can be replaced. Its old
             // stream writes another path and cannot commit or delete the new one.
@@ -217,7 +220,7 @@ export async function buildServer(config: {
     const now = Date.now();
     db.prepare(
       'INSERT INTO ga_idempotency(owner_id,operation,idempotency_key,request_sha256,response_status,response_json,created_at,expires_at,receipt_protocol) VALUES(?,?,?,?,?,?,?,?,?)',
-    ).run(owner, operation, idempotencyKey, requestHash, null, null, new Date(now).toISOString(), new Date(now + 86_400_000).toISOString(),isUploadRoute(request)?'upload-atomic-v1':null);
+    ).run(owner, operation, idempotencyKey, requestHash, null, null, new Date(now).toISOString(), new Date(now + 86_400_000).toISOString(),atomicProtocol(request));
     idempotencyRequests.set(request, { owner, operation, key: idempotencyKey });
   });
 
@@ -236,7 +239,7 @@ export async function buildServer(config: {
     if (!pending) return payload;
     // An error response must not replace a recoverable reservation or another
     // writer's success. Successful upload receipts already committed atomically.
-    if(isUploadRoute(request)&&reply.statusCode>=400)return payload;
+    if(atomicProtocol(request)&&reply.statusCode>=400)return payload;
     db.prepare(
       'UPDATE ga_idempotency SET response_status=?,response_json=? WHERE owner_id=? AND operation=? AND idempotency_key=?',
     ).run(reply.statusCode, JSON.stringify(responseValue), pending.owner, pending.operation, pending.key);
@@ -245,6 +248,7 @@ export async function buildServer(config: {
 
   app.setErrorHandler((error, _request, reply) => {
     const code = error instanceof Error ? error.message : 'internal_error';
+    if(['memory_restore_expired','memory_restore_source_conflict'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
     if(['native_creation_aborted','native_creation_outcome_unknown'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
     if(code==='task_review_output_not_found')return reply.code(404).send({error:{code:'TASK_REVIEW_OUTPUT_NOT_FOUND'}});
     if(code==='task_review_output_unavailable')return reply.code(409).send({error:{code:'TASK_REVIEW_OUTPUT_UNAVAILABLE'}});
@@ -341,7 +345,7 @@ export async function buildServer(config: {
     if(Object.keys(query).some(key=>key!=='cursor')||(query.cursor!==undefined&&(typeof query.cursor!=='string'||!query.cursor||query.cursor.length>200)))throw new Error('invalid_task_notification_settings');
     return taskNotifications.history(actor(request as any),String((request.params as {taskId:string}).taskId),query.cursor as string|undefined);
   });
-  registerWorkbenchRoutes(app, workbench, actor);
+  registerWorkbenchRoutes(app, workbench, actor,(request,operation)=>atomicCommand(request,200,operation));
   const taskDelegations=new TaskDelegationService(db,workbench,persistentTasks);
   const taskCollaboration=new TaskCollaborationService(db,workbench,persistentTasks,taskDelegations);
   registerPersistentTaskRoutes(app, persistentTasks, actor,taskDelegations,taskCollaboration);
@@ -441,7 +445,7 @@ export async function buildServer(config: {
         replay_retention_hours: 168, idempotency_retention_hours: 24 },
       voice,
       workbench: { enabled: true, agent_roles: true, independent_teams: true, agent_messages: true,
-        shared_workspace: true, memory_scopes: ['project', 'private'], memory_lifecycle: true, memory_retrieval: 'local_keyword',task_readiness:true,model_budget:budgetPolicy!==undefined,
+        shared_workspace: true, memory_scopes: ['project', 'private'], memory_lifecycle: true, memory_restore: true, memory_retrieval: 'local_keyword',task_readiness:true,model_budget:budgetPolicy!==undefined,
         task_reply_policy:true,task_reply_execution:false,task_create_delivery:true,task_notifications:true,channel_bindings:!!config.internalChannelToken||!!config.emailBindingSend,email_bindings:!!config.emailBindingSend,wecom_bindings:!!config.internalChannelToken,task_notification_events:['changed','completed','failed','needs_confirmation'],
         ...(budgetPolicy?{task_model_budget_limits:budgetPolicy.budgetSettings().limits.task_total}:{}),
         collaboration_modes: [{ id: 'single', enabled: true }, { id: 'independent_team', enabled: true },
@@ -592,14 +596,14 @@ export async function buildServer(config: {
     (request.params as { interactionId: string }).interactionId, actor(request as any), request.body as Record<string, unknown>,
     String(request.headers['idempotency-key'] || ''),
   )));
-  app.post('/v1/conversations/:conversationId/uploads', async (request, reply) => reply.code(201).send(uploadCommand(request,201,()=>artifacts.initUpload(
+  app.post('/v1/conversations/:conversationId/uploads', async (request, reply) => reply.code(201).send(atomicCommand(request,201,()=>artifacts.initUpload(
     (request.params as { conversationId: string }).conversationId, actor(request as any), request.body as Record<string, unknown>,
   ))));
   app.put('/v1/uploads/:uploadId/content', { bodyLimit: 104857600 }, async (request, reply) => {
-    await artifacts.writeContent((request.params as { uploadId: string }).uploadId, actor(request as any), request.body as AsyncIterable<Uint8Array>,()=>uploadCommand(request,204,()=>undefined));
+    await artifacts.writeContent((request.params as { uploadId: string }).uploadId, actor(request as any), request.body as AsyncIterable<Uint8Array>,()=>atomicCommand(request,204,()=>undefined));
     return reply.code(204).send();
   });
-  app.post('/v1/uploads/:uploadId/complete', async (request, reply) => reply.code(201).send(uploadCommand(request,201,()=>artifacts.complete(
+  app.post('/v1/uploads/:uploadId/complete', async (request, reply) => reply.code(201).send(atomicCommand(request,201,()=>artifacts.complete(
     (request.params as { uploadId: string }).uploadId, actor(request as any), request.body as Record<string, unknown>,
   ))));
   app.post('/v1/artifacts/:artifactId/file-operations', async (request, reply) => {

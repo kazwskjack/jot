@@ -1,5 +1,22 @@
 # Persistent tasks and shared workspaces
 
+Owned memory records now have a history view and an explicit restore
+confirmation. Restoring an earlier active revision creates a new unverified
+version, retains its sources and records which revision it replaced. It cannot
+revive deleted, superseded or expired memory, extend the current expiry, or
+restore an Agent's revoked access. Concurrent edits require a reload; a lost
+response can retry the same idempotent request. This is individual revision
+restoration, not automatic memory extraction or Dream consolidation.
+The workflow is informed by [PilotDeck's white-box memory design](https://github.com/OpenBMB/PilotDeck).
+Jot stores these revisions in its existing owner-scoped SQLite ledger.
+History opens the newest 50 revisions and provides earlier-page navigation;
+exports retain the complete authorized history. Successful restore receipts
+commit with the memory change, so the same request survives a server restart
+without creating another revision. The browser retains an unresolved command
+only while that page remains open. After a forced reload, inspect the current
+history before submitting another restore; browser command recovery is not
+persisted across reloads.
+
 Task acceptance cards include frozen-file review: inspect a small text/image or
 download the verified version before accepting. HTML/SVG remain literal text.
 Changing the current workspace file does not change that version; accepting,
@@ -275,3 +292,7 @@ must not be used to claim that those provider calls are budget-enforced.
 ## Optional native Team bridge
 
 [Native role integration](NATIVE_ROLES.md) documents the saved-role lifecycle, shared workspace and accounting, default-off deployment gates and remaining model-callable dispatch work. The lead retains planning and final-answer responsibility.
+
+### Complete PilotDeck reference scope
+
+See the [full capability and implementation checklist](docs/PILOTDECK-PARITY.md). All modules and recovery mechanisms remain in scope. Memory revision restoration does not claim full Dream consolidation parity. An unreleased preview database missing a required restore-audit compound foreign key fails startup with `memory_restore_schema_migration_required`; back it up and perform a reviewed offline migration instead of silently recreating its audit history.
