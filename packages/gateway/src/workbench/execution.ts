@@ -185,6 +185,10 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
     const input=object(request.body);fields(input,['run_id','session_ref','request_id','spawn_request_hash']);
     context(input);return {reservation:nativeChildren.lookup(input)};
   });
+  app.post('/internal/v1/workbench/native-child-abort',async request=>{
+    authorized(request.headers.authorization);if(!nativeChildren)throw new Error('task_collaboration_forbidden');
+    return nativeChildren.abortBeforeCreate(object(request.body));
+  });
   app.post('/internal/v1/workbench/native-child-published',async request=>{
     authorized(request.headers.authorization);if(!nativeChildren)throw new Error('task_collaboration_forbidden');
     const input=object(request.body);fields(input,['run_id','session_ref','request_id','spawn_request_hash','publication']);

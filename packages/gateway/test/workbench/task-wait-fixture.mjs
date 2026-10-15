@@ -22,7 +22,7 @@ export async function fixture(t,intent='wait_user',options={}){
  const internal=(name,payload)=>f.app.inject({method:'POST',url:`/internal/v1/workbench/${name}`,headers:{authorization:'Bearer test-b99992d64419ae59'},payload});
  assert.equal((await internal('goal-binding',{...identity,action:'save',...goal})).statusCode,200);
  f.modelBudgets.reserve('alice',runId,{attempt_id:'spent',provider:'fixture',model:'bounded'});f.modelBudgets.dispatch('alice',runId,'spent');f.modelBudgets.settle('alice',runId,'spent',{inputTokens:5,outputTokens:5,totalTokens:10});
- if(options.prepare)await options.prepare({...f,task,runId,occurrence,internal,identity,goal});
+ if(options.prepare)await options.prepare({...f,fixtureConfig,task,runId,occurrence,internal,identity,goal});
  const proposal=await internal('goal-proposal',{...identity,...goal,call_id:'wait-proposal',intent,summary:'Which report format should I use?',...(options.proposalFiles===undefined?{}:{files:options.proposalFiles})});assert.equal(proposal.statusCode,200,proposal.body);assert.equal(proposal.json().proposal.accepted,true);
  if(options.afterProposal)await options.afterProposal({...f,task,runId,occurrence,internal,identity,goal,coordinator,lease});
  await internal('goal-binding',{...identity,action:'save',...goal,goal_revision:8});

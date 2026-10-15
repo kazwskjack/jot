@@ -89,7 +89,8 @@ function completionSnapshot(db:DatabaseSync,runId:string) {
   WHERE r.id=? AND r.status='waiting_approval' AND t.status IN ('active','budget_exhausted')`).get(runId) as CompletionScope|undefined;
  if(!scope)throw new Error('task_completion_state_conflict');
  if(db.prepare(`SELECT 1 FROM wb_native_child_reservations q WHERE q.owner_id=? AND q.occurrence_id=?
-  AND NOT EXISTS (SELECT 1 FROM wb_native_child_closures c WHERE c.reservation_id=q.reservation_id) LIMIT 1`).get(scope.owner_id,scope.occurrence_id))throw new Error('task_auxiliary_pending');
+  AND NOT EXISTS (SELECT 1 FROM wb_native_child_closures c WHERE c.reservation_id=q.reservation_id)
+  AND NOT EXISTS (SELECT 1 FROM wb_native_creation_aborts a WHERE a.reservation_id=q.reservation_id) LIMIT 1`).get(scope.owner_id,scope.occurrence_id))throw new Error('task_auxiliary_pending');
  if(db.prepare(`SELECT 1 FROM wb_native_child_activations a WHERE a.owner_id=? AND a.occurrence_id=?
   AND NOT EXISTS (SELECT 1 FROM wb_native_activation_closures c WHERE c.run_id=a.run_id) LIMIT 1`).get(scope.owner_id,scope.occurrence_id))throw new Error('task_auxiliary_pending');
  // One identity can be visible through more than one bookkeeping relation.

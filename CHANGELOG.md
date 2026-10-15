@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- Record an immutable, internal-only pre-create abort when the original provider preparation fails and its reservation has no child binding or publication. Preserve request/Session/lease identity, cumulative quota and the original error; bound or uncertain outcomes remain pending.
+- Verify lost reservation and bind acknowledgements against the actual installed native manager without creating duplicate Sessions or running child inference.
+
 - Block task acceptance candidates until native reservations and activations close; include their settled/released model receipts in one distinct owner/occurrence cost journal and reject unresolved or exceeded spend.
 - Verify real native lifecycle services, sibling-occurrence isolation, duplicate ledger membership and post-review admission refusal. Keep unresolved unbound spawns blocked and native roles default-off pending trusted recovery.
 

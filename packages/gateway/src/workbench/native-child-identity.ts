@@ -19,6 +19,11 @@ export function installNativeChildRuns(db:DatabaseSync){
   role_id TEXT NOT NULL,child_session_ref TEXT NOT NULL UNIQUE,created_at TEXT NOT NULL);
   CREATE TRIGGER IF NOT EXISTS wb_native_child_run_no_update BEFORE UPDATE ON wb_native_child_runs BEGIN SELECT RAISE(ABORT,'native_child_identity_immutable'); END;
   CREATE TRIGGER IF NOT EXISTS wb_native_child_run_no_delete BEFORE DELETE ON wb_native_child_runs BEGIN SELECT RAISE(ABORT,'native_child_identity_immutable'); END;`);
+ db.exec(`CREATE TABLE IF NOT EXISTS wb_native_creation_aborts(
+  reservation_id TEXT PRIMARY KEY REFERENCES wb_native_child_reservations(reservation_id),
+  owner_id TEXT NOT NULL,root_run_id TEXT NOT NULL,receipt_sha256 TEXT NOT NULL,receipt_json TEXT NOT NULL,created_at TEXT NOT NULL);
+  CREATE TRIGGER IF NOT EXISTS wb_native_creation_abort_no_update BEFORE UPDATE ON wb_native_creation_aborts BEGIN SELECT RAISE(ABORT,'native_creation_abort_immutable'); END;
+  CREATE TRIGGER IF NOT EXISTS wb_native_creation_abort_no_delete BEFORE DELETE ON wb_native_creation_aborts BEGIN SELECT RAISE(ABORT,'native_creation_abort_immutable'); END;`);
  db.exec(`CREATE TABLE IF NOT EXISTS wb_native_child_closures(
   reservation_id TEXT PRIMARY KEY REFERENCES wb_native_child_reservations(reservation_id),run_id TEXT NOT NULL UNIQUE REFERENCES ga_runs(id),
   receipt_sha256 TEXT NOT NULL,receipt_json TEXT NOT NULL,created_at TEXT NOT NULL);
@@ -63,6 +68,7 @@ export function assertNativeRun(db:DatabaseSync,owner:string,runId:string):Nativ
  return assertNativeSnapshot(db,owner,JSON.parse(row.snapshot_json) as NativeReservation);
 }
 export function assertNativeSnapshot(db:DatabaseSync,owner:string,saved:NativeReservation):NativeReservation{
+ if(db.prepare('SELECT 1 FROM wb_native_creation_aborts WHERE reservation_id=?').get(saved.reservation_id))throw new Error('native_creation_aborted');
  assertNativeCollaborationPolicy(db,owner,saved.task_id,saved.policy_version,saved.role_id);
  assertExecutionLease(db,saved.root_run_id,saved.execution_lease);
  const root=db.prepare(`SELECT r.status,c.owner_id,c.workspace_id,c.project_id,b.kind,b.epoch,a.capability_epoch,a.status AS role_status,

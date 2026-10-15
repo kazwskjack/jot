@@ -15,14 +15,43 @@ native work does not contaminate this review. Freezing relinquishes the root
 worker lease; the existing native admission rules reject later creation or
 reactivation rather than extending that review's authority.
 
-These checks do not solve an unresolved spawn: a durable reservation without a
-bound child run is still pending. There is no reservation-level abort API in
-this release. Preserve the original request/Session identity for trusted host
-reconciliation; do not delete records, fabricate closure, retry with a new ID or
-release uncertain capacity merely because a timeout elapsed. Proven
-not-created recovery and end-user recovery controls remain required before
-treating the optional native-role integration as generally enabled. The
-generated official host profile continues to set `nativeRoles: false`.
+An unbound reservation can now be terminated only by the original trusted host
+reporting a failed provider-prepare callback, before the pinned native manager
+can construct its Session. The internal-only `native-child-abort` route requires
+the same request, child, parent Session, original live lease and optional spawn
+hash. It refuses any existing child binding or publication. Its immutable fact
+is separate from a native Session-log closure: it frees active capacity without
+refunding cumulative creation quota, model spend or historical records. An
+aborted identity cannot bind, create or recover publication later.
+
+Cleanup uses its own bounded signal after the original prepare fails, so user
+cancellation does not interrupt this narrow bookkeeping step. Cleanup refusal
+or an unavailable Gateway preserves the original failure and unresolved state;
+it never claims success. A lost reservation response can therefore be resolved
+for that same unbound identity. A committed bind with a lost response remains
+pending, even if the current process has not created a native Session.
+
+The original live lease may also record that fact while the root is
+`cancelling`; cleanup leaves that state unchanged and grants no execution.
+Host disposal drains one bounded cleanup attempt before removing admission.
+Failures carry a `nativeCreationRecovery` diagnostic on the original error and
+emit a fixed structured recovery status (`abort_unavailable`,
+`bound_outcome_unknown` or `original_binding_changed`) with identity keys only.
+No prompt or credentials are logged. There is no automatic retry queue or
+end-user recovery control yet.
+
+The stage proof is an attestation from the trusted original DSH provider
+callback, authenticated by the Workbench internal credential and original
+lease. Keep that credential within trusted host infrastructure; this is not a
+public/client proof API or a model-callable tool, and the payload alone is not a
+cryptographic proof of process state.
+
+This is not general spawn recovery. Cross-process creation outcomes, an already
+bound run, an expired/replaced lease or a partial native Session require trusted
+reconciliation and end-user recovery controls. Preserve original identities;
+do not delete records, fabricate closure, retry with a new ID or release
+uncertain capacity because a timeout elapsed. The generated official host
+profile continues to set `nativeRoles: false`.
 
 Native child-file delivery still requires precise step-assignment/receipt
 lineage and parent-conversation publication. The cost union above grants no

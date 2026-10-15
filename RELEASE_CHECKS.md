@@ -1,5 +1,39 @@
 # Code preview verification
 
+## Failure before native Session creation
+
+The creation-abort change passed the complete Gateway suite: 1,015 passing,
+zero failures and one POSIX-only restore skip (1,016 total), including Python
+file-engine execution. Gateway build/typecheck passed. The final seven-case
+creation subset also passed after adding real simultaneous HTTP bind/abort
+requests; both submission orders commit exactly one outcome. This checks one
+Gateway with SQLite transactions, not distributed-host capacity or throughput.
+
+Adapter tests passed 312 cases without skips using the pinned runtime; the
+final host unit subset passed 23 cases. Seven actual installed-SDK scenarios
+passed with the real native manager, Team, SessionController and Gateway HTTP:
+normal delegation, a prepare rejection before bind, a lost reservation reply,
+a lost committed-bind reply, owner cancellation during prepare, parallel
+members and cancellation of an executing member. The original CLI host suite
+passed 14 cases. Models remain local scripted/HTTP fixtures, and no production
+service or real external model was used.
+
+The prepare-cancellation case uses the actual owner cancel HTTP command and
+original command dispatcher through the Session Adapter. It verifies cleanup
+before final cancellation, zero child runs, no persisted child Session and no
+child inference. Fault-test connections are closed during isolated teardown;
+fixture timings are not a production latency benchmark.
+
+An earlier CLI host run observed a snapshot body without `messages`; its HTTP
+status/body was not retained, so the cause remains unproven. The same case and
+a subsequent full suite passed. An explicit snapshot HTTP/status assertion now
+preserves better evidence if it recurs; this is not a claimed runtime fix.
+
+An already bound run or cross-process/changed-lease creation outcome is still
+pending. This change supplies neither general provisioning replay nor an
+automatic retry queue, cryptographic process attestation, end-user recovery UI
+or production native-role approval.
+
 ## Native completion and cost accounting
 
 Gateway tests passed 1,009 cases with zero failures and one POSIX-only restore

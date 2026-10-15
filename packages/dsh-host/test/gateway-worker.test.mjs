@@ -89,7 +89,7 @@ async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=
   if(persistent){assert.equal(ended.kind,'error');assert.equal(ended.error.message,'workbench_goal_stopped');}
   else assert.equal(ended.kind,'completed');
   assert.ok(JSON.stringify(requests[0].messages).includes(complete?'Write acceptance.md':persistent?'Ask the user to confirm':'ACCEPTANCE-OK'));
-  const snapshot=await (await fetch(gatewayUrl+'/v1/conversations/'+conversation_id+'/snapshot',{headers})).json();
+  const snapshotResponse=await fetch(gatewayUrl+'/v1/conversations/'+conversation_id+'/snapshot',{headers}),snapshot=await snapshotResponse.json();assert.equal(snapshotResponse.status,200,JSON.stringify(snapshot));assert.ok(Array.isArray(snapshot.messages),'snapshot response must contain messages');
   const replies=snapshot.messages.filter(message=>message.role==='assistant'&&message.status==='complete');assert.equal(replies.length,persistent?0:1);if(!persistent)assert.ok(JSON.stringify(replies[0]).includes('ACCEPTANCE-OK'));
   if(persistent)assert.equal(service.db.prepare("SELECT count(*) n FROM ga_messages WHERE run_id=? AND role='assistant'").get(run_id).n,0);
   if(persistent){const cards=await (await fetch(gatewayUrl+'/v1/conversations/'+conversation_id+'/interactions',{headers})).json();assert.ok(cards.items.length>0);assert.ok(service.db.prepare('SELECT checkpoint_id FROM ga_runs WHERE id=?').get(run_id).checkpoint_id);

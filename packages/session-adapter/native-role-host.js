@@ -53,7 +53,8 @@ export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistenc
   }});
  const provider=new NativeRoleProvider({name:providerName,admission,prepare:async({parent,childId,roleRef,policyVersion,requestId,requestHash,signal})=>{
   const scope=spawnScope.getStore();if(!scope||scope.parent!==parent||scope.childId!==undefined)throw Error('native_role_scope_missing');scope.childId=childId;
-  const parentBinding=bridge.bindingFor(parent);await bridge.guardBudget(parent,signal);
+  const parentBinding=bridge.bindingFor(parent);let reservationAttempted=false;
+  try{await bridge.guardBudget(parent,signal);reservationAttempted=true;
   const receipt=await bridge.request('native-child-reservation',parentBinding,{child_session_ref:childId,role_ref:roleRef,expected_policy_version:policyVersion,request_id:requestId,...(requestHash===undefined?{}:{spawn_request_hash:requestHash})},signal);
   if(receipt?.reservation?.child_session_ref!==childId||receipt.reservation.role_id!==roleRef||typeof receipt.reservation.reservation_id!=='string')throw new Error('native_role_reservation_invalid');
   const response=await bridge.request('native-child-bind',parentBinding,{reservation_id:receipt.reservation.reservation_id},signal);
@@ -61,6 +62,24 @@ export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistenc
   if(bridge.bindingFor(parent)!==parentBinding)throw new Error('native_child_parent_changed');
   if(disposed)throw new Error('native_role_host_disposed');
   prepared.set(childId,{parent,parentBinding,roleRef,requestId,binding:response.binding});return {};
+  }catch(error){
+   // The pinned native manager has not materialized its child Session: this
+   // callback never returned. Only report that narrow fact. The Gateway still
+   // refuses cleanup if bind/publication exists or this original lease changed.
+   if(reservationAttempted){
+    let status='original_binding_changed';
+    if(parentBinding&&bridge.bindingFor(parent)===parentBinding){
+     try{const receipt=await bridge.request('native-child-abort',parentBinding,{child_session_ref:childId,request_id:requestId,
+      ...(requestHash===undefined?{}:{spawn_request_hash:requestHash}),proof:{protocol:1,phase:'provider_prepare_failed'}},AbortSignal.timeout(5000));
+      status=receipt?.aborted===true&&receipt.child_session_ref===childId?'aborted':'abort_unavailable';
+     }catch(cleanup){status=cleanup?.message==='native_creation_outcome_unknown'?'bound_outcome_unknown':'abort_unavailable';}
+    }
+    const recovery=Object.freeze({status,runId:parentBinding?.runId,requestId,childSessionRef:childId});
+    if(error instanceof Error&&Object.isExtensible(error)&&!Object.hasOwn(error,'nativeCreationRecovery'))Object.defineProperty(error,'nativeCreationRecovery',{value:recovery});
+    if(status!=='aborted')console.warn('[jot-native-creation-recovery]',JSON.stringify(recovery));
+   }
+   throw error;
+  }
  }});
  const removeAdmission=admission.install(ctx),removeProvider=ctx.subagents.registerProvider(provider);
  const notifyClosed=async(parent,accepted,receipt,signal)=>{
@@ -140,6 +159,7 @@ export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistenc
      signal.throwIfAborted();
      if(response?.reservation){
       const saved=response.reservation;
+      if(saved.aborted===true)throw Error('native_role_creation_aborted');
       if(typeof saved.child_session_ref!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(saved.child_session_ref))throw Error('native_role_publication_invalid');
       if(saved.publication?.member?.id===saved.child_session_ref)return saved.publication;
       scope.childId=saved.child_session_ref;

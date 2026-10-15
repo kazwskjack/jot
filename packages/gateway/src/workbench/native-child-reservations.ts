@@ -39,7 +39,7 @@ export class NativeChildReservations {
    if(!budget)throw new Error('budget_service_unavailable');
    const digest=createHash('sha256').update(JSON.stringify([runId,input.session_ref,input.child_session_ref,input.role_ref,input.expected_policy_version,lease,...(input.spawn_request_hash===undefined?[]:[input.spawn_request_hash])])).digest('hex');
    const prior=this.db.prepare('SELECT input_hash,snapshot_json FROM wb_native_child_reservations WHERE root_run_id=? AND request_id=?').get(runId,String(input.request_id)) as {input_hash:string;snapshot_json:string}|undefined;
-   if(prior){if(prior.input_hash!==digest)throw new Error('idempotency_conflict');const saved=JSON.parse(prior.snapshot_json);if(saved.task_assignment)assertNativeTaskAssignment(this.db,parent.owner_id,saved.task_assignment);return saved;}
+   if(prior){if(prior.input_hash!==digest)throw new Error('idempotency_conflict');const saved=JSON.parse(prior.snapshot_json);if(this.db.prepare('SELECT 1 FROM wb_native_creation_aborts WHERE reservation_id=?').get(saved.reservation_id))throw new Error('native_creation_aborted');if(saved.task_assignment)assertNativeTaskAssignment(this.db,parent.owner_id,saved.task_assignment);return saved;}
    if(this.db.prepare('SELECT 1 FROM ga_harness_session_bindings WHERE session_id=? UNION ALL SELECT 1 FROM wb_native_child_reservations WHERE child_session_ref=?').get(String(input.child_session_ref),String(input.child_session_ref)))throw new Error('native_child_identity_conflict');
    const native=this.db.prepare('SELECT count(*) n FROM wb_native_child_reservations WHERE owner_id=? AND occurrence_id=?').get(parent.owner_id,authorization.occurrence_id) as {n:number};
    const delegated=this.db.prepare(`SELECT count(*) n FROM wb_task_delegation_authorizations a JOIN wb_task_delegations d ON d.delegation_id=a.delegation_id WHERE d.owner_id=? AND d.occurrence_id=?`).get(parent.owner_id,authorization.occurrence_id) as {n:number};
@@ -56,6 +56,33 @@ export class NativeChildReservations {
    return receipt;
   });
  }
+ /** Trusted original provider-prepare failure only. The pinned native manager
+  * cannot construct its Session before that callback returns. A bound child,
+  * changed lease or uncertain result is deliberately not resolved here. */
+ abortBeforeCreate(input:Input){
+  const keys=['run_id','session_ref','child_session_ref','request_id','execution_lease','spawn_request_hash','proof'];
+  const proof=input?.proof as Input|undefined;
+  if(!input||Object.keys(input).some(key=>!keys.includes(key))||keys.slice(0,4).some(key=>typeof input[key]!=='string'||!ID.test(input[key] as string))
+   ||!proof||Array.isArray(proof)||Object.keys(proof).length!==2||proof.protocol!==1||proof.phase!=='provider_prepare_failed'
+   ||input.spawn_request_hash!==undefined&&(typeof input.spawn_request_hash!=='string'||!/^[a-f0-9]{64}$/.test(input.spawn_request_hash)))throw new Error('native_child_request_invalid');
+  return withImmediateTransaction(this.db,()=>{
+   const runId=String(input.run_id),lease=assertExecutionLease(this.db,runId,input.execution_lease);
+   const row=this.db.prepare(`SELECT q.reservation_id,q.snapshot_json FROM wb_native_child_reservations q
+    JOIN ga_runs r ON r.id=q.root_run_id JOIN ga_conversations c ON c.id=r.conversation_id AND c.owner_id=q.owner_id
+    JOIN ga_harness_session_bindings s ON s.conversation_id=c.id AND s.owner_id=c.owner_id
+    WHERE q.root_run_id=? AND q.request_id=? AND s.session_id=? AND r.status IN ('starting','running','cancelling')`).get(runId,String(input.request_id),String(input.session_ref)) as {reservation_id:string;snapshot_json:string}|undefined;
+   if(!row)throw new Error('workbench_identity_forbidden');
+   const saved=JSON.parse(row.snapshot_json);
+   if(saved.child_session_ref!==input.child_session_ref||saved.parent_session_ref!==input.session_ref||saved.spawn_request_hash!==input.spawn_request_hash
+    ||saved.execution_lease.owner!==lease.owner||saved.execution_lease.generation!==lease.generation)throw new Error('workbench_identity_forbidden');
+   const prior=this.db.prepare('SELECT receipt_json FROM wb_native_creation_aborts WHERE reservation_id=?').get(row.reservation_id) as {receipt_json:string}|undefined;
+   if(prior)return JSON.parse(prior.receipt_json);
+   if(this.db.prepare('SELECT 1 FROM wb_native_child_runs WHERE reservation_id=? UNION ALL SELECT 1 FROM wb_native_spawn_publications WHERE reservation_id=?').get(row.reservation_id,row.reservation_id))throw new Error('native_creation_outcome_unknown');
+   const receipt={aborted:true,reservation_id:row.reservation_id,root_run_id:runId,child_session_ref:saved.child_session_ref,
+    request_id:String(input.request_id),execution_lease:lease,proof:{protocol:1,phase:'provider_prepare_failed'}};
+   const encoded=canonical(receipt);this.db.prepare('INSERT INTO wb_native_creation_aborts VALUES(?,?,?,?,?,?)').run(row.reservation_id,saved.owner_id,runId,createHash('sha256').update(encoded).digest('hex'),encoded,new Date().toISOString());return receipt;
+  });
+ }
  /** Metadata lookup only. Never recreates a child or grants execution. */
  lookup(input:Input){
   const fields=['run_id','session_ref','request_id','spawn_request_hash','execution_lease'];
@@ -70,7 +97,8 @@ export class NativeChildReservations {
    if(saved.spawn_request_hash!==input.spawn_request_hash)throw new Error('idempotency_conflict');
    this.collaboration.authorizeNativeMember(parent.owner_id,runId,saved.role_id,saved.policy_version);
    const stored=this.db.prepare('SELECT publication_json FROM wb_native_spawn_publications WHERE reservation_id=?').get(saved.reservation_id) as {publication_json:string}|undefined;
-   return {reservation_id:saved.reservation_id,child_session_ref:saved.child_session_ref,role_ref:saved.role_id,execution_authorized:false,...(stored?{publication:JSON.parse(stored.publication_json)}:{})};
+   const aborted=!!this.db.prepare('SELECT 1 FROM wb_native_creation_aborts WHERE reservation_id=?').get(saved.reservation_id);
+   return {reservation_id:saved.reservation_id,child_session_ref:saved.child_session_ref,role_ref:saved.role_id,execution_authorized:false,...(aborted?{aborted:true}:{}),...(stored?{publication:JSON.parse(stored.publication_json)}:{})};
   });
  }
  publish(input:Input){
@@ -84,7 +112,7 @@ export class NativeChildReservations {
    ||member.context!==undefined&&member.context!=='fresh')throw new Error('native_spawn_publication_invalid');
   const encoded=canonical(publication);if(Buffer.byteLength(encoded,'utf8')>8192)throw new Error('native_spawn_publication_invalid');
   return withImmediateTransaction(this.db,()=>{
-   const saved=this.lookup(identity);if(!saved||member.id!==saved.child_session_ref)throw new Error('workbench_identity_forbidden');
+   const saved=this.lookup(identity);if(!saved||member.id!==saved.child_session_ref)throw new Error('workbench_identity_forbidden');if(saved.aborted)throw new Error('native_creation_aborted');
    if(!this.db.prepare(`SELECT 1 FROM wb_native_child_runs n JOIN wb_run_bindings b ON b.run_id=n.run_id AND b.kind='native_team'
      WHERE n.reservation_id=? AND n.child_session_ref=?`).get(saved.reservation_id,saved.child_session_ref))throw new Error('native_spawn_publication_unbound');
    const prior=this.db.prepare('SELECT publication_json FROM wb_native_spawn_publications WHERE reservation_id=?').get(saved.reservation_id) as {publication_json:string}|undefined;

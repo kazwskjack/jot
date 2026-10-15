@@ -124,6 +124,10 @@ export class WorkbenchBridge {
       signal: signal ? AbortSignal.any([signal, timed]) : timed,
     });
     if (!response.ok) {
+      if(path==='native-child-abort'&&response.status===409){
+        let code;try{code=(await response.json())?.error?.code;}catch{}
+        if(code==='NATIVE_CREATION_OUTCOME_UNKNOWN')throw Error('native_creation_outcome_unknown');
+      }
       if(path==='step-admission'){
         let code;try{code=(await response.json())?.error?.code;}catch{}
         const statuses={MODEL_BUDGET_EXHAUSTED:429,BUDGET_USAGE_UNKNOWN:409,BUDGET_USAGE_PENDING:409,

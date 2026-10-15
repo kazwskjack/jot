@@ -10,6 +10,30 @@ function fixture(options={}){const entries=new Map(),owners=new Map(),bindings=n
  return {host,ctx,root,bridge,events,bindings,entries,request,hooks,make};}
 test('named provider prepares backend identity, attaches a cloned binding and selects model before native publication',async()=>{const f=fixture();const result=await f.host.spawn(f.root,{roleRef:'role',policyVersion:1,requestId:'request'},f.request);assert.equal(result.member.id,'child-1');assert.deepEqual(f.events,['native-child-reservation','native-child-bind','attach','select','published']);assert.equal(f.entries.get('child-1').barriers.size,0);await f.host.dispose();});
 
+test('provider prepare failure reports its original identity before native creation even after user cancellation',async()=>{
+ const f=fixture(),original=f.bridge.request,controller=new AbortController(),calls=[];
+ f.bridge.request=async(path,binding,payload,signal)=>{if(path==='native-child-bind'){controller.abort();throw Error('bind unavailable');}if(path==='native-child-abort'){calls.push({binding,payload,aborted:signal.aborted});return {aborted:true,child_session_ref:payload.child_session_ref};}return original(path,binding,payload,signal);};
+ await assert.rejects(f.host.spawn(f.root,{roleRef:'role',policyVersion:1,requestId:'request'},{...f.request,signal:controller.signal}),error=>error.message==='bind unavailable'&&error.nativeCreationRecovery.status==='aborted');
+ assert.equal(calls.length,1);assert.equal(calls[0].binding,f.bridge.bindingFor(f.root));assert.equal(calls[0].payload.child_session_ref,'child-1');assert.equal(calls[0].payload.request_id,'request');assert.deepEqual(calls[0].payload.proof,{protocol:1,phase:'provider_prepare_failed'});assert.equal(calls[0].aborted,false);assert.equal(f.entries.size,1);await f.host.dispose();
+});
+
+test('an abort cleanup refusal never hides the original prepare error or creates a child',async()=>{
+ const f=fixture(),original=f.bridge.request;let attempts=0;
+ f.bridge.request=async(path,binding,payload,signal)=>{if(path==='native-child-bind')throw Error('original preparation failure');if(path==='native-child-abort'){attempts++;throw Error('native_creation_outcome_unknown');}return original(path,binding,payload,signal);};
+ await assert.rejects(f.host.spawn(f.root,{roleRef:'role',policyVersion:1,requestId:'request'},f.request),error=>error.message==='original preparation failure'&&error.nativeCreationRecovery.status==='bound_outcome_unknown');assert.equal(attempts,1);assert.equal(f.entries.size,1);await f.host.dispose();
+});
+
+test('disposal drains one bounded pre-create cleanup before removing native admission',async()=>{
+ const f=fixture(),original=f.bridge.request;let entered,release,aborts=0;const started=new Promise(resolve=>entered=resolve),gate=new Promise(resolve=>release=resolve);
+ f.bridge.request=async(path,binding,payload,signal)=>{if(path==='native-child-bind'){entered();await gate;throw Error('bind interrupted');}if(path==='native-child-abort'){assert.equal(signal.aborted,false);aborts++;return {aborted:true,child_session_ref:payload.child_session_ref};}return original(path,binding,payload,signal);};
+ const pending=f.host.spawn(f.root,{roleRef:'role',policyVersion:1,requestId:'shutdown-prepare'},f.request);await started;const stopping=f.host.dispose();release();await assert.rejects(pending,error=>error.message==='bind interrupted'&&error.nativeCreationRecovery.status==='aborted');await stopping;assert.equal(aborts,1);assert.equal(f.entries.size,1);
+});
+
+test('a durable aborted reservation is terminal and cannot create or recover a member',async()=>{
+ const f=fixture({durableSpawns:true});f.bridge.request=async()=>({reservation:{child_session_ref:'original-child',aborted:true}});
+ await assert.rejects(f.host.spawn(f.root,{roleRef:'role',policyVersion:1,requestId:'request'},f.request),/native_role_creation_aborted/);assert.equal(f.entries.size,1);await f.host.dispose();
+});
+
 test('host awaits exact handoff admission before selecting a member model or publishing it',async()=>{
  let entered,release;const ready=new Promise(done=>entered=done),gate=new Promise(done=>release=done);
  const f=fixture({handoffAdmission:async({parent,child,roleRef,binding,parentBinding})=>{
