@@ -17,7 +17,7 @@ For the standalone local Agent and browser demo, start from the repository root.
 | Browser/tool bridge | Optional | Browser actions and native batch progress; not supplied by this gateway |
 | DSH speech service | Optional | Voice transcription; disabled by default |
 
-The session adapter's `cwd` validation currently requires a POSIX absolute path. Use Linux or WSL for the extended DSH chain. The root portable Agent can run natively on Windows.
+The session adapter requires an absolute path valid on the DSH host: for example, a Windows drive path on Windows or a POSIX absolute path on Linux. The isolated [host-to-worker acceptance](../dsh-host/test/gateway-worker.test.mjs) exercises the actual Gateway, Worker and official DSH launcher on Windows with a synthetic local Messages HTTP model endpoint. This does not validate every optional browser, shell, Office or inference backend on that platform; check their own dependencies separately.
 
 ## Build and start
 

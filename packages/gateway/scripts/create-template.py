@@ -35,6 +35,7 @@ with ZipFile(path, 'w', ZIP_DEFLATED) as archive:
 catalog['templates'].append({'template_id':'copy-brief-v1','version':'1.0.0','format':'docx','file':path.name,'sha256':hashlib.sha256(path.read_bytes()).hexdigest(),'fields':{field:{'token':'[[DSH:'+field+']]','max_chars':6000} for field in fields}})
 columns = dict(zip(['entity_id','metric','value','unit','period','source_url','observed_at','evidence_ref','verification','note'], 'ABCDEFGHIJ'))
 mapping = {'template_id':'evidence-table-v1','sheet':'Evidence','header_row':5,'row_start':6,'row_end':25,'capacity':20,'natural_key':['entity_id','metric','period'],'columns':columns,'duplicate_key_policy':'reject','literal_text_policy':'never_convert_untrusted_text_to_formula'}
+mapping['status_labels'] = {'verified':'Verified','partial':'Partial','missing':'Missing','synthetic':'Synthetic'}
 (root / 'evidence-table-v1.mapping.json').write_text(json.dumps(mapping, indent=2), encoding='utf-8', newline='\n')
 path = root / 'evidence-table-v1.xlsx'
 office = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'

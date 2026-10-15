@@ -7,6 +7,12 @@ import { TemplateCatalog } from '../../src/file-engine/templates.ts';
 
 const source = resolve('file-engine/templates');
 
+test('evidence template declares every verification state accepted by both validators',()=>{
+ const mapping=JSON.parse(readFileSync(join(source,'evidence-table-v1.mapping.json'),'utf8'));
+ assert.deepEqual(Object.keys(mapping.status_labels??{}).sort(),['missing','partial','synthetic','verified']);
+ for(const value of Object.values(mapping.status_labels))assert.ok(typeof value==='string'&&value.trim());
+});
+
 test('template catalog returns only hash-verified registered templates', () => {
   const catalog = new TemplateCatalog(source);
   const rows = catalog.list();

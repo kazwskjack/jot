@@ -51,3 +51,7 @@ test('preset registration refuses unknown launcher identity before importing any
  const anchor=join(root,'package.json');await writeFile(anchor,JSON.stringify({name:'@deepseek-ai/dsh',version:'0.1.7-alpha.2'}));
  await assert.rejects(registerStandardPreset({get:()=>({installAnchor:anchor})}),/jot_host_runtime_version_mismatch/);
 }));
+test('host plugin package has the identity required by the official request inventory',async()=>{
+ const manifest=JSON.parse(await readFile(new URL('../package.json',import.meta.url),'utf8'));
+ assert.equal(manifest.name,'jot-dsh-host-preparation');assert.equal(manifest.version,'0.1.0');
+});

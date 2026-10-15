@@ -23,5 +23,11 @@
     "note": "J"
   },
   "duplicate_key_policy": "reject",
-  "literal_text_policy": "never_convert_untrusted_text_to_formula"
+  "literal_text_policy": "never_convert_untrusted_text_to_formula",
+  "status_labels": {
+    "verified": "Verified",
+    "partial": "Partial",
+    "missing": "Missing",
+    "synthetic": "Synthetic"
+  }
 }

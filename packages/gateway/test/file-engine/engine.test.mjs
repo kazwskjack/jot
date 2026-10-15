@@ -114,7 +114,7 @@ test('Python worker validates trusted template identity and complete bounded fie
     { encoding: 'utf8', env: { ...process.env, GENERAL_AGENT_FILE_ENGINE_TEMPLATE_ROOT: templateRoot } });
   assert.equal(result.status, 0, result.stderr);
   const value = JSON.parse(result.stdout.trim()); assert.equal(Object.keys(value.replacements).length, Object.keys(row.fields).length);
-  const incomplete = structuredClone(request); delete incomplete.change.fields.body;
+  const incomplete = structuredClone(request); delete incomplete.change.fields[Object.keys(row.fields)[0]];
   const rejected = spawnSync(python, ['-c', script, worker, join(templateRoot, row.file), JSON.stringify(incomplete)],
     { encoding: 'utf8', env: { ...process.env, GENERAL_AGENT_FILE_ENGINE_TEMPLATE_ROOT: templateRoot } });
   assert.notEqual(rejected.status, 0); assert.match(rejected.stderr, /TEMPLATE_CONTENT_INVALID/);

@@ -100,7 +100,9 @@ npm test
 
 Preparation tests run without installing DSH. For the real launcher canary, set
 `JOT_DSH_RUNTIME_MODULES` to the absolute installed `node_modules/@deepseek-ai`
-directory and run the same tests. The canary creates a temporary independent
+directory and run the same tests. The Gateway/Worker case also requires the
+Gateway dependencies (`npm ci --prefix packages/gateway` from the repository root).
+The canary creates a temporary independent
 home/workspace, launches the original CLI on isolated loopback ports, creates a
 real `jot-general` Session, uploads synthetic text through the official upload
 service and verifies unauthenticated requests fail. A test-only observer reads
@@ -111,8 +113,25 @@ Set `TEMP`/`TMP` to an appropriate private scratch directory if needed. Failed
 startup diagnostics, including the synthetic Web login URL, remain there;
 successful runs remove their temporary data after terminating their own process.
 
-Passing that canary proves this local official composition and upload path. It
-does not prove real model inference, external tools, Gateway task execution,
+The second integration case starts the real Gateway API and harness worker,
+keeps the original DSH Messages provider and sends one ordinary conversation
+through a loopback **synthetic model HTTP endpoint**. It checks one HTTP model
+request, one committed reply, the original native completed event, actual Agent
+permissions/route and idempotent message retry. The host plugin package carries
+an explicit version because the official DeepSeek request inventory requires
+both name and version for every named active package; missing metadata rejects
+the request before HTTP dispatch. No inventory/permission checks are bypassed.
+
+This is ordinary-chat acceptance, not persistent-task business approval or a
+real provider inference/quality test. Native Team/Goal dispatch, background task
+review and their distinct Gateway policy/lease gates remain separate acceptance
+targets. The test enables none of them on a deployment.
+It uses a synthetic owner header inside its private loopback boundary; production
+identity-proxy authentication and browser Origin/CSRF checks are not exercised
+by this integration case.
+
+Passing these cases proves the local official composition, upload and ordinary
+Gateway/Worker message path. It does not prove real model inference, external tools, persistent-task execution,
 notification delivery, target-machine ACLs or power-loss durability. Full
 claimed-input recovery additionally requires a reviewed immutable release
 manifest, actual loaded source / permissions / model-route validation and
