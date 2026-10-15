@@ -25,7 +25,7 @@ hostContext.plugin(jotSessionAdapter, {
 })
 ```
 
-This is the plugin registration boundary, not a complete DSH host bootstrap. Set the private `JOT_SESSION_ADAPTER_TOKEN` environment value before the host starts. This is also the plugin's default token environment name. Use a fresh random token of at least 32 characters. Put the identical value in the worker's private token file and point `GENERAL_AGENT_SESSION_ADAPTER_TOKEN_FILE` at it. Do not commit either value.
+This is the plugin registration boundary. For a dedicated host using the official DSH launcher and real services, follow the [host profile preparation and startup guide](../dsh-host/README.md). Set the private `JOT_SESSION_ADAPTER_TOKEN` environment value before the host starts. This is also the plugin's default token environment name. Use a fresh random token of at least 32 characters. Put the identical value in the worker's private token file and point `GENERAL_AGENT_SESSION_ADAPTER_TOKEN_FILE` at it. Do not commit either value.
 
 Only loopback binding is accepted. Port defaults to `18841`. Gateway and host should share the same private machine/network namespace, or use a deliberate loopback tunnel; the gateway client rejects public adapter URLs. The adapter only accepts authenticated POST requests and has no public health endpoint.
 
