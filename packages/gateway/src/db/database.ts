@@ -7,6 +7,7 @@ import {installOrdinarySteeringReconciliations} from '../harness/ordinary-steeri
 import {installOrdinaryFinalPublications} from '../harness/ordinary-final-publication-schema.ts';
 import {installHistoricalFinalDeliveryIntents} from '../channels/historical-final-intents-schema.ts';
 import {installOrdinaryFinalObservers} from '../harness/ordinary-final-recovery-schema.ts';
+import {installHistoricalDispatchProtocol} from '../channels/historical-final-queue.ts';
 
 const schemaUrl = new URL('./schema.sql', import.meta.url);
 let savepointSequence = 0;
@@ -33,6 +34,7 @@ export function openProductDatabase(path: string): DatabaseSync {
   ensureColumn(db, 'ga_uploads', 'writer_token', 'TEXT');
   ensureColumn(db, 'ga_uploads', 'writer_lease_until', 'TEXT');
   migrateHostDeliveries(db);
+  withImmediateTransaction(db,()=>installHistoricalDispatchProtocol(db));
   ensureColumn(db, 'ga_crawl_batches', 'summary_delivery_effect_id', 'TEXT');
   ensureColumn(db, 'ga_web_operation_cursors', 'last_status', 'TEXT');
   ensureColumn(db, 'ga_web_operation_cursors', 'items_settled', 'INTEGER NOT NULL DEFAULT 0');

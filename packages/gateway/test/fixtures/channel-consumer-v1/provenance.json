@@ -1,0 +1,72 @@
+{
+  "license": "MIT",
+  "description": "Pinned earlier Jot channel store, provider worker and pre-namespace policy. Supporting dependencies resolve to current modules; method and policy bodies are unchanged.",
+  "files": [
+    {
+      "file": "delivery.ts",
+      "source": "packages/gateway/src/channels/delivery.ts",
+      "commit": "f198681318127b1cb2101efbebbb41c36b74ff75",
+      "source_sha256": "7e212ab4d0d380b1ee3669628dbc456f8a6f2b9b35b744e8bc381c163a4615fc",
+      "fixture_sha256": "82b22863e0dfafe8c879bee2e9946353c5b6472f2d904a203a241c87416ee0b7",
+      "header": "// Pinned earlier Jot channel consumer; MIT. See provenance.json. Only dependency import paths are relocated.\n",
+      "imports": [
+        {
+          "from": "./email-provider.ts",
+          "to": "../../../src/channels/email-provider.ts"
+        },
+        {
+          "from": "../db/database.ts",
+          "to": "../../../src/db/database.ts"
+        },
+        {
+          "from": "../persistent-tasks/notifications.ts",
+          "to": "../../../src/persistent-tasks/notifications.ts"
+        },
+        {
+          "from": "../persistent-tasks/notification-policy.ts",
+          "to": "../../../src/persistent-tasks/notification-policy.ts"
+        },
+        {
+          "from": "../persistent-tasks/notification-signals.ts",
+          "to": "../../../src/persistent-tasks/notification-signals.ts"
+        },
+        {
+          "from": "../persistent-tasks/host-notifications.ts",
+          "to": "../../../src/persistent-tasks/host-notifications.ts"
+        },
+        {
+          "from": "../persistent-tasks/reply-delivery.ts",
+          "to": "../../../src/persistent-tasks/reply-delivery.ts"
+        },
+        {
+          "from": "./notification-archive.ts",
+          "to": "../../../src/channels/notification-archive.ts"
+        }
+      ]
+    },
+    {
+      "file": "worker.ts",
+      "source": "packages/gateway/src/channels/worker.ts",
+      "commit": "f198681318127b1cb2101efbebbb41c36b74ff75",
+      "source_sha256": "a86392426226464615ffcdeb4c6ea5e0ee2276ff0212395bb15128da8f2cd604",
+      "fixture_sha256": "5aef0692ac4b6a9360fa9b280f1f507b57f2f76b1db13e3eb86b4a43fc124cce",
+      "header": "// Pinned earlier Jot channel consumer; MIT. See provenance.json. Only dependency import paths are relocated.\n",
+      "imports": [
+        {
+          "from": "./delivery.ts",
+          "to": "./delivery.ts"
+        }
+      ]
+    },
+    {
+      "file": "historical-final-policy.ts",
+      "source": "packages/gateway/src/channels/historical-final-policy.ts",
+      "commit": "bfb2d50a31915b3350dd33b1e7a300159d838113",
+      "source_sha256": "c40d7189c5c0d201d58ee259a3a61cf7839d01c425b923d4e9047f89f3dfa16e",
+      "fixture_sha256": "b30827ee241dc41ddcd395e6e1367080e3da08d42bb9939be03867d224f63a3b",
+      "header": "// Pinned earlier Jot policy; MIT. See provenance.json. Body unchanged.\n",
+      "imports": []
+    }
+  ],
+  "integrity_text_eol": "LF"
+}

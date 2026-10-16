@@ -35,11 +35,11 @@ test('no transaction, stale provider facts, malformed text proof or an existing 
  f.commit();withImmediateTransaction(f.db,()=>assert.throws(()=>f.service().commit(scope,captureHistoricalDeliverySnapshot(f.db,scope).sha256,f.final)));
 });
 test('superseding cancels only an undispatched old body and queues one new final',t=>{
- const f=fixture(t),old=f.enqueue();f.commit();assert.equal(f.queue.get(old.effect_id).status,'cancelled');assert.equal(f.queue.get(old.effect_id).last_reason_code,'HISTORICAL_FINAL_SUPERSEDED');assert.equal(f.db.prepare("SELECT count(*) n FROM ga_channel_deliveries WHERE status='pending'").get().n,1);
+ const f=fixture(t),old=f.enqueue();f.commit();assert.equal(f.queue.get(old.effect_id).status,'cancelled');assert.equal(f.queue.get(old.effect_id).last_reason_code,'HISTORICAL_FINAL_SUPERSEDED');assert.equal(f.db.prepare("SELECT count(*) n FROM ga_channel_deliveries WHERE status='historical_pending'").get().n,1);
 });
 test('conclusive old delivery queues a labeled correction without changing the old receipt',t=>{
  const f=fixture(t),old=f.enqueue();f.db.prepare("UPDATE ga_channel_deliveries SET status='delivered',generation=1,provider_receipt_json=? WHERE effect_id=?").run(JSON.stringify({provider_message_id:'synthetic-old-receipt'}),old.effect_id);const before=f.queue.get(old.effect_id);f.commit();assert.deepEqual(f.queue.get(old.effect_id),before);
- const pending=f.db.prepare("SELECT * FROM ga_channel_deliveries WHERE status='pending'").get();assert.equal(JSON.parse(pending.payload_json).text,'更新后的结果：\n'+f.text);assert.equal(f.service().reconcileHeld('run'),true);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_channel_deliveries').get().n,2);
+ const pending=f.db.prepare("SELECT * FROM ga_channel_deliveries WHERE status='historical_pending'").get();assert.equal(JSON.parse(pending.payload_json).text,'更新后的结果：\n'+f.text);assert.equal(f.service().reconcileHeld('run'),true);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_channel_deliveries').get().n,2);
 });
 test('unknown old send holds, later conclusive receipt releases one correction without model or native work',t=>{
  const f=fixture(t),old=f.enqueue();f.db.prepare("UPDATE ga_channel_deliveries SET status='outcome_unknown',generation=1 WHERE effect_id=?").run(old.effect_id);f.commit();assert.equal(f.db.prepare('SELECT count(*) n FROM ga_channel_deliveries').get().n,1);assert.equal(f.db.prepare('SELECT status FROM ga_historical_final_delivery_states').get().status,'hold');

@@ -305,7 +305,10 @@ export class ChannelDeliveryService {
         LEFT JOIN wb_task_notification_deferrals d ON d.effect_id=e.effect_id
         LEFT JOIN wb_task_notification_digest_members m ON m.effect_id=e.effect_id
         LEFT JOIN wb_task_notification_digests summary ON summary.digest_id=m.digest_id
-        WHERE e.status IN ('pending','receipt_pending')
+        WHERE e.status IN ('pending','historical_pending','receipt_pending')
+          AND (e.status<>'historical_pending' OR EXISTS(
+            SELECT 1 FROM ga_historical_final_delivery_grants g JOIN ga_historical_final_delivery_states s ON s.intent_id=g.intent_id
+            WHERE g.effect_id=e.effect_id AND s.effect_id=e.effect_id AND s.status='queued'))
           AND NOT EXISTS(SELECT 1 FROM wb_task_notification_archives archived WHERE archived.effect_id=e.effect_id)
           AND (e.status='receipt_pending' OR e.destination IN (SELECT value FROM json_each(?)))
           AND (e.lease_owner IS NULL OR e.lease_expires_at<=?)
@@ -314,7 +317,7 @@ export class ChannelDeliveryService {
         ORDER BY e.created_at,e.effect_id LIMIT 1`).get(JSON.stringify(channels),current,current) as Record<string, any> | undefined;
       if (!row) return null;
       const generation = Number(row.generation) + 1;
-      const nextStatus = row.status === 'pending' ? 'sending' : 'receipt_pending';
+      const nextStatus = row.status === 'receipt_pending' ? 'receipt_pending' : 'sending';
       this.db.prepare(`UPDATE ga_channel_deliveries SET status=?,lease_owner=?,generation=?,
         lease_expires_at=?,updated_at=? WHERE effect_id=?`).run(nextStatus, owner,
         generation, current + leaseSeconds, new Date(current * 1000).toISOString(), row.effect_id);

@@ -1528,3 +1528,116 @@ remain in place. No actual external message or production enablement occurred.
 Mixed consumer/version/event upgrade and rollback, real providers, unknown
 accounting, performance/storage, production and full capability acceptance are
 not completed by these local results.
+
+### Mixed channel-consumer upgrade and rollback plan
+
+Confirmed defect: guarded historical sends use ordinary pending queue rows.
+The pinned pre-guard consumer can claim those rows and its ordinary send path
+has no historical owner/Session/body/recipient check. Merely deploying the new
+producer flag or changing the new worker does not protect a mixed fleet.
+
+Keep the existing outbox and introduce a reserved historical_pending dispatch
+state for unattempted historical text effects. Old consumers ignore it; a
+compatible consumer claims it and still executes the existing permission gates.
+Recognition of this state alone does not authorize a send: an immutable original
+historical grant must exist. The pure decision policy interprets this known
+state as queued without mutating raw snapshots or older frozen records.
+
+Install the protocol atomically at database bootstrap after the existing host
+migration. An after-grant-insert trigger isolates both current and earlier
+producer inserts in their original transaction. Upgrade existing guarded
+pending rows only when generation/receipt/lease facts prove they are unsent;
+ambiguous prior attempts become outcome_unknown with facts retained. Reject
+silently downgrading a guarded effect back to ordinary pending. Do not rewrite
+native history, canonical output, immutable intent/proof snapshots or money.
+Already sending, receipt-pending, delivered, cancelled and unknown effects retain
+their current facts and original recovery contract. Existing legacy attempts
+that passed authorization before upgrade cannot be undone by a database change;
+drain old producers/consumers before enabling production and keep those outcomes
+unknown until actual receipts prove them.
+
+Verify against pinned actual earlier Jot channel store/worker source, with only
+relative dependency imports relocated. Preserve source/fixture hashes and MIT
+provenance; use no Git-history/network dependency during tests. Show the old
+consumer incorrectly sends a revoked historical reply before the fix, then
+cannot claim the reserved row after it. Verify normal progress/file/task flows
+are unaffected, compatible send/correction still works, older records migrate
+without replay, pending ambiguity stays unknown, receipt-only recovery remains
+safe during rollback, and restarting/rolling forward resumes the same identity.
+An old producer that cannot interpret the reserved state may hold delivery;
+that is a paused transition, not permission to map it back to ordinary pending.
+Run full local gates and affected actual SDK cases, then scan and push. Keep
+production flags off and retain the wider upgrade/rollback and provider gates.
+
+### Historical dispatch protocol and rollback isolation evidence
+
+The legacy-send bypass is reproduced against earlier actual Jot channel source,
+not a mocked claim selector. The revoked historical reply was sent by the pinned
+pre-guard store/worker before the fix. The fixtures retain method bodies and
+MIT provenance; only relative dependency imports are relocated. Original and
+fixture source hashes are verified with LF text normalization, and tests do not
+need repository history or network access. Store/worker baseline is the recorded
+pre-guard commit; the earlier decision policy is separately pinned. Supporting
+permission/archive helpers resolve to current modules, so this is a defined
+compatibility fixture, not a claim to test every earlier deployed binary.
+
+The existing outbox now reserves `historical_pending` for provably unattempted
+historical effects. The new consumer recognizes it only with an immutable
+historical grant and matching queued intent. It still uses the original lease,
+provider worker, owner/Session/body/recipient checks and task/reply/digest gates.
+A status label alone cannot create a permission. The pure policy recognizes
+this known queued state without mutating raw snapshots; original frozen source
+records are not rewritten. Ordinary progress, file and reviewed-task/pause
+flows retain their original pending/recovery behavior.
+
+Database bootstrap installs this protocol in one transaction after the existing
+host-delivery migration. An after-grant-insert trigger covers both new and
+earlier producer writes inside their existing transaction. Existing guarded
+pending rows become reserved only when generation is zero and receipt/lease
+facts are absent. Earlier ambiguous pending attempts become outcome_unknown,
+retaining generation, provider parts, lease fields and earlier reasons. Existing
+sending/receipt-pending/delivered/cancelled/unknown rows are not reset. Directly
+downgrading a guarded effect to ordinary pending is rejected.
+
+Rollback to the pinned consumer leaves reserved rows waiting and continues
+unrelated legacy work. Its receipt-only recovery may still record a known
+accepted send after recipient revocation, without another provider call. If an
+older policy cannot interpret the new state, it may hold the existing intent;
+the new consumer does not claim that held row. A compatible observer can restore
+queued advice and send the same existing identity, without another model/native
+call or duplicate outbox row. Do not force this transition with SQL pending
+resets. Legacy calls already authorized/in flight before upgrade cannot be
+undone; stop/drain old producers and execution/notification consumers before
+production enablement. Mixed old state writers may pause progress; these tests
+prove isolation and controlled roll-forward, not uninterrupted mixed-fleet
+operation or a full fleet/event rollback audit.
+
+Thirteen compatibility cases pass, including actual older consumer sending
+before the fix, revoked reply isolation, legacy progress/files, compatible
+send/adoption, unsupported-policy hold/roll-forward, normal reviewed-task and
+pause permission, old-layout bootstrap and later producer writes, prior partial
+receipt/lease preservation, already-leased send facts and receipt-only recovery.
+A separate queued-policy case verifies no raw snapshot mutation. A first task
+fixture run from repository root failed because its existing template fixture
+expects Gateway cwd; the identical suite passes from the documented package cwd.
+No production files or template paths were changed to hide that diagnostic.
+
+Final current-source Gateway verification: 1292 total,1286 passed,six existing
+skips,zero failures (150.16 seconds), plus Windows Gateway build. The two affected
+actual local SDK consumer/final/correction cases pass (42.99 seconds), preserving
+original native/admission bytes and two scripted model requests, with a synthetic
+notification provider only. Root32/32, Windows root build, public regressions6/6
+and 744-file working-tree public review pass. Earlier focused policy/snapshot/
+intent/compatibility run passed54 cases before the additional non-mutating
+queued-policy case, which is covered by the final full run. No actual external
+notification, production flag change or deployment occurred.
+
+The wider full objective stays open: producer/consumer cohort and mixed-event
+upgrade/rollback, real providers/quality, unknown monetary accounting,
+large-output lock/performance/storage, production and all upstream capabilities.
+
+After the full run, the existing revoked-reply case gained an explicit old-layout
+negative control: the pinned legacy provider worker makes exactly one synthetic
+send before isolation, while the migrated/protected path makes none. The same
+13-case compatibility suite was rerun and passes (9.67 seconds); production
+implementation code did not change after the full Gateway build/test result.

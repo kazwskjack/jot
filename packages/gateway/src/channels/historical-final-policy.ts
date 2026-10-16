@@ -22,7 +22,7 @@ function fullReceipt(value:string|null):boolean{
 }
 function effectValid(value:unknown):value is Effect{
  return object(value)&&id(value.effect_id)&&id(value.message_id)&&(value.artifact_ref===null||id(value.artifact_ref))
-  &&(value.payload_json===null||typeof value.payload_json==='string')&&typeof value.status==='string'&&['pending','sending','receipt_pending','outcome_unknown','delivered','cancelled','failed'].includes(value.status)
+  &&(value.payload_json===null||typeof value.payload_json==='string')&&typeof value.status==='string'&&['pending','historical_pending','sending','receipt_pending','outcome_unknown','delivered','cancelled','failed'].includes(value.status)
   &&Number.isSafeInteger(value.generation)&&Number(value.generation)>=0&&(value.provider_receipt_json===null||typeof value.provider_receipt_json==='string')
   &&(value.lease_owner===null||id(value.lease_owner))&&(value.lease_expires_at===null||Number.isSafeInteger(value.lease_expires_at));
 }
@@ -38,7 +38,7 @@ export function decideHistoricalFinalDelivery(value:unknown):HistoricalFinalDeci
  const invalid=():HistoricalFinalDecision=>({...empty,kind:'hold',reason:'invalid_delivery_snapshot',wait_for_ids:[]});
  if(!object(value)||Object.keys(value).sort().join(',')!=='effects,message_id,protected_effect_ids,recipient_authorized,text'||!id(value.message_id)||typeof value.text!=='string'||!value.text.trim()||typeof value.recipient_authorized!=='boolean'||!Array.isArray(value.effects)||!Array.isArray(value.protected_effect_ids)||value.protected_effect_ids.some(v=>!id(v)))return invalid();
  if(!value.effects.every(effectValid)||new Set(value.effects.map(e=>e.effect_id)).size!==value.effects.length)return invalid();
- const effects=value.effects as Effect[],protectedIds=new Set(value.protected_effect_ids as string[]),text=value.text.trim(),correction='更新后的结果：\n'+text;
+ const effects=(value.effects as Effect[]).map(effect=>effect.status==='historical_pending'?{...effect,status:'pending'}:effect),protectedIds=new Set(value.protected_effect_ids as string[]),text=value.text.trim(),correction='更新后的结果：\n'+text;
  const base={execution_authorized:false as const,unresolved_effect_ids:effects.filter(unresolved).map(e=>e.effect_id)};
  if(!value.recipient_authorized)return{...base,kind:'revoke',reason:'recipient_authority_revoked'};
  const hold=(reason:string,rows:Effect[]):HistoricalFinalDecision=>({...base,kind:'hold',reason,wait_for_ids:rows.map(e=>e.effect_id)});

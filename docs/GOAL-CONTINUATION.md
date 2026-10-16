@@ -1224,3 +1224,15 @@ cases are tested locally, including independent observation processes.
 Real-provider acceptance, monetary reconciliation, large-output performance,
 production rollout/rollback and the full upstream capability inventory remain
 unfinished. Production defaults are unchanged.
+
+Historical final sends now enter the existing outbox as `historical_pending`.
+Pinned earlier notification consumers cannot claim this state; a compatible
+consumer also requires the immutable historical grant and matching queued
+intent, then performs all original send checks. A database trigger isolates
+earlier producer inserts in their original transaction and bootstrap isolates
+existing proven-unsent rows. Prior attempts remain unknown with receipt/lease
+facts retained. Do not downgrade these rows to ordinary pending during rollback.
+Earlier unsupported policy may hold delivery; a compatible observer resumes
+the same identity. Already-authorized legacy in-flight calls cannot be undone:
+drain old producers/consumers before enablement. This local compatibility gate
+does not establish complete fleet, event, real-provider or production acceptance.
