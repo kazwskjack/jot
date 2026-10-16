@@ -29,6 +29,11 @@ test('explicit conversation takes precedence and never silently opens another ro
  assert.throws(()=>selectInitialConversation(items,'missing','ordinary'));
  assert.equal(selectInitialConversation(items,'','ordinary'),'ordinary');
 });
+test('a missing or stale chat selection never opens another conversation',()=>{
+ const items=[{conversation_id:'latest-unrelated'},{conversation_id:'saved'},{conversation_id:'archived',archived_at:'2026-10-16'}];
+ for(const saved of ['', 'missing', 'archived'])assert.equal(selectInitialConversation(items,'',saved),'');
+ assert.equal(selectInitialConversation(items,'','saved'),'saved');
+});
 test('team editing submits only mutable fields accepted by the patch route',()=>{
  assert.deepEqual(teamInput({team_id:'team',name:' 团队 ',workspace_id:'w',project_id:'p',member_ids:['a'],version:4}),{name:'团队',member_ids:['a'],expected_version:4});
  assert.deepEqual(teamInput({name:'团队',workspace_id:'w',member_ids:['a']}),{name:'团队',workspace_id:'w',member_ids:['a']});

@@ -90,7 +90,9 @@ export function canResumeTask(task) { return ['paused','budget_exhausted'].inclu
 export function selectInitialConversation(items,initial,saved) {
  const visible=items.filter(item=>!item.archived_at);
  if(initial){if(!visible.some(item=>item.conversation_id===initial))throw new Error('此角色对话不可用或已归档，请返回角色列表刷新。');return initial;}
- return visible.find(item=>item.conversation_id===saved)?.conversation_id??visible[0]?.conversation_id??'';
+ // Recency does not express user selection: a list item can belong to a role
+ // or a separate workflow. Start empty rather than silently substituting it.
+ return visible.find(item=>item.conversation_id===saved)?.conversation_id??'';
 }
 export function teamInput(form) {
  const input={name:required(form.name,'团队名称'),member_ids:[...(form.member_ids??[])]};

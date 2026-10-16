@@ -85,3 +85,5 @@ Cold resume and crash-safe control receipt reconciliation remain unfinished.
 See [workbench configuration and remaining cold-control acceptance](../WORKBENCH.md#native-conversation-goals).
 These changes do not add a competing scheduler or complete the remaining
 Always-on, UI, routing, channel and packaging rows above.
+
+The internal continuation journal now joins the original Worker/Coordinator path without another human prompt. Its identity and dispatch/receipt records survive database reopen, and a runner without continuation support cannot replay source input. This is local injected-runner evidence; the Host observer handshake, public atomic admission and actual-SDK cold resume acceptance are still outstanding. See [Goal continuation](GOAL-CONTINUATION.md).

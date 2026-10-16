@@ -8,6 +8,7 @@ import type { JotProjection } from './session-event-projector.ts';
 import type { AttachmentResolver, ResolvedAttachment } from '../artifacts/resolver.ts';
 import { withImmediateTransaction } from '../db/database.ts';
 import type {SessionCheckpoint} from './session-checkpoints.ts';
+import {ConversationGoalControls} from '../conversations/goal-controls.ts';
 
 export interface DshRunResult {
   observed: boolean;
@@ -25,8 +26,7 @@ export interface DshRunResult {
   task_candidate?: {text:string;blocks?:Array<{kind:'text'|'reasoning';text:string}>};
 }
 
-export interface DshRunner {
-  run(input: { enabled: true; taskRequestId: string; message: string; sessionRef: string;
+export interface DshRunInput { enabled: true; taskRequestId: string; message: string; sessionRef: string;
     deferCompletionProbe: true; attachments?: ResolvedAttachment[]; universeSessionRef?: string;
     workbenchRunId?: string;
     workbenchExecutionLease?:Readonly<{owner:string;generation:number}>;
@@ -37,7 +37,10 @@ export interface DshRunner {
     onArtifactRef?: (artifactRef: string) => Promise<void> | void;
     onProjection?: (projection: JotProjection) => Promise<void> | void;
     onWebOperationCursor?: (toolCallId: string) => number;
-    onWebOperationSnapshot?: (toolCallId: string, snapshot: Record<string, unknown>) => number }): Promise<DshRunResult>;
+    onWebOperationSnapshot?: (toolCallId: string, snapshot: Record<string, unknown>) => number }
+export interface DshRunner {
+  run(input:DshRunInput):Promise<DshRunResult>;
+  resumeGoal?(input:DshRunInput & {goalControl:Readonly<{controlId:string;ref:Readonly<{id:string;revision:number}>;executionLease:Readonly<{owner:string;generation:number}>}>}):Promise<DshRunResult>;
 }
 
 export interface RuntimeContextStager {
@@ -82,6 +85,13 @@ export class HarnessWorker {
   async processNext(): Promise<{ run_id: string; runtime_status: string } | null> {
     const lease = this.coordinator.claimNext(this.workerId, this.leaseMs);
     if (!lease) return null;
+    const goalControl=this.db.prepare('SELECT control_id,owner_id,session_id,goal_id,goal_revision FROM ga_conversation_goal_controls WHERE run_id=?').get(lease.run_id) as {control_id:string;owner_id:string;session_id:string;goal_id:string;goal_revision:number}|undefined;
+    // Mixed-version rollout must never fall through to replaying the original
+    // human message or attachments when a continuation runner is unavailable.
+    if(goalControl&&!this.runner.resumeGoal){
+      this.coordinator.interruptWithoutRuntime(lease,'GOAL_CONTINUATION_UNAVAILABLE');
+      return {run_id:lease.run_id,runtime_status:'goal_continuation_unavailable'};
+    }
     let workbenchContext: unknown;
     try {
       this.executionGuard?.assertRunActive(lease.run_id);
@@ -92,17 +102,17 @@ export class HarnessWorker {
     }
     const backgroundTask=!!(workbenchContext && typeof workbenchContext==='object'
       && 'kind' in workbenchContext && workbenchContext.kind==='task');
-    const controllerSessionRef = this.sessionResolver?.(lease.conversation_id)
+    const controllerSessionRef = goalControl?.session_id ?? this.sessionResolver?.(lease.conversation_id)
       ?? `session-${createHash('sha256').update(lease.run_id).digest('hex').slice(0, 32)}`;
     const runtimeSessionRef = `runtime-session-${createHash('sha256').update(lease.run_id).digest('hex').slice(0, 32)}`;
     this.coordinator.bindSession(lease, runtimeSessionRef);
-    const input = this.messageInput(lease.run_id);
+    const input = goalControl?{text:'',attachmentIds:[],ownerId:goalControl.owner_id,receivedAt:0}:this.messageInput(lease.run_id);
     const message = input.text;
     const attachments = input.attachmentIds.length
       ? this.attachmentResolver?.resolveForMessage(input.ownerId, lease.conversation_id,
         input.attachmentIds, lease.run_id) ?? (() => { throw new Error('attachment_resolver_unavailable'); })()
       : [];
-    if (this.contextStager) {
+    if (this.contextStager&&!goalControl) {
       try {
         await this.contextStager.stageContext({ taskRequestId: lease.run_id, conversationId: lease.conversation_id,
           messageId: lease.input_message_id, message, sessionRef: runtimeSessionRef, controllerSessionRef,
@@ -114,7 +124,13 @@ export class HarnessWorker {
     renewal.unref();
     let result: DshRunResult;
     try {
+      const assertGoalApplied=()=>{
+        if(!goalControl)return;
+        const row=ConversationGoalControls.assertExecution(this.db,goalControl.control_id,{owner:lease.owner,generation:lease.generation});
+        if(row.state!=='applied')throw Error('goal_control_receipt_required');
+      };
       const recordObservedArtifact = async (artifactRef: string) => {
+        assertGoalApplied();
         this.executionGuard?.assertRunActive(lease.run_id);
         if (!this.attachmentResolver) return;
         const outputLeaseId = `${lease.run_id}:observed:${artifactRef}`;
@@ -130,19 +146,26 @@ export class HarnessWorker {
           if (resolved.length) this.attachmentResolver.releaseLease(outputLeaseId);
         }
       };
-      result = await this.runner.run({ enabled: true, taskRequestId: lease.run_id, message, attachments,
+      const runInput:DshRunInput={ enabled: true, taskRequestId: lease.run_id, message, attachments,
         ...(workbenchContext ? { workbenchRunId: lease.run_id,workbenchExecutionLease:Object.freeze({owner:lease.owner,generation:lease.generation}),workbenchBudgetEnforced:!!(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_model_budget_bindings'").get()&&this.db.prepare('SELECT 1 FROM wb_model_budget_bindings WHERE owner_id=? AND run_id=?').get(input.ownerId,lease.run_id)) } : {}),
         ...(backgroundTask
           ?{checkpointTask:true,onCheckpoint:(receipt:SessionCheckpoint)=>{this.executionGuard?.assertRunActive(lease.run_id);this.coordinator.recordCheckpoint(lease,controllerSessionRef,receipt);}}:{}),
         sessionRef: controllerSessionRef, universeSessionRef: controllerSessionRef, deferCompletionProbe: true,
-        onReady: () => this.readyRuns.add(lease.run_id),
+        onReady: () => {assertGoalApplied();this.readyRuns.add(lease.run_id);},
         onArtifactRef: recordObservedArtifact,
-        onProjection: projection => { this.executionGuard?.assertRunActive(lease.run_id); this.coordinator.recordProjection(lease, projection); },
+        onProjection: projection => { assertGoalApplied();this.executionGuard?.assertRunActive(lease.run_id); this.coordinator.recordProjection(lease, projection); },
         onWebOperationCursor: toolCallId => this.coordinator.webOperationCursor(lease, runtimeSessionRef, toolCallId),
         onWebOperationSnapshot: (toolCallId, snapshot) => {
+          assertGoalApplied();
           this.executionGuard?.assertRunActive(lease.run_id);
           return this.coordinator.recordWebOperationSnapshot(lease, runtimeSessionRef, toolCallId, snapshot);
-        } });
+        } };
+      if(goalControl){
+        const executionLease=Object.freeze({owner:lease.owner,generation:lease.generation});
+        ConversationGoalControls.assertExecution(this.db,goalControl.control_id,executionLease);
+        result=await this.runner.resumeGoal!({...runInput,goalControl:Object.freeze({controlId:goalControl.control_id,ref:Object.freeze({id:goalControl.goal_id,revision:goalControl.goal_revision}),executionLease})});
+        assertGoalApplied();
+      }else result=await this.runner.run(runInput);
     } catch (error) {
       if (this.cancelling(lease.run_id)) return { run_id: lease.run_id, runtime_status: 'cancel_requested' };
       const reasonCode = typeof error === 'object' && error !== null

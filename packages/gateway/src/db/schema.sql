@@ -91,6 +91,41 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_ga_one_executing_run ON ga_runs(conversati
   WHERE status IN ('starting','running','waiting_user','waiting_approval','cancelling');
 CREATE INDEX IF NOT EXISTS idx_ga_runs_queue ON ga_runs(status,created_at,id);
 
+-- Human resume intent/receipt only. Native DSH remains the Goal authority.
+CREATE TABLE IF NOT EXISTS ga_conversation_goal_controls (
+  control_id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  conversation_id TEXT NOT NULL REFERENCES ga_conversations(id) ON DELETE CASCADE,
+  session_id TEXT NOT NULL,
+  source_run_id TEXT NOT NULL REFERENCES ga_runs(id),
+  run_id TEXT NOT NULL UNIQUE REFERENCES ga_runs(id) ON DELETE CASCADE,
+  goal_id TEXT NOT NULL,goal_revision INTEGER NOT NULL CHECK(goal_revision>0),
+  idempotency_key TEXT NOT NULL,request_sha256 TEXT NOT NULL,
+  state TEXT NOT NULL CHECK(state IN ('queued','dispatching','applied','rejected')),
+  native_cursor INTEGER CHECK(native_cursor>=0),
+  dispatch_lease_owner TEXT,dispatch_lease_generation INTEGER CHECK(dispatch_lease_generation>0),
+  receipt_json TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+  UNIQUE(owner_id,conversation_id,idempotency_key),
+  CHECK((state='queued' AND native_cursor IS NULL AND dispatch_lease_owner IS NULL AND dispatch_lease_generation IS NULL AND receipt_json IS NULL)
+    OR (state='dispatching' AND native_cursor IS NOT NULL AND dispatch_lease_owner IS NOT NULL AND dispatch_lease_generation IS NOT NULL AND receipt_json IS NULL)
+    OR (state='applied' AND native_cursor IS NOT NULL AND dispatch_lease_owner IS NOT NULL AND dispatch_lease_generation IS NOT NULL AND receipt_json IS NOT NULL)
+    OR state='rejected')
+);
+CREATE INDEX IF NOT EXISTS idx_ga_goal_controls_unconfirmed ON ga_conversation_goal_controls(conversation_id,state);
+CREATE TRIGGER IF NOT EXISTS ga_goal_control_identity BEFORE UPDATE ON ga_conversation_goal_controls
+WHEN NEW.control_id IS NOT OLD.control_id OR NEW.owner_id IS NOT OLD.owner_id OR NEW.conversation_id IS NOT OLD.conversation_id
+  OR NEW.session_id IS NOT OLD.session_id OR NEW.source_run_id IS NOT OLD.source_run_id OR NEW.run_id IS NOT OLD.run_id
+  OR NEW.goal_id IS NOT OLD.goal_id OR NEW.goal_revision IS NOT OLD.goal_revision
+  OR NEW.idempotency_key IS NOT OLD.idempotency_key OR NEW.request_sha256 IS NOT OLD.request_sha256 OR NEW.created_at IS NOT OLD.created_at
+BEGIN SELECT RAISE(ABORT,'goal_control_identity_immutable'); END;
+CREATE TRIGGER IF NOT EXISTS ga_goal_control_dispatch BEFORE UPDATE ON ga_conversation_goal_controls
+WHEN OLD.state<>'queued' AND (NEW.native_cursor IS NOT OLD.native_cursor OR NEW.dispatch_lease_owner IS NOT OLD.dispatch_lease_owner
+  OR NEW.dispatch_lease_generation IS NOT OLD.dispatch_lease_generation)
+BEGIN SELECT RAISE(ABORT,'goal_control_dispatch_immutable'); END;
+CREATE TRIGGER IF NOT EXISTS ga_goal_control_receipt BEFORE UPDATE ON ga_conversation_goal_controls
+WHEN OLD.state IN ('applied','rejected')
+BEGIN SELECT RAISE(ABORT,'goal_control_receipt_immutable'); END;
+
 CREATE TABLE IF NOT EXISTS ga_run_commands (
   id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES ga_runs(id) ON DELETE CASCADE,
   kind TEXT NOT NULL, payload_json TEXT NOT NULL, status TEXT NOT NULL,

@@ -422,3 +422,7 @@ node --test packages/session-adapter/verification/native-memory-plugin-runtime.m
 ```
 
 These probes use the actual locked SDK and upstream plugin with a scripted model. The idle probe enters through the original worker-pool function and Gateway/SQLite budget ledger; it does not prove real-provider quality or that an external deployment has enabled the feature.
+
+## Ordinary Goal continuation records
+
+Resume controls now have an internal durable intent/receipt record and a distinct original-Worker continuation entry. No original human message or attachment is replayed. The Host follower/maintenance handshake and public resume admission remain under implementation; the current native runner intentionally refuses this new entry until those gates are wired. See [continuation boundaries and verification](docs/GOAL-CONTINUATION.md).
