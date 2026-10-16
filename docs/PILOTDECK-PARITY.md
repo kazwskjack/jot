@@ -354,3 +354,10 @@ message-page reads use immutable publication time for the same order after
 reload while retaining original creation dates. Public event-schema/reducer
 checks cover this boundary. Full channel queue/correction/hold integration and
 automatic production consumption remain required in the recovery plan.
+
+A pure historical channel policy now covers first delivery, matching reuse,
+known delivered-body correction, protected/unknown holds and recipient
+revocation without clearing old provider facts. It returns advice only and is
+not wired to DB/queue/provider actions. Frozen recipient/effect capture,
+transactional intent/outbox changes, send-time authorization and held-result
+reconciliation remain required before the existing channel gate can be lifted.

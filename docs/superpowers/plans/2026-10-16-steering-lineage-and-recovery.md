@@ -1217,3 +1217,54 @@ projection events. Gateway 1205 passed/six existing skips, full UI 152/152,
 Adapter 491/491, root 32/32, public regressions 6/6 and both Windows builds pass.
 No runtime sources changed during those runs. This closes the local event/
 ordering regression, not channel/automatic-consumer/production acceptance.
+
+## Historical final delivery decision policy
+
+The pure `channels/historical-final-policy.ts` component now classifies an
+already scoped recipient/effect snapshot into queue, reuse, hold or revoke. It
+has no DB, outbox, provider, model or native calls; every result retains
+execution_authorized:false. Caller-owned metadata must still be frozen and
+revalidated in the publication/outbox transaction. No existing publisher gate,
+queue worker or production behavior is enabled by this module.
+
+A first final answer uses the original body. A conclusively delivered older
+body produces a clearly labeled correction descriptor, while matching original
+or already-corrected effects are reused. Only generation-zero pending rows with
+no receipt or lease and no protection may be listed for superseding. Protected
+digest/task effects are never cancelled through this policy; matching reuse
+retains their protection marker for the original authorization path.
+
+Sending, receipt-pending, outcome-unknown, contradictory delivered leases,
+malformed receipts and incomplete/repeated provider part identities hold. A
+multipart receipt needs all ordered parts and distinct provider message IDs.
+Cancelled/failed effects with earlier attempts, partial receipts or leases
+retain uncertainty too. Matching final delivery does not clear unknown file or
+other send provenance. File effects and independent progress messages keep
+their own intent. Cancelled final intent, ambiguous matching effects and
+malformed caller/record scope produce no new send. Recipient revocation retains
+previous unknown effect IDs instead of erasing provider facts.
+
+Fourteen focused policy cases pass. The repeated-part/lease regression and the
+revocation/stopped-file provenance regressions were observed failing before
+correction. The first full Gateway run, before the last stopped-file case,
+passed 1224 total/1218 passed/six existing skips/zero failures (135.24 seconds).
+A final run for the fourteen-case implementation is recorded after completion.
+Root tests/build/public regressions are run locally. Adapter/Host paths are
+unchanged and do not import this new policy, so prior actual SDK results are not
+presented as channel end-to-end acceptance.
+
+Remaining implementation is mandatory: capture real owner/binding/version,
+effect/digest/reservation metadata; commit immutable intent and state with the
+final publication; perform guarded reuse/superseding/correction through the
+existing queue; recheck authority before each provider call; reconcile held
+outcomes and restart/concurrent cases without native/model execution. Verify
+real effect identity and provider receipt semantics rather than trusting caller
+booleans or treating this pure classification as a send permission. The current
+channel gate remains in force until this integration and acceptance are done.
+
+Final policy-stage Gateway run: 1225 total, 1219 passed, six existing skips,
+zero failures (135.09 seconds); final Windows Gateway build passes. Focused
+policy 14/14, root 32/32, public regressions 6/6, Windows root build, BRAIN links
+and 728-file working-tree public review pass. No current runtime imports the
+new pure policy; no Adapter/Host rerun or channel end-to-end claim is made.
+Real snapshot/transactional queue/send-guard integration remains required.
