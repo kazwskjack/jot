@@ -18,7 +18,7 @@ An applied receipt must contain the same Goal ID, the next revision and native a
 
 The opt-in Host backend subscribes to official follow and reads its opening snapshot before resolving an Agent. The locked SDK promotes a prepared ordinary Session when its iterator advances beyond that snapshot. The adapter therefore parks the subscribed iterator at the opening boundary until cold preflight passes, the exact Agent has been resolved and native maintenance has begun. Official subscriptions buffer the intervening events. Disconnect/disposal releases this wait without advancing native follow; observing or refusing pending input cannot trigger promotion. One exact control, run, Session and lease generation owns that live observer. The internal Gateway endpoint uses the existing service credential and rejects owner overrides, foreign run/Session identities and stale leases.
 
-After validating the ordinary preset, empty inbox and closed history, the Host uses the official resolver and `runMaintenance`. It begins the original dispatch once, resumes through native Goal CAS, flushes native persistence and commits the applied control receipt before releasing automatic rounds. Lost HTTP acknowledgements reuse the same process-local operation promise. A lost persisted-receipt acknowledgement can reconcile that original receipt without repeating native resume. New Host processes or followers do not turn an old receipt into activation authority.
+After validating the ordinary preset, empty inbox and the official balanced logical history, the Host uses the official resolver and `runMaintenance`. A persisted interrupted tail may already appear balanced in that logical view; this is different from a still-open attached turn. It begins the original dispatch once, resumes through native Goal CAS, flushes native persistence and commits the applied control receipt before releasing automatic rounds. Lost HTTP acknowledgements reuse the same process-local operation promise. A lost persisted-receipt acknowledgement can reconcile that original receipt without repeating native resume. New Host processes or followers do not turn an old receipt into activation authority.
 
 Original step, tool and LLM middleware recheck the live observer, original lease and current native Goal identity. An old receipt cannot authorize a replacement Goal in the same Session; a closing answer for the same completed Goal remains permitted. They preserve the existing native execution/permission chain and provider chunks. The LLM waterfall returns an AsyncIterable synchronously, as required by the SDK. Disconnect disarms future continuation and cancels its controlled in-flight turn; disposal also aborts the original follow. Durable Goal phase is not rewritten to pretend completion.
 
@@ -49,7 +49,7 @@ A validated native pause receipt must identify the same Goal at the next revisio
 ## Remaining acceptance
 
 1. Verify every consumer of the original run queue has the updated continuation path before enabling admission. A historical consumer may not make progress on message-free continuation records, even though the old input join cannot replay the original message.
-2. Complete process-exit and reply-loss reconciliation at all dispatch/flush/publication boundaries. Pending/claimed input and interrupted history require supported recovery; current preflight refuses them before activation.
+2. Complete process-exit and reply-loss reconciliation at all dispatch/flush/publication boundaries. Pending/claimed input still requires supported recovery and is refused before activation. Persisted interrupted tails with an empty pending inbox use the official logical-read and durable-resume repair described below; unsupported still-open attached turns remain refused.
 3. Keep unknown mutations fenced. A new lease cannot replay an old dispatch. Human pause/stop remain authoritative, and a current native state that happens to match is not proof of a prior operation receipt.
 4. Separately verify a synthetic deployed conversation and deployment rollback. Local model fixtures do not prove real-provider quality, production usage accounting or comprehensive crash recovery.
 
@@ -88,8 +88,7 @@ call that appended then threw is disarmed and stays uncertain; the API's thrown
 error is not proof that its event never committed.
 
 These cases do not exhaust process exits inside native CAS/flush, provider usage
-settlement, publication transactions or pending/claimed/interrupted-history
-recovery. They are tracked separately from the two actual process-termination
+settlement, publication transactions or pending/claimed-input recovery. They are tracked separately from the two actual process-termination
 boundaries above. Neither test scaffolding nor a safe refusal substitutes for
 those remaining implementation and deployed acceptance requirements.
 
@@ -104,4 +103,43 @@ those remaining implementation and deployed acceptance requirements.
 | Applied commit, before its acknowledgement | Retain the original receipt; restart disarmed; never infer execution completion from acceptance | Actual isolated Host termination probe |
 | Inside native CAS/flush, provider usage settlement, final publication commit | Reconcile exact native events, original cost holds and one canonical output without replay | Additional process-exit acceptance remains required |
 | Browser exits before control acknowledgement | Restore the exact original owner-scoped command/key, never infer its receipt from current Goal state | Built-browser reload and forced renderer-crash recovery, including lost committed pause and 202 resume receipts; whole-browser/OS termination is not yet verified |
-| Parked/claimed input or interrupted turn | Use supported original native recovery without consuming or dropping pending input | Refusal is verified; full supported recovery remains incomplete |
+| Persisted interrupted tail, no pending inbox input | Cold read stays read-only; official resume commits conservative closers and continues through the original Worker without replay | Real locked-SDK cases for open turn, started tool and unstarted tool, including another cold restart |
+| Parked/claimed input or still-open attached turn | Recover original input through its proper execution lineage without dropping or borrowing it for a new Goal run | Refusal is verified; full supported recovery remains incomplete |
+
+
+## Official interrupted-tail recovery
+
+The locked SDK already provides this path. Its Session Query `readColdSessionLog`
+reads a stored log and adds `interruptedTurnClosers` to the **logical in-memory**
+event array without acquiring write ownership or changing storage. The Session
+Controller's cold `inspect` therefore sees balanced history. Agent Loop
+`resumeWith` later opens the original write handle, appends the SDK's conservative
+closers, then publishes the original Agent. There is no Jot repair algorithm or
+manual history rewrite between these two stages.
+
+For an assistant tool request with a recorded `tool/call` and no result, the
+SDK supplies `TOOL_OUTCOME_UNKNOWN` and explicit guidance against blind side-effect
+retries. A request with no call-start record gets `TOOL_NOT_STARTED`. Existing
+committed results stay intact. Original planning, tool permissions, accounting,
+lease/observer checks and the new native Goal CAS remain separate requirements.
+A recovery result never proves that an external side effect did or did not occur.
+
+The real Host regression seeds three valid interrupted persisted tails: an open
+turn, a started write request without a result, and a tool request without a start
+record. It compares native compressed-log hashes before/after cold reads, checks
+zero Agent creation and zero inference for those reads, then enters through public
+202 admission and the original Worker. Restored Agent history contains the proper
+native closer/code; the model receives conservative recovery text, the original
+call-start count does not increase, and the synthetic write target stays absent.
+Three scripted requests complete the Goal and one original assistant answer is
+published without replaying the source user input. Another Host restart can read
+completion without inference. These are valid seeded-history tests, **not**
+additional kills inside a real in-flight tool or proof of real-provider judgment.
+
+This corrects the previous broad statement that all interrupted history was an
+unimplemented recovery path. It does not authorize stealing pending human input
+from another queued run, restoring claimed input under the wrong lineage, fixing
+arbitrary already-closed inconsistent logs, or enabling production continuation.
+The SDK itself documents that failed-step recovery does not rewrite unanswered
+calls in already-closed historical turns. Pending-input recovery and the rest of
+the process/crash and rollout matrix remain in scope.

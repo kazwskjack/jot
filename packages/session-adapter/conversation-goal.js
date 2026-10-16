@@ -20,7 +20,9 @@ export async function readConversationGoal({agent,agents,persistence,controller,
  const inbox=projection?.values?.inbox,preset=projection?.values?.agentPreset;
  if(!ordinaryPresets?.has(preset)||!inbox||Object.keys(inbox).length!==2||!['next-turn','next-step'].every(key=>Array.isArray(inbox[key])&&inbox[key].length===0))throw Error('goal_cold_input_pending');
  // turnBoundary is Host-only, not a wire projection. Inspect the official
- // validated history without activating an Agent; an open turn needs recovery.
+ // validated history without activating an Agent. The official cold query
+ // supplies logical interrupted closers; resolveAgent persists those same
+ // conservative closers. A still-open attached/raw history is not cold-safe.
  const history=await controller.inspect(sessionId,signal);signal?.throwIfAborted();
  if(history?.meta?.id!==sessionId||!Array.isArray(history.events))throw Error('goal_unavailable');
  let openTurn=null;
@@ -69,7 +71,8 @@ export function conversationGoal(agent,body){
 
 // Only the observed human-command path may use this resolver for resume. It
 // performs the same cold safety checks before official Agent resolution; it
-// neither arms the Goal nor supplies a prompt.
+// neither arms the Goal nor supplies a prompt. Official cold inspect already
+// includes logical interrupted closers; the resolver durably commits them.
 export async function prepareConversationGoalResume({controller,agents,persistence,sessionId,ref,signal,ordinaryPresets}){
  controlInput({action:'resume',...ref});signal?.throwIfAborted();
  if(typeof controller?.projections!=='function'||typeof controller?.inspect!=='function'||typeof controller?.resolveAgent!=='function'||typeof agents?.get!=='function'||typeof persistence?.flush!=='function')throw Error('goal_unavailable');

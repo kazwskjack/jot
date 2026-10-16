@@ -445,3 +445,11 @@ from resurrecting them. Account changes and unavailable browser storage fail
 closed. No objective, message or credential is journaled. This is local recovery
 evidence, not whole-browser/OS crash or production acceptance. See
 [browser command recovery](docs/GOAL-CONTINUATION.md#browser-command-recovery).
+
+
+The locked SDK's cold query already presents conservative logical closers for
+persisted interrupted tails; its original resolver commits them during resume.
+Jot keeps that implementation. Real Host regressions now cover an open tail and
+started/unstarted tool requests, read-only log hashes, original-run continuation
+and cold restart. Pending/claimed input and still-open attached turns remain
+separate unresolved recovery requirements. See [official interrupted-tail recovery](docs/GOAL-CONTINUATION.md#official-interrupted-tail-recovery).
