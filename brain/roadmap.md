@@ -2,7 +2,7 @@
 slug: roadmap
 title: Roadmap
 role: milestones
-updated: "2026-10-16T08:59:29"
+updated: "2026-10-16T09:16:41"
 ---
 
 # Roadmap
@@ -12,7 +12,7 @@ updated: "2026-10-16T08:59:29"
 - Versioned memory lifecycle, consolidation/rollback and retrieval traces.
 - Reviewed BRAIN.md project knowledge and a pinned local CLI.
 
-## Local extraction implementation awaiting publication and deployment acceptance
+## Optional extraction available on the development branch
 - Pinned optional runtime, isolated Host entry and original-pool idle dispatch.
 - Dedicated processing identity, source cumulative accounting and source/role/task freshness.
 - No self-capture or duplicate memory toolset; candidates remain owner-reviewed.
