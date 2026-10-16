@@ -64,3 +64,14 @@ test('empty pending recovery uses the scoped original factory receipt instead of
  f.options.claimedComposer={withResolution:async(scope,operation)=>{assert.deepEqual(scope.binding,f.options.binding);f.calls.push('claimed-factory');const value=await operation();f.agent.inbox.nextTurn=[message];return {value,recovery:{state:'restored',restored:1,execution_authorized:false},pending:{'next-step':[],'next-turn':[message]}};}};
  const result=await prepare(f.options);assert.deepEqual(result.request.messageIds,['native-input']);assert.ok(f.calls.indexOf('cold-composition')<f.calls.indexOf('claimed-factory'));result.check();
 });
+
+test('an interrupted turn with surviving pending input still uses the original claim factory',async()=>{
+ const f=fixture();f.history.events.push({seq:1,type:'turn/start',data:{turn:1}},{seq:2,type:'turn/end',data:{turn:1,reason:{kind:'interrupted'}}});
+ f.options.claimedComposer={withResolution:async(scope,operation)=>{assert.equal(scope.allowPending,true);f.calls.push('mixed-factory');const value=await operation();return{value,recovery:{state:'none',restored:0,execution_authorized:false},pending:structuredClone(f.view.values.inbox)};}};
+ await prepare(f.options);assert.ok(f.calls.includes('mixed-factory'));
+});
+
+test('possible unentered claims plus a surviving queue refuse when the original claim factory is absent',async()=>{
+ const f=fixture();f.history.events.push({seq:1,type:'turn/start',data:{turn:1}},{seq:2,type:'agent/inbox/spliced',data:{target:'next-step',start:0,removedCount:1,inserted:[]}},{seq:3,type:'turn/end',data:{turn:1,reason:{kind:'interrupted'}}});
+ await assert.rejects(prepare(f.options),/ordinary_input_/);assert.ok(!f.calls.includes('resolve'));
+});

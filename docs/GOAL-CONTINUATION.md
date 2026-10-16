@@ -1073,3 +1073,28 @@ fixture; only the recovering phase runs the real Worker. Providers are scripted.
 Later already-claimed steering, historical terminal acknowledgement uncertainty,
 monetary reconciliation and production acceptance remain incomplete. See the
 [staged steering plan](superpowers/plans/2026-10-16-steering-lineage-and-recovery.md).
+
+## Later-step claimed steering checkpoint
+
+Ordinary claimed recovery can now select proven unentered claims after the last
+matched closed step, following whole-log official invariant validation. This is
+an explicit ordinary policy; generic native restoration retains its old default.
+The original unpublished factory verifies each command's protocol-3 admission
+and rechecks it after setup before publication. Existing entry reservations,
+changed commands and foreign authority refuse without replay. Prior model/tool
+outcomes and unknown costs are preserved, not inferred from a step closer.
+
+Four real local SDK Host-death cases cover one/two claimed commands plus reserved
+and changed-command refusal. The recovering phase uses the actual original-run
+Worker and preserves old native prefix/usage/private records, one canonical
+answer and no prior-call repetition. The first Runner lease is fixture-held,
+providers are scripted, and monetary/production acceptance remains open. See
+[the staged steering plan](superpowers/plans/2026-10-16-steering-lineage-and-recovery.md).
+
+Cold claimed composition also covers the mixed state where one command has been
+claimed and another remains pending. Interrupted history uses the original
+factory despite a nonempty queue; every surviving message needs its original
+admission before publication. Without the required claim factory, a possible
+unentered claim window refuses. The real mixed Host-death case preserves both
+RPCs/order and one canonical result; terminal publication/acknowledgement races
+remain a separate open gate in the staged plan.

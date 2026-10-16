@@ -49,3 +49,27 @@ test('binary changes during original preset setup prevent factory publication',a
  const f=composition(),data=Buffer.from('original attachment bytes'),ref={attachmentId:'sha256:'+createHash('sha256').update(data).digest('hex'),bytes:data.length};f.message.content.push({type:'file',attachment:ref});f.admission.native_message_sha256=createHash('sha256').update(canonical(f.message)).digest('hex');let reads=0;f.options.ctx.attachments={async *readFileStream(){reads++;yield data;}};
  const composer=create(f.options);await assert.rejects(composer.withResolution({binding:f.options.binding,signal:f.options.signal},()=>f.resolve(()=>{data[0]^=1;})),/attachments_unconfirmed/);assert.equal(reads,2);assert.equal(f.options.agents.get('session-a'),undefined);await composer.dispose();
 });
+
+test('command claims are rechecked after preset setup before original factory publication',async()=>{
+ for(const changed of [false,true,'reserved']){const f=composition();f.message.source.rpcId='cmd-a';const parent=f.authority;
+  const proof={...parent,kind:'ordinary_steer',command_id:'cmd-a',request_id:'cmd-a',input_message_id:'message-cmd-a',original_input_message_id:parent.input_message_id,original_input_sha256:parent.input_sha256,command_sha256:'c'.repeat(64),native_content_sha256:createHash('sha256').update(JSON.stringify(f.message.content)).digest('hex')};
+  Object.assign(f.admission,{protocol:3,request_id:'cmd-a',input_message_id:proof.input_message_id,original_input_message_id:parent.input_message_id,original_input_sha256:parent.input_sha256,command_sha256:proof.command_sha256,native_content_sha256:proof.native_content_sha256,native_message_sha256:createHash('sha256').update(canonical(f.message)).digest('hex')});
+  f.options.admissions.steeringAdmissionProtocol=1;const read=f.options.bridge.request;f.options.bridge.request=async(path,...args)=>path==='ordinary-input-binding'?read(path,...args):{binding:structuredClone(proof)};
+  const composer=create(f.options),operation=()=>f.resolve(()=>{if(changed===true)proof.command_sha256='d'.repeat(64);if(changed==='reserved')f.options.admissions.readReplayCandidate=async()=>{throw Error('ordinary_input_entry_reserved');};});
+  if(changed){await assert.rejects(composer.withResolution({binding:f.options.binding,signal:f.options.signal},operation));assert.equal(f.options.agents.get('session-a'),undefined);}
+  else{const value=await composer.withResolution({binding:f.options.binding,signal:f.options.signal},operation);assert.equal(value.recovery.restored,1);assert.equal(value.recovery.execution_authorized,false);}
+  await composer.dispose();
+ }
+});
+
+test('explicit surviving-pending factory mode validates original inbox without requiring a new restoration',async()=>{
+ for(const allowPending of [true,false]){const f=composition();f.events[2].data.removedCount=0;const composer=create(f.options),work=()=>composer.withResolution({binding:f.options.binding,signal:f.options.signal,allowPending},()=>f.resolve());
+  if(allowPending){const result=await work();assert.equal(result.recovery.state,'none');assert.equal(result.recovery.restored,0);assert.deepEqual(result.pending['next-turn'],[f.message]);}
+  else await assert.rejects(work());await composer.dispose();
+ }
+});
+
+test('surviving pending input cannot be published through the factory without its original admission',async()=>{
+ const f=composition();f.events[2].data.removedCount=0;f.options.admissions.readReplayCandidate=async()=>{throw Error('missing_original_admission');};const composer=create(f.options);
+ await assert.rejects(composer.withResolution({binding:f.options.binding,signal:f.options.signal,allowPending:true},()=>f.resolve()));assert.equal(f.options.agents.get('session-a'),undefined);await composer.dispose();
+});

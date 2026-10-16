@@ -258,3 +258,13 @@ answer and refusal of reserved or changed commands. This is local scripted-model
 pending-input acceptance; later claimed steering, terminal acknowledgement and
 cost reconciliation, rollout and the other inventory rows remain incomplete.
 See [the staged plan](superpowers/plans/2026-10-16-steering-lineage-and-recovery.md).
+
+## Later claimed steering checkpoint
+
+The original ordinary factory now restores only admitted, unreserved later
+claims after a verified closed-step boundary. Exact command proofs survive
+preset setup; old logs, usage and authority are not rewritten. Real local
+single/double claimed-input Host-death cases and paired refusal cases pass.
+Historical terminal acknowledgement reconciliation, money/unknown outcomes,
+rollout and the full capability inventory remain unfinished. See
+[the staged plan](superpowers/plans/2026-10-16-steering-lineage-and-recovery.md).

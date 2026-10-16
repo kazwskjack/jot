@@ -7,7 +7,8 @@ const freeze=value=>{if(value&&typeof value==='object'){for(const child of Objec
 
 /** Host-only setup for the official resume factory, before publication. It
  * repairs input, never grants execution or calls a send/Goal/wake API. */
-export function createNativeClaimedInputRecoverySetup({Session,agents,sessions,query,projections,validateLog,authorize,confirmReplaySafety,signal}={}){
+export function createNativeClaimedInputRecoverySetup({Session,agents,sessions,query,projections,validateLog,authorize,confirmReplaySafety,signal,allowClosedStepClaims=false}={}){
+ if(typeof allowClosedStepClaims!=='boolean')throw Error('claim_recovery_config_invalid');
  if(typeof Session?.create!=='function'||typeof agents?.get!=='function'||typeof sessions?.get!=='function'||typeof query?.readSession!=='function'||typeof projections?.snapshot!=='function'||[validateLog,authorize,confirmReplaySafety].some(fn=>typeof fn!=='function'))throw Error('claim_recovery_config_invalid');
  const results=new WeakMap();
  const setup=async(_ctx,agent)=>{
@@ -48,7 +49,23 @@ export function createNativeClaimedInputRecoverySetup({Session,agents,sessions,q
   if(!interrupted){results.set(agent,receipt('none'));return;}
   const {start,end}=interrupted;
   if(!start||start.data?.turn!==end.data?.turn)throw Error('claim_recovery_history_invalid');
-  const tail=events.slice(start.seq+1,end.seq),claims=[],targets=new Set();
+  let tail=events.slice(start.seq+1,end.seq);const claims=[],targets=new Set();
+  if(allowClosedStepClaims){
+   // A structural closer is not a successful provider/tool outcome. Keep all
+   // previous events and costs; restore only claims after the last closed step.
+   let openStep=null,lastStep=0,boundary=0;
+   for(const [index,event] of tail.entries()){
+    if(event.type==='step/start'){
+     if(openStep!==null||event.data?.turn!==start.data.turn||!Number.isSafeInteger(event.data.step)||event.data.step<=lastStep)throw Error('claim_recovery_history_invalid');
+     openStep=event.data.step;
+    }else if(event.type==='step/end'){
+     if(openStep===null||event.data?.turn!==start.data.turn||event.data.step!==openStep)throw Error('claim_recovery_history_invalid');
+     lastStep=openStep;openStep=null;boundary=index+1;
+    }
+   }
+   if(openStep!==null)throw Error('claim_recovery_started');
+   tail=tail.slice(boundary);
+  }
   if(tail.some(event=>event.type==='step/start'||event.type==='user/message'||event.type==='request/header'||event.type==='tool/call'))throw Error('claim_recovery_started');
   const metadata=new Set(['agent/inbox/spliced','subagent/catalog','team/member','goal/change']);
   if(tail.some(event=>!metadata.has(event.type)||event.surfaceOp!==undefined&&event.surfaceOp!=='append'))throw Error('claim_recovery_history_invalid');

@@ -16,6 +16,20 @@ function fixture(){
  const options={binding,bridge:{request:async(path,b,body)=>{assert.equal(path,'ordinary-input-binding');assert.deepEqual(b,binding);assert.deepEqual(body,{});reads++;return {binding:structuredClone(authority)};}},ordinaryPresets:new Set(['jot-general']),profile:{read:async()=>({...profile})},admissions:{entryReservationProtocol:1,readReplayCandidate:async({session:subject,runId,messageId})=>{assert.equal(subject,session);assert.equal(runId,'run-a');assert.equal(messageId,'native-a');return structuredClone(admission);}},Session:Detached,agents:{get:()=>undefined},sessions:{get:()=>undefined},query:{readSession:async()=>({session:header,inheritedEventCount:0,events:events.slice(0,5)})},projections:{snapshot:view=>({asOfSeq:view.seq-1,values:{inbox:project(view)}})},validateLog:async()=>({validated:true}),signal:new AbortController().signal};
  return{options,agent,message,authority,profile,admission,events,reads:()=>reads};
 }
+
+function commandFixture(){const f=fixture();f.message.source.rpcId='cmd-a';const parent=f.authority;
+ const command={...parent,kind:'ordinary_steer',command_id:'cmd-a',request_id:'cmd-a',input_message_id:'message-cmd-a',original_input_message_id:parent.input_message_id,original_input_sha256:parent.input_sha256,command_sha256:'c'.repeat(64),native_content_sha256:createHash('sha256').update(JSON.stringify(f.message.content)).digest('hex')};
+ Object.assign(f.admission,{protocol:3,request_id:'cmd-a',input_message_id:command.input_message_id,original_input_message_id:parent.input_message_id,original_input_sha256:parent.input_sha256,command_sha256:command.command_sha256,native_content_sha256:command.native_content_sha256,native_message_sha256:createHash('sha256').update(canonical(f.message)).digest('hex')});
+ f.options.admissions.steeringAdmissionProtocol=1;const read=f.options.bridge.request;f.options.bridge.request=async(path,...args)=>path==='ordinary-input-binding'?read(path,...args):{binding:structuredClone(command)};return{...f,command};}
+
+test('claimed command restoration requires its original protocol-3 proof under the same parent',async()=>{
+ const f=commandFixture(),setup=create(f.options);await setup({},f.agent);assert.deepEqual(f.agent.inbox.nextTurn,[f.message]);assert.equal(setup.resultFor(f.agent).execution_authorized,false);await setup.recheckFor(f.agent);
+ f.command.command_sha256='d'.repeat(64);await assert.rejects(setup.recheckFor(f.agent),/ordinary_claimed_/);
+});
+
+test('claimed commands refuse changed parent, content receipt, missing capability or reserved entry',async()=>{
+ for(const kind of ['parent','content','capability','reserved']){const f=commandFixture();if(kind==='parent')f.command.original_input_sha256='d'.repeat(64);if(kind==='content')f.admission.native_message_sha256='d'.repeat(64);if(kind==='capability')delete f.options.admissions.steeringAdmissionProtocol;if(kind==='reserved')f.options.admissions.readReplayCandidate=async()=>{throw Error('ordinary_input_entry_reserved');};const seq=f.agent.session.seq;await assert.rejects(create(f.options)({},f.agent));assert.equal(f.agent.session.seq,seq);}
+});
 test('ordinary claimed setup restores only the admitted original human message without execution',async()=>{
  assert.equal(typeof create,'function');const f=fixture(),setup=create(f.options);await setup({},f.agent);assert.deepEqual(f.agent.inbox.nextTurn,[f.message]);assert.deepEqual(setup.resultFor(f.agent),{state:'restored',restored:1,already_pending:0,goal_owned:0,execution_authorized:false});assert.ok(f.reads()>=2);assert.equal(f.events.filter(e=>e.type==='user/message').length,0);
 });

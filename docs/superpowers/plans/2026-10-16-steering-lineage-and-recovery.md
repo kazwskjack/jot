@@ -293,3 +293,97 @@ focused case, not a claimed single 26-case run. Adapter 454/454, root 32/32,
 public-review tests 6/6 and Windows root build pass. Gateway source is unchanged
 in this checkpoint, so the prior Gateway results retain their own scope.
 No production deployment, real-provider quality or monetary settlement is claimed.
+
+## Later claimed command restoration
+
+The ordinary claimed-input policy now explicitly enables a closed-step claim
+window. The generic native helper remains conservative by default. With this
+policy, the complete cold log first passes official package invariants. Matched
+step/turn boundaries select only the removals after the final structurally closed
+step; open/mismatched steps refuse. Prior steps, model/tool events and usage stay
+in the log untouched. A claim followed by a started step is not restored from a
+missing buffered event. Neither a real nor repair-generated step closer proves
+successful provider/tool outcomes or settled money.
+
+For every restored command, the unpublished factory requires its exact current
+parent-bound Gateway command identity and original immutable protocol-3 receipt,
+full native message hash and reviewed composition. Candidate entry reservations
+still prohibit replay. Command proofs are rechecked across admission reads and
+again after preset setup, before publication. Changed proofs or new competing
+entry reservations cannot pass the after-setup gate. Original protocol-2 input
+restoration and the separately owned Goal/approval sources retain their contracts.
+
+Actual local SDK cases complete an original model step, accept one/two durable
+commands, let the real driver claim them, and hold before the next step starts.
+The Host is flushed and SIGKILLed. Startup cold projection shows no pending
+command, so recovery uses the original unpublished factory rather than a prompt.
+The real recovering Worker then consumes only the restored commands, preserves
+all earlier native prefix/usage/admission/reservation bytes, creates each new
+command entry under its current lease and publishes one canonical answer.
+Poll/restart adds no calls. As in the pending fixture, the first Runner lease is
+held by the test; this does not claim a killed first Worker-process test.
+
+Paired actual-Host faults reserve the candidate's entry or change the original
+command payload before restart. They interrupt without another model call,
+canonical answer or rewritten private admission. The first real claimed case
+failed with an interrupted parent and no published Agent; after the original
+factory was connected to command proofs, it passed. Local scripted-provider
+four-case acceptance is recorded separately from production or monetary evidence.
+
+This implements the local completed-step/unentered-claim composition. It does
+not settle historical terminal acknowledgement loss, unknown dispatch/provider
+fees, explicit Goal reactivation, consumer upgrade/rollback, real-provider quality
+or production acceptance. Those gates and the complete 26-capability objective
+remain in force; production defaults stay off.
+
+### Mixed claimed and surviving-pending input
+
+Review found an additional execution gap after the first 30-case local suite
+passed: the cold projection can contain a later pending command while an earlier
+command has already been claimed but not entered. Resolving the nonempty queue
+directly skipped the claim factory and lost the earlier command. A corrected
+actual-Host case reproduced two entry records where three were required; this
+was an implementation failure, not a test-count adjustment.
+
+Interrupted history with configured claim recovery now always passes through the
+original unpublished factory even when pending input survives. An explicit
+`allowPending` scope permits a verified unchanged nonempty queue when no restore
+is needed; it is not the default and does not grant execution. If the final
+interrupted claim window may contain removals and no claim factory is available,
+preflight refuses instead of proceeding with an incomplete queue. All surviving
+messages, not only newly restored claims, require original immutable admissions
+before publication and are rechecked after preset setup. This also rejects a
+missing admission in an otherwise unchanged surviving queue.
+
+The real mixed case now restores the earlier claim ahead of the later pending
+message, preserves old native/usage/private records, creates both command entries
+under the new original-run lease and publishes one answer without repeating the
+first model call. The earlier 30/30 result is retained as a pre-fix checkpoint,
+not final-source coverage of this new case. Final 31-case and Adapter results
+are recorded below when their actual processes complete.
+
+### Next delivery-race work
+
+A command's `applied` state proves native acceptance, not that the final answer
+covers it. Before adding historical terminal fallback, test the boundary where a
+new command is durably inserted as the Runner observes `turn/end`, including an
+acknowledgement lost after native acceptance. Inspect both the original follow
+stream's human RPC coverage and the Worker's final publication transaction.
+
+The next implementation must fence publication against commands accepted during
+that boundary. Keep the owning original Worker lease and original native stream
+until its verified command inputs are covered; recheck the command set inside
+the same transaction as canonical finalization. Do not treat a pending/applied
+flag or an old nonempty answer as coverage of a later RPC. A lost response must
+reconcile original native admission/entry/history before any new run or prompt.
+This is a proposed Jot integration boundary, not a claimed upstream API or a
+second scheduler. Preserve user cancellation and unknown dispatch/fees. Read-only
+historical terminal reconciliation remains separate from permission to resume.
+
+Final-source verification: complete actual local SDK suite 31/31, zero failures
+or skips, 389.65 seconds, including the mixed claimed/pending regression. Adapter
+463/463, root 32/32, public-review tests 6/6 and Windows root build pass. Gateway
+source is unchanged, so its earlier suite is not represented as new evidence.
+All SDK providers are local scripted fixtures; no production deployment or
+monetary acceptance is included. The earlier pre-mixed 30/30 run remains
+historical evidence only. The full objective stays active.

@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import {createNativeClaimedInputRecoverySetup} from '../native-claimed-input.js';
 
 const message=id=>({id,role:'user',source:{kind:'user'},content:[{type:'text',text:'Original '+id}]});
-function fixture({step=false,cancelled=false,later=false,goal=false,partial=false,reason='interrupted',persistedMarker=false}={}){
+function fixture({step=false,cancelled=false,later=false,goal=false,partial=false,reason='interrupted',persistedMarker=false,priorStep=false}={}){
  const one=message('one'),two=message('two'),queued=message('queued');if(goal)two.source={kind:'goal',goalId:'original-goal',revision:1,round:1};
  const history=[['agent/inbox/spliced',{target:'next-step',start:0,inserted:[one]}],['agent/inbox/spliced',{target:'next-turn',start:0,inserted:[two,queued]}],['turn/start',{turn:1}],['agent/inbox/spliced',{target:'next-step',start:0,removedCount:1,inserted:[],...(cancelled?{outcome:'canceled'}:{})}],['agent/inbox/spliced',{target:'next-turn',start:0,removedCount:1,inserted:[]}],...(step?[['step/start',{turn:1,step:1}],['user/message',one],['step/end',{turn:1,step:1}]]:[]),['turn/end',{turn:1,reason:{kind:'interrupted'}}],['session/end-seed',{}],...(later?[['turn/start',{turn:2}],['step/start',{turn:2,step:1}],['step/end',{turn:2,step:1}],['turn/end',{turn:2,reason:{kind:'completed'}}]]:[])];
+ if(priorStep)history.splice(3,0,['step/start',{turn:1,step:1}],['user/message',message('already-consumed')],['assistant/message',{id:'previous-answer',usage:{inputTokens:5,outputTokens:1}}],['step/end',{turn:1,step:1}]);
  const events=history.filter(([type,data])=>type!=='session/end-seed'&&!(partial&&type==='agent/inbox/spliced'&&data.target==='next-turn'&&data.removedCount)).map(([type,data],seq)=>({seq,type,data:type==='turn/end'&&data.turn===1?{...data,reason:{kind:reason}}:data,surfaceOp:'append'}));let storedCount=events.length;events.push({seq:events.length,type:'session/end-seed',data:{},surfaceOp:'append'});if(persistedMarker)storedCount=events.length;let calls=0,validations=0,safe=0;
  const project=view=>{const state={'next-step':[],'next-turn':[]};for(const event of view.snapshotEvents()){if(event.type==='agent/inbox/spliced'){const d=event.data;state[d.target].splice(d.start,d.removedCount??0,...d.inserted);}}return state;};
  const session={id:'original',header:{id:'original',isSeeded:false},inheritedEventCount:0,get firstLiveSeq(){return storedCount;},get seq(){return events.length;},eventAt:index=>events[index],snapshotEvents:(start=0,end=events.length)=>events.slice(start,end)};
@@ -14,6 +15,21 @@ function fixture({step=false,cancelled=false,later=false,goal=false,partial=fals
  const options={Session:Detached,agents:{get:()=>undefined},sessions:{get:()=>undefined},query:{readSession:async()=>({session:session.header,inheritedEventCount:0,events:events.slice(0,storedCount+1)})},projections:{snapshot:view=>{assert.ok(view instanceof Detached);return {asOfSeq:view.seq-1,values:{inbox:project(view)}};}},validateLog:async()=>{validations++;return {validated:true};},authorize:async({agent:subject})=>{assert.equal(subject,agent);calls++;return {authorized:true};},confirmReplaySafety:async()=>{safe++;return {safe:true};}};
  return {one,two,queued,events,agent,options,remount:()=>{storedCount=events.length;events.push({seq:events.length,type:'session/end-seed',data:{},surfaceOp:'append'});},counts:()=>({calls,validations,safe})};
 }
+
+test('an explicit closed-step claim policy restores only the later unentered window and preserves earlier usage',async()=>{
+ const f=fixture({priorStep:true}),prefix=structuredClone(f.events);f.options.allowClosedStepClaims=true;const setup=createNativeClaimedInputRecoverySetup(f.options);await setup({},f.agent);
+ assert.deepEqual(f.events.slice(0,prefix.length),prefix);assert.deepEqual(f.agent.inbox.nextStep.map(m=>m.id),['one']);assert.deepEqual(f.agent.inbox.nextTurn.map(m=>m.id),['two','queued']);assert.equal(setup.resultFor(f.agent).restored,2);
+ const original=fixture({priorStep:true});await assert.rejects(createNativeClaimedInputRecoverySetup(original.options)({},original.agent),/claim_recovery_started/);
+});
+
+test('closed-step claim policy refuses mismatched or open steps and never restores a claim already entered',async()=>{
+ for(const mode of ['mismatch','open','entered']){const f=fixture({priorStep:true});f.options.allowClosedStepClaims=true;
+  if(mode==='mismatch')f.events.find(e=>e.type==='step/end').data.step=2;
+  if(mode==='open')f.events.find(e=>e.type==='step/end').type='request/header';
+  if(mode==='entered'){const index=f.events.findIndex(e=>e.type==='turn/end');f.events.splice(index,0,{type:'step/start',data:{turn:1,step:2}},{type:'step/end',data:{turn:1,step:2}});f.events.forEach((e,i)=>e.seq=i);f.remount();}
+  const before=f.agent.session.seq,setup=createNativeClaimedInputRecoverySetup(f.options);if(mode==='entered'){await setup({},f.agent);assert.equal(setup.resultFor(f.agent).restored,0);}else await assert.rejects(setup({},f.agent),/claim_recovery_(started|history_invalid)/);assert.equal(f.agent.session.seq,before);
+ }
+});
 
 test('setup restores the original native targets and order without sending, waking or changing Goal messages',async()=>{
  const f=fixture({goal:true}),setup=createNativeClaimedInputRecoverySetup(f.options);await setup({},f.agent);
