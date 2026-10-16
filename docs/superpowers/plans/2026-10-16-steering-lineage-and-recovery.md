@@ -841,3 +841,67 @@ Final-answer/all-command recovery, unknown usage/fees, real-provider evidence,
 rolling upgrade/rollback, deployed acceptance and the full inventory remain
 required. No existing native reservation, usage or provider outcome is cleared
 by recording acceptance.
+
+## Historical final-answer recovery sequence
+
+The existing `RunRepository.appendAssistant` returns the first existing answer;
+it cannot replace an obsolete answer after a later accepted supplement. Do not
+reuse it as evidence that historical final delivery is correct, and do not
+borrow/acquire an execution lease to repair publication.
+
+1. Add `conversations/ordinary-run-history.ts` and a bearer-authenticated internal
+   source route. Inspect the exact owner/conversation/run/Session/version in one
+   transaction. Require the original complete human input and ordinary scope;
+   refuse cancellation, active Worker lease, newer product runs, foreign role/
+   task/Goal controls, conflicting Session binding or extra unaccounted human
+   messages. Include the complete ordered steering-command set (including its
+   states), original input hash, existing canonical answer ID/status/hash,
+   candidate status/text/evidence hashes and runtime/expired-lease state hashes.
+   Return no user/answer text or execution authority. Zero commands must work.
+2. Build a separate raw native completion reader for this full source digest.
+   Verify original and every relevant admitted RPC, native pending/claimed
+   state, real step/turn closure, settled final assistant output and all-command
+   coverage. Use official detached projections/invariants; respect paused/
+   blocked/incomplete native Goals and unknown tool outcomes. Logical closers
+   cannot certify completion. Recover text, reasoning, artifact references and
+   file presentations through the same semantics as the live Runner, without
+   resolving an Agent, prompt, maintenance, flush or model/tool dispatch.
+3. Add a separately versioned trusted transport/Client contract for the final
+   candidate and source/native provenance. Re-read source and native prefix;
+   old per-command answer hashes are insufficient. Verify output artifact/file
+   ownership/integrity before and inside publication, preserving current
+   permission/attachment contracts and user deletion.
+4. Implement explicit non-executing historical publication CAS and an immutable
+   receipt. Preserve original run/input/Session and one canonical message. Create
+   missing output or update the exact older message ID only after complete
+   coverage; never append a second answer. Preserve old candidate provenance and
+   unknown execution/usage/cost state. Do not infer monetary settlement or clear
+   reservations from a completed turn. Cancel, newer user work, changed source,
+   foreign scope and unknown outcomes refuse. Enqueue channel delivery only
+   through existing authorized bindings and receipts, with no duplicate send.
+5. Test actual Host/Worker death after final native persistence but before product
+   publication, lost ACK plus final recovery, existing obsolete canonical output,
+   two supplements, files/images, cancellation/newer work, source/native mutation,
+   failure rollback and reopened-DB retries. Use local scripted providers first;
+   real-provider/money, rollout/rollback and full capability acceptance remain.
+
+Start with the read-only full product snapshot and strict route regression.
+Source readiness is not completion, publication authority or a new planner.
+
+The full product-source reader is implemented with an authenticated internal
+route and exact five-field scope. It hashes the complete ordered command rows,
+original input, canonical identity/status/content, candidate bodies and provenance,
+conversation/Session binding, runtime binding and expired lease state. Candidate
+labels are hashes too; arbitrary source labels must not become a text leak.
+Ten targeted regressions pass, covering zero/two commands, lost product messages,
+ownership/archive/role/task/Goal restrictions, cancellation/newer work/live or
+malformed leases, foreign runtime bindings, duplicate or deleted canonical
+answers and workspace/binding mutations without a new run version. No native
+completion reader or publication writer is enabled by this source route.
+
+Full source-stage verification: Gateway 1192 tests, 1186 passed, six existing
+skips, zero failures (135.20 seconds); root 32/32, public regressions 6/6,
+Gateway and Windows root builds, 711-file working-tree public review and BRAIN
+links pass. Adapter/Host code is unchanged in this stage; the earlier SDK run
+is not final-recovery acceptance. Native completion candidate and publication
+CAS remain unimplemented, with production flags unchanged.

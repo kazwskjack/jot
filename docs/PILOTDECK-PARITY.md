@@ -316,3 +316,11 @@ death/lost-ACK tests and reopened-DB retries pass; cancellation, concurrent repa
 source mutation, rollback and owner deletion have explicit checks. Defaults
 remain off. Final-answer/all-command recovery, unknown fees and deployed parity
 remain separate open gates.
+
+Historical final recovery now has a full read-only product-source snapshot,
+including zero or multiple steering commands and the existing canonical answer
+identity. It exposes hashes and state only; it refuses deleted/conflicting
+answers, cancellation, newer work, active leases and foreign scope. Ten targeted
+regressions pass. This is the source stage: native all-command completion proof,
+artifact/file integrity and atomic replacement of the same canonical message
+remain required before final publication. No production configuration changed.

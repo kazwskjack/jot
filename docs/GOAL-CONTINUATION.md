@@ -1154,3 +1154,11 @@ tests retain one interrupted run, no canonical answer, unchanged native bytes
 and model calls, including repeat polling and reopening the database. The new
 reconciliation switch defaults false. This does not complete historical final
 answer/all-command coverage, monetary settlement or production acceptance.
+
+Historical final recovery now has a full read-only product-source snapshot,
+including zero or multiple steering commands and the existing canonical answer
+identity. It exposes hashes and state only; it refuses deleted/conflicting
+answers, cancellation, newer work, active leases and foreign scope. Ten targeted
+regressions pass. This is the source stage: native all-command completion proof,
+artifact/file integrity and atomic replacement of the same canonical message
+remain required before final publication. No production configuration changed.
