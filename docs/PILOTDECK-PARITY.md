@@ -248,3 +248,13 @@ not complete multi-command ordering, cold later-step recovery, lost-acknowledgem
 reconciliation, monetary settlement or production rollout. The new steering
 switch and existing recovery defaults remain off. See
 [Steering implementation and remaining gates](superpowers/plans/2026-10-16-steering-lineage-and-recovery.md).
+
+## Cold pending steering acceptance
+
+Original-run recovery now adopts separately admitted pending command RPCs and
+uses exact per-message native maintenance bindings. Real local Host-death tests
+verify one/two supplements, retained prior calls/logs/admissions, one canonical
+answer and refusal of reserved or changed commands. This is local scripted-model
+pending-input acceptance; later claimed steering, terminal acknowledgement and
+cost reconciliation, rollout and the other inventory rows remain incomplete.
+See [the staged plan](superpowers/plans/2026-10-16-steering-lineage-and-recovery.md).

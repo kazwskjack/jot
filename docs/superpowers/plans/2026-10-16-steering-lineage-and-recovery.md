@@ -240,3 +240,56 @@ no skips in 64.81 seconds: original claimed restoration, entry-reserved refusal,
 one live supplement, two live supplements and native-accepted lost-ack retry.
 This confirms legacy Host behavior with the additive compatibility package;
 it still does not invoke or prove product cold multi-RPC composition.
+
+## Cold pending command composition
+
+The existing ordinary recovery preflight now resolves each pending human RPC to
+its original parent or a read-only command binding for that exact parent. It
+checks owner/conversation/original input identity, normalized native text and
+immutable command facts before resolving an Agent, again after awaited audits,
+and inside execution guards. A pending candidate whose ID or RPC already
+appears as a committed human input is refused. A previously consumed parent can
+remain history while distinct proven commands are recovered; it is never
+re-prompted or re-admitted.
+
+Mandatory admission adoption now accepts the original protocol-3 command
+receipt, full native message hash and original reviewed profile. It refuses an
+existing entry reservation, changed command or unavailable binary, and rebinds
+only local guards to the new exact Worker lease. The original immutable receipt
+is not replaced. Mixed-RPC maintenance uses the separately named native binding
+capability and preserves queue order and exact-token revocation. Old single-RPC
+maintenance retains its previous request contract.
+
+Actual local SDK tests complete a prior model step, queue one or two real
+Dispatcher commands behind a native turn-stopping barrier, flush their original
+admissions, and SIGKILL the Host. The first observed Runner uses the manually
+held original lease; it is not a killed first Worker process. A fresh original-run
+Worker then restores the same Session under the next lease, executes only the
+pending command(s), preserves the complete prior native prefix and usage, and
+publishes one canonical answer. Earlier receipt and reservation bytes remain
+identical; only the command entry reservation is newly written under the new
+lease. Poll/restart does not repeat calls. Two pending commands retain distinct
+RPCs and order while sharing one subsequent model step.
+
+Paired actual-Host tests reserve the command entry or alter its durable command
+payload after original admission. Recovery then interrupts with no additional
+model call, canonical answer or replacement admission. The first acceptance
+attempt also exposed a test mistake: native internal `user/message` records were
+counted as human RPCs. The corrected assertion selects source kind `user` and
+still compares the complete original history prefix.
+
+This closes local **pending** multi-RPC composition, not later already-claimed
+command restoration. The original claimed-factory filter and whole-turn started
+step guard are deliberately still present. Later-claim window derivation,
+historical terminal lost-ack reconciliation, explicit Goal reactivation,
+unknown provider/tool costs, consumer upgrade/rollback and production/real-provider
+acceptance remain required. Native usage preservation is not monetary settlement.
+Production defaults remain off and the complete 26-capability scope is unchanged.
+
+Final validation for this checkpoint: complete real local SDK suite 25/25,
+zero failures/skips, 298.08 seconds; the subsequently added two-command cold
+case separately passes in 17.65 seconds. These are 25 full-suite cases plus one
+focused case, not a claimed single 26-case run. Adapter 454/454, root 32/32,
+public-review tests 6/6 and Windows root build pass. Gateway source is unchanged
+in this checkpoint, so the prior Gateway results retain their own scope.
+No production deployment, real-provider quality or monetary settlement is claimed.

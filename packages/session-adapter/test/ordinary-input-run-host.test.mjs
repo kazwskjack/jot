@@ -1,4 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import {createAdapterHandler} from '../index.js';
 const create=(await import('../ordinary-input-run-host.js').catch(()=>({}))).createOrdinaryInputRunHost;
 const wire={run_id:'run-a',execution_lease:{owner:'worker-a',generation:2}};
@@ -8,9 +9,16 @@ function fixture(options={}){
  const controller={projections:async()=>({values:{agentPreset:'jot-general',goal:null,inbox:{'next-turn':[message],'next-step':[]}}}),inspect:async()=>({meta:{id:'session-a'},events:[{seq:0,type:'session/end-seed',data:{}}]}),resolveAgent:async()=>{calls.push('resolve');agent=candidate;return{agent};},async *follow(_body,signal){calls.push('follow');yield{type:'snapshot',cursor:3,records:[]};calls.push('advance');await new Promise(r=>{if(signal.aborted)r();else signal.addEventListener('abort',r,{once:true});});}};
  const bridge={request:async()=>{if(!allowed)throw Error('revoked');return{binding:{protocol:1,run_id:'run-a',request_id:'run-a',input_message_id:'product-a',conversation_id:'conv-a',owner_id:'owner-a',session_id:'session-a',execution_lease:wire.execution_lease,input_sha256:'a'.repeat(64),execution_authorized:false}};}};
  assert.equal(typeof create,'function');const host=create({controller,agents:{get:()=>agent},bridge,ordinaryPresets:new Set(['jot-general']),verifyComposition:async()=>({verified:true,fingerprint:'b'.repeat(64)}),inputAdmissionHost:{entryReservationProtocol:1,adoptRecovered:async()=>({execution_authorized:false,message_ids:['native-a']})},...options});
- return{host,controller,candidate,calls,hooks,revoke:()=>allowed=false,hold:()=>hold=true,release:()=>release?.(),abort:new AbortController()};
+ return{host,controller,candidate,bridge,calls,hooks,revoke:()=>allowed=false,hold:()=>hold=true,release:()=>release?.(),abort:new AbortController()};
 }
 async function open(f){const stream=f.host.follow('session-a',wire,{address:{kind:'session',sessionId:'session-a'}},f.abort.signal);assert.equal((await stream.next()).value.type,'snapshot');return stream;}
+
+test('cold steering wake uses the separately bound native entry with original parent observer',async()=>{
+ const f=fixture(),message=f.candidate.inbox.nextTurn[0];message.source.rpcId='cmd-a';const read=f.bridge.request;
+ f.bridge.request=async(path,...args)=>{const value=await read(path,...args);if(path==='ordinary-input-binding')return value;assert.equal(path,'ordinary-steering-binding');return{binding:{...value.binding,kind:'ordinary_steer',request_id:'cmd-a',command_id:'cmd-a',input_message_id:'message-cmd-a',original_input_message_id:value.binding.input_message_id,original_input_sha256:value.binding.input_sha256,command_sha256:'c'.repeat(64),native_content_sha256:createHash('sha256').update(JSON.stringify(message.content)).digest('hex')}};};
+ f.candidate.jotPendingInputBindingsProtocol=1;f.candidate.jotResumePendingInputs=request=>{assert.equal(request.requestId,'run-a');assert.deepEqual(request.inputSources,[{messageId:'native-a',requestId:'cmd-a'}]);f.calls.push('wake-bound');f.candidate.token=Symbol();return Object.defineProperty({accepted:true,messageIds:request.messageIds,seq:request.seq},'wakeToken',{value:f.candidate.token});};
+ const stream=await open(f);try{assert.equal((await f.host.resume('session-a',wire)).accepted,true);assert.equal(f.calls.filter(x=>x==='wake-bound').length,1);assert.equal(f.calls.includes('wake'),false);}finally{f.abort.abort();await stream.return();await f.host.dispose();}
+});
 test('original input HTTP resume requires its parked observer and invokes native wake without prompting',async()=>{
  const f=fixture();await assert.rejects(()=>f.host.resume('session-a',wire),/ordinary_input_/);const stream=await open(f);assert.ok(!f.calls.includes('advance'));assert.ok(!f.calls.includes('resolve'));const ack=await f.host.resume('session-a',wire);assert.equal(ack.accepted,true);assert.equal(ack.run_id,'run-a');assert.equal(ack.input_message_id,'product-a');assert.deepEqual(await f.host.resume('session-a',wire),ack);assert.equal(f.calls.filter(x=>x==='wake').length,1);f.abort.abort();await stream.return();assert.ok(f.calls.includes('revoke-wake'));await f.host.dispose();
 });

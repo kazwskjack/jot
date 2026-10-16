@@ -1059,3 +1059,17 @@ production acceptance are still required. In this opt-in path, unresolved
 terminal commands stay pending rather than starting speculative fallback runs.
 See the staged plan above for the remaining gates; this is not full steering
 or production completion.
+
+## Cold pending steering checkpoint
+
+The opt-in original recovery Host now validates each pending command's parent,
+RPC, normalized content, original protocol-3 admission and exact new Worker
+lease. It uses the explicit per-message native maintenance binding, preserves
+completed parent history and never re-prompts the root. Actual local SDK tests
+cover one/two queued supplements after Host death, unchanged original log and
+admission/reservation bytes, one canonical answer, and refusal of reserved or
+changed commands without new model calls. The first Runner lease is held by the
+fixture; only the recovering phase runs the real Worker. Providers are scripted.
+Later already-claimed steering, historical terminal acknowledgement uncertainty,
+monetary reconciliation and production acceptance remain incomplete. See the
+[staged steering plan](superpowers/plans/2026-10-16-steering-lineage-and-recovery.md).

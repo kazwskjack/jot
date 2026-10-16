@@ -1,4 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 const prepare=(await import('../ordinary-input-resume.js').catch(()=>({}))).prepareOrdinaryInputResume;
 function fixture(){
  const calls=[],message={id:'native-input',role:'user',source:{kind:'user',rpcId:'run-a'},content:[{type:'text',text:'Original input'}]},binding={runId:'run-a',sessionRef:'session-a',executionLease:{owner:'worker-a',generation:2}};
@@ -8,6 +9,39 @@ function fixture(){
  const options={binding,signal:new AbortController().signal,observer:{assertActive(){calls.push('observer');}},ordinaryPresets:new Set(['jot-general']),agents:{get(){return resident;}},controller:{projections:async()=>{calls.push('cold');return view;},inspect:async()=>history,resolveAgent:async()=>{calls.push('resolve');resident=agent;return{agent};}},bridge:{request:async(path,b,body)=>{calls.push('binding');assert.equal(path,'ordinary-input-binding');assert.deepEqual(b,binding);assert.deepEqual(body,{});if(!allow)throw Error('revoked');return{binding:structuredClone(authority)};}},verifyComposition:async({phase})=>{calls.push(phase+'-composition');return{verified:true,fingerprint};}};
  return{options,calls,view,history,agent,authority,revoke:()=>allow=false,changeProfile:()=>fingerprint='c'.repeat(64)};
 }
+
+function steeringFixture(){
+ const f=fixture(),message=f.agent.inbox.nextTurn[0];message.source.rpcId='cmd-a';
+ f.agent.jotPendingInputBindingsProtocol=1;f.agent.jotResumePendingInputs=()=>assert.fail('preflight cannot wake');
+ f.history.events.push({seq:1,type:'user/message',data:{id:'previous-root-input',source:{kind:'user',rpcId:'run-a'}}});
+ const proof={...f.authority,kind:'ordinary_steer',request_id:'cmd-a',command_id:'cmd-a',input_message_id:'message-cmd-a',original_input_message_id:f.authority.input_message_id,original_input_sha256:f.authority.input_sha256,command_sha256:'c'.repeat(64),native_content_sha256:createHash('sha256').update(JSON.stringify(message.content)).digest('hex')};
+ const original=f.options.bridge.request;f.options.bridge.request=async(path,binding,body)=>{
+  if(path==='ordinary-input-binding')return original(path,binding,body);
+  assert.equal(path,'ordinary-steering-binding');assert.deepEqual(body,{command_id:'cmd-a'});return{binding:structuredClone(proof)};
+ };return {...f,proof,message};
+}
+
+test('cold pending steering preserves its command RPC and accepts prior consumed parent history without replay',async()=>{
+ const f=steeringFixture(),prepared=await prepare(f.options);
+ assert.deepEqual(prepared.request,{requestId:'run-a',messageIds:['native-input'],seq:4,inputSources:[{messageId:'native-input',requestId:'cmd-a'}]});
+ prepared.check();await prepared.recheck();f.proof.command_sha256='d'.repeat(64);await assert.rejects(()=>prepared.guardExecution(new AbortController().signal),/ordinary_input_/);
+});
+
+test('cold steering refuses a foreign parent, changed text, already consumed RPC and missing binding capability',async()=>{
+ for(const kind of ['parent','text','entered','capability']){
+  const f=steeringFixture();if(kind==='parent')f.proof.original_input_sha256='d'.repeat(64);
+  if(kind==='text')f.proof.native_content_sha256='d'.repeat(64);
+  if(kind==='entered')f.history.events.push({seq:2,type:'user/message',data:{id:'another-id',source:{kind:'user',rpcId:'cmd-a'}}});
+  if(kind==='capability')delete f.agent.jotPendingInputBindingsProtocol;
+  await assert.rejects(()=>prepare(f.options),/ordinary_input_/);
+  if(kind!=='capability')assert.ok(!f.calls.includes('resolve'),kind);
+ }
+});
+
+test('a command changed during the awaited composition audit cannot pass the final execution fence',async()=>{
+ const f=steeringFixture();let mutate=false;f.options.verifyComposition=async()=>{if(mutate)f.proof.command_sha256='e'.repeat(64);return{verified:true,fingerprint:'b'.repeat(64)};};
+ const prepared=await prepare(f.options);mutate=true;await assert.rejects(()=>prepared.guardExecution(new AbortController().signal),/ordinary_input_/);
+});
 test('ordinary resume preflight binds original RPC and composition before resolving, without waking',async()=>{
  const f=fixture();assert.equal(typeof prepare,'function');const p=await prepare(f.options);assert.deepEqual(p.request,{requestId:'run-a',messageIds:['native-input'],seq:4});assert.equal(p.authority.execution_authorized,false);assert.ok(f.calls.indexOf('cold')<f.calls.indexOf('resolve'));assert.ok(f.calls.indexOf('cold-composition')<f.calls.indexOf('resolve'));p.check();await p.recheck();f.revoke();await assert.rejects(()=>p.recheck(),/ordinary_input_/);
 });

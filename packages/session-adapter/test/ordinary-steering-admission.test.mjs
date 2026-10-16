@@ -12,6 +12,23 @@ test('steer content and foreign parent proofs cannot substitute another command'
  for(const kind of ['content','parent','native']){const f=steering(),host=create(f.options);if(kind==='parent')f.authority.run_id='other-run';let called=0;await assert.rejects(host.withSteer({binding:f.binding,content:kind==='content'?[{type:'text',text:'substitute'}]:f.message.content},async()=>{called++;if(kind==='native')f.message.content[0].text='changed by hook';f.hooks.get('agent/inbox/inserted')({agent:f.agent,message:f.message});return{accepted:true};}));assert.equal(f.writes.length,0);if(kind!=='native')assert.equal(called,0);await host.dispose();}
 });
 
+test('cold pending command adopts its original protocol-3 receipt under a new parent lease without re-admission',async()=>{
+ const f=steering(),host=create(f.options);await host.withSteer({binding:f.binding,content:f.message.content},async()=>{f.hooks.get('agent/inbox/inserted')({agent:f.agent,message:f.message});return{accepted:true};});
+ f.agent.status='idle';f.agent.inbox.nextStep.push(f.message);
+ const binding={runId:f.binding.runId,sessionRef:f.binding.sessionRef,executionLease:{owner:'replacement',generation:2}};f.authority.execution_lease=binding.executionLease;
+ const stamp=structuredClone(f.writes[0]);assert.deepEqual(await host.adoptRecovered({agent:f.agent,binding}),{execution_authorized:false,message_ids:[f.message.id]});
+ assert.deepEqual(f.writes,[stamp]);assert.equal(await host.ownsNativeInput({agent:f.agent,message:f.message,binding}),true);
+ let reservations=0;f.options.admissions.reserveEntry=async(_session,row,attempt)=>{assert.deepEqual(row,stamp);assert.deepEqual(attempt.execution_lease,binding.executionLease);reservations++;};
+ f.agent.inbox.nextStep=[];assert.equal((await f.hooks.get('agent/pre-step')({agent:f.agent,messages:[f.message],signal:new AbortController().signal},async()=>({kind:'enter',messages:[f.message]}))).kind,'enter');assert.equal(reservations,1);await host.dispose();
+});
+
+test('cold command adoption refuses a reserved entry or changed immutable command proof',async()=>{
+ for(const kind of ['reserved','changed']){const f=steering(),host=create(f.options);await host.withSteer({binding:f.binding,content:f.message.content},async()=>{f.hooks.get('agent/inbox/inserted')({agent:f.agent,message:f.message});return{accepted:true};});f.agent.status='idle';f.agent.inbox.nextStep.push(f.message);
+  if(kind==='reserved')f.options.admissions.readReplayCandidate=async()=>{throw Error('ordinary_input_entry_reserved');};else f.authority.command_sha256='d'.repeat(64);
+  await assert.rejects(host.adoptRecovered({agent:f.agent,binding:{runId:f.binding.runId,sessionRef:f.binding.sessionRef,executionLease:f.binding.executionLease}}));assert.equal(f.writes.length,1);assert.equal(f.agent.inbox.nextStep.length,1);await host.dispose();
+ }
+});
+
 
 test('adapter steering envelope preserves command RPC, normalized text and parent lease',async()=>{
  const {createAdapterHandler}=await import('../index.js');const calls=[],token='t'.repeat(32),handler=createAdapterHandler({token,controller:{prompt:async value=>{calls.push(value);return{accepted:true};}},ordinaryInputAdmissionHost:{withSteer:async(scope,operation)=>{assert.equal(scope.binding.commandId,'cmd-a');assert.equal(scope.binding.runId,'run-a');assert.deepEqual(scope.content,[{type:'text',text:'supplement'}]);return operation();}}});const request=body=>handler({method:'POST',url:new URL('http://127.0.0.1/v1/sessions/session-a/prompts'),headers:{authorization:'Bearer '+token},body});
