@@ -4,7 +4,7 @@ title: Keep native Goal state and continuation in DSH
 category: decision
 status: active
 created: "2026-10-16T11:44:16"
-updated: "2026-10-16T20:10:02"
+updated: "2026-10-16T20:32:45"
 ---
 
 <!-- compiled_truth -->
@@ -31,6 +31,8 @@ The complete PilotDeck scope in docs/PILOTDECK-PARITY.md integration and indepen
 Original attachment availability is distinct from admission identity. Claimed-factory setup/publication and mandatory pending-input adoption verify only original unentered image/file content-addressed bytes through the native store. File verification streams within the recorded byte bound; images use the native reader. Missing/corrupt objects and cancellation refuse without resealing admissions, model calls, uploads or raw storage diagnostics. Text-only input does not read binaries. An actual corrected deletion test against the prior source showed retained file text could otherwise yield a completed answer despite a missing binary; an earlier injection that did not delete anything is not evidence. Real local file/PNG transport/recovery and missing-file/image/corrupt-file cases pass with scripted providers, preserving the original reference, artifact, no restaging and one canonical answer. Additional formats, real-provider semantics, restoration/retention and production audit remain incomplete.
 
 Ordinary steering retains its own durable command RPC; it is not the parent's initial-input RPC. The new internal steering binding is read-only identity preparation: command/parent/message/Session/current-lease hashes and IDs, execution_authorized:false, pending/applied continuity and canonical-message collision checks. It does not dispatch, persist an admission or enable recovery. Full steering still needs an originally owned Worker lease, explicit command admission, multi-RPC Host ownership, completed-step claimed recovery, canonical delivery and unknown-cost handling. Never fix this by accepting arbitrary RPCs, reusing the parent RPC or removing whole-turn started-step guards. See docs/superpowers/plans/2026-10-16-steering-lineage-and-recovery.md. Production switches remain unchanged.
+
+An opt-in live ordinary steering path now retains the original ready Worker lease, distinct command RPC, strict ordinary_steer transport and immutable protocol-3 command/native-content admission. The recovered live Host checks each extra RPC against its exact scoped admission; repeated commands do not repeat Controller input. Dispatcher rechecks original ready lease and binding after acknowledgement before canonical message persistence. Local real-SDK evidence covers one live supplement after original recovery, two scripted model and usage records, one canonical answer and no repeat after restart. GENERAL_AGENT_ORDINARY_STEERING_ENABLED defaults false and requires original recovery. Multiple supplements, cold multi-RPC/later-step claimed recovery, lost acknowledgements, pre-insertion transaction ordering, terminal reconciliation and monetary/production gates remain incomplete. Unresolved opt-in terminal commands remain pending without speculative fallback. Do not report full B/C/D/E completion or enable production from this local checkpoint.
 
 
 ## Timeline
@@ -248,5 +250,11 @@ Ordinary steering retains its own durable command RPC; it is not the parent's in
 - time: 2026-10-16T20:10:02
   kind: decision
   summary: Keep steering command identity distinct and stage its read-only original lineage before native admission
+  source: docs/superpowers/plans/2026-10-16-steering-lineage-and-recovery.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-16T20:32:45
+  kind: decision
+  summary: "Bind live steering to the original ready lease and per-command admission; retain cold recovery and delivery gates"
   source: docs/superpowers/plans/2026-10-16-steering-lineage-and-recovery.md
   affects: [native-goal-boundary]

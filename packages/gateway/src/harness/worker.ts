@@ -1,3 +1,4 @@
+import {assertExecutionLease,type ExecutionLease} from '../workbench/execution-lease.ts';
 import {isDeepStrictEqual} from 'node:util';
 import {inspectOrdinaryInputBinding} from '../conversations/ordinary-input-binding.ts';
 import { createHash } from 'node:crypto';
@@ -57,8 +58,9 @@ export interface ChannelTextDelivery {
 }
 
 export class HarnessWorker {
-  private readonly readyRuns = new Set<string>();
-  isReady(runId: string) { return this.readyRuns.has(runId); }
+  private readonly readyRuns = new Map<string,Readonly<{sessionRef:string;ordinary:boolean;executionLease:ExecutionLease}>>();
+  readyExecutionFor(runId:string){const ready=this.readyRuns.get(runId);if(!ready)return undefined;try{assertExecutionLease(this.db,runId,ready.executionLease);return ready;}catch{return undefined;}}
+  isReady(runId: string) { return this.readyExecutionFor(runId)!==undefined; }
   private readonly db: DatabaseSync;
   private readonly coordinator: HarnessCoordinator;
   private readonly runner: DshRunner;
@@ -169,7 +171,7 @@ export class HarnessWorker {
         ...(backgroundTask
           ?{checkpointTask:true,onCheckpoint:(receipt:SessionCheckpoint)=>{this.executionGuard?.assertRunActive(lease.run_id);this.coordinator.recordCheckpoint(lease,controllerSessionRef,receipt);}}:{}),
         sessionRef: controllerSessionRef, universeSessionRef: controllerSessionRef, deferCompletionProbe: true,
-        onReady: () => {assertGoalApplied();this.readyRuns.add(lease.run_id);},
+        onReady: () => {assertGoalApplied();const executionLease=Object.freeze({owner:lease.owner,generation:lease.generation});assertExecutionLease(this.db,lease.run_id,executionLease);this.readyRuns.set(lease.run_id,Object.freeze({sessionRef:controllerSessionRef,ordinary:!!lease.input_message_id&&!goalControl&&!workbenchContext&&!hasWorkbenchBinding,executionLease}));},
         onArtifactRef: recordObservedArtifact,
         onProjection: projection => { assertGoalApplied();this.executionGuard?.assertRunActive(lease.run_id); this.coordinator.recordProjection(lease, projection); },
         onWebOperationCursor: toolCallId => this.coordinator.webOperationCursor(lease, runtimeSessionRef, toolCallId),

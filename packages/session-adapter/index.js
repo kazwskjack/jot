@@ -1,3 +1,4 @@
+import {normalizeOrdinarySteeringExecution} from './ordinary-steering-authority.js'
 import {createOrdinaryClaimedSessionComposer} from './ordinary-claimed-composer.js'
 import {createOrdinaryInputAdmissionHost} from './ordinary-input-admission-host.js'
 import { createServer } from 'node:http'
@@ -367,20 +368,22 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
         try { await workbenchBridge.guard(agents.get(sessionId), signal) }
         catch { return json(409, { error: 'workbench_run_forbidden' }) }
       }
+      let steeringBinding
+      if(body.ordinary_steer!==undefined){try{const value=normalizeOrdinarySteeringExecution(body.ordinary_steer);if(body.ordinary_input!==undefined||value.commandId!==requestId||mode!=='steer'||workbenchSessions.has(sessionId))throw Error();steeringBinding={...value,sessionRef:sessionId};}catch{return json(422,{error:'ordinary_steering_binding_invalid'})}if(typeof ordinaryInputAdmissionHost?.withSteer!=='function')return json(503,{error:'ordinary_input_admission_unavailable'})}
       let ordinaryBinding
       if(body.ordinary_input!==undefined){try{const value=normalizeOrdinaryInputExecution(body.ordinary_input);if(value.runId!==requestId||workbenchSessions.has(sessionId))throw Error();ordinaryBinding={...value,sessionRef:sessionId};}catch{return json(422,{error:'ordinary_input_binding_invalid'})}if(!ordinaryInputAdmissionHost)return json(503,{error:'ordinary_input_admission_unavailable'})}
       let value
       try {
         // Admission passes human content unchanged. Login operations are only
         // executed through explicit tools with trusted scope and consent checks.
-        value = ordinaryBinding?await ordinaryInputAdmissionHost.withPrompt({binding:ordinaryBinding,signal},()=>controller.prompt({requestId,sessionId,mode,content},signal)):await controller.prompt({ requestId, sessionId, mode, content }, signal)
+        value = steeringBinding?await ordinaryInputAdmissionHost.withSteer({binding:steeringBinding,content,signal},()=>controller.prompt({requestId,sessionId,mode,content},signal)):ordinaryBinding?await ordinaryInputAdmissionHost.withPrompt({binding:ordinaryBinding,signal},()=>controller.prompt({requestId,sessionId,mode,content},signal)):await controller.prompt({ requestId, sessionId, mode, content }, signal)
       } catch (error) {
         // Keep protocol-visible diagnostics stable and allow-listed. Remote error
         // messages/details may contain model, filesystem, or user-provided data.
         const hasImage = content.some(part => part.type === 'image')
         const reasonCode = hasImage && hasKnownSharpNativeImportFailure(error)
           ? 'DSH_IMAGE_PROCESSING_DEPENDENCY_FAILED' : promptFailureReasonCode(error)
-        return json(ordinaryBinding?409:422, { error: ordinaryBinding?'ordinary_input_admission_unconfirmed':'prompt_rejected', reason_code: reasonCode })
+        return json(ordinaryBinding||steeringBinding?409:422, { error: ordinaryBinding||steeringBinding?'ordinary_input_admission_unconfirmed':'prompt_rejected', reason_code: reasonCode })
       }
       return json(202, value)
     }

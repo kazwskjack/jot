@@ -2,9 +2,10 @@ import {mkdir,open,lstat,link,unlink} from 'node:fs/promises';
 import {join,isAbsolute} from 'node:path';import {createHash,randomUUID} from 'node:crypto';import {isDeepStrictEqual} from 'node:util';
 const valid=value=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(value);
 const keys='conversation_id,input_message_id,input_sha256,native_message_id,native_message_sha256,owner_id,profile_fingerprint,protocol,run_id,session_created_at,session_id';
+const steeringKeys=(keys+',request_id,original_input_message_id,original_input_sha256,command_sha256,native_content_sha256').split(',').sort().join(',');
 const fail=()=>{throw Error('ordinary_admission_invalid');};
 function identity(session,runId,messageId){if(!valid(session?.id)||!valid(runId)||!valid(messageId)||!Number.isSafeInteger(session.header?.createdAt)||session.header.createdAt<0)fail();return {session_id:session.id,session_created_at:session.header.createdAt,run_id:runId,native_message_id:messageId};}
-function validate(value,scope){if(!value||typeof value!=='object'||Object.keys(value).sort().join(',')!==keys||value.protocol!==2||!['conversation_id','input_message_id','native_message_id','owner_id','run_id','session_id'].every(k=>valid(value[k]))||!['input_sha256','native_message_sha256','profile_fingerprint'].every(k=>/^[a-f0-9]{64}$/.test(value[k]??''))||!Object.keys(scope).every(k=>value[k]===scope[k]))fail();return value;}
+function validate(value,scope){if(!value||typeof value!=='object'||Object.keys(value).sort().join(',')!==(value.protocol===3?steeringKeys:keys)||![2,3].includes(value.protocol)||value.protocol===3&&(!valid(value.request_id)||value.request_id===value.run_id||!valid(value.original_input_message_id)||!['original_input_sha256','command_sha256','native_content_sha256'].every(k=>/^[a-f0-9]{64}$/.test(value[k]??'')))||!['conversation_id','input_message_id','native_message_id','owner_id','run_id','session_id'].every(k=>valid(value[k]))||!['input_sha256','native_message_sha256','profile_fingerprint'].every(k=>/^[a-f0-9]{64}$/.test(value[k]??''))||!Object.keys(scope).every(k=>value[k]===scope[k]))fail();return value;}
 /** Operator-owned private metadata, outside Agent workspaces and native logs.
  * One immutable hash-only record per Session incarnation/run/native message.
  * Creating a record is allowed only on original admission, never recovery. */
@@ -24,7 +25,7 @@ export function createOrdinaryInputAdmissions({root}={}){
  };
  const unreserved=async(scope,signal)=>{signal?.throwIfAborted();try{await lstat(pathFor(scope).replace(/\.json$/,'.entry.json'));}catch(error){if(error.code==='ENOENT'){signal?.throwIfAborted();return;}throw error;}throw Error('ordinary_input_entry_reserved');};
  const canonical=value=>JSON.stringify(value,(_k,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.keys(item).sort().map(k=>[k,item[k]])):item);
- return Object.freeze({entryReservationProtocol:1,read,
+ return Object.freeze({entryReservationProtocol:1,steeringAdmissionProtocol:1,read,
   async create(session,value,{signal}={}){const scope=identity(session,value?.run_id,value?.native_message_id),stamp=structuredClone(validate(value,scope));return publish(scope,stamp,'.json','ordinary_admission_conflict',signal);},
   async readReplayCandidate(request){const scope=identity(request.session,request.runId,request.messageId);await unreserved(scope,request.signal);const value=await read(request);await unreserved(scope,request.signal);return value;},
   async reserveEntry(session,value,attempt,{signal}={}){

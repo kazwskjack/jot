@@ -1,9 +1,15 @@
+import {isDeepStrictEqual} from 'node:util';
+import {inspectOrdinarySteeringBinding} from '../conversations/ordinary-steering-binding.ts';
+import type {OrdinarySteeringExecution} from './session-controller-client.ts';
+import type {ExecutionLease} from '../workbench/execution-lease.ts';
 import type {DatabaseSync} from 'node:sqlite';
 import {withImmediateTransaction} from '../db/database.ts';
 import type {EventStore} from '../events/event-store.ts';
 import {RunRepository} from '../runs/repository.ts';
 
+interface OrdinarySteering {currentExecutionFor(runId:string):Readonly<{sessionRef:string;ordinary:boolean;executionLease:ExecutionLease}>|undefined;}
 interface ControlClient {
+ steerOriginal?(sessionId:string,commandId:string,text:string,proof:OrdinarySteeringExecution,signal?:AbortSignal):Promise<Record<string,unknown>>;
  prompt(sessionId:string,requestId:string,text:string,mode:'steer',signal?:AbortSignal):Promise<Record<string,unknown>>;
  cancel(sessionId:string):Promise<Record<string,unknown>>;
 }
@@ -15,8 +21,8 @@ interface ExecutionGuard {
 /** Single dispatcher in the owning Worker process; official request IDs make retries idempotent. */
 export class SessionCommandDispatcher {
  private db:DatabaseSync;private events:EventStore;private client:ControlClient;private ready:(runId:string)=>boolean;
- private executionGuard:ExecutionGuard|undefined;
- constructor(db:DatabaseSync,events:EventStore,client:ControlClient,ready:(runId:string)=>boolean,executionGuard?:ExecutionGuard){this.db=db;this.events=events;this.client=client;this.ready=ready;this.executionGuard=executionGuard;}
+ private executionGuard:ExecutionGuard|undefined;private ordinarySteering:OrdinarySteering|undefined;
+ constructor(db:DatabaseSync,events:EventStore,client:ControlClient,ready:(runId:string)=>boolean,executionGuard?:ExecutionGuard,ordinarySteering?:OrdinarySteering){if(ordinarySteering&&typeof ordinarySteering.currentExecutionFor!=='function')throw Error('ordinary_steering_dispatch_config_invalid');this.ordinarySteering=ordinarySteering;this.db=db;this.events=events;this.client=client;this.ready=ready;this.executionGuard=executionGuard;}
  async processNext():Promise<boolean>{
   const rows=this.db.prepare(`SELECT c.*,r.status run_status,r.conversation_id,r.input_message_id,
    r.created_at run_created_at,r.version,b.session_id,l.expires_at
@@ -28,6 +34,7 @@ export class SessionCommandDispatcher {
    const terminal=['succeeded','failed','cancelled','interrupted','partial'].includes(row.run_status);
    if(terminal){
     if(row.kind==='steer'){
+     if(this.ordinarySteering&&this.isOrdinaryParent(row.run_id))continue; // Historical acceptance needs separate reconciliation, never speculative fallback.
      const p=JSON.parse(row.payload_json);const owner=this.db.prepare('SELECT owner_id FROM ga_conversations WHERE id=?').get(row.conversation_id) as {owner_id:string};
      try {
       withImmediateTransaction(this.db,()=>{
@@ -65,8 +72,13 @@ export class SessionCommandDispatcher {
     if(!row.session_id)continue;
     try { this.executionGuard?.assertRunActive(row.run_id); }
     catch { this.superseded(row.id); continue; }
-    await this.client.prompt(row.session_id,row.id,String(payload.text),'steer',AbortSignal.timeout(20_000));
+    const ready=this.ordinarySteering?.currentExecutionFor(row.run_id);if(this.ordinarySteering&&!ready)throw Error('ordinary_steering_execution_unavailable');
+    const ordinary=ready?.ordinary===true;let proof:ReturnType<typeof inspectOrdinarySteeringBinding>|undefined;
+    if(ordinary){if(!this.client.steerOriginal||ready.sessionRef!==row.session_id)throw Error('ordinary_steering_execution_unavailable');proof=inspectOrdinarySteeringBinding(this.db,row.run_id,row.session_id,row.id,ready.executionLease);const receipt=await this.client.steerOriginal(row.session_id,row.id,String(payload.text),{run_id:row.run_id,command_id:row.id,execution_lease:ready.executionLease},AbortSignal.timeout(20_000));if(receipt.accepted!==true)throw Error('ordinary_steering_admission_unconfirmed');}
+    else await this.client.prompt(row.session_id,row.id,String(payload.text),'steer',AbortSignal.timeout(20_000));
     withImmediateTransaction(this.db,()=>{
+     if(ordinary){if(!isDeepStrictEqual(this.ordinarySteering!.currentExecutionFor(row.run_id),ready)||!isDeepStrictEqual(inspectOrdinarySteeringBinding(this.db,row.run_id,row.session_id,row.id,ready!.executionLease),proof))throw Error('ordinary_steering_admission_unconfirmed');}
+
      const now=new Date().toISOString();const messageId=`message-${row.id}`;
      const blocks=[{block_id:`${messageId}:text`,kind:'text',text:String(payload.text)}];
      const inserted=this.db.prepare("INSERT OR IGNORE INTO ga_messages(id,conversation_id,run_id,role,status,content_json,client_message_id,created_at,updated_at) VALUES(?,?,?,'user','complete',?,?,?,?)")
@@ -78,6 +90,12 @@ export class SessionCommandDispatcher {
    return true;
   }
   return false;
+ }
+ /** Classification for conservative terminal handling only, never authority. */
+ private isOrdinaryParent(runId:string){
+  const row=this.db.prepare(`SELECT r.conversation_id,c.owner_id,m.role,m.run_id FROM ga_runs r JOIN ga_conversations c ON c.id=r.conversation_id JOIN ga_messages m ON m.id=r.input_message_id WHERE r.id=?`).get(runId);if(!row||row.role!=='user'||row.run_id!==runId)return false;
+  const table=(name:string)=>!!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
+  return !(table('wb_agents')&&this.db.prepare('SELECT 1 FROM wb_agents WHERE conversation_id=? AND owner_id=?').get(row.conversation_id!,row.owner_id!))&&!(table('wb_run_bindings')&&this.db.prepare('SELECT 1 FROM wb_run_bindings WHERE run_id=?').get(runId))&&!this.db.prepare('SELECT 1 FROM ga_conversation_goal_controls WHERE run_id=?').get(runId);
  }
  private applied(id:string){this.db.prepare("UPDATE ga_run_commands SET status='applied',applied_at=? WHERE id=?").run(new Date().toISOString(),id);}
  private superseded(id:string){this.db.prepare("UPDATE ga_run_commands SET status='superseded',applied_at=? WHERE id=? AND status='pending'").run(new Date().toISOString(),id);}

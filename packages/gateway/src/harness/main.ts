@@ -101,11 +101,13 @@ const completionLoop=async()=>{
   if(!stopping)await new Promise(resolve=>setTimeout(resolve,1000));
  }
 };
+const ordinarySteeringEnabled=process.env.GENERAL_AGENT_ORDINARY_STEERING_ENABLED==='true';
+if(ordinarySteeringEnabled&&process.env.GENERAL_AGENT_ORDINARY_INPUT_RECOVERY_ENABLED!=='true')throw Error('ordinary_steering_requires_original_input_recovery');
 const commands = new SessionCommandDispatcher(db,events,sessionClient,runId=>worker.isReady(runId), {
   assertRunActive(runId) {workbench.assertRunActive(runId); persistentTasks.assertRunActive(runId);},
   contextForRun: runId => workbench.contextForRun(runId),
   inheritChatRun: (owner, original, next) => workbench.inheritChatRun(owner, original, next),
-});
+},ordinarySteeringEnabled?{currentExecutionFor:runId=>worker.readyExecutionFor(runId)}:undefined);
 const commandLoop = async()=>{
  while(!stopping){
   try{await commands.processNext()}catch{process.stderr.write('session_command_dispatch_retry\n')}

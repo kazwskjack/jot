@@ -236,3 +236,15 @@ restaging, and refusal of missing files, missing images or corrupted files.
 Real-provider visual quality, additional document formats, monetary settlement
 and production rollout remain unverified and disabled. See
 [Goal continuation](GOAL-CONTINUATION.md).
+
+## Live ordinary steering checkpoint
+
+A separate opt-in command admission now keeps the original Worker lease and
+command RPC, with protocol-3 per-message content/parent proofs. A recovered live
+Host accepts only the exact admitted supplement. A local real-SDK fixture
+verifies one supplement during an original recovered task, two usage records
+and one canonical answer, without repeat dispatch or restart replay. This does
+not complete multi-command ordering, cold later-step recovery, lost-acknowledgement
+reconciliation, monetary settlement or production rollout. The new steering
+switch and existing recovery defaults remain off. See
+[Steering implementation and remaining gates](superpowers/plans/2026-10-16-steering-lineage-and-recovery.md).

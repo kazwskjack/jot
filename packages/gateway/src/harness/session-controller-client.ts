@@ -10,6 +10,12 @@ export function normalizeOriginalInputExecution(value:unknown):OriginalInputExec
  if(Object.keys(row).sort().join(',')!=='execution_lease,run_id'||typeof row.run_id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(row.run_id))throw Error('ordinary_input_binding_invalid');
  return Object.freeze({run_id:row.run_id,execution_lease:normalizeExecutionLease(row.execution_lease)});
 }
+export type OrdinarySteeringExecution=Readonly<{run_id:string;command_id:string;execution_lease:ExecutionLease}>;
+export function normalizeOrdinarySteeringExecution(value:unknown):OrdinarySteeringExecution{
+ if(!value||typeof value!=='object'||Array.isArray(value))throw Error('ordinary_steering_binding_invalid');const row=value as Record<string,unknown>;
+ if(Object.keys(row).sort().join(',')!=='command_id,execution_lease,run_id'||typeof row.run_id!=='string'||typeof row.command_id!=='string'||![row.run_id,row.command_id].every(id=>/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(id))||row.run_id===row.command_id)throw Error('ordinary_steering_binding_invalid');
+ return Object.freeze({run_id:row.run_id,command_id:row.command_id,execution_lease:normalizeExecutionLease(row.execution_lease)});
+}
 export type ConversationGoalExecution=Readonly<{control_id:string;run_id:string;execution_lease:ExecutionLease}>;
 export function normalizeGoalExecution(value:unknown):ConversationGoalExecution{
   if(!value||typeof value!=='object'||Array.isArray(value))throw Error('goal_control_input_invalid');
@@ -106,6 +112,11 @@ export class SessionControllerClient {
     return await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/prompts`, {
       request_id: requestId, ...(typeof content === 'string' ? { text: content } : { content }), mode,...(admission?{ordinary_input:admission}:{}),
     }, signal)
+  }
+
+  async steerOriginal(sessionId:string,requestId:string,text:string,execution:OrdinarySteeringExecution,signal?:AbortSignal){
+    const proof=normalizeOrdinarySteeringExecution(execution);if(proof.command_id!==requestId)throw Error('ordinary_steering_binding_invalid');
+    return this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/prompts`,{request_id:requestId,text,mode:'steer',ordinary_steer:proof},signal);
   }
 
   /**

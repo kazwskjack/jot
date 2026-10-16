@@ -110,3 +110,42 @@ suite reports 1151 tests, 1145 passed, zero failed and six existing skips.
 Gateway TypeScript/template build, 32 root tests and the Windows root build
 pass. No Adapter/native execution source is changed by Stage A, and no
 production switch or steering dispatch path is enabled by it.
+
+## Lease-fenced live steering implementation
+
+An opt-in `GENERAL_AGENT_ORDINARY_STEERING_ENABLED=true` now requires ordinary
+input recovery to be enabled. It defaults off. The Worker exposes only its
+original ready execution's frozen Session and live lease. The Dispatcher
+checks the existing command binding before native send and again inside the
+product-message transaction after acknowledgement; a replacement lease cannot
+be borrowed by an old Worker.
+
+Steering uses a distinct `ordinary_steer` envelope and the official command ID
+as its RPC. The Adapter proves normalized native text against the read-only
+binding before publishing an immutable protocol-3 steering admission. Original
+protocol-2 admissions and entry-reservation protocol 1 remain unchanged. The
+live recovered Host admits another human RPC only through that exact scoped
+admission. Retry deduplication does not create another Controller input.
+
+The real local SDK case `steer-live-recovered` restores the original run,
+holds its first scripted model response, dispatches a real product steering
+command, and then observes two native human RPCs, two scripted model calls,
+two usage records, one product run and one canonical answer incorporating the
+supplement. Repeated dispatch, polling and restart do not repeat the input.
+This is local live-composition evidence, not production or provider billing
+acceptance.
+
+This checkpoint does not complete B/C in full: two supplements, concurrent
+command ordering, lost-ack reconciliation and cold multi-RPC admission remain.
+The later-step claimed guard remains in place. Stage D, historical terminal
+acceptance and stage E monetary/rollout gates remain unfinished. In the opt-in
+path, a terminal ordinary parent's pending command stays pending instead of
+speculatively creating another run; do not treat that conservative state as
+successful delivery. The pre-insertion state/version transaction improvement
+also remains on the follow-up checklist. Production switches stay off.
+
+Checkpoint verification: the complete real local SDK ordinary-input suite
+passes 20/20 with no skips (270.71 seconds), including live steering. Adapter
+446/446, Gateway 1150 passed with six existing skips and zero failures (1156
+total), root 32/32 and public-review tests 6/6 pass. Windows Gateway and root
+builds pass. No production deployment or enablement is included.

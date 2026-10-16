@@ -37,7 +37,7 @@ export function createOrdinaryInputRunHost({controller,agents,bridge,ordinaryPre
   on('agent/status',({agent,status})=>{if(agent===record.agent&&status==='idle'){record.ownsExecution=false;if(record.revoked&&!record.maintenance)clean(record);}});
   on('agent/pre-step',async(payload,next)=>{
    if(payload.agent!==record.agent)return next();
-   const humans=(payload.messages??[]).filter(m=>m?.role==='user'&&m.source?.kind==='user'),foreign=humans.some(m=>m.source.rpcId!==record.binding.runId||!record.prepared.request.messageIds.includes(m.id));
+   const humans=(payload.messages??[]).filter(m=>m?.role==='user'&&m.source?.kind==='user');let foreign=false;for(const message of humans){if(message.source.rpcId===record.binding.runId&&record.prepared.request.messageIds.includes(message.id))continue;try{if(typeof inputAdmissionHost.ownsNativeInput!=='function'||!await inputAdmissionHost.ownsNativeInput({agent:record.agent,message,binding:{...record.binding,sessionRef:record.sessionId}}))foreign=true;}catch{foreign=true;}}
    if(foreign&&!record.ownsExecution){close(record);clean(record);return next();}
    const context={signal:payload.signal,messages:[...(payload.messages??[])]};record.context=context;
    try{if(foreign)throw Error();await guard(record,payload.signal);record.ownsExecution=true;const value=await next();await guard(record,payload.signal);return value;}

@@ -1037,3 +1037,25 @@ several steps inside a turn, so removing the current whole-turn recovery guard
 is unsafe. The complete implementation/acceptance sequence is in
 [Steering lineage and recovery](superpowers/plans/2026-10-16-steering-lineage-and-recovery.md).
 No production continuation switch changes with this preparation.
+
+## Opt-in live steering checkpoint
+
+The originally owned ready Worker lease now travels through a separate
+`ordinary_steer` transport contract. Command IDs keep their official native
+RPC identity. Protocol-3 steering admissions bind both original input and
+normalized native command content; protocol-2 original admissions and entry
+reservations retain their existing semantics. An observed recovered Host
+accepts a live supplement only after exact command admission and scope checks.
+The Dispatcher revalidates the original lease and immutable command proof
+inside product-message persistence after native acknowledgement.
+
+`GENERAL_AGENT_ORDINARY_STEERING_ENABLED=false` is the default and enabling it
+requires ordinary input recovery. A real local SDK fixture has verified an
+original recovering Worker plus one live supplement, two model/usage records,
+one canonical answer, no repeated dispatch and no repeated calls after restart.
+Providers are scripted local fixtures. Cold later-step recovery, multiple
+supplement ordering, lost acknowledgement reconciliation, unknown fees and
+production acceptance are still required. In this opt-in path, unresolved
+terminal commands stay pending rather than starting speculative fallback runs.
+See the staged plan above for the remaining gates; this is not full steering
+or production completion.
