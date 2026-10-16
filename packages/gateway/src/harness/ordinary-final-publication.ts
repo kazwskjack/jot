@@ -5,7 +5,7 @@ import {inspectOrdinaryRunHistory} from '../conversations/ordinary-run-history.t
 import {ordinaryHistorySourceSha256} from './ordinary-steering-observation.ts';
 import {validateOrdinaryRunCompletion,type OrdinaryRunHistoryScope,type OrdinaryRunCompletion} from './ordinary-run-completion.ts';
 import {assistantText,assistantBlocks,collectArtifactRefs,presentedFiles} from './session-output.ts';
-import {verifyHistoricalOutputBytes} from './historical-output-integrity.ts';
+import {captureHistoricalOutputBytes,type HistoricalOutputWitness} from './historical-output-integrity.ts';
 import type {AttachmentResolver,ResolvedAttachment} from '../artifacts/resolver.ts';
 import {captureHistoricalDeliverySnapshot} from '../channels/historical-final-snapshot.ts';
 import {HistoricalFinalDeliveryIntents} from '../channels/historical-final-intents.ts';
@@ -36,14 +36,23 @@ export class OrdinaryFinalPublisher{
   return{scope,source,hash:digest(source),channels};
  }
  private resolve(owner:string,conversation:string,refs:string[],files:Array<{path:string;description?:string}>,lease:string){
-  if(!refs.length&&!files.length)return[];if(!this.options.resolver||!this.options.artifactRoot)fail();const items=this.options.resolver.resolveOutputs(owner,conversation,refs,files,lease);verifyHistoricalOutputBytes(this.options.artifactRoot,items);return items;
+  if(!refs.length&&!files.length)return[];if(!this.options.resolver||!this.options.artifactRoot)fail();return this.options.resolver.resolveOutputs(owner,conversation,refs,files,lease);
  }
- private already(runId:string,session:string,lease:string){
+ private already(runId:string,session:string,lease:string,prepared:readonly ResolvedAttachment[],witness?:HistoricalOutputWitness){
   const receipt=this.db.prepare('SELECT * FROM ga_ordinary_final_publications WHERE run_id=?').get(runId) as Receipt|undefined;if(!receipt)return false;const current=this.snapshot(runId,session),before=JSON.parse(receipt.source_json),post=JSON.parse(receipt.post_source_json),proof=JSON.parse(receipt.proof_json),outputs=JSON.parse(receipt.outputs_json);
   if(receipt.owner_id!==current.scope.owner_id||receipt.conversation_id!==current.scope.conversation_id||receipt.session_id!==session||receipt.run_id!==runId||digest(before)!==receipt.source_sha256||digest(post)!==receipt.post_source_sha256||digest(proof)!==receipt.proof_sha256||current.hash!==receipt.post_source_sha256||current.source.canonical?.message_id!==receipt.message_id
    ||before.owner_id!==receipt.owner_id||before.session_id!==session||before.run_id!==runId||proof.protocol!==1||proof.kind!=='ordinary_run_completion'||proof.source_sha256!==receipt.source_sha256||proof.run_id!==runId||proof.session_id!==session||proof.execution_authorized!==false||!Array.isArray(outputs))return false;
-  if(outputs.length){const items=this.resolve(current.scope.owner_id,current.scope.conversation_id,outputs.map(a=>a.artifact_id),[],lease);if(!isDeepStrictEqual(outputFacts(items),outputs))return false;}
+  if(outputs.length){const items=this.resolve(current.scope.owner_id,current.scope.conversation_id,outputs.map(a=>a.artifact_id),[],lease);if(!witness||!isDeepStrictEqual(items,prepared)||!isDeepStrictEqual(outputFacts(items),outputs))return false;witness.assertUnchanged();}else if(prepared.length||witness)return false;
   return !this.deliveries||this.deliveries.verifyPublished(runId,receipt.message_id,receipt.source_sha256);
+ }
+ private existing(runId:string,session:string,lease:string,signal?:AbortSignal){
+  signal?.throwIfAborted();const receipt=this.db.prepare('SELECT owner_id,conversation_id,outputs_json,post_source_sha256 FROM ga_ordinary_final_publications WHERE run_id=?').get(runId);
+  if(!receipt)return false;const current=this.snapshot(runId,session);
+  if(current.scope.owner_id!==receipt.owner_id||current.scope.conversation_id!==receipt.conversation_id||current.hash!==receipt.post_source_sha256)return false;
+  const outputs=JSON.parse(String(receipt.outputs_json));if(!Array.isArray(outputs))return false;
+  const prepared=outputs.length?this.resolve(String(receipt.owner_id),String(receipt.conversation_id),outputs.map(a=>a.artifact_id),[],lease):[];
+  const witness=prepared.length?captureHistoricalOutputBytes(this.options.artifactRoot!,prepared,signal):undefined;
+  try{return withImmediateTransaction(this.db,()=>{signal?.throwIfAborted();return this.already(runId,session,lease,prepared,witness);});}finally{witness?.close();}
  }
  async reconcile(runId:string,session:string,signal?:AbortSignal,expectedScope?:{owner_id:string;conversation_id:string}):Promise<boolean>{
   const lease=`${runId}:historical-output:${randomUUID()}`;
@@ -55,16 +64,19 @@ export class OrdinaryFinalPublisher{
     const receipt=this.db.prepare('SELECT owner_id,conversation_id FROM ga_ordinary_final_publications WHERE run_id=?').get(runId) as {owner_id:string;conversation_id:string}|undefined;
     if(!receipt||receipt.owner_id!==expectedScope.owner_id||receipt.conversation_id!==expectedScope.conversation_id)return false;
    }
-   if(found)return withImmediateTransaction(this.db,()=>this.already(runId,session,lease));if(!before)return false;
+   if(found)return this.existing(runId,session,lease,signal);if(!before)return false;
    const proof=validateOrdinaryRunCompletion(await this.client.observeRunCompletion(session,before.scope,before.source,signal),session,before.scope,before.source);signal?.throwIfAborted();
    const text=assistantText(proof.answer_event),blocks=assistantBlocks(proof.answer_event),refs=new Set<string>(),files=new Map<string,{path:string;description?:string}>();
    for(const e of proof.output_events){if(e.type==='tool/result')collectArtifactRefs(e.data,refs);for(const file of presentedFiles(e))files.set(file.path,file);}
    const artifacts=this.resolve(before.scope.owner_id,before.scope.conversation_id,[...refs],[...files.values()],lease);
    const second=validateOrdinaryRunCompletion(await this.client.observeRunCompletion(session,before.scope,before.source,signal),session,before.scope,before.source);signal?.throwIfAborted();if(!isDeepStrictEqual(proof,second))return false;
-   return withImmediateTransaction(this.db,()=>{
-    signal?.throwIfAborted();if(this.db.prepare('SELECT 1 FROM ga_ordinary_final_publications WHERE run_id=?').get(runId))return this.already(runId,session,lease);
+   const witness=artifacts.length?captureHistoricalOutputBytes(this.options.artifactRoot!,artifacts,signal):undefined;
+   const existing=Symbol('existing-publication');
+   try{const result=withImmediateTransaction(this.db,()=>{
+    signal?.throwIfAborted();if(this.db.prepare('SELECT 1 FROM ga_ordinary_final_publications WHERE run_id=?').get(runId))return existing;
     const current=this.snapshot(runId,session);if(current.hash!==before.hash)return false;
     const checked=this.resolve(current.scope.owner_id,current.scope.conversation_id,[...refs],[...files.values()],lease);if(!isDeepStrictEqual(checked,artifacts))fail();
+    witness?.assertUnchanged();
     const now=new Date().toISOString();
     const messageId=current.source.canonical?.message_id??`msg-history-${randomUUID()}`,content={blocks:blocks.map((b,i)=>({block_id:`${messageId}:${i}`,kind:b.kind,text:b.text,exposure:b.kind==='reasoning'?'provider':'public'})),attachments:checked.map(a=>a.artifactId)};
     if(this.deliveries){if(!before.channels)fail();this.deliveries.commit({owner_id:current.scope.owner_id,conversation_id:current.scope.conversation_id,run_id:runId},before.channels.sha256,{message_id:messageId,text,content_sha256:createHash('sha256').update(JSON.stringify(content)).digest('hex'),publication_source_sha256:before.hash,answer_sha256:proof.answer_sha256});}
@@ -82,8 +94,8 @@ export class OrdinaryFinalPublisher{
     this.events.append(current.scope.conversation_id,runId,'response.upsert',{revision:1,value:{kind:'ordinary_final_reconciliation',run_id:runId,message_id:messageId,...evidence,execution_authorized:false}});
     const {answer_event,output_events,...meta}=proof,proofMeta={...meta,answer_event_sha256:digest(answer_event),output_events_sha256:digest(output_events)},post=this.snapshot(runId,session);
     this.db.prepare('INSERT INTO ga_ordinary_final_publications(run_id,conversation_id,owner_id,session_id,message_id,source_sha256,source_json,proof_sha256,proof_json,post_source_sha256,post_source_json,outputs_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').run(runId,current.scope.conversation_id,current.scope.owner_id,session,messageId,before.hash,JSON.stringify(before.source),digest(proofMeta),JSON.stringify(proofMeta),post.hash,JSON.stringify(post.source),JSON.stringify(outputFacts(checked)),now);
-    return true;
-   });
+    witness?.assertUnchanged();return true;
+   });return result===existing?this.existing(runId,session,lease,signal):result;}finally{witness?.close();}
   }catch{return false;}finally{try{this.options.resolver?.releaseLease(lease);}catch{/* Temporary retention lease expires conservatively; never clear execution or money. */}}
  }
 }

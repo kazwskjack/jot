@@ -407,3 +407,13 @@ original deterministic publication and cancellation remain usable. This does
 not retroactively protect earlier unreserved commands or prevent an old live
 native prompt. Full execution-pool draining and deployment acceptance remain
 required; custody never proves native acceptance or settled money.
+
+Historical output hashing no longer runs inside the SQLite write lock. Actual
+verified descriptors remain open while the original atomic publication checks
+catalog/source/permissions and file identity/change times, including final commit.
+The opt-in [load probe](HISTORICAL-OUTPUT-LOAD.md) measures actual 1/32/200 MiB
+local files against a separate writer. The pre-fix 200 MiB cases caused busy
+failures; the final three-round local run records none, with publication locks
+5.59–6.94 ms. Receipt retries and racing publishers also avoid byte reads inside
+the transaction. This does not complete storage/retention, real-provider, fleet,
+production or all-capability acceptance; filesystem assumptions remain explicit.

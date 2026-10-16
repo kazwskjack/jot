@@ -117,6 +117,23 @@ pool before enabling the new path. The pinned earlier-dispatcher probe uses
 current supporting repositories; it is not a full older deployment test.
 See the [rollback implementation plan](superpowers/plans/2026-10-17-steering-rollback-custody.md).
 
+## Historical output locks
+
+Historical final publication now hashes the complete bounded output outside the
+SQLite write transaction and retains the actual verified file descriptors until
+commit. The atomic transaction rechecks source, owner/version/catalog and the
+same descriptor/path identity, size and nanosecond change times, including a
+last check before commit. Published-receipt retries and another publisher's
+winning receipt use the same preparation without new native calls. Bytes are
+not certified by stored catalog hashes or a serialized witness. The existing
+75 ms SQLite wait remains unchanged.
+
+An explicit [output load probe](HISTORICAL-OUTPUT-LOAD.md) records real local-file
+and independent-writer evidence. The original 200 MiB control caused competing
+SQLITE_BUSY failures; the final local three-round run does not. This is local
+synthetic performance evidence, not a filesystem snapshot, production capacity,
+remote-storage, retention, real-provider or complete deployment acceptance.
+
 ## Remaining acceptance
 
 1. Verify every consumer of the original run queue has the updated continuation path before enabling admission. A historical consumer may not make progress on message-free continuation records, even though the old input join cannot replay the original message.

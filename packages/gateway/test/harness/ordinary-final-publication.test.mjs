@@ -1,5 +1,8 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {createHash} from 'node:crypto';
-import {mkdtempSync,writeFileSync,readFileSync,rmSync,symlinkSync} from 'node:fs';import {join} from 'node:path';import {tmpdir} from 'node:os';
+import {mkdtempSync,writeFileSync,readFileSync,rmSync,symlinkSync,openSync,writeSync,closeSync} from 'node:fs';import {join} from 'node:path';import {tmpdir} from 'node:os';
+import {performance} from 'node:perf_hooks';
+import fs from 'node:fs';
+import {syncBuiltinESMExports} from 'node:module';
 import {openProductDatabase,withImmediateTransaction} from '../../src/db/database.ts';import {EventStore} from '../../src/events/event-store.ts';import {RunRepository} from '../../src/runs/repository.ts';import {RunCommandService} from '../../src/runs/commands.ts';import {AttachmentResolver} from '../../src/artifacts/resolver.ts';import {ordinaryHistorySourceSha256} from '../../src/harness/ordinary-steering-observation.ts';
 import {syntheticAttachmentPng} from '../../../dsh-host/test/attachment-fixture.mjs';
 import {fork} from 'node:child_process';import {fileURLToPath} from 'node:url';
@@ -9,6 +12,62 @@ import {fromSnapshot,reduceEvent} from '../../../../web/jot/projection.ts';
 import {ChannelDeliveryService} from '../../src/channels/delivery.ts';
 const Publisher=(await import('../../src/harness/ordinary-final-publication.ts').catch(()=>({}))).OrdinaryFinalPublisher;
 const sha=v=>createHash('sha256').update(v).digest('hex');
+
+test('large output publication measurement with an independent competing writer',{
+ skip:process.env.JOT_HISTORICAL_OUTPUT_LOAD!=='true',timeout:120000,
+},async t=>{
+ const rounds=Number(process.env.JOT_HISTORICAL_OUTPUT_LOAD_ROUNDS??3);
+ assert.ok(Number.isSafeInteger(rounds)&&rounds>=1&&rounds<=20,'measurement rounds must be 1..20');
+ for(const mib of [1,32,200])for(let round=0;round<rounds;round++)await t.test(`${mib} MiB round ${round+1}`,async t=>{
+  const f=fixture(t,{files:true,disk:true}),fd=openSync(f.file,'w'),chunk=Buffer.alloc(1024*1024,97),hash=createHash('sha256');
+  try{for(let i=0;i<mib;i++){let offset=0;while(offset<chunk.length)offset+=writeSync(fd,chunk,offset,chunk.length-offset);hash.update(chunk);}}finally{closeSync(fd);}
+  const size=mib*1024*1024;
+  f.db.prepare("UPDATE ga_artifact_versions SET sha256=?,size_bytes=? WHERE artifact_id='artifact-fixture'").run(hash.digest('hex'),size);
+  f.db.exec('CREATE TABLE synthetic_output_load_writes(at_ms REAL NOT NULL)');
+  const now=()=>performance.timeOrigin+performance.now(),windows=[];
+  const exec=f.db.exec.bind(f.db);let current,phase='publish';
+  f.db.exec=sql=>{const result=exec(sql);if(sql==='BEGIN IMMEDIATE'){current={start:now(),phase};windows.push(current);}else if((sql==='COMMIT'||sql==='ROLLBACK')&&current){current.end=now();current=undefined;}return result;};
+  const child=fork(fileURLToPath(new URL('./historical-output-load-writer.mjs',import.meta.url)),[join(f.root,'db.sqlite')],{execArgv:[],stdio:['ignore','ignore','pipe','ipc'],windowsHide:true});
+  let result,diagnostics='',resolveReady,rejectReady,resolveSampling,rejectSampling,resolveExit,rejectExit;
+  const ready=new Promise((r,j)=>{resolveReady=r;rejectReady=j;}),sampling=new Promise((r,j)=>{resolveSampling=r;rejectSampling=j;}),exit=new Promise((r,j)=>{resolveExit=r;rejectExit=j;});
+  ready.catch(()=>{});sampling.catch(()=>{});exit.catch(()=>{});
+  child.stderr.on('data',chunk=>{diagnostics=(diagnostics+chunk).slice(-1000);});
+  child.on('message',message=>{if(message.type==='ready')resolveReady();if(message.type==='sampling')resolveSampling();if(message.type==='done')result=message;});
+  const failed=error=>{rejectReady(error);rejectSampling(error);rejectExit(error);};
+  child.once('error',failed);child.once('exit',code=>code===0&&result?resolveExit():failed(Error('output writer failed '+code+': '+diagnostics)));
+  const abort=()=>child.kill();t.signal.addEventListener('abort',abort,{once:true});
+  try{
+   await ready;child.send({type:'start'});await sampling;
+   const rssBefore=process.memoryUsage().rss,started=now();
+   assert.equal(await f.publisher().reconcile(f.run.run_id,'s'),true);
+   const publicationMs=now()-started;phase='receipt';const retryStarted=now();
+   assert.equal(await f.publisher().reconcile(f.run.run_id,'s'),true);const receiptMs=now()-retryStarted;
+   assert.equal(f.calls(),2);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_ordinary_final_publications').get().n,1);
+   assert.equal(f.db.prepare("SELECT count(*) n FROM ga_messages WHERE role='assistant'").get().n,1);
+   assert.equal(f.db.prepare('SELECT count(*) n FROM ga_run_artifacts').get().n,1);
+   assert.equal(f.db.prepare('SELECT count(*) n FROM ga_artifact_leases').get().n,0);
+   assert.equal(f.db.prepare("SELECT status FROM ga_candidate_answers WHERE id=?").get(f.oldCandidate.id).status,'outcome_unknown');
+   const rssAfter=process.memoryUsage().rss;child.send({type:'stop'});await exit;
+   assert.ok(result.samples.length>0);assert.ok(result.samples.some(s=>!s.busy),'competing writer must make real progress');
+   assert.ok(windows.every(w=>Number.isFinite(w.end)));
+   const durations=result.samples.map(s=>s.end-s.start).sort((a,b)=>a-b);
+   const sample={mib,round:round+1,publication_ms:publicationMs,receipt_ms:receiptMs,
+    publish_write_lock_ms:Math.max(...windows.filter(w=>w.phase==='publish').map(w=>w.end-w.start)),
+    receipt_write_lock_ms:Math.max(...windows.filter(w=>w.phase==='receipt').map(w=>w.end-w.start)),
+    competing_writes:result.samples.filter(s=>!s.busy).length,sqlite_busy:result.samples.filter(s=>s.busy).length,
+    writer_max_ms:durations.at(-1),writer_p95_ms:durations[Math.min(durations.length-1,Math.floor(durations.length*.95))],rss_before:rssBefore,rss_after:rssAfter};
+   t.diagnostic('OUTPUT_LOAD '+JSON.stringify(sample));
+   assert.equal(sample.sqlite_busy,0,'bounded output verification must not starve the independent writer');
+   const corrupt=openSync(f.file,'r+');try{writeSync(corrupt,Buffer.from('x'),0,1,0);}finally{closeSync(corrupt);}
+   assert.equal(await f.publisher().reconcile(f.run.run_id,'s'),false,'a receipt cannot bless changed bytes');
+   assert.equal(f.calls(),2);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_ordinary_final_publications').get().n,1);
+  }finally{
+   t.signal.removeEventListener('abort',abort);
+   if(child.exitCode===null&&child.signalCode===null){const stopped=new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('output writer cleanup timed out')),5000);child.once('exit',()=>{clearTimeout(timer);resolve();});});child.kill();await stopped;}
+   f.db.exec=exec;
+  }
+ });
+});
 function fixture(t,{old=false,files=false,disk=false}={}){
  const root=mkdtempSync(join(tmpdir(),'jot-final-publication-')),db=openProductDatabase(disk?join(root,'db.sqlite'):':memory:'),events=new EventStore(db),runs=new RunRepository(db,events);t.after(()=>{db.close();rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:20});});
  db.prepare("INSERT INTO ga_conversations(id,owner_id,workspace_id,title,model,version,created_at,updated_at) VALUES('c','u','ws','Fixture','{}',1,'now','now')").run();db.prepare("INSERT INTO ga_harness_session_bindings VALUES('c','u','s','now','now')").run();const run=runs.enqueue('c','u',{client_message_id:'original',content:[{type:'text',text:'Synthetic original'}]});db.prepare("UPDATE ga_runs SET status='running' WHERE id=?").run(run.run_id);const commands=new RunCommandService(db,events),steers=[0,1].map(i=>commands.steer(run.run_id,'u',{text:'Synthetic supplement '+i,client_message_id:'supplement-'+i,expected_run_version:runs.get(run.run_id,'u').version},'supplement-'+i));db.prepare("UPDATE ga_runs SET status='interrupted',version=version+1,reason_code='OUTCOME_UNKNOWN' WHERE id=?").run(run.run_id);
@@ -17,6 +76,32 @@ function fixture(t,{old=false,files=false,disk=false}={}){
  let file;if(files){file=join(root,'report.txt');const content='Synthetic immutable output';writeFileSync(file,content);db.prepare("INSERT INTO ga_artifacts VALUES('artifact-fixture','c','u','file',1,NULL,'now','now')").run();db.prepare("INSERT INTO ga_artifact_versions VALUES('artifact-fixture',1,?,?,?,'text/plain',?,'now')").run(file,sha(content),Buffer.byteLength(content),JSON.stringify({status:'ready',file_name:'report.txt'}));}
  const resolver=new AttachmentResolver(db,root),channelQueue=new ChannelDeliveryService(db),publisher=(options={})=>new Publisher(db,events,client,{resolver,artifactRoot:root,...options,historicalChannels:options.historicalChannels?channelQueue:undefined});return{root,db,events,runs,run,steers,commands,client,oldMessage,oldCandidate,file,publisher,calls:()=>calls};
 }
+
+test('full byte reads stay outside SQLite write transactions on publication and receipt retry',async t=>{
+ const f=fixture(t,{files:true}),read=fs.readSync,reads=[];
+ fs.readSync=(...args)=>{reads.push(f.db.isTransaction);return read(...args);};syncBuiltinESMExports();
+ try{assert.deepEqual(await Promise.all([f.publisher().reconcile(f.run.run_id,'s'),f.publisher().reconcile(f.run.run_id,'s')]),[true,true]);assert.equal(await f.publisher().reconcile(f.run.run_id,'s'),true);assert.ok(reads.length>=3);assert.equal(reads.includes(true),false);assert.equal(f.calls(),4);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_ordinary_final_publications').get().n,1);}
+ finally{fs.readSync=read;syncBuiltinESMExports();}
+});
+
+for(const retry of [false,true])test('file edits during the final catalog CAS reject publication; existing receipt='+retry,async t=>{
+ const f=fixture(t,{files:true});if(retry)assert.equal(await f.publisher().reconcile(f.run.run_id,'s'),true);
+ const resolver=new AttachmentResolver(f.db,f.root),resolve=resolver.resolveOutputs.bind(resolver);
+ resolver.resolveOutputs=(...args)=>{const result=resolve(...args);if(f.db.isTransaction)writeFileSync(f.file,'x'.repeat(result[0].sizeBytes));return result;};
+ assert.equal(await f.publisher({resolver}).reconcile(f.run.run_id,'s'),false);
+ assert.equal(f.db.prepare('SELECT count(*) n FROM ga_ordinary_final_publications').get().n,retry?1:0);
+ assert.equal(f.db.prepare("SELECT count(*) n FROM ga_messages WHERE role='assistant'").get().n,retry?1:0);
+ assert.equal(f.db.prepare('SELECT count(*) n FROM ga_artifact_leases').get().n,0);
+});
+
+test('a file mutation from publication event hooks rolls back before final commit',async t=>{
+ const f=fixture(t,{files:true}),append=f.events.append.bind(f.events);let changed=false;
+ f.events.append=(...args)=>{const result=append(...args);if(!changed&&args[2]==='message.created'){writeFileSync(f.file,'changed before commit');changed=true;}return result;};
+ assert.equal(await f.publisher().reconcile(f.run.run_id,'s'),false);assert.equal(changed,true);
+ assert.equal(f.db.prepare('SELECT count(*) n FROM ga_ordinary_final_publications').get().n,0);
+ assert.equal(f.db.prepare("SELECT count(*) n FROM ga_messages WHERE role='assistant'").get().n,0);
+ assert.equal(f.db.prepare('SELECT count(*) n FROM ga_artifact_leases').get().n,0);
+});
 
 test('full final recovery atomically applies both lost acknowledgements and publishes one answer while preserving unknown provenance',async t=>{
  assert.equal(typeof Publisher,'function');const f=fixture(t),beforeRun=f.db.prepare('SELECT * FROM ga_runs').get();assert.equal(await f.publisher().reconcile(f.run.run_id,'s'),true);assert.equal(f.calls(),2);assert.equal(f.db.prepare("SELECT count(*) n FROM ga_messages WHERE role='user'").get().n,3);assert.equal(f.db.prepare("SELECT count(*) n FROM ga_messages WHERE role='assistant'").get().n,1);assert.equal(f.db.prepare("SELECT count(*) n FROM ga_run_commands WHERE status='applied'").get().n,2);assert.deepEqual(f.db.prepare('SELECT * FROM ga_candidate_answers WHERE id=?').get(f.oldCandidate.id),f.oldCandidate);assert.deepEqual(f.db.prepare('SELECT * FROM ga_runs').get(),beforeRun);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_ordinary_final_publications').get().n,1);const finalCandidate=f.db.prepare("SELECT evidence_refs_json FROM ga_candidate_answers WHERE source='dsh-history-final'").get();assert.ok(JSON.parse(finalCandidate.evidence_refs_json).every(v=>typeof v==='string'));

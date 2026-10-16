@@ -9,6 +9,7 @@
   "scripts": {
     "test": "node --test test/**/*.test.mjs",
     "test:contracts": "node --test test/contracts/contracts.test.mjs",
+    "test:historical-output-load": "node scripts/verify-historical-output-load.mjs",
     "typecheck": "tsc --noEmit",
     "build:templates": "python scripts/create-template.py",
     "build": "npm run build:templates && tsc -p tsconfig.json && node scripts/copy-assets.mjs",

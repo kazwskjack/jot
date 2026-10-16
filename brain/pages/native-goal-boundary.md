@@ -4,7 +4,7 @@ title: Keep native Goal state and continuation in DSH
 category: decision
 status: active
 created: "2026-10-16T11:44:16"
-updated: "2026-10-17T03:18:24"
+updated: "2026-10-17T03:31:03"
 ---
 
 <!-- compiled_truth -->
@@ -43,6 +43,8 @@ The ordinary claimed-input policy explicitly enables restoration only for the fi
 A surviving nonempty cold inbox does not prove that no earlier input was claimed. Interrupted history with configured claim recovery must use the original factory even with pending messages; possible unentered removals without that capability refuse. Explicit allowPending scope admits a verified unchanged surviving queue, while every message still requires its original admission before publication and after preset setup. An actual mixed claimed/pending Host-death case exposed the old omission after an earlier 30-case green run and now preserves both commands in order without repeating prior calls. Final-source regression evidence must include this case; the earlier suite alone did not prove the mixed boundary. Terminal delivery still must establish native RPC coverage, not merely command applied status or a nonempty earlier answer.
 
 Running ordinary completion now has a Worker-owned publication callback while the original Runner/lease remains live. An authenticated hash-only existing-Agent inspection proves original/private command admissions, latest completed native turn and final answer after all requested RPCs, without resolve/prompt/wake/entry or monetary mutation. Busy later work keeps the exact iterator; product acknowledgement settlement retries native facts without another stream or model call. The Worker rechecks current original authority and command set before output resolution and inside canonical publication, so a newly inserted command invalidates stale coverage. Successful publication stops renewal before Runner cleanup and cannot create a second canonical answer. The opt-in ordinary steering flag selects this matched capability stack and stays false by default. Actual SDK boundary and lost-ack tests hold the second model and prove no early canonical answer, then exactly one later answer and two model calls. Historical already-terminal/crash reconciliation, explicit concurrent Goal activation, unknown fees, rolling upgrades and production/full 26-capability acceptance remain open; read-only completion identity is not execution authority or monetary settlement.
+
+Historical final-output verification hashes actual bounded bytes outside the SQLite write transaction, keeping process-local verified file descriptors until commit. The original transaction re-resolves owner/conversation/version/catalog and rechecks descriptor/path device, inode, size and nanosecond modification/change times, including a final check before commit. Receipt retries and competing-publisher adoption use the same preparation without new native calls. This replaces expensive in-transaction byte hashing, not byte integrity, permission, source CAS or unknown-money holds. It is not a filesystem snapshot or an attestation that serialized metadata can recreate; reliable local filesystem identity/timestamps are required, privileged metadata forgery and other filesystem behavior need separate acceptance. Keep the existing bounded SQLite wait and close every descriptor/retention lease conservatively. Local synthetic competing-writer measurements are not production capacity or complete performance/retention acceptance.
 
 
 ## Timeline
@@ -393,4 +395,10 @@ Running ordinary completion now has a Worker-owned publication callback while th
   kind: evidence
   summary: "Rollback regression reproduced two runs for one uncertain supplement. Persisted original-command custody now prevents fresh-run fallback; pinned earlier dispatcher is refused by the database while original publication/cancel/reopen remain supported. Local real-SDK cases use scripted providers; production/fleet and full capability acceptance remain open."
   source: docs/superpowers/plans/2026-10-17-steering-rollback-custody.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-17T03:31:03
+  kind: decision
+  summary: "Move full output hashes outside SQLite write locks using retained descriptor witnesses and final source/catalog/file checks; retain filesystem assumptions and production gates."
+  source: docs/superpowers/plans/2026-10-17-historical-output-locks.md
   affects: [native-goal-boundary]
