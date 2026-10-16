@@ -1,3 +1,5 @@
+import {isDeepStrictEqual} from 'node:util';
+import {inspectOrdinaryInputBinding} from '../conversations/ordinary-input-binding.ts';
 import { createHash } from 'node:crypto';
 import {taskWaitSupplement} from '../persistent-tasks/task-wait.ts';
 import type { DatabaseSync } from 'node:sqlite';
@@ -40,6 +42,7 @@ export interface DshRunInput { enabled: true; taskRequestId: string; message: st
     onWebOperationSnapshot?: (toolCallId: string, snapshot: Record<string, unknown>) => number }
 export interface DshRunner {
   run(input:DshRunInput):Promise<DshRunResult>;
+  recoverInput?(input:DshRunInput & {originalInput:Readonly<{inputMessageId:string;executionLease:Readonly<{owner:string;generation:number}>}>}):Promise<DshRunResult>;
   resumeGoal?(input:DshRunInput & {goalControl:Readonly<{controlId:string;ref:Readonly<{id:string;revision:number}>;executionLease:Readonly<{owner:string;generation:number}>}>}):Promise<DshRunResult>;
 }
 
@@ -60,6 +63,7 @@ export class HarnessWorker {
   private readonly runner: DshRunner;
   private readonly workerId: string;
   private readonly leaseMs: number;
+  private readonly ordinaryInputRecoveryEnabled:boolean;
   private readonly contextStager: RuntimeContextStager | undefined;
   private readonly sessionResolver: ((conversationId: string) => string) | undefined;
   private readonly attachmentResolver: Pick<AttachmentResolver,
@@ -68,13 +72,15 @@ export class HarnessWorker {
   private readonly executionGuard: { assertRunActive(runId: string): void; contextForRun(runId: string): unknown } | undefined;
 
   constructor(db: DatabaseSync, coordinator: HarnessCoordinator, runner: DshRunner,
-    options: { workerId: string; leaseMs: number; contextStager?: RuntimeContextStager;
+    options: { workerId: string; leaseMs: number; ordinaryInputRecoveryEnabled?:boolean; contextStager?: RuntimeContextStager;
       sessionResolver?: (conversationId: string) => string;
       attachmentResolver?: Pick<AttachmentResolver, 'resolveForMessage' | 'resolveOutputs' | 'releaseLease'>;
       channelDelivery?: ChannelTextDelivery;
       executionGuard?: { assertRunActive(runId: string): void; contextForRun(runId: string): unknown } }) {
     this.db = db; this.coordinator = coordinator; this.runner = runner;
     this.workerId = options.workerId; this.leaseMs = options.leaseMs;
+    if(options.ordinaryInputRecoveryEnabled!==undefined&&typeof options.ordinaryInputRecoveryEnabled!=='boolean')throw Error('ordinary_input_recovery_config_invalid');
+    this.ordinaryInputRecoveryEnabled=options.ordinaryInputRecoveryEnabled===true;
     this.contextStager = options.contextStager;
     this.sessionResolver = options.sessionResolver;
     this.attachmentResolver = options.attachmentResolver;
@@ -102,17 +108,23 @@ export class HarnessWorker {
     }
     const backgroundTask=!!(workbenchContext && typeof workbenchContext==='object'
       && 'kind' in workbenchContext && workbenchContext.kind==='task');
-    const controllerSessionRef = goalControl?.session_id ?? this.sessionResolver?.(lease.conversation_id)
+    const hasWorkbenchBinding=!!(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_run_bindings'").get()&&this.db.prepare('SELECT 1 FROM wb_run_bindings WHERE run_id=?').get(lease.run_id));
+    const originalRecovery=this.ordinaryInputRecoveryEnabled&&lease.generation>1&&!goalControl&&!workbenchContext&&!hasWorkbenchBinding;
+    const originalSession=originalRecovery?this.db.prepare('SELECT b.session_id FROM ga_harness_session_bindings b JOIN ga_conversations c ON c.id=b.conversation_id AND c.owner_id=b.owner_id WHERE c.id=? AND c.archived_at IS NULL').get(lease.conversation_id):undefined;
+    if(originalRecovery&&(!this.runner.recoverInput||!lease.input_message_id||typeof originalSession?.session_id!=='string')){
+      this.coordinator.interruptWithoutRuntime(lease,'ORIGINAL_INPUT_RECOVERY_UNAVAILABLE');return{run_id:lease.run_id,runtime_status:'original_input_recovery_unavailable'};
+    }
+    const controllerSessionRef = (originalSession?.session_id as string|undefined) ?? goalControl?.session_id ?? this.sessionResolver?.(lease.conversation_id)
       ?? `session-${createHash('sha256').update(lease.run_id).digest('hex').slice(0, 32)}`;
     const runtimeSessionRef = `runtime-session-${createHash('sha256').update(lease.run_id).digest('hex').slice(0, 32)}`;
     this.coordinator.bindSession(lease, runtimeSessionRef);
     const input = goalControl?{text:'',attachmentIds:[],ownerId:goalControl.owner_id,receivedAt:0}:this.messageInput(lease.run_id);
-    const message = input.text;
-    const attachments = input.attachmentIds.length
+    const message = originalRecovery?'':input.text;
+    const attachments = !originalRecovery&&input.attachmentIds.length
       ? this.attachmentResolver?.resolveForMessage(input.ownerId, lease.conversation_id,
         input.attachmentIds, lease.run_id) ?? (() => { throw new Error('attachment_resolver_unavailable'); })()
       : [];
-    if (this.contextStager&&!goalControl) {
+    if (this.contextStager&&!goalControl&&!originalRecovery) {
       if(!lease.input_message_id)throw Error('run_input_missing');
       try {
         await this.contextStager.stageContext({ taskRequestId: lease.run_id, conversationId: lease.conversation_id,
@@ -123,7 +135,9 @@ export class HarnessWorker {
     this.coordinator.start(lease);
     const renewal = setInterval(() => this.coordinator.renew(lease, this.leaseMs), Math.max(100, Math.floor(this.leaseMs / 3)));
     renewal.unref();
+    let originalAuthority:ReturnType<typeof inspectOrdinaryInputBinding>|undefined;
     const assertGoalApplied=()=>{
+      if(originalRecovery){const binding=inspectOrdinaryInputBinding(this.db,lease.run_id,controllerSessionRef,{owner:lease.owner,generation:lease.generation});if(binding.input_message_id!==lease.input_message_id||originalAuthority&&!isDeepStrictEqual(binding,originalAuthority))throw Error('ordinary_input_binding_rejected');originalAuthority??=binding;}
       if(!goalControl)return;
       const row=ConversationGoalControls.assertExecution(this.db,goalControl.control_id,{owner:lease.owner,generation:lease.generation});
       if(row.state!=='applied')throw Error('goal_control_receipt_required');
@@ -167,7 +181,7 @@ export class HarnessWorker {
         ConversationGoalControls.assertExecution(this.db,goalControl.control_id,executionLease);
         result=await this.runner.resumeGoal!({...runInput,goalControl:Object.freeze({controlId:goalControl.control_id,ref:Object.freeze({id:goalControl.goal_id,revision:goalControl.goal_revision}),executionLease})});
         assertGoalApplied();
-      }else result=await this.runner.run(runInput);
+      }else if(originalRecovery){assertGoalApplied();result=await this.runner.recoverInput!({...runInput,originalInput:Object.freeze({inputMessageId:lease.input_message_id!,executionLease:Object.freeze({owner:lease.owner,generation:lease.generation})})});assertGoalApplied();}else result=await this.runner.run(runInput);
     } catch (error) {
       if (this.cancelling(lease.run_id)) return { run_id: lease.run_id, runtime_status: 'cancel_requested' };
       let reasonCode = typeof error === 'object' && error !== null

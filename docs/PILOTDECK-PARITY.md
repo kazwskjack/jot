@@ -158,3 +158,15 @@ native resume was not invoked. The test verifies zero inference/publication,
 original acceptance recovery and refusal of replacement dispatch. This is the
 third specific process-death boundary, not exhaustive storage/usage/publication
 recovery or deployed acceptance. See [Goal continuation](GOAL-CONTINUATION.md).
+
+
+## Original ordinary-run recovery and publication
+
+An opt-in reclaimed-run path now uses the original stored Session, observed
+native input and Coordinator lease without re-sending the prompt or attachments.
+The real installed-Controller/local-model case retains one original run and human
+input, one model request and one canonical answer. Source bytes and lease changes
+fence publication. Native usage stays in the original Session; monetary/unknown
+settlement is not thereby proven. Recovery remains off by default pending active
+Goal/pending-input, claimed/steering, production composition and rollout gates.
+See [Goal continuation](GOAL-CONTINUATION.md).

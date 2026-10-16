@@ -492,3 +492,15 @@ command or automatic reactivation. This extends process-death evidence to three
 specific boundaries; partial storage writes, original pending-input execution,
 provider settlement, publication and production acceptance remain separate gates.
 See [Goal continuation](docs/GOAL-CONTINUATION.md) for the exact boundary and limits.
+
+
+## Original ordinary-run recovery and publication
+
+An opt-in reclaimed-run path now uses the original stored Session, observed
+native input and Coordinator lease without re-sending the prompt or attachments.
+The real installed-Controller/local-model case retains one original run and human
+input, one model request and one canonical answer. Source bytes and lease changes
+fence publication. Native usage stays in the original Session; monetary/unknown
+settlement is not thereby proven. Recovery remains off by default pending active
+Goal/pending-input, claimed/steering, production composition and rollout gates.
+See [Goal continuation](docs/GOAL-CONTINUATION.md).

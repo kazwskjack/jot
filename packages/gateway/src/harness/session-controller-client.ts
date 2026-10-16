@@ -4,6 +4,12 @@ import { Readable } from 'node:stream'
 
 export type AdapterFetch = (input: string | URL, init?: RequestInit) => Promise<Response>
 
+export type OriginalInputExecution=Readonly<{run_id:string;execution_lease:ExecutionLease}>;
+export function normalizeOriginalInputExecution(value:unknown):OriginalInputExecution{
+ if(!value||typeof value!=='object'||Array.isArray(value))throw Error('ordinary_input_binding_invalid');const row=value as Record<string,unknown>;
+ if(Object.keys(row).sort().join(',')!=='execution_lease,run_id'||typeof row.run_id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(row.run_id))throw Error('ordinary_input_binding_invalid');
+ return Object.freeze({run_id:row.run_id,execution_lease:normalizeExecutionLease(row.execution_lease)});
+}
 export type ConversationGoalExecution=Readonly<{control_id:string;run_id:string;execution_lease:ExecutionLease}>;
 export function normalizeGoalExecution(value:unknown):ConversationGoalExecution{
   if(!value||typeof value!=='object'||Array.isArray(value))throw Error('goal_control_input_invalid');
@@ -139,6 +145,10 @@ export class SessionControllerClient {
     const deadline=AbortSignal.timeout(20_000);
     return this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/conversation-goal`,body,signal?AbortSignal.any([signal,deadline]):deadline);
   }
+  async recoverInput(sessionId:string,execution:OriginalInputExecution,signal?:AbortSignal){
+    const deadline=AbortSignal.timeout(20_000);
+    return this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/input-resume`,{ordinary_input:normalizeOriginalInputExecution(execution)},signal?AbortSignal.any([signal,deadline]):deadline);
+  }
   async resumeGoal(sessionId:string,control:ConversationGoalExecution,signal?:AbortSignal){
     const deadline=AbortSignal.timeout(20_000);
     return this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/goal-resume`,{goal_control:normalizeGoalExecution(control)},signal?AbortSignal.any([signal,deadline]):deadline);
@@ -176,11 +186,12 @@ export class SessionControllerClient {
     return this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/goal-restore`,{run_id:runId,...(intentId===undefined?{}:{intent_id:intentId})},signal?AbortSignal.any([signal,timeout]):timeout);
   }
 
-  async *follow(sessionId: string, signal?: AbortSignal,goalControl?:ConversationGoalExecution): AsyncGenerator<Record<string, unknown>> {
+  async *follow(sessionId: string, signal?: AbortSignal,goalControl?:ConversationGoalExecution,ordinaryInput?:OriginalInputExecution): AsyncGenerator<Record<string, unknown>> {
+    if(goalControl&&ordinaryInput)throw Error('ordinary_input_binding_invalid');
     const response = await this.fetchImpl(`${this.baseUrl}/v1/sessions/${encodeURIComponent(sessionId)}/follow`, {
       method: 'POST',
       headers: { authorization: `Bearer ${this.token}`, 'content-type': 'application/json; charset=utf-8' },
-      body: JSON.stringify({ max_messages: 100, assistant_stream: true,...(goalControl?{goal_control:normalizeGoalExecution(goalControl)}:{}) }),
+      body: JSON.stringify({ max_messages: 100, assistant_stream: true,...(goalControl?{goal_control:normalizeGoalExecution(goalControl)}:{}),...(ordinaryInput?{ordinary_input:normalizeOriginalInputExecution(ordinaryInput)}:{}) }),
       ...(signal ? { signal } : {}),
     })
     if (!response.ok || !response.body) throw new Error(`session_adapter_follow_http_${response.status}`)

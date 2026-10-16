@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import type { DshRunner, DshRunResult,DshRunInput } from './worker.ts'
 import type { ResolvedAttachment } from '../artifacts/resolver.ts'
-import {normalizeGoalExecution,type ConversationGoalExecution,type SessionPromptPart} from './session-controller-client.ts'
+import {normalizeGoalExecution,normalizeOriginalInputExecution,type OriginalInputExecution,type ConversationGoalExecution,type SessionPromptPart} from './session-controller-client.ts'
 import {validateCheckpoint,type SessionCheckpoint} from './session-checkpoints.ts'
 import {validateTaskGoalStatus,taskGoalStopReason,type TaskGoalStatus} from './task-goal-status.ts'
 import {validateConversationGoalView} from './conversation-goal-view.ts'
@@ -11,7 +11,8 @@ interface OfficialSessionClient {
   create(sessionId: string, cwd: string, agentPreset: string, signal?: AbortSignal, workbenchRunId?: string,workbenchExecutionLease?:Readonly<{owner:string;generation:number}>): Promise<Record<string, unknown>>
   prompt(sessionId: string, requestId: string, content: string | SessionPromptPart[], mode?: 'queue' | 'steer', signal?: AbortSignal): Promise<Record<string, unknown>>
   stageFile?(sessionId: string, path: string, displayName: string, signal?: AbortSignal): Promise<{ receipt_id: string }>
-  follow(sessionId: string, signal?: AbortSignal,goalControl?:ConversationGoalExecution): AsyncGenerator<Record<string, unknown>>
+  follow(sessionId: string, signal?: AbortSignal,goalControl?:ConversationGoalExecution,ordinaryInput?:OriginalInputExecution): AsyncGenerator<Record<string, unknown>>
+  recoverInput?(sessionId:string,execution:OriginalInputExecution,signal?:AbortSignal):Promise<Record<string,unknown>>
   resumeGoal?(sessionId:string,control:ConversationGoalExecution,signal?:AbortSignal):Promise<Record<string,unknown>>
   nativeTool?(tool: string, args: Record<string, unknown>, execution: Record<string, string>, signal?: AbortSignal): Promise<Record<string, unknown>>
   checkpoint?(sessionId:string,afterSeq:number,signal?:AbortSignal):Promise<Record<string,unknown>>
@@ -195,12 +196,18 @@ export class OfficialSessionRunner implements DshRunner {
 
   async resumeGoal(input:Parameters<NonNullable<DshRunner['resumeGoal']>>[0]):Promise<DshRunResult>{
     const ref=input.goalControl?.ref;
-    if(!input.goalControl||!ref||typeof ref.id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(ref.id)||!Number.isSafeInteger(ref.revision)||ref.revision<1||ref.revision===Number.MAX_SAFE_INTEGER||input.message!==''||input.attachments?.length||input.workbenchRunId||input.workbenchExecutionLease||input.workbenchBudgetEnforced!==undefined||input.checkpointTask)throw Error('goal_resume_input_invalid');
+    if(Object.hasOwn(input,'originalInput')||!input.goalControl||!ref||typeof ref.id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(ref.id)||!Number.isSafeInteger(ref.revision)||ref.revision<1||ref.revision===Number.MAX_SAFE_INTEGER||input.message!==''||input.attachments?.length||input.workbenchRunId||input.workbenchExecutionLease||input.workbenchBudgetEnforced!==undefined||input.checkpointTask)throw Error('goal_resume_input_invalid');
     const control=normalizeGoalExecution({control_id:input.goalControl.controlId,run_id:input.taskRequestId,execution_lease:input.goalControl.executionLease});
     return this.execute(input,control,input.goalControl.ref);
   }
 
-  private async execute(input:DshRunInput,goalControl?:ConversationGoalExecution,goalRef?:Readonly<{id:string;revision:number}>):Promise<DshRunResult>{
+  async recoverInput(input:Parameters<NonNullable<DshRunner['recoverInput']>>[0]):Promise<DshRunResult>{
+    if(Object.hasOwn(input,'goalControl')||!input.originalInput||typeof input.originalInput!=='object'||Array.isArray(input.originalInput)||Object.keys(input.originalInput).sort().join(',')!=='executionLease,inputMessageId'||typeof input.originalInput.inputMessageId!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(input.originalInput.inputMessageId)||input.message!==''||input.attachments?.length||input.workbenchRunId||input.workbenchExecutionLease||input.workbenchBudgetEnforced!==undefined||input.checkpointTask)throw Error('ordinary_input_recovery_invalid');
+    const execution=normalizeOriginalInputExecution({run_id:input.taskRequestId,execution_lease:input.originalInput.executionLease});
+    return this.execute(input,undefined,undefined,execution,input.originalInput.inputMessageId);
+  }
+
+  private async execute(input:DshRunInput,goalControl?:ConversationGoalExecution,goalRef?:Readonly<{id:string;revision:number}>,ordinaryInput?:OriginalInputExecution,inputMessageId?:string):Promise<DshRunResult>{
     const controller = new AbortController()
     const webOperationPollers = new Map<string, { stop: () => void; promise: Promise<void> }>()
     const persistedWebOperationCalls = new Set<string>()
@@ -212,12 +219,17 @@ export class OfficialSessionRunner implements DshRunner {
       const preset=input.workbenchBudgetEnforced?this.options.workbenchAgentPreset:this.options.agentPreset;
       if(input.workbenchBudgetEnforced&&(!input.workbenchRunId||!input.workbenchExecutionLease||typeof preset!=='string'||!preset.trim()))throw new Error('workbench_budget_preset_required');
       if(goalControl&&!this.client.resumeGoal)throw Error('goal_resume_unavailable');
-      if(!goalControl)await this.client.create(input.sessionRef, this.options.cwd, preset!, controller.signal, input.workbenchRunId,input.workbenchExecutionLease)
-      let iterator = (goalControl?this.client.follow(input.sessionRef,controller.signal,goalControl):this.client.follow(input.sessionRef, controller.signal))[Symbol.asyncIterator]()
+      if(ordinaryInput&&!this.client.recoverInput)throw Error('ordinary_input_recovery_unavailable');
+      if(!goalControl&&!ordinaryInput)await this.client.create(input.sessionRef, this.options.cwd, preset!, controller.signal, input.workbenchRunId,input.workbenchExecutionLease)
+      let iterator = (goalControl||ordinaryInput?this.client.follow(input.sessionRef,controller.signal,goalControl,ordinaryInput):this.client.follow(input.sessionRef, controller.signal))[Symbol.asyncIterator]()
       let opening = await iterator.next()
       if (opening.done || opening.value.type !== 'snapshot') throw new Error('session_follow_snapshot_missing')
       let cursor = Number(opening.value.cursor ?? -1)
-      if(goalControl){
+      if(ordinaryInput){
+        if(!Number.isSafeInteger(opening.value.cursor)||cursor<0)throw Error('ordinary_input_snapshot_invalid');
+        const receipt=await this.client.recoverInput!(input.sessionRef,ordinaryInput,controller.signal);
+        if(!receipt||Object.keys(receipt).sort().join(',')!=='accepted,input_message_id,native_message_ids,run_id,session_id'||receipt.accepted!==true||receipt.run_id!==input.taskRequestId||receipt.session_id!==input.sessionRef||receipt.input_message_id!==inputMessageId||!Array.isArray(receipt.native_message_ids)||!receipt.native_message_ids.length||new Set(receipt.native_message_ids).size!==receipt.native_message_ids.length||receipt.native_message_ids.some(id=>typeof id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(id)))throw Error('ordinary_input_receipt_invalid');
+      }else if(goalControl){
         if(!Number.isSafeInteger(opening.value.cursor)||cursor<0)throw Error('goal_observer_snapshot_invalid');
         const resumed=validateConversationGoalView(await this.client.resumeGoal!(input.sessionRef,goalControl,controller.signal));
         if(!resumed.goal||resumed.goal.id!==goalRef?.id||resumed.goal.revision!==goalRef.revision+1||resumed.goal.phase!=='active'||resumed.goal.activation!=='armed')throw Error('goal_control_receipt_invalid');

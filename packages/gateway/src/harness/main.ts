@@ -77,6 +77,7 @@ const runner = new OfficialSessionRunner(sessionClient, {
 });
 const worker = new HarnessWorker(db, coordinator, runner, {
   workerId, leaseMs,
+  ordinaryInputRecoveryEnabled:process.env.GENERAL_AGENT_ORDINARY_INPUT_RECOVERY_ENABLED==='true',
   sessionResolver: conversationId => sessionBindings.getOrCreateForConversation(conversationId).session_id,
   attachmentResolver,
   channelDelivery,

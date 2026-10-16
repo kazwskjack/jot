@@ -7,7 +7,7 @@ const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 
 /** Read lineage from the original product records. This does not restore an
  * inbox, activate a driver, reserve model cost, or grant tool permission. */
-function inspectBinding(db:DatabaseSync,runId:string,sessionId:string,lease:unknown){
+export function inspectOrdinaryInputBinding(db:DatabaseSync,runId:string,sessionId:string,lease:unknown){
  return withImmediateTransaction(db,()=>{
   const execution=assertExecutionLease(db,runId,lease);
   const row=db.prepare(`SELECT r.id,r.status,r.input_message_id,r.conversation_id,
@@ -40,7 +40,7 @@ export function registerOrdinaryInputBinding(app:FastifyInstance,db:DatabaseSync
   if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).sort().join(',')!=='execution_lease,run_id,session_ref'
    ||typeof body.run_id!=='string'||!ID.test(body.run_id)||typeof body.session_ref!=='string'||!ID.test(body.session_ref))return reply.code(422).send({error:{code:'ORDINARY_INPUT_BINDING_INVALID'}});
   let lease;try{lease=normalizeExecutionLease(body.execution_lease);}catch{return reply.code(422).send({error:{code:'ORDINARY_INPUT_BINDING_INVALID'}});}
-  try{return {binding:inspectBinding(db,body.run_id,body.session_ref,lease)};}
+  try{return {binding:inspectOrdinaryInputBinding(db,body.run_id,body.session_ref,lease)};}
   catch{return reply.code(409).send({error:{code:'ORDINARY_INPUT_BINDING_REJECTED'}});}
  });
 }

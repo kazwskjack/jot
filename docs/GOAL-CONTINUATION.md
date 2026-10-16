@@ -552,3 +552,46 @@ acceptance. Runner/Worker selection, original accounting/final publication,
 claimed input, steering scope, all-boundary recovery and deployed acceptance
 remain required. Both existing Goal switches and standard recovery configuration
 remain disabled.
+
+
+## Opt-in original-run Runner and Worker recovery
+
+`GENERAL_AGENT_ORDINARY_INPUT_RECOVERY_ENABLED=false` is the Worker default.
+When explicitly enabled, a reclaimed ordinary run (lease generation greater
+than one, outside workbench and Goal-control execution) uses `recoverInput`.
+It reads the existing owner-bound native Session from the original database;
+it never allocates a replacement Session. Missing original binding or a mixed
+Worker/Runner without recovery support interrupts the original run with
+`ORIGINAL_INPUT_RECOVERY_UNAVAILABLE`, without normal prompt fallback.
+
+The transport adds only exact original run/lease metadata under `ordinary_input`
+on follow and input-resume. Runner opens and reads the native snapshot first,
+then requests recovery and validates the exact original run, Session, product
+message and unique native input IDs. It does not call create, prompt, file
+upload, input attachment resolution or runtime context staging. Goal and ordinary
+execution authority cannot be mixed. Invalid acknowledgements stop observation
+before accepting output as belonging to the original request.
+
+Subsequent streaming, native Goal observation, artifacts, candidates and final
+publication reuse the existing Runner and Coordinator path with the same run ID.
+The Worker rechecks the original owner/Session/message/content hash and live
+lease before readiness, projections and canonical publication, including inside
+the final publication transaction. A changed source under the same message ID
+cannot be published against the earlier input. A replaced lease cannot publish
+from the obsolete Worker. This does not grant additional tool permission or
+change reasoning settings.
+
+The real installed-Controller fixture also exercises this Worker branch: after
+hard Host death it reclaims that original run, makes one scripted model request,
+keeps one original human input, and publishes one canonical answer to that same
+product run. A second poll finds no task; another Host restart does not create
+an Agent or issue another model request. The original native assistant event
+retains its one provider-reported usage receipt. This is native usage continuity,
+not monetary reconciliation or proof of all historical unknown spends.
+
+The SDK seed and composition audit remain synthetic. Production prompt-admission
+provenance, historical composition/attachment validation, cold claimed recovery,
+steering ownership, already-entered or unknown native outcomes, cost settlement,
+all consumer upgrades and deployed acceptance are still required before enabling
+the Worker flag and optional Host configuration. There is no automatic fallback
+that fabricates a continuation message for an unconfirmed native attempt.
