@@ -6,13 +6,16 @@ import {agentInput,featureReason,executionReason} from './form-state.mjs';
 import {workbenchApi,pathId} from './client';
 import {useResource} from './useResource';
 import type {Agent,Caps} from './types';
+import DiscoveryPolicyPanel from './DiscoveryPolicyPanel';
+import {taskDraftScope} from '../jot/client';
 import './workbench.css';
 export function ResourceStatus({loading,error,onRetry}:{loading:boolean;error:string;onRetry:()=>void}){return <>{loading&&<p className="wb-status" role="status">正在读取…</p>}{error&&<div className="wb-error" role="alert"><span>{error}</span><button type="button" onClick={onRetry}>重新读取</button></div>}</>;}
 export function Empty({children}:{children:React.ReactNode}){return <p className="wb-empty">{children}</p>;}
 export function AgentsPanel({caps,onConversation,compact=false}:{caps:Caps|null;onConversation:(id:string)=>void;compact?:boolean}){
  const reason=featureReason(caps?.workbench,'agent_roles');
  const execution=executionReason(caps?.workbench);
- const resource=useResource(signal=>workbenchApi.agents(signal),'agents',!reason);
+ const ownerScope=taskDraftScope(),resource=useResource(signal=>workbenchApi.agents(signal),'agents:'+ownerScope,!reason);
+ const [discovery,setDiscovery]=useState<{agent_id:string;ownerScope:string}|null>(null);
  const [editing,setEditing]=useState<Partial<Agent>|null>(null),[deleting,setDeleting]=useState<{agent:Agent;preview:Record<string,unknown>}|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState('');
  const agents=resource.data?.items??[],workspaces=caps?.workspaces??[];
  const [changing,setChanging]=useState<Agent|null>(null);
@@ -21,6 +24,8 @@ export function AgentsPanel({caps,onConversation,compact=false}:{caps:Caps|null;
  const start=(agent?:Agent)=>{setError('');setDeleting(null);setChanging(null);setEditing(agent?{...agent,allowed_tools:[...agent.allowed_tools]}:{name:'',instructions:'',workspace_id:workspaces[0]?.workspace_id??''});};
  const save=(e:React.FormEvent)=>{e.preventDefault();void run(async()=>{await mutation.submit(editing?.agent_id?`/agents/${pathId(editing.agent_id)}`:'/agents',editing?.agent_id?'PATCH':'POST',agentInput(editing));setEditing(null);});};
  const preview=(agent:Agent)=>void run(async()=>{setEditing(null);setDeleting({agent,preview:await workbenchApi.deletionPreview(agent.agent_id)});});
+ const discoveryAgent=discovery?.ownerScope===ownerScope?agents.find(agent=>agent.agent_id===discovery.agent_id):null;
+ if(discoveryAgent)return <DiscoveryPolicyPanel agent={discoveryAgent} onClose={()=>{setDiscovery(null);resource.reload();}} onChanged={resource.reload}/>;
  return <div className={`wb-agents ${compact?'wb-agents--compact':''}`}>
   <div className="wb-toolbar"><span>{agents.length?`${agents.length} 位角色 · 各自保留独立对话`:'让不同职责，有自己的位置'}</span><button className="wb-primary" type="button" disabled={!!reason||busy||mutation.pending} title={reason} onClick={()=>start()}><LucideIcon name="plus"/>创建角色</button></div>
   {reason&&<p className="wb-status">{reason}</p>}<ResourceStatus {...resource} onRetry={resource.reload}/>{error&&<p className="wb-error" role="alert">{error}</p>}
@@ -40,7 +45,7 @@ export function AgentsPanel({caps,onConversation,compact=false}:{caps:Caps|null;
   <div className="wb-agent-grid">{agents.map(agent=><article className="wb-agent-card" key={agent.agent_id}>
    <div className="wb-card-top"><span className="wb-avatar" aria-hidden="true">{agent.name.slice(0,1)}</span><div><h3>{agent.name}</h3><small>{workspaces.find(w=>w.workspace_id===agent.workspace_id)?.title??agent.workspace_id}</small></div><span className="wb-badge">{agent.status==='active'?(execution?'已保存':'可对话'):agent.status==='disabled'?'已停用':agent.status}</span></div>
    <p className="wb-agent-instructions">{agent.instructions}</p><div className="wb-card-footer"><button type="button" disabled={!!execution||mutation.pending||!agent.conversation_id||agent.status!=='active'||busy} title={execution} onClick={()=>onConversation(agent.conversation_id)}><LucideIcon name="message-square-plus"/>进入对话</button><div><button type="button" aria-label={`编辑 ${agent.name}`} disabled={busy||mutation.pending} onClick={()=>start(agent)}><LucideIcon name="pencil"/></button><button type="button" aria-label={`删除 ${agent.name}`} disabled={busy||mutation.pending} onClick={()=>preview(agent)}><LucideIcon name="x"/></button></div></div>
-   <div className="wb-actions wb-agent-config-actions"><button type="button" disabled={busy||mutation.pending||!['active','disabled'].includes(agent.status)} aria-label={`复制 ${agent.name}`} onClick={()=>{start();setEditing(copyAgentConfig(agent));}}>复制配置</button><button type="button" disabled={busy||mutation.pending||!['active','disabled'].includes(agent.status)} aria-label={`${agent.status==='disabled'?'启用':'停用'} ${agent.name}`} onClick={()=>{setEditing(null);setDeleting(null);setChanging(agent);setError('');}}>{agent.status==='disabled'?'启用':'停用'}</button><button type="button" disabled={busy||mutation.pending} aria-label={`导出 ${agent.name} 配置`} onClick={()=>downloadAgentConfig(agent)}>导出配置</button></div>
+   <div className="wb-actions wb-agent-config-actions"><button type="button" disabled={busy||mutation.pending||!ownerScope||!['active','disabled'].includes(agent.status)} aria-label={`项目发现 ${agent.name}`} onClick={()=>{setEditing(null);setDeleting(null);setChanging(null);setDiscovery({agent_id:agent.agent_id,ownerScope});}}>项目发现</button><button type="button" disabled={busy||mutation.pending||!['active','disabled'].includes(agent.status)} aria-label={`复制 ${agent.name}`} onClick={()=>{start();setEditing(copyAgentConfig(agent));}}>复制配置</button><button type="button" disabled={busy||mutation.pending||!['active','disabled'].includes(agent.status)} aria-label={`${agent.status==='disabled'?'启用':'停用'} ${agent.name}`} onClick={()=>{setEditing(null);setDeleting(null);setChanging(agent);setError('');}}>{agent.status==='disabled'?'启用':'停用'}</button><button type="button" disabled={busy||mutation.pending} aria-label={`导出 ${agent.name} 配置`} onClick={()=>downloadAgentConfig(agent)}>导出配置</button></div>
   </article>)}</div>
   {changing&&<div className="wb-form" role="alertdialog" aria-label="角色状态确认"><h3>{changing.status==='active'?'停用':'启用'}「{changing.name}」</h3><p>{changing.status==='active'?'停用会撤销该角色的运行权限。保留角色配置、对话和记忆；这不是删除操作。':'启用后可使用角色的新版本，不会自动重发消息或恢复已暂停的任务。'}</p><div className="wb-actions"><button type="button" disabled={busy||mutation.pending} onClick={()=>setChanging(null)}>取消</button><button type="button" disabled={busy} onClick={()=>void run(async()=>{await mutation.submit('/agents/'+pathId(changing.agent_id),'PATCH',agentStatusInput(changing));setChanging(null);})}>{changing.status==='active'?'确认停用':'确认启用'}</button></div></div>}
  </div>;

@@ -148,11 +148,14 @@ export class WorkbenchBridge {
       }
       // A recoverable prerequisite conflict is not role revocation. Expose only
       // fixed codes from the authenticated loopback Gateway, never its details.
-      if (response.status === 409 && ['guard', 'tool'].includes(path)) {
+      if (response.status === 409 && ['guard', 'tool', 'goal-proposal'].includes(path)) {
         let code;
         try { code = (await response.json())?.error?.code; } catch {}
-        if (['DEPENDENCY_NOT_COMPLETED', 'DEPENDENCY_EVIDENCE_UNVERIFIED', 'DEPENDENCY_CYCLE'].includes(code))
+        if (['guard','tool'].includes(path)&&['DEPENDENCY_NOT_COMPLETED', 'DEPENDENCY_EVIDENCE_UNVERIFIED', 'DEPENDENCY_CYCLE'].includes(code))
           throw new Error(code.toLowerCase());
+        if(path==='tool'&&['DISCOVERY_SOURCE_UNAVAILABLE','DISCOVERY_SOURCE_INTEGRITY_FAILED','DISCOVERY_EVIDENCE_REQUIRED','DISCOVERY_REPORT_REQUIRED',
+          'DISCOVERY_REPORT_STALE','DISCOVERY_REPORT_STEPS_INCOMPLETE','DISCOVERY_REPORT_SOURCE_COVERAGE_REQUIRED'].includes(code))throw new Error(code.toLowerCase());
+        if(path==='goal-proposal'&&['DISCOVERY_REPORT_REQUIRED','DISCOVERY_REPORT_STALE'].includes(code))throw new Error(code.toLowerCase());
       }
       throw new Error('workbench_run_forbidden');
     }

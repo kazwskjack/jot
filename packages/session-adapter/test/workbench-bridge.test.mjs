@@ -204,6 +204,24 @@ test('only authenticated dependency conflict codes are surfaced; arbitrary error
  }
 });
 
+test('discovery repair codes are bounded to tool or completion proposal conflicts and never expose details',async()=>{
+ for(const [path,status,code,want] of [
+  ['tool',409,'DISCOVERY_SOURCE_INTEGRITY_FAILED','discovery_source_integrity_failed'],
+  ['tool',409,'DISCOVERY_SOURCE_UNAVAILABLE','discovery_source_unavailable'],
+  ['tool',409,'DISCOVERY_REPORT_STEPS_INCOMPLETE','discovery_report_steps_incomplete'],
+  ['goal-proposal',409,'DISCOVERY_REPORT_REQUIRED','discovery_report_required'],
+  ['tool',403,'DISCOVERY_SOURCE_INTEGRITY_FAILED','workbench_run_forbidden'],
+  ['guard',409,'DISCOVERY_SOURCE_INTEGRITY_FAILED','workbench_run_forbidden'],
+  ['model-budget',409,'DISCOVERY_REPORT_REQUIRED','workbench_run_forbidden'],
+  ['tool',409,'DISCOVERY_AUTHORITY_REVOKED','workbench_run_forbidden'],
+  ['tool',409,'DISCOVERY_SOURCE_CHANGED','workbench_run_forbidden'],
+  ['tool',409,'SECRET_VALUE','workbench_run_forbidden'],
+ ]){
+  const bridge=new WorkbenchBridge({origin:'http://127.0.0.1:7654',token:'test-token-32-characters-fixture',fetchImpl:async()=>new Response(JSON.stringify({error:{code,message:'Private file path and contents must never reach the model.'}}),{status})});
+  await assert.rejects(bridge.request(path,binding),error=>error.message===want);
+ }
+});
+
 test('budget-enforced scoped model streams reserve and settle before forwarding finish; ordinary roles retain their protocol',async()=>{
  const f=fixture();f.setContext({...context(),model_budget:{protocol:1,enforced:true}});await f.bridge.attach(f.host.agent,{...binding});
  assert.equal(f.host.modelMiddleware.size,1,'native llm/stream interceptor must be mounted once');

@@ -6,6 +6,13 @@ const output=new URL('../../.test-tmp/ui-client-tests/',import.meta.url);
 await mkdir(output,{recursive:true});
 await build({entryPoints:[new URL('./client.ts',import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')],bundle:true,platform:'node',format:'esm',outfile:new URL('client.mjs',output).pathname.replace(/^\/([A-Z]:)/,'$1')});
 const {workbenchApi}=await import(new URL('client.mjs',output));
+
+test('discovery policy read uses the encoded owned role route and never sends an enable command',async t=>{
+ const original=globalThis.fetch;t.after(()=>{globalThis.fetch=original;});let call;
+ globalThis.fetch=async(url,init)=>{call={url,init};return new Response('{"policy":null,"execution_authorized":false}');};
+ const controller=new AbortController();const value=await workbenchApi.discoveryPolicy('role /1',controller.signal);
+ assert.equal(call.url,'/workbench-api/v1/agents/role%20%2F1/discovery-policy');assert.equal(call.init.method,'GET');assert.equal(call.init.body,undefined);assert.equal(call.init.credentials,'same-origin');assert.equal(value.policy,null);
+});
 test('task delegation posts only the frozen step request and retains its client key',async t=>{
  const original=globalThis.fetch;t.after(()=>{globalThis.fetch=original;});let call;
  globalThis.fetch=async(url,init)=>{call={url,init};return new Response('{}');};

@@ -742,3 +742,105 @@ tests. Root32, ten actual-SDK/scripted-model cases, public disclosure6 and
 788-file preflight pass. Local Windows root and Gateway builds pass. No
 production switch, provider call or new
 automation is enabled by this milestone.
+
+## Repairable source failures and original wait recovery
+
+An additional actual-SDK canary deliberately corrupts only the pinned blob in its
+isolated synthetic workspace. It exposed that a file integrity failure became
+INTERNAL_ERROR and then workbench_run_forbidden at the bridge, hiding a repairable
+source failure behind an authority rejection. Pinned source retrieval now maps
+integrity failure and expected absent bytes to fixed discovery-source errors.
+The bridge exposes only exact allowlisted409 codes on the tool endpoint, and
+missing/stale report conflicts on completion proposal. It never copies Gateway
+detail text or paths. Unknown errors, owner/permission denials, source drift and
+revoked authority remain generic fail-closed errors.
+
+The failed read does not insert a successful execution/source-range receipt or
+claim coverage. The original DSH Goal asks for user input, checkpoints and stops.
+The canary stops that Worker, restores the exact original bytes without changing
+the source version, answers the original interaction and retries the response
+with the same command key. Exactly one continuation inherits the original task,
+occurrence, native Session/Goal and cumulative budget. A restarted Worker reads
+the pinned source successfully before creating the evidenced inspection/report;
+normal owner business review and native completion still precede publication.
+An unchanged accepted no-plan source sleeps; a later owned version can queue the
+same task. The script uses seven synthetic model requests and one final reply.
+
+This verifies one controlled source-integrity failure and original wait/reply
+recovery. It does not establish arbitrary crash/IO recovery, a separate verified
+failure-report contract, real-provider quality or production behavior. Failed
+inspections must not be relabeled completed merely to obtain a report. Pause,
+stop, revoked policies and unknown accounting retain original authority.
+
+The public budget-policy fixture now locates repository-local temporary storage
+from import.meta.url, with containment checks before creation and deletion. It
+does not require a particular Windows drive or caller working directory. All
+files in the current Windows implementation remain under the authorized workspace;
+this targeted portability repair is not full Linux/Git-provider acceptance.
+
+## Snapshot contention and role policy interface
+
+Repeated actual-SDK regression exposed a snapshot500 independently of discovery
+report semantics. A deterministic two-connection test confirmed the initialized
+snapshot read tried to write while another connection owned a WAL write lock.
+The conversation cursor constructor always inserted its existing key, and default
+project resolution always requested a writer transaction/backfill UPDATE. Reads
+now reuse an existing valid key and initialized project without writes; genuinely
+missing state still initializes under the original writer transaction with a
+locked recheck. An owned legacy NULL project still migrates, and foreign reads do
+not create a default project. No snapshot serialization, busy timeout or blind
+read retry is substituted. Read-only, concurrent-writer, first-initializer race,
+legacy migration, stable signatures and corrupt-key rejection are tested.
+
+Role cards now open the original owner-bound discovery policy form. The form
+uses original GET/PATCH/control routes, role versions/epochs and command receipts;
+it defaults off/discover-only, saves separately from enable and offers pause,
+resume and stop. An uncertain response locks competing controls and retries the
+exact original method/body/key; CAS drift reloads policy and role instead of
+resending. Scope changes remount the form and old owner responses cannot update
+the new scope. The managed task stays outside generic edit/run-now controls.
+
+The built-browser scenario now clicks the actual form instead of configuring it
+with page.request: save off, lose the committed save response, retry, enable,
+pause, resume, stop, refresh and read back. One fixed task/five policy revisions
+remain; zero occurrences/model calls are expected because automatic discovery
+dispatch is still uninstalled. This is configuration UI acceptance, not execution
+or provider acceptance. Owner-readable cycle/report projection, isolated cycle
+providers/execution, frozen diff review/apply and remaining full UI stay open.
+
+Validation for the repair/UI milestone: all eleven official-SDK/Gateway/Worker
+cases pass with scripted local Messages transport (91.36 seconds,36 scripted
+requests). The new source-integrity case uses seven calls and confirms the same
+native Goal ID with a newer revision after original input continuation. Fifty
+bridge tests and the complete adapter suite512 cases/488 passed/24 opt-in skips/
+zero failures pass; planning15, snapshot/project/cursor targeted19, root32,
+workbench UI163 and the Windows root build pass. The primary agent reran the
+actual form browser scenario against that final build with zero page errors,
+zero occurrences/model runs and same-command response-loss recovery.
+
+Freshness refusal remains an expected non-admitting hold. The SDK fixture may
+re-observe at most three times only for OBSERVATION_STALE, checking unchanged
+run/admission/task usage/provider-attempt/model-request counts after each refusal.
+It neither accepts old evidence nor relaxes the original five-second window,
+restarts a process or retries an unknown dispatched action. Other refusals fail
+the scenario. Earlier snapshot500 and rejected observations remain recorded as
+diagnostics rather than passing evidence.
+
+Next work-cycle implementation must not substitute the current logical text file
+store for a full provider: it currently accepts UTF-8 files up to1MiB, lists at
+most200 records and rejects dot paths. A complete snapshot/Git provider needs
+explicit reviewed path scope, paged manifests, binary/large-file handling,
+deletions/renames, symlink/junction and private-configuration exclusion, frozen
+base/result identities and restart reconciliation. Existing task acceptance
+certifies frozen criteria/outputs; it is not permission to apply to the live
+project. Apply needs its own exact frozen-diff owner confirmation and per-write
+receipts. Keep DSH/original runs, leases and cumulative budgets authoritative;
+do not open discover_and_work by allowing planning files.write.
+
+Final complete Gateway run:1463 cases,1456 passed,seven existing/opt-in skips,
+zero failures (184.74 seconds). Windows Gateway build also passes after that
+run. Public disclosure6,793-file preflight and Brain link checks pass. Reopening
+the earlier failed snapshot fixture through a read-only database now succeeds
+without changing total_changes. Independent static review found no blocking
+owner/permission/idempotency/disclosure defect; this does not replace runtime
+checks or close provider, production, isolated-work/apply and full26 acceptance.

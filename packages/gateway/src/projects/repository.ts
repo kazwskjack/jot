@@ -12,6 +12,10 @@ export class ProjectRepository {
   constructor(db: DatabaseSync) { this.db = db; }
 
   ensureDefault(ownerId: string) {
+    const current=this.db.prepare('SELECT * FROM ga_projects WHERE owner_id=? AND is_default=1').get(ownerId) as ProjectRow|undefined;
+    const needsBackfill=()=>!!this.db.prepare('SELECT 1 FROM ga_conversations WHERE owner_id=? AND project_id IS NULL LIMIT 1').get(ownerId);
+    // Initialized owners need no writer transaction on conversation/snapshot reads.
+    if(current&&!needsBackfill())return this.serialize(current);
     const operation = () => {
       let row = this.db.prepare('SELECT * FROM ga_projects WHERE owner_id=? AND is_default=1').get(ownerId) as ProjectRow | undefined;
       if (!row) {
@@ -21,7 +25,7 @@ export class ProjectRepository {
           .run(id, ownerId, 'jotV0', 1, 1, now, now);
         row = this.db.prepare('SELECT * FROM ga_projects WHERE id=?').get(id) as ProjectRow;
       }
-      this.db.prepare('UPDATE ga_conversations SET project_id=? WHERE owner_id=? AND project_id IS NULL').run(row.id, ownerId);
+      if(needsBackfill())this.db.prepare('UPDATE ga_conversations SET project_id=? WHERE owner_id=? AND project_id IS NULL').run(row.id, ownerId);
       return this.serialize(row);
     };
     return this.db.isTransaction ? operation() : withImmediateTransaction(this.db, operation);

@@ -4,7 +4,7 @@ title: Keep project discovery in original DSH task boundaries
 category: decision
 status: active
 created: "2026-10-17T03:43:02"
-updated: "2026-10-17T06:58:00"
+updated: "2026-10-17T07:20:16"
 ---
 
 <!-- compiled_truth -->
@@ -25,6 +25,10 @@ Original planning admission now coalesces a source head into one original task o
 Original workspace operations now provide paged discovery context/proposal readback, on-demand pinned source text (no image fetching), immutable normalized-work/source-deduplicated proposals and report revisions. Own task steps/evidence/assessment may advance while project/memory writes, messages and delegation stay denied. Actual receipted contiguous source ranges determine coverage; no-plan reports require the full current batch. The server derives the complete proposal manifest, including beyond a bounded caller list. Current report proof binds source, role/policy, lead, steps/input and all proposals; stale reports cannot complete. It enters the original frozen Goal/business review/certificate snapshot, never a parallel acceptance flow. Recording alone is unaccepted evidence, not publication, accepted dormancy, application or automatic execution. Dedicated local SDK cases now verify original acceptance as described below; real-provider/production acceptance and remaining full lifecycle remain open.
 
 Accepted no-plan dormancy is derived read-only from the original admission, frozen report/candidate, owner business certificate/review, native Goal completion proof and committed assistant message, with exact identities and hashes. Neither a report, review nor completed status alone is sufficient. Invalid proof is unknown; absent or foreign tasks are never accepted predecessors. Unchanged source revisions remain dormant; new owned revisions can queue the same original task and cumulative budget only through current original admission checks. A restart may reconcile original native completion but never invent acceptance. Local official SDK canaries use a scripted model and do not establish real-provider quality, automatic dispatch or deployment acceptance. All remaining full lifecycle and full inventory requirements remain open.
+
+Recoverable discovery source failures are not role revocation. The authenticated original bridge may expose only exact repairable source/report conflict codes on their matching tool or completion-proposal endpoints, never server detail text or arbitrary errors. Corrupted pinned bytes and expected missing files produce bounded discovery-source reasons, no successful source receipt or coverage, no completion or dormancy. Permission, owner, stale source and revoked role failures remain fail-closed. DSH can use original native wait/reply/checkpoint continuation and the same task/Goal/cumulative budget after repair; no alternate status loop or automatic authority restoration is introduced.
+
+Initialized conversation/snapshot reads must not request writer locks merely to reopen an existing cursor key or default project. Missing initialization remains atomic with locked recheck; legacy NULL project migration remains explicit and owner-scoped, corrupt keys fail rather than rotate. Keep snapshot read consistency and cursor signature identity; do not replace contention repair with blind retries or weaker signing. Role-bound discovery policy UI configures the existing off-by-default owner policy through original receipts, with explicit enable/pause/resume/stop and same-command recovery after lost response. UI configuration is not automatic dispatch or work-cycle execution authority.
 
 
 ## Timeline
@@ -182,5 +186,17 @@ Accepted no-plan dormancy is derived read-only from the original admission, froz
 - time: 2026-10-17T06:58:00
   kind: decision
   summary: "Reconcile current durable discovery truth with original admission/report and accepted dormancy implementation; keep provider and rollout gaps explicit."
+  source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
+  affects: [always-on-discovery]
+
+- time: 2026-10-17T07:11:19
+  kind: decision
+  summary: Separate fixed repairable source/report conflicts from authority rejection and reuse original native wait/reply recovery.
+  source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
+  affects: [always-on-discovery]
+
+- time: 2026-10-17T07:20:16
+  kind: decision
+  summary: Keep initialized snapshots read-only under WAL concurrency and bind role policy UI to original owner command receipts.
   source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
   affects: [always-on-discovery]

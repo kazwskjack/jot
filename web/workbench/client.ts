@@ -1,4 +1,5 @@
 import type {MemoryRetrieval,MemoryRetrievalPage} from './types';
+import type {DiscoveryPolicyView} from './types';
 import type {MemoryCapturePolicy,MemoryCapture,MemoryCapturePage} from './types';
 import type {MemoryConsolidation,MemoryConsolidationPage} from './types';
 import {request} from '../jot/client';
@@ -12,6 +13,7 @@ import type {Run,ResumeReceipt} from '../jot/types';
 import type {ChannelBinding,ChannelBindingChallenge,TaskNotificationSettings,UpdateTaskNotifications,TaskNotificationDelivery,TaskNotificationHistoryPage} from './types';
 export const pathId=(value:string)=>encodeURIComponent(value);
 export const workbenchApi={
+ discoveryPolicy:(agentId:string,signal?:AbortSignal)=>request<DiscoveryPolicyView>(`/agents/${pathId(agentId)}/discovery-policy`,'GET',undefined,undefined,signal),
  memoryCapturePolicy:(agentId:string,signal?:AbortSignal)=>request<MemoryCapturePolicy>(`/agents/${pathId(agentId)}/memory-capture-policy`,'GET',undefined,undefined,signal),
  memoryCaptures:(agentId:string,before?:string,signal?:AbortSignal)=>request<MemoryCapturePage>(`/agents/${pathId(agentId)}/memory-captures${before?`?before_id=${pathId(before)}`:''}`,'GET',undefined,undefined,signal),
  memoryCapture:(agentId:string,id:string,signal?:AbortSignal)=>request<MemoryCapture>(`/agents/${pathId(agentId)}/memory-captures/${pathId(id)}`,'GET',undefined,undefined,signal),

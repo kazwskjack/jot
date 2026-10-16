@@ -88,7 +88,14 @@ export class DiscoveryPlanning{
    const files=this.db.prepare('SELECT path,version,sha256,size,created_at FROM wb_file_versions WHERE owner_id=? AND project_id=? AND workspace_id=? AND version=?').all(row.owner_id,row.project_id,row.workspace_id,signal.source_version) as Row[];
    const file=files.find(f=>discoverySourceId('file',f.path)===signal.source_id);
    if(!file||discoverySourceHash(file)!==signal.source_sha256||!this.workbench)throw Error('discovery_source_unavailable');
-   path=file.path;content=this.workbench.readFileVersion(row.owner_id,row.workspace_id,row.project_id,file.path,file.version,run).content;
+   path=file.path;
+   try{content=this.workbench.readFileVersion(row.owner_id,row.workspace_id,row.project_id,file.path,file.version,run).content;}
+   catch(error){
+    const message=error instanceof Error?error.message:'';
+    if(message==='file_integrity_failed')throw Error('discovery_source_integrity_failed');
+    if(message==='file_not_found'||(error as NodeJS.ErrnoException)?.code==='ENOENT')throw Error('discovery_source_unavailable');
+    throw error;
+   }
   }else if(signal.kind==='user_input'){
    const messages=this.db.prepare(`SELECT m.id,m.run_id,m.conversation_id,m.created_at,m.updated_at,b.epoch FROM ga_messages m JOIN ga_runs r ON r.id=m.run_id AND r.conversation_id=m.conversation_id
     JOIN ga_conversations c ON c.id=m.conversation_id JOIN wb_run_bindings b ON b.run_id=r.id AND b.owner_id=c.owner_id AND b.kind='chat'

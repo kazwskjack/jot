@@ -27,9 +27,12 @@ export class ConversationRepository {
   }
 
   get(id: string, ownerId: string) {
-    this.projects.ensureDefault(ownerId);
-    const row = this.db.prepare('SELECT * FROM ga_conversations WHERE id=? AND owner_id=?').get(id, ownerId) as Record<string, unknown> | undefined;
+    let row = this.db.prepare('SELECT * FROM ga_conversations WHERE id=? AND owner_id=?').get(id, ownerId) as Record<string, unknown> | undefined;
     if (!row) throw new Error('conversation_not_found');
+    if(row.project_id===null){
+      this.projects.ensureDefault(ownerId);
+      row=this.db.prepare('SELECT * FROM ga_conversations WHERE id=? AND owner_id=?').get(id,ownerId) as Record<string,unknown>;
+    }
     return {
       conversation_id: String(row.id), title: String(row.title), workspace_id: String(row.workspace_id),
       model: JSON.parse(String(row.model)), created_at: String(row.created_at), updated_at: String(row.updated_at),

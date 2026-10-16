@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdirSync,mkdtempSync,rmSync,writeFileSync} from 'node:fs';
 import {spawnSync} from 'node:child_process';
 import {join,resolve,relative,isAbsolute} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {openProductDatabase} from '../../src/db/database.ts';
 import {withImmediateTransaction} from '../../src/db/database.ts';
 import {WorkbenchService} from '../../src/workbench/service.ts';
@@ -16,14 +17,16 @@ const url=new URL('../../src/workbench/model-budget-policy.ts',import.meta.url);
 const limit={tokens:5000,nano_usd:50000,model_calls:50};
 const route={provider:'fixture',model:'bounded',revision:'rates-1',context_window:100,max_output_tokens:20,rates:{input:2,output:10,cache_read:1,cache_write:3}};
 const config=()=>({revision:1,admission_route:{provider:'fixture',model:'bounded'},routes:[structuredClone(route)],limits:Object.fromEntries(['owner_daily','project_daily','agent_daily','task_total','occurrence','chat_root','mailbox_thread'].map(k=>[k,{...limit}]))});
+const repositoryRoot=fileURLToPath(new URL('../../../../',import.meta.url));
+function assertChildPath(parent,path){const child=relative(parent,resolve(path));assert.ok(child&&!child.startsWith('..')&&!isAbsolute(child));}
 async function fixture(t,custom=config()){
  const mod=await import(url.href).catch(()=>({}));assert.equal(typeof mod.WorkbenchBudgetPolicy,'function','shared server budget allocation policy must exist');
- const base=resolve('../../.test-tmp/budget-policy');assert.match(base.replaceAll('\\','/'),/^E:\/codex\//i);mkdirSync(base,{recursive:true});const root=mkdtempSync(join(base,'case-'));
+ const tempRoot=join(repositoryRoot,'.test-tmp'),base=join(tempRoot,'budget-policy');assertChildPath(repositoryRoot,tempRoot);assertChildPath(tempRoot,base);mkdirSync(base,{recursive:true});const root=mkdtempSync(join(base,'case-'));assertChildPath(base,root);
  const db=openProductDatabase(join(root,'fixture.sqlite'));let now=new Date('2026-10-02T12:00:00Z');
  const policy=new mod.WorkbenchBudgetPolicy(db,custom,{now:()=>now});
  const service=new WorkbenchService(db,{workspaceIds:['ws'],root:join(root,'files'),modelBudgetPolicy:policy});
  const tasks=new PersistentTaskService(db,service,{now:()=>now});const runs=new RunRepository(db,new EventStore(db));
- t.after(()=>{db.close();const child=relative(base,resolve(root));assert.ok(child&&!child.startsWith('..')&&!isAbsolute(child));rmSync(root,{recursive:true,force:true});});
+ t.after(()=>{db.close();assertChildPath(base,root);rmSync(root,{recursive:true,force:true});});
  const agent=(name='Reader',owner='alice')=>service.createAgent(owner,{name});
  const task=a=>tasks.create('alice',{title:'Watch source',agent_id:a.agent_id,objective:'Read controlled source',trigger:{kind:'once',run_at:'2099-01-01T00:00:00Z'}});
  function settle(run,id='model-first'){

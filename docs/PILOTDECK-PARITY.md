@@ -535,3 +535,18 @@ boundary; unchanged sources stay dormant and a new owned revision can queue the
 same original task again without resetting its budget. Queueing a second cycle
 is not proof it executed. Automatic dispatch, failure/wait recovery, isolated
 work/reviewed apply, full UI and real-provider/production acceptance remain open.
+
+Source-integrity recovery now has a dedicated actual-SDK/scripted-model case:
+failed pinned reads produce no success receipt or coverage; the original native
+Goal waits for input and resumes its same occurrence/budget after byte repair.
+Fixed repairable source/report errors are distinct from authority rejection;
+arbitrary server detail text is not forwarded. This is one controlled fault,
+not exhaustive IO/crash recovery or production acceptance.
+
+The role-bound discovery policy form uses the existing owner API and command
+receipts: default off, save separately from enable, pause/resume/stop and explicit
+retry after response loss. Its current explanation retains the missing automatic
+dispatcher boundary. A source inventory, UI render or scripted API request is
+not equivalent to actual browser interaction or executed work-cycle acceptance.
+Isolated execution, owner-readable cycle/report projection and exact frozen-diff
+review/application remain separate required deliverables.
