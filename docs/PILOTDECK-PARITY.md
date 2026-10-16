@@ -450,3 +450,12 @@ unchanged, creates no Agent after restart and invokes no model. This is current
 Host evidence with `execution_authorized:false`, not a project collector, fleet
 idle proof, completion receipt or occurrence admission. The standard profile
 keeps it disabled pending the remaining discovery integration and acceptance.
+
+The project activity source adapter now combines original scoped SQL records,
+existing workspace readiness and the authenticated Host observation client.
+It includes archived conversation and native child Session identities, releases
+read transactions before network IO, and rejects changed/stale sources before
+returning idle evidence. It creates no records, directories, Agent or inference.
+It remains a source component: durable discovery policy/signals, existing budget
+and background-capacity integration, original occurrence admission, isolated
+work cycles/apply, UI and deployed acceptance are still open.

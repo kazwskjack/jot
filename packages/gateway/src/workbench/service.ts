@@ -990,6 +990,18 @@ export class WorkbenchService {
       || /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(part))) throw new Error('invalid_file_path');
     return parts.join('/');
   }
+  /** Observe only: unlike projectRoot, never initialize a project directory. */
+  projectWorkspaceReady(owner:string,workspaceId:string,projectId:string):boolean {
+    const workspace=this.workspace(workspaceId);this.projects.assertOwned(projectId,owner);
+    const root=resolve(this.options.root),dir=join(root,hash(`${owner}\0${workspace}\0${projectId}`));
+    noSymlinkAncestors(root);
+    if(realpathSync(root)!==this.canonicalRoot)throw Error('workspace_path_escape');
+    if(!existsSync(dir))return false;
+    const stat=lstatSync(dir);if(stat.isSymbolicLink()||!stat.isDirectory())throw Error('workspace_path_escape');
+    const rel=relative(this.canonicalRoot,realpathSync(dir));
+    if(rel==='..'||rel.startsWith(`..${sep}`)||isAbsolute(rel))throw Error('workspace_path_escape');
+    return true;
+  }
   projectRoot(owner: string, workspaceId: string, projectId: string): string {
     const workspace = this.workspace(workspaceId); this.projects.assertOwned(projectId, owner);
     const root = resolve(this.options.root), dir = join(root, hash(`${owner}\0${workspace}\0${projectId}`));

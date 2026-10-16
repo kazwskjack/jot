@@ -4,7 +4,7 @@ title: Keep project discovery in original DSH task boundaries
 category: decision
 status: active
 created: "2026-10-17T03:43:02"
-updated: "2026-10-17T04:30:50"
+updated: "2026-10-17T04:41:31"
 ---
 
 <!-- compiled_truth -->
@@ -16,7 +16,7 @@ Default policy is off. Discover-only produces proposals; discover-and-work still
 
 Honor explicit unlimited budgets. Persistent tasks now accept explicit public max_runs:null, with capability-gated UI and an exact internal (unlimited,0) tuple in the original table; finite/default100 are retained. Migration preserves original IDs, counts, states and request keys. Zero alone is not unlimited: tuple guards reject inconsistent writes and the known prior numeric admission guard refuses unsupported new tasks. Full old-worker rollout/rollback still needs acceptance. Changing limits never resets usage or automatically resumes an exhausted/paused task. Model budgets, native Goal, mailbox quotas and physical background capacity remain separate. Null in discovery gate cycle capacity means confirmed unlimited policy, never missing or guessed facts. This prerequisite does not install the discovery pipeline.
 
-The initial pure eligibility module is not a running feature. Factual native-idle collector, durable owner policy/signal/occurrence integration, DSH planning/execution/report, isolated workspace/apply, UI, real-provider and deployment acceptance remain incomplete. The source review and entire implementation sequence live in docs/superpowers/plans/2026-10-17-always-on-discovery.md. Full PilotDeck capability scope is unchanged.
+The initial pure eligibility module and the opt-in current-Host native observation protocol are implemented. The project activity source adapter combines original scoped SQL and existing workspace facts with the strict authenticated Host client, releasing read transactions before IO and rejecting drift or expired observations. These are non-authorizing source components, not a running discovery feature. Existing budget/capacity and reconciliation facts, durable owner policy/signal/occurrence integration, DSH planning/execution/report, isolated workspace/apply, UI, real-provider and deployment acceptance remain incomplete. The source review and entire implementation sequence live in docs/superpowers/plans/2026-10-17-always-on-discovery.md. Full PilotDeck capability scope is unchanged.
 
 
 ## Timeline
@@ -60,5 +60,17 @@ The initial pure eligibility module is not a running feature. Factual native-idl
 - time: 2026-10-17T04:30:50
   kind: evidence
   summary: "Opt-in current-Host observation verified through the real pinned SDK HTTP adapter and Gateway client before/after restart; paused Goal unchanged, zero restarted Agent creation and model calls. Missing Session stays unknown. Full project discovery and production acceptance remain incomplete."
+  source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
+  affects: [always-on-discovery]
+
+- time: 2026-10-17T04:39:19
+  kind: decision
+  summary: "Project activity collection reads original scoped project/role/conversation/run/child/input metadata and existing workspace readiness without creating records or directories. Release read transactions before Host IO; recheck sources and oldest observation freshness afterward. Missing bindings remain unknown. Terminal run timestamps are cooldown hints, never successful completion or budget/execution authority."
+  source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
+  affects: [always-on-discovery]
+
+- time: 2026-10-17T04:41:31
+  kind: decision
+  summary: Record completed read-only source components while retaining the full unfinished discovery lifecycle.
   source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
   affects: [always-on-discovery]
