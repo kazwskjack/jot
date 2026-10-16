@@ -7,19 +7,33 @@ import type {ModelBudgetLimits} from './model-budget.ts';
 const fields=['tokens','nano_usd','model_calls'] as const;
 const strings=(value:ModelBudgetLimits)=>Object.fromEntries(fields.map(key=>[key,value[key]===null?null:String(value[key])]));
 const zero=()=>({tokens:'0',nano_usd:'0',model_calls:'0'});
-type TaskRow={task_id:string;agent_id:string;workspace_id:string;project_id:string};
+type TaskRow={task_id:string;agent_id:string;workspace_id:string;project_id:string;version:number;generation:number};
 /** User projection has no model routes, native sessions, scope identities or machine paths. */
 export class TaskBudgetService {
   private readonly db:DatabaseSync;
   private readonly policy:WorkbenchBudgetPolicy|undefined;
   constructor(db:DatabaseSync,policy?:WorkbenchBudgetPolicy){this.db=db;this.policy=policy;}
   private task(owner:string,id:string):TaskRow {
-    const row=this.db.prepare(`SELECT t.task_id,t.agent_id,a.workspace_id,a.project_id FROM wb_persistent_tasks t
+    const row=this.db.prepare(`SELECT t.task_id,t.agent_id,a.workspace_id,a.project_id,t.version,t.generation FROM wb_persistent_tasks t
       JOIN wb_agents a ON a.agent_id=t.agent_id WHERE t.task_id=? AND t.owner_id=? AND a.owner_id=?`).get(id,owner,owner) as TaskRow|undefined;
     if(!row)throw new Error('task_not_found');return row;
   }
   get(owner:string,id:string) {
-    return withImmediateTransaction(this.db,()=>this.view(owner,this.task(owner,id)));
+    return this.read(()=>this.view(owner,this.task(owner,id)));
+  }
+  private read<T>(operation:()=>T):T{
+    if(this.db.isTransaction)return operation();
+    this.db.exec('BEGIN DEFERRED');try{return operation();}finally{this.db.exec('ROLLBACK');}
+  }
+  /** New-occurrence advice only. Preserve unknown/in-flight root usage without
+   * creating another budget, repairing an attempt or reserving a model call. */
+  observeAdmission(owner:string,id:string){return this.read(()=>{
+    const task=this.task(owner,id),view=this.view(owner,task);
+    if(!view.configured)return Object.freeze({protocol:1,task_id:id,task_version:task.version,task_generation:task.generation,budget:'unknown',reason:'BUDGET_POLICY_NOT_CONFIGURED',budget_policy_revision:null,unknown_calls:null,in_flight_calls:null,observed_at:Date.now(),execution_authorized:false});
+    const usage=this.policy!.ledger.observeDurableUsage(owner,taskBudgetKey(id));
+    const reason=usage.unknown_calls?'USAGE_UNKNOWN':usage.in_flight_calls?'USAGE_PENDING':view.can_start_next_call?null:'BUDGET_BLOCKED';
+    return Object.freeze({protocol:1,task_id:id,task_version:task.version,task_generation:task.generation,budget:reason===null?'allowed':reason==='BUDGET_BLOCKED'?'blocked':'unknown',reason,budget_policy_revision:this.policy!.observedRevision(),unknown_calls:Number(usage.unknown_calls),in_flight_calls:Number(usage.in_flight_calls),observed_at:Date.parse(view.as_of),execution_authorized:false});
+  });
   }
   private view(owner:string,task:TaskRow) {
     if(!this.policy)return {configured:false as const,task_id:task.task_id,reason:'BUDGET_POLICY_NOT_CONFIGURED' as const};
@@ -36,13 +50,7 @@ export class TaskBudgetService {
     };
     const root=summary('task_total',key,settings.limits.task_total);
     const shared=daily.definitions.map(item=>summary(item.category,item.key,settings.limits[item.category],daily.window));
-    const usage=this.db.prepare(`WITH task_runs AS (
-      SELECT run_id FROM wb_task_run_occurrences WHERE task_id=?
-      UNION SELECT run_id FROM wb_task_auxiliary_runs WHERE task_id=? AND owner_id=?)
-      SELECT COALESCE(SUM(CASE WHEN a.state='unknown' THEN 1 ELSE 0 END),0) AS unknown_calls,
-      COALESCE(SUM(CASE WHEN a.state='settled' AND json_extract(a.route_json,'$.billing.unit')='dispatched_call' THEN 1 ELSE 0 END),0) AS unmetered_calls
-      FROM wb_model_budget_attempts a JOIN wb_model_budget_bindings b ON b.run_id=a.run_id
-      JOIN task_runs r ON r.run_id=a.run_id WHERE b.owner_id=?`).get(task.task_id,task.task_id,owner,owner) as {unknown_calls:number;unmetered_calls:number};
+    const usage=ledger.observeDurableUsage(owner,key);
     const blocking_reasons:string[]=[];
     for(const scope of [root,...shared])for(const field of fields){
       if(scope.remaining[field]!==null&&BigInt(scope.remaining[field]!)<settings.nextCall[field])blocking_reasons.push(`${scope.kind}:${field}`);

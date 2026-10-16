@@ -191,6 +191,18 @@ export class ModelBudgetLedger {
   balancesForRun(owner: string, runId: string) {
     return this.binding(owner,runId).map(id=>this.balance(owner,id));
   }
+  /** Read the exact durable root, including native members and continuations.
+   * Shared daily scopes alone must not fence unrelated tasks. No reconciliation. */
+  observeDurableUsage(owner:string,key:string){
+    if(!identifier(owner)||!identifier(key)||!['task-total','chat-root','mailbox-thread'].includes(key.split(':')[0]!))throw Error('budget_scope_invalid');
+    return this.db.prepare(`SELECT
+      COALESCE(SUM(CASE WHEN a.state='unknown' THEN 1 ELSE 0 END),0) AS unknown_calls,
+      COALESCE(SUM(CASE WHEN a.state='in_flight' THEN 1 ELSE 0 END),0) AS in_flight_calls,
+      COALESCE(SUM(CASE WHEN a.state='settled' AND json_extract(a.route_json,'$.billing.unit')='dispatched_call' THEN 1 ELSE 0 END),0) AS unmetered_calls
+      FROM wb_model_budget_attempts a JOIN wb_model_budget_bindings b ON b.run_id=a.run_id WHERE b.owner_id=?
+      AND EXISTS(SELECT 1 FROM json_each(b.scopes_json) binding_scope JOIN wb_model_budget_scopes s ON s.scope_id=binding_scope.value
+        WHERE s.owner_id=b.owner_id AND s.scope_key=?)`).get(owner,key) as {unknown_calls:number;in_flight_calls:number;unmetered_calls:number};
+  }
   /** Unknown usage belongs to the durable task/chat/thread, including members.
    * Daily quota overlap alone must not freeze unrelated tasks for the owner. */
   private assertKnownUsage(owner:string,runId:string) {

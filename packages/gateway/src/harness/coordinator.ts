@@ -31,6 +31,10 @@ export interface BackgroundRunOptions {
   maxBackgroundRuns: number;
   allowBackgroundRuns: boolean;
 }
+// Shared by claim admission and its read-only projection; no second scheduler.
+const ACTIVE_BACKGROUND_SQL=`SELECT count(*) FROM ga_runs ar JOIN ga_worker_leases al ON al.resource_id=ar.id
+  JOIN wb_run_bindings ab ON ab.run_id=ar.id JOIN ga_conversations ac ON ac.id=ar.conversation_id
+  WHERE ab.kind IN ('task','internal_mailbox','memory_capture') AND ar.status IN ('starting','running','waiting_user','waiting_approval','cancelling') AND CAST(al.expires_at AS INTEGER)>?`;
 
 export class HarnessCoordinator {
   private readonly db: DatabaseSync;
@@ -49,6 +53,19 @@ export class HarnessCoordinator {
   claimNext(workerId: string, leaseMs: number): RunLease | null {
     return this.claim(workerId,leaseMs);
   }
+  /** Existing logical background slots only; not Host idle or an execution lease. */
+  observeBackgroundCapacity(owner:string){
+    if(typeof owner!=='string'||!owner.trim()||owner.length>256||/[\u0000-\u001f\u007f]/.test(owner))throw Error('background_owner_invalid');
+    const read=()=>{
+      const now=this.now(),ready=!!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_run_bindings'").get();
+      const global=ready?Number(Object.values(this.db.prepare(ACTIVE_BACKGROUND_SQL).get(now)!)[0]):0;
+      const owned=ready?Number(Object.values(this.db.prepare(ACTIVE_BACKGROUND_SQL+' AND ac.owner_id=?').get(now,owner)!)[0]):0;
+      const enabled=ready&&this.backgroundOptions.allowBackgroundRuns&&this.backgroundOptions.maxBackgroundRuns>0;
+      return Object.freeze({protocol:1,enabled,limit:this.backgroundOptions.maxBackgroundRuns,active_global:global,active_owner:owned,available:enabled?Math.max(0,Math.min(this.backgroundOptions.maxBackgroundRuns-global,this.backgroundOptions.maxBackgroundRuns-owned)):0,observed_at:now,execution_authorized:false});
+    };
+    if(this.db.isTransaction)return read();
+    this.db.exec('BEGIN DEFERRED');try{return read();}finally{this.db.exec('ROLLBACK');}
+  }
   /** Only an explicitly ready extraction dispatcher may use this admission. */
   claimMemoryExtraction(workerId:string,leaseMs:number,runId:string):RunLease|null{
     return this.claim(workerId,leaseMs,runId);
@@ -65,9 +82,7 @@ export class HarnessCoordinator {
       const hasTaskPriority=hasBindings && Number((this.db.prepare("SELECT count(*) n FROM sqlite_master WHERE type='table' AND name IN ('wb_task_occurrences','wb_persistent_tasks')").get() as {n:number}).n)===2;
       const joins=hasBindings ? `JOIN ga_conversations c ON c.id=r.conversation_id LEFT JOIN wb_run_bindings b ON b.run_id=r.id
         ${hasTaskPriority ? 'LEFT JOIN wb_task_run_occurrences o ON o.run_id=r.id LEFT JOIN wb_persistent_tasks t ON t.task_id=o.task_id' : ''}` : '';
-      const activeBackground=`SELECT count(*) FROM ga_runs ar JOIN ga_worker_leases al ON al.resource_id=ar.id
-        JOIN wb_run_bindings ab ON ab.run_id=ar.id JOIN ga_conversations ac ON ac.id=ar.conversation_id
-        WHERE ab.kind IN ('task','internal_mailbox','memory_capture') AND ar.status IN ('starting','running','waiting_user','waiting_approval','cancelling') AND CAST(al.expires_at AS INTEGER)>?`;
+      const activeBackground=ACTIVE_BACKGROUND_SQL;
       const admission=memoryRunId!==undefined?`AND b.kind='memory_capture' AND r.id=? AND ((${activeBackground})<? AND (${activeBackground} AND ac.owner_id=c.owner_id)<?)`:!hasBindings ? '' : !this.backgroundOptions.allowBackgroundRuns ? 'AND b.run_id IS NULL' :
         `AND (b.kind IS NULL OR b.kind NOT IN ('native_team','memory_capture')) AND (b.kind IS NULL OR b.kind NOT IN ('task','internal_mailbox') OR
           ((${activeBackground})<? AND (${activeBackground} AND ac.owner_id=c.owner_id)<?))`;

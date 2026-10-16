@@ -138,6 +138,7 @@ export class WorkbenchBudgetPolicy {
     const row = this.db.prepare('SELECT * FROM wb_model_budget_policy_registry WHERE singleton=1').get() as Row | undefined;
     if (!row || Number(row.revision) !== this.config.revision || row.policy_hash !== this.fingerprint) throw new Error('budget_policy_stale');
   }
+  observedRevision(){this.assertCurrent();return this.config.revision;}
   budgetSettings() {
     this.assertCurrent();
     const route=this.config.routes.find(item=>item.provider===this.config.admission_route.provider && item.model===this.config.admission_route.model)!;

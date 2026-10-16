@@ -467,3 +467,11 @@ deduplicated; own generated events are excluded and ingestion never resumes a
 paused/stopped policy. These are configuration/evidence foundations. They do not
 install the watcher, original occurrence admission, DSH work cycles or UI, and
 provide no new model/tool/budget authority. Full parity acceptance remains open.
+
+Budget/background readiness now has read-only projections over the original
+ledger and Coordinator. Task-root unknown usage includes native-style shared-root
+members rather than only primary occurrence run IDs; unrelated daily-budget
+siblings remain independent. Background observations reuse the exact claim SQL,
+preserve foreground priority, and do not create a lease. They are not native idle,
+hardware capacity or admission. Immutable discovery-task binding, remaining
+reconciliation, coalescing/reservations and execution integration remain open.

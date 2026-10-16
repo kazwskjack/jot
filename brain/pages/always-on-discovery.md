@@ -4,7 +4,7 @@ title: Keep project discovery in original DSH task boundaries
 category: decision
 status: active
 created: "2026-10-17T03:43:02"
-updated: "2026-10-17T04:57:44"
+updated: "2026-10-17T05:09:16"
 ---
 
 <!-- compiled_truth -->
@@ -16,7 +16,7 @@ Default policy is off. Discover-only produces proposals; discover-and-work still
 
 Honor explicit unlimited budgets. Persistent tasks now accept explicit public max_runs:null, with capability-gated UI and an exact internal (unlimited,0) tuple in the original table; finite/default100 are retained. Migration preserves original IDs, counts, states and request keys. Zero alone is not unlimited: tuple guards reject inconsistent writes and the known prior numeric admission guard refuses unsupported new tasks. Full old-worker rollout/rollback still needs acceptance. Changing limits never resets usage or automatically resumes an exhausted/paused task. Model budgets, native Goal, mailbox quotas and physical background capacity remain separate. Null in discovery gate cycle capacity means confirmed unlimited policy, never missing or guessed facts. This prerequisite does not install the discovery pipeline.
 
-The initial pure eligibility module and the opt-in current-Host native observation protocol are implemented. The project activity source adapter combines original scoped SQL and existing workspace facts with the strict authenticated Host client, releasing read transactions before IO and rejecting drift or expired observations. These are non-authorizing source components, not a running discovery feature. Durable owner policy configuration/control API and immutable internal signal storage are also implemented. Saving starts off; role drift revokes effective activity; only explicit owner enable can resume. Original atomic API receipts and immutable business revisions prevent duplicate writes after lost responses. Signals never resume paused/stopped policy and exclude self-generated origins. Existing budget/capacity and reconciliation facts, trusted watchers/provenance/coalescing, dormancy/reservation/original occurrence admission, DSH planning/execution/report, isolated workspace/apply, UI, real-provider and deployment acceptance remain incomplete. The source review and entire implementation sequence live in docs/superpowers/plans/2026-10-17-always-on-discovery.md. Full PilotDeck capability scope is unchanged.
+The initial pure eligibility module and the opt-in current-Host native observation protocol are implemented. The project activity source adapter combines original scoped SQL and existing workspace facts with the strict authenticated Host client, releasing read transactions before IO and rejecting drift or expired observations. These are non-authorizing source components, not a running discovery feature. Durable owner policy configuration/control API and immutable internal signal storage are also implemented. Saving starts off; role drift revokes effective activity; only explicit owner enable can resume. Original atomic API receipts and immutable business revisions prevent duplicate writes after lost responses. Signals never resume paused/stopped policy and exclude self-generated origins. Original task-budget and Coordinator logical-capacity read observations are implemented without allocating calls, scopes, leases or another scheduler. Exact durable-root usage includes members; unknown and in-flight usage remain unresolved for a new occurrence. These observations are not execution authority or native/hardware readiness. Remaining reconciliation facts, immutable discovery-task binding, trusted watchers/provenance/coalescing, dormancy/reservation/original occurrence admission, DSH planning/execution/report, isolated workspace/apply, UI, real-provider and deployment acceptance remain incomplete. The source review and entire implementation sequence live in docs/superpowers/plans/2026-10-17-always-on-discovery.md. Full PilotDeck capability scope is unchanged.
 
 
 ## Timeline
@@ -90,5 +90,23 @@ The initial pure eligibility module and the opt-in current-Host native observati
 - time: 2026-10-17T04:57:44
   kind: evidence
   summary: "Final local policy/API/contract suite passes with original atomic recovery, owner checks, two-process CAS and immutable history; complete Gateway1396 cases/1389 pass/7 existing skips, root32 and local builds pass. Public772-file scan has no findings. Synthetic1000-signal allocation grew444KiB; production retention/growth and full execution integration remain open."
+  source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
+  affects: [always-on-discovery]
+
+- time: 2026-10-17T05:06:43
+  kind: decision
+  summary: "Discovery readiness must observe existing owned task budgets and Coordinator logical slots, never allocate fresh allowance or a second scheduler. Root usage follows exact ledger scope bindings including members; daily overlap alone does not fence other tasks. Unknown/in-flight usage stays unresolved; read snapshots do not reserve writer locks, calls or leases. Original transactional admission and immutable discovery-task binding remain required."
+  source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
+  affects: [always-on-discovery]
+
+- time: 2026-10-17T05:07:16
+  kind: decision
+  summary: "Record original budget/capacity observation prerequisites and shared-root projection correction; preserve all remaining execution requirements."
+  source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
+  affects: [always-on-discovery]
+
+- time: 2026-10-17T05:09:16
+  kind: evidence
+  summary: "Original budget/capacity observation and shared-root projection regression verified: Gateway1403 cases/1396 pass/7 existing skips, root32 and local builds pass, public773-file scan0. Shared-root unknown member is visible while daily-only siblings remain independent; original foreground/lease admission semantics retained. No new execution authority, provider run or production enablement."
   source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
   affects: [always-on-discovery]

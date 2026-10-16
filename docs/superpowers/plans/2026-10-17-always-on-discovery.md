@@ -357,3 +357,57 @@ against an existing contract rule; it was corrected without weakening the check.
 One earlier public preflight could not finish inspecting the tree; the failure
 was retained, and both direct and final complete scans pass. No actual-provider,
 production deployment, watcher, occurrence or new SDK execution claim is made.
+
+### Original budget and background-capacity observations
+
+`TaskBudgetService.observeAdmission` reads an existing owned persistent task,
+its version/generation, the current registered budget-policy revision, existing
+limits/balances/holds and durable-root usage. It neither creates a scope nor
+reserves, refunds, reconciles or dispatches any call. Explicit unlimited money
+remains null; token/call limits and every original accounting fence are unchanged.
+Missing budget configuration is unknown, exhausted limits are blocked, and
+unknown/in-flight root usage remains unknown for a new occurrence. Stale process
+policy rejects the read. Task and budget revisions are observation facts, not an
+execution lease or permission to borrow another task's allowance.
+
+The task budget projection previously counted unknown/unmetered calls through
+task occurrence and mailbox run lists. A member with a valid binding to the same
+durable task-total scope could therefore be absent from the displayed count,
+although the ledger's dispatch/admission unknown-usage fence already covered it.
+The projection now asks the original ledger for usage bound to the exact owned
+durable root. That includes members, continuations and scoped auxiliaries;
+overlapping owner/project/agent daily budgets alone do not fence another task.
+Their actual used amounts and holds still reduce shared remaining allowance.
+No competing usage counter or settlement path is added. Public response fields
+remain unchanged. Budget GET and these observations use short deferred read
+snapshots rather than acquiring a SQLite writer reservation merely to inspect.
+
+`HarnessCoordinator.observeBackgroundCapacity` reads its own trusted configured
+background limit and the same active-lease SQL used by `claimNext`. It reports
+global and owner occupancy and the remaining logical background slots, without
+claiming a run or writing a lease. The common SQL retains the existing task,
+mailbox and memory-extraction categories and lease expiry semantics. Foreground
+priority and the separate physical Worker pool remain unchanged. Disabled
+background execution reports zero available slots. These counts do not prove
+native Host quiescence, idle hardware, a live Worker fleet or permission to run;
+Host readiness/freshness and original transactional claim/dispatch remain required.
+
+These components are not yet a discovery occurrence admission. Before combining
+them with project facts and pure gates, establish an immutable original task
+binding for the policy, carry source/signal/policy/role revisions, inspect remaining
+reconciliation states, and atomically revalidate the real limits/reservation.
+Never choose a fresh task/root to evade a prior unknown call or cumulative quota.
+No discovery timer, watcher, task, Agent, model call or production enablement is
+created by this milestone; the remaining full lifecycle is unchanged.
+
+Verification: Gateway 1403 total, 1396 passed, seven existing/opt-in skips,
+zero failures (159.29 seconds). Seven new source cases cover no-write/no-scope
+observation, explicit unlimited money, missing/exhausted budget, a synthetic
+member sharing the original ledger root, unrelated daily siblings, active and
+expired background leases, foreground claim while background slots are full,
+disabled background execution, in-flight calls and stale process policy. The
+initial regression reproduced a displayed unknown count of zero for the shared
+member while the original root had one unknown attempt. Existing budget-public
+and Coordinator focused tests also pass (26-case earlier focused run); root32/32
+and Windows root/Gateway builds pass. Public regressions6/6, 773-file preflight0,
+and BRAIN link checks pass. No new provider/SDK run or production rollout is claimed.
