@@ -1,3 +1,4 @@
+import {createOrdinaryInputAdmissionHost} from './ordinary-input-admission-host.js'
 import { createServer } from 'node:http'
 import { timingSafeEqual } from 'node:crypto'
 import { isAbsolute } from 'node:path'
@@ -155,7 +156,7 @@ function decodeFilename(headers) {
   return value && Buffer.byteLength(value, 'utf8') <= 255 && !/[\u0000\/\\]/.test(value) ? value : null
 }
 
-export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost }) {
+export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost }) {
   const voiceHandler = voiceEnabled ? createVoiceAdapterHandler({ speechController, token }) : null
   const workbenchSessions = new Set()
   const blockedWorkbenchSessions = new Set()
@@ -365,18 +366,20 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
         try { await workbenchBridge.guard(agents.get(sessionId), signal) }
         catch { return json(409, { error: 'workbench_run_forbidden' }) }
       }
+      let ordinaryBinding
+      if(body.ordinary_input!==undefined){try{const value=normalizeOrdinaryInputExecution(body.ordinary_input);if(value.runId!==requestId||workbenchSessions.has(sessionId))throw Error();ordinaryBinding={...value,sessionRef:sessionId};}catch{return json(422,{error:'ordinary_input_binding_invalid'})}if(!ordinaryInputAdmissionHost)return json(503,{error:'ordinary_input_admission_unavailable'})}
       let value
       try {
         // Admission passes human content unchanged. Login operations are only
         // executed through explicit tools with trusted scope and consent checks.
-        value = await controller.prompt({ requestId, sessionId, mode, content }, signal)
+        value = ordinaryBinding?await ordinaryInputAdmissionHost.withPrompt({binding:ordinaryBinding,signal},()=>controller.prompt({requestId,sessionId,mode,content},signal)):await controller.prompt({ requestId, sessionId, mode, content }, signal)
       } catch (error) {
         // Keep protocol-visible diagnostics stable and allow-listed. Remote error
         // messages/details may contain model, filesystem, or user-provided data.
         const hasImage = content.some(part => part.type === 'image')
         const reasonCode = hasImage && hasKnownSharpNativeImportFailure(error)
           ? 'DSH_IMAGE_PROCESSING_DEPENDENCY_FAILED' : promptFailureReasonCode(error)
-        return json(422, { error: 'prompt_rejected', reason_code: reasonCode })
+        return json(ordinaryBinding?409:422, { error: ordinaryBinding?'ordinary_input_admission_unconfirmed':'prompt_rejected', reason_code: reasonCode })
       }
       return json(202, value)
     }
@@ -433,6 +436,7 @@ export function apply(ctx, config = {}) {
     || (config.conversationGoalResume!==undefined&&typeof config.conversationGoalResume!=='boolean')
     || (config.conversationGoalResume===true&&workbenchToken.length<16)
     || (config.ordinaryInputRecovery!==undefined&&(!config.ordinaryInputRecovery||typeof config.ordinaryInputRecovery!=='object'||Array.isArray(config.ordinaryInputRecovery)||Object.keys(config.ordinaryInputRecovery).join(',')!=='verifyComposition'||typeof config.ordinaryInputRecovery.verifyComposition!=='function'||workbenchToken.length<16))
+    || (config.ordinaryInputAdmission!==undefined&&(!config.ordinaryInputAdmission||typeof config.ordinaryInputAdmission!=='object'||Object.keys(config.ordinaryInputAdmission).sort().join(',')!=='admissions,profile'||typeof config.ordinaryInputAdmission.profile?.read!=='function'||typeof config.ordinaryInputAdmission.admissions?.read!=='function'||typeof config.ordinaryInputAdmission.admissions?.create!=='function'||workbenchToken.length<16))
     || (config.nativeContinuation !== undefined && typeof config.nativeContinuation !== 'boolean')
     || (config.webBudgetEnabled !== undefined && typeof config.webBudgetEnabled !== 'boolean')
     || (config.nativeRoles !== undefined && typeof config.nativeRoles !== 'boolean')
@@ -491,6 +495,8 @@ export function apply(ctx, config = {}) {
   }
   const conversationGoalRunHost=config.conversationGoalResume===true?createConversationGoalRunHost({controller:ctx.sessionController,agents:ctx.agents,persistence:ctx.sessionPersistence,bridge:workbenchBridge,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted'))}):undefined
   if(conversationGoalRunHost)ctx.effect(()=>()=>conversationGoalRunHost.dispose())
+  const ordinaryInputAdmissionHost=config.ordinaryInputAdmission===undefined?undefined:createOrdinaryInputAdmissionHost({ctx,agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted')),...config.ordinaryInputAdmission})
+  if(ordinaryInputAdmissionHost)ctx.effect(()=>()=>ordinaryInputAdmissionHost.dispose())
   const ordinaryInputRunHost=config.ordinaryInputRecovery===undefined?undefined:createOrdinaryInputRunHost({controller:ctx.sessionController,agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted')),verifyComposition:config.ordinaryInputRecovery.verifyComposition})
   if(ordinaryInputRunHost)ctx.effect(()=>()=>ordinaryInputRunHost.dispose())
   const memoryExtractionHost=createOptionalMemoryExtractionHost({config:config.memoryExtraction,bridge:workbenchBridge,llm:ctx.llm,route:config.workbenchModel})
@@ -498,7 +504,7 @@ export function apply(ctx, config = {}) {
   const handler = createAdapterHandler({ controller: ctx.sessionController, fileUploads: ctx.fileUploads, agents: ctx.agents,
     sessions:ctx.sessions,persistence:ctx.sessionPersistence,
     speechController, voiceEnabled, token, workbenchBridge,
-    budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost })
+    budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost })
   const server = createServer(async (req, res) => {
     const abort = new AbortController()
     req.once('aborted', () => abort.abort())
@@ -538,3 +544,6 @@ export {prepareOrdinaryInputResume} from './ordinary-input-resume.js'
 export {createOrdinaryInputRunHost}
 
 export {createOrdinaryClaimedInputRecoverySetup} from './ordinary-claimed-input.js'
+
+export {createOrdinaryInputAdmissionHost}
+export {createOrdinaryInputAdmissions} from './ordinary-input-admissions.js'

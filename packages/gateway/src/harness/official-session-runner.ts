@@ -9,7 +9,7 @@ import { projectSessionFrame, type JotProjection, type ProjectionContext } from 
 
 interface OfficialSessionClient {
   create(sessionId: string, cwd: string, agentPreset: string, signal?: AbortSignal, workbenchRunId?: string,workbenchExecutionLease?:Readonly<{owner:string;generation:number}>): Promise<Record<string, unknown>>
-  prompt(sessionId: string, requestId: string, content: string | SessionPromptPart[], mode?: 'queue' | 'steer', signal?: AbortSignal): Promise<Record<string, unknown>>
+  prompt(sessionId: string, requestId: string, content: string | SessionPromptPart[], mode?: 'queue' | 'steer', signal?: AbortSignal, original?:OriginalInputExecution): Promise<Record<string, unknown>>
   stageFile?(sessionId: string, path: string, displayName: string, signal?: AbortSignal): Promise<{ receipt_id: string }>
   follow(sessionId: string, signal?: AbortSignal,goalControl?:ConversationGoalExecution,ordinaryInput?:OriginalInputExecution): AsyncGenerator<Record<string, unknown>>
   recoverInput?(sessionId:string,execution:OriginalInputExecution,signal?:AbortSignal):Promise<Record<string,unknown>>
@@ -192,22 +192,25 @@ export class OfficialSessionRunner implements DshRunner {
       webOperationPollIntervalMs: Math.max(100, Math.min(5000, options.webOperationPollIntervalMs ?? 750)) }
   }
 
-  async run(input:DshRunInput):Promise<DshRunResult>{return this.execute(input);}
+  async run(input:DshRunInput):Promise<DshRunResult>{
+    let admission:OriginalInputExecution|undefined;if(input.originalAdmission!==undefined){if(!input.originalAdmission||typeof input.originalAdmission!=='object'||Array.isArray(input.originalAdmission)||Object.keys(input.originalAdmission).join(',')!=='executionLease'||input.workbenchRunId||input.workbenchExecutionLease||input.workbenchBudgetEnforced!==undefined||input.checkpointTask||Object.hasOwn(input,'goalControl')||Object.hasOwn(input,'originalInput'))throw Error('ordinary_input_admission_invalid');admission=normalizeOriginalInputExecution({run_id:input.taskRequestId,execution_lease:input.originalAdmission.executionLease});}
+    return this.execute(input,undefined,undefined,undefined,undefined,admission);
+  }
 
   async resumeGoal(input:Parameters<NonNullable<DshRunner['resumeGoal']>>[0]):Promise<DshRunResult>{
     const ref=input.goalControl?.ref;
-    if(Object.hasOwn(input,'originalInput')||!input.goalControl||!ref||typeof ref.id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(ref.id)||!Number.isSafeInteger(ref.revision)||ref.revision<1||ref.revision===Number.MAX_SAFE_INTEGER||input.message!==''||input.attachments?.length||input.workbenchRunId||input.workbenchExecutionLease||input.workbenchBudgetEnforced!==undefined||input.checkpointTask)throw Error('goal_resume_input_invalid');
+    if(Object.hasOwn(input,'originalAdmission')||Object.hasOwn(input,'originalInput')||!input.goalControl||!ref||typeof ref.id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(ref.id)||!Number.isSafeInteger(ref.revision)||ref.revision<1||ref.revision===Number.MAX_SAFE_INTEGER||input.message!==''||input.attachments?.length||input.workbenchRunId||input.workbenchExecutionLease||input.workbenchBudgetEnforced!==undefined||input.checkpointTask)throw Error('goal_resume_input_invalid');
     const control=normalizeGoalExecution({control_id:input.goalControl.controlId,run_id:input.taskRequestId,execution_lease:input.goalControl.executionLease});
     return this.execute(input,control,input.goalControl.ref);
   }
 
   async recoverInput(input:Parameters<NonNullable<DshRunner['recoverInput']>>[0]):Promise<DshRunResult>{
-    if(Object.hasOwn(input,'goalControl')||!input.originalInput||typeof input.originalInput!=='object'||Array.isArray(input.originalInput)||Object.keys(input.originalInput).sort().join(',')!=='executionLease,inputMessageId'||typeof input.originalInput.inputMessageId!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(input.originalInput.inputMessageId)||input.message!==''||input.attachments?.length||input.workbenchRunId||input.workbenchExecutionLease||input.workbenchBudgetEnforced!==undefined||input.checkpointTask)throw Error('ordinary_input_recovery_invalid');
+    if(Object.hasOwn(input,'originalAdmission')||Object.hasOwn(input,'goalControl')||!input.originalInput||typeof input.originalInput!=='object'||Array.isArray(input.originalInput)||Object.keys(input.originalInput).sort().join(',')!=='executionLease,inputMessageId'||typeof input.originalInput.inputMessageId!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(input.originalInput.inputMessageId)||input.message!==''||input.attachments?.length||input.workbenchRunId||input.workbenchExecutionLease||input.workbenchBudgetEnforced!==undefined||input.checkpointTask)throw Error('ordinary_input_recovery_invalid');
     const execution=normalizeOriginalInputExecution({run_id:input.taskRequestId,execution_lease:input.originalInput.executionLease});
     return this.execute(input,undefined,undefined,execution,input.originalInput.inputMessageId);
   }
 
-  private async execute(input:DshRunInput,goalControl?:ConversationGoalExecution,goalRef?:Readonly<{id:string;revision:number}>,ordinaryInput?:OriginalInputExecution,inputMessageId?:string):Promise<DshRunResult>{
+  private async execute(input:DshRunInput,goalControl?:ConversationGoalExecution,goalRef?:Readonly<{id:string;revision:number}>,ordinaryInput?:OriginalInputExecution,inputMessageId?:string,admission?:OriginalInputExecution):Promise<DshRunResult>{
     const controller = new AbortController()
     const webOperationPollers = new Map<string, { stop: () => void; promise: Promise<void> }>()
     const persistedWebOperationCalls = new Set<string>()
@@ -257,7 +260,7 @@ export class OfficialSessionRunner implements DshRunner {
           content.push({ type: 'file', receipt_id: receipt.receipt_id })
         }
         if (!content.length) throw new Error('session_prompt_empty')
-        await this.client.prompt(input.sessionRef, input.taskRequestId, content, 'queue', controller.signal)
+        await this.client.prompt(input.sessionRef, input.taskRequestId, content, 'queue', controller.signal,admission)
       }
       input.onReady?.()
       let finalText = ''; let finalBlocks: Array<{ kind: 'text' | 'reasoning'; text: string }> = []

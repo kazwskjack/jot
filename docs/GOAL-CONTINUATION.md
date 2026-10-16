@@ -683,3 +683,89 @@ not the production Controller prompt/attachment admission path. Durable admissio
 storage and its original Controller integration, scoped before/after-setup
 composition, ordinary Host/Worker connection, steering and monetary/unknown
 settlement remain required. No production configuration enables this helper.
+
+
+## Original Controller prompt admission and private receipts
+
+The optional `ordinaryInputAdmission: {profile, admissions}` Host configuration
+observes the original Controller's `agent/inbox/inserted` event. This occurs
+when the official Controller has resolved file receipts, checked image capability,
+and admitted prompt attachments into its final native user message. Jot does not
+replace or duplicate that logic. A scoped observer captures a frozen full-message
+hash and the original product binding plus reviewed bound profile fingerprint.
+The observer first flushes the original native Session through its canonical
+durability listener and only then publishes the private receipt. The original
+pre-step waits for both barriers and revalidates ownership,
+configuration and unchanged message before allowing its next hook to enter.
+The final enter decision must still contain the same original message; a later
+hook cannot replace or drop it under an earlier receipt.
+Explicit native user cancellation is respected without restoring that input;
+admission failure retains known unentered human inputs before a parent cancellation.
+
+`createOrdinaryInputAdmissions({root})` stores one immutable JSON receipt per
+Session creation timestamp, original run and native message. The root is
+operator-owned and must be outside Agent workspaces. Each entry is limited to
+4 KiB, contains only original identities, timestamp and hashes, and is written
+through a synced exclusive temporary file followed by an atomic no-overwrite
+link. Matching retry writes are idempotent; conflicting records are refused.
+Read checks reject symlinks, unexpected fields and inode substitution. Pending
+crash-orphan temporary files cannot be read as committed receipts. No message,
+image, file bytes, password or login data belongs in these records. Windows tests
+need the authorized user context for atomic hard-link publication; sandbox EPERM
+is not evidence that a non-atomic overwrite fallback is acceptable.
+
+The internal prompt body can include `ordinary_input: {run_id, execution_lease}`.
+Its run must equal the original request ID and cannot carry owner overrides or
+workbench authority. An explicitly requested admission requires the configured
+Host; there is no ordinary-prompt fallback when it is unavailable. The Client
+and Runner preserve this metadata on only the original prompt. With the existing
+ordinary recovery flag explicitly enabled, first-generation ordinary Worker runs
+supply their original lease; Goal controls, workbench tasks and reclaimed input
+recovery keep their separate contracts. Defaults remain unchanged and off.
+
+The SDK's normal RPC deduplication checks committed user messages and pending
+queues. A currently claimed-but-unentered message can be absent from both. The
+Host keeps the exact live admission in that gap and returns its acceptance
+without invoking Controller prompt again. A cold historical insertion with no
+live original admission is refused as fresh submission; recovery must never
+retroactively certify it. A committed/pending original RPC can be acknowledged
+only if its original receipt already exists and still matches.
+
+Real installed-Controller probes cover both an actual first prompt held at the
+claimed boundary and normal execution. The former records the original native
+message, deduplicates during claim, then survives hard Host death with zero
+model calls and no fresh-input replay. The latter calls the scripted model once,
+acknowledges a later duplicate without a second model call or receipt, then cold
+restarts without activation. A real first-generation Worker additionally publishes
+one canonical answer for the original run and retains one admission receipt;
+a further poll/restart does not repeat execution. These initial probes use text
+input. Native image/file admission behavior is retained by the original code but
+requires further model- and receipt-specific integration acceptance.
+
+Receipt creation is now connected to original prompt admission. Connecting cold
+claimed restoration through the exact original before/after-setup factory and
+parked observer remains incomplete. Unconfirmed admission/storage outcomes are
+not not-called or free model attempts, and this is not provider monetary
+reconciliation. Existing Goal rearming, steering ownership, consumer rollout,
+private storage retention and production acceptance gates remain. Receipts grow
+by at most one bounded record per distinct admitted native message; no eviction
+policy may remove evidence still required by retained recoverable native history.
+
+
+The expanded process suite repeated the earlier idle-flush timeout in two existing
+cases while the full Gateway suite was also running. Diagnostics now establish
+that native idle was observed; the outstanding wait was the subsequent service-wide
+persistence barrier. The fixture now uses the SDK's canonical per-Session
+`sessions.flush(session)` and verifies the exact expected prefix through a real
+read handle before reporting idle-flushed. No deadline or assertion is relaxed.
+This improves the specificity of the durability evidence; it does not establish
+the cause of the earlier service-wide stall or prove its production resolution.
+
+
+An admission error after native submission returns a fixed
+`ordinary_input_admission_unconfirmed` conflict, not a claim that native input
+was definitely rejected. It never exposes internal storage error text. Abort is
+checked inside the scheduled original Controller operation as well as at awaited
+boundaries; a cancelled queued microtask cannot submit later, and its rejected
+promise remains observed. These checks preserve uncertainty without creating a
+new prompt or inferring model/accounting completion.

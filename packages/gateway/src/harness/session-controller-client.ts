@@ -101,9 +101,10 @@ export class SessionControllerClient {
   }
 
   async prompt(sessionId: string, requestId: string, content: string | SessionPromptPart[],
-    mode: 'queue' | 'steer' = 'queue', signal?: AbortSignal) {
+    mode: 'queue' | 'steer' = 'queue', signal?: AbortSignal, original?:OriginalInputExecution) {
+    const admission=original===undefined?undefined:normalizeOriginalInputExecution(original);if(admission&&admission.run_id!==requestId)throw Error('ordinary_input_binding_invalid');
     return await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/prompts`, {
-      request_id: requestId, ...(typeof content === 'string' ? { text: content } : { content }), mode,
+      request_id: requestId, ...(typeof content === 'string' ? { text: content } : { content }), mode,...(admission?{ordinary_input:admission}:{}),
     }, signal)
   }
 

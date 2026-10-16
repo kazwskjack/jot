@@ -518,3 +518,16 @@ wrong lease/profile/admission without model calls. This does not enable ordinary
 HTTP claimed recovery: original Controller admission storage, factory composition,
 Host/Worker integration and production acceptance remain open. See
 [Goal continuation](docs/GOAL-CONTINUATION.md).
+
+
+## Original prompt admission milestone
+
+An optional Host now records hash-only private receipts from the actual
+Controller's final native input and gates model entry on durable admission.
+First-generation opted-in Worker/Runner/Client metadata carries only the original
+run and lease. Real Controller probes verify claim-gap deduplication, one normal
+model execution and one canonical Worker answer, without duplicate execution on
+retry/restart. The original attachment pipeline is preserved; these native cases
+use text. Cold claimed-factory integration, richer attachment acceptance, cost
+settlement, retention and rollout remain separate unfinished gates. See
+[Goal continuation](docs/GOAL-CONTINUATION.md).

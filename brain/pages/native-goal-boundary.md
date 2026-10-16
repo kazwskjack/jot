@@ -4,7 +4,7 @@ title: Keep native Goal state and continuation in DSH
 category: decision
 status: active
 created: "2026-10-16T11:44:16"
-updated: "2026-10-16T18:16:18"
+updated: "2026-10-16T18:42:53"
 ---
 
 <!-- compiled_truth -->
@@ -45,6 +45,8 @@ Installed-Controller HTTP recovery now has three real local SDK cases with origi
 Opt-in original ordinary-run recovery now connects Worker, SessionControllerClient and Runner to the observed Host. A generation>1 ordinary run uses its stored owner-bound Session and exact original message/lease; it skips create/prompt/input attachment replay/context staging. Missing original Session or mixed-version Runner interrupts without prompt fallback. Exact acknowledgements and separate Goal/ordinary execution metadata are checked. The original binding, including input content hash, is rechecked before readiness/projections and within canonical publication. Real installed-Controller testing now reclaims one original run, makes one scripted model request, preserves one original human and native usage receipt, publishes exactly one canonical answer, and does not repeat after a further poll/restart. Cold original-input recovery alongside persisted active/complete Goals is verified without implicit rearming or changing their identity/revision/phase/rounds; paused/blocked Goals refuse before Agent creation or inference and preserve the original inbox. The native Goal service resets activation on attachment, and the native round driver requires active plus armed: inbox wake does not authorize Goal resume. Explicit Goal rearming after recovered input, historical provider-cost/unknown settlement, claimed restoration, steering and production composition/rollout gates remain. GENERAL_AGENT_ORDINARY_INPUT_RECOVERY_ENABLED defaults false.
 
 普通聊天的 claimed 输入还原现在有独立的 unpublished-factory 校验层：沿原 Gateway owner/run/Session/input hash/lease，校验原消息 RPC、全消息指纹、Session createdAt 与历史 admission/configuration 指纹，再调用原生 append-only 还原算法。消息的历史受理证明必须先于中断存在，不能在恢复时根据当前日志补造。真实 Gateway/SDK 硬退出验证了落盘后发布、重复硬退出后零重复插入和错误身份/配置/admission 的拒绝，且没有模型调用。工厂还原始终不授予执行权；普通 HTTP claimed 恢复仍拒绝，尚须接入原 Controller 消息受理存储、原工厂前后配置审核与观察中的 Worker 执行，之后才能开放。普通销毁会取消 inbox，不得当作崩溃测试或复活已取消消息。
+
+普通消息的历史 admission 现在由可选 original Controller 受理观察器生成：保留官方文件收据/图像能力/附件处理，在原生 inbox inserted 时同步捕获最终消息指纹，先经原 sessions.flush 确认原生日志落盘再发布原子私有记录，原 pre-step 等待两道持久化屏障并核对最终 enter 内容。首次 Worker/Runner/Client 只在原恢复开关开启时传原 run/lease，缺 Host 不回落。每 Session incarnation/run/native ID 一条不可覆盖的 hash-only 记录，不保存正文或凭据。官方 committed/pending 去重存在 claimed 未 entered 空档；本地原受理记录在该空档返回相同 acceptance 而不再次调用 Controller。冷历史插入不能当新提交或补造受理证明。真实 Controller 已验证领取空档去重、正常一次模型执行和原 Worker 一条 canonical 回答；模型为本地脚本，当前实测为文本。原 claimed factory、附件专项、未知费用/生产组合审核和 rollout 仍未完成，默认开关保持关闭。
 
 
 ## Timeline
@@ -214,5 +216,17 @@ Opt-in original ordinary-run recovery now connects Worker, SessionControllerClie
 - time: 2026-10-16T18:16:18
   kind: decision
   summary: Require original per-message admission and composition evidence before ordinary claimed-input factory restoration
+  source: docs/GOAL-CONTINUATION.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-16T18:39:11
+  kind: decision
+  summary: Record original Controller admissions durably and preserve claim-gap deduplication without replacing native attachment or permission logic
+  source: docs/GOAL-CONTINUATION.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-16T18:42:53
+  kind: decision
+  summary: Flush the original native input before publishing its immutable admission receipt
   source: docs/GOAL-CONTINUATION.md
   affects: [native-goal-boundary]
