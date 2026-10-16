@@ -10,7 +10,7 @@ import {prepareDshPreSetupRuntime} from '../scripts/prepare-dsh-pre-setup.mjs';
 const runtime=process.env.JOT_DSH_RUNTIME_MODULES;
 async function prepareFixture(root){
  const scoped=join(root,'node_modules','@deepseek-ai');await mkdir(scoped,{recursive:true});
- const prepared=prepareDshPreSetupRuntime(join(runtime,'dsh-agent-loop'),join(scoped,'dsh-agent-loop'),{pendingInputWake:true});assert.equal(prepared.pendingInputProtocol,1);
+ const prepared=prepareDshPreSetupRuntime(join(runtime,'dsh-agent-loop'),join(scoped,'dsh-agent-loop'),{pendingInputWake:true});assert.equal(prepared.pendingInputProtocol,1);assert.equal(prepared.pendingWakeRevocationProtocol,1);
  for(const entry of await readdir(runtime,{withFileTypes:true}))if(entry.name!=='dsh-agent-loop'&&entry.isDirectory())await symlink(join(runtime,entry.name),join(scoped,entry.name),'junction');
  await symlink(join(dirname(runtime),'zod'),join(root,'node_modules','zod'),'junction');
 }
@@ -30,18 +30,22 @@ test('installed native driver consumes the existing message once and honours can
   ctx=new modules.cordis.Context();for(const name of names.filter(n=>n!=='cordis'))await ctx.plugin(modules[name].default??modules[name],name==='dsh-session-persistence-jsonl'?{root:join(root,'sessions'),compression:'none'}:{});
   let calls=0;class LocalAdapter extends modules['dsh-llm'].LlmAdapter{async *stream(){calls++;yield{type:'text-delta',index:0,text:'Existing input consumed.'};yield{type:'usage',usage:{inputTokens:5,outputTokens:1,totalTokens:6}};yield{type:'finish',reason:{kind:'stop'}};}}
   ctx.llm.registerAdapter(['local-pending'],new LocalAdapter());
-  for(const cancelled of [false,true]){
-   const handle=await ctx.agents.create({sessionId:cancelled?'cancelled-pending':'original-pending',agentOptions:{provider:'local-pending',model:'scripted'}});handles.push(handle);const agent=handle.agent;
-   const original={id:cancelled?'cancelled-input':'original-input',role:'user',source:{kind:'user',rpcId:'original-run'},content:[{type:'text',text:'Use this original input exactly once.'}]};agent.send(original,'next-turn',false);await ctx.sessionPersistence.flush(agent.session);assert.equal(calls,cancelled?1:0);
+  for(const cancelled of [false,true,'observer']){
+   const handle=await ctx.agents.create({sessionId:cancelled==='observer'?'observer-pending':cancelled?'cancelled-pending':'original-pending',agentOptions:{provider:'local-pending',model:'scripted'}});handles.push(handle);const agent=handle.agent;
+   const original={id:cancelled?'cancelled-input':'original-input',role:'user',source:{kind:'user',rpcId:'original-run'},content:[{type:'text',text:'Use this original input exactly once.'}]};agent.send(original,'next-turn',false);await ctx.sessionPersistence.flush(agent.session);assert.equal(calls,cancelled?1:0);let previousWakeToken;
    await agent.runMaintenance(async signal=>{
-    const seq=agent.session.seq;assert.equal(agent.jotPendingInputProtocol,1);assert.deepEqual(agent.jotResumePending({requestId:'original-run',messageIds:[original.id],seq}),{accepted:true,messageIds:[original.id],seq});
+    const seq=agent.session.seq;assert.equal(agent.jotPendingInputProtocol,1);const wake=agent.jotResumePending({requestId:'original-run',messageIds:[original.id],seq});previousWakeToken=wake.wakeToken;assert.equal(typeof wake.wakeToken,'symbol');assert.ok(!JSON.stringify(wake).includes('wakeToken'));assert.deepEqual(wake,{accepted:true,messageIds:[original.id],seq});
     assert.equal(agent.session.seq,seq,'latching cannot append an inbox event or new user message');assert.deepEqual(agent.inbox.nextTurn,[original]);assert.equal(calls,cancelled?1:0);
-    if(cancelled){agent.cancel({kind:'user'});assert.equal(signal.aborted,true);}
+    if(cancelled){if(cancelled==='observer'){assert.equal(agent.jotPendingWakeRevocationProtocol,1);assert.equal(agent.jotRevokePendingWake(Symbol('forged')),false);assert.equal(agent.jotRevokePendingWake({requestId:'original-run',messageIds:[original.id],seq}),false);assert.equal(agent.jotRevokePendingWake(wake.wakeToken),true);assert.equal(agent.jotRevokePendingWake(wake.wakeToken),false);}agent.cancel({kind:cancelled==='observer'?'parent':'user'},cancelled==='observer'?{keepInbox:true}:undefined);assert.equal(signal.aborted,true);}
    });
    await agent.whenIdle();await ctx.sessionPersistence.flush(agent.session);const events=(await ctx.sessionQuery.readSession(agent.id)).events;
    assert.equal(events.filter(event=>event.type==='user/message'&&event.data.id===original.id).length,cancelled?0:1);assert.equal(events.filter(event=>event.type==='user/message').length,cancelled?0:1);
-   assert.equal(calls,1);assert.equal(agent.inbox.hasPending,false);
+   assert.equal(calls,1);assert.equal(agent.inbox.hasPending,cancelled==='observer');if(cancelled==='observer')await agent.runMaintenance(async()=>{const request={requestId:'original-run',messageIds:[original.id],seq:agent.session.seq};const wake=agent.jotResumePending(request);assert.equal(agent.jotRevokePendingWake(previousWakeToken),false,'an earlier maintenance attempt must not revoke a later identical request');assert.equal(agent.jotRevokePendingWake(wake.wakeToken),true);});
   }
+  const other=await ctx.agents.create({sessionId:'competing-pending',agentOptions:{provider:'local-pending',model:'scripted'}});handles.push(other);const agent=other.agent,one={id:'first-owned',role:'user',source:{kind:'user',rpcId:'first-run'},content:[{type:'text',text:'First authorized synthetic input'}]},two={id:'second-owned',role:'user',source:{kind:'user',rpcId:'second-run'},content:[{type:'text',text:'Second independent synthetic input'}]};
+  agent.send(one,'next-turn',false);await agent.runMaintenance(async()=>{const request={requestId:'first-run',messageIds:[one.id],seq:agent.session.seq};const wake=agent.jotResumePending(request);agent.followup(two);assert.equal(agent.jotRevokePendingWake(wake.wakeToken),false,'an old observer cannot revoke a subsequent independent native wake');});
+  await agent.whenIdle();assert.equal(calls,3);const users=(await ctx.sessionQuery.readSession(agent.id)).events.filter(e=>e.type==='user/message');assert.deepEqual(users.map(e=>e.data.id),[one.id,two.id]);assert.equal(agent.jotRevokePendingWake({requestId:'first-run',messageIds:[one.id],seq:0}),false);
+
  }finally{
   for(const handle of handles)await handle.dispose();if(ctx)await ctx.fiber.dispose();
   await cleanupFixture(base,root);

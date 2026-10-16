@@ -44,7 +44,7 @@ export async function prepareOrdinaryInputResume({binding,controller,agents,brid
  const seq=agent?.session?.seq;
  const check=()=>{
   active();if(resolved?.error||!agent||agent.id!==owned.sessionRef||agent.session?.id!==owned.sessionRef||agents.get(owned.sessionRef)!==agent||agent.status!=='idle'||!Number.isSafeInteger(seq)||agent.session.seq!==seq
-   ||agent.jotPendingInputProtocol!==1||typeof agent.jotResumePending!=='function'||typeof agent.runMaintenance!=='function'||!Array.isArray(agent.inbox?.nextStep)||!Array.isArray(agent.inbox?.nextTurn)
+   ||agent.jotPendingInputProtocol!==1||agent.jotPendingWakeRevocationProtocol!==1||typeof agent.jotResumePending!=='function'||typeof agent.jotRevokePendingWake!=='function'||typeof agent.runMaintenance!=='function'||!Array.isArray(agent.inbox?.nextStep)||!Array.isArray(agent.inbox?.nextTurn)
    ||!isDeepStrictEqual(agent.inbox.nextStep,inbox['next-step'])||!isDeepStrictEqual(agent.inbox.nextTurn,inbox['next-turn']))fail();
  };
  const recheck=async()=>{check();if(!isDeepStrictEqual(await readAuthority(),authority)||await composition('bound',agent,projection,authority)!==fingerprint)fail();check();};

@@ -4,7 +4,7 @@ title: Keep native Goal state and continuation in DSH
 category: decision
 status: active
 created: "2026-10-16T11:44:16"
-updated: "2026-10-16T17:04:42"
+updated: "2026-10-16T17:12:45"
 ---
 
 <!-- compiled_truth -->
@@ -35,6 +35,8 @@ Ordinary original-input recovery now has a read-only internal product binding en
 The locked upstream Controller cannot wake an already accepted pending RPC, and its driver wake is private. An explicit optional Jot compatibility transform now adds an exact-sequence/exact-pending-ID/exact-human-RPC wake capability behind original native maintenance, without inbox mutation or a new prompt. It uses the native driver latch and honours native cancellation. The prepared package must retain the complete audited setup hooks and exact pinned upstream bytes; partial/modified packages are refused and the default package preparation remains unchanged. This is a Jot extension, not an upstream API. Real local SDK tests cover attached-input consumption once and cancellation before execution; cold original-run recovery, Host/Runner integration, composition/permission/accounting and production acceptance remain incomplete. No installed live runtime is modified or feature enabled by the transform.
 
 Original-input resume preflight now joins original product binding to exact cold native pending human RPCs before Agent resolution. Clone/freeze native projection and history before asynchronous checks: a shared mutable projection otherwise allowed changed content to replace verified input. A trusted actual observer assertion and cold/bound historical-composition audit with an unchanged fingerprint are mandatory, with no permissive default; repeated checks retain original lineage/lease and unchanged native sequence/inbox. This packaged preparer does not open a stream, restore claims, grant execution or wake a driver. The real HTTP Host/Runner, cumulative usage and full recovery/deployment acceptance remain incomplete.
+
+Preserving inbox input does not revoke an existing native maintenance wake: parent cancel with keepInbox can still start that driver. The optional compatibility package now supplies separate pending-wake revocation protocol 1. Each latch returns a fresh non-enumerable readonly process-local Symbol token; only that token can revoke its owned maintenance wake, without clearing input. Same IDs/RPC/sequence cannot identify a later wake attempt. A subsequent independent native wake invalidates old ownership, and stale/forged tokens cannot cancel it. Real SDK regressions first reproduced both continued execution after parent cancellation and old-request revocation of a later identical wake, then passed with token ownership. Preflight requires both wake and revocation capabilities. This is local native cancellation infrastructure, not completed HTTP Host/Runner/accounting recovery or production enablement.
 
 
 ## Timeline
@@ -168,5 +170,11 @@ Original-input resume preflight now joins original product binding to exact cold
 - time: 2026-10-16T17:04:42
   kind: decision
   summary: Freeze original pending input across audited recovery preflight without granting execution
+  source: docs/GOAL-CONTINUATION.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-16T17:12:45
+  kind: decision
+  summary: Revoke only the exact local pending wake while preserving inbox and later execution ownership
   source: docs/GOAL-CONTINUATION.md
   affects: [native-goal-boundary]

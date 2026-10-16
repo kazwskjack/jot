@@ -428,3 +428,35 @@ subsequent steps/tools/models while preserving original usage/publication.
 Claim restoration and complete process/accounting/deployment acceptance remain
 separate requirements. The helper is packaged/exported for that integration;
 it is not wired to default HTTP routes or enabled by a preset change.
+
+
+### Revoking only the observer's queued wake
+
+A native maintenance boundary needs separate wake revocation. The installed SDK
+retains a previously latched wake when `cancel({kind: 'parent'}, {keepInbox: true})`
+aborts maintenance; leaving maintenance can still start the original driver.
+A real SDK regression reproduced a user-message commit despite the expected stop.
+Keeping pending input and revoking a queued wake are separate operations.
+
+The optional package now also declares `jotPendingWakeRevocationProtocol: 1` and
+`jotRevokePendingWake(wakeToken)`. Each successful `jotResumePending` produces a
+fresh process-local Symbol token. It is a non-enumerable, readonly property of
+the local result and is omitted from JSON; the public metadata receipt is not
+revocation authority. A trusted Host must retain that local token and revoke
+its wake before cancelling maintenance with the parent cause and keepInbox.
+Revocation clears only that owned native latch; it preserves all input.
+
+The token is specific to one maintenance attempt. Even another attempt with the
+same original message IDs/RPC and unchanged Session sequence gets a different
+token. A subsequent independent native wake invalidates the earlier token rather
+than allowing an old observer to cancel it. Forged, stale, repeated and already
+running/idle revocations return false without cancelling another execution.
+There is no persisted token, new planner or reusable permission grant.
+
+Installed-SDK regressions cover retained input with zero inference after owned
+wake revocation, old-token refusal in a later identical maintenance attempt,
+and preservation of a subsequent independently authorized native wake. Ordinary
+resume preflight now requires both capability protocols and both methods.
+The preparer still does not execute or revoke by itself. HTTP Host/Runner wiring,
+original cumulative usage and deployed acceptance remain incomplete; no default
+runtime is modified by these tests or the optional preparation transform.
