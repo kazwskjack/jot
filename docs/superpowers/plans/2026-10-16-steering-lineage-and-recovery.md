@@ -1054,3 +1054,83 @@ the runtime variable had 24 environment skips and is not the final runtime
 acceptance. No production flags or deployment changed. Same-message final
 publication, verified file integrity, delivery reconciliation, crash/rollback,
 real-provider/money and full inventory gates remain required.
+
+## Atomic ordinary final publication core
+
+`OrdinaryFinalPublisher` now consumes the complete bound proof twice, around
+output preparation, then compares the complete original product source under
+one immediate SQLite transaction. It reconciles exact pending command messages
+and applied states, creates a missing canonical answer or updates the exact
+existing message ID with a row CAS, links verified output versions and writes a
+new provenance-bearing candidate. Earlier candidates, unknown statuses, native
+logs, execution leases, run outcome and monetary state are not rewritten.
+Reasoning keeps provider exposure; canonical updates use the existing complete
+message event/upsert contract. All events precede the post-source digest and
+immutable final receipt. A retry verifies receipt/post-state without another
+Host call; message deletion retains the receipt so it cannot resurrect output.
+Conversation/run deletion keeps the existing private-data cascade.
+
+The dedicated output verifier hashes bounded actual bytes via a read descriptor,
+compares size/hash/file identity before and after, and rejects symlinks/junctions
+through the entire path. Catalog ownership/readiness/path/version checks still
+use the existing resolver before and in the publication transaction. Temporary
+artifact retention leases are separate from Worker execution leases and are
+released on every normal/refused path. Text and a synthetic PNG are tested
+alongside corruption, missing/foreign/late-mutated files and an actual junction.
+A failed output check does not publish a text-only fallback. Candidate evidence
+retains the repository's string-reference format; detailed provenance is in
+hash-only receipt metadata rather than native tool/answer bodies.
+
+Eleven targeted publication regressions pass, including two simultaneous
+repairs, reopened DB, rollback after an event failure, cancellation/newer work,
+source/second-proof mutation, deletion before/after first recovery, old canonical
+identity and untouched unknown candidate/run state. Two actual pinned HTTP Host
+crash cases pass (29.32 seconds): native answer durably exists but product output
+is missing, and the same case with an obsolete canonical answer. Both recover
+through the real Client/Adapter/product source and retain two original model
+calls, no cold Agent creation, unchanged raw/admission bytes, one answer and one
+receipt; reopened receipt validation never contacts Host.
+
+This core is not wired into a production/automatic consumer. It explicitly
+refuses channel-bound or previously externally delivered runs until dedicated
+channel correction/hold reconciliation is implemented; this is a remaining
+implementation gate, not a replacement for full channel capability. No external
+send or new rollout flag is enabled. Existing run outcome is preserved because
+publication evidence alone must not erase unknown execution/provider accounting.
+Full Goal/business/accounting/deployment gates remain. Before automatic rollout,
+add reload/stream ordering acceptance for repaired supplement timestamps and an
+updated older canonical message, in addition to the remaining full matrix.
+
+The initial evidence-format regression failed on object-valued evidence refs;
+its correction keeps string refs like existing candidates. That default-sandbox
+run also lacked junction permission; the final authorized Windows-user focused
+run executed the junction check with no skip and passed. Full-suite outcomes
+are appended only after their original processes finish.
+
+Additional concurrent acceptance uses two independent Node processes and SQLite
+connections, synchronized after both original source snapshots. Both terminate
+successfully with one canonical answer, one immutable final receipt, exactly one
+reconciliation event and the complete supplemental user set. The focused suite
+is now 12/12, including the real junction check with no skip. The first full
+Gateway suite (before this extra process case) passed 1208 total/1202 passed/
+six existing skips/zero failures (139.61 seconds); a final full suite including
+the extra process case is running separately. Implementation/SDK sources remain
+unchanged during those verification runs. Root 32/32, public regressions 6/6,
+Windows root build and Adapter 491/491 already pass; final SDK and Gateway
+outcomes are recorded after their original processes finish.
+
+Final Gateway suite including the independent-process race: 1209 total,
+1203 passed, six existing skips, zero failures (140.71 seconds); final Windows
+Gateway build passed. Adapter 491/491, root 32/32, public regressions 6/6,
+Windows root build, BRAIN links and 725-file working-tree review pass. Only the
+original 39-case actual Host SDK process remains in flight; its last case must
+terminate before the final SDK acceptance claim or commit.
+
+The original complete actual pinned Host SDK run finished 39/39, zero failures
+or skips (578.60 seconds), including both missing-final and obsolete-canonical
+publication after hard Host death. Model calls, native/admission bytes, original
+run outcome and reopened-receipt no-contact checks pass. This is local scripted
+provider evidence, not production or real-provider monetary acceptance. The core
+remains unwired to automatic consumption; full channel correction/hold,
+reload/stream ordering, run/business/accounting reconciliation, rolling upgrade
+and complete deployment/capability acceptance remain required.

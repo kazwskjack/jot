@@ -339,3 +339,11 @@ complete product-source binding and retain unchanged logs/model calls. Product
 runtime cursor and DSH controller Session identities are independently checked
 using the existing Worker mapping. No canonical publisher is enabled; output
 integrity, atomic same-message recovery and deployment gates remain open.
+
+The atomic final-publication core now repairs lost supplemental user messages
+and one canonical answer together, preserving its existing ID when present.
+It validates actual output bytes, retains old/unknown candidate provenance and
+stores an immutable post-state receipt; repeated/reopened recovery does not
+replay native work or resurrect deleted output. Two actual Host crash cases
+pass. Automatic production consumption, channel correction/holds, reload
+ordering and the wider accounting/deployment/full-capability gates remain.
