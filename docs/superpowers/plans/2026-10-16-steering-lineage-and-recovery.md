@@ -1268,3 +1268,49 @@ policy 14/14, root 32/32, public regressions 6/6, Windows root build, BRAIN link
 and 728-file working-tree public review pass. No current runtime imports the
 new pure policy; no Adapter/Host rerun or channel end-to-end claim is made.
 Real snapshot/transactional queue/send-guard integration remains required.
+
+### Real channel snapshot prerequisite
+
+`channels/historical-final-snapshot.ts` reads original conversation bindings,
+all delivery rows for the run, owner-binding facts and effect-linked metadata
+in one SQLite transaction. Its private digest has `execution_authorized: false`.
+It does not install schemas, write messages, call providers or read native logs.
+
+Only original conversation targets and already existing run effects enter the
+snapshot. A separately verified owner recipient does not add a target. Effects
+without a current conversation binding retain state but gain no broad reply
+authority. Revoked or foreign verified bindings cannot authorize the original
+target. These are current facts, not substitutes for frozen task/reply grants
+or send-time authorization.
+
+The digest covers complete effect rows, run/conversation/message facts,
+binding revisions and effect-related table schemas/row hashes. Effect metadata
+is discovered through effect columns and foreign keys, including future grant
+tables. Metadata protects an effect from casual superseding. Shared digest
+membership and peer effect/receipt hashes are included across runs. Private
+recipient/body data must not enter public events or documentation.
+
+`assertHistoricalDeliverySnapshot` requires the caller's transaction and
+re-reads actual state against the expected digest. Changed receipts,
+reservations, bindings, messages or shared digest peers refuse the comparison.
+It accepts no caller-supplied replacement recipient or effect list. The native
+product-source protocol is unchanged.
+
+Eight focused cases cover read-only repeatability, scope/archive refusal,
+no recipient expansion, revoked/foreign bindings, retained unknown sends,
+transactional invalidation, future metadata and shared digest peers. A
+disk-backed case changes a real effect through a second SQLite connection
+before publication and verifies stale comparison refusal.
+
+Still required: immutable final intents and mutable delivery state committed
+with publication; guarded queue reuse/superseding/corrections; original
+task/reply/digest permissions; send-time checks; held-outcome reconciliation;
+restart/concurrency and provider-fixture acceptance. No publisher or automatic
+consumer uses this module yet. Channel and production gates remain unchanged.
+
+Final snapshot-stage verification: focused policy/snapshot tests 22/22, Gateway
+1233 total / 1227 passed / six existing skips / zero failures (137.73 seconds),
+Windows Gateway build/typecheck, root 32/32, Windows root build, public
+regressions 6/6 and 730-file working-tree public review passed. These tests do
+not establish real-provider or production channel acceptance. Adapter/Host
+runtime paths are unchanged. Atomic intent/outbox and send guards remain open.

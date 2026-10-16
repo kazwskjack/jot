@@ -361,3 +361,12 @@ revocation without clearing old provider facts. It returns advice only and is
 not wired to DB/queue/provider actions. Frozen recipient/effect capture,
 transactional intent/outbox changes, send-time authorization and held-result
 reconciliation remain required before the existing channel gate can be lifted.
+
+Real historical channel snapshots now observe original bindings, all run
+effects, owner-binding revisions and effect-linked metadata without writes.
+Shared digest peer receipts and future effect grants participate in a
+transactional comparison. Extra owner bindings do not add targets; revoked or
+foreign bindings do not grant reply authority. This private reader is not yet
+wired to publication or provider sends. Atomic intents/outbox, send-time checks,
+held reconciliation and automatic consumption remain required. Channel and
+production gates remain unchanged.
