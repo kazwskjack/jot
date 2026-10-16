@@ -1,3 +1,4 @@
+import {verifyNativeInputAttachments} from './native-input-attachments.js';
 import {AsyncLocalStorage} from 'node:async_hooks';
 import {isDeepStrictEqual} from 'node:util';
 import {normalizeHostExecutionLease} from './workbench.js';
@@ -20,6 +21,7 @@ export function createOrdinaryClaimedSessionComposer({ctx,bridge,Session,agents,
  const storage=new AsyncLocalStorage(),shutdown=new AbortController(),operations=new Set(),pending=new Set(),busy=new Set();let disposed=false,cleaned=false,disposal;
  const authority=async record=>{record.signal.throwIfAborted();if(disposed||record.closed)fail();const current=await wait(()=>readOrdinaryInputAuthority({bridge,binding:record.binding,signal:record.signal}),record.signal);if(!isDeepStrictEqual(current,record.authority))fail();};
  const check=(record,agent)=>{record.signal.throwIfAborted();if(disposed||record.closed||agent?.id!==record.binding.sessionRef||agent.session?.id!==agent.id||agent.status!=='idle'||agents.get(agent.id)!==undefined||sessions.get(agent.id)!==undefined||!ordinaryPresets.has(agent.session.header?.agentPreset)||agent.session.header.parentSession!==undefined||agent.session.header.origin==='subagent')fail();if(record.session&&(agent.session!==record.session||!isDeepStrictEqual(agent.session.header,record.header)))fail();const goal=projections.snapshot(agent.session,['goal'])?.values?.goal;if(goal!=null&&(!valid(goal.goal?.id)||!['active','complete'].includes(goal.goal.phase)))fail();};
+ const verifyAttachments=(record,messages)=>wait(()=>verifyNativeInputAttachments(messages,{attachments:typeof ctx.get==='function'?ctx.get('attachments'):ctx.attachments,signal:record.signal}),record.signal);
  const inbox=agent=>({'next-step':structuredClone(agent.inbox.nextStep),'next-turn':structuredClone(agent.inbox.nextTurn)});
  const removers=[];
  removers.push(ctx.on('agent/before-setup',async({agent,source,signal:nativeSignal,bindAbortSignal})=>{
@@ -28,12 +30,12 @@ export function createOrdinaryClaimedSessionComposer({ctx,bridge,Session,agents,
   const setup=createOrdinaryClaimedInputRecoverySetup({binding:record.binding,bridge,Session,agents,sessions,query,projections,validateLog,admissions,ordinaryPresets,signal:record.signal,profile:{read:async request=>{const current=await wait(()=>profile.read(request),record.signal);if(!isDeepStrictEqual(current,record.profile))fail();return current;}}});
   await wait(()=>setup(agent.ctx,agent),record.signal);check(record,agent);const report=setup.resultFor(agent),items=inbox(agent),messages=[...items['next-step'],...items['next-turn']];
   if(report?.execution_authorized!==false||report.state!=='restored'||report.restored<1||report.goal_owned!==0||!messages.length||messages.some(m=>m?.role!=='user'||m.source?.kind!=='user'||m.source.rpcId!==record.binding.runId)||new Set(messages.map(m=>m.id)).size!==messages.length)fail();
-  record.agent=agent;record.pending=freeze(items);record.report=report;record.seq=agent.session.seq;record.prefix=freeze(structuredClone(agent.session.snapshotEvents(0)));record.observed=true;
+  await verifyAttachments(record,messages);check(record,agent);record.agent=agent;record.pending=freeze(items);record.report=report;record.seq=agent.session.seq;record.prefix=freeze(structuredClone(agent.session.snapshotEvents(0)));record.observed=true;
  },{prepend:true}));
  removers.push(ctx.on('agent/after-setup',async({agent,source,signal:nativeSignal})=>{
   const record=storage.getStore();if(!record)return;if(!record.observed||record.finalized||record.agent!==agent||source!=='resume')fail();record.signal=AbortSignal.any([record.signal,nativeSignal]);check(record,agent);await authority(record);check(record,agent);
   const current=await wait(()=>profile.read({agent,presetId:agent.session.header.agentPreset,phase:'bound',signal:record.signal}),record.signal);check(record,agent);
-  const events=agent.session.snapshotEvents(0);if(!isDeepStrictEqual(current,record.profile)||!isDeepStrictEqual(inbox(agent),record.pending)||!isDeepStrictEqual(events.slice(0,record.seq),record.prefix)||events.slice(record.seq).some(e=>['turn/start','step/start','user/message','request/header','tool/call'].includes(e.type)))fail();await authority(record);check(record,agent);record.finalized=true;
+  const events=agent.session.snapshotEvents(0);if(!isDeepStrictEqual(current,record.profile)||!isDeepStrictEqual(inbox(agent),record.pending)||!isDeepStrictEqual(events.slice(0,record.seq),record.prefix)||events.slice(record.seq).some(e=>['turn/start','step/start','user/message','request/header','tool/call'].includes(e.type)))fail();await verifyAttachments(record,[...record.pending['next-step'],...record.pending['next-turn']]);await authority(record);check(record,agent);record.finalized=true;
  },{prepend:true}));
  const cleanup=()=>{if(disposed&&!operations.size&&!cleaned){cleaned=true;removers.forEach(remove=>remove());storage.disable();}};
  return {

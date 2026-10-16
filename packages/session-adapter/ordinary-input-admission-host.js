@@ -1,3 +1,4 @@
+import {verifyNativeInputAttachments} from './native-input-attachments.js';
 import {AsyncLocalStorage} from 'node:async_hooks';import {createHash,randomUUID} from 'node:crypto';import {isDeepStrictEqual} from 'node:util';
 import {normalizeHostExecutionLease} from './workbench.js';import {readOrdinaryInputAuthority} from './ordinary-input-resume.js';
 const valid=value=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(value);
@@ -55,6 +56,7 @@ export function createOrdinaryInputAdmissionHost({ctx,agents,bridge,profile,admi
     const record={binding:owned,agent,session,signal:AbortSignal.any([signal,shutdown.signal]),entry:freeze({execution_lease:owned.executionLease,observer_id:randomUUID()}),observed:new Set([message.id]),native:message,message:freeze(structuredClone(message)),persisting:Promise.resolve(),closed:true};
     await audit(record);idle();const row=await wait(admissions.readReplayCandidate({session,runId:owned.runId,messageId:message.id,signal:record.signal}),record.signal);idle();if(!isDeepStrictEqual(row,receipt(record,record.message)))fail();await verify(record);idle();prepared.push(record);
    }
+   const attachmentSignal=AbortSignal.any([signal,shutdown.signal]);await wait(verifyNativeInputAttachments(prepared.map(record=>record.message),{attachments:typeof ctx.get==='function'?ctx.get('attachments'):ctx.attachments,signal:attachmentSignal}),attachmentSignal);idle();for(const record of prepared){await verify(record);idle();}
    // The old execution is idle and the exact original messages have no entry
    // reservation. Rebind only their local guards to the currently proven lease.
    const prior=records.get(agent)??new Set();for(const record of [...prior])if(record.binding.runId===owned.runId)prior.delete(record);for(const record of prepared)prior.add(record);records.set(agent,prior);

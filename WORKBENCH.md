@@ -558,3 +558,15 @@ record prerequisites; their cold-wiring gap is now closed locally. Production
 composition/attachment acceptance, steering, unknown cost reconciliation and
 rollout remain open and defaults remain disabled. See
 [Goal continuation](docs/GOAL-CONTINUATION.md).
+
+
+## Original attachment integrity milestone
+
+Cold claimed-factory publication and pending-input adoption now verify original
+image/file bytes through the native attachment store before continuation.
+Text-only input does not read binaries; this adds no vision call or upload.
+Local real-SDK cases cover retained original file/image references, no file
+restaging, and refusal of missing files, missing images or corrupted files.
+Real-provider visual quality, additional document formats, monetary settlement
+and production rollout remain unverified and disabled. See
+[Goal continuation](docs/GOAL-CONTINUATION.md).

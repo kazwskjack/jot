@@ -935,3 +935,68 @@ Final local verification for this connection, including the Session/header
 fence, passed all 14 real HTTP/SDK cases in one run with no skips, 435 adapter
 tests, 32 root tests and the Windows build. Earlier diagnostic failures above
 remain historical evidence rather than being relabelled as passes.
+
+
+## Original attachment recovery integrity
+
+Original image/file references must remain available and intact when an input
+is recovered. A reference hash in the admission proves which message was
+admitted; it does not prove its binary object still exists. Local testing of
+the earlier source confirmed that a removed native file could still reach the
+scripted model and complete using the retained prompt text. Retained text alone
+must not certify that the full original attachment is usable.
+
+`verifyNativeInputAttachments` now reads **only** the unentered original input's
+image/file references through the installed attachment store, verifies their
+content-addressed SHA-256 and byte bounds, and returns metadata-only success.
+File bytes stream without aggregation and close immediately on exceeding the
+original reference size. Images use the native verified reader and are hashed
+as stored normalized objects. Missing readers, invalid references, missing or
+changed bytes and cancellation refuse; storage paths/error text are not exposed.
+This performs no vision inference, upload, receipt re-admission or historical
+image rescan. Text-only input performs no binary read.
+
+The scoped claimed factory verifies before and after original preset setup,
+before its original publication barrier. The mandatory original-input admission
+gate also verifies attachments before adopting pending/recovered messages, then
+rechecks authority/profile/idle state before rebinding local guards. A file
+changing during setup therefore cannot publish a recovered Agent; a failed
+pending adoption does not wake the existing Agent or rewrite its admission.
+Normal native permission, model-image capability and original upload/receipt
+handling remain unchanged. The continuity audit must cover this helper and the
+actual native attachment-store implementation as part of the reviewed source
+composition; a current hash by itself is insufficient.
+
+Real local SDK cases create an owned Gateway upload with its original digest,
+resolve it through the original attachment resolver, and use the original Runner
+to stage a file or submit an image through actual Controller admission. The
+fixture manually owns the initial Gateway lease; it is not a whole-process
+initial-Worker crash test. It then kills the Host at the actual claim boundary
+and uses the real recovering Worker. The admitted native reference is unchanged
+after restart, its stored bytes verify, the original Gateway artifact remains
+unchanged, no Host file restaging occurs, and only one canonical answer is
+published. The image case uses the actual native normalization and provider
+Files/Message transport against a scripted local endpoint. It does not measure
+real-model visual understanding or real provider billing.
+
+The paired fault cases remove a native file, remove an image, or corrupt a native
+file **only after** checking the resolved object remains inside the owned
+synthetic test root. Each mutation has an explicit absence/digest assertion.
+They must interrupt with no newly published Agent, model request, canonical
+answer or entry reservation, while retaining the exact original admission.
+An earlier attempt did not actually apply its deletion and is excluded as fault
+evidence. The corrected test against the previous source reproduced the bug;
+the fixed source passed all five attachment cases together. An initially invalid
+PNG fixture was also rejected by native validation and replaced with a generated
+checksummed synthetic PNG; native image validation was not relaxed.
+
+This closes the local basic file/PNG transport and recovery-integrity cases.
+Other formats, large/complex documents, steering, production composition review,
+real-provider semantics, unknown cost reconciliation, retention/restore policy
+and deployment acceptance remain separate requirements. No recovery/Goal
+production switch is enabled.
+
+Final verification including both recovery gates passed 19/19 real local SDK
+cases in one run with no skips, 441 adapter tests, 32 root tests and the
+Windows build. The real providers remain scripted; no production enablement
+or monetary/visual-quality acceptance is implied.

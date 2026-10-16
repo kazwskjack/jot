@@ -43,3 +43,9 @@ test('factory cancellation releases caller and keeps a fence on late original se
 test('original setup cannot replace the restored Session instance or its header before publication',async()=>{
  for(const kind of ['session','header']){const f=composition(),composer=create(f.options);await assert.rejects(composer.withResolution({binding:f.options.binding,signal:f.options.signal},()=>f.resolve(()=>{if(kind==='session')f.agent.session={...f.agent.session};else f.agent.session.header.createdAt++;})),undefined,kind);assert.equal(f.options.agents.get('session-a'),undefined);await composer.dispose();}
 });
+
+
+test('binary changes during original preset setup prevent factory publication',async()=>{
+ const f=composition(),data=Buffer.from('original attachment bytes'),ref={attachmentId:'sha256:'+createHash('sha256').update(data).digest('hex'),bytes:data.length};f.message.content.push({type:'file',attachment:ref});f.admission.native_message_sha256=createHash('sha256').update(canonical(f.message)).digest('hex');let reads=0;f.options.ctx.attachments={async *readFileStream(){reads++;yield data;}};
+ const composer=create(f.options);await assert.rejects(composer.withResolution({binding:f.options.binding,signal:f.options.signal},()=>f.resolve(()=>{data[0]^=1;})),/attachments_unconfirmed/);assert.equal(reads,2);assert.equal(f.options.agents.get('session-a'),undefined);await composer.dispose();
+});
