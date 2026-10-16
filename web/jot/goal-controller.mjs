@@ -28,7 +28,7 @@ export class ConversationGoalController {
  }
  observeRun(run){
   if(!run||run.conversation_id!==this.id||typeof run.run_id!=='string'||typeof run.goal_control_id!=='string'||!/^goal-control-[A-Za-z0-9-]{1,128}$/.test(run.goal_control_id)||!['queued','starting','running','waiting_user','waiting_approval','cancelling','succeeded','partial','failed','cancelled','interrupted'].includes(run.status))return;
-  const value={accepted:true,control_id:run.goal_control_id,run_id:run.run_id,conversation_id:this.id,status:run.status};
+  const value={accepted:true,control_id:run.goal_control_id,run_id:run.run_id,conversation_id:this.id,status:run.status,...(typeof run.error_code==='string'?{error_code:run.error_code}:{})};
   if(JSON.stringify(this.execution)!==JSON.stringify(value)){this.execution=value;this.changed();}
  }
  async control(action){
@@ -76,4 +76,9 @@ export function goalResumeHint(readiness){
 export function latestGoalRun(runs,conversationId){
  const candidates=runs.filter(run=>run.conversation_id===conversationId&&typeof run.goal_control_id==='string');
  return candidates.find(run=>['queued','starting','running','waiting_user','waiting_approval','cancelling'].includes(run.status))??candidates.sort((a,b)=>String(b.created_at??'').localeCompare(String(a.created_at??''))||String(b.run_id).localeCompare(String(a.run_id)))[0];
+}
+
+export function goalExecutionHint(execution){
+ if(!execution||!['interrupted','failed'].includes(execution.status))return '';
+ return ({GOAL_CONTEXT_RECOVERY_REQUIRED:'本次未启动：会话有待恢复内容，目标已保留。',GOAL_REVISION_CHANGED:'本次未启动：目标已变化，请刷新后确认。',GOAL_NOT_RESUMABLE:'本次未启动：当前目标暂不能继续。',GOAL_RESUME_NOT_APPLIED:'本次未启动，目标已保留，请核对后重试。'}[execution.error_code])??'续跑未完成，请核对执行记录后重试。';
 }

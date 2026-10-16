@@ -11,6 +11,10 @@ export function openProductDatabase(path: string): DatabaseSync {
   const db = new DatabaseSync(path);
   db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=75; PRAGMA foreign_keys=ON;');
   db.exec(readFileSync(schemaUrl, 'utf8'));
+  ensureColumn(db,'ga_conversation_goal_controls','dispatch_observer_id','TEXT');
+  db.exec(`CREATE TRIGGER IF NOT EXISTS ga_goal_control_observer BEFORE UPDATE ON ga_conversation_goal_controls
+    WHEN OLD.state<>'queued' AND NEW.dispatch_observer_id IS NOT OLD.dispatch_observer_id
+    BEGIN SELECT RAISE(ABORT,'goal_control_observer_immutable'); END;`);
   installSessionCheckpoints(db);
   installTaskWaitInteractions(db);
   ensureColumn(db, 'ga_conversations', 'project_id', 'TEXT');

@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {ConversationGoalController,goalPresentation,goalPrompt,goalControlError,latestGoalRun} from './goal-controller.mjs';
+import {ConversationGoalController,goalPresentation,goalPrompt,goalControlError,latestGoalRun,goalExecutionHint} from './goal-controller.mjs';
 const view=(revision=1,phase='active',activation='armed')=>({goal:{id:'goal-1',revision,objective:'Collect source-backed evidence',phase,activation,roundsStarted:2,maxGoalRounds:Number.MAX_SAFE_INTEGER}});
 test('ordinary Goal reads address only the selected conversation and preserve unavailable state',async()=>{
  const calls=[],c=new ConversationGoalController('conversation /1',{request:async(...args)=>{calls.push(args);return view();}});
@@ -73,4 +73,8 @@ test('continuation display selects this conversation active control before a new
  const active={conversation_id:'ordinary',run_id:'run-a',goal_control_id:'goal-control-a',status:'queued',created_at:'2026-01-01'},finished={...active,run_id:'run-b',status:'succeeded',created_at:'2026-01-02'};
  assert.equal(latestGoalRun([{...active,conversation_id:'foreign'},finished,active],'ordinary'),active);
  assert.equal(latestGoalRun([{...active,status:'failed'},finished],'ordinary'),finished);assert.equal(latestGoalRun([active],'foreign'),undefined);
+});
+
+test('confirmed refusal exposes a fixed user-readable reason without raw transport details',()=>{
+ const c=new ConversationGoalController('ordinary',{request:async()=>({goal:null})});c.observeRun({run_id:'resume-failed',conversation_id:'ordinary',goal_control_id:'goal-control-fixture',status:'interrupted',error_code:'GOAL_CONTEXT_RECOVERY_REQUIRED'});assert.equal(c.execution.error_code,'GOAL_CONTEXT_RECOVERY_REQUIRED');assert.equal(goalExecutionHint(c.execution),'本次未启动：会话有待恢复内容，目标已保留。');assert.equal(goalExecutionHint({...c.execution,error_code:'secret transport details'}),'续跑未完成，请核对执行记录后重试。');
 });

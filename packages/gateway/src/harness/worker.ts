@@ -8,7 +8,7 @@ import type { JotProjection } from './session-event-projector.ts';
 import type { AttachmentResolver, ResolvedAttachment } from '../artifacts/resolver.ts';
 import { withImmediateTransaction } from '../db/database.ts';
 import type {SessionCheckpoint} from './session-checkpoints.ts';
-import {ConversationGoalControls} from '../conversations/goal-controls.ts';
+import {ConversationGoalControls,validateGoalControlRejection} from '../conversations/goal-controls.ts';
 
 export interface DshRunResult {
   observed: boolean;
@@ -170,10 +170,13 @@ export class HarnessWorker {
       }else result=await this.runner.run(runInput);
     } catch (error) {
       if (this.cancelling(lease.run_id)) return { run_id: lease.run_id, runtime_status: 'cancel_requested' };
-      const reasonCode = typeof error === 'object' && error !== null
+      let reasonCode = typeof error === 'object' && error !== null
         && 'reasonCode' in error && typeof error.reasonCode === 'string'
         && /^DSH_(IMAGE_[A-Z0-9_]+|IMAGES_TOO_LARGE|TOO_MANY_IMAGES|MODEL_UNAVAILABLE|SESSION_NOT_FOUND|PROMPT_REJECTED)$/.test(error.reasonCode)
         ? error.reasonCode : 'DSH_NO_RUNTIME_OUTCOME';
+      if(goalControl){
+        try{const row=ConversationGoalControls.assertExecution(this.db,goalControl.control_id,{owner:lease.owner,generation:lease.generation});if(row.state==='rejected')reasonCode=validateGoalControlRejection(JSON.parse(row.receipt_json!)).reason_code;}catch{}
+      }
       this.coordinator.interruptWithoutRuntime(lease, reasonCode);
       return { run_id: lease.run_id, runtime_status: 'harness_failed' };
     } finally {

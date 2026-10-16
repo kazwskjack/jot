@@ -1,0 +1,11 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {DatabaseSync} from 'node:sqlite';import {readFileSync,mkdtempSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';import {openProductDatabase} from '../../src/db/database.ts';
+test('observer migration preserves legacy uncertain control identity without granting it a new observer',()=>{
+ const root=mkdtempSync(join(tmpdir(),'jot-goal-observer-migration-')),file=join(root,'legacy.sqlite');let db=new DatabaseSync(file);
+ try{
+  const old=readFileSync(new URL('../../src/db/schema.sql',import.meta.url),'utf8').replace('  dispatch_observer_id TEXT,\n','').replace('  dispatch_observer_id TEXT,\r\n','');assert.equal(old.includes('dispatch_observer_id'),false);db.exec(old);
+  db.prepare('INSERT INTO ga_conversations(id,owner_id,workspace_id,title,model,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)').run('conv-old','owner-old','ws','Synthetic','{}',1,'now','now');
+  for(const id of ['source-old','run-old'])db.prepare('INSERT INTO ga_runs(id,conversation_id,input_message_id,status,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run(id,'conv-old',null,'interrupted',1,'now','now');
+  db.prepare("INSERT INTO ga_conversation_goal_controls(control_id,owner_id,conversation_id,session_id,source_run_id,run_id,goal_id,goal_revision,idempotency_key,request_sha256,state,native_cursor,dispatch_lease_owner,dispatch_lease_generation,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,'dispatching',5,'worker-old',1,'now','now')").run('control-old','owner-old','conv-old','session-old','source-old','run-old','goal-old',3,'old-request','old-digest');
+  const before=db.prepare('SELECT * FROM ga_conversation_goal_controls').get();db.close();db=openProductDatabase(file);const after=db.prepare('SELECT * FROM ga_conversation_goal_controls').get();assert.equal(after.dispatch_observer_id,null);const {dispatch_observer_id,...unchanged}=after;assert.deepEqual(unchanged,{...before});assert.throws(()=>db.prepare("UPDATE ga_conversation_goal_controls SET dispatch_observer_id='new-observer'").run(),/goal_control_observer_immutable/);
+ }finally{db.close();rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:20});}
+});

@@ -3,19 +3,19 @@ import {createConversationGoalRunHost} from '../conversation-goal-run-host.js';
 const binding={control_id:'control-a',run_id:'run-a',execution_lease:{owner:'worker-a',generation:1}};
 const goal={id:'goal-a',revision:3,objective:'Original goal',phase:'paused',activation:'disarmed',maxGoalRounds:10,roundsStarted:1,createdAt:1,updatedAt:2};
 function fixture(){
- const calls=[],handlers=new Map();let current={...goal},state='queued',receipt=null,allow=true,created=0,cancelled=0;
+ const calls=[],handlers=new Map();let current={...goal},state='queued',receipt=null,observerId=null,allow=true,created=0,cancelled=0;
  const agent={id:'session-a',status:'idle',session:{id:'session-a'},inbox:{nextTurn:[],nextStep:[]},cancel:()=>{cancelled++;agent.status='idle';},runMaintenance:async fn=>{calls.push('maintenance');return fn(new AbortController().signal)}};
  const goals={get:()=>current,resume:(_a,ref)=>{assert.equal(ref.id,current.id);assert.equal(ref.revision,current.revision);calls.push('resume');current={...current,revision:current.revision+1,phase:'active',activation:'armed'};return current;},disarm:()=>{calls.push('disarm');current={...current,activation:'disarmed'};}};
  agent.ctx={get:name=>{assert.equal(name,'goals');return goals},on:(name,fn)=>{const list=handlers.get(name)||[];list.push(fn);handlers.set(name,list);return()=>handlers.set(name,(handlers.get(name)||[]).filter(x=>x!==fn));}};
  const controller={projections:async()=>{calls.push('projection');return {values:{goal:{goal:current,roundsStarted:1,createdAt:1,updatedAt:2},agentPreset:'jot-general',inbox:{'next-turn':[],'next-step':[]}}}},inspect:async()=>({meta:{id:'session-a'},events:[{seq:0,type:'fixture'}]}),resolveAgent:async()=>{created++;calls.push('resolve');return{agent}},async *follow(_request,signal){calls.push('follow-open');yield {type:'snapshot',cursor:8,records:[],projections:{}};await new Promise(resolve=>{if(signal.aborted)return resolve();signal.addEventListener('abort',resolve,{once:true});});}};
  const bridge={async request(path,b,payload){assert.equal(path,'conversation-goal-control');assert.equal(b.sessionRef,'session-a');assert.equal(b.runId,'run-a');assert.deepEqual(b.executionLease,binding.execution_lease);assert.equal(payload.control_id,'control-a');if(!allow)throw Error('fixture_revoked');calls.push(payload.operation);
-  if(payload.operation==='begin'){assert.equal(state,'queued');assert.equal(payload.cursor,8);state='dispatching';return{acquired:true,control:view()};}
+  if(payload.operation==='begin'){assert.equal(state,'queued');assert.equal(payload.cursor,8);state='dispatching';observerId=payload.observer_id;return{acquired:true,control:view()};}
   if(payload.operation==='applied'){state='applied';receipt=payload.receipt;return{control:view()};}return{control:view()};
  }};
- const view=()=>({control_id:'control-a',run_id:'run-a',conversation_id:'conversation-a',session_id:'session-a',ref:{id:'goal-a',revision:3},state,native_cursor:state==='queued'?null:8,receipt});
+ const view=()=>({control_id:'control-a',run_id:'run-a',conversation_id:'conversation-a',session_id:'session-a',ref:{id:'goal-a',revision:3},state,observer_id:observerId,native_cursor:state==='queued'?null:8,receipt});
  const registry={get:()=>agent},persistence={flush:async()=>{calls.push('flush')}};
  const host=createConversationGoalRunHost({controller,agents:registry,persistence,bridge,ordinaryPresets:new Set(['jot-general'])});
- return {host,agent,controller,bridge,calls,handlers,abort:new AbortController(),counts:()=>({created,cancelled}),setState:v=>state=v,setGoal:v=>current=v,revoke:()=>allow=false,current:()=>current};
+ return {host,agent,controller,bridge,persistence,calls,handlers,abort:new AbortController(),counts:()=>({created,cancelled}),setState:v=>state=v,setGoal:v=>current=v,revoke:()=>allow=false,current:()=>current,journal:view};
 }
 async function open(f){const stream=f.host.follow('session-a',binding,{address:{kind:'session',sessionId:'session-a'},assistantStream:true},f.abort.signal);assert.equal((await stream.next()).value.type,'snapshot');return stream;}
 test('observed human resume follows first, uses native maintenance and flushes before persisting the receipt',async()=>{
@@ -82,4 +82,21 @@ test('an applied old receipt cannot authorize a replacement native Goal or its m
 test('completion of the same native Goal still permits its original closing answer',async()=>{
  const f=fixture(),stream=await open(f);await f.host.resume('session-a',binding);f.setGoal({...f.current(),revision:5,phase:'complete',activation:'disarmed'});
  const chunks=f.handlers.get('llm/stream')[0]({sessionId:'session-a',signal:new AbortController().signal},async function*(){yield{type:'closing-answer'};});const seen=[];for await(const chunk of chunks)seen.push(chunk);assert.deepEqual(seen,[{type:'closing-answer'}]);f.abort.abort();await stream.return();await f.host.dispose();
+});
+
+for(const stage of ['preflight','begin-reply-lost','native-call-threw','native-flush','applied-reply-unconfirmed'])test('resume failure classification keeps native-call knowledge exact: '+stage,async()=>{
+ const f=fixture(),original=f.bridge.request,stream=await open(f);
+ f.bridge.request=async(...args)=>{const payload=args[2];if(payload.operation==='rejected'){f.setState('rejected');return{control:{...f.journal(),receipt:{rejected:true,mutation:'not_called',reason_code:payload.reason_code}}};}if(stage==='begin-reply-lost'&&payload.operation==='begin'){await original(...args);throw Error('fixture_reply_lost');}if(stage==='applied-reply-unconfirmed'&&payload.operation==='applied')throw Error('fixture_offline');return original(...args)};
+ if(stage==='preflight'){const projections=f.controller.projections;f.controller.projections=async()=>{const p=await projections();p.values.inbox['next-turn']=[{text:'pending'}];return p;};}
+ if(stage==='native-call-threw'){const goals=f.agent.ctx.get('goals'),resume=goals.resume;goals.resume=(...args)=>{resume(...args);throw Error('fixture_after_native_append')};}
+ if(stage==='native-flush')f.persistence.flush=async()=>{throw Error('fixture_flush_failed')};
+ await assert.rejects(()=>f.host.resume('session-a',binding));const invoked=f.calls.includes('resume');assert.equal(invoked,['native-call-threw','native-flush','applied-reply-unconfirmed'].includes(stage));assert.equal(f.journal().state,invoked?'dispatching':'rejected');assert.equal(f.calls.includes('applied'),false);assert.equal(f.current().activation,'disarmed');
+ await assert.rejects(()=>f.host.resume('session-a',binding));assert.equal(f.calls.filter(x=>x==='resume').length,invoked?1:0);f.abort.abort();await stream.return();await f.host.dispose();
+});
+
+
+
+test('advancing the product observer cannot trigger official post-snapshot promotion before maintenance',async()=>{
+ const f=fixture();f.controller.follow=async function*(_request,signal){f.calls.push('follow-open');yield{type:'snapshot',cursor:8};f.calls.push('follow-promote');await new Promise(resolve=>{if(signal.aborted)return resolve();signal.addEventListener('abort',resolve,{once:true})});};const stream=await open(f),tail=stream.next();await new Promise(resolve=>setImmediate(resolve));assert.equal(f.calls.includes('follow-promote'),false);assert.equal(f.counts().created,0);
+ await f.host.resume('session-a',binding);await new Promise(resolve=>setImmediate(resolve));assert.ok(f.calls.indexOf('maintenance')<f.calls.indexOf('follow-promote'));f.abort.abort();assert.equal((await tail).done,true);await f.host.dispose();
 });

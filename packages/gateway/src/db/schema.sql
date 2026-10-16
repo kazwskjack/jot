@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS ga_conversation_goal_controls (
   state TEXT NOT NULL CHECK(state IN ('queued','dispatching','applied','rejected')),
   native_cursor INTEGER CHECK(native_cursor>=0),
   dispatch_lease_owner TEXT,dispatch_lease_generation INTEGER CHECK(dispatch_lease_generation>0),
+  dispatch_observer_id TEXT,
   receipt_json TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
   UNIQUE(owner_id,conversation_id,idempotency_key),
   CHECK((state='queued' AND native_cursor IS NULL AND dispatch_lease_owner IS NULL AND dispatch_lease_generation IS NULL AND receipt_json IS NULL)

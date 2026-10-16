@@ -95,3 +95,11 @@ The two explicit rollout switches default off. See [Goal continuation](GOAL-CONT
 
 These changes do not complete the remaining Always-on, UI, routing, channel and
 packaging rows above; the complete 26-capability scope remains unchanged.
+
+
+The observed Goal adapter parks official follow at its opening snapshot until
+preflight and native maintenance admit restoration. This matters because the
+locked official iterator promotes a prepared Session when advanced past that
+snapshot. Confirmed pre-native refusals have exact immutable receipts; failures
+after invoking native resume remain uncertain. See [Goal failure and crash
+boundaries](GOAL-CONTINUATION.md#failure-evidence-and-remaining-crash-matrix).

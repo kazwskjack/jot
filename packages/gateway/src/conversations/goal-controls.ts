@@ -8,9 +8,15 @@ import {validateConversationGoalView} from '../harness/conversation-goal-view.ts
 
 type ResumeRequest={ownerId:string;conversationId:string;sessionId:string;idempotencyKey:string;ref:{id:string;revision:number}};
 type Accepted={accepted:true;control_id:string;run_id:string;conversation_id:string};
-type ControlRow={control_id:string;owner_id:string;conversation_id:string;session_id:string;source_run_id:string;run_id:string;goal_id:string;goal_revision:number;idempotency_key:string;request_sha256:string;state:'queued'|'dispatching'|'applied'|'rejected';native_cursor:number|null;dispatch_lease_owner:string|null;dispatch_lease_generation:number|null;receipt_json:string|null};
+type ControlRow={control_id:string;owner_id:string;conversation_id:string;session_id:string;source_run_id:string;run_id:string;goal_id:string;goal_revision:number;idempotency_key:string;request_sha256:string;state:'queued'|'dispatching'|'applied'|'rejected';native_cursor:number|null;dispatch_lease_owner:string|null;dispatch_lease_generation:number|null;dispatch_observer_id:string|null;receipt_json:string|null};
 const active="'queued','starting','running','waiting_user','waiting_approval','cancelling'";
 const identifier=(value:unknown):value is string=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(value);
+export function validateGoalControlRejection(value:unknown):{rejected:true;mutation:'not_called';reason_code:string}{
+ if(!value||typeof value!=='object'||Array.isArray(value))throw Error('goal_control_rejection_invalid');
+ const row=value as Record<string,unknown>;
+ if(Object.keys(row).sort().join(',')!=='mutation,reason_code,rejected'||row.rejected!==true||row.mutation!=='not_called'||typeof row.reason_code!=='string'||!['GOAL_CONTEXT_RECOVERY_REQUIRED','GOAL_REVISION_CHANGED','GOAL_NOT_RESUMABLE','GOAL_RESUME_NOT_APPLIED'].includes(row.reason_code))throw Error('goal_control_rejection_invalid');
+ return structuredClone(value) as {rejected:true;mutation:'not_called';reason_code:string};
+}
 
 /** Durable human command intent, not another Goal state machine or scheduler.
  * Only a Worker with an attached native follower may call begin. No method
@@ -78,25 +84,28 @@ export class ConversationGoalControls {
  }
  inspect(controlId:string,lease:unknown){
   const row=ConversationGoalControls.assertExecution(this.db,controlId,lease);
-  return {control_id:row.control_id,run_id:row.run_id,conversation_id:row.conversation_id,session_id:row.session_id,ref:{id:row.goal_id,revision:row.goal_revision},state:row.state,native_cursor:row.native_cursor,receipt:row.receipt_json?JSON.parse(row.receipt_json) as Record<string,unknown>:null};
+  return {control_id:row.control_id,run_id:row.run_id,conversation_id:row.conversation_id,session_id:row.session_id,ref:{id:row.goal_id,revision:row.goal_revision},state:row.state,native_cursor:row.native_cursor,observer_id:row.dispatch_observer_id,receipt:row.receipt_json?JSON.parse(row.receipt_json) as Record<string,unknown>:null};
  }
- begin(controlId:string,lease:unknown,cursor:number){
+ begin(controlId:string,lease:unknown,cursor:number,observerId:string){
   if(!Number.isSafeInteger(cursor)||cursor<0)throw Error('goal_control_cursor_invalid');
+  if(!identifier(observerId))throw Error('goal_control_observer_invalid');
   return withImmediateTransaction(this.db,()=>{
    const row=ConversationGoalControls.assertExecution(this.db,controlId,lease);
    if(row.state!=='queued'){
+    if(row.dispatch_observer_id!==observerId)throw Error('goal_control_observer_changed');
     if(row.native_cursor!==cursor)throw Error('goal_control_dispatch_unknown');
     return {acquired:false as const,state:row.state};
    }
    const execution=normalizeExecutionLease(lease);
-   this.db.prepare("UPDATE ga_conversation_goal_controls SET state='dispatching',native_cursor=?,dispatch_lease_owner=?,dispatch_lease_generation=?,updated_at=? WHERE control_id=? AND state='queued'").run(cursor,execution.owner,execution.generation,new Date().toISOString(),controlId);
+   this.db.prepare("UPDATE ga_conversation_goal_controls SET state='dispatching',native_cursor=?,dispatch_lease_owner=?,dispatch_lease_generation=?,dispatch_observer_id=?,updated_at=? WHERE control_id=? AND state='queued'").run(cursor,execution.owner,execution.generation,observerId,new Date().toISOString(),controlId);
    return {acquired:true as const,state:'dispatching' as const};
   });
  }
- applied(controlId:string,lease:ExecutionLease,value:unknown){
+ applied(controlId:string,lease:ExecutionLease,value:unknown,observerId:string){
   const receipt=validateConversationGoalView(value);
   return withImmediateTransaction(this.db,()=>{
    const row=ConversationGoalControls.assertExecution(this.db,controlId,lease);
+   if(!identifier(observerId)||row.dispatch_observer_id!==observerId)throw Error('goal_control_observer_changed');
    if(row.state==='applied'){
     const previous=JSON.parse(row.receipt_json!);
     if(JSON.stringify(previous)!==JSON.stringify(receipt))throw Error('goal_control_receipt_conflict');
@@ -104,6 +113,26 @@ export class ConversationGoalControls {
    }
    if(row.state!=='dispatching'||!receipt.goal||receipt.goal.id!==row.goal_id||receipt.goal.revision!==row.goal_revision+1||receipt.goal.phase!=='active'||receipt.goal.activation!=='armed')throw Error('goal_control_receipt_invalid');
    this.db.prepare("UPDATE ga_conversation_goal_controls SET state='applied',receipt_json=?,updated_at=? WHERE control_id=? AND state='dispatching'").run(JSON.stringify(receipt),new Date().toISOString(),controlId);
+   return receipt;
+  });
+ }
+ /** Trusted Host attestation made only before invoking the native mutation.
+  * A timeout, matching current Goal or failed flush is never such proof.
+  */
+ rejectBeforeNative(controlId:string,lease:unknown,reasonCode:string,observerId:string){
+  const receipt=validateGoalControlRejection({rejected:true,mutation:'not_called',reason_code:reasonCode});
+  if(!identifier(observerId))throw Error('goal_control_observer_invalid');
+  return withImmediateTransaction(this.db,()=>{
+   const row=ConversationGoalControls.assertExecution(this.db,controlId,lease);
+   if(row.state!=='queued'&&row.dispatch_observer_id!==observerId)throw Error('goal_control_observer_changed');
+   if(row.state==='rejected'){
+    const previous=validateGoalControlRejection(JSON.parse(row.receipt_json!));
+    if(JSON.stringify(previous)!==JSON.stringify(receipt))throw Error('goal_control_receipt_conflict');
+    return previous;
+   }
+   if(!['queued','dispatching'].includes(row.state))throw Error('goal_control_receipt_conflict');
+   const execution=normalizeExecutionLease(lease);
+   this.db.prepare("UPDATE ga_conversation_goal_controls SET state='rejected',receipt_json=?,dispatch_lease_owner=?,dispatch_lease_generation=?,dispatch_observer_id=?,updated_at=? WHERE control_id=?").run(JSON.stringify(receipt),execution.owner,execution.generation,observerId,new Date().toISOString(),controlId);
    return receipt;
   });
  }

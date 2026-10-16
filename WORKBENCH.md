@@ -427,3 +427,11 @@ These probes use the actual locked SDK and upstream plugin with a scripted model
 ## Ordinary Goal continuation records
 
 Resume controls now have an internal durable intent/receipt record, a live Host observer/maintenance handshake and a distinct original-Worker/native-Runner continuation entry. No original human message or attachment is replayed. Real locked-SDK cases verify cold resume and original publication with a local scripted model. Public atomic 202 admission and UI integration are connected and verified with the real locked Host/Worker against a scripted local model. Message-free runs preserve original lineage without replaying human input. Exhaustive crash recovery, complete consumer-pool rollout and production acceptance remain unfinished; both rollout switches stay off by default. See [continuation boundaries and verification](docs/GOAL-CONTINUATION.md).
+
+
+The observed Goal adapter parks official follow at its opening snapshot until
+preflight and native maintenance admit restoration. This matters because the
+locked official iterator promotes a prepared Session when advanced past that
+snapshot. Confirmed pre-native refusals have exact immutable receipts; failures
+after invoking native resume remain uncertain. See [Goal failure and crash
+boundaries](docs/GOAL-CONTINUATION.md#failure-evidence-and-remaining-crash-matrix).
