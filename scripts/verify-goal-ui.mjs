@@ -1,19 +1,21 @@
 // Built UI + synthetic HTTP fixtures only. No provider, production site or credentials.
 import assert from 'node:assert/strict';import {createServer} from 'node:http';
-import {readFile,mkdir} from 'node:fs/promises';import {resolve,extname,sep} from 'node:path';
+import {readFile,mkdir,mkdtemp,rm} from 'node:fs/promises';import {resolve,extname,sep,relative,isAbsolute} from 'node:path';
 import {fileURLToPath} from 'node:url';import {chromium} from 'playwright';
 import {randomBytes} from 'node:crypto';
+import {launchOwnedBrowser} from './owned-browser-process.mjs';
 const dist=fileURLToPath(new URL('../dist/',import.meta.url)),errors=[],controls=[],messages=[];
 const fixtureCsrf=randomBytes(24).toString('hex'),fixtureScope=randomBytes(32).toString('hex'),receipts=new Map();
-const server=createServer(async(req,res)=>{try{const target=resolve(dist,'.'+new URL(req.url,'http://localhost').pathname);if(!target.startsWith(resolve(dist)+sep))throw Error('invalid_path');const bytes=await readFile(target);res.writeHead(200,{'content-type':({'.html':'text/html','.js':'application/javascript','.css':'text/css'}[extname(target)]??'application/octet-stream')});res.end(bytes);}catch{res.writeHead(404);res.end();}});
+const server=createServer(async(req,res)=>{try{const pathname=new URL(req.url,'http://localhost').pathname,sourceModules={'/__goal-test/durable-goal-receipts.mjs':'../web/jot/durable-goal-receipts.mjs','/__goal-test/goal-receipts.mjs':'../web/jot/goal-receipts.mjs'};if(sourceModules[pathname]){res.writeHead(200,{'content-type':'application/javascript'});res.end(await readFile(fileURLToPath(new URL(sourceModules[pathname],import.meta.url))));return;}const target=resolve(dist,'.'+pathname);if(!target.startsWith(resolve(dist)+sep))throw Error('invalid_path');const bytes=await readFile(target);res.writeHead(200,{'content-type':({'.html':'text/html','.js':'application/javascript','.css':'text/css'}[extname(target)]??'application/octet-stream')});res.end(bytes);}catch{res.writeHead(404);res.end();}});
 await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin=`http://127.0.0.1:${server.address().port}`;
-let browser,diagnosticPage;
+const fullBrowserCrash=process.argv.includes('--browser-crash'),scratch=resolve('.test-tmp');
+let browser,context,page,profile,owned,diagnosticPage;
 const fresh=()=>({id:'goal-fixture',revision:1,objective:'Compare verified sources and write a short report',phase:'active',activation:'armed',roundsStarted:2,maxGoalRounds:Number.MAX_SAFE_INTEGER});
 let goal=fresh(),running=true,losePause=true,loseResume=true,goalReads=0,denyColdStop=false,resumeEnabled=true,controlRun=null;
 const snapshot=id=>({conversation:{conversation_id:id,title:'Synthetic conversation'},as_of_seq:'0',messages:[],runs:controlRun?[{...controlRun,conversation_id:id}]:running?[{run_id:'run-fixture',conversation_id:id,status:'running',version:1}]:[],activities:[],sources:[],interactions:[],artifacts:[],stream_cursors:[]});
 try{
- browser=await chromium.launch({headless:true,...(process.platform==='win32'?{channel:'msedge'}:{})});const context=await browser.newContext({viewport:{width:1100,height:820}});let page=await context.newPage();diagnosticPage=page;page.on('pageerror',e=>errors.push(e.message));
- await context.route('**/*',async route=>{
+ if(fullBrowserCrash){await mkdir(scratch,{recursive:true});profile=await mkdtemp(resolve(scratch,'goal-browser-crash-'));}
+ const routeFixture=async route=>{
   const request=route.request(),url=new URL(request.url());if(url.origin!==origin){await route.abort();throw Error('external_request');}
   if(!url.pathname.startsWith('/workbench-api/'))return route.continue();
   const path=url.pathname.replace('/workbench-api/v1',''),method=request.method(),json=async(value,status=200)=>route.fulfill({status,contentType:'application/json',headers:{'x-csrf-token':fixtureCsrf,'x-workbench-draft-scope':fixtureScope},body:JSON.stringify(value)});
@@ -35,7 +37,35 @@ try{
   }
   if(path.endsWith('/messages')&&method==='POST'){messages.push(request.postDataJSON());return json({accepted:true,message_id:'message-fixture',run_id:'run-fixture',conversation_id:'ordinary-fixture'});}
   throw Error('unexpected_fixture_request');
+ };
+ const launch=async()=>{
+  const options={headless:true,viewport:{width:1100,height:820},...(process.platform==='win32'?{channel:'msedge'}:{})};
+  if(fullBrowserCrash){owned=await launchOwnedBrowser(chromium,profile);({context,browser}=owned);}
+  else {browser=await chromium.launch(options);context=await browser.newContext({viewport:options.viewport});}
+  await context.route('**/*',routeFixture);page=context.pages()[0]??await context.newPage();await page.setViewportSize({width:1100,height:820});
+ };
+ await launch();diagnosticPage=page;page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(origin+'/workbench.html');
+ const storageChecks=await page.evaluate(async()=>{
+  const {DurableGoalReceiptStore}=await import('/__goal-test/durable-goal-receipts.mjs');
+  const scope='c'.repeat(64),conversation='storage-fixture',prefix=`jot-goal-receipt/v1/${scope}/${conversation}/`,command=key=>({body:{action:'pause',id:'goal-storage',revision:1},key});
+  const check=(condition,label)=>{if(!condition)throw Error(label);},legacy=command('legacy-original');localStorage.setItem(prefix+legacy.key,JSON.stringify({command:legacy,status:'pending'}));
+  const a=await DurableGoalReceiptStore.open(indexedDB,scope,conversation,localStorage),b=await DurableGoalReceiptStore.open(indexedDB,scope,conversation,localStorage);
+  check((await a.pending()).length===1,'legacy_migration_missing');await Promise.all([a.save(command('tab-one')),b.save(command('tab-two'))]);check((await a.pending()).length===3,'concurrent_commands_overwritten');
+  await a.acknowledge(legacy);check(JSON.parse(localStorage.getItem(prefix+legacy.key)).status==='acknowledged','legacy_ack_missing');
+  let conflict=false;try{await b.save({...command('tab-one'),body:{action:'stop',id:'goal-storage',revision:1}});}catch{conflict=true;}check(conflict,'conflicting_key_was_accepted');
+  const other=await DurableGoalReceiptStore.open(indexedDB,'d'.repeat(64),conversation,localStorage);check((await other.pending()).length===0,'cross_owner_recovery');other.close();
+  const transaction=b.db.transaction.bind(b.db);b.db.transaction=(...args)=>{const tx=transaction(...args);if(args[1]==='readwrite')Object.defineProperty(tx,'durability',{value:'relaxed'});return tx;};
+  let weak=false;try{await b.save(command('weak-commit'));}catch{weak=true;}b.db.transaction=transaction;check(weak&&!(await a.pending()).some(c=>c.key==='weak-commit'),'non_strict_commit_accepted');
+  for(let i=0;i<25;i++){const c=command('completed-'+i);await a.save(c);await a.acknowledge(c);}
+  const mutate=fn=>new Promise((resolve,reject)=>{const tx=a.db.transaction('commands','readwrite',{durability:'strict'});fn(tx.objectStore('commands'));tx.oncomplete=()=>resolve();tx.onabort=()=>reject(Error('storage_probe_write_failed'));});
+  const rows=await new Promise((resolve,reject)=>{const request=a.db.transaction('commands').objectStore('commands').getAll(IDBKeyRange.bound(prefix,prefix+'\uffff'));request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(Error('storage_probe_read_failed'));});
+  check(rows.filter(r=>r.status==='acknowledged').length===20,'unbounded_acknowledgements');check((await a.pending()).length===2,'unknown_commands_pruned');
+  await mutate(records=>records.put({invalid:true},prefix+'corrupt'));let corrupt=false;try{await a.pending();}catch{corrupt=true;}check(corrupt,'corrupt_record_accepted');await mutate(records=>records.delete(prefix+'corrupt'));
+  a.close();b.close();const restored=await DurableGoalReceiptStore.open(indexedDB,scope,conversation,localStorage);check((await restored.pending()).length===2,'acknowledgement_resurrected');restored.close();
+  return {legacyMigration:true,legacyAcknowledgement:true,concurrentCommands:true,ownerIsolation:true,strictCommitRequired:true,boundedAcknowledgements:true,unknownCommandsRetained:true,corruptionBlocked:true};
  });
+
  const open=async()=>{await page.goto(origin+'/workbench.html');await page.getByRole('button',{name:'我的对话',exact:true}).click();await page.getByRole('button',{name:'Synthetic ordinary chat',exact:true}).click();await page.getByText('目标进行中',{exact:true}).waitFor();};
  const openPaused=async()=>{await page.goto(origin+'/workbench.html');await page.getByRole('button',{name:'我的对话',exact:true}).click();await page.getByRole('button',{name:'Synthetic ordinary chat',exact:true}).click();await page.getByText('目标已暂停',{exact:true}).waitFor();};
  await open();await page.getByRole('button',{name:'更多消息选项'}).click();const option=page.getByRole('menuitemcheckbox',{name:'目标模式'});assert.equal(await option.getAttribute('aria-checked'),'false');await option.click();assert.equal(await page.getByPlaceholder('描述你的目标…').count(),1);
@@ -44,7 +74,9 @@ try{
  await page.getByRole('button',{name:'重试原目标操作'}).click();await page.getByRole('button',{name:'重试原目标操作'}).waitFor({state:'hidden'});await page.getByText('目标已暂停',{exact:true}).waitFor();assert.deepEqual(controls[0],controls[1]);
  // The previous execution settles. Cold resume is admitted as a new original
  // product run; 202 alone must not change the native Goal phase.
- running=false;await openPaused();await page.getByRole('button',{name:'继续',exact:true}).click();await page.getByRole('button',{name:'重试原目标操作'}).waitFor();await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent==='重试原目标操作'&&!b.disabled));const originalResume=controls.at(-1);assert.equal(originalResume.body.action,'resume');const cdp=await context.newCDPSession(page),crashed=page.waitForEvent('crash');const crashRequest=cdp.send('Page.crash').catch(()=>{});await crashed;await page.close();await crashRequest;page=await context.newPage();diagnosticPage=page;page.on('pageerror',e=>errors.push(e.message));await openPaused();await page.getByRole('button',{name:'重试原目标操作'}).waitFor();await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent==='重试原目标操作'&&!b.disabled));assert.deepEqual(controls.at(-1),originalResume);await page.getByRole('button',{name:'重试原目标操作'}).click();await page.getByRole('button',{name:'重试原目标操作'}).waitFor({state:'hidden'});await page.getByText('续跑已受理，正在同步目标状态。',{exact:true}).waitFor();assert.equal(goal.phase,'paused');assert.equal(await page.getByText('目标已完成',{exact:true}).count(),0);assert.equal(await page.getByRole('button',{name:'继续',exact:true}).isDisabled(),true);
+ running=false;await openPaused();await page.getByRole('button',{name:'继续',exact:true}).click();await page.getByRole('button',{name:'重试原目标操作'}).waitFor();await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent==='重试原目标操作'&&!b.disabled));const originalResume=controls.at(-1);assert.equal(originalResume.body.action,'resume');if(fullBrowserCrash){
+  await owned.crash();assert.equal(owned.exited,true);assert.equal(browser.isConnected(),false);await launch();
+ }else{const cdp=await context.newCDPSession(page),crashed=page.waitForEvent('crash');const crashRequest=cdp.send('Page.crash').catch(()=>{});await crashed;await page.close();await crashRequest;page=await context.newPage();}diagnosticPage=page;page.on('pageerror',e=>errors.push(e.message));await openPaused();await page.getByRole('button',{name:'重试原目标操作'}).waitFor();await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent==='重试原目标操作'&&!b.disabled));assert.deepEqual(controls.at(-1),originalResume);await page.getByRole('button',{name:'重试原目标操作'}).click();await page.getByRole('button',{name:'重试原目标操作'}).waitFor({state:'hidden'});await page.getByText('续跑已受理，正在同步目标状态。',{exact:true}).waitFor();assert.equal(goal.phase,'paused');assert.equal(await page.getByText('目标已完成',{exact:true}).count(),0);assert.equal(await page.getByRole('button',{name:'继续',exact:true}).isDisabled(),true);
  assert.deepEqual(controls[2],controls[3]);
  await page.waitForTimeout(500);running=false;controlRun={...controlRun,status:'queued',version:1};goal={...goal,revision:goal.revision+1,phase:'active',activation:'armed'};await page.getByText('目标进行中',{exact:true}).waitFor({timeout:10000});
  const beforeStop=controls.length;await page.getByRole('button',{name:'停止',exact:true}).click();assert.equal(controls.length,beforeStop);await page.getByRole('button',{name:'确认停止目标'}).click();await page.getByRole('region',{name:'当前目标'}).waitFor({state:'hidden'});assert.equal(goal,null);
@@ -55,5 +87,5 @@ try{
  if(process.env.JOT_GOAL_SCREENSHOT_DIR){await mkdir(process.env.JOT_GOAL_SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:resolve(process.env.JOT_GOAL_SCREENSHOT_DIR,'goal-mobile.png'),fullPage:true});}
  denyColdStop=true;await page.getByRole('button',{name:'停止',exact:true}).click();await page.getByRole('button',{name:'确认停止目标'}).click();await page.getByText('会话有待恢复内容，请先恢复当前任务。',{exact:true}).waitFor();assert.equal(await page.getByRole('button',{name:'重试原目标操作'}).count(),0);assert.equal(await page.getByRole('region',{name:'Ordinary conversation'}).getByRole('button',{name:'返回工作台',exact:true}).isEnabled(),true);assert.equal(goal.phase,'paused');
  await page.getByRole('region',{name:'Ordinary conversation'}).getByRole('button',{name:'返回工作台',exact:true}).click();await page.getByRole('banner').getByRole('button',{name:'返回工作台',exact:true}).click();await page.getByRole('button',{name:'进入对话',exact:true}).click();await page.getByRole('textbox',{name:'角色消息',exact:true}).waitFor();assert.equal(await page.getByRole('button',{name:'更多消息选项'}).count(),0);assert.equal(await page.getByRole('region',{name:'当前目标'}).count(),0);
- assert.deepEqual(errors,[]);console.log(JSON.stringify({result:'PASS',syntheticOnly:true,goalMenu:true,exactRetry:true,reloadRecovery:true,closedPageRecovery:true,rendererCrashRecovery:true,lostCommittedReceipt:true,pauseResumeStop:true,coldResumeAccepted:true,acceptanceNotCompletion:true,disabledResumeGated:true,recoveryRefusal:true,roleIsolated:true,mobileOverflow:false,goalReads,controls:controls.length,messages:messages.length}));
-}catch(error){console.error(JSON.stringify({syntheticGoalDiagnostic:await diagnosticPage?.getByRole('region',{name:'当前目标'}).innerText().catch(()=>''),controlActions:controls.map(c=>c.body.action)}));throw error;}finally{await browser?.close();await new Promise(r=>server.close(r));}
+ assert.deepEqual(errors,[]);console.log(JSON.stringify({result:'PASS',syntheticOnly:true,storageChecks,goalMenu:true,exactRetry:true,reloadRecovery:true,closedPageRecovery:true,rendererCrashRecovery:!fullBrowserCrash,browserProcessCrashRecovery:fullBrowserCrash,lostCommittedReceipt:true,pauseResumeStop:true,coldResumeAccepted:true,acceptanceNotCompletion:true,disabledResumeGated:true,recoveryRefusal:true,roleIsolated:true,mobileOverflow:false,goalReads,controls:controls.length,messages:messages.length}));
+}catch(error){console.error(JSON.stringify({syntheticGoalDiagnostic:await diagnosticPage?.getByRole('region',{name:'当前目标'}).innerText({timeout:1000}).catch(()=>''),controlActions:controls.map(c=>c.body.action)}));throw error;}finally{try{if(owned)await owned.close();else await browser?.close();}finally{await new Promise(r=>server.close(r));if(profile){const child=relative(scratch,resolve(profile));assert.ok(child&&!child.startsWith('..')&&!isAbsolute(child),'cleanup must stay inside the test workspace');await rm(profile,{recursive:true,force:true,maxRetries:5,retryDelay:100});}}}

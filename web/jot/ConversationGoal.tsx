@@ -1,13 +1,13 @@
 import React,{useEffect,useMemo,useState} from 'react';
 import {request,taskDraftScope} from './client';
-import {GoalReceiptStore} from './goal-receipts.mjs';
+import {DurableGoalReceiptStore} from './durable-goal-receipts.mjs';
 import {ConversationGoalController,goalPresentation,goalControlError,goalResumeHint,goalExecutionHint} from './goal-controller.mjs';
 import type {Run} from './types';
 const labels:Record<string,string>={pause:'暂停',resume:'继续',stop:'停止'};
 export default function ConversationGoal({id,running,runStatus,controlRun,onResumeAccepted,onPendingChange}:{id:string;running:boolean;runStatus?:string;controlRun?:Run|undefined;onResumeAccepted?:()=>void;onPendingChange:(pending:boolean)=>void}){
  const [,render]=useState(0),[error,setError]=useState(''),[confirmStop,setConfirmStop]=useState(false);
  const controller=useMemo(()=>new ConversationGoalController(id,{request},()=>{},true),[id]);
- const ensureRecovery=async()=>{if(controller.recoveryReady)return;await request('/capabilities');controller.configureRecovery(new GoalReceiptStore(window.localStorage,taskDraftScope(),id),async(scope:string)=>{await request('/capabilities');return taskDraftScope()===scope;});};
+ const ensureRecovery=async()=>{if(controller.recoveryReady)return;const lifecycle=controller.lifecycle;await request('/capabilities');const store=await DurableGoalReceiptStore.open(window.indexedDB,taskDraftScope(),id,window.localStorage);if(lifecycle!==controller.lifecycle){store.close();throw Error('goal_control_disposed');}await controller.configureRecovery(store,async(scope:string)=>{await request('/capabilities');return taskDraftScope()===scope;});};
  useEffect(()=>{let mounted=true;controller.onChange=()=>{if(mounted){render(n=>n+1);onPendingChange(controller.pending);}};setError('');setConfirmStop(false);return()=>{mounted=false;controller.onChange=()=>{};controller.dispose();onPendingChange(false);};},[controller,onPendingChange]);
  const refresh=async()=>{try{await ensureRecovery();await controller.refresh();setError('');if(controller.goal&&goalPresentation(controller.goal).actions.includes('resume'))await controller.refreshReadiness().catch(()=>setError('续跑状态暂不可用，请稍后刷新。'));}catch{setError('目标或操作回执暂不可用，请检查浏览器存储后刷新。');}};
  useEffect(()=>{let mounted=true;const read=async()=>{try{await ensureRecovery();if(!mounted)return;await controller.refresh();if(mounted)setError('');if(controller.goal&&goalPresentation(controller.goal).actions.includes('resume'))await controller.refreshReadiness();}catch{if(mounted)setError('目标或操作回执暂不可用，请检查浏览器存储后刷新。');}};void read();const timer=(running||controller.executing)?setInterval(()=>void read(),3000):undefined;return()=>{mounted=false;clearInterval(timer);};},[controller,running,runStatus,controller.executing]);
@@ -23,7 +23,7 @@ export default function ConversationGoal({id,running,runStatus,controlRun,onResu
    {controller.executing&&goal.phase!=='complete'&&!(goal.phase==='active'&&goal.activation==='armed')&&<p role="status" className="jot-goal-hint">续跑已受理，正在同步目标状态。</p>}
    {goalExecutionHint(controller.execution)&&<p role="status" className="jot-goal-hint">{goalExecutionHint(controller.execution)}</p>}
   </>}
-  {error&&<p role="alert">{error}</p>}{controller.pending&&<div role="alert"><p>上次操作的结果尚未确认，重试会保留原目标和请求。</p><button type="button" disabled={controller.busy} onClick={()=>void execute()}>重试原目标操作</button></div>}
+  {error&&<p role="alert">{error}</p>}{controller.pending&&<div role="alert"><p>上次操作的结果尚未确认，重试会保留原目标和请求。</p><button type="button" disabled={controller.busy||controller.preparing} onClick={()=>void execute()}>重试原目标操作</button></div>}
   {confirmStop&&<div role="alertdialog" aria-label="停止当前目标"><p>停止此目标？已有结果和历史会保留。</p><button type="button" disabled={controller.busy||controller.pending} onClick={()=>setConfirmStop(false)}>返回</button><button type="button" disabled={disabled} onClick={()=>void execute('stop')}>确认停止目标</button></div>}
  </section>;
 }

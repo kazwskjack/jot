@@ -443,7 +443,7 @@ termination, and require explicit retry. Separate command keys preserve uncertai
 operations from different tabs; acknowledged tombstones prevent pruning failures
 from resurrecting them. Account changes and unavailable browser storage fail
 closed. No objective, message or credential is journaled. This is local recovery
-evidence, not whole-browser/OS crash or production acceptance. See
+evidence; OS/power-loss and production acceptance remain unverified. See
 [browser command recovery](docs/GOAL-CONTINUATION.md#browser-command-recovery).
 
 
@@ -461,3 +461,12 @@ Paused/blocked/complete phases do not hide a still-running closing request;
 replacement Goals remain untouched. A real Host disconnect/flush/restart probe
 checks retained input IDs and no extra inference. This does not complete original
 pending-input delivery recovery. See [observer revocation](docs/GOAL-CONTINUATION.md#observer-revocation-preserves-other-inputs).
+
+
+Whole-browser termination exposed a limitation of the former localStorage
+journal: same-page read-back did not ensure the command survived process exit.
+Ordinary Goal controls now await strict IndexedDB transaction completion before
+POST and acknowledgement. The owned-browser process-tree/restart probe passes
+with the same profile and exact original request, alongside renderer recovery,
+legacy migration and storage-failure tests. OS/power loss and production acceptance
+remain unverified. See [browser recovery](docs/GOAL-CONTINUATION.md#browser-command-recovery).

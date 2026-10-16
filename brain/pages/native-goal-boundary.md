@@ -4,7 +4,7 @@ title: Keep native Goal state and continuation in DSH
 category: decision
 status: active
 created: "2026-10-16T11:44:16"
-updated: "2026-10-16T15:26:45"
+updated: "2026-10-16T15:49:11"
 ---
 
 <!-- compiled_truth -->
@@ -18,7 +18,7 @@ Public resume admission atomically commits the original request, queued run and 
 
 The trusted Host subscribes to official follow and parks its iterator at the opening snapshot before restoring an Agent. In the locked SDK, advancing beyond that snapshot promotes a prepared Session; preflight and exact native maintenance must admit that advancement. Cold observations and rejected pending input must not create an Agent. Native CAS, persistence flush and an applied receipt precede model execution. Every original step/tool/model path checks the live observer, original lease and current Goal identity; an old receipt cannot authorize a replacement Goal. Same-Goal completion still allows its closing answer. New Hosts/followers cannot rearm an old unknown dispatch or receipt.
 
-The UI follows accepted original runs separately from validated native Goal phase and continues polling while restoration is queued. Unknown replies persist minimal owner/conversation-scoped control metadata before POST and recover the exact request/key after reload or page-renderer termination, with explicit human retry only. Fresh scope checks, separate per-command keys, read-back writes and acknowledged tombstones protect this recovery. No objective, message, credential or native phase is stored in the browser journal. Clearing site data, storage eviction and whole-browser/OS termination remain separate limitations. All-boundary server-process reconciliation, pending/claimed-input and unsupported attached-history recovery and production acceptance remain incomplete. Gateway admission and Host observer switches default off until complete consumer rollout and remaining gates pass. Real locked-SDK/scripted-model verification is wiring evidence, not real-provider quality or production accounting.
+The UI follows accepted original runs separately from validated native Goal phase and continues polling while restoration is queued. Unknown replies persist minimal owner/conversation-scoped control metadata through strict IndexedDB transactions before POST and acknowledgement. The original localStorage read-back was insufficient: a real whole-browser process-tree termination lost its unconfirmed command. Await strict transaction completion; unavailable strict storage fails closed. Legacy pending commands migrate without resending, and durable migration tombstones prevent failed local acknowledgements from resurrecting them. Fresh scope checks, separate per-command keys, serialized writes and acknowledged tombstones preserve explicit original-key recovery. No objective, message, credential or native phase is stored in the browser journal. Both renderer-crash and owned whole-browser process-tree termination/restart recover the exact original key in real local browser probes, without automatic POST or storage export/reinjection. Clearing site data, storage eviction and OS/power-loss behavior remain separate limitations. All-boundary server-process reconciliation, pending/claimed-input and unsupported attached-history recovery and production acceptance remain incomplete. Gateway admission and Host observer switches default off until complete consumer rollout and remaining gates pass. Real locked-SDK/scripted-model verification is wiring evidence, not real-provider quality or production accounting.
 
 Only the original trusted live attempt before invoking native resume may attest an immutable not-called rejection. The Gateway records its fixed reason with the exact original run/Session/lease; Worker and UI expose that reason without raw transport text. A lost begin acknowledgement can be reconciled as not-called only by that still-live attempt. Once native resume has been invoked, a thrown error, failed flush or lost applied acknowledgement is uncertain and cannot be reclassified from the current Goal alone. Disarm covers a native invocation that appended then threw. Actual isolated Host termination is tested after native flush and after applied commit, distinct from unit fault injection or exhaustive crash recovery.
 
@@ -116,5 +116,17 @@ Observer revocation cancels only its same-Goal in-flight work using the official
 - time: 2026-10-16T15:26:45
   kind: decision
   summary: Keep later inbox input when revoking only an observed Goal execution
+  source: docs/GOAL-CONTINUATION.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-16T15:49:11
+  kind: decision
+  summary: Wait for strict IndexedDB commits before control dispatch and acknowledgement
+  source: docs/GOAL-CONTINUATION.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-16T15:49:11
+  kind: reversal
+  summary: "localStorage read-back did not survive owned whole-browser termination; strict IndexedDB commit now gates dispatch"
   source: docs/GOAL-CONTINUATION.md
   affects: [native-goal-boundary]

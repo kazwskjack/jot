@@ -38,13 +38,59 @@ Gateway `GENERAL_AGENT_CONVERSATION_GOAL_RESUME_ENABLED` defaults to false. Enab
 
 ## Browser command recovery
 
-Before a control POST, its exact command must be written and read back in localStorage. Missing authenticated owner scope, inaccessible storage or malformed records prevents new controls. Fresh authenticated capabilities are checked before sending and before accepting the response; an account change retains the original pending record and cannot redirect it into another owner namespace. Server ownership, CAS, permission and idempotency checks remain authoritative.
+Before a control POST, the exact command must commit in IndexedDB with
+`durability: 'strict'`. The UI waits for transaction completion, not only a
+successful individual put or a same-page read-back. localStorage alone lost an
+unconfirmed command in the real whole-browser crash probe; it is now only a
+legacy migration source. Missing authenticated scope, unavailable strict storage
+or corrupt records prevents a new control POST. Commands still contain only the
+original action, Goal ID/revision and idempotency key plus local pending/ack and
+migration metadata; no objective, message, credential or native phase is stored.
 
-Each command has a separate key so two tabs cannot overwrite distinct uncertain commands. Reopening discovers pending metadata but sends nothing automatically. Only an explicit retry uses the original Goal reference and original request key. It cannot regenerate a key from the currently displayed Goal. Multiple pending commands are presented one at a time for explicit reconciliation, not scheduled for execution. Known native preflight/revision refusals resolve their original command; authentication, not-found, timeout, unknown conflict and transport errors preserve it.
+Fresh authenticated capabilities are checked before sending and before accepting
+the response. Account changes cannot redirect an original command into another
+owner namespace. Each command has a separate owner/conversation key; IndexedDB
+read/write transactions serialize same-key checks across tabs. Reopening restores
+pending metadata but sends nothing automatically. Explicit retry keeps the
+original Goal reference and key, never a regenerated request based on current
+Goal state. Known native preflight/revision refusals resolve their command;
+authentication, not-found, timeout, unknown conflict and transport errors retain it.
 
-A validated native pause receipt must identify the same Goal at the next revision in paused/disarmed state; stop must return null. Resume still validates its separate original-run 202 acceptance. An acknowledgement tombstone is durably written before the local pending command is cleared. Up to twenty acknowledged records per conversation are retained when pruning succeeds; unknown commands are never automatically discarded. Failed pruning can leave extra safe tombstones, while failed acknowledgement writes leave the exact request available for reconciliation. No local marker is evidence that native execution completed.
+Pause receipts must identify the same Goal at the next revision in paused/disarmed
+state; stop must return null; resume validates its separate original-run 202.
+Acknowledgement commits durably before pending UI state is cleared. Up to twenty
+ordinary acknowledged records per conversation are retained when pruning succeeds;
+unknown commands never expire automatically. Imported legacy acknowledgements
+retain a durable migration tombstone until local acknowledgement succeeds, so a
+failed legacy update cannot resurrect an uncertain request. Failed pruning may
+retain additional safe tombstones. No local marker certifies native completion.
 
-`verify-goal-ui.mjs` commits a synthetic pause, loses its reply, reloads, and checks the original key replay. It also commits a synthetic resume acceptance, loses that reply, forcibly crashes the Chromium page renderer with CDP, opens a new page in the same browser context, and checks the same original control/run acceptance. The resumed native phase remains paused until its separate fixture update. No new user message is added by recovery. This verifies reload and renderer-process termination, not persistence after whole-browser or OS termination, real-provider execution or production rollout. Clearing browser site data, private-browsing teardown or storage eviction can remove local metadata; such loss must not be presented as confirmed failure or permission to reconstruct an old request.
+```sh
+npm run build
+npm run test:goal-ui
+npm run test:goal-ui:browser-crash
+```
+
+Both built-browser modes check legacy migration, concurrent commands, owner
+isolation, strict-commit refusal, bounded acknowledgements, unknown-command
+retention and corrupt-record refusal against real IndexedDB. They commit a
+synthetic pause, lose its reply, reload and check the same key. They then commit a
+resume 202 and lose its reply. The default mode terminates the page renderer and
+opens another page. The browser-crash mode starts its own browser with a fresh
+workspace-local profile, forcibly terminates only that owned process tree,
+confirms process exit and CDP disconnection, then starts a new browser with the
+same profile. It never exports/reinjects storage to simulate recovery and never
+selects or terminates a user's browser. Explicit retry recovers the same original
+control/run; 202 is still not native Goal completion, and no extra user message
+is generated.
+
+These probes use synthetic local HTTP responses, not a real provider or deployed
+conversation. They do not prove OS/power-loss behavior, storage eviction or private
+browsing teardown. Clearing site data can remove the journal and must not be
+interpreted as confirmed failure or permission to reconstruct an old request.
+The first CDP `Browser.crash` attempt hung the automation transport after the
+browser exited; the final owned-process probe uses independent process handles
+and bounded cleanup rather than treating an observation timeout as process exit.
 
 ## Remaining acceptance
 
@@ -102,7 +148,7 @@ those remaining implementation and deployed acceptance requirements.
 | Native flush completed, before applied commit | Restart disarmed; zero inference/publication; keep unknown dispatch fenced | Actual isolated Host termination probe |
 | Applied commit, before its acknowledgement | Retain the original receipt; restart disarmed; never infer execution completion from acceptance | Actual isolated Host termination probe |
 | Inside native CAS/flush, provider usage settlement, final publication commit | Reconcile exact native events, original cost holds and one canonical output without replay | Additional process-exit acceptance remains required |
-| Browser exits before control acknowledgement | Restore the exact original owner-scoped command/key, never infer its receipt from current Goal state | Built-browser reload and forced renderer-crash recovery, including lost committed pause and 202 resume receipts; whole-browser/OS termination is not yet verified |
+| Browser exits before control acknowledgement | Restore the exact original owner-scoped command/key, never infer its receipt from current Goal state | Built-browser reload, renderer crash and strict-commit journal recovery, including lost committed pause and 202 resume receipts; owned whole-browser process-tree termination and restart are verified; OS/power-loss behavior is not |
 | Persisted interrupted tail, no pending inbox input | Cold read stays read-only; official resume commits conservative closers and continues through the original Worker without replay | Real locked-SDK cases for open turn, started tool and unstarted tool, including another cold restart |
 | Parked/claimed input or still-open attached turn | Recover original input through its proper execution lineage without dropping or borrowing it for a new Goal run | Refusal is verified; full supported recovery remains incomplete |
 

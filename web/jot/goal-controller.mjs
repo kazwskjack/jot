@@ -1,21 +1,23 @@
 import {validateConversationGoalView,validateConversationGoalAcceptance,validateConversationGoalResumeReadiness} from '../../packages/gateway/src/harness/conversation-goal-view.ts';
 function validate(value){try{return validateConversationGoalView(value).goal;}catch{throw Error('goal_view_invalid');}}
 export class ConversationGoalController {
- constructor(id,api,onChange=()=>{},requireRecovery=false){this.id=id;this.api=api;this.onChange=onChange;this.goal=undefined;this.available=false;this.loading=false;this.busy=false;this.command=null;this.generation=0;this.requests=new Set();this.execution=null;this.resumeReadiness=undefined;this.readinessGeneration=0;this.recoveryReady=!requireRecovery;}
- configureRecovery(store,verifyScope){
+ constructor(id,api,onChange=()=>{},requireRecovery=false){this.id=id;this.api=api;this.onChange=onChange;this.goal=undefined;this.available=false;this.loading=false;this.busy=false;this.command=null;this.generation=0;this.requests=new Set();this.execution=null;this.resumeReadiness=undefined;this.readinessGeneration=0;this.recoveryReady=!requireRecovery;this.lifecycle=0;this.preparing=false;}
+ async configureRecovery(store,verifyScope){
   if(store.conversation!==this.id||typeof verifyScope!=='function')throw Error('goal_recovery_invalid');
-  if(this.store){if(this.store.prefix!==store.prefix)throw Error('goal_recovery_scope_changed');return;}
-  const pending=store.pending();this.store=store;this.verifyScope=verifyScope;this.command=pending[0]??null;this.recoveryReady=true;this.changed();
+  const lifecycle=this.lifecycle;
+  const reuse=()=>{if(!this.store)return false;if(store!==this.store)store.close?.();if(this.store.prefix!==store.prefix)throw Error('goal_recovery_scope_changed');return true;};
+  if(reuse())return;const pending=await store.pending();if(lifecycle!==this.lifecycle){store.close?.();throw Error('goal_control_disposed');}if(reuse())return;
+  this.store=store;this.verifyScope=verifyScope;this.command=pending[0]??null;this.recoveryReady=true;this.changed();
  }
  async checkScope(){if(!this.recoveryReady)throw Error('goal_recovery_unavailable');if(this.store&&await this.verifyScope(this.store.scope)!==true)throw Error('goal_recovery_scope_changed');}
- acknowledge(command){if(this.store)this.store.acknowledge(command);this.command=this.store?.pending()[0]??null;}
- get pending(){return this.command!==null;}
+ async acknowledge(command){if(this.store)await this.store.acknowledge(command);this.command=(this.store?await this.store.pending():[])[0]??null;}
+ get pending(){return this.command!==null||this.preparing===true;}
  get executing(){return ['queued','starting','running','waiting_user','waiting_approval','cancelling'].includes(this.execution?.status);}
  changed(){this.onChange(this);}
  get path(){return `/conversations/${encodeURIComponent(this.id)}/goal`;}
- dispose(){this.generation++;this.readinessGeneration++;for(const request of this.requests)request.abort();this.requests.clear();}
+ dispose(){this.lifecycle=(this.lifecycle??0)+1;this.generation++;this.readinessGeneration++;for(const request of this.requests)request.abort();this.requests.clear();this.store?.close?.();}
  refresh(){
-  if(this.busy)return Promise.resolve(this.goal);
+  if(this.busy||this.preparing)return Promise.resolve(this.goal);
   if(this.loading&&this.reading)return this.reading;
   const generation=++this.generation,abort=new AbortController();this.requests.add(abort);this.loading=true;this.changed();
   return this.reading=(async()=>{
@@ -41,14 +43,18 @@ export class ConversationGoalController {
  async control(action){
   if(this.pending)throw Error('goal_control_pending');
   if(!this.recoveryReady)throw Error('goal_recovery_unavailable');
-  if(this.store){this.command=this.store.pending()[0]??null;if(this.pending){this.changed();throw Error('goal_control_pending');}}
+  const generation=this.generation;this.preparing=true;this.changed();
+  try{
+  if(this.store){this.command=(await this.store.pending())[0]??null;if(this.command){this.changed();throw Error('goal_control_pending');}}
   if(!this.available||!this.goal||!goalPresentation(this.goal).actions.includes(action))throw Error('goal_state_unavailable');
   if(action==='resume'){if(this.executing)throw Error('goal_control_pending');if(this.resumeReadiness?.ready!==true)throw Error('goal_resume_unavailable');}
   const command={body:{action,id:this.goal.id,revision:this.goal.revision},key:crypto.randomUUID()};
-  if(this.store)this.store.save(command);this.command=command;return this.retry();
+  if(this.store)await this.store.save(command);if(generation!==this.generation)throw Error('goal_control_disposed');this.command=command;
+  }finally{this.preparing=false;this.changed();}
+  return this.retry();
  }
  async retry(){
-  if(this.busy||!this.command)throw Error('goal_control_pending');
+  if(this.busy||this.preparing||!this.command)throw Error('goal_control_pending');
   const generation=++this.generation,command=this.command,abort=new AbortController();this.requests.add(abort);this.busy=true;this.loading=false;this.changed();
   try{
    await this.checkScope();
@@ -57,13 +63,13 @@ export class ConversationGoalController {
    if(this.store)await this.checkScope();
    if(command.body.action==='resume'){
     const accepted=validateConversationGoalAcceptance(response);if(accepted.conversation_id!==this.id)throw Error('goal_acceptance_invalid');
-    if(generation===this.generation){this.acknowledge(command);this.execution={...accepted,status:'queued'};this.available=true;this.resumeReadiness=undefined;}return accepted;
+    if(generation===this.generation){await this.acknowledge(command);if(generation!==this.generation)throw Error('goal_control_disposed');this.execution={...accepted,status:'queued'};this.available=true;this.resumeReadiness=undefined;}return accepted;
    }
    const goal=validate(response);
    if(command.body.action==='stop'?goal!==null:!goal||goal.id!==command.body.id||goal.revision!==command.body.revision+1||goal.phase!=='paused'||goal.activation!=='disarmed')throw Error('goal_control_receipt_invalid');
-   if(generation===this.generation){this.acknowledge(command);this.goal=goal;this.available=true;if(!goal)this.execution=null;}return goal;
+   if(generation===this.generation){await this.acknowledge(command);if(generation!==this.generation)throw Error('goal_control_disposed');this.goal=goal;this.available=true;if(!goal)this.execution=null;}return goal;
   }catch(error){
-   if(generation===this.generation){this.available=false;if(error?.status===409&&['GOAL_CONTEXT_RECOVERY_REQUIRED','GOAL_REVISION_CHANGED','GOAL_NOT_RESUMABLE','GOAL_RESUME_NOT_APPLIED'].includes(error.message))this.acknowledge(command);}
+   if(generation===this.generation){this.available=false;if(error?.status===409&&['GOAL_CONTEXT_RECOVERY_REQUIRED','GOAL_REVISION_CHANGED','GOAL_NOT_RESUMABLE','GOAL_RESUME_NOT_APPLIED'].includes(error.message))await this.acknowledge(command);}
    throw error;
   }finally{this.requests.delete(abort);this.busy=false;this.changed();}
  }
