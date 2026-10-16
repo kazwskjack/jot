@@ -4,7 +4,7 @@ title: Keep native Goal state and continuation in DSH
 category: decision
 status: active
 created: "2026-10-16T11:44:16"
-updated: "2026-10-17T03:31:03"
+updated: "2026-10-17T03:41:39"
 ---
 
 <!-- compiled_truth -->
@@ -401,4 +401,10 @@ Historical final-output verification hashes actual bounded bytes outside the SQL
   kind: decision
   summary: "Move full output hashes outside SQLite write locks using retained descriptor witnesses and final source/catalog/file checks; retain filesystem assumptions and production gates."
   source: docs/superpowers/plans/2026-10-17-historical-output-locks.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-17T03:41:39
+  kind: decision
+  summary: "Always-on discovery must use original DSH planning/task occurrences and existing budgets, with owner opt-in, isolated work cycles and explicit reviewed apply. Pure eligibility is non-authorizing; empty channel presence cannot prove native idle. Upstream unattended permission bypass must not replace Gateway permissions. Full plan includes collector, durable admission, native execution/report, workspace/apply, UI and deployment."
+  source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
   affects: [native-goal-boundary]

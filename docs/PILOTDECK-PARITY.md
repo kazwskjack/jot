@@ -417,3 +417,18 @@ failures; the final three-round local run records none, with publication locks
 5.59–6.94 ms. Receipt retries and racing publishers also avoid byte reads inside
 the transaction. This does not complete storage/retention, real-provider, fleet,
 production or all-capability acceptance; filesystem assumptions remain explicit.
+
+## Always-on discovery implementation started
+
+The [complete discovery/work-cycle plan](superpowers/plans/2026-10-17-always-on-discovery.md)
+maps the upstream scheduler, discovery/work/report, workspace and reviewed apply
+flows to original DSH/Gateway contracts. The first pure eligibility evaluator
+is implemented and locally tested: explicit owner/project/role scope and revision,
+fresh observations, native idle, recent human input, cooldown, existing budget
+holds, background capacity, dormant signals and reservation/cycle gates.
+Its positive result is advice with `execution_authorized:false`, never admission.
+No scheduling loop, configured owner policy, workspace, apply route or model call
+is enabled by that module. The factual collector, persistent policy/admission,
+original DSH planning/execution/report, work-cycle isolation/apply, UI and deployed
+acceptance remain to implement. Persistent configured tasks are not full
+Always-on discovery. Upstream unattended permission bypass is not transplanted.
