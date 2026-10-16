@@ -1,17 +1,19 @@
 import React,{useEffect,useMemo,useState} from 'react';
-import {request} from './client';
+import {request,taskDraftScope} from './client';
+import {GoalReceiptStore} from './goal-receipts.mjs';
 import {ConversationGoalController,goalPresentation,goalControlError,goalResumeHint,goalExecutionHint} from './goal-controller.mjs';
 import type {Run} from './types';
 const labels:Record<string,string>={pause:'暂停',resume:'继续',stop:'停止'};
 export default function ConversationGoal({id,running,runStatus,controlRun,onResumeAccepted,onPendingChange}:{id:string;running:boolean;runStatus?:string;controlRun?:Run|undefined;onResumeAccepted?:()=>void;onPendingChange:(pending:boolean)=>void}){
  const [,render]=useState(0),[error,setError]=useState(''),[confirmStop,setConfirmStop]=useState(false);
- const controller=useMemo(()=>new ConversationGoalController(id,{request}),[id]);
+ const controller=useMemo(()=>new ConversationGoalController(id,{request},()=>{},true),[id]);
+ const ensureRecovery=async()=>{if(controller.recoveryReady)return;await request('/capabilities');controller.configureRecovery(new GoalReceiptStore(window.localStorage,taskDraftScope(),id),async(scope:string)=>{await request('/capabilities');return taskDraftScope()===scope;});};
  useEffect(()=>{let mounted=true;controller.onChange=()=>{if(mounted){render(n=>n+1);onPendingChange(controller.pending);}};setError('');setConfirmStop(false);return()=>{mounted=false;controller.onChange=()=>{};controller.dispose();onPendingChange(false);};},[controller,onPendingChange]);
- const refresh=async()=>{try{await controller.refresh();setError('');if(controller.goal&&goalPresentation(controller.goal).actions.includes('resume'))await controller.refreshReadiness().catch(()=>setError('续跑状态暂不可用，请稍后刷新。'));}catch{setError('目标状态暂不可用，请刷新重试。');}};
- useEffect(()=>{let mounted=true;const read=async()=>{try{await controller.refresh();if(mounted)setError('');if(controller.goal&&goalPresentation(controller.goal).actions.includes('resume'))await controller.refreshReadiness();}catch{if(mounted)setError('目标或续跑状态暂不可用，请刷新重试。');}};void read();const timer=(running||controller.executing)?setInterval(()=>void read(),3000):undefined;return()=>{mounted=false;clearInterval(timer);};},[controller,running,runStatus,controller.executing]);
+ const refresh=async()=>{try{await ensureRecovery();await controller.refresh();setError('');if(controller.goal&&goalPresentation(controller.goal).actions.includes('resume'))await controller.refreshReadiness().catch(()=>setError('续跑状态暂不可用，请稍后刷新。'));}catch{setError('目标或操作回执暂不可用，请检查浏览器存储后刷新。');}};
+ useEffect(()=>{let mounted=true;const read=async()=>{try{await ensureRecovery();if(!mounted)return;await controller.refresh();if(mounted)setError('');if(controller.goal&&goalPresentation(controller.goal).actions.includes('resume'))await controller.refreshReadiness();}catch{if(mounted)setError('目标或操作回执暂不可用，请检查浏览器存储后刷新。');}};void read();const timer=(running||controller.executing)?setInterval(()=>void read(),3000):undefined;return()=>{mounted=false;clearInterval(timer);};},[controller,running,runStatus,controller.executing]);
  useEffect(()=>{controller.observeRun(controlRun);},[controller,controlRun?.run_id,controlRun?.version,controlRun?.status,controlRun?.error_code]);
  const execute=async(action?:string)=>{try{const result=action?await controller.control(action):await controller.retry();setError('');setConfirmStop(false);if(result?.accepted)onResumeAccepted?.();else if(controller.goal&&goalPresentation(controller.goal).actions.includes('resume'))await controller.refreshReadiness().catch(()=>{});}catch(reason){setError(goalControlError(reason));}};
- const goal=controller.goal,view=goal?goalPresentation(goal):null,disabled=controller.busy||controller.pending||!controller.available;
+ const goal=controller.goal,view=goal?goalPresentation(goal):null,disabled=controller.busy||controller.pending||!controller.available||!controller.recoveryReady;
  if(!goal&&controller.available&&!controller.pending&&!error)return null;
  return <section className="jot-native-goal" aria-label="当前目标" aria-busy={controller.loading||controller.busy}>
   <div className="jot-goal-heading"><strong>{view?.label??'目标状态'}</strong><button type="button" disabled={controller.busy||controller.loading} onClick={()=>void refresh()}>刷新目标</button></div>

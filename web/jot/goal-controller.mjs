@@ -1,7 +1,14 @@
 import {validateConversationGoalView,validateConversationGoalAcceptance,validateConversationGoalResumeReadiness} from '../../packages/gateway/src/harness/conversation-goal-view.ts';
 function validate(value){try{return validateConversationGoalView(value).goal;}catch{throw Error('goal_view_invalid');}}
 export class ConversationGoalController {
- constructor(id,api,onChange=()=>{}){this.id=id;this.api=api;this.onChange=onChange;this.goal=undefined;this.available=false;this.loading=false;this.busy=false;this.command=null;this.generation=0;this.requests=new Set();this.execution=null;this.resumeReadiness=undefined;this.readinessGeneration=0;}
+ constructor(id,api,onChange=()=>{},requireRecovery=false){this.id=id;this.api=api;this.onChange=onChange;this.goal=undefined;this.available=false;this.loading=false;this.busy=false;this.command=null;this.generation=0;this.requests=new Set();this.execution=null;this.resumeReadiness=undefined;this.readinessGeneration=0;this.recoveryReady=!requireRecovery;}
+ configureRecovery(store,verifyScope){
+  if(store.conversation!==this.id||typeof verifyScope!=='function')throw Error('goal_recovery_invalid');
+  if(this.store){if(this.store.prefix!==store.prefix)throw Error('goal_recovery_scope_changed');return;}
+  const pending=store.pending();this.store=store;this.verifyScope=verifyScope;this.command=pending[0]??null;this.recoveryReady=true;this.changed();
+ }
+ async checkScope(){if(!this.recoveryReady)throw Error('goal_recovery_unavailable');if(this.store&&await this.verifyScope(this.store.scope)!==true)throw Error('goal_recovery_scope_changed');}
+ acknowledge(command){if(this.store)this.store.acknowledge(command);this.command=this.store?.pending()[0]??null;}
  get pending(){return this.command!==null;}
  get executing(){return ['queued','starting','running','waiting_user','waiting_approval','cancelling'].includes(this.execution?.status);}
  changed(){this.onChange(this);}
@@ -33,23 +40,30 @@ export class ConversationGoalController {
  }
  async control(action){
   if(this.pending)throw Error('goal_control_pending');
+  if(!this.recoveryReady)throw Error('goal_recovery_unavailable');
+  if(this.store){this.command=this.store.pending()[0]??null;if(this.pending){this.changed();throw Error('goal_control_pending');}}
   if(!this.available||!this.goal||!goalPresentation(this.goal).actions.includes(action))throw Error('goal_state_unavailable');
   if(action==='resume'){if(this.executing)throw Error('goal_control_pending');if(this.resumeReadiness?.ready!==true)throw Error('goal_resume_unavailable');}
-  this.command={body:{action,id:this.goal.id,revision:this.goal.revision},key:crypto.randomUUID()};return this.retry();
+  const command={body:{action,id:this.goal.id,revision:this.goal.revision},key:crypto.randomUUID()};
+  if(this.store)this.store.save(command);this.command=command;return this.retry();
  }
  async retry(){
   if(this.busy||!this.command)throw Error('goal_control_pending');
   const generation=++this.generation,command=this.command,abort=new AbortController();this.requests.add(abort);this.busy=true;this.loading=false;this.changed();
   try{
+   await this.checkScope();
+   if(generation!==this.generation)throw Error('goal_control_disposed');
    const response=await this.api.request(this.path,'POST',command.body,command.key,abort.signal);
+   if(this.store)await this.checkScope();
    if(command.body.action==='resume'){
     const accepted=validateConversationGoalAcceptance(response);if(accepted.conversation_id!==this.id)throw Error('goal_acceptance_invalid');
-    if(generation===this.generation){this.execution={...accepted,status:'queued'};this.available=true;this.command=null;this.resumeReadiness=undefined;}return accepted;
+    if(generation===this.generation){this.acknowledge(command);this.execution={...accepted,status:'queued'};this.available=true;this.resumeReadiness=undefined;}return accepted;
    }
    const goal=validate(response);
-   if(generation===this.generation){this.goal=goal;this.available=true;this.command=null;if(!goal)this.execution=null;}return goal;
+   if(command.body.action==='stop'?goal!==null:!goal||goal.id!==command.body.id||goal.revision!==command.body.revision+1||goal.phase!=='paused'||goal.activation!=='disarmed')throw Error('goal_control_receipt_invalid');
+   if(generation===this.generation){this.acknowledge(command);this.goal=goal;this.available=true;if(!goal)this.execution=null;}return goal;
   }catch(error){
-   if(generation===this.generation){this.available=false;if(error?.status>=400&&error.status<500&&error.status!==408&&error.message!=='IDEMPOTENCY_IN_PROGRESS')this.command=null;}
+   if(generation===this.generation){this.available=false;if(error?.status===409&&['GOAL_CONTEXT_RECOVERY_REQUIRED','GOAL_REVISION_CHANGED','GOAL_NOT_RESUMABLE','GOAL_RESUME_NOT_APPLIED'].includes(error.message))this.acknowledge(command);}
    throw error;
   }finally{this.requests.delete(abort);this.busy=false;this.changed();}
  }
@@ -63,6 +77,8 @@ export function goalPrompt(text,enabled=false){
  return '目标模式：先调用 get_goal。没有目标时，调用 create_goal 创建以下目标，max_goal_rounds=9007199254740991（不设业务轮次上限）。已有目标时根据本条消息继续或调整，不重复创建、不丢进度。由原生目标驱动继续执行；用户暂停或停止、需要人工验证或真实阻塞时正确停止。按真实工具回执验收，不把进度答复当完成。\n用户目标：'+text;
 }
 export function goalControlError(error){
+ if(error?.message==='goal_recovery_scope_changed')return '登录用户已变化，请重新进入原用户的对话核对操作。';
+ if(error?.message?.startsWith('goal_recovery_'))return '无法保存或读取目标操作回执，请检查浏览器存储后刷新。';
  if(error?.status===409&&error.message==='GOAL_CONTEXT_RECOVERY_REQUIRED')return '会话有待恢复内容，请先恢复当前任务。';
  if(error?.status===409&&error.message==='IDEMPOTENCY_IN_PROGRESS')return '操作仍在处理中，请重试原操作。';
  if(error?.status===409)return '目标或运行状态已变化，请刷新后确认。';

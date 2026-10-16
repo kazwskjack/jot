@@ -435,3 +435,13 @@ locked official iterator promotes a prepared Session when advanced past that
 snapshot. Confirmed pre-native refusals have exact immutable receipts; failures
 after invoking native resume remain uncertain. See [Goal failure and crash
 boundaries](docs/GOAL-CONTINUATION.md#failure-evidence-and-remaining-crash-matrix).
+
+
+Ordinary Goal controls now persist minimal owner/conversation-scoped command
+metadata before POST, recover the original key after reload or renderer-process
+termination, and require explicit retry. Separate command keys preserve uncertain
+operations from different tabs; acknowledged tombstones prevent pruning failures
+from resurrecting them. Account changes and unavailable browser storage fail
+closed. No objective, message or credential is journaled. This is local recovery
+evidence, not whole-browser/OS crash or production acceptance. See
+[browser command recovery](docs/GOAL-CONTINUATION.md#browser-command-recovery).

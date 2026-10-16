@@ -1,6 +1,32 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {ConversationGoalController,goalPresentation,goalPrompt,goalControlError,latestGoalRun,goalExecutionHint} from './goal-controller.mjs';
+import {GoalReceiptStore} from './goal-receipts.mjs';
+const memory=()=>{const data=new Map();return {get length(){return data.size;},key:i=>[...data.keys()][i]??null,getItem:k=>data.get(k)??null,setItem:(k,v)=>data.set(k,v),removeItem:k=>data.delete(k)};};
 const view=(revision=1,phase='active',activation='armed')=>({goal:{id:'goal-1',revision,objective:'Collect source-backed evidence',phase,activation,roundsStarted:2,maxGoalRounds:Number.MAX_SAFE_INTEGER}});
+test('a new controller restores a lost reply without sending, then explicitly retries the identical command',async()=>{
+ const storage=memory(),store=()=>new GoalReceiptStore(storage,'a'.repeat(64),'ordinary'),calls=[];
+ const api={request:async(path,method,body,key)=>{if(method==='GET')return view();calls.push(structuredClone({body,key}));throw Error('lost');}};
+ const first=new ConversationGoalController('ordinary',api);first.configureRecovery(store(),async()=>true);await first.refresh();await assert.rejects(()=>first.control('pause'));first.dispose();
+ const second=new ConversationGoalController('ordinary',api);second.configureRecovery(store(),async()=>true);assert.equal(second.pending,true);assert.equal(calls.length,1);api.request=async(path,method,body,key)=>{calls.push({body,key});return view(2,'paused','disarmed');};await second.retry();assert.deepEqual(calls[0],calls[1]);assert.equal(second.pending,false);assert.deepEqual(store().pending(),[]);
+});
+test('durability and owner checks must succeed before any POST; auth failures preserve the original request',async()=>{
+ const storage=memory(),store=new GoalReceiptStore(storage,'a'.repeat(64),'ordinary');let posts=0,owner=true;
+ const c=new ConversationGoalController('ordinary',{request:async(path,method)=>{if(method==='GET')return view();posts++;throw Object.assign(Error('AUTH_REQUIRED'),{status:401});}});c.configureRecovery(store,async()=>owner);await c.refresh();storage.setItem=()=>{throw Error('quota');};await assert.rejects(()=>c.control('pause'));assert.equal(posts,0);
+ const d=new ConversationGoalController('ordinary',c.api);d.configureRecovery(new GoalReceiptStore(memory(),'a'.repeat(64),'ordinary'),async()=>owner);await d.refresh();await assert.rejects(()=>d.control('pause'));assert.equal(d.pending,true);owner=false;await assert.rejects(()=>d.retry(),/goal_recovery_scope_changed/);assert.equal(posts,1);assert.equal(d.pending,true);
+});
+test('wrong pause/stop receipts and failed acknowledgement writes retain the exact request',async()=>{
+ for(const action of ['pause','stop']){const c=new ConversationGoalController('ordinary',{request:async(path,method)=>method==='GET'?view():view(9,'paused','disarmed')});await c.refresh();await assert.rejects(()=>c.control(action),/goal_control_receipt_invalid/);assert.equal(c.pending,true);}
+ const storage=memory(),store=new GoalReceiptStore(storage,'a'.repeat(64),'ordinary'),c=new ConversationGoalController('ordinary',{request:async(path,method)=>method==='GET'?view():view(2,'paused','disarmed')});c.configureRecovery(store,async()=>true);await c.refresh();const write=storage.setItem;storage.setItem=(k,v)=>{if(v.includes('acknowledged'))throw Error('quota');write(k,v);};await assert.rejects(()=>c.control('pause'));assert.equal(c.pending,true);assert.equal(c.goal.phase,'active');assert.equal(store.pending().length,1);
+});
+test('required recovery cannot be bypassed and disposal while verifying the owner never sends',async()=>{
+ const store=new GoalReceiptStore(memory(),'a'.repeat(64),'ordinary');let posts=0,finish;
+ const c=new ConversationGoalController('ordinary',{request:async(path,method)=>{if(method==='POST')posts++;return view();}},()=>{},true);await c.refresh();await assert.rejects(()=>c.control('pause'),/goal_recovery_unavailable/);assert.equal(posts,0);
+ c.configureRecovery(store,()=>new Promise(resolve=>finish=resolve));const pending=c.control('pause');c.dispose();finish(true);await assert.rejects(()=>pending,/goal_control_disposed/);assert.equal(posts,0);assert.equal(store.pending().length,1);
+});
+test('owner changes after a reply preserve recovery metadata and do not apply another owner response',async()=>{
+ const store=new GoalReceiptStore(memory(),'a'.repeat(64),'ordinary');let checks=0;
+ const c=new ConversationGoalController('ordinary',{request:async(path,method)=>method==='GET'?view():view(2,'paused','disarmed')});c.configureRecovery(store,async()=>++checks===1);await c.refresh();await assert.rejects(()=>c.control('pause'),/goal_recovery_scope_changed/);assert.equal(c.goal.phase,'active');assert.equal(c.pending,true);assert.equal(store.pending().length,1);
+});
 test('ordinary Goal reads address only the selected conversation and preserve unavailable state',async()=>{
  const calls=[],c=new ConversationGoalController('conversation /1',{request:async(...args)=>{calls.push(args);return view();}});
  await c.refresh();assert.equal(c.goal.id,'goal-1');assert.equal(calls[0][0],'/conversations/conversation%20%2F1/goal');assert.equal(calls[0][1],'GET');
