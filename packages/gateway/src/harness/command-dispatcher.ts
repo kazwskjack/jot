@@ -1,5 +1,6 @@
 import {isDeepStrictEqual} from 'node:util';
 import {inspectOrdinarySteeringBinding} from '../conversations/ordinary-steering-binding.ts';
+import {hasOrdinarySteeringCustody,reserveOrdinarySteeringCustody} from './ordinary-steering-custody.ts';
 import type {OrdinarySteeringExecution} from './session-controller-client.ts';
 import type {ExecutionLease} from '../workbench/execution-lease.ts';
 import type {DatabaseSync} from 'node:sqlite';
@@ -34,8 +35,8 @@ export class SessionCommandDispatcher {
    const terminal=['succeeded','failed','cancelled','interrupted','partial'].includes(row.run_status);
    if(terminal){
     if(row.kind==='steer'){
-     if(this.ordinarySteering&&this.isOrdinaryParent(row.run_id)){
-      if(row.run_status!=='cancelled'&&typeof row.session_id==='string'&&await this.ordinarySteering.reconcileHistorical?.(row.run_id,row.session_id,row.id))return true;
+     if(hasOrdinarySteeringCustody(this.db,row.id)||this.ordinarySteering&&this.isOrdinaryParent(row.run_id)){
+      if(row.run_status!=='cancelled'&&typeof row.session_id==='string'&&await this.ordinarySteering?.reconcileHistorical?.(row.run_id,row.session_id,row.id))return true;
       continue; // Never convert absent/unknown acceptance into a fallback run.
      }
      const p=JSON.parse(row.payload_json);const owner=this.db.prepare('SELECT owner_id FROM ga_conversations WHERE id=?').get(row.conversation_id) as {owner_id:string};
@@ -76,8 +77,10 @@ export class SessionCommandDispatcher {
     try { this.executionGuard?.assertRunActive(row.run_id); }
     catch { this.superseded(row.id); continue; }
     const ready=this.ordinarySteering?.currentExecutionFor(row.run_id);if(this.ordinarySteering&&!ready)throw Error('ordinary_steering_execution_unavailable');
-    const ordinary=ready?.ordinary===true;let proof:ReturnType<typeof inspectOrdinarySteeringBinding>|undefined;
-    if(ordinary){if(!this.client.steerOriginal||ready.sessionRef!==row.session_id)throw Error('ordinary_steering_execution_unavailable');proof=inspectOrdinarySteeringBinding(this.db,row.run_id,row.session_id,row.id,ready.executionLease);const receipt=await this.client.steerOriginal(row.session_id,row.id,String(payload.text),{run_id:row.run_id,command_id:row.id,execution_lease:ready.executionLease},AbortSignal.timeout(20_000));if(receipt.accepted!==true)throw Error('ordinary_steering_admission_unconfirmed');}
+    const ordinary=ready?.ordinary===true;
+    if(hasOrdinarySteeringCustody(this.db,row.id)&&!ordinary)continue;
+    let proof:ReturnType<typeof inspectOrdinarySteeringBinding>|undefined;
+    if(ordinary){if(!this.client.steerOriginal||ready.sessionRef!==row.session_id)throw Error('ordinary_steering_execution_unavailable');proof=reserveOrdinarySteeringCustody(this.db,row.run_id,row.session_id,row.id,ready.executionLease);const receipt=await this.client.steerOriginal(row.session_id,row.id,String(payload.text),{run_id:row.run_id,command_id:row.id,execution_lease:ready.executionLease},AbortSignal.timeout(20_000));if(receipt.accepted!==true)throw Error('ordinary_steering_admission_unconfirmed');}
     else await this.client.prompt(row.session_id,row.id,String(payload.text),'steer',AbortSignal.timeout(20_000));
     withImmediateTransaction(this.db,()=>{
      if(ordinary){if(!isDeepStrictEqual(this.ordinarySteering!.currentExecutionFor(row.run_id),ready)||!isDeepStrictEqual(inspectOrdinarySteeringBinding(this.db,row.run_id,row.session_id,row.id,ready!.executionLease),proof))throw Error('ordinary_steering_admission_unconfirmed');}

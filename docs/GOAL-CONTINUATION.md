@@ -92,6 +92,31 @@ The first CDP `Browser.crash` attempt hung the automation transport after the
 browser exited; the final owned-process probe uses independent process handles
 and bounded cleanup rather than treating an observation timeout as process exit.
 
+## Steering custody during configuration rollback
+
+Before an opted-in ordinary steering call, the owning dispatcher now commits
+immutable, hash-only command custody in the existing Gateway database. The
+record fixes the original command/run/owner/conversation/Session and client
+message identity. It prohibits converting an uncertain supplement into a new
+run. It does not certify acceptance, native entry, execution authority or cost.
+Even if the newer steering option is disabled later, a current dispatcher
+retains this command instead of calling an unbound prompt or creating a fallback.
+
+A database insert guard also rejects the earlier dispatcher's fresh-message
+fallback for that reserved client ID in the original conversation. The original
+deterministic command-message publication and idempotent lookup still work;
+unrelated conversations and unreserved legacy commands retain their behavior.
+Custody and command identity cannot be silently edited, replaced or deleted
+while their parent exists. Parent deletion and explicit cancellation remain
+supported. Reopening preserves custody without changing pending to applied.
+
+Existing commands are not retroactively certified or assigned custody. This
+guard cannot undo legacy native calls already issued or keep an old live
+dispatcher from using its old native API. Stop/drain the complete old execution
+pool before enabling the new path. The pinned earlier-dispatcher probe uses
+current supporting repositories; it is not a full older deployment test.
+See the [rollback implementation plan](superpowers/plans/2026-10-17-steering-rollback-custody.md).
+
 ## Remaining acceptance
 
 1. Verify every consumer of the original run queue has the updated continuation path before enabling admission. A historical consumer may not make progress on message-free continuation records, even though the old input join cannot replay the original message.

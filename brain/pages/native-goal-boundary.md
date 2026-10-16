@@ -4,7 +4,7 @@ title: Keep native Goal state and continuation in DSH
 category: decision
 status: active
 created: "2026-10-16T11:44:16"
-updated: "2026-10-17T03:04:21"
+updated: "2026-10-17T03:18:24"
 ---
 
 <!-- compiled_truth -->
@@ -381,4 +381,16 @@ Running ordinary completion now has a Worker-owned publication callback while th
   kind: decision
   summary: "Historical outbox effects use a reserved pending protocol that old notification consumers cannot claim. Bootstrap and after-grant insertion isolate proven-unsent rows atomically; previous attempts retain unknown receipt/lease facts. Queue labels alone are not send authority. Keep original grants, queued identity and send gates, pause on rollback without ordinary-pending resets, and drain legacy in-flight actors before enablement."
   source: docs/superpowers/plans/2026-10-16-steering-lineage-and-recovery.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-17T03:15:12
+  kind: decision
+  summary: "Original steering must retain immutable fallback prohibition before native dispatch across configuration rollback. Custody is not acceptance, execution permission, replay authority or money settlement; old in-flight native calls still require a drained consumer rollout."
+  source: docs/superpowers/plans/2026-10-17-steering-rollback-custody.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-17T03:18:24
+  kind: evidence
+  summary: "Rollback regression reproduced two runs for one uncertain supplement. Persisted original-command custody now prevents fresh-run fallback; pinned earlier dispatcher is refused by the database while original publication/cancel/reopen remain supported. Local real-SDK cases use scripted providers; production/fleet and full capability acceptance remain open."
+  source: docs/superpowers/plans/2026-10-17-steering-rollback-custody.md
   affects: [native-goal-boundary]

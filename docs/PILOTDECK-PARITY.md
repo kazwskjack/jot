@@ -398,3 +398,12 @@ Earlier unsupported policy may hold delivery; a compatible observer resumes
 the same identity. Already-authorized legacy in-flight calls cannot be undone:
 drain old producers/consumers before enablement. This local compatibility gate
 does not establish complete fleet, event, real-provider or production acceptance.
+
+Original ordinary steering now commits hash-only fallback prohibition before its
+native call. A lost reply followed by configuration rollback cannot turn that
+reserved input into a fresh run in the current dispatcher. An existing-database
+insert guard also rejects the pinned earlier dispatcher's fallback message;
+original deterministic publication and cancellation remain usable. This does
+not retroactively protect earlier unreserved commands or prevent an old live
+native prompt. Full execution-pool draining and deployment acceptance remain
+required; custody never proves native acceptance or settled money.

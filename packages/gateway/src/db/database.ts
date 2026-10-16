@@ -8,6 +8,7 @@ import {installOrdinaryFinalPublications} from '../harness/ordinary-final-public
 import {installHistoricalFinalDeliveryIntents} from '../channels/historical-final-intents-schema.ts';
 import {installOrdinaryFinalObservers} from '../harness/ordinary-final-recovery-schema.ts';
 import {installHistoricalDispatchProtocol} from '../channels/historical-final-queue.ts';
+import {installOrdinarySteeringCustody} from '../harness/ordinary-steering-custody.ts';
 
 const schemaUrl = new URL('./schema.sql', import.meta.url);
 let savepointSequence = 0;
@@ -17,6 +18,7 @@ export function openProductDatabase(path: string): DatabaseSync {
   db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=75; PRAGMA foreign_keys=ON;');
   db.exec(readFileSync(schemaUrl, 'utf8'));
   installOrdinarySteeringReconciliations(db);
+  installOrdinarySteeringCustody(db);
   installOrdinaryFinalPublications(db);
   installHistoricalFinalDeliveryIntents(db);
   installOrdinaryFinalObservers(db);

@@ -1,0 +1,35 @@
+{
+  "license": "MIT",
+  "description": "Earlier dispatcher methods unchanged; supporting dependencies are current, so this is not a complete old deployment.",
+  "source": "packages/gateway/src/harness/command-dispatcher.ts",
+  "commit": "01bfb4ea5c4d9a90825d78122a13583f90972d54",
+  "source_sha256": "db817b81034a544d0c3d10b8c6ef678b60f182bd635f2e408f416408c3af73cd",
+  "fixture_sha256": "b0601f18de7e8aa567c2bd780244b8dc64de992dbc9c28fb68b8662a43191702",
+  "header": "// Pinned earlier Jot dispatcher; MIT. See provenance.json. Only dependency imports are relocated.\n",
+  "imports": [
+    {
+      "from": "../conversations/ordinary-steering-binding.ts",
+      "to": "../../../src/conversations/ordinary-steering-binding.ts"
+    },
+    {
+      "from": "./session-controller-client.ts",
+      "to": "../../../src/harness/session-controller-client.ts"
+    },
+    {
+      "from": "../workbench/execution-lease.ts",
+      "to": "../../../src/workbench/execution-lease.ts"
+    },
+    {
+      "from": "../db/database.ts",
+      "to": "../../../src/db/database.ts"
+    },
+    {
+      "from": "../events/event-store.ts",
+      "to": "../../../src/events/event-store.ts"
+    },
+    {
+      "from": "../runs/repository.ts",
+      "to": "../../../src/runs/repository.ts"
+    }
+  ]
+}
