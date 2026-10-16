@@ -14,11 +14,27 @@ Apply/reject and policy writes use version checks and atomic idempotency receipt
 
 ## Extraction-plugin integration boundary
 
-The evaluated extraction engine is [haitang1/dsh-memory](https://github.com/haitang1/dsh-memory), version 0.5.0 at revision `15de1c791bbcb5be2c9b0c2096eddedcaa61cc17` (MIT). Its isolated import, upstream synthetic tests and real Cordis initialization have been checked locally. It is **not yet wired as a production automatic worker**.
+The extraction engine is [haitang1/dsh-memory](https://github.com/haitang1/dsh-memory), version 0.5.0 at revision `15de1c791bbcb5be2c9b0c2096eddedcaa61cc17` (MIT). The optional loader verifies its package and JavaScript hashes and the tested Cordis 4.0.4 / DSH LLM 0.2.0-rc.2 versions before enabling extraction. A missing or changed optional plugin reports not ready without taking ordinary Sessions offline.
 
-Its default global store, direct background model calls, reasoning-off requests, memory tools, runtime skill and prompt injection must not be mounted unchanged into Jot. The remaining integration must use a trusted processing run, original model admission/usage accounting, role-specific storage, source validation and the same candidate-review flow. There must be only one extractor per source batch and one memory injection path. Existing manual capture tools are not evidence of unattended extraction.
+Each source batch has one immutable `memory_capture` processing identity and an internal original DSH run. The run inherits the source's cumulative budget scopes and today's ordinary daily scopes; it cannot obtain fresh cumulative spending by changing conversations. Its internal conversation is excluded from chat lists and project counts. It has no recalled memories or external tools and can only read its bound batch and propose candidates.
 
-Idle dispatch, restart/cancellation recovery, actual provider quality and production acceptance remain open. Installation and scripted model tests do not prove those requirements.
+The original worker pool tries ordinary work first, then its extraction pump. Original background capacity, role idleness, owner/project/role, policy/epoch, source freshness and source-task pause checks remain enforced. The plugin uses the original budgeted LLM stream at high reasoning, a single model call, a separate scratch directory and no duplicate tools, runtime skill or full-summary prompt injection. It cannot approve memory. The Host polls authority and propagates cancellation to the auxiliary stream; incurred costs can still settle after authority is revoked.
+
+A lost Host response can complete from the exact committed proposal and settled original usage. In-flight/unknown usage and an existing scratch claim never cause a speculative new provider call. Unresolved runs stop for reconciliation; they do not silently retry with a new run. The workbench shows processing or reconciliation status. Exhaustive crash recovery and actual provider quality still require deployment-specific acceptance.
+
+### Optional host configuration
+
+Install the pinned plugin in the existing isolated DSH profile, not globally, and preserve the upstream license. In the session adapter's trusted configuration set `memoryExtraction` with exactly:
+
+| Key | Value |
+|---|---|
+| `modulesRoot` | Absolute path to that profile's `node_modules`, containing the reviewed plugin and SDK |
+| `root` | Absolute private scratch directory dedicated to extraction; never a public or Git directory |
+| `maxOutputTokens` | The existing priced model route's output ceiling; mirror it rather than introducing a separate budget policy |
+
+Keep the existing `workbenchModel`, original model-budget configuration and budgeted preset. Set `GENERAL_AGENT_MEMORY_EXTRACTION_ENABLED=true` on the existing Gateway worker, with execution readiness and at least two original pool slots so the configured background allowance is nonzero. This adds no extra worker pool. The authenticated `/v1/memory-extraction/readiness` endpoint reports readiness without starting a model. Enable the role's **Automatic memory** policy in the workbench; it covers future bindings only. Assistant and automation sources remain separate opt-ins.
+
+The package includes the optional loader, original-pool pump and Host entry. Local tests include the actual SDK/plugin with a scripted model, cancellation, source revocation, accounting and lost-response checks. These are not evidence that a particular production installation is configured, or that a real provider extracts useful notes. Confirm its readiness, one future source batch, exact candidate provenance, original usage and owner approval separately before claiming production acceptance.
 
 ## BRAIN.md
 
@@ -30,6 +46,6 @@ BRAIN makes no model requests and is not a second conversation extractor. This r
 
 Summary-size settings do not bound all disk use. Extractor rollout files, journals and archives can accumulate; BRAIN timelines and Git history also grow. Retention must preserve evidence still referenced by candidates or rollback history.
 
-A local synthetic measurement of 100 different 512-byte notes added about 1.25 KB per extractor turn when writing both raw entries and rollouts. Updating the same BRAIN page added about 140 bytes per revision. These are logical file bytes, not production daily rates or filesystem allocation. They exclude SQLite/WAL, source conversations, images, backups and Git history. The integration will not automatically publish each extracted note into BRAIN or enable duplicate raw-writing tools.
+A local synthetic measurement of 100 different 512-byte notes added about 1.25 KB per extractor turn when writing both raw entries and rollouts. Updating the same BRAIN page added about 140 bytes per revision. These are logical file bytes, not production daily rates or filesystem allocation. They exclude SQLite/WAL, source conversations, images, backups and Git history. The integration does not automatically publish each extracted note into BRAIN or enable duplicate raw-writing tools.
 
 Measure actual growth using successive timestamped samples of the same runtime storage scope. Report the sampling interval, net bytes and a separate breakdown for database/WAL, attachments, logs and backups. Do not treat archive rotation as total-size enforcement or extrapolated fixture data as a production benchmark.

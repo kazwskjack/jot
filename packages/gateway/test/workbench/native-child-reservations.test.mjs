@@ -1,6 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {DatabaseSync} from 'node:sqlite';
 import {fixture} from './task-wait-fixture.mjs';import {TaskCollaborationService} from '../../src/workbench/task-collaboration.ts';import {TaskDelegationService} from '../../src/workbench/task-delegation.ts';
 import {NativeChildReservations} from '../../src/workbench/native-child-reservations.ts';
+import {withImmediateTransaction} from '../../src/db/database.ts';
 import {WorkbenchBridge} from '../../../session-adapter/workbench.js';
 import {createNativeRoleHost} from '../../../session-adapter/native-role-host.js';
 async function setup(t){const f=await fixture(t),member=f.workbench.createAgent('alice',{name:'Native member',workspace_id:'ws',project_id:f.a.project_id});
@@ -172,3 +173,14 @@ test('invalid or foreign remote outcome facts cannot release a native member',as
 });
 
 test('handoff can read immutable closed evidence without granting a predecessor activation',async t=>{const f=await setup(t),reservation=f.service.reserve(f.input),child=f.workbench.prepareNativeChild('alice',reservation.reservation_id),proof=closureProof(child.session_ref);f.workbench.closeNativeChild('alice',child.run_id,proof);const request={run_id:f.runId,session_ref:'session-fixture',child_session_ref:child.session_ref,execution_lease:f.input.execution_lease,purpose:'handoff'};const source=f.workbench.nativeChildSource('alice',request);assert.equal(source.previous_run_id,child.run_id);assert.deepEqual(source.proof,proof);assert.throws(()=>f.workbench.nativeChildSource('alice',{...request,run_id:'foreign-root'}),/workbench_identity_forbidden/);assert.throws(()=>f.workbench.nativeChildSource('bob',request),/workbench_identity_forbidden/);assert.throws(()=>f.workbench.nativeChildSource('alice',{...request,purpose:'resume-anything'}),/native_activation_invalid/);assert.equal(f.db.prepare('SELECT count(*) n FROM wb_native_child_activations').get().n,0);});
+
+
+test('native source extraction cannot outlive its original task generation',async t=>{
+ const f=await setup(t);f.workbench.memoryCapture.setPolicy('alice',f.member.agent_id,{expected_version:0,mode:'suggest',include_automation:true,include_assistant:true});
+ const child=f.workbench.prepareNativeChild('alice',f.service.reserve(f.input).reservation_id);
+ f.db.prepare('UPDATE ga_conversations SET archived_at=NULL WHERE id=?').run(child.conversation_id);
+ withImmediateTransaction(f.db,()=>f.runs.appendAssistant(child.run_id,'A synthetic durable collaboration preference.'));
+ f.db.prepare("UPDATE ga_runs SET status='succeeded' WHERE id IN (?,?)").run(f.runId,child.run_id);f.workbench.collectMemoryCaptures();
+ const capture=f.workbench.memoryCapture.list('alice',f.member.agent_id).items[0];assert.equal(capture.status,'ready');const job=f.workbench.prepareMemoryProcessing('alice',f.member.agent_id,capture.capture_id);assert.doesNotThrow(()=>f.workbench.assertRunActive(job.processor_run_id));
+ f.db.prepare('UPDATE wb_persistent_tasks SET generation=generation+1 WHERE task_id=?').run(f.task.task_id);assert.throws(()=>f.workbench.assertRunActive(job.processor_run_id),/memory_processing_source_unavailable/);
+});

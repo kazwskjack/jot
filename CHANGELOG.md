@@ -87,3 +87,5 @@ Production Handoff remains gated on end-to-end lifecycle acceptance and provider
 - Deployment, technology, Agent and contributor documentation.
 
 This is a code preview, not a claim of model-backed deployment or sustained load certification. Optional integrations need their own services and acceptance checks.
+
+- Added optional pinned memory extraction through the original DSH worker pool and budget ledger, with isolated candidates, cancellation, lost-response reconciliation and visible processing state. Production provider acceptance is separate from local scripted tests.

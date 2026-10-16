@@ -9,6 +9,7 @@ import {createNativeRoleHost} from './native-role-host.js'
 import {createNativeHandoffLifecycle} from './native-handoff-lifecycle.js'
 import {createNativeClaimedSessionComposer} from './native-claimed-composer.js'
 import {conversationGoal} from './conversation-goal.js'
+import {createOptionalMemoryExtractionHost} from './optional-memory-extraction.js'
 import { WorkbenchBridge,normalizeHostExecutionLease } from './workbench.js'
 
 export const name = 'jot-jot-session-adapter'
@@ -152,7 +153,7 @@ function decodeFilename(headers) {
   return value && Buffer.byteLength(value, 'utf8') <= 255 && !/[\u0000\/\\]/.test(value) ? value : null
 }
 
-export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer }) {
+export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost }) {
   const voiceHandler = voiceEnabled ? createVoiceAdapterHandler({ speechController, token }) : null
   const workbenchSessions = new Set()
   const blockedWorkbenchSessions = new Set()
@@ -184,9 +185,17 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       if(requestedPreset==='jot-workbench-budgeted'&&(!workbenchRunId||!workbenchExecutionLease))return json(422,{error:'workbench_budget_binding_required'})
       if(nativeClaimedComposer&&(!workbenchRunId||!workbenchExecutionLease))return json(422,{error:'native_input_recovery_binding_required'})
       if(requestedPreset==='jot-workbench-budgeted'&&(typeof budgetModelSelector!=='function'||typeof workbenchBridge?.guardBudget!=='function'))return json(503,{error:'workbench_model_unavailable'})
+      let memoryPurpose=false
+      if(workbenchRunId&&memoryExtractionHost){
+        try{
+          const trusted=await workbenchBridge.request('guard',{runId:String(workbenchRunId),sessionRef:sessionId,executionLease:workbenchExecutionLease},{},signal)
+          memoryPurpose=trusted?.context?.kind==='memory_capture'
+          if(memoryPurpose&&(requestedPreset!=='jot-workbench-budgeted'||!workbenchExecutionLease||(await memoryExtractionHost.readiness()).ready!==true))return json(503,{error:'memory_extraction_unavailable'})
+        }catch{return json(503,{error:'workbench_bridge_unavailable'})}
+      }
       if (requestedPreset !== undefined) request.agentPreset = requestedPreset
       let value,inputRecovery
-      if(nativeClaimedComposer){
+      if(nativeClaimedComposer&&!memoryPurpose){
         try{
           const created=await nativeClaimedComposer.withCreation({sessionId,cwd,presetId:requestedPreset??null,
             binding:{runId:String(workbenchRunId),sessionRef:sessionId,executionLease:workbenchExecutionLease},signal},()=>controller.create(request))
@@ -219,6 +228,20 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
         if(handoffRecovery?.state!=='blocked')blockedWorkbenchSessions.delete(sessionId)
       }
       return json(201,{...value,...(inputRecovery?{native_input_recovery:inputRecovery}:{}),...(nativeRecovery?{native_dispatch_recovery:nativeRecovery}:{}),...(handoffRecovery?{native_handoff_recovery:handoffRecovery}:{})})
+    }
+    if(url.pathname==='/v1/memory-extraction/readiness'){
+      if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).length)return json(422,{error:'memory_extraction_input_invalid'});
+      return json(200,memoryExtractionHost?await memoryExtractionHost.readiness():{ready:false,reason:'memory_extraction_disabled'});
+    }
+    const memoryExtraction=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/memory-extraction$/)
+    if(memoryExtraction){
+      const sessionId=decodeURIComponent(memoryExtraction[1]);
+      if(!ID.test(sessionId)||!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).some(key=>key!=='run_id')||typeof body.run_id!=='string'||!ID.test(body.run_id))return json(422,{error:'memory_extraction_input_invalid'});
+      if(typeof memoryExtractionHost?.run!=='function')return json(503,{error:'memory_extraction_unavailable'});
+      const agent=agents?.get?.(sessionId),binding=agent&&workbenchBridge?.bindingFor?.(agent);
+      if(agent?.id!==sessionId||blockedWorkbenchSessions.has(sessionId)||binding?.sessionRef!==sessionId||binding?.runId!==body.run_id)return json(409,{error:'memory_extraction_binding_invalid'});
+      try{return json(200,await memoryExtractionHost.run(agent,{signal}));}
+      catch{return json(409,{error:'memory_extraction_not_completed'});}
     }
     const nativeMembers=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/native-members$/)
     if(nativeMembers){
@@ -311,6 +334,7 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
     if (prompt) {
       const sessionId = decodeURIComponent(prompt[1])
       const requestId = String(body?.request_id ?? '')
+      if(workbenchBridge?.memoryCaptureBindingFor?.(agents?.get?.(sessionId)))return json(409,{error:'memory_extraction_prompt_forbidden'})
       const content = promptContent(body)
       const mode = body?.mode === 'steer' ? 'steer' : 'queue'
       if (!ID.test(sessionId) || !ID.test(requestId) || !content) return json(422, { error: 'prompt_input_invalid' })
@@ -428,10 +452,12 @@ export function apply(ctx, config = {}) {
     nativeTaskDispatcher=createNativeTaskDispatcher({bridge:workbenchBridge,host:nativeRoleHost,scheduler:nativeTaskScheduler})
     ctx.effect(()=>async()=>{await nativeTaskScheduler?.dispose();await nativeRoleHost.dispose()})
   }
+  const memoryExtractionHost=createOptionalMemoryExtractionHost({config:config.memoryExtraction,bridge:workbenchBridge,llm:ctx.llm,route:config.workbenchModel})
+  if(memoryExtractionHost)ctx.effect(()=>()=>memoryExtractionHost.dispose())
   const handler = createAdapterHandler({ controller: ctx.sessionController, fileUploads: ctx.fileUploads, agents: ctx.agents,
     sessions:ctx.sessions,persistence:ctx.sessionPersistence,
     speechController, voiceEnabled, token, workbenchBridge,
-    budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery,nativeClaimedComposer })
+    budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery,nativeClaimedComposer,memoryExtractionHost })
   const server = createServer(async (req, res) => {
     const abort = new AbortController()
     req.once('aborted', () => abort.abort())

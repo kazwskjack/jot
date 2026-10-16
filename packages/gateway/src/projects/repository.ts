@@ -44,10 +44,12 @@ export class ProjectRepository {
 
   list(ownerId: string) {
     this.ensureDefault(ownerId);
+    const excludeInternal = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_memory_processing_runs'").get()
+      ? 'AND NOT EXISTS (SELECT 1 FROM wb_memory_processing_runs processing WHERE processing.conversation_id=c.id)' : '';
     const rows = this.db.prepare(`SELECT p.*,
       SUM(CASE WHEN c.id IS NOT NULL AND c.archived_at IS NULL THEN 1 ELSE 0 END) AS active_count,
       SUM(CASE WHEN c.id IS NOT NULL AND c.archived_at IS NOT NULL THEN 1 ELSE 0 END) AS archived_count
-      FROM ga_projects p LEFT JOIN ga_conversations c ON c.project_id=p.id AND c.owner_id=p.owner_id
+      FROM ga_projects p LEFT JOIN ga_conversations c ON c.project_id=p.id AND c.owner_id=p.owner_id ${excludeInternal}
       WHERE p.owner_id=? GROUP BY p.id ORDER BY p.is_default DESC,p.updated_at DESC,p.id DESC`).all(ownerId) as Array<ProjectRow & { active_count: number; archived_count: number }>;
     return { items: rows.map(row => ({ ...this.serialize(row), active_conversation_count: Number(row.active_count), archived_conversation_count: Number(row.archived_count) })) };
   }

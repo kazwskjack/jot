@@ -120,6 +120,14 @@ export class SessionControllerClient {
     return value as { receipt_id: string; file?: Record<string, unknown> }
   }
 
+  async memoryExtractionReadiness(signal:AbortSignal){
+    return this.post('/v1/memory-extraction/readiness',{},signal);
+  }
+
+  async extractMemory(sessionId:string,runId:string,signal:AbortSignal){
+    return this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/memory-extraction`,{run_id:runId},signal);
+  }
+
   async cancel(sessionId: string) {
     return await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/cancel`, {}, AbortSignal.timeout(20_000))
   }

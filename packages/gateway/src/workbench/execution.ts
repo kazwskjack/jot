@@ -500,6 +500,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
     const input = object(request.body); fields(input, ['run_id', 'session_ref', 'operation', 'arguments', 'call_id']);
     if (input.operation === 'web.read') {
       const identity = context({...input, tool_name: 'jot_workspace'});
+      if(identity.kind==='memory_capture')throw new Error('workbench_operation_forbidden');
       const args = object(input.arguments); fields(args, ['url']);
       if (typeof args.url !== 'string' || args.url.length > 2048) throw new Error('invalid_page_url');
       const task = identity.task_binding;
@@ -549,6 +550,10 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       };
       if (!keys[operation]) throw new Error('invalid_workspace_operation');
       fields(args, keys[operation]!);
+      if(identity.kind==='memory_capture'){
+        const job=workbench.memoryProcessing.assertRun(owner,identity.agent_id,runId);
+        if(!['memory.capture.read','memory.capture.propose'].includes(operation)||args.capture_id!==job.capture_id)throw new Error('workbench_operation_forbidden');
+      }
       const mutating = ['messages.send', 'memory.save', 'memory.stage', 'memory.propose', 'memory.capture.propose', 'files.write','tasks.upsert','tasks.evidence','tasks.assess','tasks.delegate','tasks.reply_draft'].includes(operation);
       const attested = (!!identity.task_binding||(identity.kind==='native_team'&&!!identity.task_assignment)) && !operation.startsWith('tasks.');
       const receipted = mutating || attested;

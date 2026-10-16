@@ -334,7 +334,7 @@ read these batches and propose notes. The owner reviews and applies or rejects
 them. A collection receipt is not proof that a model extracted facts.
 
 See [memory automation](MEMORY-AUTOMATION.md) for the API, isolation, BRAIN.md
-publication boundary, storage behavior and remaining idle-worker work. The
+publication boundary, storage behavior and optional original-pool idle extraction. The
 separate installed-SDK canary is:
 
 ```sh
@@ -344,3 +344,16 @@ node --test packages/session-adapter/verification/native-memory-capture-runtime.
 It uses a scripted local model, proves original budget settlement and keeps
 live memory unchanged until an explicit owner apply. It does not test the
 upstream plugin's autonomous extraction or a real model's quality.
+
+
+## Optional idle extraction engine
+
+The pinned upstream extraction engine is now available through a dedicated original `memory_capture` run, authenticated Host entry and the original worker pool's idle fallback. It produces source-backed candidates without writing live memory or registering a second memory toolset. Role policy remains opt-in. Original ownership, source/task freshness, high reasoning, cumulative budget scopes, background capacity and lease fencing remain enforced. The Host propagates cancellation to the auxiliary stream; known incurred usage can settle after source revocation.
+
+The workbench shows processing or reconciliation state. A committed proposal plus settled original usage can recover a lost response without another model call. Unknown usage or an existing unconfirmed scratch claim does not trigger speculative replay. Deployment-specific crash recovery, real-provider quality and production acceptance are distinct remaining gates. See [configuration and evidence boundaries](MEMORY-AUTOMATION.md).
+
+```sh
+node --test packages/session-adapter/verification/native-memory-plugin-runtime.mjs packages/session-adapter/verification/native-memory-idle-runtime.mjs
+```
+
+These probes use the actual locked SDK and upstream plugin with a scripted model. The idle probe enters through the original worker-pool function and Gateway/SQLite budget ledger; it does not prove real-provider quality or that an external deployment has enabled the feature.

@@ -35,6 +35,10 @@ function validContext(context, binding) {
       || context.model_budget.protocol !== 1 || context.model_budget.enforced !== true))
     || !Array.isArray(context.allowed_tools) || context.allowed_tools.some(name => typeof name !== 'string' || !SAFE_TOOLS.has(name))
     || (context.memories !== undefined && !Array.isArray(context.memories))) throw new Error('workbench_context_invalid');
+  if(context.kind==='memory_capture'){
+    const source=context.memory_capture;
+    if(!source||Object.keys(source).some(key=>!['capture_id','source_run_id','source_version','policy_version'].includes(key))||!['capture_id','source_run_id'].every(key=>typeof source[key]==='string'&&ID.test(source[key]))||!['source_version','policy_version'].every(key=>Number.isSafeInteger(source[key])&&source[key]>=1)||context.allowed_tools.length||context.memories?.length||context.model_budget?.enforced!==true)throw new Error('workbench_context_invalid');
+  }else if(context.memory_capture!==undefined)throw new Error('workbench_context_invalid');
   return structuredClone(context);
 }
 
@@ -192,6 +196,7 @@ export class WorkbenchBridge {
     return Object.freeze({binding:owned,scope,mapping:saved===null?null:Object.freeze({...saved})});
   }
   bindingFor(agent){return this.installed.get(agent)?.current.binding;}
+  memoryCaptureBindingFor(agent){const current=this.installed.get(agent)?.current;return current?.context.kind==='memory_capture'?current.binding:undefined;}
   taskRootBindingFor(agent){const current=this.installed.get(agent)?.current;return current?.context.kind==='task'&&current.context.task_binding?.root_run_id===current.binding.runId?current.binding:undefined;}
 
   async observe(agent,signal) {

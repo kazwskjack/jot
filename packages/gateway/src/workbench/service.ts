@@ -1,4 +1,5 @@
 import {MemoryCaptureService} from './memory-capture.ts';
+import {MemoryProcessingRegistry} from './memory-processing.ts';
 import {MemoryRetrievalLog,type RetrievalData} from './memory-retrievals.ts';
 import {MemoryConsolidationService} from './memory-consolidation.ts';
 import {validateNativeOperationProofs} from './native-operation-proof.ts';
@@ -32,6 +33,7 @@ export interface AgentRunContext {
   run_id: string; agent_id: string; owner_id: string; workspace_id: string; project_id: string; instructions: string;
   name: string; capability_epoch: number; allowed_tools: string[]; memories: Input[]; kind: string;
   task_assignment?:{subtask_id:string;subtask_version:number;title:string;acceptance:string;dependencies:string[]};
+  memory_capture?:{capture_id:string;source_run_id:string;source_version:number;policy_version:number};
 }
 export interface WorkbenchOptions {
   workspaceIds: string[]; root: string; allowedToolIds?: string[]; maxMailboxRunsPerDay?: number;
@@ -73,6 +75,7 @@ export class WorkbenchService {
   readonly memoryConsolidations: MemoryConsolidationService;
   readonly memoryRetrievals: MemoryRetrievalLog;
   readonly memoryCapture: MemoryCaptureService;
+  readonly memoryProcessing: MemoryProcessingRegistry;
   constructor(db: DatabaseSync, options: WorkbenchOptions) {
     this.db = db; this.options = options;
     installTaskRunLineage(db);
@@ -154,6 +157,12 @@ export class WorkbenchService {
       agent:(owner,agentId)=>{const agent=this.active(owner,agentId);this.projects.assertOwned(agent.project_id,owner);return agent;},
       assertRun:(owner,agentId,runId)=>{const agent=this.active(owner,agentId),context=this.runIdentity(owner,agent.workspace_id,runId);if(context.agent_id!==agentId||context.project_id!==agent.project_id)throw new Error('memory_scope_forbidden');},
       save:(owner,workspace,input)=>this.saveMemory(owner,workspace,input),
+    });
+    this.memoryProcessing=new MemoryProcessingRegistry(db,{
+      actor:(owner,agentId)=>this.active(owner,agentId),
+      source:(owner,agentId,captureId)=>this.memoryCapture.get(owner,agentId,captureId),
+      createRun:(owner,actor)=>{const agent=this.active(owner,actor.agent_id),source=this.conversations.get(agent.conversation_id,owner),conversation=this.conversations.create(owner,{workspace_id:actor.workspace_id,project_id:actor.project_id,title:'Memory extraction',model:source.model});return this.runs.enqueue(conversation.conversation_id,owner,{client_message_id:'memory-extraction',content:[{type:'text',text:'Extract durable candidates from the bound public source batch only.'}]}) as {run_id:string;conversation_id:string};},
+      bindRun:(owner,agentId,runId)=>this.bindRun(owner,agentId,runId,'memory_capture'),
     });
     this.memoryRetrievals=new MemoryRetrievalLog(db,(owner,workspaceId,agentId)=>{
       const workspace=this.workspace(workspaceId),agent=this.active(owner,agentId);
@@ -251,6 +260,8 @@ export class WorkbenchService {
     this.transaction(() => {
       this.assertBudgetService();
       const agent = this.active(owner, agentId);
+      const processing=kind==='memory_capture'?this.memoryProcessing.assertRun(owner,agentId,runId):null;
+      if(processing&&!this.options.modelBudgetPolicy)throw new Error('budget_service_unavailable');
       const run = this.runs.get(runId, owner);
       const conversation = this.conversations.get(String(run.conversation_id), owner);
       if (conversation.workspace_id !== agent.workspace_id || conversation.project_id !== agent.project_id) throw new Error('run_agent_scope_mismatch');
@@ -259,12 +270,13 @@ export class WorkbenchService {
         if (existing.agent_id !== agentId || existing.owner_id !== owner || existing.kind !== kind) throw new Error('run_binding_conflict');
         this.assertRunActive(runId); return;
       }
-      const recalled=this.recalledMemory(owner,agent);
+      const recalled=kind==='memory_capture'?{items:[],candidate_count:0,excluded:{query_miss:0,result_limit:0,context_limit:0,duplicate:0,context_budget:0}}:this.recalledMemory(owner,agent);
       const context: AgentRunContext = { run_id: runId, agent_id: agentId, owner_id: owner, name: agent.name, instructions: agent.instructions,
         workspace_id: agent.workspace_id, project_id: agent.project_id, capability_epoch: agent.capability_epoch,
-        allowed_tools: agent.allowed_tools, memories: recalled.items, kind };
+        allowed_tools: kind==='memory_capture'?[]:agent.allowed_tools, memories: recalled.items, kind,
+        ...(processing?{memory_capture:{capture_id:String(processing.capture_id),source_run_id:String(processing.source_run_id),source_version:Number(processing.source_version),policy_version:Number(processing.policy_version)}}:{}) };
       this.db.prepare('INSERT INTO wb_run_bindings VALUES(?,?,?,?,?,?,?)').run(runId, owner, agentId, agent.capability_epoch, kind, JSON.stringify(context), timestamp());
-      this.recordMemorySnapshot(owner,agent,runId,recalled.items,recalled.candidate_count,recalled.excluded);
+      if(kind!=='memory_capture')this.recordMemorySnapshot(owner,agent,runId,recalled.items,recalled.candidate_count,recalled.excluded);
       this.memoryCapture.register(owner,agentId,runId);
       this.options.modelBudgetPolicy?.allocate(owner,runId);
     });
@@ -486,6 +498,7 @@ export class WorkbenchService {
     const agent = this.active(String(row.owner_id), String(row.agent_id));
     if (agent.capability_epoch !== Number(row.epoch)) throw new Error('agent_capability_revoked');
     const context = { ...JSON.parse(String(row.context_json)), run_id: runId } as AgentRunContext;
+    if(row.kind==='memory_capture')this.memoryProcessing.assertRun(String(row.owner_id),agent.agent_id,runId);
     if(row.kind==='native_team'){
       const saved=assertNativeRun(this.db,String(row.owner_id),runId);
       if(saved.role_id!==agent.agent_id||saved.role_epoch!==agent.capability_epoch)throw new Error('task_collaboration_revoked');
@@ -525,6 +538,7 @@ export class WorkbenchService {
       && this.db.prepare('SELECT 1 FROM wb_model_budget_policy_registry WHERE singleton=1').get()) throw new Error('budget_service_unavailable');
   }
   collectMemoryCaptures(){return this.memoryCapture.collect();}
+  prepareMemoryProcessing(owner:string,agentId:string,captureId:string){if(!this.options.modelBudgetPolicy)throw new Error('budget_service_unavailable');this.options.modelBudgetPolicy.assertCurrent();return this.memoryProcessing.prepare(owner,agentId,captureId);}
   reconcileBudgets() {
     const ledger=this.options.modelBudgetPolicy?.ledger;
     ledger?.reconcileDispatchedCalls();

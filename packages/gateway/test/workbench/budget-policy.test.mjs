@@ -38,6 +38,29 @@ async function fixture(t,custom=config()){
  return {mod,db,root,policy,service,tasks,runs,agent,task,settle,allocation,scope,balance,now:value=>{now=new Date(value);}};
 }
 
+test('memory processing shares source cumulative spend and obtains only the current daily scopes',async t=>{
+ const f=await fixture(t),a=f.agent();f.service.memoryCapture.setPolicy('alice',a.agent_id,{expected_version:0,mode:'suggest'});const source=f.service.enqueueAgentMessage('alice',a.agent_id,{text:'Keep concise answers',client_message_id:'capture-source'});f.settle(source.run_id);f.db.prepare("UPDATE ga_runs SET status='succeeded' WHERE id=?").run(source.run_id);f.service.collectMemoryCaptures();const capture=f.service.memoryCapture.list('alice',a.agent_id).items[0];
+ f.now('2026-10-03T12:00:00Z');const job=f.service.prepareMemoryProcessing('alice',a.agent_id,capture.capture_id),before=f.allocation(source.run_id),after=f.allocation(job.processor_run_id);
+ assert.equal(f.scope(job.processor_run_id,'chat-root:'),f.scope(source.run_id,'chat-root:'));assert.notEqual(f.scope(job.processor_run_id,'owner-day:'),f.scope(source.run_id,'owner-day:'));assert.equal(f.balance(job.processor_run_id,'chat-root:').used.tokens,'25');
+ assert.equal(after.scopes.filter(scope=>scope.key.startsWith('chat-root:')).length,1);assert.equal(before.scopes.length,after.scopes.length);assert.equal(f.service.contextForRun(job.processor_run_id).kind,'memory_capture');assert.deepEqual(f.service.contextForRun(job.processor_run_id).allowed_tools,[]);assert.deepEqual(f.service.contextForRun(job.processor_run_id).memories,[]);
+ assert.equal(f.service.memoryCapture.list('alice',a.agent_id).items.length,1,'the processing run must not capture itself');
+ const {HarnessCoordinator}=await import('../../src/harness/coordinator.ts'),{ConversationRepository}=await import('../../src/conversations/repository.ts');assert.equal(new HarnessCoordinator(f.db,f.runs,new EventStore(f.db)).claimNext('ordinary-worker',30000),null,'ordinary workers cannot mistake an extraction job for chat');assert.equal(new ConversationRepository(f.db).list('alice',{state:'all'}).items.some(item=>item.conversation_id===job.conversation_id),false);
+ const {ProjectRepository}=await import('../../src/projects/repository.ts');const counts=new ProjectRepository(f.db).list('alice').items.find(project=>project.project_id===a.project_id);assert.equal(counts.active_conversation_count,1,'internal extraction must not inflate the ordinary chat count');
+ const coordinator=new HarnessCoordinator(f.db,f.runs,new EventStore(f.db));const lease=coordinator.claimMemoryExtraction('memory-worker',30000,job.processor_run_id);assert.equal(lease.run_id,job.processor_run_id);assert.equal(lease.generation,1);assert.equal(f.db.prepare('SELECT owner FROM ga_worker_leases WHERE resource_id=?').get(job.processor_run_id).owner,'memory-worker');
+ f.service.enqueueAgentMessage('alice',a.agent_id,{text:'A new user task',client_message_id:'new-user-work'});assert.throws(()=>f.service.assertRunActive(job.processor_run_id),/memory_processing_source_unavailable/);
+});
+
+test('paused source tasks revoke extraction even though their public source text is still available',async t=>{
+ const f=await fixture(t),a=f.agent(),task=f.task(a);f.service.memoryCapture.setPolicy('alice',a.agent_id,{expected_version:0,mode:'suggest',include_automation:true});const source=f.tasks.runNow('alice',task.task_id,'task-source');f.settle(source.run_id);f.db.prepare("UPDATE ga_runs SET status='succeeded' WHERE id=?").run(source.run_id);f.service.collectMemoryCaptures();const capture=f.service.memoryCapture.list('alice',a.agent_id).items[0],job=f.service.prepareMemoryProcessing('alice',a.agent_id,capture.capture_id);
+ assert.equal(f.scope(source.run_id,'task-total:'),f.scope(job.processor_run_id,'task-total:'));assert.equal(f.scope(source.run_id,'occurrence:'),f.scope(job.processor_run_id,'occurrence:'));
+ f.tasks.pause('alice',task.task_id,1);assert.throws(()=>f.service.assertRunActive(job.processor_run_id),/memory_processing_source_unavailable/);
+});
+
+test('memory processing cannot reset an exhausted source root by creating a fresh run',async t=>{
+ const custom=config();custom.limits.chat_root.tokens=100;const f=await fixture(t,custom),a=f.agent();f.service.memoryCapture.setPolicy('alice',a.agent_id,{expected_version:0,mode:'suggest'});const source=f.service.enqueueAgentMessage('alice',a.agent_id,{text:'Persistent source',client_message_id:'limited-source'});f.settle(source.run_id);f.db.prepare("UPDATE ga_runs SET status='succeeded' WHERE id=?").run(source.run_id);f.service.collectMemoryCaptures();const capture=f.service.memoryCapture.list('alice',a.agent_id).items[0],runs=f.db.prepare('SELECT count(*) n FROM ga_runs').get().n;
+ assert.throws(()=>f.service.prepareMemoryProcessing('alice',a.agent_id,capture.capture_id),/model_budget_exhausted/);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_runs').get().n,runs);assert.equal(f.db.prepare('SELECT count(*) n FROM wb_memory_processing_runs').get().n,0);assert.equal(f.balance(source.run_id,'chat-root:').used.tokens,'25');
+});
+
 test('completed role message retry returns its original receipt without rebinding execution or reserving budget',async t=>{
  const f=await fixture(t),agent=f.agent(),input={text:'Original request',client_message_id:'completed-retry'};
  const original=f.service.enqueueAgentMessage('alice',agent.agent_id,input);f.settle(original.run_id);

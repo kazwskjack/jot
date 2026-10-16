@@ -5,6 +5,7 @@ import { EventStore } from '../events/event-store.ts';
 import { RunRepository } from '../runs/repository.ts';
 import { HarnessCoordinator } from './coordinator.ts';
 import { HarnessWorker } from './worker.ts';
+import {MemoryExtractionPump} from './memory-extraction-pump.ts';
 import { RuntimeEventClient } from './runtime-events.ts';
 import { SessionControllerClient } from './session-controller-client.ts';
 import { OfficialSessionRunner } from './official-session-runner.ts';
@@ -85,6 +86,12 @@ const worker = new HarnessWorker(db, coordinator, runner, {
     stageContext: input => runtimeClient.stageContext(input, leafBridgeBaseUrl),
   } } : {}),
 });
+const memoryShutdown=new AbortController();
+const memoryPump=new MemoryExtractionPump(db,workbench,coordinator,sessionClient,{
+  enabled:workbenchExecutionReady&&concurrency>1&&process.env.GENERAL_AGENT_MEMORY_EXTRACTION_ENABLED==='true',
+  workerId:`${workerId}:memory`,leaseMs,cwd:harnessCwd,
+  sessionResolver:conversationId=>sessionBindings.getOrCreateForConversation(conversationId).session_id,
+});
 let stopping = false;
 const completions=new TaskCompletionPump(db,coordinator,sessionClient,{workerId:`${workerId}:completion`});
 const completionLoop=async()=>{
@@ -115,12 +122,12 @@ const workbenchLoop = async () => {
   }
 };
 
-for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, () => { stopping = true; });
+for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, () => { stopping = true;memoryShutdown.abort(new Error('worker_shutdown')); });
 await Promise.all([completionLoop(),commandLoop(),workbenchLoop(),runWorkerPool({
   concurrency,
   pollMs,
   shouldStop: () => stopping,
-  processNext: () => worker.processNext(),
+  processNext: async () => await worker.processNext() ?? await memoryPump.processNext(memoryShutdown.signal),
   onError: error => {
     const code = error instanceof Error ? error.message : 'worker_error';
     process.stderr.write(`${JSON.stringify({ level: 'error', code: code.slice(0, 96) })}\n`);

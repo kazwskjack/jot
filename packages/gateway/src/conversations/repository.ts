@@ -49,6 +49,7 @@ export class ConversationRepository {
     if (!['active', 'archived', 'all'].includes(state)) throw new Error('invalid_conversation_state');
     if (options.project_id) this.projects.assertOwned(options.project_id, ownerId);
     const clauses = ['owner_id=?'];
+    if(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_memory_processing_runs'").get())clauses.push('NOT EXISTS (SELECT 1 FROM wb_memory_processing_runs processing WHERE processing.conversation_id=ga_conversations.id)');
     const parameters: Array<string | number> = [ownerId];
     if (options.project_id) { clauses.push('project_id=?'); parameters.push(options.project_id); }
     if (state === 'active') clauses.push('archived_at IS NULL');

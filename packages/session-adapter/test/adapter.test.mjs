@@ -149,3 +149,23 @@ test('nativeDeferredHandoff accepts the trusted nativeHandoff composition withou
   if(priorBridge===undefined)delete process.env.JOT_NATIVE_HANDOFF_CONFIG_TEST;else process.env.JOT_NATIVE_HANDOFF_CONFIG_TEST=priorBridge;
  }
 });
+
+
+test('memory extraction endpoint uses only its existing bound Session and propagates cancellation',async()=>{
+ const agent={id:'extract-session',status:'idle'},binding={runId:'extract-run',sessionRef:'extract-session',executionLease:{owner:'worker',generation:1}},controller=new AbortController();let calls=0;
+ const handler=createAdapterHandler({token,controller:{},agents:{get:id=>id===agent.id?agent:null},workbenchBridge:{bindingFor:target=>target===agent?binding:null},memoryExtractionHost:{run:async(target,options)=>{calls++;assert.equal(target,agent);assert.equal(options.signal,controller.signal);return {capture_id:'capture',version:3,status:'proposed'};}}});
+ const invoke=(body,auth=`Bearer ${token}`)=>handler({method:'POST',url:new URL('http://127.0.0.1/v1/sessions/extract-session/memory-extraction'),headers:{authorization:auth},body,signal:controller.signal});
+ assert.equal((await invoke({run_id:'extract-run'},'Bearer invalid')).status,401);
+ assert.equal((await invoke({run_id:'extract-run',source_text:'Injected'})).status,422);
+ assert.equal((await invoke({run_id:'other-run'})).status,409);assert.equal(calls,0);
+ const result=await invoke({run_id:'extract-run'});assert.equal(result.status,200);assert.equal(result.value.status,'proposed');assert.equal(calls,1);
+});
+
+
+test('trusted extraction purpose skips task-input recovery without skipping original Session or budget attachment',async()=>{
+ const agent={id:'extract-session'},binding={runId:'extract-run',sessionRef:'extract-session',executionLease:{owner:'worker',generation:1}};let attached=0,selected=0,created=0;
+ const bridge={async request(){return {context:{kind:'memory_capture'}};},async attach(){attached++;},async guardBudget(){}};
+ const handler=createAdapterHandler({token,controller:{async create(){created++;return {sessionId:agent.id};}},agents:{get:()=>agent},workbenchBridge:bridge,budgetModelSelector:async()=>{selected++;},nativeClaimedComposer:{async withCreation(){throw Error('task_composer_must_not_run');}},memoryExtractionHost:{async readiness(){return {ready:true};}}});
+ const result=await handler({method:'POST',url:new URL('http://127.0.0.1/v1/sessions'),headers:{authorization:`Bearer ${token}`},body:{session_id:agent.id,cwd:path.resolve('.test-tmp/extraction-workspace'),agent_preset:'jot-workbench-budgeted',workbench_context:{run_id:binding.runId,execution_lease:binding.executionLease}}});
+ assert.equal(result.status,201);assert.equal(created,1);assert.equal(attached,1);assert.equal(selected,1);
+});

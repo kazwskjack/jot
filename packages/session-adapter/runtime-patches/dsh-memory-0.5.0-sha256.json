@@ -1,0 +1,11 @@
+{
+  "LICENSE": "3ff31afd1881651d8c2decfe0af5860a374e0df5bb3df2aa09d6c34d3caea852",
+  "lib/automation.js": "8814fb64f18b6b78ad83c0e222b388ef32dc751ac90bb8c06d589ca21cb91f1f",
+  "lib/browser.js": "8b823d8298e56bc372f6962a88c317903674ded2bb982b98dc6ed44b62b3a913",
+  "lib/client.js": "a571db69d92da45547bf149680ff9d406f8a18bc4f82c37a76ebcba39624d606",
+  "lib/index.js": "c6cec211d8bcbd529851681e6f9e3c5f6b98885e2fb0d04cd3df3321278fe1fd",
+  "lib/store.js": "ebac81c2f22a6f16d992a63578d6c8fd7c8f5c4db57a8ef2f78ced49376949b5",
+  "lib/volatile.js": "109e70942c2dde2ca7899751aeea81379fb67bcaf856cd15e17f9d1971a29729",
+  "lib/web.js": "c4d326dcd5851c57d720b01dae77d750f735850a7e843f0a099f72ee53719292",
+  "package.json": "39ea39721aa5c7bed6ea5034fc2e39bc233e76fe97ae694f1d73ae32c26a0637"
+}

@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
+import {assertMemoryProcessingIdentity} from '../workbench/memory-processing.ts';
 import { withImmediateTransaction } from '../db/database.ts';
 import type { EventStore } from '../events/event-store.ts';
 import type { RunRepository } from '../runs/repository.ts';
@@ -46,22 +47,36 @@ export class HarnessCoordinator {
   }
 
   claimNext(workerId: string, leaseMs: number): RunLease | null {
+    return this.claim(workerId,leaseMs);
+  }
+  /** Only an explicitly ready extraction dispatcher may use this admission. */
+  claimMemoryExtraction(workerId:string,leaseMs:number,runId:string):RunLease|null{
+    return this.claim(workerId,leaseMs,runId);
+  }
+  private claim(workerId:string,leaseMs:number,memoryRunId?:string):RunLease|null{
     const now = this.now();
     return withImmediateTransaction(this.db, () => {
       const hasBindings=Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_run_bindings'").get());
+      if(memoryRunId!==undefined){
+        if(!hasBindings||!this.backgroundOptions.allowBackgroundRuns||this.backgroundOptions.maxBackgroundRuns<1||!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_memory_processing_runs'").get())return null;
+        const job=this.db.prepare('SELECT owner_id FROM wb_memory_processing_runs WHERE processor_run_id=?').get(memoryRunId) as {owner_id:string}|undefined;if(!job)return null;
+        try{assertMemoryProcessingIdentity(this.db,job.owner_id,memoryRunId);}catch(error){if(error instanceof Error&&error.message==='memory_processing_source_unavailable')return null;throw error;}
+      }
       const hasTaskPriority=hasBindings && Number((this.db.prepare("SELECT count(*) n FROM sqlite_master WHERE type='table' AND name IN ('wb_task_occurrences','wb_persistent_tasks')").get() as {n:number}).n)===2;
       const joins=hasBindings ? `JOIN ga_conversations c ON c.id=r.conversation_id LEFT JOIN wb_run_bindings b ON b.run_id=r.id
         ${hasTaskPriority ? 'LEFT JOIN wb_task_run_occurrences o ON o.run_id=r.id LEFT JOIN wb_persistent_tasks t ON t.task_id=o.task_id' : ''}` : '';
       const activeBackground=`SELECT count(*) FROM ga_runs ar JOIN ga_worker_leases al ON al.resource_id=ar.id
         JOIN wb_run_bindings ab ON ab.run_id=ar.id JOIN ga_conversations ac ON ac.id=ar.conversation_id
-        WHERE ab.kind IN ('task','internal_mailbox') AND ar.status IN ('starting','running','waiting_user','waiting_approval','cancelling') AND CAST(al.expires_at AS INTEGER)>?`;
-      const admission=!hasBindings ? '' : !this.backgroundOptions.allowBackgroundRuns ? 'AND b.run_id IS NULL' :
-        `AND (b.kind IS NULL OR b.kind <> 'native_team') AND (b.kind IS NULL OR b.kind NOT IN ('task','internal_mailbox') OR
+        WHERE ab.kind IN ('task','internal_mailbox','memory_capture') AND ar.status IN ('starting','running','waiting_user','waiting_approval','cancelling') AND CAST(al.expires_at AS INTEGER)>?`;
+      const admission=memoryRunId!==undefined?`AND b.kind='memory_capture' AND r.id=? AND ((${activeBackground})<? AND (${activeBackground} AND ac.owner_id=c.owner_id)<?)`:!hasBindings ? '' : !this.backgroundOptions.allowBackgroundRuns ? 'AND b.run_id IS NULL' :
+        `AND (b.kind IS NULL OR b.kind NOT IN ('native_team','memory_capture')) AND (b.kind IS NULL OR b.kind NOT IN ('task','internal_mailbox') OR
           ((${activeBackground})<? AND (${activeBackground} AND ac.owner_id=c.owner_id)<?))`;
       const order=hasBindings ? `CASE WHEN b.kind IN ('task','internal_mailbox') THEN 1 ELSE 0 END,
         ${hasTaskPriority ? 'COALESCE(t.priority,50)' : 'CAST(50 AS INTEGER)'} DESC,` : '';
       const parameters:Array<number>=[now];
-      if(hasBindings && this.backgroundOptions.allowBackgroundRuns)parameters.push(now,this.backgroundOptions.maxBackgroundRuns,now,this.backgroundOptions.maxBackgroundRuns);
+      const queryParameters:Array<number|string>=parameters;
+      if(memoryRunId!==undefined)queryParameters.push(memoryRunId);
+      if(hasBindings && this.backgroundOptions.allowBackgroundRuns)queryParameters.push(now,this.backgroundOptions.maxBackgroundRuns,now,this.backgroundOptions.maxBackgroundRuns);
       const row = this.db.prepare(
         `SELECT r.id,r.conversation_id,r.input_message_id,r.status,l.generation
          FROM ga_runs r LEFT JOIN ga_worker_leases l ON l.resource_id=r.id
@@ -72,7 +87,7 @@ export class HarnessCoordinator {
          )) OR (r.status IN ('starting','running') AND (l.resource_id IS NULL OR CAST(l.expires_at AS INTEGER)<=?)))
          ${admission}
          ORDER BY ${order} CASE r.status WHEN 'queued' THEN 0 ELSE 1 END,r.created_at,r.id LIMIT 1`,
-      ).get(...parameters) as Record<string, unknown> | undefined;
+      ).get(...queryParameters) as Record<string, unknown> | undefined;
       if (!row) return null;
       const runId = String(row.id);
       const conversationId = String(row.conversation_id);

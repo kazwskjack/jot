@@ -6,6 +6,7 @@ import { parseWorkerConcurrency } from '../harness/worker-pool.ts';
 import { ModelBudgetLedger, normalizeModelBudgetRoutes, type ModelBudgetLimits, type ModelBudgetRoute } from './model-budget.ts';
 import {installTaskMailbox,currentTaskMailbox} from './task-mailbox.ts';
 import {assertNativeRun} from './native-child-identity.ts';
+import {assertMemoryProcessingIdentity} from './memory-processing.ts';
 
 const categories = ['owner_daily','project_daily','agent_daily','task_total','occurrence','chat_root','mailbox_thread'] as const;
 type Category = typeof categories[number];
@@ -208,6 +209,14 @@ export class WorkbenchBudgetPolicy {
         const taskRoot=currentTaskMailbox(this.db,owner,String(thread.thread_id));
         if(taskRoot)definitions.push({key:taskBudgetKey(taskRoot.task_id),category:'task_total'},
           {key:`occurrence:${hash(taskRoot.occurrence_id)}`,category:'occurrence'});
+      } else if (binding.kind === 'memory_capture') {
+        const saved=assertMemoryProcessingIdentity(this.db,owner,runId);
+        if(saved.agent_id!==binding.agent_id)throw new Error('budget_binding_invalid');
+        const source=this.allocation(owner,String(saved.source_run_id)),cumulative=source.scopes.filter(scope=>!['owner-day','project-day','agent-day'].includes(scope.key.split(':')[0]!));
+        if(!cumulative.length)throw new Error('budget_binding_invalid');
+        const categoryByPrefix:Record<string,Category>={'task-total':'task_total',occurrence:'occurrence','chat-root':'chat_root','mailbox-thread':'mailbox_thread'};
+        for(const scope of cumulative){const category=categoryByPrefix[scope.key.split(':')[0]!];if(!category)throw new Error('budget_binding_invalid');definitions.push({key:scope.key,category});}
+        if(this.db.prepare(`SELECT 1 FROM wb_model_budget_attempts attempts JOIN wb_model_budget_bindings bindings ON bindings.run_id=attempts.run_id WHERE bindings.owner_id=? AND EXISTS (SELECT 1 FROM json_each(bindings.scopes_json) scope WHERE scope.value IN (${cumulative.map(()=>'?').join(',')})) AND attempts.state IN ('unknown','in_flight') LIMIT 1`).get(owner,...cumulative.map(scope=>scope.scope_id)))throw new Error('budget_usage_unknown');
       } else if (binding.kind === 'chat') {
         let root = run, seen = new Set<string>();
         for (;;) {

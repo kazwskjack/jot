@@ -36,7 +36,12 @@
     "native-operation-observer.js",
     "native-role-provider.js",
     "native-task-dispatch.js",
-    "native-task-scheduler.js"
+    "native-task-scheduler.js",
+    "memory-plugin-runtime.js",
+    "memory-extraction-host.js",
+    "memory-runtime-loader.js",
+    "optional-memory-extraction.js",
+    "runtime-patches/dsh-memory-0.5.0-sha256.json"
   ],
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",

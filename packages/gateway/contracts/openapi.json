@@ -20988,6 +20988,32 @@
           "updated_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "processing": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "status",
+                  "reason_code"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string"
+                  },
+                  "reason_code": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            ]
           }
         },
         "required": [
@@ -21289,6 +21315,32 @@
               },
               {
                 "type": "null"
+              }
+            ]
+          },
+          "processing": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "status",
+                  "reason_code"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string"
+                  },
+                  "reason_code": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
               }
             ]
           }
