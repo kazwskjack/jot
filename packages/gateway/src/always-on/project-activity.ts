@@ -24,13 +24,14 @@ function instant(value:unknown):number|null{
 export class ProjectActivityObserver{
  private readonly db:DatabaseSync;private readonly workbench:WorkspaceReader;private readonly native:NativeReader;
  private readonly now:()=>number;private readonly maxAgeMs:number;
+ private readonly issued=new WeakMap<object,{scope:Scope;source:string;expires:number}>();
  constructor(options:{db:DatabaseSync;workbench:WorkspaceReader;native:NativeReader;now?:()=>number;maxAgeMs:number}){
   if(!Number.isSafeInteger(options.maxAgeMs)||options.maxAgeMs<1)throw Error('discovery_observation_config_invalid');
   this.db=options.db;this.workbench=options.workbench;this.native=options.native;this.now=options.now??Date.now;this.maxAgeMs=options.maxAgeMs;
  }
  private snapshot(scope:Scope){
-  if(this.db.isTransaction)throw Error('discovery_observation_transaction_active');
-  this.db.exec('BEGIN DEFERRED');
+  const ownsTransaction=!this.db.isTransaction;
+  if(ownsTransaction)this.db.exec('BEGIN DEFERRED');
   try{
    const {owner_id:owner,project_id:project,workspace_id:workspace,agent_id:agent}=scope;
    const p=this.db.prepare('SELECT version FROM ga_projects WHERE id=? AND owner_id=?').get(project,owner) as Row|undefined;
@@ -49,9 +50,17 @@ export class ProjectActivityObserver{
    const inputs=this.db.prepare(`SELECT m.id,m.created_at,m.updated_at,m.status FROM ga_messages m JOIN ga_conversations c ON c.id=m.conversation_id
     WHERE c.owner_id=? AND c.project_id=? AND c.workspace_id=? AND m.role='user' ORDER BY m.id`).all(owner,project,workspace) as Row[];
    return {project:p,role,conversations,runs,children,controls,inputs};
-  }finally{this.db.exec('ROLLBACK');}
+  }finally{if(ownsTransaction)this.db.exec('ROLLBACK');}
+ }
+ /** Revalidate only this observer's exact issued idle receipt. No network or
+  * fresh native inference is performed inside a caller's admission transaction. */
+ isCurrent(value:unknown):boolean{
+  if(!value||typeof value!=='object')return false;
+  const issued=this.issued.get(value),now=this.now();if(!issued||!Number.isSafeInteger(now)||now>issued.expires)return false;
+  try{return hash(this.snapshot(issued.scope))===issued.source&&this.workbench.projectWorkspaceReady(issued.scope.owner_id,issued.scope.workspace_id,issued.scope.project_id);}catch{return false;}
  }
  async observe(value:unknown,signal?:AbortSignal){
+  if(this.db.isTransaction)throw Error('discovery_observation_transaction_active');
   const scope=scopeOf(value);signal?.throwIfAborted();const first=this.snapshot(scope),started=this.now();
   if(!Number.isSafeInteger(started)||started<0)throw Error('discovery_observation_config_invalid');
   const source_sha256=hash(first),sessions=[...new Set([...first.conversations.map(c=>c.session_id),...first.children.map(c=>c.child_session_ref)].filter((id):id is string=>typeof id==='string'))].sort();
@@ -85,6 +94,6 @@ export class ProjectActivityObserver{
   let workspaceStillReady=false;try{workspaceStillReady=this.workbench.projectWorkspaceReady(scope.owner_id,scope.workspace_id,scope.project_id);}catch{}
   if(hash(second)!==source_sha256||!workspaceStillReady)return result('SOURCE_CHANGED');
   const finished=this.now();if(!Number.isSafeInteger(finished)||finished<started||finished-oldest>this.maxAgeMs)return result('OBSERVATION_STALE');
-  facts.native_idle='idle';return result(null);
+  facts.native_idle='idle';const receipt=result(null);this.issued.set(receipt,{scope,source:source_sha256,expires:oldest+this.maxAgeMs});return receipt;
  }
 }

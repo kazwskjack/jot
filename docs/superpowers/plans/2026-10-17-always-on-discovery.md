@@ -530,3 +530,78 @@ and later-version holds, complete rollback/retry, and zero new occurrences/runs/
 model attempts during maintenance. Root32 and local Windows Gateway/root builds
 pass. Public6 and 779-file preflight have zero findings; BRAIN CLI links pass.
 No production change, new automation or actual provider run is claimed.
+
+## Original planning occurrence admission milestone
+
+`DiscoveryAdmissionController.admit` now collects the exact owner/project/workspace/
+role sources, obtains actual project/native activity through the original observer,
+and enters the original `PersistentTaskService` occurrence transaction. There is
+no public/model endpoint, extra Agent, model loop, alternate queue or automatic
+Worker discovery dispatcher. The controller accepts trusted service objects, not
+browser/model snapshots or an `execution_authorized` boolean.
+
+Inside admission it rechecks the current policy and source journal, an exact fresh
+idle receipt issued by that observer, original scoped SQL/workspace identity,
+original task budget/accounting and Coordinator background slots. The observer's
+Host IO is still forbidden inside a caller transaction. Only synchronous source
+revalidation is permitted there; it checks full scoped identity metadata and the
+existing workspace path, without body/blob reads or directory creation. Scale
+acceptance for large project metadata histories is still required.
+
+The signal head identifies an immutable ordered journal prefix. One original
+task generation/source-head pair has one immutable admission identity. Signals
+arriving during observation invalidate that batch; repeats do not create another
+occurrence. A prior unaccepted/unknown occurrence holds even after native runtime
+termination. This is once-per-signal coalescing, not proof of an accepted no-plan
+report or completed dormancy protocol. Cycle limits use the original accumulated
+run count; explicit unlimited remains unlimited.
+
+`wb_discovery_admissions` is evidence linking an exact original task/occurrence,
+policy/role versions, task generation, source/activity digests and original budget
+revision. It owns no replacement task status. Its deferred foreign key requires
+the exact occurrence to commit in the same original transaction. Reservation,
+conversation, queued input/run, original occurrence, original budget allocation
+and count therefore roll back together on failure. Budget allocation may create
+the normal never-dispatched admission hold; that is not a model request and must
+not be reported as zero accounting reservations.
+
+The previous unconditional SQL occurrence guard is now transactionally upgraded
+to require the exact immutable reservation plus current policy/task/source
+identities and deterministic trigger key. Generic/legacy insertion remains refused.
+The existing original task limit/active occurrence, binding, role/permission,
+budget/lease and execution protections still apply. The receipt does not by itself
+authorize execution, tools or model dispatch.
+
+This increment admits **discover-only planning**. The generic authenticated
+workspace transport enforces a read-operation allowlist before dispatch, refusing
+file writes, memory writes, messages, delegation and other mutation. Original
+model/tool identity checks revoke planning after policy/role/version changes or
+stop. Discover-and-work refuses admission until isolated work-cycle authority is
+implemented. Planning/report task metadata contracts still need integration; do
+not enable the automatic dispatcher just because a queue fixture passes.
+
+Remaining sequence: structured source-backed plan/report operations in the original
+workspace family; accepted no-plan/dormancy and exact report/occurrence binding;
+isolated cycle provider, shared scoped memory and explicit reviewed apply; full
+policy/work-cycle UI; original Worker lifecycle dispatch configuration and actual
+DSH/provider restart/pause/stop/unknown-outcome acceptance; then production rollout
+and the complete capability inventory. No production setting is changed here.
+
+Validation: final local Gateway1439 cases/1432 passed/seven existing or opt-in
+skips/zero failures (157.07 seconds), including fourteen admission cases and the
+new issued-receipt revalidation regression. Earlier focused44 original task,
+migration and admission cases passed; the initial full1438 run preceded the final
+scope-freezing correction and is not substituted for final verification. Tests
+exercise real SQLite/Workbench/original queue/budget/Coordinator with controlled
+native-idle fixture responses. Two independent Node fixture processes reserve one
+original queue entry; these are test processes, not AI subagents. Authenticated
+Gateway transport allows a scoped file read and refuses a write before mutation.
+Native/model/provider execution is not claimed. Rollback, policy/source drift,
+unknown idle, budget/capacity refusal, immutable history and caller-scope mutation
+are covered. Root32 and local Windows Gateway/root builds pass. Built Edge UI
+through the original BFF and isolated Gateway retains one managed task and
+pause/resume/stop with zero unintended occurrences/model runs and zero page errors.
+Public6 and 783-file preflight have zero findings; BRAIN CLI links pass. Automatic
+dispatch, planning metadata/report operations and full lifecycle acceptance remain
+open; the planning allowlist must be extended through reviewed original task
+operations when that protocol is implemented.

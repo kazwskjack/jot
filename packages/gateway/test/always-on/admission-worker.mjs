@@ -1,0 +1,12 @@
+import {join} from 'node:path';
+import {openProductDatabase} from '../../src/db/database.ts';import {EventStore} from '../../src/events/event-store.ts';import {RunRepository} from '../../src/runs/repository.ts';
+import {WorkbenchService} from '../../src/workbench/service.ts';import {WorkbenchBudgetPolicy} from '../../src/workbench/model-budget-policy.ts';import {PersistentTaskService} from '../../src/persistent-tasks/service.ts';
+import {HarnessCoordinator} from '../../src/harness/coordinator.ts';import {DiscoveryPolicies} from '../../src/always-on/discovery-policy.ts';import {ProjectActivityObserver} from '../../src/always-on/project-activity.ts';import {DiscoveryAdmissionController} from '../../src/always-on/admission.ts';
+const [path,root,scopeJson]=process.argv.slice(2),db=openProductDatabase(path),events=new EventStore(db),runs=new RunRepository(db,events);
+const limits={tokens:5000,nano_usd:50000,model_calls:50},route={provider:'fixture',model:'bounded',revision:'rates-1',context_window:100,max_output_tokens:20,rates:{input:2,output:10,cache_read:1,cache_write:3}};
+const budget=new WorkbenchBudgetPolicy(db,{revision:1,admission_route:{provider:'fixture',model:'bounded'},routes:[route],limits:Object.fromEntries(['owner_daily','project_daily','agent_daily','task_total','occurrence','chat_root','mailbox_thread'].map(k=>[k,{...limits}]))});
+const workbench=new WorkbenchService(db,{workspaceIds:['ws'],root:join(root,'workspace'),modelBudgetPolicy:budget}),tasks=new PersistentTaskService(db,workbench,{modelBudgetPolicy:budget}),policies=new DiscoveryPolicies(db),coordinator=new HarnessCoordinator(db,runs,events);
+const native={nativeIdleObservationReadiness:async()=>({protocol:1,ready:true,execution_authorized:false}),observeNativeIdle:async id=>{await new Promise(resolve=>setTimeout(resolve,15));return{protocol:1,session_id:id,basis:'live',native_idle:'idle',reason:null,observed_at:Date.now(),execution_authorized:false};}};
+const activity=new ProjectActivityObserver({db,workbench,native,maxAgeMs:5000}),controller=new DiscoveryAdmissionController({db,workbench,tasks,policies,coordinator,activity,budgetPolicy:budget,maxAgeMs:5000});
+process.once('message',async()=>{try{const result=await controller.admit('owner',JSON.parse(scopeJson));process.send?.({admitted:result.admitted});db.close();process.disconnect();}catch{process.send?.({failed:true});db.close();process.exitCode=1;process.disconnect();}});
+process.send?.({ready:true});

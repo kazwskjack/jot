@@ -1,8 +1,9 @@
 import type {DatabaseSync} from 'node:sqlite';
 import {withImmediateTransaction} from '../db/database.ts';
 import {installDiscoveryPolicySchema} from './discovery-policy.ts';
-/** Stable task/budget identity. Occurrence admission remains deliberately closed
- * until its source/authority/reservation protocol is installed and verified. */
+import {installDiscoveryAdmissions} from './admission-schema.ts';
+/** Stable task/budget identity. Generic occurrence admission stays closed;
+ * the trusted planning path requires an immutable original-occurrence receipt. */
 export function installDiscoveryTaskBindings(db:DatabaseSync){
  withImmediateTransaction(db,()=>{installDiscoveryPolicySchema(db);db.exec(`CREATE TABLE IF NOT EXISTS wb_discovery_task_bindings(
   policy_id TEXT PRIMARY KEY REFERENCES wb_discovery_policies(policy_id),task_id TEXT NOT NULL UNIQUE REFERENCES wb_persistent_tasks(task_id),
@@ -39,5 +40,5 @@ export function installDiscoveryTaskBindings(db:DatabaseSync){
  BEGIN SELECT RAISE(ABORT,'task_discovery_managed'); END;
  CREATE TRIGGER IF NOT EXISTS wb_discovery_occurrence_closed BEFORE INSERT ON wb_task_occurrences
  WHEN EXISTS(SELECT 1 FROM wb_discovery_task_bindings WHERE task_id=NEW.task_id)
- BEGIN SELECT RAISE(ABORT,'task_discovery_admission_required'); END;`);});
+ BEGIN SELECT RAISE(ABORT,'task_discovery_admission_required'); END;`);installDiscoveryAdmissions(db);});
 }

@@ -565,6 +565,15 @@ cycles and corresponding workbench UI are still being implemented; configuration
 is not a running autonomous task. See the [full implementation and acceptance
 plan](docs/superpowers/plans/2026-10-17-always-on-discovery.md).
 
+A trusted internal admission controller can now coalesce one signal-journal head
+into one original planning occurrence. Current policy/role/source, issued native
+idle receipt, original budget and Coordinator capacity are checked again inside
+the original transaction. Immutable reservation and occurrence commit together;
+legacy insertion still fails. Planning allows scoped reads and refuses workspace
+mutation, messaging and delegation. This controller is not a public/model tool or
+an installed automatic discovery dispatcher. Work mode still needs isolated-cycle
+authority, and plan/report/acceptance integration remains unfinished.
+
 
 ## Original prompt admission milestone
 

@@ -3,6 +3,14 @@ import {mkdtempSync,rmSync,readdirSync,symlinkSync} from 'node:fs';import {join}
 import {openProductDatabase} from '../../src/db/database.ts';import {WorkbenchService} from '../../src/workbench/service.ts';
 import {createServer} from 'node:http';import {createAdapterHandler} from '../../../session-adapter/index.js';import {SessionControllerClient} from '../../src/harness/session-controller-client.ts';
 const Observer=(await import('../../src/always-on/project-activity.ts').catch(()=>({}))).ProjectActivityObserver;
+
+test('only an issued fresh idle observation can be revalidated inside admission transaction',async t=>{
+ const f=fixture(t),observer=f.observer(),receipt=await observer.observe(f.scope);
+ assert.equal(typeof observer.isCurrent,'function');
+ f.db.exec('BEGIN IMMEDIATE');try{assert.equal(observer.isCurrent(receipt),true);assert.equal(observer.isCurrent({...receipt}),false);}finally{f.db.exec('ROLLBACK');}
+ f.db.prepare('UPDATE wb_agents SET version=version+1 WHERE agent_id=?').run(f.agent.agent_id);
+ assert.equal(observer.isCurrent(receipt),false);
+});
 function fixture(t,{ready=true,bound=true}={}){
  const root=mkdtempSync(join(tmpdir(),'jot-project-observation-')),db=openProductDatabase(join(root,'db.sqlite')),workbench=new WorkbenchService(db,{root:join(root,'shared'),workspaceIds:['ws']});
  t.after(()=>{db.close();rmSync(root,{recursive:true,force:true});});

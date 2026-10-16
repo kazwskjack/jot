@@ -563,6 +563,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       };
       if (!keys[operation]) throw new Error('invalid_workspace_operation');
       fields(args, keys[operation]!);
+      tasks.assertDiscoveryOperation(runId,operation);
       if(identity.kind==='memory_capture'){
         const job=workbench.memoryProcessing.assertRun(owner,identity.agent_id,runId);
         if(!['memory.capture.read','memory.capture.propose'].includes(operation)||args.capture_id!==job.capture_id)throw new Error('workbench_operation_forbidden');

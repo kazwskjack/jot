@@ -496,3 +496,17 @@ authorship. Private inputs from another role/owner are not promoted. Paused
 policies collect without resuming; off/stopped/revoked policies do not collect.
 This does not prove physical watcher coverage, source editing/revision support,
 coalescing/dormancy, transactional occurrence admission or a DSH work cycle.
+
+The next admission increment is now implemented internally: one journal head
+reserves one original planning occurrence, without another task/Agent/budget loop.
+An immutable receipt carries policy/role/task generation, source-head/activity
+digests and original budget-policy revision. A deferred occurrence FK and original
+transaction prevent orphan reservations; competing fixture processes create one
+queue entry. Only exact observer-issued fresh idle receipts can be revalidated;
+no Host IO occurs while the writer is held. Policy/source drift, unknown idle,
+original budget/capacity holds and unaccepted prior cycles refuse admission.
+Planning workspace operations are restricted to reads, and stop/role/policy drift
+revokes the run. This is a callable trusted controller, not an automatically
+running Worker discovery dispatcher. Discover-and-work, source-backed structured
+plans/reports, accepted no-plan dormancy, isolated work/apply, UI and real-provider/
+rollout acceptance remain open.
