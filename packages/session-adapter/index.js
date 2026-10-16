@@ -10,6 +10,7 @@ import {createNativeHandoffLifecycle} from './native-handoff-lifecycle.js'
 import {createNativeClaimedSessionComposer} from './native-claimed-composer.js'
 import {readConversationGoal} from './conversation-goal.js'
 import {createConversationGoalRunHost} from './conversation-goal-run-host.js'
+import {createOrdinaryInputRunHost,normalizeOrdinaryInputExecution} from './ordinary-input-run-host.js'
 import {createOptionalMemoryExtractionHost} from './optional-memory-extraction.js'
 import { WorkbenchBridge,normalizeHostExecutionLease } from './workbench.js'
 
@@ -154,7 +155,7 @@ function decodeFilename(headers) {
   return value && Buffer.byteLength(value, 'utf8') <= 255 && !/[\u0000\/\\]/.test(value) ? value : null
 }
 
-export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost }) {
+export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost }) {
   const voiceHandler = voiceEnabled ? createVoiceAdapterHandler({ speechController, token }) : null
   const workbenchSessions = new Set()
   const blockedWorkbenchSessions = new Set()
@@ -273,6 +274,14 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       try{return json(200,await conversationGoalRunHost.resume(sessionId,body.goal_control));}
       catch(error){return json(409,{error:['goal_revision_changed','goal_cold_input_pending','goal_control_dispatch_unknown','goal_observer_required'].includes(error?.message)?error.message:'goal_resume_unavailable'});}
     }
+    const inputResume=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/input-resume$/)
+    if(inputResume){
+      const sessionId=decodeURIComponent(inputResume[1]);
+      if(!ID.test(sessionId)||!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).join(',')!=='ordinary_input'||workbenchSessions.has(sessionId)||blockedWorkbenchSessions.has(sessionId))return json(422,{error:'ordinary_input_binding_invalid'});
+      if(!ordinaryInputRunHost)return json(503,{error:'ordinary_input_resume_unavailable'});
+        try{normalizeOrdinaryInputExecution(body.ordinary_input);}catch{return json(422,{error:'ordinary_input_binding_invalid'});}
+      try{return json(200,await ordinaryInputRunHost.resume(sessionId,body.ordinary_input));}catch{return json(409,{error:'ordinary_input_resume_unavailable'});}
+    }
     const chatGoal=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/conversation-goal$/)
     if(chatGoal){
       const sessionId=decodeURIComponent(chatGoal[1]);
@@ -386,6 +395,13 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       const maxMessages = Math.min(200, Math.max(1, Number(body?.max_messages ?? 50)))
       const request = { address: { kind: 'session', sessionId }, maxMessages }
       if (body?.assistant_stream === true) request.assistantStream = true
+      if(body?.goal_control!==undefined&&body?.ordinary_input!==undefined)return json(422,{error:'ordinary_input_binding_invalid'});
+      if(body?.ordinary_input!==undefined){
+        if(!ordinaryInputRunHost)return json(503,{error:'ordinary_input_resume_unavailable'});
+        try{normalizeOrdinaryInputExecution(body.ordinary_input);}catch{return json(422,{error:'ordinary_input_binding_invalid'});}
+        if(workbenchSessions.has(sessionId)||blockedWorkbenchSessions.has(sessionId))return json(422,{error:'ordinary_input_binding_invalid'});
+        return {status:200,stream:ordinaryInputRunHost.follow(sessionId,body.ordinary_input,request,signal)};
+      }
       if(body?.goal_control!==undefined){
         if(!conversationGoalRunHost)return json(503,{error:'goal_resume_unavailable'});
         if(workbenchSessions.has(sessionId)||blockedWorkbenchSessions.has(sessionId))return json(422,{error:'goal_control_input_invalid'});
@@ -416,6 +432,7 @@ export function apply(ctx, config = {}) {
   if (host !== '127.0.0.1' || !Number.isInteger(port) || port < 1024 || token.length < 32
     || (config.conversationGoalResume!==undefined&&typeof config.conversationGoalResume!=='boolean')
     || (config.conversationGoalResume===true&&workbenchToken.length<16)
+    || (config.ordinaryInputRecovery!==undefined&&(!config.ordinaryInputRecovery||typeof config.ordinaryInputRecovery!=='object'||Array.isArray(config.ordinaryInputRecovery)||Object.keys(config.ordinaryInputRecovery).join(',')!=='verifyComposition'||typeof config.ordinaryInputRecovery.verifyComposition!=='function'||workbenchToken.length<16))
     || (config.nativeContinuation !== undefined && typeof config.nativeContinuation !== 'boolean')
     || (config.webBudgetEnabled !== undefined && typeof config.webBudgetEnabled !== 'boolean')
     || (config.nativeRoles !== undefined && typeof config.nativeRoles !== 'boolean')
@@ -474,12 +491,14 @@ export function apply(ctx, config = {}) {
   }
   const conversationGoalRunHost=config.conversationGoalResume===true?createConversationGoalRunHost({controller:ctx.sessionController,agents:ctx.agents,persistence:ctx.sessionPersistence,bridge:workbenchBridge,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted'))}):undefined
   if(conversationGoalRunHost)ctx.effect(()=>()=>conversationGoalRunHost.dispose())
+  const ordinaryInputRunHost=config.ordinaryInputRecovery===undefined?undefined:createOrdinaryInputRunHost({controller:ctx.sessionController,agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted')),verifyComposition:config.ordinaryInputRecovery.verifyComposition})
+  if(ordinaryInputRunHost)ctx.effect(()=>()=>ordinaryInputRunHost.dispose())
   const memoryExtractionHost=createOptionalMemoryExtractionHost({config:config.memoryExtraction,bridge:workbenchBridge,llm:ctx.llm,route:config.workbenchModel})
   if(memoryExtractionHost)ctx.effect(()=>()=>memoryExtractionHost.dispose())
   const handler = createAdapterHandler({ controller: ctx.sessionController, fileUploads: ctx.fileUploads, agents: ctx.agents,
     sessions:ctx.sessions,persistence:ctx.sessionPersistence,
     speechController, voiceEnabled, token, workbenchBridge,
-    budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost })
+    budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost })
   const server = createServer(async (req, res) => {
     const abort = new AbortController()
     req.once('aborted', () => abort.abort())
@@ -515,3 +534,5 @@ export {createNativeClaimedSessionComposer}
 export {createNativeReplayProfile} from './native-replay-profile.js'
 export {createNativeReplayProvenance} from './native-replay-provenance.js'
 export {prepareOrdinaryInputResume} from './ordinary-input-resume.js'
+
+export {createOrdinaryInputRunHost}

@@ -460,3 +460,47 @@ resume preflight now requires both capability protocols and both methods.
 The preparer still does not execute or revoke by itself. HTTP Host/Runner wiring,
 original cumulative usage and deployed acceptance remain incomplete; no default
 runtime is modified by these tests or the optional preparation transform.
+
+
+## Optional original-input HTTP observer Host
+
+The adapter can opt into `ordinaryInputRecovery: {verifyComposition}` in trusted
+Host configuration. It requires the existing internal service credential and an
+actual audit callback; absent configuration leaves recovery unavailable. The new
+`createOrdinaryInputRunHost` is packaged/exported. It reuses the existing native
+Controller, original product binding and Coordinator lease, rather than creating
+a prompt, Goal or scheduler.
+
+An authenticated follow request carries `ordinary_input: {run_id, execution_lease}`.
+The Host checks original binding, subscribes to native follow and parks its iterator
+at the first snapshot. It cannot advance native observation or resolve an Agent
+before the audited preflight. The same live observer then owns
+`POST /v1/sessions/<session>/input-resume` with the same `ordinary_input` body.
+Goal controls and ordinary recovery cannot be combined in one follow request.
+Malformed execution metadata is rejected before native stream creation.
+
+Native maintenance rechecks original lineage/composition and unchanged input,
+then releases follow only after admission to that maintenance boundary. Another
+check precedes the native existing-input latch. The Host retains the local wake
+Symbol; its HTTP result contains only original run/Session/product message and
+native input IDs plus `accepted: true`. It is not a completion certificate or
+a durable replay receipt. A duplicate call on that same live observer shares the
+same attempt promise; a new Host does not reconstruct local wake authority.
+
+The original Agent's pre-step, tool and model hooks recheck original lease,
+identity and composition. Disconnect revokes its exact pending wake before
+parent cancellation with keepInbox. A known live pre-step preserves original
+unentered human claims before that cancellation. Guards remain installed while
+maintenance is unwinding; a native latch that throws or returns an invalid result
+cannot admit inference. The Host rechecks observer liveness before acknowledging
+maintenance. Native idle releases execution ownership. A later foreign human
+input after idle closes/detaches the old observer and delegates to the new task;
+the old Host does not reject or cancel it.
+
+The new Host route/lifecycle tests are isolated fixtures. Installed-SDK tests
+separately prove the native wake/revoke primitives; this does not yet prove this
+complete Host with the real Controller/profile, original Worker accounting and
+canonical publication. Runner selection is not wired yet. Cold claimed recovery,
+steering ownership mapping, durable failure reconciliation, real-provider and
+production acceptance remain open. No standard profile enables this option and
+ordinary Goal switches remain off.

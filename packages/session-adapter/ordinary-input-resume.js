@@ -48,5 +48,6 @@ export async function prepareOrdinaryInputResume({binding,controller,agents,brid
    ||!isDeepStrictEqual(agent.inbox.nextStep,inbox['next-step'])||!isDeepStrictEqual(agent.inbox.nextTurn,inbox['next-turn']))fail();
  };
  const recheck=async()=>{check();if(!isDeepStrictEqual(await readAuthority(),authority)||await composition('bound',agent,projection,authority)!==fingerprint)fail();check();};
- await recheck();return Object.freeze({agent,authority,request:frozen({requestId:owned.runId,messageIds:ids,seq}),check,recheck});
+ const guardExecution=async nativeSignal=>{active();try{nativeSignal?.throwIfAborted();}catch{fail();}if(agents.get(owned.sessionRef)!==agent||agent.id!==owned.sessionRef||agent.session?.id!==owned.sessionRef||!isDeepStrictEqual(await readAuthority(),authority)||await composition('bound',agent,projection,authority)!==fingerprint)fail();active();if(agents.get(owned.sessionRef)!==agent||agent.id!==owned.sessionRef||agent.session?.id!==owned.sessionRef)fail();try{nativeSignal?.throwIfAborted();}catch{fail();}};
+ await recheck();return Object.freeze({agent,authority,request:frozen({requestId:owned.runId,messageIds:ids,seq}),check,recheck,guardExecution});
 }
