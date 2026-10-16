@@ -1,4 +1,5 @@
 import {normalizeExecutionLease,type ExecutionLease} from '../workbench/execution-lease.ts'
+import {ordinaryRunCompletionSource,validateOrdinaryRunCompletion,type OrdinaryRunHistoryScope} from './ordinary-run-completion.ts'
 import {normalizeOrdinaryHistoryScope,validateOrdinarySteeringObservation,validateBoundOrdinarySteeringObservation,type OrdinaryHistoryScope} from './ordinary-steering-observation.ts'
 import { createReadStream } from 'node:fs'
 import { Readable } from 'node:stream'
@@ -128,6 +129,10 @@ export class SessionControllerClient {
   async observeBoundSteeringHistory(sessionId:string,input:OrdinaryHistoryScope,sourceHash:string,signal?:AbortSignal){
     const scope=normalizeOrdinaryHistoryScope(sessionId,input);if(typeof sourceHash!=='string'||!/^[a-f0-9]{64}$/.test(sourceHash))throw Error('ordinary_history_contract_invalid');
     return validateBoundOrdinarySteeringObservation(await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/steering-history-v2`,{history:scope,source_sha256:sourceHash},signal),sessionId,scope,sourceHash);
+  }
+  async observeRunCompletion(sessionId:string,input:OrdinaryRunHistoryScope,source:unknown,signal?:AbortSignal){
+    const expected=ordinaryRunCompletionSource(sessionId,input,source);
+    return validateOrdinaryRunCompletion(await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/run-history-completion`,{history:expected.scope,source_sha256:expected.source_sha256},signal),sessionId,expected.scope,source);
   }
 
   async steerOriginal(sessionId:string,requestId:string,text:string,execution:OrdinarySteeringExecution,signal?:AbortSignal){

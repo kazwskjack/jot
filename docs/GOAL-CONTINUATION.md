@@ -1170,3 +1170,10 @@ file presentations. A pinned local DSH characterization adds no model/tool calls
 when reading the disposed Host's history. This reader has no enabled endpoint
 or automatic publisher yet; versioned transport, output integrity and canonical
 publication CAS remain open gates. See the steering recovery plan.
+
+The full ordinary historical completion reader now has a separate opt-in trusted
+Host transport and validated Gateway Client. Real Host history tests use the
+complete product-source binding and retain unchanged logs/model calls. Product
+runtime cursor and DSH controller Session identities are independently checked
+using the existing Worker mapping. No canonical publisher is enabled; output
+integrity, atomic same-message recovery and deployment gates remain open.

@@ -959,3 +959,98 @@ existing end-to-end behavior; the new detached reader has its separate actual
 rc2 characterization above and is not yet wired to HTTP/publication. Production
 and feature switches remain unchanged. Versioned trusted transport, verified
 files/artifacts, one-canonical-message CAS and crash/reopen acceptance are next.
+
+## Full historical completion transport and runtime identity correction
+
+The separate absent-by-default `ordinaryRunHistory` trusted kit now composes the
+reader with official projections and existing immutable admissions. New bearer
+readiness and `/v1/sessions/:id/run-history-completion` routes accept only exact
+owner/conversation/run/version metadata plus the complete source digest. They
+refuse content/actions/leases, return 503 when disabled and generic 409 for
+unconfirmed facts, and never invoke an execution fallback. Gateway
+`observeRunCompletion` derives the digest from its caller-held product snapshot,
+checks the full pending/applied command order, unique native message IDs,
+Session/run/version, settled answer hash and allowed output event sequences.
+The existing per-command v1/v2 protocols are unchanged.
+
+Real HTTP integration exposed an incorrect source-only assumption: the Worker
+stores a deterministic product runtime cursor in `ga_runtime_bindings`, not the
+DSH controller Session from `ga_harness_session_bindings`. The earlier fixture
+used the same string for both and missed the distinction. Source validation and
+Worker now share the unchanged `runtimeSessionRefForRun` mapping. Actual runtime
+identity is accepted; a controller ID substituted as a runtime alias or any
+foreign runtime remains refused. This does not migrate bindings, replace a
+Session or acquire a lease. The failure and corrected source regression were
+observed before the end-to-end test passed.
+
+Four actual pinned Host history cases pass (59.51 seconds), including Host death,
+lost ACK, an open raw tail, pre-ready port collision and acceptance repair. The
+closed cases now use the real Gateway full-source inspector, Client, bearer
+HTTP Adapter, internal product bridge, official raw completion reader and return
+validation twice. The acceptance-repair case repeats full completion observation
+after the product command becomes applied. Raw logs/admissions, model calls and
+canonical/message counts keep their prior invariants; no publication is added.
+Twelve focused source/Client checks and three transport/configuration checks
+pass. The first attempt at the focused SDK command used the wrong directory and
+never ran a test; it is not counted as a feature regression or acceptance.
+
+Full suites are recorded only when their current processes terminate. Scoped
+native output events remain private internal data; output ownership/integrity,
+publication CAS, immutable final receipts, unknown costs, real providers,
+rollout/rollback and deployed/full capability acceptance remain required. No
+automatic final-answer consumer or production switch is enabled by this stage.
+
+### Publication implementation constraints confirmed from current code
+
+- `AttachmentResolver.resolveOutputs` checks owner/conversation, registration,
+  ready/local state, path root, existence and recorded version/size/hash; it does
+  not itself hash current bytes. Historical publication must additionally check
+  actual bytes against the immutable recorded version and retain the no-symlink
+  boundary used by task outputs. Repeat scoped DB/version checks in the final
+  transaction and release temporary artifact leases on every exit. Do not call
+  recorded metadata a completed integrity check.
+- Keep output extraction separate from final authority. Parse native reasoning,
+  text, structured artifact references and presented files with the shared
+  interpreter; validate all output artifacts before publishing. A failed file
+  check does not downgrade into a successful text-only publication.
+- `appendAssistant` returns the first existing message; it is not replacement
+  authority. A separate historical CAS must compare the saved canonical row and
+  update that exact message ID, or create only when none exists. Never alter old
+  candidate provenance or clear `outcome_unknown` by bulk-setting candidates.
+- Channel delivery identity includes content as well as the message ID. Merely
+  calling `enqueueText` with corrected text can create another effect. The final
+  writer must inspect prior message delivery state in its transaction, preserve
+  sending/unknown provider outcomes and use a reviewed correction/hold policy;
+  repeated receipt repair must not enqueue or resend again. Current work does
+  not enable external delivery from historical evidence.
+- Re-read complete source and native proof after output preparation, then CAS
+  source/version/owner/canonical inside one product transaction. Do not borrow an
+  execution lease or use `finalizePublication` to overwrite unknown runtime,
+  usage or provider accounting. Test rollback, concurrent repair, reopened DB,
+  deleted output/message, cancelled/newer work and conflicting delivery states.
+
+For lost-ACK final recovery, the full proof may contain committed pending
+commands whose product user messages are still absent. Final publication must
+atomically reconcile those exact deterministic user messages and applied states
+alongside the one canonical answer, under the complete source CAS. Keep existing
+payload/client-ID collision checks and standard message events. Do not forge
+per-command protocol-2 receipts from a full-completion protocol or await another
+native call inside a SQLite transaction. The distinct immutable final receipt
+must retain the complete accepted command set and its original full proof.
+EventStore updates conversation sequence/timestamps on every append: compute
+and retain the post-publication source only after all transaction events, then
+store the final receipt without a later source-changing event. Reopened retries
+must validate that post-state and never rewrite an existing final receipt.
+
+Final transport-stage verification: complete actual pinned Host SDK 37/37,
+zero failures or skips (511.32 seconds). The four history cases exercise new
+full completion transport alongside unchanged per-command v1/v2; acceptance
+repair also repeats the new observation after command application. Gateway
+1197 total/1191 passed/six existing skips/zero failures (145.46 seconds),
+Adapter 491/491 with the fixed runtime enabled and no skips (9.16 seconds),
+root 32/32, public regressions 6/6, Gateway and Windows root builds, BRAIN
+links and the 720-file working-tree review pass. The first Adapter run without
+the runtime variable had 24 environment skips and is not the final runtime
+acceptance. No production flags or deployment changed. Same-message final
+publication, verified file integrity, delivery reconciliation, crash/rollback,
+real-provider/money and full inventory gates remain required.

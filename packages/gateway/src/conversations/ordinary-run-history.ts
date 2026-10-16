@@ -2,6 +2,7 @@ import type {DatabaseSync} from 'node:sqlite';import type {FastifyInstance} from
 import {createHash,timingSafeEqual} from 'node:crypto';
 import {withImmediateTransaction} from '../db/database.ts';
 import {inspectOrdinarySteeringHistory} from './ordinary-steering-history.ts';
+import {runtimeSessionRefForRun} from '../harness/run-session-identity.ts';
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 const sha=(value:string)=>createHash('sha256').update(value).digest('hex');
 const recordHash=(value:unknown)=>sha(JSON.stringify(value,(_k,v)=>v&&typeof v==='object'&&!Array.isArray(v)?Object.fromEntries(Object.keys(v).sort().map(k=>[k,v[k]])):v));
@@ -26,7 +27,7 @@ export function inspectOrdinaryRunHistory(db:DatabaseSync,scope:Scope){
   if(!input||input.run_id!==scope.run_id||input.conversation_id!==scope.conversation_id||input.role!=='user'||input.status!=='complete'||typeof input.content_json!=='string')rejected();
   const lease=db.prepare('SELECT * FROM ga_worker_leases WHERE resource_id=?').get(scope.run_id);
   if(lease&&(typeof lease.owner!=='string'||!ID.test(lease.owner)||!Number.isSafeInteger(lease.generation)||Number(lease.generation)<1||typeof lease.expires_at!=='string'||!/^\d+$/.test(lease.expires_at)||!Number.isSafeInteger(Number(lease.expires_at))||Number(lease.expires_at)>Date.now()))rejected();
-  const runtime=db.prepare('SELECT * FROM ga_runtime_bindings WHERE run_id=?').get(scope.run_id);if(runtime&&runtime.harness_session_ref!==scope.session_ref)rejected();
+  const runtime=db.prepare('SELECT * FROM ga_runtime_bindings WHERE run_id=?').get(scope.run_id);if(runtime&&runtime.harness_session_ref!==runtimeSessionRefForRun(scope.run_id))rejected();
   const commandRows=db.prepare('SELECT * FROM ga_run_commands WHERE run_id=? ORDER BY created_at,rowid').all(scope.run_id);
   const commands=commandRows.map((row,position)=>{if(typeof row.id!=='string')rejected();return{...inspectOrdinarySteeringHistory(db,{...scope,command_id:row.id}),position,record_sha256:recordHash(row)};});
   const humanIds=new Set([run.input_message_id,...commands.filter(c=>c.product_message_present).map(c=>c.input_message_id)]);

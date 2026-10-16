@@ -221,3 +221,34 @@ upgraded into bound evidence. Gateway `observeBoundSteeringHistory` validates
 this version explicitly. These facts may support acceptance-only reconciliation
 under a separate product transaction; they never authorize native replay,
 driver activation, final-answer publication or monetary settlement.
+
+### Full ordinary historical completion transport
+
+An independent trusted `ordinaryRunHistory: {Session, validateLog}` kit enables
+only the new reader. It also requires the existing immutable admission store,
+the official `sessionProjections.snapshot` service and the internal product
+bridge. It is absent by default and does not arm Goal/recovery or publish.
+Bearer POST `/v1/ordinary-run-history/readiness` accepts `{}` and returns
+`{ready,protocol:1,execution_authorized:false}`.
+POST `/v1/sessions/:id/run-history-completion` accepts exactly
+`{history:{owner_id,conversation_id,run_id,expected_run_version},source_sha256}`.
+The digest binds the entire `ordinary_run_history` product record. Text,
+commands, execution leases and actions in the request are rejected. Disabled
+configuration is 503; unconfirmed source/native state is a generic 409.
+
+The result is protocol 1 of `ordinary_run_completion`, not a per-command
+steering observation. It contains the exact command/native-message coverage,
+source/native provenance and scoped native answer/output events for Gateway's
+shared output interpreter. These events are private internal data, not public
+logs or execution authorization. Gateway `observeRunCompletion` accepts the
+caller-held full product snapshot, derives its digest and validates identity,
+version, complete command order, unique native IDs, answer text hash and output
+sequence/type bounds. Rechecking output ownership/integrity and source inside a
+publication transaction remains necessary. No canonical writer or automatic
+consumer is enabled here; unknown usage and money remain unchanged.
+
+Product runtime cursors use the Worker's existing deterministic
+`runtime-session-<run hash>` identity, independently of the DSH controller
+Session in `ga_harness_session_bindings`. A shared mapping now prevents the
+history source from confusing those identities. A controller ID substituted
+into the runtime binding is refused rather than treated as an alias.

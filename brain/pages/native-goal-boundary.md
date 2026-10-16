@@ -4,7 +4,7 @@ title: Keep native Goal state and continuation in DSH
 category: decision
 status: active
 created: "2026-10-16T11:44:16"
-updated: "2026-10-16T23:36:58"
+updated: "2026-10-17T00:24:24"
 ---
 
 <!-- compiled_truth -->
@@ -344,5 +344,11 @@ Running ordinary completion now has a Worker-owned publication callback while th
 - time: 2026-10-16T23:36:58
   kind: evidence
   summary: "Final source-bound acceptance matrix passes local actual SDK 37/37, Gateway 1176 passed/six existing skips, Adapter 478/478, root 32/32 and Windows builds. Protocol 2 and an opt-in original terminal Dispatcher consumer repair acceptance atomically with an immutable private metadata receipt; cancellation, source mutation, concurrent repair, rollback, owned-parent deletion and reopened-DB idempotency are verified. Final answers/run state/native reservations/usage/fees are untouched. Defaults and production stay off; canonical final recovery and full rollout/inventory remain open."
+  source: docs/superpowers/plans/2026-10-16-steering-lineage-and-recovery.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-17T00:24:24
+  kind: evidence
+  summary: "Product runtime cursor identity and DSH controller Session are separate boundaries. Historical source validates the unchanged deterministic Worker runtime mapping while independently retaining the original controller Session binding; neither identity substitutes for the other."
   source: docs/superpowers/plans/2026-10-16-steering-lineage-and-recovery.md
   affects: [native-goal-boundary]

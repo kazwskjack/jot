@@ -1,4 +1,5 @@
 import {validateOrdinaryCompletion,type OrdinaryCompletionProof} from './ordinary-completion.ts';
+import {runtimeSessionRefForRun} from './run-session-identity.ts';
 import {inspectOrdinarySteeringBinding} from '../conversations/ordinary-steering-binding.ts';
 import {assertExecutionLease,type ExecutionLease} from '../workbench/execution-lease.ts';
 import {isDeepStrictEqual} from 'node:util';
@@ -127,7 +128,7 @@ export class HarnessWorker {
     }
     const controllerSessionRef = (originalSession?.session_id as string|undefined) ?? goalControl?.session_id ?? this.sessionResolver?.(lease.conversation_id)
       ?? `session-${createHash('sha256').update(lease.run_id).digest('hex').slice(0, 32)}`;
-    const runtimeSessionRef = `runtime-session-${createHash('sha256').update(lease.run_id).digest('hex').slice(0, 32)}`;
+    const runtimeSessionRef = runtimeSessionRefForRun(lease.run_id);
     this.coordinator.bindSession(lease, runtimeSessionRef);
     const input = goalControl?{text:'',attachmentIds:[],ownerId:goalControl.owner_id,receivedAt:0}:this.messageInput(lease.run_id);
     const message = originalRecovery?'':input.text;
