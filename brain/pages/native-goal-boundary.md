@@ -4,7 +4,7 @@ title: Keep native Goal state and continuation in DSH
 category: decision
 status: active
 created: "2026-10-16T11:44:16"
-updated: "2026-10-16T17:54:40"
+updated: "2026-10-16T18:03:49"
 ---
 
 <!-- compiled_truth -->
@@ -42,7 +42,7 @@ The optional ordinaryInputRecovery Host now owns a parked native follow and exac
 
 Installed-Controller HTTP recovery now has three real local SDK cases with original Gateway/Coordinator records: execute once after hard Host death and original-run lease replacement, refuse an obsolete lease before Agent creation while retaining input, and cancel a held model request on observer disconnect. A further restart preserves the expected inbox without Agent creation and rejects vanished observer authority. The synthetic pending input is seeded by a test wrapper, its composition audit is fixture-only and its local provider is scripted; initial production prompt admission, historical production composition, cost settlement and canonical Worker publication are not proven. Human counts use source.kind=user rather than all user-role context events. The isolated passing Loader overlay disables the old agent-loop entry and inserts the prepared compatibility plugin; a name-only replacement did not change actual Agent capabilities in the first experiment. No live runtime is edited.
 
-Opt-in original ordinary-run recovery now connects Worker, SessionControllerClient and Runner to the observed Host. A generation>1 ordinary run uses its stored owner-bound Session and exact original message/lease; it skips create/prompt/input attachment replay/context staging. Missing original Session or mixed-version Runner interrupts without prompt fallback. Exact acknowledgements and separate Goal/ordinary execution metadata are checked. The original binding, including input content hash, is rechecked before readiness/projections and within canonical publication. Real installed-Controller testing now reclaims one original run, makes one scripted model request, preserves one original human and native usage receipt, publishes exactly one canonical answer, and does not repeat after a further poll/restart. Historical provider-cost/unknown settlement and pending input alongside an active Goal are not proven; claimed restoration, steering and production composition/rollout gates remain. GENERAL_AGENT_ORDINARY_INPUT_RECOVERY_ENABLED defaults false.
+Opt-in original ordinary-run recovery now connects Worker, SessionControllerClient and Runner to the observed Host. A generation>1 ordinary run uses its stored owner-bound Session and exact original message/lease; it skips create/prompt/input attachment replay/context staging. Missing original Session or mixed-version Runner interrupts without prompt fallback. Exact acknowledgements and separate Goal/ordinary execution metadata are checked. The original binding, including input content hash, is rechecked before readiness/projections and within canonical publication. Real installed-Controller testing now reclaims one original run, makes one scripted model request, preserves one original human and native usage receipt, publishes exactly one canonical answer, and does not repeat after a further poll/restart. Cold original-input recovery alongside persisted active/complete Goals is verified without implicit rearming or changing their identity/revision/phase/rounds; paused/blocked Goals refuse before Agent creation or inference and preserve the original inbox. The native Goal service resets activation on attachment, and the native round driver requires active plus armed: inbox wake does not authorize Goal resume. Explicit Goal rearming after recovered input, historical provider-cost/unknown settlement, claimed restoration, steering and production composition/rollout gates remain. GENERAL_AGENT_ORDINARY_INPUT_RECOVERY_ENABLED defaults false.
 
 
 ## Timeline
@@ -200,5 +200,11 @@ Opt-in original ordinary-run recovery now connects Worker, SessionControllerClie
 - time: 2026-10-16T17:54:40
   kind: decision
   summary: Connect opt-in original-run Worker recovery and publication without replay while retaining source and lease fences
+  source: docs/GOAL-CONTINUATION.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-16T18:03:49
+  kind: decision
+  summary: "Preserve independent Goal activation when recovering original input; verify cold coexistence and pause/block refusal"
   source: docs/GOAL-CONTINUATION.md
   affects: [native-goal-boundary]

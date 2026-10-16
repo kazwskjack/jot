@@ -501,6 +501,8 @@ native input and Coordinator lease without re-sending the prompt or attachments.
 The real installed-Controller/local-model case retains one original run and human
 input, one model request and one canonical answer. Source bytes and lease changes
 fence publication. Native usage stays in the original Session; monetary/unknown
-settlement is not thereby proven. Recovery remains off by default pending active
-Goal/pending-input, claimed/steering, production composition and rollout gates.
+settlement is not thereby proven. Recovery remains off by default pending explicit
+Goal rearming after input recovery, claimed/steering, production composition and
+rollout gates. Cold active/complete Goal coexistence is verified without implicit
+rearming; paused/blocked Goals refuse before Agent creation or inference.
 See [Goal continuation](docs/GOAL-CONTINUATION.md).

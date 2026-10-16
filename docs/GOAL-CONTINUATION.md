@@ -595,3 +595,35 @@ steering ownership, already-entered or unknown native outcomes, cost settlement,
 all consumer upgrades and deployed acceptance are still required before enabling
 the Worker flag and optional Host configuration. There is no automatic fallback
 that fabricates a continuation message for an unconfirmed native attempt.
+
+
+## Pending original input with a persisted Goal
+
+The installed rc.2 Goal service resets process-local activation to `disarmed`
+on Agent creation. Its round driver only schedules automatic rounds when the
+Goal is both `active` and `armed`. Waking the existing human inbox is not an
+independent human-authorized Goal resume edge. Ordinary-input recovery must
+therefore leave the existing Goal identity, revision, phase and round counter
+unchanged; it must not create a Goal, call resume, or fabricate a Goal-round prompt.
+
+The real Controller/HTTP/Worker fixture now covers pending original input beside
+persisted `active` and `complete` Goals: one original human input, one model
+request and one canonical product answer, with no native Goal-source message.
+Both Goal views remain disarmed and unchanged before and after recovery and
+another cold Host restart. Persisted `paused` and `blocked` Goals are refused
+before Agent creation or inference; their original inbox input survives restart.
+These are isolated SDK and scripted-provider checks, not deployed acceptance.
+
+This establishes coexistence without implicit rearming. It does not establish
+a combined workflow for recovering pending input and then explicitly resuming an
+active Goal, nor recovery after input claim or model dispatch. Those remain
+separate original-run authority, cancellation and accounting acceptance gates.
+
+
+The expanded suite also exposed one intermittent timeout in the existing manual
+`execute` case: the native assistant usage and completed `turn/end` were present,
+but the fixture's idle-flush receipt did not arrive within its deadline. An
+isolated repeat passed. The fixture now records native status transitions with
+Session sequence numbers so recurrence can distinguish missing idle notification
+from pending persistence. No timeout or assertion was relaxed, and this event is
+not classified as a resolved product defect or proof of stable production recovery.
