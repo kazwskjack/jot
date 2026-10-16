@@ -56,3 +56,9 @@ test('original recovery adopts the existing admission before native wake and ref
 test('original recovery cannot be constructed without the durable entry admission gate',()=>{
  assert.throws(()=>fixture({inputAdmissionHost:undefined}),/ordinary_input_host_unavailable/);
 });
+
+
+test('observed Host passes an empty original inbox through its optional claimed factory before adoption and wake',async()=>{
+ let composed=0;const composer={withResolution:async(scope,operation)=>{assert.equal(scope.binding.runId,'run-a');composed++;const value=await operation();return{value,recovery:{state:'restored',restored:1,execution_authorized:false},pending:{'next-step':[],'next-turn':structuredClone(f.candidate.inbox.nextTurn)}};}};
+ const f=fixture({claimedComposer:composer}),project=f.controller.projections;f.controller.projections=async()=>{const value=await project();value.values.inbox['next-turn']=[];return value;};const stream=await open(f);await f.host.resume('session-a',wire);assert.equal(composed,1);assert.ok(f.calls.includes('wake'));f.abort.abort();await stream.return();await f.host.dispose();
+});

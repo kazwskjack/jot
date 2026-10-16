@@ -210,3 +210,17 @@ usage/accounting evidence. A real Host hard-exit probe preserves that conservati
 boundary. Cold claimed-factory integration and unknown outcome/cost reconciliation
 remain open; no production switch is enabled. See
 [Goal continuation](GOAL-CONTINUATION.md).
+
+
+## Observed ordinary claimed-factory milestone
+
+An optional operator-configured original Controller factory now restores
+protocol-2 admitted, unreserved ordinary input through reviewed before/after
+setup hooks, then passes it to the existing observed Host and original Worker.
+The paired real local SDK cases verify one canonical result after hard Host
+death and refusal of a previously reserved entry. No prompt replay or implicit
+Goal activation is introduced. Earlier policy/reservation-only milestones above
+record prerequisites; their cold-wiring gap is now closed locally. Production
+composition/attachment acceptance, steering, unknown cost reconciliation and
+rollout remain open and defaults remain disabled. See
+[Goal continuation](GOAL-CONTINUATION.md).

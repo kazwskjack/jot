@@ -20,6 +20,7 @@
     "ordinary-input-resume.js",
     "ordinary-input-run-host.js",
     "ordinary-claimed-input.js",
+    "ordinary-claimed-composer.js",
     "ordinary-input-admissions.js",
     "ordinary-input-admission-host.js",
     "native-child-admission.js",

@@ -635,7 +635,7 @@ not classified as a resolved product defect or proof of stable production recove
 original unpublished native resume factory. It reuses the append-only native
 claimed-input restoration algorithm and invariant replay; it does not create or
 publish an Agent, open a follow stream, call prompt/send, arm a Goal or authorize
-execution. The existing ordinary HTTP Host still refuses cold claimed input;
+execution. At the policy-only milestone, the ordinary HTTP Host still refused cold claimed input;
 this factory policy is a prerequisite for that connection, not an enabled route.
 
 The policy requires the original Gateway binding, a reviewed native replay
@@ -822,7 +822,7 @@ commit/model entry. After restart the immutable reservation remains, the replay
 reader refuses it, and no fresh model/Agent is activated. This does not classify
 that reservation as not-called, certify power-loss durability, or settle cost.
 
-Cold claimed-factory integration still remains. This reservation gate was added
+At the entry-reservation milestone, cold claimed-factory integration remained. The reservation gate was added
 first so that wiring the factory cannot confuse missing buffered native events
 with permission to repeat an already attempted model/tool path. Both existing
 Goal switches and ordinary production recovery remain disabled. Storage now has
@@ -862,3 +862,76 @@ This is split-run evidence, not a claim of one clean 12-case suite. Adapter
 regressions passed 429/429, root tests 32/32, the receipt helper 2/2 and the
 Windows build passed. No production enablement follows from these local
 scripted-provider and fixture-composition results.
+
+
+## Observed ordinary claimed-factory connection
+
+Cold ordinary claimed-input restoration can now be composed into the **original**
+Controller resume factory, behind explicit operator configuration:
+
+```js
+ordinaryInputAdmission: { profile, admissions },
+ordinaryInputRecovery: {
+  verifyComposition,
+  claimedInput: { Session, validateLog }
+}
+```
+
+`Session` and `validateLog` must come from the reviewed installed native runtime
+and its package-owned invariant replay. The admission store must retain the
+original protocol-2 receipts and exclusive entry-reservation capability. The
+operator must review both prepared and bound compositions. This is not enabled
+by an HTTP request body, a preset name or a current source hash alone. Without
+`claimedInput`, the previous empty-inbox refusal remains. Defaults stay off.
+
+After a parked original-run observer and cold identity/history/composition
+preflight, an empty pending inbox takes the scoped `withResolution` path. Its
+AsyncLocalStorage scope admits only the same unpublished **resume** Agent; a
+startup, existing resident Agent, duplicate concurrent resolution, unrelated
+Session, paused/blocked Goal or missing hook capability refuses. The original
+Controller still selects and configures the Agent. No prompt, user-message copy,
+new Session, Goal activation, scheduler or model route is substituted.
+
+Before original preset setup, `createOrdinaryClaimedInputRecoverySetup` verifies
+the original Gateway identity/current lease, complete native history/invariants,
+original full-message hashes, historical profile and absence of an entry
+reservation. It restores the original append-only inbox splice. The after-setup
+hook verifies the same authority/profile, unchanged Session instance/header, restored inbox and native
+history prefix, and no setup-time turn/model/tool entry before original factory
+publication. The factory's original suffix flush remains before publication.
+The receipt contains `execution_authorized: false`; restoration is not a wake.
+
+The ordinary Host next adopts those exact pending messages through its mandatory
+admission gate. Only its existing maintenance/wake path can continue the original
+Worker run. Final pre-step still acquires the exclusive entry slot, so a new
+reservation arriving after restoration/adoption cannot authorize a duplicate
+entry. Caller cancellation is bound into native factory rollback. A late original
+operation retains a rejecting scope until it settles; disposing a composer does
+not remove its fence while that operation is still live.
+
+A real local HTTP/SDK test now starts with **actual original Controller prompt
+admission**, holds after claim but before entry reservation, flushes and kills the
+Host, and reclaims the original Gateway run under its next lease. It restores the
+original Session/native message, makes one scripted provider request, retains
+native usage, and publishes exactly one canonical Worker answer. A further poll
+and cold restart do not repeat it. The paired reserved-entry hard-death case
+refuses recovery with no Agent/model activation. These cases passed together.
+
+This closes the local opt-in Controller/Host/Worker claimed-factory wiring gate;
+it does not complete production acceptance. Source/composition review in these
+tests remains fixture-only and model output is scripted. Image/file-specific
+recovery, steering across multiple RPC owners, explicit Goal reactivation,
+unknown model/tool outcomes and monetary reconciliation, retention, complete
+consumer rollout/rollback and real-provider deployment gates remain unfinished.
+Reservations are never cleared merely to make recovery succeed.
+
+Upgrading this source does not silently reseal prior admissions with the new
+profile fingerprint. If an original receipt's reviewed composition differs,
+recovery refuses until a separately reviewed historical compatibility path
+exists. A missing admission, old protocol or newly computed current hash is not
+permission to migrate or replay old input.
+
+Final local verification for this connection, including the Session/header
+fence, passed all 14 real HTTP/SDK cases in one run with no skips, 435 adapter
+tests, 32 root tests and the Windows build. Earlier diagnostic failures above
+remain historical evidence rather than being relabelled as passes.

@@ -17,7 +17,7 @@ export async function readOrdinaryInputAuthority({bridge,binding:owned,signal,as
 
 /** Identity/composition preflight only. The caller must own an actual parked
  * observer; this neither opens a stream, restores claims nor wakes execution. */
-export async function prepareOrdinaryInputResume({binding,controller,agents,bridge,ordinaryPresets,verifyComposition,observer,signal}={}){
+export async function prepareOrdinaryInputResume({binding,controller,agents,bridge,ordinaryPresets,verifyComposition,observer,signal,claimedComposer}={}){
  if(!binding||Object.keys(binding).sort().join(',')!=='executionLease,runId,sessionRef'||!valid(binding.runId)||!valid(binding.sessionRef)
   ||typeof controller?.projections!=='function'||typeof controller?.inspect!=='function'||typeof controller?.resolveAgent!=='function'||typeof agents?.get!=='function'
   ||typeof bridge?.request!=='function'||typeof verifyComposition!=='function'||typeof observer?.assertActive!=='function'||!(ordinaryPresets instanceof Set)||!ordinaryPresets.size)fail();
@@ -33,8 +33,8 @@ export async function prepareOrdinaryInputResume({binding,controller,agents,brid
  try{projection=frozen(structuredClone(await controller.projections({sessionId:owned.sessionRef},signal)));active();history=frozen(structuredClone(await controller.inspect(owned.sessionRef,signal)));}catch{fail();}active();
  const values=projection?.values,inbox=values?.inbox;
  if(!ordinaryPresets.has(values?.agentPreset)||!inbox||Object.keys(inbox).sort().join(',')!=='next-step,next-turn'||!['next-step','next-turn'].every(key=>Array.isArray(inbox[key])))fail();
- const pending=structuredClone([...inbox['next-step'],...inbox['next-turn']]),ids=pending.map(message=>message?.id);
- if(!ids.length||new Set(ids).size!==ids.length||pending.some(message=>!valid(message?.id)||message.role!=='user'||message.source?.kind!=='user'||message.source.rpcId!==owned.runId))fail();
+ let expectedInbox=inbox,pending=structuredClone([...inbox['next-step'],...inbox['next-turn']]),ids=pending.map(message=>message?.id);
+ if((!ids.length&&typeof claimedComposer?.withResolution!=='function')||new Set(ids).size!==ids.length||pending.some(message=>!valid(message?.id)||message.role!=='user'||message.source?.kind!=='user'||message.source.rpcId!==owned.runId))fail();
  const goal=values.goal;if(goal!==null&&(!goal?.goal||!valid(goal.goal.id)||!['active','complete'].includes(goal.goal.phase)))fail();
  if(history?.meta?.id!==owned.sessionRef||!Array.isArray(history.events))fail();let open=null;
  for(const [index,event] of history.events.entries()){
@@ -44,12 +44,12 @@ export async function prepareOrdinaryInputResume({binding,controller,agents,brid
   if(event.type==='user/message'&&(ids.includes(event.data?.id)||event.data?.source?.rpcId===owned.runId))fail();
  }if(open!==null)fail();
  const fingerprint=await composition('cold',undefined,projection,authority);if(!isDeepStrictEqual(await readAuthority(),authority))fail();
- let resolved;try{resolved=await controller.resolveAgent(owned.sessionRef);}catch{fail();}active();const agent=resolved?.agent;
+ let resolved;try{if(ids.length)resolved=await controller.resolveAgent(owned.sessionRef);else{const recovered=await claimedComposer.withResolution({binding:owned,signal},()=>controller.resolveAgent(owned.sessionRef));active();if(recovered?.recovery?.execution_authorized!==false||recovered.recovery.state!=='restored'||recovered.recovery.restored<1)fail();resolved=recovered.value;expectedInbox=frozen(structuredClone(recovered.pending));if(!expectedInbox||Object.keys(expectedInbox).sort().join(',')!=='next-step,next-turn'||!Array.isArray(expectedInbox['next-step'])||!Array.isArray(expectedInbox['next-turn']))fail();pending=[...expectedInbox['next-step'],...expectedInbox['next-turn']];ids=pending.map(m=>m?.id);if(!ids.length||new Set(ids).size!==ids.length||pending.some(m=>!valid(m?.id)||m.role!=='user'||m.source?.kind!=='user'||m.source.rpcId!==owned.runId))fail();}}catch{fail();}active();const agent=resolved?.agent;
  const seq=agent?.session?.seq;
  const check=()=>{
   active();if(resolved?.error||!agent||agent.id!==owned.sessionRef||agent.session?.id!==owned.sessionRef||agents.get(owned.sessionRef)!==agent||agent.status!=='idle'||!Number.isSafeInteger(seq)||agent.session.seq!==seq
    ||agent.jotPendingInputProtocol!==1||agent.jotPendingWakeRevocationProtocol!==1||typeof agent.jotResumePending!=='function'||typeof agent.jotRevokePendingWake!=='function'||typeof agent.runMaintenance!=='function'||!Array.isArray(agent.inbox?.nextStep)||!Array.isArray(agent.inbox?.nextTurn)
-   ||!isDeepStrictEqual(agent.inbox.nextStep,inbox['next-step'])||!isDeepStrictEqual(agent.inbox.nextTurn,inbox['next-turn']))fail();
+   ||!isDeepStrictEqual(agent.inbox.nextStep,expectedInbox['next-step'])||!isDeepStrictEqual(agent.inbox.nextTurn,expectedInbox['next-turn']))fail();
  };
  const recheck=async()=>{check();if(!isDeepStrictEqual(await readAuthority(),authority)||await composition('bound',agent,projection,authority)!==fingerprint)fail();check();};
  const guardExecution=async nativeSignal=>{active();try{nativeSignal?.throwIfAborted();}catch{fail();}if(agents.get(owned.sessionRef)!==agent||agent.id!==owned.sessionRef||agent.session?.id!==owned.sessionRef||!isDeepStrictEqual(await readAuthority(),authority)||await composition('bound',agent,projection,authority)!==fingerprint)fail();active();if(agents.get(owned.sessionRef)!==agent||agent.id!==owned.sessionRef||agent.session?.id!==owned.sessionRef)fail();try{nativeSignal?.throwIfAborted();}catch{fail();}};

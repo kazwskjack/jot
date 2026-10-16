@@ -23,3 +23,10 @@ test('native pending changes and observer loss invalidate prepared input before 
 test('a shared mutable projection cannot replace the verified original input during composition checks',async()=>{
  const f=fixture();f.options.verifyComposition=async()=>{f.agent.inbox.nextTurn[0].content[0].text='Changed after cold validation';return{verified:true,fingerprint:'b'.repeat(64)};};await assert.rejects(()=>prepare(f.options),/ordinary_input_/);
 });
+
+
+test('empty pending recovery uses the scoped original factory receipt instead of prompting',async()=>{
+ const f=fixture(),message=structuredClone(f.agent.inbox.nextTurn[0]);f.view.values.inbox['next-turn']=[];f.agent.inbox.nextTurn=[];
+ f.options.claimedComposer={withResolution:async(scope,operation)=>{assert.deepEqual(scope.binding,f.options.binding);f.calls.push('claimed-factory');const value=await operation();f.agent.inbox.nextTurn=[message];return {value,recovery:{state:'restored',restored:1,execution_authorized:false},pending:{'next-step':[],'next-turn':[message]}};}};
+ const result=await prepare(f.options);assert.deepEqual(result.request.messageIds,['native-input']);assert.ok(f.calls.indexOf('cold-composition')<f.calls.indexOf('claimed-factory'));result.check();
+});

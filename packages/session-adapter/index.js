@@ -1,3 +1,4 @@
+import {createOrdinaryClaimedSessionComposer} from './ordinary-claimed-composer.js'
 import {createOrdinaryInputAdmissionHost} from './ordinary-input-admission-host.js'
 import { createServer } from 'node:http'
 import { timingSafeEqual } from 'node:crypto'
@@ -435,7 +436,7 @@ export function apply(ctx, config = {}) {
   if (host !== '127.0.0.1' || !Number.isInteger(port) || port < 1024 || token.length < 32
     || (config.conversationGoalResume!==undefined&&typeof config.conversationGoalResume!=='boolean')
     || (config.conversationGoalResume===true&&workbenchToken.length<16)
-    || (config.ordinaryInputRecovery!==undefined&&(!config.ordinaryInputRecovery||typeof config.ordinaryInputRecovery!=='object'||Array.isArray(config.ordinaryInputRecovery)||Object.keys(config.ordinaryInputRecovery).join(',')!=='verifyComposition'||typeof config.ordinaryInputRecovery.verifyComposition!=='function'||workbenchToken.length<16||config.ordinaryInputAdmission===undefined))
+    || (config.ordinaryInputRecovery!==undefined&&(!config.ordinaryInputRecovery||typeof config.ordinaryInputRecovery!=='object'||Array.isArray(config.ordinaryInputRecovery)||!['verifyComposition','claimedInput,verifyComposition'].includes(Object.keys(config.ordinaryInputRecovery).sort().join(','))||config.ordinaryInputRecovery.claimedInput!==undefined&&(!config.ordinaryInputRecovery.claimedInput||Object.keys(config.ordinaryInputRecovery.claimedInput).sort().join(',')!=='Session,validateLog'||typeof config.ordinaryInputRecovery.claimedInput.Session?.create!=='function'||typeof config.ordinaryInputRecovery.claimedInput.validateLog!=='function')||typeof config.ordinaryInputRecovery.verifyComposition!=='function'||workbenchToken.length<16||config.ordinaryInputAdmission===undefined))
     || (config.ordinaryInputAdmission!==undefined&&(!config.ordinaryInputAdmission||typeof config.ordinaryInputAdmission!=='object'||Object.keys(config.ordinaryInputAdmission).sort().join(',')!=='admissions,profile'||typeof config.ordinaryInputAdmission.profile?.read!=='function'||typeof config.ordinaryInputAdmission.admissions?.read!=='function'||typeof config.ordinaryInputAdmission.admissions?.create!=='function'||config.ordinaryInputAdmission.admissions.entryReservationProtocol!==1||typeof config.ordinaryInputAdmission.admissions.reserveEntry!=='function'||typeof config.ordinaryInputAdmission.admissions.readReplayCandidate!=='function'||workbenchToken.length<16))
     || (config.nativeContinuation !== undefined && typeof config.nativeContinuation !== 'boolean')
     || (config.webBudgetEnabled !== undefined && typeof config.webBudgetEnabled !== 'boolean')
@@ -497,7 +498,9 @@ export function apply(ctx, config = {}) {
   if(conversationGoalRunHost)ctx.effect(()=>()=>conversationGoalRunHost.dispose())
   const ordinaryInputAdmissionHost=config.ordinaryInputAdmission===undefined?undefined:createOrdinaryInputAdmissionHost({ctx,agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted')),...config.ordinaryInputAdmission})
   if(ordinaryInputAdmissionHost)ctx.effect(()=>()=>ordinaryInputAdmissionHost.dispose())
-  const ordinaryInputRunHost=config.ordinaryInputRecovery===undefined?undefined:createOrdinaryInputRunHost({controller:ctx.sessionController,agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted')),verifyComposition:config.ordinaryInputRecovery.verifyComposition,inputAdmissionHost:ordinaryInputAdmissionHost})
+  const ordinaryClaimedComposer=config.ordinaryInputRecovery?.claimedInput===undefined?undefined:createOrdinaryClaimedSessionComposer({ctx,bridge:workbenchBridge,agents:ctx.agents,sessions:ctx.sessions,query:typeof ctx.get==='function'?ctx.get('sessionQuery'):ctx.sessionQuery,projections:ctx.sessionProjections,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted')),...config.ordinaryInputAdmission,...config.ordinaryInputRecovery.claimedInput})
+  if(ordinaryClaimedComposer)ctx.effect(()=>()=>ordinaryClaimedComposer.dispose())
+  const ordinaryInputRunHost=config.ordinaryInputRecovery===undefined?undefined:createOrdinaryInputRunHost({controller:ctx.sessionController,agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted')),verifyComposition:config.ordinaryInputRecovery.verifyComposition,inputAdmissionHost:ordinaryInputAdmissionHost,claimedComposer:ordinaryClaimedComposer})
   if(ordinaryInputRunHost)ctx.effect(()=>()=>ordinaryInputRunHost.dispose())
   const memoryExtractionHost=createOptionalMemoryExtractionHost({config:config.memoryExtraction,bridge:workbenchBridge,llm:ctx.llm,route:config.workbenchModel})
   if(memoryExtractionHost)ctx.effect(()=>()=>memoryExtractionHost.dispose())
@@ -547,3 +550,5 @@ export {createOrdinaryClaimedInputRecoverySetup} from './ordinary-claimed-input.
 
 export {createOrdinaryInputAdmissionHost}
 export {createOrdinaryInputAdmissions} from './ordinary-input-admissions.js'
+
+export {createOrdinaryClaimedSessionComposer}
