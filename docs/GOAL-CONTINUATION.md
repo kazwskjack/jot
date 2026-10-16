@@ -504,3 +504,51 @@ canonical publication. Runner selection is not wired yet. Cold claimed recovery,
 steering ownership mapping, durable failure reconciliation, real-provider and
 production acceptance remain open. No standard profile enables this option and
 ordinary Goal switches remain off.
+
+
+### Real Controller HTTP recovery evidence
+
+`packages/dsh-host/test/ordinary-input.test.mjs` now runs the optional Host with
+an installed real Controller, real ordinary preset, isolated compatibility loop,
+authenticated HTTP/NDJSON transport and original Gateway/Coordinator records.
+A test-only wrapper quietly seeds one synthetic pending human input under the
+original product run RPC and explicitly flushes it. The parent kills its owned
+Host process, replaces the expired original lease with generation 2 on that same
+run, then restarts. This seed is not evidence of the production prompt-admission
+path; the subsequent Controller/Host recovery path is real.
+
+Three cases pass: execute consumes that original native input once with one
+local scripted model request; lease replacement after the opening snapshot
+refuses recovery before Agent creation and retains the original pending input;
+disconnect during the held model request records native parent cancellation and
+flushes the resulting idle state. The opening snapshot itself creates no Agent
+and calls no model. Another Host restart cold-reads the expected pending queue,
+creates no Agent, and refuses the vanished original observer without inference.
+Repeated requests on the original live observer reuse its acknowledgement.
+
+The event assertions distinguish explicit human `source.kind: user` from DSH's
+runtime-context and skill-catalog messages, even when those use user-role events.
+Generated context is neither a second human request nor a duplicate answer.
+The Gateway retains one original human product message and zero assistant
+publications in these manual Host tests: canonical Worker publication and usage
+reconciliation are still separate, uncompleted integration requirements.
+
+The test audit callback is deliberately synthetic; it does not certify historical
+production composition, approval behavior, real-provider quality or costs. In this
+Loader fixture, changing only the existing agent-loop entry's name left the old
+Agent implementation active. The passing isolated overlay explicitly disables
+that entry and inserts the separately prepared compatibility plugin. It asserts
+both actual native capability protocols before crashing the seed process. No
+installed or production SDK is modified.
+
+Run the three cases with the existing locked `JOT_DSH_RUNTIME_MODULES` setting:
+
+```sh
+node --test --test-concurrency=1 packages/dsh-host/test/ordinary-input.test.mjs
+```
+
+Without the SDK setting the cases are explicitly skipped, not counted as native
+acceptance. Runner/Worker selection, original accounting/final publication,
+claimed input, steering scope, all-boundary recovery and deployed acceptance
+remain required. Both existing Goal switches and standard recovery configuration
+remain disabled.

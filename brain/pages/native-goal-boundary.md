@@ -4,7 +4,7 @@ title: Keep native Goal state and continuation in DSH
 category: decision
 status: active
 created: "2026-10-16T11:44:16"
-updated: "2026-10-16T17:23:55"
+updated: "2026-10-16T17:35:59"
 ---
 
 <!-- compiled_truth -->
@@ -38,7 +38,9 @@ Original-input resume preflight now joins original product binding to exact cold
 
 Preserving inbox input does not revoke an existing native maintenance wake: parent cancel with keepInbox can still start that driver. The optional compatibility package now supplies separate pending-wake revocation protocol 1. Each latch returns a fresh non-enumerable readonly process-local Symbol token; only that token can revoke its owned maintenance wake, without clearing input. Same IDs/RPC/sequence cannot identify a later wake attempt. A subsequent independent native wake invalidates old ownership, and stale/forged tokens cannot cancel it. Real SDK regressions first reproduced both continued execution after parent cancellation and old-request revocation of a later identical wake, then passed with token ownership. Preflight requires both wake and revocation capabilities. This is local native cancellation infrastructure, not completed HTTP Host/Runner/accounting recovery or production enablement.
 
-The optional ordinaryInputRecovery Host now owns a parked native follow and exact original-run lease, invokes preflight/maintenance/wake without a prompt, retains local wake-token custody, and guards pre-step/tool/model entry. Maintenance disconnect revokes the exact wake before parent cancellation with keepInbox. Unconfirmed native wake cannot admit a provider; known unentered human claims are retained before cancellation. Native idle releases ownership, and a later foreign human delegates after detaching the old observer rather than rejecting the new task. Host acknowledgements are neither completion nor durable replay receipts. Route/lifecycle fixtures pass, but real Controller/profile Host integration, Runner selection, steering ownership, claimed recovery, cumulative accounting and deployment acceptance remain incomplete; configuration and both Goal switches stay off by default.
+The optional ordinaryInputRecovery Host now owns a parked native follow and exact original-run lease, invokes preflight/maintenance/wake without a prompt, retains local wake-token custody, and guards pre-step/tool/model entry. Maintenance disconnect revokes the exact wake before parent cancellation with keepInbox. Unconfirmed native wake cannot admit a provider; known unentered human claims are retained before cancellation. Native idle releases ownership, and a later foreign human delegates after detaching the old observer rather than rejecting the new task. Host acknowledgements are neither completion nor durable replay receipts. Route/lifecycle fixtures and the local installed-Controller HTTP recovery cases pass, but production composition audit, Runner selection, steering ownership, claimed recovery, cumulative accounting and deployment acceptance remain incomplete; configuration and both Goal switches stay off by default.
+
+Installed-Controller HTTP recovery now has three real local SDK cases with original Gateway/Coordinator records: execute once after hard Host death and original-run lease replacement, refuse an obsolete lease before Agent creation while retaining input, and cancel a held model request on observer disconnect. A further restart preserves the expected inbox without Agent creation and rejects vanished observer authority. The synthetic pending input is seeded by a test wrapper, its composition audit is fixture-only and its local provider is scripted; initial production prompt admission, historical production composition, cost settlement and canonical Worker publication are not proven. Human counts use source.kind=user rather than all user-role context events. The isolated passing Loader overlay disables the old agent-loop entry and inserts the prepared compatibility plugin; a name-only replacement did not change actual Agent capabilities in the first experiment. No live runtime is edited.
 
 
 ## Timeline
@@ -184,5 +186,11 @@ The optional ordinaryInputRecovery Host now owns a parked native follow and exac
 - time: 2026-10-16T17:23:55
   kind: decision
   summary: Connect an opt-in original-run HTTP observer Host while preserving local wake custody and later task ownership
+  source: docs/GOAL-CONTINUATION.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-16T17:35:59
+  kind: decision
+  summary: Record real Controller HTTP recovery and distinguish fixture composition from unfinished Worker accounting
   source: docs/GOAL-CONTINUATION.md
   affects: [native-goal-boundary]
