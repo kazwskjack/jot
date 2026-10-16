@@ -1,0 +1,8 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {randomBytes} from 'node:crypto';
+import {SessionControllerClient} from '../../src/harness/session-controller-client.ts';
+test('full-history readiness uses the authenticated read-only route with no Session or prompt input',async()=>{
+ const token=randomBytes(32).toString('hex');for(const ready of [false,true]){const calls=[],client=new SessionControllerClient('http://127.0.0.1:18841',token,async(url,init)=>{calls.push({url:String(url),init});return new Response(JSON.stringify({ready,protocol:1,execution_authorized:false}));});assert.equal(typeof client.ordinaryRunHistoryReadiness,'function');assert.deepEqual(await client.ordinaryRunHistoryReadiness(),{ready,protocol:1,execution_authorized:false});assert.equal(calls.length,1);assert.equal(calls[0].url,'http://127.0.0.1:18841/v1/ordinary-run-history/readiness');assert.deepEqual(JSON.parse(calls[0].init.body),{});assert.equal(calls[0].init.headers.authorization,'Bearer '+token);}
+});
+test('malformed or execution-authorizing readiness cannot trigger a fallback request',async()=>{
+ for(const value of [{ready:'true',protocol:1,execution_authorized:false},{ready:true,protocol:2,execution_authorized:false},{ready:true,protocol:1,execution_authorized:true},{ready:true,protocol:1,execution_authorized:false,action:'resume'},null]){let calls=0;const client=new SessionControllerClient('http://127.0.0.1:18841',randomBytes(32).toString('hex'),async()=>{calls++;return new Response(JSON.stringify(value));});await assert.rejects(()=>client.ordinaryRunHistoryReadiness(),/readiness/);assert.equal(calls,1);}
+});

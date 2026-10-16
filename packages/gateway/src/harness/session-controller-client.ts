@@ -134,6 +134,11 @@ export class SessionControllerClient {
     const expected=ordinaryRunCompletionSource(sessionId,input,source);
     return validateOrdinaryRunCompletion(await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/run-history-completion`,{history:expected.scope,source_sha256:expected.source_sha256},signal),sessionId,expected.scope,source);
   }
+  async ordinaryRunHistoryReadiness(signal?:AbortSignal){
+    const deadline=AbortSignal.timeout(15000),value=await this.post('/v1/ordinary-run-history/readiness',{},signal?AbortSignal.any([signal,deadline]):deadline);
+    if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!=='execution_authorized,protocol,ready'||typeof value.ready!=='boolean'||value.protocol!==1||value.execution_authorized!==false)throw Error('ordinary_run_history_readiness_invalid');
+    return{ready:value.ready,protocol:1 as const,execution_authorized:false as const};
+  }
 
   async steerOriginal(sessionId:string,requestId:string,text:string,execution:OrdinarySteeringExecution,signal?:AbortSignal){
     const proof=normalizeOrdinarySteeringExecution(execution);if(proof.command_id!==requestId)throw Error('ordinary_steering_binding_invalid');

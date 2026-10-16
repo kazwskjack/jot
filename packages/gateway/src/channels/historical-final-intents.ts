@@ -10,6 +10,7 @@ const sha=(value:string)=>createHash('sha256').update(value).digest('hex');
 function fail():never{throw Error('historical_final_delivery_unconfirmed');}
 export class HistoricalFinalDeliveryIntents{
  private db:DatabaseSync;private queue:ChannelDeliveryService;
+ usesDatabase(db:DatabaseSync):boolean{return this.db===db;}
  constructor(db:DatabaseSync,queue:ChannelDeliveryService){if(!(queue instanceof ChannelDeliveryService)||!queue.usesDatabase(db))throw Error('historical_delivery_database_mismatch');this.db=db;this.queue=queue;}
  /** Only called within the original publisher transaction, before modifying
   * canonical/source facts. A missing final receipt prevents actual sending. */

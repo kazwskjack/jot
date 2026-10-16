@@ -1406,3 +1406,125 @@ BRAIN links and working-tree public review pass (734 source/document files).
 No actual external notification or production deployment was performed. The
 automatic original-run consumer/held scheduler, real providers, money,
 performance, deployment/rollback and full capability inventory remain open.
+
+### Automatic original-run recovery consumer implementation plan
+
+Continue the original scope by connecting the existing publisher and held
+reconciler to the owning Worker process. No new Agent, prompt, planner,
+execution lease, quota grant or provider worker is introduced.
+
+1. Add `harness/ordinary-final-recovery-schema.ts` and install it through the
+   existing database bootstrap. Its observation claims bind original owner,
+   conversation and controller Session, with a separate token, observation TTL,
+   retry time and outcome. They coalesce read/publication attempts only; expiry
+   never proves that a native/provider operation was not called. Parent deletion
+   cascades and original identity cannot be silently retargeted.
+2. Add `harness/ordinary-final-recovery.ts`. Use actual original product runs,
+   Session bindings, absence of active original Worker leases and existing
+   publication/intent records. Only the latest terminal ordinary source can
+   enter publication; cancelled/continued/task/role/Goal runs cannot. Complete
+   normal unsteered replies do not require historical republishing. Existing
+   frozen channel holds may be followed even after a newer conversation turn.
+3. Claim one due observation atomically. Reuse `OrdinaryFinalPublisher` and
+   `HistoricalFinalDeliveryIntents` on the exact same database connection.
+   Original publisher proofs/source fences remain authoritative. No missing
+   native evidence, observation TTL or failed/lost observer permits replay.
+   Cross-process contention, same-instance overlap, shutdown, stale scope,
+   retry cooldown and lost observation ownership must not duplicate work or
+   overwrite a replacement observer's state.
+4. Add a strict read-only history-readiness method to the existing Client. An
+   explicit Worker flag defaults false and requires original input recovery
+   plus original steering. Enabled startup requires the trusted history reader
+   to be ready; there is no legacy prompt/model fallback.
+5. Connect one bounded observation loop to `harness/main.ts`, using the existing
+   initialized channel queue, artifact resolver and Worker shutdown signal.
+   Extend the Gateway environment example and current capability documentation.
+6. Write failing tests first for disabled/configuration/readiness behavior,
+   complete automatic publication/outbox, original scope/lease/cancellation
+   exclusions, unknown holds and later receipt release, concurrent observers,
+   cooldown/reopen/lost-owner/shutdown behavior and startup composition. Extend
+   the two actual SDK historical cases to invoke the automatic consumer and
+   verify original logs/admissions/call counts remain unchanged.
+7. Run focused cases, Gateway tests/build, actual affected SDK cases, root
+   tests/build and public/metadata scans. Keep failure evidence. Do not claim
+   real-provider, monetary, performance, production or full inventory acceptance
+   from this local consumer integration. Defaults stay off pending rollout.
+
+### Automatic observer implementation and local evidence
+
+`OrdinaryFinalRecoveryPump` is now connected to the owning Worker through
+`GENERAL_AGENT_ORDINARY_FINAL_RECONCILIATION_ENABLED=false` by default. Enabling
+it requires original input recovery and steering. The existing Client checks
+`/v1/ordinary-run-history/readiness` with an authenticated empty request and
+strict protocol/ready/no-execution fields. Missing or malformed readiness cannot
+trigger another Session, prompt or legacy fallback; an unready reader prevents
+enabled startup before the Worker loops begin.
+
+The pump reuses the exact existing publisher, channel queue and database
+connection. Its durable observation row freezes original owner/conversation/
+controller Session, with separate observer/token/TTL, retry timing, attempt
+count and observed outcome. This is not `ga_worker_leases`, a native admission,
+a Goal activation, a model budget or a declaration that work was not called.
+An expired observation may allow another factual read, never native replay.
+An old observer cannot overwrite a replacement token's record. Same-instance
+overlap and different processes coalesce while a proof read is active.
+
+Only current terminal ordinary source may enter publication. Original user
+input and owned Session binding must exist; continued/cancelled/superseded,
+archived, active-lease, role/task and Goal sources are excluded. Complete normal
+unsteered replies do not need republishing. Full publisher/native/source checks
+remain authoritative after selection. An explicit original owner/conversation
+expectation prevents a selected identity from retargeting before its first read.
+A failed source waits before checking again and does not block other due sources.
+The observation identity and cooldown survive reopening the database.
+
+Existing frozen delivery holds can be followed without another Host call, even
+after a newer conversation turn. No recipient is added and no revoked authority
+is renewed. Independent unknown provenance remains retained. Conclusive later
+receipts may release the already defined correction through the existing queue.
+Queued/pending states and delivered states with unresolved independent effects
+are followed; conclusively settled or revoked intent does not generate a new
+polling task or model request. This is provider-fact follow-up, not a provider
+send or fee settlement.
+
+The one Worker loop shares its existing shutdown signal. Shutdown during a
+read leaves original commands/native work untouched. A shutdown arriving after
+an atomic publication cannot relabel a committed answer as stopped. The default
+observer makes no claims, Host requests or product/outbox writes.
+
+Twenty focused tests pass locally, including actual independent Node/SQLite
+observers, a parked read, replacement observation ownership, cooldown/reopen,
+owner change, cancellation and active leases, shutdown and late shutdown, and
+actual Worker startup against a loopback synthetic history server. Ready startup
+publishes one original answer/outbox with two history reads; unready startup
+exits before observation. No prompt/Agent/Goal-control route is requested. One
+retry under the default restricted shell was refused loopback access with
+EACCES; the identical tests pass under the already authorized Windows user
+context. No ACL or network policy was relaxed. Windows child termination here
+is a startup smoke-test cleanup, not Linux systemd signal acceptance.
+
+The two affected actual local DSH SDK cases now invoke this pump, not just a
+manually called publisher. They pass (29.22 seconds), including ready history,
+one original run, one observation, original input ACKs, one final/correction
+through the existing queue/provider worker, reopened receipt retry, unchanged
+native/admission bytes and the same two scripted model requests. The notification
+provider remains synthetic; no actual external account receives a test message.
+The broader SDK/Adapter matrices are prior evidence, not relabeled current
+full-matrix acceptance.
+
+Still required: mixed-version consumer/event upgrade and rollback acceptance,
+real-provider delivery and quality, unknown monetary accounting, large-output
+lock/performance and storage checks, production rollout and the full upstream
+capability inventory. This local opt-in consumer does not authorize production
+enablement or turn a canonical answer into proof of business completion.
+
+Final automatic-consumer verification: Gateway 1278 total / 1272 passed / six
+existing skips / zero failures (146.39 seconds), Windows Gateway build,
+20 focused observer/readiness/actual-entry/process cases, the two affected actual
+local SDK consumer cases (29.22 seconds), root 32/32, Windows root build, public
+regressions 6/6 and a 738-file working-tree review all pass. BRAIN links pass.
+Default-off and original source/owner/Session/native/send/accounting boundaries
+remain in place. No actual external message or production enablement occurred.
+Mixed consumer/version/event upgrade and rollback, real providers, unknown
+accounting, performance/storage, production and full capability acceptance are
+not completed by these local results.

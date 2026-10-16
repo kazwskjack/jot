@@ -19,10 +19,11 @@ function fail():never{throw Error('ordinary_final_publication_unconfirmed');}
 /** Non-executing historical publication. Never borrows a Worker lease, prompts,
  * rewrites native state, changes run outcome, settles money or sends a channel.
  * Historical channel intent/outbox composition is explicitly opt-in. Existing
- * provider workers and permissions perform sending; no automatic consumer or
- * production flag wires this class yet. */
+ * provider workers and permissions perform sending. The owning Worker's
+ * separately gated observer may consume this class; its default remains off. */
 export class OrdinaryFinalPublisher{
  private db:DatabaseSync;private events:EventStore;private client:Client;private options:Options;private deliveries?:HistoricalFinalDeliveryIntents;
+ usesDatabase(db:DatabaseSync):boolean{return this.db===db;}
  constructor(db:DatabaseSync,events:EventStore,client:Client,options:Options={}){this.db=db;this.events=events;this.client=client;this.options=options;if(!!options.resolver!==!!options.artifactRoot)throw Error('ordinary_final_publication_config_invalid');if(options.historicalChannels!==undefined)this.deliveries=new HistoricalFinalDeliveryIntents(db,options.historicalChannels);}
  private snapshot(runId:string,session:string){
   const row=this.db.prepare('SELECT c.owner_id,r.conversation_id,r.version FROM ga_runs r JOIN ga_conversations c ON c.id=r.conversation_id WHERE r.id=?').get(runId) as {owner_id:string;conversation_id:string;version:number}|undefined;if(!row)fail();
@@ -44,10 +45,16 @@ export class OrdinaryFinalPublisher{
   if(outputs.length){const items=this.resolve(current.scope.owner_id,current.scope.conversation_id,outputs.map(a=>a.artifact_id),[],lease);if(!isDeepStrictEqual(outputFacts(items),outputs))return false;}
   return !this.deliveries||this.deliveries.verifyPublished(runId,receipt.message_id,receipt.source_sha256);
  }
- async reconcile(runId:string,session:string,signal?:AbortSignal):Promise<boolean>{
+ async reconcile(runId:string,session:string,signal?:AbortSignal,expectedScope?:{owner_id:string;conversation_id:string}):Promise<boolean>{
   const lease=`${runId}:historical-output:${randomUUID()}`;
   try{
+   if(expectedScope&&Object.keys(expectedScope).sort().join(',')!=='conversation_id,owner_id')return false;
    signal?.throwIfAborted();let found=false;const before=withImmediateTransaction(this.db,()=>{found=!!this.db.prepare('SELECT 1 FROM ga_ordinary_final_publications WHERE run_id=?').get(runId);return found?undefined:this.snapshot(runId,session);});
+   if(expectedScope&&(!before||Object.keys(expectedScope).sort().join(',')!=='conversation_id,owner_id'||before.scope.owner_id!==expectedScope.owner_id||before.scope.conversation_id!==expectedScope.conversation_id)){
+    if(!found)return false;
+    const receipt=this.db.prepare('SELECT owner_id,conversation_id FROM ga_ordinary_final_publications WHERE run_id=?').get(runId) as {owner_id:string;conversation_id:string}|undefined;
+    if(!receipt||receipt.owner_id!==expectedScope.owner_id||receipt.conversation_id!==expectedScope.conversation_id)return false;
+   }
    if(found)return withImmediateTransaction(this.db,()=>this.already(runId,session,lease));if(!before)return false;
    const proof=validateOrdinaryRunCompletion(await this.client.observeRunCompletion(session,before.scope,before.source,signal),session,before.scope,before.source);signal?.throwIfAborted();
    const text=assistantText(proof.answer_event),blocks=assistantBlocks(proof.answer_event),refs=new Set<string>(),files=new Map<string,{path:string;description?:string}>();

@@ -4,7 +4,7 @@ title: Keep native Goal state and continuation in DSH
 category: decision
 status: active
 created: "2026-10-16T11:44:16"
-updated: "2026-10-17T02:03:48"
+updated: "2026-10-17T02:35:34"
 ---
 
 <!-- compiled_truth -->
@@ -368,5 +368,11 @@ Running ordinary completion now has a Worker-owned publication callback while th
 - time: 2026-10-17T02:03:48
   kind: decision
   summary: "Historical final publication optionally commits immutable recipient intents and the existing outbox on the exact same SQLite connection. The publisher must reuse an initialized queue, never construct another during proof. Provider sending remains behind original task/reply/digest permissions plus immutable run/Session/body/recipient checks; held receipts reconcile without native/model work or renewed authority."
+  source: docs/superpowers/plans/2026-10-16-steering-lineage-and-recovery.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-17T02:35:34
+  kind: decision
+  summary: "The owning Worker may opt into original historical final/held observation only with original recovery/steering and strict trusted history readiness. Durable observation TTL/token coalesces reads and cannot grant execution or reset admission/money. Preserve the exact original owner/Session and existing queue/connection, source/native proof gates, shutdown and truthful post-commit outcome; no new planner or prompt fallback."
   source: docs/superpowers/plans/2026-10-16-steering-lineage-and-recovery.md
   affects: [native-goal-boundary]

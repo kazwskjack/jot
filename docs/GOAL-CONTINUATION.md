@@ -1213,6 +1213,14 @@ a Session or mutating a granted effect cannot bypass history checks. Startup,
 process-competition, rollback and synthetic-provider cases cover the local
 composition; actual SDK cases preserve original logs/admissions and model calls.
 
-Automatic production consumption, held-outcome scheduling, real-provider
-acceptance, monetary reconciliation, performance/rollout and the full upstream
-capability inventory remain unfinished. Production defaults are unchanged.
+The owning Worker now has a separate opt-in original-run observer and frozen
+held-outcome follow-up loop. It requires original input recovery/steering and
+strict trusted history readiness. Persistent observation claims coalesce reads;
+they do not grant execution, reset native reservations or settle money. The
+loop follows only original owned scope and uses the Worker's shutdown signal.
+Default-off behavior, actual Worker startup and two actual SDK historical
+cases are tested locally, including independent observation processes.
+
+Real-provider acceptance, monetary reconciliation, large-output performance,
+production rollout/rollback and the full upstream capability inventory remain
+unfinished. Production defaults are unchanged.

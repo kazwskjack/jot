@@ -14,6 +14,9 @@ import { AttachmentResolver } from '../artifacts/resolver.ts';
 import { parseWorkerConcurrency, runWorkerPool } from './worker-pool.ts';
 import { SessionCommandDispatcher } from './command-dispatcher.ts';
 import {OrdinarySteeringReconciler} from './ordinary-steering-reconciliation.ts';
+import {OrdinaryFinalPublisher} from './ordinary-final-publication.ts';
+import {OrdinaryFinalRecoveryPump,ordinaryFinalRecoveryEnabled} from './ordinary-final-recovery.ts';
+import {HistoricalFinalDeliveryIntents} from '../channels/historical-final-intents.ts';
 import { TaskCompletionPump } from './task-completion-pump.ts';
 import { ChannelDeliveryService } from '../channels/delivery.ts';
 import {NotificationArchiveMaintenance,notificationArchiveMaintenanceConfig} from '../channels/notification-maintenance.ts';
@@ -81,6 +84,11 @@ if(ordinarySteeringEnabled&&process.env.GENERAL_AGENT_ORDINARY_INPUT_RECOVERY_EN
 const ordinaryReconciliationEnabled=process.env.GENERAL_AGENT_ORDINARY_STEERING_RECONCILIATION_ENABLED==='true';
 if(ordinaryReconciliationEnabled&&!ordinarySteeringEnabled)throw Error('ordinary_reconciliation_requires_steering');
 const ordinaryReconciler=ordinaryReconciliationEnabled?new OrdinarySteeringReconciler(db,events,sessionClient):undefined;
+const finalRecoveryEnabled=ordinaryFinalRecoveryEnabled(process.env);
+if(finalRecoveryEnabled&&(await sessionClient.ordinaryRunHistoryReadiness()).ready!==true)throw Error('ordinary_final_history_unavailable');
+const finalRecovery=finalRecoveryEnabled?new OrdinaryFinalRecoveryPump(db,
+  new OrdinaryFinalPublisher(db,events,sessionClient,{resolver:attachmentResolver,artifactRoot:fileRoot,historicalChannels:channelDelivery}),
+  new HistoricalFinalDeliveryIntents(db,channelDelivery),{enabled:true,workerId:`${workerId}:history`}):undefined;
 const worker = new HarnessWorker(db, coordinator, runner, {
   workerId, leaseMs,
   ordinaryInputRecoveryEnabled:process.env.GENERAL_AGENT_ORDINARY_INPUT_RECOVERY_ENABLED==='true',ordinarySteeringEnabled,
@@ -100,6 +108,13 @@ const memoryPump=new MemoryExtractionPump(db,workbench,coordinator,sessionClient
   sessionResolver:conversationId=>sessionBindings.getOrCreateForConversation(conversationId).session_id,
 });
 let stopping = false;
+const finalRecoveryLoop=async()=>{
+ if(!finalRecovery)return;
+ while(!stopping){
+  try{await finalRecovery.processNext(memoryShutdown.signal);}catch{if(!stopping)process.stderr.write('ordinary_final_observation_retry\n');}
+  if(!stopping)await new Promise(resolve=>setTimeout(resolve,1000));
+ }
+};
 const completions=new TaskCompletionPump(db,coordinator,sessionClient,{workerId:`${workerId}:completion`});
 const completionLoop=async()=>{
  while(!stopping){
@@ -132,7 +147,7 @@ const workbenchLoop = async () => {
 };
 
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, () => { stopping = true;memoryShutdown.abort(new Error('worker_shutdown')); });
-await Promise.all([completionLoop(),commandLoop(),workbenchLoop(),runWorkerPool({
+await Promise.all([completionLoop(),commandLoop(),workbenchLoop(),finalRecoveryLoop(),runWorkerPool({
   concurrency,
   pollMs,
   shouldStop: () => stopping,
