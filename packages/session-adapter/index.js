@@ -8,7 +8,7 @@ import {createNativeTaskScheduler} from './native-task-scheduler.js'
 import {createNativeRoleHost} from './native-role-host.js'
 import {createNativeHandoffLifecycle} from './native-handoff-lifecycle.js'
 import {createNativeClaimedSessionComposer} from './native-claimed-composer.js'
-import {conversationGoal} from './conversation-goal.js'
+import {readConversationGoal} from './conversation-goal.js'
 import {createOptionalMemoryExtractionHost} from './optional-memory-extraction.js'
 import { WorkbenchBridge,normalizeHostExecutionLease } from './workbench.js'
 
@@ -264,7 +264,7 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
     if(chatGoal){
       const sessionId=decodeURIComponent(chatGoal[1]);
       if(!ID.test(sessionId)||workbenchSessions.has(sessionId)||blockedWorkbenchSessions.has(sessionId))return json(422,{error:'conversation_goal_scope_invalid'});
-      try{return json(200,conversationGoal(agents?.get?.(sessionId),body))}
+      try{return json(200,await readConversationGoal({agent:agents?.get?.(sessionId),controller,sessionId,body,signal}))}
       catch(error){return json(409,{error:error.message==='goal_revision_changed'?'goal_revision_changed':'conversation_goal_unavailable'})}
     }
     const goalStatus=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/goal-status$/)

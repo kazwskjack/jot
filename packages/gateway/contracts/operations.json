@@ -952,5 +952,23 @@
     "MemoryCapture",
     "200",
     "Owner-scoped automatic public-message capture and reviewed candidate application. No model call in these endpoints; GET never captures sources."
+  ],
+  [
+    "GET",
+    "/v1/conversations/{conversation_id}/goal",
+    "Read the original native conversation Goal",
+    null,
+    "ConversationGoalView",
+    "200",
+    "Read-only, existing Session binding only; cold persisted Goals are disarmed."
+  ],
+  [
+    "POST",
+    "/v1/conversations/{conversation_id}/goal",
+    "Pause, resume or stop an owned original Goal with its exact revision",
+    "ConversationGoalCommand",
+    "ConversationGoalView",
+    "200",
+    "DSH owns state; this route cannot create or complete a Goal."
   ]
 ]

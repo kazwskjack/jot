@@ -47,6 +47,7 @@ import { ModelBudgetLedger, type ModelBudgetRoute } from './workbench/model-budg
 import { WorkbenchBudgetPolicy, type ModelBudgetPolicyConfig } from './workbench/model-budget-policy.ts';
 import { TaskBudgetService, registerTaskBudgetRoutes } from './workbench/budget-public.ts';
 import {createAuxiliaryRunGuard} from './workbench/auxiliary-run-guard.ts';
+import {registerConversationGoalRoutes,type ConversationGoalClient} from './conversations/goal-routes.ts';
 
 function actor(request: { headers: Record<string, unknown> }) {
   const id = String(request.headers['x-user-id'] || '');
@@ -70,6 +71,7 @@ export async function buildServer(config: {
   modelBudgetRoutes?: ModelBudgetRoute[];
   modelBudgetPolicy?: ModelBudgetPolicyConfig | undefined;
   replyJudge?: ReplyJudgeClient;
+  conversationGoalClient?: ConversationGoalClient;
   /** Server-only trusted provider configuration; never populated from request bodies. */
   emotion?: {env?:NodeJS.ProcessEnv;transport?:typeof fetch;accountingRoutes?:EmotionAccounting['routes']};
 }) {
@@ -430,6 +432,7 @@ export async function buildServer(config: {
     return reply.code(202).send(crawlBatches.ingest(String(body.owner_id ?? ''), body.event as any));
   });
 
+  registerConversationGoalRoutes(app,{db,conversations,actor,client:config.conversationGoalClient});
   app.get('/v1/capabilities', async (request, reply) => {
     const ownerId = actor(request as any);
     const voice = await voiceTranscriptions.capability();

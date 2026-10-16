@@ -12073,6 +12073,212 @@
           }
         }
       }
+    },
+    "/v1/conversations/{conversation_id}/goal": {
+      "get": {
+        "operationId": "getConversationGoal",
+        "summary": "Read the original native conversation Goal",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Existing Goal or null",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationGoalView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Authenticated control, state conflict or unavailable Host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authenticated control, state conflict or unavailable Host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated control, state conflict or unavailable Host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Authenticated control, state conflict or unavailable Host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Authenticated control, state conflict or unavailable Host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Authenticated control, state conflict or unavailable Host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authenticated control, state conflict or unavailable Host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "controlConversationGoal",
+        "summary": "Pause, resume or stop an owned original Goal with its exact revision",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Existing Goal or null",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationGoalView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Authenticated control, state conflict or unavailable Host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authenticated control, state conflict or unavailable Host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated control, state conflict or unavailable Host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Authenticated control, state conflict or unavailable Host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Authenticated control, state conflict or unavailable Host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Authenticated control, state conflict or unavailable Host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authenticated control, state conflict or unavailable Host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationGoalCommand"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -21403,6 +21609,121 @@
         "properties": {},
         "required": [],
         "additionalProperties": false
+      },
+      "ConversationGoalView": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "goal": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 192,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  },
+                  "revision": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "objective": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "phase": {
+                    "enum": [
+                      "active",
+                      "paused",
+                      "blocked",
+                      "complete"
+                    ]
+                  },
+                  "activation": {
+                    "enum": [
+                      "armed",
+                      "disarmed"
+                    ]
+                  },
+                  "maxGoalRounds": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "roundsStarted": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "createdAt": {
+                    "type": "number"
+                  },
+                  "updatedAt": {
+                    "type": "number"
+                  },
+                  "blockedReason": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "type": "string"
+                      },
+                      "message": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "code",
+                      "message"
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "revision",
+                  "objective",
+                  "phase",
+                  "activation"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "goal"
+        ]
+      },
+      "ConversationGoalCommand": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "pause",
+              "resume",
+              "stop"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 192,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "action",
+          "id",
+          "revision"
+        ]
       }
     },
     "parameters": {

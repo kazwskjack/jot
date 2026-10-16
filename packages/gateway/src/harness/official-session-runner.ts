@@ -4,6 +4,7 @@ import type { ResolvedAttachment } from '../artifacts/resolver.ts'
 import type { SessionPromptPart } from './session-controller-client.ts'
 import {validateCheckpoint,type SessionCheckpoint} from './session-checkpoints.ts'
 import {validateTaskGoalStatus,taskGoalStopReason,type TaskGoalStatus} from './task-goal-status.ts'
+import {validateConversationGoalView} from './conversation-goal-view.ts'
 import { projectSessionFrame, type JotProjection, type ProjectionContext } from './session-event-projector.ts'
 
 interface OfficialSessionClient {
@@ -14,6 +15,7 @@ interface OfficialSessionClient {
   nativeTool?(tool: string, args: Record<string, unknown>, execution: Record<string, string>, signal?: AbortSignal): Promise<Record<string, unknown>>
   checkpoint?(sessionId:string,afterSeq:number,signal?:AbortSignal):Promise<Record<string,unknown>>
   goalStatus?(sessionId:string,signal?:AbortSignal):Promise<Record<string,unknown>>
+  conversationGoal?(sessionId:string,body?:Record<string,unknown>,signal?:AbortSignal):Promise<Record<string,unknown>>
   goalStop?(sessionId:string,ref:{goal_id:string;goal_revision:number},signal?:AbortSignal):Promise<Record<string,unknown>>
 }
 
@@ -247,6 +249,7 @@ export class OfficialSessionRunner implements DshRunner {
       let turnCompleted = false
       let turnEndSeq=-1
       let nativeGoalManaged=false,goalStopped=false;
+      let ordinaryGoalManaged=false,ordinaryGoalContinuing=false;
       let goalState:TaskGoalStatus|undefined;
       let taskStop:DshRunResult['task_stop'];
       let turnReasonCode = 'SESSION_FINAL_TEXT_MISSING'
@@ -421,6 +424,7 @@ export class OfficialSessionRunner implements DshRunner {
           const next = await iterator.next()
           if (next.done) {
             if(nativeGoalManaged){goalStopped=true;turnReasonCode='SESSION_GOAL_STREAM_ENDED';}
+            if(ordinaryGoalContinuing)turnReasonCode='SESSION_GOAL_STREAM_ENDED';
             break
           }
           observationOrdinal += 1
@@ -537,10 +541,18 @@ export class OfficialSessionRunner implements DshRunner {
                 continue;
               }
             }
+            if(!input.checkpointTask&&!input.workbenchRunId&&turnCompleted&&this.client.conversationGoal){
+              const {goal}=validateConversationGoalView(await this.client.conversationGoal(input.sessionRef,{},controller.signal));
+              ordinaryGoalManaged ||= goal!==null;
+              ordinaryGoalContinuing=goal?.phase==='active'&&goal.activation==='armed';
+              if(ordinaryGoalContinuing){
+                turnCompleted=false;finalText='';finalBlocks=[];turnReasonCode='SESSION_GOAL_CONTINUING';continue;
+              }
+            }
             break
           }
         }
-        if (goalStopped || nativeGoalManaged || !turnCompleted || pendingCrawlBatches.size === 0
+        if (goalStopped || nativeGoalManaged || ordinaryGoalManaged || !turnCompleted || pendingCrawlBatches.size === 0
           || crawlAutoContinueCount >= this.options.maxCrawlAutoContinues) break
         crawlAutoContinueCount += 1
         const batchIds = [...pendingCrawlBatches.keys()].join(', ')

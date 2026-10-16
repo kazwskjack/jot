@@ -20,10 +20,14 @@ const SAFE_ADAPTER_REASON_CODES = new Set([
 
 export class SessionAdapterError extends Error {
   readonly reasonCode: string
-  constructor(status: number, reasonCode: string) {
+  readonly status:number
+  readonly protocolCode:string|undefined
+  constructor(status: number, reasonCode: string,protocolCode?:string) {
     super(`session_adapter_http_${status}`)
     this.name = 'SessionAdapterError'
     this.reasonCode = reasonCode
+    this.status=status
+    this.protocolCode=protocolCode
   }
 }
 
@@ -70,7 +74,7 @@ export class SessionControllerClient {
     if (!response.ok) {
       const reasonCode = typeof value.reason_code === 'string' && SAFE_ADAPTER_REASON_CODES.has(value.reason_code)
         ? value.reason_code : 'DSH_NO_RUNTIME_OUTCOME'
-      throw new SessionAdapterError(response.status, reasonCode)
+      throw new SessionAdapterError(response.status, reasonCode,value.error==='goal_revision_changed'?'goal_revision_changed':undefined)
     }
     return value
   }
@@ -122,6 +126,10 @@ export class SessionControllerClient {
 
   async memoryExtractionReadiness(signal:AbortSignal){
     return this.post('/v1/memory-extraction/readiness',{},signal);
+  }
+  async conversationGoal(sessionId:string,body:Record<string,unknown>={},signal?:AbortSignal){
+    const deadline=AbortSignal.timeout(20_000);
+    return this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/conversation-goal`,body,signal?AbortSignal.any([signal,deadline]):deadline);
   }
 
   async extractMemory(sessionId:string,runId:string,signal:AbortSignal){

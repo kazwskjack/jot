@@ -262,3 +262,6 @@ export type UpdateMemoryCapturePolicy = {expected_version:number;mode:"off"|"sug
 export type MemoryCaptureCollection = {ready:number;skipped:number};
 export type MemoryCaptureCommand = {expected_version:number};
 export type EmptyObject = Record<string,never>;
+
+export type ConversationGoalView = {goal: {id:string;revision:number;objective:string;phase:'active'|'paused'|'blocked'|'complete';activation:'armed'|'disarmed';maxGoalRounds?:number;roundsStarted?:number;createdAt?:number;updatedAt?:number;blockedReason?:{code:string;message:string}}|null};
+export type ConversationGoalCommand = {action:'pause'|'resume'|'stop';id:string;revision:number};

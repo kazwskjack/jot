@@ -23,3 +23,18 @@ test('absent goal is a valid read, malformed control is rejected',()=>{
  assert.deepEqual(conversationGoal(agent,{}),{goal:null});
  assert.throws(()=>conversationGoal(agent,{action:'pause',id:'g',revision:2}),/goal_revision_changed/);
 });
+
+test('cold Goal reads use official projections without creating, prompting or arming a Session',async()=>{
+ const {createAdapterHandler}=await import('../index.js');let reads=0;
+ const handler=createAdapterHandler({token:'a'.repeat(32),agents:{get:()=>undefined},controller:{async projections(request,signal){reads++;assert.deepEqual(request,{sessionId:'cold'});assert.ok(signal instanceof AbortSignal);return{values:{goal:{goal:{id:'g',revision:3,objective:'Persisted objective',phase:'paused',maxGoalRounds:20},roundsStarted:2,createdAt:1,updatedAt:2}}};},create(){throw Error('must_not_create');},prompt(){throw Error('must_not_prompt');}}});
+ const invoke=body=>handler({method:'POST',url:new URL('http://127.0.0.1/v1/sessions/cold/conversation-goal'),headers:{authorization:'Bearer '+'a'.repeat(32)},body});
+ const read=await invoke({});assert.equal(read.status,200);assert.equal(read.value.goal.phase,'paused');assert.equal(read.value.goal.activation,'disarmed');assert.equal(read.value.goal.roundsStarted,2);assert.equal(reads,1);
+ const mutate=await invoke({action:'resume',id:'g',revision:3});assert.equal(mutate.status,409);assert.equal(reads,1);
+});
+test('cold Goal reads distinguish absent Sessions from unavailable or corrupt projections',async()=>{
+ const {createAdapterHandler}=await import('../index.js');
+ for(const [projection,status] of [[null,200],[{values:{goal:null}},200],[{values:{}},409],[{values:{goal:{goal:{phase:'invented'}}}},409]]){
+  const handler=createAdapterHandler({token:'a'.repeat(32),agents:{get:()=>undefined},controller:{async projections(){return projection;}}});
+  const result=await handler({method:'POST',url:new URL('http://127.0.0.1/v1/sessions/cold/conversation-goal'),headers:{authorization:'Bearer '+'a'.repeat(32)},body:{}});assert.equal(result.status,status);if(status===200)assert.deepEqual(result.value,{goal:null});
+ }
+});

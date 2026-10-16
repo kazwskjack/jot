@@ -71,6 +71,30 @@ and neither scans Git history nor replaces a human review of the staged diff.
 
 ## Runtime prerequisites
 
+### Native conversation Goals
+
+The extended Gateway exposes `GET /v1/conversations/{id}/goal` and `POST` to
+the same path with `{action: "pause" | "resume" | "stop", id, revision}`.
+Only the existing owner-bound ordinary Session is addressed. Clients cannot
+submit a Session ID, create a Goal, mark one complete or control a role/task
+Goal through these routes. Existing CSRF, idempotency and revision checks apply.
+Configure the existing `GENERAL_AGENT_SESSION_ADAPTER_TOKEN_FILE` and loopback
+`GENERAL_AGENT_SESSION_ADAPTER_URL` on the Gateway to connect its native client.
+
+DSH owns Goal creation and automatic rounds. The runner observes the same stream
+across active rounds; it does not send another prompt to simulate continuation.
+Paused or blocked Goals suppress the legacy crawl-follow prompt. An ended stream
+while continuation is armed is an interrupted outcome, not completion.
+
+After Host restart, reads use the official persisted projection without loading
+an Agent, calling a model or rearming a Goal. A persisted active phase is shown
+as disarmed until explicitly resumed. Missing Sessions return null; unavailable
+or corrupt projections return an error. Controls currently require a loaded
+ordinary Agent; a cold read does not silently activate one to perform a control.
+The public workbench's dedicated Goal composer/control UI and a complete cold
+control/reattachment flow still need acceptance; these API and runner changes do
+not establish that those interfaces or every deployment are ready.
+
 Copy the gateway `.env.example` to an untracked `.env`. Configure independent
 authentication tokens, allowed origins, writable database and workspace paths,
 and the Session adapter endpoint. Keep all credentials outside the repository.

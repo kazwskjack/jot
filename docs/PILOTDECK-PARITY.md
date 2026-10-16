@@ -67,3 +67,14 @@ Future-run source policies, completed public-message capture, immutable source r
 The reviewed dsh-memory engine now has an isolated Host entry and original-pool idle dispatch. Dedicated immutable processing lineage inherits the source cumulative budget; exact original leases, public-source hashes, policy/epoch and source-task state remain authoritative. No duplicate memory tools, planner or full-summary injection is enabled. Local actual-SDK/scripted-model probes cover dispatch, revoked-source accounting and candidates awaiting owner review. Lost Host replies reconcile committed proposals; unknown usage and unconfirmed claims stop rather than repeat.
 
 This adds locally verified extraction wiring, not automatic Dream consolidation, exhaustive crash recovery, real-provider quality or production acceptance. BRAIN.md remains a separate reviewed publication format; it does not become a second user-memory store. The complete upstream capability inventory remains in scope.
+
+## Native conversation Goal boundary
+
+Ordinary Goal observation and exact-revision controls now map to the original
+DSH Session. Role/task Goals stay on their existing scoped path. The runner
+retains the original stream across native rounds and suppresses crawl-follow
+prompts when a Goal is paused or blocked. A real official Host restart test
+verifies that persisted Goal reads neither instantiate an Agent nor rearm it.
+See [workbench configuration and remaining UI/cold-control acceptance](../WORKBENCH.md#native-conversation-goals).
+These changes do not add a competing scheduler or complete the remaining
+Always-on, UI, routing, channel and packaging rows above.

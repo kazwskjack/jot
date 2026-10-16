@@ -224,3 +224,9 @@ release, and installing an exact package version is not that approval.
 
 DSH and its standard declaration remain upstream MIT-licensed components;
 Jot's profile integration does not claim authorship of them.
+
+The isolated `test/cold-goal.test.mjs` additionally creates and pauses a native
+Goal, restarts the actual Host, then reads its persisted state through the
+adapter. It checks that the ID/revision/phase survive, activation is disarmed,
+and no Agent or model call is created by the read. It uses no provider credentials.
+This is restart/read acceptance, not a cold resume-control or power-loss test.
