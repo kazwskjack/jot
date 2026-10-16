@@ -1,9 +1,12 @@
 import {replyPolicyInput} from './reply-policy-ui.mjs';
 const required=(value,label)=>{const text=String(value??'').trim();if(!text)throw new Error(`请填写${label}`);return text;};
 const integer=(value,label,min,max)=>{const number=Number(value);if(!Number.isSafeInteger(number)||number<min||number>max)throw new Error(`${label}必须为 ${min}–${max} 的整数`);return number;};
-export function taskInput(form,limits,modelBudgetEnabled=false) {
+export function taskInput(form,limits,modelBudgetEnabled=false,unlimitedRunsEnabled=false) {
  const input={title:required(form.title,'任务名称'),agent_id:required(form.agent_id,'执行角色'),objective:required(form.objective,'任务目标'),trigger:taskTriggerInput(form,limits)};
- if(String(form.max_runs??'').trim())input.budget={max_runs:integer(form.max_runs,'最多运行次数',1,10000)};
+ if(form.max_runs==='unlimited'){
+  if(!unlimitedRunsEnabled)throw new Error('服务器尚未支持不限运行次数');
+  input.budget={max_runs:null};
+ }else if(String(form.max_runs??'').trim())input.budget={max_runs:integer(form.max_runs,'最多运行次数',1,10000)};
  if(form.source!==undefined){
   if(!form.source||Object.keys(form.source).sort().join(',')!=='conversation_id,message_id')throw new Error('任务来源无效');
   const source={conversation_id:required(form.source.conversation_id,'来源对话'),message_id:required(form.source.message_id,'来源消息')};
@@ -18,11 +21,11 @@ export function taskInput(form,limits,modelBudgetEnabled=false) {
  if(form.notification_settings!==undefined)input.notification_settings=taskCreationNotificationInput(form.notification_settings);
  return input;
 }
-export function validateTaskWizardStep(form,step,limits,modelBudgetEnabled=false){
+export function validateTaskWizardStep(form,step,limits,modelBudgetEnabled=false,unlimitedRunsEnabled=false){
  if(step===0){required(form.title,'任务名称');required(form.agent_id,'执行角色');required(form.objective,'任务目标');return;}
  if(step===1){taskTriggerInput(form,limits);return;}
- if(step===2){taskInput({...form,reply_settings:undefined},limits,modelBudgetEnabled);return;}
- if(step===3||step===4){taskInput(form,limits,modelBudgetEnabled);return;}
+ if(step===2){taskInput({...form,reply_settings:undefined},limits,modelBudgetEnabled,unlimitedRunsEnabled);return;}
+ if(step===3||step===4){taskInput(form,limits,modelBudgetEnabled,unlimitedRunsEnabled);return;}
  throw new Error('任务向导步骤无效');
 }
 export function taskTriggerInput(form,limits) {
@@ -59,7 +62,7 @@ export function taskFormFromMessage(selection,agents,limits,modelLimits){
  return {...blankTaskForm(agent?.agent_id??'',limits,modelLimits),objective,source:{conversation_id:selection.conversation_id,message_id:message.message_id}};
 }
 export function taskFormFromTask(task,limits) {
- return {...Object.fromEntries(Object.entries(blankTaskForm(task.agent_id,limits)).filter(([key])=>key!=='notification_settings')),title:task.title,objective:task.objective,kind:task.trigger.kind,conversation_id:task.trigger.conversation_id??'',interval_seconds:String(task.trigger.interval_seconds??limits?.default_interval_seconds??300),url:task.trigger.url??'',max_runs:String(task.budget.max_runs),run_at:task.trigger.run_at??'',time:task.trigger.time??'09:00',timezone:task.trigger.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone??'UTC',weekdays:[...(task.trigger.weekdays??[new Date().getDay()])]};
+ return {...Object.fromEntries(Object.entries(blankTaskForm(task.agent_id,limits)).filter(([key])=>key!=='notification_settings')),title:task.title,objective:task.objective,kind:task.trigger.kind,conversation_id:task.trigger.conversation_id??'',interval_seconds:String(task.trigger.interval_seconds??limits?.default_interval_seconds??300),url:task.trigger.url??'',max_runs:task.budget.max_runs===null?'unlimited':String(task.budget.max_runs),run_at:task.trigger.run_at??'',time:task.trigger.time??'09:00',timezone:task.trigger.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone??'UTC',weekdays:[...(task.trigger.weekdays??[new Date().getDay()])]};
 }
 export function taskTriggerSummary(trigger) {
  if(trigger.kind==='conversation_message')return '对话收到新消息';
@@ -86,7 +89,8 @@ export function featureReason(capabilities,feature) {
  return capabilities?.enabled===true&&capabilities?.[feature]===true?'':'当前服务尚未启用此能力，请在服务接入完成后重试。';
 }
 export function executionReason(capabilities) { return capabilities?.enabled===true&&capabilities?.execution_ready===true?'':'角色与任务可保存；执行宿主尚未就绪'; }
-export function canResumeTask(task) { return ['paused','budget_exhausted'].includes(task.status)&&task.runs_used<task.budget.max_runs; }
+export function canResumeTask(task) { return ['paused','budget_exhausted'].includes(task.status)&&(task.budget.max_runs===null||task.runs_used<task.budget.max_runs); }
+export function taskRunCountLabel(task){return task.budget.max_runs===null?`已运行 ${task.runs_used} 次 · 不限次数`:`已运行 ${task.runs_used} / ${task.budget.max_runs}`;}
 export function selectInitialConversation(items,initial,saved) {
  const visible=items.filter(item=>!item.archived_at);
  if(initial){if(!visible.some(item=>item.conversation_id===initial))throw new Error('此角色对话不可用或已归档，请返回角色列表刷新。');return initial;}

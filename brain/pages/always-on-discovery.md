@@ -4,7 +4,7 @@ title: Keep project discovery in original DSH task boundaries
 category: decision
 status: active
 created: "2026-10-17T03:43:02"
-updated: "2026-10-17T03:44:45"
+updated: "2026-10-17T04:04:05"
 ---
 
 <!-- compiled_truth -->
@@ -14,7 +14,7 @@ DSH remains the sole planner. Reuse Gateway ownership, role epochs, permissions,
 
 Default policy is off. Discover-only produces proposals; discover-and-work still requires bounded owned workspace/tool authority. Applying an isolated cycle to the original project always requires explicit review of a frozen diff/base and idempotent owner confirmation. No automatic new planner, ordinary-chat prompt replay, fresh-budget escape or resurrection of revoked memory/permission.
 
-Honor explicit unlimited budgets. Current persistent task max_runs defaults to 100 and supports only 1..10000; this must gain an explicit unlimited contract across storage, readers, admission and UI before standing unlimited discovery can reuse it. Null in a gate observation means confirmed unlimited cycle capacity, never a missing or guessed limit. Physical background capacity remains a separate resource fact.
+Honor explicit unlimited budgets. Persistent tasks now accept explicit public max_runs:null, with capability-gated UI and an exact internal (unlimited,0) tuple in the original table; finite/default100 are retained. Migration preserves original IDs, counts, states and request keys. Zero alone is not unlimited: tuple guards reject inconsistent writes and the known prior numeric admission guard refuses unsupported new tasks. Full old-worker rollout/rollback still needs acceptance. Changing limits never resets usage or automatically resumes an exhausted/paused task. Model budgets, native Goal, mailbox quotas and physical background capacity remain separate. Null in discovery gate cycle capacity means confirmed unlimited policy, never missing or guessed facts. This prerequisite does not install the discovery pipeline.
 
 The initial pure eligibility module is not a running feature. Factual native-idle collector, durable owner policy/signal/occurrence integration, DSH planning/execution/report, isolated workspace/apply, UI, real-provider and deployment acceptance remain incomplete. The source review and entire implementation sequence live in docs/superpowers/plans/2026-10-17-always-on-discovery.md. Full PilotDeck capability scope is unchanged.
 
@@ -37,4 +37,16 @@ The initial pure eligibility module is not a running feature. Factual native-idl
   kind: evidence
   summary: "Source audit identified persistent-task finite limits in storage, admission, exhaustion SQL, route/OpenAPI schemas, form conversion/resume controls and durable save recovery. Mailbox max_runs is a distinct policy and must not be changed through a broad replacement. The new 30-case pure gate contract is not a live scheduler or collector."
   source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
+  affects: [always-on-discovery]
+
+- time: 2026-10-17T04:01:39
+  kind: decision
+  summary: "Persistent-task unlimited runs use explicit public max_runs:null and an exact internal (unlimited,0) tuple; finite/default100 remain unchanged. New mode is capability-gated in UI and tuple-guarded in the original table. The known earlier numeric guard refuses zero, not proof of full mixed-fleet availability. Pause, native Goal, model budget, mailbox quotas and unknown outcomes remain separate."
+  source: docs/superpowers/plans/2026-10-17-unlimited-task-runs.md
+  affects: [always-on-discovery]
+
+- time: 2026-10-17T04:04:05
+  kind: decision
+  summary: "Implement explicit unlimited task-run contract while preserving finite defaults, original counts/receipts, conservative legacy refusal and all other authority gates."
+  source: docs/superpowers/plans/2026-10-17-unlimited-task-runs.md
   affects: [always-on-discovery]

@@ -4,6 +4,15 @@ import {taskInput, agentInput, teamInput, featureReason, executionReason, canRes
 import * as formState from './form-state.mjs';
 
 const valid={title:'  周报  ',agent_id:'a1',objective:'  整理资料 ',kind:'interval',interval_seconds:'60',max_runs:'5'};
+
+test('unlimited task runs are explicit, capability gated and remain resumable after finite counts',()=>{
+ assert.throws(()=>taskInput({...valid,max_runs:'unlimited'}),/尚未支持/);
+ assert.deepEqual(taskInput({...valid,max_runs:'unlimited'},undefined,false,true).budget,{max_runs:null});
+ const task={task_id:'t',title:'x',objective:'x',agent_id:'a1',trigger:{kind:'interval',interval_seconds:60},budget:{max_runs:null},status:'paused',runs_used:10001};
+ assert.equal(formState.taskFormFromTask(task).max_runs,'unlimited');assert.equal(canResumeTask(task),true);
+ assert.equal(formState.taskRunCountLabel(task),'已运行 10001 次 · 不限次数');
+ assert.equal(canResumeTask({...task,budget:{max_runs:10000}}),false);
+});
 test('task form produces typed interval and bounded execution budget',()=>{
  assert.deepEqual(taskInput(valid),{title:'周报',agent_id:'a1',objective:'整理资料',trigger:{kind:'interval',interval_seconds:60},budget:{max_runs:5}});
 });

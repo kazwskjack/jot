@@ -1,5 +1,31 @@
 # Persistent tasks and shared workspaces
 
+## Unlimited task runs
+
+The task wizard offers **不限运行次数** when the connected Gateway advertises
+`task_unlimited_runs: true` and `task_run_limit_protocol: 1`. The confirmation,
+task counter and edit view keep that choice explicit. Existing tasks/defaults
+remain finite; the unchanged default is 100 runs. Unlimited is not inferred from
+a blank field, numeric zero, missing budget or missing server capability.
+
+The API uses `budget: { "max_runs": null }` for explicit unlimited runs and an
+integer 1–10000 for a finite limit. Editing without a budget preserves the
+current choice. Counts continue to accumulate; switching modes does not reset
+history. A previously exhausted task still requires explicit resume after its
+limit changes. Pause/archive remain authoritative. Once triggers still fire
+once; unlimited applies to admitted occurrences, not automatic repeated execution
+of a one-off request. Unknown save responses retain the original nullable body
+and request key through reload instead of creating another task.
+
+This removes only the configured occurrence-count ceiling. Model spending,
+permissions, unknown outcomes, per-conversation serialization, mailbox quotas
+and physical execution capacity remain separately enforced. It does not enable
+the planned project-discovery scheduler. Upgrade the API, UI and complete task
+consumer pool before using it; capability advertisement is not a fleet audit.
+See the [migration and acceptance record](docs/superpowers/plans/2026-10-17-unlimited-task-runs.md).
+
+## Memory history and task reviews
+
 Owned memory records now have a history view and an explicit restore
 confirmation. Restoring an earlier active revision creates a new unverified
 version, retains its sources and records which revision it replaced. It cannot

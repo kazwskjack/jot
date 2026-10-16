@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import {configuredTaskRunLimit,storedTaskRunLimit,taskRunLimitExhausted,encodedTaskRunLimit,installTaskRunLimits} from './run-limit.ts';
 import { existsSync, lstatSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
@@ -100,6 +101,7 @@ export class PersistentTaskService {
     if (!columns.some(column=>column.name==='retry_after_at')) db.exec('ALTER TABLE wb_persistent_tasks ADD COLUMN retry_after_at TEXT');
     if (!columns.some(column=>column.name==='source_json')) db.exec('ALTER TABLE wb_persistent_tasks ADD COLUMN source_json TEXT');
     this.dialogue=new DialogueEvents(db);
+    installTaskRunLimits(db);
     this.notificationSignals=new TaskNotificationSignals(db,()=>this.now());
     this.monitorFailures=new TaskMonitorFailures(db,()=>this.now());
     this.replyPolicies=new TaskReplyPolicies(db,{now:()=>new Date(this.now())});
@@ -112,7 +114,7 @@ export class PersistentTaskService {
   private value(row: Row) {
     return { task_id: String(row.task_id), agent_id: String(row.agent_id), title: String(row.title), objective: String(row.objective),
       trigger: JSON.parse(row.trigger_json) as Trigger, ...(row.source_json?{source:JSON.parse(String(row.source_json))}:{}), priority: Number(row.priority), status: String(row.status),version: Number(row.version),
-      generation: Number(row.generation), schedule_revision: Number(row.schedule_revision), budget: { max_runs: Number(row.max_runs) },
+      generation: Number(row.generation), schedule_revision: Number(row.schedule_revision), budget: { max_runs: storedTaskRunLimit(row) },
       runs_used: Number(row.runs_used),next_due_at: row.next_due_at as string | null,last_error: row.last_error as string | null,
       projection_pending: Boolean(row.projection_pending),created_at: String(row.created_at),updated_at: String(row.updated_at) };
   }
@@ -152,9 +154,9 @@ export class PersistentTaskService {
     const source=freezeTaskSource(this.db,owner,agent,input.source);
     const trigger = this.trigger(input.trigger); const priority = integer(input.priority,50,0,100,'invalid_priority');
     if(isDialogueTrigger(trigger))this.dialogue.assertOwned(owner,trigger.conversation_id);
-    const maxRuns = integer(input.budget?.max_runs,100,1,10000,'invalid_budget'); const id = `task-${randomUUID()}`; const now = this.now();
-    this.db.prepare(`INSERT INTO wb_persistent_tasks(task_id,owner_id,agent_id,title,objective,trigger_json,priority,status,version,generation,schedule_revision,max_runs,next_due_at,created_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,'active',1,1,1,?,?,?,?)`).run(id,owner,agent.agent_id,title,objective,JSON.stringify(trigger),priority,maxRuns,this.firstDue(trigger,now),now,now);
+    const limit=encodedTaskRunLimit(configuredTaskRunLimit(input.budget)); const id = `task-${randomUUID()}`; const now = this.now();
+    this.db.prepare(`INSERT INTO wb_persistent_tasks(task_id,owner_id,agent_id,title,objective,trigger_json,priority,status,version,generation,schedule_revision,max_runs,run_limit_mode,next_due_at,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,'active',1,1,1,?,?,?,?,?)`).run(id,owner,agent.agent_id,title,objective,JSON.stringify(trigger),priority,limit.maximum,limit.mode,this.firstDue(trigger,now),now,now);
     if(source)this.db.prepare('UPDATE wb_persistent_tasks SET source_json=? WHERE task_id=?').run(JSON.stringify(source),id);
     if(input.model_budget!==undefined)this.taskBudgets.update(owner,id,{expected_version:0,limits:input.model_budget});
     if(input.reply_policy!==undefined)this.replyPolicies.update(owner,id,{expected_version:0,policy:input.reply_policy});
@@ -181,11 +183,11 @@ export class PersistentTaskService {
       const trigger = input.trigger === undefined ? JSON.parse(row.trigger_json) : this.trigger(input.trigger);
       if(isDialogueTrigger(trigger))this.dialogue.assertOwned(owner,trigger.conversation_id);
       const changed = input.trigger !== undefined && JSON.stringify(trigger) !== row.trigger_json;
-      const budget = integer(input.budget?.max_runs, row.max_runs,1,10000,'invalid_budget');
-      this.db.prepare(`UPDATE wb_persistent_tasks SET title=?,objective=?,agent_id=?,trigger_json=?,priority=?,max_runs=?,version=version+1,
+      const budget = encodedTaskRunLimit(configuredTaskRunLimit(input.budget,storedTaskRunLimit(row)));
+      this.db.prepare(`UPDATE wb_persistent_tasks SET title=?,objective=?,agent_id=?,trigger_json=?,priority=?,max_runs=?,run_limit_mode=?,version=version+1,
         generation=generation+1,schedule_revision=schedule_revision+?,next_due_at=?,baseline_hash=?,baseline_revision=?,projection_pending=1,updated_at=? WHERE task_id=? AND owner_id=? AND version=?`)
         .run(input.title === undefined ? row.title : text(input.title,'invalid_task_title',200),input.objective === undefined ? row.objective : text(input.objective,'invalid_objective'),agent.agent_id,JSON.stringify(trigger),
-          integer(input.priority,row.priority,0,100,'invalid_priority'),budget,changed ? 1 : 0,changed ? this.firstDue(trigger,this.now()) : row.next_due_at,
+          integer(input.priority,row.priority,0,100,'invalid_priority'),budget.maximum,budget.mode,changed ? 1 : 0,changed ? this.firstDue(trigger,this.now()) : row.next_due_at,
           changed ? null : row.baseline_hash,changed ? 0 : row.baseline_revision,this.now(),id,owner,row.version);
       this.dialogue.reset(this.row(owner,id) as any);
       this.cancelActive(owner,id,'task_updated'); return this.get(owner,id);
@@ -196,7 +198,7 @@ export class PersistentTaskService {
     return withImmediateTransaction(this.db, () => {
       const row=this.row(owner,id); this.cas(row,version);
       if (row.status === 'archived' && status !== 'archived') throw new Error('task_state_conflict');
-      if (status === 'active') { if (this.workbench.getAgent(owner,row.agent_id).status !== 'active') throw new Error('agent_unavailable'); if (row.runs_used >= row.max_runs) throw new Error('task_budget_exhausted'); }
+      if (status === 'active') { if (this.workbench.getAgent(owner,row.agent_id).status !== 'active') throw new Error('agent_unavailable'); if (taskRunLimitExhausted(row)) throw new Error('task_budget_exhausted'); }
       this.db.prepare('UPDATE wb_persistent_tasks SET status=?,version=version+1,generation=generation+1,projection_pending=1,updated_at=? WHERE task_id=? AND owner_id=? AND version=?').run(status,this.now(),id,owner,version);
       this.dialogue.reset(this.row(owner,id) as any);
       if (status !== 'active') this.cancelActive(owner,id,`task_${status}`);
@@ -286,7 +288,7 @@ export class PersistentTaskService {
       const existing=this.db.prepare('SELECT * FROM wb_task_current_occurrences WHERE task_id=? AND trigger_key=?').get(id,key) as Row | undefined;
       if (existing) return this.occurrence(existing);
       if (row.status !== 'active') throw new Error('task_state_conflict');
-      if (row.runs_used >= row.max_runs) throw new Error('task_budget_exhausted');
+      if (taskRunLimitExhausted(row)) throw new Error('task_budget_exhausted');
       if (this.active(id)) throw new Error('task_active_occurrence');
       const agent=this.workbench.getAgent(owner,row.agent_id); if (agent.status !== 'active') throw new Error('agent_unavailable');
       const parent=this.conversations.get(agent.conversation_id,owner);
@@ -300,7 +302,7 @@ export class PersistentTaskService {
       beginSubtaskOccurrence(this.db,id,occurrenceId,now);
       this.workbench.bindRun(owner,agent.agent_id,runId,'task');
       this.dialogue.bindRun(id,runId,causation);
-      this.db.prepare(`UPDATE wb_persistent_tasks SET runs_used=runs_used+1,status=CASE WHEN runs_used+1>=max_runs THEN 'budget_exhausted' ELSE status END,projection_pending=1,updated_at=? WHERE task_id=?`).run(now,id);
+      this.db.prepare(`UPDATE wb_persistent_tasks SET runs_used=runs_used+1,status=CASE WHEN run_limit_mode='finite' AND runs_used+1>=max_runs THEN 'budget_exhausted' ELSE status END,projection_pending=1,updated_at=? WHERE task_id=?`).run(now,id);
       this.notificationSignals.capture(owner,id,occurrenceId);
       return this.occurrence(this.db.prepare('SELECT * FROM wb_task_occurrences WHERE occurrence_id=?').get(occurrenceId) as Row);
     });
@@ -460,7 +462,7 @@ export class PersistentTaskService {
     const readiness={parent:assessments.assessment(owner,id),subtasks:subtasks.map(item=>({subtask_id:item.subtask_id,...assessments.assessment(owner,id,item.subtask_id)})),next:assessments.nextActions(owner,id)};
     const state={schema_version:1,generated_at:this.now(),task:{...task,projection_pending:false},subtask_occurrence_id:subtaskOccurrence(this.db,id),subtasks,occurrences,readiness};
     const escape=(value: string)=>value.replace(/[\r\n]/g,' ').replace(/\|/g,'\\|');
-    const files: Record<string,string>={ 'STATE.json':JSON.stringify(state,null,2)+'\n', 'TASKS.md':`# ${escape(task.title)}\n\n${task.objective}\n\n状态：${task.status}；已使用运行预算：${task.runs_used}/${task.budget.max_runs}\n\n| 子任务 | 状态 | 优先级 | 证据数 |\n|---|---|---:|---:|\n${subtasks.map(s=>`| ${escape(s.title)} | ${s.status} | ${s.priority} | ${s.evidence.length} |`).join('\n')}\n`,
+    const files: Record<string,string>={ 'STATE.json':JSON.stringify(state,null,2)+'\n', 'TASKS.md':`# ${escape(task.title)}\n\n${task.objective}\n\n状态：${task.status}；已使用运行预算：${task.runs_used}/${task.budget.max_runs===null?'不限次数':task.budget.max_runs}\n\n| 子任务 | 状态 | 优先级 | 证据数 |\n|---|---|---:|---:|\n${subtasks.map(s=>`| ${escape(s.title)} | ${s.status} | ${s.priority} | ${s.evidence.length} |`).join('\n')}\n`,
       'NEXT.md':`# 下一步\n\n${task.status==='active' ? `等待触发：${task.next_due_at ?? (isDialogueTrigger(task.trigger)?'等待指定对话事件':'一次执行已入队')}` : `任务状态：${task.status}`}\n\n执行准备度，供参考（不是成功概率）\n\n${readiness.next.items.map(s=>`- ${escape(s.title)}：${s.next_action}；准备度 ${s.readiness_score}；${s.uncertainty_reasons.join('、')}`).join('\n')}\n${readiness.next.blocked.map(s=>`- ${escape(s.title)}：等待补充；${s.reasons.join('、')}`).join('\n')}\n`,
       'EVIDENCE.jsonl':occurrences.flatMap(o=>o.evidence.map(ref=>JSON.stringify({occurrence_id:o.occurrence_id,...ref}))).join('\n')+'\n' };
     try {

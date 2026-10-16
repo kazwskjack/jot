@@ -26,6 +26,16 @@ test('known validation failures allow correction with a new request key; timeout
  assert.equal(receipt.pending,true);assert.equal(counter,2);
 });
 const memory=()=>{const data=new Map();return {getItem:key=>data.get(key)??null,setItem:(key,value)=>data.set(key,value),removeItem:key=>data.delete(key)};};
+
+test('unlimited draft and lost nullable command recover exact payload and original key',async()=>{
+ const storage=memory(),store=new save.TaskDraftStore(storage,'c'.repeat(64)),form={...blankTaskForm('a'),title:'Standing task',objective:'Watch',max_runs:'unlimited'};
+ store.saveDraft(form,null,4);const first=new save.TaskSaveReceipt(()=> 'original-unlimited-key',store);
+ await assert.rejects(first.submit(async()=>{throw Error('lost');},'/persistent-tasks','POST',{title:'Standing task',budget:{max_runs:null}}));
+ const reopened=new save.TaskDraftStore(storage,'c'.repeat(64)),second=new save.TaskSaveReceipt(()=> 'wrong-key',reopened);
+ assert.equal(reopened.read().form.max_runs,'unlimited');assert.equal(second.pending,true);
+ await second.submit(async(path,method,body,key)=>{assert.equal(body.budget.max_runs,null);assert.equal(key,'original-unlimited-key');assert.equal(path,'/persistent-tasks');assert.equal(method,'POST');},'/persistent-tasks','POST',{budget:{max_runs:100}});
+ assert.equal(second.pending,false);assert.equal(reopened.read().command,null);
+});
 test('task draft and unknown command survive remount without resending and remain owner scoped',async()=>{
  assert.equal(typeof save.TaskDraftStore,'function');
  const storage=memory(),store=new save.TaskDraftStore(storage,'a'.repeat(64));

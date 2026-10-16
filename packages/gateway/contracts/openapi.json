@@ -16337,6 +16337,8 @@
           "task_readiness": {
             "type": "boolean"
           },
+          "task_unlimited_runs": { "type": "boolean" },
+          "task_run_limit_protocol": { "type": "integer", "const": 1 },
           "model_budget": {
             "type": "boolean"
           },
@@ -17628,9 +17630,10 @@
         "type": "object",
         "properties": {
           "max_runs": {
-            "type": "integer",
+            "type": ["integer", "null"],
             "minimum": 1,
-            "maximum": 10000
+            "maximum": 10000,
+            "description": "Explicit null means unlimited run count; omission retains existing defaults. Model budgets and permissions are separate."
           }
         },
         "required": [

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawn,spawnSync} from 'node:child_process';
+import {existsSync} from 'node:fs';
 import {completionFixture,candidate} from './task-completion-fixture.mjs';
 import {withImmediateTransaction} from '../../src/db/database.ts';
 import {prepareTaskCompletion,confirmTaskCompletion} from '../../src/persistent-tasks/completion-handshake.ts';
@@ -111,27 +112,48 @@ test('a real process exit after publication commit recovers one final answer wit
  assert.equal(f.db.prepare('SELECT count(*) n FROM ga_runs').get().n,1);assert.equal(f.db.prepare("SELECT count(*) n FROM ga_messages WHERE role='assistant'").get().n,1);
 });
 
-test('two ready Gateway processes racing the same occurrence receive one publication receipt',async t=>{
- const f=await ready(t),script=`import {buildServer} from ${JSON.stringify(new URL('../../src/server.ts',import.meta.url).href)};
+for(const holdMs of [0,120])test('two ready Gateway processes racing the same occurrence recover one publication receipt; lock hold='+holdMs,async t=>{
+ const f=await ready(t),locked=f.fixtureConfig.databasePath+'.synthetic-lock-held',refused=f.fixtureConfig.databasePath+'.synthetic-lock-refused',script=`import {buildServer} from ${JSON.stringify(new URL('../../src/server.ts',import.meta.url).href)};
+  import {existsSync,writeFileSync} from 'node:fs';
   import {HarnessCoordinator} from ${JSON.stringify(new URL('../../src/harness/coordinator.ts',import.meta.url).href)};
   const f=await buildServer(${JSON.stringify(f.fixtureConfig)}),c=new HarnessCoordinator(f.db,f.runs,f.events);
-  process.once('message',()=>{try{const receipt=c.finalizeReviewedTask('alice',${JSON.stringify(f.runId)},${JSON.stringify(f.intent.intent_id)});process.send({receipt},()=>process.exit(0));}
-   catch(e){process.send({error:e.message},()=>process.exit(1));}});process.send({ready:true});`;
+  if(f.db.isTransaction)throw Error('publication fixture unexpectedly owns a transaction');
+  const ordinal=Number(process.argv.at(-1));
+  let began=false;const exec=f.db.exec.bind(f.db);f.db.exec=sql=>{const result=exec(sql);if(sql==='BEGIN IMMEDIATE'){began=true;if(${holdMs}&&ordinal===0){writeFileSync(${JSON.stringify(locked)},'synthetic lock held');const deadline=Date.now()+3000;while(!existsSync(${JSON.stringify(refused)})){if(Date.now()>deadline)throw Error('controlled contender did not confirm refusal');Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,2);}Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,${holdMs});}}return result;};
+  process.once('message',()=>{began=false;try{const receipt=c.finalizeReviewedTask('alice',${JSON.stringify(f.runId)},${JSON.stringify(f.intent.intent_id)});process.send({receipt},()=>process.exit(0));}
+   catch(e){if(e.errcode===5&&!began){if(${holdMs}&&ordinal===1)writeFileSync(${JSON.stringify(refused)},'synthetic acquisition refused');process.send({contention:{phase:'before_begin',code:5}},()=>process.exit(0));}else process.send({error:e.stack??e.message},()=>process.exit(1));}});process.send({ready:true});`;
  const jobs=[];
  for(let index=0;index<2;index++){
-  const child=spawn(process.execPath,['--input-type=module','-e',script],{stdio:['ignore','ignore','pipe','ipc']});let diagnostics='',receipt;
+  const child=spawn(process.execPath,['--input-type=module','-e',script,String(index)],{stdio:['ignore','ignore','pipe','ipc'],windowsHide:true});let diagnostics='',receipt;
   child.stderr.on('data',chunk=>{diagnostics+=chunk;});
   let readyResolve,readyReject;const started=new Promise((resolve,reject)=>{readyResolve=resolve;readyReject=reject;});
   const finished=new Promise((resolve,reject)=>{
    const timer=setTimeout(()=>{child.kill();reject(new Error('publication child timeout'));},15000);
    child.on('error',error=>{clearTimeout(timer);readyReject(error);reject(error);});
-   child.on('message',message=>{if(message.ready)readyResolve();if(message.receipt)receipt=message.receipt;if(message.error)diagnostics+=message.error;});
+   child.on('message',message=>{if(message.ready)readyResolve();if(message.receipt||message.contention)receipt=message;if(message.error)diagnostics+=message.error;});
    child.on('exit',code=>{clearTimeout(timer);if(code!==0){const error=new Error(diagnostics);readyReject(error);reject(error);}else resolve(receipt);});
   });
+  started.catch(()=>{});finished.catch(()=>{});
   jobs.push({child,started,finished});
  }
- await Promise.all(jobs.map(j=>j.started));jobs.forEach(j=>j.child.send('go'));
- const receipts=await Promise.all(jobs.map(j=>j.finished));assert.deepEqual(receipts[0],receipts[1]);
+ try{
+ await Promise.all(jobs.map(j=>j.started));
+ if(holdMs){jobs[0].child.send('go');const deadline=Date.now()+3000;while(!existsSync(locked)){if(Date.now()>deadline)throw Error('publisher did not confirm held lock');await new Promise(resolve=>setTimeout(resolve,2));}jobs[1].child.send('go');}
+ else jobs.forEach(j=>j.child.send('go'));
+ const results=await Promise.all(jobs.map(j=>j.finished));assert.ok(results.some(result=>result?.receipt),'a real competing publisher must commit');
+ if(holdMs)assert.ok(results.some(result=>result?.contention),'controlled hold must exercise bounded acquisition refusal');
+ const receipts=results.map(result=>{
+  if(result.receipt)return result.receipt;
+  assert.deepEqual(result.contention,{phase:'before_begin',code:5});
+  // The winner has committed. Recover its existing immutable receipt using the
+  // same original operation; no native completion or publication is repeated.
+  const before=f.db.prepare('SELECT total_changes() n').get().n,receipt=publish(f);
+  assert.equal(f.db.prepare('SELECT total_changes() n').get().n,before);return receipt;
+ });assert.deepEqual(receipts[0],receipts[1]);
  assert.equal(receipts[0].status,'succeeded');assert.equal(f.db.prepare('SELECT count(*) n FROM wb_task_finalizations').get().n,1);
  assert.equal(f.db.prepare("SELECT count(*) n FROM ga_messages WHERE role='assistant'").get().n,1);
+ assert.equal(f.db.prepare('SELECT count(*) n FROM wb_task_native_completions').get().n,1);
+ }finally{
+  await Promise.all(jobs.filter(job=>job.child.exitCode===null&&job.child.signalCode===null).map(job=>new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('publication race child cleanup timed out')),5000);job.child.once('exit',()=>{clearTimeout(timer);resolve();});job.child.kill();})));
+ }
 });

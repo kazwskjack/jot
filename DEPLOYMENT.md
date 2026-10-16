@@ -19,6 +19,22 @@ The root application can run without DSH. The gateway cannot execute queued task
 
 Gateway management can save roles and task rules before an execution host is ready. Its execution readiness flag must reflect a verified host; local fixture flags are not production evidence. The workbench role chat supports snapshot/SSE recovery, message queues, cancellation, interaction responses and output-file downloads. From a completed role message, task creation preserves server-validated source IDs independently of the trigger conversation. The five-step task wizard reviews role/goal, triggers, budgets, delivery and a final confirmation before saving. When `task_create_delivery` is advertised, selected verified owner bindings and the task save atomically; invalid or revoked bindings roll back the entire creation. Unselected external delivery stays application-local. With a configured gateway CSRF token, an opaque authenticated-owner namespace separates same-tab drafts and unknown save receipts; navigation or reload restores the confirmation view without sending a request. An explicit retry uses the original payload and request key. Browser storage must accept the receipt before a network save starts. Closing the tab or rotating the authentication secret changes this recovery boundary. The workbench can also open owned gateway conversations and convert a completed ordinary-chat message into a task after an explicit role selection. The gateway rechecks source ownership and workspace/project compatibility; the portable root chat remains a separate runtime. The picker currently exposes the most recent 100 active gateway conversations, without claiming full list pagination. Bounded autonomous reply and formal host acceptance remain integration work. SMTP acceptance proves transport receipt, not recipient inbox arrival. The portable runtime's operation-specific approval path is separate.
 
+## Task run-limit upgrades
+
+Before enabling explicitly unlimited persistent-task runs, back up the existing
+private database and upgrade the task API/UI and every task consumer together.
+The migration adds `run_limit_mode`, defaulting existing rows to finite, without
+resetting task IDs, counts, pause state or occurrence keys. The exact internal
+`(unlimited,0)` tuple maps to public `max_runs:null`; zero on its own is invalid.
+Database guards reject inconsistent tuples. The known earlier numeric admission
+check refuses this zero rather than executing an unsupported unlimited task.
+This is a rollback refusal mechanism, not full historical-binary compatibility:
+older consumers may leave error/exhausted state. After upgrade, inspect the
+original records and explicitly resume where appropriate; never reset counts,
+drop the mode column or convert uncertain work to a new task. Preserve original
+user pause/cancel and unknown model/tool outcomes. New capability flags indicate
+API support only, not that every deployed Worker has been upgraded.
+
 ## Resource planning
 
 These figures are engineering starting estimates, not measured minimums or benchmarked capacity guarantees. They exclude remote model infrastructure, depend on document size and page complexity, and must be verified with your actual workloads. Disk space includes operating-system/dependency headroom rather than a promise of unlimited retained files.

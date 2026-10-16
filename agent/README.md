@@ -23,6 +23,12 @@ Session adapter connects to the configured controller and optional speech
 service. Per-conversation model switching still needs integration validation.
 Client routes use conversation IDs; internal Session identifiers stay server-side.
 
+An explicitly configured persistent task may have `budget.max_runs: null` for
+unlimited occurrences. Missing budget and numeric zero do not mean unlimited.
+This never authorizes new spending, resuming a paused task, repeating uncertain
+tool/model calls or bypassing owner permissions. Native Goal controls and the
+original cumulative model scopes remain separate from occurrence counts.
+
 The lead runtime plans and reviews results. A task-specific grant can authorize
 bounded members from an owned team. The durable mailbox queues their work,
 and the original Worker/Runner executes each member in a distinct Session.

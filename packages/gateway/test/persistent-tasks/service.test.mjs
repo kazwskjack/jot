@@ -22,6 +22,64 @@ async function fixture(options = {}) {
 }
 const input = { title: 'Check', agent_id: 'agent-a', objective: 'Check public information', trigger: { kind: 'once' } };
 
+test('explicit unlimited run budget survives counts beyond finite bounds, pause, retry and reopen',async()=>{
+ const f=await fixture();try{
+  let task=f.service.create('alice',{...input,trigger:{kind:'interval',interval_seconds:60},budget:{max_runs:null}});
+  assert.equal(task.budget.max_runs,null);
+  f.db.prepare('UPDATE wb_persistent_tasks SET runs_used=10001 WHERE task_id=?').run(task.task_id);
+  const occurrence=f.service.runNow('alice',task.task_id,'original');assert.equal(f.service.runNow('alice',task.task_id,'original').run_id,occurrence.run_id);
+  task=f.service.get('alice',task.task_id);assert.equal(task.runs_used,10002);assert.equal(task.status,'active');
+  task=f.service.pause('alice',task.task_id,task.version);assert.equal(task.status,'paused');
+  task=f.service.resume('alice',task.task_id,task.version);assert.equal(task.budget.max_runs,null);
+  const {PersistentTaskService}=await import(moduleUrl),reopened=new PersistentTaskService(f.db,f.workbench);
+  assert.equal(reopened.get('alice',task.task_id).budget.max_runs,null);assert.equal(reopened.get('alice',task.task_id).runs_used,10002);
+  assert.throws(()=>reopened.get('bob',task.task_id),/task_not_found/);
+ }finally{f.close();}
+});
+
+test('finite exhausted tasks require explicit resume after switching to unlimited',async()=>{
+ const f=await fixture();try{
+  let task=f.service.create('alice',{...input,budget:{max_runs:1}});f.service.runNow('alice',task.task_id,'one');
+  task=f.service.get('alice',task.task_id);assert.equal(task.status,'budget_exhausted');
+  task=f.service.update('alice',task.task_id,{expected_version:task.version,budget:{max_runs:null}});
+  assert.equal(task.status,'budget_exhausted');assert.equal(task.runs_used,1);assert.equal(task.budget.max_runs,null);
+  task=f.service.resume('alice',task.task_id,task.version);assert.equal(task.status,'active');
+  task=f.service.update('alice',task.task_id,{expected_version:task.version,title:'retains unlimited'});assert.equal(task.budget.max_runs,null);
+  task=f.service.pause('alice',task.task_id,task.version);task=f.service.update('alice',task.task_id,{expected_version:task.version,budget:{max_runs:1}});
+  assert.equal(task.budget.max_runs,1);assert.throws(()=>f.service.resume('alice',task.task_id,task.version),/task_budget_exhausted/);
+ }finally{f.close();}
+});
+
+test('unlimited interval keeps scheduling across the old default while once still fires once',async()=>{
+ const f=await fixture();try{
+  const task=f.service.create('alice',{...input,trigger:{kind:'interval',interval_seconds:60},budget:{max_runs:null}});
+  f.db.prepare('UPDATE wb_persistent_tasks SET runs_used=99 WHERE task_id=?').run(task.task_id);
+  await f.service.tick();f.db.prepare("UPDATE ga_runs SET status='succeeded'").run();f.setTime('2026-10-01T00:02:00Z');await f.service.tick();
+  assert.equal(f.service.get('alice',task.task_id).runs_used,101);assert.equal(f.service.get('alice',task.task_id).status,'active');
+  f.service.pause('alice',task.task_id,f.service.get('alice',task.task_id).version);
+  const once=f.service.create('alice',{...input,budget:{max_runs:null}});await f.service.tick();f.db.prepare("UPDATE ga_runs SET status='succeeded'").run();f.setTime('2026-10-02T00:02:00Z');await f.service.tick();
+  assert.equal(f.service.occurrences('alice',once.task_id).items.length,1);assert.equal(f.service.get('alice',once.task_id).budget.max_runs,null);
+  const projection=f.service.project('alice',once.task_id);assert.match(readFileSync(join(projection.directory,'TASKS.md'),'utf8'),/不限次数/);
+ }finally{f.close();}
+});
+
+test('old layout migrates finite limits without resetting state and inconsistent new tuples are refused',async()=>{
+ const f=await fixture();try{
+  let task=f.service.create('alice',{...input,budget:{max_runs:7}});task=f.service.pause('alice',task.task_id,task.version);
+  f.db.exec('DROP TRIGGER wb_task_run_limit_insert; DROP TRIGGER wb_task_run_limit_update; ALTER TABLE wb_persistent_tasks DROP COLUMN run_limit_mode');
+  const before=f.db.prepare('SELECT * FROM wb_persistent_tasks').get(),{PersistentTaskService}=await import(moduleUrl);
+  const migrated=new PersistentTaskService(f.db,f.workbench),after=f.db.prepare('SELECT * FROM wb_persistent_tasks').get();
+  const {run_limit_mode,...rest}=after;assert.equal(run_limit_mode,'finite');assert.deepEqual(rest,{...before});assert.equal(migrated.get('alice',task.task_id).budget.max_runs,7);
+  assert.throws(()=>f.db.prepare("UPDATE wb_persistent_tasks SET max_runs=0 WHERE task_id=?").run(task.task_id),/task_run_limit_unconfirmed/);
+  task=migrated.update('alice',task.task_id,{expected_version:task.version,budget:{max_runs:null}});
+  const raw=f.db.prepare('SELECT max_runs,run_limit_mode,runs_used FROM wb_persistent_tasks').get();assert.equal(raw.max_runs,0);assert.equal(raw.run_limit_mode,'unlimited');
+  assert.equal(raw.runs_used>=raw.max_runs,true,'legacy numeric guard must refuse this new mode');
+  assert.throws(()=>f.db.prepare("UPDATE wb_persistent_tasks SET max_runs=100 WHERE task_id=?").run(task.task_id),/task_run_limit_unconfirmed/);
+  const other=openProductDatabase(join(f.directory,'fixture.sqlite'));try{const physicalReopen=new PersistentTaskService(other,f.workbench);assert.equal(physicalReopen.get('alice',task.task_id).budget.max_runs,null);assert.equal(physicalReopen.get('alice',task.task_id).status,'paused');}finally{other.close();}
+  for(const budget of [{max_runs:0},{max_runs:-1},{max_runs:'unlimited'},null,{}, {max_runs:null,owner_id:'other'}])assert.throws(()=>migrated.create('alice',{...input,budget}),/invalid_budget/);
+ }finally{f.close();}
+});
+
 test('persistent task service is exported', async () => {
   const module = await import(moduleUrl).catch(() => ({}));
   assert.equal(typeof module.PersistentTaskService, 'function');

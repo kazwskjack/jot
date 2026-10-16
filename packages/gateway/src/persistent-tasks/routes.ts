@@ -23,7 +23,7 @@ const trigger={oneOf:[
   {type:'object',additionalProperties:false,required:['kind','time','timezone'],properties:{kind:{const:'daily'},...calendarFields}},
   {type:'object',additionalProperties:false,required:['kind','time','timezone','weekdays'],properties:{kind:{const:'weekly'},...calendarFields,weekdays:{type:'array',minItems:1,maxItems:7,uniqueItems:true,items:{type:'integer',minimum:0,maximum:6}}}},
 ]};
-const fields={title:{type:'string',minLength:1,maxLength:200},agent_id:{type:'string',minLength:1,maxLength:200},objective:{type:'string',minLength:1,maxLength:12000},trigger,priority:{type:'integer',minimum:0,maximum:100},budget:{type:'object',additionalProperties:false,required:['max_runs'],properties:{max_runs:{type:'integer',minimum:1,maximum:10000}}}};
+const fields={title:{type:'string',minLength:1,maxLength:200},agent_id:{type:'string',minLength:1,maxLength:200},objective:{type:'string',minLength:1,maxLength:12000},trigger,priority:{type:'integer',minimum:0,maximum:100},budget:{type:'object',additionalProperties:false,required:['max_runs'],properties:{max_runs:{type:['integer','null'],minimum:1,maximum:10000}}}};
 const modelBudget={type:'object',additionalProperties:false,required:['tokens','nano_usd','model_calls'],properties:Object.fromEntries(['tokens','nano_usd','model_calls'].map(key=>[key,{type:'integer',minimum:0,maximum:Number.MAX_SAFE_INTEGER}]))};
 function body(request: FastifyRequest) { return (request.body ?? {}) as Record<string,unknown>; }
 function taskId(request: FastifyRequest) { return (request.params as {taskId:string}).taskId; }

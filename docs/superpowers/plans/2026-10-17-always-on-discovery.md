@@ -37,7 +37,7 @@ work-cycle record, isolated-workspace provider or reviewed cycle apply path.
 Session checkpoints are native history recovery, not project file snapshots.
 No existing green recovery test proves these missing capabilities.
 
-One concrete contract gap must be resolved before continuous admission:
+The initial audit found a concrete contract gap before continuous admission:
 `PersistentTaskService.create` currently defaults `max_runs` to 100 and accepts
 only 1–10000. That existing task limit is not an unlimited discovery policy.
 Do not silently create such a task and claim continuous/unlimited operation.
@@ -45,6 +45,12 @@ Extend the original task run-limit contract, migrations, all admission/readiness
 consumers, pause/stop and UI to an explicit owner-selected unlimited form before
 using it for standing discovery. This is separate from existing unlimited model
 budgets and must not be implemented as a new competing quota ledger.
+
+That prerequisite now has an [implemented explicit unlimited contract](2026-10-17-unlimited-task-runs.md):
+public null, an exact mode/legacy-refusal tuple, guarded schemas, original counts,
+pause/resume and capability-gated UI. The historical audit above explains the
+gap; it is not the current claim that only finite tasks exist. Discovery factual
+collection, policy/signal admission and the rest of this plan remain unfinished.
 
 ## End-to-end design
 

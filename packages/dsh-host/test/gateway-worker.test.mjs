@@ -26,7 +26,7 @@ function executionReceipt(value){
 const userTexts=input=>input.messages.filter(message=>message.role==='user').flatMap(message=>typeof message.content==='string'?[message.content]:(message.content??[]).filter(part=>part.type==='text').map(part=>part.text));
 const occurrences=(text,part)=>text.split(part).length-1;
 
-async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=false,automatic=false}={}){
+async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=false,automatic=false,unlimited=false}={}){
  role ||= persistent;
  const {buildServer}=await import('../../gateway/src/server.ts');
  const root=await mkdtemp(join(tmpdir(),'jot-gateway-host-')),home=join(root,'home'),workspace=join(root,'workspace');await mkdir(workspace);
@@ -72,7 +72,7 @@ async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=
   const headers={'x-user-id':'acceptance-owner','content-type':'application/json','x-csrf-token':csrfToken,origin:'https://fixture.invalid','idempotency-key':'acceptance-create'};
   let conversation_id,messageUrl,messageBody;
   if(role){const response=await fetch(gatewayUrl+'/v1/agents',{method:'POST',headers,body:JSON.stringify({name:'Acceptance role',workspace_id:'jot',instructions:'Reply clearly using the provided evidence.'})});assert.equal(response.status,201);const agent=await response.json();conversation_id=agent.conversation_id;messageUrl='/v1/agents/'+agent.agent_id+'/messages';messageBody={client_message_id:'acceptance-one',text:'Reply with the single word ACCEPTANCE-OK.'};
-   if(persistent){const created=await fetch(gatewayUrl+'/v1/persistent-tasks',{method:'POST',headers:{...headers,'idempotency-key':'acceptance-task'},body:JSON.stringify({title:'Wait for confirmation',agent_id:agent.agent_id,objective:complete?'Write acceptance.md containing ACCEPTANCE-OK and request owner acceptance.':'Ask the user to confirm before any further work.',trigger:{kind:'once',run_at:'2099-01-01T00:00:00Z'},budget:{max_runs:1}})});const task=await created.json();assert.equal(created.status,201,JSON.stringify(task));messageUrl='/v1/persistent-tasks/'+task.task_id+'/run-now';messageBody={};}
+   if(persistent){const created=await fetch(gatewayUrl+'/v1/persistent-tasks',{method:'POST',headers:{...headers,'idempotency-key':'acceptance-task'},body:JSON.stringify({title:'Wait for confirmation',agent_id:agent.agent_id,objective:complete?'Write acceptance.md containing ACCEPTANCE-OK and request owner acceptance.':'Ask the user to confirm before any further work.',trigger:{kind:'once',run_at:'2099-01-01T00:00:00Z'},budget:{max_runs:unlimited?null:1}})});const task=await created.json();assert.equal(created.status,201,JSON.stringify(task));messageUrl='/v1/persistent-tasks/'+task.task_id+'/run-now';messageBody={};}
   }
   else{const conversation=await fetch(gatewayUrl+'/v1/conversations',{method:'POST',headers,body:JSON.stringify({title:'Synthetic local model acceptance',workspace_id:'jot',model:{provider:'deepseek-official',model:'deepseek-flash'}})});assert.equal(conversation.status,201);({conversation_id}=await conversation.json());messageUrl='/v1/conversations/'+conversation_id+'/messages';messageBody={client_message_id:'acceptance-one',content:[{type:'text',text:'Reply with the single word ACCEPTANCE-OK.'}]};}
   const postMessage=()=>fetch(gatewayUrl+messageUrl,{method:'POST',headers:{...headers,'idempotency-key':'acceptance-one'},body:JSON.stringify(messageBody)});
@@ -159,9 +159,10 @@ async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=
    assert.ok(JSON.stringify(requests[1].messages).includes('Use the Markdown format'));
    assert.equal(service.db.prepare('SELECT count(*) n FROM ga_runs').get().n,3);
   }
+  if(persistent){const task=service.persistentTasks.list('acceptance-owner').items[0];assert.equal(task.budget.max_runs,unlimited?null:1);assert.equal(task.runs_used,1);assert.equal(task.status,unlimited?'active':'budget_exhausted');}
   assert.equal(host.output().includes('entry did not activate'),false);
   const finalSnapshot=await (await fetch(gatewayUrl+'/v1/conversations/'+conversation_id+'/snapshot',{headers})).json();
-  t.diagnostic(JSON.stringify({officialLauncher:true,realGateway:true,realWorker:true,role,persistent,resume,complete,automatic,modelTransport:'synthetic local Messages HTTP',modelRequests:requests.length,replyCount:finalSnapshot.messages.filter(message=>message.role==='assistant'&&message.status==='complete').length,initialStatus:run.status,status:finalSnapshot.runs.at(-1).status,production:false}));succeeded=true;
+  t.diagnostic(JSON.stringify({officialLauncher:true,realGateway:true,realWorker:true,role,persistent,resume,complete,automatic,unlimited,modelTransport:'synthetic local Messages HTTP',modelRequests:requests.length,replyCount:finalSnapshot.messages.filter(message=>message.role==='assistant'&&message.status==='complete').length,initialStatus:run.status,status:finalSnapshot.runs.at(-1).status,production:false}));succeeded=true;
  }catch(error){await writeFile(join(root,'startup-private.log'),JSON.stringify({host:host?.output(),worker:worker?.output(),modelRequests:requests.length},null,2));throw Error('gateway_host_acceptance_failed; private diagnostics: '+root,{cause:error});}
  finally{await worker?.stop();await host?.stop();if(service){await service.app.close();service.db.close();}model.closeAllConnections();await new Promise(done=>model.close(done));if(succeeded)await rm(root,{recursive:true,force:true});}
 }
@@ -174,3 +175,6 @@ test('real task input and review replies resume the same occurrence and native G
 test('a real file task publishes once only after owner criteria acceptance and native Goal completion',{skip:!runtime,timeout:60000},t=>gatewayCase(t,{persistent:true,complete:true}));
 
 test('the original native Goal driver admits another round without a competing Gateway prompt or run',{skip:!runtime,timeout:60000},t=>gatewayCase(t,{persistent:true,automatic:true}));
+
+test('explicit unlimited task replies keep the same occurrence and native Goal without consuming another task run',{skip:!runtime,timeout:60000},t=>gatewayCase(t,{persistent:true,resume:true,unlimited:true}));
+test('explicit unlimited file task still requires owner acceptance and native Goal completion',{skip:!runtime,timeout:60000},t=>gatewayCase(t,{persistent:true,complete:true,unlimited:true}));

@@ -3,6 +3,14 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const contracts = new URL('../../contracts/', import.meta.url);
+test('task run-limit schemas preserve finite limits and explicit unlimited null in JSON and YAML',async()=>{
+ const spec=await json('openapi.json'),{default:Ajv}=await import('ajv/dist/2020.js'),schema=spec.components.schemas.PersistentTaskBudget;
+ const validate=new Ajv({strict:false}).compile(schema);
+ for(const value of [{max_runs:null},{max_runs:1},{max_runs:10000}])assert.equal(validate(value),true);
+ for(const value of [{},{max_runs:0},{max_runs:-1},{max_runs:10001},{max_runs:'unlimited'},{max_runs:null,run_limit_mode:'unlimited'}])assert.equal(validate(value),false);
+ const yaml=await readFile(new URL('openapi.yaml',contracts),'utf8'),line=yaml.split('\n').find(s=>s.trimStart().startsWith('PersistentTaskBudget: '));
+ assert.deepEqual(JSON.parse(line.slice(line.indexOf(':')+1)),schema);
+});
 test('owner mailbox request can bind a public task run without accepting internal session identities',async()=>{
  const spec=await json('openapi.json'),{default:Ajv}=await import('ajv/dist/2020.js');
  const validate=new Ajv({strict:false}).compile(spec.components.schemas.SendAgentMailboxMessage);

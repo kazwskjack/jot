@@ -432,3 +432,12 @@ is enabled by that module. The factual collector, persistent policy/admission,
 original DSH planning/execution/report, work-cycle isolation/apply, UI and deployed
 acceptance remain to implement. Persistent configured tasks are not full
 Always-on discovery. Upstream unattended permission bypass is not transplanted.
+
+The [unlimited task-run prerequisite](superpowers/plans/2026-10-17-unlimited-task-runs.md)
+is now implemented across the original table/admission, schemas, capabilities,
+workspace projection and built UI. Explicit null retains counts and pause/resume;
+finite defaults and once triggers remain unchanged. Actual SDK tests preserve the
+same occurrence/native Goal and reviewed file delivery; the built BFF/Gateway UI
+recovers a lost nullable save without creating another task. This does not install
+the discovery collector, policy/signal scheduler, isolated workspace or apply
+workflow. Full 26-capability and production acceptance remain open.
