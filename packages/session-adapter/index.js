@@ -284,13 +284,13 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).length)return json(422,{error:'ordinary_history_input_invalid'});
       return json(200,{ready:typeof ordinarySteeringObservationReader==='function',protocol:1,execution_authorized:false});
     }
-    const historyObservation=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/steering-history$/)
+    const historyObservation=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/(steering-history|steering-history-v2)$/)
     if(historyObservation){
-      const sessionId=decodeURIComponent(historyObservation[1]);let scope;
-      if(!ID.test(sessionId)||!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).join(',')!=='history'||!body.history||typeof body.history!=='object'||Array.isArray(body.history)||Object.keys(body.history).sort().join(',')!=='command_id,conversation_id,expected_run_version,owner_id,run_id'||workbenchSessions.has(sessionId)||blockedWorkbenchSessions.has(sessionId))return json(422,{error:'ordinary_history_input_invalid'});
+      const sessionId=decodeURIComponent(historyObservation[1]),bound=historyObservation[2]==='steering-history-v2';let scope;
+      if(!ID.test(sessionId)||!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).sort().join(',')!==(bound?'history,source_sha256':'history')||bound&&(typeof body.source_sha256!=='string'||!/^[a-f0-9]{64}$/.test(body.source_sha256))||!body.history||typeof body.history!=='object'||Array.isArray(body.history)||Object.keys(body.history).sort().join(',')!=='command_id,conversation_id,expected_run_version,owner_id,run_id'||workbenchSessions.has(sessionId)||blockedWorkbenchSessions.has(sessionId))return json(422,{error:'ordinary_history_input_invalid'});
       try{scope=normalizeOrdinaryHistoryScope({...body.history,session_ref:sessionId});}catch{return json(422,{error:'ordinary_history_input_invalid'})}
       if(typeof ordinarySteeringObservationReader!=='function')return json(503,{error:'ordinary_history_unavailable'});
-      try{return json(200,await ordinarySteeringObservationReader({scope,signal}));}catch{return json(409,{error:'ordinary_steering_observation_unconfirmed'})}
+      try{return json(200,await ordinarySteeringObservationReader({scope,signal,...(bound?{protocol:2,expectedSourceSha256:body.source_sha256}:{})}));}catch{return json(409,{error:'ordinary_steering_observation_unconfirmed'})}
     }
     const inputCompletion=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/input-completion$/)
     if(inputCompletion){

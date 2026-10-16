@@ -35,3 +35,10 @@ test('historical cancellation stays an observation and changing product/raw sour
  const cancelled=fixture();cancelled.source.run_status='cancelled';cancelled.source.command_status='superseded';assert.equal((await create(cancelled.options)({scope:cancelled.scope,signal:new AbortController().signal})).run_status,'cancelled');
  for(const mode of ['product','raw','read-error','validation-error']){const f=fixture();if(mode==='product'){const read=f.options.admissions.read;f.options.admissions.read=async q=>{const value=await read(q);f.source.command_status='applied';f.source.product_message_present=true;return value;};}if(mode==='raw'){const read=f.options.admissions.read;f.options.admissions.read=async q=>{const value=await read(q);f.events.push({seq:f.events.length,type:'session/end-seed',data:{}});return value;};}if(mode==='read-error'){const open=f.options.persistence.open;f.options.persistence.open=async(...args)=>{const handle=await open(...args);handle.read=async()=>{throw Error('fixture read failure');};return handle;};}if(mode==='validation-error')f.options.validateLog=async()=>({validated:false});await assert.rejects(create(f.options)({scope:f.scope,signal:new AbortController().signal}),undefined,mode);assert.equal(f.counts().opens,f.counts().closes);}
 });
+
+test('protocol 2 binds the complete product-source digest before opening history and keeps protocol 1 read-only',async()=>{
+ const f=fixture(),sourceHash=hash(canonical(f.source)),read=create(f.options),signal=new AbortController().signal;
+ const view=await read({scope:f.scope,signal,protocol:2,expectedSourceSha256:sourceHash});assert.equal(view.protocol,2);assert.equal(view.source_sha256,sourceHash);assert.equal(view.execution_authorized,false);
+ for(const request of [{protocol:2},{protocol:2,expectedSourceSha256:'0'.repeat(64)},{protocol:3,expectedSourceSha256:sourceHash},{protocol:1,expectedSourceSha256:sourceHash}]){const g=fixture();await assert.rejects(create(g.options)({scope:g.scope,signal,...request}));assert.equal(g.counts().opens,0);}
+ const legacy=await read({scope:f.scope,signal});assert.equal(legacy.protocol,1);assert.ok(!('source_sha256' in legacy));
+});

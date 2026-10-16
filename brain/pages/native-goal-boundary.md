@@ -4,7 +4,7 @@ title: Keep native Goal state and continuation in DSH
 category: decision
 status: active
 created: "2026-10-16T11:44:16"
-updated: "2026-10-16T23:11:42"
+updated: "2026-10-16T23:36:58"
 ---
 
 <!-- compiled_truth -->
@@ -332,5 +332,17 @@ Running ordinary completion now has a Worker-owned publication callback while th
 - time: 2026-10-16T23:11:42
   kind: evidence
   summary: "Final historical HTTP composition passes actual local SDK 36/36, Gateway 1167 passed/six existing skips and Adapter 476/476. Exact scope/response validation and absent-by-default readiness are verified. Before any ACK writer, add a separately versioned complete product-source digest and atomic idempotent repair receipt; IDs/run version and protocol-1 observations remain read-only. Final-answer/all-command, money, rollout and full capability acceptance stay open."
+  source: docs/superpowers/plans/2026-10-16-steering-lineage-and-recovery.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-16T23:29:42
+  kind: evidence
+  summary: "Protocol-2 historical evidence binds the complete product-source digest while protocol 1 stays read-only. A separately opt-in terminal Dispatcher consumer atomically repairs only accepted product input/command state with an immutable metadata receipt. Payload/owner/version changes, cancellation and unknown/legacy evidence refuse; retries and concurrent repair deduplicate. Actual local SDK Host-death/lost-ACK repair preserves one interrupted run, no canonical answer, native bytes and model calls, including reopened-DB retry. Final delivery, unknown fees and deployment remain open."
+  source: docs/superpowers/plans/2026-10-16-steering-lineage-and-recovery.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-16T23:36:58
+  kind: evidence
+  summary: "Final source-bound acceptance matrix passes local actual SDK 37/37, Gateway 1176 passed/six existing skips, Adapter 478/478, root 32/32 and Windows builds. Protocol 2 and an opt-in original terminal Dispatcher consumer repair acceptance atomically with an immutable private metadata receipt; cancellation, source mutation, concurrent repair, rollback, owned-parent deletion and reopened-DB idempotency are verified. Final answers/run state/native reservations/usage/fees are untouched. Defaults and production stay off; canonical final recovery and full rollout/inventory remain open."
   source: docs/superpowers/plans/2026-10-16-steering-lineage-and-recovery.md
   affects: [native-goal-boundary]

@@ -210,3 +210,14 @@ generic 409, without private diagnostic text. The Gateway's
 `SessionControllerClient.observeSteeringHistory` validates this exact request and
 the returned hashes, identity, nullable facts and sequence bounds. No public
 browser/MCP route or automatic reconciliation consumer is enabled by this API.
+
+Protocol 2 is separate: `POST /v1/sessions/:id/steering-history-v2` accepts only
+`{history, source_sha256}`. The Gateway derives the digest from the complete
+current product-source record using recursively sorted JSON keys. The Host
+checks it before raw history access and again rechecks the source afterward.
+The response has protocol 2 and the same digest, still with
+`execution_authorized: false`. Legacy protocol 1 remains unchanged and cannot be
+upgraded into bound evidence. Gateway `observeBoundSteeringHistory` validates
+this version explicitly. These facts may support acceptance-only reconciliation
+under a separate product transaction; they never authorize native replay,
+driver activation, final-answer publication or monetary settlement.

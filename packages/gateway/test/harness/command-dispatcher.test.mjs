@@ -13,6 +13,15 @@ function fixture(){
  db.prepare('INSERT INTO ga_harness_session_bindings(conversation_id,owner_id,session_id,created_at,updated_at) VALUES(?,?,?,?,?)').run('c','u','s','now','now');
  return {db,events,runs,receipt,commands:new RunCommandService(db,events)};
 }
+test('opt-in historical consumer observes the original terminal command and never creates a fallback run',async()=>{
+ const x=fixture();try{x.commands.steer(x.receipt.run_id,'u',{text:'supplement',client_message_id:'history-consumer',expected_run_version:1},'history-consumer');x.db.prepare("UPDATE ga_runs SET status='interrupted' WHERE id=?").run(x.receipt.run_id);const command=x.db.prepare('SELECT id FROM ga_run_commands').get().id;let calls=0;
+ const d=new SessionCommandDispatcher(x.db,x.events,{prompt:async()=>assert.fail('no prompt'),cancel:async()=>({settled:true})},()=>false,undefined,{currentExecutionFor:()=>undefined,reconcileHistorical:async(...args)=>{calls++;assert.deepEqual(args,[x.receipt.run_id,'s',command]);return true;}});assert.equal(await d.processNext(),true);assert.equal(calls,1);assert.equal(x.db.prepare('SELECT count(*) n FROM ga_runs').get().n,1);
+ x.db.prepare("UPDATE ga_runs SET status='cancelled' WHERE id=?").run(x.receipt.run_id);assert.equal(await d.processNext(),false);assert.equal(calls,1);
+ }finally{x.db.close();}
+});
+test('unconfirmed historical consumer stays pending without an automatic legacy fallback',async()=>{
+ const x=fixture();try{x.commands.steer(x.receipt.run_id,'u',{text:'supplement',client_message_id:'history-unknown',expected_run_version:1},'history-unknown');x.db.prepare("UPDATE ga_runs SET status='interrupted' WHERE id=?").run(x.receipt.run_id);const d=new SessionCommandDispatcher(x.db,x.events,{prompt:async()=>assert.fail('no prompt'),cancel:async()=>({settled:true})},()=>false,undefined,{currentExecutionFor:()=>undefined,reconcileHistorical:async()=>false});assert.equal(await d.processNext(),false);assert.equal(x.db.prepare('SELECT status FROM ga_run_commands').get().status,'pending');assert.equal(x.db.prepare('SELECT count(*) n FROM ga_runs').get().n,1);}finally{x.db.close();}
+});
 test('supplement is durable during startup and waits for the session delivery window',async()=>{
  const x=fixture();try{
   x.db.prepare("UPDATE ga_runs SET status='starting' WHERE id=?").run(x.receipt.run_id);

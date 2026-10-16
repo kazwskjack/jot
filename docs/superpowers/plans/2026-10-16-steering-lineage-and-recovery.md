@@ -761,3 +761,83 @@ configuration and execution switches are unchanged. Source-digest binding,
 atomic ACK repair, complete-command final-answer reconciliation, unknown usage/
 fees, real-provider and rolling/deployment acceptance plus the full capability
 inventory remain open; this checkpoint establishes read-only transport only.
+
+## Bound historical acceptance and atomic repair sequence
+
+Keep protocol 1 and its endpoint strictly read-only and unchanged. Add protocol
+2 at `/v1/sessions/:id/steering-history-v2`, accepting exact `{history,
+source_sha256}`. The source digest is SHA-256 of recursively key-sorted JSON of
+the complete existing `ordinary_steer_history` product record. The Gateway derives
+it from its own transactionally inspected records, never from browser/model text.
+The Host compares it before opening raw history and rechecks the full source
+after reading. The response echoes protocol 2 and that digest while retaining
+`execution_authorized: false`. A missing/mismatched digest refuses; protocol-1
+observations cannot be used as bound evidence. Extend strict Gateway Client/DTOs
+and real SDK cases to verify both versions without new Agent/model calls.
+
+Then implement `OrdinarySteeringReconciler` for terminal ordinary pending
+commands, separate from final-answer publication. Inspect owner/Session/version
+and the full source, obtain protocol-2 native acceptance, and re-inspect/hash
+inside the same transaction as deterministic product message, applied command,
+event and immutable hash-only reconciliation receipt. Changed owner, archived
+scope, changed payload/version/status, collisions, foreign/legacy/unknown proof
+or cancellation refuse without enqueue/prompt/lease/Goal/cost changes. An
+accepted input with unknown provider outcome may have its acceptance recorded;
+that never settles fees or authorizes replay. A missing input never authorizes
+fallback. Replay the same receipt idempotently, preserve real user cancel/stop
+and leave canonical answers/run state unchanged.
+
+Wire a separately opt-in Dispatcher consumer only after the transaction and real
+SDK lost-ACK/Host-death tests pass. Keep defaults off; final-answer/all-command
+coverage, unknown outcomes/fees, rollout and the complete inventory still apply.
+
+### Bound acceptance implementation checkpoint
+
+Protocol-2 source binding, strict Adapter/Gateway contracts and both-version
+real-SDK probes are implemented. `OrdinarySteeringReconciler` snapshots the
+terminal ordinary product source, obtains bound acceptance, then rechecks owner,
+Session/version and the complete source digest inside the same transaction as
+the deterministic user message, command applied state, events and immutable
+receipt. Unknown/legacy/foreign evidence, changed payload/source, cancellation,
+archive and collisions do not enqueue or repair. Existing applied receipts are
+revalidated idempotently without another Host call. No run state, canonical
+assistant message, native log/admission, Goal, lease, usage or cost is changed.
+
+The new private receipt table stores only IDs/hashes and source/observation
+metadata. Update, replace and direct deletion refuse. Parent run/command or
+conversation deletion removes it through existing foreign-key cascades. The
+conversation-deletion regression initially exposed an overbroad immutable-delete
+guard; the corrected guard preserves owned parent deletion without allowing
+standalone receipt deletion. The initial Node direct-TS test also exposed an
+unsupported constructor parameter property; explicit fields fix it without
+changing runtime semantics.
+
+Six transaction tests pass, including concurrent repair, source mutation during
+the Host read, rollback and owner deletion. Dispatcher tests pass 16/16 with
+transaction tests. A new actual SDK lost-ACK/Host-death case repairs acceptance
+through the original terminal Dispatcher consumer, leaves one interrupted run
+and zero canonical answers, then reopens the database and confirms no duplicate
+message/receipt or Host query. Native log/admission bytes and model calls stay
+unchanged. Four real SDK historical cases pass 4/4 (59.15 seconds).
+
+`GENERAL_AGENT_ORDINARY_STEERING_RECONCILIATION_ENABLED=false` is a separate
+opt-in, requiring ordinary steering/recovery and the matching bound-history
+Host. Cancelled parents never enter the consumer; unavailable/unknown evidence
+stays pending without legacy fallback. The option remains false in examples and
+production has not changed. Gateway Windows build, root 32/32, Windows root
+build, public regressions 6/6 and Adapter 478/478 pass. Final Gateway and 37-case
+SDK results are appended only after their processes finish. Acceptance repair
+does not complete all-command canonical answer recovery, unknown money, rollout
+or the remaining capability inventory.
+
+Final bound-acceptance verification: complete actual local SDK 37/37, zero
+failures or skips (508.16 seconds), including version-1/version-2 continuity,
+terminal Dispatcher acceptance repair and reopened-database idempotency. Final
+Gateway 1182 total, 1176 passed, six existing skips, zero failures (140.02
+seconds); Adapter 478/478, root 32/32, public-review regressions 6/6, Gateway and
+Windows root builds plus BRAIN links pass. All providers are local scripted
+endpoints. The acceptance consumer and production configuration remain off.
+Final-answer/all-command recovery, unknown usage/fees, real-provider evidence,
+rolling upgrade/rollback, deployed acceptance and the full inventory remain
+required. No existing native reservation, usage or provider outcome is cleared
+by recording acceptance.

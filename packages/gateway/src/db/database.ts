@@ -3,6 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import {installSessionCheckpoints} from '../harness/session-checkpoints.ts';
 import {installTaskWaitInteractions} from '../persistent-tasks/task-wait-schema.ts';
 import {migrateHostDeliveries} from './host-delivery-migration.ts';
+import {installOrdinarySteeringReconciliations} from '../harness/ordinary-steering-reconciliation-schema.ts';
 
 const schemaUrl = new URL('./schema.sql', import.meta.url);
 let savepointSequence = 0;
@@ -11,6 +12,7 @@ export function openProductDatabase(path: string): DatabaseSync {
   const db = new DatabaseSync(path);
   db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=75; PRAGMA foreign_keys=ON;');
   db.exec(readFileSync(schemaUrl, 'utf8'));
+  installOrdinarySteeringReconciliations(db);
   ensureColumn(db,'ga_conversation_goal_controls','dispatch_observer_id','TEXT');
   db.exec(`CREATE TRIGGER IF NOT EXISTS ga_goal_control_observer BEFORE UPDATE ON ga_conversation_goal_controls
     WHEN OLD.state<>'queued' AND NEW.dispatch_observer_id IS NOT OLD.dispatch_observer_id

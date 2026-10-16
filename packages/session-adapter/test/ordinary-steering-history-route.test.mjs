@@ -25,3 +25,11 @@ test('historical Host configuration cannot enable without trusted native and adm
  try{for(const ordinaryInputHistory of [true,{},'enabled',{Session:{create(){}},validateLog(){},extra:true},{Session:{create(){}},validateLog(){}}])assert.throws(()=>apply({}, {ordinaryInputHistory}),/config/);}
  finally{if(previous===undefined)delete process.env.JOT_SESSION_ADAPTER_TOKEN;else process.env.JOT_SESSION_ADAPTER_TOKEN=previous;}
 });
+
+test('bound history endpoint carries protocol 2 and its source digest without promoting legacy requests',async()=>{
+ let calls=0;const sourceHash='a'.repeat(64),handler=createAdapterHandler({token,controller:{prompt:()=>assert.fail('no execution')},ordinarySteeringObservationReader:async args=>{calls++;assert.equal(args.protocol,2);assert.equal(args.expectedSourceSha256,sourceHash);return{protocol:2,source_sha256:sourceHash,execution_authorized:false};}});
+ const request=(body,path='/v1/sessions/session-a/steering-history-v2')=>handler({method:'POST',url:new URL('http://127.0.0.1'+path),headers:{authorization:'Bearer '+token},body});
+ assert.equal((await request({history,source_sha256:sourceHash})).status,200);assert.equal(calls,1);
+ for(const body of [{history},{history,source_sha256:'bad'},{history,source_sha256:sourceHash,action:'repair'}])assert.equal((await request(body)).status,422);
+ assert.equal((await request({history,source_sha256:sourceHash},'/v1/sessions/session-a/steering-history')).status,422);assert.equal(calls,1);
+});

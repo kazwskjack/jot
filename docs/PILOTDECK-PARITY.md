@@ -305,6 +305,14 @@ Client enforces exact request scope and returned observation contracts. Real
 local SDK cases now use this HTTP path rather than test-only file exchange,
 retaining unchanged-byte/call/state checks. The capability defaults absent/off;
 it does not enable replay, automatic ACK repair or historical final publication.
-A future writer must use a separately versioned complete product-source digest
-and atomic idempotent repair checks, not treat current observation IDs/version
-as mutation authority. See the steering plan for remaining gates.
+Acceptance writers require protocol-2 complete product-source binding and atomic
+idempotent repair checks. Legacy protocol-1 observations stay read-only. See the
+steering plan for remaining gates.
+
+An opt-in terminal ordinary acceptance consumer now revalidates complete source
+digests and atomically records the accepted user message, command and immutable
+receipt without replay or canonical final publication. Local actual-SDK Host
+death/lost-ACK tests and reopened-DB retries pass; cancellation, concurrent repair,
+source mutation, rollback and owner deletion have explicit checks. Defaults
+remain off. Final-answer/all-command recovery, unknown fees and deployed parity
+remain separate open gates.

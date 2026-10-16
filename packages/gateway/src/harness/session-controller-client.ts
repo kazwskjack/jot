@@ -1,5 +1,5 @@
 import {normalizeExecutionLease,type ExecutionLease} from '../workbench/execution-lease.ts'
-import {normalizeOrdinaryHistoryScope,validateOrdinarySteeringObservation,type OrdinaryHistoryScope} from './ordinary-steering-observation.ts'
+import {normalizeOrdinaryHistoryScope,validateOrdinarySteeringObservation,validateBoundOrdinarySteeringObservation,type OrdinaryHistoryScope} from './ordinary-steering-observation.ts'
 import { createReadStream } from 'node:fs'
 import { Readable } from 'node:stream'
 
@@ -124,6 +124,10 @@ export class SessionControllerClient {
   async observeSteeringHistory(sessionId:string,input:OrdinaryHistoryScope,signal?:AbortSignal){
     const scope=normalizeOrdinaryHistoryScope(sessionId,input);
     return validateOrdinarySteeringObservation(await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/steering-history`,{history:scope},signal),sessionId,scope);
+  }
+  async observeBoundSteeringHistory(sessionId:string,input:OrdinaryHistoryScope,sourceHash:string,signal?:AbortSignal){
+    const scope=normalizeOrdinaryHistoryScope(sessionId,input);if(typeof sourceHash!=='string'||!/^[a-f0-9]{64}$/.test(sourceHash))throw Error('ordinary_history_contract_invalid');
+    return validateBoundOrdinarySteeringObservation(await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/steering-history-v2`,{history:scope,source_sha256:sourceHash},signal),sessionId,scope,sourceHash);
   }
 
   async steerOriginal(sessionId:string,requestId:string,text:string,execution:OrdinarySteeringExecution,signal?:AbortSignal){

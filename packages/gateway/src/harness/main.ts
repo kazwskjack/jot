@@ -13,6 +13,7 @@ import { SessionBindingRepository } from './session-bindings.ts';
 import { AttachmentResolver } from '../artifacts/resolver.ts';
 import { parseWorkerConcurrency, runWorkerPool } from './worker-pool.ts';
 import { SessionCommandDispatcher } from './command-dispatcher.ts';
+import {OrdinarySteeringReconciler} from './ordinary-steering-reconciliation.ts';
 import { TaskCompletionPump } from './task-completion-pump.ts';
 import { ChannelDeliveryService } from '../channels/delivery.ts';
 import {NotificationArchiveMaintenance,notificationArchiveMaintenanceConfig} from '../channels/notification-maintenance.ts';
@@ -77,6 +78,9 @@ const runner = new OfficialSessionRunner(sessionClient, {
 });
 const ordinarySteeringEnabled=process.env.GENERAL_AGENT_ORDINARY_STEERING_ENABLED==='true';
 if(ordinarySteeringEnabled&&process.env.GENERAL_AGENT_ORDINARY_INPUT_RECOVERY_ENABLED!=='true')throw Error('ordinary_steering_requires_original_input_recovery');
+const ordinaryReconciliationEnabled=process.env.GENERAL_AGENT_ORDINARY_STEERING_RECONCILIATION_ENABLED==='true';
+if(ordinaryReconciliationEnabled&&!ordinarySteeringEnabled)throw Error('ordinary_reconciliation_requires_steering');
+const ordinaryReconciler=ordinaryReconciliationEnabled?new OrdinarySteeringReconciler(db,events,sessionClient):undefined;
 const worker = new HarnessWorker(db, coordinator, runner, {
   workerId, leaseMs,
   ordinaryInputRecoveryEnabled:process.env.GENERAL_AGENT_ORDINARY_INPUT_RECOVERY_ENABLED==='true',ordinarySteeringEnabled,
@@ -109,7 +113,7 @@ const commands = new SessionCommandDispatcher(db,events,sessionClient,runId=>wor
   assertRunActive(runId) {workbench.assertRunActive(runId); persistentTasks.assertRunActive(runId);},
   contextForRun: runId => workbench.contextForRun(runId),
   inheritChatRun: (owner, original, next) => workbench.inheritChatRun(owner, original, next),
-},ordinarySteeringEnabled?{currentExecutionFor:runId=>worker.readyExecutionFor(runId)}:undefined);
+},ordinarySteeringEnabled?{currentExecutionFor:runId=>worker.readyExecutionFor(runId),...(ordinaryReconciler?{reconcileHistorical:(runId:string,sessionId:string,commandId:string)=>ordinaryReconciler.reconcile(runId,sessionId,commandId,AbortSignal.timeout(20000))}:{})}:undefined);
 const commandLoop = async()=>{
  while(!stopping){
   try{await commands.processNext()}catch{process.stderr.write('session_command_dispatch_retry\n')}

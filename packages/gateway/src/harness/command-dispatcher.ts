@@ -7,7 +7,7 @@ import {withImmediateTransaction} from '../db/database.ts';
 import type {EventStore} from '../events/event-store.ts';
 import {RunRepository} from '../runs/repository.ts';
 
-interface OrdinarySteering {currentExecutionFor(runId:string):Readonly<{sessionRef:string;ordinary:boolean;executionLease:ExecutionLease}>|undefined;}
+interface OrdinarySteering {currentExecutionFor(runId:string):Readonly<{sessionRef:string;ordinary:boolean;executionLease:ExecutionLease}>|undefined;reconcileHistorical?(runId:string,sessionId:string,commandId:string):Promise<boolean>;}
 interface ControlClient {
  steerOriginal?(sessionId:string,commandId:string,text:string,proof:OrdinarySteeringExecution,signal?:AbortSignal):Promise<Record<string,unknown>>;
  prompt(sessionId:string,requestId:string,text:string,mode:'steer',signal?:AbortSignal):Promise<Record<string,unknown>>;
@@ -22,7 +22,7 @@ interface ExecutionGuard {
 export class SessionCommandDispatcher {
  private db:DatabaseSync;private events:EventStore;private client:ControlClient;private ready:(runId:string)=>boolean;
  private executionGuard:ExecutionGuard|undefined;private ordinarySteering:OrdinarySteering|undefined;
- constructor(db:DatabaseSync,events:EventStore,client:ControlClient,ready:(runId:string)=>boolean,executionGuard?:ExecutionGuard,ordinarySteering?:OrdinarySteering){if(ordinarySteering&&typeof ordinarySteering.currentExecutionFor!=='function')throw Error('ordinary_steering_dispatch_config_invalid');this.ordinarySteering=ordinarySteering;this.db=db;this.events=events;this.client=client;this.ready=ready;this.executionGuard=executionGuard;}
+ constructor(db:DatabaseSync,events:EventStore,client:ControlClient,ready:(runId:string)=>boolean,executionGuard?:ExecutionGuard,ordinarySteering?:OrdinarySteering){if(ordinarySteering&&(typeof ordinarySteering.currentExecutionFor!=='function'||ordinarySteering.reconcileHistorical!==undefined&&typeof ordinarySteering.reconcileHistorical!=='function'))throw Error('ordinary_steering_dispatch_config_invalid');this.ordinarySteering=ordinarySteering;this.db=db;this.events=events;this.client=client;this.ready=ready;this.executionGuard=executionGuard;}
  async processNext():Promise<boolean>{
   const rows=this.db.prepare(`SELECT c.*,r.status run_status,r.conversation_id,r.input_message_id,
    r.created_at run_created_at,r.version,b.session_id,l.expires_at
@@ -34,7 +34,10 @@ export class SessionCommandDispatcher {
    const terminal=['succeeded','failed','cancelled','interrupted','partial'].includes(row.run_status);
    if(terminal){
     if(row.kind==='steer'){
-     if(this.ordinarySteering&&this.isOrdinaryParent(row.run_id))continue; // Historical acceptance needs separate reconciliation, never speculative fallback.
+     if(this.ordinarySteering&&this.isOrdinaryParent(row.run_id)){
+      if(row.run_status!=='cancelled'&&typeof row.session_id==='string'&&await this.ordinarySteering.reconcileHistorical?.(row.run_id,row.session_id,row.id))return true;
+      continue; // Never convert absent/unknown acceptance into a fallback run.
+     }
      const p=JSON.parse(row.payload_json);const owner=this.db.prepare('SELECT owner_id FROM ga_conversations WHERE id=?').get(row.conversation_id) as {owner_id:string};
      try {
       withImmediateTransaction(this.db,()=>{

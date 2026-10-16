@@ -26,12 +26,13 @@ function validateSource(row,scope){
 export function createOrdinarySteeringObservationReader({bridge,persistence,admissions,agents,sessions,Session,validateLog,ordinaryPresets}){
  if(typeof bridge?.request!=='function'||typeof persistence?.open!=='function'||admissions?.entryInspectionProtocol!==1||typeof admissions.read!=='function'||typeof admissions.inspectEntry!=='function'
   ||typeof agents?.get!=='function'||typeof sessions?.get!=='function'||typeof Session?.create!=='function'||typeof validateLog!=='function'||!(ordinaryPresets instanceof Set)||!ordinaryPresets.size)fail();
- return async({scope:input,signal})=>{
+ return async({scope:input,signal,protocol=1,expectedSourceSha256})=>{
+  if(![1,2].includes(protocol)||protocol===1&&expectedSourceSha256!==undefined||protocol===2&&!hash(expectedSourceSha256))fail();
   const scope=normalizeOrdinaryHistoryScope(input);if(!signal)fail();
   const check=()=>{signal.throwIfAborted();if(agents.get(scope.session_ref)!==undefined||sessions.get(scope.session_ref)!==undefined)fail();};
   const readSource=async()=>{check();const value=await bridge.request('ordinary-steering-history',{runId:scope.run_id,sessionRef:scope.session_ref},
    {owner_id:scope.owner_id,conversation_id:scope.conversation_id,command_id:scope.command_id,expected_run_version:scope.expected_run_version},signal);check();return validateSource(value?.history,scope);};
-  const source=await readSource();
+  const source=await readSource(),sourceHash=digest(canonical(source));if(protocol===2&&sourceHash!==expectedSourceSha256)fail();
   const readRaw=async()=>{
    check();const handle=await persistence.open(scope.session_ref,'read',{signal});
    try{check();const read=await handle.read(0,undefined,{signal});check();return structuredClone({header:handle.header,inheritedEventCount:handle.inheritedEventCount,events:read.events});}
@@ -79,7 +80,7 @@ export function createOrdinarySteeringObservationReader({bridge,persistence,admi
    if(text&&!events.some(e=>e.type==='user/message'&&e.seq>entered.seq&&e.seq<final.seq&&e.data?.source?.kind==='user'&&![scope.run_id,scope.command_id].includes(e.data.source.rpcId)))answer={answer_sha256:digest(text),answer_seq:final.seq,turn_end_seq:lastEnd.seq};
   }
   if(!isDeepStrictEqual(await readRaw(),raw)||!isDeepStrictEqual(await readSource(),source))fail();check();
-  return{protocol:1,kind:'ordinary_steer_observation',run_id:scope.run_id,command_id:scope.command_id,session_id:scope.session_ref,run_version:source.run_version,run_status:source.run_status,command_status:source.command_status,
+  return{protocol,...(protocol===2?{source_sha256:sourceHash}:{}),kind:'ordinary_steer_observation',run_id:scope.run_id,command_id:scope.command_id,session_id:scope.session_ref,run_version:source.run_version,run_status:source.run_status,command_status:source.command_status,
    native_state:entered?'committed':command?'admitted':'unproven',original_native_message_id:root?.id??null,command_native_message_id:command?.id??null,
    profile_fingerprint:profile,raw_event_count:events.length,raw_sha256:digest(canonical(raw)),original_entry:originalEntry,command_entry:commandEntry,answer,execution_authorized:false};
  };

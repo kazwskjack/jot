@@ -1,5 +1,8 @@
+import {createHash} from 'node:crypto';
 export type OrdinaryHistoryScope=Readonly<{owner_id:string;conversation_id:string;run_id:string;command_id:string;expected_run_version:number}>;
 export type OrdinarySteeringObservation={protocol:1;kind:'ordinary_steer_observation';run_id:string;command_id:string;session_id:string;run_version:number;run_status:string;command_status:string;native_state:'unproven'|'admitted'|'committed';original_native_message_id:string|null;command_native_message_id:string|null;profile_fingerprint:string|null;raw_event_count:number;raw_sha256:string;original_entry:'reserved'|'unreserved'|null;command_entry:'reserved'|'unreserved'|null;answer:{answer_sha256:string;answer_seq:number;turn_end_seq:number}|null;execution_authorized:false};
+export type BoundOrdinarySteeringObservation=Omit<OrdinarySteeringObservation,'protocol'>&{protocol:2;source_sha256:string};
+export function ordinaryHistorySourceSha256(value:unknown):string{return createHash('sha256').update(JSON.stringify(value,(_k,x)=>x&&typeof x==='object'&&!Array.isArray(x)?Object.fromEntries(Object.keys(x).sort().map(k=>[k,x[k]])):x)).digest('hex');}
 const valid=(v:unknown):v is string=>typeof v==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(v);
 const hash=(v:unknown):v is string=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v);
 function invalid():never{throw Error('ordinary_history_contract_invalid');}
@@ -26,4 +29,9 @@ export function validateOrdinarySteeringObservation(value:unknown,sessionId:stri
   if(Object.keys(answer).sort().join(',')!=='answer_seq,answer_sha256,turn_end_seq'||!hash(answer.answer_sha256)||!Number.isSafeInteger(answer.answer_seq)||Number(answer.answer_seq)<0||!Number.isSafeInteger(answer.turn_end_seq)||!(Number(answer.answer_seq)<Number(answer.turn_end_seq)&&Number(answer.turn_end_seq)<Number(row.raw_event_count)))invalid();
  }
  return structuredClone(value) as OrdinarySteeringObservation;
+}
+export function validateBoundOrdinarySteeringObservation(value:unknown,sessionId:string,scope:OrdinaryHistoryScope,sourceHash:string):BoundOrdinarySteeringObservation{
+ if(!value||typeof value!=='object'||Array.isArray(value)||!hash(sourceHash))invalid();const {source_sha256,protocol,...base}=value as Record<string,unknown>;
+ if(protocol!==2||source_sha256!==sourceHash)invalid();validateOrdinarySteeringObservation({...base,protocol:1},sessionId,scope);
+ return structuredClone(value) as BoundOrdinarySteeringObservation;
 }
