@@ -555,7 +555,12 @@ signals are deduplicated without creating recursive work. Every receipt retains
 `execution_authorized:false`. Explicit enable now prepares one fixed, unscheduled
 persistent task and budget identity; pause/stop and later enable reuse it. Its
 ordinary run/edit controls are replaced by a discovery-management label. The
-watcher, original occurrence admission, work
+existing Worker maintenance now collects scoped role-chat input metadata and
+immutable workspace file-version metadata into the original signal journal.
+It excludes recorded discovery-derived outputs through original cumulative budget
+lineage, holds unconfirmed producers, and never reads message bodies or blobs.
+Paused policies may accumulate evidence without resuming. This is a bounded
+database collector, not a physical filesystem watcher. Original occurrence admission, work
 cycles and corresponding workbench UI are still being implemented; configuration
 is not a running autonomous task. See the [full implementation and acceptance
 plan](docs/superpowers/plans/2026-10-17-always-on-discovery.md).

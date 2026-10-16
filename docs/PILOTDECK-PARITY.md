@@ -483,3 +483,16 @@ currently refuses all its occurrences until the full admission protocol is ready
 Built UI/BFF verification covers the managed card and lifecycle without any model
 run. Preparation is not an executing discovery loop, a completed work cycle or
 deployed acceptance; all remaining source/admission/DSH/workspace/UI gates remain.
+
+Trusted source ingestion now runs on the existing ready Worker maintenance loop:
+role-bound chat user-input identity metadata and owned immutable file versions
+become deduplicated journal signals. It reads neither message bodies nor file
+blobs and creates no run, lease or model attempt. Recorded output producers are
+checked against original owned cumulative budget scopes; discovery-derived
+outputs in the same project are excluded, including other discovery roles.
+Unknown recorded producers hold their file path's subsequent versions. Direct
+owned versions without a producer are base-file metadata, not proof of human
+authorship. Private inputs from another role/owner are not promoted. Paused
+policies collect without resuming; off/stopped/revoked policies do not collect.
+This does not prove physical watcher coverage, source editing/revision support,
+coalescing/dormancy, transactional occurrence admission or a DSH work cycle.

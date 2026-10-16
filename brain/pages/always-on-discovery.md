@@ -4,7 +4,7 @@ title: Keep project discovery in original DSH task boundaries
 category: decision
 status: active
 created: "2026-10-17T03:43:02"
-updated: "2026-10-17T05:28:43"
+updated: "2026-10-17T05:48:00"
 ---
 
 <!-- compiled_truth -->
@@ -17,6 +17,8 @@ Default policy is off. Discover-only produces proposals; discover-and-work still
 Honor explicit unlimited budgets. Persistent tasks now accept explicit public max_runs:null, with capability-gated UI and an exact internal (unlimited,0) tuple in the original table; finite/default100 are retained. Migration preserves original IDs, counts, states and request keys. Zero alone is not unlimited: tuple guards reject inconsistent writes and the known prior numeric admission guard refuses unsupported new tasks. Full old-worker rollout/rollback still needs acceptance. Changing limits never resets usage or automatically resumes an exhausted/paused task. Model budgets, native Goal, mailbox quotas and physical background capacity remain separate. Null in discovery gate cycle capacity means confirmed unlimited policy, never missing or guessed facts. This prerequisite does not install the discovery pipeline.
 
 The initial pure eligibility module and the opt-in current-Host native observation protocol are implemented. The project activity source adapter combines original scoped SQL and existing workspace facts with the strict authenticated Host client, releasing read transactions before IO and rejecting drift or expired observations. These are non-authorizing source components, not a running discovery feature. Durable owner policy configuration/control API and immutable internal signal storage are also implemented. Saving starts off; role drift revokes effective activity; only explicit owner enable can resume. Original atomic API receipts and immutable business revisions prevent duplicate writes after lost responses. Signals never resume paused/stopped policy and exclude self-generated origins. Original task-budget and Coordinator logical-capacity read observations are implemented without allocating calls, scopes, leases or another scheduler. Exact durable-root usage includes members; unknown and in-flight usage remain unresolved for a new occurrence. These observations are not execution authority or native/hardware readiness. Explicit owner enable now prepares one fixed original task/budget identity atomically with the policy command, with no due time or occurrence. Pause/stop/resume reuse it without resetting the accumulated run count. Generic mutations, timer and legacy occurrence paths are guarded; occurrence admission remains closed until its full protocol is verified. Remaining reconciliation facts, trusted watchers/provenance/coalescing, dormancy/reservation/original occurrence admission, DSH planning/execution/report, isolated workspace/apply, full policy/work-cycle UI, real-provider and deployment acceptance remain incomplete. The source review and entire implementation sequence live in docs/superpowers/plans/2026-10-17-always-on-discovery.md. Full PilotDeck capability scope is unchanged.
+
+Trusted database source ingestion now runs on the existing ready Worker maintenance loop. It journals role-bound human input identity metadata and owned immutable file-version metadata without reading bodies/blobs, creating runs or reserving a model attempt. Original cumulative task budget lineage excludes recorded discovery-derived outputs across the project; unknown producers hold later versions of that path. Direct owned versions without producer records are base metadata, not human-authorship proof. Off/stopped/revoked policies do not collect; paused policies never resume. Bounded drain batches are not task/token caps. Physical filesystem watchers, edited-message revisions, coalescing/dormancy, transactional occurrence reservations/admission and all remaining DSH/work-cycle/apply/UI/provider/rollout acceptance remain open. The SQL occurrence guard is still closed.
 
 
 ## Timeline
@@ -120,5 +122,23 @@ The initial pure eligibility module and the opt-in current-Host native observati
 - time: 2026-10-17T05:28:43
   kind: decision
   summary: Record fixed original task preparation and verified built BFF lifecycle while keeping actual occurrence admission closed and full scope open.
+  source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
+  affects: [always-on-discovery]
+
+- time: 2026-10-17T05:46:52
+  kind: decision
+  summary: Record trusted metadata ingestion on the original Worker while preserving closed occurrence admission and all remaining acceptance.
+  source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
+  affects: [always-on-discovery]
+
+- time: 2026-10-17T05:47:11
+  kind: decision
+  summary: "Source collection uses original typed chat and immutable file metadata only. Task cumulative scope lineage excludes own project discovery outputs; unresolved recorded producers hold later versions, and policy pause or stop never resumes itself. No occurrence grant is enabled."
+  source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
+  affects: [always-on-discovery]
+
+- time: 2026-10-17T05:48:00
+  kind: evidence
+  summary: "Trusted source ingestion validated on real isolated original SQLite/Workbench/chat/budget/maintenance: focused16, full Gateway1424 cases/1417 pass/7 existing skips/0 fail, root32 and local Windows builds pass. Synthetic derived lineage is not SDK/provider acceptance; no new occurrence/run/model attempt or production enablement. Public779-file preflight0; full lifecycle remains incomplete."
   source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
   affects: [always-on-discovery]

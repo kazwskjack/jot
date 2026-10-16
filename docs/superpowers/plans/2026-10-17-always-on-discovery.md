@@ -472,3 +472,61 @@ fixture/schema compatibility failure; the final run retains all original migrati
 and protection assertions. No actual SDK/provider execution, deployment or active
 discovery acceptance is claimed. Run the browser check with
 `node scripts/verify-discovery-task-ui.mjs` after a local root build.
+
+## Trusted database source ingestion milestone
+
+`DiscoverySourceCollector` now supplies actual source metadata to the durable
+signal journal. The existing `maintainWorkbench` lifecycle calls it only after
+execution readiness; there is no new timer, Agent, model call or default policy.
+Internal batches are bounded to 50 source rows per policy and ten policies per
+maintenance pass. These are drain batches, not cycle/token/budget ceilings. A
+round-robin policy cursor wraps; input/file streams interleave; journal identity
+is the deduplication authority. No timestamp or rowid watermark can skip a late
+source. Restart repeats evidence checks without duplicating signals.
+
+Input sources are complete user-message identity metadata on original `chat`
+bindings belonging to the configured role conversation, owner, project and
+workspace. Task/mailbox/native-helper inputs and private inputs in other role
+conversations are not promoted. Message bodies, attachments, OCR and images are
+not read. The current product has no message-edit revision protocol: an input
+identity is version one, not a claim to observe future content edits.
+
+File sources are the original owned immutable `wb_file_versions` metadata,
+including every version in order for a logical path. No blob is read, no project
+directory is created, and no physical filesystem watcher is installed. Unattributed
+owned versions are base-file metadata, not a claim of human authorship. When a
+producer is recorded, the collector validates its original owned run/conversation
+and nonempty budget-scope binding. Any matching discovery task cumulative scope
+in this project excludes the output, including derived/native/helper runs and
+other discovery roles. Invalid or absent recorded-producer lineage is unconfirmed:
+it does not become an external signal and later versions of that path wait too.
+This classification is based on trusted records, never a model-origin boolean.
+
+Source reads, current policy/role checks and journal writes share one bounded
+metadata transaction, with no network, Host call or body/blob hashing under its
+writer lock. Digests/source IDs contain no raw message or path. This is metadata
+evidence, not file-byte integrity verification: the original execution/file APIs
+must still validate content and permissions when needed. A failed journal insert
+rolls back the complete batch. Off/stopped and revoked roles do not collect;
+paused policies can accumulate evidence but cannot resume or execute. Missing
+provenance schemas remain unavailable rather than positive readiness.
+
+The managed-occurrence SQL guard remains closed. Source ingestion alone is not
+coalescing, dormancy, a reservation, idle/budget/capacity authorization, DSH planning,
+execution or accepted reporting. Before opening admission, combine these facts
+with the original policy/role/task/native/budget/capacity authorities and immutable
+reservation inside the original occurrence protocol. Full isolation, reviewed
+apply, policy UI, provider, rollout and production acceptance remain required.
+
+Validation: complete local Gateway 1424 cases, 1417 passed, seven existing/opt-in
+skips, zero failures (158.66 seconds). Eleven source-collector tests plus the
+existing scheduler cases and new lifecycle test pass as a focused 16-case suite.
+They use real isolated SQLite, Workbench file versions, original chat bindings,
+budget scopes and maintenance. Synthetic derived-run lineage is explicitly not
+an executed SDK/provider cycle. Cases cover no default/off/stopped writes,
+repeated ingestion, all file versions across drain batches, role/owner isolation,
+revocation, paused accumulation, derived-output exclusion, unresolved producer
+and later-version holds, complete rollback/retry, and zero new occurrences/runs/
+model attempts during maintenance. Root32 and local Windows Gateway/root builds
+pass. Public6 and 779-file preflight have zero findings; BRAIN CLI links pass.
+No production change, new automation or actual provider run is claimed.

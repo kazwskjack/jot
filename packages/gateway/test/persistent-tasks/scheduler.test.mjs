@@ -11,6 +11,14 @@ const moduleUrl=new URL('../../src/persistent-tasks/scheduler.ts',import.meta.ur
 function directory(){const base=resolve('.test-tmp');mkdirSync(base,{recursive:true});return mkdtempSync(join(base,'workbench-scheduler-'));}
 test('workbench maintenance scheduler is exported',async()=>{const m=await import(moduleUrl).catch(()=>({}));assert.equal(typeof m.maintainWorkbench,'function');});
 
+test('ready maintenance ingests discovery sources on the original lifecycle only',async()=>{
+ const {maintainWorkbench}=await import(moduleUrl);const calls=[];
+ const workbench={resumeDeletions:()=>[],processMailbox:()=>calls.push('mailbox')};
+ const tasks={collectDiscoverySources(){calls.push('sources');return {policies:1,recorded:2};},async tick(){calls.push('tick');return {};}};
+ await maintainWorkbench(workbench,tasks,false);assert.deepEqual(calls,[]);
+ const result=await maintainWorkbench(workbench,tasks,true);assert.deepEqual(calls,['sources','mailbox','tick']);assert.deepEqual(result.discovery_sources,{policies:1,recorded:2});
+});
+
 test('completed memory sources are collected while model execution is unavailable',async()=>{
  const {maintainWorkbench}=await import(moduleUrl);const calls=[];
  const workbench={resumeDeletions(){calls.push('cleanup');return [];},reconcileBudgets(){calls.push('budgets');},collectMemoryCaptures(){calls.push('capture');return {ready:1,skipped:0};},processMailbox(){throw new Error('must not execute');}};

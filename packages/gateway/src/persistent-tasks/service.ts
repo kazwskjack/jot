@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {configuredTaskRunLimit,storedTaskRunLimit,taskRunLimitExhausted,encodedTaskRunLimit,installTaskRunLimits} from './run-limit.ts';
 import {installDiscoveryTaskBindings} from '../always-on/task-binding.ts';
+import {DiscoveryPolicies} from '../always-on/discovery-policy.ts';
+import {DiscoverySourceCollector} from '../always-on/source-collector.ts';
 import { existsSync, lstatSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
@@ -72,6 +74,7 @@ export class PersistentTaskService {
   private readonly monitorFailures:TaskMonitorFailures;
   private readonly replyPolicies:TaskReplyPolicies;
   private notificationCacheCursor:string|undefined;
+  private discoverySourceCursor='';
   private ticking = false;
   constructor(db: DatabaseSync, workbench: Workbench, options: PersistentTaskOptions = {}) {
     this.db = db; this.workbench = workbench; this.options = options;
@@ -415,6 +418,21 @@ export class PersistentTaskService {
       this.maintainNotifications();
       return { dispatched,checked };
     } finally { this.ticking=false; }
+  }
+  /** Existing Worker maintenance only; creates signals, never occurrences/runs. */
+  collectDiscoverySources(){
+    // Thin configured-task hosts have no local role table and cannot own discovery.
+    if(!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_agents'").get())return {policies:0,recorded:0,pending:0};
+    const rows=this.db.prepare(`SELECT p.* FROM wb_discovery_policies p
+      JOIN wb_agents a ON a.agent_id=p.agent_id AND a.owner_id=p.owner_id
+      JOIN ga_projects project ON project.id=p.project_id AND project.owner_id=p.owner_id
+      JOIN ga_conversations c ON c.id=a.conversation_id AND c.owner_id=p.owner_id AND c.project_id=p.project_id AND c.workspace_id=p.workspace_id
+      WHERE p.state IN ('active','paused') AND a.status<>'deleted' AND p.policy_id>? ORDER BY p.policy_id LIMIT 10`).all(this.discoverySourceCursor) as Row[];
+    if(!rows.length){this.discoverySourceCursor='';return {policies:0,recorded:0,pending:0};}
+    const collector=new DiscoverySourceCollector(this.db,new DiscoveryPolicies(this.db));let recorded=0,pending=0;
+    for(const row of rows){const result=collector.collect(row.owner_id,{project_id:row.project_id,workspace_id:row.workspace_id,agent_id:row.agent_id});recorded+=result.recorded;if(!result.caught_up)pending++;}
+    this.discoverySourceCursor=String(rows.at(-1)!.policy_id);
+    return {policies:rows.length,recorded,pending};
   }
   maintainNotifications(){
     const signals=this.notificationSignals.maintain();
