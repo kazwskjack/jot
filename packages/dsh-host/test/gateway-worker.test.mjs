@@ -26,20 +26,28 @@ function executionReceipt(value){
 const userTexts=input=>input.messages.filter(message=>message.role==='user').flatMap(message=>typeof message.content==='string'?[message.content]:(message.content??[]).filter(part=>part.type==='text').map(part=>part.text));
 const occurrences=(text,part)=>text.split(part).length-1;
 
-async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=false,automatic=false,unlimited=false}={}){
- role ||= persistent;
+async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=false,automatic=false,unlimited=false,discovery=false,noPlan=false}={}){
+ persistent ||= discovery; complete ||= discovery; unlimited ||= discovery; role ||= persistent;
  const {buildServer}=await import('../../gateway/src/server.ts');
  const root=await mkdtemp(join(tmpdir(),'jot-gateway-host-')),home=join(root,'home'),workspace=join(root,'workspace');await mkdir(workspace);
- let host,worker,service,succeeded=false;const requests=[];
+ let host,worker,service,succeeded=false,modelFailure;const requests=[];
  const modelKey='sk-'+randomBytes(32).toString('hex'),adapterToken=randomBytes(32).toString('hex'),internalToken=randomBytes(32).toString('hex'),csrfToken=randomBytes(32).toString('hex');
  const model=createServer(async(req,res)=>{try{
   const chunks=[];for await(const chunk of req)chunks.push(chunk);const input=JSON.parse(Buffer.concat(chunks).toString());
   assert.equal(req.method,'POST');assert.match(req.url,/\/messages$/);assert.equal(req.headers['x-api-key'],modelKey);
   requests.push(input);const ordinal=requests.length;res.writeHead(200,{'content-type':'text/event-stream','cache-control':'no-cache'});
   let operation='tasks.propose',argumentsValue={intent:complete?'complete':automatic&&ordinal===1?'continue':resume&&ordinal===2?'wait_approval':'wait_user',summary:ordinal===2?'Please review the next step.':'Please confirm the next step.'};
-  if(complete&&ordinal===1){operation='files.write';argumentsValue={path:'acceptance.md',content:'ACCEPTANCE-OK',expected_version:0};}
-  if(complete&&ordinal===2){operation='tasks.upsert';const evidence=executionReceipt(input.messages);assert.ok(evidence,'the model must consume a real file operation receipt');argumentsValue={title:'Write the acceptance file',acceptance:'acceptance.md contains exactly ACCEPTANCE-OK.',status:'completed',evidence:[evidence]};}
-  if(complete&&ordinal===3)argumentsValue.files=[{path:'acceptance.md',description:'Reviewed report'}];
+  if(complete&&!discovery&&ordinal===1){operation='files.write';argumentsValue={path:'acceptance.md',content:'ACCEPTANCE-OK',expected_version:0};}
+  if(complete&&!discovery&&ordinal===2){operation='tasks.upsert';const evidence=executionReceipt(input.messages);assert.ok(evidence,'the model must consume a real file operation receipt');argumentsValue={title:'Write the acceptance file',acceptance:'acceptance.md contains exactly ACCEPTANCE-OK.',status:'completed',evidence:[evidence]};}
+  if(complete&&!discovery&&ordinal===3)argumentsValue.files=[{path:'acceptance.md',description:'Reviewed report'}];
+  if(discovery){
+   const source=executionReceipt(input.messages);
+   const actions=[['discovery.context',{}],['discovery.source',{revision:1}],['tasks.upsert',{title:'Inspect discovery source',acceptance:'Use the pinned source to support a proposal.',status:'completed',evidence:source?[source]:[]}],
+    ['discovery.plan',{summary:'Clarify the source',rationale:'The inspected source supports a wording improvement.',changes:[{path:'source.md',description:'Clarify wording',steps:['Review wording'],verification:['Compare with the pinned source']}],evidence:source?[source]:[]}],
+    ['discovery.report',{outcome:'proposals',summary:'One source-backed proposal for review.',limitations:[],plan_ids:[],evidence:source?[source]:[]}],['tasks.propose',{intent:'complete',summary:'Review the recorded discovery report.'}]];
+   if(noPlan){actions.splice(3,1);actions[2][1].acceptance='Inspect the pinned source and state supported conclusions.';actions[3][1].outcome='no_plan';actions[3][1].summary='No supported improvement in the inspected source.';}
+   assert.ok(ordinal<=actions.length,'discovery must not loop past its six synthetic responses');[operation,argumentsValue]=actions[ordinal-1];
+  }
   const toolEvents=persistent&&!(automatic&&ordinal===2)?[
    {type:'content_block_start',index:1,content_block:{type:'tool_use',id:'synthetic-wait-call-'+ordinal,name:'jot_workspace',input:{operation,arguments_json:JSON.stringify(argumentsValue)}}},
    {type:'content_block_stop',index:1},
@@ -53,7 +61,7 @@ async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=
    {type:'message_delta',delta:{stop_reason:toolEvents.length?'tool_use':'end_turn'},usage:{output_tokens:1}},
    {type:'message_stop'},
   ])res.write('event: '+event.type+'\ndata: '+JSON.stringify(event)+'\n\n');res.end();
- }catch{res.writeHead(500);res.end('synthetic_protocol_request_rejected');}});
+ }catch(error){modelFailure=error;if(!res.headersSent)res.writeHead(500);res.end('synthetic_protocol_request_rejected');}});
  const modelUrl=await listen(model);
  const route={provider:'deepseek-official',model:'deepseek-flash',revision:'synthetic-rates-1',context_window:1000000,max_output_tokens:256000,rates:{input:1,output:1,cache_read:1,cache_write:1}};
  const policy={revision:1,admission_route:{provider:route.provider,model:route.model},routes:[route],limits:Object.fromEntries(['owner_daily','project_daily','agent_daily','task_total','occurrence','chat_root','mailbox_thread'].map(key=>[key,{tokens:10000000,nano_usd:null,model_calls:100}]))};
@@ -61,7 +69,7 @@ async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=
   service=await buildServer({databasePath:join(root,'gateway.db'),uploadRoot:join(root,'files'),workbenchRoot:join(root,'workspaces'),templateRoot:fileURLToPath(new URL('../../gateway/file-engine/templates',import.meta.url)),workspaces:['jot'],internalChannelToken:internalToken,csrfToken,allowedOrigins:['https://fixture.invalid'],...(role?{modelBudgetPolicy:policy,workbenchExecutionReady:true}:{})});
   await service.app.listen({host:'127.0.0.1',port:0});const gatewayUrl='http://127.0.0.1:'+service.app.server.address().port;
   const prepared=await createHostProfile({home,...(role?{workbench:{provider:route.provider,model:route.model,origin:gatewayUrl}}:{})}),port=await freePort(),patchPath=join(prepared.directory,'cordis.patch.yml');
-  let patch=await readFile(patchPath,'utf8');patch=patch.replace('"port": 18841','"port": '+port).replace('http://127.0.0.1:18831',gatewayUrl).replace('"jotHostReady"','"jotHostReady", "jotHostInspectionReady"');
+  let patch=await readFile(patchPath,'utf8');patch=patch.replace('"port": 18841','"port": '+port+(discovery?', "nativeIdleObservation": true':'')).replace('http://127.0.0.1:18831',gatewayUrl).replace('"jotHostReady"','"jotHostReady", "jotHostInspectionReady"');
   const inspection={insert:[{id:'jot-host-inspection',name:pathToFileURL(fileURLToPath(new URL('./inspect-host-plugin.mjs',import.meta.url))).href,config:{receipt:join(root,'composition.json'),sessionPrefix:'jot-host-acceptance-'}}]};
   patch=patch.trim().replace(/\]$/,', '+JSON.stringify({id:'llm-deepseek',config:{baseURL:modelUrl,apiKeyEnv:'DEEPSEEK_API_KEY',reasoningEffort:'high'}})+', '+JSON.stringify(inspection)+']');await writeFile(patchPath,patch);
   host=launch([join(runtime,'dsh/lib/bin.js'),'--profile','jot','--host','127.0.0.1','--port','0','--no-open'],workspace,{...cleanEnv(),DSH_HOME:home,DSH_TELEMETRY_DISABLED:'1',JOT_SESSION_ADAPTER_TOKEN:adapterToken,GENERAL_AGENT_INTERNAL_CHANNEL_TOKEN:internalToken,DEEPSEEK_API_KEY:modelKey});
@@ -70,16 +78,39 @@ async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=
   const tokenFile=join(root,'adapter.token');await writeFile(tokenFile,adapterToken,{mode:0o600});
   const policyFile=join(root,'budget-policy.json');if(role)await writeFile(policyFile,JSON.stringify(policy));
   const headers={'x-user-id':'acceptance-owner','content-type':'application/json','x-csrf-token':csrfToken,origin:'https://fixture.invalid','idempotency-key':'acceptance-create'};
-  let conversation_id,messageUrl,messageBody;
-  if(role){const response=await fetch(gatewayUrl+'/v1/agents',{method:'POST',headers,body:JSON.stringify({name:'Acceptance role',workspace_id:'jot',instructions:'Reply clearly using the provided evidence.'})});assert.equal(response.status,201);const agent=await response.json();conversation_id=agent.conversation_id;messageUrl='/v1/agents/'+agent.agent_id+'/messages';messageBody={client_message_id:'acceptance-one',text:'Reply with the single word ACCEPTANCE-OK.'};
-   if(persistent){const created=await fetch(gatewayUrl+'/v1/persistent-tasks',{method:'POST',headers:{...headers,'idempotency-key':'acceptance-task'},body:JSON.stringify({title:'Wait for confirmation',agent_id:agent.agent_id,objective:complete?'Write acceptance.md containing ACCEPTANCE-OK and request owner acceptance.':'Ask the user to confirm before any further work.',trigger:{kind:'once',run_at:'2099-01-01T00:00:00Z'},budget:{max_runs:unlimited?null:1}})});const task=await created.json();assert.equal(created.status,201,JSON.stringify(task));messageUrl='/v1/persistent-tasks/'+task.task_id+'/run-now';messageBody={};}
+  let conversation_id,messageUrl,messageBody,roleAgent,discoveryController,discoveryScope;
+  if(role){const response=await fetch(gatewayUrl+'/v1/agents',{method:'POST',headers,body:JSON.stringify({name:'Acceptance role',workspace_id:'jot',instructions:'Reply clearly using the provided evidence.'})});assert.equal(response.status,201);const agent=await response.json();roleAgent=agent;conversation_id=agent.conversation_id;messageUrl='/v1/agents/'+agent.agent_id+'/messages';messageBody={client_message_id:'acceptance-one',text:'Reply with the single word ACCEPTANCE-OK.'};
+   if(persistent&&!discovery){const created=await fetch(gatewayUrl+'/v1/persistent-tasks',{method:'POST',headers:{...headers,'idempotency-key':'acceptance-task'},body:JSON.stringify({title:'Wait for confirmation',agent_id:agent.agent_id,objective:complete?'Write acceptance.md containing ACCEPTANCE-OK and request owner acceptance.':'Ask the user to confirm before any further work.',trigger:{kind:'once',run_at:'2099-01-01T00:00:00Z'},budget:{max_runs:unlimited?null:1}})});const task=await created.json();assert.equal(created.status,201,JSON.stringify(task));messageUrl='/v1/persistent-tasks/'+task.task_id+'/run-now';messageBody={};}
   }
   else{const conversation=await fetch(gatewayUrl+'/v1/conversations',{method:'POST',headers,body:JSON.stringify({title:'Synthetic local model acceptance',workspace_id:'jot',model:{provider:'deepseek-official',model:'deepseek-flash'}})});assert.equal(conversation.status,201);({conversation_id}=await conversation.json());messageUrl='/v1/conversations/'+conversation_id+'/messages';messageBody={client_message_id:'acceptance-one',content:[{type:'text',text:'Reply with the single word ACCEPTANCE-OK.'}]};}
+  if(discovery){
+   const {SessionControllerClient}=await import('../../gateway/src/harness/session-controller-client.ts');
+   const {ProjectActivityObserver}=await import('../../gateway/src/always-on/project-activity.ts');
+   const {DiscoveryAdmissionController}=await import('../../gateway/src/always-on/admission.ts');
+   const {DiscoveryPolicies}=await import('../../gateway/src/always-on/discovery-policy.ts');
+   const {WorkbenchBudgetPolicy}=await import('../../gateway/src/workbench/model-budget-policy.ts');
+   const {HarnessCoordinator}=await import('../../gateway/src/harness/coordinator.ts');
+   const client=new SessionControllerClient(adapterUrl,adapterToken),roleSession='discovery-idle-role';
+   await client.create(roleSession,workspace,'jot-general');assert.equal(requests.length,0,'idle role setup must not call the model');
+   service.db.prepare('INSERT INTO ga_harness_session_bindings VALUES(?,?,?,?,?)').run(roleAgent.conversation_id,'acceptance-owner',roleSession,new Date().toISOString(),new Date().toISOString());
+   assert.equal((await client.nativeIdleObservationReadiness()).ready,true);assert.equal((await client.observeNativeIdle(roleSession)).native_idle,'idle');
+   service.workbench.writeFile('acceptance-owner','jot',{project_id:roleAgent.project_id,path:'source.md',content:'Discovery source observed for ACCEPTANCE-OK.',expected_version:0});
+   const policyUrl=gatewayUrl+'/v1/agents/'+roleAgent.agent_id+'/discovery-policy';
+   const saved=await fetch(policyUrl,{method:'PATCH',headers:{...headers,'idempotency-key':'discovery-save'},body:JSON.stringify({expected_version:0,expected_role_version:1,expected_role_epoch:1,mode:'discover_only',cooldown_ms:0,recent_input_ms:0,max_cycles:null})});assert.equal(saved.status,200,await saved.clone().text());
+   const enabled=await fetch(policyUrl+'/control',{method:'POST',headers:{...headers,'idempotency-key':'discovery-enable'},body:JSON.stringify({action:'enable',expected_version:1,expected_role_version:1,expected_role_epoch:1})});assert.equal(enabled.status,200,await enabled.clone().text());
+   discoveryScope={project_id:roleAgent.project_id,workspace_id:'jot',agent_id:roleAgent.agent_id};
+   discoveryController=new DiscoveryAdmissionController({db:service.db,workbench:service.workbench,tasks:service.persistentTasks,policies:new DiscoveryPolicies(service.db),
+    activity:new ProjectActivityObserver({db:service.db,workbench:service.workbench,native:client,maxAgeMs:5000}),coordinator:new HarnessCoordinator(service.db,service.runs,service.events),budgetPolicy:new WorkbenchBudgetPolicy(service.db,policy),maxAgeMs:5000});
+  }
   const postMessage=()=>fetch(gatewayUrl+messageUrl,{method:'POST',headers:{...headers,'idempotency-key':'acceptance-one'},body:JSON.stringify(messageBody)});
-  const posted=await postMessage();assert.equal(posted.status,202);const accepted=await posted.json(),run_id=accepted.run_id;if(persistent)conversation_id=accepted.conversation_id;
-  worker=launch(['--import',new URL('./trace-gateway-fetch.mjs',import.meta.url).href,'--experimental-strip-types',fileURLToPath(new URL('../../gateway/src/harness/main.ts',import.meta.url))],workspace,{...cleanEnv(),JOT_ACCEPTANCE_FETCH_TRACE:join(root,'fetch-status.jsonl'),GENERAL_AGENT_DB:join(root,'gateway.db'),GENERAL_AGENT_FILE_ROOT:join(root,'files'),GENERAL_AGENT_WORKBENCH_ROOT:join(root,'workspaces'),GENERAL_AGENT_WORKSPACES:'jot',GENERAL_AGENT_SESSION_ADAPTER_URL:adapterUrl,GENERAL_AGENT_SESSION_ADAPTER_TOKEN_FILE:tokenFile,GENERAL_AGENT_HARNESS_CWD:workspace,GENERAL_AGENT_DSH_AGENT_PRESET:'jot-general',GENERAL_AGENT_DSH_SESSION_PREFIX:'jot-host-acceptance',GENERAL_AGENT_INTERNAL_CHANNEL_TOKEN:internalToken,GENERAL_AGENT_WORKER_POLL_MS:'250',...(role?{GENERAL_AGENT_MODEL_BUDGET_POLICY_FILE:policyFile,GENERAL_AGENT_WORKBENCH_DSH_AGENT_PRESET:'jot-workbench-budgeted',GENERAL_AGENT_WORKBENCH_EXECUTION_READY:'true',GENERAL_AGENT_WORKER_CONCURRENCY:'2'}:{})});
-  const run=await until(async()=>{assert.equal(worker.terminal(),false,'official gateway worker exited');const current=await (await fetch(gatewayUrl+'/v1/runs/'+run_id,{headers})).json();if(['succeeded','failed','interrupted','waiting_user','waiting_approval'].includes(current.status))return current;return false;});
-  assert.equal(run.status,complete?'waiting_approval':persistent?'waiting_user':'succeeded',JSON.stringify(run));const initialCalls=complete||automatic?3:1;assert.equal(requests.length,initialCalls);assert.equal(requests[0].model,'deepseek-flash');
+  let accepted;
+  if(discovery){const receipt=await discoveryController.admit('acceptance-owner',discoveryScope);assert.equal(receipt.admitted,true,JSON.stringify(receipt));accepted=service.db.prepare('SELECT run_id,conversation_id FROM wb_task_occurrences WHERE occurrence_id=?').get(receipt.occurrence_id);assert.ok(accepted);}
+  else{const posted=await postMessage();assert.equal(posted.status,202);accepted=await posted.json();}
+  const run_id=accepted.run_id;if(persistent)conversation_id=accepted.conversation_id;
+  const startWorker=()=>launch(['--import',new URL('./trace-gateway-fetch.mjs',import.meta.url).href,'--experimental-strip-types',fileURLToPath(new URL('../../gateway/src/harness/main.ts',import.meta.url))],workspace,{...cleanEnv(),JOT_ACCEPTANCE_FETCH_TRACE:join(root,'fetch-status.jsonl'),GENERAL_AGENT_DB:join(root,'gateway.db'),GENERAL_AGENT_FILE_ROOT:join(root,'files'),GENERAL_AGENT_WORKBENCH_ROOT:join(root,'workspaces'),GENERAL_AGENT_WORKSPACES:'jot',GENERAL_AGENT_SESSION_ADAPTER_URL:adapterUrl,GENERAL_AGENT_SESSION_ADAPTER_TOKEN_FILE:tokenFile,GENERAL_AGENT_HARNESS_CWD:workspace,GENERAL_AGENT_DSH_AGENT_PRESET:'jot-general',GENERAL_AGENT_DSH_SESSION_PREFIX:'jot-host-acceptance',GENERAL_AGENT_INTERNAL_CHANNEL_TOKEN:internalToken,GENERAL_AGENT_WORKER_POLL_MS:'250',...(role?{GENERAL_AGENT_MODEL_BUDGET_POLICY_FILE:policyFile,GENERAL_AGENT_WORKBENCH_DSH_AGENT_PRESET:'jot-workbench-budgeted',GENERAL_AGENT_WORKBENCH_EXECUTION_READY:'true',GENERAL_AGENT_WORKER_CONCURRENCY:'2'}:{})});
+  worker=startWorker();
+  const run=await until(async()=>{if(modelFailure)throw modelFailure;assert.equal(worker.terminal(),false,'official gateway worker exited');const current=await (await fetch(gatewayUrl+'/v1/runs/'+run_id,{headers})).json();if(['succeeded','failed','interrupted','waiting_user','waiting_approval'].includes(current.status))return current;return false;});
+  assert.equal(run.status,complete?'waiting_approval':persistent?'waiting_user':'succeeded',JSON.stringify(run));const initialCalls=discovery?(noPlan?5:6):complete||automatic?3:1;assert.equal(requests.length,initialCalls);assert.equal(requests[0].model,'deepseek-flash');
   assert.ok(requests[0].dsh_plugin_packages.packages.some(item=>item.name==='jot-dsh-host-preparation'&&item.version==='0.1.0'));
   const composition=JSON.parse(await readFile(join(root,'composition.json'),'utf8'));
   assert.equal(composition.preset,role?'jot-workbench-budgeted':'jot-general');assert.equal(composition.mounted,true);assert.equal(composition.approval,'ask');assert.equal(composition.permission,'workspace-write');assert.equal(composition.sandbox.workspaceRoot,workspace);
@@ -88,7 +119,7 @@ async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=
   const ended=composition.events.findLast(event=>event.type==='turn/end')?.reason;
   if(persistent){assert.equal(ended.kind,'error');assert.equal(ended.error.message,'workbench_goal_stopped');}
   else assert.equal(ended.kind,'completed');
-  assert.ok(JSON.stringify(requests[0].messages).includes(complete?'Write acceptance.md':persistent?'Ask the user to confirm':'ACCEPTANCE-OK'));
+  assert.ok(JSON.stringify(requests[0].messages).includes(discovery?'discovery_signal_batch':complete?'Write acceptance.md':persistent?'Ask the user to confirm':'ACCEPTANCE-OK'));
   const snapshotResponse=await fetch(gatewayUrl+'/v1/conversations/'+conversation_id+'/snapshot',{headers}),snapshot=await snapshotResponse.json();assert.equal(snapshotResponse.status,200,JSON.stringify(snapshot));assert.ok(Array.isArray(snapshot.messages),'snapshot response must contain messages');
   const replies=snapshot.messages.filter(message=>message.role==='assistant'&&message.status==='complete');assert.equal(replies.length,persistent?0:1);if(!persistent)assert.ok(JSON.stringify(replies[0]).includes('ACCEPTANCE-OK'));
   if(persistent)assert.equal(service.db.prepare("SELECT count(*) n FROM ga_messages WHERE run_id=? AND role='assistant'").get(run_id).n,0);
@@ -96,11 +127,11 @@ async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=
    const response=await fetch(adapterUrl+'/v1/sessions/'+composition.sessionId+'/goal-status',{method:'POST',headers:{authorization:'Bearer '+adapterToken,'content-type':'application/json'},body:'{}'});const observed=await response.json();assert.equal(response.status,200,JSON.stringify(observed));assert.equal(observed.state.goal.phase,'paused');assert.equal(observed.state.goal.activation,'disarmed');assert.equal(observed.state.host_status,'idle');assert.equal(observed.state.task.run_status,complete?'waiting_approval':'waiting_user');
    if(automatic){const changes=composition.events.filter(event=>event.goalRound!==undefined);assert.equal(changes[0].goalRound,0);assert.equal(observed.state.goal.rounds_started,changes[0].goalRound+1);const ends=composition.events.filter(event=>event.type==='turn/end');assert.equal(ends.length,2);assert.equal(ends[0].reason.kind,'completed');assert.equal(service.db.prepare('SELECT count(*) n FROM ga_runs').get().n,1);assert.equal(service.db.prepare('SELECT count(*) n FROM ga_run_commands').get().n,0);}
   }
-  const retry=await postMessage();
-  const retried=await retry.json();assert.equal(retry.status,202,JSON.stringify(retried));assert.equal(retried.run_id,run_id);assert.equal(requests.length,initialCalls);
+  if(discovery){assert.equal((await discoveryController.admit('acceptance-owner',discoveryScope)).admitted,false);assert.equal(service.db.prepare('SELECT count(*) n FROM ga_runs').get().n,1);assert.equal(requests.length,initialCalls);}
+  else{const retry=await postMessage();const retried=await retry.json();assert.equal(retry.status,202,JSON.stringify(retried));assert.equal(retried.run_id,run_id);assert.equal(requests.length,initialCalls);}
   const checkBudget=(runId,calls)=>{const balances=service.modelBudgets.balancesForRun('acceptance-owner',runId);assert.ok(balances.length>0);for(const balance of balances){assert.equal(balance.used.tokens,String(calls*6));assert.equal(balance.used.model_calls,String(calls));assert.equal(balance.held.tokens,'0');assert.equal(balance.held.model_calls,'0');}};
   if(role){const settled=service.db.prepare("SELECT actual_tokens FROM wb_model_budget_attempts WHERE run_id=? AND state='settled'").all(run_id);assert.equal(settled.length,initialCalls);assert.ok(settled.every(value=>Number(value.actual_tokens)===6));assert.equal(service.db.prepare("SELECT count(*) n FROM wb_model_budget_attempts WHERE run_id=? AND state IN ('reserved','in_flight','unknown')").get(run_id).n,0);checkBudget(run_id,initialCalls);}
-  if(complete){
+  if(complete&&!discovery){
    const card=(await (await fetch(gatewayUrl+'/v1/conversations/'+conversation_id+'/interactions',{headers})).json()).items[0];assert.equal(card.purpose,'task_acceptance_review');assert.equal(card.questions.length,1);
    const file=service.db.prepare('SELECT owner_id,workspace_id,project_id,path FROM wb_files WHERE path=?').get('acceptance.md');assert.ok(file);assert.equal(service.workbench.readFile(file.owner_id,file.workspace_id,file.project_id,file.path).content,'ACCEPTANCE-OK');
    assert.equal(service.artifacts.listForRun(run_id,'acceptance-owner').items.length,0);
@@ -125,6 +156,19 @@ async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=
    assert.equal(service.db.prepare('SELECT count(*) n FROM ga_run_artifacts WHERE run_id=?').get(run_id).n,1);
    assert.equal(service.db.prepare('SELECT count(*) n FROM ga_runs').get().n,1);assert.equal(service.db.prepare('SELECT count(*) n FROM wb_task_finalizations').get().n,1);
    const proof=JSON.parse(service.db.prepare('SELECT proof_json FROM wb_task_native_completions').get().proof_json);assert.equal(proof.goal.phase,'complete');assert.equal(proof.goal.activation,'disarmed');assert.equal(proof.checkpoint.session_ref,composition.sessionId);
+  }
+  if(discovery){
+   const report=service.db.prepare('SELECT report_id,payload_sha256,payload_json FROM wb_discovery_reports').get(),plan=service.db.prepare('SELECT plan_id FROM wb_discovery_plans').get();assert.ok(report);if(noPlan)assert.equal(plan,undefined);else assert.ok(plan);
+   assert.deepEqual(JSON.parse(report.payload_json).plan_ids,noPlan?[]:[plan.plan_id]);assert.equal(JSON.parse(report.payload_json).outcome,noPlan?'no_plan':'proposals');assert.deepEqual(JSON.parse(report.payload_json).coverage,{signal_count:1,fully_read:1});
+   const frozen=JSON.parse(service.db.prepare('SELECT snapshot_json FROM wb_task_completion_candidates WHERE run_id=?').get(run_id).snapshot_json);assert.equal(frozen.discovery_report.report_id,report.report_id);assert.equal(frozen.discovery_report.sha256,report.payload_sha256);
+   assert.equal(service.db.prepare('SELECT count(*) n FROM wb_file_write_runs WHERE run_id=?').get(run_id).n,0);assert.equal(service.db.prepare('SELECT count(*) n FROM wb_task_business_certificates').get().n,0);
+   const card=(await (await fetch(gatewayUrl+'/v1/conversations/'+conversation_id+'/interactions',{headers})).json()).items[0];assert.equal(card.purpose,'task_acceptance_review');
+   if(noPlan){await worker.stop();assert.equal(worker.terminal(),true);}
+   const review=await fetch(gatewayUrl+'/v1/interactions/'+card.interaction_id+'/response',{method:'POST',headers:{...headers,'idempotency-key':'accept-discovery'},body:JSON.stringify({expected_version:card.version,answers:card.questions.map(q=>({question_id:q.question_id,selected_option_ids:['accept'],custom_text:''}))})});assert.equal(review.status,202,await review.clone().text());
+   if(noPlan){assert.equal(service.db.prepare('SELECT count(*) n FROM wb_task_business_certificates').get().n,1);assert.equal(service.db.prepare('SELECT count(*) n FROM wb_task_finalizations').get().n,0);const {observeDiscoveryDormancy}=await import('../../gateway/src/always-on/dormancy.ts');assert.equal(observeDiscoveryDormancy(service.db,'acceptance-owner',service.db.prepare('SELECT policy_id FROM wb_discovery_policies').get().policy_id).state,'none','owner review without native publication cannot establish dormancy');worker=startWorker();}
+   await until(async()=>{const result=await (await fetch(gatewayUrl+'/v1/runs/'+run_id,{headers})).json();return result.status==='succeeded';});
+   const delivered=await (await fetch(gatewayUrl+'/v1/conversations/'+conversation_id+'/snapshot',{headers})).json();assert.equal(delivered.messages.filter(m=>m.role==='assistant'&&m.status==='complete').length,1);assert.equal(delivered.artifacts.length,0);checkBudget(run_id,initialCalls);
+   assert.equal(service.workbench.readFile('acceptance-owner','jot',roleAgent.project_id,'source.md').content,'Discovery source observed for ACCEPTANCE-OK.');
   }
   if(resume){
    let parent=run_id,priorGoal;
@@ -162,7 +206,21 @@ async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=
   if(persistent){const task=service.persistentTasks.list('acceptance-owner').items[0];assert.equal(task.budget.max_runs,unlimited?null:1);assert.equal(task.runs_used,1);assert.equal(task.status,unlimited?'active':'budget_exhausted');}
   assert.equal(host.output().includes('entry did not activate'),false);
   const finalSnapshot=await (await fetch(gatewayUrl+'/v1/conversations/'+conversation_id+'/snapshot',{headers})).json();
-  t.diagnostic(JSON.stringify({officialLauncher:true,realGateway:true,realWorker:true,role,persistent,resume,complete,automatic,unlimited,modelTransport:'synthetic local Messages HTTP',modelRequests:requests.length,replyCount:finalSnapshot.messages.filter(message=>message.role==='assistant'&&message.status==='complete').length,initialStatus:run.status,status:finalSnapshot.runs.at(-1).status,production:false}));succeeded=true;
+  t.diagnostic(JSON.stringify({officialLauncher:true,realGateway:true,realWorker:true,role,persistent,resume,complete,automatic,unlimited,discovery,noPlan,modelTransport:'synthetic local Messages HTTP',modelRequests:requests.length,replyCount:finalSnapshot.messages.filter(message=>message.role==='assistant'&&message.status==='complete').length,initialStatus:run.status,status:finalSnapshot.runs.at(-1).status,production:false}));
+  let dormancy;
+  if(noPlan){
+   const beforeTask=service.persistentTasks.list('acceptance-owner').items[0];
+   const {observeDiscoveryDormancy}=await import('../../gateway/src/always-on/dormancy.ts'),policyId=service.db.prepare('SELECT policy_id FROM wb_discovery_policies').get().policy_id;
+   const changes=service.db.prepare('SELECT total_changes() n').get().n;assert.deepEqual(observeDiscoveryDormancy(service.db,'acceptance-owner',policyId),{protocol:1,state:'accepted',revision:1,execution_authorized:false});assert.equal(observeDiscoveryDormancy(service.db,'foreign-owner',policyId).state,'none');assert.equal(service.db.prepare('SELECT total_changes() n').get().n,changes);
+   const sleeping=await discoveryController.admit('acceptance-owner',discoveryScope);assert.equal(sleeping.admitted,false);assert.equal(sleeping.reason,'DORMANT_NO_SIGNAL');
+   await worker.stop();assert.equal(worker.terminal(),true);
+   service.workbench.writeFile('acceptance-owner','jot',{project_id:roleAgent.project_id,path:'source.md',content:'A new owned source revision.',expected_version:1});
+   const awake=await discoveryController.admit('acceptance-owner',discoveryScope);assert.equal(awake.admitted,true,JSON.stringify(awake));
+   const afterTask=service.persistentTasks.list('acceptance-owner').items[0];assert.equal(afterTask.task_id,beforeTask.task_id);assert.equal(afterTask.runs_used,2);assert.equal(requests.length,5);
+   dormancy={dormant_reason:sleeping.reason,woke:awake.admitted,same_task:afterTask.task_id===beforeTask.task_id};
+  }
+  succeeded=true;
+  if(discovery)return {admissions:service.db.prepare('SELECT count(*) n FROM wb_discovery_admissions').get().n,plans:service.db.prepare('SELECT count(*) n FROM wb_discovery_plans').get().n,reports:service.db.prepare('SELECT count(*) n FROM wb_discovery_reports').get().n,source_reads:service.db.prepare('SELECT count(*) n FROM wb_discovery_source_reads').get().n,finalizations:service.db.prepare('SELECT count(*) n FROM wb_task_finalizations').get().n,model_requests:requests.length,...(dormancy??{})};
  }catch(error){await writeFile(join(root,'startup-private.log'),JSON.stringify({host:host?.output(),worker:worker?.output(),modelRequests:requests.length},null,2));throw Error('gateway_host_acceptance_failed; private diagnostics: '+root,{cause:error});}
  finally{await worker?.stop();await host?.stop();if(service){await service.app.close();service.db.close();}model.closeAllConnections();await new Promise(done=>model.close(done));if(succeeded)await rm(root,{recursive:true,force:true});}
 }
@@ -178,3 +236,13 @@ test('the original native Goal driver admits another round without a competing G
 
 test('explicit unlimited task replies keep the same occurrence and native Goal without consuming another task run',{skip:!runtime,timeout:60000},t=>gatewayCase(t,{persistent:true,resume:true,unlimited:true}));
 test('explicit unlimited file task still requires owner acceptance and native Goal completion',{skip:!runtime,timeout:60000},t=>gatewayCase(t,{persistent:true,complete:true,unlimited:true}));
+
+test('official DSH discovery tools produce a source-backed plan and report before original owner acceptance',{skip:!runtime,timeout:80000},async t=>{
+ const proof=await gatewayCase(t,{persistent:true,complete:true,unlimited:true,discovery:true});
+ assert.deepEqual(proof,{admissions:1,plans:1,reports:1,source_reads:1,finalizations:1,model_requests:6});
+});
+
+test('accepted no-plan discovery stays dormant across Worker restart and new source wakes its original task',{skip:!runtime,timeout:100000},async t=>{
+ const proof=await gatewayCase(t,{discovery:true,noPlan:true});
+ assert.deepEqual(proof,{admissions:2,plans:0,reports:1,source_reads:1,finalizations:1,model_requests:5,dormant_reason:'DORMANT_NO_SIGNAL',woke:true,same_task:true});
+});

@@ -525,3 +525,13 @@ review/certificate snapshot. Report storage is not acceptance, no-plan dormancy,
 project application or completion. Dedicated discovery SDK/provider execution,
 accepted dormancy, isolated work/apply, full UI and automatic lifecycle dispatch
 and production/rollout acceptance remain unfinished.
+
+Dedicated local discovery canaries now exercise the official DSH SDK with the
+real Gateway/Worker and a scripted local model, including source-backed proposals,
+original owner review and native completion/publication. Accepted no-plan
+dormancy is derived read-only from these original receipts, not model claims or
+completed status projections. A Worker restart preserves the review/completion
+boundary; unchanged sources stay dormant and a new owned revision can queue the
+same original task again without resetting its budget. Queueing a second cycle
+is not proof it executed. Automatic dispatch, failure/wait recovery, isolated
+work/reviewed apply, full UI and real-provider/production acceptance remain open.

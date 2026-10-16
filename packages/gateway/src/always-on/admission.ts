@@ -9,6 +9,7 @@ import {DiscoveryPolicies} from './discovery-policy.ts';
 import {ProjectActivityObserver} from './project-activity.ts';
 import {DiscoverySourceCollector} from './source-collector.ts';
 import {evaluateDiscoveryGates} from './discovery-gates.ts';
+import {discoveryPredecessorsAccepted,observeDiscoveryDormancy} from './dormancy.ts';
 
 type Scope={project_id:string;workspace_id:string;agent_id:string};
 type Row=Record<string,any>;
@@ -47,10 +48,13 @@ export class DiscoveryAdmissionController{
     const current=this.sources.collect(owner,scope);
     if(!current.caught_up||current.signal_revision!==source.signal_revision)deny('SOURCE_CHANGED');
     const previous=o.db.prepare('SELECT signal_revision FROM wb_discovery_admissions WHERE policy_id=? ORDER BY rowid DESC LIMIT 1').get(initial.policy_id) as Row|undefined;
+    if(!discoveryPredecessorsAccepted(o.db,owner,task.task_id))deny('PREVIOUS_CYCLE_UNACCEPTED');
+    const dormancy=observeDiscoveryDormancy(o.db,owner,initial.policy_id);
+    if(dormancy.state==='unknown')deny('DORMANCY_UNCONFIRMED');
+    if(dormancy.state==='accepted'&&dormancy.revision===current.signal_revision)deny('DORMANT_NO_SIGNAL');
     if(previous?.signal_revision===current.signal_revision)deny('SIGNAL_ALREADY_ADMITTED');
     // Admission is not acceptance. Unaccepted or unknown predecessors hold even
     // when their native run has ended; no speculative new planning attempt.
-    if(o.db.prepare("SELECT 1 FROM wb_task_occurrences WHERE task_id=? AND business_state<>'completed' LIMIT 1").get(task.task_id))deny('PREVIOUS_CYCLE_UNACCEPTED');
     const budget=this.budgets.observeAdmission(owner,task.task_id),capacity=o.coordinator.observeBackgroundCapacity(owner),now=Date.now();
     const p=policy!,facts=observation.facts;
     const advice=evaluateDiscoveryGates({protocol:1,enabled:p.effective_state==='active',scope:{owner_id:owner,...scope},revision:p.version,
@@ -59,7 +63,7 @@ export class DiscoveryAdmissionController{
       observed_at:Math.min(observation.observed_at,budget.observed_at,capacity.observed_at),project_present:true,workspace_ready:facts.workspace_ready,
       role_active:facts.role_active,host_ready:facts.host_ready,native_idle:facts.native_idle,run_busy:facts.run_busy,
       last_user_input_at:facts.last_user_input_at,last_completed_at:facts.last_terminal_at,budget:budget.budget,background_slots:capacity.available,
-      dormant_at_revision:null,signal_revision:current.signal_revision,
+      dormant_at_revision:dormancy.state==='accepted'?dormancy.revision:null,signal_revision:current.signal_revision,
       cycle_slots:p.max_cycles===null?null:Math.max(0,p.max_cycles-task.runs_used),reservation:'available'},
      {now,max_age_ms:o.maxAgeMs});
     if(!advice.eligible)deny(advice.reason!);

@@ -687,3 +687,58 @@ make seven synthetic model requests, not real-provider calls, and do not prove a
 dedicated discovery run. Root32 and Windows Gateway/root builds pass. Public786-file
 preflight has zero findings. Remaining acceptance and all full-scope requirements
 above remain open; automatic discovery dispatch is not installed.
+
+## Original SDK discovery and accepted dormancy
+
+The dedicated discovery fixture now runs the pinned official DSH launcher, real
+Gateway/Worker, original authenticated workspace tools, source receipts, budget
+settlement, owner business review and native Goal completion/publication. Its
+Messages HTTP model is scripted locally: this verifies integration, not provider
+quality or production readiness. The proposal case reads one pinned source,
+records one plan/report and publishes one owner-accepted original result without
+modifying the source workspace.
+
+Dormancy is a read-only derivation of the original immutable admission, report,
+frozen completion candidate, owner certificate/review, native completion proof
+and committed assistant message. Hashes and exact identities must agree. A
+no-plan report or owner review alone cannot establish dormancy. Legacy completed
+status projections without canonical finalization hold the next admission.
+Missing/foreign tasks never count as accepted predecessors. Invalid evidence
+returns unknown and blocks; observation creates no status, authority, lease or
+model attempt.
+
+The no-plan fixture stops its original Worker at the review boundary, accepts
+through the owner API and restarts the Worker against the same database. Only
+original native completion/publication establishes accepted dormancy. An
+unchanged source returns DORMANT_NO_SIGNAL without another model call. A new
+owned source revision can queue the second occurrence of the same task and
+cumulative budget, subject to all current policy, role, idle and capacity checks.
+That second occurrence is queued only in this fixture, not executed. These are
+controlled lifecycle stops, not retries caused by an observation timeout.
+
+This does not install the automatic discovery dispatcher or enable production.
+Failure/wait/recovery, isolated work/shared memory/reviewed apply, full policy and
+work-cycle UI, real-provider quality/cost, complete lifecycle and rollout/full
+inventory acceptance remain required.
+
+Verification of this milestone: all ten Gateway/Worker SDK cases pass with the
+pinned official runtime and scripted local Messages transport (86.79 seconds).
+The two discovery cases consume six and five synthetic requests respectively;
+the accepted no-plan case checks read-only observation, foreign-owner denial,
+review-before-native-completion, one committed reply, Worker restart, unchanged
+source dormancy and same-task new-source admission. The entire fixture group
+makes 29 scripted model requests. These are not real-provider calls.
+
+An earlier parallel heavy regression produced one OBSERVATION_STALE refusal for
+the second admission: it created no new run and did not relax freshness. All ten
+cases then passed sequentially with the existing five-second evidence window.
+Restricted-shell root/Gateway checks also encountered loopback EACCES and
+directory-link restrictions; the root32 pass in the authorized Windows user
+context. Environment refusals remain recorded separately from product defects.
+
+Final complete Gateway regression:1456 cases,1449 passed,seven existing/opt-in
+skips,zero failures (187.96 seconds), including all three dormancy/predecessor
+tests. Root32, ten actual-SDK/scripted-model cases, public disclosure6 and
+788-file preflight pass. Local Windows root and Gateway builds pass. No
+production switch, provider call or new
+automation is enabled by this milestone.
