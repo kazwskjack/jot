@@ -280,3 +280,80 @@ Root tests pass 32/32; Windows root and Gateway builds pass. Public regressions
 pass 6/6 and the 766-file working-tree preflight has no findings. An initial
 fixture cleanup failure was fixed by closing its second SQLite connection before
 removing the owned temporary directory; production ACLs were not changed.
+
+### Durable policy and source-signal foundation
+
+The original Gateway database now owns one discovery policy per exact
+owner/project/workspace/role scope. Lookup returns a null policy and performs no
+default creation. Saving requires exact current policy and role versions, explicit
+mode/timing values and nullable cycle capacity. A new saved configuration is off;
+configuration edits preserve paused/stopped state. Enable, pause and stop are
+explicit owner commands with current-version checks. Role revision/epoch or
+status changes revoke effective active state. Reconfiguration after revocation
+leaves the policy paused until an explicit enable captures current role authority.
+No policy record grants a model call or bypasses ordinary tool approval.
+
+Immutable per-policy revision records retain the original command key, canonical
+request hash and exact receipt. Head, revision and command receipt commit in one
+transaction; duplicate requests recover that receipt, and changed bodies conflict.
+Head deletion/replacement, history mutation and history replacement are rejected.
+Replaying an old enable receipt after a later stop does not re-enable the head.
+Clients must refresh current status after recovering historical command receipts.
+
+Three owner API operations are registered in the existing authenticated Gateway:
+
+- `GET /v1/agents/:agentId/discovery-policy` reads current configuration/effective
+  state without creating policy, source signals or directories.
+- `PATCH /v1/agents/:agentId/discovery-policy` saves exact configuration, with
+  policy and role version checks and an original idempotency key.
+- `POST /v1/agents/:agentId/discovery-policy/control` accepts explicit enable,
+  pause or stop. Enable additionally requires current role version/epoch.
+
+Scope is derived from the owned role rather than client-supplied owner/project
+fields. JSON/YAML OpenAPI, operation manifest and TypeScript contracts agree.
+The existing origin/CSRF/actor checks and atomic response-validation/receipt
+protocol wrap these writes. Only matching `discovery-policy-atomic-v1` pending
+reservations can recover; legacy unconfirmed records remain blocked. Immutable
+business receipts retain deduplication even if the generic HTTP cache is removed.
+These API operations configure future discovery; they do not install a running
+scheduler, a DSH task, an occurrence, a periodic model call or the workbench UI.
+
+Internal signal ingestion records only kind, opaque source identity, monotonic
+source version, source digest and policy revision. Duplicate source/version/hash
+returns its original signal revision; changed hashes conflict and unseen older
+versions are rejected. Own cycle/generated origins are ignored. Off/stopped or
+revoked policies cannot ingest new signals; paused policies may retain relevant
+external changes but are never resumed by ingestion. Journal revisions survive
+restart and cannot be changed, replaced or deleted. Signal ingestion is not a
+public API or model tool; trusted source adapters must establish provenance and
+exclude own outputs before invoking it. It is not connected to watchers yet.
+
+Remaining B work includes durable dormancy/no-plan proof, coalescing/reservations,
+budget/capacity and unknown-outcome sources, fresh native/source admission fences,
+original task/occurrence binding and restart/rollout acceptance. Source journals
+currently retain append-only evidence; production growth, compaction and evidence
+retention need explicit acceptance before enabling watchers. All C–E work and
+the original full 26-capability scope remain required.
+
+A local synthetic SQLite measurement appended 1000 external signal versions for
+one source/policy. Allocated database pages grew by 454656 bytes (444 KiB), about
+455 allocated bytes per signal in that sample; the complete fixture database was
+1404928 bytes. Ingestion took 8.43 seconds and created zero task runs. This is a
+single local Windows sample, not a production daily growth rate or throughput
+guarantee. Page allocation, indexes, source diversity and future coalescing affect
+growth. No watcher is enabled, so this measurement creates no production events.
+Retention/archival and real cohort growth remain open acceptance work; do not
+delete immutable evidence or weaken its triggers as a shortcut to compaction.
+
+Verification for this foundation: final Gateway suite 1396 total, 1389 passed,
+seven existing/opt-in skips, zero failures (149.69 seconds). The 17 focused
+policy/API/contract cases cover restart through a second connection, competing
+independent processes, failed receipt rollback, immutable history/head protection,
+owner/CSRF/origin checks, lost atomic receipt recovery, removed HTTP-cache recovery,
+explicit null and role revocation. Root tests pass 32/32; Windows Gateway/root
+builds pass; public regressions pass 6/6 and final 772-file preflight has no findings.
+BRAIN links are clean. The first full suite exposed declaration-spacing drift
+against an existing contract rule; it was corrected without weakening the check.
+One earlier public preflight could not finish inspecting the tree; the failure
+was retained, and both direct and final complete scans pass. No actual-provider,
+production deployment, watcher, occurrence or new SDK execution claim is made.

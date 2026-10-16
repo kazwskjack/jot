@@ -37,6 +37,8 @@ import { VoiceTranscriptionService } from './voice/service.ts';
 import type { VoiceAdapter } from './voice/adapter-client.ts';
 import { VOICE_MAX_BYTES, validateVoiceWave } from './voice/wav.ts';
 import { WorkbenchService } from './workbench/service.ts';
+import {DiscoveryPolicies} from './always-on/discovery-policy.ts';
+import {registerDiscoveryPolicyRoutes} from './always-on/discovery-policy-routes.ts';
 import {configureTaskOutputReader} from './persistent-tasks/output-content.ts';
 import {configureTaskOutputDelivery} from './persistent-tasks/output-delivery.ts';
 import { registerWorkbenchRoutes } from './workbench/routes.ts';
@@ -131,7 +133,8 @@ export async function buildServer(config: {
   const isMemoryConsolidationRoute=(request:any)=>request.method==='POST'&&['/v1/workspaces/:workspaceId/memory-consolidations',...['propose','apply','rollback','reject'].map(action=>`/v1/workspaces/:workspaceId/memory-consolidations/:consolidationId/${action}`)].includes(request.routeOptions.url);
   const isMemoryCaptureRoute=(request:any)=>(request.method==='PATCH'&&request.routeOptions.url==='/v1/agents/:agentId/memory-capture-policy')||(request.method==='POST'&&['/v1/agents/:agentId/memory-capture-policy/collect',...['apply','reject'].map(action=>`/v1/agents/:agentId/memory-captures/:captureId/${action}`)].includes(request.routeOptions.url));
   const isGoalResumeRoute=(request:any)=>request.method==='POST'&&request.routeOptions.url==='/v1/conversations/:conversationId/goal'&&request.body?.action==='resume';
-  const atomicProtocol=(request:any)=>isGoalResumeRoute(request)?'conversation-goal-resume-atomic-v1':isUploadRoute(request)?'upload-atomic-v1':isMemoryRestoreRoute(request)?'memory-restore-atomic-v1':isMemoryConsolidationRoute(request)?'memory-consolidation-atomic-v1':isMemoryCaptureRoute(request)?'memory-capture-atomic-v1':null;
+  const isDiscoveryPolicyRoute=(request:any)=>(request.method==='PATCH'&&request.routeOptions.url==='/v1/agents/:agentId/discovery-policy')||(request.method==='POST'&&request.routeOptions.url==='/v1/agents/:agentId/discovery-policy/control');
+  const atomicProtocol=(request:any)=>isDiscoveryPolicyRoute(request)?'discovery-policy-atomic-v1':isGoalResumeRoute(request)?'conversation-goal-resume-atomic-v1':isUploadRoute(request)?'upload-atomic-v1':isMemoryRestoreRoute(request)?'memory-restore-atomic-v1':isMemoryConsolidationRoute(request)?'memory-consolidation-atomic-v1':isMemoryCaptureRoute(request)?'memory-capture-atomic-v1':null;
   // Receipt protocol is reserved with the original request. Legacy pending rows
   // have no proof of an atomic business boundary and must not be re-executed.
   const atomicCommand=<T>(request:any,status:number,operation:()=>T):T=>{
@@ -195,7 +198,7 @@ export async function buildServer(config: {
     if (existing) {
       if (existing.request_sha256 !== requestHash) throw new Error('idempotency_conflict');
       if (existing.response_status === null) {
-        if((isGoalResumeRoute(request)||isMemoryRestoreRoute(request)||isMemoryConsolidationRoute(request)||isMemoryCaptureRoute(request))&&existing.receipt_protocol===atomicProtocol(request)){idempotencyRequests.set(request,{owner,operation,key:idempotencyKey});return;}
+        if((isDiscoveryPolicyRoute(request)||isGoalResumeRoute(request)||isMemoryRestoreRoute(request)||isMemoryConsolidationRoute(request)||isMemoryCaptureRoute(request))&&existing.receipt_protocol===atomicProtocol(request)){idempotencyRequests.set(request,{owner,operation,key:idempotencyKey});return;}
         if(isUploadRoute(request)&&existing.receipt_protocol==='upload-atomic-v1'){
           if(request.method==='PUT'){
             const upload=db.prepare('SELECT status,declared_size,received_size,declared_sha256,actual_sha256,writer_token,writer_lease_until FROM ga_uploads WHERE id=? AND owner_id=?').get(String((request.params as Record<string,unknown>).uploadId),owner) as Record<string,unknown>|undefined;
@@ -308,6 +311,9 @@ export async function buildServer(config: {
     if (code === 'mailbox_queue_full') return reply.code(429).send({ error: { code: code.toUpperCase() } });
     if (code === 'unsafe_page_url') return reply.code(403).send({error:{code:'UNSAFE_PAGE_URL'}});
     if (code.startsWith('page_')) return reply.code(502).send({error:{code:code.toUpperCase()}});
+    if (code==='discovery_scope_unavailable')return reply.code(404).send({error:{code:code.toUpperCase()}});
+    if (['discovery_role_changed','discovery_role_unavailable'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
+    if (code==='discovery_policy_invalid'||code==='discovery_command_key_invalid')return reply.code(422).send({error:{code:code.toUpperCase()}});
     if (code.endsWith('_not_found')) return reply.code(404).send({ error: { code: code.toUpperCase() } });
     if (['reply_review_mode_conflict','reply_draft_corrupt','reply_review_state_conflict','task_wait_response_required','version_conflict', 'active_run_model_change', 'run_state_conflict', 'run_version_conflict', 'checkpoint_invalid', 'reconciliation_required', 'interaction_kind_conflict', 'interaction_state_conflict', 'interaction_version_conflict', 'interaction_expired', 'action_digest_mismatch', 'idempotency_conflict', 'idempotency_in_progress', 'voice_idempotency_conflict', 'STALE_FILE_VERSION', 'IDEMPOTENCY_CONFLICT', 'crawl_batch_owner_mismatch'].includes(code)) return reply.code(409).send({ error: { code: code.toUpperCase() } });
     if (['reply_evidence_unverified','interaction_answer_invalid', 'interaction_decision_invalid', 'upload_size_invalid', 'upload_sha256_invalid', 'upload_filename_invalid', 'upload_size_mismatch', 'upload_sha256_mismatch', 'artifact_diff_unsupported', 'source_evidence_required', 'source_url_invalid', 'invalid_project_title', 'invalid_conversation_state', 'FILE_REQUEST_INVALID', 'TEMPLATE_CONTENT_INVALID', 'UNSUPPORTED_FORMAT_OPERATION', 'requested_count_invalid', 'event_seq_invalid', 'input_index_invalid', 'item_id_invalid', 'owner_id_invalid', 'run_id_invalid', 'batch_id_invalid', 'conversation_id_invalid', 'crawl_url_invalid'].includes(code)) return reply.code(422).send({ error: { code: code.toUpperCase() } });
@@ -446,6 +452,7 @@ export async function buildServer(config: {
     return reply.code(202).send(crawlBatches.ingest(String(body.owner_id ?? ''), body.event as any));
   });
 
+  registerDiscoveryPolicyRoutes(app,{policies:new DiscoveryPolicies(db),actor,role:(owner,id)=>workbench.getAgent(owner,id),atomic:atomicCommand});
   registerConversationGoalRoutes(app,{db,conversations,actor,client:config.conversationGoalClient,resumeAdmission:{enabled:config.conversationGoalResumeEnabled===true,controls:new ConversationGoalControls(db,events,runs),atomic:atomicCommand}});
   app.get('/v1/capabilities', async (request, reply) => {
     const ownerId = actor(request as any);

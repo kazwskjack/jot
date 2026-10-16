@@ -268,3 +268,8 @@ export type ConversationGoalCommand = {action:'pause'|'resume'|'stop';id:string;
 
 export type ConversationGoalAccepted = {accepted:true;control_id:string;run_id:string;conversation_id:string};
 export type ConversationGoalResumeReadiness = {enabled:boolean;ready:boolean;reason:'READY'|'DISABLED'|'NO_SESSION'|'RUN_BUSY'|'UNCONFIRMED_CONTROL'|'HOST_UNAVAILABLE'};
+
+export type DiscoveryPolicySave = {expected_version:number;expected_role_version:number;expected_role_epoch:number;mode:'discover_only'|'discover_and_work';cooldown_ms:number;recent_input_ms:number;max_cycles:number|null};
+export type DiscoveryPolicyControl = {action:'enable';expected_version:number;expected_role_version:number;expected_role_epoch:number}|{action:'pause'|'stop';expected_version:number};
+export type DiscoveryPolicyReceipt = {policy_id:string;scope:{project_id:string;workspace_id:string;agent_id:string};version:number;role_version:number;role_epoch:number;state:'off'|'active'|'paused'|'stopped';mode:'discover_only'|'discover_and_work';cooldown_ms:number;recent_input_ms:number;max_cycles:number|null;execution_authorized:false};
+export type DiscoveryPolicyStatus = {policy:(DiscoveryPolicyReceipt&{effective_state:DiscoveryPolicyReceipt['state']|'revoked'})|null;execution_authorized:false};

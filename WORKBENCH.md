@@ -545,6 +545,18 @@ HTTP claimed recovery: original Controller admission storage, factory compositio
 Host/Worker integration and production acceptance remain open. See
 [Goal continuation](docs/GOAL-CONTINUATION.md).
 
+## Discovery configuration foundation
+
+Owned role APIs can now read/save discovery configuration and explicitly enable,
+pause or stop that configuration. Saving starts off. Role revision/permission
+changes revoke effective activity; a settings edit does not resume paused or
+stopped policy. Commands have immutable atomic receipts, and internal source
+signals are deduplicated without creating recursive work. Every receipt retains
+`execution_authorized:false`. The watcher, original occurrence admission, work
+cycles and corresponding workbench UI are still being implemented; configuration
+is not a running autonomous task. See the [full implementation and acceptance
+plan](docs/superpowers/plans/2026-10-17-always-on-discovery.md).
+
 
 ## Original prompt admission milestone
 

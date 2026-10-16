@@ -459,3 +459,11 @@ returning idle evidence. It creates no records, directories, Agent or inference.
 It remains a source component: durable discovery policy/signals, existing budget
 and background-capacity integration, original occurrence admission, isolated
 work cycles/apply, UI and deployed acceptance are still open.
+
+Durable discovery configuration is now available through owned role API routes,
+with default-off saving, explicit enable/pause/stop, role revision revocation and
+immutable atomic command receipts. Internal source signals are durable and
+deduplicated; own generated events are excluded and ingestion never resumes a
+paused/stopped policy. These are configuration/evidence foundations. They do not
+install the watcher, original occurrence admission, DSH work cycles or UI, and
+provide no new model/tool/budget authority. Full parity acceptance remains open.

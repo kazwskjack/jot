@@ -12391,6 +12391,326 @@
           }
         }
       }
+    },
+    "/v1/agents/{agentId}/discovery-policy": {
+      "get": {
+        "operationId": "getDiscoveryPolicy",
+        "summary": "Read owned discovery policy",
+        "description": "Configuration only. Saving starts off; enable does not create a task, Agent or model call. Original DSH execution, budget and permissions remain separate. Pause/stop persist; only an explicit owner enable can rearm. Signal ingestion is internal.",
+        "tags": [
+          "workbench"
+        ],
+        "parameters": [
+          {
+            "name": "agentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owned policy configuration receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscoveryPolicyStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "saveDiscoveryPolicy",
+        "summary": "Save owned discovery configuration",
+        "description": "Configuration only. Saving starts off; enable does not create a task, Agent or model call. Original DSH execution, budget and permissions remain separate. Pause/stop persist; only an explicit owner enable can rearm. Signal ingestion is internal.",
+        "tags": [
+          "workbench"
+        ],
+        "parameters": [
+          {
+            "name": "agentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiscoveryPolicySave"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Owned policy configuration receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscoveryPolicyReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agents/{agentId}/discovery-policy/control": {
+      "post": {
+        "operationId": "controlDiscoveryPolicy",
+        "summary": "Enable, pause or stop discovery configuration",
+        "description": "Configuration only. Saving starts off; enable does not create a task, Agent or model call. Original DSH execution, budget and permissions remain separate. Pause/stop persist; only an explicit owner enable can rearm. Signal ingestion is internal.",
+        "tags": [
+          "workbench"
+        ],
+        "parameters": [
+          {
+            "name": "agentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiscoveryPolicyControl"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Owned policy configuration receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscoveryPolicyReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -16337,8 +16657,13 @@
           "task_readiness": {
             "type": "boolean"
           },
-          "task_unlimited_runs": { "type": "boolean" },
-          "task_run_limit_protocol": { "type": "integer", "const": 1 },
+          "task_unlimited_runs": {
+            "type": "boolean"
+          },
+          "task_run_limit_protocol": {
+            "type": "integer",
+            "const": 1
+          },
           "model_budget": {
             "type": "boolean"
           },
@@ -17630,7 +17955,10 @@
         "type": "object",
         "properties": {
           "max_runs": {
-            "type": ["integer", "null"],
+            "type": [
+              "integer",
+              "null"
+            ],
             "minimum": 1,
             "maximum": 10000,
             "description": "Explicit null means unlimited run count; omission retains existing defaults. Model budgets and permissions are separate."
@@ -21991,6 +22319,349 @@
             }
           }
         ]
+      },
+      "DiscoveryPolicySave": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expected_version",
+          "expected_role_version",
+          "expected_role_epoch",
+          "mode",
+          "cooldown_ms",
+          "recent_input_ms",
+          "max_cycles"
+        ],
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "expected_role_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "expected_role_epoch": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "discover_only",
+              "discover_and_work"
+            ]
+          },
+          "cooldown_ms": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "recent_input_ms": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "max_cycles": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        }
+      },
+      "DiscoveryPolicyControl": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "action",
+              "expected_version",
+              "expected_role_version",
+              "expected_role_epoch"
+            ],
+            "properties": {
+              "action": {
+                "const": "enable"
+              },
+              "expected_version": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "expected_role_version": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "expected_role_epoch": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "action",
+              "expected_version"
+            ],
+            "properties": {
+              "action": {
+                "enum": [
+                  "pause",
+                  "stop"
+                ]
+              },
+              "expected_version": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              }
+            }
+          }
+        ]
+      },
+      "DiscoveryPolicyReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "policy_id",
+          "scope",
+          "version",
+          "role_version",
+          "role_epoch",
+          "state",
+          "mode",
+          "cooldown_ms",
+          "recent_input_ms",
+          "max_cycles",
+          "execution_authorized"
+        ],
+        "properties": {
+          "policy_id": {
+            "type": "string",
+            "pattern": "^discovery-[a-f0-9]{64}$"
+          },
+          "scope": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "project_id",
+              "workspace_id",
+              "agent_id"
+            ],
+            "properties": {
+              "project_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "workspace_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "agent_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            }
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "role_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "role_epoch": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "off",
+              "active",
+              "paused",
+              "stopped"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "discover_only",
+              "discover_and_work"
+            ]
+          },
+          "cooldown_ms": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "recent_input_ms": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "max_cycles": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "execution_authorized": {
+            "const": false
+          }
+        }
+      },
+      "DiscoveryPolicyStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "policy",
+          "execution_authorized"
+        ],
+        "properties": {
+          "policy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "policy_id",
+                  "scope",
+                  "version",
+                  "role_version",
+                  "role_epoch",
+                  "state",
+                  "mode",
+                  "cooldown_ms",
+                  "recent_input_ms",
+                  "max_cycles",
+                  "execution_authorized",
+                  "effective_state"
+                ],
+                "properties": {
+                  "policy_id": {
+                    "type": "string",
+                    "pattern": "^discovery-[a-f0-9]{64}$"
+                  },
+                  "scope": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "project_id",
+                      "workspace_id",
+                      "agent_id"
+                    ],
+                    "properties": {
+                      "project_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "workspace_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "agent_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      }
+                    }
+                  },
+                  "version": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "role_version": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "role_epoch": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "active",
+                      "paused",
+                      "stopped"
+                    ]
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "discover_only",
+                      "discover_and_work"
+                    ]
+                  },
+                  "cooldown_ms": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "recent_input_ms": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "max_cycles": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "execution_authorized": {
+                    "const": false
+                  },
+                  "effective_state": {
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "active",
+                      "paused",
+                      "stopped",
+                      "revoked"
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          "execution_authorized": {
+            "const": false
+          }
+        }
       }
     },
     "parameters": {

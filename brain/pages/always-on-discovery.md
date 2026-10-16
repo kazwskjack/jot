@@ -4,7 +4,7 @@ title: Keep project discovery in original DSH task boundaries
 category: decision
 status: active
 created: "2026-10-17T03:43:02"
-updated: "2026-10-17T04:41:31"
+updated: "2026-10-17T04:57:44"
 ---
 
 <!-- compiled_truth -->
@@ -16,7 +16,7 @@ Default policy is off. Discover-only produces proposals; discover-and-work still
 
 Honor explicit unlimited budgets. Persistent tasks now accept explicit public max_runs:null, with capability-gated UI and an exact internal (unlimited,0) tuple in the original table; finite/default100 are retained. Migration preserves original IDs, counts, states and request keys. Zero alone is not unlimited: tuple guards reject inconsistent writes and the known prior numeric admission guard refuses unsupported new tasks. Full old-worker rollout/rollback still needs acceptance. Changing limits never resets usage or automatically resumes an exhausted/paused task. Model budgets, native Goal, mailbox quotas and physical background capacity remain separate. Null in discovery gate cycle capacity means confirmed unlimited policy, never missing or guessed facts. This prerequisite does not install the discovery pipeline.
 
-The initial pure eligibility module and the opt-in current-Host native observation protocol are implemented. The project activity source adapter combines original scoped SQL and existing workspace facts with the strict authenticated Host client, releasing read transactions before IO and rejecting drift or expired observations. These are non-authorizing source components, not a running discovery feature. Existing budget/capacity and reconciliation facts, durable owner policy/signal/occurrence integration, DSH planning/execution/report, isolated workspace/apply, UI, real-provider and deployment acceptance remain incomplete. The source review and entire implementation sequence live in docs/superpowers/plans/2026-10-17-always-on-discovery.md. Full PilotDeck capability scope is unchanged.
+The initial pure eligibility module and the opt-in current-Host native observation protocol are implemented. The project activity source adapter combines original scoped SQL and existing workspace facts with the strict authenticated Host client, releasing read transactions before IO and rejecting drift or expired observations. These are non-authorizing source components, not a running discovery feature. Durable owner policy configuration/control API and immutable internal signal storage are also implemented. Saving starts off; role drift revokes effective activity; only explicit owner enable can resume. Original atomic API receipts and immutable business revisions prevent duplicate writes after lost responses. Signals never resume paused/stopped policy and exclude self-generated origins. Existing budget/capacity and reconciliation facts, trusted watchers/provenance/coalescing, dormancy/reservation/original occurrence admission, DSH planning/execution/report, isolated workspace/apply, UI, real-provider and deployment acceptance remain incomplete. The source review and entire implementation sequence live in docs/superpowers/plans/2026-10-17-always-on-discovery.md. Full PilotDeck capability scope is unchanged.
 
 
 ## Timeline
@@ -72,5 +72,23 @@ The initial pure eligibility module and the opt-in current-Host native observati
 - time: 2026-10-17T04:41:31
   kind: decision
   summary: Record completed read-only source components while retaining the full unfinished discovery lifecycle.
+  source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
+  affects: [always-on-discovery]
+
+- time: 2026-10-17T04:52:26
+  kind: decision
+  summary: "Durable discovery policy starts off, uses original owner/role versions and immutable atomic command receipts, and requires explicit enable to resume. Role drift revokes effective activity. Original authenticated API configures only; source signals are internal metadata, monotonic/deduplicated, exclude own generated origins and never resume paused/stopped policy. No scheduler or task/model grant is installed."
+  source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
+  affects: [always-on-discovery]
+
+- time: 2026-10-17T04:54:28
+  kind: decision
+  summary: Record durable policy API and signal storage without claiming scheduler or task execution.
+  source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
+  affects: [always-on-discovery]
+
+- time: 2026-10-17T04:57:44
+  kind: evidence
+  summary: "Final local policy/API/contract suite passes with original atomic recovery, owner checks, two-process CAS and immutable history; complete Gateway1396 cases/1389 pass/7 existing skips, root32 and local builds pass. Public772-file scan has no findings. Synthetic1000-signal allocation grew444KiB; production retention/growth and full execution integration remain open."
   source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
   affects: [always-on-discovery]
