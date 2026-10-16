@@ -12396,7 +12396,7 @@
       "get": {
         "operationId": "getDiscoveryPolicy",
         "summary": "Read owned discovery policy",
-        "description": "Configuration only. Saving starts off; enable does not create a task, Agent or model call. Original DSH execution, budget and permissions remain separate. Pause/stop persist; only an explicit owner enable can rearm. Signal ingestion is internal.",
+        "description": "Saving starts off. Explicit enable may prepare one fixed unscheduled original task, but creates no occurrence, Agent or model call. Original DSH admission, budget and permissions remain required. Pause/stop persist and reuse the same task; only explicit owner enable can rearm. Signal ingestion is internal.",
         "tags": [
           "workbench"
         ],
@@ -12488,7 +12488,7 @@
       "patch": {
         "operationId": "saveDiscoveryPolicy",
         "summary": "Save owned discovery configuration",
-        "description": "Configuration only. Saving starts off; enable does not create a task, Agent or model call. Original DSH execution, budget and permissions remain separate. Pause/stop persist; only an explicit owner enable can rearm. Signal ingestion is internal.",
+        "description": "Saving starts off. Explicit enable may prepare one fixed unscheduled original task, but creates no occurrence, Agent or model call. Original DSH admission, budget and permissions remain required. Pause/stop persist and reuse the same task; only explicit owner enable can rearm. Signal ingestion is internal.",
         "tags": [
           "workbench"
         ],
@@ -12602,7 +12602,7 @@
       "post": {
         "operationId": "controlDiscoveryPolicy",
         "summary": "Enable, pause or stop discovery configuration",
-        "description": "Configuration only. Saving starts off; enable does not create a task, Agent or model call. Original DSH execution, budget and permissions remain separate. Pause/stop persist; only an explicit owner enable can rearm. Signal ingestion is internal.",
+        "description": "Saving starts off. Explicit enable may prepare one fixed unscheduled original task, but creates no occurrence, Agent or model call. Original DSH admission, budget and permissions remain required. Pause/stop persist and reuse the same task; only explicit owner enable can rearm. Signal ingestion is internal.",
         "tags": [
           "workbench"
         ],
@@ -18099,7 +18099,14 @@
             "maxLength": 12000
           },
           "trigger": {
-            "$ref": "#/components/schemas/PersistentTaskTrigger"
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PersistentTaskTrigger"
+              },
+              {
+                "$ref": "#/components/schemas/ProjectDiscoveryTaskTrigger"
+              }
+            ]
           },
           "priority": {
             "type": "integer",
@@ -22660,6 +22667,23 @@
           },
           "execution_authorized": {
             "const": false
+          }
+        }
+      },
+      "ProjectDiscoveryTaskTrigger": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "policy_id"
+        ],
+        "properties": {
+          "kind": {
+            "const": "project_discovery"
+          },
+          "policy_id": {
+            "type": "string",
+            "pattern": "^discovery-[a-f0-9]{64}$"
           }
         }
       }

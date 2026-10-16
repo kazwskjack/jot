@@ -552,7 +552,10 @@ pause or stop that configuration. Saving starts off. Role revision/permission
 changes revoke effective activity; a settings edit does not resume paused or
 stopped policy. Commands have immutable atomic receipts, and internal source
 signals are deduplicated without creating recursive work. Every receipt retains
-`execution_authorized:false`. The watcher, original occurrence admission, work
+`execution_authorized:false`. Explicit enable now prepares one fixed, unscheduled
+persistent task and budget identity; pause/stop and later enable reuse it. Its
+ordinary run/edit controls are replaced by a discovery-management label. The
+watcher, original occurrence admission, work
 cycles and corresponding workbench UI are still being implemented; configuration
 is not a running autonomous task. See the [full implementation and acceptance
 plan](docs/superpowers/plans/2026-10-17-always-on-discovery.md).

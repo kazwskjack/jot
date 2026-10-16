@@ -66,9 +66,13 @@ test('unlimited interval keeps scheduling across the old default while once stil
 test('old layout migrates finite limits without resetting state and inconsistent new tuples are refused',async()=>{
  const f=await fixture();try{
   let task=f.service.create('alice',{...input,budget:{max_runs:7}});task=f.service.pause('alice',task.task_id,task.version);
-  f.db.exec('DROP TRIGGER wb_task_run_limit_insert; DROP TRIGGER wb_task_run_limit_update; ALTER TABLE wb_persistent_tasks DROP COLUMN run_limit_mode');
+  // Construct the pre-feature layout only in this isolated fixture. The real
+  // migration must reinstall both the limit and discovery-dependent guards.
+  assert.equal(f.db.prepare('SELECT count(*) n FROM wb_discovery_task_bindings').get().n,0);
+  f.db.exec('DROP TRIGGER wb_discovery_binding_valid; DROP TRIGGER wb_discovery_task_guard; DROP TRIGGER wb_task_run_limit_insert; DROP TRIGGER wb_task_run_limit_update; ALTER TABLE wb_persistent_tasks DROP COLUMN run_limit_mode');
   const before=f.db.prepare('SELECT * FROM wb_persistent_tasks').get(),{PersistentTaskService}=await import(moduleUrl);
   const migrated=new PersistentTaskService(f.db,f.workbench),after=f.db.prepare('SELECT * FROM wb_persistent_tasks').get();
+  assert.equal(f.db.prepare("SELECT count(*) n FROM sqlite_master WHERE type='trigger' AND name IN ('wb_discovery_binding_valid','wb_discovery_task_guard')").get().n,2);
   const {run_limit_mode,...rest}=after;assert.equal(run_limit_mode,'finite');assert.deepEqual(rest,{...before});assert.equal(migrated.get('alice',task.task_id).budget.max_runs,7);
   assert.throws(()=>f.db.prepare("UPDATE wb_persistent_tasks SET max_runs=0 WHERE task_id=?").run(task.task_id),/task_run_limit_unconfirmed/);
   task=migrated.update('alice',task.task_id,{expected_version:task.version,budget:{max_runs:null}});

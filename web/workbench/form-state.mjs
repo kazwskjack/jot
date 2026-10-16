@@ -65,6 +65,7 @@ export function taskFormFromTask(task,limits) {
  return {...Object.fromEntries(Object.entries(blankTaskForm(task.agent_id,limits)).filter(([key])=>key!=='notification_settings')),title:task.title,objective:task.objective,kind:task.trigger.kind,conversation_id:task.trigger.conversation_id??'',interval_seconds:String(task.trigger.interval_seconds??limits?.default_interval_seconds??300),url:task.trigger.url??'',max_runs:task.budget.max_runs===null?'unlimited':String(task.budget.max_runs),run_at:task.trigger.run_at??'',time:task.trigger.time??'09:00',timezone:task.trigger.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone??'UTC',weekdays:[...(task.trigger.weekdays??[new Date().getDay()])]};
 }
 export function taskTriggerSummary(trigger) {
+ if(trigger.kind==='project_discovery')return '项目发现策略';
  if(trigger.kind==='conversation_message')return '对话收到新消息';
  if(trigger.kind==='conversation_result')return '对话完成新结果';
  if(trigger.kind==='once')return '单次';

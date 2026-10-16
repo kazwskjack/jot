@@ -473,5 +473,13 @@ ledger and Coordinator. Task-root unknown usage includes native-style shared-roo
 members rather than only primary occurrence run IDs; unrelated daily-budget
 siblings remain independent. Background observations reuse the exact claim SQL,
 preserve foreground priority, and do not create a lease. They are not native idle,
-hardware capacity or admission. Immutable discovery-task binding, remaining
+hardware capacity or admission. Source-bound occurrence admission, remaining
 reconciliation, coalescing/reservations and execution integration remain open.
+
+Explicit policy enable now atomically prepares one immutable original task/budget
+identity with an unscheduled managed trigger. Pause/stop/resume reuse it and keep
+the accumulated run count. Ordinary task/timer paths cannot admit it; a SQL guard
+currently refuses all its occurrences until the full admission protocol is ready.
+Built UI/BFF verification covers the managed card and lifecycle without any model
+run. Preparation is not an executing discovery loop, a completed work cycle or
+deployed acceptance; all remaining source/admission/DSH/workspace/UI gates remain.

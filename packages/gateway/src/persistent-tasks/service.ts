@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {configuredTaskRunLimit,storedTaskRunLimit,taskRunLimitExhausted,encodedTaskRunLimit,installTaskRunLimits} from './run-limit.ts';
+import {installDiscoveryTaskBindings} from '../always-on/task-binding.ts';
 import { existsSync, lstatSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
@@ -28,9 +29,9 @@ import {TaskMonitorFailures} from './monitor-failures.ts';
 import {pruneNotificationCaches} from '../channels/notification-retention.ts';
 
 type Row = Record<string, any>;
-type Agent = { agent_id: string; status: string; workspace_id: string; project_id: string; conversation_id: string };
+type Agent = { agent_id: string; status: string; workspace_id: string; project_id: string; conversation_id: string;version?:number;capability_epoch?:number };
 type Workbench = { getAgent(owner: string, id: string): Agent; bindRun(owner: string, agent: string, run: string, kind?: string): unknown };
-type Trigger = CalendarTrigger | DialogueTrigger | { kind: 'once' | 'interval' | 'page_change'; run_at?: string; interval_seconds?: number; url?: string };
+type Trigger = CalendarTrigger | DialogueTrigger | {kind:'project_discovery';policy_id:string} | { kind: 'once' | 'interval' | 'page_change'; run_at?: string; interval_seconds?: number; url?: string };
 type Evidence = { kind: string; reference: string; hash?: string };
 export type PersistentTaskOptions = { now?: () => Date; projectionRoot?: string; events?: EventStore;
   modelBudgetPolicy?:WorkbenchBudgetPolicy;
@@ -102,6 +103,7 @@ export class PersistentTaskService {
     if (!columns.some(column=>column.name==='source_json')) db.exec('ALTER TABLE wb_persistent_tasks ADD COLUMN source_json TEXT');
     this.dialogue=new DialogueEvents(db);
     installTaskRunLimits(db);
+    installDiscoveryTaskBindings(db);
     this.notificationSignals=new TaskNotificationSignals(db,()=>this.now());
     this.monitorFailures=new TaskMonitorFailures(db,()=>this.now());
     this.replyPolicies=new TaskReplyPolicies(db,{now:()=>new Date(this.now())});
@@ -132,6 +134,7 @@ export class PersistentTaskService {
     return { kind: value.kind, interval_seconds: seconds, ...(value.kind === 'page_change' ? { url: validatePageUrl(value.url).href } : {}) };
   }
   private firstDue(trigger: Trigger, now: string): string | null {
+    if(trigger.kind==='project_discovery')return null;
     if(isDialogueTrigger(trigger))return null;
     return trigger.kind === 'daily' || trigger.kind === 'weekly' ? nextCalendarOccurrence(trigger, now) : ('run_at' in trigger ? trigger.run_at : undefined) ?? now;
   }
@@ -141,7 +144,35 @@ export class PersistentTaskService {
   }
   list(owner: string) { return { items: (this.db.prepare('SELECT * FROM wb_persistent_tasks WHERE owner_id=? ORDER BY priority DESC,created_at,task_id').all(owner) as Row[]).map(row => this.value(row)) }; }
   get(owner: string, id: string) { return this.value(this.row(owner,id)); }
+  private assertConfigured(owner:string,id:string){
+    this.row(owner,id);if(this.db.prepare('SELECT 1 FROM wb_discovery_task_bindings WHERE task_id=? AND owner_id=?').get(id,owner))throw Error('task_discovery_managed');
+  }
+  /** Only the explicit policy command callback may prepare/rearm this fixed
+   * original task. No occurrence, Session or model call is created here. */
+  synchronizeDiscoveryPolicy(owner:string,policyId:string,event:'save'|'enable'|'pause'|'stop'){
+    return withImmediateTransaction(this.db,()=>{
+      const policy=this.db.prepare('SELECT * FROM wb_discovery_policies WHERE policy_id=? AND owner_id=?').get(policyId,owner) as Row|undefined;
+      if(!policy)throw Error('discovery_scope_unavailable');
+      const role=this.workbench.getAgent(owner,policy.agent_id);
+      if(role.project_id!==policy.project_id||role.workspace_id!==policy.workspace_id)throw Error('discovery_scope_unavailable');
+      let binding=this.db.prepare('SELECT task_id FROM wb_discovery_task_bindings WHERE policy_id=? AND owner_id=?').get(policyId,owner) as Row|undefined;
+      if(policy.state==='active'){
+        if(role.status!=='active'||role.version!==policy.role_version||role.capability_epoch!==policy.role_epoch)throw Error('discovery_role_changed');
+        if(event!=='enable')return;
+        if(!binding){
+          const task=this.createTask(owner,{title:'项目发现',objective:'由原 DSH 在当前授权的项目和角色范围内发现可核验的改进；按绑定来源形成计划，遵守原任务权限和预算。',agent_id:policy.agent_id,trigger:{kind:'project_discovery',policy_id:policyId},budget:{max_runs:null}},`discovery-policy:${policyId}`,policyId);
+          this.db.prepare('INSERT INTO wb_discovery_task_bindings VALUES(?,?,?,?,?,?,?,?)').run(policyId,task.task_id,owner,policy.project_id,policy.workspace_id,policy.agent_id,policy.version,this.now());
+          return task;
+        }
+        const task=this.row(owner,binding.task_id);return task.status==='active'?this.get(owner,binding.task_id):this.transition(owner,binding.task_id,task.version,'active',true);
+      }
+      if(binding){const task=this.row(owner,binding.task_id);if(task.status!=='paused'&&task.status!=='archived')return this.transition(owner,binding.task_id,task.version,'paused',true);}
+    });
+  }
   create(owner: string, input: Row, key?: string) {
+    return this.createTask(owner,input,key);
+  }
+  private createTask(owner:string,input:Row,key?:string,discoveryPolicyId?:string){
     return withImmediateTransaction(this.db,()=>{
     const requestKey=key===undefined ? null : text(key,'idempotency_key_required',200);
     const digest=hash(JSON.stringify(canonical(input)));
@@ -152,7 +183,7 @@ export class PersistentTaskService {
     const title = text(input.title,'invalid_task_title',200); const objective = text(input.objective,'invalid_objective');
     const agent = this.workbench.getAgent(owner,text(input.agent_id,'invalid_agent_id',200)); if (agent.status !== 'active') throw new Error('agent_unavailable');
     const source=freezeTaskSource(this.db,owner,agent,input.source);
-    const trigger = this.trigger(input.trigger); const priority = integer(input.priority,50,0,100,'invalid_priority');
+    const trigger:Trigger = discoveryPolicyId?{kind:'project_discovery',policy_id:discoveryPolicyId}:this.trigger(input.trigger); const priority = integer(input.priority,50,0,100,'invalid_priority');
     if(isDialogueTrigger(trigger))this.dialogue.assertOwned(owner,trigger.conversation_id);
     const limit=encodedTaskRunLimit(configuredTaskRunLimit(input.budget)); const id = `task-${randomUUID()}`; const now = this.now();
     this.db.prepare(`INSERT INTO wb_persistent_tasks(task_id,owner_id,agent_id,title,objective,trigger_json,priority,status,version,generation,schedule_revision,max_runs,run_limit_mode,next_due_at,created_at,updated_at)
@@ -172,6 +203,7 @@ export class PersistentTaskService {
   }
   update(owner: string, id: string, input: Row) {
     return withImmediateTransaction(this.db, () => {
+      this.assertConfigured(owner,id);
       const row = this.row(owner,id); this.cas(row,input.expected_version);
       if(Object.hasOwn(input,'model_budget'))throw new Error('budget_limit_invalid');
       if(Object.hasOwn(input,'source'))throw new Error('invalid_task_source');
@@ -194,8 +226,9 @@ export class PersistentTaskService {
     });
   }
   private cas(row: Row, version: unknown) { if (typeof version !== 'number' || !Number.isInteger(version) || row.version !== version) throw new Error('version_conflict'); }
-  private transition(owner: string,id: string,version: number,status: string) {
+  private transition(owner: string,id: string,version: number,status: string,discovery=false) {
     return withImmediateTransaction(this.db, () => {
+      if(!discovery)this.assertConfigured(owner,id);
       const row=this.row(owner,id); this.cas(row,version);
       if (row.status === 'archived' && status !== 'archived') throw new Error('task_state_conflict');
       if (status === 'active') { if (this.workbench.getAgent(owner,row.agent_id).status !== 'active') throw new Error('agent_unavailable'); if (taskRunLimitExhausted(row)) throw new Error('task_budget_exhausted'); }
@@ -210,7 +243,7 @@ export class PersistentTaskService {
   archive(owner: string,id: string,version: number) { return this.transition(owner,id,version,'archived'); }
   pauseForAgent(owner: string, agent: string) {
     const rows=this.db.prepare("SELECT * FROM wb_persistent_tasks WHERE owner_id=? AND agent_id=? AND status IN ('active','budget_exhausted')").all(owner,agent) as Row[];
-    for (const row of rows) this.pause(owner,row.task_id,row.version); return { paused:rows.length };
+    for (const row of rows) this.transition(owner,row.task_id,row.version,'paused',true); return { paused:rows.length };
   }
   private cancelActive(owner: string,id: string,reason: string) {
     const rows=this.db.prepare('SELECT r.id,r.status,r.version FROM ga_runs r JOIN wb_task_run_occurrences o ON o.run_id=r.id WHERE o.task_id=?').all(id) as Row[];
@@ -269,7 +302,7 @@ export class PersistentTaskService {
       WHEN status IN ('starting','running') AND business_state IN ('input_requested','approval_requested') THEN business_state
       ELSE status END ${id ? 'WHERE task_id=?' : ''}`).run(...(id ? [id] : []));
   }
-  runNow(owner: string,id: string,key: string) { return this.enqueue(owner,id,`manual:${text(key,'idempotency_key_required',200)}`,this.now()); }
+  runNow(owner: string,id: string,key: string) { this.assertConfigured(owner,id);return this.enqueue(owner,id,`manual:${text(key,'idempotency_key_required',200)}`,this.now()); }
   cancelOccurrence(owner: string,id: string,occurrenceId: string,expectedVersion: number,key: string) {
     return withImmediateTransaction(this.db,()=>{
       this.row(owner,id); const o=this.db.prepare('SELECT * FROM wb_task_current_occurrences WHERE task_id=? AND occurrence_id=?').get(id,occurrenceId) as Row | undefined;
@@ -337,6 +370,7 @@ export class PersistentTaskService {
           if (this.workbench.getAgent(snapshot.owner_id,snapshot.agent_id).status !== 'active') { this.pause(snapshot.owner_id,snapshot.task_id,snapshot.version); continue; }
           if (this.active(snapshot.task_id)) continue;
           const trigger=JSON.parse(snapshot.trigger_json) as Trigger;
+          if(trigger.kind==='project_discovery')continue;
           const page=trigger.kind === 'page_change' ? await (this.options.pageReader ?? readPublicPage)(trigger.url!) : null;
           const result=withImmediateTransaction(this.db,()=>{
             const current=this.row(snapshot.owner_id,snapshot.task_id);

@@ -13,7 +13,7 @@ function identity(value:unknown,code='discovery_scope_unavailable'):string{
  if(typeof value!=='string'||!value.trim()||value.length>256||/[\u0000-\u001f\u007f]/.test(value))throw Error(code);return value;
 }
 function integer(value:unknown,min=0){if(!Number.isSafeInteger(value)||Number(value)<min)throw Error('discovery_policy_invalid');return Number(value);}
-function install(db:DatabaseSync){withImmediateTransaction(db,()=>{
+export function installDiscoveryPolicySchema(db:DatabaseSync){withImmediateTransaction(db,()=>{
  db.exec(`CREATE TABLE IF NOT EXISTS wb_discovery_policies(
   policy_id TEXT PRIMARY KEY,owner_id TEXT NOT NULL,project_id TEXT NOT NULL,workspace_id TEXT NOT NULL,agent_id TEXT NOT NULL,
   version INTEGER NOT NULL CHECK(version>0),role_version INTEGER NOT NULL CHECK(role_version>0),role_epoch INTEGER NOT NULL CHECK(role_epoch>0),
@@ -48,7 +48,8 @@ function install(db:DatabaseSync){withImmediateTransaction(db,()=>{
  * model/tool grant. Signal ingestion is internal and must not be a model tool. */
 export class DiscoveryPolicies{
  private readonly db:DatabaseSync;
- constructor(db:DatabaseSync){this.db=db;install(db);}
+ private readonly onChange:((owner:string,receipt:Row,event:'save'|'enable'|'pause'|'stop')=>void)|undefined;
+ constructor(db:DatabaseSync,options:{onChange?:(owner:string,receipt:Row,event:'save'|'enable'|'pause'|'stop')=>void}={}){this.db=db;this.onChange=options.onChange;installDiscoveryPolicySchema(db);}
  private owned(owner:string,value:unknown){
   identity(owner);const scope=exact(value,['project_id','workspace_id','agent_id'],'discovery_scope_unavailable') as Scope;
   for(const key of ['project_id','workspace_id','agent_id'] as const)identity(scope[key]);
@@ -88,7 +89,8 @@ export class DiscoveryPolicies{
    if(row)this.db.prepare('UPDATE wb_discovery_policies SET version=?,role_version=?,role_epoch=?,state=?,config_json=?,updated_at=? WHERE policy_id=? AND version=?').run(version,roleVersion,roleEpoch,state,JSON.stringify(config),now,owned.id,row.version);
    else this.db.prepare('INSERT INTO wb_discovery_policies VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(owned.id,owner,owned.scope.project_id,owned.scope.workspace_id,owned.scope.agent_id,version,roleVersion,roleEpoch,state,JSON.stringify(config),now);
    const receipt=this.view(this.head(owned.id)!);
-   this.db.prepare('INSERT INTO wb_discovery_policy_revisions VALUES(?,?,?,?,?,?)').run(owned.id,version,key,commandHash,JSON.stringify(receipt),now);return receipt;
+   this.db.prepare('INSERT INTO wb_discovery_policy_revisions VALUES(?,?,?,?,?,?)').run(owned.id,version,key,commandHash,JSON.stringify(receipt),now);
+   this.onChange?.(owner,receipt,action==='save'?'save':body.action);return receipt;
   });
  }
  save(owner:string,scope:unknown,input:unknown,key:string){return this.command(owner,scope,input,key,'save');}

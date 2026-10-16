@@ -987,7 +987,7 @@
     null,
     "DiscoveryPolicyStatus",
     "200",
-    "Configuration only. Saving starts off; enable does not create a task, Agent or model call. Original DSH execution, budget and permissions remain separate. Pause/stop persist; only an explicit owner enable can rearm. Signal ingestion is internal."
+    "Saving starts off. Explicit enable may prepare one fixed unscheduled original task, but creates no occurrence, Agent or model call. Original DSH admission, budget and permissions remain required. Pause/stop persist and reuse the same task; only explicit owner enable can rearm. Signal ingestion is internal."
   ],
   [
     "PATCH",
@@ -996,7 +996,7 @@
     "DiscoveryPolicySave",
     "DiscoveryPolicyReceipt",
     "200",
-    "Configuration only. Saving starts off; enable does not create a task, Agent or model call. Original DSH execution, budget and permissions remain separate. Pause/stop persist; only an explicit owner enable can rearm. Signal ingestion is internal."
+    "Saving starts off. Explicit enable may prepare one fixed unscheduled original task, but creates no occurrence, Agent or model call. Original DSH admission, budget and permissions remain required. Pause/stop persist and reuse the same task; only explicit owner enable can rearm. Signal ingestion is internal."
   ],
   [
     "POST",
@@ -1005,6 +1005,6 @@
     "DiscoveryPolicyControl",
     "DiscoveryPolicyReceipt",
     "200",
-    "Configuration only. Saving starts off; enable does not create a task, Agent or model call. Original DSH execution, budget and permissions remain separate. Pause/stop persist; only an explicit owner enable can rearm. Signal ingestion is internal."
+    "Saving starts off. Explicit enable may prepare one fixed unscheduled original task, but creates no occurrence, Agent or model call. Original DSH admission, budget and permissions remain required. Pause/stop persist and reuse the same task; only explicit owner enable can rearm. Signal ingestion is internal."
   ]
 ]

@@ -311,6 +311,7 @@ export async function buildServer(config: {
     if (code === 'mailbox_queue_full') return reply.code(429).send({ error: { code: code.toUpperCase() } });
     if (code === 'unsafe_page_url') return reply.code(403).send({error:{code:'UNSAFE_PAGE_URL'}});
     if (code.startsWith('page_')) return reply.code(502).send({error:{code:code.toUpperCase()}});
+    if (code==='task_discovery_managed'||code==='task_discovery_admission_required')return reply.code(409).send({error:{code:code.toUpperCase()}});
     if (code==='discovery_scope_unavailable')return reply.code(404).send({error:{code:code.toUpperCase()}});
     if (['discovery_role_changed','discovery_role_unavailable'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
     if (code==='discovery_policy_invalid'||code==='discovery_command_key_invalid')return reply.code(422).send({error:{code:code.toUpperCase()}});
@@ -452,7 +453,7 @@ export async function buildServer(config: {
     return reply.code(202).send(crawlBatches.ingest(String(body.owner_id ?? ''), body.event as any));
   });
 
-  registerDiscoveryPolicyRoutes(app,{policies:new DiscoveryPolicies(db),actor,role:(owner,id)=>workbench.getAgent(owner,id),atomic:atomicCommand});
+  registerDiscoveryPolicyRoutes(app,{policies:new DiscoveryPolicies(db,{onChange:(owner,receipt,event)=>persistentTasks.synchronizeDiscoveryPolicy(owner,receipt.policy_id,event)}),actor,role:(owner,id)=>workbench.getAgent(owner,id),atomic:atomicCommand});
   registerConversationGoalRoutes(app,{db,conversations,actor,client:config.conversationGoalClient,resumeAdmission:{enabled:config.conversationGoalResumeEnabled===true,controls:new ConversationGoalControls(db,events,runs),atomic:atomicCommand}});
   app.get('/v1/capabilities', async (request, reply) => {
     const ownerId = actor(request as any);

@@ -315,8 +315,9 @@ The existing origin/CSRF/actor checks and atomic response-validation/receipt
 protocol wrap these writes. Only matching `discovery-policy-atomic-v1` pending
 reservations can recover; legacy unconfirmed records remain blocked. Immutable
 business receipts retain deduplication even if the generic HTTP cache is removed.
-These API operations configure future discovery; they do not install a running
-scheduler, a DSH task, an occurrence, a periodic model call or the workbench UI.
+These API operations configure future discovery. The fixed-task preparation
+milestone below adds one unscheduled original task on explicit enable; it does
+not install occurrence admission, a running scheduler or periodic model calls.
 
 Internal signal ingestion records only kind, opaque source identity, monotonic
 source version, source digest and policy revision. Duplicate source/version/hash
@@ -411,3 +412,63 @@ member while the original root had one unknown attempt. Existing budget-public
 and Coordinator focused tests also pass (26-case earlier focused run); root32/32
 and Windows root/Gateway builds pass. Public regressions6/6, 773-file preflight0,
 and BRAIN link checks pass. No new provider/SDK run or production rollout is claimed.
+
+### Fixed original task and budget identity
+
+The trusted Gateway policy-command callback now prepares exactly one original
+persistent task when the owner explicitly enables a policy. Default lookup and
+off-mode save still create none. Policy head/revision, task creation, immutable
+scope binding and original API receipt commit atomically; a failed binding insert
+rolls all of them back. Replaying an older command does not rerun the callback or
+rearm the current task. Independent processes replaying the same enable converge
+on one policy receipt and one original task.
+
+The binding permanently fixes policy/task/owner/project/workspace/role identities.
+Its original task uses the explicit unlimited tuple and a dedicated read-only
+`project_discovery` trigger with no due time. Only response DTOs accept that
+trigger: ordinary create/update/preview inputs retain their configured trigger
+schema. No discovery occurrence or budget scope/call is allocated at preparation.
+Future task-total allowance remains derived from this one task ID, rather than
+choosing a new task after a stop, exhausted quota or unknown provider outcome.
+
+Pause/stop synchronizes through the original Task transition/cancellation path;
+an explicit later enable resumes the same task without resetting its run counter.
+Role drift still revokes policy activity; saving current role settings leaves the
+task paused until fresh explicit enable. Generic managed-task run/edit/lifecycle
+commands are refused; the task card shows discovery-policy management rather than
+ordinary run/edit buttons. Existing task budget controls and accounting are kept.
+Configuration-only task-service integrations may expose a narrower role facade;
+managed preparation still requires real matching role version/epoch and fails
+closed if those are missing. The SQL binding verifies the immutable owned policy
+and task identities; current role validation occurs in that same command transaction.
+
+Database guards prevent binding mutation/replacement/deletion, task identity or
+content/trigger changes, rescheduling, changing the unlimited tuple and decrementing
+the accumulated run count. The ordinary timer explicitly skips this trigger. A
+separate SQL occurrence-insert guard currently refuses every managed occurrence,
+including legacy callers: this milestone deliberately has no admission escape
+flag or caller-supplied authorization boolean. Next, replace that closed guard
+transactionally only with the verified original occurrence/reservation protocol,
+carrying source/signal/policy/role/task revisions and all current authority checks.
+Until that implementation and its acceptance pass, prepared tasks cannot execute.
+
+Schema installation is transactional and ordered after task-limit migration;
+all referenced discovery tables exist even in standalone task-service startup.
+The old-layout fixture now removes feature-dependent triggers only while building
+its isolated pre-feature layout, then asserts migration restores them. Production
+guards remain enabled. This is preparation and storage compatibility, not full
+mixed-fleet rollout/rollback or real-provider acceptance.
+
+Verification: final Gateway 1412 total, 1405 passed, seven existing/opt-in skips,
+zero failures (155.59 seconds). The nine new binding cases include two independent
+enable processes, stable identity/counter across lifecycle commands, role reconfig,
+atomic failure rollback, no ordinary-timer admission, legacy SQL guard refusal and
+complete standalone referenced schemas. Root32/32, workbench154/154 and Windows
+root/Gateway builds pass. Final real Edge testing runs the built UI through the
+original BFF and real isolated Gateway/SQLite: one task, pause/resume/stop, managed
+controls, zero occurrences, zero model runs and zero page errors. Public6/6,
+777-file preflight0 and BRAIN links pass. The first full run caught an old-layout
+fixture/schema compatibility failure; the final run retains all original migration
+and protection assertions. No actual SDK/provider execution, deployment or active
+discovery acceptance is claimed. Run the browser check with
+`node scripts/verify-discovery-task-ui.mjs` after a local root build.
