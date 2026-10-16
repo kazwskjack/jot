@@ -296,3 +296,15 @@ reservations. Real local SDK cases verify lost-ACK/Host death, raw open steps an
 unchanged stored bytes, without new model calls or Agent activation. It does not
 yet provide deployed historical ACK/final delivery repair. Unknown execution,
 fees, upgrade/rollback and the other capability rows remain separate open gates.
+
+### Authenticated historical observation transport
+
+The verified reader is now available through explicit trusted Host configuration
+and dedicated bearer-authenticated readiness/history endpoints. The Gateway
+Client enforces exact request scope and returned observation contracts. Real
+local SDK cases now use this HTTP path rather than test-only file exchange,
+retaining unchanged-byte/call/state checks. The capability defaults absent/off;
+it does not enable replay, automatic ACK repair or historical final publication.
+A future writer must use a separately versioned complete product-source digest
+and atomic idempotent repair checks, not treat current observation IDs/version
+as mutation authority. See the steering plan for remaining gates.

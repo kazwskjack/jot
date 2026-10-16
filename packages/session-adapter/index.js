@@ -1,4 +1,5 @@
 import {createOrdinaryCompletionReader} from './ordinary-completion.js'
+import {createOrdinarySteeringObservationReader,normalizeOrdinaryHistoryScope} from './ordinary-steering-observation.js'
 import {nativeGoalsFor} from './workbench-goal.js'
 import {normalizeOrdinarySteeringExecution} from './ordinary-steering-authority.js'
 import {createOrdinaryClaimedSessionComposer} from './ordinary-claimed-composer.js'
@@ -160,7 +161,7 @@ function decodeFilename(headers) {
   return value && Buffer.byteLength(value, 'utf8') <= 255 && !/[\u0000\/\\]/.test(value) ? value : null
 }
 
-export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader }) {
+export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader }) {
   const voiceHandler = voiceEnabled ? createVoiceAdapterHandler({ speechController, token }) : null
   const workbenchSessions = new Set()
   const blockedWorkbenchSessions = new Set()
@@ -278,6 +279,18 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       if(!conversationGoalRunHost)return json(503,{error:'goal_resume_unavailable'});
       try{return json(200,await conversationGoalRunHost.resume(sessionId,body.goal_control));}
       catch(error){return json(409,{error:['goal_revision_changed','goal_cold_input_pending','goal_control_dispatch_unknown','goal_observer_required'].includes(error?.message)?error.message:'goal_resume_unavailable'});}
+    }
+    if(url.pathname==='/v1/ordinary-input-history/readiness'){
+      if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).length)return json(422,{error:'ordinary_history_input_invalid'});
+      return json(200,{ready:typeof ordinarySteeringObservationReader==='function',protocol:1,execution_authorized:false});
+    }
+    const historyObservation=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/steering-history$/)
+    if(historyObservation){
+      const sessionId=decodeURIComponent(historyObservation[1]);let scope;
+      if(!ID.test(sessionId)||!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).join(',')!=='history'||!body.history||typeof body.history!=='object'||Array.isArray(body.history)||Object.keys(body.history).sort().join(',')!=='command_id,conversation_id,expected_run_version,owner_id,run_id'||workbenchSessions.has(sessionId)||blockedWorkbenchSessions.has(sessionId))return json(422,{error:'ordinary_history_input_invalid'});
+      try{scope=normalizeOrdinaryHistoryScope({...body.history,session_ref:sessionId});}catch{return json(422,{error:'ordinary_history_input_invalid'})}
+      if(typeof ordinarySteeringObservationReader!=='function')return json(503,{error:'ordinary_history_unavailable'});
+      try{return json(200,await ordinarySteeringObservationReader({scope,signal}));}catch{return json(409,{error:'ordinary_steering_observation_unconfirmed'})}
     }
     const inputCompletion=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/input-completion$/)
     if(inputCompletion){
@@ -449,6 +462,7 @@ export function apply(ctx, config = {}) {
   if (host !== '127.0.0.1' || !Number.isInteger(port) || port < 1024 || token.length < 32
     || (config.conversationGoalResume!==undefined&&typeof config.conversationGoalResume!=='boolean')
     || (config.conversationGoalResume===true&&workbenchToken.length<16)
+    || (config.ordinaryInputHistory!==undefined&&(!config.ordinaryInputHistory||typeof config.ordinaryInputHistory!=='object'||Array.isArray(config.ordinaryInputHistory)||Object.keys(config.ordinaryInputHistory).sort().join(',')!=='Session,validateLog'||typeof config.ordinaryInputHistory.Session?.create!=='function'||typeof config.ordinaryInputHistory.validateLog!=='function'||config.ordinaryInputAdmission?.admissions?.entryInspectionProtocol!==1||typeof config.ordinaryInputAdmission?.admissions?.inspectEntry!=='function'||workbenchToken.length<16))
     || (config.ordinaryInputRecovery!==undefined&&(!config.ordinaryInputRecovery||typeof config.ordinaryInputRecovery!=='object'||Array.isArray(config.ordinaryInputRecovery)||!['verifyComposition','claimedInput,verifyComposition'].includes(Object.keys(config.ordinaryInputRecovery).sort().join(','))||config.ordinaryInputRecovery.claimedInput!==undefined&&(!config.ordinaryInputRecovery.claimedInput||Object.keys(config.ordinaryInputRecovery.claimedInput).sort().join(',')!=='Session,validateLog'||typeof config.ordinaryInputRecovery.claimedInput.Session?.create!=='function'||typeof config.ordinaryInputRecovery.claimedInput.validateLog!=='function')||typeof config.ordinaryInputRecovery.verifyComposition!=='function'||workbenchToken.length<16||config.ordinaryInputAdmission===undefined))
     || (config.ordinaryInputAdmission!==undefined&&(!config.ordinaryInputAdmission||typeof config.ordinaryInputAdmission!=='object'||Object.keys(config.ordinaryInputAdmission).sort().join(',')!=='admissions,profile'||typeof config.ordinaryInputAdmission.profile?.read!=='function'||typeof config.ordinaryInputAdmission.admissions?.read!=='function'||typeof config.ordinaryInputAdmission.admissions?.create!=='function'||config.ordinaryInputAdmission.admissions.entryReservationProtocol!==1||typeof config.ordinaryInputAdmission.admissions.reserveEntry!=='function'||typeof config.ordinaryInputAdmission.admissions.readReplayCandidate!=='function'||workbenchToken.length<16))
     || (config.nativeContinuation !== undefined && typeof config.nativeContinuation !== 'boolean')
@@ -512,6 +526,7 @@ export function apply(ctx, config = {}) {
   const ordinaryInputAdmissionHost=config.ordinaryInputAdmission===undefined?undefined:createOrdinaryInputAdmissionHost({ctx,agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted')),...config.ordinaryInputAdmission})
   if(ordinaryInputAdmissionHost)ctx.effect(()=>()=>ordinaryInputAdmissionHost.dispose())
   const ordinaryCompletionReader=config.ordinaryInputAdmission===undefined?undefined:createOrdinaryCompletionReader({agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted')),readGoal:agent=>nativeGoalsFor(agent)?.get(agent),...config.ordinaryInputAdmission})
+  const ordinarySteeringObservationReader=config.ordinaryInputHistory===undefined?undefined:createOrdinarySteeringObservationReader({agents:ctx.agents,sessions:ctx.sessions,persistence:ctx.sessionPersistence,bridge:workbenchBridge,admissions:config.ordinaryInputAdmission.admissions,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted')),...config.ordinaryInputHistory})
   const ordinaryClaimedComposer=config.ordinaryInputRecovery?.claimedInput===undefined?undefined:createOrdinaryClaimedSessionComposer({ctx,bridge:workbenchBridge,agents:ctx.agents,sessions:ctx.sessions,query:typeof ctx.get==='function'?ctx.get('sessionQuery'):ctx.sessionQuery,projections:ctx.sessionProjections,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted')),...config.ordinaryInputAdmission,...config.ordinaryInputRecovery.claimedInput})
   if(ordinaryClaimedComposer)ctx.effect(()=>()=>ordinaryClaimedComposer.dispose())
   const ordinaryInputRunHost=config.ordinaryInputRecovery===undefined?undefined:createOrdinaryInputRunHost({controller:ctx.sessionController,agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted')),verifyComposition:config.ordinaryInputRecovery.verifyComposition,inputAdmissionHost:ordinaryInputAdmissionHost,claimedComposer:ordinaryClaimedComposer})
@@ -521,7 +536,7 @@ export function apply(ctx, config = {}) {
   const handler = createAdapterHandler({ controller: ctx.sessionController, fileUploads: ctx.fileUploads, agents: ctx.agents,
     sessions:ctx.sessions,persistence:ctx.sessionPersistence,
     speechController, voiceEnabled, token, workbenchBridge,
-    budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader })
+    budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader })
   const server = createServer(async (req, res) => {
     const abort = new AbortController()
     req.once('aborted', () => abort.abort())

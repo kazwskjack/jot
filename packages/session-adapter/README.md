@@ -191,3 +191,22 @@ observation requires a real persisted completed turn. Missing input is unproven,
 never safe to resend. A reported historical profile fingerprint is not current
 replay compatibility. This factory does not register an HTTP/MCP tool or perform
 ACK repair, final publication, replay, Agent activation or billing settlement.
+
+The Adapter can explicitly expose this reader through trusted Host configuration
+`ordinaryInputHistory: {Session, validateLog}`. Use the installed official Session
+class and the existing detached invariant validator; the original private
+`ordinaryInputAdmission` store must support `entryInspectionProtocol: 1`. Omit
+this option to keep history unavailable. It does not enable ordinary replay or
+steering and does not require arming a Goal.
+
+With the existing Adapter bearer token, `POST /v1/ordinary-input-history/readiness`
+accepts `{}` and returns `{ready, protocol: 1, execution_authorized: false}`.
+`POST /v1/sessions/:id/steering-history` accepts only
+`{history:{owner_id,conversation_id,run_id,command_id,expected_run_version}}`.
+Session identity comes from the path. No content, old lease or requested action
+is accepted. Per-call product/native verification is mandatory even when ready.
+Unavailable configuration returns 503; an unconfirmed scope/snapshot returns a
+generic 409, without private diagnostic text. The Gateway's
+`SessionControllerClient.observeSteeringHistory` validates this exact request and
+the returned hashes, identity, nullable facts and sequence bounds. No public
+browser/MCP route or automatic reconciliation consumer is enabled by this API.

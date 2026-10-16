@@ -4,7 +4,7 @@ title: Keep native Goal state and continuation in DSH
 category: decision
 status: active
 created: "2026-10-16T11:44:16"
-updated: "2026-10-16T22:54:45"
+updated: "2026-10-16T23:11:42"
 ---
 
 <!-- compiled_truth -->
@@ -320,5 +320,17 @@ Running ordinary completion now has a Worker-owned publication callback while th
 - time: 2026-10-16T22:54:45
   kind: evidence
   summary: "Final historical observation SDK matrix passes 36/36 with no skips/failures; Adapter 473/473, startup guards 3/3 and root 32/32 pass. The known test-port collision now has bounded pre-ready-only recovery with a deterministic real DSH case. No live-process/timeout restart is allowed. Historical transport, ACK/final publication repair, unknown money, deployment and full capability acceptance remain unfinished."
+  source: docs/superpowers/plans/2026-10-16-steering-lineage-and-recovery.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-16T23:04:02
+  kind: evidence
+  summary: "Historical observation now has explicit opt-in trusted Host configuration and dedicated bearer-authenticated readiness/history routes. Gateway validates exact owner/conversation request scope, returned original run/command/Session/version, hashes, nullable facts and sequence bounds. All three actual SDK historical cases use the real Client/HTTP/bridge/raw reader instead of a fixture file exchange; byte/call/state assertions pass. No automatic ACK/final repair or execution consumer is enabled."
+  source: docs/superpowers/plans/2026-10-16-steering-lineage-and-recovery.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-16T23:11:42
+  kind: evidence
+  summary: "Final historical HTTP composition passes actual local SDK 36/36, Gateway 1167 passed/six existing skips and Adapter 476/476. Exact scope/response validation and absent-by-default readiness are verified. Before any ACK writer, add a separately versioned complete product-source digest and atomic idempotent repair receipt; IDs/run version and protocol-1 observations remain read-only. Final-answer/all-command, money, rollout and full capability acceptance stay open."
   source: docs/superpowers/plans/2026-10-16-steering-lineage-and-recovery.md
   affects: [native-goal-boundary]

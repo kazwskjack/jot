@@ -8,7 +8,6 @@ import {fileURLToPath,pathToFileURL} from 'node:url';
 import {createNativeInvariantReplay} from '../../session-adapter/native-invariant-replay.js';
 import {createNativeReplayProfile} from '../../session-adapter/native-replay-profile.js';
 import {createOrdinaryInputAdmissions} from '../../session-adapter/ordinary-input-admissions.js';
-import {createOrdinarySteeringObservationReader} from '../../session-adapter/ordinary-steering-observation.js';
 // Test-only audit and seed wrapper. Never install as a product adapter.
 import {writeFileSync,existsSync,readFileSync,mkdirSync,copyFileSync} from 'node:fs';
 import {apply as applyAdapter} from '../../session-adapter/index.js';
@@ -36,24 +35,10 @@ export async function apply(ctx,{fixture,...config}){
  if(fixture.admissionEntryHold&&!existsSync(fixture.seeded)){const store=ordinaryInputAdmission.admissions;ordinaryInputAdmission.admissions={...store,reserveEntry:async(...args)=>{await store.reserveEntry(...args);writeFileSync(fixture.seeded,JSON.stringify({messageId:args[1].native_message_id,sourceRpcId:fixture.runId,phase:'entry-reserved'}));await new Promise(()=>{});}};}
  if(fixture.coldSteerHold)ctx.on('agent/turn-stopping',async({agent})=>{if(agent.id!==fixture.sessionId||existsSync(fixture.coldSteerHold))return;await ctx.sessions.flush(agent.session);await ctx.sessionPersistence.flush();writeFileSync(fixture.coldSteerHold,JSON.stringify({prefix:agent.session.snapshotEvents(0)}));if(fixture.coldClaimHold){while(!existsSync(fixture.coldClaimRelease))await new Promise(r=>setTimeout(r,20));}else await new Promise(()=>{});});
  const seedBridge=new WorkbenchBridge({origin:config.workbenchOrigin,token:process.env.GENERAL_AGENT_INTERNAL_CHANNEL_TOKEN});
- // Isolated read-only probe for the historical acceptance fixture. This file
- // exchange is test-only and is never exposed as a product endpoint.
- let historyProbeBusy=false,historyProbeDone=false;
- ctx.effect(()=>{const timer=setInterval(async()=>{
-  const request=fixture.seeded+'.history-request.json',result=fixture.seeded+'.history-result.json';
-  if(historyProbeBusy||historyProbeDone||!existsSync(request))return;historyProbeBusy=true;
-  try{const scope=JSON.parse(readFileSync(request,'utf8'));
-   const [cordis,session,invariants,sessionInvariant]=await Promise.all(['cordis/lib/index.js','dsh-session/lib/index.js','dsh-invariants/lib/index.js','dsh-session/lib/invariant.js'].map(file=>import(pathToFileURL(join(fixture.runtimeModules,file)).href)));
-   const read=createOrdinarySteeringObservationReader({bridge:seedBridge,persistence:ctx.sessionPersistence,admissions:ordinaryInputAdmission.admissions,agents:ctx.agents,sessions:ctx.sessions,Session:session.Session,
-    validateLog:createNativeInvariantReplay({Context:cordis.Context,Service:cordis.Service,InvariantRegistry:invariants.InvariantRegistry,sessionInvariant}),ordinaryPresets:new Set(['jot-general'])});
-   const view=await read({scope,signal:AbortSignal.timeout(15000)});writeFileSync(result,JSON.stringify({view}));
-  }catch(error){writeFileSync(result,JSON.stringify({error:{name:error.name,code:error.code,reason:error.message}}));}
-  finally{historyProbeDone=true;historyProbeBusy=false;}
- },50);return()=>clearInterval(timer);});
  if(fixture.controllerAdmission&&!fixture.admissionHold&&!fixture.admissionEntryHold)ctx.on('agent/inbox/inserted',({agent,message})=>{if(agent.id===fixture.sessionId&&message.source?.rpcId===fixture.runId)writeFileSync(fixture.seeded,JSON.stringify({messageId:message.id,sourceRpcId:fixture.runId}));});
  if(fixture.admissionHold&&!existsSync(fixture.seeded))ctx.on('agent/pre-step',async({agent,messages},next)=>{const original=messages.find(m=>m.source?.kind==='user'&&m.source.rpcId===fixture.runId);if(agent.id!==fixture.sessionId||!original)return next();await ctx.sessions.flush(agent.session);await ctx.sessionPersistence.flush();writeFileSync(fixture.seeded,JSON.stringify({messageId:original.id,sourceRpcId:fixture.runId}));await new Promise(()=>{});});
  if(fixture.coldClaimHold&&!existsSync(fixture.coldClaimHold))ctx.on('agent/pre-step',async({agent,messages},next)=>{if(agent.id!==fixture.sessionId||!messages.some(m=>m.source?.kind==='user'&&m.source.rpcId!==fixture.runId))return next();await ctx.sessions.flush(agent.session);await ctx.sessionPersistence.flush();storedLogPath=ctx.sessionPersistence.locate(agent.session.header).path;save();writeFileSync(fixture.coldClaimHold,JSON.stringify({prefix:agent.session.snapshotEvents(0)}));await new Promise(()=>{});});
- let claimedInput;
- if(fixture.claimedRecovery){const [cordis,session,invariants,sessionInvariant]=await Promise.all(['cordis/lib/index.js','dsh-session/lib/index.js','dsh-invariants/lib/index.js','dsh-session/lib/invariant.js'].map(file=>import(pathToFileURL(join(fixture.runtimeModules,file)).href)));claimedInput={Session:session.Session,validateLog:createNativeInvariantReplay({Context:cordis.Context,Service:cordis.Service,InvariantRegistry:invariants.InvariantRegistry,sessionInvariant})};}
- return applyAdapter(ctx,{...config,...(ordinaryInputAdmission?{ordinaryInputAdmission}:{}),ordinaryInputRecovery:{...(claimedInput?{claimedInput}:{}),verifyComposition:async({phase,agent,projection,authority})=>{audits.push({phase,preset:projection.values.agentPreset,seq:agent?.session.seq??null,status:agent?.status??null,wake:agent?.jotPendingInputProtocol??null,revoke:agent?.jotPendingWakeRevocationProtocol??null});save();return{verified:authority.run_id===fixture.runId&&projection.values.agentPreset==='jot-general'&&(!agent||agent.id===fixture.sessionId&&agent.jotPendingWakeRevocationProtocol===1),fingerprint:fixture.fingerprint};}}});
+ let claimedInput,historyInput;
+ if(fixture.claimedRecovery||fixture.historyTransport){const [cordis,session,invariants,sessionInvariant]=await Promise.all(['cordis/lib/index.js','dsh-session/lib/index.js','dsh-invariants/lib/index.js','dsh-session/lib/invariant.js'].map(file=>import(pathToFileURL(join(fixture.runtimeModules,file)).href)));const kit={Session:session.Session,validateLog:createNativeInvariantReplay({Context:cordis.Context,Service:cordis.Service,InvariantRegistry:invariants.InvariantRegistry,sessionInvariant})};if(fixture.claimedRecovery)claimedInput=kit;if(fixture.historyTransport)historyInput=kit;}
+ return applyAdapter(ctx,{...config,...(historyInput?{ordinaryInputHistory:historyInput}:{}),...(ordinaryInputAdmission?{ordinaryInputAdmission}:{}),ordinaryInputRecovery:{...(claimedInput?{claimedInput}:{}),verifyComposition:async({phase,agent,projection,authority})=>{audits.push({phase,preset:projection.values.agentPreset,seq:agent?.session.seq??null,status:agent?.status??null,wake:agent?.jotPendingInputProtocol??null,revoke:agent?.jotPendingWakeRevocationProtocol??null});save();return{verified:authority.run_id===fixture.runId&&projection.values.agentPreset==='jot-general'&&(!agent||agent.id===fixture.sessionId&&agent.jotPendingWakeRevocationProtocol===1),fingerprint:fixture.fingerprint};}}});
 }

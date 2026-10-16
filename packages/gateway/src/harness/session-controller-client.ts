@@ -1,4 +1,5 @@
 import {normalizeExecutionLease,type ExecutionLease} from '../workbench/execution-lease.ts'
+import {normalizeOrdinaryHistoryScope,validateOrdinarySteeringObservation,type OrdinaryHistoryScope} from './ordinary-steering-observation.ts'
 import { createReadStream } from 'node:fs'
 import { Readable } from 'node:stream'
 
@@ -117,6 +118,12 @@ export class SessionControllerClient {
   async inputCompletion(sessionId:string,execution:OriginalInputExecution,commandIds:readonly string[],signal?:AbortSignal){
     const scope=normalizeOriginalInputExecution(execution);if(!Array.isArray(commandIds)||commandIds.some(id=>typeof id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(id)||id===scope.run_id)||new Set(commandIds).size!==commandIds.length)throw Error('ordinary_completion_input_invalid');
     return this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/input-completion`,{ordinary_input:scope,command_ids:[...commandIds]},signal);
+  }
+
+  /** Private read-only history; acceptance facts never authorize another prompt. */
+  async observeSteeringHistory(sessionId:string,input:OrdinaryHistoryScope,signal?:AbortSignal){
+    const scope=normalizeOrdinaryHistoryScope(sessionId,input);
+    return validateOrdinarySteeringObservation(await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/steering-history`,{history:scope},signal),sessionId,scope);
   }
 
   async steerOriginal(sessionId:string,requestId:string,text:string,execution:OrdinarySteeringExecution,signal?:AbortSignal){

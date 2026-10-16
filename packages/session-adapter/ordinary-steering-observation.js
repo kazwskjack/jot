@@ -7,9 +7,10 @@ const hash=v=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v);
 const fail=()=>{throw Error('ordinary_steering_observation_unconfirmed');};
 const sourceKeys='command_id,command_sha256,command_status,conversation_id,execution_authorized,input_message_id,input_sha256,kind,native_acceptance,native_content_sha256,original_input_message_id,original_input_sha256,owner_id,product_message_present,protocol,run_id,run_status,run_version,session_id';
 function validateScope(scope){
- if(!scope||Object.keys(scope).sort().join(',')!=='command_id,conversation_id,expected_run_version,owner_id,run_id,session_ref'
+ if(!scope||typeof scope!=='object'||Array.isArray(scope)||Object.keys(scope).sort().join(',')!=='command_id,conversation_id,expected_run_version,owner_id,run_id,session_ref'
   ||!['command_id','conversation_id','owner_id','run_id','session_ref'].every(k=>valid(scope[k]))||scope.command_id===scope.run_id||!Number.isSafeInteger(scope.expected_run_version)||scope.expected_run_version<1)fail();
 }
+export function normalizeOrdinaryHistoryScope(scope){validateScope(scope);return structuredClone(scope);}
 function validateSource(row,scope){
  if(!row||Object.keys(row).sort().join(',')!==sourceKeys||row.protocol!==1||row.kind!=='ordinary_steer_history'||row.execution_authorized!==false||row.native_acceptance!=='unverified'
   ||row.run_id!==scope.run_id||row.command_id!==scope.command_id||row.conversation_id!==scope.conversation_id||row.owner_id!==scope.owner_id||row.session_id!==scope.session_ref||row.run_version!==scope.expected_run_version
@@ -26,7 +27,7 @@ export function createOrdinarySteeringObservationReader({bridge,persistence,admi
  if(typeof bridge?.request!=='function'||typeof persistence?.open!=='function'||admissions?.entryInspectionProtocol!==1||typeof admissions.read!=='function'||typeof admissions.inspectEntry!=='function'
   ||typeof agents?.get!=='function'||typeof sessions?.get!=='function'||typeof Session?.create!=='function'||typeof validateLog!=='function'||!(ordinaryPresets instanceof Set)||!ordinaryPresets.size)fail();
  return async({scope:input,signal})=>{
-  validateScope(input);if(!signal)fail();const scope=structuredClone(input);
+  const scope=normalizeOrdinaryHistoryScope(input);if(!signal)fail();
   const check=()=>{signal.throwIfAborted();if(agents.get(scope.session_ref)!==undefined||sessions.get(scope.session_ref)!==undefined)fail();};
   const readSource=async()=>{check();const value=await bridge.request('ordinary-steering-history',{runId:scope.run_id,sessionRef:scope.session_ref},
    {owner_id:scope.owner_id,conversation_id:scope.conversation_id,command_id:scope.command_id,expected_run_version:scope.expected_run_version},signal);check();return validateSource(value?.history,scope);};

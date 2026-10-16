@@ -691,3 +691,73 @@ read-only transport/consumer, atomic product ACK repair, final-answer recovery,
 unknown usage/fees, real-provider acceptance, upgrade/rollback and the complete
 capability inventory remain unfinished. Do not activate production steering or
 claim all historical delivery is fixed from these observations alone.
+
+## Read-only historical transport and consumer boundary
+
+Next connect the verified reader to a dedicated authenticated Adapter endpoint,
+`POST /v1/sessions/:id/steering-history`, with exact `{history:{owner_id,
+conversation_id,run_id,command_id,expected_run_version}}`. Session comes only
+from the path. No text, execution lease, action or replay parameter is accepted.
+Use existing bearer authentication and generic unavailable/unconfirmed errors.
+An authenticated readiness inspection reports capability only, not authority.
+
+Explicit trusted Host config `ordinaryInputHistory: {Session,validateLog}` must
+be absent by default. Enabling it requires the original admission store's
+inspection capability and the existing internal product bridge; it does not
+require activating ordinary replay. Construct only the read-only reader. No new
+MCP/model tool or browser route is added.
+
+Add Gateway `ordinary-steering-observation.ts` for strict scope/response DTOs,
+and `SessionControllerClient.observeSteeringHistory` for this exact transport.
+Validate original owner/conversation/run/command/Session/version, all hashes and
+nullable facts, state dependencies and native answer sequence. Reject coercion,
+extra fields, foreign identity or any claimed execution permission. Readiness
+does not waive per-call scope checks. Do not mutate the Dispatcher yet.
+
+Tests first: transport auth/method/envelope, disabled/unconfirmed/no execution
+fallback, trusted configuration requirements and strict Gateway response tests.
+Replace test-only file exchange in the real SDK historical cases with this
+actual authenticated Client/Adapter path, preserving byte/call/state assertions.
+Then run Adapter, Gateway tests/build, root tests/Windows build and the full
+SDK matrix. ACK/final delivery repair and rollout remain separate required work.
+
+### Historical HTTP implementation checkpoint
+
+The dedicated authenticated history/readiness routes, explicit trusted Host
+configuration and Gateway scope/observation contracts are implemented. Missing
+configuration reports unavailable; invalid or changed evidence never falls back
+to prompt, Agent resolution or resume. Strict Client validation happens before
+send and after response. Existing workbench classification and the reader's
+product/native checks remain in force. The option defaults absent/off.
+
+The test-only history file-exchange timer has been removed. All three real SDK
+historical cases now traverse the actual Gateway Client, Adapter bearer route,
+product-source bridge and raw-history reader. They pass 3/3 (45.11 seconds),
+retaining byte, model-call, Agent-count, command state and canonical-message
+assertions. Focused Adapter/reader 7/7 and Gateway contract/client 2/2 pass;
+Gateway Windows build passes. The complete Adapter suite passes 476/476 without
+skips. Final Gateway/root/SDK results follow only after their processes finish.
+This makes observation available to a future trusted consumer; it does not
+repair ACKs, publish a historical answer or authorize another execution.
+
+Before a product writer consumes this transport, add a separately versioned
+binding to the complete product-source digest (including original/command
+content hashes) and recheck that digest inside the acknowledgement transaction.
+The current observation's IDs and run version alone must not authorize mutation:
+command payload/product state can change without that parent version changing.
+Keep protocol-1 observations read-only; do not silently grandfather them into a
+future repair permission. Reconciliation needs its own idempotent receipt,
+ownership/cancellation checks and unchanged source proof. Final-answer recovery
+also requires coverage of the entire command set and the original canonical
+publication boundary, not just one command's observed answer hash.
+
+Final HTTP checkpoint verification: complete actual local SDK 36/36, zero
+failures or skips (492.33 seconds), now using the real authenticated history
+transport in all three historical cases. Final Gateway 1173 total, 1167 passed,
+six existing skips, zero failures (136.03 seconds); Adapter 476/476 without
+skips; root 32/32, public-review regressions 6/6, Gateway/Windows root builds and
+BRAIN links pass. All model endpoints are local scripted fixtures. Production
+configuration and execution switches are unchanged. Source-digest binding,
+atomic ACK repair, complete-command final-answer reconciliation, unknown usage/
+fees, real-provider and rolling/deployment acceptance plus the full capability
+inventory remain open; this checkpoint establishes read-only transport only.
