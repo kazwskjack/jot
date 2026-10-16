@@ -4,7 +4,7 @@ title: One memory authority with separate extraction and publication
 category: decision
 status: active
 created: "2026-10-15T21:00:42"
-updated: "2026-10-15T22:38:42"
+updated: "2026-10-16T11:09:55"
 ---
 
 <!-- compiled_truth -->
@@ -46,5 +46,11 @@ Optional loader, Host entry and idle pool dispatch have passed local actual-SDK/
 - time: 2026-10-15T22:38:42
   kind: decision
   summary: "Record optional pinned extraction, original idle pool and accounting evidence without claiming production acceptance"
+  source: MEMORY-AUTOMATION.md
+  affects: [memory-authority]
+
+- time: 2026-10-16T11:09:55
+  kind: decision
+  summary: "Resolve actual high route before extraction; explicitly configure vendor dialect behind loopback aliases, and verify provider acceptance separately from readiness"
   source: MEMORY-AUTOMATION.md
   affects: [memory-authority]
