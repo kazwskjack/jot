@@ -1000,3 +1000,40 @@ Final verification including both recovery gates passed 19/19 real local SDK
 cases in one run with no skips, 441 adapter tests, 32 root tests and the
 Windows build. The real providers remain scripted; no production enablement
 or monetary/visual-quality acceptance is implied.
+
+
+## Steering command lineage preparation
+
+The native steering RPC is the durable command ID, distinct from the parent
+run's initial-input RPC. The existing original-input Host does not yet admit
+this as an owned supplement. Broadening its RPC filter, reusing the run ID or
+resubmitting the initial prompt would not solve the ownership/replay problem.
+
+A new read-only internal `ordinary-steering-binding` route prepares the missing
+identity proof. It derives the command, deterministic future product message,
+parent owner/conversation/original input, owner-bound Session and live lease
+from the existing Gateway records in one transaction. Pending and applied
+commands produce the same stable identity; a command's later state is checked
+but not included as immutable admission data. Applied commands require the
+exact committed user message. ID/client-message collisions, conflicting
+content, future run versions, wrong command kind/state, archived/stopped parent
+runs and invalid scope/lease refuse. The response returns only IDs and hashes,
+with `execution_authorized: false`; it writes no admission or product message
+and acquires no lease.
+
+The product-message hash uses the dispatcher's current exact representation.
+`native_content_sha256` separately describes the existing trimmed native wire
+text parts. The command payload and parent input have their own hashes. An
+API read does not freeze database records: future consumers must compare these
+facts to the original per-message admission and reject changes, rather than
+resealing them at recovery time. Authentication and the exact request envelope
+are mandatory; caller-supplied owner/content overrides are rejected.
+
+This route alone does **not** fix or enable steering recovery. The dispatcher
+still needs its originally owned lease, the Client/Host still need explicit
+command admission, and later claimed supplements need a verified completed-step
+boundary plus canonical delivery and cost reconciliation. Native rc2 can take
+several steps inside a turn, so removing the current whole-turn recovery guard
+is unsafe. The complete implementation/acceptance sequence is in
+[Steering lineage and recovery](superpowers/plans/2026-10-16-steering-lineage-and-recovery.md).
+No production continuation switch changes with this preparation.

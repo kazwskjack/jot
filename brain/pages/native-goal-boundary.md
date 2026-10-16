@@ -4,7 +4,7 @@ title: Keep native Goal state and continuation in DSH
 category: decision
 status: active
 created: "2026-10-16T11:44:16"
-updated: "2026-10-16T19:54:43"
+updated: "2026-10-16T20:10:02"
 ---
 
 <!-- compiled_truth -->
@@ -29,6 +29,8 @@ Recovery, Goal execution and related production switches remain off by default. 
 The complete PilotDeck scope in docs/PILOTDECK-PARITY.md integration and independent runnable backend/workbench remain the objective. Individual milestones and capability tables are not proof of all 26 capabilities. Preserve DSH high reasoning, Jev/Laya boundaries and user authorization. Do not include private endpoints, credentials, profiles, user records, logs or databases in the public repository.
 
 Original attachment availability is distinct from admission identity. Claimed-factory setup/publication and mandatory pending-input adoption verify only original unentered image/file content-addressed bytes through the native store. File verification streams within the recorded byte bound; images use the native reader. Missing/corrupt objects and cancellation refuse without resealing admissions, model calls, uploads or raw storage diagnostics. Text-only input does not read binaries. An actual corrected deletion test against the prior source showed retained file text could otherwise yield a completed answer despite a missing binary; an earlier injection that did not delete anything is not evidence. Real local file/PNG transport/recovery and missing-file/image/corrupt-file cases pass with scripted providers, preserving the original reference, artifact, no restaging and one canonical answer. Additional formats, real-provider semantics, restoration/retention and production audit remain incomplete.
+
+Ordinary steering retains its own durable command RPC; it is not the parent's initial-input RPC. The new internal steering binding is read-only identity preparation: command/parent/message/Session/current-lease hashes and IDs, execution_authorized:false, pending/applied continuity and canonical-message collision checks. It does not dispatch, persist an admission or enable recovery. Full steering still needs an originally owned Worker lease, explicit command admission, multi-RPC Host ownership, completed-step claimed recovery, canonical delivery and unknown-cost handling. Never fix this by accepting arbitrary RPCs, reusing the parent RPC or removing whole-turn started-step guards. See docs/superpowers/plans/2026-10-16-steering-lineage-and-recovery.md. Production switches remain unchanged.
 
 
 ## Timeline
@@ -241,4 +243,10 @@ Original attachment availability is distinct from admission identity. Claimed-fa
   kind: decision
   summary: Verify original binary availability before factory publication and pending adoption without additional model calls
   source: docs/GOAL-CONTINUATION.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-16T20:10:02
+  kind: decision
+  summary: Keep steering command identity distinct and stage its read-only original lineage before native admission
+  source: docs/superpowers/plans/2026-10-16-steering-lineage-and-recovery.md
   affects: [native-goal-boundary]
