@@ -46,3 +46,9 @@ test('source revocation after model completion prevents candidate publication',{
  const f=await setup(t);let revoked=false,proposals=0;
  await assert.rejects(runMemoryPluginExtraction({...f,authorize:async()=>{if(revoked)throw Error('source_revoked_after_model');},stream:async function*(){yield {type:'text-delta',index:0,text:JSON.stringify({summary:'Preference',notes:[{content:'Prefers short answers.',source_ids:['source-a']}]})};yield {type:'finish',reason:{kind:'stop'}};revoked=true;},propose:async()=>{proposals++;}}),/source_revoked_after_model/);assert.equal(proposals,0);
 });
+
+test('extraction preserves the original route output ceiling rather than the upstream summary default',{skip:!installed,timeout:15000},async t=>{
+ const f=await setup(t);let outputLimit;
+ const result=await runMemoryPluginExtraction({...f,route:{...f.route,max_output_tokens:16384},stream:async function*(options){outputLimit=options.maxTokens;yield {type:'text-delta',index:0,text:JSON.stringify({summary:'Preference',notes:[{content:'Prefers short answers.',source_ids:['source-a']}]})};yield {type:'finish',reason:{kind:'stop'}};},propose:async()=>({capture_id:f.packet.capture_id,version:3,status:'proposed'})});
+ assert.equal(result.status,'proposed');assert.equal(outputLimit,16384);
+});

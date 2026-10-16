@@ -16,9 +16,17 @@ export function createOptionalMemoryExtractionHost({config,bridge,llm,route}={})
    host=createMemoryExtractionHost({runtime,root:config.root,bridge,llm,route:{...route,max_output_tokens:config.maxOutputTokens}});
   }catch{/* Readiness exposes a fixed reason, never package paths or contents. */}
  })();
+ async function ready(){
+  await prepared;
+  if(!host||disposed||typeof llm?.resolveCallConfig!=='function')return false;
+  try{
+   const resolved=await llm.resolveCallConfig({provider:route.provider,model:route.model,reasoningEffort:'high',maxTokens:config.maxOutputTokens});
+   return !disposed&&resolved.provider===route.provider&&resolved.model===route.model&&resolved.reasoningEffort==='high'&&resolved.maxTokens===config.maxOutputTokens;
+  }catch{return false;}
+ }
  return {
-  async readiness(){await prepared;return host&&!disposed?{ready:true}:{ready:false,reason:'memory_extraction_runtime_unavailable'};},
-  async run(agent,options){await prepared;if(!host||disposed)throw Error('memory_extraction_runtime_unavailable');return host.run(agent,options);},
+  async readiness(){return await ready()?{ready:true}:{ready:false,reason:'memory_extraction_runtime_unavailable'};},
+  async run(agent,options){if(!await ready())throw Error('memory_extraction_runtime_unavailable');return host.run(agent,options);},
   async dispose(){disposed=true;await prepared;await host?.dispose();},
  };
 }

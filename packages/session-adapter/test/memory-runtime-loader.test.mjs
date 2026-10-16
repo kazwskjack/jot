@@ -25,6 +25,13 @@ test('optional extraction readiness can fail without failing the ordinary Host',
 
 
 test('a configured reviewed runtime reports ready without starting a model',{skip:!installed},async()=>{
- let calls=0;const host=createOptionalMemoryExtractionHost({config:{root:resolve('.test-tmp/unused-ready-memory'),modulesRoot:resolve(installed,'..'),maxOutputTokens:20},bridge:{bindingFor(){},async guardBudget(){},async request(){}},llm:{async *stream(){calls++;}},route:{provider:'fixture',model:'fixture'}});
+ let calls=0;const host=createOptionalMemoryExtractionHost({config:{root:resolve('.test-tmp/unused-ready-memory'),modulesRoot:resolve(installed,'..'),maxOutputTokens:20},bridge:{bindingFor(){},async guardBudget(){},async request(){}},llm:{async resolveCallConfig(value){assert.equal(value.reasoningEffort,'high');return value;},async *stream(){calls++;}},route:{provider:'fixture',model:'fixture'}});
  assert.deepEqual(await host.readiness(),{ready:true});assert.equal(calls,0);await host.dispose();assert.equal((await host.readiness()).ready,false);
+});
+
+test('readiness validates the actual high route before a run can spend',{skip:!installed},async()=>{
+ for(const resolveCallConfig of [async()=>{throw Object.assign(Error('unsupported'),{code:'UNSUPPORTED_REASONING_EFFORT'});},async value=>({...value,reasoningEffort:'off'}),async value=>({...value,provider:'different-route'})]){
+  let calls=0;const host=createOptionalMemoryExtractionHost({config:{root:resolve('.test-tmp/unused-invalid-high'),modulesRoot:resolve(installed,'..'),maxOutputTokens:20},bridge:{bindingFor(){},async guardBudget(){},async request(){}},llm:{resolveCallConfig,async *stream(){calls++;}},route:{provider:'fixture',model:'fixture'}});
+  assert.equal((await host.readiness()).ready,false);await assert.rejects(host.run({}),/memory_extraction_runtime_unavailable/);assert.equal(calls,0);await host.dispose();
+ }
 });
