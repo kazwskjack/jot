@@ -4,7 +4,7 @@ title: Keep native Goal state and continuation in DSH
 category: decision
 status: active
 created: "2026-10-16T11:44:16"
-updated: "2026-10-16T18:03:49"
+updated: "2026-10-16T18:16:18"
 ---
 
 <!-- compiled_truth -->
@@ -43,6 +43,8 @@ The optional ordinaryInputRecovery Host now owns a parked native follow and exac
 Installed-Controller HTTP recovery now has three real local SDK cases with original Gateway/Coordinator records: execute once after hard Host death and original-run lease replacement, refuse an obsolete lease before Agent creation while retaining input, and cancel a held model request on observer disconnect. A further restart preserves the expected inbox without Agent creation and rejects vanished observer authority. The synthetic pending input is seeded by a test wrapper, its composition audit is fixture-only and its local provider is scripted; initial production prompt admission, historical production composition, cost settlement and canonical Worker publication are not proven. Human counts use source.kind=user rather than all user-role context events. The isolated passing Loader overlay disables the old agent-loop entry and inserts the prepared compatibility plugin; a name-only replacement did not change actual Agent capabilities in the first experiment. No live runtime is edited.
 
 Opt-in original ordinary-run recovery now connects Worker, SessionControllerClient and Runner to the observed Host. A generation>1 ordinary run uses its stored owner-bound Session and exact original message/lease; it skips create/prompt/input attachment replay/context staging. Missing original Session or mixed-version Runner interrupts without prompt fallback. Exact acknowledgements and separate Goal/ordinary execution metadata are checked. The original binding, including input content hash, is rechecked before readiness/projections and within canonical publication. Real installed-Controller testing now reclaims one original run, makes one scripted model request, preserves one original human and native usage receipt, publishes exactly one canonical answer, and does not repeat after a further poll/restart. Cold original-input recovery alongside persisted active/complete Goals is verified without implicit rearming or changing their identity/revision/phase/rounds; paused/blocked Goals refuse before Agent creation or inference and preserve the original inbox. The native Goal service resets activation on attachment, and the native round driver requires active plus armed: inbox wake does not authorize Goal resume. Explicit Goal rearming after recovered input, historical provider-cost/unknown settlement, claimed restoration, steering and production composition/rollout gates remain. GENERAL_AGENT_ORDINARY_INPUT_RECOVERY_ENABLED defaults false.
+
+普通聊天的 claimed 输入还原现在有独立的 unpublished-factory 校验层：沿原 Gateway owner/run/Session/input hash/lease，校验原消息 RPC、全消息指纹、Session createdAt 与历史 admission/configuration 指纹，再调用原生 append-only 还原算法。消息的历史受理证明必须先于中断存在，不能在恢复时根据当前日志补造。真实 Gateway/SDK 硬退出验证了落盘后发布、重复硬退出后零重复插入和错误身份/配置/admission 的拒绝，且没有模型调用。工厂还原始终不授予执行权；普通 HTTP claimed 恢复仍拒绝，尚须接入原 Controller 消息受理存储、原工厂前后配置审核与观察中的 Worker 执行，之后才能开放。普通销毁会取消 inbox，不得当作崩溃测试或复活已取消消息。
 
 
 ## Timeline
@@ -206,5 +208,11 @@ Opt-in original ordinary-run recovery now connects Worker, SessionControllerClie
 - time: 2026-10-16T18:03:49
   kind: decision
   summary: "Preserve independent Goal activation when recovering original input; verify cold coexistence and pause/block refusal"
+  source: docs/GOAL-CONTINUATION.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-16T18:16:18
+  kind: decision
+  summary: Require original per-message admission and composition evidence before ordinary claimed-input factory restoration
   source: docs/GOAL-CONTINUATION.md
   affects: [native-goal-boundary]

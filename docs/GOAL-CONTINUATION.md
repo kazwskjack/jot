@@ -627,3 +627,59 @@ isolated repeat passed. The fixture now records native status transitions with
 Session sequence numbers so recurrence can distinguish missing idle notification
 from pending persistence. No timeout or assertion was relaxed, and this event is
 not classified as a resolved product defect or proof of stable production recovery.
+
+
+## Ordinary claimed-input factory policy
+
+`createOrdinaryClaimedInputRecoverySetup` adds a trusted setup policy for the
+original unpublished native resume factory. It reuses the append-only native
+claimed-input restoration algorithm and invariant replay; it does not create or
+publish an Agent, open a follow stream, call prompt/send, arm a Goal or authorize
+execution. The existing ordinary HTTP Host still refuses cold claimed input;
+this factory policy is a prerequisite for that connection, not an enabled route.
+
+The policy requires the original Gateway binding, a reviewed native replay
+profile, an ordinary preset, the exact unpublished Session identity, and a
+read-only original-admission provider. The original owner, conversation, product
+input ID/content hash and current execution lease are revalidated through the
+same read-only binding parser as pending-input recovery. Each recovered human
+message must retain the original run RPC source. The native restorer supplies
+its canonical full-message SHA-256, covering source, content and attachments,
+to the safety callback along with the original queue target and message ID.
+
+An admission provider must return exactly these fields:
+
+```
+protocol: 1
+run_id, input_message_id, conversation_id, owner_id, session_id
+session_created_at, input_sha256
+native_message_id, native_message_sha256, profile_fingerprint
+```
+
+The Session creation timestamp fences reuse of the same ID. The original
+product hash, native message hash and reviewed composition fingerprint all must
+match. Missing admissions are refusals; recovery must never create an admission
+from the current cold message. The current profile is checked repeatedly, and
+a final binding read after awaited admission checks fences lease replacement.
+The shared restorer now rereads native history before this final authorization,
+so a lease replaced during that awaited history read cannot restore the old input.
+Paused/blocked Goals and already-published Agents are refused. The caller still
+owns abort binding, the original factory's durable-before-publication barrier,
+after-setup composition verification and the later observed execution admission.
+A successful setup receipt always says `execution_authorized: false`.
+
+A real Gateway/installed-SDK process test records a synthetic admission before
+native input submission, flushes the actual claimed pre-step boundary, and kills
+that exact worker. A replacement original lease restores the original input
+before factory publication with zero model calls. Corrupt admission, changed
+profile and wrong lease are refused before publication. The first restoration
+is durably observed and hard-killed; another process reports zero restored and
+one already-pending original, without duplicate insertion. A normal Agent
+disposal cancels its inbox and must not be substituted for that second crash.
+The policy correctly refused that cancelled log during fixture development.
+
+The fixture uses raw native human submission and a reviewed synthetic profile,
+not the production Controller prompt/attachment admission path. Durable admission
+storage and its original Controller integration, scoped before/after-setup
+composition, ordinary Host/Worker connection, steering and monetary/unknown
+settlement remain required. No production configuration enables this helper.

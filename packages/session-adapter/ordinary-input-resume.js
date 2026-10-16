@@ -5,6 +5,16 @@ const valid=value=>typeof value==='string'&&ID.test(value);
 const fail=()=>{throw Error('ordinary_input_recovery_required');};
 const frozen=value=>{if(value&&typeof value==='object'){Object.values(value).forEach(frozen);Object.freeze(value);}return value;};
 
+/** Read-only original product identity; never grants execution. */
+export async function readOrdinaryInputAuthority({bridge,binding:owned,signal,assertActive=()=>{}}){
+ const active=()=>{try{signal?.throwIfAborted();assertActive();}catch{fail();}};
+ active();let result;try{result=await bridge.request('ordinary-input-binding',owned,{},signal);}catch{fail();}active();const row=result?.binding;
+ if(!row||typeof row!=='object'||Object.keys(row).sort().join(',')!=='conversation_id,execution_authorized,execution_lease,input_message_id,input_sha256,owner_id,protocol,request_id,run_id,session_id'
+  ||row.protocol!==1||row.execution_authorized!==false||row.run_id!==owned.runId||row.request_id!==owned.runId||row.session_id!==owned.sessionRef
+  ||!['conversation_id','owner_id','input_message_id'].every(key=>valid(row[key]))||!/^[a-f0-9]{64}$/.test(row.input_sha256??'')||!isDeepStrictEqual(row.execution_lease,owned.executionLease))fail();
+ return frozen(structuredClone(row));
+}
+
 /** Identity/composition preflight only. The caller must own an actual parked
  * observer; this neither opens a stream, restores claims nor wakes execution. */
 export async function prepareOrdinaryInputResume({binding,controller,agents,bridge,ordinaryPresets,verifyComposition,observer,signal}={}){
@@ -14,13 +24,7 @@ export async function prepareOrdinaryInputResume({binding,controller,agents,brid
  let executionLease;try{executionLease=normalizeHostExecutionLease(binding.executionLease);}catch{fail();}
  const owned=frozen({runId:binding.runId,sessionRef:binding.sessionRef,executionLease});
  const active=()=>{try{signal?.throwIfAborted();observer.assertActive();}catch{fail();}};
- const readAuthority=async()=>{
-  active();let result;try{result=await bridge.request('ordinary-input-binding',owned,{},signal);}catch{fail();}active();const row=result?.binding;
-  if(!row||typeof row!=='object'||Object.keys(row).sort().join(',')!=='conversation_id,execution_authorized,execution_lease,input_message_id,input_sha256,owner_id,protocol,request_id,run_id,session_id'
-   ||row.protocol!==1||row.execution_authorized!==false||row.run_id!==owned.runId||row.request_id!==owned.runId||row.session_id!==owned.sessionRef
-   ||!['conversation_id','owner_id','input_message_id'].every(key=>valid(row[key]))||!/^[a-f0-9]{64}$/.test(row.input_sha256??'')||!isDeepStrictEqual(row.execution_lease,owned.executionLease))fail();
-  return frozen(structuredClone(row));
- };
+ const readAuthority=()=>readOrdinaryInputAuthority({bridge,binding:owned,signal,assertActive:active});
  const composition=async(phase,agent,projection,authority)=>{
   active();let result;try{result=await verifyComposition({phase,agent,projection,authority,signal});}catch{fail();}active();
   if(result?.verified!==true||typeof result.fingerprint!=='string'||!/^[a-f0-9]{64}$/.test(result.fingerprint))fail();return result.fingerprint;

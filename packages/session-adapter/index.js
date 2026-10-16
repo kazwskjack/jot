@@ -536,3 +536,5 @@ export {createNativeReplayProvenance} from './native-replay-provenance.js'
 export {prepareOrdinaryInputResume} from './ordinary-input-resume.js'
 
 export {createOrdinaryInputRunHost}
+
+export {createOrdinaryClaimedInputRecoverySetup} from './ordinary-claimed-input.js'

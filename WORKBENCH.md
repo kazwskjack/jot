@@ -506,3 +506,15 @@ Goal rearming after input recovery, claimed/steering, production composition and
 rollout gates. Cold active/complete Goal coexistence is verified without implicit
 rearming; paused/blocked Goals refuse before Agent creation or inference.
 See [Goal continuation](docs/GOAL-CONTINUATION.md).
+
+
+## Ordinary claimed-input policy milestone
+
+An unpublished native-factory policy now verifies the original Gateway owner,
+run, input hash and lease, plus historical per-message admission and composition
+fingerprints, before restoring an unentered claimed human message. Real process
+termination/recovery verifies durable original-input restoration once and rejects
+wrong lease/profile/admission without model calls. This does not enable ordinary
+HTTP claimed recovery: original Controller admission storage, factory composition,
+Host/Worker integration and production acceptance remain open. See
+[Goal continuation](docs/GOAL-CONTINUATION.md).

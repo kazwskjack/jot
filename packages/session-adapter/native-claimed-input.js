@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 const valid=value=>typeof value==='string'&&ID.test(value);
 const canonical=value=>JSON.stringify(value,(_key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item);
@@ -86,7 +87,7 @@ export function createNativeClaimedInputRecoverySetup({Session,agents,sessions,q
    if(found.length){if(found.length!==1||found[0].key!==target||found[0].index!==index||canonical(found[0].item)!==canonical(message))throw Error('claim_recovery_pending_conflict');already++;}
    else{working[target].splice(index,0,message);plan.push({target,index,message});}index++;
   }}
-  if(plan.length){const candidates=freeze(originals.map(({target,message})=>({message_id:message.id,target,source:structuredClone(message.source)})));if((await confirmReplaySafety({agent,signal,turn:start.data.turn,candidates}))?.safe!==true)throw Error('claim_recovery_safety_unconfirmed');check();if((await authorize({agent,signal,candidates}))?.authorized!==true)throw Error('claim_recovery_forbidden');check();if(canonical(await query.readSession(agent.id))!==baseline)throw Error('claim_recovery_history_changed');check();}
+  if(plan.length){const candidates=freeze(originals.map(({target,message})=>({message_id:message.id,target,source:structuredClone(message.source),message_sha256:createHash('sha256').update(canonical(message)).digest('hex')})));if((await confirmReplaySafety({agent,signal,turn:start.data.turn,candidates}))?.safe!==true)throw Error('claim_recovery_safety_unconfirmed');check();if(canonical(await query.readSession(agent.id))!==baseline)throw Error('claim_recovery_history_changed');check();if((await authorize({agent,signal,candidates}))?.authorized!==true)throw Error('claim_recovery_forbidden');check();}
   // Synchronous append-only insertion keeps the original native targets and
   // positions. The official factory flushes this suffix before publication.
   for(const {target,index,message} of plan)agent.inbox.splice(target,index,0,[message]);

@@ -19,6 +19,7 @@
     "conversation-goal-run-host.js",
     "ordinary-input-resume.js",
     "ordinary-input-run-host.js",
+    "ordinary-claimed-input.js",
     "native-child-admission.js",
     "native-child-closure.js",
     "native-invariant-replay.js",
