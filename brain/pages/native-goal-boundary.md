@@ -4,23 +4,21 @@ title: Keep native Goal state and continuation in DSH
 category: decision
 status: active
 created: "2026-10-16T11:44:16"
-updated: "2026-10-16T13:28:04"
+updated: "2026-10-16T14:11:37"
 ---
 
 <!-- compiled_truth -->
-DSH is the authority for Goal state, creation and automatic rounds. Gateway control routes resolve an existing owner-bound ordinary Session and allow only exact-revision pause/resume/stop; role and task Goals use their own scoped paths. These controls do not approve external effects or certify task completion.
+DSH remains the authority for ordinary Goal state, automatic rounds, planning and completion. Gateway projections and human control receipts do not create another scheduler or grant tool permission. Human pause/stop and the original owner, Session, high reasoning and cumulative accounting remain authoritative. Role and persistent-task Goals keep their existing scoped paths.
 
-Observe native rounds on the existing stream. Paused or blocked Goals must suppress legacy crawl-follow prompts. A stream ending while continuation remains armed is an interrupted outcome, not completion. Native view enums are exact strings; coercible malformed values cannot become a completion fact.
+Persisted Goal reads use official cold projections without creating an Agent or rearming activation. Explicit cold pause/clear require an ordinary preset, empty durable inbox and contiguous closed history, then official resolver/maintenance/persistence. Pending input and unsupported interrupted history are recovery requirements, not proof that there is no Goal.
 
-Reading a persisted Goal after Host restart uses the official projection API. It must not create an Agent, call a model or restore process-local activation. Persisted phase and live activation are separate facts. Unavailable projection data is not proof that no Goal exists.
+Human resume is a durable intent in the original database, run queue, outbox and Coordinator lease, not a model prompt. Its continuation run has null input_message_id plus explicit goal_control_id and source-run lineage. The original user message and attachments are not replayed; candidate attribution follows the source run. Null input prevents a historical input-message join from obtaining the source prompt, but does not prove an old Worker can execute the new job. The whole consumer pool still needs upgrading before rollout.
 
-Explicit cold pause/clear can resolve an ordinary Agent only after checking the stored preset, empty inbox and closed contiguous history through official inspect. The operation rechecks live identity and inbox, uses native maintenance and flushes persistence. Stop is one native clear tombstone. Pending input is a definite recovery refusal before activation; Host-only turnBoundary is not a public wire projection.
+Public resume admission atomically commits the original request, queued run and exact-key 202 acceptance receipt. Acceptance, native applied receipt and Goal completion are different facts. Lost replies recover only the original durable receipt; a typed pre-admission reservation can retry its original request without a duplicate job. Readiness reports configured capability and original queue facts, not a complete rollout audit or recoverability guarantee.
 
-Human controls retain their exact CAS command and idempotency key when the response is unknown. Resume is an explicit human execution intent in the original database/run/Worker lineage, not another Goal authority or a model input. Original input text, images and attachments must not be replayed. A dispatch belongs to one live follower cursor and one Worker lease generation; an unconfirmed mutation cannot be replaced with a new request. Accepted intent, applied native receipt and completed Goal are separate facts.
+The trusted Host attaches the official follow before restoring an Agent. Native CAS, persistence flush and an applied receipt precede model execution. Every original step/tool/model path checks the live observer, original lease and current Goal identity; an old receipt cannot authorize a replacement Goal. Same-Goal completion still allows its closing answer. New Hosts/followers cannot rearm an old unknown dispatch or receipt.
 
-The durable control journal, original Worker/native Runner and opt-in Host observer/maintenance/receipt handshake are implemented. The real follow precedes Agent resolution. Native flush and the applied receipt precede model execution. Original step/tool/LLM paths keep their permissions and check the exact live observer and lease. A lost acknowledgement may recover only the original persisted receipt or the same process-local operation; a new Host/follower cannot rearm an old dispatch.
-
-Public atomic resume admission, UI pending controls, supported interrupted-history recovery and all-boundary crash acceptance remain unfinished. The standard profile keeps this backend off until the full queue-consumer rollout and acceptance gates pass. No public readiness is inferred from a running product status or injected runner. Official model tools reject resuming a durable paused Goal; do not imitate human resume with a model prompt.
+The UI follows accepted original runs separately from validated native Goal phase and continues polling while restoration is queued. Unknown replies preserve the exact request in the current page and warn before navigation. Forced browser-crash recovery for unacknowledged requests, all-boundary process reconciliation, pending/interrupted-history recovery and production acceptance remain incomplete. Gateway admission and Host observer switches default off until complete consumer rollout and remaining gates pass. Real locked-SDK/scripted-model verification is wiring evidence, not real-provider quality or production accounting.
 
 
 ## Timeline
@@ -64,5 +62,11 @@ Public atomic resume admission, UI pending controls, supported interrupted-histo
 - time: 2026-10-16T13:28:04
   kind: decision
   summary: Record implemented observer and native Runner while preserving remaining public recovery gates
+  source: docs/GOAL-CONTINUATION.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-16T14:11:37
+  kind: decision
+  summary: Use atomic public acceptance and message-free original lineage while keeping recovery and rollout gates explicit
   source: docs/GOAL-CONTINUATION.md
   affects: [native-goal-boundary]

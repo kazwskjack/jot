@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {ConversationGoalController,goalPresentation,goalPrompt,goalControlError} from './goal-controller.mjs';
+import {ConversationGoalController,goalPresentation,goalPrompt,goalControlError,latestGoalRun} from './goal-controller.mjs';
 const view=(revision=1,phase='active',activation='armed')=>({goal:{id:'goal-1',revision,objective:'Collect source-backed evidence',phase,activation,roundsStarted:2,maxGoalRounds:Number.MAX_SAFE_INTEGER}});
 test('ordinary Goal reads address only the selected conversation and preserve unavailable state',async()=>{
  const calls=[],c=new ConversationGoalController('conversation /1',{request:async(...args)=>{calls.push(args);return view();}});
@@ -46,4 +46,31 @@ test('Goal controls distinguish a recovery refusal from unknown or still-process
  assert.equal(goalControlError({status:409,message:'GOAL_CONTEXT_RECOVERY_REQUIRED'}),'会话有待恢复内容，请先恢复当前任务。');
  assert.equal(goalControlError({status:409,message:'IDEMPOTENCY_IN_PROGRESS'}),'操作仍在处理中，请重试原操作。');assert.equal(goalControlError({status:409,message:'GOAL_REVISION_CHANGED'}),'目标或运行状态已变化，请刷新后确认。');
  assert.equal(goalControlError({status:503,message:'private-diagnostic'}),'操作结果尚未确认，请核对后重试原操作。');
+});
+
+test('202 resume acceptance preserves the native phase and follows a separate original-run identity',async()=>{
+ const accepted={accepted:true,control_id:'goal-control-fixture',run_id:'run-resume',conversation_id:'ordinary'},calls=[],c=new ConversationGoalController('ordinary',{request:async(path,method,body,key)=>{calls.push({path,method,body,key});if(path.endsWith('/resume-readiness'))return{enabled:true,ready:true,reason:'READY'};if(method==='GET')return view(3,'paused','disarmed');return accepted;}});
+ await c.refresh();await c.refreshReadiness();const result=await c.control('resume');assert.deepEqual(result,accepted);assert.equal(c.goal.phase,'paused');assert.equal(c.pending,false);assert.equal(c.executing,true);assert.equal(c.execution.run_id,'run-resume');await assert.rejects(()=>c.control('resume'),/goal_control_pending/);
+ c.observeRun({run_id:'foreign',conversation_id:'another',goal_control_id:'goal-control-fixture',status:'succeeded'});assert.equal(c.executing,true);
+ c.observeRun({run_id:'run-resume',conversation_id:'ordinary',goal_control_id:'goal-control-fixture',status:'succeeded'});assert.equal(c.executing,false);assert.equal(c.goal.phase,'paused');assert.equal(goalPresentation(c.goal).label,'目标已暂停');
+});
+test('a lost resume response retries the exact CAS/key and does not infer acceptance from a newer native view',async()=>{
+ const accepted={accepted:true,control_id:'goal-control-fixture',run_id:'run-resume',conversation_id:'ordinary'},calls=[];let lost=true;const c=new ConversationGoalController('ordinary',{request:async(path,method,body,key)=>{if(path.endsWith('/resume-readiness'))return{enabled:true,ready:true,reason:'READY'};if(method==='GET')return view(3,'paused','disarmed');calls.push(structuredClone({body,key}));if(lost){lost=false;throw Error('reply_lost');}return accepted;}});
+ await c.refresh();await c.refreshReadiness();await assert.rejects(()=>c.control('resume'));assert.equal(c.pending,true);assert.equal(c.execution,null);await c.refresh();assert.equal(c.pending,true);await c.retry();assert.deepEqual(calls[0],calls[1]);assert.equal(c.execution.control_id,accepted.control_id);assert.equal(c.pending,false);
+});
+test('disabled, malformed and foreign resume readiness or receipts cannot enable execution',async()=>{
+ const c=new ConversationGoalController('ordinary',{request:async()=>view(3,'paused','disarmed')});await c.refresh();await assert.rejects(()=>c.control('resume'),/goal_resume_unavailable/);
+ c.api.request=async()=>({enabled:false,ready:true,reason:'READY'});await assert.rejects(()=>c.refreshReadiness());assert.equal(c.resumeReadiness,undefined);
+ c.api.request=async(path,method)=>path.endsWith('/resume-readiness')?{enabled:true,ready:true,reason:'READY'}:method==='GET'?view(3,'paused','disarmed'):{accepted:true,control_id:'goal-control-fixture',run_id:'run-a',conversation_id:'foreign'};await c.refreshReadiness();await assert.rejects(()=>c.control('resume'));assert.equal(c.pending,true);assert.equal(c.execution,null);
+});
+
+test('a synchronous readiness transport failure does not permanently poison the coalesced request',async()=>{
+ const c=new ConversationGoalController('ordinary',{request:()=>{throw Error('transport_setup_failed');}});await assert.rejects(()=>c.refreshReadiness(),/transport_setup_failed/);
+ c.api.request=()=>({enabled:true,ready:true,reason:'READY'});assert.deepEqual(await c.refreshReadiness(),{enabled:true,ready:true,reason:'READY'});
+});
+
+test('continuation display selects this conversation active control before a newer finished receipt',()=>{
+ const active={conversation_id:'ordinary',run_id:'run-a',goal_control_id:'goal-control-a',status:'queued',created_at:'2026-01-01'},finished={...active,run_id:'run-b',status:'succeeded',created_at:'2026-01-02'};
+ assert.equal(latestGoalRun([{...active,conversation_id:'foreign'},finished,active],'ordinary'),active);
+ assert.equal(latestGoalRun([{...active,status:'failed'},finished],'ordinary'),finished);assert.equal(latestGoalRun([active],'foreign'),undefined);
 });

@@ -22,3 +22,14 @@ export function validateConversationGoalView(value:unknown):{goal:ConversationGo
   if(g.blockedReason!==undefined&&(!object(g.blockedReason)||Object.keys(g.blockedReason).some(k=>!['code','message'].includes(k))||typeof g.blockedReason.code!=='string'||typeof g.blockedReason.message!=='string'))return invalid();
   return {goal:structuredClone(g) as unknown as ConversationGoal};
 }
+
+export interface ConversationGoalAcceptance {accepted:true;control_id:string;run_id:string;conversation_id:string}
+export function validateConversationGoalAcceptance(value:unknown):ConversationGoalAcceptance{
+ if(!object(value)||Object.keys(value).sort().join(',')!=='accepted,control_id,conversation_id,run_id'||value.accepted!==true||typeof value.control_id!=='string'||value.control_id.length>128||!/^goal-control-[A-Za-z0-9-]{1,128}$/.test(value.control_id)||!['run_id','conversation_id'].every(key=>typeof value[key]==='string'&&/^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$/.test(value[key] as string)))throw Error('goal_acceptance_invalid');
+ return structuredClone(value) as unknown as ConversationGoalAcceptance;
+}
+export interface ConversationGoalResumeReadiness {enabled:boolean;ready:boolean;reason:'READY'|'DISABLED'|'NO_SESSION'|'RUN_BUSY'|'UNCONFIRMED_CONTROL'|'HOST_UNAVAILABLE'}
+export function validateConversationGoalResumeReadiness(value:unknown):ConversationGoalResumeReadiness{
+ if(!object(value)||Object.keys(value).sort().join(',')!=='enabled,ready,reason'||typeof value.enabled!=='boolean'||typeof value.ready!=='boolean'||typeof value.reason!=='string'||!['READY','DISABLED','NO_SESSION','RUN_BUSY','UNCONFIRMED_CONTROL','HOST_UNAVAILABLE'].includes(value.reason)||value.ready&&(!value.enabled||value.reason!=='READY')||!value.ready&&value.reason==='READY'||!value.enabled&&(value.ready||value.reason!=='DISABLED'))throw Error('goal_resume_readiness_invalid');
+ return structuredClone(value) as unknown as ConversationGoalResumeReadiness;
+}

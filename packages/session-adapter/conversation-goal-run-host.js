@@ -31,7 +31,7 @@ export function createConversationGoalRunHost({controller,agents,persistence,bri
   if(!record.agent||record.agent.status==='idle')clean(record);
  };
  const guard=async(record,signal)=>{
-  try{signal?.throwIfAborted();if(record.revoked||!record.applied||agents.get(record.sessionId)!==record.agent||boundAgents.get(record.agent)!==record)throw Error('goal_control_execution_revoked');const control=await inspect(record);if(control.state!=='applied'||control.ref.id!==record.ref.id||control.ref.revision!==record.ref.revision)throw Error('goal_control_execution_revoked');}
+  try{signal?.throwIfAborted();if(record.revoked||!record.applied||agents.get(record.sessionId)!==record.agent||boundAgents.get(record.agent)!==record)throw Error('goal_control_execution_revoked');const control=await inspect(record);if(control.state!=='applied'||control.ref.id!==record.ref.id||control.ref.revision!==record.ref.revision||nativeGoalsFor(record.agent).get(record.agent)?.id!==record.ref.id)throw Error('goal_control_execution_revoked');}
   catch{revoke(record);throw Error('goal_control_execution_revoked');}
  };
  const install=record=>{

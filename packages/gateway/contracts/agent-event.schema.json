@@ -1117,7 +1117,10 @@
           "pattern": "^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"
         },
         "input_message_id": {
-          "type": "string",
+          "type": [
+            "string",
+            "null"
+          ],
           "pattern": "^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"
         },
         "status": {
@@ -1158,6 +1161,10 @@
         },
         "error_code": {
           "type": "string"
+        },
+        "goal_control_id": {
+          "type": "string",
+          "pattern": "^goal-control-[A-Za-z0-9-]{1,128}$"
         }
       },
       "required": [
@@ -1169,7 +1176,44 @@
         "created_at",
         "updated_at"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "goal_control_id"
+            ]
+          },
+          "then": {
+            "properties": {
+              "input_message_id": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "continuation_of"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "input_message_id": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "input_message_id"
+            ]
+          },
+          "then": {
+            "required": [
+              "goal_control_id",
+              "continuation_of"
+            ]
+          }
+        }
+      ]
     },
     "InputBlock": {
       "oneOf": [

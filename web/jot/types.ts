@@ -19,7 +19,7 @@ export type UpdateConversation = { expected_version: number; title?: string; mod
 
 export type ConversationPage = { items: Array<Conversation>; next_cursor?: string };
 
-export type Run = { run_id: string; conversation_id: string; input_message_id: string; status: "queued" | "starting" | "partial" | "running" | "waiting_user" | "waiting_approval" | "cancelling" | "succeeded" | "failed" | "cancelled" | "interrupted"; version: number; created_at: string; updated_at: string; continuation_of?: string; checkpoint_id?: string; error_code?: string };
+export type Run = { run_id: string; conversation_id: string; input_message_id: string | null; goal_control_id?:string; status: "queued" | "starting" | "partial" | "running" | "waiting_user" | "waiting_approval" | "cancelling" | "succeeded" | "failed" | "cancelled" | "interrupted"; version: number; created_at: string; updated_at: string; continuation_of?: string; checkpoint_id?: string; error_code?: string };
 
 export type InputBlock = ({ type: "text"; text: string }) | ({ type: "file"; artifact_id: string });
 

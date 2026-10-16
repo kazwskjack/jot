@@ -113,6 +113,7 @@ export class HarnessWorker {
         input.attachmentIds, lease.run_id) ?? (() => { throw new Error('attachment_resolver_unavailable'); })()
       : [];
     if (this.contextStager&&!goalControl) {
+      if(!lease.input_message_id)throw Error('run_input_missing');
       try {
         await this.contextStager.stageContext({ taskRequestId: lease.run_id, conversationId: lease.conversation_id,
           messageId: lease.input_message_id, message, sessionRef: runtimeSessionRef, controllerSessionRef,
@@ -122,13 +123,13 @@ export class HarnessWorker {
     this.coordinator.start(lease);
     const renewal = setInterval(() => this.coordinator.renew(lease, this.leaseMs), Math.max(100, Math.floor(this.leaseMs / 3)));
     renewal.unref();
+    const assertGoalApplied=()=>{
+      if(!goalControl)return;
+      const row=ConversationGoalControls.assertExecution(this.db,goalControl.control_id,{owner:lease.owner,generation:lease.generation});
+      if(row.state!=='applied')throw Error('goal_control_receipt_required');
+    };
     let result: DshRunResult;
     try {
-      const assertGoalApplied=()=>{
-        if(!goalControl)return;
-        const row=ConversationGoalControls.assertExecution(this.db,goalControl.control_id,{owner:lease.owner,generation:lease.generation});
-        if(row.state!=='applied')throw Error('goal_control_receipt_required');
-      };
       const recordObservedArtifact = async (artifactRef: string) => {
         assertGoalApplied();
         this.executionGuard?.assertRunActive(lease.run_id);
@@ -139,6 +140,7 @@ export class HarnessWorker {
           resolved = this.attachmentResolver.resolveOutputs(input.ownerId, lease.conversation_id,
             [artifactRef], [], outputLeaseId);
           withImmediateTransaction(this.db, () => {
+            assertGoalApplied();
             this.executionGuard?.assertRunActive(lease.run_id);
             for (const item of resolved) this.coordinator.recordArtifact(lease, item);
           });
@@ -227,6 +229,7 @@ export class HarnessWorker {
         // Recheck inside the same transaction as publication, after resolving
         // outputs. Deletion and completion cannot race across DB processes.
         this.executionGuard?.assertRunActive(lease.run_id);
+        assertGoalApplied();
         for (const item of outputAttachments) this.coordinator.recordArtifact(lease, item);
         this.coordinator.recordCandidate(lease, finalText);
         this.coordinator.setCandidateStatus(lease, 'verified', []);

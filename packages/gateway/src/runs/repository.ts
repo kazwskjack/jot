@@ -116,8 +116,13 @@ export class RunRepository {
   saveCandidate(runId: string, text: string, attempt = 1, source = 'dsh-headless', sourceVersion = '1') {
     const value = text.trim();
     if (!value) throw new Error('candidate_text_empty');
-    const run = this.db.prepare('SELECT input_message_id FROM ga_runs WHERE id=?').get(runId) as { input_message_id: string } | undefined;
+    const run = this.db.prepare(`SELECT COALESCE(r.input_message_id,m.id) AS input_message_id FROM ga_runs r
+      LEFT JOIN ga_conversation_goal_controls g ON g.run_id=r.id
+      LEFT JOIN ga_runs source ON source.id=g.source_run_id AND source.conversation_id=r.conversation_id
+      LEFT JOIN ga_messages m ON m.id=source.input_message_id AND m.conversation_id=r.conversation_id AND m.role='user'
+      WHERE r.id=?`).get(runId) as { input_message_id: string|null } | undefined;
     if (!run) throw new Error('run_not_found');
+    if(!run.input_message_id)throw Error('run_input_missing');
     const now = new Date().toISOString();
     this.db.prepare(`INSERT INTO ga_candidate_answers(
       id,run_id,input_message_id,turn_id,attempt,source,source_version,status,text,evidence_refs_json,created_at,updated_at
@@ -159,6 +164,7 @@ export class RunRepository {
     const value: Record<string, unknown> = { run_id: row.id, conversation_id: row.conversation_id,
       input_message_id: row.input_message_id, status: row.status, version: Number(row.version),
       created_at: row.created_at, updated_at: row.updated_at };
+    if(row.input_message_id===null){const control=this.db.prepare('SELECT control_id FROM ga_conversation_goal_controls WHERE run_id=?').get(String(row.id));if(control)value.goal_control_id=control.control_id;}
     if (row.continuation_of) value.continuation_of = row.continuation_of;
     if (row.checkpoint_id) value.checkpoint_id = row.checkpoint_id;
     if (row.reason_code) value.error_code = row.reason_code;

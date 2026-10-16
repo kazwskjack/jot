@@ -26,7 +26,7 @@ export type UpdateConversation = { expected_version: number; title?: string; mod
 
 export type ConversationPage = { items: Array<Conversation>; next_cursor?: string };
 
-export type Run = { run_id: string; conversation_id: string; input_message_id: string; status: "queued" | "starting" | "partial" | "running" | "waiting_user" | "waiting_approval" | "cancelling" | "succeeded" | "failed" | "cancelled" | "interrupted"; version: number; created_at: string; updated_at: string; continuation_of?: string; checkpoint_id?: string; error_code?: string };
+export type Run = { run_id: string; conversation_id: string; input_message_id: string | null; goal_control_id?:string; status: "queued" | "starting" | "partial" | "running" | "waiting_user" | "waiting_approval" | "cancelling" | "succeeded" | "failed" | "cancelled" | "interrupted"; version: number; created_at: string; updated_at: string; continuation_of?: string; checkpoint_id?: string; error_code?: string };
 
 export type InputBlock = ({ type: "text"; text: string }) | ({ type: "file"; artifact_id: string });
 
@@ -265,3 +265,6 @@ export type EmptyObject = Record<string,never>;
 
 export type ConversationGoalView = {goal: {id:string;revision:number;objective:string;phase:'active'|'paused'|'blocked'|'complete';activation:'armed'|'disarmed';maxGoalRounds?:number;roundsStarted?:number;createdAt?:number;updatedAt?:number;blockedReason?:{code:string;message:string}}|null};
 export type ConversationGoalCommand = {action:'pause'|'resume'|'stop';id:string;revision:number};
+
+export type ConversationGoalAccepted = {accepted:true;control_id:string;run_id:string;conversation_id:string};
+export type ConversationGoalResumeReadiness = {enabled:boolean;ready:boolean;reason:'READY'|'DISABLED'|'NO_SESSION'|'RUN_BUSY'|'UNCONFIRMED_CONTROL'|'HOST_UNAVAILABLE'};

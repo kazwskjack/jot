@@ -15,7 +15,7 @@ function fixture(){
  const view=()=>({control_id:'control-a',run_id:'run-a',conversation_id:'conversation-a',session_id:'session-a',ref:{id:'goal-a',revision:3},state,native_cursor:state==='queued'?null:8,receipt});
  const registry={get:()=>agent},persistence={flush:async()=>{calls.push('flush')}};
  const host=createConversationGoalRunHost({controller,agents:registry,persistence,bridge,ordinaryPresets:new Set(['jot-general'])});
- return {host,agent,controller,bridge,calls,handlers,abort:new AbortController(),counts:()=>({created,cancelled}),setState:v=>state=v,revoke:()=>allow=false,current:()=>current};
+ return {host,agent,controller,bridge,calls,handlers,abort:new AbortController(),counts:()=>({created,cancelled}),setState:v=>state=v,setGoal:v=>current=v,revoke:()=>allow=false,current:()=>current};
 }
 async function open(f){const stream=f.host.follow('session-a',binding,{address:{kind:'session',sessionId:'session-a'},assistantStream:true},f.abort.signal);assert.equal((await stream.next()).value.type,'snapshot');return stream;}
 test('observed human resume follows first, uses native maintenance and flushes before persisting the receipt',async()=>{
@@ -71,4 +71,15 @@ test('concurrent acknowledgements share one native mutation and one dispatch',as
 
 test('opt-in Host readiness cannot be constructed from an incomplete native service contract',()=>{
  const f=fixture();assert.throws(()=>createConversationGoalRunHost({controller:{...f.controller,resolveAgent:undefined},agents:{get:()=>f.agent},persistence:{flush:async()=>{}},bridge:f.bridge,ordinaryPresets:new Set(['jot-general'])}),/goal_control_unavailable/);
+});
+
+test('an applied old receipt cannot authorize a replacement native Goal or its model call',async()=>{
+ const f=fixture(),stream=await open(f);await f.host.resume('session-a',binding);f.setGoal({...f.current(),id:'replacement-goal',revision:1});let called=false;
+ const chunks=f.handlers.get('llm/stream')[0]({sessionId:'session-a',signal:new AbortController().signal},async function*(){called=true;yield{type:'must-not-run'};});
+ await assert.rejects(async()=>{for await(const _ of chunks){}},/goal_control_execution_revoked/);assert.equal(called,false);assert.equal(f.current().activation,'armed','the old observer must not mutate a replacement Goal');f.abort.abort();await stream.return();await f.host.dispose();
+});
+
+test('completion of the same native Goal still permits its original closing answer',async()=>{
+ const f=fixture(),stream=await open(f);await f.host.resume('session-a',binding);f.setGoal({...f.current(),revision:5,phase:'complete',activation:'disarmed'});
+ const chunks=f.handlers.get('llm/stream')[0]({sessionId:'session-a',signal:new AbortController().signal},async function*(){yield{type:'closing-answer'};});const seen=[];for await(const chunk of chunks)seen.push(chunk);assert.deepEqual(seen,[{type:'closing-answer'}]);f.abort.abort();await stream.return();await f.host.dispose();
 });

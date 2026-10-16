@@ -70,23 +70,28 @@ This adds locally verified extraction wiring, not automatic Dream consolidation,
 
 ## Native conversation Goal boundary
 
-Ordinary Goal observation and exact-revision controls now map to the original
-DSH Session. Role/task Goals stay on their existing scoped path. The runner
-retains the original stream across native rounds and suppresses crawl-follow
-prompts when a Goal is paused or blocked. A real official Host restart test
-verifies that persisted Goal reads neither instantiate an Agent nor rearm it.
-The ordinary workbench now has a plus-menu Goal composer and a native status card,
-with exact-request recovery for uncertain controls. Local built-UI fixtures cover
-these interactions and mobile/role isolation. Continue without a running product
-run is refused. Cold pause/clear now use the official resolver, maintenance and
-persistence after validating the ordinary preset, empty inbox and closed history.
-Actual-Host probes cover restart persistence, competing CAS and no model calls.
-Cold resume and crash-safe control receipt reconciliation remain unfinished.
-See [workbench configuration and remaining cold-control acceptance](../WORKBENCH.md#native-conversation-goals).
-These changes do not add a competing scheduler or complete the remaining
-Always-on, UI, routing, channel and packaging rows above.
+Ordinary Goal observation and exact-revision controls use the original DSH
+Session. Role/task Goals stay scoped. Cold reads do not create an Agent or
+rearm a persisted Goal. Cold pause/clear use the official resolver, maintenance
+and persistence after checking the ordinary preset, empty inbox and closed
+history. Actual Host probes cover persistence and competing CAS without inference.
 
-The internal continuation journal now joins the original Worker/Coordinator path without another human prompt. Its identity and dispatch/receipt records survive database reopen, and a runner without continuation support cannot replay source input. This is local injected-runner evidence; the Host observer handshake, public atomic admission and actual-SDK cold resume acceptance are still outstanding. See [Goal continuation](GOAL-CONTINUATION.md).
+The ordinary composer has **+ → Goal mode** and a native status card. Explicit
+resume uses an atomic public 202 acceptance, a message-free original product run,
+Coordinator lease and distinct native Runner entry. Follow attaches before Agent
+restoration; native persistence and the exact control receipt precede model calls.
+The UI tracks acceptance, queued execution and native completion separately.
+Unknown responses retry the exact request. An old observer cannot execute a
+replacement Goal in the same Session.
 
+Real locked-SDK tests enter both direct observation and public admission through
+the original Worker, use a scripted local model, publish one assistant answer,
+retain only the original human message, and preserve completion after Host restart.
+The source-input join cannot replay a null-input continuation. This does not prove
+that historical queue consumers can execute it, real-provider quality, comprehensive
+crash recovery or production accounting. Full consumer-pool rollout, supported
+pending/interrupted-history recovery and deployed acceptance remain required.
+The two explicit rollout switches default off. See [Goal continuation](GOAL-CONTINUATION.md).
 
-The opt-in observed Host/Runner backend now passes real locked-SDK cold resume and original-Worker publication against a scripted local model. The observer precedes Agent restoration, and native persistence plus the exact control receipt precede inference. Public atomic admission/UI, all-boundary crash recovery and production acceptance still remain; the standard profile keeps this backend off. See [current continuation evidence](GOAL-CONTINUATION.md).
+These changes do not complete the remaining Always-on, UI, routing, channel and
+packaging rows above; the complete 26-capability scope remains unchanged.

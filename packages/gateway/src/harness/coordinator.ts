@@ -17,7 +17,7 @@ import {
 export interface RunLease {
   run_id: string;
   conversation_id: string;
-  input_message_id: string;
+  input_message_id: string|null;
   owner: string;
   generation: number;
   expires_at: number;
@@ -91,7 +91,7 @@ export class HarnessCoordinator {
       if (!row) return null;
       const runId = String(row.id);
       const conversationId = String(row.conversation_id);
-      const inputMessageId = String(row.input_message_id);
+      const inputMessageId = row.input_message_id===null?null:String(row.input_message_id);
       const generation = Number(row.generation || 0) + 1;
       const expiresAt = now + Math.max(100, leaseMs);
       this.db.prepare(
@@ -433,7 +433,10 @@ export class HarnessCoordinator {
   }
 
   private runValue(row: Record<string, unknown>) {
-    return { run_id: row.id, conversation_id: row.conversation_id, input_message_id: row.input_message_id,
-      status: row.status, version: Number(row.version), created_at: row.created_at, updated_at: row.updated_at };
+    const value:Record<string,unknown>={run_id:row.id,conversation_id:row.conversation_id,input_message_id:row.input_message_id,
+      status:row.status,version:Number(row.version),created_at:row.created_at,updated_at:row.updated_at};
+    if(row.continuation_of)value.continuation_of=row.continuation_of;
+    if(row.input_message_id===null){const control=this.db.prepare('SELECT control_id FROM ga_conversation_goal_controls WHERE run_id=?').get(String(row.id));if(control)value.goal_control_id=control.control_id;}
+    return value;
   }
 }

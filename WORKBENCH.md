@@ -109,13 +109,14 @@ mutation result. It does not clear, replay or automatically process that input.
   and native model tools. It requests the maximum safe integer round count, not
   a second scheduler or a change to token, currency or permission policy.
 
-  Continue currently requires an existing running product run. Without it, the
-  API returns `409 GOAL_RUN_REQUIRED` before reaching the Host and the UI disables
-  Continue. This guard alone is not proof that a live native follower is attached.
-  Complete cold resume, observed run reattachment and control-receipt recovery still
-  require implementation and real-Host acceptance. Do not silently wake a cold
-  Agent or send a model prompt to imitate a user resuming a paused Goal: the
-  official model tool deliberately rejects that phase transition.
+  Continue now uses an atomic 202 admission receipt and message-free original
+  Worker run when explicitly enabled. The UI separates accepted execution from
+  native Goal phase, checks readiness and follows the queued run without another
+  human prompt. Both Gateway and Host switches default off pending complete
+  queue-consumer rollout, crash-recovery and deployment acceptance. A running
+  product status is not evidence of a native follower. See
+  [Goal continuation](docs/GOAL-CONTINUATION.md) for configuration and remaining
+  boundaries; the official model tool still cannot imitate human resume.
 
   After building, `npm run test:goal-ui` uses the optional Playwright dependency
   and a local browser (Edge on Windows, installed Chromium elsewhere). It serves
@@ -425,4 +426,4 @@ These probes use the actual locked SDK and upstream plugin with a scripted model
 
 ## Ordinary Goal continuation records
 
-Resume controls now have an internal durable intent/receipt record, a live Host observer/maintenance handshake and a distinct original-Worker/native-Runner continuation entry. No original human message or attachment is replayed. Real locked-SDK cases verify cold resume and original publication with a local scripted model. Public atomic admission, UI pending-state integration, exhaustive crash recovery and production acceptance remain unfinished; the Host option stays off by default. See [continuation boundaries and verification](docs/GOAL-CONTINUATION.md).
+Resume controls now have an internal durable intent/receipt record, a live Host observer/maintenance handshake and a distinct original-Worker/native-Runner continuation entry. No original human message or attachment is replayed. Real locked-SDK cases verify cold resume and original publication with a local scripted model. Public atomic 202 admission and UI integration are connected and verified with the real locked Host/Worker against a scripted local model. Message-free runs preserve original lineage without replaying human input. Exhaustive crash recovery, complete consumer-pool rollout and production acceptance remain unfinished; both rollout switches stay off by default. See [continuation boundaries and verification](docs/GOAL-CONTINUATION.md).

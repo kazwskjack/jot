@@ -970,5 +970,14 @@
     "ConversationGoalView",
     "200",
     "DSH owns state; this route cannot create or complete a Goal."
+  ],
+  [
+    "GET",
+    "/v1/conversations/{conversation_id}/goal/resume-readiness",
+    "Check original queue and Host Goal resume readiness",
+    null,
+    "ConversationGoalResumeReadiness",
+    "200",
+    "Read-only; never activates an Agent."
   ]
 ]

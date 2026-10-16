@@ -71,3 +71,10 @@ test('Universe projection events are part of the public event union', async () =
     'response.upsert',
   ]) assert.ok(Object.hasOwn(eventTypes, type), type);
 });
+
+test('Run contract allows a message-free Goal control only with explicit control and source lineage',async()=>{
+ const {ContractValidator}=await import('../../src/contracts/validator.ts'),validator=new ContractValidator(),operation=validator.operationFor('GET','/v1/runs/{runId}');
+ const run={run_id:'run-a',conversation_id:'conv-a',input_message_id:null,goal_control_id:'goal-control-fixture',continuation_of:'run-source',status:'queued',version:1,created_at:'2026-10-16T00:00:00Z',updated_at:'2026-10-16T00:00:00Z'};
+ assert.equal(validator.validateResponse(operation,200,run).valid,true);
+ for(const patch of [{goal_control_id:undefined},{continuation_of:undefined},{input_message_id:'old-prompt'}]){const value={...run,...patch};for(const key of Object.keys(value))if(value[key]===undefined)delete value[key];assert.equal(validator.validateResponse(operation,200,value).valid,false);}
+});

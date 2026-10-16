@@ -34,13 +34,13 @@ test('unavailable adapters and malformed Goal views expose fixed errors',async t
  const broken=await fixture(t,{conversationGoal:async()=>{throw Error('private credential');}});broken.bind();const response=await broken.app.inject({method:'GET',url:broken.path,headers});assert.equal(response.statusCode,503);assert.ok(!response.body.includes('private credential'));
  const malformed=await fixture(t,{conversationGoal:async()=>({goal:{...goal,phase:'surprise'},hidden:'private'})});malformed.bind();const bad=await malformed.app.inject({method:'GET',url:malformed.path,headers});assert.equal(bad.statusCode,502);assert.equal(bad.json().error.code,'GOAL_STATE_INVALID');assert.ok(!bad.body.includes('private'));
 });
-test('resume cannot arm a native Goal without an owned running product run',async t=>{
+test('disabled resume never arms a native Goal even when a product run is running',async t=>{
  let calls=0;const f=await fixture(t,{conversationGoal:async()=>{calls++;return {goal};}});f.bind();const body={action:'resume',id:goal.id,revision:4};
- const blocked=await f.app.inject({method:'POST',url:f.path,headers,payload:body});assert.equal(blocked.statusCode,409);assert.equal(blocked.json().error.code,'GOAL_RUN_REQUIRED');assert.equal(calls,0);
+ const blocked=await f.app.inject({method:'POST',url:f.path,headers:{...headers,'idempotency-key':'disabled-resume'},payload:body});assert.equal(blocked.statusCode,409);assert.equal(blocked.json().error.code,'GOAL_RESUME_DISABLED');assert.equal(calls,0);
  const receipt=(await f.app.inject({method:'POST',url:`/v1/conversations/${f.id}/messages`,headers,payload:{client_message_id:'fixture-message',content:[{type:'text',text:'Continue after review'}]}})).json();assert.ok(receipt.run_id);
- assert.equal((await f.app.inject({method:'POST',url:f.path,headers,payload:body})).statusCode,409);assert.equal(calls,0);
+ assert.equal((await f.app.inject({method:'POST',url:f.path,headers:{...headers,'idempotency-key':'disabled-resume'},payload:body})).statusCode,409);assert.equal(calls,0);
  f.db.prepare("UPDATE ga_runs SET status='running' WHERE id=?").run(receipt.run_id);
- assert.equal((await f.app.inject({method:'POST',url:f.path,headers,payload:body})).statusCode,200);assert.equal(calls,1);
+ assert.equal((await f.app.inject({method:'POST',url:f.path,headers:{...headers,'idempotency-key':'disabled-resume'},payload:body})).statusCode,409);assert.equal(calls,0);
 });
 test('a cold pending-input refusal remains a deterministic recovery conflict rather than an unknown mutation',async t=>{
  const f=await fixture(t,{conversationGoal:async()=>{throw {protocolCode:'goal_cold_input_pending'};}});f.bind();const r=await f.app.inject({method:'POST',url:f.path,headers,payload:{action:'stop',id:goal.id,revision:4}});assert.equal(r.statusCode,409);assert.deepEqual(r.json(),{error:{code:'GOAL_CONTEXT_RECOVERY_REQUIRED'}});

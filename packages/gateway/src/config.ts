@@ -25,6 +25,7 @@ export function loadBffConfig() {
     templateRoot: process.env.GENERAL_AGENT_TEMPLATE_ROOT?.trim()
       || '/opt/jot/general-agent-web/current/file-engine/templates',
     voiceEnabled: process.env.GENERAL_AGENT_VOICE_ENABLED === 'true',
+    conversationGoalResumeEnabled:process.env.GENERAL_AGENT_CONVERSATION_GOAL_RESUME_ENABLED==='true',
     workbenchRoot: process.env.GENERAL_AGENT_WORKBENCH_ROOT?.trim() || join(dirname(databasePath), 'jot-workspaces'),
     ...workbenchExecutionConfiguration(process.env),
     voiceAdapterUrl: process.env.GENERAL_AGENT_VOICE_ADAPTER_URL?.trim() || 'http://127.0.0.1:18841',

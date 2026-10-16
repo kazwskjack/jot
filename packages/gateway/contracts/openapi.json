@@ -12266,6 +12266,16 @@
                 }
               }
             }
+          },
+          "202": {
+            "description": "Human resume accepted on the original run queue, not Goal completion",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationGoalAccepted"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -12274,6 +12284,108 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/ConversationGoalCommand"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/conversations/{conversation_id}/goal/resume-readiness": {
+      "get": {
+        "operationId": "getConversationGoalResumeReadiness",
+        "summary": "Check original queue and Host resume admission without activation",
+        "tags": [
+          "conversations"
+        ],
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current admission readiness only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationGoalResumeReadiness"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Authenticated control, state conflict or unavailable Host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authenticated control, state conflict or unavailable Host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated control, state conflict or unavailable Host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Authenticated control, state conflict or unavailable Host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Authenticated control, state conflict or unavailable Host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Authenticated control, state conflict or unavailable Host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authenticated control, state conflict or unavailable Host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
               }
             }
           }
@@ -12798,7 +12910,10 @@
             "pattern": "^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"
           },
           "input_message_id": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "pattern": "^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"
           },
           "status": {
@@ -12839,6 +12954,10 @@
           },
           "error_code": {
             "type": "string"
+          },
+          "goal_control_id": {
+            "type": "string",
+            "pattern": "^goal-control-[A-Za-z0-9-]{1,128}$"
           }
         },
         "required": [
@@ -12850,7 +12969,44 @@
           "created_at",
           "updated_at"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "goal_control_id"
+              ]
+            },
+            "then": {
+              "properties": {
+                "input_message_id": {
+                  "type": "null"
+                }
+              },
+              "required": [
+                "continuation_of"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "input_message_id": {
+                  "type": "null"
+                }
+              },
+              "required": [
+                "input_message_id"
+              ]
+            },
+            "then": {
+              "required": [
+                "goal_control_id",
+                "continuation_of"
+              ]
+            }
+          }
+        ]
       },
       "InputBlock": {
         "oneOf": [
@@ -21723,6 +21879,114 @@
           "action",
           "id",
           "revision"
+        ]
+      },
+      "ConversationGoalAccepted": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "accepted": {
+            "const": true
+          },
+          "control_id": {
+            "type": "string",
+            "maxLength": 128,
+            "pattern": "^goal-control-[A-Za-z0-9-]{1,128}$"
+          },
+          "run_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"
+          },
+          "conversation_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"
+          }
+        },
+        "required": [
+          "accepted",
+          "control_id",
+          "run_id",
+          "conversation_id"
+        ]
+      },
+      "ConversationGoalResumeReadiness": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "ready": {
+            "type": "boolean"
+          },
+          "reason": {
+            "enum": [
+              "READY",
+              "DISABLED",
+              "NO_SESSION",
+              "RUN_BUSY",
+              "UNCONFIRMED_CONTROL",
+              "HOST_UNAVAILABLE"
+            ]
+          }
+        },
+        "required": [
+          "enabled",
+          "ready",
+          "reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "ready": {
+                  "const": true
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "enabled": {
+                  "const": true
+                },
+                "reason": {
+                  "const": "READY"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "reason": {
+                  "enum": [
+                    "DISABLED",
+                    "NO_SESSION",
+                    "RUN_BUSY",
+                    "UNCONFIRMED_CONTROL",
+                    "HOST_UNAVAILABLE"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "enabled": {
+                  "const": false
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "ready": {
+                  "const": false
+                },
+                "reason": {
+                  "const": "DISABLED"
+                }
+              }
+            }
+          }
         ]
       }
     },

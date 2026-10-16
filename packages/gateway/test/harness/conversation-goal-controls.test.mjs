@@ -22,7 +22,7 @@ function fixture(t){
 test('resume intent uses the original run queue and lineage without adding or resending a human message',t=>{
  const f=fixture(t),before=f.db.prepare('SELECT count(*) n FROM ga_messages').get().n,result=f.controls.enqueue(f.request,view);
  assert.equal(result.accepted,true);assert.equal(result.conversation_id,'conv-a');assert.ok(result.control_id);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_messages').get().n,before);
- const run=f.runs.get(result.run_id,'owner-a');assert.equal(run.status,'queued');assert.equal(run.continuation_of,f.original.run_id);assert.equal(run.input_message_id,f.original.message_id);
+ const run=f.runs.get(result.run_id,'owner-a');assert.equal(run.status,'queued');assert.equal(run.continuation_of,f.original.run_id);assert.equal(run.input_message_id,null);assert.equal(run.goal_control_id,result.control_id);
  assert.equal(f.db.prepare("SELECT count(*) n FROM ga_outbox WHERE aggregate_id=? AND event_type='run.queued'").get(result.run_id).n,1);
  assert.deepEqual(f.controls.enqueue(f.request,{goal:null}),result);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_runs').get().n,2);
  assert.throws(()=>f.controls.enqueue({...f.request,ref:{id:'goal-fixture',revision:5}},view),/goal_control_idempotency_conflict/);
@@ -110,4 +110,11 @@ test('receipt and dispatch identity survive closing and reopening the original d
   const after=new ConversationGoalControls(db,new EventStore(db),new RunRepository(db,new EventStore(db)));assert.deepEqual(after.inspect(r.control_id,execution).receipt,receipt);
   db.prepare('UPDATE ga_worker_leases SET expires_at=? WHERE resource_id=?').run(String(Date.now()-1),r.run_id);const next=new HarnessCoordinator(db,new RunRepository(db,new EventStore(db)),new EventStore(db)).claimNext('replacement-worker',30000);assert.ok(next);assert.throws(()=>after.inspect(r.control_id,{owner:next.owner,generation:next.generation}),/goal_control_dispatch_unknown/);
  }finally{db.close();rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:20});}
+});
+
+test('a Goal continuation carries no replayable input message and exposes its explicit control identity',t=>{
+ const f=fixture(t),r=f.controls.enqueue(f.request,view),run=f.runs.get(r.run_id,'owner-a');assert.equal(run.input_message_id,null);assert.equal(run.goal_control_id,r.control_id);assert.equal(run.continuation_of,f.original.run_id);
+ const legacyInput=f.db.prepare('SELECT m.content_json FROM ga_runs r JOIN ga_messages m ON m.id=r.input_message_id WHERE r.id=?').get(r.run_id);assert.equal(legacyInput,undefined);
+ const coordinator=new HarnessCoordinator(f.db,f.runs,f.events),lease=coordinator.claimNext('worker-a',30000);assert.equal(lease.input_message_id,null);coordinator.start(lease);
+ assert.equal(JSON.parse(f.db.prepare("SELECT payload_json FROM ga_events WHERE run_id=? AND type='run.state' ORDER BY seq DESC LIMIT 1").get(r.run_id).payload_json).goal_control_id,r.control_id);
 });

@@ -143,6 +143,10 @@ export class SessionControllerClient {
     const deadline=AbortSignal.timeout(20_000);
     return this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/goal-resume`,{goal_control:normalizeGoalExecution(control)},signal?AbortSignal.any([signal,deadline]):deadline);
   }
+  async conversationGoalResumeReadiness(signal?:AbortSignal){
+    const deadline=AbortSignal.timeout(5000);
+    return this.post('/v1/conversation-goal-resume/readiness',{},signal?AbortSignal.any([signal,deadline]):deadline);
+  }
 
   async extractMemory(sessionId:string,runId:string,signal:AbortSignal){
     return this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/memory-extraction`,{run_id:runId},signal);
