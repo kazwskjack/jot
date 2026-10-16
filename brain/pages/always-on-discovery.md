@@ -4,7 +4,7 @@ title: Keep project discovery in original DSH task boundaries
 category: decision
 status: active
 created: "2026-10-17T03:43:02"
-updated: "2026-10-17T04:04:05"
+updated: "2026-10-17T04:30:50"
 ---
 
 <!-- compiled_truth -->
@@ -49,4 +49,16 @@ The initial pure eligibility module is not a running feature. Factual native-idl
   kind: decision
   summary: "Implement explicit unlimited task-run contract while preserving finite defaults, original counts/receipts, conservative legacy refusal and all other authority gates."
   source: docs/superpowers/plans/2026-10-17-unlimited-task-runs.md
+  affects: [always-on-discovery]
+
+- time: 2026-10-17T04:29:01
+  kind: decision
+  summary: "Current-Host idle observations are opt-in, read-only and non-authorizing. Missing Sessions remain unknown; cold active Goals remain busy. Actual project collection and transactional admission must still revalidate owner policy, all bindings, freshness, budgets and execution authority."
+  source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
+  affects: [always-on-discovery]
+
+- time: 2026-10-17T04:30:50
+  kind: evidence
+  summary: "Opt-in current-Host observation verified through the real pinned SDK HTTP adapter and Gateway client before/after restart; paused Goal unchanged, zero restarted Agent creation and model calls. Missing Session stays unknown. Full project discovery and production acceptance remain incomplete."
+  source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
   affects: [always-on-discovery]

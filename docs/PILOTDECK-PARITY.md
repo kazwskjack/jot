@@ -441,3 +441,12 @@ same occurrence/native Goal and reviewed file delivery; the built BFF/Gateway UI
 recovers a lost nullable save without creating another task. This does not install
 the discovery collector, policy/signal scheduler, isolated workspace or apply
 workflow. Full 26-capability and production acceptance remain open.
+
+The native-idle observation prerequisite now has an opt-in authenticated Host
+route and a strict Gateway client. It reads existing live Agent facts or stable
+cold Session projections; missing/changed facts stay unknown and active persisted
+Goals stay busy. Actual pinned Host restart verification leaves the paused Goal
+unchanged, creates no Agent after restart and invokes no model. This is current
+Host evidence with `execution_authorized:false`, not a project collector, fleet
+idle proof, completion receipt or occurrence admission. The standard profile
+keeps it disabled pending the remaining discovery integration and acceptance.

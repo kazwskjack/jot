@@ -2,11 +2,12 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';import {createServer} from 'node:net';import {randomBytes} from 'node:crypto';
 import {mkdtemp,mkdir,readFile,writeFile,rm} from 'node:fs/promises';import{join}from'node:path';import{tmpdir}from'node:os';import{fileURLToPath,pathToFileURL}from'node:url';
 import{createHostProfile}from'../create-profile.mjs';const runtime=process.env.JOT_DSH_RUNTIME_MODULES;
+import{SessionControllerClient}from'../../gateway/src/harness/session-controller-client.ts';
 test('official Host reads a persisted paused Goal after restart without loading an Agent or calling a model',{skip:!runtime,timeout:80000},async()=>{
  const root=await mkdtemp(join(tmpdir(),'jot-cold-goal-')),home=join(root,'home'),workspace=join(root,'workspace'),receipt=join(root,'observed.json'),seeded=join(root,'seeded.json');await mkdir(workspace);
  const profile=await createHostProfile({home,adapter:fileURLToPath(new URL('../../session-adapter/index.js',import.meta.url))}),probe=createServer();await new Promise(r=>probe.listen(0,'127.0.0.1',r));const port=probe.address().port;await new Promise(r=>probe.close(r));
  const patch=join(profile.directory,'cordis.patch.yml'),initial=await readFile(patch,'utf8'),plugin={id:'cold-goal-inspection',name:pathToFileURL(fileURLToPath(new URL('./cold-goal-inspect-plugin.mjs',import.meta.url))).href,config:{receipt,seeded}};
- await writeFile(patch,initial.replace('"port": 18841','"port": '+port).replace('"jotHostReady"','"jotHostReady", "jotColdGoalInspectionReady"').trim().replace(/\]$/,', '+JSON.stringify({insert:[plugin]})+']'));
+ await writeFile(patch,initial.replace('"port": 18841','"port": '+port+', "nativeIdleObservation": true').replace('"jotHostReady"','"jotHostReady", "jotColdGoalInspectionReady"').trim().replace(/\]$/,', '+JSON.stringify({insert:[plugin]})+']'));
  const env={};for(const key of ['PATH','SystemRoot','WINDIR','COMSPEC','TEMP','TMP','PATHEXT'])if(process.env[key])env[key]=process.env[key];Object.assign(env,{DSH_HOME:home,DSH_TELEMETRY_DISABLED:'1',JOT_SESSION_ADAPTER_TOKEN:randomBytes(32).toString('hex')});
  let child,done,exit,output='';
  async function stop(){if(child&&!exit){child.kill('SIGINT');await Promise.race([done,new Promise(r=>setTimeout(r,5000))]);if(!exit){child.kill();await done;}}}
@@ -14,8 +15,14 @@ test('official Host reads a persisted paused Goal after restart without loading 
   const deadline=Date.now()+30000;while(Date.now()<deadline&&!exit){try{const r=await fetch('http://127.0.0.1:'+port+'/v1/sessions',{method:'POST',headers:{'content-type':'application/json'},body:'{}',signal:AbortSignal.timeout(500)});if(r.status===401)return;}catch{}await new Promise(r=>setTimeout(r,100));}if(process.env.JOT_HOST_DIAGNOSTIC_DIR){await mkdir(process.env.JOT_HOST_DIAGNOSTIC_DIR,{recursive:true});await writeFile(join(process.env.JOT_HOST_DIAGNOSTIC_DIR,'cold-goal.test.mjs.startup.json'),JSON.stringify({exit:exit??null,output}),{mode:0o600});}throw Error('isolated_host_not_ready');}
  async function request(path,body){const response=await fetch('http://127.0.0.1:'+port+path,{method:'POST',headers:{authorization:'Bearer '+env.JOT_SESSION_ADAPTER_TOKEN,'content-type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(10000)});return {status:response.status,value:await response.json()};}
  try{
-  await start();const created=await request('/v1/sessions',{session_id:'cold-goal-canary',cwd:workspace,agent_preset:'jot-general'});assert.equal(created.status,201,JSON.stringify(created.value));const saved=JSON.parse(await readFile(seeded,'utf8'));assert.equal(saved.phase,'paused');await stop();
+  const client=new SessionControllerClient('http://127.0.0.1:'+port,env.JOT_SESSION_ADAPTER_TOKEN);
+  await start();assert.equal((await client.nativeIdleObservationReadiness()).ready,true);
+  const created=await request('/v1/sessions',{session_id:'cold-goal-canary',cwd:workspace,agent_preset:'jot-general'});assert.equal(created.status,201,JSON.stringify(created.value));const saved=JSON.parse(await readFile(seeded,'utf8'));assert.equal(saved.phase,'paused');
+  const live=await client.observeNativeIdle('cold-goal-canary');assert.equal(live.basis,'live');assert.equal(live.native_idle,'idle');assert.equal(live.execution_authorized,false);await stop();
   await start();const result=await request('/v1/sessions/cold-goal-canary/conversation-goal',{});assert.equal(result.status,200,JSON.stringify(result.value));assert.equal(result.value.goal.id,saved.id);assert.equal(result.value.goal.revision,saved.revision);assert.equal(result.value.goal.phase,'paused');assert.equal(result.value.goal.activation,'disarmed');assert.equal(result.value.goal.maxGoalRounds,11);
+  const cold=await client.observeNativeIdle('cold-goal-canary');assert.equal(cold.basis,'cold');assert.equal(cold.native_idle,'idle');assert.equal(cold.execution_authorized,false);
+  const unchanged=await request('/v1/sessions/cold-goal-canary/conversation-goal',{});assert.deepEqual(unchanged.value,result.value);
+  const absent=await client.observeNativeIdle('not-created');assert.equal(absent.basis,'absent');assert.equal(absent.native_idle,'unknown');assert.equal(absent.reason,'SESSION_MISSING');
   const observed=JSON.parse(await readFile(receipt,'utf8'));assert.equal(observed.created,0);assert.equal(observed.modelCalls,0);
   assert.deepEqual((await request('/v1/sessions/not-created/conversation-goal',{})).value,{goal:null});
  }finally{await stop();await rm(root,{recursive:true,force:true,maxRetries:5,retryDelay:20});}

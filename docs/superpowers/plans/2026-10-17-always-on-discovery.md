@@ -183,3 +183,49 @@ No new actual SDK/provider or deployment claim is made: the new pure module has
 no runtime dispatch hookup to exercise. Earlier SDK results remain separate
 historical evidence. Next is the explicit unlimited task-run contract followed
 by factual observation/policy/occurrence wiring, with all later phases retained.
+
+### Native Host observation prerequisite
+
+The optional internal protocol now observes current Host quiescence through
+`POST /v1/sessions/:id/idle-observation` with exactly `{ "protocol": 1 }`.
+Bearer authentication remains mandatory. The separate readiness endpoint takes
+an empty object. Enable `nativeIdleObservation: true` only in the trusted Host
+adapter configuration; the generated standard profile keeps it disabled.
+This is not a public conversation route or model tool.
+
+Live observation reads the already attached Agent, native inbox and Goal service.
+Running, pending input or an armed Goal means busy. Two reduced snapshots and
+the original registry identity must agree. Cold observation reads the official
+Session projections twice without resolving an Agent; pending input or an active
+persisted Goal means busy. A missing Session means unknown, never idle. Missing
+services, invalid shape, changed state or unsupported preset cannot produce idle.
+Only reduced facts leave the Host: protocol, Session ID, basis, idle state,
+reason, observation timestamp and `execution_authorized: false`. Goal objectives,
+inbox content and raw exceptions are excluded. The Gateway client rejects extra
+fields, inconsistent basis/reasons, changed identity and any claimed authority.
+
+The isolated pinned official Host test exercises the real Gateway client and
+authenticated HTTP adapter before and after restart. A paused Goal is unchanged;
+the restarted Host creates zero Agents and makes zero model calls while reading
+the persisted Session. An absent Session remains unknown. This proves the tested
+Host observation behavior, not a universal disk no-write guarantee, provider
+completion, fleet-wide idleness or execution admission.
+
+This prerequisite does not install the project source collector. Next, collect
+owned project/workspace/role versions, all relevant Session bindings, recent
+user input, original run occupancy and existing budget/capacity facts. Reconcile
+Host timestamps with bounded freshness; do not promote an empty binding set or
+an unavailable Host into idle. Revalidate the owner policy and original execution
+authorities transactionally before an occurrence is admitted. Policy storage,
+signals/reservations, DSH planning/work cycles, reviewed apply, UI, real-provider
+and deployment acceptance remain required in the original full scope.
+
+Local verification for this prerequisite: Adapter suite 509 total, 485 passed,
+24 SDK-dependent skips, zero failures; Gateway suite 1359 total, 1352 passed,
+seven existing/opt-in skips, zero failures (146.36 seconds). After two additional
+test-only cases, the focused Adapter/client set passes 25/25. The separately
+configured pinned SDK restart test passes 1/1 through the real authenticated
+HTTP adapter and Gateway client. Root runtime passes 32/32; Windows Gateway and
+root builds pass. The Adapter package dry-run includes the new module. Public
+regressions pass 6/6 and the 764-file working-tree preflight has no findings.
+No production flag, model invocation, scheduler or user task was enabled.

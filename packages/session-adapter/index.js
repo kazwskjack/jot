@@ -16,6 +16,7 @@ import {createNativeRoleHost} from './native-role-host.js'
 import {createNativeHandoffLifecycle} from './native-handoff-lifecycle.js'
 import {createNativeClaimedSessionComposer} from './native-claimed-composer.js'
 import {readConversationGoal} from './conversation-goal.js'
+import {readNativeIdleObservation} from './native-idle-observation.js'
 import {createConversationGoalRunHost} from './conversation-goal-run-host.js'
 import {createOrdinaryInputRunHost,normalizeOrdinaryInputExecution} from './ordinary-input-run-host.js'
 import {createOptionalMemoryExtractionHost} from './optional-memory-extraction.js'
@@ -162,7 +163,7 @@ function decodeFilename(headers) {
   return value && Buffer.byteLength(value, 'utf8') <= 255 && !/[\u0000\/\\]/.test(value) ? value : null
 }
 
-export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader }) {
+export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,nativeIdleObservation=false }) {
   const voiceHandler = voiceEnabled ? createVoiceAdapterHandler({ speechController, token }) : null
   const workbenchSessions = new Set()
   const blockedWorkbenchSessions = new Set()
@@ -319,6 +320,17 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       if(!ordinaryInputRunHost)return json(503,{error:'ordinary_input_resume_unavailable'});
         try{normalizeOrdinaryInputExecution(body.ordinary_input);}catch{return json(422,{error:'ordinary_input_binding_invalid'});}
       try{return json(200,await ordinaryInputRunHost.resume(sessionId,body.ordinary_input));}catch{return json(409,{error:'ordinary_input_resume_unavailable'});}
+    }
+    if(url.pathname==='/v1/native-idle-observation/readiness'){
+      if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).length)return json(422,{error:'native_idle_observation_input_invalid'});
+      return json(200,{protocol:1,ready:nativeIdleObservation===true&&typeof agents?.get==='function'&&typeof controller?.projections==='function',execution_authorized:false});
+    }
+    const idleObservation=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/idle-observation$/)
+    if(idleObservation){
+      let sessionId;try{sessionId=decodeURIComponent(idleObservation[1]);}catch{return json(422,{error:'native_idle_observation_input_invalid'});}
+      if(!ID.test(sessionId)||!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).join(',')!=='protocol'||body.protocol!==1)return json(422,{error:'native_idle_observation_input_invalid'});
+      if(nativeIdleObservation!==true||typeof agents?.get!=='function'||typeof controller?.projections!=='function')return json(503,{error:'native_idle_observation_unavailable'});
+      try{return json(200,await readNativeIdleObservation({agents,controller,sessionId,signal,allowedPresets:ALLOWED_AGENT_PRESETS}));}catch{return json(409,{error:'native_idle_observation_unconfirmed'});}
     }
     const chatGoal=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/conversation-goal$/)
     if(chatGoal){
@@ -550,7 +562,7 @@ export function apply(ctx, config = {}) {
   const handler = createAdapterHandler({ controller: ctx.sessionController, fileUploads: ctx.fileUploads, agents: ctx.agents,
     sessions:ctx.sessions,persistence:ctx.sessionPersistence,
     speechController, voiceEnabled, token, workbenchBridge,
-    budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader })
+    budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,nativeIdleObservation:config.nativeIdleObservation===true })
   const server = createServer(async (req, res) => {
     const abort = new AbortController()
     req.once('aborted', () => abort.abort())

@@ -3,6 +3,7 @@ import {ordinaryRunCompletionSource,validateOrdinaryRunCompletion,type OrdinaryR
 import {normalizeOrdinaryHistoryScope,validateOrdinarySteeringObservation,validateBoundOrdinarySteeringObservation,type OrdinaryHistoryScope} from './ordinary-steering-observation.ts'
 import { createReadStream } from 'node:fs'
 import { Readable } from 'node:stream'
+import {nativeIdleSessionId,validateNativeIdleObservation} from './native-idle-observation.ts'
 
 export type AdapterFetch = (input: string | URL, init?: RequestInit) => Promise<Response>
 
@@ -178,6 +179,15 @@ export class SessionControllerClient {
 
   async memoryExtractionReadiness(signal:AbortSignal){
     return this.post('/v1/memory-extraction/readiness',{},signal);
+  }
+  async nativeIdleObservationReadiness(signal?:AbortSignal){
+    const deadline=AbortSignal.timeout(5000),value=await this.post('/v1/native-idle-observation/readiness',{},signal?AbortSignal.any([signal,deadline]):deadline);
+    if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!=='execution_authorized,protocol,ready'||value.protocol!==1||typeof value.ready!=='boolean'||value.execution_authorized!==false)throw Error('native_idle_readiness_invalid');
+    return Object.freeze({protocol:1 as const,ready:value.ready,execution_authorized:false as const});
+  }
+  async observeNativeIdle(sessionId:string,signal?:AbortSignal){
+    nativeIdleSessionId(sessionId);const deadline=AbortSignal.timeout(20_000);
+    return validateNativeIdleObservation(await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/idle-observation`,{protocol:1},signal?AbortSignal.any([signal,deadline]):deadline),sessionId);
   }
   async conversationGoal(sessionId:string,body:Record<string,unknown>={},signal?:AbortSignal){
     const deadline=AbortSignal.timeout(20_000);
