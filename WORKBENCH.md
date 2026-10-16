@@ -425,4 +425,4 @@ These probes use the actual locked SDK and upstream plugin with a scripted model
 
 ## Ordinary Goal continuation records
 
-Resume controls now have an internal durable intent/receipt record and a distinct original-Worker continuation entry. No original human message or attachment is replayed. The Host follower/maintenance handshake and public resume admission remain under implementation; the current native runner intentionally refuses this new entry until those gates are wired. See [continuation boundaries and verification](docs/GOAL-CONTINUATION.md).
+Resume controls now have an internal durable intent/receipt record, a live Host observer/maintenance handshake and a distinct original-Worker/native-Runner continuation entry. No original human message or attachment is replayed. Real locked-SDK cases verify cold resume and original publication with a local scripted model. Public atomic admission, UI pending-state integration, exhaustive crash recovery and production acceptance remain unfinished; the Host option stays off by default. See [continuation boundaries and verification](docs/GOAL-CONTINUATION.md).

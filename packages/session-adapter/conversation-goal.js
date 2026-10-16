@@ -66,3 +66,31 @@ export function conversationGoal(agent,body){
  }
  return {goal:service[body.action](agent,ref)};
 }
+
+// Only the observed human-command path may use this resolver for resume. It
+// performs the same cold safety checks before official Agent resolution; it
+// neither arms the Goal nor supplies a prompt.
+export async function prepareConversationGoalResume({controller,agents,persistence,sessionId,ref,signal,ordinaryPresets}){
+ controlInput({action:'resume',...ref});signal?.throwIfAborted();
+ if(typeof controller?.projections!=='function'||typeof controller?.inspect!=='function'||typeof controller?.resolveAgent!=='function'||typeof agents?.get!=='function'||typeof persistence?.flush!=='function')throw Error('goal_unavailable');
+ const projection=await controller.projections({sessionId},signal),view=projectedGoal(projection);signal?.throwIfAborted();
+ if(!view.goal||view.goal.id!==ref.id||view.goal.revision!==ref.revision)throw Error('goal_revision_changed');
+ if(view.goal.phase==='complete')throw Error('goal_not_resumable');
+ const inbox=projection?.values?.inbox;
+ if(!ordinaryPresets?.has(projection?.values?.agentPreset)||!inbox||Object.keys(inbox).length!==2||!['next-turn','next-step'].every(key=>Array.isArray(inbox[key])&&!inbox[key].length))throw Error('goal_cold_input_pending');
+ const history=await controller.inspect(sessionId,signal);signal?.throwIfAborted();
+ if(history?.meta?.id!==sessionId||!Array.isArray(history.events))throw Error('goal_unavailable');
+ let open=null;
+ for(const [index,event] of history.events.entries()){
+  if(event?.seq!==index||typeof event.type!=='string')throw Error('goal_unavailable');
+  if(event.type==='turn/start'){if(open!==null||!Number.isSafeInteger(event.data?.turn)||event.data.turn<0)throw Error('goal_unavailable');open=event.data.turn;}
+  if(event.type==='turn/end'){if(open===null||event.data?.turn!==open)throw Error('goal_unavailable');open=null;}
+ }
+ if(open!==null)throw Error('goal_cold_input_pending');
+ const resolved=await controller.resolveAgent(sessionId),agent=resolved?.agent;
+ const check=()=>{
+  signal?.throwIfAborted();
+  if(resolved?.error||!agent||agent.id!==sessionId||agent.session?.id!==sessionId||agents.get(sessionId)!==agent||agent.status!=='idle'||!['nextTurn','nextStep'].every(key=>Array.isArray(agent.inbox?.[key])&&!agent.inbox[key].length)||typeof agent.runMaintenance!=='function'||typeof agent.ctx?.on!=='function')throw Error('goal_unavailable');
+ };
+ check();return {agent,check};
+}

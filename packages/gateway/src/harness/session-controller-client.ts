@@ -4,6 +4,14 @@ import { Readable } from 'node:stream'
 
 export type AdapterFetch = (input: string | URL, init?: RequestInit) => Promise<Response>
 
+export type ConversationGoalExecution=Readonly<{control_id:string;run_id:string;execution_lease:ExecutionLease}>;
+export function normalizeGoalExecution(value:unknown):ConversationGoalExecution{
+  if(!value||typeof value!=='object'||Array.isArray(value))throw Error('goal_control_input_invalid');
+  const row=value as Record<string,unknown>;
+  if(Object.keys(row).sort().join(',')!=='control_id,execution_lease,run_id'||!['control_id','run_id'].every(key=>typeof row[key]==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(row[key] as string)))throw Error('goal_control_input_invalid');
+  return Object.freeze({control_id:row.control_id as string,run_id:row.run_id as string,execution_lease:normalizeExecutionLease(row.execution_lease)});
+}
+
 export type SessionPromptPart = { type: 'text'; text: string }
   | { type: 'image'; media_type: string; data: string; name?: string }
   | { type: 'file'; receipt_id: string }
@@ -131,6 +139,10 @@ export class SessionControllerClient {
     const deadline=AbortSignal.timeout(20_000);
     return this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/conversation-goal`,body,signal?AbortSignal.any([signal,deadline]):deadline);
   }
+  async resumeGoal(sessionId:string,control:ConversationGoalExecution,signal?:AbortSignal){
+    const deadline=AbortSignal.timeout(20_000);
+    return this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/goal-resume`,{goal_control:normalizeGoalExecution(control)},signal?AbortSignal.any([signal,deadline]):deadline);
+  }
 
   async extractMemory(sessionId:string,runId:string,signal:AbortSignal){
     return this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/memory-extraction`,{run_id:runId},signal);
@@ -160,11 +172,11 @@ export class SessionControllerClient {
     return this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/goal-restore`,{run_id:runId,...(intentId===undefined?{}:{intent_id:intentId})},signal?AbortSignal.any([signal,timeout]):timeout);
   }
 
-  async *follow(sessionId: string, signal?: AbortSignal): AsyncGenerator<Record<string, unknown>> {
+  async *follow(sessionId: string, signal?: AbortSignal,goalControl?:ConversationGoalExecution): AsyncGenerator<Record<string, unknown>> {
     const response = await this.fetchImpl(`${this.baseUrl}/v1/sessions/${encodeURIComponent(sessionId)}/follow`, {
       method: 'POST',
       headers: { authorization: `Bearer ${this.token}`, 'content-type': 'application/json; charset=utf-8' },
-      body: JSON.stringify({ max_messages: 100, assistant_stream: true }),
+      body: JSON.stringify({ max_messages: 100, assistant_stream: true,...(goalControl?{goal_control:normalizeGoalExecution(goalControl)}:{}) }),
       ...(signal ? { signal } : {}),
     })
     if (!response.ok || !response.body) throw new Error(`session_adapter_follow_http_${response.status}`)

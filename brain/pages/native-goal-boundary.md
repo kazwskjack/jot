@@ -4,7 +4,7 @@ title: Keep native Goal state and continuation in DSH
 category: decision
 status: active
 created: "2026-10-16T11:44:16"
-updated: "2026-10-16T13:08:08"
+updated: "2026-10-16T13:28:04"
 ---
 
 <!-- compiled_truth -->
@@ -18,7 +18,9 @@ Explicit cold pause/clear can resolve an ordinary Agent only after checking the 
 
 Human controls retain their exact CAS command and idempotency key when the response is unknown. Resume is an explicit human execution intent in the original database/run/Worker lineage, not another Goal authority or a model input. Original input text, images and attachments must not be replayed. A dispatch belongs to one live follower cursor and one Worker lease generation; an unconfirmed mutation cannot be replaced with a new request. Accepted intent, applied native receipt and completed Goal are separate facts.
 
-The durable control journal and Worker continuation entry are implemented internally. Full cold resume still requires the Host observer/maintenance/receipt handshake, supported history recovery, public atomic admission and real SDK acceptance. No public resume readiness is inferred from a fake runner or product running status. Mixed-version runners refuse the new path instead of falling through to ordinary prompts. Official model tools reject resuming a durable paused Goal; do not use a model prompt to imitate human resume.
+The durable control journal, original Worker/native Runner and opt-in Host observer/maintenance/receipt handshake are implemented. The real follow precedes Agent resolution. Native flush and the applied receipt precede model execution. Original step/tool/LLM paths keep their permissions and check the exact live observer and lease. A lost acknowledgement may recover only the original persisted receipt or the same process-local operation; a new Host/follower cannot rearm an old dispatch.
+
+Public atomic resume admission, UI pending controls, supported interrupted-history recovery and all-boundary crash acceptance remain unfinished. The standard profile keeps this backend off until the full queue-consumer rollout and acceptance gates pass. No public readiness is inferred from a running product status or injected runner. Official model tools reject resuming a durable paused Goal; do not imitate human resume with a model prompt.
 
 
 ## Timeline
@@ -50,5 +52,17 @@ The durable control journal and Worker continuation entry are implemented intern
 - time: 2026-10-16T13:08:08
   kind: decision
   summary: Keep explicit resume intent and native receipt in original run lineage without prompt replay
+  source: docs/GOAL-CONTINUATION.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-16T13:27:49
+  kind: decision
+  summary: Keep the observed Host backend opt-in until public admission and recovery gates pass
+  source: docs/GOAL-CONTINUATION.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-16T13:28:04
+  kind: decision
+  summary: Record implemented observer and native Runner while preserving remaining public recovery gates
   source: docs/GOAL-CONTINUATION.md
   affects: [native-goal-boundary]

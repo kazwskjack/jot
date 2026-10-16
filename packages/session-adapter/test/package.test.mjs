@@ -16,6 +16,8 @@ test('packed adapter loads independently with every runtime module included',asy
  assert.equal(typeof pack.filename,'string');assert.match(pack.filename,/^[A-Za-z0-9._-]+\.tgz$/);
  execFileSync('tar',['-xzf',join(root,pack.filename),'-C',root]);
  const entry=await import(pathToFileURL(join(root,'package/index.js')).href);
+ const observedGoal=await import(pathToFileURL(join(root,'package/conversation-goal-run-host.js')).href);
+ assert.equal(typeof observedGoal.createConversationGoalRunHost,'function');assert.ok(files.includes('conversation-goal-run-host.js'));
  const native=await import(pathToFileURL(join(root,'package/native-role-host.js')).href);
  assert.equal(typeof native.createNativeRoleHost,'function');
  const handoff=await import(pathToFileURL(join(root,'package/native-handoff-admission.js')).href);assert.equal(typeof handoff.createNativeHandoffAdmission,'function');

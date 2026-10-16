@@ -244,3 +244,10 @@ test('ordinary Goal revision conflicts retain only an allowlisted protocol code'
   await assert.rejects(()=>client.conversationGoal('session'),error=>error.status===409&&error.protocolCode===(code==='private-token-value'?undefined:code)&&!error.message.includes('private-token-value'));
  }
 });
+
+test('observed resume transport carries only the original control and lease on follow and human resume',async()=>{
+ const requests=[],control={control_id:'control-a',run_id:'run-a',execution_lease:{owner:'worker-a',generation:1}},client=new SessionControllerClient('http://127.0.0.1:18841','a'.repeat(32),async(url,init)=>{requests.push({url:String(url),body:JSON.parse(init.body)});return String(url).endsWith('/follow')?new Response(JSON.stringify({type:'snapshot',cursor:5})+'\n'):Response.json({goal:null});});
+ for await(const frame of client.follow('session-a',undefined,control))assert.equal(frame.cursor,5);await client.resumeGoal('session-a',control);
+ assert.deepEqual(requests[0].body,{max_messages:100,assistant_stream:true,goal_control:control});assert.deepEqual(requests[1].body,{goal_control:control});assert.ok(requests[1].url.endsWith('/session-a/goal-resume'));
+ await assert.rejects(()=>client.resumeGoal('session-a',{...control,owner_id:'untrusted'}),/goal_control_input_invalid/);assert.equal(requests.length,2);
+});

@@ -44,3 +44,17 @@ test('coercible malformed native Goal states cannot turn partial work into a com
  }
 });
 
+
+test('cold resume Runner attaches first and uses no create, prompt or attachment staging',async()=>{
+ const calls=[],control={controlId:'control-a',ref:{id:'goal-a',revision:3},executionLease:{owner:'worker-a',generation:1}},active={id:'goal-a',revision:4,objective:'Original goal',phase:'active',activation:'armed'};
+ const client={create:async()=>{throw Error('must not activate before follow')},prompt:async()=>{throw Error('must not replay human input')},stageFile:async()=>{throw Error('must not replay files')},conversationGoal:async()=>({goal:{...active,revision:5,phase:'complete',activation:'disarmed'}}),resumeGoal:async(session,binding)=>{calls.push(['resume',session,binding]);return{goal:active};},async *follow(session,signal,binding){calls.push(['follow',session,binding]);yield{type:'snapshot',cursor:8,records:[]};yield{type:'event',event:{type:'assistant/message',seq:9,data:{message:{content:[{type:'text',text:'Resumed output'}]}}}};yield{type:'event',event:{type:'turn/end',seq:10,data:{reason:{kind:'completed'}}}};}};
+ const input={enabled:true,taskRequestId:'run-a',message:'',sessionRef:'session-a',attachments:[],deferCompletionProbe:true,goalControl:control},runner=new OfficialSessionRunner(client,{cwd:'/fixture',agentPreset:'jot-general'});
+ const result=await runner.resumeGoal(input);assert.equal(result.completed,true);assert.equal(result.final_text,'Resumed output');assert.deepEqual(calls.map(x=>x[0]),['follow','resume']);assert.deepEqual(calls[0][2],{control_id:'control-a',run_id:'run-a',execution_lease:{owner:'worker-a',generation:1}});
+ for(const patch of [{message:'Do not resend me'},{attachments:[{kind:'image'}]},{workbenchRunId:'role-run'},{checkpointTask:true}])await assert.rejects(()=>runner.resumeGoal({...input,...patch}),/goal_resume_input_invalid/);
+});
+
+test('invalid resume refs and coercible native cursors cannot dispatch human activation',async()=>{
+ let resumes=0;const client={create:async()=>({}),prompt:async()=>({}),resumeGoal:async()=>{resumes++;return{}},async *follow(){yield{type:'snapshot',cursor:'8',records:[]}}},runner=new OfficialSessionRunner(client,{cwd:'/fixture',agentPreset:'jot-general'}),input={enabled:true,taskRequestId:'run-a',message:'',sessionRef:'s',deferCompletionProbe:true,goalControl:{controlId:'control-a',ref:{id:'goal-a',revision:3},executionLease:{owner:'worker-a',generation:1}}};
+ await assert.rejects(()=>runner.resumeGoal(input),/goal_observer_snapshot_invalid/);assert.equal(resumes,0);
+ for(const ref of [{id:'goal-a',revision:'3'},{id:'goal-a',revision:0},{id:'',revision:3}])await assert.rejects(()=>runner.resumeGoal({...input,goalControl:{...input.goalControl,ref}}),/goal_resume_input_invalid/);
+});
