@@ -905,3 +905,57 @@ Gateway and Windows root builds, 711-file working-tree public review and BRAIN
 links pass. Adapter/Host code is unchanged in this stage; the earlier SDK run
 is not final-recovery acceptance. Native completion candidate and publication
 CAS remain unimplemented, with production flags unchanged.
+
+## Detached full native completion reader (source stage follow-up)
+
+The new `ordinary-run-completion.js` joins the full product snapshot to original
+protocol-2 and all relevant protocol-3 admissions. It requires the exact source
+digest before reading raw persistence, no attached Agent/Session, an ordinary
+unseeded Session, official detached invariants and official inbox/Goal
+projections. Raw step/turn boundaries must close successfully; constructor-added
+logical closers are not evidence. Active, paused or blocked Goals, pending input,
+foreign/duplicate/missing/late human RPCs, a claim between original admission and
+commit, unmatched tools, explicit TOOL_OUTCOME_UNKNOWN and unfinished newer
+assistant drafts all refuse. Admission/entry views and source/raw prefixes are
+re-read after awaited checks. No execution lease, replay, prompt or flush occurs.
+
+The reader returns scoped native answer/output events plus provenance for the
+next trusted transport stage. The shared Gateway `session-output.ts` interpreter
+now serves the existing live Runner and the cold characterization: text,
+reasoning blocks, structured artifact references and presented file paths retain
+their existing semantics. Extraction alone does not validate file ownership or
+integrity, publish an answer or settle usage/fees.
+
+Actual pinned rc2 characterization uses three pre-admitted synthetic human RPCs,
+four original local scripted model calls and one synthetic output tool. After
+runtime context disposal, two detached observations retain the artifact reference,
+leave raw persistence unchanged and add no model/tool calls or attached Agent.
+The initial fixture assumed three synchronous followups coalesced into one
+model call; real DSH performed three original turns. The fixture now measures
+and checks actual original calls, with the tool adding one further original
+step. This is not a provider latency benchmark or an end-to-end crash/publication
+acceptance. Unit tests cover complete output, reasoning/files, malformed scope,
+admission/profile/incarnation changes, raw/source races and unknown tails.
+
+No Host endpoint, automatic consumer or production flag is enabled for this new
+reader. Full versioned transport, all-command publication CAS, artifact/file
+integrity, immutable receipts, crash/reopen tests and provider/deployment/full
+capability gates remain required. Previously running SDK regression sources
+were unchanged while additional new-reader-only boundary tests were developed.
+
+Verification before publication: Adapter 488/488, shared output regressions
+3/3, actual pinned cold-reader characterization 1/1 (no skip), Gateway 1195
+cases with 1189 passed/six existing skips/zero failures (140.58 seconds), root
+32/32, public regressions 6/6 and Gateway/Windows root builds pass. BRAIN links
+and 716-file working-tree review pass. The full existing 37-case actual Host
+regression is recorded separately after its original process completes. The
+new reader's endpoint and canonical writer remain unimplemented/off; this
+characterization does not substitute for their crash/publication acceptance.
+
+The original complete actual Host regression finished: 37/37, zero failures or
+skips (510.73 seconds), including completion races, lost ACK, cold claims and
+terminal acceptance repair. This validates the live Runner extraction against
+existing end-to-end behavior; the new detached reader has its separate actual
+rc2 characterization above and is not yet wired to HTTP/publication. Production
+and feature switches remain unchanged. Versioned trusted transport, verified
+files/artifacts, one-canonical-message CAS and crash/reopen acceptance are next.

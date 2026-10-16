@@ -324,3 +324,11 @@ answers, cancellation, newer work, active leases and foreign scope. Ten targeted
 regressions pass. This is the source stage: native all-command completion proof,
 artifact/file integrity and atomic replacement of the same canonical message
 remain required before final publication. No production configuration changed.
+
+A detached full native-completion reader now verifies the full ordinary source
+and admission set, official inbox/Goal projections and raw closure. Shared live/
+historical output interpretation preserves reasoning, artifact references and
+file presentations. A pinned local DSH characterization adds no model/tool calls
+when reading the disposed Host's history. This reader has no enabled endpoint
+or automatic publisher yet; versioned transport, output integrity and canonical
+publication CAS remain open gates. See the steering recovery plan.
