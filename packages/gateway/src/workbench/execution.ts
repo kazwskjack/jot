@@ -342,6 +342,18 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       assertTaskModelAccounting(requireTask(workbench.contextForRun(native.root_run_id)!),identity.run_id);
     }
   }
+  function assertMemoryModelAdmission(identity:ReturnType<typeof context>,attemptId:unknown){
+    if(identity.kind!=='memory_capture')return;
+    if(!validCallId(attemptId))throw new Error('budget_request_invalid');
+    const attempts=db.prepare(`SELECT a.attempt_id,a.state,CASE WHEN q.attempt_id IS NULL THEN 0 ELSE 1 END AS admission
+      FROM wb_model_budget_attempts a LEFT JOIN wb_model_budget_admissions q ON q.run_id=a.run_id AND q.attempt_id=a.attempt_id
+      WHERE a.run_id=?`).all(identity.run_id) as Array<{attempt_id:string;state:string;admission:number}>;
+    // A new Host or lease must never turn an already dispatched extraction
+    // into a second provider call. Only never-sent reservations may be closed
+    // and replaced through the original ledger; accounting closure stays open.
+    if(attempts.some(item=>item.admission?item.attempt_id===attemptId:
+      !['reserved','released'].includes(item.state)||(item.state==='reserved'&&item.attempt_id!==attemptId)))throw new Error('budget_dispatch_conflict');
+  }
   const webBudgets=modelBudgets&&token&&token.length>=16?new WebDecisionBudgetService(db,{ledger:modelBudgets,secret:token,guard:(owner,run)=>createAuxiliaryRunGuard(db,workbench,tasks,owner,run)}):undefined;
   app.post('/internal/v1/workbench/web-budget-grant',async request=>{
     authorized(request.headers.authorization);const input=object(request.body);fields(input,['run_id','session_ref','call_id','tool_name','request_hash']);if(typeof input.call_id!=='string'||typeof input.request_hash!=='string')throw new Error('invalid_web_budget_request');if(!webBudgets)throw new Error('budget_service_unavailable');
@@ -366,6 +378,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
         assertExecutionLease(db,runId,input.execution_lease);
         const identity=context(input);
         assertIdentityAccounting(identity);
+        assertMemoryModelAdmission(identity,action==='reserve'?(input.request as ModelBudgetRequest)?.attempt_id:input.attempt_id);
       }
       if(action==='reserve')return {receipt:modelBudgets.reserve(owner,runId,input.request as ModelBudgetRequest)};
       if(!validCallId(input.attempt_id))throw new Error('budget_request_invalid');

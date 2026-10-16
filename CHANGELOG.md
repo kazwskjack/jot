@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+- Enforce extraction-call admission across Host restarts in the original budget ledger. A settled call without a proposal cannot trigger another model call; never-dispatched reservations remain recoverable without changing normal task budgets.
+
 - Add opt-in, role-scoped future-run public-message capture, immutable source batches, native pending/read/propose tools and owner-reviewed atomic application. Preserve source freshness, request receipts and original model budgeting.
 - Add the automatic-memory workbench view and a pinned local BRAIN.md project-knowledge workflow. The separate extraction plugin's idle worker and real-provider/production acceptance remain incomplete; no duplicate prompt injection or memory authority is enabled.
 
