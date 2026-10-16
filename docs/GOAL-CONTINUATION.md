@@ -143,3 +143,36 @@ arbitrary already-closed inconsistent logs, or enabling production continuation.
 The SDK itself documents that failed-step recovery does not rewrite unanswered
 calls in already-closed historical turns. Pending-input recovery and the rest of
 the process/crash and rollout matrix remain in scope.
+
+
+## Observer revocation preserves other inputs
+
+The official Agent `cancel` defaults to clearing its durable inbox. A Goal
+observer losing its connection or lease owns cancellation of its controlled
+in-flight work; it does not own cancellation of later human input. The adapter
+therefore disarms only the same Goal identity and uses the official
+`cancel(cause, {keepInbox: true})` option. It neither removes nor reinserts pending
+messages and does not send another prompt. A replacement Goal is never cancelled
+by an old observer.
+
+This cancellation also applies when the same Goal has moved to paused, blocked
+or complete while its original model/closing-answer request is still running.
+Those phases are not proof that an in-flight request has stopped. With a live
+observer, same-Goal completion still permits its original closing answer; loss
+of that observer revokes its execution. No native durable phase is rewritten.
+
+A unit regression models the SDK's default inbox-clearing behavior and checks
+both later queued and next-step inputs across all four native phases. The real
+locked Host probe admits an original control, keeps its first local model HTTP
+request in flight, parks two distinct synthetic user inputs, then disconnects
+the observer. The native driver reaches idle with both IDs retained. The probe
+explicitly awaits native persistence flush and restarts the Host; a cold
+projection still contains both inputs, creates no Agent and makes no second
+model request. No assistant answer is published for the cancelled request.
+
+That probe proves retention and flush/restart behavior, not recovery under an
+arbitrary power failure before input persistence, production rollout, or actual
+delivery of the synthetic inputs through separate Gateway runs. Re-admitting
+pending/claimed input through its original product run and permission/usage
+lineage remains a separate requirement. A new Goal run must not silently consume
+it simply because cancellation now preserves it.

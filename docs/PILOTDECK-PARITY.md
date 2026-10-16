@@ -121,3 +121,11 @@ Jot keeps that implementation. Real Host regressions now cover an open tail and
 started/unstarted tool requests, read-only log hashes, original-run continuation
 and cold restart. Pending/claimed input and still-open attached turns remain
 separate unresolved recovery requirements. See [official interrupted-tail recovery](GOAL-CONTINUATION.md#official-interrupted-tail-recovery).
+
+
+Revoking an ordinary Goal observer now cancels its same-Goal in-flight work with
+the SDK's `keepInbox` option, preserving later queued and steering inputs.
+Paused/blocked/complete phases do not hide a still-running closing request;
+replacement Goals remain untouched. A real Host disconnect/flush/restart probe
+checks retained input IDs and no extra inference. This does not complete original
+pending-input delivery recovery. See [observer revocation](GOAL-CONTINUATION.md#observer-revocation-preserves-other-inputs).

@@ -27,9 +27,11 @@ export function createConversationGoalRunHost({controller,agents,persistence,bri
  };
  const inspect=async record=>{live(record);const result=await request(record,'inspect');live(record);return identity(record,result?.control);};
  const clean=record=>{for(const remove of record.removers.splice(0))try{remove();}catch{}if(boundAgents.get(record.agent)===record)boundAgents.delete(record.agent);};
+ // Revoking this observer stops its in-flight work, including a closing
+ // answer, without durably cancelling another original input in the inbox.
  const revoke=record=>{
   if(record.revoked)return;record.revoked=true;
-  if(record.agent&&record.nativeAttempted){try{const goals=nativeGoalsFor(record.agent),current=goals.get(record.agent);if(current?.id===record.ref?.id){goals.disarm(record.agent);if(record.agent.status==='running'&&current.phase==='active')record.agent.cancel({kind:'user'});}}catch{}}
+  if(record.agent&&record.nativeAttempted){try{const goals=nativeGoalsFor(record.agent),current=goals.get(record.agent);if(current?.id===record.ref?.id){goals.disarm(record.agent);if(record.agent.status==='running')record.agent.cancel({kind:'user'},{keepInbox:true});}}catch{}}
   if(!record.agent||record.agent.status==='idle')clean(record);
  };
  const guard=async(record,signal)=>{

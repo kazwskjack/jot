@@ -4,7 +4,7 @@ const binding={control_id:'control-a',run_id:'run-a',execution_lease:{owner:'wor
 const goal={id:'goal-a',revision:3,objective:'Original goal',phase:'paused',activation:'disarmed',maxGoalRounds:10,roundsStarted:1,createdAt:1,updatedAt:2};
 function fixture(){
  const calls=[],handlers=new Map();let current={...goal},state='queued',receipt=null,observerId=null,allow=true,created=0,cancelled=0;
- const agent={id:'session-a',status:'idle',session:{id:'session-a'},inbox:{nextTurn:[],nextStep:[]},cancel:()=>{cancelled++;agent.status='idle';},runMaintenance:async fn=>{calls.push('maintenance');return fn(new AbortController().signal)}};
+ const agent={id:'session-a',status:'idle',session:{id:'session-a'},inbox:{nextTurn:[],nextStep:[]},cancel:(_cause,options={})=>{cancelled++;agent.status='idle';if(!options.keepInbox){agent.inbox.nextTurn.length=0;agent.inbox.nextStep.length=0;}},runMaintenance:async fn=>{calls.push('maintenance');return fn(new AbortController().signal)}};
  const goals={get:()=>current,resume:(_a,ref)=>{assert.equal(ref.id,current.id);assert.equal(ref.revision,current.revision);calls.push('resume');current={...current,revision:current.revision+1,phase:'active',activation:'armed'};return current;},disarm:()=>{calls.push('disarm');current={...current,activation:'disarmed'};}};
  agent.ctx={get:name=>{assert.equal(name,'goals');return goals},on:(name,fn)=>{const list=handlers.get(name)||[];list.push(fn);handlers.set(name,list);return()=>handlers.set(name,(handlers.get(name)||[]).filter(x=>x!==fn));}};
  const controller={projections:async()=>{calls.push('projection');return {values:{goal:{goal:current,roundsStarted:1,createdAt:1,updatedAt:2},agentPreset:'jot-general',inbox:{'next-turn':[],'next-step':[]}}}},inspect:async()=>({meta:{id:'session-a'},events:[{seq:0,type:'fixture'}]}),resolveAgent:async()=>{created++;calls.push('resolve');return{agent}},async *follow(_request,signal){calls.push('follow-open');yield {type:'snapshot',cursor:8,records:[],projections:{}};await new Promise(resolve=>{if(signal.aborted)return resolve();signal.addEventListener('abort',resolve,{once:true});});}};
@@ -36,6 +36,12 @@ test('pending cold input is refused before Agent resolution or dispatch',async()
 });
 test('disconnect disarms native continuation and cancels its in-flight turn without changing durable phase',async()=>{
  const f=fixture(),stream=await open(f);await f.host.resume('session-a',binding);f.agent.status='running';f.abort.abort();await stream.return();assert.equal(f.current().activation,'disarmed');assert.equal(f.current().phase,'active');assert.equal(f.counts().cancelled,1);await f.host.dispose();
+});
+for(const phase of ['active','paused','blocked','complete'])test('observer revocation preserves later inputs while cancelling its owned in-flight request: '+phase,async()=>{
+ const f=fixture(),stream=await open(f);await f.host.resume('session-a',binding);f.agent.status='running';
+ f.setGoal({...f.current(),phase});
+ const queued={id:'later-human-input',source:{kind:'user',rpcId:'later-original-run'}},steering={id:'later-human-steer',source:{kind:'user',rpcId:'another-original-run'}};f.agent.inbox.nextTurn.push(queued);f.agent.inbox.nextStep.push(steering);
+ f.abort.abort();await stream.return();assert.deepEqual(f.agent.inbox.nextTurn,[queued]);assert.deepEqual(f.agent.inbox.nextStep,[steering]);assert.equal(f.current().activation,'disarmed');assert.equal(f.current().phase,phase);assert.equal(f.counts().cancelled,1);await f.host.dispose();
 });
 test('original step and tool hooks recheck the exact lease without replacing native execution',async()=>{
  const f=fixture(),stream=await open(f);await f.host.resume('session-a',binding);let next=0;const step=f.handlers.get('agent/pre-step')[0],tool=f.handlers.get('tools/execute')[0];
@@ -74,9 +80,9 @@ test('opt-in Host readiness cannot be constructed from an incomplete native serv
 });
 
 test('an applied old receipt cannot authorize a replacement native Goal or its model call',async()=>{
- const f=fixture(),stream=await open(f);await f.host.resume('session-a',binding);f.setGoal({...f.current(),id:'replacement-goal',revision:1});let called=false;
+ const f=fixture(),stream=await open(f);await f.host.resume('session-a',binding);f.agent.status='running';f.setGoal({...f.current(),id:'replacement-goal',revision:1});let called=false;
  const chunks=f.handlers.get('llm/stream')[0]({sessionId:'session-a',signal:new AbortController().signal},async function*(){called=true;yield{type:'must-not-run'};});
- await assert.rejects(async()=>{for await(const _ of chunks){}},/goal_control_execution_revoked/);assert.equal(called,false);assert.equal(f.current().activation,'armed','the old observer must not mutate a replacement Goal');f.abort.abort();await stream.return();await f.host.dispose();
+ await assert.rejects(async()=>{for await(const _ of chunks){}},/goal_control_execution_revoked/);assert.equal(called,false);assert.equal(f.current().activation,'armed','the old observer must not mutate a replacement Goal');assert.equal(f.counts().cancelled,0,'the old observer must not cancel replacement work');f.abort.abort();await stream.return();await f.host.dispose();
 });
 
 test('completion of the same native Goal still permits its original closing answer',async()=>{

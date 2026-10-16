@@ -4,7 +4,7 @@ title: Keep native Goal state and continuation in DSH
 category: decision
 status: active
 created: "2026-10-16T11:44:16"
-updated: "2026-10-16T15:16:47"
+updated: "2026-10-16T15:26:45"
 ---
 
 <!-- compiled_truth -->
@@ -23,6 +23,8 @@ The UI follows accepted original runs separately from validated native Goal phas
 Only the original trusted live attempt before invoking native resume may attest an immutable not-called rejection. The Gateway records its fixed reason with the exact original run/Session/lease; Worker and UI expose that reason without raw transport text. A lost begin acknowledgement can be reconciled as not-called only by that still-live attempt. Once native resume has been invoked, a thrown error, failed flush or lost applied acknowledgement is uncertain and cannot be reclassified from the current Goal alone. Disarm covers a native invocation that appended then threw. Actual isolated Host termination is tested after native flush and after applied commit, distinct from unit fault injection or exhaustive crash recovery.
 
 Dispatch identity also includes a Host-generated immutable observer ID. Begin, applied and pre-native refusal bind that same ID, even within one unchanged Worker lease. A delayed old observer cannot reject or apply a replacement observer's dispatch. Existing uncertain/applied records gain a null observer field, never a retroactive execution grant; the original request and receipts remain unchanged.
+
+Observer revocation cancels only its same-Goal in-flight work using the official keepInbox option. Default Agent cancellation would durably clear later human inputs, so it is not appropriate for observer loss. Pending queued/steering input must remain unchanged, and no replacement Goal may be cancelled by an old observer. Same-Goal paused, blocked or complete state does not prove its model/closing request is idle. The real Host probe parks two synthetic inputs during one in-flight model request, disconnects, explicitly flushes and restarts, then verifies both input IDs persist without another Agent/model request. This is not original-product-run replay authorization, unflushed power-failure recovery or production acceptance.
 
 
 ## Timeline
@@ -108,5 +110,11 @@ Dispatch identity also includes a Host-generated immutable observer ID. Begin, a
 - time: 2026-10-16T15:16:47
   kind: reversal
   summary: "Persisted interrupted tails are already repaired by official cold query and resume; pending or claimed input remains a separate gap"
+  source: docs/GOAL-CONTINUATION.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-16T15:26:45
+  kind: decision
+  summary: Keep later inbox input when revoking only an observed Goal execution
   source: docs/GOAL-CONTINUATION.md
   affects: [native-goal-boundary]
