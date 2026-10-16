@@ -4,7 +4,7 @@ title: Keep native Goal state and continuation in DSH
 category: decision
 status: active
 created: "2026-10-16T11:44:16"
-updated: "2026-10-16T16:15:02"
+updated: "2026-10-16T16:41:22"
 ---
 
 <!-- compiled_truth -->
@@ -29,6 +29,8 @@ Observer revocation cancels only its same-Goal in-flight work using the official
 KeepInbox does not protect a batch already claimed before native pre-step entry. While an original observed pre-step remains live, observer revocation synchronously preserves its unentered human inputs before its own cancellation, using the official Goal driver's next-step convention and original IDs/content/RPC source. No send, new prompt or wake occurs; generated Goal rounds/context and committed message IDs are excluded. An already-aborted native step is not restored, and a later explicit cancellation can discard restored input. Identical pending records are not duplicated; conflicting content or unavailable history produces a fixed unconfirmed recovery error without overwrite. A real Host lease-revocation/flush/restart probe preserves the once-claimed input with zero model requests. This does not authorize arbitrary cold claimed-input replay or replace original-run/owner/lease/composition/accounting recovery.
 
 Observer/lease loss is an owning-execution cancellation and uses the official parent cause, not user. Only actual user stop paths should be described as user cancellation. This changes the current cancellation event classification; it never rewrites historical immutable receipts or grants resumed execution.
+
+Ordinary original-input recovery now has a read-only internal product binding endpoint. The existing service identity and a transaction prove the running original human run/message, database-derived owner, current Session and exact Coordinator lease; workbench and message-free Goal runs are rejected. Its stored product content digest is not native attachment equivalence, and execution_authorized remains false. This identity snapshot cannot wake a driver, reserve model cost or replace tool permission. The current Host/Runner does not yet consume it: original native input/composition and cumulative accounting recovery still need implementation and real acceptance.
 
 
 ## Timeline
@@ -144,5 +146,11 @@ Observer/lease loss is an owning-execution cancellation and uses the official pa
 - time: 2026-10-16T16:15:02
   kind: decision
   summary: Attribute observer or lease revocation to its owning execution rather than a user stop
+  source: docs/GOAL-CONTINUATION.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-16T16:41:22
+  kind: decision
+  summary: Bind ordinary input recovery to original product lineage without granting execution
   source: docs/GOAL-CONTINUATION.md
   affects: [native-goal-boundary]

@@ -290,3 +290,34 @@ This is one real process boundary after the in-memory native commit and before
 the adapter's flush. It does not prove all native CAS branches, partial storage
 writes, OS/power loss, provider settlement or final publication reconciliation.
 The fault plugin is test-only; production code and default switches are unchanged.
+
+
+## Original human input binding
+
+The internal `POST /internal/v1/workbench/ordinary-input-binding` endpoint reads
+an original ordinary run's lineage under its current Coordinator lease. It uses
+the existing service credential and accepts only `run_id`, `session_ref` and
+`execution_lease`. Owner identity comes from the database, never from the caller.
+A single transaction checks the running original run, its original user message,
+conversation ownership/archive status, current native Session binding and lease.
+Workbench roles/bound runs and message-free Goal control runs are rejected.
+
+The read-only receipt contains the original product message ID, original run ID
+as expected native `source.rpcId`, owner/conversation/Session, exact lease, and a
+SHA-256 of the stored product content bytes. It never returns prompt content or
+changes records. Product message IDs and native message IDs are distinct; the
+stored-content hash does not assert equality to transformed native attachments.
+`execution_authorized: false` is deliberate: this snapshot is not a wake token,
+model cost reservation, tool approval or proof that native input remains pending.
+An expired receipt must be rechecked against original authority before mutation.
+
+This is connected identity infrastructure for ordinary pending/claimed-input
+recovery. The existing Host and Runner do not yet invoke it to consume an inbox.
+Restoring native claims, checking the original preset/composition, observing the
+same run, preserving cumulative usage and admitting supported driver execution
+remain required. No private wake method or fabricated prompt is used, and no
+Goal resume switch is enabled by this endpoint.
+
+Route tests cover an exact unchanged database receipt, content omission, service
+authentication, caller-owner rejection, wrong Session/lease, archive and cancelled
+states, corrupt message lineage, workbench scope, and message-free continuation.
