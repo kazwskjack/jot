@@ -4,7 +4,7 @@ title: Keep native Goal state and continuation in DSH
 category: decision
 status: active
 created: "2026-10-16T11:44:16"
-updated: "2026-10-16T15:49:11"
+updated: "2026-10-16T16:15:02"
 ---
 
 <!-- compiled_truth -->
@@ -25,6 +25,10 @@ Only the original trusted live attempt before invoking native resume may attest 
 Dispatch identity also includes a Host-generated immutable observer ID. Begin, applied and pre-native refusal bind that same ID, even within one unchanged Worker lease. A delayed old observer cannot reject or apply a replacement observer's dispatch. Existing uncertain/applied records gain a null observer field, never a retroactive execution grant; the original request and receipts remain unchanged.
 
 Observer revocation cancels only its same-Goal in-flight work using the official keepInbox option. Default Agent cancellation would durably clear later human inputs, so it is not appropriate for observer loss. Pending queued/steering input must remain unchanged, and no replacement Goal may be cancelled by an old observer. Same-Goal paused, blocked or complete state does not prove its model/closing request is idle. The real Host probe parks two synthetic inputs during one in-flight model request, disconnects, explicitly flushes and restarts, then verifies both input IDs persist without another Agent/model request. This is not original-product-run replay authorization, unflushed power-failure recovery or production acceptance.
+
+KeepInbox does not protect a batch already claimed before native pre-step entry. While an original observed pre-step remains live, observer revocation synchronously preserves its unentered human inputs before its own cancellation, using the official Goal driver's next-step convention and original IDs/content/RPC source. No send, new prompt or wake occurs; generated Goal rounds/context and committed message IDs are excluded. An already-aborted native step is not restored, and a later explicit cancellation can discard restored input. Identical pending records are not duplicated; conflicting content or unavailable history produces a fixed unconfirmed recovery error without overwrite. A real Host lease-revocation/flush/restart probe preserves the once-claimed input with zero model requests. This does not authorize arbitrary cold claimed-input replay or replace original-run/owner/lease/composition/accounting recovery.
+
+Observer/lease loss is an owning-execution cancellation and uses the official parent cause, not user. Only actual user stop paths should be described as user cancellation. This changes the current cancellation event classification; it never rewrites historical immutable receipts or grants resumed execution.
 
 
 ## Timeline
@@ -128,5 +132,17 @@ Observer revocation cancels only its same-Goal in-flight work using the official
 - time: 2026-10-16T15:49:11
   kind: reversal
   summary: "localStorage read-back did not survive owned whole-browser termination; strict IndexedDB commit now gates dispatch"
+  source: docs/GOAL-CONTINUATION.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-16T16:11:25
+  kind: decision
+  summary: Preserve unentered live claimed inputs before observer cancellation while respecting explicit user cancellation
+  source: docs/GOAL-CONTINUATION.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-16T16:15:02
+  kind: decision
+  summary: Attribute observer or lease revocation to its owning execution rather than a user stop
   source: docs/GOAL-CONTINUATION.md
   affects: [native-goal-boundary]

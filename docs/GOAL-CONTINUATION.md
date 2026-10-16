@@ -197,7 +197,7 @@ The official Agent `cancel` defaults to clearing its durable inbox. A Goal
 observer losing its connection or lease owns cancellation of its controlled
 in-flight work; it does not own cancellation of later human input. The adapter
 therefore disarms only the same Goal identity and uses the official
-`cancel(cause, {keepInbox: true})` option. It neither removes nor reinserts pending
+`cancel({kind: 'parent'}, {keepInbox: true})` option. Observer/lease loss is an owning-execution cancellation, not evidence that the user pressed stop. It neither removes nor reinserts pending
 messages and does not send another prompt. A replacement Goal is never cancelled
 by an old observer.
 
@@ -222,3 +222,46 @@ delivery of the synthetic inputs through separate Gateway runs. Re-admitting
 pending/claimed input through its original product run and permission/usage
 lineage remains a separate requirement. A new Goal run must not silently consume
 it simply because cancellation now preserves it.
+
+
+## Live claimed-input preservation
+
+`keepInbox` only protects messages still queued. The native loop claims its next
+batch before entering the pre-step waterfall. If the Goal observer loses its
+lease/connection inside that waterfall, rejecting the step previously stranded
+the just-claimed human inputs outside the inbox and outside committed conversation
+messages. They had not been sent to a model, but no longer appeared as pending.
+
+The observer now retains only its original live pre-step payload while that
+waterfall runs. Before its own revocation cancellation, it synchronously checks
+the same live Agent and Goal, skips already committed user-message IDs, and puts
+original human inputs back at `next-step` in original batch order. This follows
+the official Goal driver's `restoreOtherClaimed` convention for unentered step
+context. Original IDs, content and RPC/source identity remain intact. Generated
+Goal-round prompts and downstream-generated context are not reinserted. There is
+no send, new prompt, model call or wake operation. Payload references are released
+when the waterfall returns; this is not a second input scheduler or Goal store.
+
+An already-aborted native step is not restored, so explicit user cancellation
+cannot be undone. Preservation is synchronous and happens before the observer's
+own cancel, allowing a later explicit cancellation to discard it normally.
+Identical already-pending input is not duplicated. Conflicting content, duplicate
+identities or unavailable original history is reported as
+`goal_input_recovery_unconfirmed`; cancellation still proceeds, and the adapter
+does not overwrite another message or claim successful preservation.
+
+The actual Host probe parks one synthetic human input during native Goal resume,
+lets the native loop claim it, then revokes the original Coordinator lease at the
+first applied pre-step guard. The input is claimed exactly once, no model request
+or assistant publication occurs, and the original input ID remains pending at
+idle. After an explicit native flush and another Host restart, a cold projection
+still contains it without creating an Agent or making a model request. The
+original native applied receipt is not relabelled as a not-called rejection.
+Unit tests separately cover pre/post-waterfall rejection, prior/later explicit
+cancellation, committed IDs, identical pending input and conflicting content.
+
+This is an in-process preservation window, not reconstruction after an arbitrary
+Host crash or authorization to consume old pending inputs under a new run. Cold
+pending/claimed-input recovery still needs its original run/RPC, owner, lease,
+composition and accounting evidence. A raw claim record alone is not replay
+permission, and a safe refusal is not complete recovery acceptance.

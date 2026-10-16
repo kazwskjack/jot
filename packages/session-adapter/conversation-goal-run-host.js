@@ -2,6 +2,7 @@ import {conversationGoal,prepareConversationGoalResume} from './conversation-goa
 import {nativeGoalsFor} from './workbench-goal.js';
 import {normalizeHostExecutionLease} from './workbench.js';
 import {randomUUID} from 'node:crypto';
+import {isDeepStrictEqual} from 'node:util';
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 function binding(value){
  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!=='control_id,execution_lease,run_id'||typeof value.control_id!=='string'||!ID.test(value.control_id)||typeof value.run_id!=='string'||!ID.test(value.run_id))throw Error('goal_control_input_invalid');
@@ -27,11 +28,30 @@ export function createConversationGoalRunHost({controller,agents,persistence,bri
  };
  const inspect=async record=>{live(record);const result=await request(record,'inspect');live(record);return identity(record,result?.control);};
  const clean=record=>{for(const remove of record.removers.splice(0))try{remove();}catch{}if(boundAgents.get(record.agent)===record)boundAgents.delete(record.agent);};
+ const preserveClaimed=record=>{
+  const context=record.claimedContext,agent=record.agent;
+  // Do this synchronously before our own cancel. A prior explicit user cancel
+  // must not be undone; a later one can still discard these restored inputs.
+  if(!context||context.signal?.aborted||agents.get(record.sessionId)!==agent)return;
+  const messages=context.messages.filter(message=>message?.role==='user'&&message.source?.kind==='user');if(!messages.length)return;
+  if(typeof agent.session.snapshotEvents!=='function'||typeof agent.inbox?.prepend!=='function')throw Error('goal_input_recovery_unconfirmed');
+  const events=agent.session.snapshotEvents(0);if(!Array.isArray(events))throw Error('goal_input_recovery_unconfirmed');
+  const entered=new Set(events.filter(event=>event.type==='user/message').map(event=>event.data?.id)),seen=new Set(),restore=[];
+  for(const message of messages){
+   if(!ID.test(message.id??'')||seen.has(message.id))throw Error('goal_input_recovery_unconfirmed');seen.add(message.id);if(entered.has(message.id))continue;
+   const pending=[...agent.inbox.nextTurn,...agent.inbox.nextStep].filter(value=>value.id===message.id);
+   if(pending.length){if(pending.length!==1||!isDeepStrictEqual(pending[0],message))throw Error('goal_input_recovery_unconfirmed');continue;}
+   restore.push(message);
+  }
+  // Match the official Goal driver's restoreOtherClaimed convention: retain
+  // original step context at next-step, without a send, prompt or wake call.
+  for(const message of restore.toReversed())agent.inbox.prepend('next-step',message);
+ };
  // Revoking this observer stops its in-flight work, including a closing
  // answer, without durably cancelling another original input in the inbox.
  const revoke=record=>{
   if(record.revoked)return;record.revoked=true;
-  if(record.agent&&record.nativeAttempted){try{const goals=nativeGoalsFor(record.agent),current=goals.get(record.agent);if(current?.id===record.ref?.id){goals.disarm(record.agent);if(record.agent.status==='running')record.agent.cancel({kind:'user'},{keepInbox:true});}}catch{}}
+  if(record.agent&&record.nativeAttempted){try{const goals=nativeGoalsFor(record.agent),current=goals.get(record.agent);if(current?.id===record.ref?.id){try{preserveClaimed(record);}catch{record.inputRecoveryError=true;}goals.disarm(record.agent);if(record.agent.status==='running')record.agent.cancel({kind:'parent'},{keepInbox:true});}}catch{}}
   if(!record.agent||record.agent.status==='idle')clean(record);
  };
  const guard=async(record,signal)=>{
@@ -44,8 +64,10 @@ export function createConversationGoalRunHost({controller,agents,persistence,bri
   on('agent/status',({agent,status})=>{if(agent===record.agent&&status==='idle'&&record.revoked)clean(record);});
   on('agent/pre-step',async(payload,next)=>{
    if(payload.agent!==record.agent)return next();
+   const context={signal:payload.signal,messages:Array.isArray(payload.messages)?[...payload.messages]:[]};record.claimedContext=context;
    try{await guard(record,payload.signal);const value=await next();await guard(record,payload.signal);return value;}
-   catch{return {kind:'reject'};}
+   catch{if(record.inputRecoveryError)throw Error('goal_input_recovery_unconfirmed');return {kind:'reject'};}
+   finally{if(record.claimedContext===context)record.claimedContext=null;}
   });
   on('tools/execute',async(payload,next)=>{await guard(record,payload.signal);return next();});
   // The SDK waterfall returns an AsyncIterable synchronously, not a Promise.

@@ -5,6 +5,7 @@ const goal={id:'goal-a',revision:3,objective:'Original goal',phase:'paused',acti
 function fixture(){
  const calls=[],handlers=new Map();let current={...goal},state='queued',receipt=null,observerId=null,allow=true,created=0,cancelled=0;
  const agent={id:'session-a',status:'idle',session:{id:'session-a'},inbox:{nextTurn:[],nextStep:[]},cancel:(_cause,options={})=>{cancelled++;agent.status='idle';if(!options.keepInbox){agent.inbox.nextTurn.length=0;agent.inbox.nextStep.length=0;}},runMaintenance:async fn=>{calls.push('maintenance');return fn(new AbortController().signal)}};
+ agent.session.snapshotEvents=()=>[];agent.inbox.prepend=(target,message)=>{assert.equal(target,'next-step');agent.inbox.nextStep.unshift(message);calls.push('restore-input');};
  const goals={get:()=>current,resume:(_a,ref)=>{assert.equal(ref.id,current.id);assert.equal(ref.revision,current.revision);calls.push('resume');current={...current,revision:current.revision+1,phase:'active',activation:'armed'};return current;},disarm:()=>{calls.push('disarm');current={...current,activation:'disarmed'};}};
  agent.ctx={get:name=>{assert.equal(name,'goals');return goals},on:(name,fn)=>{const list=handlers.get(name)||[];list.push(fn);handlers.set(name,list);return()=>handlers.set(name,(handlers.get(name)||[]).filter(x=>x!==fn));}};
  const controller={projections:async()=>{calls.push('projection');return {values:{goal:{goal:current,roundsStarted:1,createdAt:1,updatedAt:2},agentPreset:'jot-general',inbox:{'next-turn':[],'next-step':[]}}}},inspect:async()=>({meta:{id:'session-a'},events:[{seq:0,type:'fixture'}]}),resolveAgent:async()=>{created++;calls.push('resolve');return{agent}},async *follow(_request,signal){calls.push('follow-open');yield {type:'snapshot',cursor:8,records:[],projections:{}};await new Promise(resolve=>{if(signal.aborted)return resolve();signal.addEventListener('abort',resolve,{once:true});});}};
@@ -37,6 +38,10 @@ test('pending cold input is refused before Agent resolution or dispatch',async()
 test('disconnect disarms native continuation and cancels its in-flight turn without changing durable phase',async()=>{
  const f=fixture(),stream=await open(f);await f.host.resume('session-a',binding);f.agent.status='running';f.abort.abort();await stream.return();assert.equal(f.current().activation,'disarmed');assert.equal(f.current().phase,'active');assert.equal(f.counts().cancelled,1);await f.host.dispose();
 });
+test('observer loss is a parent execution cancellation rather than a claimed user stop',async()=>{
+ const f=fixture(),stream=await open(f);await f.host.resume('session-a',binding);f.agent.status='running';const cancel=f.agent.cancel,causes=[];f.agent.cancel=(cause,options)=>{causes.push({cause,options});cancel(cause,options);};
+ f.abort.abort();await stream.return();assert.deepEqual(causes,[{cause:{kind:'parent'},options:{keepInbox:true}}]);await f.host.dispose();
+});
 for(const phase of ['active','paused','blocked','complete'])test('observer revocation preserves later inputs while cancelling its owned in-flight request: '+phase,async()=>{
  const f=fixture(),stream=await open(f);await f.host.resume('session-a',binding);f.agent.status='running';
  f.setGoal({...f.current(),phase});
@@ -47,6 +52,33 @@ test('original step and tool hooks recheck the exact lease without replacing nat
  const f=fixture(),stream=await open(f);await f.host.resume('session-a',binding);let next=0;const step=f.handlers.get('agent/pre-step')[0],tool=f.handlers.get('tools/execute')[0];
  assert.deepEqual(await step({agent:f.agent,signal:new AbortController().signal},async()=>{next++;return{kind:'accept',messages:[]}}),{kind:'accept',messages:[]});assert.equal(await tool({signal:new AbortController().signal},async()=>{next++;return'original-tool'}),'original-tool');assert.equal(next,2);
  f.revoke();assert.deepEqual(await step({agent:f.agent,signal:new AbortController().signal},async()=>{next++;return{kind:'accept'}}),{kind:'reject'});await assert.rejects(()=>tool({signal:new AbortController().signal},async()=>{next++;}),/goal_control_execution_revoked/);assert.equal(next,2);f.abort.abort();await stream.return();await f.host.dispose();
+});
+
+for(const stage of ['before-next','after-next'])test('revoked pre-step preserves original claimed human input without waking a driver: '+stage,async()=>{
+ const f=fixture(),stream=await open(f);await f.host.resume('session-a',binding);f.agent.status='running';const input=id=>({id,role:'user',source:{kind:'user',rpcId:id+'-rpc'},content:[{type:'text',text:'Retain this original input'}]}),one=input('claimed-one'),two=input('claimed-two');let next=0;
+ f.agent.followup=f.agent.steer=f.agent.send=()=>{throw Error('must_not_wake');};if(stage==='before-next')f.revoke();
+ const result=await f.handlers.get('agent/pre-step')[0]({agent:f.agent,signal:new AbortController().signal,messages:[one,two,{id:'native-round',role:'user',source:{kind:'goal',round:1},content:[]}]},async()=>{next++;f.revoke();return{kind:'enter',messages:[one,two,input('generated-by-next')]};});
+ assert.deepEqual(result,{kind:'reject'});assert.deepEqual(f.agent.inbox.nextStep,[one,two]);assert.equal(next,stage==='before-next'?0:1);assert.equal(f.counts().cancelled,1);f.abort.abort();await stream.return();await f.host.dispose();
+});
+test('explicit user cancellation and already committed messages are never resurrected by pre-step recovery',async()=>{
+ for(const reason of ['user-cancelled','already-committed']){
+  const f=fixture(),stream=await open(f);await f.host.resume('session-a',binding);f.agent.status='running';const signal=new AbortController(),message={id:'human-original',role:'user',source:{kind:'user',rpcId:'original-rpc'},content:[{type:'text',text:'Original task'}]};
+  if(reason==='user-cancelled')signal.abort({kind:'user'});else f.agent.session.snapshotEvents=()=>[{type:'user/message',data:message}];f.revoke();
+  assert.deepEqual(await f.handlers.get('agent/pre-step')[0]({agent:f.agent,signal:signal.signal,messages:[message]},async()=>{throw Error('must_not_enter');}),{kind:'reject'});assert.deepEqual(f.agent.inbox.nextStep,[]);f.abort.abort();await stream.return();await f.host.dispose();
+ }
+});
+test('a later explicit cancel can discard restored input because preservation precedes observer cancellation',async()=>{
+ const f=fixture(),stream=await open(f);await f.host.resume('session-a',binding);f.agent.status='running';const message={id:'claimed-human',role:'user',source:{kind:'user'},content:[{type:'text',text:'Original'}]},cancel=f.agent.cancel;
+ f.agent.cancel=(...args)=>{assert.deepEqual(f.agent.inbox.nextStep,[message]);cancel(...args);cancel({kind:'user'});};f.revoke();
+ assert.deepEqual(await f.handlers.get('agent/pre-step')[0]({agent:f.agent,signal:new AbortController().signal,messages:[message]},async()=>{throw Error('must_not_enter');}),{kind:'reject'});assert.deepEqual(f.agent.inbox.nextStep,[]);f.abort.abort();await stream.return();await f.host.dispose();
+});
+test('claim preservation is idempotent but conflicting pending content is reported without overwrite',async()=>{
+ for(const conflict of [false,true]){
+  const f=fixture(),stream=await open(f);await f.host.resume('session-a',binding);f.agent.status='running';const message={id:'claimed-human',role:'user',source:{kind:'user'},content:[{type:'text',text:'Original'}]},pending=conflict?{...message,content:[{type:'text',text:'Different'}]}:message;f.agent.inbox.nextStep.push(pending);f.revoke();
+  const operation=f.handlers.get('agent/pre-step')[0]({agent:f.agent,signal:new AbortController().signal,messages:[message]},async()=>{throw Error('must_not_enter');});
+  if(conflict)await assert.rejects(()=>operation,/goal_input_recovery_unconfirmed/);else assert.deepEqual(await operation,{kind:'reject'});
+  assert.deepEqual(f.agent.inbox.nextStep,[pending]);assert.equal(f.calls.filter(c=>c==='restore-input').length,0);assert.equal(f.counts().cancelled,1);f.abort.abort();await stream.return();await f.host.dispose();
+ }
 });
 
 test('Host disposal aborts the original follow and never leaves a live observer behind',async()=>{

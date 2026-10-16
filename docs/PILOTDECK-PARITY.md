@@ -138,3 +138,12 @@ POST and acknowledgement. The owned-browser process-tree/restart probe passes
 with the same profile and exact original request, alongside renderer recovery,
 legacy migration and storage-failure tests. OS/power loss and production acceptance
 remain unverified. See [browser recovery](GOAL-CONTINUATION.md#browser-command-recovery).
+
+
+Observer revocation also preserves original human inputs already claimed by the
+current live pre-step, before any conversation-message commit. It quietly retains
+that unentered step context using the official next-step convention, preserving
+IDs/content/source without a new prompt or wake. User cancellation is respected;
+conflicting or already committed input is not overwritten/replayed. The real Host
+lease-revocation/flush/restart probe makes zero model requests. Cold reconstruction
+and original-run execution recovery remain separate. See [live claimed inputs](GOAL-CONTINUATION.md#live-claimed-input-preservation).
