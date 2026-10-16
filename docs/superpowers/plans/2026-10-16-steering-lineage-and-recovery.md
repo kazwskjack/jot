@@ -456,3 +456,75 @@ Gateway suite: 1165 total, 1159 passed, six existing skips, zero failures
 6/6 and BRAIN link lint pass. Providers remain local scripted endpoints. These
 results do not certify historical terminal recovery, production, fees or the
 remaining capability inventory.
+
+## Historical terminal reconciliation work sequence
+
+The live binding deliberately requires a running original parent and its live
+lease. Do not relax that authority to inspect terminal history. Add a separately
+named product-source inspection, versioned as `ordinary_steer_history`, with
+explicit owner/conversation/Session/run/command and expected run version. It
+returns only original hashes, command/product state and terminal version; no
+lease, raw content, accepted-native claim or execution permission. A cancelled
+parent remains cancelled. This source read is not a proof of native inactivity.
+
+- [x] Add `conversations/ordinary-steering-history.ts` and its authenticated
+  internal route in `server.ts`. Tests first: terminal source facts without
+  writes, exact owner/Session/version, missing/conflicting product messages,
+  malformed payload, cancellation, running/role/Goal exclusion, strict auth and
+  envelope. Keep live binding behavior unchanged.
+- [ ] Join that source snapshot to independently read, exact-incarnation native
+  history, immutable original/command admissions and entry reservations. Compare
+  source again after asynchronous native reads. Missing evidence means unknown;
+  an entry reservation is not proof that dispatch or completion occurred.
+- [ ] Reproduce Host/Worker death after native acceptance but before product ACK,
+  and after native answer but before product publication. Preserve all original
+  RPCs/usage and one parent. Distinguish accepted pending input, entered unknown,
+  answered and unproven cases. Never issue a prompt during inspection.
+- [ ] Only after these proofs, define an atomic product acknowledgement repair
+  and separate final-answer reconciliation. Respect cancellation, owner changes,
+  current version and canonical publication. No implicit resume or new fallback
+  run. Unknown model/tool outcomes and billing remain separate required gates.
+
+Execute serially in the existing public branch, with Windows local tests/builds,
+private evidence outside publication and exact-commit sensitive-data scanning.
+This sequence continues stage E and the full inventory; it does not replace them.
+
+### Product-source inspection implementation
+
+`POST /internal/v1/workbench/ordinary-steering-history` is now registered with
+its own internal bearer authentication, separate from browser actor/CSRF routes.
+The exact request is `owner_id`, `conversation_id`, `session_ref`, `run_id`,
+`command_id`, `expected_run_version`; coercible versions, extra lease/text fields
+and foreign scope refuse. It reads one transaction and returns a distinct
+`ordinary_steer_history` record, original/command/content hashes, terminal run
+version/state, command state and whether the exact deterministic product message
+exists. Applied commands require that message. Existing collisions, malformed
+payloads, future source versions, wrong original lineage, archived ownership,
+roles/tasks and Goal controls refuse. Errors never include stored text.
+
+Pending, applied, superseded and rejected are product facts only. The response
+always says `native_acceptance: unverified` and `execution_authorized: false`.
+It has no execution lease and cannot satisfy the live binding or completion
+proof contracts. Reading a cancelled/failed parent leaves it unchanged. An absent
+lease does not block this source inspection, and a lingering lease is not treated
+as native inactivity. No Dispatcher uses this inspection yet. Native history,
+entry/receipt verification and atomic ACK/final-answer reconciliation remain
+unchecked items above; historical delivery is not repaired by this endpoint.
+
+Six new actual-Gateway tests plus eight existing live-binding tests pass. The
+first red run saw the missing route rejected; after initial registration, the
+browser CSRF prehandler still rejected it before internal authentication. Adding
+only this exact authenticated internal path fixed that transport gap. The first
+build exposed TypeScript control-flow narrowing for an arrow `never` helper;
+a function declaration fixed it. Windows Gateway build passes. Complete final
+suite and publication evidence are appended after their actual completion.
+
+Historical source checkpoint final validation: Gateway 1171 total, 1165 passed,
+six existing skips, zero failures (138.69 seconds). Root 32/32 and public-review
+regression 6/6 pass; Windows Gateway/root builds and BRAIN links pass. The first
+root run in the restricted sandbox failed loopback connections with EACCES; the
+existing authorized Windows-user run passes. No Adapter/SDK execution sources
+changed in this checkpoint, so earlier SDK results are not presented as a new
+historical-recovery test. Working-tree public review scans 699 files. No native
+historical reconciliation, production deployment or permission enablement is
+claimed. The remaining sequence above stays open.

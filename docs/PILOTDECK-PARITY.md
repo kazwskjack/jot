@@ -279,3 +279,13 @@ ending a task with a later command running. Historical terminal recovery,
 unknown money, explicit Goal reactivation and rolling/production acceptance
 remain separate open gates. See
 [the staged plan](superpowers/plans/2026-10-16-steering-lineage-and-recovery.md).
+
+## Historical ordinary source inspection
+
+A separate internal bearer-authenticated terminal source endpoint now verifies
+owner/conversation/Session/run/command and an exact expected run version. It
+returns hashes and product state without raw text or an execution lease. Native
+acceptance is always unverified. It cannot resume cancelled work, create an
+Agent, repair acknowledgement, or settle cost. The live steering/lease contracts
+are unchanged. Native history/admission/entry joining and atomic historical
+repair remain incomplete. See the steering implementation plan.
