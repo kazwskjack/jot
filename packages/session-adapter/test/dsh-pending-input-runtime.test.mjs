@@ -10,10 +10,32 @@ import {prepareDshPreSetupRuntime} from '../scripts/prepare-dsh-pre-setup.mjs';
 const runtime=process.env.JOT_DSH_RUNTIME_MODULES;
 async function prepareFixture(root){
  const scoped=join(root,'node_modules','@deepseek-ai');await mkdir(scoped,{recursive:true});
- const prepared=prepareDshPreSetupRuntime(join(runtime,'dsh-agent-loop'),join(scoped,'dsh-agent-loop'),{pendingInputWake:true});assert.equal(prepared.pendingInputProtocol,1);assert.equal(prepared.pendingWakeRevocationProtocol,1);
+ const prepared=prepareDshPreSetupRuntime(join(runtime,'dsh-agent-loop'),join(scoped,'dsh-agent-loop'),{pendingInputWake:true});assert.equal(prepared.pendingInputProtocol,1);assert.equal(prepared.pendingWakeRevocationProtocol,1);assert.equal(prepared.pendingInputBindingsProtocol,1);
  for(const entry of await readdir(runtime,{withFileTypes:true}))if(entry.name!=='dsh-agent-loop'&&entry.isDirectory())await symlink(join(runtime,entry.name),join(scoped,entry.name),'junction');
  await symlink(join(dirname(runtime),'zod'),join(root,'node_modules','zod'),'junction');
 }
+
+test('installed multi-RPC wake consumes only the exact ordered inputs and retains local token custody',{skip:!runtime,timeout:30000},async()=>{
+ const base=fileURLToPath(new URL('../../../.test-tmp/',import.meta.url));await mkdir(base,{recursive:true});const root=await mkdtemp(join(base,'pending-multi-')),scoped=join(root,'node_modules','@deepseek-ai');let ctx,handle;
+ try{
+  await prepareFixture(root);
+  const manifest=JSON.parse(await readFile(join(scoped,'dsh-agent-loop/package.json'),'utf8'));assert.equal(manifest.jotCompatibilityPatch.pendingInputBindingsProtocol,1);
+  const names=['cordis','dsh-session','dsh-session-projection','dsh-session-persistence-jsonl','dsh-session-query','dsh-agent','dsh-llm','dsh-tools','dsh-system-prompt','dsh-agent-loop'],modules={};
+  for(const name of names)modules[name]=await import(pathToFileURL(join(name==='dsh-agent-loop'?scoped:runtime,name,'lib/index.js')).href);
+  ctx=new modules.cordis.Context();for(const name of names.filter(n=>n!=='cordis'))await ctx.plugin(modules[name].default??modules[name],name==='dsh-session-persistence-jsonl'?{root:join(root,'sessions'),compression:'none'}:{});
+  let calls=0;class LocalAdapter extends modules['dsh-llm'].LlmAdapter{async *stream(){calls++;yield{type:'text-delta',index:0,text:'Ordered inputs consumed.'};yield{type:'usage',usage:{inputTokens:5,outputTokens:1,totalTokens:6}};yield{type:'finish',reason:{kind:'stop'}};}}
+  ctx.llm.registerAdapter(['local-multi'],new LocalAdapter());handle=await ctx.agents.create({sessionId:'multi-pending',agentOptions:{provider:'local-multi',model:'scripted'}});const agent=handle.agent;
+  const messages=['cmd-a','cmd-b'].map((rpcId,index)=>({id:'input-'+index,role:'user',source:{kind:'user',rpcId},content:[{type:'text',text:'Original synthetic '+index}]}));
+  for(const message of messages)agent.send(message,'next-step',false);
+  assert.equal(agent.jotPendingInputBindingsProtocol,1);let oldToken;
+  const request=()=>({requestId:'parent-run',messageIds:messages.map(m=>m.id),seq:agent.session.seq,inputSources:messages.map(m=>({messageId:m.id,requestId:m.source.rpcId}))});
+  await agent.runMaintenance(async()=>{const seq=agent.session.seq;assert.throws(()=>agent.jotResumePending({...request(),inputSources:undefined}));assert.throws(()=>agent.jotResumePendingInputs({...request(),inputSources:request().inputSources.toReversed()}));assert.equal(calls,0);const wake=agent.jotResumePendingInputs(request());oldToken=wake.wakeToken;assert.equal(agent.jotRevokePendingWake(Symbol('forged')),false);assert.equal(agent.jotRevokePendingWake(oldToken),true);assert.equal(agent.session.seq,seq);assert.deepEqual(agent.inbox.nextStep,messages);});
+  await agent.whenIdle();assert.equal(calls,0);
+  await agent.runMaintenance(async()=>{const seq=agent.session.seq,wake=agent.jotResumePendingInputs(request());assert.equal(agent.jotRevokePendingWake(oldToken),false);assert.equal(typeof wake.wakeToken,'symbol');assert.equal(agent.session.seq,seq);assert.deepEqual(agent.inbox.nextStep,messages);});
+  await agent.whenIdle();await ctx.sessionPersistence.flush(agent.session);
+  const events=(await ctx.sessionQuery.readSession(agent.id)).events,users=events.filter(e=>e.type==='user/message');assert.deepEqual(users.map(e=>e.data),messages);assert.equal(calls,1);assert.equal(agent.inbox.hasPending,false);
+ }finally{if(handle)await handle.dispose();if(ctx)await ctx.fiber.dispose();await cleanupFixture(base,root);}
+});
 async function cleanupFixture(base,root){
  const canonicalBase=await realpath(base),canonicalRoot=await realpath(root),rel=relative(canonicalBase,canonicalRoot);assert.ok(rel&&!isAbsolute(rel)&&!rel.startsWith('..'));await rm(canonicalRoot,{recursive:true,force:true,maxRetries:5,retryDelay:20});
 }

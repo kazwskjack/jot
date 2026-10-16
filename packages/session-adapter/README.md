@@ -145,3 +145,22 @@ maintenance without a new prompt or inbox mutation. The default HTTP Controller
 does not invoke it. Original product ownership, execution/composition authority,
 cancellation and usage recovery remain required; see
 [Goal continuation](../../docs/GOAL-CONTINUATION.md#optional-native-pending-input-wake-compatibility).
+
+## Explicit pending input binding compatibility
+
+Newly prepared optional compatibility copies advertise
+`pendingInputBindingsProtocol: 1` in their manifest and expose
+`jotPendingInputBindingsProtocol: 1` plus `jotResumePendingInputs`. The original
+single-RPC `jotResumePending` contract is unchanged. The new entry requires one
+exact ordered `{messageId, requestId}` pair per existing human inbox message,
+with no duplicates, missing/extra identities or unknown fields. Native
+maintenance, current sequence, non-aborted state and absence of another wake
+are still mandatory. It appends no input or history and retains the same fresh
+local Symbol token and exact-token revocation semantics.
+
+This is a Jot compatibility extension to the pinned installed MIT-licensed
+runtime, not an upstream API or execution authorization. Preparation writes a
+new isolated package and refuses overwrite; an earlier patched copy is not
+silently upgraded. Hosts still need per-command product/admission proofs before
+using this capability. The ordinary cold recovery path has not yet been wired
+to it. No production package is modified by these local tests.

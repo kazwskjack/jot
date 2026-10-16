@@ -4,7 +4,7 @@ title: Keep native Goal state and continuation in DSH
 category: decision
 status: active
 created: "2026-10-16T11:44:16"
-updated: "2026-10-16T20:32:45"
+updated: "2026-10-16T20:45:18"
 ---
 
 <!-- compiled_truth -->
@@ -32,7 +32,9 @@ Original attachment availability is distinct from admission identity. Claimed-fa
 
 Ordinary steering retains its own durable command RPC; it is not the parent's initial-input RPC. The new internal steering binding is read-only identity preparation: command/parent/message/Session/current-lease hashes and IDs, execution_authorized:false, pending/applied continuity and canonical-message collision checks. It does not dispatch, persist an admission or enable recovery. Full steering still needs an originally owned Worker lease, explicit command admission, multi-RPC Host ownership, completed-step claimed recovery, canonical delivery and unknown-cost handling. Never fix this by accepting arbitrary RPCs, reusing the parent RPC or removing whole-turn started-step guards. See docs/superpowers/plans/2026-10-16-steering-lineage-and-recovery.md. Production switches remain unchanged.
 
-An opt-in live ordinary steering path now retains the original ready Worker lease, distinct command RPC, strict ordinary_steer transport and immutable protocol-3 command/native-content admission. The recovered live Host checks each extra RPC against its exact scoped admission; repeated commands do not repeat Controller input. Dispatcher rechecks original ready lease and binding after acknowledgement before canonical message persistence. Local real-SDK evidence covers one live supplement after original recovery, two scripted model and usage records, one canonical answer and no repeat after restart. GENERAL_AGENT_ORDINARY_STEERING_ENABLED defaults false and requires original recovery. Multiple supplements, cold multi-RPC/later-step claimed recovery, lost acknowledgements, pre-insertion transaction ordering, terminal reconciliation and monetary/production gates remain incomplete. Unresolved opt-in terminal commands remain pending without speculative fallback. Do not report full B/C/D/E completion or enable production from this local checkpoint.
+An opt-in live ordinary steering path now retains the original ready Worker lease, distinct command RPC, strict ordinary_steer transport and immutable protocol-3 command/native-content admission. The recovered live Host checks each extra RPC against its exact scoped admission; repeated commands do not repeat Controller input. Dispatcher rechecks original ready lease and binding after acknowledgement before canonical message persistence. Local real-SDK evidence covers one live supplement after original recovery, two scripted model and usage records, one canonical answer and no repeat after restart. GENERAL_AGENT_ORDINARY_STEERING_ENABLED defaults false and requires original recovery. Two live supplements and lost-acknowledgement retry after real native acceptance now pass local actual-SDK cases, preserving one canonical result. Parent owner/state/version checks now run inside the same immediate transaction as command insertion; competing committed updates refuse. Cold multi-RPC/later-step claimed recovery, historical terminal reconciliation and monetary/production gates remain incomplete. Unresolved opt-in terminal commands remain pending without speculative fallback. Do not report full B/C/D/E completion or enable production from this local checkpoint.
+
+The optional pinned-runtime compatibility preparer now advertises a separate pendingInputBindingsProtocol 1 / jotResumePendingInputs capability without changing the legacy single-RPC contract. It matches every existing inbox message to its exact ordered human RPC behind native maintenance, with the same current sequence and local Symbol custody. Installed-driver tests preserve inbox/history, consume two inputs once, reject altered identities and preserve stale-token refusal. It grants no execution authority; ordinary cold preflight/adoption has not been connected to it. The rc2 step/end event is appended in finally, so step closure does not establish model success or settled fees. Retain unknown costs and original completed prefixes when adding later claimed-input recovery.
 
 
 ## Timeline
@@ -256,5 +258,11 @@ An opt-in live ordinary steering path now retains the original ready Worker leas
 - time: 2026-10-16T20:32:45
   kind: decision
   summary: "Bind live steering to the original ready lease and per-command admission; retain cold recovery and delivery gates"
+  source: docs/superpowers/plans/2026-10-16-steering-lineage-and-recovery.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-16T20:45:18
+  kind: decision
+  summary: "Verify two live supplements and lost acknowledgements; add exact native pending input bindings without claiming cold composition"
   source: docs/superpowers/plans/2026-10-16-steering-lineage-and-recovery.md
   affects: [native-goal-boundary]

@@ -7,6 +7,33 @@ const patch=(await import('../dsh-pending-input-patch.js').catch(()=>({}))).patc
 test('pending-input compatibility is an explicit pinned-source transform',()=>{
  assert.equal(typeof patch,'function');assert.throws(()=>patch({version:'0.2.0',runtimeSource:'unknown',declarationSource:'unknown'}));
 });
+
+test('multi-RPC pending wake requires an exact ordered binding for every existing input',{skip:!process.env.JOT_DSH_RUNTIME_MODULES},()=>{
+ const root=join(process.env.JOT_DSH_RUNTIME_MODULES,'dsh-agent-loop'),read=p=>readFileSync(join(root,p),'utf8');
+ const result=patch({version:JSON.parse(read('package.json')).version,runtimeSource:read('lib/index.js'),declarationSource:read('lib/types/index.d.ts')});
+ assert.equal(result.pendingInputBindingsProtocol,1);
+ const body=result.runtimeSource.match(/\tjotResumePendingInputs\(request\) \{([\s\S]+?)\n\t\}\n/);assert.ok(body);
+ const resume=Function('return function(request){'+body[1]+'}')();
+ const messages=['cmd-a','cmd-b'].map((rpcId,index)=>({id:'input-'+index,role:'user',source:{kind:'user',rpcId},content:[{type:'text',text:'Synthetic '+index}]}));
+ const original={requestId:'parent-run',messageIds:messages.map(m=>m.id),seq:9,inputSources:messages.map(m=>({messageId:m.id,requestId:m.source.rpcId}))};
+ for(const kind of ['accepted','wrong-rpc','wrong-order','missing','duplicate','extra-field','foreign-source','changed-seq','cancelled','already-waking']){
+  const request=structuredClone(original),phase={kind:'maintenance',abort:new AbortController(),wakeRequested:false};let wakes=0;
+  const agent={phase,session:{seq:9},inbox:{nextStep:structuredClone(messages),nextTurn:[]},wakeDriver(){wakes++;phase.wakeRequested=true;}};
+  if(kind==='wrong-rpc')request.inputSources[1].requestId='foreign-command';
+  if(kind==='wrong-order')request.inputSources.reverse();
+  if(kind==='missing')request.inputSources.pop();
+  if(kind==='duplicate')request.inputSources[1]=request.inputSources[0];
+  if(kind==='extra-field')request.inputSources[0].owner='forged';
+  if(kind==='foreign-source')agent.inbox.nextStep[1].source.kind='goal';
+  if(kind==='changed-seq')agent.session.seq++;
+  if(kind==='cancelled')phase.abort.abort({kind:'user'});
+  if(kind==='already-waking')phase.wakeRequested=true;
+  const before=structuredClone(agent.inbox);
+  if(kind==='accepted'){const value=resume.call(agent,request);assert.deepEqual(value,{accepted:true,messageIds:original.messageIds,seq:9});assert.equal(typeof value.wakeToken,'symbol');assert.equal(wakes,1);}
+  else{assert.throws(()=>resume.call(agent,request),/dsh_pending_input_/);assert.equal(wakes,0);}
+  assert.deepEqual(agent.inbox,before);
+ }
+});
 test('pending wake retains original messages, runs only behind maintenance and rejects changed identity',{skip:!process.env.JOT_DSH_RUNTIME_MODULES},()=>{
  const root=join(process.env.JOT_DSH_RUNTIME_MODULES,'dsh-agent-loop'),read=p=>readFileSync(join(root,p),'utf8'),input={version:JSON.parse(read('package.json')).version,runtimeSource:read('lib/index.js'),declarationSource:read('lib/types/index.d.ts')};
  assert.equal(typeof patch,'function');const result=patch(input);assert.equal(result.pendingInputProtocol,1);assert.equal(result.protocol,2);

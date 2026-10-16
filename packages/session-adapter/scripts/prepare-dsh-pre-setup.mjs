@@ -150,7 +150,7 @@ function collectPackageFiles(packageRoot, pendingInputWake) {
 
   files.set('package.json', Buffer.from(`${JSON.stringify({
     ...manifest,
-    jotCompatibilityPatch: {protocol: 2, upstreamVersion: manifest.version,...(pendingInputWake?{pendingInputProtocol:1,pendingWakeRevocationProtocol:1}:{})},
+    jotCompatibilityPatch: {protocol: 2, upstreamVersion: manifest.version,...(pendingInputWake?{pendingInputProtocol:1,pendingWakeRevocationProtocol:1,pendingInputBindingsProtocol:1}:{})},
   }, null, 2)}\n`, 'utf8'));
   files.set('LICENSE', readRegularFile(join(packageRoot, 'LICENSE'), 'dsh_pre_setup_package_license'));
 
@@ -224,7 +224,7 @@ export function prepareDshPreSetupRuntime(sourcePackage, outputPackage, options=
   // Read, validate, and patch the complete permitted file set before creating anything.
   const files = collectPackageFiles(canonicalSource, options.pendingInputWake===true);
   writePreparedPackage(files, canonicalOutput);
-  return Object.freeze({protocol: 2, upstreamVersion: supportedVersion,...(options.pendingInputWake?{pendingInputProtocol:1,pendingWakeRevocationProtocol:1}:{})});
+  return Object.freeze({protocol: 2, upstreamVersion: supportedVersion,...(options.pendingInputWake?{pendingInputProtocol:1,pendingWakeRevocationProtocol:1,pendingInputBindingsProtocol:1}:{})});
 }
 
 function cli() {

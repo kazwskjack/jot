@@ -149,3 +149,94 @@ passes 20/20 with no skips (270.71 seconds), including live steering. Adapter
 446/446, Gateway 1150 passed with six existing skips and zero failures (1156
 total), root 32/32 and public-review tests 6/6 pass. Windows Gateway and root
 builds pass. No production deployment or enablement is included.
+
+## Next cold multi-RPC implementation boundary
+
+The reviewed rc2 driver appends `step/end` in a `finally` block. It is a
+structural boundary, including error paths, and must never be converted into a
+successful-call or settled-fee assertion. Prior provider/tool events and unknown
+outcomes stay in the original log and accounting holds.
+
+Implement the remaining composition in this order:
+
+1. Preserve the single-input pending-wake protocol and add a separately named,
+   explicitly versioned message/RPC binding capability. Match the entire inbox
+   in original queue order, exact IDs and exact human sources inside native
+   maintenance. Keep the same process-local wake-token custody and revocation.
+   A map that is correct except for one RPC, order, duplicate, extra message,
+   changed sequence or user cancellation must refuse without a wake.
+2. Add cold per-message authority reads to the existing parent-bound preflight.
+   Resolve a command RPC only to that same parent's protocol-3 private admission,
+   normalized content hash and exact native message. Do not infer ownership from
+   a prefix, a command-like ID or a generic user source. Original protocol-2
+   admission remains distinct. Compare immutable facts again after each awaited
+   setup/adoption boundary. A lease replacement cannot reseal old receipts.
+3. Allow an already-consumed parent input to remain history only when recovering
+   different, proven unentered candidates. Candidate IDs already committed as
+   user messages are still rejected; do not re-prompt the root to give a later
+   command a parent. Original completed log prefixes, artifacts and usage must
+   be byte-for-byte preserved.
+4. For claimed inputs, derive only the final claim window after the last fully
+   closed native step. Validate the whole original log with package invariants,
+   match each step/turn and prove no later step/request/tool entry exists for
+   those candidates. Exclude all prior claimed/committed messages from the
+   restore plan. Keep rejection of an open/invalid step, explicit canceled claim,
+   unknown input source, later work and any existing entry reservation.
+5. Thread these facts through original factory before/after setup, mandatory
+   admission adoption, parked observer and original Worker publication. Do not
+   make a second Session, prompt, planner, activation or ordinary follow call to
+   bypass the reviewed maintenance path. Keep native Goal active/disarmed states
+   and actual user pause/stop/cancel separate.
+6. Hard-kill the actual Host after a later command is claimed but before entry.
+   Restart under a new original-run lease and prove prior calls are not repeated,
+   only the proven remaining inputs enter, canonical delivery happens once, and
+   all earlier usage/unknown costs survive. Pair with kill-after-reservation,
+   mutated command/content/profile, foreign owner, canceled input, two queue
+   targets, setup cancellation and replacement-lease refusals.
+
+Live lost-ack tests do not prove this cold path or historical terminal
+reconciliation. In-flight Controller work may have accepted input even when a
+product command remains pending and a cold buffered event is absent. Terminal
+fallback therefore still needs settled original-operation custody and read-only
+historical native/admission reconciliation before any new enqueue is considered.
+
+## Transaction and additional live acceptance
+
+Steering now acquires the immediate transaction before reading parent ownership,
+state and expected version. Three real two-connection SQLite tests commit a
+competing owner, cancellation or version update immediately before acquisition;
+the old source wrongly inserted all three commands, and the fixed source refuses
+without a command or open transaction. Existing idempotency and dispatch remain.
+
+Two additional actual-SDK scenarios pass: two supplements queued while the first
+model reply is held (including equal command timestamps), and an injected lost
+acknowledgement after real native acceptance followed by retry of the exact
+command RPC. The latter leaves product command/message state uncommitted until
+retry, then confirms one native input and one canonical final answer. Two
+supplements are consumed in queue order in one additional native model step,
+not assumed to require one model request per message. These are live tests;
+unknown terminal acceptance and cold replay still require their separate gates.
+
+The separately versioned per-message pending binding capability described above
+is implemented in the isolated runtime compatibility preparer. Pure transform
+refusal tests and an installed native-driver test verify exact two-RPC order,
+no inbox mutation, one model call, local wake-token revocation and stale-token
+refusal. Legacy single-input and process-death tests also pass. Product cold
+preflight/adoption and completed-step claimed restoration remain unwired.
+
+Verification for this follow-up: Gateway build and full suite pass (1159 total,
+1153 passed, six existing skips, zero failures); root 32 tests and Windows build
+pass. The full ordinary-input local SDK suite passes 22/22 with no skips in
+298.15 seconds. That process had already loaded the original compatibility
+transform before the additive binding capability was authored; it verifies the
+transaction and expanded live steering scenarios, not the newly prepared
+binding capability. The final compatibility source separately passes all 448
+Adapter tests, including installed multi-RPC driver, legacy wake and process
+crash/cancel probes. A fresh actual-Host focused run against that final source
+is recorded separately below. All providers remain local scripted fixtures.
+
+Fresh final-source actual-Host verification passes all five focused cases with
+no skips in 64.81 seconds: original claimed restoration, entry-reserved refusal,
+one live supplement, two live supplements and native-accepted lost-ack retry.
+This confirms legacy Host behavior with the additive compatibility package;
+it still does not invoke or prove product cold multi-RPC composition.
