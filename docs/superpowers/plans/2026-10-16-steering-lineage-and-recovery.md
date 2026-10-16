@@ -476,6 +476,15 @@ parent remains cancelled. This source read is not a proof of native inactivity.
   history, immutable original/command admissions and entry reservations. Compare
   source again after asynchronous native reads. Missing evidence means unknown;
   an entry reservation is not proof that dispatch or completion occurred.
+  First make admission reads inspect an existing private directory without
+  creating it. Add a read-only `inspectEntry` store capability requiring the
+  exact existing admission and validating entry scope, original admission hash,
+  observer and original lease. Report only an observed reservation/absence,
+  never replay permission or provider completion. Re-read admission across the
+  inspection; malformed, changed, missing or cancelled reads refuse. Preserve
+  existing exclusive reservation and replay guards. Test missing-root no-write,
+  stable bytes, protocol-2/3 records, corrupt scope/hash/lease and cancellation,
+  then Adapter and actual SDK suites for the modified storage composition.
 - [ ] Reproduce Host/Worker death after native acceptance but before product ACK,
   and after native answer but before product publication. Preserve all original
   RPCs/usage and one parent. Distinguish accepted pending input, entered unknown,
@@ -528,3 +537,64 @@ changed in this checkpoint, so earlier SDK results are not presented as a new
 historical-recovery test. Working-tree public review scans 699 files. No native
 historical reconciliation, production deployment or permission enablement is
 claimed. The remaining sequence above stays open.
+
+### Private admission and reservation observation
+
+`ordinary-input-admissions.js` now separates existing-root validation from
+creation. `read`, `readReplayCandidate` and the new `inspectEntry` never create
+a missing private directory. Directory creation stays confined to write paths;
+exclusive no-overwrite publication and execution reservation remain unchanged.
+The regression genuinely failed because a read created the missing directory.
+
+`entryInspectionProtocol: 1` advertises this local storage capability.
+`inspectEntry({session,runId,messageId,signal})` requires an existing exact
+protocol-2 or protocol-3 admission and rechecks it after reading the entry. It
+returns `protocol`, observed `state` (`reserved` or `unreserved`),
+`admission_sha256`, the validated hash-only entry (or null), and
+`execution_authorized: false`. Entry scope, admission digest, observer, original
+lease and exact schema must match. A missing directory/admission, wrong Session
+incarnation, invalid/corrupt/oversized record or cancellation refuses. JSON null
+in an existing file must refuse rather than masquerade as no reservation; the
+additional corruption regression exposed and corrected that distinction.
+
+Reservation observations are snapshots, not stable claims of nonexecution.
+`unreserved` cannot authorize replay, dispatch or a new task; all original
+replay/entry checks remain mandatory. `reserved` proves only that the immutable
+pre-entry fence exists, not model/tool dispatch, answer completion, usage or
+fees. No reservation is deleted or renewed by inspection. Native historical
+source joining and product acknowledgement/final repair are still unfinished.
+
+The focused storage suite passes 9/9, including unchanged record bytes and
+protocol-3 corruption cases. Complete Adapter coverage with the pinned SDK is
+469/469, zero skips/failures; the first run without SDK configuration passed
+445 with 24 skips and is not complete compatibility evidence. Full actual SDK
+composition results are recorded only after that process finishes.
+
+### Native history source review for the next join
+
+The pinned official `SessionController.inspect` reads an attached snapshot or
+calls `inspectApiSession`, which observes cold storage with projection mode
+`none`; it does not resolve an Agent. However, the cold query's
+`readColdSessionLog` appends `interruptedTurnClosers` in memory. Those logical
+closers balance a transcript and must never certify actual dispatch, successful
+execution, a persisted closing event or money settlement.
+
+Historical reconciliation must distinguish raw persisted event count/prefix
+from this logical repaired view. The official raw seam is
+`sessionPersistence.open(sessionId, 'read', {signal})`, then
+`handle.read(0, undefined, {signal})` and `handle.close()` even on failure. Header
+incarnation and inherited count belong to that same handle. Read the verified
+product source before opening it and revalidate after awaited reads. No
+`resolveAgent`, follow promotion, maintenance, flush or synthetic write belongs
+in inspection. Add real-SDK tests showing raw bytes and call counts unchanged,
+including an interrupted open step, before using the result to reconcile ACKs.
+
+Final storage-composition validation: actual local SDK 33/33, zero failures or
+skips (407.97 seconds), including mixed claimed/pending input and both final
+publication races. Adapter 469/469 with the pinned SDK; root 32/32, Windows root
+build, public-review regressions 6/6, BRAIN links and working-tree public review
+pass. SDK providers are scripted local endpoints. Gateway source is unchanged
+from the preceding 1165-pass/six-skip checkpoint; that suite was not rerun for
+this storage-only change. These checks preserve live/cold recovery behavior but
+do not prove historical native joining, ACK repair, real-provider usage/fees,
+production rollout or the complete capability inventory.

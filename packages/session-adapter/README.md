@@ -171,3 +171,12 @@ completion capability. The endpoint accepts only original execution metadata
 and command IDs; it returns IDs/hashes and busy/completed observations, no user
 text or execution grant. It does not create/wake an Agent or change admissions.
 Keep the switch off until the matching stack and rollout gates are accepted.
+
+Private ordinary admission storage exposes `entryInspectionProtocol: 1` and
+`inspectEntry({session,runId,messageId,signal})` for historical observation.
+Reads require existing storage and never create a directory. The result contains
+the exact admission digest and a validated reservation or observed absence,
+always with `execution_authorized: false`. Absence does not grant replay; a
+reservation does not prove provider dispatch, completion or cost. Original
+admission/replay/reservation guards remain authoritative and unchanged. This
+storage API alone does not repair historical product acknowledgement or delivery.

@@ -12,8 +12,9 @@ function validate(value,scope){if(!value||typeof value!=='object'||Object.keys(v
 export function createOrdinaryInputAdmissions({root}={}){
  if(typeof root!=='string'||!isAbsolute(root))fail();
  const pathFor=scope=>join(root,createHash('sha256').update(JSON.stringify(scope)).digest('hex')+'.json');
- const safeRoot=async()=>{await mkdir(root,{recursive:true,mode:0o700});const stat=await lstat(root);if(!stat.isDirectory()||stat.isSymbolicLink())fail();};
- const readJson=async(scope,suffix,signal)=>{signal?.throwIfAborted();await safeRoot();const path=pathFor(scope).replace(/\.json$/,suffix),stat=await lstat(path);if(!stat.isFile()||stat.isSymbolicLink()||stat.size>4096)fail();let handle;
+ const existingRoot=async()=>{const stat=await lstat(root);if(!stat.isDirectory()||stat.isSymbolicLink())fail();};
+ const safeRoot=async()=>{await mkdir(root,{recursive:true,mode:0o700});await existingRoot();};
+ const readJson=async(scope,suffix,signal)=>{signal?.throwIfAborted();await existingRoot();const path=pathFor(scope).replace(/\.json$/,suffix),stat=await lstat(path);if(!stat.isFile()||stat.isSymbolicLink()||stat.size>4096)fail();let handle;
   try{handle=await open(path,'r');const opened=await handle.stat();if(!opened.isFile()||opened.dev!==stat.dev||opened.ino!==stat.ino||opened.size>4096)fail();const value=JSON.parse(await handle.readFile({encoding:'utf8',signal}));signal?.throwIfAborted();return value;}finally{await handle?.close();}
  };
  const read=async({session,runId,messageId,signal})=>{const scope=identity(session,runId,messageId);return validate(await readJson(scope,'.json',signal),scope);};
@@ -25,7 +26,25 @@ export function createOrdinaryInputAdmissions({root}={}){
  };
  const unreserved=async(scope,signal)=>{signal?.throwIfAborted();try{await lstat(pathFor(scope).replace(/\.json$/,'.entry.json'));}catch(error){if(error.code==='ENOENT'){signal?.throwIfAborted();return;}throw error;}throw Error('ordinary_input_entry_reserved');};
  const canonical=value=>JSON.stringify(value,(_k,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.keys(item).sort().map(k=>[k,item[k]])):item);
- return Object.freeze({entryReservationProtocol:1,steeringAdmissionProtocol:1,read,
+ return Object.freeze({entryReservationProtocol:1,steeringAdmissionProtocol:1,entryInspectionProtocol:1,read,
+  /** A reservation observation is never dispatch, usage, completion or replay
+   * authority. Missing admissions refuse; no directory or receipt is created. */
+  async inspectEntry(request){
+   const scope=identity(request.session,request.runId,request.messageId),stamp=await read(request),digest=createHash('sha256').update(canonical(stamp)).digest('hex');let entry=null,present=true;
+   try{entry=await readJson(scope,'.entry.json',request.signal);}catch(error){if(error.code!=='ENOENT')throw error;present=false;
+    // Missing storage must not masquerade as an absent reservation.
+    await existingRoot();
+   }
+   if(present){
+    if(!entry||typeof entry!=='object'||Array.isArray(entry))fail();
+    const lease=entry.execution_lease;
+    if(Object.keys(entry).sort().join(',')!=='admission_sha256,execution_lease,native_message_id,observer_id,protocol,run_id,session_created_at,session_id'
+     ||entry.protocol!==1||!Object.keys(scope).every(k=>entry[k]===scope[k])||entry.admission_sha256!==digest||!valid(entry.observer_id)
+     ||!lease||Object.keys(lease).sort().join(',')!=='generation,owner'||!valid(lease.owner)||!Number.isSafeInteger(lease.generation)||lease.generation<1)fail();
+   }
+   if(!isDeepStrictEqual(await read(request),stamp))fail();request.signal?.throwIfAborted();
+   return Object.freeze({protocol:1,state:entry?'reserved':'unreserved',admission_sha256:digest,entry:entry?structuredClone(entry):null,execution_authorized:false});
+  },
   async create(session,value,{signal}={}){const scope=identity(session,value?.run_id,value?.native_message_id),stamp=structuredClone(validate(value,scope));return publish(scope,stamp,'.json','ordinary_admission_conflict',signal);},
   async readReplayCandidate(request){const scope=identity(request.session,request.runId,request.messageId);await unreserved(scope,request.signal);const value=await read(request);await unreserved(scope,request.signal);return value;},
   async reserveEntry(session,value,attempt,{signal}={}){

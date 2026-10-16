@@ -4,7 +4,7 @@ title: Keep native Goal state and continuation in DSH
 category: decision
 status: active
 created: "2026-10-16T11:44:16"
-updated: "2026-10-16T22:10:09"
+updated: "2026-10-16T22:15:27"
 ---
 
 <!-- compiled_truth -->
@@ -302,5 +302,11 @@ Running ordinary completion now has a Worker-owned publication callback while th
 - time: 2026-10-16T22:10:09
   kind: decision
   summary: "Terminal ordinary steering uses a separate versioned product-source history inspection. It requires explicit owner/conversation/Session/run/command and expected terminal version, returns hashes only, never borrows an expired live lease, and always leaves native acceptance unverified. It cannot resume, dispatch, repair ACKs or settle money. Full historical reconciliation still requires independent native admission/history and source revalidation."
+  source: docs/superpowers/plans/2026-10-16-steering-lineage-and-recovery.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-16T22:15:27
+  kind: evidence
+  summary: "Private ordinary admission reads no longer create a missing directory. Entry inspection requires exact original admission/Session incarnation and validates the immutable reservation hash, observer and lease, then rechecks admission. Reserved/unreserved are observations without replay, dispatch, completion or monetary authority. Missing or corrupt records refuse. This is a storage prerequisite, not historical ACK/final-answer repair."
   source: docs/superpowers/plans/2026-10-16-steering-lineage-and-recovery.md
   affects: [native-goal-boundary]
