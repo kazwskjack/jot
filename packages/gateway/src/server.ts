@@ -313,6 +313,9 @@ export async function buildServer(config: {
     if (code.startsWith('page_')) return reply.code(502).send({error:{code:code.toUpperCase()}});
     if (code==='task_discovery_managed'||code==='task_discovery_admission_required')return reply.code(409).send({error:{code:code.toUpperCase()}});
     if (code==='discovery_scope_unavailable')return reply.code(404).send({error:{code:code.toUpperCase()}});
+    if (['discovery_not_bound','discovery_authority_revoked','discovery_source_changed','discovery_source_unavailable','discovery_evidence_required','discovery_report_required','discovery_report_stale','discovery_report_steps_incomplete','discovery_planning_read_only'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
+    if (code==='discovery_planning_invalid')return reply.code(422).send({error:{code:code.toUpperCase()}});
+    if (code==='discovery_report_source_coverage_required')return reply.code(409).send({error:{code:code.toUpperCase()}});
     if (['discovery_role_changed','discovery_role_unavailable'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
     if (code==='discovery_policy_invalid'||code==='discovery_command_key_invalid')return reply.code(422).send({error:{code:code.toUpperCase()}});
     if (code.endsWith('_not_found')) return reply.code(404).send({ error: { code: code.toUpperCase() } });

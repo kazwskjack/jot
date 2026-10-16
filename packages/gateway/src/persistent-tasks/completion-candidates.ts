@@ -1,4 +1,5 @@
 import {createHash,randomUUID} from 'node:crypto';
+import {DiscoveryPlanning} from '../always-on/planning.ts';
 import type {DatabaseSync} from 'node:sqlite';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {occurrenceSubtaskRows} from './subtask-state.ts';
@@ -107,7 +108,8 @@ function completionSnapshot(db:DatabaseSync,runId:string) {
   a.held_tokens,a.held_nano_usd,a.usage_json,a.actual_tokens,a.actual_nano_usd,a.bound_exceeded
   FROM wb_model_budget_attempts a JOIN ${occurrenceRuns} o ON o.run_id=a.run_id
   WHERE o.owner_id=? AND o.occurrence_id=? ORDER BY a.run_id,a.attempt_id`).all(scope.owner_id,scope.occurrence_id);
- return {...scope,budget_attempts,steps:steps.map(step=>({subtask_id:String(step.subtask_id),version:Number(step.version),title:String(step.title),
+ const discovery_report=new DiscoveryPlanning(db).completion(runId);
+ return {...scope,...(discovery_report?{discovery_report}:{}),budget_attempts,steps:steps.map(step=>({subtask_id:String(step.subtask_id),version:Number(step.version),title:String(step.title),
   acceptance:String(step.acceptance),status:String(step.status),dependencies:JSON.parse(step.dependencies_json) as string[],
   evidence:JSON.parse(step.evidence_json),business_verdict:'unreviewed' as const}))};
 }

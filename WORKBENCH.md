@@ -574,6 +574,19 @@ mutation, messaging and delegation. This controller is not a public/model tool o
 an installed automatic discovery dispatcher. Work mode still needs isolated-cycle
 authority, and plan/report/acceptance integration remains unfinished.
 
+Discovery planning now uses the existing `jot_workspace` tool family:
+`discovery.context`, `discovery.source`, `discovery.plan`, and `discovery.report`.
+The original task can record its own steps/evidence/assessments while project and
+memory writes, messages and delegation remain refused. Source text is read only
+on demand in pinned, receipted chunks; images are omitted. Proposals are immutable
+and deduplicated by normalized work and source hashes. Reports derive the complete
+proposal manifest and record actual source coverage. A no-plan claim requires
+contiguous reads of every source in that batch. Reports remain unaccepted evidence;
+the original Goal completion candidate, owner review and native completion process
+are still required. New proposals, changed steps/input or source/policy drift make
+old reports stale. Automatic dispatch and the remaining work-cycle/apply/UI/
+provider/rollout integration are not enabled by these operations.
+
 
 ## Original prompt admission milestone
 

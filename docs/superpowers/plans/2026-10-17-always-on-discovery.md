@@ -605,3 +605,85 @@ Public6 and 783-file preflight have zero findings; BRAIN CLI links pass. Automat
 dispatch, planning metadata/report operations and full lifecycle acceptance remain
 open; the planning allowlist must be extended through reviewed original task
 operations when that protocol is implemented.
+
+## Structured planning and report evidence milestone
+
+The existing original `jot_workspace` tool now exposes four discovery operations;
+there is no additional public MCP, planner, model or task status store:
+
+- `discovery.context` pages this admission's new signal range using
+  `after_revision`. It also pages proposal summaries with `after_plan_id` and
+  reads one owned full proposal with `plan_id`.
+- `discovery.source` reads one admitted revision with optional `offset`. It
+  revalidates original owned file-version metadata and actual pinned bytes, or
+  the bound role-chat input identity before reading its text. Sources are
+  untrusted data. Images/non-text blocks are omitted, never automatically loaded.
+  Text chunks preserve surrogate pairs and return an exact `next_offset`.
+- `discovery.plan` records summary, rationale, logical target changes, ordered
+  steps, verification and genuine occurrence-owned source receipts. Targets are
+  proposals, not filesystem writes. Normalized work and source hashes deduplicate
+  repeated proposals even with another call ID, title or repeated source receipt;
+  exact original call retries retain their existing idempotency semantics.
+- `discovery.report` records outcome, summary, limitations, proposal IDs, source
+  evidence and server-derived coverage. `plan_ids:[]` derives the entire current
+  manifest; a nonempty list must match it exactly. The explicit-ID input bound
+  therefore cannot impose a total plan count ceiling. Reports cannot hide plans
+  or call a record an accepted business result.
+
+The generic planning allowlist now permits original `tasks.upsert/evidence/observe/
+assess` and read operations for this exact original task. Existing CAS, permission,
+dependency, evidence, lease and accounting checks still apply. Project file writes,
+memory writes, messages and delegation remain denied. Plan/report mutations use
+the original tool-call receipt/retry path; self-authored plans and reports are not
+attested as independent execution/source evidence.
+
+Actual source retrieval is attested before the original transaction writes an
+immutable source-range receipt linked to the original execution receipt. A source
+counts as fully read only when its chunks form a contiguous chain from zero to
+the final chunk. A no-plan report requires every current-batch source; a tail-only
+read, ordinary unpinned read or model statement is insufficient. Other reports
+with incomplete coverage require explicit limitations. Report steps must already
+be complete with original verified evidence. Blocked reports currently describe
+completed inspection with limitations; failure diagnostics without completed
+inspection still require original task wait/recovery integration.
+
+Plans and report revisions are immutable evidence bound to the original admission,
+task generation/source and role/policy versions. The current report also binds the
+current lead, exact task-step revisions, user-input identity metadata and complete
+proposal set. New proposals or changed steps/input make it stale. Newly journaled
+sources revoke original discovery execution through its existing guard, including
+model/tool calls. A valid report is required before native completion proposal
+and is included in the original frozen completion candidate and certificate hash.
+Existing owner business review and original native Goal completion/publication
+remain authoritative. There is no separate accept/apply operation in the model
+tool and no automatic promotion of `accepted:false` records.
+
+Storage grows with proposal/report JSON, source-range metadata and the existing
+tool response/receipt cache. Duplicate work does not create another proposal;
+source text chunks still use the original durable response cache for exact retry.
+No production growth/retention or large-history performance claim is made. The
+metadata/context batch sizes and text chunks are drain/paging bounds, not new
+task/token/dollar limits. Production retention and scale acceptance remain open.
+
+Next required integration: a dedicated actual DSH discovery planning/approval
+case, accepted no-plan dormancy derived from original business/native finalization,
+failure/wait/recovery handling, isolated cycle workspace/shared memory/reviewed
+apply, full UI, original Worker lifecycle dispatch, real-provider quality/cost,
+pause/stop/restart/unknown-outcome and production rollout/full inventory acceptance.
+No production setting or automatic discovery dispatcher is changed here.
+
+Validation: final complete Gateway1453 cases/1446 passed/seven existing or opt-in
+skips/zero failures (158.12 seconds). Fourteen planning tests cover typed source
+readback, omitted images, contiguous Unicode-safe long-text reads, source coverage,
+proposal dedup across call IDs/titles, full derived manifests including 33 proposals,
+immutability/idempotent retries, stale reports, source drift and the actual original
+Goal completion candidate containing the report. Controlled native checkpoint and
+accounting facts are fixtures, not a new discovery SDK/provider acceptance.
+The full Session adapter suite is511 cases/487 passed/24 existing opt-in skips/
+zero failures. Three selected existing regressions use the pinned official DSH
+SDK, real Gateway/Worker and native Goal with synthetic local Messages transport:
+saved role, reviewed file task and unlimited reviewed file task all pass. They
+make seven synthetic model requests, not real-provider calls, and do not prove a
+dedicated discovery run. Root32 and Windows Gateway/root builds pass. Public786-file
+preflight has zero findings. Remaining acceptance and all full-scope requirements
+above remain open; automatic discovery dispatch is not installed.

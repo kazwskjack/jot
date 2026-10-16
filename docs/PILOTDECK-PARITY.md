@@ -510,3 +510,18 @@ revokes the run. This is a callable trusted controller, not an automatically
 running Worker discovery dispatcher. Discover-and-work, source-backed structured
 plans/reports, accepted no-plan dormancy, isolated work/apply, UI and real-provider/
 rollout acceptance remain open.
+
+Structured discovery proposals/reports now reuse original task operations and
+the existing workspace tool. Own task metadata can advance; project mutation,
+memory mutation, messages and delegation remain denied. Context and proposal
+readback are paged, source text is pinned and chunked on demand, and images are
+not fetched. Actual source-read receipt ranges establish batch coverage; model
+coverage claims or unrelated ordinary reads do not establish no-plan coverage.
+Proposal dedup follows owned admission/source and normalized work, not a title or
+new call ID. The server derives all report plan IDs so a bounded explicit-ID list
+does not impose a plan-count ceiling or omit proposals. Current report proof is
+required before native completion proposal and enters the original frozen business
+review/certificate snapshot. Report storage is not acceptance, no-plan dormancy,
+project application or completion. Dedicated discovery SDK/provider execution,
+accepted dormancy, isolated work/apply, full UI and automatic lifecycle dispatch
+and production/rollout acceptance remain unfinished.

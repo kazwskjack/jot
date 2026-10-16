@@ -588,3 +588,12 @@ test('capture tools expose only pending source reads and grounded proposals',asy
  for(const key of ['owner_id','project_id','agent_id','verified'])await assert.rejects(f.host.execute('jot_workspace',{operation:'memory.capture.read',arguments_json:JSON.stringify({capture_id:'capture-a',[key]:'forged'})}),/workbench_arguments_invalid/);
  assert.equal(f.host.tools.get('jot_workspace').isConcurrencySafe({operation:'memory.capture.propose',arguments_json:'{}'}),false);
 });
+
+test('discovery planning operations reuse the original tool and refuse caller identity fields',async()=>{
+ const f=fixture();await f.bridge.attach(f.host.agent,binding);
+ for(const [operation,args] of [['discovery.context',{}],['discovery.source',{revision:1,offset:0}],['discovery.plan',{summary:'Proposal',rationale:'Observed source',changes:[],evidence:[]}],['discovery.report',{outcome:'no_plan',summary:'Nothing supported',limitations:[],plan_ids:[],evidence:[]}]]){
+  await f.host.execute('jot_workspace',{operation,arguments_json:JSON.stringify(args)});assert.equal(f.requests.at(-1).body.operation,operation);assert.deepEqual(f.requests.at(-1).body.arguments,args);
+ }
+ for(const key of ['owner_id','project_id','run_id','accepted'])await assert.rejects(f.host.execute('jot_workspace',{operation:'discovery.context',arguments_json:JSON.stringify({[key]:'forged'})}),/workbench_arguments_invalid/);
+ for(const operation of ['discovery.apply','discovery.accept'])await assert.rejects(f.host.execute('jot_workspace',{operation,arguments_json:'{}'}),/workbench_arguments_invalid/);
+});

@@ -263,6 +263,7 @@ export class PersistentTaskService {
       const role=this.workbench.getAgent(discovery.owner_id,discovery.agent_id);
       if(policy.state!=='active'||policy.version!==discovery.policy_version||role.status!=='active'
         ||role.version!==discovery.role_version||role.capability_epoch!==discovery.role_epoch)throw Error('discovery_authority_revoked');}
+    if(discovery&&Number((this.db.prepare('SELECT coalesce(max(revision),0) n FROM wb_discovery_signals WHERE policy_id=?').get(discovery.policy_id) as Row).n)!==discovery.signal_revision)throw Error('discovery_source_changed');
   }
   private discoveryForRun(runId:string):Row|undefined{
     const query=(id:string)=>this.db.prepare(`SELECT a.*,b.agent_id FROM wb_discovery_admissions a
@@ -278,7 +279,8 @@ export class PersistentTaskService {
   assertDiscoveryOperation(runId:string,operation:string){
     if(!this.discoveryForRun(runId))return;
     this.assertRunActive(runId);
-    if(!['agents.list','messages.list','memory.list','files.list','files.read','tasks.get','tasks.subtasks','tasks.next','tasks.reply_drafts'].includes(operation))throw Error('discovery_planning_read_only');
+    if(!['agents.list','messages.list','memory.list','files.list','files.read','tasks.get','tasks.subtasks','tasks.next','tasks.reply_drafts',
+      'tasks.upsert','tasks.evidence','tasks.assessment','tasks.observe','tasks.assess','discovery.context','discovery.source','discovery.plan','discovery.report'].includes(operation))throw Error('discovery_planning_read_only');
   }
   private active(id: string) {
     return Boolean(this.db.prepare(`SELECT 1 FROM wb_task_current_occurrences o JOIN ga_runs r ON r.id=o.run_id WHERE o.task_id=? AND (r.reason_code='OUTCOME_UNKNOWN' OR o.status='outcome_unknown' OR r.status NOT IN (${TERMINAL.map(() => '?').join(',')})) LIMIT 1`).get(id,...TERMINAL));

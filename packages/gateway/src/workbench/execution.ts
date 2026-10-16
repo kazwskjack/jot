@@ -1,4 +1,5 @@
 import {TaskReplyDrafts} from '../persistent-tasks/reply-drafts.ts';
+import {DiscoveryPlanning} from '../always-on/planning.ts';
 import {TaskReplySemanticChecks} from '../persistent-tasks/reply-semantic.ts';
 import type {ReplyJudgeClient} from '../persistent-tasks/reply-judge-client.ts';
 import {createAuxiliaryRunGuard} from './auxiliary-run-guard.ts';
@@ -61,6 +62,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       goal_id TEXT NOT NULL,goal_revision INTEGER NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)`);
   const assessments=new PersistentTaskAssessmentService(db);
   const executionEvidence = new TaskExecutionEvidence(db);
+  const discoveryPlanning=new DiscoveryPlanning(db,workbench);
   const replyDrafts=new TaskReplyDrafts(db);
   const replyChecks=replyJudge?new TaskReplySemanticChecks(db):undefined;
   if(replyJudge&&!modelBudgets)throw new Error('reply_judge_budget_required');
@@ -472,6 +474,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
     const summary=input.summary.trim();
     return withImmediateTransaction(db,()=>{
       const identity=context(input),task=requireTask(identity);
+      if(input.intent==='complete')discoveryPlanning.completion(identity.run_id);
       if(!eligibleTaskOccurrence(db,identity.owner_id,task.task_id,identity.run_id))throw new Error('task_execution_revoked');
       const status=db.prepare('SELECT status FROM ga_runs WHERE id=?').get(identity.run_id) as {status:string}|undefined;
       if(!status||!['starting','running'].includes(status.status))throw new Error('budget_run_inactive');
@@ -560,6 +563,8 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
         'tasks.observe': ['subtask_id','observations'],
         'tasks.assess': ['subtask_id','expected_task_version','expected_subtask_version','expected_assessment_revision','expected_observation_revision','observations','expires_at'],
         'tasks.next': [],'tasks.reply_draft':['text','evidence'],'tasks.reply_drafts':[],
+        'discovery.context':['after_revision','plan_id','after_plan_id'],'discovery.source':['revision','offset'],
+        'discovery.plan':['summary','rationale','changes','evidence'],'discovery.report':['outcome','summary','limitations','plan_ids','evidence'],
       };
       if (!keys[operation]) throw new Error('invalid_workspace_operation');
       fields(args, keys[operation]!);
@@ -568,8 +573,8 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
         const job=workbench.memoryProcessing.assertRun(owner,identity.agent_id,runId);
         if(!['memory.capture.read','memory.capture.propose'].includes(operation)||args.capture_id!==job.capture_id)throw new Error('workbench_operation_forbidden');
       }
-      const mutating = ['messages.send', 'memory.save', 'memory.stage', 'memory.propose', 'memory.capture.propose', 'files.write','tasks.upsert','tasks.evidence','tasks.assess','tasks.delegate','tasks.reply_draft'].includes(operation);
-      const attested = (!!identity.task_binding||(identity.kind==='native_team'&&!!identity.task_assignment)) && !operation.startsWith('tasks.');
+      const mutating = ['messages.send', 'memory.save', 'memory.stage', 'memory.propose', 'memory.capture.propose', 'files.write','tasks.upsert','tasks.evidence','tasks.assess','tasks.delegate','tasks.reply_draft','discovery.plan','discovery.report'].includes(operation);
+      const attested = (!!identity.task_binding||(identity.kind==='native_team'&&!!identity.task_assignment)) && !operation.startsWith('tasks.')&&(!operation.startsWith('discovery.')||operation==='discovery.source');
       const receipted = mutating || attested;
       const callId = input.call_id;
       if (receipted && !validCallId(callId)) throw new Error('invalid_call_id');
@@ -590,6 +595,10 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
         assertTaskDependenciesReady(db,executionEvidence,owner,identity.task_binding.task_id,runId);
       let result: unknown;
       switch (operation) {
+        case 'discovery.context': result=discoveryPlanning.context(runId,args.after_revision as number|undefined,args.plan_id as string|undefined,args.after_plan_id as string|undefined);break;
+        case 'discovery.source': result=discoveryPlanning.source(runId,{revision:args.revision,offset:args.offset??0});break;
+        case 'discovery.plan': result=discoveryPlanning.plan(runId,String(callId),args);break;
+        case 'discovery.report': result=discoveryPlanning.report(runId,String(callId),args);break;
         case 'agents.list': result = {items: workbench.listAgents(owner).items.filter(agent => agent.workspace_id === workspace && agent.project_id === project && agent.status === 'active')}; break;
         case 'messages.list': result = workbench.listMessages(owner, workspace, runId); break;
         case 'messages.send': result = workbench.sendMessage(owner, workspace,
@@ -662,7 +671,9 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
         case 'tasks.reply_drafts': requireTask(identity);result=replyDrafts.list(owner,runId);break;
         case 'tasks.next': result=assessments.nextActions(owner,requireTask(identity).task_id,undefined,runId);break;
       }
-      if (attested) result = {...object(result), execution_receipt: executionEvidence.record(runId, String(callId), operation, result)};
+      if (attested){const sourceResult=object(result),proof=executionEvidence.record(runId,String(callId),operation,result);
+        if(operation==='discovery.source')discoveryPlanning.recordRead(runId,proof.reference,sourceResult);
+        result={...sourceResult,execution_receipt:proof};}
       if (receipted && savedCall(runId, String(callId), digest) === undefined) saveCall(runId, String(callId), digest, result);
       return result;
     });

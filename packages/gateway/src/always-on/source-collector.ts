@@ -8,6 +8,8 @@ type Scope={project_id:string;workspace_id:string;agent_id:string};
 type Row=Record<string,any>;
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const sourceId=(kind:string,key:string)=>hash([kind,key]);
+export const discoverySourceId=sourceId;
+export const discoverySourceHash=hash;
 const registered=new WeakSet<DatabaseSync>();
 const safeScopes=(alias:string)=>`CASE WHEN json_valid(${alias}.scopes_json) THEN ${alias}.scopes_json ELSE '[]' END`;
 
