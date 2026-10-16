@@ -12,6 +12,7 @@ function canonical(value:any):string{
  return '{'+Object.keys(value).sort().map(key=>JSON.stringify(key)+':'+canonical(value[key])).join(',')+'}';
 }
 const hash=(value:unknown)=>createHash('sha256').update(canonical(value)).digest('hex');
+export const historicalDeliveryValueSha256=hash;
 function reject():never{throw Error('historical_delivery_snapshot_rejected');}
 const order=(rows:Row[])=>rows.sort((a,b)=>canonical(a).localeCompare(canonical(b),'en'));
 

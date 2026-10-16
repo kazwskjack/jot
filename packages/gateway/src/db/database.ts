@@ -5,6 +5,7 @@ import {installTaskWaitInteractions} from '../persistent-tasks/task-wait-schema.
 import {migrateHostDeliveries} from './host-delivery-migration.ts';
 import {installOrdinarySteeringReconciliations} from '../harness/ordinary-steering-reconciliation-schema.ts';
 import {installOrdinaryFinalPublications} from '../harness/ordinary-final-publication-schema.ts';
+import {installHistoricalFinalDeliveryIntents} from '../channels/historical-final-intents-schema.ts';
 
 const schemaUrl = new URL('./schema.sql', import.meta.url);
 let savepointSequence = 0;
@@ -15,6 +16,7 @@ export function openProductDatabase(path: string): DatabaseSync {
   db.exec(readFileSync(schemaUrl, 'utf8'));
   installOrdinarySteeringReconciliations(db);
   installOrdinaryFinalPublications(db);
+  installHistoricalFinalDeliveryIntents(db);
   ensureColumn(db,'ga_conversation_goal_controls','dispatch_observer_id','TEXT');
   db.exec(`CREATE TRIGGER IF NOT EXISTS ga_goal_control_observer BEFORE UPDATE ON ga_conversation_goal_controls
     WHEN OLD.state<>'queued' AND NEW.dispatch_observer_id IS NOT OLD.dispatch_observer_id

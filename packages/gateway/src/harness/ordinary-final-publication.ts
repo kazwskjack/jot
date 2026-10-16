@@ -7,26 +7,32 @@ import {validateOrdinaryRunCompletion,type OrdinaryRunHistoryScope,type Ordinary
 import {assistantText,assistantBlocks,collectArtifactRefs,presentedFiles} from './session-output.ts';
 import {verifyHistoricalOutputBytes} from './historical-output-integrity.ts';
 import type {AttachmentResolver,ResolvedAttachment} from '../artifacts/resolver.ts';
+import {captureHistoricalDeliverySnapshot} from '../channels/historical-final-snapshot.ts';
+import {HistoricalFinalDeliveryIntents} from '../channels/historical-final-intents.ts';
+import {ChannelDeliveryService} from '../channels/delivery.ts';
 type Client={observeRunCompletion(session:string,scope:OrdinaryRunHistoryScope,source:unknown,signal?:AbortSignal):Promise<unknown>};
-type Options={resolver?:AttachmentResolver;artifactRoot?:string};
+type Options={resolver?:AttachmentResolver;artifactRoot?:string;historicalChannels?:ChannelDeliveryService};
 type Receipt={run_id:string;conversation_id:string;owner_id:string;session_id:string;message_id:string;source_sha256:string;source_json:string;proof_sha256:string;proof_json:string;post_source_sha256:string;post_source_json:string;outputs_json:string};
 const digest=ordinaryHistorySourceSha256;
 const outputFacts=(items:readonly ResolvedAttachment[])=>items.map(a=>({artifact_id:a.artifactId,version:a.version,sha256:a.sha256,size_bytes:a.sizeBytes}));
 function fail():never{throw Error('ordinary_final_publication_unconfirmed');}
 /** Non-executing historical publication. Never borrows a Worker lease, prompts,
  * rewrites native state, changes run outcome, settles money or sends a channel.
- * Channel-bound runs remain ineligible until dedicated delivery reconciliation
- * is supplied; no automatic consumer or production flag wires this class yet. */
+ * Historical channel intent/outbox composition is explicitly opt-in. Existing
+ * provider workers and permissions perform sending; no automatic consumer or
+ * production flag wires this class yet. */
 export class OrdinaryFinalPublisher{
- private db:DatabaseSync;private events:EventStore;private client:Client;private options:Options;
- constructor(db:DatabaseSync,events:EventStore,client:Client,options:Options={}){this.db=db;this.events=events;this.client=client;this.options=options;if(!!options.resolver!==!!options.artifactRoot)throw Error('ordinary_final_publication_config_invalid');}
+ private db:DatabaseSync;private events:EventStore;private client:Client;private options:Options;private deliveries?:HistoricalFinalDeliveryIntents;
+ constructor(db:DatabaseSync,events:EventStore,client:Client,options:Options={}){this.db=db;this.events=events;this.client=client;this.options=options;if(!!options.resolver!==!!options.artifactRoot)throw Error('ordinary_final_publication_config_invalid');if(options.historicalChannels!==undefined)this.deliveries=new HistoricalFinalDeliveryIntents(db,options.historicalChannels);}
  private snapshot(runId:string,session:string){
   const row=this.db.prepare('SELECT c.owner_id,r.conversation_id,r.version FROM ga_runs r JOIN ga_conversations c ON c.id=r.conversation_id WHERE r.id=?').get(runId) as {owner_id:string;conversation_id:string;version:number}|undefined;if(!row)fail();
   const scope={owner_id:row.owner_id,conversation_id:row.conversation_id,run_id:runId,expected_run_version:row.version},source=inspectOrdinaryRunHistory(this.db,{...scope,session_ref:session});
-  // No historical channel send is admitted through this web publication core.
-  if(this.db.prepare('SELECT 1 FROM ga_channel_bindings WHERE conversation_id=?').get(row.conversation_id)||this.db.prepare('SELECT 1 FROM ga_channel_deliveries WHERE run_id=?').get(runId))fail();
+  // The original default gate stays in place unless transactional channel
+  // composition has been explicitly supplied by the trusted application.
+  if(!this.deliveries&&(this.db.prepare('SELECT 1 FROM ga_channel_bindings WHERE conversation_id=?').get(row.conversation_id)||this.db.prepare('SELECT 1 FROM ga_channel_deliveries WHERE run_id=?').get(runId)))fail();
   if(source.canonical===null&&this.db.prepare("SELECT 1 FROM ga_events WHERE run_id=? AND type='message.created' AND json_extract(payload_json,'$.role')='assistant'").get(runId))fail();
-  return{scope,source,hash:digest(source)};
+  const channels=this.deliveries?captureHistoricalDeliverySnapshot(this.db,{owner_id:row.owner_id,conversation_id:row.conversation_id,run_id:runId}):undefined;
+  return{scope,source,hash:digest(source),channels};
  }
  private resolve(owner:string,conversation:string,refs:string[],files:Array<{path:string;description?:string}>,lease:string){
   if(!refs.length&&!files.length)return[];if(!this.options.resolver||!this.options.artifactRoot)fail();const items=this.options.resolver.resolveOutputs(owner,conversation,refs,files,lease);verifyHistoricalOutputBytes(this.options.artifactRoot,items);return items;
@@ -36,7 +42,7 @@ export class OrdinaryFinalPublisher{
   if(receipt.owner_id!==current.scope.owner_id||receipt.conversation_id!==current.scope.conversation_id||receipt.session_id!==session||receipt.run_id!==runId||digest(before)!==receipt.source_sha256||digest(post)!==receipt.post_source_sha256||digest(proof)!==receipt.proof_sha256||current.hash!==receipt.post_source_sha256||current.source.canonical?.message_id!==receipt.message_id
    ||before.owner_id!==receipt.owner_id||before.session_id!==session||before.run_id!==runId||proof.protocol!==1||proof.kind!=='ordinary_run_completion'||proof.source_sha256!==receipt.source_sha256||proof.run_id!==runId||proof.session_id!==session||proof.execution_authorized!==false||!Array.isArray(outputs))return false;
   if(outputs.length){const items=this.resolve(current.scope.owner_id,current.scope.conversation_id,outputs.map(a=>a.artifact_id),[],lease);if(!isDeepStrictEqual(outputFacts(items),outputs))return false;}
-  return true;
+  return !this.deliveries||this.deliveries.verifyPublished(runId,receipt.message_id,receipt.source_sha256);
  }
  async reconcile(runId:string,session:string,signal?:AbortSignal):Promise<boolean>{
   const lease=`${runId}:historical-output:${randomUUID()}`;
@@ -53,13 +59,14 @@ export class OrdinaryFinalPublisher{
     const current=this.snapshot(runId,session);if(current.hash!==before.hash)return false;
     const checked=this.resolve(current.scope.owner_id,current.scope.conversation_id,[...refs],[...files.values()],lease);if(!isDeepStrictEqual(checked,artifacts))fail();
     const now=new Date().toISOString();
+    const messageId=current.source.canonical?.message_id??`msg-history-${randomUUID()}`,content={blocks:blocks.map((b,i)=>({block_id:`${messageId}:${i}`,kind:b.kind,text:b.text,exposure:b.kind==='reasoning'?'provider':'public'})),attachments:checked.map(a=>a.artifactId)};
+    if(this.deliveries){if(!before.channels)fail();this.deliveries.commit({owner_id:current.scope.owner_id,conversation_id:current.scope.conversation_id,run_id:runId},before.channels.sha256,{message_id:messageId,text,content_sha256:createHash('sha256').update(JSON.stringify(content)).digest('hex'),publication_source_sha256:before.hash,answer_sha256:proof.answer_sha256});}
     for(const c of current.source.commands.filter(c=>c.command_status==='pending')){
      const raw=this.db.prepare('SELECT payload_json FROM ga_run_commands WHERE id=? AND run_id=?').get(c.command_id,runId) as {payload_json:string},payload=JSON.parse(raw.payload_json),content={blocks:[{block_id:c.input_message_id+':text',kind:'text',text:payload.text}],attachments:[]};
      if(!c.product_message_present){this.db.prepare("INSERT INTO ga_messages(id,conversation_id,run_id,role,status,content_json,client_message_id,created_at,updated_at) VALUES(?,?,?,'user','complete',?,?,?,?)").run(c.input_message_id,current.scope.conversation_id,runId,JSON.stringify(content),payload.client_message_id,now,now);this.events.append(current.scope.conversation_id,runId,'message.created',{message_id:c.input_message_id,run_id:runId,role:'user',status:'complete',blocks:content.blocks,created_at:now});}
      if(this.db.prepare("UPDATE ga_run_commands SET status='applied',applied_at=? WHERE id=? AND run_id=? AND status='pending'").run(now,c.command_id,runId).changes!==1)fail();
     }
     for(const item of checked){if(this.db.prepare('INSERT OR IGNORE INTO ga_run_artifacts(run_id,artifact_id,version,created_at) VALUES(?,?,?,?)').run(runId,item.artifactId,item.version!,now).changes)this.events.append(current.scope.conversation_id,runId,'run.artifact',{run_id:runId,conversation_id:current.scope.conversation_id,artifact_id:item.artifactId,version:item.version,file_name:item.displayName,media_type:item.mediaType,size_bytes:item.sizeBytes,sha256:item.sha256,status:'ready',download_url:`/v1/artifacts/${item.artifactId}/download?version=${item.version}`,created_at:now});}
-    const messageId=current.source.canonical?.message_id??`msg-history-${randomUUID()}`,content={blocks:blocks.map((b,i)=>({block_id:`${messageId}:${i}`,kind:b.kind,text:b.text,exposure:b.kind==='reasoning'?'provider':'public'})),attachments:checked.map(a=>a.artifactId)};
     if(current.source.canonical){const old=this.db.prepare('SELECT status,content_json FROM ga_messages WHERE id=? AND run_id=? AND conversation_id=?').get(messageId,runId,current.scope.conversation_id) as {status:string;content_json:string};if(this.db.prepare("UPDATE ga_messages SET status='complete',content_json=?,updated_at=? WHERE id=? AND run_id=? AND conversation_id=? AND role='assistant' AND status=? AND content_json=?").run(JSON.stringify(content),now,messageId,runId,current.scope.conversation_id,old.status,old.content_json).changes!==1)fail();}
     else this.db.prepare("INSERT INTO ga_messages(id,conversation_id,run_id,role,status,content_json,client_message_id,created_at,updated_at) VALUES(?,?,?,'assistant','complete',?,NULL,?,?)").run(messageId,current.scope.conversation_id,runId,JSON.stringify(content),now,now);
     const evidence={source_sha256:before.hash,raw_sha256:proof.raw_sha256,answer_sha256:proof.answer_sha256,command_ids:proof.command_ids,answer_seq:proof.answer_seq,turn_end_seq:proof.turn_end_seq};

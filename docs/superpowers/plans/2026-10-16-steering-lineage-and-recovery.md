@@ -1314,3 +1314,95 @@ Windows Gateway build/typecheck, root 32/32, Windows root build, public
 regressions 6/6 and 730-file working-tree public review passed. These tests do
 not establish real-provider or production channel acceptance. Adapter/Host
 runtime paths are unchanged. Atomic intent/outbox and send guards remain open.
+
+### Atomic historical channel intents and existing outbox
+
+The optional channel composition now takes an existing `ChannelDeliveryService`
+on the exact same SQLite connection. `HistoricalFinalDeliveryIntents` rejects a
+foreign queue/connection before writing. The publisher constructor no longer
+initializes channel schemas. The default publisher still refuses channel-bound
+runs; application/production consumption is not automatically enabled.
+
+Before modifying any canonical/source facts, the original publisher rechecks
+the captured real channel snapshot and creates an immutable batch plus frozen
+recipient intents in its existing transaction. The batch binds owner,
+conversation, run, final message, exact canonical-content hash, final text/hash,
+native publication-source digest and original private snapshot. It is committed
+together with input ACKs, artifact links, canonical answer, projection events
+and final publication receipt. A missing final receipt prevents actual sending.
+Rollback also restores a superseded old effect; no channel failure can leave a
+half-published canonical answer.
+
+Mutable per-intent delivery state is separate from the immutable intent. New
+messages go through the existing queue identity, not a second outbox. Only
+unprotected pending generation-zero bodies without receipt/lease/reservation
+can be superseded. Conclusive older delivery gets `更新后的结果：` plus the final
+body. Matching final/correction effects are reused. Existing protected effects
+retain their original task/reply/digest gate and receive no broad replacement
+grant. Independent progress and file intents are retained.
+
+Sending/partial/unknown outcomes hold a new final send. `reconcileHeld` only
+observes provider facts for the original frozen recipient set; it never calls a
+model, native Session or provider, renews authority, erases an old receipt or
+settles fees. A later conclusive old receipt can release one correction.
+Revocation is retained, not automatically renewed when a binding reappears.
+Missing frozen effects abort the whole reconciliation transaction, including
+any earlier target changes; a missing effect is not proof that nothing sent.
+Automatic scheduling of this method remains unfinished.
+
+The original `ChannelDeliveryWorker` performs the sends. Its existing
+`authorizeSend` now applies additional historical restrictions before the
+unchanged reply/task/digest gates. Immutable grants are resolved by effect ID
+first, so mutations to run/message/artifact/channel/recipient/payload cannot
+escape the check. The current original controller Session, owner, archive and
+cancellation state, canonical bytes, final publication receipt and frozen
+recipient binding must still match. Already partial or previously attempted
+sends retain `outcome_unknown` on revocation. Normal unrelated effects keep
+their existing behavior. Receipt-only recovery does not re-send or require a
+new native call.
+
+Direct immutable-intent/grant deletion and replacement are rejected; original
+run/conversation deletion still cascades. Full source and provider facts stay
+private in the database; public events do not gain recipient or provider data.
+
+Local acceptance covers rollback, stale snapshot refusal, final/reuse/correction,
+unknown holds and release, recipient revocation, partial sends, native Session
+replacement, identity mutations, foreign database denial, and two independent
+Node/SQLite publication processes. The actual SDK's two historical final cases
+now run the real Client/HTTP/raw reader, original publisher, existing outbox and
+provider worker with a local synthetic provider. They check one final/correction,
+retained prior receipt, reopened-database retry, unchanged native/admission bytes
+and no additional model calls. This is not a real WeCom/email provider send.
+
+A first full Gateway run exposed a genuine startup schema-lock collision in
+the test composition and a helper left waiting after its peer failed. Its
+1253-case run had one failure (1246 passed, six existing skips), retained in
+private diagnostics. The publisher was changed to reuse the already initialized
+queue; the fixture initializes schemas before competition and cleans up and
+awaits both helpers in `finally`, including abort and deliberate startup failure.
+A dedicated failed-startup case verifies termination without any publication.
+The original full run was allowed to report failure after stopping only its
+confirmed isolated waiting helper; no production process was stopped and no
+live test was silently restarted because observation timed out.
+
+The complete SDK matrix before the final identity/queue-injection refinements
+passed 39/39 (541.07 seconds). The two affected historical channel cases are
+rerun against the final composition; final verification is recorded below.
+Mandatory remaining work includes the automatic original-run consumer and held
+scheduler, mixed/legacy event compatibility, real providers, unknown monetary
+outcomes, large-output lock/performance measurements, deployment and rollback,
+and the full upstream inventory. Production configuration remains unchanged.
+
+Final atomic-channel verification: the current implementation passes Gateway
+1258 total / 1252 passed / six existing skips / zero failures (147.02 seconds),
+Windows Gateway build, focused policy/snapshot/intent tests 41/41, root 32/32,
+Windows root build and public regressions 6/6. The two affected actual local SDK
+historical channel cases pass against the final configuration (45.03 seconds),
+including the current original-Session and effect-identity checks. A historical
+text with prior provider parts or a repeated send generation is refused and
+retains unknown outcome; receipt-only processing remains separate. Earlier
+39/39 SDK evidence is explicitly identified above as before the final refinements.
+BRAIN links and working-tree public review pass (734 source/document files).
+No actual external notification or production deployment was performed. The
+automatic original-run consumer/held scheduler, real providers, money,
+performance, deployment/rollback and full capability inventory remain open.

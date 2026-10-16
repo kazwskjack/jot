@@ -8,6 +8,7 @@ import {signalDeliveryAuthorized,signalDeliverySourceResolved} from '../persiste
 import {hostDeliveryAuthorized,hostDeliverySourceResolved} from '../persistent-tasks/host-notifications.ts';
 import {replyDeliveryCheck} from '../persistent-tasks/reply-delivery.ts';
 import {resolveNotificationArchive,resolveNotificationDigestArchive,ensureNotificationArchiveSchema} from './notification-archive.ts';
+import {historicalFinalSendCheck} from './historical-final-send.ts';
 
 export interface ExternalDeliveryInput {
   runId: string;
@@ -21,6 +22,7 @@ export interface ExternalDeliveryInput {
 export class ChannelDeliveryService {
   private readonly db: DatabaseSync;
   private readonly now: () => number;
+  usesDatabase(db:DatabaseSync):boolean{return this.db===db;}
   constructor(db: DatabaseSync,
     now: () => number = () => Math.floor(Date.now() / 1000)) {
     this.db = db;
@@ -87,6 +89,12 @@ export class ChannelDeliveryService {
       if(subjects.some(member=>member.lease_expires_at===null||Number(member.lease_expires_at)<=this.now())){
         for(const member of subjects)this.db.prepare(`UPDATE ga_channel_deliveries SET status='outcome_unknown',last_reason_code='PROVIDER_SEND_STATE_AMBIGUOUS',lease_owner=NULL,lease_expires_at=NULL,updated_at=? WHERE effect_id=? AND generation=? AND status='sending'`)
           .run(new Date(this.now()*1000).toISOString(),member.effect_id,Number(member.generation));
+        return false;
+      }
+      const historical=subjects.map(member=>({member,check:historicalFinalSendCheck(this.db,member)}));
+      if(historical.some(item=>item.check?.allowed===false)){
+        for(const {member,check} of historical)this.db.prepare("UPDATE ga_channel_deliveries SET status=?,last_reason_code='HISTORICAL_FINAL_AUTHORITY_REVOKED',lease_owner=NULL,lease_expires_at=NULL,updated_at=? WHERE effect_id=? AND generation=? AND status='sending'")
+          .run(check?.uncertain||member.provider_receipt_json?'outcome_unknown':'cancelled',new Date(this.now()*1000).toISOString(),member.effect_id,Number(member.generation));
         return false;
       }
       if(members.length){

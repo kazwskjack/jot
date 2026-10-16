@@ -355,18 +355,26 @@ reload while retaining original creation dates. Public event-schema/reducer
 checks cover this boundary. Full channel queue/correction/hold integration and
 automatic production consumption remain required in the recovery plan.
 
-A pure historical channel policy now covers first delivery, matching reuse,
-known delivered-body correction, protected/unknown holds and recipient
-revocation without clearing old provider facts. It returns advice only and is
-not wired to DB/queue/provider actions. Frozen recipient/effect capture,
-transactional intent/outbox changes, send-time authorization and held-result
-reconciliation remain required before the existing channel gate can be lifted.
+Historical final channel recovery now composes the real snapshot and policy
+with immutable final/recipient intents, mutable delivery state and the existing
+outbox in the same publication transaction. It is opt-in through a trusted
+ChannelDeliveryService instance on the exact same database connection. The
+publisher does not create a new queue, initialize channel schemas or call a
+provider. Without this explicit composition the original channel gate remains.
 
-Real historical channel snapshots now observe original bindings, all run
-effects, owner-binding revisions and effect-linked metadata without writes.
-Shared digest peer receipts and future effect grants participate in a
-transactional comparison. Extra owner bindings do not add targets; revoked or
-foreign bindings do not grant reply authority. This private reader is not yet
-wired to publication or provider sends. Atomic intents/outbox, send-time checks,
-held reconciliation and automatic consumption remain required. Channel and
-production gates remain unchanged.
+Only proven undispatched old bodies can be superseded. Known delivered bodies
+receive a labeled correction; matching effects are reused. Unknown/partial
+sends stay held, and later receipt reconciliation uses the same frozen targets
+without model/native work. Recipient revocation retains unknown provenance.
+
+The existing provider worker rechecks the immutable intent, original run and
+Session, canonical body, original recipient binding and effect identity before
+sending. These restrictions precede and preserve task/reply/digest permission
+gates. Independent file/progress effects keep their existing intent. Replacing
+a Session or mutating a granted effect cannot bypass history checks. Startup,
+process-competition, rollback and synthetic-provider cases cover the local
+composition; actual SDK cases preserve original logs/admissions and model calls.
+
+Automatic production consumption, held-outcome scheduling, real-provider
+acceptance, monetary reconciliation, performance/rollout and the full upstream
+capability inventory remain unfinished. Production defaults are unchanged.

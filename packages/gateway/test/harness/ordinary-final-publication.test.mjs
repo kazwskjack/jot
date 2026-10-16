@@ -6,6 +6,7 @@ import {fork} from 'node:child_process';import {fileURLToPath} from 'node:url';
 import Ajv from 'ajv/dist/2020.js';import addFormats from 'ajv-formats';
 import {buildSnapshot} from '../../src/events/snapshot.ts';import {ConversationRepository} from '../../src/conversations/repository.ts';
 import {fromSnapshot,reduceEvent} from '../../../../web/jot/projection.ts';
+import {ChannelDeliveryService} from '../../src/channels/delivery.ts';
 const Publisher=(await import('../../src/harness/ordinary-final-publication.ts').catch(()=>({}))).OrdinaryFinalPublisher;
 const sha=v=>createHash('sha256').update(v).digest('hex');
 function fixture(t,{old=false,files=false,disk=false}={}){
@@ -14,7 +15,7 @@ function fixture(t,{old=false,files=false,disk=false}={}){
  let oldMessage;if(old)withImmediateTransaction(db,()=>{oldMessage=runs.appendAssistant(run.run_id,'Older incomplete synthetic answer');});runs.saveCandidate(run.run_id,'Earlier uncertain candidate');runs.setCandidateStatus(run.run_id,'outcome_unknown',['unknown-provider-attempt']);const oldCandidate=db.prepare('SELECT * FROM ga_candidate_answers').get();let calls=0;
  const client={observeRunCompletion:async(session,scope,source)=>{calls++;return{protocol:1,kind:'ordinary_run_completion',run_id:run.run_id,session_id:session,run_version:scope.expected_run_version,source_sha256:ordinaryHistorySourceSha256(source),raw_sha256:'a'.repeat(64),raw_event_count:12,profile_fingerprint:'b'.repeat(64),command_ids:steers.map(c=>c.command_id),native_message_ids:['native-root','native-one','native-two'],answer_sha256:sha('Final synthetic answer'),answer_seq:9,turn_end_seq:11,answer_event:{seq:9,type:'assistant/message',data:{turn:2,step:1,message:{content:[{type:'reasoning',text:'Synthetic reasoning'},{type:'text',text:'Final synthetic answer'}]}}},output_events:files?[{seq:8,type:'tool/result',data:{result:{status:'completed',output_version:1,artifact_ref:'artifact-fixture'}}},{seq:10,type:'deliverables/presented',data:{files:[{path:join(root,'report.txt'),description:'Report'}]}}]:[],execution_authorized:false};}};
  let file;if(files){file=join(root,'report.txt');const content='Synthetic immutable output';writeFileSync(file,content);db.prepare("INSERT INTO ga_artifacts VALUES('artifact-fixture','c','u','file',1,NULL,'now','now')").run();db.prepare("INSERT INTO ga_artifact_versions VALUES('artifact-fixture',1,?,?,?,'text/plain',?,'now')").run(file,sha(content),Buffer.byteLength(content),JSON.stringify({status:'ready',file_name:'report.txt'}));}
- const resolver=new AttachmentResolver(db,root),publisher=()=>new Publisher(db,events,client,{resolver,artifactRoot:root});return{root,db,events,runs,run,steers,commands,client,oldMessage,oldCandidate,file,publisher,calls:()=>calls};
+ const resolver=new AttachmentResolver(db,root),channelQueue=new ChannelDeliveryService(db),publisher=(options={})=>new Publisher(db,events,client,{resolver,artifactRoot:root,...options,historicalChannels:options.historicalChannels?channelQueue:undefined});return{root,db,events,runs,run,steers,commands,client,oldMessage,oldCandidate,file,publisher,calls:()=>calls};
 }
 
 test('full final recovery atomically applies both lost acknowledgements and publishes one answer while preserving unknown provenance',async t=>{
@@ -62,16 +63,47 @@ test('unreviewed channel delivery and cancellation never enter the web-only publ
  for(const mode of ['binding','late-binding','abort']){const f=fixture(t);const bind=()=>f.db.prepare("INSERT INTO ga_channel_bindings VALUES('wecom','synthetic-recipient','c','now','now')").run();if(mode==='binding')bind();if(mode==='late-binding'){const read=f.client.observeRunCompletion;f.client.observeRunCompletion=async(...args)=>{const p=await read(...args);if(f.calls()===1)bind();return p;};}assert.equal(await f.publisher().reconcile(f.run.run_id,'s',mode==='abort'?AbortSignal.abort():undefined),false,mode);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_ordinary_final_publications').get().n,0);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_channel_deliveries').get().n,0);assert.equal(f.db.prepare("SELECT count(*) n FROM ga_messages WHERE role='assistant'").get().n,0);}
 });
 
-test('two independent processes race the same original final publication without duplicating output or receipt',{timeout:20000},async t=>{
- const f=fixture(t,{disk:true}),children=[];t.after(()=>{for(const child of children)if(child.exitCode===null)child.kill();});
- const start=()=>{
-  const child=fork(fileURLToPath(new URL('./ordinary-final-publication-worker.mjs',import.meta.url)),[join(f.root,'db.sqlite'),f.run.run_id],{execArgv:[],stdio:['ignore','ignore','pipe','ipc'],windowsHide:true});children.push(child);
+test('explicit historical channel composition commits final publication and one original recipient effect atomically',async t=>{
+ const f=fixture(t);f.db.prepare("INSERT INTO ga_channel_bindings VALUES('wecom','synthetic-recipient','c','now','now')").run();
+ assert.equal(await f.publisher({historicalChannels:true}).reconcile(f.run.run_id,'s'),true);assert.equal(f.calls(),2);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_historical_final_delivery_batches').get().n,1);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_channel_deliveries').get().n,1);
+ const queue=new ChannelDeliveryService(f.db),effect=queue.claim('provider',90,['wecom']);assert.equal(queue.authorizeSend(effect.effect_id,effect.generation),true);queue.recordProviderSent(effect.effect_id,effect.generation,{provider_message_id:'synthetic-receipt'});queue.recordDelivered(effect.effect_id);
+ assert.equal(await f.publisher({historicalChannels:true}).reconcile(f.run.run_id,'s'),true);assert.equal(f.calls(),2);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_channel_deliveries').get().n,1);
+});
+test('provider changes during native proof inspection reject the old channel snapshot without modifying source facts',async t=>{
+ const f=fixture(t,{old:true}),queue=new ChannelDeliveryService(f.db);f.db.prepare("INSERT INTO ga_channel_bindings VALUES('wecom','synthetic-recipient','c','now','now')").run();const old=queue.enqueueExternal({runId:f.run.run_id,messageId:f.oldMessage.message_id,destination:'wecom',recipient:'synthetic-recipient',artifactRef:null,text:'Synthetic obsolete answer'});
+ const read=f.client.observeRunCompletion;f.client.observeRunCompletion=async(...args)=>{const result=await read(...args);if(f.calls()===1)f.db.prepare("UPDATE ga_channel_deliveries SET status='sending',generation=1,lease_owner='provider',lease_expires_at=9999999999 WHERE effect_id=?").run(old.effect_id);return result;};
+ assert.equal(await f.publisher({historicalChannels:true}).reconcile(f.run.run_id,'s'),false);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_historical_final_delivery_batches').get().n,0);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_ordinary_final_publications').get().n,0);assert.equal(queue.get(old.effect_id).status,'sending');assert.equal(f.db.prepare("SELECT count(*) n FROM ga_run_commands WHERE status='pending'").get().n,2);
+});
+test('failure after outbox creation rolls back canonical output, superseding and every delivery intent',async t=>{
+ const f=fixture(t,{old:true}),queue=new ChannelDeliveryService(f.db);f.db.prepare("INSERT INTO ga_channel_bindings VALUES('wecom','synthetic-recipient','c','now','now')").run();const old=queue.enqueueExternal({runId:f.run.run_id,messageId:f.oldMessage.message_id,destination:'wecom',recipient:'synthetic-recipient',artifactRef:null,text:'Synthetic obsolete answer'}),append=f.events.append.bind(f.events);
+ f.events.append=(...args)=>{if(args[2]==='response.upsert')throw Error('Synthetic final publication failure');return append(...args);};
+ assert.equal(await f.publisher({historicalChannels:true}).reconcile(f.run.run_id,'s'),false);assert.equal(queue.get(old.effect_id).status,'pending');assert.equal(f.db.prepare('SELECT count(*) n FROM ga_channel_deliveries').get().n,1);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_historical_final_delivery_batches').get().n,0);
+ f.events.append=append;assert.equal(await f.publisher({historicalChannels:true}).reconcile(f.run.run_id,'s'),true);assert.equal(queue.get(old.effect_id).status,'cancelled');assert.equal(f.db.prepare('SELECT count(*) n FROM ga_channel_deliveries').get().n,2);
+});
+test('unknown original send does not block publishing the proven answer and does not mint a second send',async t=>{
+ const f=fixture(t,{old:true}),queue=new ChannelDeliveryService(f.db);f.db.prepare("INSERT INTO ga_channel_bindings VALUES('wecom','synthetic-recipient','c','now','now')").run();const old=queue.enqueueExternal({runId:f.run.run_id,messageId:f.oldMessage.message_id,destination:'wecom',recipient:'synthetic-recipient',artifactRef:null,text:'Synthetic obsolete answer'});f.db.prepare("UPDATE ga_channel_deliveries SET status='outcome_unknown',generation=1 WHERE effect_id=?").run(old.effect_id);
+ assert.equal(await f.publisher({historicalChannels:true}).reconcile(f.run.run_id,'s'),true);assert.equal(queue.get(old.effect_id).status,'outcome_unknown');assert.equal(f.db.prepare('SELECT count(*) n FROM ga_channel_deliveries').get().n,1);assert.equal(f.db.prepare('SELECT status FROM ga_historical_final_delivery_states').get().status,'hold');
+});
+
+for(const channels of [false,true,'startup-failure'])test('two independent processes race the same original final publication without duplicating output or receipt; channels='+channels,{timeout:20000},async t=>{
+ const f=fixture(t,{disk:true}),children=[];
+ if(channels)f.db.prepare("INSERT INTO ga_channel_bindings VALUES('wecom','synthetic-recipient','c','now','now')").run();
+ const start=mode=>{
+  const child=fork(fileURLToPath(new URL('./ordinary-final-publication-worker.mjs',import.meta.url)),[join(f.root,'db.sqlite'),f.run.run_id,mode],{execArgv:[],stdio:['ignore','ignore','pipe','ipc'],windowsHide:true});children.push(child);
   let readyResolve,doneResolve,readyReject,doneReject,result,diagnostics='';
   const ready=new Promise((resolve,reject)=>{readyResolve=resolve;readyReject=reject;}),done=new Promise((resolve,reject)=>{doneResolve=resolve;doneReject=reject;});done.catch(()=>{});
   child.stderr.on('data',chunk=>{diagnostics=(diagnostics+chunk).slice(-1000);});child.on('message',message=>{if(message.type==='ready')readyResolve();if(message.type==='done')result=message;});
-  child.once('error',error=>{readyReject(error);doneReject(error);});child.once('exit',code=>{if(code!==0||!result){const error=Error('publication worker failed '+code+': '+diagnostics);readyReject(error);doneReject(error);}else doneResolve(result);});return{child,ready,done};
+  const abort=()=>{child.kill();const error=Error('publication fixture aborted');readyReject(error);doneReject(error);};t.signal.addEventListener('abort',abort,{once:true});
+  child.once('error',error=>{readyReject(error);doneReject(error);});child.once('exit',code=>{t.signal.removeEventListener('abort',abort);if(code!==0||!result){const error=Error('publication worker failed '+code+': '+diagnostics);readyReject(error);doneReject(error);}else doneResolve(result);});return{child,ready,done};
  };
- const a=start(),b=start();await Promise.all([a.ready,b.ready]);a.child.send({type:'go'});b.child.send({type:'go'});const results=await Promise.all([a.done,b.done]);assert.ok(results.every(r=>r.result===true));assert.ok(results.every(r=>r.calls===2));assert.equal(f.db.prepare("SELECT count(*) n FROM ga_messages WHERE role='assistant'").get().n,1);assert.equal(f.db.prepare("SELECT count(*) n FROM ga_messages WHERE role='user'").get().n,3);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_ordinary_final_publications').get().n,1);assert.equal(f.db.prepare("SELECT count(*) n FROM ga_events WHERE type='response.upsert' AND json_extract(payload_json,'$.value.kind')='ordinary_final_reconciliation'").get().n,1);
+ try{
+  const a=start(channels===true?'channels':'web'),b=start(channels==='startup-failure'?'startup-failure':channels?'channels':'web');
+  const execute=async()=>{await Promise.all([a.ready,b.ready]);a.child.send({type:'go'});b.child.send({type:'go'});return Promise.all([a.done,b.done]);};
+  if(channels==='startup-failure'){await assert.rejects(execute,/publication worker failed/);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_ordinary_final_publications').get().n,0);return;}
+  const results=await execute();assert.ok(results.every(r=>r.result===true));assert.ok(results.every(r=>r.calls===2));assert.equal(f.db.prepare("SELECT count(*) n FROM ga_messages WHERE role='assistant'").get().n,1);assert.equal(f.db.prepare("SELECT count(*) n FROM ga_messages WHERE role='user'").get().n,3);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_ordinary_final_publications').get().n,1);assert.equal(f.db.prepare("SELECT count(*) n FROM ga_events WHERE type='response.upsert' AND json_extract(payload_json,'$.value.kind')='ordinary_final_reconciliation'").get().n,1);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_channel_deliveries').get().n,channels?1:0);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_historical_final_delivery_batches').get().n,channels?1:0);
+ }finally{
+  await Promise.all(children.filter(c=>c.exitCode===null&&c.signalCode===null).map(child=>new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('publication fixture cleanup failed')),5000);child.once('exit',()=>{clearTimeout(timer);resolve();});child.kill();})));
+ }
 });
 
 test('recovered old canonical output follows all supplements in schema-valid live events and after snapshot/page reload',async t=>{
