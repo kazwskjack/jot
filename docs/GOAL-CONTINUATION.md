@@ -119,7 +119,7 @@ The first tests use isolated SQLite files and an injected runner. The last test 
 ### Failure evidence and remaining crash matrix
 
 The installed-SDK probe also covers a persisted pending inbox and real isolated
-Host termination at two verified boundaries: native persistence completed but
+Host termination at three verified boundaries: native Goal change emitted before the adapter flush returns, native persistence completed but
 Gateway applied receipt not committed, and applied receipt committed before its
 HTTP acknowledgement. Pending input must keep zero Agent creations and zero
 model calls. Terminated cases keep zero model calls, preserve native phase across
@@ -134,7 +134,7 @@ call that appended then threw is disarmed and stays uncertain; the API's thrown
 error is not proof that its event never committed.
 
 These cases do not exhaust process exits inside native CAS/flush, provider usage
-settlement, publication transactions or pending/claimed-input recovery. They are tracked separately from the two actual process-termination
+settlement, publication transactions or pending/claimed-input recovery. They are tracked separately from the three actual process-termination
 boundaries above. Neither test scaffolding nor a safe refusal substitutes for
 those remaining implementation and deployed acceptance requirements.
 
@@ -145,6 +145,7 @@ those remaining implementation and deployed acceptance requirements.
 | Opening snapshot, before maintenance | Subscriptions buffer events; no post-snapshot promotion or pending-input activation | Iterator unit test and installed-SDK zero-Agent/zero-model refusal |
 | Begin response lost, native call not invoked | Only the same live observer can attest not-called; a replacement observer cannot close its dispatch | Host injected fault, immutable observer journal and internal-route tests |
 | Native invocation appends then throws | Disarm controlled execution; retain uncertainty; never claim not-called | Host injected native-call failure test |
+| Native Goal change emitted, before adapter flush | Do not infer not-called from an unchanged cold projection; retain the original dispatch, disarm on restart and refuse replacement keys | Actual isolated Host termination at the synchronous native notification; original paused revision survived in this probe, dispatch stayed unknown, zero inference/publication |
 | Native flush completed, before applied commit | Restart disarmed; zero inference/publication; keep unknown dispatch fenced | Actual isolated Host termination probe |
 | Applied commit, before its acknowledgement | Retain the original receipt; restart disarmed; never infer execution completion from acceptance | Actual isolated Host termination probe |
 | Inside native CAS/flush, provider usage settlement, final publication commit | Reconcile exact native events, original cost holds and one canonical output without replay | Additional process-exit acceptance remains required |
@@ -265,3 +266,27 @@ Host crash or authorization to consume old pending inputs under a new run. Cold
 pending/claimed-input recovery still needs its original run/RPC, owner, lease,
 composition and accounting evidence. A raw claim record alone is not replay
 permission, and a safe refusal is not complete recovery acceptance.
+
+
+### Native change before flush
+
+The `crash-native-change` fixture listens to the installed SDK's synchronous
+`goal/changed` notification for resume. The official implementation appends the
+Goal event and updates its in-memory activation before emitting that notification.
+Only the isolated test plugin pauses there; the parent owns its spawned Host
+handle and terminates that process after reading the boundary marker. This keeps
+the adapter from reaching its explicit persistence flush or applied receipt.
+The bounded pause throws if the parent fails to terminate it, so a timeout is
+never accepted as process-death evidence.
+
+In the verified local run, cold restart recovered the original paused Goal
+revision, while the Gateway correctly kept the exact dispatch uncertain. No model
+request or assistant publication occurred. The original public acceptance still
+resolved to its original run; stale control execution and a replacement key were
+refused. An unchanged persisted Goal does not prove that native resume was never
+invoked and must not manufacture a not-called receipt.
+
+This is one real process boundary after the in-memory native commit and before
+the adapter's flush. It does not prove all native CAS branches, partial storage
+writes, OS/power loss, provider settlement or final publication reconciliation.
+The fault plugin is test-only; production code and default switches are unchanged.

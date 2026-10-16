@@ -2,9 +2,9 @@
 import {writeFileSync,readFileSync,existsSync} from 'node:fs';
 export const name='jot-observed-goal-inspection';
 export const inject=['jotHostReady','sessionPersistence','sessionController','agents'];
-export async function apply(ctx,{receipt,seeded,parkInput=false,interruptTail=false,interruptTool=null,parkDuringRun=false,parkBeforeStep=false}){
+export async function apply(ctx,{receipt,seeded,parkInput=false,interruptTail=false,interruptTool=null,parkDuringRun=false,parkBeforeStep=false,crashNativeChange=false}){
  let created=0,repairedTail=false,recoveryCodes=[],originalCalls=0,parkedDuringRun=false,pendingFlushed=false,pendingOnIdle=[],startupPending=[],claimedCount=0;const events=[];const save=()=>writeFileSync(receipt,JSON.stringify({created,events,repairedTail,recoveryCodes,originalCalls,parkedDuringRun,pendingFlushed,pendingOnIdle,startupPending,claimedCount}));save();
- ctx.on('goal/changed',({agent,change})=>{if(parkBeforeStep&&!parkedDuringRun&&agent.id==='observed-goal-fixture'&&change.operation==='resume'){parkedDuringRun=true;agent.send({id:'later-claimed-human',role:'user',content:[{type:'text',text:'Retain this unentered original input'}],source:{kind:'user',rpcId:'later-original-run'}},'next-step',false);save();}});
+ ctx.on('goal/changed',({agent,change})=>{if(crashNativeChange&&agent.id==='observed-goal-fixture'&&change.operation==='resume'){writeFileSync(receipt,JSON.stringify({created,events,crashBoundary:'native-change-before-flush'}));Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,30000);throw Error('synthetic_crash_boundary_not_terminated');}if(parkBeforeStep&&!parkedDuringRun&&agent.id==='observed-goal-fixture'&&change.operation==='resume'){parkedDuringRun=true;agent.send({id:'later-claimed-human',role:'user',content:[{type:'text',text:'Retain this unentered original input'}],source:{kind:'user',rpcId:'later-original-run'}},'next-step',false);save();}});
  ctx.on('agent/inbox/claimed',({agent,message})=>{if(parkBeforeStep&&agent.id==='observed-goal-fixture'&&message.id==='later-claimed-human'){claimedCount++;save();}});
  ctx.on('llm/stream',(payload,next)=>{
   if(parkDuringRun&&!parkedDuringRun&&payload.sessionId==='observed-goal-fixture'){

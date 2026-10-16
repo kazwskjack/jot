@@ -479,3 +479,16 @@ IDs/content/source without a new prompt or wake. User cancellation is respected;
 conflicting or already committed input is not overwritten/replayed. The real Host
 lease-revocation/flush/restart probe makes zero model requests. Cold reconstruction
 and original-run execution recovery remain separate. See [live claimed inputs](docs/GOAL-CONTINUATION.md#live-claimed-input-preservation).
+
+
+## Native Goal pre-flush process boundary
+
+The real installed-SDK probe now terminates its owned isolated Host at the
+synchronous native resume notification, after its in-memory change and before
+the adapter can confirm its flush. Cold restart retains the original revision
+in this case, while the original Gateway dispatch remains uncertain rather than
+being relabelled not-called. There is no inference, answer publication, replacement
+command or automatic reactivation. This extends process-death evidence to three
+specific boundaries; partial storage writes, original pending-input execution,
+provider settlement, publication and production acceptance remain separate gates.
+See [Goal continuation](docs/GOAL-CONTINUATION.md) for the exact boundary and limits.
