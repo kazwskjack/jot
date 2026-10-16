@@ -363,3 +363,32 @@ composition, an original-run observer and repeated lease/cancellation checks;
 retain cumulative model usage and canonical final publication. This optional
 native primitive grants none of those authorities and must not be presented as
 ordinary recovery being fully enabled. Existing Goal switches remain off.
+
+
+### Pending input across real process death
+
+The installed-SDK fixture now also uses three separate processes. The first
+quietly admits one synthetic original input with its original RPC, explicitly
+flushes and verifies the durable native prefix, then reports its exact identity.
+The parent owns that spawned process and force-terminates it only after the
+receipt, waiting for its actual exit. No framework disposal substitutes for the
+crash, and no timeout is treated as proof of termination.
+
+A fresh process resumes the same persisted Session and confirms the exact input
+is still pending with zero automatic model calls. It latches that original input
+inside native maintenance. The execute case commits exactly one original human
+message and makes one scripted local model request, retaining its original ID and
+RPC. The cancel case invokes native user cancellation before leaving maintenance
+and commits no human message or model request. Neither case sends a new prompt.
+
+A third fresh process cold-reads the resulting native log and reconstructs its
+inbox with a detached official Session projection. Both queues are empty and no
+Agent or model is created. Hashes of all regular native store files remain
+identical across this cold inspection. Each spawned fixture process is confirmed
+terminal before its isolated test directory is removed.
+
+This proves the optional primitive across this flushed-pending-input process
+boundary. It does not cover an input already claimed before the crash, unflushed
+power loss, the default HTTP Controller, original Gateway/Worker execution or
+production permissions, composition and cumulative usage. Those integration and
+acceptance requirements remain open; the default runtime remains unchanged.
