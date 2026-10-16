@@ -9,6 +9,7 @@ export function installOrdinaryFinalPublications(db:DatabaseSync){db.exec(`
   post_source_sha256 TEXT NOT NULL,post_source_json TEXT NOT NULL,
   outputs_json TEXT NOT NULL,created_at TEXT NOT NULL
  );
+ CREATE INDEX IF NOT EXISTS idx_ga_ordinary_final_publications_conversation ON ga_ordinary_final_publications(conversation_id,created_at,message_id);
  CREATE TRIGGER IF NOT EXISTS ga_ordinary_final_publication_update BEFORE UPDATE ON ga_ordinary_final_publications
  BEGIN SELECT RAISE(ABORT,'ordinary_final_publication_immutable'); END;
  CREATE TRIGGER IF NOT EXISTS ga_ordinary_final_publication_replace BEFORE INSERT ON ga_ordinary_final_publications

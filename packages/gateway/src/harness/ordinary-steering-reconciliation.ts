@@ -46,7 +46,7 @@ export class OrdinarySteeringReconciler{
     if(this.db.prepare("UPDATE ga_run_commands SET status='applied',applied_at=? WHERE id=? AND run_id=? AND status='pending'").run(now,command,runId).changes!==1)throw Error('ordinary_steering_repair_unconfirmed');
     this.db.prepare('INSERT INTO ga_ordinary_steering_reconciliations(command_id,run_id,conversation_id,owner_id,session_id,source_sha256,observation_sha256,source_json,observation_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)')
      .run(command,runId,current.scope.conversation_id,current.scope.owner_id,session,before.hash,ordinaryHistorySourceSha256(proof),JSON.stringify(before.source),JSON.stringify(proof),now);
-    this.events.append(current.scope.conversation_id,runId,'command.reconciled',{command_id:command,phase:'accepted',source_sha256:before.hash,native_message_id:proof.command_native_message_id,execution_authorized:false});return true;
+    this.events.append(current.scope.conversation_id,runId,'progress.updated',{revision:1,value:{kind:'ordinary_input_reconciliation',command_id:command,phase:'accepted',source_sha256:before.hash,native_message_id:proof.command_native_message_id,execution_authorized:false}});return true;
    });
   }catch{return false;}
  }

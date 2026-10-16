@@ -1,3 +1,4 @@
+import {storedConversationMessageRows} from '../messages/order.ts';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { decodeStoredContent } from '../messages/content.ts';
@@ -87,9 +88,8 @@ export class ConversationRepository {
 
   messages(id: string, ownerId: string, limit = 50) {
     this.get(id, ownerId);
-    const rows = this.db.prepare('SELECT * FROM ga_messages WHERE conversation_id=? ORDER BY created_at DESC,id DESC LIMIT ?')
-      .all(id, Math.max(1, Math.min(limit, 200))) as Array<Record<string, unknown>>;
-    return { items: rows.reverse().map(row => {
+    const rows = storedConversationMessageRows(this.db,id,limit);
+    return { items: rows.map(row => {
       const content = decodeStoredContent(String(row.content_json));
       return { message_id: row.id, run_id: row.run_id, role: row.role,
         status: row.status, blocks: content.blocks,

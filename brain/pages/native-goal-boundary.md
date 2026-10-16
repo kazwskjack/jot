@@ -4,7 +4,7 @@ title: Keep native Goal state and continuation in DSH
 category: decision
 status: active
 created: "2026-10-16T11:44:16"
-updated: "2026-10-17T00:24:24"
+updated: "2026-10-17T01:10:07"
 ---
 
 <!-- compiled_truth -->
@@ -350,5 +350,11 @@ Running ordinary completion now has a Worker-owned publication callback while th
 - time: 2026-10-17T00:24:24
   kind: evidence
   summary: "Product runtime cursor identity and DSH controller Session are separate boundaries. Historical source validates the unchanged deterministic Worker runtime mapping while independently retaining the original controller Session binding; neither identity substitutes for the other."
+  source: docs/superpowers/plans/2026-10-16-steering-lineage-and-recovery.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-17T01:10:07
+  kind: evidence
+  summary: "Historical reconciliation uses registered product projection envelopes; full schema plus reducer replay is required alongside native evidence. Canonical presentation order follows the immutable publication receipt while original IDs and creation dates stay intact across stream and snapshot/page reload."
   source: docs/superpowers/plans/2026-10-16-steering-lineage-and-recovery.md
   affects: [native-goal-boundary]

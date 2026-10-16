@@ -1185,3 +1185,10 @@ stores an immutable post-state receipt; repeated/reopened recovery does not
 replay native work or resurrect deleted output. Two actual Host crash cases
 pass. Automatic production consumption, channel correction/holds, reload
 ordering and the wider accounting/deployment/full-capability gates remain.
+
+Historical reconciliation now emits registered product projection events.
+The UI moves the same completed answer behind its supplements, and snapshot/
+message-page reads use immutable publication time for the same order after
+reload while retaining original creation dates. Public event-schema/reducer
+checks cover this boundary. Full channel queue/correction/hold integration and
+automatic production consumption remain required in the recovery plan.

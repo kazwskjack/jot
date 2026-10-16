@@ -1134,3 +1134,86 @@ provider evidence, not production or real-provider monetary acceptance. The core
 remains unwired to automatic consumption; full channel correction/hold,
 reload/stream ordering, run/business/accounting reconciliation, rolling upgrade
 and complete deployment/capability acceptance remain required.
+
+## Reconciliation event contracts and presentation order
+
+A full product-event schema plus real reducer replay exposed two issues the
+native-only tests could not prove: unregistered `answer.reconciled` failed the
+public event contract, and updating an old message ID kept its earlier insertion
+position ahead of supplemental messages. The acceptance-only custom event had
+the same contract gap. New producers now use existing projection envelopes:
+`response.upsert` with `value.kind=ordinary_final_reconciliation`, and
+`progress.updated` with `value.kind=ordinary_input_reconciliation`. Both retain
+revision 1 and execution_authorized:false; no new planning/tool authority or
+public protocol version is introduced.
+
+The final response projection reorders only an existing complete assistant
+message in the exact conversation/run. Missing, foreign, user-message or
+execution-authorizing payloads refuse; duplicate event cursors remain idempotent.
+Original message IDs and creation dates are retained. Snapshot and message-page
+reads share a query that orders a recovered canonical answer by the immutable
+publication receipt time, with repaired same-time messages in stored insertion
+order. Normal messages retain their existing date/ID ordering. Snapshot merging
+of transient streams respects that recovered publication time too. An index
+supports receipt lookup by conversation. No DTO timestamp or new frontend
+presentation field is manufactured to replace original creation history.
+
+Twenty-seven focused backend/UI checks pass, including public-schema validation
+of actual emitted frames, before/after live replay, page and snapshot reload,
+repeated recovery, scope refusal, independent-process publication and the prior
+file/rollback cases. Full root/UI/build, Adapter, Gateway and actual pinned SDK
+runs are recorded after their original processes finish. Runtime sources are
+fixed during that verification; production/automatic consumption is unchanged.
+
+### Required channel integration sequence
+
+Keep the existing channel outbox/provider worker. Prepare an exact original
+owner/conversation/final-message/recipient binding snapshot and the prior effect
+rows before final publication, then revalidate those facts inside its product
+transaction. Sender credentials stay inside existing channel services. Preserve
+verified recipient binding identity/version rather than retargeting a held
+result to a different newly bound account.
+
+- Queue a first final text with the existing deterministic effect identity;
+  retrying the same final receipt must reuse it without a provider call.
+- Reuse an already matching final effect. An old conclusively delivered body
+  needs a clearly labeled, once-only correction linked to the original effect.
+- Supersede an older pending body only when original evidence proves it was
+  never dispatched: generation zero, no provider receipt/part, no active lease,
+  no send reservation or digest membership. Preserve existing digest and task
+  authorization rules rather than editing their rows through a shortcut.
+- Sending, receipt-pending, partial-receipt and outcome-unknown effects require
+  a held plan. Do not enqueue another body until existing receipt reconciliation
+  proves the earlier effect's outcome. Resume the held plan through dedicated
+  channel state reconciliation, without another model/native execution.
+- Recheck current owner/binding, canonical message/content, cancellation and
+  deletion before queuing or releasing a held plan. Lost/revoked/ambiguous
+  recipient authority cannot create another send. Keep explicit file effects
+  independent of final-text replacement, retaining their receipts and unknowns.
+- Commit plan/queue changes with final publication, retain immutable intent
+  provenance and separate mutable delivery status. Existing provider progress
+  updates do not append conversation events; preserve that boundary so an
+  unrelated receipt update does not change the final-publication post-source.
+  If introducing later conversation delivery events, explicitly version receipt
+  validation for authority-preserving counter changes; do not reseal old proof.
+- Validate original text, corrected text, unsent replacement, matching receipt,
+  unknown holds, delayed receipt reconciliation, recipient changes, cancellation,
+  file/digest cases, concurrent release, lost queue ACK and database restart with
+  scripted providers before adding the automatic final consumer. Real external
+  send/provider accounting and production gates remain separate.
+
+Final ordering-stage checks completed so far: Gateway 1211 total/1205 passed/six
+existing skips/zero failures (141.47 seconds) and Windows build pass. Root 32/32,
+full Workbench/Jot UI 152/152, public regressions 6/6, Windows root build and
+Adapter 491/491 with the fixed runtime enabled/no skips (4.86 seconds) pass.
+BRAIN links and the 726-file working-tree public review pass. The existing
+39-case actual Host process is still observed on its original handle; record
+its final result only after termination. Production flags remain unchanged.
+
+The original complete actual pinned Host SDK process finished 39/39, zero
+failures or skips (537.48 seconds), including cold history, acceptance repair,
+missing final output and obsolete canonical replacement with the registered
+projection events. Gateway 1205 passed/six existing skips, full UI 152/152,
+Adapter 491/491, root 32/32, public regressions 6/6 and both Windows builds pass.
+No runtime sources changed during those runs. This closes the local event/
+ordering regression, not channel/automatic-consumer/production acceptance.

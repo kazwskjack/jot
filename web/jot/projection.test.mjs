@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fromSnapshot,reduceEvent} from './projection.ts';
+test('final reconciliation reorders only an existing complete answer in its exact run and leaves creation dates intact',()=>{
+ const message=(id,role,run='r',status='complete')=>({message_id:id,run_id:run,role,status,created_at:'2026-10-01T00:00:00Z',blocks:[{block_id:id,kind:'text',text:id}]}),state=fromSnapshot({conversation:{conversation_id:'c'},as_of_seq:'0',messages:[message('original','user'),message('final','assistant'),message('supplement','user')],runs:[],activities:[],sources:[],interactions:[],artifacts:[],stream_cursors:[]});
+ const event={schema_version:'1.0',event_id:'event',conversation_id:'c',run_id:'r',seq:'1',at:'2026-10-17T00:00:00Z',type:'response.upsert',payload:{revision:1,value:{kind:'ordinary_final_reconciliation',run_id:'r',message_id:'final',execution_authorized:false}}};
+ const next=reduceEvent(state,event);assert.deepEqual(Object.keys(next.messages),['original','supplement','final']);assert.deepEqual(Object.keys(state.messages),['original','final','supplement']);assert.equal(next.messages.final.created_at,state.messages.final.created_at);assert.equal(reduceEvent(next,event),next);
+ for(const patch of [{run_id:'other'},{message_id:'missing'},{message_id:'original'},{execution_authorized:true}])assert.throws(()=>reduceEvent(state,{...event,payload:{...event.payload,value:{...event.payload.value,...patch}}}));
+ assert.deepEqual(Object.keys(reduceEvent(state,{...event,payload:{revision:1,value:{kind:'other'}}}).messages),Object.keys(state.messages));
+});
 test('真实流无消息壳也能展示；失败撤回；最终消息替换临时答案',()=>{
  let s=fromSnapshot(snapshot); let seq=BigInt(s.seq);
  const emit=(type,payload)=>s=reduceEvent(s,{schema_version:'1.0',conversation_id:s.conversationId,run_id:'r',at:'2026-09-13',seq:String(++seq),type,payload});

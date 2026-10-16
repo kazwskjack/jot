@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { ConversationRepository } from '../conversations/repository.ts';
 import { decodeStoredContent } from '../messages/content.ts';
+import {storedConversationMessageRows,recoveredMessageTimes} from '../messages/order.ts';
 import {publicInteractionValue} from '../interactions/service.ts';
 
 export function buildSnapshot(db: DatabaseSync, conversationId: string, ownerId: string) {
@@ -8,8 +9,8 @@ export function buildSnapshot(db: DatabaseSync, conversationId: string, ownerId:
   try {
     const conversation = new ConversationRepository(db).get(conversationId, ownerId);
     const asOf = db.prepare('SELECT next_seq-1 AS seq FROM ga_conversations WHERE id=?').get(conversationId) as { seq: number };
-    const messages = db.prepare('SELECT * FROM ga_messages WHERE conversation_id=? ORDER BY created_at DESC,id DESC LIMIT 200').all(conversationId)
-      .reverse().map((row: any) => {
+    const messages = storedConversationMessageRows(db,conversationId,200)
+      .map((row: any) => {
         const content = decodeStoredContent(row.content_json);
         return { message_id: row.id, run_id: row.run_id, role: row.role, status: row.status,
           blocks: content.blocks, ...(content.attachments.length ? { attachments: content.attachments } : {}), created_at: row.created_at };
@@ -67,7 +68,9 @@ export function buildSnapshot(db: DatabaseSync, conversationId: string, ownerId:
       block.text+=p.text;transient.set(p.message_id,m);attempts.set(p.message_id,p.attempt_id);
     }
     messages.push(...transient.values());
-    messages.sort((a:any,b:any)=>a.created_at.localeCompare(b.created_at));
+    const recovered=recoveredMessageTimes(db,conversationId);
+    messages.sort((a:any,b:any)=>(recovered.get(a.message_id)??a.created_at).localeCompare(recovered.get(b.message_id)??b.created_at)
+      ||Number(recovered.has(a.message_id))-Number(recovered.has(b.message_id)));
     const artifacts = db.prepare(`SELECT a.id,a.conversation_id,a.kind,a.runtime_ref,a.created_at,
       COALESCE(
         (SELECT p.run_id FROM ga_artifact_producers p JOIN ga_runs r ON r.id=p.run_id AND r.conversation_id=a.conversation_id

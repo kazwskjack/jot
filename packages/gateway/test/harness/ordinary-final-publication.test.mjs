@@ -3,6 +3,9 @@ import {mkdtempSync,writeFileSync,readFileSync,rmSync,symlinkSync} from 'node:fs
 import {openProductDatabase,withImmediateTransaction} from '../../src/db/database.ts';import {EventStore} from '../../src/events/event-store.ts';import {RunRepository} from '../../src/runs/repository.ts';import {RunCommandService} from '../../src/runs/commands.ts';import {AttachmentResolver} from '../../src/artifacts/resolver.ts';import {ordinaryHistorySourceSha256} from '../../src/harness/ordinary-steering-observation.ts';
 import {syntheticAttachmentPng} from '../../../dsh-host/test/attachment-fixture.mjs';
 import {fork} from 'node:child_process';import {fileURLToPath} from 'node:url';
+import Ajv from 'ajv/dist/2020.js';import addFormats from 'ajv-formats';
+import {buildSnapshot} from '../../src/events/snapshot.ts';import {ConversationRepository} from '../../src/conversations/repository.ts';
+import {fromSnapshot,reduceEvent} from '../../../../web/jot/projection.ts';
 const Publisher=(await import('../../src/harness/ordinary-final-publication.ts').catch(()=>({}))).OrdinaryFinalPublisher;
 const sha=v=>createHash('sha256').update(v).digest('hex');
 function fixture(t,{old=false,files=false,disk=false}={}){
@@ -32,7 +35,7 @@ test('source changes, cancellation, new work, deleted messages and changed secon
 });
 
 test('failed final event rolls back message, commands, candidate and receipt; a later original retry can succeed',async t=>{
- const f=fixture(t),append=f.events.append.bind(f.events),before=f.db.prepare('SELECT * FROM ga_conversations').get();f.events.append=(...args)=>{if(args[2]==='answer.reconciled')throw Error('Synthetic event failure');return append(...args);};assert.equal(await f.publisher().reconcile(f.run.run_id,'s'),false);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_messages').get().n,1);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_candidate_answers').get().n,1);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_ordinary_final_publications').get().n,0);assert.deepEqual(f.db.prepare('SELECT * FROM ga_conversations').get(),before);f.events.append=append;assert.equal(await f.publisher().reconcile(f.run.run_id,'s'),true);
+ const f=fixture(t),append=f.events.append.bind(f.events),before=f.db.prepare('SELECT * FROM ga_conversations').get();f.events.append=(...args)=>{if(args[2]==='response.upsert')throw Error('Synthetic event failure');return append(...args);};assert.equal(await f.publisher().reconcile(f.run.run_id,'s'),false);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_messages').get().n,1);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_candidate_answers').get().n,1);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_ordinary_final_publications').get().n,0);assert.deepEqual(f.db.prepare('SELECT * FROM ga_conversations').get(),before);f.events.append=append;assert.equal(await f.publisher().reconcile(f.run.run_id,'s'),true);
 });
 
 test('registered outputs need actual byte integrity; valid files persist once and tampered or foreign files cannot become text-only success',async t=>{
@@ -68,5 +71,13 @@ test('two independent processes race the same original final publication without
   child.stderr.on('data',chunk=>{diagnostics=(diagnostics+chunk).slice(-1000);});child.on('message',message=>{if(message.type==='ready')readyResolve();if(message.type==='done')result=message;});
   child.once('error',error=>{readyReject(error);doneReject(error);});child.once('exit',code=>{if(code!==0||!result){const error=Error('publication worker failed '+code+': '+diagnostics);readyReject(error);doneReject(error);}else doneResolve(result);});return{child,ready,done};
  };
- const a=start(),b=start();await Promise.all([a.ready,b.ready]);a.child.send({type:'go'});b.child.send({type:'go'});const results=await Promise.all([a.done,b.done]);assert.ok(results.every(r=>r.result===true));assert.ok(results.every(r=>r.calls===2));assert.equal(f.db.prepare("SELECT count(*) n FROM ga_messages WHERE role='assistant'").get().n,1);assert.equal(f.db.prepare("SELECT count(*) n FROM ga_messages WHERE role='user'").get().n,3);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_ordinary_final_publications').get().n,1);assert.equal(f.db.prepare("SELECT count(*) n FROM ga_events WHERE type='answer.reconciled'").get().n,1);
+ const a=start(),b=start();await Promise.all([a.ready,b.ready]);a.child.send({type:'go'});b.child.send({type:'go'});const results=await Promise.all([a.done,b.done]);assert.ok(results.every(r=>r.result===true));assert.ok(results.every(r=>r.calls===2));assert.equal(f.db.prepare("SELECT count(*) n FROM ga_messages WHERE role='assistant'").get().n,1);assert.equal(f.db.prepare("SELECT count(*) n FROM ga_messages WHERE role='user'").get().n,3);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_ordinary_final_publications').get().n,1);assert.equal(f.db.prepare("SELECT count(*) n FROM ga_events WHERE type='response.upsert' AND json_extract(payload_json,'$.value.kind')='ordinary_final_reconciliation'").get().n,1);
+});
+
+test('recovered old canonical output follows all supplements in schema-valid live events and after snapshot/page reload',async t=>{
+ const f=fixture(t,{old:true}),before=buildSnapshot(f.db,'c','u');let state=fromSnapshot(before);const originalDate=state.messages[f.oldMessage.message_id].created_at;
+ assert.equal(await f.publisher().reconcile(f.run.run_id,'s'),true);
+ const ajv=new Ajv({strict:false,allErrors:true});addFormats(ajv);const validate=ajv.compile(JSON.parse(readFileSync(new URL('../../contracts/agent-event.schema.json',import.meta.url),'utf8')));
+ for(const frame of f.events.replay('c',Number(before.as_of_seq),1000)){assert.equal(validate(frame),true,'event '+frame.type+' must match the public schema');state=reduceEvent(state,frame);}
+ const expected=[f.run.message_id,...f.steers.map(c=>'message-'+c.command_id),f.oldMessage.message_id];assert.deepEqual(Object.keys(state.messages),expected);const snapshot=buildSnapshot(f.db,'c','u');assert.deepEqual(snapshot.messages.map(m=>m.message_id),expected);assert.deepEqual(new ConversationRepository(f.db).messages('c','u').items.map(m=>m.message_id),expected);assert.equal(snapshot.messages.at(-1).created_at,originalDate);assert.equal(await f.publisher().reconcile(f.run.run_id,'s'),true);assert.deepEqual(buildSnapshot(f.db,'c','u').messages.map(m=>m.message_id),expected);
 });

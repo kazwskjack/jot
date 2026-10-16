@@ -101,11 +101,20 @@ export function reduceEvent(state: Projection, event: AgentEvent): Projection {
     case 'runtime.outcome':
     case 'checkpoint.upsert':
     case 'delivery.upsert':
-    case 'response.upsert':
     case 'usage.updated':
     case 'run.error':
       // Application adds usage/error indexes; run.state is the authoritative run status.
       break;
+    case 'response.upsert': {
+      const value=event.payload.value;
+      if(value.kind!=='ordinary_final_reconciliation')break;
+      const id=value.message_id;
+      if(typeof id!=='string'||value.run_id!==event.run_id||value.execution_authorized!==false)throw new Error('WRONG_RECONCILIATION_SCOPE');
+      const message=next.messages[id];
+      if(!message||message.role!=='assistant'||message.status!=='complete'||message.run_id!==event.run_id)throw new Error('RECONCILIATION_MESSAGE_MISSING');
+      const ordered={...next.messages};delete ordered[id];ordered[id]=message;next.messages=ordered;
+      break;
+    }
     default: { const exhaustive: never=event; throw new Error(String(exhaustive)); }
   }
   return next;
