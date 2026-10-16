@@ -844,3 +844,94 @@ the earlier failed snapshot fixture through a read-only database now succeeds
 without changing total_changes. Independent static review found no blocking
 owner/permission/idempotency/disclosure defect; this does not replace runtime
 checks or close provider, production, isolated-work/apply and full26 acceptance.
+
+## Next isolated-work artifacts and original history integration
+
+The next increment implements real artifacts without opening execution/apply:
+
+- [x] `workspace-provider.ts` / `snapshot-provider.ts`: explicit trusted roots
+  and selected relative scope; streamed binary/large-file inventory and copying,
+  empty directories, immutable base manifest/hash and creation receipt. Recheck
+  drift, owner guard/cancellation, containment, links, case collisions and private
+  configuration exclusions. Failed copies retain diagnostic remnants without a
+  ready receipt and never recursively remove a user checkout. Result inspection
+  is a separate factual read of the isolated workspace, not a model manifest.
+- [x] `workspace-diff.ts`: canonical, validated base/result manifest differences,
+  exact hashes, add/delete/content/mode/type changes and unambiguous rename
+  evidence. Output is non-authorizing and never applies files. Ambiguous matching
+  hashes remain additions/deletions; do not guess a rename.
+- [x] `discovery-history.ts` / routes: owner-scoped, paged read projection of
+  original admissions/current occurrences/runs/reports/proposals/finalizations.
+  No new status table, default creation, native Host call or repair on read.
+  Canonical acceptance differs from terminal runtime status; corrupt proof holds.
+- [x] Existing role policy UI: list original cycles, preview reports, coverage,
+  limitations and proposals with scope-safe pagination. Preserve actual policy
+  form browser tests, and add original BFF/API history browser acceptance.
+
+These artifacts still require frozen owned cycle identity/root-budget binding,
+snapshot/Git provider recovery, original DSH isolated execution and scoped memory,
+verified result/report integration, exact owner diff review and idempotent apply
+intents/per-write receipts/reconciliation. Neither a snapshot, manifest diff nor
+history API is execution permission or reviewed apply. Automatic dispatch and
+discover_and_work remain gated until their complete original authority and
+lifecycle acceptance is demonstrated. Full26 scope remains unchanged.
+
+### Snapshot/diff and owner-history evidence
+
+Snapshot creation uses64KiB streaming, regular-file descriptor and path/inode
+rechecks, frozen base manifests and target byte verification. The selected tree
+includes binary files and empty directories. Known private path components,
+symlink/junctions, scope/root overlap, case collisions, cancellation, drift and
+limits refuse a ready receipt. Partial copies remain identifiable by snapshot ID
+and a residual flag; no user checkout is recursively removed. Inspect inventories
+the whole isolated root and permits only changes within the original selection.
+The provider currently issues inspection capability through a private same-instance
+WeakMap; process restart recovery is not implemented or silently inferred.
+
+Default physical copy bounds are50,000 entries,2GiB total,1GiB per file and depth100,
+with explicit configurable limits and a100,000-entry manifest safety ceiling.
+Bounds fail rather than truncate. These are filesystem resource controls, not
+new task-round, model-call, token or money limits. Larger-tree throughput and
+production retention/growth remain unaccepted. Known path exclusions do not
+identify arbitrary secrets inside selected source text. Directory permissions and
+Node path/inode/O_NOFOLLOW checks do not replace an OS sandbox; a changing live
+tree is not a filesystem-wide atomic snapshot.
+
+Diff artifacts validate both complete manifest hashes and identical selection,
+retain content/mode/type/add/delete changes, and pair renames only for unique
+matching content digests and lengths. Ambiguous repeated bytes stay add/delete;
+case-only renames retain an explicit marker. Artifacts are frozen and contain no
+file bodies or absolute roots, and cannot apply files. Cross-review reproduced a
+scope defect: selecting one file also permitted replacing/deleting its structural
+parent. Validator and real inspection now reject a non-directory ancestor, and
+diff omits operations on merely structural ancestors. Parent disappearance after
+deleting the selected file does not authorize removal of unselected siblings.
+
+History endpoints page20 original admissions or proposals using scope-bound
+keyset cursors. They create no schema/defaults and perform no Host/model call.
+Reports and proposal hashes are checked; runtime status alone never establishes
+accepted. Existing canonical finalization must match the current continuation,
+owner review/certificate, frozen report/candidate and native completion/message.
+Corrupt proof produces a bounded error. The UI uses escaped text and scope-safe
+reads, shows coverage/limitations and separates execution/business/accepted state.
+It does not directly load raw source bodies or trusted roots; model summaries may
+themselves quote source text, so this is not content redaction or DLP.
+
+Targeted verification: snapshot15, diff8 (including actual2MiB binary copy/edit/
+inspection and a5,000-change ambiguous-content group), history11 and UI169 pass.
+Final root32/build and real built-browser policy/history scenario pass: actual
+original admission/source read/inspection step/21 proposals/report, proposal pages
+20→1→20, escaped HTML, no raw source body, accepted:false and zero page errors.
+Native idle in that browser fixture is controlled synthetic evidence. Separately,
+three actual pinned official DSH SDK cases pass (28.02 seconds,18 scripted local
+Messages requests), including original owner review/native publication, restart,
+input continuation and history accepted:true for the exact native result. These
+are SDK/scripted-model evidence, not real-provider or production acceptance.
+
+Final full Gateway verification:1497 cases,1490 passed,seven existing/opt-in
+skips,zero failures (190.90 seconds); Windows Gateway build passes. Root32,
+UI169, final built-browser, selected SDK3, disclosure6,805-file preflight and
+Brain links pass. Independent cross-review identified the ancestor-scope defect
+before publication; red/green tests and a second review confirm that specific
+issue closed. All remaining cycle authority/recovery/Git/DSH/apply/rollout and
+full26 requirements above remain open. No execution or production switch changes.

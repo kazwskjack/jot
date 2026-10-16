@@ -39,6 +39,8 @@ import { VOICE_MAX_BYTES, validateVoiceWave } from './voice/wav.ts';
 import { WorkbenchService } from './workbench/service.ts';
 import {DiscoveryPolicies} from './always-on/discovery-policy.ts';
 import {registerDiscoveryPolicyRoutes} from './always-on/discovery-policy-routes.ts';
+import {DiscoveryHistory} from './always-on/discovery-history.ts';
+import {registerDiscoveryHistoryRoutes} from './always-on/discovery-history-routes.ts';
 import {configureTaskOutputReader} from './persistent-tasks/output-content.ts';
 import {configureTaskOutputDelivery} from './persistent-tasks/output-delivery.ts';
 import { registerWorkbenchRoutes } from './workbench/routes.ts';
@@ -313,6 +315,7 @@ export async function buildServer(config: {
     if (code.startsWith('page_')) return reply.code(502).send({error:{code:code.toUpperCase()}});
     if (code==='task_discovery_managed'||code==='task_discovery_admission_required')return reply.code(409).send({error:{code:code.toUpperCase()}});
     if (code==='discovery_scope_unavailable')return reply.code(404).send({error:{code:code.toUpperCase()}});
+    if (code==='discovery_history_corrupt')return reply.code(409).send({error:{code:'DISCOVERY_HISTORY_CORRUPT'}});
     if (['discovery_not_bound','discovery_authority_revoked','discovery_source_changed','discovery_source_unavailable','discovery_evidence_required','discovery_report_required','discovery_report_stale','discovery_report_steps_incomplete','discovery_planning_read_only'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
     if (code==='discovery_source_integrity_failed')return reply.code(409).send({error:{code:'DISCOVERY_SOURCE_INTEGRITY_FAILED'}});
     if (code==='discovery_planning_invalid')return reply.code(422).send({error:{code:code.toUpperCase()}});
@@ -458,6 +461,7 @@ export async function buildServer(config: {
   });
 
   registerDiscoveryPolicyRoutes(app,{policies:new DiscoveryPolicies(db,{onChange:(owner,receipt,event)=>persistentTasks.synchronizeDiscoveryPolicy(owner,receipt.policy_id,event)}),actor,role:(owner,id)=>workbench.getAgent(owner,id),atomic:atomicCommand});
+  registerDiscoveryHistoryRoutes(app,{history:new DiscoveryHistory(db),actor,role:(owner,id)=>workbench.getAgent(owner,id)});
   registerConversationGoalRoutes(app,{db,conversations,actor,client:config.conversationGoalClient,resumeAdmission:{enabled:config.conversationGoalResumeEnabled===true,controls:new ConversationGoalControls(db,events,runs),atomic:atomicCommand}});
   app.get('/v1/capabilities', async (request, reply) => {
     const ownerId = actor(request as any);

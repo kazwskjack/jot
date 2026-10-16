@@ -550,3 +550,19 @@ dispatcher boundary. A source inventory, UI render or scripted API request is
 not equivalent to actual browser interaction or executed work-cycle acceptance.
 Isolated execution, owner-readable cycle/report projection and exact frozen-diff
 review/application remain separate required deliverables.
+
+Owner history now pages the original discovery admissions, reports and proposals
+and verifies canonical acceptance independently of runtime status. The role
+workbench previews those records and their limitations. Actual built-browser
+tests exercise original BFF/API records and proposal pagination; selected actual
+DSH SDK cases verify accepted history after original native publication, with a
+scripted local model. These are separate evidence from provider/production use.
+
+A snapshot-copy artifact provider now streams explicitly selected binary/text
+files and empty directories into a separate root and inventories scoped results.
+Frozen manifest differences retain exact content/mode/type/add/delete/unique
+rename facts. Structural ancestors never become modification authority for a
+selected child. These helpers do not execute tasks or apply changes; same-instance
+inspection is not durable restart recovery or an OS sandbox. Git providers,
+frozen owned cycle/root-budget binding, original DSH isolated execution, reviewed
+application/reconciliation and remaining full lifecycle acceptance remain open.

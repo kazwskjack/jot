@@ -13,6 +13,15 @@ test('discovery policy read uses the encoded owned role route and never sends an
  const controller=new AbortController();const value=await workbenchApi.discoveryPolicy('role /1',controller.signal);
  assert.equal(call.url,'/workbench-api/v1/agents/role%20%2F1/discovery-policy');assert.equal(call.init.method,'GET');assert.equal(call.init.body,undefined);assert.equal(call.init.credentials,'same-origin');assert.equal(value.policy,null);
 });
+
+test('discovery history and proposal pagination remain read-only original role/admission routes',async t=>{
+ const original=globalThis.fetch,calls=[];t.after(()=>{globalThis.fetch=original;});
+ globalThis.fetch=async(url,init)=>{calls.push({url,init});return new Response('{"execution_authorized":false}');};
+ await workbenchApi.discoveryHistory('role /1','admission /2');await workbenchApi.discoveryHistoryDetail('role /1','admission /2','plan /3');
+ assert.equal(calls[0].url,'/workbench-api/v1/agents/role%20%2F1/discovery-history?before_id=admission%20%2F2');
+ assert.equal(calls[1].url,'/workbench-api/v1/agents/role%20%2F1/discovery-history/admission%20%2F2?after_plan_id=plan%20%2F3');
+ for(const {init} of calls){assert.equal(init.method,'GET');assert.equal(init.body,undefined);assert.equal(init.credentials,'same-origin');assert.equal(init.cache,'no-store');}
+});
 test('task delegation posts only the frozen step request and retains its client key',async t=>{
  const original=globalThis.fetch;t.after(()=>{globalThis.fetch=original;});let call;
  globalThis.fetch=async(url,init)=>{call={url,init};return new Response('{}');};

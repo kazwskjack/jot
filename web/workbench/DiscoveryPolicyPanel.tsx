@@ -5,6 +5,7 @@ import {useResource} from './useResource';
 import {useMutationReceipt} from './useMutationReceipt';
 import {discoveryPolicyForm,discoveryPolicyInput,discoveryControlInput,discoveryPolicyMatches,discoveryScope} from './discovery-policy.mjs';
 import type {Agent,DiscoveryPolicy} from './types';
+import DiscoveryHistory from './DiscoveryHistory';
 type Form={cooldown_seconds:string;recent_input_seconds:string;max_cycles:string};
 type Command={path:string;method:string;body:any};
 const states:Record<string,string>={off:'默认关闭',active:'策略已启用',paused:'已暂停',stopped:'已停止',revoked:'角色权限已变化'};
@@ -62,5 +63,6 @@ function ScopedPolicy({agent,identity,ownerScope,onClose,onChanged}:{agent:Agent
   {resource.loading&&<p role="status">正在读取策略…</p>}{resource.error&&<p className="wb-error" role="alert">{resource.error}</p>}{resource.data&&!matches&&<p className="wb-error" role="alert">策略归属不符，不显示其他角色的配置。</p>}{error&&<p className="wb-error" role="alert">{error}</p>}
   <DiscoveryPolicySettings agent={agent} policy={policy} form={form} ready={ready} busy={busy} pending={mutation.pending} onChange={setForm} onSave={event=>{event.preventDefault();prepare(()=>({path:base,method:'PATCH',body:discoveryPolicyInput(agent,policy,form)}));}} onControl={action=>prepare(()=>({path:base+'/control',method:'POST',body:discoveryControlInput(agent,policy,action)}))}/>
   <div className="wb-actions">{mutation.pending?<button disabled={busy} onClick={()=>void execute()}>重试原请求</button>:<button disabled={busy||resource.loading} onClick={resource.reload}>重新读取策略</button>}</div>
+  <DiscoveryHistory agent={agent} identity={identity} ownerScope={ownerScope} disabled={busy||mutation.pending}/>
  </section>;
 }

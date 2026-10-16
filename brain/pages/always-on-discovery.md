@@ -4,7 +4,7 @@ title: Keep project discovery in original DSH task boundaries
 category: decision
 status: active
 created: "2026-10-17T03:43:02"
-updated: "2026-10-17T07:20:16"
+updated: "2026-10-17T07:45:38"
 ---
 
 <!-- compiled_truth -->
@@ -29,6 +29,8 @@ Accepted no-plan dormancy is derived read-only from the original admission, froz
 Recoverable discovery source failures are not role revocation. The authenticated original bridge may expose only exact repairable source/report conflict codes on their matching tool or completion-proposal endpoints, never server detail text or arbitrary errors. Corrupted pinned bytes and expected missing files produce bounded discovery-source reasons, no successful source receipt or coverage, no completion or dormancy. Permission, owner, stale source and revoked role failures remain fail-closed. DSH can use original native wait/reply/checkpoint continuation and the same task/Goal/cumulative budget after repair; no alternate status loop or automatic authority restoration is introduced.
 
 Initialized conversation/snapshot reads must not request writer locks merely to reopen an existing cursor key or default project. Missing initialization remains atomic with locked recheck; legacy NULL project migration remains explicit and owner-scoped, corrupt keys fail rather than rotate. Keep snapshot read consistency and cursor signature identity; do not replace contention repair with blind retries or weaker signing. Role-bound discovery policy UI configures the existing off-by-default owner policy through original receipts, with explicit enable/pause/resume/stop and same-command recovery after lost response. UI configuration is not automatic dispatch or work-cycle execution authority.
+
+Isolated snapshot manifests, creation/inspection receipts and exact base/result differences are non-authorizing artifacts. They use explicit trusted roots, relative selections, binary streaming and frozen hashes; structural ancestors are containers only and never become replace/delete authority when selecting a child file. Unique exact content can establish a rename; ambiguous repeated bytes remain add/delete. Keep original source untouched. Known private path refusal is not arbitrary secret-body detection, path/inode checks are not OS sandboxing, and checks of a live tree are not an atomic filesystem snapshot. Current provider instance-issued inspection capabilities do not survive process restart; durable cycle/root binding and recovery must be integrated before execution/apply. Owner history is a pure paged projection of original runs/reports/certificates/native completion/publication, not another status store or an authorization source. Model summary text remains untrusted and may quote source content; omission of raw source/root fields is not DLP. Git provider, original DSH isolated execution, scoped memory, exact reviewed apply/reconciliation, automatic dispatch and complete deployment/scale acceptance remain open.
 
 
 ## Timeline
@@ -198,5 +200,11 @@ Initialized conversation/snapshot reads must not request writer locks merely to 
 - time: 2026-10-17T07:20:16
   kind: decision
   summary: Keep initialized snapshots read-only under WAL concurrency and bind role policy UI to original owner command receipts.
+  source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
+  affects: [always-on-discovery]
+
+- time: 2026-10-17T07:45:38
+  kind: decision
+  summary: "Keep isolated snapshot/diff artifacts non-authorizing, constrain structural ancestors, and derive owner history from original canonical receipts."
   source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
   affects: [always-on-discovery]
