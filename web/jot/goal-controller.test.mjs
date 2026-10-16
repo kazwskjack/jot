@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {ConversationGoalController,goalPresentation,goalPrompt} from './goal-controller.mjs';
+import {ConversationGoalController,goalPresentation,goalPrompt,goalControlError} from './goal-controller.mjs';
 const view=(revision=1,phase='active',activation='armed')=>({goal:{id:'goal-1',revision,objective:'Collect source-backed evidence',phase,activation,roundsStarted:2,maxGoalRounds:Number.MAX_SAFE_INTEGER}});
 test('ordinary Goal reads address only the selected conversation and preserve unavailable state',async()=>{
  const calls=[],c=new ConversationGoalController('conversation /1',{request:async(...args)=>{calls.push(args);return view();}});
@@ -41,4 +41,9 @@ test('cold active Goals are waiting for explicit continuation and blocked/comple
 });
 test('native Goal prompt preserves user text, does not complete a Goal and uses the native tools',()=>{
  assert.equal(goalPrompt('A\nB',false),'A\nB');const text=goalPrompt('A\nB',true);assert.ok(text.endsWith('A\nB'));assert.match(text,/get_goal/);assert.match(text,/create_goal/);assert.match(text,/9007199254740991/);assert.doesNotMatch(text,/goal_id|session_id/);
+});
+test('Goal controls distinguish a recovery refusal from unknown or still-processing operations',()=>{
+ assert.equal(goalControlError({status:409,message:'GOAL_CONTEXT_RECOVERY_REQUIRED'}),'会话有待恢复内容，请先恢复当前任务。');
+ assert.equal(goalControlError({status:409,message:'IDEMPOTENCY_IN_PROGRESS'}),'操作仍在处理中，请重试原操作。');assert.equal(goalControlError({status:409,message:'GOAL_REVISION_CHANGED'}),'目标或运行状态已变化，请刷新后确认。');
+ assert.equal(goalControlError({status:503,message:'private-diagnostic'}),'操作结果尚未确认，请核对后重试原操作。');
 });

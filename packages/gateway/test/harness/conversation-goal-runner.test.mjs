@@ -36,4 +36,11 @@ test('an ended active Goal stream cannot manufacture completion or another promp
  let prompts=0;const client={create:async()=>({}),prompt:async()=>{prompts++;return{};},conversationGoal:async()=>({goal:{id:'native',revision:1,objective:'Work',phase:'active',activation:'armed'}}),async *follow(){yield{type:'snapshot',cursor:0,records:[]};yield{type:'event',event:{type:'assistant/message',seq:1,data:{message:{content:[{type:'text',text:'Partial'}]}}}};yield{type:'event',event:{type:'turn/end',seq:2,data:{reason:{kind:'completed'}}}};}};
  const result=await new OfficialSessionRunner(client,{cwd:'/fixture',agentPreset:'jot-general'}).run({enabled:true,taskRequestId:'ended-run',message:'Work',sessionRef:'ended-session',deferCompletionProbe:true});assert.equal(result.completed,false);assert.equal(result.reason_code,'SESSION_GOAL_STREAM_ENDED');assert.equal(prompts,1);
 });
+test('coercible malformed native Goal states cannot turn partial work into a completed answer',async()=>{
+ for(const field of ['phase','activation']){
+  const value={id:'g',revision:1,objective:'Work',phase:'active',activation:'armed'};value[field]=[value[field]];
+  const client={create:async()=>({}),prompt:async()=>({}),conversationGoal:async()=>({goal:value}),async *follow(){yield{type:'snapshot',cursor:0,records:[]};yield{type:'event',event:{type:'assistant/message',seq:1,data:{message:{content:[{type:'text',text:'Partial result'}]}}}};yield{type:'event',event:{type:'turn/end',seq:2,data:{reason:{kind:'completed'}}}};}};
+  await assert.rejects(()=>new OfficialSessionRunner(client,{cwd:'/fixture',agentPreset:'jot-general'}).run({enabled:true,taskRequestId:'malformed-goal',message:'Work',sessionRef:'s',deferCompletionProbe:true}),/conversation_goal_state_invalid/);
+ }
+});
 

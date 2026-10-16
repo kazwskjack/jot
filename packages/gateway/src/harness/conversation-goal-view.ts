@@ -14,7 +14,7 @@ export function validateConversationGoalView(value:unknown):{goal:ConversationGo
   if(!object(g)||Object.keys(g).some(k=>!['id','revision','objective','phase','activation','maxGoalRounds','roundsStarted','createdAt','updatedAt','blockedReason'].includes(k))
     ||typeof g.id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(g.id)
     ||!Number.isSafeInteger(g.revision)||Number(g.revision)<1||typeof g.objective!=='string'||!g.objective.trim()
-    ||!['active','paused','blocked','complete'].includes(String(g.phase))||!['armed','disarmed'].includes(String(g.activation)))return invalid();
+    ||typeof g.phase!=='string'||!['active','paused','blocked','complete'].includes(g.phase)||typeof g.activation!=='string'||!['armed','disarmed'].includes(g.activation))return invalid();
   for(const key of ['maxGoalRounds','roundsStarted'])if(g[key]!==undefined&&(!Number.isSafeInteger(g[key])||Number(g[key])<(key==='maxGoalRounds'?1:0)))return invalid();
   if(g.maxGoalRounds!==undefined&&g.roundsStarted!==undefined&&Number(g.roundsStarted)>Number(g.maxGoalRounds))return invalid();
   for(const key of ['createdAt','updatedAt'])if(g[key]!==undefined&&(typeof g[key]!=='number'||!Number.isFinite(g[key])))return invalid();

@@ -239,8 +239,8 @@ test('ordinary Goal transport preserves exact CAS, encoded Session identity and 
  const body={action:'stop',id:'goal',revision:2};assert.deepEqual(await client.conversationGoal('session/other?x=1',body,parent.signal),{goal:null});assert.equal(calls[0].url,'http://127.0.0.1:18841/v1/sessions/session%2Fother%3Fx%3D1/conversation-goal');assert.deepEqual(JSON.parse(calls[0].init.body),body);assert.equal(calls[0].init.headers.authorization,'Bearer '+'a'.repeat(32));parent.abort();assert.equal(calls[0].init.signal.aborted,true);
 });
 test('ordinary Goal revision conflicts retain only an allowlisted protocol code',async()=>{
- for(const code of ['goal_revision_changed','private-token-value']){
+ for(const code of ['goal_revision_changed','goal_cold_input_pending','private-token-value']){
   const client=new SessionControllerClient('http://127.0.0.1:18841','a'.repeat(32),async()=>Response.json({error:code},{status:409}));
-  await assert.rejects(()=>client.conversationGoal('session'),error=>error.status===409&&error.protocolCode===(code==='goal_revision_changed'?code:undefined)&&!error.message.includes('private-token-value'));
+  await assert.rejects(()=>client.conversationGoal('session'),error=>error.status===409&&error.protocolCode===(code==='private-token-value'?undefined:code)&&!error.message.includes('private-token-value'));
  }
 });

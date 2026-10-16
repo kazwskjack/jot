@@ -89,8 +89,17 @@ while continuation is armed is an interrupted outcome, not completion.
 After Host restart, reads use the official persisted projection without loading
 an Agent, calling a model or rearming a Goal. A persisted active phase is shown
 as disarmed until explicitly resumed. Missing Sessions return null; unavailable
-or corrupt projections return an error. Controls currently require a loaded
-ordinary Agent; a cold read does not silently activate one to perform a control.
+or corrupt projections return an error. Reads never activate an Agent.
+
+Cold pause and stop can use the official ordinary Session resolver when the
+stored preset is allowed, both durable inbox queues are empty and the official
+inspection shows a closed, contiguous turn history. The operation rechecks the
+exact live Agent and idle inbox, uses native maintenance, and flushes persistence
+before acknowledging. Stop uses one native `clear` tombstone, not pause followed
+by clear. Pending input or an open turn returns `409 GOAL_CONTEXT_RECOVERY_REQUIRED`
+without activating the Agent; this definite refusal is distinct from an unknown
+mutation result. It does not clear, replay or automatically process that input.
+
   The ordinary conversation composer includes **+ → Goal mode**. The status card
   shows the objective, native phase and admitted rounds, with pause, continue and
   confirmed stop controls. Pause stops subsequent rounds; it does not cancel an
@@ -103,7 +112,7 @@ ordinary Agent; a cold read does not silently activate one to perform a control.
   Continue currently requires an existing running product run. Without it, the
   API returns `409 GOAL_RUN_REQUIRED` before reaching the Host and the UI disables
   Continue. This guard alone is not proof that a live native follower is attached.
-  Complete cold control, observed run reattachment and restart recovery still
+  Complete cold resume, observed run reattachment and control-receipt recovery still
   require implementation and real-Host acceptance. Do not silently wake a cold
   Agent or send a model prompt to imitate a user resuming a paused Goal: the
   official model tool deliberately rejects that phase transition.
@@ -114,6 +123,18 @@ ordinary Agent; a cold read does not silently activate one to perform a control.
   exact-request retry, pause/continue/stop, ordinary/role separation and a mobile
   viewport. No model, remote website or production data is used. This is UI wiring
   evidence, not full Goal execution or production acceptance.
+
+The separate official-Host probe is:
+
+```sh
+node --test packages/dsh-host/test/cold-goal.test.mjs packages/dsh-host/test/cold-goal-controls.test.mjs
+```
+
+Set `JOT_DSH_RUNTIME_MODULES` to the installed locked SDK packages. The probes use
+temporary profiles without provider credentials. They cover read-only restart,
+cold pause, clearing active and paused Goals, competing CAS requests, durable
+restart results, refusal of parked input before activation, and zero model calls.
+They do not prove a complete interrupted-input recovery or observed resume flow.
 
 Copy the gateway `.env.example` to an untracked `.env`. Configure independent
 authentication tokens, allowed origins, writable database and workspace paths,

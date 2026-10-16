@@ -264,8 +264,8 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
     if(chatGoal){
       const sessionId=decodeURIComponent(chatGoal[1]);
       if(!ID.test(sessionId)||workbenchSessions.has(sessionId)||blockedWorkbenchSessions.has(sessionId))return json(422,{error:'conversation_goal_scope_invalid'});
-      try{return json(200,await readConversationGoal({agent:agents?.get?.(sessionId),controller,sessionId,body,signal}))}
-      catch(error){return json(409,{error:error.message==='goal_revision_changed'?'goal_revision_changed':'conversation_goal_unavailable'})}
+      try{return json(200,await readConversationGoal({agent:agents?.get?.(sessionId),agents,persistence,controller,sessionId,body,signal,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted'))}))}
+      catch(error){return json(409,{error:['goal_revision_changed','goal_cold_input_pending'].includes(error?.message)?error.message:'conversation_goal_unavailable'})}
     }
     const goalStatus=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/goal-status$/)
     if(goalStatus){

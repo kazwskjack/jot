@@ -78,7 +78,10 @@ verifies that persisted Goal reads neither instantiate an Agent nor rearm it.
 The ordinary workbench now has a plus-menu Goal composer and a native status card,
 with exact-request recovery for uncertain controls. Local built-UI fixtures cover
 these interactions and mobile/role isolation. Continue without a running product
-run is refused; full observed reattachment and cold controls remain unfinished.
+run is refused. Cold pause/clear now use the official resolver, maintenance and
+persistence after validating the ordinary preset, empty inbox and closed history.
+Actual-Host probes cover restart persistence, competing CAS and no model calls.
+Cold resume and crash-safe control receipt reconciliation remain unfinished.
 See [workbench configuration and remaining cold-control acceptance](../WORKBENCH.md#native-conversation-goals).
 These changes do not add a competing scheduler or complete the remaining
 Always-on, UI, routing, channel and packaging rows above.

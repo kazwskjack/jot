@@ -42,6 +42,9 @@ test('resume cannot arm a native Goal without an owned running product run',asyn
  f.db.prepare("UPDATE ga_runs SET status='running' WHERE id=?").run(receipt.run_id);
  assert.equal((await f.app.inject({method:'POST',url:f.path,headers,payload:body})).statusCode,200);assert.equal(calls,1);
 });
+test('a cold pending-input refusal remains a deterministic recovery conflict rather than an unknown mutation',async t=>{
+ const f=await fixture(t,{conversationGoal:async()=>{throw {protocolCode:'goal_cold_input_pending'};}});f.bind();const r=await f.app.inject({method:'POST',url:f.path,headers,payload:{action:'stop',id:goal.id,revision:4}});assert.equal(r.statusCode,409);assert.deepEqual(r.json(),{error:{code:'GOAL_CONTEXT_RECOVERY_REQUIRED'}});
+});
 
 test('authenticated Goal mutations retain normal CSRF and successful idempotent replay',async t=>{
  const root=mkdtempSync(join(tmpdir(),'jot-goal-auth-'));let calls=0;const csrf='c'.repeat(32),origin='http://localhost:3030';const service=await buildServer({databasePath:join(root,'test.db'),workspaces:['ws'],csrfToken:csrf,allowedOrigins:[origin],conversationGoalClient:{async conversationGoal(){calls++;return{goal:{...goal,phase:'paused',activation:'disarmed',revision:5}};}}});t.after(async()=>{await service.app.close();service.db.close();rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:20});});

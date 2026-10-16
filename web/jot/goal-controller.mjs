@@ -41,3 +41,9 @@ export function goalPrompt(text,enabled=false){
  if(!enabled)return text;
  return '目标模式：先调用 get_goal。没有目标时，调用 create_goal 创建以下目标，max_goal_rounds=9007199254740991（不设业务轮次上限）。已有目标时根据本条消息继续或调整，不重复创建、不丢进度。由原生目标驱动继续执行；用户暂停或停止、需要人工验证或真实阻塞时正确停止。按真实工具回执验收，不把进度答复当完成。\n用户目标：'+text;
 }
+export function goalControlError(error){
+ if(error?.status===409&&error.message==='GOAL_CONTEXT_RECOVERY_REQUIRED')return '会话有待恢复内容，请先恢复当前任务。';
+ if(error?.status===409&&error.message==='IDEMPOTENCY_IN_PROGRESS')return '操作仍在处理中，请重试原操作。';
+ if(error?.status===409)return '目标或运行状态已变化，请刷新后确认。';
+ return '操作结果尚未确认，请核对后重试原操作。';
+}

@@ -1,6 +1,6 @@
 import React,{useEffect,useMemo,useState} from 'react';
 import {request} from './client';
-import {ConversationGoalController,goalPresentation} from './goal-controller.mjs';
+import {ConversationGoalController,goalPresentation,goalControlError} from './goal-controller.mjs';
 const labels:Record<string,string>={pause:'暂停',resume:'继续',stop:'停止'};
 export default function ConversationGoal({id,running,runStatus,onPendingChange}:{id:string;running:boolean;runStatus?:string;onPendingChange:(pending:boolean)=>void}){
  const [,render]=useState(0),[error,setError]=useState(''),[confirmStop,setConfirmStop]=useState(false);
@@ -8,7 +8,7 @@ export default function ConversationGoal({id,running,runStatus,onPendingChange}:
  useEffect(()=>{let mounted=true;controller.onChange=()=>{if(mounted){render(n=>n+1);onPendingChange(controller.pending);}};setError('');setConfirmStop(false);return()=>{mounted=false;controller.onChange=()=>{};controller.dispose();onPendingChange(false);};},[controller,onPendingChange]);
  const refresh=async()=>{try{await controller.refresh();setError('');}catch{setError('目标状态暂不可用，请刷新重试。');}};
  useEffect(()=>{let mounted=true;const read=()=>void controller.refresh().then(()=>{if(mounted)setError('');},()=>{if(mounted)setError('目标状态暂不可用，请刷新重试。');});read();const timer=running?setInterval(read,3000):undefined;return()=>{mounted=false;clearInterval(timer);};},[controller,running,runStatus]);
- const execute=async(action?:string)=>{try{if(action)await controller.control(action);else await controller.retry();setError('');setConfirmStop(false);}catch(reason){setError((reason as {status?:number})?.status===409?'目标或运行状态已变化，请刷新后确认。':'操作结果尚未确认，请核对后重试原操作。');}};
+ const execute=async(action?:string)=>{try{if(action)await controller.control(action);else await controller.retry();setError('');setConfirmStop(false);}catch(reason){setError(goalControlError(reason));}};
  const goal=controller.goal,view=goal?goalPresentation(goal):null,disabled=controller.busy||controller.pending||!controller.available;
  if(!goal&&controller.available&&!controller.pending&&!error)return null;
  return <section className="jot-native-goal" aria-label="当前目标" aria-busy={controller.loading||controller.busy}>

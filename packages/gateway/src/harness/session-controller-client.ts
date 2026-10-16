@@ -74,7 +74,7 @@ export class SessionControllerClient {
     if (!response.ok) {
       const reasonCode = typeof value.reason_code === 'string' && SAFE_ADAPTER_REASON_CODES.has(value.reason_code)
         ? value.reason_code : 'DSH_NO_RUNTIME_OUTCOME'
-      throw new SessionAdapterError(response.status, reasonCode,value.error==='goal_revision_changed'?'goal_revision_changed':undefined)
+      throw new SessionAdapterError(response.status, reasonCode,typeof value.error==='string'&&['goal_revision_changed','goal_cold_input_pending'].includes(value.error)?value.error:undefined)
     }
     return value
   }

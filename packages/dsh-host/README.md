@@ -230,3 +230,15 @@ Goal, restarts the actual Host, then reads its persisted state through the
 adapter. It checks that the ID/revision/phase survive, activation is disarmed,
 and no Agent or model call is created by the read. It uses no provider credentials.
 This is restart/read acceptance, not a cold resume-control or power-loss test.
+
+`test/cold-goal-controls.test.mjs` uses the same actual launcher with isolated
+synthetic Sessions to pause a cold Goal, clear both active and paused Goals, and
+verify durable results after another restart. Competing CAS operations admit only
+one change; parked input is refused before activation, with zero model calls.
+Cold control inspects official history and uses the ordinary resolver plus native
+maintenance; the Host-only turn-boundary projection is not a wire contract.
+This does not prove cold resume, crash-window control receipt recovery, actual
+provider quality or production deployment acceptance.
+
+Set `JOT_HOST_DIAGNOSTIC_DIR` to an untracked private directory to retain startup
+failure diagnostics. The probes otherwise clean up their temporary profiles.
