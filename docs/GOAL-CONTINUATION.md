@@ -392,3 +392,39 @@ boundary. It does not cover an input already claimed before the crash, unflushed
 power loss, the default HTTP Controller, original Gateway/Worker execution or
 production permissions, composition and cumulative usage. Those integration and
 acceptance requirements remain open; the default runtime remains unchanged.
+
+
+## Original input resume preflight
+
+The exported `prepareOrdinaryInputResume` connects the internal product binding
+receipt to a cold native Session and its exact existing human RPC. A trusted
+caller must provide a live observer assertion and an audited composition check.
+This preparer does not create an observer or grant execution by accepting a
+caller-supplied boolean. The future HTTP Host must own the real parked stream.
+
+Before resolving an Agent it checks the original product receipt, ordinary preset,
+complete pending queue, human IDs/RPC, native history sequence and balanced turns.
+Already entered inputs, foreign requests, empty queues requiring claim recovery,
+paused/blocked Goals and unsupported composition are refused. Cold projections
+and history are cloned and frozen before asynchronous composition checks; sharing
+a mutable projection with a later inbox mutation cannot replace verified input.
+The native Agent must remain the original idle registered instance, with the
+optional compatibility capability and matching pending content/targets.
+
+The trusted `verifyComposition` callback runs at `cold` and `bound` phases and
+must return `{verified: true, fingerprint}` with the same reviewed fingerprint.
+It must verify historical provenance, actual preset/model/permissions/attachments
+and current mounted composition; returning a preset name alone is insufficient.
+There is intentionally no permissive default callback. Product authority is read
+again around preparation. The returned `check()` validates the unchanged local
+snapshot; asynchronous `recheck()` also reads current original lease/lineage and
+rechecks composition. Neither check is an enduring capability or tool approval.
+
+The result exposes the original Agent and exact native wake request, plus the
+unchanged `execution_authorized: false` identity receipt. It never calls native
+maintenance, wake, prompt or a model. The HTTP Host/Runner still needs to own the
+observer, invoke checks inside native maintenance, admit execution and guard
+subsequent steps/tools/models while preserving original usage/publication.
+Claim restoration and complete process/accounting/deployment acceptance remain
+separate requirements. The helper is packaged/exported for that integration;
+it is not wired to default HTTP routes or enabled by a preset change.

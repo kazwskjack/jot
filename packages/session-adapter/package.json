@@ -17,6 +17,7 @@
     "budget-model-selection.js",
     "conversation-goal.js",
     "conversation-goal-run-host.js",
+    "ordinary-input-resume.js",
     "native-child-admission.js",
     "native-child-closure.js",
     "native-invariant-replay.js",

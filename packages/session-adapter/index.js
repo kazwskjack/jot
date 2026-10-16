@@ -514,3 +514,4 @@ export {createNativeClaimedInputRecoverySetup} from './native-claimed-input.js'
 export {createNativeClaimedSessionComposer}
 export {createNativeReplayProfile} from './native-replay-profile.js'
 export {createNativeReplayProvenance} from './native-replay-provenance.js'
+export {prepareOrdinaryInputResume} from './ordinary-input-resume.js'

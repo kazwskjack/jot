@@ -4,7 +4,7 @@ title: Keep native Goal state and continuation in DSH
 category: decision
 status: active
 created: "2026-10-16T11:44:16"
-updated: "2026-10-16T16:51:33"
+updated: "2026-10-16T17:04:42"
 ---
 
 <!-- compiled_truth -->
@@ -33,6 +33,8 @@ Observer/lease loss is an owning-execution cancellation and uses the official pa
 Ordinary original-input recovery now has a read-only internal product binding endpoint. The existing service identity and a transaction prove the running original human run/message, database-derived owner, current Session and exact Coordinator lease; workbench and message-free Goal runs are rejected. Its stored product content digest is not native attachment equivalence, and execution_authorized remains false. This identity snapshot cannot wake a driver, reserve model cost or replace tool permission. The current Host/Runner does not yet consume it: original native input/composition and cumulative accounting recovery still need implementation and real acceptance.
 
 The locked upstream Controller cannot wake an already accepted pending RPC, and its driver wake is private. An explicit optional Jot compatibility transform now adds an exact-sequence/exact-pending-ID/exact-human-RPC wake capability behind original native maintenance, without inbox mutation or a new prompt. It uses the native driver latch and honours native cancellation. The prepared package must retain the complete audited setup hooks and exact pinned upstream bytes; partial/modified packages are refused and the default package preparation remains unchanged. This is a Jot extension, not an upstream API. Real local SDK tests cover attached-input consumption once and cancellation before execution; cold original-run recovery, Host/Runner integration, composition/permission/accounting and production acceptance remain incomplete. No installed live runtime is modified or feature enabled by the transform.
+
+Original-input resume preflight now joins original product binding to exact cold native pending human RPCs before Agent resolution. Clone/freeze native projection and history before asynchronous checks: a shared mutable projection otherwise allowed changed content to replace verified input. A trusted actual observer assertion and cold/bound historical-composition audit with an unchanged fingerprint are mandatory, with no permissive default; repeated checks retain original lineage/lease and unchanged native sequence/inbox. This packaged preparer does not open a stream, restore claims, grant execution or wake a driver. The real HTTP Host/Runner, cumulative usage and full recovery/deployment acceptance remain incomplete.
 
 
 ## Timeline
@@ -160,5 +162,11 @@ The locked upstream Controller cannot wake an already accepted pending RPC, and 
 - time: 2026-10-16T16:51:33
   kind: decision
   summary: Use an explicit audited native maintenance capability for existing-input wake without fabricated prompts
+  source: docs/GOAL-CONTINUATION.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-16T17:04:42
+  kind: decision
+  summary: Freeze original pending input across audited recovery preflight without granting execution
   source: docs/GOAL-CONTINUATION.md
   affects: [native-goal-boundary]
