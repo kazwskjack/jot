@@ -197,3 +197,16 @@ retry/restart. The original attachment pipeline is preserved; these native cases
 use text. Cold claimed-factory integration, richer attachment acceptance, cost
 settlement, retention and rollout remain separate unfinished gates. See
 [Goal continuation](GOAL-CONTINUATION.md).
+
+
+## Ordinary entry reservation milestone
+
+Versioned original admission receipts now require an exclusive durable native
+step-entry reservation. A competing or previously reserved attempt cannot be
+replayed from an apparently unentered cold log. Original pending-input recovery
+must adopt the real admission gate before wake; legacy identity-only Host
+configuration is refused. The entry record is neither a model-call receipt nor
+usage/accounting evidence. A real Host hard-exit probe preserves that conservative
+boundary. Cold claimed-factory integration and unknown outcome/cost reconciliation
+remain open; no production switch is enabled. See
+[Goal continuation](GOAL-CONTINUATION.md).

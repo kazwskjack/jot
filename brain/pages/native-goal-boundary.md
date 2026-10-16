@@ -4,7 +4,7 @@ title: Keep native Goal state and continuation in DSH
 category: decision
 status: active
 created: "2026-10-16T11:44:16"
-updated: "2026-10-16T18:42:53"
+updated: "2026-10-16T19:02:24"
 ---
 
 <!-- compiled_truth -->
@@ -47,6 +47,8 @@ Opt-in original ordinary-run recovery now connects Worker, SessionControllerClie
 普通聊天的 claimed 输入还原现在有独立的 unpublished-factory 校验层：沿原 Gateway owner/run/Session/input hash/lease，校验原消息 RPC、全消息指纹、Session createdAt 与历史 admission/configuration 指纹，再调用原生 append-only 还原算法。消息的历史受理证明必须先于中断存在，不能在恢复时根据当前日志补造。真实 Gateway/SDK 硬退出验证了落盘后发布、重复硬退出后零重复插入和错误身份/配置/admission 的拒绝，且没有模型调用。工厂还原始终不授予执行权；普通 HTTP claimed 恢复仍拒绝，尚须接入原 Controller 消息受理存储、原工厂前后配置审核与观察中的 Worker 执行，之后才能开放。普通销毁会取消 inbox，不得当作崩溃测试或复活已取消消息。
 
 普通消息的历史 admission 现在由可选 original Controller 受理观察器生成：保留官方文件收据/图像能力/附件处理，在原生 inbox inserted 时同步捕获最终消息指纹，先经原 sessions.flush 确认原生日志落盘再发布原子私有记录，原 pre-step 等待两道持久化屏障并核对最终 enter 内容。首次 Worker/Runner/Client 只在原恢复开关开启时传原 run/lease，缺 Host 不回落。每 Session incarnation/run/native ID 一条不可覆盖的 hash-only 记录，不保存正文或凭据。官方 committed/pending 去重存在 claimed 未 entered 空档；本地原受理记录在该空档返回相同 acceptance 而不再次调用 Controller。冷历史插入不能当新提交或补造受理证明。真实 Controller 已验证领取空档去重、正常一次模型执行和原 Worker 一条 canonical 回答；模型为本地脚本，当前实测为文本。原 claimed factory、附件专项、未知费用/生产组合审核和 rollout 仍未完成，默认开关保持关闭。
+
+冷日志缺少 step/request 事件不证明从未调用模型。普通恢复新增强制 durable entry reservation：受理证明协议2与入口服务协议1分开，旧受理证明不因没有新文件而自动升级。最终原生 pre-step enter 前以原消息+Session incarnation+admission hash+当前lease+Host新observer ID原子创建排他记录；记录证明预留，不证明调用/费用/成功，不因租约过期或Goal未变清除。readReplayCandidate与原claimed policy拒绝已有预留。普通恢复Host强制配置实际admission gate，唤醒前adoptRecovered只接管当前原run/lease和精确pending消息，真实受理证明不补写，进入时仍竞争同一个排他槽；旧身份-only配置不再支持。冷claimed factory因此仍未开放，不能在缺少不可重放边界时直接接线。对不确定入口和历史费用继续保守对账，保留DSH总控、原权限/高推理和用户取消。
 
 
 ## Timeline
@@ -228,5 +230,11 @@ Opt-in original ordinary-run recovery now connects Worker, SessionControllerClie
 - time: 2026-10-16T18:42:53
   kind: decision
   summary: Flush the original native input before publishing its immutable admission receipt
+  source: docs/GOAL-CONTINUATION.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-16T19:02:24
+  kind: decision
+  summary: "Fence ordinary replay with versioned immutable entry reservation; absence of buffered native events is not a not-called receipt"
   source: docs/GOAL-CONTINUATION.md
   affects: [native-goal-boundary]

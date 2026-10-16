@@ -7,7 +7,8 @@ export function normalizeOrdinaryInputExecution(value){
  return Object.freeze({runId:value.run_id,executionLease:normalizeHostExecutionLease(value.execution_lease)});
 }
 /** One parked original-run observer; no new prompt, Goal or planner. */
-export function createOrdinaryInputRunHost({controller,agents,bridge,ordinaryPresets,verifyComposition}){
+export function createOrdinaryInputRunHost({controller,agents,bridge,ordinaryPresets,verifyComposition,inputAdmissionHost}){
+ if(inputAdmissionHost?.entryReservationProtocol!==1||typeof inputAdmissionHost.adoptRecovered!=='function')throw Error('ordinary_input_host_unavailable');
  if(!['follow','projections','inspect','resolveAgent'].every(key=>typeof controller?.[key]==='function')||typeof agents?.get!=='function'||typeof bridge?.request!=='function'||typeof verifyComposition!=='function'||!(ordinaryPresets instanceof Set)||!ordinaryPresets.size)throw Error('ordinary_input_host_unavailable');
  const observers=new Map(),bound=new Map();let disposed=false;
  const active=record=>{if(disposed||record.closed||record.signal.aborted||observers.get(record.sessionId)!==record)throw Error('ordinary_input_observer_required');};
@@ -58,7 +59,7 @@ export function createOrdinaryInputRunHost({controller,agents,bridge,ordinaryPre
   async resume(sessionId,value){
    const owned=normalizeOrdinaryInputExecution(value),record=observers.get(sessionId);if(!record?.opened||!isDeepStrictEqual(record.binding,owned))throw Error('ordinary_input_observer_required');active(record);
    record.promise??=(async()=>{try{
-    const prepared=await prepareOrdinaryInputResume({binding:{...owned,sessionRef:sessionId},controller,agents,bridge,ordinaryPresets,verifyComposition,observer:{assertActive:()=>active(record)},signal:record.signal});active(record);record.prepared=prepared;record.agent=prepared.agent;install(record);
+    const prepared=await prepareOrdinaryInputResume({binding:{...owned,sessionRef:sessionId},controller,agents,bridge,ordinaryPresets,verifyComposition,observer:{assertActive:()=>active(record)},signal:record.signal});active(record);record.prepared=prepared;record.agent=prepared.agent;if(inputAdmissionHost){const admission=await inputAdmissionHost.adoptRecovered({agent:record.agent,binding:{...owned,sessionRef:sessionId},signal:record.signal});active(record);if(admission?.execution_authorized!==false||!isDeepStrictEqual(admission.message_ids,prepared.request.messageIds))throw Error('ordinary_input_admission_unconfirmed');}install(record);
     record.maintenance=true;try{const result=await record.agent.runMaintenance(async nativeSignal=>{await prepared.recheck();nativeSignal.throwIfAborted();active(record);record.release();await prepared.recheck();nativeSignal.throwIfAborted();active(record);prepared.check();record.ownsExecution=true;const wake=record.agent.jotResumePending(prepared.request);record.wakeToken=wake?.wakeToken;if(wake?.accepted!==true||typeof record.wakeToken!=='symbol'||wake.seq!==prepared.request.seq||!isDeepStrictEqual(wake.messageIds,prepared.request.messageIds))throw Error('ordinary_input_wake_unconfirmed');record.admitted=true;return{accepted:true,run_id:owned.runId,session_id:sessionId,input_message_id:prepared.authority.input_message_id,native_message_ids:[...wake.messageIds]};});active(record);return result;}finally{record.maintenance=false;if(record.revoked&&record.agent.status==='idle')clean(record);}
    }catch(error){revoke(record);throw error;}})();return record.promise;
   },

@@ -11,7 +11,7 @@ const fail=()=>{throw Error('ordinary_claimed_input_unconfirmed');};
  * Admissions must come from a separately audited original prompt-admission path,
  * not be inferred or created from the current cold message during recovery. */
 export function createOrdinaryClaimedInputRecoverySetup({binding,bridge,ordinaryPresets,profile,admissions,signal,...native}={}){
- if(!binding||Object.keys(binding).sort().join(',')!=='executionLease,runId,sessionRef'||!valid(binding.runId)||!valid(binding.sessionRef)||typeof bridge?.request!=='function'||!(ordinaryPresets instanceof Set)||!ordinaryPresets.size||typeof profile?.read!=='function'||typeof admissions?.read!=='function')fail();
+ if(!binding||Object.keys(binding).sort().join(',')!=='executionLease,runId,sessionRef'||!valid(binding.runId)||!valid(binding.sessionRef)||typeof bridge?.request!=='function'||!(ordinaryPresets instanceof Set)||!ordinaryPresets.size||typeof profile?.read!=='function'||admissions?.entryReservationProtocol!==1||typeof admissions.readReplayCandidate!=='function')fail();
  let lease;try{lease=normalizeHostExecutionLease(binding.executionLease);}catch{fail();}
  const owned=freeze({runId:binding.runId,sessionRef:binding.sessionRef,executionLease:lease}),results=new WeakMap(),used=new WeakSet();
  const setup=async(ctx,agent)=>{
@@ -27,8 +27,8 @@ export function createOrdinaryClaimedInputRecoverySetup({binding,bridge,ordinary
   };
   const verifyAdmissions=async candidates=>{for(const candidate of candidates){
    check();if(candidate.source?.kind!=='user'||candidate.source.rpcId!==owned.runId||!valid(candidate.message_id)||!hash(candidate.message_sha256)||!['next-step','next-turn'].includes(candidate.target))fail();
-   const row=await admissions.read({session:agent.session,runId:owned.runId,messageId:candidate.message_id,signal});check();
-   const expected={protocol:1,run_id:original.run_id,input_message_id:original.input_message_id,conversation_id:original.conversation_id,owner_id:original.owner_id,session_id:original.session_id,session_created_at:agent.session.header.createdAt,input_sha256:original.input_sha256,native_message_id:candidate.message_id,native_message_sha256:candidate.message_sha256,profile_fingerprint:reviewed.fingerprint};
+   const row=await admissions.readReplayCandidate({session:agent.session,runId:owned.runId,messageId:candidate.message_id,signal});check();
+   const expected={protocol:2,run_id:original.run_id,input_message_id:original.input_message_id,conversation_id:original.conversation_id,owner_id:original.owner_id,session_id:original.session_id,session_created_at:agent.session.header.createdAt,input_sha256:original.input_sha256,native_message_id:candidate.message_id,native_message_sha256:candidate.message_sha256,profile_fingerprint:reviewed.fingerprint};
    if(!isDeepStrictEqual(row,expected))fail();
   }};
   const authorize=async()=>{check();const current=await readOrdinaryInputAuthority({bridge,binding:owned,signal,assertActive:check});check();

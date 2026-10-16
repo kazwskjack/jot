@@ -650,7 +650,7 @@ to the safety callback along with the original queue target and message ID.
 An admission provider must return exactly these fields:
 
 ```
-protocol: 1
+protocol: 2
 run_id, input_message_id, conversation_id, owner_id, session_id
 session_created_at, input_sha256
 native_message_id, native_message_sha256, profile_fingerprint
@@ -769,3 +769,96 @@ checked inside the scheduled original Controller operation as well as at awaited
 boundaries; a cancelled queued microtask cannot submit later, and its rejected
 promise remains observed. These checks preserve uncertainty without creating a
 new prompt or inferring model/accounting completion.
+
+
+## Durable exclusive step-entry reservation
+
+An unentered-looking cold native log is insufficient evidence of no model call:
+step and request events can still be buffered when a process exits. Ordinary
+replay now requires a negative entry check backed by the original private
+admission store. The service advertises `entryReservationProtocol: 1`; its
+admission receipts use **protocol 2**. Legacy protocol-1 admissions are refused,
+not upgraded from current content, current profile, or absence of a newer file.
+This version boundary is independent of the Gateway binding and native wake
+protocols, which retain their existing versions.
+
+Before the final original pre-step returns `enter`, the admission Host atomically
+reserves that message's entry slot with `reserveEntry`. The immutable
+`.entry.json` record binds the Session incarnation, original run/native message,
+admission hash, current execution lease and a fresh Host-local observer ID.
+Two competing attempts cannot overwrite or both own that slot. Only the same
+exact local attempt can repeat its reservation idempotently; a new Host never
+reconstructs activation authority from an old observer ID stored on disk.
+The Host rechecks the original authority/profile and native cancellation after
+the awaited reservation and before returning the native enter decision.
+
+This record proves **reservation**, not model dispatch, success, usage or cost.
+`readReplayCandidate` checks for it before and after reading the original
+admission and refuses any existing reservation conservatively. No TTL, lease
+replacement, unchanged Goal or missing native step event clears an unknown
+reservation. The separate original factory policy now requires this versioned
+replay-safe reader. Reconciliation of reserved-but-not-entered, model-dispatched
+and settled attempts remains a later accounting/recovery requirement.
+
+The ordinary recovery Host must now have the actual admission gate configured;
+it cannot silently use the earlier identity-only path. After preflight and before
+native maintenance/wake, it adopts the exact pending original messages through
+`adoptRecovered`. Adoption verifies their original protocol-2 receipts, profile,
+content, Session sequence and live lease without a prompt or a new admission
+write. It returns `execution_authorized: false`. A recovered native pre-step
+then competes for its own immutable entry slot through the same gate. A prior
+reservation blocks adoption; a competing reservation created after adoption
+still blocks its entry. Rebinding stale local guards requires the same live idle
+Agent, unchanged exact pending messages and current original authority; it does
+not reclaim a reserved entry or revive user cancellation.
+
+The actual HTTP fixture now uses the versioned private admission store for all
+ordinary recovery cases, including the explicitly synthetic quiet-input seeds.
+Those seeds obtain the real original Gateway binding and reviewed fixture profile;
+they are still not production Controller admissions. The actual Controller cases
+retain their original initial-admission path. A new hard-process-death probe
+stops after the entry reservation is durably published but before native input
+commit/model entry. After restart the immutable reservation remains, the replay
+reader refuses it, and no fresh model/Agent is activated. This does not classify
+that reservation as not-called, certify power-loss durability, or settle cost.
+
+Cold claimed-factory integration still remains. This reservation gate was added
+first so that wiring the factory cannot confuse missing buffered native events
+with permission to repeat an already attempted model/tool path. Both existing
+Goal switches and ordinary production recovery remain disabled. Storage now has
+at most one bounded admission and one bounded entry-reservation payload per
+native message, plus filesystem/temporary-file overhead. Retention and unknown
+outcome reconciliation must preserve both records together.
+
+
+### Persistence verification diagnostics
+
+The final native-log prefix read remains an explicit acceptance assertion;
+returning from `sessions.flush(session)` alone does not satisfy it. One local
+12-case run passed 11 cases and timed out in the ordinary Worker case after the
+model response and native idle event. A focused repeat recorded the last stage
+as `prefix-read-awaiting`, without an exception or fatal Host output. Isolated
+decoding of a captured **synthetic** log passed 100 repetitions; instrumented
+focused Worker runs also passed. These observations do not establish the cause
+of the original stall or prove a production persistence defect/fix.
+
+A later buffered-diagnostic run exposed a separate, confirmed Windows fixture
+fault: the test reader could temporarily deny atomic replacement of its own
+`receipt.json`, and the resulting `EPERM` escaped the diagnostic timer. The
+fixture receipt writer now retries only `EPERM`, `EACCES` or `EBUSY` rename
+contention, at most ten attempts with ten-millisecond pauses, then fails visibly.
+Unrelated errors fail immediately. The bytes and atomic rename operation remain
+unchanged. This helper is test-only; native logs, private admissions, entry
+reservations, model execution, deadlines and prefix equality assertions are not
+altered. Optional persistence-method traces and synthetic-byte snapshots are
+private diagnostic aids, disabled in normal acceptance. Passing instrumented
+runs must not erase earlier failures or count as production rollout evidence.
+
+The final uninstrumented local suite passed 11 of 12 cases, including the
+previously stalled Worker and the new reserved-entry hard-death refusal. The
+remaining blocked-Goal case exited during Host restart with loopback `listen
+EACCES`, before its recovery assertion; its unchanged focused repeat passed.
+This is split-run evidence, not a claim of one clean 12-case suite. Adapter
+regressions passed 429/429, root tests 32/32, the receipt helper 2/2 and the
+Windows build passed. No production enablement follows from these local
+scripted-provider and fixture-composition results.

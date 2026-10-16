@@ -2,12 +2,12 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import {createAdapterHandler} from '../index.js';
 const create=(await import('../ordinary-input-run-host.js').catch(()=>({}))).createOrdinaryInputRunHost;
 const wire={run_id:'run-a',execution_lease:{owner:'worker-a',generation:2}};
-function fixture(){
+function fixture(options={}){
  const calls=[],hooks=new Map(),message={id:'native-a',role:'user',source:{kind:'user',rpcId:'run-a'},content:[{type:'text',text:'Original'}]};let agent,allowed=true,hold=false,release;
  const candidate={id:'session-a',session:{id:'session-a',seq:4,snapshotEvents:()=>[]},status:'idle',inbox:{nextStep:[],nextTurn:[message],prepend:(_target,m)=>candidate.inbox.nextStep.unshift(m)},ctx:{get:()=>({disarm:()=>calls.push('disarm')}),on:(name,fn)=>{hooks.set(name,fn);return()=>hooks.delete(name);}},jotPendingInputProtocol:1,jotPendingWakeRevocationProtocol:1,jotResumePending:request=>{calls.push('wake');candidate.token=Symbol();return Object.defineProperty({accepted:true,messageIds:request.messageIds,seq:request.seq},'wakeToken',{value:candidate.token});},jotRevokePendingWake:token=>{assert.equal(token,candidate.token);calls.push('revoke-wake');return true;},cancel:()=>{calls.push('cancel');candidate.status='idle';},runMaintenance:async fn=>{calls.push('maintenance');const value=await fn(new AbortController().signal);if(hold)await new Promise(r=>release=r);return value;}};
  const controller={projections:async()=>({values:{agentPreset:'jot-general',goal:null,inbox:{'next-turn':[message],'next-step':[]}}}),inspect:async()=>({meta:{id:'session-a'},events:[{seq:0,type:'session/end-seed',data:{}}]}),resolveAgent:async()=>{calls.push('resolve');agent=candidate;return{agent};},async *follow(_body,signal){calls.push('follow');yield{type:'snapshot',cursor:3,records:[]};calls.push('advance');await new Promise(r=>{if(signal.aborted)r();else signal.addEventListener('abort',r,{once:true});});}};
  const bridge={request:async()=>{if(!allowed)throw Error('revoked');return{binding:{protocol:1,run_id:'run-a',request_id:'run-a',input_message_id:'product-a',conversation_id:'conv-a',owner_id:'owner-a',session_id:'session-a',execution_lease:wire.execution_lease,input_sha256:'a'.repeat(64),execution_authorized:false}};}};
- assert.equal(typeof create,'function');const host=create({controller,agents:{get:()=>agent},bridge,ordinaryPresets:new Set(['jot-general']),verifyComposition:async()=>({verified:true,fingerprint:'b'.repeat(64)})});
+ assert.equal(typeof create,'function');const host=create({controller,agents:{get:()=>agent},bridge,ordinaryPresets:new Set(['jot-general']),verifyComposition:async()=>({verified:true,fingerprint:'b'.repeat(64)}),inputAdmissionHost:{entryReservationProtocol:1,adoptRecovered:async()=>({execution_authorized:false,message_ids:['native-a']})},...options});
  return{host,controller,candidate,calls,hooks,revoke:()=>allowed=false,hold:()=>hold=true,release:()=>release?.(),abort:new AbortController()};
 }
 async function open(f){const stream=f.host.follow('session-a',wire,{address:{kind:'session',sessionId:'session-a'}},f.abort.signal);assert.equal((await stream.next()).value.type,'snapshot');return stream;}
@@ -44,4 +44,15 @@ test('a native wake that throws after latching cannot admit model execution',asy
 test('malformed HTTP execution metadata is rejected before opening a native stream',async()=>{
  const handler=createAdapterHandler({token:'t'.repeat(32),controller:{},ordinaryInputRunHost:{follow(){throw Error('must not open');},resume(){throw Error('must not resume');}}});
  for(const path of ['follow','input-resume'])for(const ordinary_input of [{...wire,owner_id:'forged'},{run_id:'run-a',execution_lease:{owner:'worker-a',generation:0}}])assert.equal((await handler({method:'POST',url:new URL('http://127.0.0.1/v1/sessions/session-a/'+path),headers:{authorization:'Bearer '+'t'.repeat(32)},body:{ordinary_input}})).status,422);
+});
+
+
+test('original recovery adopts the existing admission before native wake and refuses unknown entry',async()=>{
+ let adopted=0;const f=fixture({inputAdmissionHost:{entryReservationProtocol:1,adoptRecovered:async({agent,binding})=>{adopted++;assert.equal(agent.id,'session-a');assert.deepEqual(binding,{runId:'run-a',sessionRef:'session-a',executionLease:wire.execution_lease});return{execution_authorized:false,message_ids:['native-a']};}}});const stream=await open(f);await f.host.resume('session-a',wire);assert.equal(adopted,1);assert.equal(f.calls.filter(c=>c==='wake').length,1);f.abort.abort();await stream.return();await f.host.dispose();
+ const g=fixture({inputAdmissionHost:{entryReservationProtocol:1,adoptRecovered:async()=>{throw Error('ordinary_input_entry_reserved');}}}),other=await open(g);await assert.rejects(()=>g.host.resume('session-a',wire),/entry_reserved/);assert.ok(!g.calls.includes('wake'));g.abort.abort();await other.return();await g.host.dispose();
+});
+
+
+test('original recovery cannot be constructed without the durable entry admission gate',()=>{
+ assert.throws(()=>fixture({inputAdmissionHost:undefined}),/ordinary_input_host_unavailable/);
 });
