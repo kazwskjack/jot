@@ -91,9 +91,29 @@ an Agent, calling a model or rearming a Goal. A persisted active phase is shown
 as disarmed until explicitly resumed. Missing Sessions return null; unavailable
 or corrupt projections return an error. Controls currently require a loaded
 ordinary Agent; a cold read does not silently activate one to perform a control.
-The public workbench's dedicated Goal composer/control UI and a complete cold
-control/reattachment flow still need acceptance; these API and runner changes do
-not establish that those interfaces or every deployment are ready.
+  The ordinary conversation composer includes **+ → Goal mode**. The status card
+  shows the objective, native phase and admitted rounds, with pause, continue and
+  confirmed stop controls. Pause stops subsequent rounds; it does not cancel an
+  in-flight tool operation. Unknown control replies retain the original revision
+  and idempotency key; returning from the conversation is blocked until resolved.
+  Goal mode sends the explicit human request through the original message path
+  and native model tools. It requests the maximum safe integer round count, not
+  a second scheduler or a change to token, currency or permission policy.
+
+  Continue currently requires an existing running product run. Without it, the
+  API returns `409 GOAL_RUN_REQUIRED` before reaching the Host and the UI disables
+  Continue. This guard alone is not proof that a live native follower is attached.
+  Complete cold control, observed run reattachment and restart recovery still
+  require implementation and real-Host acceptance. Do not silently wake a cold
+  Agent or send a model prompt to imitate a user resuming a paused Goal: the
+  official model tool deliberately rejects that phase transition.
+
+  After building, `npm run test:goal-ui` uses the optional Playwright dependency
+  and a local browser (Edge on Windows, installed Chromium elsewhere). It serves
+  the actual built workbench with synthetic API fixtures, covering the plus menu,
+  exact-request retry, pause/continue/stop, ordinary/role separation and a mobile
+  viewport. No model, remote website or production data is used. This is UI wiring
+  evidence, not full Goal execution or production acceptance.
 
 Copy the gateway `.env.example` to an untracked `.env`. Configure independent
 authentication tokens, allowed origins, writable database and workspace paths,

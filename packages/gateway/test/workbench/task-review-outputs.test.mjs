@@ -82,12 +82,12 @@ test('preview verification keeps a read snapshot without blocking a separate wor
  try{const result=await read(f,`/v1/interactions/${card.interaction_id}/outputs/0`);assert.equal(result.statusCode,200,result.body);assert.equal(checked,true);assert.equal(f.db.prepare('SELECT value FROM preview_write_probe').get().value,1);}finally{writer.close();}
 });
 
-test('a pending download bounds concurrent reads and disconnect releases the preview slot',async t=>{
+test('a pending download bounds concurrent reads and disconnect releases the preview slot',{timeout:15000},async t=>{
  let entered,release;const started=new Promise(resolve=>entered=resolve),hold=new Promise(resolve=>release=resolve);
  const f=await files(t,f=>f.app.addHook('onSend',async(request,reply,payload)=>{if(request.url.endsWith('/outputs/0')){entered();await hold;}return payload;}));
  const card=(await f.list())[0],base=`/v1/interactions/${card.interaction_id}/outputs`,address=await f.app.listen({host:'127.0.0.1',port:0});let pending;
  try{
-  pending=get(address+base+'/0',{headers:{'x-user-id':'alice'}},response=>response.resume());pending.on('error',()=>{});await started;
+  pending=get(address+base+'/0',{headers:{'x-user-id':'alice'}},response=>response.resume());pending.on('error',()=>{});await Promise.race([started,new Promise((resolve,reject)=>pending.once('error',reject))]);
   const blocked=await read(f,base);assert.equal(blocked.statusCode,429,blocked.body);assert.match(blocked.headers['cache-control'],/no-store/);
  }finally{pending?.destroy();release();}
  let recovered;for(let attempt=0;attempt<20;attempt++){await new Promise(resolve=>setTimeout(resolve,20));recovered=await read(f,base);if(recovered.statusCode!==429)break;}

@@ -38,6 +38,7 @@ export function registerConversationGoalRoutes(app:FastifyInstance,{db,conversat
     if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).length!==3||Object.keys(body).some(k=>!['action','id','revision'].includes(k))
       ||!['pause','resume','stop'].includes(String(body.action))||typeof body.id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(body.id)||!Number.isSafeInteger(body.revision)||Number(body.revision)<1)return reply.code(400).send({error:{code:'GOAL_INPUT_INVALID'}});
     if(!binding.sessionId)return reply.code(503).send({error:{code:'GOAL_UNAVAILABLE'}});
+    if(body.action==='resume'&&!db.prepare("SELECT 1 FROM ga_runs WHERE conversation_id=? AND status='running' LIMIT 1").get(String((request.params as Record<string,unknown>).conversationId)))return reply.code(409).send({error:{code:'GOAL_RUN_REQUIRED'}});
     try{return await native(binding.sessionId,body);}catch(error){return failure(reply,error);}
   });
 }

@@ -16,6 +16,11 @@ test('a rejected request is not retained as an uncertain accepted message',async
  const controller=new RoleChatController('role-1',{request:async()=>{throw Object.assign(new Error('denied'),{status:403});}});
  await assert.rejects(()=>controller.send('message'),/denied/);assert.equal(controller.pendingMessage,false);
 });
+test('ordinary Goal send freezes the native instruction on lost receipt and default messages stay unchanged',async()=>{
+ const calls=[];let fail=true;const c=new RoleChatController('ordinary',{request:async(path,method,body,key)=>{calls.push(structuredClone({body,key}));if(fail){fail=false;throw Error('lost');}return {};}});
+ await assert.rejects(()=>c.send('Find sources',[],{goalMode:true}));assert.match(calls[0].body.content[0].text,/create_goal/);
+ await c.send('Changed draft',[],{goalMode:false});assert.deepEqual(calls[0],calls[1]);await c.send('Normal message');assert.equal(calls[2].body.content[0].text,'Normal message');
+});
 
 test('attachment-only messages and unknown sends freeze the exact uploaded file references',async()=>{
  const calls=[];let fail=true;const controller=new RoleChatController('role-1',{request:async(path,method,body,key)=>{calls.push(structuredClone({body,key}));if(fail){fail=false;throw new Error('connection_lost');}return {accepted:true};}});

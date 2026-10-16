@@ -1,4 +1,5 @@
 import {fromSnapshot,reduceEvent} from './projection.ts';
+import {goalPrompt} from './goal-controller.mjs';
 export class RoleChatController {
  constructor(id,api,onChange=()=>{}){this.id=id;this.api=api;this.onChange=onChange;this.state=null;this.pending=null;this.connection='connecting';this.error='';this.abort=null;this.sending=false;}
  get pendingMessage(){return Boolean(this.pending);}
@@ -18,12 +19,13 @@ export class RoleChatController {
    await new Promise(resolve=>{const done=()=>{clearTimeout(timer);controller.signal.removeEventListener('abort',done);resolve();};const timer=setTimeout(done,Math.min(15000,300*2**Math.min(attempts++,6)));controller.signal.addEventListener('abort',done,{once:true});});
   }}
  }
- async send(text,attachments=[]){
+ async send(text,attachments=[],options={}){
   if(this.sending)throw new Error('message_in_flight');
   if(!this.pending){
    if(!Array.isArray(attachments)||attachments.some(id=>typeof id!=='string'||!id||id.length>200)||new Set(attachments).size!==attachments.length)throw new Error('invalid_attachments');
    if(!text.trim()&&!attachments.length)throw new Error('empty_message');
-   const content=[...(text.trim()?[{type:'text',text}]:[]),...attachments.map(artifact_id=>({type:'file',artifact_id}))];
+   if(options.goalMode&&!text.trim())throw new Error('goal_objective_required');
+   const content=[...(text.trim()?[{type:'text',text:goalPrompt(text,options.goalMode===true)}]:[]),...attachments.map(artifact_id=>({type:'file',artifact_id}))];
    this.pending={key:crypto.randomUUID(),body:{client_message_id:crypto.randomUUID(),content,client_time_zone:Intl.DateTimeFormat().resolvedOptions().timeZone}};
   }
   this.sending=true;this.changed();const pending=this.pending;

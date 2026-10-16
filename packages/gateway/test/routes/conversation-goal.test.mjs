@@ -34,6 +34,14 @@ test('unavailable adapters and malformed Goal views expose fixed errors',async t
  const broken=await fixture(t,{conversationGoal:async()=>{throw Error('private credential');}});broken.bind();const response=await broken.app.inject({method:'GET',url:broken.path,headers});assert.equal(response.statusCode,503);assert.ok(!response.body.includes('private credential'));
  const malformed=await fixture(t,{conversationGoal:async()=>({goal:{...goal,phase:'surprise'},hidden:'private'})});malformed.bind();const bad=await malformed.app.inject({method:'GET',url:malformed.path,headers});assert.equal(bad.statusCode,502);assert.equal(bad.json().error.code,'GOAL_STATE_INVALID');assert.ok(!bad.body.includes('private'));
 });
+test('resume cannot arm a native Goal without an owned running product run',async t=>{
+ let calls=0;const f=await fixture(t,{conversationGoal:async()=>{calls++;return {goal};}});f.bind();const body={action:'resume',id:goal.id,revision:4};
+ const blocked=await f.app.inject({method:'POST',url:f.path,headers,payload:body});assert.equal(blocked.statusCode,409);assert.equal(blocked.json().error.code,'GOAL_RUN_REQUIRED');assert.equal(calls,0);
+ const receipt=(await f.app.inject({method:'POST',url:`/v1/conversations/${f.id}/messages`,headers,payload:{client_message_id:'fixture-message',content:[{type:'text',text:'Continue after review'}]}})).json();assert.ok(receipt.run_id);
+ assert.equal((await f.app.inject({method:'POST',url:f.path,headers,payload:body})).statusCode,409);assert.equal(calls,0);
+ f.db.prepare("UPDATE ga_runs SET status='running' WHERE id=?").run(receipt.run_id);
+ assert.equal((await f.app.inject({method:'POST',url:f.path,headers,payload:body})).statusCode,200);assert.equal(calls,1);
+});
 
 test('authenticated Goal mutations retain normal CSRF and successful idempotent replay',async t=>{
  const root=mkdtempSync(join(tmpdir(),'jot-goal-auth-'));let calls=0;const csrf='c'.repeat(32),origin='http://localhost:3030';const service=await buildServer({databasePath:join(root,'test.db'),workspaces:['ws'],csrfToken:csrf,allowedOrigins:[origin],conversationGoalClient:{async conversationGoal(){calls++;return{goal:{...goal,phase:'paused',activation:'disarmed',revision:5}};}}});t.after(async()=>{await service.app.close();service.db.close();rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:20});});

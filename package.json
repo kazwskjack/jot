@@ -13,6 +13,7 @@
     "test": "node --test test/*.test.mjs",
     "test:dsh-host": "npm --prefix packages/dsh-host test",
     "test:workbench-ui": "node --test web/workbench/*.test.mjs web/jot/*.test.mjs",
+    "test:goal-ui": "node scripts/verify-goal-ui.mjs",
     "test:public": "node --test scripts/verify-public.test.mjs scripts/verify-git-public.test.mjs && node scripts/verify-public.mjs .",
     "brain": "brain"
   },

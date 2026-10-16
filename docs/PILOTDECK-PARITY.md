@@ -75,6 +75,10 @@ DSH Session. Role/task Goals stay on their existing scoped path. The runner
 retains the original stream across native rounds and suppresses crawl-follow
 prompts when a Goal is paused or blocked. A real official Host restart test
 verifies that persisted Goal reads neither instantiate an Agent nor rearm it.
-See [workbench configuration and remaining UI/cold-control acceptance](../WORKBENCH.md#native-conversation-goals).
+The ordinary workbench now has a plus-menu Goal composer and a native status card,
+with exact-request recovery for uncertain controls. Local built-UI fixtures cover
+these interactions and mobile/role isolation. Continue without a running product
+run is refused; full observed reattachment and cold controls remain unfinished.
+See [workbench configuration and remaining cold-control acceptance](../WORKBENCH.md#native-conversation-goals).
 These changes do not add a competing scheduler or complete the remaining
 Always-on, UI, routing, channel and packaging rows above.
