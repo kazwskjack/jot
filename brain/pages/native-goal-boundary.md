@@ -4,7 +4,7 @@ title: Keep native Goal state and continuation in DSH
 category: decision
 status: active
 created: "2026-10-16T11:44:16"
-updated: "2026-10-16T22:15:27"
+updated: "2026-10-16T22:54:45"
 ---
 
 <!-- compiled_truth -->
@@ -308,5 +308,17 @@ Running ordinary completion now has a Worker-owned publication callback while th
 - time: 2026-10-16T22:15:27
   kind: evidence
   summary: "Private ordinary admission reads no longer create a missing directory. Entry inspection requires exact original admission/Session incarnation and validates the immutable reservation hash, observer and lease, then rechecks admission. Reserved/unreserved are observations without replay, dispatch, completion or monetary authority. Missing or corrupt records refuse. This is a storage prerequisite, not historical ACK/final-answer repair."
+  source: docs/superpowers/plans/2026-10-16-steering-lineage-and-recovery.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-16T22:33:02
+  kind: evidence
+  summary: "Historical ordinary steering observation now joins terminal product-source facts to raw read-only persistence, detached official invariants, exact protocol-2/3 admissions and entry observations. Actual local SDK lost-ACK/Host-death and open-step cases preserve native log/admission bytes and call counts. Admitted is historical acceptance, committed is native input entry; neither grants replay, repair, publication or billing authority. Current execution compatibility and atomic ACK/final delivery repair remain separate gates."
+  source: docs/superpowers/plans/2026-10-16-steering-lineage-and-recovery.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-16T22:54:45
+  kind: evidence
+  summary: "Final historical observation SDK matrix passes 36/36 with no skips/failures; Adapter 473/473, startup guards 3/3 and root 32/32 pass. The known test-port collision now has bounded pre-ready-only recovery with a deterministic real DSH case. No live-process/timeout restart is allowed. Historical transport, ACK/final publication repair, unknown money, deployment and full capability acceptance remain unfinished."
   source: docs/superpowers/plans/2026-10-16-steering-lineage-and-recovery.md
   affects: [native-goal-boundary]

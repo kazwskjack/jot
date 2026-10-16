@@ -289,3 +289,10 @@ acceptance is always unverified. It cannot resume cancelled work, create an
 Agent, repair acknowledgement, or settle cost. The live steering/lease contracts
 are unchanged. Native history/admission/entry joining and atomic historical
 repair remain incomplete. See the steering implementation plan.
+
+The isolated native historical observation factory now joins exact product
+lineage, raw persisted inputs, official invariants and immutable admissions/
+reservations. Real local SDK cases verify lost-ACK/Host death, raw open steps and
+unchanged stored bytes, without new model calls or Agent activation. It does not
+yet provide deployed historical ACK/final delivery repair. Unknown execution,
+fees, upgrade/rollback and the other capability rows remain separate open gates.

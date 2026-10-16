@@ -26,6 +26,7 @@
     "ordinary-input-admission-host.js",
     "ordinary-steering-authority.js",
     "ordinary-completion.js",
+    "ordinary-steering-observation.js",
     "native-child-admission.js",
     "native-child-closure.js",
     "native-invariant-replay.js",

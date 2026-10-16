@@ -1125,3 +1125,11 @@ acceptance is always unverified. It cannot resume cancelled work, create an
 Agent, repair acknowledgement, or settle cost. The live steering/lease contracts
 are unchanged. Native history/admission/entry joining and atomic historical
 repair remain incomplete. See the steering implementation plan.
+
+An isolated historical observation factory now joins that product source to the
+original raw Session prefix, official detached invariants and immutable input/
+entry records. It returns hash-only facts without activating a driver. Local
+actual-SDK lost-ACK/Host-death and raw open-step cases preserve log/admission
+bytes; logical cold closers cannot certify completion. This adds observation,
+not deployed reconciliation transport, ACK repair, canonical final publication
+or monetary settlement. Those delivery gates remain open.

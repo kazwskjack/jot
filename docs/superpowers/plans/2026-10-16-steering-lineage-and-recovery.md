@@ -472,7 +472,7 @@ parent remains cancelled. This source read is not a proof of native inactivity.
   writes, exact owner/Session/version, missing/conflicting product messages,
   malformed payload, cancellation, running/role/Goal exclusion, strict auth and
   envelope. Keep live binding behavior unchanged.
-- [ ] Join that source snapshot to independently read, exact-incarnation native
+- [x] Join that source snapshot to independently read, exact-incarnation native
   history, immutable original/command admissions and entry reservations. Compare
   source again after asynchronous native reads. Missing evidence means unknown;
   an entry reservation is not proof that dispatch or completion occurred.
@@ -589,6 +589,50 @@ product source before opening it and revalidate after awaited reads. No
 in inspection. Add real-SDK tests showing raw bytes and call counts unchanged,
 including an interrupted open step, before using the result to reconcile ACKs.
 
+The next reader, `ordinary-steering-observation.js`, will authorize its exact
+scope through `ordinary-steering-history` before opening raw persistence. It
+requires no attached Agent/Session in this Host, the original ordinary unseeded
+header, a contiguous raw prefix, detached official invariant validation, and
+matching protocol-2/3 original/command admissions. Native inbox insertion and
+committed user-message facts are distinguished; a missing candidate is unproven,
+never safe-to-resend. Persisted completed-turn answer evidence is hash-only and
+is not canonical delivery. Original/command profile fingerprints must agree;
+this reports the historical fingerprint, not current replay compatibility.
+Re-read the raw prefix and product source after awaited receipt checks. Every
+handle closes on failure/cancellation. Use this read-only factory in isolation
+first; no Dispatcher mutation, execution or production flag is enabled by it.
+Tests must cover open raw turns (no synthetic closer), missing/changed evidence,
+foreign scope, attached state, receipt/profile mismatch, cancelled parents and
+raw/source mutation during reads. Actual SDK/real-storage tests remain required
+before any ACK or final-answer repair consumes these observations.
+
+### Historical join implementation checkpoint
+
+The isolated reader now joins the exact terminal source to raw persistence,
+detached official invariants, immutable original/command admissions and validated
+entry observations. It reads the product source before opening a handle; handles
+always close. It refuses live attached Agent/Session state in this Host, seeded
+or inherited/foreign Session headers, changed source/version/native prefix,
+receipt/hash/profile disagreement, duplicate/conflicting input identity and
+cancelled reads. Cancelled product parents may be observed but are not resumed.
+The historical profile fingerprint is reported, not adopted as current execution
+authority. It neither registers an endpoint/tool nor mutates the Dispatcher.
+
+`native_state` means only `unproven`, historically `admitted`, or native input
+`committed`. Admitted does not mean still queued: later cancellation/removal may
+have occurred. An answer field is an observed hash and persisted sequence, not
+proof of business completion, product publication or cost. Unknown input never
+means safe-to-resend. Full ACK/final-answer repair remains open.
+
+Four focused reader tests cover source/receipt corruption, raw open turns,
+admission-only/unproven input, attached execution, cancellation, source mutation
+and handle cleanup. The first actual SDK lost-ACK/Host-death case passes without
+new Agent/model/product output. A strengthened matrix initially used the wrong
+fixture field (`fullHistory` instead of emitted `history`) and timed out; that
+test-fixture failure is excluded as product evidence. The raw open-step case
+passes and confirms cold logical closers do not enter the raw event count.
+Final corrected matrix/full-suite results are recorded after completion.
+
 Final storage-composition validation: actual local SDK 33/33, zero failures or
 skips (407.97 seconds), including mixed claimed/pending input and both final
 publication races. Adapter 469/469 with the pinned SDK; root 32/32, Windows root
@@ -598,3 +642,52 @@ from the preceding 1165-pass/six-skip checkpoint; that suite was not rerun for
 this storage-only change. These checks preserve live/cold recovery behavior but
 do not prove historical native joining, ACK repair, real-provider usage/fees,
 production rollout or the complete capability inventory.
+
+Full SDK attempt: 35 cases, 34 passed, one failed, zero skipped (421.56 seconds).
+The failure was `steer-cold-claimed-two` during initial Host startup: the process
+exited with exact `listen EADDRINUSE`, before any Agent creation or model request.
+The unchanged original case then passes alone (1/1, 17.73 seconds). Both new
+historical cases pass in the full attempt. This is not a full green run: retain
+the collision evidence and address the test fixture's probe-close/spawn port
+race before final publication. Only an authoritatively exited, pre-ready Host
+with this exact bind failure may receive a bounded test-only fresh-port retry;
+never restart on observation timeout, unknown failure or after submitting input.
+No production behavior, permission or prompt replay should change for this test
+infrastructure fix. The current observation implementation remains uncommitted
+pending that fix and a complete final matrix.
+
+### Test-only startup bind recovery
+
+`packages/dsh-host/test/startup-bind-retry.mjs` now bounds initial Host startup
+to three attempts. A fresh port is selected only after an authoritatively exited
+code-1 process reports the exact loopback port's `Error: listen EADDRINUSE`,
+before readiness or input submission. Unknown exits, signals, permission errors,
+timeouts, ready/submitted work and cancellation never rebind/restart. An existing
+live process is never killed by this helper. The fixture updates its own adapter
+port and connection URL, preserving the original profile/workspace/Session and
+private collision evidence. This is test infrastructure, not runtime failover.
+
+Three helper tests pass, including a real occupied listener and isolated child.
+The original failed SDK case plus both historical cases pass 3/3 after wiring.
+A new actual DSH case deliberately keeps the selected port occupied; it records
+the exited bind collision, rebinds before any model/input request, then verifies
+the same lost-ACK historical observation and unchanged bytes. That case passes
+1/1 (18.25 seconds). Final ordinary-input coverage is now 36 cases; results
+remain pending until the complete final process finishes. Adapter final source
+passes 473/473, with no skips. Earlier failed runs remain audit evidence.
+
+Final historical-observation checkpoint: actual local SDK 36/36, zero failures
+or skips, 450.72 seconds. The deliberate startup collision is retained in the
+private record for `steer-history-port-collision`; this does not imply an audit
+of every port allocation by other processes. Adapter 473/473, startup guard
+3/3, root 32/32, public-review
+regressions 6/6, Windows root build and BRAIN links pass. Exact original native
+log and admission bytes remain unchanged in the three historical cases. Gateway
+execution sources did not change and its previous suite is not claimed as new
+verification. All model providers are local scripted endpoints.
+
+The checked native-join item is implemented as an isolated reader. A deployed
+read-only transport/consumer, atomic product ACK repair, final-answer recovery,
+unknown usage/fees, real-provider acceptance, upgrade/rollback and the complete
+capability inventory remain unfinished. Do not activate production steering or
+claim all historical delivery is fixed from these observations alone.

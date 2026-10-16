@@ -180,3 +180,14 @@ always with `execution_authorized: false`. Absence does not grant replay; a
 reservation does not prove provider dispatch, completion or cost. Original
 admission/replay/reservation guards remain authoritative and unchanged. This
 storage API alone does not repair historical product acknowledgement or delivery.
+
+`ordinary-steering-observation.js` provides an isolated
+`createOrdinarySteeringObservationReader` factory. It verifies terminal product
+scope before opening the original raw persistence handle, joins exact immutable
+original/command admissions and reservation observations, then re-reads raw and
+product sources. It refuses attached execution in this Host. Its hash-only facts
+distinguish historically admitted input from committed native input; an answer
+observation requires a real persisted completed turn. Missing input is unproven,
+never safe to resend. A reported historical profile fingerprint is not current
+replay compatibility. This factory does not register an HTTP/MCP tool or perform
+ACK repair, final publication, replay, Agent activation or billing settlement.
