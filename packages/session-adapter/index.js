@@ -1,3 +1,5 @@
+import {createOrdinaryCompletionReader} from './ordinary-completion.js'
+import {nativeGoalsFor} from './workbench-goal.js'
 import {normalizeOrdinarySteeringExecution} from './ordinary-steering-authority.js'
 import {createOrdinaryClaimedSessionComposer} from './ordinary-claimed-composer.js'
 import {createOrdinaryInputAdmissionHost} from './ordinary-input-admission-host.js'
@@ -158,7 +160,7 @@ function decodeFilename(headers) {
   return value && Buffer.byteLength(value, 'utf8') <= 255 && !/[\u0000\/\\]/.test(value) ? value : null
 }
 
-export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost }) {
+export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader }) {
   const voiceHandler = voiceEnabled ? createVoiceAdapterHandler({ speechController, token }) : null
   const workbenchSessions = new Set()
   const blockedWorkbenchSessions = new Set()
@@ -276,6 +278,14 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       if(!conversationGoalRunHost)return json(503,{error:'goal_resume_unavailable'});
       try{return json(200,await conversationGoalRunHost.resume(sessionId,body.goal_control));}
       catch(error){return json(409,{error:['goal_revision_changed','goal_cold_input_pending','goal_control_dispatch_unknown','goal_observer_required'].includes(error?.message)?error.message:'goal_resume_unavailable'});}
+    }
+    const inputCompletion=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/input-completion$/)
+    if(inputCompletion){
+      const sessionId=decodeURIComponent(inputCompletion[1]);let execution;
+      if(!ID.test(sessionId)||!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).sort().join(',')!=='command_ids,ordinary_input'||!Array.isArray(body.command_ids)||body.command_ids.some(id=>typeof id!=='string'||!ID.test(id))||new Set(body.command_ids).size!==body.command_ids.length||workbenchSessions.has(sessionId)||blockedWorkbenchSessions.has(sessionId))return json(422,{error:'ordinary_completion_input_invalid'});
+      try{execution=normalizeOrdinaryInputExecution(body.ordinary_input);}catch{return json(422,{error:'ordinary_completion_input_invalid'})}
+      if(typeof ordinaryCompletionReader!=='function')return json(503,{error:'ordinary_completion_unavailable'});
+      try{return json(200,await ordinaryCompletionReader({binding:{...execution,sessionRef:sessionId},commandIds:body.command_ids,signal}));}catch{return json(409,{error:'ordinary_completion_unconfirmed'})}
     }
     const inputResume=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/input-resume$/)
     if(inputResume){
@@ -501,6 +511,7 @@ export function apply(ctx, config = {}) {
   if(conversationGoalRunHost)ctx.effect(()=>()=>conversationGoalRunHost.dispose())
   const ordinaryInputAdmissionHost=config.ordinaryInputAdmission===undefined?undefined:createOrdinaryInputAdmissionHost({ctx,agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted')),...config.ordinaryInputAdmission})
   if(ordinaryInputAdmissionHost)ctx.effect(()=>()=>ordinaryInputAdmissionHost.dispose())
+  const ordinaryCompletionReader=config.ordinaryInputAdmission===undefined?undefined:createOrdinaryCompletionReader({agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted')),readGoal:agent=>nativeGoalsFor(agent)?.get(agent),...config.ordinaryInputAdmission})
   const ordinaryClaimedComposer=config.ordinaryInputRecovery?.claimedInput===undefined?undefined:createOrdinaryClaimedSessionComposer({ctx,bridge:workbenchBridge,agents:ctx.agents,sessions:ctx.sessions,query:typeof ctx.get==='function'?ctx.get('sessionQuery'):ctx.sessionQuery,projections:ctx.sessionProjections,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted')),...config.ordinaryInputAdmission,...config.ordinaryInputRecovery.claimedInput})
   if(ordinaryClaimedComposer)ctx.effect(()=>()=>ordinaryClaimedComposer.dispose())
   const ordinaryInputRunHost=config.ordinaryInputRecovery===undefined?undefined:createOrdinaryInputRunHost({controller:ctx.sessionController,agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted')),verifyComposition:config.ordinaryInputRecovery.verifyComposition,inputAdmissionHost:ordinaryInputAdmissionHost,claimedComposer:ordinaryClaimedComposer})
@@ -510,7 +521,7 @@ export function apply(ctx, config = {}) {
   const handler = createAdapterHandler({ controller: ctx.sessionController, fileUploads: ctx.fileUploads, agents: ctx.agents,
     sessions:ctx.sessions,persistence:ctx.sessionPersistence,
     speechController, voiceEnabled, token, workbenchBridge,
-    budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost })
+    budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader })
   const server = createServer(async (req, res) => {
     const abort = new AbortController()
     req.once('aborted', () => abort.abort())

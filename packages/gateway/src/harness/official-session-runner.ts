@@ -1,3 +1,6 @@
+import {createHash} from 'node:crypto'
+import {isDeepStrictEqual} from 'node:util'
+import {validateOrdinaryCompletion} from './ordinary-completion.ts'
 import { readFile } from 'node:fs/promises'
 import type { DshRunner, DshRunResult,DshRunInput } from './worker.ts'
 import type { ResolvedAttachment } from '../artifacts/resolver.ts'
@@ -8,6 +11,7 @@ import {validateConversationGoalView} from './conversation-goal-view.ts'
 import { projectSessionFrame, type JotProjection, type ProjectionContext } from './session-event-projector.ts'
 
 interface OfficialSessionClient {
+  inputCompletion?(sessionId:string,execution:OriginalInputExecution,commandIds:readonly string[],signal?:AbortSignal):Promise<Record<string,unknown>>
   create(sessionId: string, cwd: string, agentPreset: string, signal?: AbortSignal, workbenchRunId?: string,workbenchExecutionLease?:Readonly<{owner:string;generation:number}>): Promise<Record<string, unknown>>
   prompt(sessionId: string, requestId: string, content: string | SessionPromptPart[], mode?: 'queue' | 'steer', signal?: AbortSignal, original?:OriginalInputExecution): Promise<Record<string, unknown>>
   stageFile?(sessionId: string, path: string, displayName: string, signal?: AbortSignal): Promise<{ receipt_id: string }>
@@ -182,6 +186,7 @@ async function attachmentText(attachment: ResolvedAttachment): Promise<string> {
 }
 
 export class OfficialSessionRunner implements DshRunner {
+  readonly ordinaryCompletionProtocol=1 as const
   private readonly client: OfficialSessionClient
   private readonly options: { cwd: string; timeoutMs?: number; agentPreset: string;workbenchAgentPreset?:string; deltaFlushMs: number; deltaMaxChars: number; maxCrawlAutoContinues: number; webOperationPollIntervalMs: number }
   constructor(client: OfficialSessionClient, options: { cwd: string; timeoutMs?: number; agentPreset: string;workbenchAgentPreset?:string;
@@ -223,6 +228,8 @@ export class OfficialSessionRunner implements DshRunner {
       if(input.workbenchBudgetEnforced&&(!input.workbenchRunId||!input.workbenchExecutionLease||typeof preset!=='string'||!preset.trim()))throw new Error('workbench_budget_preset_required');
       if(goalControl&&!this.client.resumeGoal)throw Error('goal_resume_unavailable');
       if(ordinaryInput&&!this.client.recoverInput)throw Error('ordinary_input_recovery_unavailable');
+      const completion=input.ordinaryCompletion;let completionScope:OriginalInputExecution|undefined;
+      if(completion){completionScope=normalizeOriginalInputExecution({run_id:input.taskRequestId,execution_lease:completion.executionLease});if(typeof completion.commands!=='function'||typeof completion.publish!=='function'||!this.client.inputCompletion||input.workbenchRunId||input.checkpointTask||goalControl||!isDeepStrictEqual(completionScope,ordinaryInput??admission))throw Error('ordinary_completion_unavailable');}
       if(!goalControl&&!ordinaryInput)await this.client.create(input.sessionRef, this.options.cwd, preset!, controller.signal, input.workbenchRunId,input.workbenchExecutionLease)
       let iterator = (goalControl||ordinaryInput?this.client.follow(input.sessionRef,controller.signal,goalControl,ordinaryInput):this.client.follow(input.sessionRef, controller.signal))[Symbol.asyncIterator]()
       let opening = await iterator.next()
@@ -438,6 +445,18 @@ export class OfficialSessionRunner implements DshRunner {
         if (buffer.text.length >= this.options.deltaMaxChars
           || Date.now() - buffer.lastFlushAt >= this.options.deltaFlushMs) await flushBuffer(buffer)
       }
+      const commitOrdinary=async()=>{
+        while(true){
+          controller.signal.throwIfAborted();const ids=[...completion!.commands()];
+          const proof=validateOrdinaryCompletion(await this.client.inputCompletion!(input.sessionRef,completionScope!,ids,controller.signal),input.sessionRef,completionScope!,ids);
+          if(proof.status==='busy'){if(proof.wait_for==='events')return false;await pause(25,controller.signal);continue;}
+          if(proof.turn_end_seq<turnEndSeq)throw Error('ordinary_completion_proof_stale');
+          if(proof.turn_end_seq!==turnEndSeq||proof.answer_sha256!==createHash('sha256').update(finalText).digest('hex'))return false;
+          const candidate:DshRunResult={observed:true,completed:true,reason_code:'SESSION_TURN_COMPLETED',runtime_status:toolMarker?'runtime_observed':'not_required',final_text:finalText,final_blocks:finalBlocks,...(outputArtifactRefs.size?{output_artifact_refs:[...outputArtifactRefs]}:{}),...(outputFiles.size?{presented_files:[...outputFiles.values()]}:{}),tool_marker:toolMarker};
+          if(await completion!.publish(candidate,proof,controller.signal))return true;
+          await pause(25,controller.signal);
+        }
+      };
       while (true) {
         while (true) {
           const next = await iterator.next()
@@ -572,7 +591,12 @@ export class OfficialSessionRunner implements DshRunner {
           }
         }
         if (goalStopped || nativeGoalManaged || ordinaryGoalManaged || !turnCompleted || pendingCrawlBatches.size === 0
-          || crawlAutoContinueCount >= this.options.maxCrawlAutoContinues) break
+          || crawlAutoContinueCount >= this.options.maxCrawlAutoContinues){
+          if(completion&&!goalStopped&&!nativeGoalManaged&&turnCompleted&&Boolean(finalText)&&lastSettledOrdinal>=lastUnsettledAssistantOrdinal&&!await commitOrdinary()){
+            turnCompleted=false;finalText='';finalBlocks=[];turnReasonCode='SESSION_STEERING_CONTINUING';continue;
+          }
+          break;
+        }
         crawlAutoContinueCount += 1
         const batchIds = [...pendingCrawlBatches.keys()].join(', ')
         const requestId = `${input.taskRequestId}-crawl-follow-${crawlAutoContinueCount}`

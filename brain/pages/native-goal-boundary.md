@@ -4,7 +4,7 @@ title: Keep native Goal state and continuation in DSH
 category: decision
 status: active
 created: "2026-10-16T11:44:16"
-updated: "2026-10-16T21:20:00"
+updated: "2026-10-16T22:00:31"
 ---
 
 <!-- compiled_truth -->
@@ -41,6 +41,8 @@ Cold pending steering can retain an already-consumed parent in history only whil
 The ordinary claimed-input policy explicitly enables restoration only for the final unentered claim window after matched closed native steps, following complete official log-invariant validation. Generic native recovery still defaults to its prior refusal. Open/mismatched steps, later work and existing candidate entry reservations refuse; previous step/model/tool events and unknown outcomes remain untouched. Protocol-3 command authority is bound to the original parent and immutable full-message admission, rechecked across reads and after preset setup before unpublished-factory publication. Four actual local Host-death cases cover one/two later claims plus reserved/changed refusal; they preserve earlier prefix/usage/private bytes, perform only remaining calls and publish one canonical result. The first Runner lease is fixture-held and providers are scripted. Step/end, including synthetic repair closers, never establishes successful provider/tool outcomes or monetary settlement. Historical terminal lost-acknowledgement reconciliation, explicit Goal reactivation, unknown fees, consumer upgrade/rollback, production and complete 26-capability acceptance remain open.
 
 A surviving nonempty cold inbox does not prove that no earlier input was claimed. Interrupted history with configured claim recovery must use the original factory even with pending messages; possible unentered removals without that capability refuse. Explicit allowPending scope admits a verified unchanged surviving queue, while every message still requires its original admission before publication and after preset setup. An actual mixed claimed/pending Host-death case exposed the old omission after an earlier 30-case green run and now preserves both commands in order without repeating prior calls. Final-source regression evidence must include this case; the earlier suite alone did not prove the mixed boundary. Terminal delivery still must establish native RPC coverage, not merely command applied status or a nonempty earlier answer.
+
+Running ordinary completion now has a Worker-owned publication callback while the original Runner/lease remains live. An authenticated hash-only existing-Agent inspection proves original/private command admissions, latest completed native turn and final answer after all requested RPCs, without resolve/prompt/wake/entry or monetary mutation. Busy later work keeps the exact iterator; product acknowledgement settlement retries native facts without another stream or model call. The Worker rechecks current original authority and command set before output resolution and inside canonical publication, so a newly inserted command invalidates stale coverage. Successful publication stops renewal before Runner cleanup and cannot create a second canonical answer. The opt-in ordinary steering flag selects this matched capability stack and stays false by default. Actual SDK boundary and lost-ack tests hold the second model and prove no early canonical answer, then exactly one later answer and two model calls. Historical already-terminal/crash reconciliation, explicit concurrent Goal activation, unknown fees, rolling upgrades and production/full 26-capability acceptance remain open; read-only completion identity is not execution authority or monetary settlement.
 
 
 ## Timeline
@@ -288,5 +290,11 @@ A surviving nonempty cold inbox does not prove that no earlier input was claimed
 - time: 2026-10-16T21:20:00
   kind: decision
   summary: Preserve mixed claimed and surviving pending messages through one original factory and require all admissions
+  source: docs/superpowers/plans/2026-10-16-steering-lineage-and-recovery.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-16T22:00:31
+  kind: decision
+  summary: Fence running ordinary completion by native command coverage and atomic original-Worker publication
   source: docs/superpowers/plans/2026-10-16-steering-lineage-and-recovery.md
   affects: [native-goal-boundary]

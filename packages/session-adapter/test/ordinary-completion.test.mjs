@@ -1,0 +1,30 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {createHash} from 'node:crypto';
+const create=(await import('../ordinary-completion.js').catch(()=>({}))).createOrdinaryCompletionReader;
+const canonical=v=>JSON.stringify(v,(_k,x)=>x&&typeof x==='object'&&!Array.isArray(x)?Object.fromEntries(Object.keys(x).sort().map(k=>[k,x[k]])):x),hash=v=>createHash('sha256').update(v).digest('hex');
+function fixture(){
+ const binding={runId:'run-a',sessionRef:'session-a',executionLease:{owner:'worker-a',generation:1}},root={protocol:1,run_id:'run-a',request_id:'run-a',input_message_id:'product-a',conversation_id:'conv-a',owner_id:'owner-a',session_id:'session-a',execution_lease:binding.executionLease,input_sha256:'a'.repeat(64),execution_authorized:false};
+ const command={...root,kind:'ordinary_steer',command_id:'cmd-a',request_id:'cmd-a',input_message_id:'message-cmd-a',original_input_message_id:'product-a',original_input_sha256:root.input_sha256,command_sha256:'b'.repeat(64),native_content_sha256:hash(JSON.stringify([{type:'text',text:'Supplement'}]))};
+ const messages=[{id:'root-native',role:'user',source:{kind:'user',rpcId:'run-a'},content:[{type:'text',text:'Original'}]},{id:'cmd-native',role:'user',source:{kind:'user',rpcId:'cmd-a'},content:[{type:'text',text:'Supplement'}]}];
+ const events=[['turn/start',{turn:1}],...messages.map(m=>['user/message',m]),['assistant/message',{turn:1,step:1,message:{content:[{type:'text',text:'Final answer'}]}}],['turn/end',{turn:1,reason:{kind:'completed'}}]].map(([type,data],seq)=>({type,data,seq}));
+ const session={id:'session-a',header:{createdAt:123,agentPreset:'jot-general'},get seq(){return events.length;},snapshotEvents:()=>events};let idle=0;
+ const agent={id:'session-a',status:'idle',session,inbox:{nextStep:[],nextTurn:[]},whenIdle:async()=>{idle++;}},profile={fingerprint:'c'.repeat(64)};
+ const receipts=messages.map((m,index)=>{const p=index?command:root;return {protocol:index?3:2,...(index?{request_id:p.request_id,original_input_message_id:p.original_input_message_id,original_input_sha256:p.original_input_sha256,command_sha256:p.command_sha256,native_content_sha256:p.native_content_sha256}:{}),run_id:p.run_id,input_message_id:p.input_message_id,conversation_id:p.conversation_id,owner_id:p.owner_id,session_id:p.session_id,session_created_at:123,input_sha256:p.input_sha256,native_message_id:m.id,native_message_sha256:hash(canonical(m)),profile_fingerprint:profile.fingerprint};});
+ const options={agents:{get:()=>agent},bridge:{request:async path=>({binding:structuredClone(path==='ordinary-input-binding'?root:command)})},profile:{read:async()=>profile},admissions:{read:async({messageId})=>structuredClone(receipts.find(r=>r.native_message_id===messageId))},ordinaryPresets:new Set(['jot-general']),readGoal:()=>undefined};
+ return {options,binding,agent,events,command,receipts,idle:()=>idle};
+}
+test('completion reader proves exact admitted RPCs and current answer without running or returning text',async()=>{
+ const f=fixture();assert.equal(typeof create,'function');const read=create(f.options),proof=await read({binding:f.binding,commandIds:['cmd-a'],signal:new AbortController().signal});
+ assert.equal(proof.status,'complete');assert.equal(proof.execution_authorized,false);assert.equal(proof.answer_sha256,hash('Final answer'));assert.deepEqual(proof.command_ids,['cmd-a']);assert.equal(JSON.stringify(proof).includes('Final answer'),false);assert.ok(f.idle()>0);
+});
+test('completion reader refuses changed receipts and lineage and cannot certify pending or aborted work',async()=>{
+ for(const mode of ['pending','aborted','receipt','lineage','new-work','goal','raced']){const f=fixture();if(mode==='pending')f.agent.inbox.nextStep.push({id:'later'});if(mode==='aborted')f.events.at(-1).data.reason.kind='aborted';if(mode==='receipt')f.receipts[1].native_message_sha256='d'.repeat(64);if(mode==='lineage')f.command.original_input_sha256='d'.repeat(64);if(mode==='goal')f.options.readGoal=()=>({phase:'active',activation:'armed'});if(mode==='raced'){const read=f.options.admissions.read;f.options.admissions.read=async scope=>{const value=await read(scope);f.events.push({seq:f.events.length,type:'turn/start',data:{turn:2}});return value;};}if(mode==='new-work')f.events.push({seq:f.events.length,type:'turn/start',data:{turn:2}});
+  const read=create(f.options);if(['pending','new-work','goal','raced'].includes(mode))assert.equal((await read({binding:f.binding,commandIds:['cmd-a'],signal:new AbortController().signal})).status,'busy');else await assert.rejects(read({binding:f.binding,commandIds:['cmd-a'],signal:new AbortController().signal}));
+ }
+});
+
+test('completion transport requires exact original execution metadata and never falls through to prompt',async()=>{
+ const {createAdapterHandler}=await import('../index.js'),token='t'.repeat(32),headers={authorization:'Bearer '+token};let reads=0;
+ const handler=createAdapterHandler({token,controller:{prompt:()=>assert.fail('no prompt')},ordinaryCompletionReader:async({binding,commandIds})=>{reads++;assert.equal(binding.runId,'run-a');assert.deepEqual(commandIds,['cmd-a']);return{protocol:1,status:'busy',execution_authorized:false};}});
+ const request=body=>handler({method:'POST',url:new URL('http://127.0.0.1/v1/sessions/session-a/input-completion'),headers,body}),body={ordinary_input:{run_id:'run-a',execution_lease:{owner:'worker-a',generation:1}},command_ids:['cmd-a']};
+ assert.equal((await request(body)).status,200);assert.equal(reads,1);assert.equal((await request({...body,owner_id:'forged'})).status,422);assert.equal(reads,1);
+});

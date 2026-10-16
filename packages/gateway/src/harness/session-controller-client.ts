@@ -114,6 +114,11 @@ export class SessionControllerClient {
     }, signal)
   }
 
+  async inputCompletion(sessionId:string,execution:OriginalInputExecution,commandIds:readonly string[],signal?:AbortSignal){
+    const scope=normalizeOriginalInputExecution(execution);if(!Array.isArray(commandIds)||commandIds.some(id=>typeof id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(id)||id===scope.run_id)||new Set(commandIds).size!==commandIds.length)throw Error('ordinary_completion_input_invalid');
+    return this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/input-completion`,{ordinary_input:scope,command_ids:[...commandIds]},signal);
+  }
+
   async steerOriginal(sessionId:string,requestId:string,text:string,execution:OrdinarySteeringExecution,signal?:AbortSignal){
     const proof=normalizeOrdinarySteeringExecution(execution);if(proof.command_id!==requestId)throw Error('ordinary_steering_binding_invalid');
     return this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/prompts`,{request_id:requestId,text,mode:'steer',ordinary_steer:proof},signal);

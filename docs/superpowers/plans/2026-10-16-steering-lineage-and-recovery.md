@@ -387,3 +387,72 @@ source is unchanged, so its earlier suite is not represented as new evidence.
 All SDK providers are local scripted fixtures; no production deployment or
 monetary acceptance is included. The earlier pre-mixed 30/30 run remains
 historical evidence only. The full objective stays active.
+
+## Running-turn completion and acknowledgement coverage
+
+A real SDK boundary case now reproduces the next delivery bug: the original
+Runner observes `turn/end`, a real Dispatcher accepts a supplement during its
+ordinary Goal-state read, and the second model call starts. The previous Worker
+still finalized the old answer and closed the observer. The first attempt had
+incorrectly preclaimed the Worker's lease and timed out; that attempt is excluded.
+After correcting the fixture, the genuine failure was `finished` versus the
+required `still-running` while the second model was held. Its defective earlier
+test process tree was identified and stopped; no production process was touched.
+
+The opt-in ordinary steering stack now adds a hash-only `input-completion`
+inspection. It reads only the existing Agent, exact original/command lineage,
+immutable native admissions and current reviewed composition. It does not resolve
+an Agent, prompt, wake, reserve an entry, modify persistence or settle money.
+Pending/open work yields an observation hint; completed work must have a latest
+completed turn, a real final assistant message after every requested human RPC,
+no duplicate/foreign current RPC, an empty inbox and stable current identity.
+The answer hash and native sequence are checked against the Runner's observed
+candidate. Changed receipts/parent or an aborted turn cannot certify completion.
+
+The Runner retains its exact original iterator/cursor for later native work;
+it does not open another follow, manufacture a prompt or repeat the original
+input. Product acknowledgement settlement can be retried against the same native
+facts without another model call. Publication remains a callback owned by the
+original Worker: owner, current lease, original input and the complete durable
+command set are checked before output resolution and again inside the same
+transaction as candidate verification, canonical message and terminal state.
+Commands still awaiting their accepted product message block publication. A new
+command arriving during output resolution invalidates that transaction's coverage
+rather than publishing stale output. The Worker remains ready and renews its lease
+until publication; successful publication stops renewal before releasing the
+Runner, and late cleanup cannot create another canonical answer.
+
+`GENERAL_AGENT_ORDINARY_STEERING_ENABLED=true` now also selects this delivery
+contract and requires ordinary input recovery plus a matching Runner/Adapter.
+`ordinaryCompletionProtocol: 1` is an internal Jot integration capability, not an
+upstream API or a model-facing tool. The public MCP tool set and DSH planning,
+reasoning settings, permissions and actual user cancellation remain unchanged.
+The default stays false. Missing/mixed capabilities refuse instead of publishing
+through the legacy path; rolling upgrades are not yet accepted.
+
+Two actual local SDK cases pass at the running completion boundary, including
+accept-after-send acknowledgement loss. They hold the second model response and
+prove no canonical answer is published early; after response and exact-RPC
+product reconciliation, one final answer is published with two original model
+requests. The full ordinary-input SDK suite now enables the gate for its ordinary
+Workers, including pending/claimed recovery, binary and independent Goal states.
+All providers are scripted local endpoints.
+
+This closes the demonstrated running completion race, not historical terminal
+reconciliation after old deployments or a Host/Worker crash after all input was
+entered. Unknown dispatch/fees, explicit concurrent Goal reactivation,
+consumer upgrade/rollback, real-provider/deployment acceptance and the complete
+26-capability scope remain required. An accepted command, closed native turn or
+completion hash is never a monetary settlement or a new execution permission.
+
+Final completion-gate validation: local actual SDK 33/33, zero failures or skips
+(414.40 seconds). A fresh two-case run after the last assertion changes passes
+2/2 (31.63 seconds), verifying the second model request contains the supplement,
+exactly one product run, two human messages and one canonical answer. Final
+Gateway suite: 1165 total, 1159 passed, six existing skips, zero failures
+(132.95 seconds), including command arrival during output resolution. Adapter
+466/466 plus the final strengthened reader's armed-Goal/sequence-race checks
+3/3; root 32/32; Gateway and root Windows builds pass. Public-review regression
+6/6 and BRAIN link lint pass. Providers remain local scripted endpoints. These
+results do not certify historical terminal recovery, production, fees or the
+remaining capability inventory.

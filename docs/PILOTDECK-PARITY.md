@@ -268,3 +268,14 @@ single/double claimed-input Host-death cases and paired refusal cases pass.
 Historical terminal acknowledgement reconciliation, money/unknown outcomes,
 rollout and the full capability inventory remain unfinished. See
 [the staged plan](superpowers/plans/2026-10-16-steering-lineage-and-recovery.md).
+
+## Running completion delivery checkpoint
+
+The original ordinary Worker now checks native RPC/answer coverage and durable
+product acknowledgement inside final publication while its Runner is live.
+The same native iterator continues for later commands; no new prompt/planner is
+introduced. Local SDK boundary and lost-ack cases prevent an old answer from
+ending a task with a later command running. Historical terminal recovery,
+unknown money, explicit Goal reactivation and rolling/production acceptance
+remain separate open gates. See
+[the staged plan](superpowers/plans/2026-10-16-steering-lineage-and-recovery.md).

@@ -1,3 +1,5 @@
+import {validateOrdinaryCompletion,type OrdinaryCompletionProof} from './ordinary-completion.ts';
+import {inspectOrdinarySteeringBinding} from '../conversations/ordinary-steering-binding.ts';
 import {assertExecutionLease,type ExecutionLease} from '../workbench/execution-lease.ts';
 import {isDeepStrictEqual} from 'node:util';
 import {inspectOrdinaryInputBinding} from '../conversations/ordinary-input-binding.ts';
@@ -37,12 +39,14 @@ export interface DshRunInput { enabled: true; taskRequestId: string; message: st
     workbenchBudgetEnforced?:boolean;
     checkpointTask?:boolean;
     onCheckpoint?:(receipt:SessionCheckpoint)=>Promise<void>|void;
+    ordinaryCompletion?:Readonly<{executionLease:ExecutionLease;commands:()=>string[];publish:(candidate:DshRunResult,proof:OrdinaryCompletionProof,signal:AbortSignal)=>Promise<boolean>}>;
     onReady?: () => void;
     onArtifactRef?: (artifactRef: string) => Promise<void> | void;
     onProjection?: (projection: JotProjection) => Promise<void> | void;
     onWebOperationCursor?: (toolCallId: string) => number;
     onWebOperationSnapshot?: (toolCallId: string, snapshot: Record<string, unknown>) => number }
 export interface DshRunner {
+  readonly ordinaryCompletionProtocol?:1;
   run(input:DshRunInput):Promise<DshRunResult>;
   recoverInput?(input:DshRunInput & {originalInput:Readonly<{inputMessageId:string;executionLease:Readonly<{owner:string;generation:number}>}>}):Promise<DshRunResult>;
   resumeGoal?(input:DshRunInput & {goalControl:Readonly<{controlId:string;ref:Readonly<{id:string;revision:number}>;executionLease:Readonly<{owner:string;generation:number}>}>}):Promise<DshRunResult>;
@@ -67,6 +71,7 @@ export class HarnessWorker {
   private readonly workerId: string;
   private readonly leaseMs: number;
   private readonly ordinaryInputRecoveryEnabled:boolean;
+  private readonly ordinarySteeringEnabled:boolean;
   private readonly contextStager: RuntimeContextStager | undefined;
   private readonly sessionResolver: ((conversationId: string) => string) | undefined;
   private readonly attachmentResolver: Pick<AttachmentResolver,
@@ -75,7 +80,7 @@ export class HarnessWorker {
   private readonly executionGuard: { assertRunActive(runId: string): void; contextForRun(runId: string): unknown } | undefined;
 
   constructor(db: DatabaseSync, coordinator: HarnessCoordinator, runner: DshRunner,
-    options: { workerId: string; leaseMs: number; ordinaryInputRecoveryEnabled?:boolean; contextStager?: RuntimeContextStager;
+    options: { workerId: string; leaseMs: number; ordinaryInputRecoveryEnabled?:boolean;ordinarySteeringEnabled?:boolean; contextStager?: RuntimeContextStager;
       sessionResolver?: (conversationId: string) => string;
       attachmentResolver?: Pick<AttachmentResolver, 'resolveForMessage' | 'resolveOutputs' | 'releaseLease'>;
       channelDelivery?: ChannelTextDelivery;
@@ -84,6 +89,7 @@ export class HarnessWorker {
     this.workerId = options.workerId; this.leaseMs = options.leaseMs;
     if(options.ordinaryInputRecoveryEnabled!==undefined&&typeof options.ordinaryInputRecoveryEnabled!=='boolean')throw Error('ordinary_input_recovery_config_invalid');
     this.ordinaryInputRecoveryEnabled=options.ordinaryInputRecoveryEnabled===true;
+    if(options.ordinarySteeringEnabled!==undefined&&typeof options.ordinarySteeringEnabled!=='boolean'||options.ordinarySteeringEnabled===true&&!this.ordinaryInputRecoveryEnabled)throw Error('ordinary_completion_config_invalid');this.ordinarySteeringEnabled=options.ordinarySteeringEnabled===true;
     this.contextStager = options.contextStager;
     this.sessionResolver = options.sessionResolver;
     this.attachmentResolver = options.attachmentResolver;
@@ -112,6 +118,8 @@ export class HarnessWorker {
     const backgroundTask=!!(workbenchContext && typeof workbenchContext==='object'
       && 'kind' in workbenchContext && workbenchContext.kind==='task');
     const hasWorkbenchBinding=!!(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_run_bindings'").get()&&this.db.prepare('SELECT 1 FROM wb_run_bindings WHERE run_id=?').get(lease.run_id));
+    const ordinaryDelivery=this.ordinarySteeringEnabled&&!!lease.input_message_id&&!goalControl&&!workbenchContext&&!hasWorkbenchBinding;
+    if(ordinaryDelivery&&this.runner.ordinaryCompletionProtocol!==1){this.coordinator.interruptWithoutRuntime(lease,'ORDINARY_COMPLETION_UNAVAILABLE');return{run_id:lease.run_id,runtime_status:'ordinary_completion_unavailable'};}
     const originalRecovery=this.ordinaryInputRecoveryEnabled&&lease.generation>1&&!goalControl&&!workbenchContext&&!hasWorkbenchBinding;
     const originalSession=originalRecovery?this.db.prepare('SELECT b.session_id FROM ga_harness_session_bindings b JOIN ga_conversations c ON c.id=b.conversation_id AND c.owner_id=b.owner_id WHERE c.id=? AND c.archived_at IS NULL').get(lease.conversation_id):undefined;
     if(originalRecovery&&(!this.runner.recoverInput||!lease.input_message_id||typeof originalSession?.session_id!=='string')){
@@ -140,10 +148,58 @@ export class HarnessWorker {
     renewal.unref();
     let originalAuthority:ReturnType<typeof inspectOrdinaryInputBinding>|undefined;
     const assertGoalApplied=()=>{
-      if(originalRecovery){const binding=inspectOrdinaryInputBinding(this.db,lease.run_id,controllerSessionRef,{owner:lease.owner,generation:lease.generation});if(binding.input_message_id!==lease.input_message_id||originalAuthority&&!isDeepStrictEqual(binding,originalAuthority))throw Error('ordinary_input_binding_rejected');originalAuthority??=binding;}
+      if(originalRecovery||ordinaryDelivery){const binding=inspectOrdinaryInputBinding(this.db,lease.run_id,controllerSessionRef,{owner:lease.owner,generation:lease.generation});if(binding.input_message_id!==lease.input_message_id||originalAuthority&&!isDeepStrictEqual(binding,originalAuthority))throw Error('ordinary_input_binding_rejected');originalAuthority??=binding;}
       if(!goalControl)return;
       const row=ConversationGoalControls.assertExecution(this.db,goalControl.control_id,{owner:lease.owner,generation:lease.generation});
       if(row.state!=='applied')throw Error('goal_control_receipt_required');
+    };
+    let published=false,publishedRuntime='not_required';
+    const commandIds=()=>{assertGoalApplied();this.executionGuard?.assertRunActive(lease.run_id);assertExecutionLease(this.db,lease.run_id,{owner:lease.owner,generation:lease.generation});return (this.db.prepare("SELECT id FROM ga_run_commands WHERE run_id=? AND kind='steer' AND status IN ('pending','applied') ORDER BY created_at,rowid").all(lease.run_id) as {id:string}[]).map(row=>{inspectOrdinarySteeringBinding(this.db,lease.run_id,controllerSessionRef,row.id,{owner:lease.owner,generation:lease.generation});return row.id;});};
+    const completionFence=(candidate:DshRunResult,proof?:OrdinaryCompletionProof)=>{
+      if(!ordinaryDelivery)return true;
+      const ids=commandIds();if(!proof||!isDeepStrictEqual(ids,proof.command_ids))return false;
+      const validated=validateOrdinaryCompletion(proof,controllerSessionRef,{run_id:lease.run_id,execution_lease:{owner:lease.owner,generation:lease.generation}},ids);
+      if(validated.status!=='complete'||!candidate.completed||!candidate.final_text?.trim()||validated.input_sha256!==originalAuthority!.input_sha256||validated.answer_sha256!==createHash('sha256').update(candidate.final_text.trim()).digest('hex'))throw Error('ordinary_completion_proof_invalid');
+      return !this.db.prepare("SELECT 1 FROM ga_run_commands WHERE run_id=? AND kind='steer' AND status='pending'").get(lease.run_id);
+    };
+    const publishOrdinary=async(candidate:DshRunResult,proof?:OrdinaryCompletionProof)=>{
+      if(published)throw Error('ordinary_completion_already_published');if(!completionFence(candidate,proof))return false;
+      const finalText=candidate.final_text?.trim();if(!finalText)throw Error('ordinary_completion_empty');
+      const outputLeaseId=`${lease.run_id}:outputs`;let outputAttachments:ResolvedAttachment[]=[];
+      try{
+        const artifactRefs=candidate.output_artifact_refs??[],presentedFiles=candidate.presented_files??[];
+        if(artifactRefs.length||presentedFiles.length){if(!this.attachmentResolver)throw Error('output_attachment_resolver_unavailable');outputAttachments=this.attachmentResolver.resolveOutputs(input.ownerId,lease.conversation_id,artifactRefs,presentedFiles,outputLeaseId);}
+      const committed=withImmediateTransaction(this.db, () => {
+        // Recheck inside the same transaction as publication, after resolving
+        // outputs. Deletion and completion cannot race across DB processes.
+        this.executionGuard?.assertRunActive(lease.run_id);
+        assertGoalApplied();if(!completionFence(candidate,proof))return false;
+        for (const item of outputAttachments) this.coordinator.recordArtifact(lease, item);
+        this.coordinator.recordCandidate(lease, finalText);
+        this.coordinator.setCandidateStatus(lease, 'verified', []);
+        const assistant = this.coordinator.recordAssistant(lease, finalText, candidate.final_blocks,
+          outputAttachments.map(item => item.artifactId));
+        this.coordinator.finalizePublication(lease, 'succeeded', null);
+        if (this.channelDelivery) {
+        const binding = this.db.prepare(`SELECT principal FROM ga_channel_bindings
+          WHERE channel='wecom' AND conversation_id=?`).get(lease.conversation_id) as
+          { principal?: string } | undefined;
+        if (binding?.principal) {
+          try {
+            this.channelDelivery.enqueueText({ runId: lease.run_id, messageId: String(assistant.message_id),
+              destination: 'wecom', recipient: binding.principal, text: finalText });
+          } catch (error) {
+            process.stderr.write(`${JSON.stringify({ level: 'error', code: 'channel_delivery_enqueue_failed',
+              detail: String(error instanceof Error ? error.message : error).slice(0, 96) })}\n`);
+          }
+        }
+        }
+
+        return true;
+      });
+      if(committed&&ordinaryDelivery){published=true;publishedRuntime=candidate.tool_marker?'runtime_observed':'not_required';clearInterval(renewal);}
+      return committed;
+      }finally{if(outputAttachments.length)this.attachmentResolver?.releaseLease(outputLeaseId);}
     };
     let result: DshRunResult;
     try {
@@ -171,6 +227,7 @@ export class HarnessWorker {
         ...(backgroundTask
           ?{checkpointTask:true,onCheckpoint:(receipt:SessionCheckpoint)=>{this.executionGuard?.assertRunActive(lease.run_id);this.coordinator.recordCheckpoint(lease,controllerSessionRef,receipt);}}:{}),
         sessionRef: controllerSessionRef, universeSessionRef: controllerSessionRef, deferCompletionProbe: true,
+        ...(ordinaryDelivery?{ordinaryCompletion:Object.freeze({executionLease:Object.freeze({owner:lease.owner,generation:lease.generation}),commands:commandIds,publish:async(candidate:DshRunResult,proof:OrdinaryCompletionProof,signal:AbortSignal)=>{signal.throwIfAborted();return publishOrdinary(candidate,proof);}})}:{}),
         onReady: () => {assertGoalApplied();const executionLease=Object.freeze({owner:lease.owner,generation:lease.generation});assertExecutionLease(this.db,lease.run_id,executionLease);this.readyRuns.set(lease.run_id,Object.freeze({sessionRef:controllerSessionRef,ordinary:!!lease.input_message_id&&!goalControl&&!workbenchContext&&!hasWorkbenchBinding,executionLease}));},
         onArtifactRef: recordObservedArtifact,
         onProjection: projection => { assertGoalApplied();this.executionGuard?.assertRunActive(lease.run_id); this.coordinator.recordProjection(lease, projection); },
@@ -185,8 +242,9 @@ export class HarnessWorker {
         ConversationGoalControls.assertExecution(this.db,goalControl.control_id,executionLease);
         result=await this.runner.resumeGoal!({...runInput,goalControl:Object.freeze({controlId:goalControl.control_id,ref:Object.freeze({id:goalControl.goal_id,revision:goalControl.goal_revision}),executionLease})});
         assertGoalApplied();
-      }else if(originalRecovery){assertGoalApplied();result=await this.runner.recoverInput!({...runInput,originalInput:Object.freeze({inputMessageId:lease.input_message_id!,executionLease:Object.freeze({owner:lease.owner,generation:lease.generation})})});assertGoalApplied();}else result=await this.runner.run(runInput);
+      }else if(originalRecovery){assertGoalApplied();result=await this.runner.recoverInput!({...runInput,originalInput:Object.freeze({inputMessageId:lease.input_message_id!,executionLease:Object.freeze({owner:lease.owner,generation:lease.generation})})});if(!published)assertGoalApplied();}else result=await this.runner.run(runInput);
     } catch (error) {
+      if(published)return{run_id:lease.run_id,runtime_status:publishedRuntime};
       if (this.cancelling(lease.run_id)) return { run_id: lease.run_id, runtime_status: 'cancel_requested' };
       let reasonCode = typeof error === 'object' && error !== null
         && 'reasonCode' in error && typeof error.reasonCode === 'string'
@@ -203,6 +261,7 @@ export class HarnessWorker {
       if(this.cancelling(lease.run_id))this.db.prepare('DELETE FROM ga_worker_leases WHERE resource_id=? AND owner=? AND generation=?').run(lease.run_id,lease.owner,lease.generation);
       if (attachments.length) this.attachmentResolver?.releaseLease(lease.run_id);
     }
+    if(published)return{run_id:lease.run_id,runtime_status:publishedRuntime};
     const finalText = result.final_text?.trim();
     const stoppedCandidate=result.task_candidate??(finalText?{text:finalText,...(result.final_blocks?{blocks:result.final_blocks}:{})}:undefined);
     if(this.cancelling(lease.run_id))return {run_id:lease.run_id,runtime_status:'cancel_requested'};
@@ -236,49 +295,9 @@ export class HarnessWorker {
       }
       return { run_id: lease.run_id, runtime_status: result.runtime_status };
     }
-    const outputLeaseId = `${lease.run_id}:outputs`;
-    let outputAttachments: ResolvedAttachment[] = [];
-    try {
-      const artifactRefs = result.output_artifact_refs ?? [];
-      const presentedFiles = result.presented_files ?? [];
-      if (artifactRefs.length || presentedFiles.length) {
-        if (!this.attachmentResolver) throw new Error('output_attachment_resolver_unavailable');
-        outputAttachments = this.attachmentResolver.resolveOutputs(input.ownerId, lease.conversation_id,
-          artifactRefs, presentedFiles, outputLeaseId);
-      }
-      withImmediateTransaction(this.db, () => {
-        // Recheck inside the same transaction as publication, after resolving
-        // outputs. Deletion and completion cannot race across DB processes.
-        this.executionGuard?.assertRunActive(lease.run_id);
-        assertGoalApplied();
-        for (const item of outputAttachments) this.coordinator.recordArtifact(lease, item);
-        this.coordinator.recordCandidate(lease, finalText);
-        this.coordinator.setCandidateStatus(lease, 'verified', []);
-        const assistant = this.coordinator.recordAssistant(lease, finalText, result.final_blocks,
-          outputAttachments.map(item => item.artifactId));
-        this.coordinator.finalizePublication(lease, 'succeeded', null);
-        if (this.channelDelivery) {
-        const binding = this.db.prepare(`SELECT principal FROM ga_channel_bindings
-          WHERE channel='wecom' AND conversation_id=?`).get(lease.conversation_id) as
-          { principal?: string } | undefined;
-        if (binding?.principal) {
-          try {
-            this.channelDelivery.enqueueText({ runId: lease.run_id, messageId: String(assistant.message_id),
-              destination: 'wecom', recipient: binding.principal, text: finalText });
-          } catch (error) {
-            process.stderr.write(`${JSON.stringify({ level: 'error', code: 'channel_delivery_enqueue_failed',
-              detail: String(error instanceof Error ? error.message : error).slice(0, 96) })}\n`);
-          }
-        }
-        }
-      });
-    } catch {
-      this.coordinator.interruptWithoutRuntime(lease);
-      return { run_id: lease.run_id, runtime_status: 'output_attachment_invalid' };
-    } finally {
-      if (outputAttachments.length) this.attachmentResolver?.releaseLease(outputLeaseId);
-    }
-    return { run_id: lease.run_id, runtime_status: result.tool_marker ? 'runtime_observed' : 'not_required' };
+    if(ordinaryDelivery){this.coordinator.interruptWithoutRuntime(lease,'ORDINARY_COMPLETION_UNCONFIRMED');return{run_id:lease.run_id,runtime_status:'ordinary_completion_unconfirmed'};}
+    try{await publishOrdinary(result);return{run_id:lease.run_id,runtime_status:result.tool_marker?'runtime_observed':'not_required'};}
+    catch{this.coordinator.interruptWithoutRuntime(lease);return{run_id:lease.run_id,runtime_status:'output_attachment_invalid'};}
   }
 
   private cancelling(runId:string){const row=this.db.prepare('SELECT status FROM ga_runs WHERE id=?').get(runId) as {status:string}|undefined;return row?.status==='cancelling'||row?.status==='cancelled';}

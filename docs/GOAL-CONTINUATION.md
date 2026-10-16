@@ -1098,3 +1098,20 @@ admission before publication. Without the required claim factory, a possible
 unentered claim window refuses. The real mixed Host-death case preserves both
 RPCs/order and one canonical result; terminal publication/acknowledgement races
 remain a separate open gate in the staged plan.
+
+## Ordinary final-answer coverage
+
+Opt-in ordinary steering now keeps the original live Runner until its observed
+final answer follows every admitted command RPC and the product receipts are
+settled. A hash-only existing-Agent completion read checks original admissions,
+answer sequence/hash, parent/lease and native completion; it never creates or
+wakes execution. The original Worker publishes while that Runner is still alive
+and rechecks the command set inside canonical finalization. A new command during
+output resolution invalidates stale coverage. Exact-RPC acknowledgement retry
+needs no new prompt or model call.
+
+This is selected by `GENERAL_AGENT_ORDINARY_STEERING_ENABLED=true`, requires the
+matching completion-capable Runner/Adapter and recovery configuration, and stays
+off by default. Local actual-SDK boundary/lost-ack tests pass. Historical terminal
+reconciliation, concurrent explicit Goal reactivation, unknown money, rolling
+upgrades and production acceptance remain open; see the staged plan.

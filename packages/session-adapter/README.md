@@ -164,3 +164,10 @@ new isolated package and refuses overwrite; an earlier patched copy is not
 silently upgraded. Hosts still need per-command product/admission proofs before
 using this capability. The ordinary cold recovery path has not yet been wired
 to it. No production package is modified by these local tests.
+
+The opt-in ordinary steering configuration also requires this Adapter's
+`POST /v1/sessions/:id/input-completion` inspection and the matching Runner's
+completion capability. The endpoint accepts only original execution metadata
+and command IDs; it returns IDs/hashes and busy/completed observations, no user
+text or execution grant. It does not create/wake an Agent or change admissions.
+Keep the switch off until the matching stack and rollout gates are accepted.
