@@ -321,3 +321,45 @@ Goal resume switch is enabled by this endpoint.
 Route tests cover an exact unchanged database receipt, content omission, service
 authentication, caller-owner rejection, wrong Session/lease, archive and cancelled
 states, corrupt message lineage, workbench scope, and message-free continuation.
+
+
+## Optional native pending-input wake compatibility
+
+The locked upstream rc.2 Controller treats an existing prompt RPC as accepted
+without waking pending input. Its driver's wake method is private. Jot therefore
+provides an explicit optional compatibility delta, not an upstream API or another
+scheduler: `patchDshPendingInputSource`, prepared only in a new isolated package.
+The exact upstream package bytes, setup-hook delta, declarations, secondary files
+and license are still verified. Modified, partial or different SDKs are rejected.
+The normal preparation command and installed runtime are unchanged by default.
+
+```sh
+node packages/session-adapter/scripts/prepare-dsh-pre-setup.mjs \
+  /absolute/private/source/dsh-agent-loop \
+  /absolute/private/new/dsh-agent-loop --pending-input-wake
+```
+
+The optional Agent capability `jotPendingInputProtocol: 1` offers
+`jotResumePending({requestId, messageIds, seq})` only inside original native
+maintenance. It requires the exact unchanged Session sequence and complete ordered
+pending IDs; every pending input must be an original human message with that
+request RPC. Empty, duplicate, foreign, generated Goal, changed, already-waking,
+idle/running or aborted calls are refused. It latches the original native driver;
+it never inserts/removes input, creates a prompt, changes Goal state or adds a
+user message. Native maintenance then decides whether to start: a user cancellation
+clears the pending latch/input and prevents inference.
+
+An installed-SDK test prepares the optional package and uses a synthetic local
+model. It confirms no message or inbox append during the latch, one commit of
+the existing original user message and one model request. A second Agent cancelled
+inside maintenance makes no additional model request and commits no user message.
+The primitive tests also verify partial-package refusal and source/version drift.
+These are actual native driver results for an attached pending inbox, not a cold
+process-crash recovery or full Gateway/Host/Runner deployment acceptance.
+
+The default HTTP Host does not yet invoke this capability. Before enabling it,
+connect the original product binding, cold claim restoration, audited preset and
+composition, an original-run observer and repeated lease/cancellation checks;
+retain cumulative model usage and canonical final publication. This optional
+native primitive grants none of those authorities and must not be presented as
+ordinary recovery being fully enabled. Existing Goal switches remain off.

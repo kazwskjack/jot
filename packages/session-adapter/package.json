@@ -30,6 +30,7 @@
     "native-replay-profile.js",
     "native-replay-provenance.js",
     "dsh-pre-setup-patch.js",
+    "dsh-pending-input-patch.js",
     "runtime-patches/DSH-MIT-LICENSE.txt",
     "runtime-patches/dsh-agent-loop-rc2-sha256.json",
     "scripts/prepare-dsh-pre-setup.mjs",

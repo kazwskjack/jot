@@ -4,7 +4,7 @@ title: Keep native Goal state and continuation in DSH
 category: decision
 status: active
 created: "2026-10-16T11:44:16"
-updated: "2026-10-16T16:41:22"
+updated: "2026-10-16T16:51:33"
 ---
 
 <!-- compiled_truth -->
@@ -31,6 +31,8 @@ KeepInbox does not protect a batch already claimed before native pre-step entry.
 Observer/lease loss is an owning-execution cancellation and uses the official parent cause, not user. Only actual user stop paths should be described as user cancellation. This changes the current cancellation event classification; it never rewrites historical immutable receipts or grants resumed execution.
 
 Ordinary original-input recovery now has a read-only internal product binding endpoint. The existing service identity and a transaction prove the running original human run/message, database-derived owner, current Session and exact Coordinator lease; workbench and message-free Goal runs are rejected. Its stored product content digest is not native attachment equivalence, and execution_authorized remains false. This identity snapshot cannot wake a driver, reserve model cost or replace tool permission. The current Host/Runner does not yet consume it: original native input/composition and cumulative accounting recovery still need implementation and real acceptance.
+
+The locked upstream Controller cannot wake an already accepted pending RPC, and its driver wake is private. An explicit optional Jot compatibility transform now adds an exact-sequence/exact-pending-ID/exact-human-RPC wake capability behind original native maintenance, without inbox mutation or a new prompt. It uses the native driver latch and honours native cancellation. The prepared package must retain the complete audited setup hooks and exact pinned upstream bytes; partial/modified packages are refused and the default package preparation remains unchanged. This is a Jot extension, not an upstream API. Real local SDK tests cover attached-input consumption once and cancellation before execution; cold original-run recovery, Host/Runner integration, composition/permission/accounting and production acceptance remain incomplete. No installed live runtime is modified or feature enabled by the transform.
 
 
 ## Timeline
@@ -152,5 +154,11 @@ Ordinary original-input recovery now has a read-only internal product binding en
 - time: 2026-10-16T16:41:22
   kind: decision
   summary: Bind ordinary input recovery to original product lineage without granting execution
+  source: docs/GOAL-CONTINUATION.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-16T16:51:33
+  kind: decision
+  summary: Use an explicit audited native maintenance capability for existing-input wake without fabricated prompts
   source: docs/GOAL-CONTINUATION.md
   affects: [native-goal-boundary]

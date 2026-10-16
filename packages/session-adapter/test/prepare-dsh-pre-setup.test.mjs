@@ -181,13 +181,13 @@ test('rejects unsupported package versions and modified upstream files before cr
   assert.equal(existsSync(hashOutput), false);
 });
 
-test('CLI requires exactly two explicit paths and prints only fixed usage text otherwise', () => {
+test('CLI requires two paths and only the explicit pending-input opt-in flag', () => {
   assert.equal(existsSync(scriptPath), true, 'prepare-dsh-pre-setup.mjs must exist');
   for (const args of [[], ['source'], ['source', 'output', 'extra']]) {
     const result = spawnSync(process.execPath, [scriptPath, ...args], {cwd: workspaceRoot, encoding: 'utf8'});
     assert.equal(result.status, 2);
     assert.equal(result.stdout, '');
-    assert.equal(result.stderr, 'Usage: node prepare-dsh-pre-setup.mjs <source-package> <output-package>\n');
+    assert.equal(result.stderr, 'Usage: node prepare-dsh-pre-setup.mjs <source-package> <output-package> [--pending-input-wake]\n');
   }
 });
 
@@ -200,4 +200,9 @@ test('rejects secondary runtime and manifest drift even when patch anchors match
   else{const manifest=JSON.parse(readFileSync(path,'utf8'));manifest.main='lib/invariant.js';writeFileSync(path,JSON.stringify(manifest));}
   assertCode(()=>prepareDshPreSetupRuntime(source,output),'dsh_pre_setup_package_integrity');assert.equal(existsSync(output),false);
  }
+});
+
+
+test('preparation rejects unsupported options before resolving or creating output',()=>{
+ for(const options of [null,[],{pendingInputWake:'yes'},{unknown:true}])assertCode(()=>prepareDshPreSetupRuntime('not-read','not-created',options),'dsh_pre_setup_options_invalid');
 });

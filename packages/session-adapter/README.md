@@ -135,3 +135,13 @@ checks. Validate the actual mounted Registry generation in the second phase;
 pre-reading a source file alone is insufficient. Regenerate an isolated copy
 from the pinned original package rather than updating an existing protocol 1
 copy in place. Source receipt migration remains explicit and unimplemented.
+
+
+The package includes an optional pending-input wake compatibility transform for
+the exact locked rc.2 SDK. Preparation requires `--pending-input-wake` and writes
+a new package; normal preparation remains unchanged. This is a Jot extension,
+not an upstream API. It latches existing exact-RPC inputs behind native
+maintenance without a new prompt or inbox mutation. The default HTTP Controller
+does not invoke it. Original product ownership, execution/composition authority,
+cancellation and usage recovery remain required; see
+[Goal continuation](../../docs/GOAL-CONTINUATION.md#optional-native-pending-input-wake-compatibility).

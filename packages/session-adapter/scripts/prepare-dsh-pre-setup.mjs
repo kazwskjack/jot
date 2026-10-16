@@ -14,6 +14,7 @@ import {basename, dirname, isAbsolute, join, relative, resolve, sep} from 'node:
 import {pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
 import {patchDshPreSetupSource} from '../dsh-pre-setup-patch.js';
+import {patchDshPendingInputSource} from '../dsh-pending-input-patch.js';
 
 const packageName = '@deepseek-ai/dsh-agent-loop';
 const supportedVersion = '0.2.0-rc.2';
@@ -118,7 +119,7 @@ function readLibFiles(packageRoot) {
   return files;
 }
 
-function collectPackageFiles(packageRoot) {
+function collectPackageFiles(packageRoot, pendingInputWake) {
   const manifestBytes = readRegularFile(join(packageRoot, 'package.json'), 'dsh_pre_setup_package_manifest');
   let manifest;
   try {
@@ -139,7 +140,7 @@ function collectPackageFiles(packageRoot) {
 
   let patch;
   try {
-    patch = patchDshPreSetupSource({version: manifest.version, runtimeSource, declarationSource});
+    patch = (pendingInputWake ? patchDshPendingInputSource : patchDshPreSetupSource)({version: manifest.version, runtimeSource, declarationSource});
   } catch (error) {
     if (error instanceof Error && /^dsh_pre_setup_[a-z0-9_]+$/.test(error.message)) throw error;
     fail('dsh_pre_setup_patch_failed');
@@ -149,7 +150,7 @@ function collectPackageFiles(packageRoot) {
 
   files.set('package.json', Buffer.from(`${JSON.stringify({
     ...manifest,
-    jotCompatibilityPatch: {protocol: 2, upstreamVersion: manifest.version},
+    jotCompatibilityPatch: {protocol: 2, upstreamVersion: manifest.version,...(pendingInputWake?{pendingInputProtocol:1}:{})},
   }, null, 2)}\n`, 'utf8'));
   files.set('LICENSE', readRegularFile(join(packageRoot, 'LICENSE'), 'dsh_pre_setup_package_license'));
 
@@ -214,27 +215,28 @@ function writePreparedPackage(files, outputPackage) {
 }
 
 /** Copy the exact supported DSH package into a new, isolated compatibility package. */
-export function prepareDshPreSetupRuntime(sourcePackage, outputPackage) {
+export function prepareDshPreSetupRuntime(sourcePackage, outputPackage, options={}) {
+  if(!options||typeof options!=='object'||Array.isArray(options)||Object.keys(options).some(key=>key!=='pendingInputWake')||options.pendingInputWake!==undefined&&typeof options.pendingInputWake!=='boolean')fail('dsh_pre_setup_options_invalid');
   const canonicalSource = canonicalSourcePath(sourcePackage);
   const canonicalOutput = canonicalNewOutputPath(outputPackage);
   if (pathsOverlap(canonicalSource, canonicalOutput)) fail('dsh_pre_setup_path_overlap');
 
   // Read, validate, and patch the complete permitted file set before creating anything.
-  const files = collectPackageFiles(canonicalSource);
+  const files = collectPackageFiles(canonicalSource, options.pendingInputWake===true);
   writePreparedPackage(files, canonicalOutput);
-  return Object.freeze({protocol: 2, upstreamVersion: supportedVersion});
+  return Object.freeze({protocol: 2, upstreamVersion: supportedVersion,...(options.pendingInputWake?{pendingInputProtocol:1}:{})});
 }
 
 function cli() {
   const args = process.argv.slice(2);
-  if (args.length !== 2) {
-    process.stderr.write('Usage: node prepare-dsh-pre-setup.mjs <source-package> <output-package>\n');
+  if (args.length < 2 || args.length > 3 || args.length===3&&args[2]!=='--pending-input-wake') {
+    process.stderr.write('Usage: node prepare-dsh-pre-setup.mjs <source-package> <output-package> [--pending-input-wake]\n');
     process.exitCode = 2;
     return;
   }
   try {
-    prepareDshPreSetupRuntime(args[0], args[1]);
-    process.stdout.write('Prepared DSH rc.2 compatibility package (protocol 2).\n');
+    const result=prepareDshPreSetupRuntime(args[0], args[1],{pendingInputWake:args.length===3});
+    process.stdout.write(`Prepared DSH rc.2 compatibility package (protocol 2${result.pendingInputProtocol?', pending-input 1':''}).\n`);
   } catch (error) {
     const code = error instanceof Error && /^dsh_pre_setup_[a-z0-9_]+$/.test(error.message)
       ? error.message
