@@ -4,7 +4,7 @@ title: Keep project discovery in original DSH task boundaries
 category: decision
 status: active
 created: "2026-10-17T03:43:02"
-updated: "2026-10-17T11:29:11"
+updated: "2026-10-17T12:18:50"
 ---
 
 <!-- compiled_truth -->
@@ -238,5 +238,11 @@ Logical Workbench files are the default project source: capture all owned immuta
 - time: 2026-10-17T11:29:11
   kind: decision
   summary: "Keep logical source/current-base and scoped observation invariants with original cycle recovery; retain unfinished native execution and reviewed apply."
+  source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
+  affects: [always-on-discovery]
+
+- time: 2026-10-17T12:18:50
+  kind: decision
+  summary: "Native work uses a distinct original occurrence and immutable owner work grant, not proposal acceptance or snapshot authority. Its trusted cwd/objective, plan-only file IO and discriminated immutable output receipts must be connected before admission opens. IO cannot outlive a synchronous SQL transaction; unresolved write intents fence recovery. Current occurrence is per occurrence, and occurrence generation revocation must be checked independently from task generation."
   source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
   affects: [always-on-discovery]

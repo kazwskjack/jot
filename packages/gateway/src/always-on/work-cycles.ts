@@ -37,7 +37,7 @@ export class WorkCycles{
  private prior(owner:string,key:string,fingerprint:string){const row=this.db.prepare('SELECT * FROM wb_discovery_work_cycle_commands WHERE owner_id=? AND command_key=?').get(owner,key) as Row|undefined;if(!row)return null;if(row.command_sha256!==fingerprint)throw Error('idempotency_conflict');try{return frozen(JSON.parse(row.receipt_json)) as WorkCycleView;}catch{throw Error('work_cycle_corrupt');}}
  private receipt(owner:string,key:string,fingerprint:string,cycle:WorkCycleView){this.db.prepare('INSERT INTO wb_discovery_work_cycle_commands VALUES(?,?,?,?,?,?)').run(owner,key,fingerprint,cycle.cycle_id,canonicalJson(cycle),new Date().toISOString());return cycle;}
  private facts(owner:string,scope:WorkCycleScope,admissionId:string){
-  const role=this.scope(owner,scope),row=this.db.prepare(`SELECT a.*,o.root_run_id,o.run_id AS current_run_id,t.version AS current_task_version,t.generation AS current_task_generation,t.status AS task_status,
+  const role=this.scope(owner,scope),row=this.db.prepare(`SELECT a.*,o.root_run_id,o.run_id AS current_run_id,o.generation AS current_occurrence_generation,t.version AS current_task_version,t.generation AS current_task_generation,t.status AS task_status,
    p.version AS current_policy_version,p.state AS policy_state,p.role_version AS current_policy_role_version,p.role_epoch AS current_policy_role_epoch
    FROM wb_discovery_admissions a JOIN wb_discovery_policies p ON p.policy_id=a.policy_id AND p.owner_id=a.owner_id
    JOIN wb_discovery_task_bindings b ON b.policy_id=p.policy_id AND b.task_id=a.task_id AND b.owner_id=a.owner_id AND b.agent_id=p.agent_id AND b.project_id=p.project_id AND b.workspace_id=p.workspace_id
@@ -48,7 +48,7 @@ export class WorkCycles{
   const head=(this.db.prepare('SELECT coalesce(max(revision),0) revision FROM wb_discovery_signals WHERE policy_id=?').get(row.policy_id) as Row).revision;
   if(role.status!=='active'||role.version!==row.role_version||role.capability_epoch!==row.role_epoch||row.policy_state!=='active'
    ||row.current_policy_version!==row.policy_version||row.current_policy_role_version!==row.role_version||row.current_policy_role_epoch!==row.role_epoch
-   ||row.current_task_version!==row.task_version||row.current_task_generation!==row.task_generation||!['active','budget_exhausted'].includes(row.task_status)||head!==row.signal_revision)throw Error('work_cycle_authority_revoked');
+   ||row.current_task_version!==row.task_version||row.current_task_generation!==row.task_generation||row.current_occurrence_generation!==row.task_generation||!['active','budget_exhausted'].includes(row.task_status)||head!==row.signal_revision)throw Error('work_cycle_authority_revoked');
   return row;
  }
  private budget(owner:string,row:Row){

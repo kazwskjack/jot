@@ -1113,3 +1113,135 @@ Final public preflight: disclosure6 and824 files pass; Brain links have no broke
 references. Independent static review found no further important defect within
 the logical source/artifact scope. These checks do not establish arbitrary secret
 redaction or execution/apply/production acceptance.
+
+## Native isolated execution: reviewed implementation boundary
+
+The following sequence is planned integration, not delivered execution. Parallel
+source audits traced admission, file-output lineage and native Session/Goal
+independently. All three must be connected before any work admission is exposed.
+Changing only cwd or lifting the planning operation allowlist is insufficient.
+
+### Original occurrence revocation correction
+
+`WorkCycles.facts` now compares the current planning occurrence generation with
+the immutable planning admission generation. The original cancellation path can
+record occurrence generation -1 without changing the task version/generation.
+That persisted revocation must reject both fresh cycle creation and fresh guards.
+Previously these checks only compared task-level generations. Two regressions
+first failed with missing expected exceptions, then passed with the correction.
+The complete targeted suite passes11/11. Normal accepted terminal planning remains
+valid; historical get/idempotent-command receipt recovery and explicit resource
+close remain available and confer no renewed authority. Public cancellation
+already refuses succeeded runs: these tests establish persisted-generation
+validation, not a demonstrated public cancellation of an already succeeded run.
+
+`wb_task_current_occurrences` is a continuation head per occurrence, not the
+latest occurrence of an entire task. Enqueue increases runs_used but does not
+increase task version/generation. A distinct work occurrence therefore does not
+in itself invalidate the original planning resource. Its execution nevertheless
+needs its own binding and live guard; the planning guard is never that authority.
+
+### 1. Explicit work selection and original atomic admission
+
+- [ ] Add internal `always-on/work-grants.ts` with owner-command idempotency.
+  `authorize(owner, scope, cycleId, input, key)` accepts only expected cycle,
+  policy and role versions/epoch plus snapshot_id/source_sha256. Derive accepted
+  report/plans/path hashes, original task/version/generation, actual planning
+  occurrence generation, original task-total budget scope and private ready
+  snapshot record on the server. Do not accept roots, plan bodies or a boolean
+  authorization claim. Proposal acceptance and artifact preparation remain
+  separate from the owner's work authorization.
+- [ ] Add internal `always-on/work-admission.ts` which verifies the actual ready
+  artifact and original source bytes outside SQL transactions, obtains fresh
+  native idle/budget/capacity observations, then revalidates original facts under
+  the final enqueue transaction. Drift, unresolved accounting and uncertain
+  workspace preparation refuse admission; they do not rebase or recopy.
+- [ ] Add `PersistentTaskService.enqueueDiscoveryWork` through the existing
+  private enqueue function. Extend the private pre-occurrence callback to receive
+  occurrence_id, run_id and conversation_id. Persist one immutable admission per
+  owner grant, with deferred original-occurrence FK and exact
+  `discovery-work:<grant-id>` trigger identity. Extend the existing SQL gate with
+  this exact branch while retaining its planning branch and generic refusal.
+  Keep reservation, occurrence, original run binding, counts and command receipt
+  in the same transaction. After original bindRun, verify the original pinned
+  task-total scope; do not allocate an alternative task or reset allowance.
+- [ ] Resolve work admissions for continuations and any allowed native members
+  through original run ancestry. `discoveryForRun` currently sees planning only;
+  its early return must not accidentally grant work runs ordinary shared file,
+  memory, message or delegation access. Require a work guard in assertRunActive
+  and every operation. Keep work admission closed until all following stages pass.
+
+### 2. Isolated IO, durable results and original evidence
+
+- [ ] Add a focused internal isolated-file service. Preparation and byte IO run
+  outside the synchronous transaction in `workbench/execution.ts`. Returning a
+  Promise from withImmediateTransaction is prohibited: it would commit before
+  the awaited work. Reuse authenticated original session/lease, operation digest,
+  dependencies and call idempotency in an explicit async file-operation branch.
+- [ ] Use original files.list/read/write operation names, with server-resolved
+  isolated scope. Exact selected plan paths alone are writable; copied context,
+  structural ancestors and path-prefix descendants are not write grants. Preserve
+  the existing text-write size contract and physical provider bounds. Recheck
+  roots/ancestors/open handles, reject links/junctions/hardlinks, and use verified
+  exclusive temporary writes plus guarded replacement. Reject changed context
+  bytes independently of an inspection that merely reports the changes.
+- [ ] Persist an immutable per-call write intent before IO. Serialize pending
+  writes per cycle across processes using database CAS. An unresolved intent
+  blocks conflicting work; it is not evidence that bytes were successfully
+  written. Verify exact before/after facts during recovery rather than blindly
+  repeating writes. Commit immutable cycle-local output bytes/hash/version,
+  isolated receipt subtype, original execution receipt and original tool response
+  together after live authority revalidation. Lost responses recover that receipt.
+- [ ] Extend `persistent-tasks/execution-evidence.ts` and `task-file-source.ts`
+  with a discriminated isolated source. Never insert fake wb_files or
+  wb_file_versions rows to satisfy shared-output checks. Preserve original
+  owner/task/occurrence/step/producer lineage. The isolated identity includes
+  cycle_id/snapshot_id/receipt_id; path/version alone can collide with shared data.
+- [ ] Update output-content, completion-candidates, review-outputs,
+  output-delivery and artifact registration to consume that exact immutable
+  source. Freeze actual full isolated inspection/diff, base and plan hashes in
+  original completion evidence. Historical output comes from its immutable
+  version, not whatever bytes currently occupy the mutable isolated tree.
+  Artifact delivery does not apply changes to the source project.
+
+### 3. Trusted native workspace, objective and end-to-end acceptance
+
+- [ ] Resolve private cwd from the verified admitted work binding in the Worker
+  immediately before original Session creation. Pass a trusted run workspace
+  through DshRunInput/OfficialSessionRunner; a bound work run missing that binding
+  must fail rather than fall back to the global harness directory. Browser/model
+  fields and an absolute path string cannot supply this authority.
+- [ ] Derive task_binding.objective from the exact frozen selected plans for this
+  occurrence. Do not mutate the intentionally immutable persistent-task objective
+  or rely on a source-context string labeled as untrusted input. Use a new
+  original conversation/Session/Goal for the new work occurrence. Continuations
+  retain that work Goal; completed planning Goals are never resurrected.
+- [ ] Extend the opt-in pinned official SDK/Gateway/Worker fixture with both
+  planning and work Sessions/Goals. Prove actual plan-only files.write, unchanged
+  original source bytes, exact objective and journaled cwd, same cumulative
+  task-total scope, distinct occurrence count and continued usage. Prove wrong
+  paths, missing binding, stale base and revoked lease/policy/role/source/cycle
+  dispatch no work and produce no success receipt. Exercise native wait/reply
+  and restart using the same work occurrence/Goal, without manual prompt replay.
+- [ ] Test concurrent writers, lost responses and crash positions around intent,
+  replacement and receipt commit; substituted roots/ancestors/links; cross-cycle
+  receipt confusion; changed copied context; immutable output publication after
+  later writes. Retain normal shared-file and native-team completion regressions.
+  Then run complete Gateway/root regressions, Windows builds, disclosure/committed
+  content checks and review before upload. Local scripted-model SDK results do
+  not establish provider quality or production rollout.
+
+Native shell/exec remains outside this initial file-tool integration until real
+command sandbox/permission authority is implemented. Automatic discovery dispatch,
+reviewed apply, memory/report integration, Git/provider variants, retention and
+production/full26 acceptance remain in the original scope; this sequence does
+not replace or declare completion of those requirements.
+
+The occurrence-generation correction has fresh full Gateway evidence:1585 tests,
+1578 passed,seven existing/opt-in skips and zero failures (219.65s), followed by
+a successful Windows Gateway build. Root32 and the Windows root build pass.
+Disclosure regression6,824-file working-tree preflight and Brain link checks pass
+after test fixtures finish. A preflight attempted during live fixture creation
+could not inspect the changing tree; it was not counted as successful review.
+This correction does not add a work occurrence, model call, dispatcher, public
+execution route or production enablement.

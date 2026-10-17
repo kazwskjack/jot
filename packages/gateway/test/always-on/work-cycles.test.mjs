@@ -23,6 +23,29 @@ test('guard reopens a genuinely read-only SQLite connection and validates accept
  try{const before=readonly.prepare('SELECT total_changes() n').get().n,store=new WorkCycles(readonly);assert.deepEqual(store.guard('owner',f.scope,cycle.cycle_id),cycle);assert.equal(readonly.prepare('SELECT total_changes() n').get().n,before);assert.equal(readonly.isTransaction,false);assert.equal(store.get('owner',f.scope,cycle.cycle_id).execution_authorized,false);}
  finally{readonly.close();}
 });
+
+test('cancelled source occurrence generation revokes guards while preserving historical receipts',async t=>{
+ const f=await acceptedWorkCycleFixture(t),store=new WorkCycles(f.db),request=input(f),cycle=store.create('owner',f.scope,request,'create');
+ assert.deepEqual(store.guard('owner',f.scope,cycle.cycle_id),cycle,'normal accepted terminal planning remains valid');
+ const taskBefore=f.db.prepare('SELECT version,generation FROM wb_persistent_tasks WHERE task_id=?').get(cycle.task_id);
+ // The original cancelOccurrence path revokes only this occurrence generation;
+ // it does not change the task version or the immutable planning admission.
+ f.db.prepare('UPDATE wb_task_occurrences SET generation=-1 WHERE occurrence_id=?').run(cycle.occurrence_id);
+ assert.deepEqual(f.db.prepare('SELECT version,generation FROM wb_persistent_tasks WHERE task_id=?').get(cycle.task_id),taskBefore);
+ assert.throws(()=>store.guard('owner',f.scope,cycle.cycle_id),/work_cycle_authority_revoked/);
+ assert.deepEqual(store.create('owner',f.scope,request,'create'),cycle,'lost reply recovers historical receipt only');
+ assert.deepEqual(store.get('owner',f.scope,cycle.cycle_id),cycle);
+ store.close('owner',f.scope,cycle.cycle_id,{expected_version:1},'close');
+ assert.throws(()=>store.create('owner',f.scope,request,'fresh-create'),/work_cycle_authority_revoked/);
+ assert.equal(store.list('owner',f.scope).items.length,1);
+});
+
+test('cancelled source occurrence generation rejects fresh creation from an accepted report',async t=>{
+ const f=await acceptedWorkCycleFixture(t),store=new WorkCycles(f.db),request=input(f);
+ f.db.prepare('UPDATE wb_task_occurrences SET generation=-1 WHERE occurrence_id=?').run(f.admission.occurrence_id);
+ assert.throws(()=>store.create('owner',f.scope,request,'fresh-create'),/work_cycle_authority_revoked/);
+ assert.equal(store.list('owner',f.scope).items.length,0);
+});
 test('guard retains the exact original task-total scope identity even if a damaged ledger is rebound consistently',async t=>{
  const f=await acceptedWorkCycleFixture(t),store=new WorkCycles(f.db),cycle=store.create('owner',f.scope,input(f),'create'),allocation=JSON.parse(f.db.prepare('SELECT allocation_json FROM wb_budget_allocations WHERE run_id=?').get(cycle.root_run_id).allocation_json),bound=JSON.parse(f.db.prepare('SELECT scopes_json FROM wb_model_budget_bindings WHERE run_id=?').get(cycle.root_run_id).scopes_json),original=allocation.scopes.find(scope=>scope.key.startsWith('task-total:')).scope_id,replacement=original+'-rebound';
  f.db.exec('DROP TRIGGER wb_budget_scope_config_immutable;DROP TRIGGER wb_budget_allocation_immutable;DROP TRIGGER wb_budget_binding_immutable;');
