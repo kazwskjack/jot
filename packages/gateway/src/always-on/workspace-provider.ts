@@ -11,7 +11,13 @@ export type WorkspaceGuard=(context:Readonly<{phase:'prepare'|'copy'|'verify'|'p
 export type WorkspaceProviderLimits={max_entries?:number;max_total_bytes?:number;max_file_bytes?:number;max_depth?:number};
 export type SnapshotWorkspaceInput={sourceRoot:string;storageRoot:string;paths:readonly string[];guard:WorkspaceGuard;signal:AbortSignal;limits?:WorkspaceProviderLimits};
 export type WorkspaceInspectionInput={snapshot:WorkspaceSnapshot;guard:WorkspaceGuard;signal:AbortSignal};
-export interface WorkspaceProvider {create(input:SnapshotWorkspaceInput):Promise<WorkspaceSnapshot>;inspect(input:WorkspaceInspectionInput):Promise<WorkspaceInspection>}
+/** Private host-only artifact facts. Absolute roots must never enter public API projections. */
+export type SnapshotRecoveryRoot=Readonly<{path:string;canonical:string;dev:string;ino:string}>;
+export type SnapshotRecoveryRecord=Readonly<{protocol:1;provider:'snapshot-copy';snapshot_id:string;storage_root:SnapshotRecoveryRoot;isolated_root:SnapshotRecoveryRoot;manifest:WorkspaceManifest;receipt:WorkspaceCreationReceipt;selection:readonly Readonly<{path:string;kind:'file'|'directory'}>[];limits:Required<WorkspaceProviderLimits>}>;
+export type SnapshotRecoveryStore={commit(record:SnapshotRecoveryRecord):Promise<void>;read(snapshot_id:string):Promise<SnapshotRecoveryRecord|undefined>};
+export type SnapshotProviderOptions={recoveryStore?:SnapshotRecoveryStore};
+export type WorkspaceRecoveryInput={snapshot_id:string;storageRoot:string;guard:WorkspaceGuard;signal:AbortSignal};
+export interface WorkspaceProvider {create(input:SnapshotWorkspaceInput):Promise<WorkspaceSnapshot>;inspect(input:WorkspaceInspectionInput):Promise<WorkspaceInspection>;recover(input:WorkspaceRecoveryInput):Promise<WorkspaceSnapshot>}
 
 export function workspaceRelativePath(value:unknown):string{
  if(typeof value!=='string'||!value||value.length>4096||value.startsWith('/')||/[\\:\x00-\x1f\x7f]/.test(value)

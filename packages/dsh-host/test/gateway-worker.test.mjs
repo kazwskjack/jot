@@ -218,6 +218,18 @@ async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=
    assert.equal(history.items[0].accepted,true,'history must recognize actual native SDK completion, not only fixture status');assert.equal(history.items[0].run.run_id,completionRun);assert.equal(history.items[0].report.report_id,report.report_id);assert.equal(history.items[0].report.sha256,report.payload_sha256);
    const detailResponse=await fetch(historyUrl+'/'+history.items[0].admission_id,{headers}),detail=await detailResponse.json();assert.equal(detailResponse.status,200,JSON.stringify(detail.error));assert.equal(detail.cycle.accepted,true);assert.equal(detail.report.report_id,report.report_id);assert.equal(detail.plans.length,noPlan?0:1);assert.equal(detail.execution_authorized,false);
    assert.equal((await fetch(historyUrl,{headers:{...headers,'x-user-id':'foreign-owner'}})).status,404);
+   if(!noPlan){
+    const {WorkCycles}=await import('../../gateway/src/always-on/work-cycles.ts'),cycles=new WorkCycles(service.db);
+    const admission=service.db.prepare('SELECT * FROM wb_discovery_admissions WHERE admission_id=?').get(detail.cycle.admission_id);
+    const counts=()=>['ga_runs','wb_task_occurrences','wb_model_budget_attempts','wb_budget_allocations'].map(table=>service.db.prepare(`SELECT count(*) n FROM ${table}`).get().n);
+    const before=counts(),calls=requests.length,request={admission_id:admission.admission_id,report_sha256:report.payload_sha256,plan_ids:detail.plans.map(p=>p.plan_id),expected_policy_version:admission.policy_version,expected_role_version:admission.role_version,expected_role_epoch:admission.role_epoch};
+    const cycle=cycles.create('acceptance-owner',discoveryScope,request,'sdk-owned-artifact');
+    assert.equal(cycle.execution_authorized,false);assert.equal(cycle.task_id,admission.task_id);assert.equal(cycle.occurrence_id,admission.occurrence_id);
+    assert.deepEqual(cycles.guard('acceptance-owner',discoveryScope,cycle.cycle_id),cycle);
+    assert.deepEqual(new WorkCycles(service.db).create('acceptance-owner',discoveryScope,request,'sdk-owned-artifact'),cycle);
+    assert.equal(cycles.close('acceptance-owner',discoveryScope,cycle.cycle_id,{expected_version:1},'sdk-close-artifact').state,'closed');
+    assert.deepEqual(counts(),before);assert.equal(requests.length,calls,'artifact resource creation never dispatches a model');
+   }
    assert.equal(service.workbench.readFile('acceptance-owner','jot',roleAgent.project_id,'source.md').content,'Discovery source observed for ACCEPTANCE-OK.');
   }
   if(resume){

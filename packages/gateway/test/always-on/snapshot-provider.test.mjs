@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,readdirSync,rmSync,rmdirSync,existsSync,symlinkSync,renameSync,statSync} from 'node:fs';
 import {resolve,join} from 'node:path';
 import {createHash} from 'node:crypto';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 import {SnapshotCopyWorkspaceProvider} from '../../src/always-on/snapshot-provider.ts';
 import {validateWorkspaceManifest,workspaceManifestHash} from '../../src/always-on/workspace-provider.ts';
 
@@ -123,4 +125,72 @@ test('real inspection rejects replacing an unselected structural parent with a f
  const removed=await provider.inspect({snapshot,...controls});assert.deepEqual(removed.manifest.entries,[]);assert.deepEqual(removed.manifest.paths,['src/selected.txt']);
  writeFileSync(join(snapshot.isolated_root,'src'),'replacement');await assert.rejects(()=>provider.inspect({snapshot,...controls}),/workspace_/);
  assert.equal(readFileSync(join(f.sourceRoot,'src/untouched.txt'),'utf8'),'unselected sibling');
+});
+
+function recoveryStore(){const records=new Map();let commits=0;return {records,get commits(){return commits;},commit:async record=>{commits++;records.set(record.snapshot_id,structuredClone(record));},read:async id=>records.get(id)};}
+
+test('a new provider recovers a committed snapshot and inspects legitimate edits without copying or changing base',async t=>{
+ const f=fixture(t);mkdirSync(join(f.sourceRoot,'src'));writeFileSync(join(f.sourceRoot,'src/a'),'before');const store=recoveryStore(),first=new SnapshotCopyWorkspaceProvider({recoveryStore:store}),snapshot=await first.create(input(f));
+ writeFileSync(join(snapshot.isolated_root,'src/a'),'after');writeFileSync(join(snapshot.isolated_root,'src/new'),'added');const before=readdirSync(f.storageRoot),second=new SnapshotCopyWorkspaceProvider({recoveryStore:store});
+ const restored=await second.recover({snapshot_id:snapshot.receipt.snapshot_id,storageRoot:f.storageRoot,guard:()=>{},signal:new AbortController().signal}),result=await second.inspect({snapshot:restored,guard:()=>{},signal:new AbortController().signal});
+ assert.equal(restored.receipt.manifest_sha256,snapshot.receipt.manifest_sha256);assert.equal(restored.isolated_root,snapshot.isolated_root);assert.equal(restored.manifest.entries.find(e=>e.path==='src/a').sha256,sha('before'));
+ assert.equal(result.manifest.entries.find(e=>e.path==='src/a').sha256,sha('after'));assert.ok(result.manifest.entries.some(e=>e.path==='src/new'));assert.deepEqual(readdirSync(f.storageRoot),before);assert.equal(store.commits,1);assert.equal(restored.receipt.execution_authorized,false);
+});
+
+test('lost recovery-store commit response cannot return ready but committed identity can be recovered once without recopy',async t=>{
+ const f=fixture(t);mkdirSync(join(f.sourceRoot,'src'));writeFileSync(join(f.sourceRoot,'src/a'),'ready bytes');const store=recoveryStore(),commit=store.commit;store.commit=async record=>{await commit(record);throw Error('synthetic lost response');};
+ let snapshotId;await assert.rejects(()=>new SnapshotCopyWorkspaceProvider({recoveryStore:store}).create(input(f,{guard:context=>{snapshotId??=context.snapshot_id;}})),/workspace_recovery_commit_unknown/);
+ assert.equal(store.records.size,1);assert.equal(readdirSync(f.storageRoot).length,1);const provider=new SnapshotCopyWorkspaceProvider({recoveryStore:store}),recovered=await provider.recover({snapshot_id:snapshotId,storageRoot:f.storageRoot,guard:()=>{},signal:new AbortController().signal});
+ assert.equal(recovered.receipt.status,'ready');assert.equal(store.commits,1);assert.equal(readdirSync(f.storageRoot).length,1);
+});
+
+test('recovery refuses unrecorded leftovers, wrong storage, forged metadata, root replacement, revoked guard and cancellation',async t=>{
+ const f=fixture(t);mkdirSync(join(f.sourceRoot,'src'));writeFileSync(join(f.sourceRoot,'src/a'),'before');const store=recoveryStore(),provider=new SnapshotCopyWorkspaceProvider({recoveryStore:store}),snapshot=await provider.create(input(f)),id=snapshot.receipt.snapshot_id;
+ const recover=(options={},using=store)=>new SnapshotCopyWorkspaceProvider({recoveryStore:using}).recover({snapshot_id:id,storageRoot:f.storageRoot,guard:()=>{},signal:new AbortController().signal,...options});
+ await assert.rejects(()=>new SnapshotCopyWorkspaceProvider().recover({snapshot_id:id,storageRoot:f.storageRoot,guard:()=>{},signal:new AbortController().signal}),/workspace_recovery_unavailable/);
+ await assert.rejects(()=>recover({},recoveryStore()),/workspace_recovery_not_found/);
+ mkdirSync(join(f.root,'other'));await assert.rejects(()=>recover({storageRoot:join(f.root,'other')}),/workspace_recovery_/);
+ for(const modify of [r=>r.snapshot_id='workspace-snapshot-forged',r=>r.receipt.manifest_sha256='0'.repeat(64),r=>r.isolated_root.ino='0',r=>r.selection=[{path:'outside',kind:'directory'}],r=>r.limits={max_entries:1},r=>r.isolated_root.path=f.sourceRoot]){
+  const forged=structuredClone(store.records.get(id));modify(forged);await assert.rejects(()=>recover({},{...store,read:async()=>forged}),/workspace_/);
+ }
+ await assert.rejects(()=>recover({guard:()=>{throw Error('revoked');}}),/workspace_guard_rejected/);const aborted=new AbortController();aborted.abort();await assert.rejects(()=>recover({signal:aborted.signal}),/workspace_cancelled/);
+ renameSync(snapshot.isolated_root,snapshot.isolated_root+'-old');mkdirSync(snapshot.isolated_root);await assert.rejects(()=>recover(),/workspace_/);assert.equal(store.commits,1);
+});
+
+test('recovery validates real result scope, private files and partial preparation without modifying artifacts',async t=>{
+ const f=fixture(t);mkdirSync(join(f.sourceRoot,'src'));writeFileSync(join(f.sourceRoot,'src/a'),'before');const store=recoveryStore(),snapshot=await new SnapshotCopyWorkspaceProvider({recoveryStore:store}).create(input(f)),id=snapshot.receipt.snapshot_id;
+ const recover=()=>new SnapshotCopyWorkspaceProvider({recoveryStore:store}).recover({snapshot_id:id,storageRoot:f.storageRoot,guard:()=>{},signal:new AbortController().signal});
+ for(const path of ['outside','src/.env']){writeFileSync(join(snapshot.isolated_root,path),'forbidden');await assert.rejects(recover,/workspace_/);assert.equal(readFileSync(join(snapshot.isolated_root,path),'utf8'),'forbidden');rmSync(join(snapshot.isolated_root,path));}
+ const partialStore=recoveryStore();await assert.rejects(()=>new SnapshotCopyWorkspaceProvider({recoveryStore:partialStore}).create(input(f,{guard:context=>{if(context.phase==='copy')throw Error('stop before copy');}})),/workspace_guard_rejected/);assert.equal(partialStore.records.size,0);
+ assert.equal(store.commits,1);assert.equal((await recover()).receipt.status,'ready');
+});
+
+test('another Node process reconstructs the provider from its trusted host record without writing metadata',async t=>{
+ const f=fixture(t);mkdirSync(join(f.sourceRoot,'src'));writeFileSync(join(f.sourceRoot,'src/a'),'before');const store=recoveryStore(),snapshot=await new SnapshotCopyWorkspaceProvider({recoveryStore:store}).create(input(f)),id=snapshot.receipt.snapshot_id,recordPath=join(f.root,'trusted-record.json');writeFileSync(recordPath,JSON.stringify(store.records.get(id)));writeFileSync(join(snapshot.isolated_root,'src/a'),'edited');
+ const source=`import {readFileSync} from 'node:fs';import {SnapshotCopyWorkspaceProvider} from ${JSON.stringify(new URL('../../src/always-on/snapshot-provider.ts',import.meta.url).href)};const record=JSON.parse(readFileSync(process.argv[1],'utf8'));let commits=0;const provider=new SnapshotCopyWorkspaceProvider({recoveryStore:{read:async()=>record,commit:async()=>{commits++;throw Error('must not write');}}});const snapshot=await provider.recover({snapshot_id:record.snapshot_id,storageRoot:process.argv[2],guard:()=>{},signal:new AbortController().signal});const result=await provider.inspect({snapshot,guard:()=>{},signal:new AbortController().signal});console.log(JSON.stringify({commits,sha256:result.manifest.entries.find(e=>e.kind==='file').sha256,base:snapshot.receipt.manifest_sha256}));`;
+ const before=readFileSync(recordPath,'utf8'),result=await promisify(execFile)(process.execPath,['--input-type=module','-e',source,recordPath,f.storageRoot]);assert.deepEqual(JSON.parse(result.stdout),{commits:0,sha256:sha('edited'),base:snapshot.receipt.manifest_sha256});assert.equal(readFileSync(recordPath,'utf8'),before);assert.equal(readdirSync(f.storageRoot).length,1);
+});
+
+test('recovery refuses replacement of the storage directory and does not initialize a missing configured root',async t=>{
+ const f=fixture(t);mkdirSync(join(f.sourceRoot,'src'));writeFileSync(join(f.sourceRoot,'src/a'),'before');const store=recoveryStore(),snapshot=await new SnapshotCopyWorkspaceProvider({recoveryStore:store}).create(input(f));
+ renameSync(f.storageRoot,f.storageRoot+'-original');mkdirSync(f.storageRoot);const provider=new SnapshotCopyWorkspaceProvider({recoveryStore:store}),recover=storageRoot=>provider.recover({snapshot_id:snapshot.receipt.snapshot_id,storageRoot,guard:()=>{},signal:new AbortController().signal});
+ await assert.rejects(()=>recover(f.storageRoot),/workspace_recovery_storage_changed/);assert.deepEqual(readdirSync(f.storageRoot),[]);
+ const missing=join(f.root,'missing');await assert.rejects(()=>recover(missing),/workspace_recovery_failed/);assert.equal(existsSync(missing),false);assert.equal(store.commits,1);
+});
+
+test('recovery rechecks links and structural scope and preserves exact bytes and metadata on a valid read',async t=>{
+ const f=fixture(t);mkdirSync(join(f.sourceRoot,'src'));writeFileSync(join(f.sourceRoot,'src/selected'),'before');const store=recoveryStore(),snapshot=await new SnapshotCopyWorkspaceProvider({recoveryStore:store}).create(input(f,{paths:['src/selected']}));
+ const recover=()=>new SnapshotCopyWorkspaceProvider({recoveryStore:store}).recover({snapshot_id:snapshot.receipt.snapshot_id,storageRoot:f.storageRoot,guard:()=>{},signal:new AbortController().signal});
+ const before={root:statSync(snapshot.isolated_root,{bigint:true}),file:statSync(join(snapshot.isolated_root,'src/selected'),{bigint:true}),record:JSON.stringify(store.records.get(snapshot.receipt.snapshot_id))};
+ await recover();const afterRoot=statSync(snapshot.isolated_root,{bigint:true}),afterFile=statSync(join(snapshot.isolated_root,'src/selected'),{bigint:true});
+ for(const key of ['ino','mtimeNs','ctimeNs']){assert.equal(afterRoot[key],before.root[key]);assert.equal(afterFile[key],before.file[key]);}assert.equal(readFileSync(join(snapshot.isolated_root,'src/selected'),'utf8'),'before');assert.equal(JSON.stringify(store.records.get(snapshot.receipt.snapshot_id)),before.record);
+ rmSync(join(snapshot.isolated_root,'src/selected'));rmdirSync(join(snapshot.isolated_root,'src'));writeFileSync(join(snapshot.isolated_root,'src'),'unselected parent');await assert.rejects(recover,/workspace_scope_changed/);rmSync(join(snapshot.isolated_root,'src'));mkdirSync(join(snapshot.isolated_root,'src'));symlinkSync(f.sourceRoot,join(snapshot.isolated_root,'src/selected'),'junction');await assert.rejects(recover,/workspace_path_unsafe/);
+});
+
+test('an interrupted preparation has no recoverable ready record and store errors expose only bounded codes',async t=>{
+ const f=fixture(t);mkdirSync(join(f.sourceRoot,'src'));writeFileSync(join(f.sourceRoot,'src/a'),'before');const store=recoveryStore();let id;
+ await assert.rejects(()=>new SnapshotCopyWorkspaceProvider({recoveryStore:store}).create(input(f,{guard:context=>{id=context.snapshot_id;if(context.phase==='copy')throw Error('stop');}})),/workspace_guard_rejected/);
+ const roots=readdirSync(f.storageRoot),options={snapshot_id:id,storageRoot:f.storageRoot,guard:()=>{},signal:new AbortController().signal};
+ await assert.rejects(()=>new SnapshotCopyWorkspaceProvider({recoveryStore:store}).recover(options),/workspace_recovery_not_found/);assert.deepEqual(readdirSync(f.storageRoot),roots);assert.equal(store.commits,0);
+ await assert.rejects(()=>new SnapshotCopyWorkspaceProvider({recoveryStore:{commit:async()=>{},read:async()=>{throw Error('private exception includes a root');}}}).recover(options),error=>error.message==='workspace_recovery_unavailable');
 });

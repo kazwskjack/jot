@@ -562,7 +562,27 @@ A snapshot-copy artifact provider now streams explicitly selected binary/text
 files and empty directories into a separate root and inventories scoped results.
 Frozen manifest differences retain exact content/mode/type/add/delete/unique
 rename facts. Structural ancestors never become modification authority for a
-selected child. These helpers do not execute tasks or apply changes; same-instance
-inspection is not durable restart recovery or an OS sandbox. Git providers,
-frozen owned cycle/root-budget binding, original DSH isolated execution, reviewed
-application/reconciliation and remaining full lifecycle acceptance remain open.
+selected child. These helpers do not execute tasks, apply changes or provide an
+OS sandbox. Durable artifact recovery uses the original bindings described below.
+
+Owned work-cycle resources now freeze selected proposals from a canonically
+accepted original report, source/policy/role/task identities and the original
+cumulative task budget scope. One open resource occupies an owned workspace;
+explicit resource close neither completes the task nor deletes files or refunds
+usage. Immutable command receipts recover lost replies without renewing authority.
+
+A private preparation journal binds one snapshot intent to that resource and a
+trusted host configuration. The snapshot provider can recover a committed artifact
+across instances/processes, checking original manifest/root identities and actual
+scoped files. An intent without a ready record stays uncertain; retry does not
+silently copy again. The internal workspace manager combines those checks and
+retains the distinction between copied context and proposed writable paths.
+Root identities and recovery records are internal, not browser inputs or public
+report fields. Directory identity and selected-entry types must still agree at
+commit; a successful logical policy guard does not substitute for filesystem checks.
+
+This increment does not install a project-to-physical-root registry, isolated DSH
+execution, an OS sandbox, Git provider, automatic discovery dispatcher or reviewed
+application. Before execution/apply, actual source-base drift, permissions, scoped
+memory and original native task continuation still require their own integration
+and acceptance. Full26 capability and real-provider/deployment scope remains open.

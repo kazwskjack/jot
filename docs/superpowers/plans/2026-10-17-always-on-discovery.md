@@ -5,7 +5,7 @@ not a replacement for ordinary native Goal or existing persistent tasks. DSH
 remains the only planner and native executor. This plan does not authorize
 background work against user projects before their owners configure it.
 
-## Source review and current gap
+## Source review and initial gap
 
 Reference baseline: OpenBMB/PilotDeck `783499ffdb2d501bf590b2e035acd027a882df10`,
 AGPL-3.0. This review traced named call paths below, not every upstream line or
@@ -29,10 +29,10 @@ permits an empty fresh channel-lease list. Those are **not** Jot permission or
 idle proofs and will not be transplanted. DSH high reasoning, existing Gateway
 ownership, permissions, original leases and unknown-accounting holds stay intact.
 
-Current Jot `persistent-tasks/scheduler.ts:maintainWorkbench` admits configured
+At the initial audit, Jot `persistent-tasks/scheduler.ts:maintainWorkbench` admitted configured
 tasks only after execution readiness. `PersistentTaskService` owns triggers,
 occurrences, idempotency and pause/stop; `WorkbenchService` owns scoped roles,
-memory and run bindings. The Gateway currently has no project discovery scheduler,
+memory and run bindings. The Gateway then had no project discovery scheduler,
 work-cycle record, isolated-workspace provider or reviewed cycle apply path.
 Session checkpoints are native history recovery, not project file snapshots.
 No existing green recovery test proves these missing capabilities.
@@ -49,8 +49,8 @@ budgets and must not be implemented as a new competing quota ledger.
 That prerequisite now has an [implemented explicit unlimited contract](2026-10-17-unlimited-task-runs.md):
 public null, an exact mode/legacy-refusal tuple, guarded schemas, original counts,
 pause/resume and capability-gated UI. The historical audit above explains the
-gap; it is not the current claim that only finite tasks exist. Discovery factual
-collection, policy/signal admission and the rest of this plan remain unfinished.
+gap; it is not the current claim that only finite tasks exist. See the current
+delivery summary and individual evidence below for implemented and open work.
 
 ## End-to-end design
 
@@ -163,9 +163,16 @@ disclosure review before enabling it. Keep full 26-capability acceptance open.
 
 ## Delivery status
 
-This plan defines the complete work, not a claim that the pipeline exists. The
-initial pure gate contract is only prerequisite A; policy/collector, admission,
-DSH execution, workspace/apply, UI and deployment acceptance remain required.
+Current local implementation includes original policy/source/admission/planning,
+source-backed reports, canonical accepted history, native wait/reply recovery,
+policy/history UI and durable owned snapshot artifacts. These are supported by
+the scoped evidence in the later sections, not a claim of complete Always-on.
+Remaining work includes trusted logical-project to physical-root configuration,
+Git provider, original DSH isolated execution and scoped memory, physical base
+revalidation, owner-reviewed diff/apply/reconciliation, automatic dispatcher,
+complete cycle UI, provider/deployment/retention and full26 acceptance.
+
+The following gate-only results are historical prerequisite A evidence:
 
 The first 30 local gate cases pass, including all four scope identities, changed
 policy/role versions, unknown Host idle, stale/future facts, cooldown boundaries,
@@ -885,8 +892,9 @@ symlink/junctions, scope/root overlap, case collisions, cancellation, drift and
 limits refuse a ready receipt. Partial copies remain identifiable by snapshot ID
 and a residual flag; no user checkout is recursively removed. Inspect inventories
 the whole isolated root and permits only changes within the original selection.
-The provider currently issues inspection capability through a private same-instance
-WeakMap; process restart recovery is not implemented or silently inferred.
+The provider issues inspection capability through a private instance WeakMap.
+The later durable recovery increment reissues it only from trusted original-cycle
+records and actual artifact validation; copying a caller object never reissues it.
 
 Default physical copy bounds are50,000 entries,2GiB total,1GiB per file and depth100,
 with explicit configurable limits and a100,000-entry manifest safety ceiling.
@@ -935,3 +943,77 @@ Brain links pass. Independent cross-review identified the ancestor-scope defect
 before publication; red/green tests and a second review confirm that specific
 issue closed. All remaining cycle authority/recovery/Git/DSH/apply/rollout and
 full26 requirements above remain open. No execution or production switch changes.
+
+## Persistent owned work-cycle and artifact recovery increment
+
+Ruling: an owned work cycle is an artifact resource, not another task execution
+state machine. Freeze only selected proposals from the original canonically
+accepted report, exact policy/role/source/task identities and the existing
+cumulative task budget scope. Explicit close releases the resource slot without
+deleting files, completing the task or refunding usage. Historical command
+receipts remain historical; fresh guards determine current authority.
+
+- [x] Install immutable work-cycle identities and command receipts during
+  original task schema initialization, with one open owner/project/workspace
+  resource slot. Pure reads do not initialize schema. Test independent process
+  competition, acceptance proof, idempotent lost responses and revoked facts.
+- [x] Persist exactly one snapshot preparation intent for each cycle before
+  provider filesystem IO. Bind trusted host root configuration and copy scope
+  hashes. Keep the private recovery record and canonical digest in the original
+  database; do not expose host paths or accept a browser recovery record.
+- [x] Restore the same snapshot ID and root from the trusted durable record
+  across provider instances/processes. Recheck original manifest, root identity,
+  scope and actual isolated inventory. No ready record means uncertain/partial
+  preparation, not permission to copy again. Retain diagnostic remnants.
+- [x] Integrate Store, journal and provider with guards before/during IO and
+  recovery. A larger read-only copied context does not expand the proposed
+  writable scope. Test actual binary copy, lost response, database reopening,
+  source/role/policy/close/cancel drift, altered configuration and root replacement.
+  Assert no extra task/run/model attempt or budget allowance and no source edit.
+- [x] Run targeted, complete Gateway and root verification, Windows local builds,
+  independent review and public disclosure checks before publishing this batch.
+
+Artifact recovery proves a prepared artifact identity only. It does not prove the
+current physical source still matches the captured base or authorize execution.
+Original DSH isolated execution, physical base revalidation, Git provider, exact
+owner-reviewed diff/apply, automatic dispatch, real-provider and full26 acceptance
+remain required after this increment. Do not enable discover_and_work here.
+
+### Recovery evidence and limits
+
+WorkCycles targeted9 verifies original canonical business/native publication,
+23-plan pagination and second-page selection, immutable resource/command rows,
+owner/role/policy/source/task/budget drift, true read-only DB reopen and two
+independent processes competing for one slot. Journal targeted7 verifies exact
+intent CAS, immutable canonical private records, wrong snapshot/selection refusal,
+lost-response readonly reopening, revoked/closed denial and two-process intent
+competition. Neither constructor performs DDL or creates defaults on read.
+
+Provider targeted23 verifies same-ID recovery across instances and a separate
+Node process, actual isolated edits, lost commit responses, half preparations,
+missing/substituted roots, malformed records, scope/links/private paths and
+cancellation. Recovery never commits another record, repairs or copies again.
+The manager integrates actual accepted original records with real synthetic
+host filesystem bytes, including binary context, new database connection,
+lost ready response, incomplete preparation and unchanged original accounting.
+These configured test roots are synthetic, not evidence that production logical
+projects are already mapped to physical source roots.
+
+Cross-review found two preparation windows and tests reproduced both: replacing
+source/storage roots after configuration capture, and turning a selected file
+into a directory before provider inventory. The manager now rechecks initial
+root identities after intent creation, before durable commit and final return,
+and compares the provider's exact selection kinds/paths with initial configuration.
+Refusal may leave copied diagnostic bytes but cannot publish a ready record;
+retry remains tied to the original intent. This is observed race detection,
+not OS isolation or a filesystem-wide atomic snapshot.
+
+Three selected official DSH SDK/Gateway/Worker/native Goal cases pass (28.14s,
+18 scripted local Messages requests). The proposal case creates/guards/replays/
+closes an artifact resource after actual native publication without adding model
+requests, tasks, occurrences or budget allocations. This does not execute a work
+cycle. Final Gateway regression has1530 cases,1523 passed,seven existing/opt-in
+skips and zero failures (197.88s). Windows Gateway build passes after that run.
+Root32/UI169 and Windows root build pass. Public disclosure6 and814-file preflight
+pass; Brain links have no broken references. These are local verification results,
+not physical-root production mapping, isolated execution or reviewed apply.

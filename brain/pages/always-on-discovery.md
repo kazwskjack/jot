@@ -4,7 +4,7 @@ title: Keep project discovery in original DSH task boundaries
 category: decision
 status: active
 created: "2026-10-17T03:43:02"
-updated: "2026-10-17T07:45:38"
+updated: "2026-10-17T08:05:11"
 ---
 
 <!-- compiled_truth -->
@@ -30,7 +30,7 @@ Recoverable discovery source failures are not role revocation. The authenticated
 
 Initialized conversation/snapshot reads must not request writer locks merely to reopen an existing cursor key or default project. Missing initialization remains atomic with locked recheck; legacy NULL project migration remains explicit and owner-scoped, corrupt keys fail rather than rotate. Keep snapshot read consistency and cursor signature identity; do not replace contention repair with blind retries or weaker signing. Role-bound discovery policy UI configures the existing off-by-default owner policy through original receipts, with explicit enable/pause/resume/stop and same-command recovery after lost response. UI configuration is not automatic dispatch or work-cycle execution authority.
 
-Isolated snapshot manifests, creation/inspection receipts and exact base/result differences are non-authorizing artifacts. They use explicit trusted roots, relative selections, binary streaming and frozen hashes; structural ancestors are containers only and never become replace/delete authority when selecting a child file. Unique exact content can establish a rename; ambiguous repeated bytes remain add/delete. Keep original source untouched. Known private path refusal is not arbitrary secret-body detection, path/inode checks are not OS sandboxing, and checks of a live tree are not an atomic filesystem snapshot. Current provider instance-issued inspection capabilities do not survive process restart; durable cycle/root binding and recovery must be integrated before execution/apply. Owner history is a pure paged projection of original runs/reports/certificates/native completion/publication, not another status store or an authorization source. Model summary text remains untrusted and may quote source content; omission of raw source/root fields is not DLP. Git provider, original DSH isolated execution, scoped memory, exact reviewed apply/reconciliation, automatic dispatch and complete deployment/scale acceptance remain open.
+Isolated snapshot manifests, creation/inspection receipts and exact base/result differences are non-authorizing artifacts. They use explicit trusted roots, relative selections, binary streaming and frozen hashes; structural ancestors are containers only and never become replace/delete authority when selecting a child file. Unique exact content can establish a rename; ambiguous repeated bytes remain add/delete. Keep original source untouched. Known private path refusal is not arbitrary secret-body detection, path/inode checks are not OS sandboxing, and checks of a live tree are not an atomic filesystem snapshot. Provider instance capabilities can be reissued only through a trusted durable original-cycle journal and real artifact/root verification. One immutable preparation intent binds the exact accepted original proposals, owner scope, original cumulative budget identity and trusted host configuration; a missing ready record remains uncertain and never automatically recopies. Artifact recovery is not execution permission, current physical base validation or reviewed apply. Owner history is a pure paged projection of original runs/reports/certificates/native completion/publication, not another status store or an authorization source. Model summary text remains untrusted and may quote source content; omission of raw source/root fields is not DLP. Git provider, original DSH isolated execution, scoped memory, exact reviewed apply/reconciliation, automatic dispatch and complete deployment/scale acceptance remain open.
 
 
 ## Timeline
@@ -206,5 +206,17 @@ Isolated snapshot manifests, creation/inspection receipts and exact base/result 
 - time: 2026-10-17T07:45:38
   kind: decision
   summary: "Keep isolated snapshot/diff artifacts non-authorizing, constrain structural ancestors, and derive owner history from original canonical receipts."
+  source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
+  affects: [always-on-discovery]
+
+- time: 2026-10-17T07:56:37
+  kind: decision
+  summary: "Owned work cycles freeze accepted original proposal and cumulative task budget identities as resources, not another execution lifecycle. Persist one preparation intent before copy and trust only the original private recovery journal; uncertain preparation never automatically recopies. Recovery validates the original artifact but does not authorize execution, expand writable scope or prove the current physical source base."
+  source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
+  affects: [always-on-discovery]
+
+- time: 2026-10-17T08:05:11
+  kind: decision
+  summary: Bind durable isolated artifact recovery to accepted original cycle identities without granting execution or resetting budgets.
   source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
   affects: [always-on-discovery]

@@ -3,6 +3,8 @@ import {withImmediateTransaction} from '../db/database.ts';
 import {installDiscoveryPolicySchema} from './discovery-policy.ts';
 import {installDiscoveryAdmissions} from './admission-schema.ts';
 import {installDiscoveryPlanning} from './planning.ts';
+import {installWorkCycles} from './work-cycle-schema.ts';
+import {installWorkspaceJournal} from './workspace-journal-schema.ts';
 /** Stable task/budget identity. Generic occurrence admission stays closed;
  * the trusted planning path requires an immutable original-occurrence receipt. */
 export function installDiscoveryTaskBindings(db:DatabaseSync){
@@ -41,5 +43,5 @@ export function installDiscoveryTaskBindings(db:DatabaseSync){
  BEGIN SELECT RAISE(ABORT,'task_discovery_managed'); END;
  CREATE TRIGGER IF NOT EXISTS wb_discovery_occurrence_closed BEFORE INSERT ON wb_task_occurrences
  WHEN EXISTS(SELECT 1 FROM wb_discovery_task_bindings WHERE task_id=NEW.task_id)
- BEGIN SELECT RAISE(ABORT,'task_discovery_admission_required'); END;`);installDiscoveryAdmissions(db);installDiscoveryPlanning(db);});
+ BEGIN SELECT RAISE(ABORT,'task_discovery_admission_required'); END;`);installDiscoveryAdmissions(db);installDiscoveryPlanning(db);installWorkCycles(db);installWorkspaceJournal(db);});
 }

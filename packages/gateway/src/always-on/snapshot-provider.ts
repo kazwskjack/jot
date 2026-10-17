@@ -4,7 +4,7 @@ import {lstat,realpath,readdir,mkdir,open} from 'node:fs/promises';
 import {resolve,dirname,relative,isAbsolute,sep,join,parse} from 'node:path';
 import type {BigIntStats} from 'node:fs';
 import {canonicalJson} from '../db/canonical-json.ts';
-import {workspaceRelativePath,workspaceSelection,validateWorkspaceManifest,workspaceManifestHash,type WorkspaceProvider,type SnapshotWorkspaceInput,type WorkspaceSnapshot,type WorkspaceManifestEntry,type WorkspaceGuard,type WorkspaceInspectionInput,type WorkspaceInspection} from './workspace-provider.ts';
+import {workspaceRelativePath,workspaceSelection,validateWorkspaceManifest,workspaceManifestHash,type WorkspaceProvider,type SnapshotWorkspaceInput,type WorkspaceSnapshot,type WorkspaceManifestEntry,type WorkspaceGuard,type WorkspaceInspectionInput,type WorkspaceInspection,type SnapshotRecoveryRoot,type SnapshotRecoveryRecord,type SnapshotRecoveryStore,type SnapshotProviderOptions,type WorkspaceRecoveryInput,type WorkspaceCreationReceipt} from './workspace-provider.ts';
 
 type Limits={max_entries:number;max_total_bytes:number;max_file_bytes:number;max_depth:number};
 type Root={path:string;canonical:string;dev:bigint;ino:bigint};
@@ -28,6 +28,28 @@ async function check(guard:WorkspaceGuard,signal:AbortSignal,phase:Parameters<Wo
  if(signal.aborted)throw failure('workspace_cancelled');try{await guard(Object.freeze({phase,snapshot_id,relative_path,execution_authorized:false}));}catch{throw failure('workspace_guard_rejected');}if(signal.aborted)throw failure('workspace_cancelled');
 }
 function controls(guard:WorkspaceGuard,signal:AbortSignal){if(typeof guard!=='function'||!(signal instanceof AbortSignal))throw failure('workspace_controls_required');}
+function recoveryId(value:unknown):string{if(typeof value!=='string'||!/^workspace-snapshot-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value))throw failure('workspace_recovery_invalid');return value;}
+function savedRoot(root:Root):SnapshotRecoveryRoot{return Object.freeze({path:root.path,canonical:root.canonical,dev:String(root.dev),ino:String(root.ino)});}
+function exact(value:unknown,keys:string[]):value is Record<string,unknown>{return !!value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join(',')===[...keys].sort().join(',');}
+function recoveryRoot(value:unknown):SnapshotRecoveryRoot{
+ if(!exact(value,['path','canonical','dev','ino'])||typeof value.path!=='string'||typeof value.canonical!=='string'||!isAbsolute(value.path)||!isAbsolute(value.canonical)||resolve(value.path)!==value.path||resolve(value.canonical)!==value.canonical||!['dev','ino'].every(k=>typeof value[k]==='string'&&/^(0|[1-9][0-9]{0,127})$/.test(value[k] as string)))throw failure('workspace_recovery_invalid');
+ return Object.freeze({path:value.path,canonical:value.canonical,dev:value.dev as string,ino:value.ino as string});
+}
+function validateRecovery(value:unknown,id:string):SnapshotRecoveryRecord{
+ if(!exact(value,['protocol','provider','snapshot_id','storage_root','isolated_root','manifest','receipt','selection','limits'])||value.protocol!==1||value.provider!=='snapshot-copy'||value.snapshot_id!==id)throw failure('workspace_recovery_invalid');
+ const storage_root=recoveryRoot(value.storage_root),isolated_root=recoveryRoot(value.isolated_root),manifest=validateWorkspaceManifest(value.manifest);
+ if(!exact(value.limits,Object.keys(defaults)))throw failure('workspace_recovery_invalid');const limits=limitsOf(value.limits as Limits);
+ const selection=value.selection;if(!Array.isArray(selection)||selection.length!==manifest.paths.length)throw failure('workspace_recovery_invalid');
+ const entries=new Map(manifest.entries.map(e=>[e.path,e])),kinds=selection.map((entry,index)=>{
+  if(!exact(entry,['path','kind'])||entry.path!==manifest.paths[index]||!['file','directory'].includes(String(entry.kind))||entries.get(String(entry.path))?.kind!==entry.kind)throw failure('workspace_recovery_invalid');
+  return Object.freeze({path:entry.path as string,kind:entry.kind as 'file'|'directory'});
+ });
+ if(manifest.entries.length>limits.max_entries||manifest.entries.some(e=>e.path.split('/').length>limits.max_depth||e.kind==='file'&&e.bytes>limits.max_file_bytes))throw failure('workspace_recovery_invalid');
+ const file_count=manifest.entries.filter(e=>e.kind==='file').length,directory_count=manifest.entries.length-file_count,total_bytes=manifest.entries.reduce((sum,e)=>sum+(e.kind==='file'?e.bytes:0),0),receipt=value.receipt;
+ if(!Number.isSafeInteger(total_bytes)||total_bytes>limits.max_total_bytes||!exact(receipt,['protocol','provider','snapshot_id','manifest_sha256','file_count','directory_count','total_bytes','created_at','status','execution_authorized'])||receipt.protocol!==1||receipt.provider!=='snapshot-copy'||receipt.snapshot_id!==id||receipt.manifest_sha256!==workspaceManifestHash(manifest)||receipt.file_count!==file_count||receipt.directory_count!==directory_count||receipt.total_bytes!==total_bytes||receipt.status!=='ready'||receipt.execution_authorized!==false||typeof receipt.created_at!=='string'||!Number.isFinite(Date.parse(receipt.created_at))||new Date(receipt.created_at).toISOString()!==receipt.created_at)throw failure('workspace_recovery_invalid');
+ if(isolated_root.path!==join(storage_root.path,id)||!inside(storage_root.canonical,isolated_root.canonical)||relative(storage_root.canonical,isolated_root.canonical)!==id)throw failure('workspace_recovery_invalid');
+ return Object.freeze({protocol:1,provider:'snapshot-copy',snapshot_id:id,storage_root,isolated_root,manifest,receipt:Object.freeze({...receipt}) as WorkspaceCreationReceipt,selection:Object.freeze(kinds),limits:Object.freeze(limits)});
+}
 async function inventory(root:Root,paths:readonly string[],limits:Limits,guard:WorkspaceGuard,signal:AbortSignal,id:string,selection?:Map<string,'file'|'directory'>):Promise<Entry[]>{
  const values=new Map<string,Entry>(),folded=new Map<string,string>();let bytes=0;
  const add=async(path:string,recurse:boolean)=>{
@@ -67,6 +89,11 @@ async function copyFile(source:Root,target:Root,entry:Entry,guard:WorkspaceGuard
  * Known private paths are excluded; arbitrary secret content is not detected. */
 export class SnapshotCopyWorkspaceProvider implements WorkspaceProvider{
  private readonly issued=new WeakMap<WorkspaceSnapshot,Issued>();
+ private readonly recoveryStore:SnapshotRecoveryStore|undefined;
+ constructor(options:SnapshotProviderOptions={}){
+  if(!options||typeof options!=='object'||Object.keys(options).some(key=>key!=='recoveryStore')||options.recoveryStore!==undefined&&(!options.recoveryStore||typeof options.recoveryStore.commit!=='function'||typeof options.recoveryStore.read!=='function'))throw failure('workspace_recovery_config_invalid');
+  const store=options.recoveryStore;this.recoveryStore=store?Object.freeze({commit:store.commit.bind(store),read:store.read.bind(store)}):undefined;
+ }
  async create(input:SnapshotWorkspaceInput):Promise<WorkspaceSnapshot>{
   const id='workspace-snapshot-'+randomUUID();let created=false;
   try{
@@ -87,7 +114,13 @@ export class SnapshotCopyWorkspaceProvider implements WorkspaceProvider{
    for(const entry of targetEntries){const expected=outputs.get(entry.path);if(!expected||expected.kind!==entry.kind||entry.kind==='file'&&(expected.kind!=='file'||!!(entry.stat.mode&0o100n)!==expected.executable||await hashFile(target,entry,input.guard,input.signal,id)!==expected.sha256))throw failure('workspace_copy_verification_failed');}
    if(identities(entries)!==identities(await inventory(source,paths,limits,input.guard,input.signal,id))||identities(targetEntries)!==identities(await inventory(target,paths,limits,input.guard,input.signal,id,selection)))throw failure('workspace_source_changed');
    const receipt=Object.freeze({protocol:1 as const,provider:'snapshot-copy' as const,snapshot_id:id,manifest_sha256:workspaceManifestHash(manifest),file_count:output.filter(e=>e.kind==='file').length,directory_count:output.filter(e=>e.kind==='directory').length,total_bytes:output.reduce((sum,e)=>sum+(e.kind==='file'?e.bytes:0),0),created_at:new Date().toISOString(),status:'ready' as const,execution_authorized:false as const});
-   const result=Object.freeze({isolated_root:isolated,manifest,receipt});this.issued.set(result,{root:target,paths,selection,limits,receipt:canonicalJson(receipt)});return result;
+   const result=Object.freeze({isolated_root:isolated,manifest,receipt});
+   if(this.recoveryStore){
+    const record=validateRecovery({protocol:1,provider:'snapshot-copy',snapshot_id:id,storage_root:savedRoot(storage),isolated_root:savedRoot(target),manifest,receipt,selection:paths.map(path=>({path,kind:selection.get(path)!})),limits},id);
+    try{await this.recoveryStore.commit(record);}catch{throw failure('workspace_recovery_commit_unknown');}
+    await check(input.guard,input.signal,'publish',id,null);
+   }
+   this.issued.set(result,{root:target,paths,selection,limits,receipt:canonicalJson(receipt)});return result;
   }catch(error){const code=error instanceof Error&&/^workspace_[a-z_]+$/.test(error.message)?error.message:input?.signal?.aborted?'workspace_cancelled':'workspace_snapshot_failed';const safeError=Object.assign(failure(code),{snapshot_id:id,residual_possible:created});throw safeError;}
  }
  async inspect(input:WorkspaceInspectionInput):Promise<WorkspaceInspection>{
@@ -99,5 +132,21 @@ export class SnapshotCopyWorkspaceProvider implements WorkspaceProvider{
   await check(input.guard,input.signal,'publish',id,null);if(identities(before)!==identities(await inventory(issued.root,issued.paths,issued.limits,input.guard,input.signal,id,issued.selection)))throw failure('workspace_source_changed');
   const manifest=validateWorkspaceManifest({protocol:1,provider:'snapshot-copy',paths:issued.paths,entries});return Object.freeze({snapshot_id:id,manifest,manifest_sha256:workspaceManifestHash(manifest),execution_authorized:false});
   }catch(error){throw failure(error instanceof Error&&/^workspace_[a-z_]+$/.test(error.message)?error.message:input?.signal?.aborted?'workspace_cancelled':'workspace_inspection_failed');}
+ }
+ /** Reissues a trusted host artifact reference only. Does not grant current
+  * project, task, execution or apply authority and never repairs/re-copies files. */
+ async recover(input:WorkspaceRecoveryInput):Promise<WorkspaceSnapshot>{
+  try{
+   controls(input.guard,input.signal);const id=recoveryId(input.snapshot_id);await check(input.guard,input.signal,'prepare',id,null);
+   if(!this.recoveryStore)throw failure('workspace_recovery_unavailable');
+   let saved:SnapshotRecoveryRecord|undefined;try{saved=await this.recoveryStore.read(id);}catch{throw failure('workspace_recovery_unavailable');}
+   if(!saved)throw failure('workspace_recovery_not_found');const record=validateRecovery(saved,id);await check(input.guard,input.signal,'verify',id,null);
+   const storage=await rootOf(input.storageRoot);if(canonicalJson(savedRoot(storage))!==canonicalJson(record.storage_root))throw failure('workspace_recovery_storage_changed');
+   const isolated=await rootOf(record.isolated_root.path);if(canonicalJson(savedRoot(isolated))!==canonicalJson(record.isolated_root)||isolated.path!==join(storage.path,id)||relative(storage.canonical,isolated.canonical)!==id)throw failure('workspace_recovery_root_changed');
+   const snapshot=Object.freeze({isolated_root:isolated.path,manifest:record.manifest,receipt:record.receipt});this.issued.set(snapshot,{root:isolated,paths:record.manifest.paths,selection:new Map(record.selection.map(entry=>[entry.path,entry.kind])),limits:record.limits,receipt:canonicalJson(record.receipt)});
+   try{await this.inspect({snapshot,guard:input.guard,signal:input.signal});await assertRoot(storage);await assertRoot(isolated);if(input.signal.aborted)throw failure('workspace_cancelled');}
+   catch(error){this.issued.delete(snapshot);throw error;}
+   return snapshot;
+  }catch(error){throw failure(error instanceof Error&&/^workspace_[a-z_]+$/.test(error.message)?error.message:input?.signal?.aborted?'workspace_cancelled':'workspace_recovery_failed');}
  }
 }
