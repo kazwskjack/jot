@@ -4,7 +4,7 @@ title: Keep project discovery in original DSH task boundaries
 category: decision
 status: active
 created: "2026-10-17T03:43:02"
-updated: "2026-10-17T12:18:50"
+updated: "2026-10-17T13:01:39"
 ---
 
 <!-- compiled_truth -->
@@ -244,5 +244,17 @@ Logical Workbench files are the default project source: capture all owned immuta
 - time: 2026-10-17T12:18:50
   kind: decision
   summary: "Native work uses a distinct original occurrence and immutable owner work grant, not proposal acceptance or snapshot authority. Its trusted cwd/objective, plan-only file IO and discriminated immutable output receipts must be connected before admission opens. IO cannot outlive a synchronous SQL transaction; unresolved write intents fence recovery. Current occurrence is per occurrence, and occurrence generation revocation must be checked independently from task generation."
+  source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
+  affects: [always-on-discovery]
+
+- time: 2026-10-17T12:48:55
+  kind: decision
+  summary: "Keep the full 26-chain execution ledger and independent ownership through parallel implementation. An explicit immutable owner work grant pins the accepted plans, current logical base, ready artifact and original task-total lineage but still confers no running authority or byte-verification claim. Native work admission, isolated tools and Goal remain separate required integration. PRD input binds immutable reviewed source to the existing paused task objective; only original DSH decomposes it, without new task, budget or planner."
+  source: docs/superpowers/plans/2026-10-17-pilotdeck-remaining-full-chain.md
+  affects: [always-on-discovery]
+
+- time: 2026-10-17T13:01:39
+  kind: decision
+  summary: "Separate readiness for a new work admission from authority of an already admitted work run. WorkGrants fresh readiness may reject pending accounting; the future running work guard must instead bind immutable owner permission, current original authority and exact cumulative scope identity, while the original ledger/lease controls active calls and new spends. Do not treat a correctly admitted current in-flight call as permission revocation or unresolved external usage as fresh allowance."
   source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
   affects: [always-on-discovery]

@@ -7,6 +7,16 @@ await mkdir(output,{recursive:true});
 await build({entryPoints:[new URL('./client.ts',import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')],bundle:true,platform:'node',format:'esm',outfile:new URL('client.mjs',output).pathname.replace(/^\/([A-Z]:)/,'$1')});
 const {workbenchApi}=await import(new URL('client.mjs',output));
 
+test('file list pages encode scope and cursor and use authenticated read-only BFF requests',async t=>{
+ const original=globalThis.fetch;t.after(()=>{globalThis.fetch=original;});const calls=[];
+ globalThis.fetch=async(url,init)=>{calls.push({url,init});return new Response('{"items":[],"next_cursor":null}');};
+ assert.equal(typeof workbenchApi.files,'function');
+ const signal=new AbortController().signal;
+ await workbenchApi.files('ws /1','project /2',{cursor:'token+/=',limit:25},signal);
+ assert.equal(calls[0].url,'/workbench-api/v1/workspaces/ws%20%2F1/files?project_id=project%20%2F2&limit=25&cursor=token%2B%2F%3D');
+ assert.equal(calls[0].init.method,'GET');assert.equal(calls[0].init.credentials,'same-origin');assert.equal(calls[0].init.cache,'no-store');assert.equal(calls[0].init.body,undefined);
+});
+
 test('discovery policy read uses the encoded owned role route and never sends an enable command',async t=>{
  const original=globalThis.fetch;t.after(()=>{globalThis.fetch=original;});let call;
  globalThis.fetch=async(url,init)=>{call={url,init};return new Response('{"policy":null,"execution_authorized":false}');};

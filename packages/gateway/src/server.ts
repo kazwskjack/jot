@@ -49,6 +49,8 @@ import {TaskNotifications} from './persistent-tasks/notifications.ts';
 import {TaskReplyPolicies} from './persistent-tasks/reply-policy.ts';
 import {TaskReplyHistory} from './persistent-tasks/reply-history.ts';
 import { registerPersistentTaskRoutes } from './persistent-tasks/routes.ts';
+import {TaskPrdService} from './persistent-tasks/prd.ts';
+import {registerTaskPrdRoutes} from './persistent-tasks/prd-routes.ts';
 import {TaskDelegationService} from './workbench/task-delegation.ts';
 import {TaskCollaborationService} from './workbench/task-collaboration.ts';
 import { registerWorkbenchExecution, WORKBENCH_TOOL_IDS } from './workbench/execution.ts';
@@ -121,6 +123,7 @@ export async function buildServer(config: {
     ...(budgetPolicy?{modelBudgetPolicy:budgetPolicy}:{}),
   });
   const taskNotifications=new TaskNotifications(db);
+  const taskPrd=new TaskPrdService(db,workbench,persistentTasks,artifacts,{uploadRoot:config.uploadRoot??join(dirname(config.databasePath),'general-agent-uploads')});
   const taskReplyPolicies=new TaskReplyPolicies(db);
   const replyDrafts=new TaskReplyDrafts(db,events);
   const replyHistory=new TaskReplyHistory(db);
@@ -174,6 +177,10 @@ export async function buildServer(config: {
     if (!(config.allowedOrigins ?? []).includes(origin)) throw new Error('origin_forbidden');
     const csrf = String(request.headers['x-csrf-token'] ?? '');
     if (config.csrfToken.length < 16 || csrf !== config.csrfToken) throw new Error('csrf_invalid');
+    // Only these server-registered route markers use the PRD service's own
+    // immutable transaction/receipt; never persist read-only preview requests.
+    const prdCommand=(request.routeOptions.config as {taskPrdCommand?:string}).taskPrdCommand;
+    if(request.method==='POST'&&['preview','bind'].includes(prdCommand??''))return;
     // Preview only computes a schedule; retain authentication and CSRF without persisting requests.
     if (request.method === 'POST' && request.url.split('?')[0] === '/v1/persistent-tasks/preview') return;
     if ((request.routeOptions.url ?? request.url).includes('/voice/transcriptions')) return;
@@ -376,6 +383,7 @@ export async function buildServer(config: {
   const taskDelegations=new TaskDelegationService(db,workbench,persistentTasks);
   const taskCollaboration=new TaskCollaborationService(db,workbench,persistentTasks,taskDelegations);
   registerPersistentTaskRoutes(app, persistentTasks, actor,taskDelegations,taskCollaboration);
+  registerTaskPrdRoutes(app,taskPrd,actor);
   registerTaskBudgetRoutes(app,new TaskBudgetService(db,budgetPolicy),actor);
   registerWorkbenchExecution(app, db, workbench, persistentTasks, config.internalChannelToken, modelBudgets,taskCollaboration,config.replyJudge);
   registerConversationGoalExecution(app,new ConversationGoalControls(db,events,runs),config.internalChannelToken);
@@ -480,7 +488,7 @@ export async function buildServer(config: {
         replay_retention_hours: 168, idempotency_retention_hours: 24 },
       voice,
       workbench: { enabled: true, agent_roles: true, independent_teams: true, agent_messages: true,
-        shared_workspace: true, memory_scopes: ['project', 'private'], memory_lifecycle: true, memory_restore: true, memory_consolidation: true, memory_retrieval_traces: true, memory_capture:true, memory_retrieval: 'local_keyword',task_readiness:true,task_unlimited_runs:true,task_run_limit_protocol:1,model_budget:budgetPolicy!==undefined,
+        shared_workspace: true, memory_scopes: ['project', 'private'], memory_lifecycle: true, memory_restore: true, memory_consolidation: true, memory_retrieval_traces: true, memory_capture:true, memory_retrieval: 'local_keyword',task_readiness:true,task_prd:true,task_unlimited_runs:true,task_run_limit_protocol:1,model_budget:budgetPolicy!==undefined,
         task_reply_policy:true,task_reply_execution:false,task_create_delivery:true,task_notifications:true,channel_bindings:!!config.internalChannelToken||!!config.emailBindingSend,email_bindings:!!config.emailBindingSend,wecom_bindings:!!config.internalChannelToken,task_notification_events:['changed','completed','failed','needs_confirmation'],
         ...(budgetPolicy?{task_model_budget_limits:budgetPolicy.budgetSettings().limits.task_total}:{}),
         collaboration_modes: [{ id: 'single', enabled: true }, { id: 'independent_team', enabled: true },
@@ -760,7 +768,7 @@ export async function buildServer(config: {
   });
   app.addHook('onClose', async () => voiceTranscriptions.close());
   return { app, db, events, projects, conversations, runs, commands, interactions, artifacts, sources, fileJobs, crawlBatches,
-    voiceTranscriptions, workbench, persistentTasks, modelBudgets };
+    voiceTranscriptions, workbench, persistentTasks, taskPrd, modelBudgets };
   } catch (error) {
     const cleanupErrors: unknown[] = [];
     try { await app.close(); } catch (failure) { cleanupErrors.push(failure); }

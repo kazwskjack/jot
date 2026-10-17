@@ -78,9 +78,12 @@ export function registerWorkbenchRoutes(app: FastifyInstance, service: Workbench
   app.post('/v1/workspaces/:workspaceId/memory', async (request, reply) => reply.code(201).send(service.saveMemory(actor(request), param(request, 'workspaceId'), body(request, ['scope', 'agent_id', 'project_id', 'content', 'verified', 'memory_id', 'expected_version', 'provenance', 'source_revision', 'expires_at', 'supersedes']))));
   app.delete('/v1/workspaces/:workspaceId/memory/:memoryId', async request => service.deleteMemory(actor(request), param(request, 'workspaceId'), param(request, 'memoryId'), version(body(request, ['expected_version']))));
   app.get('/v1/workspaces/:workspaceId/files', async request => {
-    const project = query(request).project_id;
+    const input=query(request),project = input.project_id;
     if (typeof project !== 'string') throw new Error('invalid_project_id');
-    return service.listFiles(actor(request), param(request, 'workspaceId'), project);
+    if(Object.keys(input).some(key=>!['project_id','limit','cursor'].includes(key))||
+      (input.limit!==undefined&&(typeof input.limit!=='string'||!/^(?:[1-9][0-9]?|1[0-9]{2}|200)$/.test(input.limit)))||
+      (input.cursor!==undefined&&(typeof input.cursor!=='string'||!input.cursor||input.cursor.length>2048)))throw new Error('invalid_file_list_query');
+    return service.listFiles(actor(request), param(request, 'workspaceId'), project,undefined,{...(input.limit===undefined?{}:{limit:Number(input.limit)}),...(input.cursor===undefined?{}:{cursor:input.cursor as string})});
   });
   app.get('/v1/workspaces/:workspaceId/files/content', async request => {
     const input = query(request);

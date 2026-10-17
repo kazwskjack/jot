@@ -5820,7 +5820,7 @@
         "tags": [
           "workbench"
         ],
-        "description": "服务器根据认证身份校验owner；跨角色和项目范围由服务端核验。修改使用版本和既有同源CSRF/幂等边界。",
+        "description": "服务器根据认证身份校验owner；跨角色和项目范围由服务端核验。修改使用版本和既有同源CSRF/幂等边界。 Stable BINARY-path pages, default/max 200. Cursor binds owner/workspace/project and current metadata inventory for 24 hours. Any inventory change refuses continuation with FILE_LIST_STATE_CONFLICT (409); restart at the first page. No retained filesystem snapshot; file contents use their current version when opened.",
         "parameters": [
           {
             "name": "workspace_id",
@@ -5840,6 +5840,27 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 128
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 200
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
             }
           }
         ],
@@ -12711,6 +12732,347 @@
           }
         }
       }
+    },
+    "/v1/persistent-tasks/{task_id}/prd/sources": {
+      "get": {
+        "operationId": "listTaskPrdSources",
+        "summary": "listTaskPrdSources",
+        "description": "Explicit PRD source preview and binding to the existing paused task. No new task, run, budget, resume or execution authorization.",
+        "tags": [
+          "persistent-tasks"
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskPrdSources"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Rejected; no execution grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Rejected; no execution grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Rejected; no execution grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Rejected; no execution grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Rejected; no execution grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Rejected; no execution grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Rejected; no execution grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/persistent-tasks/{task_id}/prd/preview": {
+      "post": {
+        "operationId": "previewTaskPrd",
+        "summary": "previewTaskPrd",
+        "description": "Explicit PRD source preview and binding to the existing paused task. No new task, run, budget, resume or execution authorization.",
+        "tags": [
+          "persistent-tasks"
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskPrdPreview"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Rejected; no execution grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Rejected; no execution grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Rejected; no execution grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Rejected; no execution grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Rejected; no execution grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Rejected; no execution grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Rejected; no execution grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskPrdPreviewRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/persistent-tasks/{task_id}/prd/bind": {
+      "post": {
+        "operationId": "bindTaskPrd",
+        "summary": "bindTaskPrd",
+        "description": "Explicit PRD source preview and binding to the existing paused task. No new task, run, budget, resume or execution authorization.",
+        "tags": [
+          "persistent-tasks"
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskPrdReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Rejected; no execution grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Rejected; no execution grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Rejected; no execution grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Rejected; no execution grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Rejected; no execution grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Rejected; no execution grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Rejected; no execution grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskPrdBindRequest"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -16716,6 +17078,9 @@
           },
           "memory_capture": {
             "type": "boolean"
+          },
+          "task_prd": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -17720,11 +18085,20 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/WorkbenchFile"
-            }
+            },
+            "maxItems": 200
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 2048
           }
         },
         "required": [
-          "items"
+          "items",
+          "next_cursor"
         ],
         "additionalProperties": false
       },
@@ -22684,6 +23058,371 @@
           "policy_id": {
             "type": "string",
             "pattern": "^discovery-[a-f0-9]{64}$"
+          }
+        }
+      },
+      "TaskPrdSelection": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "path",
+              "version",
+              "sha256"
+            ],
+            "properties": {
+              "kind": {
+                "const": "logical_file"
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "artifact_id",
+              "version",
+              "sha256"
+            ],
+            "properties": {
+              "kind": {
+                "const": "upload"
+              },
+              "artifact_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            }
+          }
+        ]
+      },
+      "TaskPrdSource": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "path",
+              "version",
+              "sha256",
+              "name",
+              "size"
+            ],
+            "properties": {
+              "kind": {
+                "const": "logical_file"
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 65536
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "artifact_id",
+              "version",
+              "sha256",
+              "name",
+              "size"
+            ],
+            "properties": {
+              "kind": {
+                "const": "upload"
+              },
+              "artifact_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 65536
+              }
+            }
+          }
+        ]
+      },
+      "TaskPrdPreviewRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source"
+        ],
+        "properties": {
+          "source": {
+            "$ref": "#/components/schemas/TaskPrdSelection"
+          }
+        }
+      },
+      "TaskPrdBindRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source",
+          "preview_sha256"
+        ],
+        "properties": {
+          "source": {
+            "$ref": "#/components/schemas/TaskPrdSelection"
+          },
+          "preview_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        }
+      },
+      "TaskPrdReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "binding_id",
+          "task_id",
+          "task_version",
+          "revision",
+          "source",
+          "content_sha256",
+          "objective_sha256",
+          "created_at",
+          "execution_authorized"
+        ],
+        "properties": {
+          "binding_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "task_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "task_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "source": {
+            "$ref": "#/components/schemas/TaskPrdSource"
+          },
+          "content_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "objective_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "execution_authorized": {
+            "const": false
+          }
+        }
+      },
+      "TaskPrdPreview": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "task_id",
+          "task_version",
+          "role",
+          "source",
+          "content",
+          "objective",
+          "preview_sha256",
+          "execution_authorized"
+        ],
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "task_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "role": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "agent_id",
+              "version",
+              "capability_epoch"
+            ],
+            "properties": {
+              "agent_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "capability_epoch": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              }
+            }
+          },
+          "source": {
+            "$ref": "#/components/schemas/TaskPrdSource"
+          },
+          "content": {
+            "type": "string",
+            "maxLength": 65536
+          },
+          "objective": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 12000
+          },
+          "preview_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "execution_authorized": {
+            "const": false
+          }
+        }
+      },
+      "TaskPrdSources": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "task_id",
+          "task_version",
+          "readiness",
+          "sources",
+          "truncated",
+          "binding"
+        ],
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "task_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "readiness": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "ready",
+              "reasons"
+            ],
+            "properties": {
+              "ready": {
+                "type": "boolean"
+              },
+              "reasons": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskPrdSource"
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "binding": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskPrdReceipt"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       }

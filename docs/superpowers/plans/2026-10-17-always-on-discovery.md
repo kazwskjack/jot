@@ -1245,3 +1245,26 @@ after test fixtures finish. A preflight attempted during live fixture creation
 could not inspect the changing tree; it was not counted as successful review.
 This correction does not add a work occurrence, model call, dispatcher, public
 execution route or production enablement.
+
+### Explicit work selection prerequisite
+
+Internal WorkGrants now records an immutable explicit owner selection bound to
+the accepted proposal, current cycle/task/role/source identities, ready snapshot
+record and original task-total scope. Historical get/replay never renews live
+authority. Fresh checks include actual source and continuation occurrence
+generations and current metadata, not just the planning admission's old values.
+Both execution_authorized and source_bytes_verified remain false; no public
+route, work occurrence, model call, SQL admission branch or dispatcher was added.
+The final11-case focused suite includes a real Unicode source/snapshot ordering
+regression and passes, as does type checking. Final complete integration evidence
+is recorded in the full-chain ledger.
+
+The execution resolver must not reuse new-admission budget eligibility as the
+running work guard. WorkGrants.guard currently checks readiness to admit fresh
+work; a legitimately active original run can have its own reserved or in-flight
+call. After admission, verify the immutable owner grant, live original authority
+and exact cumulative scope identity through a dedicated work-run guard; retain
+the original model ledger/lease rules for existing calls and new spends. Never
+turn unresolved external usage into fresh allowance, and never reject a current
+run merely because its own correctly admitted call is still being accounted for.
+This phase distinction must be tested before connecting actual isolated tools.

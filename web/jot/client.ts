@@ -25,28 +25,32 @@ export async function request<T>(path:string,method='GET',body?:unknown,key?:str
 function abortableDelay(ms:number,signal:AbortSignal){return new Promise<void>((resolve,reject)=>{if(signal.aborted){reject(new DOMException('Aborted','AbortError'));return;}const timer=setTimeout(done,ms);function done(){signal.removeEventListener('abort',aborted);resolve()}function aborted(){clearTimeout(timer);signal.removeEventListener('abort',aborted);reject(new DOMException('Aborted','AbortError'))}signal.addEventListener('abort',aborted,{once:true})})}
 export async function transcribeVoice(conversationId:string,audio:Uint8Array,signal:AbortSignal):Promise<string>{
  const clientRequestId=crypto.randomUUID(),form=new FormData();form.append('client_request_id',clientRequestId);form.append('audio',new Blob([new Uint8Array(audio)],{type:'audio/wav'}),'recording.wav');
- let transcriptionId='';
+ const scope=draftScope,csrf=csrfToken,timed=deadline(signal,120000);
+ const current=()=>{if(timed.signal.aborted)throw new DOMException('Aborted','AbortError');if(draftScope!==scope)throw new Error('VOICE_SCOPE_CHANGED');};
+ let transcriptionId='',succeeded=false;
  try{
-  const accepted=await fetch(`${base}/v1/conversations/${encodeURIComponent(conversationId)}/voice/transcriptions`,{method:'POST',headers:{'X-jot-Actor':'web','X-CSRF-Token':csrfToken},credentials:'same-origin',cache:'no-store',signal,body:form});
+  current();
+  const accepted=await fetch(`${base}/v1/conversations/${encodeURIComponent(conversationId)}/voice/transcriptions`,{method:'POST',headers:{'X-jot-Actor':'web','X-CSRF-Token':csrf},credentials:'same-origin',cache:'no-store',signal:timed.signal,body:form});
   if(!accepted.ok){const data=await accepted.json().catch(()=>({}));throw new ApiError(accepted.status,data.error?.code??`语音请求失败 (${accepted.status})`)}
-  const receipt=await accepted.json();transcriptionId=String(receipt.transcription_id??'');if(!transcriptionId)throw new Error('语音服务未返回任务编号');
-  const end=Date.now()+120000;
-  while(Date.now()<end){
-   const response=await fetch(`${base}/v1/conversations/${encodeURIComponent(conversationId)}/voice/transcriptions/${encodeURIComponent(transcriptionId)}`,{headers:{'X-jot-Actor':'web'},credentials:'same-origin',cache:'no-store',signal});
+  const receipt=await accepted.json();transcriptionId=typeof receipt.transcription_id==='string'?receipt.transcription_id:'';if(!transcriptionId)throw new Error('语音服务未返回任务编号');
+  current();
+  while(true){
+   const response=await fetch(`${base}/v1/conversations/${encodeURIComponent(conversationId)}/voice/transcriptions/${encodeURIComponent(transcriptionId)}`,{headers:{'X-jot-Actor':'web'},credentials:'same-origin',cache:'no-store',signal:timed.signal});
    if(!response.ok){const data=await response.json().catch(()=>({}));throw new ApiError(response.status,data.error?.code??`查询语音状态失败 (${response.status})`)}
-   const state=await response.json();
-   if(state.status==='succeeded'&&typeof state.text==='string')return state.text;
-   if(state.status==='failed')throw new Error(state.error_code==='result_expired'?'识别结果已过期，请重新录音':'语音识别失败，请重试');
+   const state=await response.json();current();
+   if(state.status==='succeeded'){if(typeof state.text!=='string')throw new Error('VOICE_TRANSCRIPTION_INVALID');succeeded=true;return state.text;}
+   if(state.status==='failed')throw new Error(`VOICE_TRANSCRIPTION_FAILED: ${String(state.error_code??'unknown')}`);
    if(state.status==='cancelled')throw new Error('语音识别已取消');
-   await abortableDelay(400,signal);
+   if(!['queued','transcribing'].includes(state.status))throw new Error('VOICE_TRANSCRIPTION_INVALID');
+   await abortableDelay(400,timed.signal);
   }
-  throw new Error('语音识别等待超时');
  }catch(error){
-  if(transcriptionId&&signal.aborted){
-   await fetch(`${base}/v1/conversations/${encodeURIComponent(conversationId)}/voice/transcriptions/${encodeURIComponent(transcriptionId)}`,{method:'DELETE',headers:{'X-jot-Actor':'web','X-CSRF-Token':csrfToken},credentials:'same-origin',cache:'no-store',signal:AbortSignal.timeout(30000)}).catch(()=>{});
+  if(transcriptionId&&!succeeded&&timed.signal.aborted&&draftScope===scope){
+   await fetch(`${base}/v1/conversations/${encodeURIComponent(conversationId)}/voice/transcriptions/${encodeURIComponent(transcriptionId)}`,{method:'DELETE',headers:{'X-jot-Actor':'web','X-CSRF-Token':csrf},credentials:'same-origin',cache:'no-store',signal:AbortSignal.timeout(30000)}).catch(()=>{});
   }
+  if(timed.signal.aborted&&!signal.aborted)throw new Error('VOICE_TRANSCRIPTION_TIMEOUT');
   throw error;
- }
+ }finally{timed.dispose();}
 }
 // Fetch SSE supports custom headers and AbortController; native EventSource does not.
 export async function follow(id:string,after:string,onEvent:(e:AgentEvent)=>void,signal:AbortSignal){

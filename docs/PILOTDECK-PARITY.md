@@ -2,6 +2,12 @@
 
 Jot's reference scope covers all PilotDeck functions and implementation mechanisms, not only its interface or headline features. This checklist is not a claim of complete parity.
 
+For the current remaining work, dependencies and parallel implementation
+assignments across all26 capabilities, use the
+[full-chain execution ledger](superpowers/plans/2026-10-17-pilotdeck-remaining-full-chain.md).
+Its three source-audit records distinguish implemented paths from missing product
+entry points and from real-provider/deployment acceptance.
+
 Reference: [OpenBMB/PilotDeck](https://github.com/OpenBMB/PilotDeck), commit `783499ffdb2d501bf590b2e035acd027a882df10`, licensed AGPL-3.0. These are design references. Copying or adapting upstream code requires preserving attribution and satisfying applicable license obligations; reused implementations must not be described as independently authored.
 
 DSH retains planning, conversation lifecycle and native Goal execution. Gateway retains ownership, permissions, leases, occurrences, memory revisions and delivery acceptance. Jev/Laya decisions remain subject to these boundaries. Upstream capabilities map to existing contracts without silently creating a second planner or competing authoritative store.

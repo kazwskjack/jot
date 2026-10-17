@@ -1006,5 +1006,32 @@
     "DiscoveryPolicyReceipt",
     "200",
     "Saving starts off. Explicit enable may prepare one fixed unscheduled original task, but creates no occurrence, Agent or model call. Original DSH admission, budget and permissions remain required. Pause/stop persist and reuse the same task; only explicit owner enable can rearm. Signal ingestion is internal."
+  ],
+  [
+    "GET",
+    "/v1/persistent-tasks/{task_id}/prd/sources",
+    "listTaskPrdSources",
+    null,
+    "TaskPrdSources",
+    "200",
+    "Explicit PRD source preview and binding to the existing paused task. No new task, run, budget, resume or execution authorization."
+  ],
+  [
+    "POST",
+    "/v1/persistent-tasks/{task_id}/prd/preview",
+    "previewTaskPrd",
+    "TaskPrdPreviewRequest",
+    "TaskPrdPreview",
+    "200",
+    "Explicit PRD source preview and binding to the existing paused task. No new task, run, budget, resume or execution authorization."
+  ],
+  [
+    "POST",
+    "/v1/persistent-tasks/{task_id}/prd/bind",
+    "bindTaskPrd",
+    "TaskPrdBindRequest",
+    "TaskPrdReceipt",
+    "200",
+    "Explicit PRD source preview and binding to the existing paused task. No new task, run, budget, resume or execution authorization."
   ]
 ]

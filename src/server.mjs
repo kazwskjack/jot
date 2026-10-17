@@ -19,7 +19,7 @@ export async function buildServer(options={}){
   const workbench=workbenchConfig(options.workbench??{url:process.env.JOT_WORKBENCH_URL,owner:process.env.JOT_WORKBENCH_OWNER,csrf:process.env.JOT_WORKBENCH_CSRF_TOKEN});
   const root=resolve(options.root??'.data/files'),store=new Store(options.database??'.data/jot.db');store.recover();
   const origins=new Set((process.env.JOT_WEB_ORIGINS??'').split(',').map(x=>x.trim()).filter(Boolean));
-  const tools=createTools({store,root,origins,searchUrl:process.env.JOT_SEARCH_URL??'',browserEnabled:process.env.JOT_BROWSER==='true'&&!demo});
+  const tools=createTools({store,root,origins,searchUrl:process.env.JOT_SEARCH_URL??'',browserEnabled:process.env.JOT_BROWSER==='true'&&!demo,...(options.browserFactory?{browserFactory:options.browserFactory}:{})});
   const demoProvider=async (messages,definitions,signal,onText)=>{
     const text='This is a local demonstration, not a model response. Jot can show task progress, preserve conversations, request approval and deliver files. Configure a model endpoint to perform real tasks.';
     for(const word of text.split(' ')){await new Promise((resolve,reject)=>{if(signal.aborted)return reject(new Error('cancelled'));const done=()=>{signal.removeEventListener('abort',abort);resolve();},timer=setTimeout(done,35);const abort=()=>{clearTimeout(timer);reject(new Error('cancelled'));};signal.addEventListener('abort',abort,{once:true});});onText(word+' ');}return {role:'assistant',content:text};

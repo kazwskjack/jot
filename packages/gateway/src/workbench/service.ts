@@ -1,4 +1,5 @@
 import {MemoryCaptureService} from './memory-capture.ts';
+import {listProjectFiles,type FileListOptions} from './file-list.ts';
 import {installWorkbenchSourceRevisions} from '../always-on/workbench-source-revisions.ts';
 import {MemoryProcessingRegistry} from './memory-processing.ts';
 import {MemoryRetrievalLog,type RetrievalData} from './memory-retrievals.ts';
@@ -1044,12 +1045,11 @@ export class WorkbenchService {
     return result;
   }
   private fileValue(row: Row): Input { return { path: row.path, version: Number(row.version), sha256: row.sha256, size: Number(row.size), updated_at: row.updated_at }; }
-  listFiles(owner: string, workspaceId: string, projectId: string, runId?: string) {
+  listFiles(owner: string, workspaceId: string, projectId: string, runId?: string,options:FileListOptions={}) {
     const context = runId ? this.runIdentity(owner, workspaceId, runId) : null;
     if (context && context.project_id !== projectId) throw new Error('file_scope_forbidden');
-    this.projectRoot(owner, workspaceId, projectId);
-    const rows = this.db.prepare('SELECT * FROM wb_files WHERE owner_id=? AND workspace_id=? AND project_id=? ORDER BY path LIMIT 200').all(owner, workspaceId, projectId) as Row[];
-    return { items: rows.map(row => this.fileValue(row)) };
+    this.workspace(workspaceId);this.projects.assertOwned(projectId,owner);
+    return listProjectFiles(this.db,owner,workspaceId,projectId,options);
   }
   readFile(owner: string, workspaceId: string, projectId: string, filePath: string, runId?: string) {
     const context = runId ? this.runIdentity(owner, workspaceId, runId) : null;

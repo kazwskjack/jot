@@ -4,6 +4,7 @@ import type {DiscoveryHistoryPage,DiscoveryHistoryDetail} from './types';
 import type {MemoryCapturePolicy,MemoryCapture,MemoryCapturePage} from './types';
 import type {MemoryConsolidation,MemoryConsolidationPage} from './types';
 import {request} from '../jot/client';
+import type {WorkspaceFilePage,WorkspaceFileListOptions} from './types';
 import type {MemoryHistoryPage} from './types';
 import type {Agent,Caps,Task,Occurrence,Team,Memory,MemoryExport,AgentMessage} from './types';
 import type {TaskReadiness,TaskSubtask} from './types';
@@ -14,6 +15,7 @@ import type {Run,ResumeReceipt} from '../jot/types';
 import type {ChannelBinding,ChannelBindingChallenge,TaskNotificationSettings,UpdateTaskNotifications,TaskNotificationDelivery,TaskNotificationHistoryPage} from './types';
 export const pathId=(value:string)=>encodeURIComponent(value);
 export const workbenchApi={
+ files:(workspace:string,project:string,options:WorkspaceFileListOptions={},signal?:AbortSignal)=>request<WorkspaceFilePage>(`/workspaces/${pathId(workspace)}/files?project_id=${pathId(project)}${options.limit===undefined?'':`&limit=${options.limit}`}${options.cursor===undefined?'':`&cursor=${pathId(options.cursor)}`}`,'GET',undefined,undefined,signal),
  discoveryPolicy:(agentId:string,signal?:AbortSignal)=>request<DiscoveryPolicyView>(`/agents/${pathId(agentId)}/discovery-policy`,'GET',undefined,undefined,signal),
  discoveryHistory:(agentId:string,before?:string,signal?:AbortSignal)=>request<DiscoveryHistoryPage>(`/agents/${pathId(agentId)}/discovery-history${before?`?before_id=${pathId(before)}`:''}`,'GET',undefined,undefined,signal),
  discoveryHistoryDetail:(agentId:string,admissionId:string,afterPlan?:string,signal?:AbortSignal)=>request<DiscoveryHistoryDetail>(`/agents/${pathId(agentId)}/discovery-history/${pathId(admissionId)}${afterPlan?`?after_plan_id=${pathId(afterPlan)}`:''}`,'GET',undefined,undefined,signal),

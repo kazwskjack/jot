@@ -7,7 +7,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test test/**/*.test.mjs",
+    "test": "node --test --test-concurrency=4 test/**/*.test.mjs",
     "test:contracts": "node --test test/contracts/contracts.test.mjs",
     "test:historical-output-load": "node scripts/verify-historical-output-load.mjs",
     "typecheck": "tsc --noEmit",
