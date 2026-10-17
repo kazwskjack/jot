@@ -4,20 +4,20 @@ import {join} from 'node:path';import {buildServer} from '../../src/server.ts';i
 import {prepareTaskCompletion,confirmTaskCompletion} from '../../src/persistent-tasks/completion-handshake.ts';
 import {DiscoveryPlanning} from '../../src/always-on/planning.ts';import {TaskExecutionEvidence} from '../../src/persistent-tasks/execution-evidence.ts';
 import {DiscoveryHistory as History} from '../../src/always-on/discovery-history.ts';
-async function planned(t,count=1){
+async function planned(t,count=1,planPath='source.md'){
  const f=fixture(t);f.file();await f.controller().admit('owner',f.scope);
  const occurrence=f.db.prepare('SELECT * FROM wb_task_occurrences').get(),run=occurrence.run_id,lease=f.coordinator.claimNext('history-worker',30000);f.coordinator.start(lease);
  f.db.prepare('INSERT INTO ga_harness_session_bindings VALUES(?,?,?,?,?)').run(occurrence.conversation_id,'owner','history-session','now','now');
  const planning=new DiscoveryPlanning(f.db,f.workbench),source=planning.source(run,{revision:1,offset:0});
  const evidence=new TaskExecutionEvidence(f.db).record(run,'source','discovery.source',source);planning.recordRead(run,evidence.reference,source);
  f.tasks.upsertSubtask('owner',occurrence.task_id,{title:'Inspect source',acceptance:'Use the pinned source',status:'completed',evidence:[evidence]},run);
- for(let i=0;i<count;i++)planning.plan(run,'plan-'+i,{summary:'Proposal '+i,rationale:'Observed source',changes:[{path:'source.md',description:'Change '+i,steps:['Review'],verification:['Compare']}],evidence:[evidence]});
+ for(let i=0;i<count;i++)planning.plan(run,'plan-'+i,{summary:'Proposal '+i,rationale:'Observed source',changes:[{path:planPath,description:'Change '+i,steps:['Review'],verification:['Compare']}],evidence:[evidence]});
  const report=planning.report(run,'report',{outcome:count?'proposals':'no_plan',summary:'Source inspected',limitations:[],plan_ids:[],evidence:[evidence]});
  return {...f,occurrence,run,lease,planning,report,history:new History(f.db),admission:f.db.prepare('SELECT * FROM wb_discovery_admissions').get()};
 }
-export async function acceptedWorkCycleFixture(t,{publish=true,count=2}={}){
+export async function acceptedWorkCycleFixture(t,{publish=true,count=2,planPath='source.md'}={}){
  const cleanup=[];let server;t.after(async()=>{if(server){await server.app.close();server.db.close();}for(const close of cleanup.reverse())await close();});
- const f=await planned({after:close=>cleanup.push(close)},count),config=JSON.parse(f.db.prepare('SELECT policy_json FROM wb_model_budget_policy_history ORDER BY revision DESC LIMIT 1').get().policy_json);
+ const f=await planned({after:close=>cleanup.push(close)},count,planPath),config=JSON.parse(f.db.prepare('SELECT policy_json FROM wb_model_budget_policy_history ORDER BY revision DESC LIMIT 1').get().policy_json);
  server=await buildServer({databasePath:join(f.root,'db.sqlite'),workspaces:['ws'],workbenchRoot:join(f.root,'workspace'),uploadRoot:join(f.root,'uploads'),templateRoot:new URL('../../file-engine/templates/',import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1'),internalChannelToken:'test-history-11df6da2',modelBudgetPolicy:config,csrfToken:'test-history-dcbf0559',allowedOrigins:['https://fixture.invalid']});
  const identity={run_id:f.run,session_ref:'history-session',execution_lease:{owner:'history-worker',generation:f.lease.generation}},goal={goal_id:'history-goal',goal_revision:1};
  const internal=(name,extra)=>server.app.inject({method:'POST',url:'/internal/v1/workbench/'+name,headers:{authorization:'Bearer test-history-11df6da2'},payload:{...identity,...extra}});

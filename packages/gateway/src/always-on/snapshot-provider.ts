@@ -4,7 +4,7 @@ import {lstat,realpath,readdir,mkdir,open} from 'node:fs/promises';
 import {resolve,dirname,relative,isAbsolute,sep,join,parse} from 'node:path';
 import type {BigIntStats} from 'node:fs';
 import {canonicalJson} from '../db/canonical-json.ts';
-import {workspaceRelativePath,workspaceSelection,validateWorkspaceManifest,workspaceManifestHash,type WorkspaceProvider,type SnapshotWorkspaceInput,type WorkspaceSnapshot,type WorkspaceManifestEntry,type WorkspaceGuard,type WorkspaceInspectionInput,type WorkspaceInspection,type SnapshotRecoveryRoot,type SnapshotRecoveryRecord,type SnapshotRecoveryStore,type SnapshotProviderOptions,type WorkspaceRecoveryInput,type WorkspaceCreationReceipt} from './workspace-provider.ts';
+import {workspaceRelativePath,workspaceSelection,validateWorkspaceManifest,workspaceManifestHash,type WorkspaceProvider,type SnapshotWorkspaceInput,type WorkspaceSnapshot,type WorkspaceManifestEntry,type WorkspaceGuard,type WorkspaceInspectionInput,type WorkspaceInspection,type SnapshotRecoveryRoot,type SnapshotRecoveryRecord,type SnapshotRecoveryStore,type SnapshotProviderOptions,type WorkspaceRecoveryInput,type WorkspaceCreationReceipt,type WorkspaceMaterializationInput} from './workspace-provider.ts';
 
 type Limits={max_entries:number;max_total_bytes:number;max_file_bytes:number;max_depth:number};
 type Root={path:string;canonical:string;dev:bigint;ino:bigint};
@@ -41,7 +41,7 @@ function validateRecovery(value:unknown,id:string):SnapshotRecoveryRecord{
  if(!exact(value.limits,Object.keys(defaults)))throw failure('workspace_recovery_invalid');const limits=limitsOf(value.limits as Limits);
  const selection=value.selection;if(!Array.isArray(selection)||selection.length!==manifest.paths.length)throw failure('workspace_recovery_invalid');
  const entries=new Map(manifest.entries.map(e=>[e.path,e])),kinds=selection.map((entry,index)=>{
-  if(!exact(entry,['path','kind'])||entry.path!==manifest.paths[index]||!['file','directory'].includes(String(entry.kind))||entries.get(String(entry.path))?.kind!==entry.kind)throw failure('workspace_recovery_invalid');
+  if(!exact(entry,['path','kind'])||entry.path!==manifest.paths[index]||!['file','directory'].includes(String(entry.kind))||entries.has(String(entry.path))&&entries.get(String(entry.path))?.kind!==entry.kind)throw failure('workspace_recovery_invalid');
   return Object.freeze({path:entry.path as string,kind:entry.kind as 'file'|'directory'});
  });
  if(manifest.entries.length>limits.max_entries||manifest.entries.some(e=>e.path.split('/').length>limits.max_depth||e.kind==='file'&&e.bytes>limits.max_file_bytes))throw failure('workspace_recovery_invalid');
@@ -93,6 +93,44 @@ export class SnapshotCopyWorkspaceProvider implements WorkspaceProvider{
  constructor(options:SnapshotProviderOptions={}){
   if(!options||typeof options!=='object'||Object.keys(options).some(key=>key!=='recoveryStore')||options.recoveryStore!==undefined&&(!options.recoveryStore||typeof options.recoveryStore.commit!=='function'||typeof options.recoveryStore.read!=='function'))throw failure('workspace_recovery_config_invalid');
   const store=options.recoveryStore;this.recoveryStore=store?Object.freeze({commit:store.commit.bind(store),read:store.read.bind(store)}):undefined;
+ }
+ /** Direct materialization from a trusted pinned logical source. All callbacks
+  * remain host-only. No source tree, task, model call or execution grant is made. */
+ async materialize(input:WorkspaceMaterializationInput):Promise<WorkspaceSnapshot>{
+  const id='workspace-snapshot-'+randomUUID();let created=false;
+  try{
+   controls(input.guard,input.signal);if(typeof input.read!=='function'||typeof input.assertCurrent!=='function')throw failure('workspace_source_controls_required');
+   const limits=limitsOf(input.limits),manifest=validateWorkspaceManifest(input.manifest),paths=manifest.paths;
+   const sourceCheck=async()=>{await check(input.guard,input.signal,'verify',id,null);try{await input.assertCurrent();}catch{throw failure('workspace_source_changed');}await check(input.guard,input.signal,'verify',id,null);};
+   const entries=new Map(manifest.entries.map(entry=>[entry.path,entry]));
+   if(!Array.isArray(input.selection)||input.selection.length!==paths.length)throw failure('workspace_selection_invalid');
+   const selection=new Map<string,'file'|'directory'>();for(const [i,entry] of input.selection.entries()){
+    if(!exact(entry,['path','kind'])||typeof entry.path!=='string'||typeof entry.kind!=='string'||entry.path!==paths[i]||!['file','directory'].includes(entry.kind)||entries.has(entry.path)&&entries.get(entry.path)!.kind!==entry.kind)throw failure('workspace_selection_invalid');selection.set(entry.path,entry.kind as 'file'|'directory');
+   }
+   const total=manifest.entries.reduce((n,e)=>n+(e.kind==='file'?e.bytes:0),0);
+   if(!Number.isSafeInteger(total)||total>limits.max_total_bytes||manifest.entries.length>limits.max_entries||manifest.entries.some(e=>e.path.split('/').length>limits.max_depth||e.kind==='file'&&e.bytes>limits.max_file_bytes))throw failure('workspace_limit');
+   await check(input.guard,input.signal,'prepare',id,null);await sourceCheck();const storage=await rootOf(input.storageRoot);await assertRoot(storage);
+   const isolated=join(storage.path,id);await mkdir(isolated,{mode:0o700});created=true;const target=await rootOf(isolated);
+   for(const entry of manifest.entries){await check(input.guard,input.signal,'copy',id,entry.path);await assertRoot(target);const destination=join(target.path,...entry.path.split('/'));await safe(dirname(destination));
+    if(entry.kind==='directory'){await mkdir(destination,{mode:0o700});continue;}
+    const handle=await open(destination,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|(constants.O_NOFOLLOW??0),entry.executable?0o700:0o600);
+    try{let bytes=0;const digest=createHash('sha256');for await(const chunk of input.read(entry.path)){
+      if(!(chunk instanceof Uint8Array))throw failure('workspace_source_invalid');bytes+=chunk.byteLength;if(bytes>entry.bytes)throw failure('workspace_source_changed');digest.update(chunk);
+      for(let offset=0;offset<chunk.byteLength;){await check(input.guard,input.signal,'copy',id,entry.path);const length=Math.min(65536,chunk.byteLength-offset),written=await handle.write(chunk,offset,length);if(!written.bytesWritten)throw failure('workspace_copy_failed');offset+=written.bytesWritten;}
+     }
+     await handle.sync();if(bytes!==entry.bytes||digest.digest('hex')!==entry.sha256)throw failure('workspace_source_changed');
+    }finally{await handle.close();}
+   }
+   await sourceCheck();const before=await inventory(target,paths,limits,input.guard,input.signal,id,selection);if(before.length!==manifest.entries.length)throw failure('workspace_copy_verification_failed');
+   for(const entry of before){const expected=entries.get(entry.path);if(!expected||entry.kind!==expected.kind||entry.kind==='file'&&(expected.kind!=='file'||Number(entry.stat.size)!==expected.bytes||!!(entry.stat.mode&0o100n)!==expected.executable||await hashFile(target,entry,input.guard,input.signal,id)!==expected.sha256))throw failure('workspace_copy_verification_failed');}
+   await check(input.guard,input.signal,'publish',id,null);await sourceCheck();await assertRoot(storage);await assertRoot(target);
+   if(identities(before)!==identities(await inventory(target,paths,limits,input.guard,input.signal,id,selection)))throw failure('workspace_copy_verification_failed');
+   const receipt=Object.freeze({protocol:1 as const,provider:'snapshot-copy' as const,snapshot_id:id,manifest_sha256:workspaceManifestHash(manifest),file_count:manifest.entries.filter(e=>e.kind==='file').length,directory_count:manifest.entries.filter(e=>e.kind==='directory').length,total_bytes:total,created_at:new Date().toISOString(),status:'ready' as const,execution_authorized:false as const});
+   const result=Object.freeze({isolated_root:isolated,manifest,receipt}),record=validateRecovery({protocol:1,provider:'snapshot-copy',snapshot_id:id,storage_root:savedRoot(storage),isolated_root:savedRoot(target),manifest,receipt,selection:paths.map(path=>({path,kind:selection.get(path)!})),limits},id);
+   if(this.recoveryStore){try{await this.recoveryStore.commit(record);}catch{throw failure('workspace_recovery_commit_unknown');}}
+   await sourceCheck();await check(input.guard,input.signal,'publish',id,null);await assertRoot(storage);await assertRoot(target);
+   this.issued.set(result,{root:target,paths,selection,limits,receipt:canonicalJson(receipt)});return result;
+  }catch(error){const code=error instanceof Error&&/^workspace_[a-z_]+$/.test(error.message)?error.message:input?.signal?.aborted?'workspace_cancelled':'workspace_materialization_failed';throw Object.assign(failure(code),{snapshot_id:id,residual_possible:created});}
  }
  async create(input:SnapshotWorkspaceInput):Promise<WorkspaceSnapshot>{
   const id='workspace-snapshot-'+randomUUID();let created=false;

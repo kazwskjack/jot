@@ -581,8 +581,20 @@ Root identities and recovery records are internal, not browser inputs or public
 report fields. Directory identity and selected-entry types must still agree at
 commit; a successful logical policy guard does not substitute for filesystem checks.
 
-This increment does not install a project-to-physical-root registry, isolated DSH
+This increment does not install an external project-to-physical-root registry, isolated DSH
 execution, an OS sandbox, Git provider, automatic discovery dispatcher or reviewed
 application. Before execution/apply, actual source-base drift, permissions, scoped
 memory and original native task continuation still require their own integration
 and acceptance. Full26 capability and real-provider/deployment scope remains open.
+
+The default logical Workbench project source now has a direct byte-stream bridge:
+all current owned versions become pinned private source facts and logical paths
+in the isolated snapshot, rather than copies of the blob container. Source
+revisions detect writes before collector polling; verification reads actual
+bytes as well as metadata. Empty/new targets, binary internal fixtures, more than
+200 files, exact restart recovery and unknown preparation are covered locally.
+Project-scoped observation avoids unrelated database writes cancelling a copy;
+transactional schema verification cannot pollute its committed cache. Large
+project materialization still has significant guard/IO overhead. This completes
+the logical source artifact connection, not original DSH work admission,
+plan-only isolated file execution, reviewed application or production acceptance.

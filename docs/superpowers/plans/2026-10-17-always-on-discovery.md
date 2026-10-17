@@ -165,10 +165,11 @@ disclosure review before enabling it. Keep full 26-capability acceptance open.
 
 Current local implementation includes original policy/source/admission/planning,
 source-backed reports, canonical accepted history, native wait/reply recovery,
-policy/history UI and durable owned snapshot artifacts. These are supported by
+policy/history UI, durable owned snapshot artifacts and the original logical-file
+source bridge. These are supported by
 the scoped evidence in the later sections, not a claim of complete Always-on.
-Remaining work includes trusted logical-project to physical-root configuration,
-Git provider, original DSH isolated execution and scoped memory, physical base
+Remaining work includes external filesystem/Git root configuration,
+Git provider, original DSH isolated execution and scoped memory, execution-time base
 revalidation, owner-reviewed diff/apply/reconciliation, automatic dispatcher,
 complete cycle UI, provider/deployment/retention and full26 acceptance.
 
@@ -1017,3 +1018,98 @@ skips and zero failures (197.88s). Windows Gateway build passes after that run.
 Root32/UI169 and Windows root build pass. Public disclosure6 and814-file preflight
 pass; Brain links have no broken references. These are local verification results,
 not physical-root production mapping, isolated execution or reviewed apply.
+
+## Logical project source and current-base integration
+
+The original project file store uses immutable blobs and logical versions, not a
+physical checkout. Use that existing owned store as the default source; never
+copy its container as if blob names were project paths. External Git/filesystem
+projects still require separately configured trusted root bindings.
+
+1. Read all scoped current file metadata and exact immutable version rows in a
+   short read transaction, then release it before streaming bytes. Do not reuse
+   the UI's200-file list or UTF-8 read to materialize binary content. Keep raw blob
+   names/root identities private and reject links, private paths and collisions.
+2. Pin one immutable private source base per original work cycle before its
+   snapshot intent. Losing the pin response recovers the same base. Source changes
+   do not authorize rebasing or replacing that base. Compare full current inventory
+   independently of collector signal arrival; byte verification remains necessary.
+3. Materialize trusted source streams directly into the same snapshot provider,
+   without a second random staging tree or another task state machine. Verify every
+   file's expected size/hash and actual target, retain original recovery records,
+   and publish ready only after source/owner/cancellation checks. Missing future
+   target paths remain absent base facts, never placeholder source files.
+4. Integrate source checkpoint, original cycle and snapshot journal behind a
+   Host-configured storage root. Copy context remains separate from plan paths;
+   absent root/nested file targets must be representable without expanding writes.
+   Preparation/recovery may produce artifacts only. Verify current base through
+   actual pinned-byte reads as well as metadata before later execution/apply.
+5. Prove real logical project bytes, more than200 files, binary internal fixtures,
+   historical planning/current-base separation, new targets, drift during copy,
+   unknown commit/restart, corrupt bytes, revoked facts and unchanged accounting.
+   Then run full regression/build/privacy review before publication.
+
+The subsequent executor must admit a distinct work occurrence in the original
+task, create its corresponding native Session/Goal, inherit original cumulative
+task budget and enforce plan-only file writes in isolation. Merely changing DSH
+cwd does not redirect the current shared files.write implementation. Completed
+planning Sessions cannot be resumed to fake a work occurrence. Shell/exec is not
+currently in the workbench tool allowlist; enabling it needs real sandbox and
+command authority, not a boolean on these artifact helpers. Keep these unfinished
+execution/apply requirements open while implementing the source bridge.
+
+### Logical source evidence and remaining performance work
+
+WorkbenchProjectSource captures every owned current file and matching immutable
+version, streams raw64KiB buffers and checks size/hash, descriptor/root identity,
+links, authority and cancellation. Its public manifest contains logical facts;
+blob names and roots remain private. Binary/multi-MiB tests use controlled
+internal version fixtures; the normal text write API still has its original
+contract. WorkCycleSources pins an immutable private base before snapshot intent.
+LogicalWorkCycleWorkspaceManager directly materializes those bytes into the
+existing snapshot provider and restores its original ID/root. Planned absent
+root or nested targets do not create fake original files. verifyBase actually
+reads all pinned source bytes, detecting blob corruption even without metadata
+changes. All these outputs remain non-authorizing.
+
+An initial per-chunk full inventory scan was quadratic in file count. Project
+source revisions now track all original wb_files insert/update/delete operations,
+including both scopes of a scope change. Stable snapshot observations reuse a
+validated inventory; changed project revisions require full comparison. Other
+projects' commits and unrelated Worker writes do not interrupt an unchanged source.
+Missing or altered tracking triggers fail. Schema checks are cached only outside
+transactions: a reproduced outer DDL rollback/version-reuse bug has a red/green
+regression and cannot publish uncommitted cache state. No transaction spans source
+IO; role, cancellation, root and byte validation are never cached away.
+
+Source targeted23, checkpoint8, materialization7, logical manager14 and the
+DDL-rollback regression pass. A complete503-file read including a2MiB version
+uses at most four full inventory SELECTs. Controlled501-file materialization
+measured72.94s before correction and58.07s afterward; the final parallel full-suite
+run measured79.07s for that case. This remains substantial IO/guard cost, not a
+production speed claim. Initial materialization consumes source bytes once;
+recovery/verifyBase still read and verify the complete original base.
+
+Final Gateway verification after the rollback fix:1583 cases,1576 passed,
+seven existing/opt-in skips,zero failures (181.95s), followed by Windows Gateway
+build. Root32/UI169 and Windows root build pass. Three selected actual official
+SDK/Gateway/Worker/native Goal cases pass (28.91s,18 scripted local Messages
+requests). After native publication, the proposal case materializes actual owned
+logical source bytes, reopens the same snapshot ID/root, verifies the current
+base and preserves all task/run/model/budget counts. This is artifact preparation
+after SDK acceptance, not a DSH work occurrence executing in that artifact.
+
+Two earlier SDK runs failed strict observation assertions. Numeric timing traced
+one genuine hold to a Host timestamp1ms ahead of the Gateway sample, rather than
+a five-second model delay. The fixture now uses its existing bounded fresh
+observation helper for dormancy as well; rejected samples must leave execution
+and usage unchanged. Final verification includes a rejected future sample and
+a fresh accepted observation. Production freshness/future-time rules remain
+unchanged; automatic-dispatch liveness under clock sampling jitter still needs
+acceptance. No production execution, automatic dispatcher, reviewed apply or
+full26 acceptance follows from these local results.
+
+Final public preflight: disclosure6 and824 files pass; Brain links have no broken
+references. Independent static review found no further important defect within
+the logical source/artifact scope. These checks do not establish arbitrary secret
+redaction or execution/apply/production acceptance.

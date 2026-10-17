@@ -17,6 +17,8 @@ export type SnapshotRecoveryRecord=Readonly<{protocol:1;provider:'snapshot-copy'
 export type SnapshotRecoveryStore={commit(record:SnapshotRecoveryRecord):Promise<void>;read(snapshot_id:string):Promise<SnapshotRecoveryRecord|undefined>};
 export type SnapshotProviderOptions={recoveryStore?:SnapshotRecoveryStore};
 export type WorkspaceRecoveryInput={snapshot_id:string;storageRoot:string;guard:WorkspaceGuard;signal:AbortSignal};
+/** Internal trusted versioned source bridge, not a public manifest or read URL. */
+export type WorkspaceMaterializationInput={storageRoot:string;manifest:WorkspaceManifest;selection:readonly Readonly<{path:string;kind:'file'|'directory'}>[];read:(path:string)=>AsyncIterable<Uint8Array>;assertCurrent:()=>Promise<void>;guard:WorkspaceGuard;signal:AbortSignal;limits?:WorkspaceProviderLimits};
 export interface WorkspaceProvider {create(input:SnapshotWorkspaceInput):Promise<WorkspaceSnapshot>;inspect(input:WorkspaceInspectionInput):Promise<WorkspaceInspection>;recover(input:WorkspaceRecoveryInput):Promise<WorkspaceSnapshot>}
 
 export function workspaceRelativePath(value:unknown):string{

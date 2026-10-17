@@ -1,4 +1,5 @@
 import {MemoryCaptureService} from './memory-capture.ts';
+import {installWorkbenchSourceRevisions} from '../always-on/workbench-source-revisions.ts';
 import {MemoryProcessingRegistry} from './memory-processing.ts';
 import {MemoryRetrievalLog,type RetrievalData} from './memory-retrievals.ts';
 import {MemoryConsolidationService} from './memory-consolidation.ts';
@@ -152,6 +153,7 @@ export class WorkbenchService {
       CREATE TRIGGER IF NOT EXISTS wb_file_write_run_no_delete BEFORE DELETE ON wb_file_write_runs
         BEGIN SELECT RAISE(ABORT,'file_write_run_immutable'); END;
     `);
+    installWorkbenchSourceRevisions(db);
     this.memoryLifecycle = new MemoryLifecycle(db);
     this.memoryCapture=new MemoryCaptureService(db,{
       agent:(owner,agentId)=>{const agent=this.active(owner,agentId);this.projects.assertOwned(agent.project_id,owner);return agent;},
@@ -989,6 +991,18 @@ export class WorkbenchService {
     if (parts.some(part => !part || part === '.' || part === '..' || part.startsWith('.') || /[. ]$/.test(part) || /[<>"|?*]/.test(part)
       || /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(part))) throw new Error('invalid_file_path');
     return parts.join('/');
+  }
+  /** Observe only: unlike projectRoot, never initialize a project directory. */
+  projectSourceRoot(owner:string,workspaceId:string,projectId:string):string|null {
+    const workspace=this.workspace(workspaceId);this.projects.assertOwned(projectId,owner);
+    const root=resolve(this.options.root),dir=join(root,hash(`${owner}\0${workspace}\0${projectId}`));
+    noSymlinkAncestors(root);
+    if(realpathSync(root)!==this.canonicalRoot)throw Error('workspace_path_escape');
+    let stat;try{stat=lstatSync(dir);}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return null;throw error;}
+    if(stat.isSymbolicLink()||!stat.isDirectory())throw Error('workspace_path_escape');
+    const canonical=realpathSync(dir),rel=relative(this.canonicalRoot,canonical);
+    if(rel==='..'||rel.startsWith(`..${sep}`)||isAbsolute(rel))throw Error('workspace_path_escape');
+    return canonical;
   }
   /** Observe only: unlike projectRoot, never initialize a project directory. */
   projectWorkspaceReady(owner:string,workspaceId:string,projectId:string):boolean {

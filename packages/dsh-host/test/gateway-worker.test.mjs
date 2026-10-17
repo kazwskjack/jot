@@ -84,7 +84,7 @@ async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=
   const tokenFile=join(root,'adapter.token');await writeFile(tokenFile,adapterToken,{mode:0o600});
   const policyFile=join(root,'budget-policy.json');if(role)await writeFile(policyFile,JSON.stringify(policy));
   const headers={'x-user-id':'acceptance-owner','content-type':'application/json','x-csrf-token':csrfToken,origin:'https://fixture.invalid','idempotency-key':'acceptance-create'};
-  let conversation_id,messageUrl,messageBody,roleAgent,discoveryController,discoveryScope,sourceBlob,sourceBytes;
+  let conversation_id,messageUrl,messageBody,roleAgent,discoveryController,discoveryScope,sourceBlob,sourceBytes;const observationTimings=[];
   if(role){const response=await fetch(gatewayUrl+'/v1/agents',{method:'POST',headers,body:JSON.stringify({name:'Acceptance role',workspace_id:'jot',instructions:'Reply clearly using the provided evidence.'})});assert.equal(response.status,201);const agent=await response.json();roleAgent=agent;conversation_id=agent.conversation_id;messageUrl='/v1/agents/'+agent.agent_id+'/messages';messageBody={client_message_id:'acceptance-one',text:'Reply with the single word ACCEPTANCE-OK.'};
    if(persistent&&!discovery){const created=await fetch(gatewayUrl+'/v1/persistent-tasks',{method:'POST',headers:{...headers,'idempotency-key':'acceptance-task'},body:JSON.stringify({title:'Wait for confirmation',agent_id:agent.agent_id,objective:complete?'Write acceptance.md containing ACCEPTANCE-OK and request owner acceptance.':'Ask the user to confirm before any further work.',trigger:{kind:'once',run_at:'2099-01-01T00:00:00Z'},budget:{max_runs:unlimited?null:1}})});const task=await created.json();assert.equal(created.status,201,JSON.stringify(task));messageUrl='/v1/persistent-tasks/'+task.task_id+'/run-now';messageBody={};}
   }
@@ -110,8 +110,10 @@ async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=
    const saved=await fetch(policyUrl,{method:'PATCH',headers:{...headers,'idempotency-key':'discovery-save'},body:JSON.stringify({expected_version:0,expected_role_version:1,expected_role_epoch:1,mode:'discover_only',cooldown_ms:0,recent_input_ms:0,max_cycles:null})});assert.equal(saved.status,200,await saved.clone().text());
    const enabled=await fetch(policyUrl+'/control',{method:'POST',headers:{...headers,'idempotency-key':'discovery-enable'},body:JSON.stringify({action:'enable',expected_version:1,expected_role_version:1,expected_role_epoch:1})});assert.equal(enabled.status,200,await enabled.clone().text());
    discoveryScope={project_id:roleAgent.project_id,workspace_id:'jot',agent_id:roleAgent.agent_id};
-   discoveryController=new DiscoveryAdmissionController({db:service.db,workbench:service.workbench,tasks:service.persistentTasks,policies:new DiscoveryPolicies(service.db),
-    activity:new ProjectActivityObserver({db:service.db,workbench:service.workbench,native:client,maxAgeMs:5000}),coordinator:new HarnessCoordinator(service.db,service.runs,service.events),budgetPolicy:new WorkbenchBudgetPolicy(service.db,policy),maxAgeMs:5000});
+   const native={nativeIdleObservationReadiness:signal=>client.nativeIdleObservationReadiness(signal),observeNativeIdle:async(id,signal)=>{const start=Date.now(),monotonic=performance.now(),fact=await client.observeNativeIdle(id,signal),end=Date.now();observationTimings.push({phase:'native',wall_before:start,wall_after:end,host_observed_at:fact.observed_at,elapsed_monotonic_ms:performance.now()-monotonic,age_ms:end-fact.observed_at});return fact;}};
+   const activity=new ProjectActivityObserver({db:service.db,workbench:service.workbench,native,maxAgeMs:5000,now:()=>{const wall=Date.now();observationTimings.push({phase:'clock',wall});return wall;}}),observe=activity.observe.bind(activity);
+   activity.observe=async(...args)=>{const start=Date.now(),fact=await observe(...args);observationTimings.push({phase:'activity',elapsed_ms:Date.now()-start,age_ms:Date.now()-fact.observed_at,reason:fact.reason,session_count:fact.facts.session_count});return fact;};
+   discoveryController=new DiscoveryAdmissionController({db:service.db,workbench:service.workbench,tasks:service.persistentTasks,policies:new DiscoveryPolicies(service.db),activity,coordinator:new HarnessCoordinator(service.db,service.runs,service.events),budgetPolicy:new WorkbenchBudgetPolicy(service.db,policy),maxAgeMs:5000});
   }
   const postMessage=()=>fetch(gatewayUrl+messageUrl,{method:'POST',headers:{...headers,'idempotency-key':'acceptance-one'},body:JSON.stringify(messageBody)});
   const admitFresh=async()=>{
@@ -124,6 +126,7 @@ async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=
      used:service.persistentTasks.list('acceptance-owner').items[0].runs_used,modelRequests:requests.length,attempts:service.db.prepare('SELECT count(*) n FROM wb_model_budget_attempts').get().n});
     const before=state();receipt=await discoveryController.admit('acceptance-owner',discoveryScope);
     if(receipt.reason!=='OBSERVATION_STALE')return receipt;
+    t.diagnostic(JSON.stringify({freshness_hold:true,observations:observationTimings.splice(0)}));
     assert.deepEqual(state(),before,'expired observations cannot admit runs, spend or reset task usage');
    }
    return receipt;
@@ -227,6 +230,14 @@ async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=
     assert.equal(cycle.execution_authorized,false);assert.equal(cycle.task_id,admission.task_id);assert.equal(cycle.occurrence_id,admission.occurrence_id);
     assert.deepEqual(cycles.guard('acceptance-owner',discoveryScope,cycle.cycle_id),cycle);
     assert.deepEqual(new WorkCycles(service.db).create('acceptance-owner',discoveryScope,request,'sdk-owned-artifact'),cycle);
+    const {LogicalWorkCycleWorkspaceManager}=await import('../../gateway/src/always-on/logical-work-cycle-workspace.ts'),storageRoot=join(root,'cycle-artifacts');await mkdir(storageRoot);
+    const options={db:service.db,workbench:service.workbench,storageRoot},manager=new LogicalWorkCycleWorkspaceManager(options),control={signal:new AbortController().signal};
+    const prepared=await manager.prepare('acceptance-owner',discoveryScope,cycle.cycle_id,control);
+    assert.equal(await readFile(join(prepared.snapshot.isolated_root,'source.md'),'utf8'),'Discovery source observed for ACCEPTANCE-OK.');
+    assert.deepEqual(prepared.plan_paths,['source.md']);assert.equal(prepared.execution_authorized,false);
+    const restored=await new LogicalWorkCycleWorkspaceManager(options).prepare('acceptance-owner',discoveryScope,cycle.cycle_id,control);
+    assert.equal(restored.snapshot.receipt.snapshot_id,prepared.snapshot.receipt.snapshot_id);assert.equal(restored.snapshot.isolated_root,prepared.snapshot.isolated_root);
+    const base=await manager.verifyBase('acceptance-owner',discoveryScope,cycle.cycle_id,control);assert.equal(base.file_count,1);assert.equal(base.execution_authorized,false);
     assert.equal(cycles.close('acceptance-owner',discoveryScope,cycle.cycle_id,{expected_version:1},'sdk-close-artifact').state,'closed');
     assert.deepEqual(counts(),before);assert.equal(requests.length,calls,'artifact resource creation never dispatches a model');
    }
@@ -275,7 +286,7 @@ async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=
    const beforeTask=service.persistentTasks.list('acceptance-owner').items[0];
    const {observeDiscoveryDormancy}=await import('../../gateway/src/always-on/dormancy.ts'),policyId=service.db.prepare('SELECT policy_id FROM wb_discovery_policies').get().policy_id;
    const changes=service.db.prepare('SELECT total_changes() n').get().n;assert.deepEqual(observeDiscoveryDormancy(service.db,'acceptance-owner',policyId),{protocol:1,state:'accepted',revision:1,execution_authorized:false});assert.equal(observeDiscoveryDormancy(service.db,'foreign-owner',policyId).state,'none');assert.equal(service.db.prepare('SELECT total_changes() n').get().n,changes);
-   const sleeping=await discoveryController.admit('acceptance-owner',discoveryScope);assert.equal(sleeping.admitted,false);assert.equal(sleeping.reason,'DORMANT_NO_SIGNAL');
+   const sleeping=await admitFresh();assert.equal(sleeping.admitted,false);assert.equal(sleeping.reason,'DORMANT_NO_SIGNAL');
    await worker.stop();assert.equal(worker.terminal(),true);
    service.workbench.writeFile('acceptance-owner','jot',{project_id:roleAgent.project_id,path:'source.md',content:'A new owned source revision.',expected_version:1});
    const awake=await admitFresh();assert.equal(awake.admitted,true,JSON.stringify(awake));
