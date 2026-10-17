@@ -4,6 +4,7 @@ import {isDeepStrictEqual} from 'node:util'
 import {validateOrdinaryCompletion} from './ordinary-completion.ts'
 import { readFile } from 'node:fs/promises'
 import type { DshRunner, DshRunResult,DshRunInput } from './worker.ts'
+import {assertTrustedWorkWorkspace} from './worker.ts'
 import type { ResolvedAttachment } from '../artifacts/resolver.ts'
 import {normalizeGoalExecution,normalizeOriginalInputExecution,type OriginalInputExecution,type ConversationGoalExecution,type SessionPromptPart} from './session-controller-client.ts'
 import {validateCheckpoint,type SessionCheckpoint} from './session-checkpoints.ts'
@@ -13,7 +14,7 @@ import { projectSessionFrame, type JotProjection, type ProjectionContext } from 
 
 interface OfficialSessionClient {
   inputCompletion?(sessionId:string,execution:OriginalInputExecution,commandIds:readonly string[],signal?:AbortSignal):Promise<Record<string,unknown>>
-  create(sessionId: string, cwd: string, agentPreset: string, signal?: AbortSignal, workbenchRunId?: string,workbenchExecutionLease?:Readonly<{owner:string;generation:number}>): Promise<Record<string, unknown>>
+  create(sessionId: string, cwd: string, agentPreset: string, signal?: AbortSignal, workbenchRunId?: string,workbenchExecutionLease?:Readonly<{owner:string;generation:number}>,workWorkspace?:Readonly<{protocol:1}>): Promise<Record<string, unknown>>
   prompt(sessionId: string, requestId: string, content: string | SessionPromptPart[], mode?: 'queue' | 'steer', signal?: AbortSignal, original?:OriginalInputExecution): Promise<Record<string, unknown>>
   stageFile?(sessionId: string, path: string, displayName: string, signal?: AbortSignal): Promise<{ receipt_id: string }>
   follow(sessionId: string, signal?: AbortSignal,goalControl?:ConversationGoalExecution,ordinaryInput?:OriginalInputExecution): AsyncGenerator<Record<string, unknown>>
@@ -169,6 +170,7 @@ export class OfficialSessionRunner implements DshRunner {
       ? setTimeout(() => controller.abort(new Error('session_follow_timeout')), this.options.timeoutMs)
       : undefined
     try {
+      const workWorkspace=assertTrustedWorkWorkspace(input);
       if(input.workbenchBudgetEnforced!==undefined&&typeof input.workbenchBudgetEnforced!=='boolean')throw new Error('workbench_preset_binding_invalid');
       const preset=input.workbenchBudgetEnforced?this.options.workbenchAgentPreset:this.options.agentPreset;
       if(input.workbenchBudgetEnforced&&(!input.workbenchRunId||!input.workbenchExecutionLease||typeof preset!=='string'||!preset.trim()))throw new Error('workbench_budget_preset_required');
@@ -176,7 +178,7 @@ export class OfficialSessionRunner implements DshRunner {
       if(ordinaryInput&&!this.client.recoverInput)throw Error('ordinary_input_recovery_unavailable');
       const completion=input.ordinaryCompletion;let completionScope:OriginalInputExecution|undefined;
       if(completion){completionScope=normalizeOriginalInputExecution({run_id:input.taskRequestId,execution_lease:completion.executionLease});if(typeof completion.commands!=='function'||typeof completion.publish!=='function'||!this.client.inputCompletion||input.workbenchRunId||input.checkpointTask||goalControl||!isDeepStrictEqual(completionScope,ordinaryInput??admission))throw Error('ordinary_completion_unavailable');}
-      if(!goalControl&&!ordinaryInput)await this.client.create(input.sessionRef, this.options.cwd, preset!, controller.signal, input.workbenchRunId,input.workbenchExecutionLease)
+      if(!goalControl&&!ordinaryInput)await this.client.create(input.sessionRef, workWorkspace?.cwd??this.options.cwd, preset!, controller.signal, input.workbenchRunId,input.workbenchExecutionLease,...(workWorkspace?[Object.freeze({protocol:1 as const})]:[]))
       let iterator = (goalControl||ordinaryInput?this.client.follow(input.sessionRef,controller.signal,goalControl,ordinaryInput):this.client.follow(input.sessionRef, controller.signal))[Symbol.asyncIterator]()
       let opening = await iterator.next()
       if (opening.done || opening.value.type !== 'snapshot') throw new Error('session_follow_snapshot_missing')

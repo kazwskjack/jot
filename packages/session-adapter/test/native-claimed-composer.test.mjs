@@ -31,9 +31,9 @@ test('an authorization change or caller cancellation before provenance prevents 
 });
 
 test('formal adapter creation invokes the composer and refuses an unbound bypass',async()=>{
- const calls=[],token='a'.repeat(32),composer={withCreation:async(scope,operation)=>{assert.equal(scope.binding.sessionRef,'session');calls.push('authorize');return {value:await operation(),recovery:{state:'none',execution_authorized:false}};}},handler=createAdapterHandler({token,controller:{create:async()=>{calls.push('controller');return {sessionId:'session'};}},agents:{get:()=>({})},workbenchBridge:{attach:async()=>{calls.push('attach');}},nativeClaimedComposer:composer});
+ const calls=[],token='a'.repeat(32),composer={withCreation:async(scope,operation)=>{assert.equal(scope.binding.sessionRef,'session');calls.push('authorize');return {value:await operation(),recovery:{state:'none',execution_authorized:false}};}},handler=createAdapterHandler({token,controller:{create:async()=>{calls.push('controller');return {sessionId:'session'};}},agents:{get:()=>({})},workbenchBridge:{request:async()=>{calls.push('guard');return {context:{}};},attach:async()=>{calls.push('attach');}},nativeClaimedComposer:composer});
  const request=body=>handler({method:'POST',url:new URL('http://127.0.0.1/v1/sessions'),headers:{authorization:'Bearer '+token},body});
- const body={session_id:'session',cwd:'/workspace',workbench_context:{run_id:'run',execution_lease:{owner:'worker',generation:1}}};assert.equal((await request(body)).status,201);assert.deepEqual(calls,['authorize','controller','attach']);assert.equal((await request({session_id:'unbound',cwd:'/workspace'})).status,422);
+ const body={session_id:'session',cwd:'/workspace',workbench_context:{run_id:'run',execution_lease:{owner:'worker',generation:1}}};assert.equal((await request(body)).status,201);assert.deepEqual(calls,['guard','authorize','controller','attach']);assert.equal((await request({session_id:'unbound',cwd:'/workspace'})).status,422);
 });
 
 test('caller cancellation and host disposal release a hanging authorization without entering the Controller',async()=>{

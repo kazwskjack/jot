@@ -1143,7 +1143,7 @@ needs its own binding and live guard; the planning guard is never that authority
 
 ### 1. Explicit work selection and original atomic admission
 
-- [ ] Add internal `always-on/work-grants.ts` with owner-command idempotency.
+- [x] Add internal `always-on/work-grants.ts` with owner-command idempotency.
   `authorize(owner, scope, cycleId, input, key)` accepts only expected cycle,
   policy and role versions/epoch plus snapshot_id/source_sha256. Derive accepted
   report/plans/path hashes, original task/version/generation, actual planning
@@ -1151,12 +1151,12 @@ needs its own binding and live guard; the planning guard is never that authority
   snapshot record on the server. Do not accept roots, plan bodies or a boolean
   authorization claim. Proposal acceptance and artifact preparation remain
   separate from the owner's work authorization.
-- [ ] Add internal `always-on/work-admission.ts` which verifies the actual ready
+- [x] Add internal `always-on/work-admission.ts` which verifies the actual ready
   artifact and original source bytes outside SQL transactions, obtains fresh
   native idle/budget/capacity observations, then revalidates original facts under
   the final enqueue transaction. Drift, unresolved accounting and uncertain
   workspace preparation refuse admission; they do not rebase or recopy.
-- [ ] Add `PersistentTaskService.enqueueDiscoveryWork` through the existing
+- [x] Add `PersistentTaskService.enqueueDiscoveryWork` through the existing
   private enqueue function. Extend the private pre-occurrence callback to receive
   occurrence_id, run_id and conversation_id. Persist one immutable admission per
   owner grant, with deferred original-occurrence FK and exact
@@ -1268,3 +1268,98 @@ the original model ledger/lease rules for existing calls and new spends. Never
 turn unresolved external usage into fresh allowance, and never reject a current
 run merely because its own correctly admitted call is still being accounted for.
 This phase distinction must be tested before connecting actual isolated tools.
+
+## Native-work prerequisite implementation, subsequent increment
+
+The internal work controller now consumes an explicit immutable owner grant,
+observes original native/project activity, restores and inspects the private ready
+snapshot and re-reads original source bytes outside SQL transactions. It then
+revalidates the original grant, current source metadata, issued activity receipt,
+policy, budget and background capacity in the original enqueue transaction.
+One immutable work admission binds a distinct original occurrence, run and
+conversation to the same task-total budget scope. Response recovery reads that
+receipt instead of creating another occurrence. Original next-call reservations
+remain part of original accounting; no model call is dispatched by this helper.
+
+The running authority guard deliberately does not reuse new-admission budget
+readiness. It validates current task/occurrence generations, policy, role, source,
+cycle, original budget scope and actual continuation ancestry. Generic work file,
+memory, message and delegation operations remain refused until their complete
+isolated implementation is installed. Native member ancestry is recognized only
+to prevent an ordinary-permission fallback, not to grant member execution.
+
+Cycle capacity counts original planning admissions. A selected work occurrence
+belongs to its already admitted cycle; it does not spend another max_cycles slot.
+The task's runs_used and original budgets still accumulate actual occurrences.
+Both finite-cycle failures were reproduced before correcting the two gates.
+
+The new internal isolated file service uses exact selected paths, a durable
+per-call intent and cross-process pending CAS, byte-verified temporary writes,
+immutable version bytes and a synchronous original receipt callback. It checks
+source context, latest accepted writable bytes, roots, links and ancestor identity.
+The tests include a replaced ancestor with unchanged original file identities,
+real competing processes and process death after replacement but before receipt
+commit. An unknown intent holds the cycle; explicit reconciliation is unfinished.
+Path checks observe races; they are not an OS capability sandbox or atomic
+protection against every hostile external filesystem mutation.
+
+Worker/Runner work inputs carry a process-owned token bound to the exact original
+run, session and execution lease. The selected objective is separate from the
+actual continuation prompt, which retains checkpoint recovery instructions and
+owner replies. The work-only Host branch requires original private workspace
+context, the budgeted preset and matching cold/resident/native header directory
+and preset before activation/attachment. It rejects a missing work marker based
+on the original authenticated guard instead of trusting the request alone.
+Ordinary requests remain on their existing paths; workbench creates add an
+original authority check before Session creation.
+
+This is not a running work feature or full acceptance. Still required: the actual
+private journal resolver and execution.context native_workspace wiring; the async
+operation/evidence/content/review/artifact adapters; explicit unknown-IO recovery;
+actual installed SDK planning-to-work Goal, wait/reply and restart acceptance;
+scoped memory/report, reviewed source apply and automatic dispatch. The isolated
+schema and services are not exposed through a public/model operation or installed
+as an alternate execution loop. Missing work configuration fails closed.
+
+Full-regression correction: generic occurrence SQL initially referenced a role
+table absent from the existing narrow task facade, breaking ordinary enqueue
+and old-layout ALTER migrations. The generic trigger no longer has that
+redundant reference. Work admission installation explicitly denies work when
+original role authority is unavailable and installs the full validator when
+the actual Workbench is later constructed. Role checks remain on reservation
+insertion and the final original transaction guard; both late revocation phases
+roll back. Reinstalled validity checks leave duplicate identities to the immutable
+receipt guard, independent of SQLite trigger ordering.
+
+The latest focused work-record suite passes12/12, including a positive real
+original-service checkpoint/resume/inherit path with the same receipt, original
+occurrence and cumulative budget. Its Goal record is synthetic, not actual SDK
+work acceptance. The first complete run failed24/1680 with these SQL compatibility
+defects; it is retained as failed evidence. Corrected full regression and final
+Gateway build must be recorded after they terminate.
+
+
+A final controller-only regression reproduced a completed owned role-chat input
+that had not yet reached the signal journal: the old grant incorrectly remained
+admissible. Fresh work admission now invokes the existing trusted source collector
+before grant validation and inside the final original enqueue callback. Pending
+or unconfirmed provenance holds; historical committed response recovery remains
+a read ahead of recollection. The original source collector and controller group
+passes20/20 after the correction, and scoped independent review finds no open
+issue. The full corrected SQL regression was already running before this late
+controller correction; it is not evidence of a full rerun of the final source.
+
+
+Final verification for the subsequent prerequisite increment: the complete
+corrected-SQL Gateway run has1683 tests,1676 passed,seven existing/opt-in skips,
+zero failures and zero cancellations (589.85s). It includes the positive original
+service continuation and schema upgrade/revocation regressions. This run precedes
+the final typed-input collector correction; the complete controller plus original
+collector20/20 rerun passes after that correction. The final Windows Gateway build
+passes on the corrected source. Root50/50, interface212/212, final frontend build
+and Session adapter534 total/510 passed/24 existing or opt-in skips/zero failures
+are separate evidence. Skips and synthetic native Goal/controller tests do not
+prove actual installed SDK work execution, provider quality or production rollout.
+Final independent and scoped re-reviews have no open findings within this internal
+prerequisite scope. Both failed full/focused attempts remain in private records;
+they have not been relabeled as passes. No new dependency or license change.

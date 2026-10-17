@@ -102,10 +102,10 @@ export class SessionControllerClient {
     return value
   }
 
-  async create(sessionId: string, cwd: string, agentPreset: string, signal?: AbortSignal, workbenchRunId?: string, workbenchExecutionLease?: ExecutionLease) {
+  async create(sessionId: string, cwd: string, agentPreset: string, signal?: AbortSignal, workbenchRunId?: string, workbenchExecutionLease?: ExecutionLease,workWorkspace?:Readonly<{protocol:1}>) {
     return await this.post('/v1/sessions', {
       session_id: sessionId, cwd, agent_preset: agentPreset,
-      ...(workbenchRunId ? { workbench_context: { run_id: workbenchRunId, ...(workbenchExecutionLease?{execution_lease:normalizeExecutionLease(workbenchExecutionLease)}:{}) } } : {}),
+      ...(workbenchRunId ? { workbench_context: { run_id: workbenchRunId, ...(workbenchExecutionLease?{execution_lease:normalizeExecutionLease(workbenchExecutionLease)}:{}),...(workWorkspace?{work_workspace:workWorkspace}:{}) } } : {}),
     }, signal)
   }
 

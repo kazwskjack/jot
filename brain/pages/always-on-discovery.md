@@ -4,7 +4,7 @@ title: Keep project discovery in original DSH task boundaries
 category: decision
 status: active
 created: "2026-10-17T03:43:02"
-updated: "2026-10-17T13:01:39"
+updated: "2026-10-17T13:44:51"
 ---
 
 <!-- compiled_truth -->
@@ -256,5 +256,17 @@ Logical Workbench files are the default project source: capture all owned immuta
 - time: 2026-10-17T13:01:39
   kind: decision
   summary: "Separate readiness for a new work admission from authority of an already admitted work run. WorkGrants fresh readiness may reject pending accounting; the future running work guard must instead bind immutable owner permission, current original authority and exact cumulative scope identity, while the original ledger/lease controls active calls and new spends. Do not treat a correctly admitted current in-flight call as permission revocation or unresolved external usage as fresh allowance."
+  source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
+  affects: [always-on-discovery]
+
+- time: 2026-10-17T13:23:36
+  kind: decision
+  summary: "An explicit work occurrence remains part of its already admitted discovery cycle: max_cycles counts original planning admissions, while runs_used and cumulative budget still count actual original occurrences. Do not charge one cycle twice or reset execution accounting."
+  source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
+  affects: [always-on-discovery]
+
+- time: 2026-10-17T13:44:51
+  kind: decision
+  summary: "Refresh the original trusted typed-source collector before fresh work grant validation and again in original atomic enqueue; a completed owned chat input can otherwise remain absent from the signal journal and leave a stale selection admissible. Historical receipt recovery remains a read and does not recollect or renew work. Pending or unconfirmed provenance holds admission."
   source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
   affects: [always-on-discovery]

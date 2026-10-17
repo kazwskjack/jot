@@ -1,0 +1,11 @@
+import {join} from 'node:path';
+import {openProductDatabase} from '../../src/db/database.ts';
+import {WorkbenchService} from '../../src/workbench/service.ts';
+import {WorkbenchBudgetPolicy} from '../../src/workbench/model-budget-policy.ts';
+import {PersistentTaskService} from '../../src/persistent-tasks/service.ts';
+import {WorkGrants} from '../../src/always-on/work-grants.ts';
+const [path,root,scopeJson,grantId]=process.argv.slice(2),db=openProductDatabase(path);
+const config=JSON.parse(db.prepare('SELECT policy_json FROM wb_model_budget_policy_history ORDER BY revision DESC LIMIT 1').get().policy_json),budget=new WorkbenchBudgetPolicy(db,config),workbench=new WorkbenchService(db,{workspaceIds:['ws'],root:join(root,'workspace'),modelBudgetPolicy:budget}),tasks=new PersistentTaskService(db,workbench,{modelBudgetPolicy:budget});
+db.exec('PRAGMA busy_timeout=5000');
+process.once('message',()=>{try{const record=tasks.enqueueDiscoveryWork('owner',grantId,()=>{new WorkGrants(db,budget).guard('owner',JSON.parse(scopeJson),grantId);return{activity_sha256:'a'.repeat(64),native_sha256:'b'.repeat(64),capacity_sha256:'c'.repeat(64),source_verified_sha256:'d'.repeat(64),snapshot_verified_sha256:'e'.repeat(64),budget_policy_revision:1,observed_at:Date.now()};});process.send?.({record});}catch(error){process.send?.({failed:String(error)});process.exitCode=1;}finally{db.close();process.disconnect();}});
+process.send?.({ready:true});

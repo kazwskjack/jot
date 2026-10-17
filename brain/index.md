@@ -1,6 +1,6 @@
 # Brain Index
 
-_Auto-generated. Last updated 2026-10-17T05:01:39.161Z._
+_Auto-generated. Last updated 2026-10-17T05:44:51.313Z._
 
 - [always-on-discovery](pages/always-on-discovery.md) — category: decision | Project discovery covers the full lifecycle: explicit owner project/workspace/role policy, factual idle/source collection, original occurren
 - [memory-authority](pages/memory-authority.md) — category: decision | The original DSH runtime owns planning, permissions, cancellation and model accounting. Jot's scoped, versioned ledger is the only live-memo

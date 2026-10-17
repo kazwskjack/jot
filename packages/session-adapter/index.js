@@ -184,6 +184,9 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       }
       const request = { sessionId, cwd }
       const workbenchRunId = body?.workbench_context?.run_id
+      const isolatedWork=body?.workbench_context?.work_workspace
+      if(isolatedWork!==undefined&&(!isolatedWork||typeof isolatedWork!=='object'||Array.isArray(isolatedWork)||Object.keys(isolatedWork).join(',')!=='protocol'||isolatedWork.protocol!==1))return json(422,{error:'work_workspace_binding_invalid'})
+      if(isolatedWork!==undefined&&requestedPreset!=='jot-workbench-budgeted')return json(409,{error:'work_workspace_binding_invalid'})
       let workbenchExecutionLease
       if (body?.workbench_context !== undefined) {
         if (!ID.test(String(workbenchRunId ?? ''))) return json(422, { error: 'workbench_binding_invalid' })
@@ -195,11 +198,54 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       if(requestedPreset==='jot-workbench-budgeted'&&(!workbenchRunId||!workbenchExecutionLease))return json(422,{error:'workbench_budget_binding_required'})
       if(nativeClaimedComposer&&(!workbenchRunId||!workbenchExecutionLease))return json(422,{error:'native_input_recovery_binding_required'})
       if(requestedPreset==='jot-workbench-budgeted'&&(typeof budgetModelSelector!=='function'||typeof workbenchBridge?.guardBudget!=='function'))return json(503,{error:'workbench_model_unavailable'})
+      let initialWorkbenchContext
+      if(workbenchRunId!==undefined){
+        try{
+          if(typeof workbenchBridge?.request!=='function')throw Error('workbench_guard_unavailable')
+          initialWorkbenchContext=(await workbenchBridge.request('guard',{runId:String(workbenchRunId),sessionRef:sessionId,executionLease:workbenchExecutionLease},{},signal))?.context
+          if(!initialWorkbenchContext||typeof initialWorkbenchContext!=='object'||Array.isArray(initialWorkbenchContext))throw Error('workbench_guard_unavailable')
+          signal?.throwIfAborted()
+        }catch{return json(503,{error:'workbench_bridge_unavailable'})}
+        // Server authority determines whether this is work. Omitting the wire
+        // protocol cannot turn a bound work run into an ordinary global-cwd run.
+        if(isolatedWork===undefined&&(initialWorkbenchContext.work_binding!==undefined||initialWorkbenchContext.native_workspace!==undefined))return json(409,{error:'work_workspace_binding_invalid'})
+      }
+      let workWorkspaceAuthority
+      const checkWorkWorkspace=async()=>{
+        signal?.throwIfAborted()
+        if(!workbenchExecutionLease||typeof workbenchBridge?.request!=='function')throw Error('work_workspace_binding_invalid')
+        const context=(await workbenchBridge.request('guard',{runId:String(workbenchRunId),sessionRef:sessionId,executionLease:workbenchExecutionLease},{},signal))?.context
+        const workspace=context?.native_workspace,binding=context?.work_binding,task=context?.task_binding
+        if(workspace?.protocol!==1||workspace.cwd!==cwd||binding?.kind!=='isolated_work'
+          ||context.model_budget?.protocol!==1||context.model_budget.enforced!==true
+          ||!ID.test(binding.original_run_id??'')||!ID.test(binding.occurrence_id??'')
+          ||task?.root_run_id!==binding.original_run_id||task?.occurrence_id!==binding.occurrence_id
+          ||typeof task.objective!=='string'||!task.objective.trim())throw Error('work_workspace_binding_invalid')
+        const authority=JSON.stringify({workspace,binding,task,model_budget:context.model_budget})
+        if(workWorkspaceAuthority!==undefined&&workWorkspaceAuthority!==authority)throw Error('work_workspace_binding_changed')
+        workWorkspaceAuthority=authority;signal?.throwIfAborted()
+      }
+      if(isolatedWork!==undefined){
+        try{
+          await checkWorkWorkspace()
+          if(typeof controller.inspect!=='function'||typeof sessions?.get!=='function')throw Error('work_workspace_history_unavailable')
+          const resident=agents.get(sessionId),cached=sessions.get(sessionId)
+          const check=()=>{signal?.throwIfAborted();if(agents.get(sessionId)!==resident||sessions.get(sessionId)!==cached
+            ||resident&&(resident.id!==sessionId||resident.session?.id!==sessionId||resident.session.header?.cwd!==cwd||resident.session.header?.agentPreset!==requestedPreset)
+            ||cached&&(cached.id!==sessionId||cached.header?.cwd!==cwd||cached.header?.agentPreset!==requestedPreset))throw Error('work_workspace_binding_changed')}
+          check()
+          let history
+          try{history=await controller.inspect(sessionId,signal)}catch(error){if(error?.code!=='session/not-found')throw error;history=null}
+          check()
+          if(history!==null&&(history?.meta?.id!==sessionId||history.meta.cwd!==cwd||history.meta.agentPreset!==requestedPreset))throw Error('work_workspace_history_invalid')
+          if(history===null&&(resident||cached))throw Error('work_workspace_history_invalid')
+          await checkWorkWorkspace();check()
+        }catch{return json(409,{error:'work_workspace_binding_invalid'})}
+      }
       let memoryPurpose=false
       if(workbenchRunId&&memoryExtractionHost){
         try{
-          const trusted=await workbenchBridge.request('guard',{runId:String(workbenchRunId),sessionRef:sessionId,executionLease:workbenchExecutionLease},{},signal)
-          memoryPurpose=trusted?.context?.kind==='memory_capture'
+          memoryPurpose=initialWorkbenchContext?.kind==='memory_capture'
           if(memoryPurpose&&(requestedPreset!=='jot-workbench-budgeted'||!workbenchExecutionLease||(await memoryExtractionHost.readiness()).ready!==true))return json(503,{error:'memory_extraction_unavailable'})
         }catch{return json(503,{error:'workbench_bridge_unavailable'})}
       }
@@ -216,6 +262,13 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
           return json(503,{error:'native_input_recovery_unavailable'})
         }
       }else value=await controller.create(request)
+      if(isolatedWork!==undefined){
+        try{
+          await checkWorkWorkspace()
+          const agent=agents.get(sessionId)
+          if(agent?.id!==sessionId||agent.session?.id!==sessionId||agent.session.header?.cwd!==cwd||agent.session.header?.agentPreset!==requestedPreset||sessions.get(sessionId)!==agent.session)throw Error('work_workspace_binding_changed')
+        }catch{return json(409,{error:'work_workspace_binding_invalid'})}
+      }
       let nativeRecovery,handoffRecovery
       if (workbenchRunId !== undefined) {
         try { await workbenchBridge.attach(agents.get(sessionId), { runId: String(workbenchRunId), sessionRef: sessionId,...(workbenchExecutionLease?{executionLease:workbenchExecutionLease}:{}) },{sessions,persistence,signal}) }

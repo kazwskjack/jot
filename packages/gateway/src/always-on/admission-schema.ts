@@ -36,5 +36,20 @@ export function installDiscoveryAdmissions(db:DatabaseSync){
     AND NEW.trigger_key='discovery:'||a.admission_id AND t.owner_id=a.owner_id AND t.status='active'
     AND p.state='active' AND p.version=a.policy_version AND t.version=a.task_version AND t.generation=a.task_generation
     AND a.signal_revision=coalesce((SELECT max(revision) FROM wb_discovery_signals WHERE policy_id=p.policy_id),0))
+  AND NOT EXISTS(SELECT 1 FROM wb_discovery_work_admissions a JOIN wb_discovery_work_grants g ON g.grant_id=a.grant_id
+   JOIN wb_discovery_work_cycles c ON c.cycle_id=g.cycle_id JOIN wb_discovery_task_bindings b ON b.task_id=a.task_id
+   JOIN wb_discovery_policies p ON p.policy_id=b.policy_id JOIN wb_persistent_tasks t ON t.task_id=a.task_id
+   JOIN wb_task_occurrences planning ON planning.occurrence_id=c.occurrence_id AND planning.task_id=t.task_id
+   JOIN wb_task_current_occurrences current_planning ON current_planning.occurrence_id=planning.occurrence_id
+   WHERE a.task_id=NEW.task_id AND a.occurrence_id=NEW.occurrence_id AND a.run_id=NEW.run_id
+    AND a.conversation_id=NEW.conversation_id AND a.task_generation=NEW.generation
+    AND NEW.trigger_key='discovery-work:'||a.grant_id AND t.owner_id=a.owner_id AND g.owner_id=a.owner_id
+    AND t.status='active' AND t.version=a.task_version AND t.generation=a.task_generation
+    AND c.state='open' AND c.version=g.cycle_version AND c.task_id=t.task_id
+    AND planning.generation>=0 AND planning.generation=json_extract(g.grant_json,'$.planning_source_generation')
+    AND current_planning.generation=json_extract(g.grant_json,'$.planning_occurrence_generation')
+    AND current_planning.run_id=json_extract(g.grant_json,'$.planning_current_run_id')
+    AND p.state='active' AND p.version=c.policy_version AND p.role_version=c.role_version AND p.role_epoch=c.role_epoch
+    AND c.signal_revision=coalesce((SELECT max(revision) FROM wb_discovery_signals WHERE policy_id=p.policy_id),0))
  BEGIN SELECT RAISE(ABORT,'task_discovery_admission_required'); END;`);
 }

@@ -15,6 +15,24 @@ import type { AttachmentResolver, ResolvedAttachment } from '../artifacts/resolv
 import { withImmediateTransaction } from '../db/database.ts';
 import type {SessionCheckpoint} from './session-checkpoints.ts';
 import {ConversationGoalControls,validateGoalControlRejection} from '../conversations/goal-controls.ts';
+import {isAbsolute} from 'node:path';
+
+/** Host-only result from the admitted work journal; never a browser/model field. */
+export type TrustedWorkRunWorkspace=Readonly<{kind:'isolated_work';runId:string;originalRunId:string;ownerId:string;conversationId:string;taskId:string;occurrenceId:string;sessionRef:string;cwd:string;objective:string}>;
+export interface WorkRunWorkspaceResolver {resolve(runId:string,executionLease:ExecutionLease):TrustedWorkRunWorkspace|null|Promise<TrustedWorkRunWorkspace|null>}
+const trustedWorkWorkspaces=new WeakMap<object,Readonly<{executionLease:ExecutionLease;prompt:string}>>();
+/** Process-local custody prevents path strings or serialized objects claiming authority. */
+export function assertTrustedWorkWorkspace(input:DshRunInput):TrustedWorkRunWorkspace|undefined {
+  const workspace=input.trustedWorkWorkspace;
+  const custody=workspace&&trustedWorkWorkspaces.get(workspace);
+  if(input.requiresWorkWorkspace===undefined&&workspace===undefined)return undefined;
+  if(input.requiresWorkWorkspace!==true||!workspace||!trustedWorkWorkspaces.has(workspace)
+    ||workspace.runId!==input.taskRequestId||workspace.sessionRef!==input.sessionRef
+    ||custody?.prompt!==input.message||input.workbenchRunId!==workspace.runId
+    ||!isDeepStrictEqual(custody?.executionLease,input.workbenchExecutionLease))
+    throw Error('work_workspace_binding_invalid');
+  return workspace;
+}
 
 export interface DshRunResult {
   observed: boolean;
@@ -33,6 +51,8 @@ export interface DshRunResult {
 }
 
 export interface DshRunInput { enabled: true; taskRequestId: string; message: string; sessionRef: string;
+    requiresWorkWorkspace?:true;
+    trustedWorkWorkspace?:TrustedWorkRunWorkspace;
     deferCompletionProbe: true; attachments?: ResolvedAttachment[]; universeSessionRef?: string;
     originalAdmission?:Readonly<{executionLease:Readonly<{owner:string;generation:number}>}>;
     workbenchRunId?: string;
@@ -79,12 +99,14 @@ export class HarnessWorker {
     'resolveForMessage' | 'resolveOutputs' | 'releaseLease'> | undefined;
   private readonly channelDelivery: ChannelTextDelivery | undefined;
   private readonly executionGuard: { assertRunActive(runId: string): void; contextForRun(runId: string): unknown } | undefined;
+  private readonly workRunWorkspaceResolver:WorkRunWorkspaceResolver|undefined;
 
   constructor(db: DatabaseSync, coordinator: HarnessCoordinator, runner: DshRunner,
     options: { workerId: string; leaseMs: number; ordinaryInputRecoveryEnabled?:boolean;ordinarySteeringEnabled?:boolean; contextStager?: RuntimeContextStager;
       sessionResolver?: (conversationId: string) => string;
       attachmentResolver?: Pick<AttachmentResolver, 'resolveForMessage' | 'resolveOutputs' | 'releaseLease'>;
       channelDelivery?: ChannelTextDelivery;
+      workRunWorkspaceResolver?:WorkRunWorkspaceResolver;
       executionGuard?: { assertRunActive(runId: string): void; contextForRun(runId: string): unknown } }) {
     this.db = db; this.coordinator = coordinator; this.runner = runner;
     this.workerId = options.workerId; this.leaseMs = options.leaseMs;
@@ -96,6 +118,7 @@ export class HarnessWorker {
     this.attachmentResolver = options.attachmentResolver;
     this.channelDelivery = options.channelDelivery;
     this.executionGuard = options.executionGuard;
+    this.workRunWorkspaceResolver=options.workRunWorkspaceResolver;
   }
 
   async processNext(): Promise<{ run_id: string; runtime_status: string } | null> {
@@ -118,6 +141,17 @@ export class HarnessWorker {
     }
     const backgroundTask=!!(workbenchContext && typeof workbenchContext==='object'
       && 'kind' in workbenchContext && workbenchContext.kind==='task');
+    const workLineage=()=>this.db.prepare("SELECT 1 FROM sqlite_master WHERE name='wb_task_run_occurrences'").get()
+      ?this.db.prepare(`SELECT o.run_id,o.root_run_id,o.task_id,o.occurrence_id,o.conversation_id,t.owner_id,r.continuation_of,r.checkpoint_id
+        FROM wb_task_run_occurrences o JOIN wb_persistent_tasks t ON t.task_id=o.task_id JOIN ga_runs r ON r.id=o.run_id
+        WHERE o.run_id=? AND o.trigger_key LIKE 'discovery-work:%'`).get(lease.run_id):undefined;
+    const initialWorkLineage=workLineage();
+    const workMarker=(context:unknown)=>context&&typeof context==='object'&&'work_binding' in context?context.work_binding:undefined;
+    const requiresWorkWorkspace=!!initialWorkLineage||workMarker(workbenchContext)!==undefined;
+    if(requiresWorkWorkspace&&(!initialWorkLineage||!this.workRunWorkspaceResolver||!backgroundTask)){
+      this.coordinator.interruptWithoutRuntime(lease,'WORK_WORKSPACE_BINDING_UNAVAILABLE');
+      return{run_id:lease.run_id,runtime_status:'work_workspace_unavailable'};
+    }
     const hasWorkbenchBinding=!!(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_run_bindings'").get()&&this.db.prepare('SELECT 1 FROM wb_run_bindings WHERE run_id=?').get(lease.run_id));
     const ordinaryDelivery=this.ordinarySteeringEnabled&&!!lease.input_message_id&&!goalControl&&!workbenchContext&&!hasWorkbenchBinding;
     if(ordinaryDelivery&&this.runner.ordinaryCompletionProtocol!==1){this.coordinator.interruptWithoutRuntime(lease,'ORDINARY_COMPLETION_UNAVAILABLE');return{run_id:lease.run_id,runtime_status:'ordinary_completion_unavailable'};}
@@ -131,7 +165,7 @@ export class HarnessWorker {
     const runtimeSessionRef = runtimeSessionRefForRun(lease.run_id);
     this.coordinator.bindSession(lease, runtimeSessionRef);
     const input = goalControl?{text:'',attachmentIds:[],ownerId:goalControl.owner_id,receivedAt:0}:this.messageInput(lease.run_id);
-    const message = originalRecovery?'':input.text;
+    let message = originalRecovery?'':input.text;
     const attachments = !originalRecovery&&input.attachmentIds.length
       ? this.attachmentResolver?.resolveForMessage(input.ownerId, lease.conversation_id,
         input.attachmentIds, lease.run_id) ?? (() => { throw new Error('attachment_resolver_unavailable'); })()
@@ -204,6 +238,34 @@ export class HarnessWorker {
     };
     let result: DshRunResult;
     try {
+      let trustedWorkWorkspace:TrustedWorkRunWorkspace|undefined;
+      if(requiresWorkWorkspace){
+        const resolved=await this.workRunWorkspaceResolver!.resolve(lease.run_id,Object.freeze({owner:lease.owner,generation:lease.generation}));
+        this.executionGuard?.assertRunActive(lease.run_id);
+        assertExecutionLease(this.db,lease.run_id,{owner:lease.owner,generation:lease.generation});
+        const current=workLineage(),marker=workMarker(this.executionGuard?.contextForRun(lease.run_id));
+        const saved=this.db.prepare(`SELECT b.session_id,c.owner_id FROM ga_harness_session_bindings b
+          JOIN ga_conversations c ON c.id=b.conversation_id AND c.owner_id=b.owner_id
+          WHERE c.id=? AND c.archived_at IS NULL`).get(lease.conversation_id);
+        if(!current||!isDeepStrictEqual(current,initialWorkLineage)||!resolved||resolved.kind!=='isolated_work'
+          ||!marker||typeof marker!=='object'||!('kind' in marker)||marker.kind!=='isolated_work'
+          ||!('original_run_id' in marker)||marker.original_run_id!==current.root_run_id
+          ||!('occurrence_id' in marker)||marker.occurrence_id!==current.occurrence_id
+          ||resolved.runId!==lease.run_id||resolved.originalRunId!==current.root_run_id
+          ||resolved.ownerId!==input.ownerId||resolved.ownerId!==current.owner_id||saved?.owner_id!==resolved.ownerId
+          ||resolved.conversationId!==lease.conversation_id||current.conversation_id!==lease.conversation_id
+          ||resolved.taskId!==current.task_id||resolved.occurrenceId!==current.occurrence_id
+          ||(current.root_run_id===lease.run_id?current.continuation_of!==null:!current.continuation_of||!current.checkpoint_id)
+          ||resolved.sessionRef!==controllerSessionRef||saved?.session_id!==controllerSessionRef
+          ||typeof resolved.cwd!=='string'||!isAbsolute(resolved.cwd)||resolved.cwd.includes('\0')
+          ||typeof resolved.objective!=='string'||!resolved.objective.trim()||goalControl||originalRecovery||attachments.length)
+          throw Error('work_workspace_binding_invalid');
+        trustedWorkWorkspace=Object.freeze({...resolved});
+        // Continuations retain the original recovery instructions and the
+        // checkpoint-bound owner reply. The Goal objective remains frozen.
+        if(current.root_run_id===lease.run_id)message=trustedWorkWorkspace.objective;
+        trustedWorkWorkspaces.set(trustedWorkWorkspace,Object.freeze({executionLease:Object.freeze({owner:lease.owner,generation:lease.generation}),prompt:message}));
+      }
       const recordObservedArtifact = async (artifactRef: string) => {
         assertGoalApplied();
         this.executionGuard?.assertRunActive(lease.run_id);
@@ -223,6 +285,7 @@ export class HarnessWorker {
         }
       };
       const runInput:DshRunInput={ enabled: true, taskRequestId: lease.run_id, message, attachments,
+        ...(trustedWorkWorkspace?{requiresWorkWorkspace:true as const,trustedWorkWorkspace}:{}),
         ...(this.ordinaryInputRecoveryEnabled&&lease.generation===1&&lease.input_message_id&&!goalControl&&!workbenchContext&&!hasWorkbenchBinding?{originalAdmission:Object.freeze({executionLease:Object.freeze({owner:lease.owner,generation:lease.generation})})}:{}),
         ...(workbenchContext ? { workbenchRunId: lease.run_id,workbenchExecutionLease:Object.freeze({owner:lease.owner,generation:lease.generation}),workbenchBudgetEnforced:!!(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_model_budget_bindings'").get()&&this.db.prepare('SELECT 1 FROM wb_model_budget_bindings WHERE owner_id=? AND run_id=?').get(input.ownerId,lease.run_id)) } : {}),
         ...(backgroundTask

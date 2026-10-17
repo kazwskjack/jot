@@ -57,6 +57,7 @@ export class DiscoveryAdmissionController{
     // when their native run has ended; no speculative new planning attempt.
     const budget=this.budgets.observeAdmission(owner,task.task_id),capacity=o.coordinator.observeBackgroundCapacity(owner),now=Date.now();
     const p=policy!,facts=observation.facts;
+    const cycleCount=Number((o.db.prepare('SELECT count(*) n FROM wb_discovery_admissions WHERE owner_id=? AND policy_id=?').get(owner,p.policy_id) as Row).n);
     const advice=evaluateDiscoveryGates({protocol:1,enabled:p.effective_state==='active',scope:{owner_id:owner,...scope},revision:p.version,
       role_version:p.role_version,role_epoch:p.role_epoch,cooldown_ms:p.cooldown_ms,recent_input_ms:p.recent_input_ms},
      {protocol:1,scope:{owner_id:owner,...scope},policy_revision:p.version,role_version:facts.role_version,role_epoch:facts.role_epoch,
@@ -64,7 +65,7 @@ export class DiscoveryAdmissionController{
       role_active:facts.role_active,host_ready:facts.host_ready,native_idle:facts.native_idle,run_busy:facts.run_busy,
       last_user_input_at:facts.last_user_input_at,last_completed_at:facts.last_terminal_at,budget:budget.budget,background_slots:capacity.available,
       dormant_at_revision:dormancy.state==='accepted'?dormancy.revision:null,signal_revision:current.signal_revision,
-      cycle_slots:p.max_cycles===null?null:Math.max(0,p.max_cycles-task.runs_used),reservation:'available'},
+      cycle_slots:p.max_cycles===null?null:Math.max(0,p.max_cycles-cycleCount),reservation:'available'},
      {now,max_age_ms:o.maxAgeMs});
     if(!advice.eligible)deny(advice.reason!);
     const head=o.db.prepare('SELECT * FROM wb_discovery_signals WHERE policy_id=? ORDER BY revision DESC LIMIT 1').get(p.policy_id);

@@ -75,7 +75,9 @@ to run two writers against the same module.
 |Release preflight|Independent read-only CLI, tests and distribution instructions.|Profile-specific local source/runtime readiness; stable check codes; no network/service/database creation or secret output.|
 |Native isolated work|Coordinator's original admission, file-output and Worker/Goal integration.|The complete sequence below passes before execution admission opens.|
 
-These assignments are in progress, not claims of delivered features. Backend
+The first five assignments have been published as the bounded entries described
+below; their complete capability rows remain open. Native isolated execution is
+still in progress. Backend
 registration, public API schema, BFF and shared entry changes are coordinated
 explicitly. A worker finding that a required interface is absent reports that
 dependency and continues independent work instead of inventing an authority stub.
@@ -201,3 +203,24 @@ the correction, followed by a successful Windows Gateway build. The complete
 1624-test run above preceded this narrow correction; its result is not presented
 as a rerun of the corrected source.
 
+
+The subsequent native-work increment implements internal atomic admission,
+isolated file IO and trusted native Session input prerequisites. It keeps work
+tool exposure closed; private resolver/Goal/output integration and all other
+remaining chains above remain required. See the native-work implementation
+appendix for actual boundaries and outstanding acceptance.
+
+
+Final verification for the subsequent prerequisite increment: the complete
+corrected-SQL Gateway run has1683 tests,1676 passed,seven existing/opt-in skips,
+zero failures and zero cancellations (589.85s). It includes the positive original
+service continuation and schema upgrade/revocation regressions. This run precedes
+the final typed-input collector correction; the complete controller plus original
+collector20/20 rerun passes after that correction. The final Windows Gateway build
+passes on the corrected source. Root50/50, interface212/212, final frontend build
+and Session adapter534 total/510 passed/24 existing or opt-in skips/zero failures
+are separate evidence. Skips and synthetic native Goal/controller tests do not
+prove actual installed SDK work execution, provider quality or production rollout.
+Final independent and scoped re-reviews have no open findings within this internal
+prerequisite scope. Both failed full/focused attempts remain in private records;
+they have not been relabeled as passes. No new dependency or license change.
