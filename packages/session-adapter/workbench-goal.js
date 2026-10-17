@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import {normalizeHostExecutionLease} from './host-execution-lease.js';
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 const NATIVE_GOAL_TOOLS = new Set(['get_goal', 'create_goal', 'update_goal']);
@@ -164,7 +165,9 @@ export class WorkbenchGoalBridge {
     }
     if(completionIntentId!==undefined&&(typeof completionIntentId!=='string'||!ID.test(completionIntentId)))return Promise.reject(new Error('workbench_goal_completion_invalid'));
     if(typeof readOnlyCompletion!=='boolean'||readOnlyCompletion&&completionIntentId!==undefined)return Promise.reject(new Error('workbench_goal_completion_invalid'));
-    const trustedBinding = Object.freeze({ runId: binding.runId, sessionRef: binding.sessionRef });
+    let executionLease;
+    try{if(binding.executionLease!==undefined)executionLease=normalizeHostExecutionLease(binding.executionLease);}catch(error){return Promise.reject(error);}
+    const trustedBinding = Object.freeze({ runId: binding.runId, sessionRef: binding.sessionRef,...(executionLease?{executionLease}:{}) });
     const epoch = this.revocationEpoch.get(agent) ?? 0;
     // Serialize create/get/save on one exact live Agent. There is no awaited
     // boundary between get/create/disarm in the synchronous native service.
@@ -440,7 +443,10 @@ export class WorkbenchGoalBridge {
     const binding=state.binding;
     signal?.throwIfAborted();
     if(agent.session?.id!==binding.sessionRef)throw new Error('workbench_goal_identity_conflict');
-    const response=await this.request('task-state',binding,{},signal);
+    // A stopped Goal remains observable after its Worker releases execution.
+    // This original read endpoint validates the saved Session/run identity;
+    // retaining a lease here would turn observation into stale execution.
+    const response=await this.request('task-state',Object.freeze({runId:binding.runId,sessionRef:binding.sessionRef}),{},signal);
     signal?.throwIfAborted();
     if(state.binding!==binding || state.revoked || JSON.stringify(trustedScope(response.context,binding))!==JSON.stringify(state.scope))throw new Error('workbench_goal_binding_changed');
     const goals=nativeGoalsFor(agent);

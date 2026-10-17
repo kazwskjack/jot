@@ -6,7 +6,7 @@ import {resolve,join,relative,isAbsolute} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 
 test('packed adapter loads independently with every runtime module included',async t=>{
- const cwd=fileURLToPath(new URL('..',import.meta.url)),base=resolve(cwd,'../../.test-tmp/adapter-package');
+ const cwd=fileURLToPath(new URL('..',import.meta.url)),base=resolve(process.env.JOT_TEST_TMP??resolve(cwd,'../../.test-tmp'),'adapter-package');
  mkdirSync(base,{recursive:true});const root=mkdtempSync(join(base,'case-'));
  t.after(()=>{const child=relative(base,root);assert.ok(child&&!child.startsWith('..')&&!isAbsolute(child));rmSync(root,{recursive:true,force:true});});
  // Invoke npm through Node, avoiding Windows cmd string interpolation.
@@ -31,6 +31,6 @@ test('packed adapter loads independently with every runtime module included',asy
  const lifecycle=await import(pathToFileURL(join(root,'package/native-handoff-lifecycle.js')).href);assert.equal(typeof lifecycle.createNativeHandoffLifecycle,'function');assert.ok(files.includes('native-handoff-lifecycle.js'));
  const scheduler=await import(pathToFileURL(join(root,'package/native-task-scheduler.js')).href);assert.equal(typeof scheduler.createNativeTaskScheduler,'function');assert.ok(files.includes('native-task-scheduler.js'));
  assert.equal(typeof entry.createAdapterHandler,'function');assert.equal(typeof entry.apply,'function');assert.equal(typeof entry.createNativeHandoffLifecycle,'function');
- for(const name of ['workbench-goal.js','model-budget-stream.js','checkpoint.js','native-child-admission.js','native-role-provider.js','native-role-host.js','native-handoff-admission.js','native-handoff-barrier.js','native-child-closure.js','native-operation-observer.js'])assert.ok(files.includes(name),name);
+ for(const name of ['workbench-goal.js','host-execution-lease.js','model-budget-stream.js','checkpoint.js','native-child-admission.js','native-role-provider.js','native-role-host.js','native-handoff-admission.js','native-handoff-barrier.js','native-child-closure.js','native-operation-observer.js'])assert.ok(files.includes(name),name);
  assert.equal(readFileSync(join(root,'package/package.json'),'utf8').includes('"private": true'),true);
 });

@@ -22,10 +22,15 @@ export function taskOutputsDeliverable(db:DatabaseSync,frozen:Frozen):boolean {
   &&typeof group.sha256==='string'&&Number.isSafeInteger(group.size_bytes)&&!!group.parts?.length)))return false;
  for(const [files,outputs] of [[frozen.candidate.presented_files??[],frozen.snapshot.file_outputs??[]],
    [frozen.candidate.workspace_files??[],frozen.snapshot.workspace_file_outputs??[]]] as const){
-  if(files.length&&(!publishers.has(db)||outputs.length!==files.length||!outputs.every((output,index)=>
+  if(outputs.length!==files.length||files.length&&(!publishers.has(db)||!outputs.every((output,index)=>
    output.path===files[index]?.path&&output.verified&&output.content_verified===true
    &&Number.isSafeInteger(output.version)&&Number(output.version)>0&&typeof output.receipt_id==='string'
-   &&typeof output.sha256==='string'&&Number.isSafeInteger(output.size))))return false;
+   &&typeof output.sha256==='string'&&Number.isSafeInteger(output.size)&&Number(output.size)>=0)))return false;
+  for(const output of outputs){
+   if(!output.verified)return false;
+   if(output.source!==undefined&&output.source!=='workspace'&&output.source!=='isolated')return false;
+   if(output.source==='isolated'&&(!output.cycle_id||!output.snapshot_id||!output.isolated_receipt_id))return false;
+  }
  }
  return true;
 }
@@ -48,11 +53,13 @@ export function publishTaskOutputs(db:DatabaseSync,frozen:Frozen,runId:string,co
   if(!ids.includes(id))ids.push(id);
  };
  for(const output of outputs){
+  if(!output.verified)throw new Error('task_output_source_unverified');
   const source=taskFileSource(db,frozen.snapshot,output.receipt_id!,runId);
-  if(!source||source.conversation_id!==conversationId||source.path!==output.path||source.version!==output.version||source.sha256!==output.sha256||source.size!==output.size)throw new Error('task_output_source_unverified');
+  if(!source||(output.source===undefined?source.source!=='workspace':output.source!==source.source)
+   ||(output.source==='isolated'&&(source.source!=='isolated'||output.cycle_id!==source.cycle_id||output.snapshot_id!==source.snapshot_id||output.isolated_receipt_id!==source.isolated_receipt_id))||source.conversation_id!==conversationId||source.path!==output.path||source.version!==output.version||source.sha256!==output.sha256||source.size!==output.size)throw new Error('task_output_source_unverified');
   const content=verifyTaskOutputContent(db,{owner:frozen.snapshot.owner_id,workspace:context.workspace_id,
-   project:context.project_id,path:output.path,version:output.version!,runId},{sha256:output.sha256!,size:output.size!});
-  const artifact=publisher.artifacts.registerTaskFileVersion({runId:source.run_id,receiptId:output.receipt_id!,content:content.content,...(source.native?{deliveryRunId:runId}:{})});
+   project:context.project_id,path:output.path,version:output.version!,runId,source},{sha256:output.sha256!,size:output.size!});
+  const artifact=publisher.artifacts.registerTaskFileVersion({runId:source.run_id,receiptId:output.receipt_id!,content:content.content,location:source,...(source.native||source.source==='isolated'?{deliveryRunId:runId}:{})});
   link(artifact);
  }
  for(const group of groups){

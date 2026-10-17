@@ -1,0 +1,31 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {workGrantFixture} from '../always-on/work-grant-fixture.mjs';
+import {WorkGrants} from '../../src/always-on/work-grants.ts';
+import {TrustedWorkRunWorkspaceResolver} from '../../src/always-on/work-run-workspace.ts';
+import {HarnessWorker} from '../../src/harness/worker.ts';
+import {SessionBindingRepository} from '../../src/harness/session-bindings.ts';
+import {installIsolatedWorkFiles} from '../../src/always-on/isolated-work-file-schema.ts';
+test('review verifies original work Session survives actual Worker prefix change',async t=>{
+ const f=await workGrantFixture(t);installIsolatedWorkFiles(f.db);const grant=new WorkGrants(f.db,f.budget).authorize('owner',f.scope,f.cycle.cycle_id,f.input,'review-session-work');const admission=f.tasks.enqueueDiscoveryWork('owner',grant.grant_id,()=>({activity_sha256:'a'.repeat(64),native_sha256:'b'.repeat(64),capacity_sha256:'c'.repeat(64),source_verified_sha256:'d'.repeat(64),snapshot_verified_sha256:'e'.repeat(64),budget_policy_revision:1,observed_at:Date.now()}));
+ const saved='oldprefix-original-work-session';f.db.prepare('INSERT INTO ga_harness_session_bindings VALUES(?,?,?,?,?)').run(admission.conversation_id,'owner',saved,'now','now');
+ const resolver=new TrustedWorkRunWorkspaceResolver({db:f.db,workbench:f.workbench,policies:f.policies,workspace:f.manager}),sessionBindings=new SessionBindingRepository(f.db,'newprefix');let started;
+ const contextForRun=runId=>{const base=f.workbench.contextForRun(runId),work=f.db.prepare("SELECT conversation_id FROM wb_task_run_occurrences WHERE run_id=? AND trigger_key LIKE 'discovery-work:%'").get(runId);if(!work)return base;if(!f.db.prepare('SELECT 1 FROM ga_harness_session_bindings WHERE conversation_id=?').get(work.conversation_id))sessionBindings.getOrCreateForConversation(work.conversation_id);const context=resolver.context(runId);return {...base,work_binding:context.work_binding,native_workspace:context.native_workspace,objective:context.objective};};
+ const worker=new HarnessWorker(f.db,f.coordinator,{run:async input=>{started=input.sessionRef;return {observed:false,completed:false,reason_code:'FIXTURE_END',runtime_status:'fixture_end'};}},{workerId:'review-prefix-worker',leaseMs:60000,sessionResolver:id=>sessionBindings.getOrCreateForConversation(id).session_id,workRunWorkspaceResolver:resolver,executionGuard:{assertRunActive:runId=>{f.workbench.assertRunActive(runId);f.tasks.assertRunActive(runId);},contextForRun}});
+ await worker.processNext();const after=f.db.prepare('SELECT session_id FROM ga_harness_session_bindings WHERE conversation_id=?').get(admission.conversation_id).session_id;
+ assert.equal(after,saved);assert.equal(started,saved);
+});
+import {RunCommandService} from '../../src/runs/commands.ts';
+import {withImmediateTransaction} from '../../src/db/database.ts';
+test('missing original Session on a real checkpoint continuation cannot allocate a replacement',async t=>{
+ const f=await workGrantFixture(t),grant=new WorkGrants(f.db,f.budget).authorize('owner',f.scope,f.cycle.cycle_id,f.input,'continuation-session-work');
+ const record=f.tasks.enqueueDiscoveryWork('owner',grant.grant_id,()=>({activity_sha256:'a'.repeat(64),native_sha256:'b'.repeat(64),capacity_sha256:'c'.repeat(64),source_verified_sha256:'d'.repeat(64),snapshot_verified_sha256:'e'.repeat(64),budget_policy_revision:1,observed_at:Date.now()})),lease=f.coordinator.claimNext('session-continuation-worker',60000);assert.equal(lease.run_id,record.run_id);f.coordinator.start(lease);
+ const sessions=new SessionBindingRepository(f.db,'original-work'),saved=sessions.getOrCreateForConversation(record.conversation_id),now=new Date().toISOString();
+ f.db.prepare('INSERT INTO wb_native_goal_bindings VALUES(?,?,?,?,?,?)').run(record.run_id,record.occurrence_id,'synthetic-session-identity-goal',3,now,now);
+ const checkpoint=f.coordinator.recordCheckpoint(lease,saved.session_id,{session_ref:saved.session_id,seq_exclusive:5,turn_end_seq:4,goal_id:'synthetic-session-identity-goal',goal_revision:3,log_sha256:'a'.repeat(64)});f.coordinator.interruptWithoutRuntime(lease,'SESSION_TURN_INTERRUPTED');
+ const commands=new RunCommandService(f.db,f.events),next=withImmediateTransaction(f.db,()=>{const resumed=commands.resume(record.run_id,'owner',{expected_run_version:f.runs.get(record.run_id,'owner').version,checkpoint_id:checkpoint},'session-identity-resume');f.workbench.inheritCheckpointRun('owner',record.run_id,resumed.run_id);return resumed.run_id;});
+ assert.notEqual(next,record.run_id);assert.equal(sessions.getOrCreateForConversation(record.conversation_id).session_id,saved.session_id);
+ f.db.prepare('DELETE FROM ga_harness_session_bindings WHERE conversation_id=?').run(record.conversation_id);
+ assert.throws(()=>new SessionBindingRepository(f.db,'newprefix').getOrCreateForConversation(record.conversation_id),/work_session_recovery_required/);
+ assert.equal(f.db.prepare('SELECT 1 FROM ga_harness_session_bindings WHERE conversation_id=?').get(record.conversation_id),undefined);
+ assert.equal(f.db.prepare('SELECT session_ref FROM ga_session_checkpoints WHERE checkpoint_id=?').get(checkpoint).session_ref,saved.session_id);
+});

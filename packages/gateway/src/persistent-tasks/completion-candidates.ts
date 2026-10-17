@@ -1,4 +1,5 @@
 import {createHash,randomUUID} from 'node:crypto';
+import {types} from 'node:util';
 import {DiscoveryPlanning} from '../always-on/planning.ts';
 import type {DatabaseSync} from 'node:sqlite';
 import {canonicalJson} from '../db/canonical-json.ts';
@@ -7,14 +8,22 @@ import {TaskExecutionEvidence} from './execution-evidence.ts';
 import {assertDependencyReasons,taskDependencyReasons} from './execution-eligibility.ts';
 import {verifyTaskOutputContent} from './output-content.ts';
 import {freezeGeneratedOutputs,type GeneratedOutput} from './generated-output-content.ts';
-import {taskFileSource,type TaskFileScope,type TaskFileSource} from './task-file-source.ts';
+import {taskFileSource,type TaskFileScope,type TaskFileSource,type TaskFileLocation} from './task-file-source.ts';
 
 export type TaskCompletionCandidate={text:string;blocks?:Array<{kind:'text'|'reasoning';text:string}>;
  artifact_refs?:string[];presented_files?:Array<{path:string;description?:string}>;workspace_files?:Array<{path:string;description?:string}>};
 type CompletionScope={owner_id:string;task_id:string;objective:string;task_version:number;generation:number;
  occurrence_id:string;root_run_id:string;checkpoint_id:string;run_version:number;agent_id:string;frozen_context:string;epoch:number;
  goal_id:string;goal_revision:number;turn_end_seq:number;seq_exclusive:number};
-type FileOutput={path:string;verified:boolean;content_verified?:true;version?:number;sha256?:string;size?:number;receipt_id?:string};
+type FileOutput={path:string;verified:false}|(TaskFileLocation&{path:string;verified:true;content_verified:true;version:number;sha256:string;size:number;receipt_id:string});
+// Legacy pins are accepted only after resolving their exact original shared proof.
+type LegacyFileOutput=FileOutput|{path:string;verified:true;content_verified:true;version:number;sha256:string;size:number;receipt_id:string;source?:undefined};
+export type TaskCompletionWorkScope=Pick<CompletionScope,'owner_id'|'task_id'|'occurrence_id'|'root_run_id'|'frozen_context'>&{runId:string};
+const workEvidenceReaders=new WeakMap<DatabaseSync,(scope:TaskCompletionWorkScope)=>unknown>();
+export function configureTaskCompletionWorkEvidence(db:DatabaseSync,reader:(scope:TaskCompletionWorkScope)=>unknown):void{
+ if(workEvidenceReaders.has(db))throw new Error('task_completion_work_evidence_already_configured');
+ workEvidenceReaders.set(db,reader);
+}
 type PresentedFile={path:string;description?:string};
 type FileScope=TaskFileScope;
 
@@ -35,7 +44,7 @@ export function prepareTaskPresentedFiles(db:DatabaseSync,scope:FileScope,value:
  return {workspace_files,workspace_file_outputs};
 }
 
-function fileOutputs(db:DatabaseSync,snapshot:FileScope,files:Array<{path:string}>,runId:string,pinned?:FileOutput[]):FileOutput[]{
+function fileOutputs(db:DatabaseSync,snapshot:FileScope,files:Array<{path:string}>,runId:string,pinned?:LegacyFileOutput[]):LegacyFileOutput[]{
  if(files.length>100)throw new Error('task_completion_candidate_invalid');
  const context=JSON.parse(snapshot.frozen_context) as {workspace_id:string;project_id:string};
  const references=new Set(snapshot.steps.flatMap(step=>step.evidence as Array<{kind:string;reference:string}>).filter(ref=>ref.kind==='tool_receipt').map(ref=>ref.reference));
@@ -48,9 +57,11 @@ function fileOutputs(db:DatabaseSync,snapshot:FileScope,files:Array<{path:string
   if(prior?.verified===false)return prior;
   const source=sources.find(row=>row.path===file.path&&(!prior||row.receipt_id===prior.receipt_id));
   if(!source){if(prior?.verified)throw new Error('task_completion_state_conflict');return {path:file.path,verified:false};}
-  const row={receipt_id:source.receipt_id,version:source.version,sha256:source.sha256,size:source.size};
-  verifyTaskOutputContent(db,{owner:snapshot.owner_id,workspace:context.workspace_id,project:context.project_id,path:file.path,version:row.version,runId},row);
-  const output={path:file.path,verified:true,content_verified:true as const,...row};
+  const location:TaskFileLocation=source.source==='isolated'?{source:'isolated',cycle_id:source.cycle_id,snapshot_id:source.snapshot_id,isolated_receipt_id:source.isolated_receipt_id}:{source:'workspace'};
+  if(prior&&prior.source===undefined&&source.source!=='workspace')throw new Error('task_completion_state_conflict');
+  const row={...(prior&&prior.source===undefined?{}:location),receipt_id:source.receipt_id,version:source.version,sha256:source.sha256,size:source.size};
+  verifyTaskOutputContent(db,{owner:snapshot.owner_id,workspace:context.workspace_id,project:context.project_id,path:file.path,version:row.version,runId,source},row);
+  const output={path:file.path,verified:true as const,content_verified:true as const,...row};
   if(prior&&canonicalJson(output)!==canonicalJson(prior))throw new Error('task_completion_state_conflict');
   return output;
  });
@@ -108,8 +119,18 @@ function completionSnapshot(db:DatabaseSync,runId:string) {
   a.held_tokens,a.held_nano_usd,a.usage_json,a.actual_tokens,a.actual_nano_usd,a.bound_exceeded
   FROM wb_model_budget_attempts a JOIN ${occurrenceRuns} o ON o.run_id=a.run_id
   WHERE o.owner_id=? AND o.occurrence_id=? ORDER BY a.run_id,a.attempt_id`).all(scope.owner_id,scope.occurrence_id);
+ const isWork=!!db.prepare("SELECT 1 FROM wb_task_occurrences WHERE occurrence_id=? AND trigger_key LIKE 'discovery-work:%'").get(scope.occurrence_id);
+ const isolated_work_evidence=isWork?workEvidenceReaders.get(db)?.({...scope,runId}):undefined;
+ if(isWork&&types.isPromise(isolated_work_evidence)){
+  void Promise.prototype.then.call(isolated_work_evidence,undefined,()=>{});
+  throw new Error('task_completion_work_inspection_required');
+ }
+ if(isWork&&(!isolated_work_evidence||typeof isolated_work_evidence!=='object'||'then' in isolated_work_evidence))throw new Error('task_completion_work_inspection_required');
+ const selectedObjective=(isolated_work_evidence as {selected_objective?:unknown}|undefined)?.selected_objective;
+ if(isWork&&(typeof selectedObjective!=='string'||!selectedObjective.trim()||selectedObjective.length>65536))throw new Error('task_completion_work_inspection_required');
+ const objective=isWork?selectedObjective as string:scope.objective;
  const discovery_report=new DiscoveryPlanning(db).completion(runId);
- return {...scope,...(discovery_report?{discovery_report}:{}),budget_attempts,steps:steps.map(step=>({subtask_id:String(step.subtask_id),version:Number(step.version),title:String(step.title),
+ return {...scope,objective,...(isolated_work_evidence?{isolated_work_evidence}:{}),...(discovery_report?{discovery_report}:{}),budget_attempts,steps:steps.map(step=>({subtask_id:String(step.subtask_id),version:Number(step.version),title:String(step.title),
   acceptance:String(step.acceptance),status:String(step.status),dependencies:JSON.parse(step.dependencies_json) as string[],
   evidence:JSON.parse(step.evidence_json),business_verdict:'unreviewed' as const}))};
 }
@@ -127,15 +148,16 @@ export function freezeTaskCompletionCandidate(db:DatabaseSync,runId:string,candi
  if(snapshot.occurrence_id!==proposal.occurrence_id||snapshot.goal_id!==proposal.goal_id
   ||Number(snapshot.goal_revision)<Number(proposal.goal_revision)||snapshot.objective!==proposed.objective
   ||snapshot.task_version!==proposed.task_version||snapshot.generation!==proposed.generation
-  ||canonicalJson(steps)!==canonicalJson(proposed.steps))throw new Error('task_completion_state_conflict');
+  ||canonicalJson(steps)!==canonicalJson(proposed.steps)
+  ||canonicalJson(snapshot.isolated_work_evidence??null)!==canonicalJson(proposed.isolated_work_evidence??null))throw new Error('task_completion_state_conflict');
  let workspaceFiles:PresentedFile[]=[];
- const pins=new Map<string,FileOutput>();
+ const pins=new Map<string,LegacyFileOutput>();
  if(proposed.workspace_files!==undefined||proposed.workspace_file_outputs!==undefined){
   const declared=validateProposedFiles(proposed.workspace_files),outputs=proposed.workspace_file_outputs;
   if(candidate.presented_files?.length)throw new Error('task_output_sources_conflict');
   if(!Array.isArray(outputs)||outputs.length!==declared.length)throw new Error('task_completion_state_conflict');
   for(const [index,file] of declared.entries()){
-   const output=outputs[index] as FileOutput|undefined;
+   const output=outputs[index] as LegacyFileOutput|undefined;
    if(!output||output.path!==file.path||!output.verified||output.content_verified!==true)throw new Error('task_completion_state_conflict');
    pins.set(file.path,output);
   }
@@ -167,10 +189,12 @@ export function currentTaskCompletionCandidate(db:DatabaseSync,owner:string,runI
   JOIN ga_conversations c ON c.id=r.conversation_id WHERE f.run_id=? AND c.owner_id=?`).get(runId,owner) as Record<string,string>|undefined;
  if(!row)throw new Error('task_completion_candidate_not_found');
  const current=completionSnapshot(db,runId),candidate=JSON.parse(row.candidate_json!) as TaskCompletionCandidate;
- const saved=JSON.parse(row.snapshot_json!) as {file_outputs?:FileOutput[];workspace_file_outputs?:FileOutput[];artifact_outputs?:GeneratedOutput[]};
+ const saved=JSON.parse(row.snapshot_json!) as {file_outputs?:LegacyFileOutput[];workspace_file_outputs?:LegacyFileOutput[];artifact_outputs?:GeneratedOutput[];isolated_work_evidence?:unknown};
  const proposal=db.prepare("SELECT snapshot_json FROM wb_task_goal_proposals WHERE proposal_id=? AND run_id=? AND intent='complete'").get(row.proposal_id!,runId) as {snapshot_json:string}|undefined;
  if(!proposal)throw new Error('task_completion_state_conflict');
- const declared=JSON.parse(proposal.snapshot_json) as {workspace_files?:PresentedFile[];workspace_file_outputs?:FileOutput[]};
+ const declared=JSON.parse(proposal.snapshot_json) as {workspace_files?:PresentedFile[];workspace_file_outputs?:LegacyFileOutput[];isolated_work_evidence?:unknown};
+ if(canonicalJson(declared.isolated_work_evidence??null)!==canonicalJson(saved.isolated_work_evidence??null)
+  ||canonicalJson(declared.isolated_work_evidence??null)!==canonicalJson(current.isolated_work_evidence??null))throw new Error('task_completion_state_conflict');
  if(candidate.workspace_files?.length||declared.workspace_files!==undefined||declared.workspace_file_outputs!==undefined){
   if(candidate.presented_files?.length)throw new Error('task_output_sources_conflict');
   validateProposedFiles(declared.workspace_files);

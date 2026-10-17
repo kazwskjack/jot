@@ -7,6 +7,30 @@ try { ({ WorkbenchGoalBridge } = await import('../workbench-goal.js')); } catch 
 }
 
 const binding = { runId: 'run-1', sessionRef: 'session-1' };
+test('native Goal preserves the exact original execution lease through attach reattach and checkpoint continuation',async()=>{
+ const f=fixture(),observed=[],request=f.bridge.request;
+ f.bridge.request=(path,scoped,...args)=>{observed.push(structuredClone(scoped));return request(path,scoped,...args);};
+ const lease={owner:'original-worker',generation:2},leased={...binding,executionLease:lease};
+ f.setBinding(leased);
+ await f.bridge.attach(f.host.agent,leased);assert.ok(observed.length);assert.ok(observed.every(b=>assert.deepEqual(b.executionLease,lease)===undefined));
+ observed.length=0;await f.bridge.attach(f.host.agent,leased);assert.ok(observed.every(b=>assert.deepEqual(b.executionLease,lease)===undefined));
+ await f.bridge.revoke(f.host.agent);
+ const next={...f.continueAs(),executionLease:{owner:'continuation-worker',generation:3}};f.setBinding(next);observed.length=0;
+ await f.bridge.attach(f.host.agent,next);assert.ok(observed.length);assert.ok(observed.every(b=>assert.deepEqual(b.executionLease,next.executionLease)===undefined));assert.equal(f.host.creates,1);
+});
+test('native Goal rejects malformed execution leases before any original request',async()=>{
+ for(const executionLease of [null,{}, {owner:'worker',generation:0},{owner:'worker',generation:1,extra:true},{owner:'../worker',generation:1}]){
+  const f=fixture();await assert.rejects(f.bridge.attach(f.host.agent,{...binding,executionLease}),/workbench_binding_invalid/);assert.equal(f.requests.length,0);
+ }
+});
+test('read-only stopped Goal observation keeps original Session identity after execution lease release',async()=>{
+ const f=fixture(),leased={...binding,executionLease:{owner:'finished-worker',generation:1}};f.setBinding(leased);await f.bridge.attach(f.host.agent,leased);
+ f.host.agent.session={id:binding.sessionRef};f.host.agent.status='idle';
+ f.bridge.request=async(path,scoped)=>{assert.equal(path,'task-state');assert.deepEqual(scoped,binding);return {context:context(),task:{run_status:'waiting_user',business_state:'waiting_user',steps:{total:0,completed:0,evidence_verified:0,all_completed:false,all_execution_evidence_verified:false},budget:{configured:false,balances:[],pending_unknown:null,pending_in_flight:null}}};};
+ assert.equal((await f.bridge.observe(f.host.agent)).host_status,'idle');
+ f.bridge.request=async(path,scoped)=>{assert.equal(path,'guard');assert.deepEqual(scoped,leased);throw Error('workbench_execution_lease_revoked');};
+ await assert.rejects(f.bridge.propose(f.host.agent,'stale-proposal',{intent:'complete',summary:'Cannot use released execution'}),/workbench_execution_lease_revoked/);
+});
 test('Goal observation preserves unlimited money limits but rejects null usage or non-money limits',async()=>{
  const f=fixture();f.host.agent.session={id:binding.sessionRef};f.host.agent.status='idle';await f.bridge.attach(f.host.agent,binding);
  const amounts={tokens:'100',nano_usd:'0',model_calls:'10'};
@@ -70,7 +94,7 @@ function fixture(shared,options={}) {
     } else assert.equal(payload.action, 'get');
     return { binding: structuredClone(durable.mapping) };
   } });
-  return { bridge, durable, requests, host: host(), setContext(value) { trusted = value; },
+  return { bridge, durable, requests, host: host(), setContext(value) { trusted = value; },setBinding(value){activeBinding=value;},
     continueAs(runId = 'run-2', parent = 'run-1') { activeBinding = { ...binding, runId }; trusted = { ...context(), run_id: runId,
       task_binding: { ...context().task_binding, root_run_id: 'run-1', continuation_of: parent } }; return activeBinding; },
     reject() { unavailable = true; }, failSave(value = true) { saveFailure = value; } };

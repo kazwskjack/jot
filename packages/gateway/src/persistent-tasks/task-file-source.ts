@@ -1,16 +1,18 @@
 import type {DatabaseSync} from 'node:sqlite';
+import {readIsolatedTaskFileVersion} from './isolated-output-source.ts';
 import {TaskExecutionEvidence,type ExecutionEvidence} from './execution-evidence.ts';
 
 export type TaskFileScope={owner_id:string;task_id:string;occurrence_id:string;frozen_context:string;
  steps:Array<{subtask_id:string;version:number;status?:string;evidence:ExecutionEvidence[]}>};
-export type TaskFileSource={receipt_id:string;run_id:string;owner_id:string;workspace_id:string;project_id:string;path:string;
+export type TaskFileLocation={source:'workspace'}|{source:'isolated';cycle_id:string;snapshot_id:string;isolated_receipt_id:string};
+export type TaskFileSource=TaskFileLocation&{task_id:string;occurrence_id:string;receipt_id:string;run_id:string;owner_id:string;workspace_id:string;project_id:string;path:string;
  version:number;sha256:string;size:number;conversation_id:string;native:boolean};
 
 /** One receipt, exact step evidence and actual write/version lineage. No file
  * access or publication authority follows from a native run ID alone. */
 export function taskFileSource(db:DatabaseSync,scope:TaskFileScope,receiptId:string,targetRunId:string):TaskFileSource|undefined{
  const context=JSON.parse(scope.frozen_context) as {workspace_id:string;project_id:string};
- const source=db.prepare(`SELECT e.*,b.kind,b.context_json,r.conversation_id FROM wb_task_file_execution_receipts e
+ let source=db.prepare(`SELECT e.*,b.kind,b.context_json,r.conversation_id FROM wb_task_file_execution_receipts e
   JOIN wb_task_execution_receipts proof ON proof.receipt_id=e.receipt_id AND proof.run_id=e.run_id AND proof.operation='files.write'
   JOIN wb_file_write_runs w ON w.run_id=e.run_id AND w.owner_id=e.owner_id AND w.workspace_id=e.workspace_id AND w.project_id=e.project_id
    AND w.path=e.path AND w.version=e.version AND w.sha256=e.sha256 AND w.size=e.size
@@ -22,6 +24,19 @@ export function taskFileSource(db:DatabaseSync,scope:TaskFileScope,receiptId:str
    AND c.workspace_id=e.workspace_id AND c.project_id=e.project_id
    AND json_extract(b.context_json,'$.workspace_id')=e.workspace_id AND json_extract(b.context_json,'$.project_id')=e.project_id`)
   .get(receiptId,scope.owner_id,context.workspace_id,context.project_id) as (TaskFileSource&{kind:string;context_json:string})|undefined;
+ if(source)source={...source,source:'workspace',task_id:scope.task_id,occurrence_id:scope.occurrence_id};
+ else {
+  source=db.prepare(`SELECT e.*,b.kind,b.context_json,r.conversation_id FROM wb_task_isolated_file_execution_receipts e
+   JOIN wb_task_execution_receipts proof ON proof.receipt_id=e.receipt_id AND proof.run_id=e.run_id AND proof.operation='files.write'
+   JOIN wb_run_bindings b ON b.run_id=e.run_id AND b.owner_id=e.owner_id JOIN ga_runs r ON r.id=e.run_id
+   JOIN ga_conversations c ON c.id=r.conversation_id AND c.owner_id=e.owner_id
+   WHERE e.receipt_id=? AND e.owner_id=? AND e.workspace_id=? AND e.project_id=? AND e.task_id=? AND e.occurrence_id=?
+   AND c.workspace_id=e.workspace_id AND c.project_id=e.project_id
+   AND json_extract(b.context_json,'$.workspace_id')=e.workspace_id AND json_extract(b.context_json,'$.project_id')=e.project_id`)
+   .get(receiptId,scope.owner_id,context.workspace_id,context.project_id,scope.task_id,scope.occurrence_id) as (TaskFileSource&{kind:string;context_json:string})|undefined;
+  if(!source)return;source={...source,source:'isolated'} as (TaskFileSource&{kind:string;context_json:string})|undefined;
+  try{readIsolatedTaskFileVersion(db,source!);}catch{return;}
+ }
  if(!source)return;
  const target=db.prepare(`SELECT o.root_run_id,r.conversation_id FROM wb_task_run_occurrences o
   JOIN wb_persistent_tasks t ON t.task_id=o.task_id JOIN ga_runs r ON r.id=o.run_id
@@ -46,5 +61,5 @@ export function taskFileSource(db:DatabaseSync,scope:TaskFileScope,receiptId:str
   if(!native)return;const assignment=JSON.parse(native.snapshot_json).task_assignment;
   if(!assignment||references.some(({step})=>step.subtask_id!==assignment.subtask_id||!Number.isSafeInteger(step.version)||step.version<=assignment.subtask_version))return;
  }else return;
- const {kind,context_json,...file}=source;return {...file,conversation_id:target.conversation_id,native:kind==='native_team'};
+ const {kind,context_json,...file}=source;delete (file as Record<string,unknown>).result_json;return {...file,conversation_id:target.conversation_id,native:kind==='native_team'};
 }

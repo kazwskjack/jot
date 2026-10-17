@@ -38,6 +38,8 @@ import type { VoiceAdapter } from './voice/adapter-client.ts';
 import { VOICE_MAX_BYTES, validateVoiceWave } from './voice/wav.ts';
 import { WorkbenchService } from './workbench/service.ts';
 import {DiscoveryPolicies} from './always-on/discovery-policy.ts';
+import {createNativeWorkRuntime} from './always-on/native-work-runtime.ts';
+import {readIsolatedTaskFileVersion} from './persistent-tasks/isolated-output-source.ts';
 import {registerDiscoveryPolicyRoutes} from './always-on/discovery-policy-routes.ts';
 import {DiscoveryHistory} from './always-on/discovery-history.ts';
 import {registerDiscoveryHistoryRoutes} from './always-on/discovery-history-routes.ts';
@@ -79,6 +81,7 @@ export async function buildServer(config: {
   voiceEnabled?: boolean;
   voiceAdapter?: VoiceAdapter;
   workbenchRoot?: string;
+  nativeWorkRoot?: string;
   workbenchExecutionReady?: boolean;
   modelBudgetRoutes?: ModelBudgetRoute[];
   modelBudgetPolicy?: ModelBudgetPolicyConfig | undefined;
@@ -114,13 +117,15 @@ export async function buildServer(config: {
   const workbenchRoot = config.workbenchRoot ?? join(dirname(config.databasePath), 'jot-workspaces');
   const workbench = new WorkbenchService(db, { workspaceIds: config.workspaces,
     root: workbenchRoot, allowedToolIds: WORKBENCH_TOOL_IDS, ...(budgetPolicy ? {modelBudgetPolicy: budgetPolicy} : {}) });
-  configureTaskOutputReader(db,({owner,workspace,project,path,version,runId})=>workbench.readFileVersion(owner,workspace,project,path,version,runId));
+  configureTaskOutputReader(db,input=>input.source?.source==='isolated'?readIsolatedTaskFileVersion(db,input.source):workbench.readFileVersion(input.owner,input.workspace,input.project,input.path,input.version,input.runId));
   configureTaskOutputDelivery(db,artifacts,events);
   const taskWaitResponder=new TaskWaitResponder(db,workbench,commands);
+  const nativeWork=createNativeWorkRuntime({db,workbench,...(config.nativeWorkRoot!==undefined?{root:config.nativeWorkRoot}:{}),executionReady:config.workbenchExecutionReady===true,...(budgetPolicy?{budgetPolicy}:{})});
 
   const persistentTasks = new PersistentTaskService(db, workbench, {
     projectionRoot: join(workbenchRoot, 'tasks'), events,
     ...(budgetPolicy?{modelBudgetPolicy:budgetPolicy}:{}),
+    ...(nativeWork?{discoveryWorkOperations:nativeWork}:{}),
   });
   const taskNotifications=new TaskNotifications(db);
   const taskPrd=new TaskPrdService(db,workbench,persistentTasks,artifacts,{uploadRoot:config.uploadRoot??join(dirname(config.databasePath),'general-agent-uploads')});
@@ -385,7 +390,7 @@ export async function buildServer(config: {
   registerPersistentTaskRoutes(app, persistentTasks, actor,taskDelegations,taskCollaboration);
   registerTaskPrdRoutes(app,taskPrd,actor);
   registerTaskBudgetRoutes(app,new TaskBudgetService(db,budgetPolicy),actor);
-  registerWorkbenchExecution(app, db, workbench, persistentTasks, config.internalChannelToken, modelBudgets,taskCollaboration,config.replyJudge);
+  registerWorkbenchExecution(app, db, workbench, persistentTasks, config.internalChannelToken, modelBudgets,taskCollaboration,config.replyJudge,nativeWork);
   registerConversationGoalExecution(app,new ConversationGoalControls(db,events,runs),config.internalChannelToken);
   registerOrdinaryInputBinding(app,db,config.internalChannelToken);
   registerOrdinarySteeringBinding(app,db,config.internalChannelToken);
@@ -768,7 +773,7 @@ export async function buildServer(config: {
   });
   app.addHook('onClose', async () => voiceTranscriptions.close());
   return { app, db, events, projects, conversations, runs, commands, interactions, artifacts, sources, fileJobs, crawlBatches,
-    voiceTranscriptions, workbench, persistentTasks, taskPrd, modelBudgets };
+    voiceTranscriptions, workbench, persistentTasks, taskPrd, modelBudgets,nativeWorkResolver:nativeWork?.resolver,nativeWorkInspections:nativeWork?.inspections };
   } catch (error) {
     const cleanupErrors: unknown[] = [];
     try { await app.close(); } catch (failure) { cleanupErrors.push(failure); }

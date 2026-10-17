@@ -65,3 +65,78 @@ The additional existing Workbench service suite produced 14 passes and two failu
 During the parallel PRD integration, the combined selected Gateway rerun reached 13/14: all seven pagination cases and the file route passed; the shared contract declaration test observed the newly added `TaskPrdPreviewRequest` schema before its matching TypeScript declaration had been appended. That shared integration intermediate state was reported to its owner rather than changing the other feature's contract. Final combined contract verification belongs to the integrating run. UI/client 14/14 was rerun successfully after the final Files controls change; these are controller/SSR checks, not live-browser acceptance.
 
 
+
+
+## 后续实施记录：原 work occurrence 的内部 lead 输出与完成证据
+
+本轮allowlist只覆盖隔离`jot_workspace`文件及原任务操作接线，不是所有外部工具的总沙箱。
+原allowed external tools仍受原role、lease、依赖、Goal和预算约束；不扩展浏览器或外部动作
+权限，native work成员仍fail-closed。
+
+后续工作树已通过显式可信 runtime 连接原 work admission/continuation、保存 Session、
+完整 selected-plan objective、隔离 cwd、lead 文本 file IO，以及原 proof/response、
+不可变内容、inspection、proposal/candidate 与原 owner review/artifact 接口。
+完整检查在事务外读取真实物理源和隔离树；短事务内复核原权限/租约、成员关闭、已结算用量、
+pending IO 和完整原调用集合。完整 manifests/diff/计划源哈希在内部不可变保存。
+之后的原文件调用、新原 owner 输入或权限/预算漂移使旧检查失效；新检查不能刷新旧 proposal。
+原 task/occurrence/run 计数和累计预算不替换、不重置；原 planning objective 不改。
+
+inspection/business-completion 针对性13/13 与 typecheck 通过；普通 owner review、
+证书、completion handshake、shared native 文件和 continuation output27/27 通过。
+历史 reader 原 response/proof 硬化另有3/3 通过。27 项组明确排除了此前 loopback 权限失败
+个案，没有记作通过。root50/50、UI212/212通过；完整Gateway/build/披露当前结果及首轮失败统一记录于下文，
+不替代SDK稳定性门槛。
+较早一次修正后的实际 installed SDK两例2/2通过（37.7s）：direct10条 Messages请求/60 reported
+tokens；cold wait/reply11条/66 tokens并重启Host+Worker，保留原work Session/Goal、
+occurrence、完整selected objective。两例验证exact1 isolated write、原native completion、
+owner验收和immutable artifact交付，ledger无held/unknown/reserved。更早pending-step
+与末尾fixture查询失败保留失败记录。官方typed missing-Session兼容和GoalBridge lease/
+readonly observation边界已修正。完整adapter回归548总/524通过/24既有SDK依赖skip/
+0失败（2.75s，未设置可选SDK模块环境），与显式SDK两例分别记录；package dry-run54文件
+包含新helper，真实解包import测试通过。脚本本地Messages传输不证明真实provider质量或生产接受。
+
+此增量默认关闭，未生产部署，也不等于第1/3/4/5/8/9/10/19/20项或全部26完成。
+授权 native 成员 work 仍关闭；完整 diff/base/plan 的 owner UI、独立批准 apply、unknown
+reconciliation、scoped memory/report、自动派发与 idle/wake/recovery、retention/Git，
+以及同库双 isolated cycle/version 与原 native member/restart 的完整接受矩阵仍需实施/验收。
+初始文本 file IO 不授予 binary producer 或原生 shell 权限。详见
+[原完整计划](../superpowers/plans/2026-10-17-pilotdeck-remaining-full-chain.md#current-bounded-native-work-integration-and-pending-acceptance)
+与[精确 native-work 边界](../superpowers/plans/2026-10-17-always-on-discovery.md#current-internal-lead-io-and-frozen-output-integration)。
+
+
+### 当前最终本地 gate、首轮失败与 Host 待修发现
+
+首完整Gateway运行1729总/1719通过/3失败/7既有或opt-in skip（668.09s），3失败全部为
+memory-pump。窄Workbench schema只有悬空current-occurrences view、缺原task-occurrences
+base table时，新Session识别查询view导致普通memory processing失败；现先检查真实base
+再query view，不合成原task权限或放宽work恢复。修后目标回归32/32通过：普通Session20、
+工作Session2、operation-gate5、memory-pump5。首轮全量失败保留失败记录。
+
+修后完整Gateway重跑1729总/1722通过/7既有skip/0失败/0取消（632.263s）。Windows
+Gateway build与前端Vite build通过；public6测试通过，891份working-tree文件preflight
+零findings，Brain lint-links通过。两个test fixture仅缩短合成bearer字符串以通过隐私扫描，
+相关18目标测试全通过；没有修改扫描规则或runtime credential处理。root50、UI212、
+adapter和显式SDK证据分别记录，不相加成总体capability完成。
+
+新final review实证P2 Host生命周期缺口：composer非必选且native Session历史缺失时，
+Host可能先create，尚未确认原首次work run及不存在saved native Goal mapping。Host
+before-create修正的35/35目标测试通过，独立fresh review确认覆盖且无新具体finding。
+最终完整adapter为556总/532通过/24既有skip/0失败；最新no-recreate实际SDK2/2通过
+（33.13s），direct10条Messages、cold11条，保留原Session/Goal、完整selected objective、
+exact1 isolated write和原交付。Gateway/build先于此Host-only变动，因此另列它自己的目标/
+完整adapter/SDK证据；这些通过不宣称修复SQLite锁争用。默认off、未生产部署；SQLite稳定性解决、精确发布readback及真实provider/
+部署接受仍是门槛。
+
+### 此前 final-log SDK 反证：冷 continuation 的 SQLite 稳定性仍开放
+
+此前final-log实际SDK重跑仅1/2通过：direct通过，cold在原step-admission路径遇SQLite
+`database is locked`。原busy_timeout为75ms；具体持锁者和根因没有证据，不能猜测，
+没有提高timeout或盲重试来宣称修复。较早2/2保留为该次真实证据，不能替代最终全通过或
+稳定性结论。cold continuation的SQLite contention/stability、修正后的完整验收重跑仍待解决。
+本次为受控本地脚本Messages传输，不是实际provider调用或生产验收；没有虚构final成功。
+
+另一次只读cold trace为1/1通过：7552 records、4个SQLite进程、零SQL error，未观测到跨
+microtask/event loop未关闭transaction。观测到isolated原receipt事务56ms、Worker BEGIN
+等待46.598ms、complete proposal44ms、相邻Goal binding/task state25–31ms；原75ms
+busy timeout下同步跨进程争用仅是可能解释，不能回推此前具体持锁者/根因。trace通过不覆盖
+此前final-log SDK1/2失败；最新no-recreate2/2亦不能证明锁问题已修复，SQLite contention/stability继续开放。

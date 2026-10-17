@@ -2,6 +2,8 @@ import { WorkbenchGoalBridge, nativeGoalsFor, nativeTaskResumeScope } from './wo
 import { budgetedModelStream,BudgetedModelStreamQueue } from './model-budget-stream.js';
 import {runNativeBudgetedTool} from './web-budget-tool.js';
 import {captureSessionCheckpoint,verifySessionCheckpoint} from './checkpoint.js';
+import {normalizeHostExecutionLease} from './host-execution-lease.js';
+export {normalizeHostExecutionLease} from './host-execution-lease.js';
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 const OPERATIONS = ['agents.list', 'messages.list', 'messages.send', 'memory.list', 'memory.save', 'memory.stage', 'memory.propose', 'memory.consolidation', 'memory.capture.pending', 'memory.capture.read', 'memory.capture.propose', 'files.list', 'files.read', 'files.write', 'web.read','tasks.get','tasks.subtasks','tasks.upsert','tasks.delegate','tasks.evidence','tasks.assessment','tasks.observe','tasks.assess','tasks.next','tasks.propose','tasks.reply_draft','tasks.reply_drafts','discovery.context','discovery.source','discovery.plan','discovery.report'];
 const SAFE_TOOLS = new Set(['universe_capabilities', 'universe_search']);
@@ -23,11 +25,6 @@ const ARGUMENT_KEYS = {
   'tasks.assessment': ['subtask_id','observations'], 'tasks.observe': ['subtask_id','observations'],
   'tasks.assess': ['subtask_id','expected_task_version','expected_subtask_version','expected_assessment_revision','expected_observation_revision','observations','expires_at'], 'tasks.next': [],
 };
-export function normalizeHostExecutionLease(value){
-  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!['owner','generation'].includes(key))
-    ||typeof value.owner!=='string'||!ID.test(value.owner)||!Number.isSafeInteger(value.generation)||value.generation<1)throw new Error('workbench_binding_invalid');
-  return Object.freeze({owner:value.owner,generation:value.generation});
-}
 function validContext(context, binding) {
   if (!context || context.run_id !== binding.runId || !['owner_id', 'agent_id', 'workspace_id', 'project_id'].every(key => typeof context[key] === 'string' && ID.test(context[key]))
     || !Number.isSafeInteger(context.capability_epoch) || context.capability_epoch < 1

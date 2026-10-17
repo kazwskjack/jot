@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {canonicalJson} from '../../src/db/canonical-json.ts';
 import {writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
@@ -92,4 +93,25 @@ test('a pending download bounds concurrent reads and disconnect releases the pre
  }finally{pending?.destroy();release();}
  let recovered;for(let attempt=0;attempt<20;attempt++){await new Promise(resolve=>setTimeout(resolve,20));recovered=await read(f,base);if(recovered.statusCode!==429)break;}
  assert.equal(recovered.statusCode,200,recovered.body);
+});
+
+test('workspace completion pins its receipt namespace and artifact rejects an isolated location for shared proof',async t=>{
+ const f=await files(t),saved=f.db.prepare('SELECT snapshot_json FROM wb_task_completion_candidates WHERE run_id=?').get(f.runId);
+ const output=JSON.parse(saved.snapshot_json).workspace_file_outputs[0];
+ assert.equal(output.source,'workspace');
+ withImmediateTransaction(f.db,()=>assert.throws(()=>f.artifacts.registerTaskFileVersion({runId:f.runId,receiptId:output.receipt_id,content:'Original reviewed report',location:{source:'isolated',cycle_id:'foreign-cycle',snapshot_id:'foreign-snapshot',isolated_receipt_id:'foreign-local'}}),/task_output_source_unverified/));
+});
+
+
+test('legacy shared pins remain readable only through their original workspace receipt',async t=>{
+ const f=await files(t),row=f.db.prepare('SELECT candidate_id,proposal_id,snapshot_json FROM wb_task_completion_candidates WHERE run_id=?').get(f.runId);
+ const snapshot=JSON.parse(row.snapshot_json),proposal=JSON.parse(f.db.prepare('SELECT snapshot_json FROM wb_task_goal_proposals WHERE proposal_id=?').get(row.proposal_id).snapshot_json);
+ for(const output of [...snapshot.workspace_file_outputs,...proposal.workspace_file_outputs])delete output.source;
+ // Simulate bytes created by the previous release, keeping its real original shared proof.
+ f.db.exec('DROP TRIGGER wb_task_completion_candidates_no_update');
+ for(const trigger of f.db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name='wb_task_goal_proposals' AND sql LIKE '%BEFORE UPDATE%'").all())f.db.exec('DROP TRIGGER '+trigger.name);
+ f.db.prepare('UPDATE wb_task_completion_candidates SET snapshot_json=? WHERE candidate_id=?').run(canonicalJson(snapshot),row.candidate_id);
+ f.db.prepare('UPDATE wb_task_goal_proposals SET snapshot_json=? WHERE proposal_id=?').run(canonicalJson(proposal),row.proposal_id);
+ const card=(await f.list())[0],base=`/v1/interactions/${card.interaction_id}/outputs`;
+ const result=await read(f,base+'/0');assert.equal(result.statusCode,200,result.body);assert.equal(result.body,'Original reviewed report');
 });

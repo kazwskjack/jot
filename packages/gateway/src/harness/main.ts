@@ -21,6 +21,8 @@ import { TaskCompletionPump } from './task-completion-pump.ts';
 import { ChannelDeliveryService } from '../channels/delivery.ts';
 import {NotificationArchiveMaintenance,notificationArchiveMaintenanceConfig} from '../channels/notification-maintenance.ts';
 import { WorkbenchService } from '../workbench/service.ts';
+import {createNativeWorkRuntime} from '../always-on/native-work-runtime.ts';
+import {readIsolatedTaskFileVersion} from '../persistent-tasks/isolated-output-source.ts';
 import {configureTaskOutputReader} from '../persistent-tasks/output-content.ts';
 import {configureTaskOutputDelivery} from '../persistent-tasks/output-delivery.ts';
 import {ArtifactService} from '../artifacts/service.ts';
@@ -55,8 +57,9 @@ const workbench = new WorkbenchService(db, {
   root: workbenchRoot, allowedToolIds: WORKBENCH_TOOL_IDS,
   ...(budgetPolicy ? {modelBudgetPolicy:budgetPolicy} : {}),
 });
-const persistentTasks = new PersistentTaskService(db, workbench, { projectionRoot: join(workbenchRoot, 'tasks'), events,...(budgetPolicy?{modelBudgetPolicy:budgetPolicy}:{}) });
-configureTaskOutputReader(db,({owner,workspace,project,path,version,runId})=>workbench.readFileVersion(owner,workspace,project,path,version,runId));
+const nativeWork=createNativeWorkRuntime({db,workbench,executionReady:workbenchExecutionReady,...(process.env.GENERAL_AGENT_NATIVE_WORK_ROOT!==undefined?{root:process.env.GENERAL_AGENT_NATIVE_WORK_ROOT.trim()}:{}),...(budgetPolicy?{budgetPolicy}:{})});
+const persistentTasks = new PersistentTaskService(db, workbench, { projectionRoot: join(workbenchRoot, 'tasks'), events,...(budgetPolicy?{modelBudgetPolicy:budgetPolicy}:{}),...(nativeWork?{discoveryWorkOperations:nativeWork}:{}) });
+configureTaskOutputReader(db,input=>input.source?.source==='isolated'?readIsolatedTaskFileVersion(db,input.source):workbench.readFileVersion(input.owner,input.workspace,input.project,input.path,input.version,input.runId));
 configureTaskOutputDelivery(db,new ArtifactService(db,fileRoot),events);
 const coordinator = new HarnessCoordinator(db, runs, events, Date.now, {
   maxBackgroundRuns: Math.max(0, concurrency - 1), allowBackgroundRuns: workbenchExecutionReady,
@@ -66,6 +69,18 @@ const archiveMaintenanceConfig=notificationArchiveMaintenanceConfig(process.env)
 const archiveMaintenance=archiveMaintenanceConfig?new NotificationArchiveMaintenance(db,archiveMaintenanceConfig):undefined;
 const replyDispatch=new TaskReplyDispatch(db,events,{enabled:workbenchExecutionReady&&replyExecutionRequested});
 const sessionBindings = new SessionBindingRepository(db, sessionPrefix);
+// Only the claimed original work run may allocate its initial saved Session.
+// All subsequent resolver reads require that same saved binding to exist.
+const workContextForRun=(runId:string,initialize=false)=>{
+ const base=workbench.contextForRun(runId);
+ const work=db.prepare("SELECT conversation_id FROM wb_task_run_occurrences WHERE run_id=? AND trigger_key LIKE 'discovery-work:%'").get(runId) as {conversation_id:string}|undefined;
+ if(!work)return base;
+ if(!nativeWork)throw Error('work_admission_execution_unavailable');
+ if(initialize&&!db.prepare('SELECT 1 FROM ga_harness_session_bindings WHERE conversation_id=?').get(work.conversation_id))sessionBindings.getOrCreateForConversation(work.conversation_id);
+ const context=nativeWork.resolver.context(runId);
+ if(!context)throw Error('work_admission_execution_unavailable');
+ return {...base,work_binding:context.work_binding,native_workspace:context.native_workspace,objective:context.objective};
+};
 const attachmentResolver = new AttachmentResolver(db, fileRoot);
 const runtimeBaseUrl = process.env.GENERAL_AGENT_RUNTIME_BASE_URL?.trim();
 const runtimeSecretFile = process.env.GENERAL_AGENT_RUNTIME_SECRET_FILE?.trim();
@@ -95,8 +110,9 @@ const worker = new HarnessWorker(db, coordinator, runner, {
   sessionResolver: conversationId => sessionBindings.getOrCreateForConversation(conversationId).session_id,
   attachmentResolver,
   channelDelivery,
+  ...(nativeWork?{workRunWorkspaceResolver:nativeWork.resolver}:{}),
   executionGuard: { assertRunActive(runId) { workbench.assertRunActive(runId); persistentTasks.assertRunActive(runId); },
-    contextForRun: runId => workbench.contextForRun(runId) },
+    contextForRun: runId => workContextForRun(runId,true) },
   ...(runtimeClient ? { contextStager: {
     stageContext: input => runtimeClient.stageContext(input, leafBridgeBaseUrl),
   } } : {}),
@@ -126,7 +142,7 @@ const completionLoop=async()=>{
 
 const commands = new SessionCommandDispatcher(db,events,sessionClient,runId=>worker.isReady(runId), {
   assertRunActive(runId) {workbench.assertRunActive(runId); persistentTasks.assertRunActive(runId);},
-  contextForRun: runId => workbench.contextForRun(runId),
+  contextForRun: runId => workContextForRun(runId),
   inheritChatRun: (owner, original, next) => workbench.inheritChatRun(owner, original, next),
 },ordinarySteeringEnabled?{currentExecutionFor:runId=>worker.readyExecutionFor(runId),...(ordinaryReconciler?{reconcileHistorical:(runId:string,sessionId:string,commandId:string)=>ordinaryReconciler.reconcile(runId,sessionId,commandId,AbortSignal.timeout(20000))}:{})}:undefined);
 const commandLoop = async()=>{

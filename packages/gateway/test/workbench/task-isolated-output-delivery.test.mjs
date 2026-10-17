@@ -1,0 +1,43 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
+import {canonicalJson} from '../../src/db/canonical-json.ts';
+import {workGrantFixture} from '../always-on/work-grant-fixture.mjs';
+import {WorkGrants} from '../../src/always-on/work-grants.ts';
+import {WorkAdmissionRecords} from '../../src/always-on/work-admission-records.ts';
+import {WorkspaceJournal} from '../../src/always-on/workspace-journal.ts';
+import {installIsolatedWorkFiles} from '../../src/always-on/isolated-work-file-schema.ts';
+import {IsolatedWorkFiles} from '../../src/always-on/isolated-work-files.ts';
+import {TaskExecutionEvidence} from '../../src/persistent-tasks/execution-evidence.ts';
+import {taskFileSource} from '../../src/persistent-tasks/task-file-source.ts';
+import {configureTaskOutputReader,verifyTaskOutputContent} from '../../src/persistent-tasks/output-content.ts';
+import {DatabaseSync} from 'node:sqlite';
+import {withImmediateTransaction} from '../../src/db/database.ts';
+const hash=s=>createHash('sha256').update(s).digest('hex');
+
+import {prepareTaskPresentedFiles} from '../../src/persistent-tasks/completion-candidates.ts';
+import {ArtifactService} from '../../src/artifacts/service.ts';
+import {join} from 'node:path';
+test('real isolated proposals pin exact original and isolated receipts and cannot publish before a frozen completion',async t=>{
+ const f=await workGrantFixture(t),grants=new WorkGrants(f.db,f.budget),grant=grants.authorize('owner',f.scope,f.cycle.cycle_id,f.input,'isolated-output-grant');
+ const admission=f.tasks.enqueueDiscoveryWork('owner',grant.grant_id,()=>{grants.guard('owner',f.scope,grant.grant_id);return {activity_sha256:'a'.repeat(64),native_sha256:'b'.repeat(64),capacity_sha256:'c'.repeat(64),source_verified_sha256:'d'.repeat(64),snapshot_verified_sha256:'e'.repeat(64),budget_policy_revision:1,observed_at:Date.now()};});
+ const records=new WorkAdmissionRecords(f.db),identity={owner_id:'owner',...f.scope,cycle_id:grant.cycle_id,snapshot_id:grant.snapshot_id,run_id:admission.run_id,occurrence_id:admission.occurrence_id,call_id:'write-isolated'};
+ installIsolatedWorkFiles(f.db);const proofs=new TaskExecutionEvidence(f.db);let proof;
+ const service=new IsolatedWorkFiles({db:f.db,resolve:async()=>({workspace:f.prepared,record:new WorkspaceJournal(f.db).record('owner',f.scope,grant.cycle_id,grant.snapshot_id),binding:Object.fromEntries(Object.entries(identity).filter(([k])=>k!=='call_id')),guard:()=>records.guard('owner',admission.run_id)}),commitReceipt:(db,result)=>{proof=proofs.record(result.run_id,result.call_id,'files.write',result);const {operation,...args}=JSON.parse(db.prepare('SELECT i.operation_json FROM wb_isolated_file_intents i JOIN wb_isolated_file_results r ON r.call_key=i.call_key WHERE r.receipt_id=?').get(result.receipt_id).operation_json);db.prepare('INSERT INTO wb_tool_receipts VALUES(?,?,?,?,?)').run(result.run_id,result.call_id,hash(canonicalJson({operation,args})),JSON.stringify({...result,execution_receipt:proof}),new Date().toISOString());}});
+ const result=await service.execute(identity,{operation:'files.write',path:'source.md',content:'Isolated first',expected_version:0});assert.ok(proof);assert.notEqual(proof.reference,result.receipt_id);
+ const step=f.tasks.upsertSubtask('owner',admission.task_id,{title:'Write isolated',acceptance:'Exact output',status:'completed',evidence:[proof]},admission.run_id);
+ const scope={owner_id:'owner',task_id:admission.task_id,occurrence_id:admission.occurrence_id,frozen_context:JSON.stringify(f.scope),steps:[{...step,evidence:[proof]}]};
+
+ const {readIsolatedTaskFileVersion}=await import('../../src/persistent-tasks/isolated-output-source.ts');
+ configureTaskOutputReader(f.db,input=>readIsolatedTaskFileVersion(f.db,input.source));
+ const pinned=withImmediateTransaction(f.db,()=>prepareTaskPresentedFiles(f.db,scope,[{path:'source.md'}],admission.run_id));
+ assert.throws(()=>withImmediateTransaction(f.db,()=>prepareTaskPresentedFiles(f.db,scope,[{path:'source.md',source:'workspace'}],admission.run_id)),/invalid_goal_files/);
+ const output=pinned.workspace_file_outputs[0];
+ assert.equal(output.source,'isolated');assert.equal(output.cycle_id,grant.cycle_id);assert.equal(output.snapshot_id,grant.snapshot_id);
+ assert.equal(output.isolated_receipt_id,result.receipt_id);assert.equal(output.receipt_id,proof.reference);assert.equal(output.version,1);
+ const source=taskFileSource(f.db,scope,proof.reference,admission.run_id);
+ assert.equal(verifyTaskOutputContent(f.db,{owner:'owner',workspace:f.scope.workspace_id,project:f.scope.project_id,path:'source.md',version:1,runId:admission.run_id,source},output).content,'Isolated first');
+ const artifacts=new ArtifactService(f.db,join(f.root,'delivery-artifacts'));
+ assert.throws(()=>withImmediateTransaction(f.db,()=>artifacts.registerTaskFileVersion({runId:admission.run_id,deliveryRunId:admission.run_id,receiptId:proof.reference,location:source,content:'Isolated first'})),/task_output_source_unverified/);
+ assert.equal(f.db.prepare("SELECT count(*) n FROM ga_artifacts WHERE kind='task_output_file'").get().n,0);
+});

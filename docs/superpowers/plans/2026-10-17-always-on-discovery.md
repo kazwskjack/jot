@@ -1363,3 +1363,180 @@ prove actual installed SDK work execution, provider quality or production rollou
 Final independent and scoped re-reviews have no open findings within this internal
 prerequisite scope. Both failed full/focused attempts remain in private records;
 they have not been relabeled as passes. No new dependency or license change.
+
+
+## Current internal lead IO and frozen output integration
+
+The new allowlist covers isolated `jot_workspace` file and original task
+operations; it is not a sandbox for every external tool. Existing allowed
+external tools retain original role, lease, dependencies, Goal and budget checks.
+This wiring grants no additional browser or external-action permission, and
+isolated native-member work remains refused.
+
+This later working-tree increment connects the private resolver, lead file-tool
+and output/inspection paths that the prerequisite-only sections above left open.
+It requires explicit trusted configuration together with original execution and
+budget readiness; defaults remain closed. It creates no alternative runtime,
+planner, task identity or budget. Production deployment has not been performed.
+
+### Connected source contracts
+
+`createNativeWorkRuntime` installs the same trusted resolver and inspection
+collector on the Gateway and Worker database connections. The resolver derives
+actual original work admission/continuation, owner/role/source authority, saved
+Session, selected complete plans and isolated cwd. The original task's planning
+objective remains immutable; the work Goal and work completion snapshot use the
+same complete selected objective derived from accepted plans. Saved work Session
+identity is preserved through prefix changes; missing historical bindings are
+recovery errors rather than permission to create a replacement Session.
+
+Authenticated original `files.list/read/write` dispatches the admitted lead to
+`IsolatedWorkFiles` outside SQL transactions. Original session/lease, dependencies,
+operation digest, plan paths and live binding are checked before IO and again
+in its synchronous final receipt callback. Immutable isolated result, original
+execution proof, isolated subtype and original tool response commit atomically.
+Original-response replay precedes IO. A failed final callback leaves an uncertain
+pending intent, not a successful proof or permission to repeat replacement.
+
+`TaskFileSource` and trusted content readers retain original producer/target,
+occurrence/step and namespace authority. Isolated identity includes cycle,
+snapshot and local isolated receipt separately from the original execution-proof
+ID. Historical isolated reads independently check the original request digest,
+response/proof and immutable BLOB hash/size. Proposal pins, frozen candidates,
+owner review reads and original `ArtifactService` delivery preserve that exact
+identity. Legacy pins without a discriminator are accepted only through their
+actual original shared subtype. No fake shared versions are inserted; neither
+mutable isolated bytes nor shared-project bytes are a read fallback.
+
+`WorkInspections.collect` performs full physical inspection outside the final
+transaction. It freezes the complete original base and result manifests/diff,
+selected objective, plan/path/source hashes and the complete isolated call set.
+Final original authority, lease, closed native members, settled accounting,
+non-pending IO and exact original proof/response facts are rechecked before an
+immutable inspection row is committed. Synchronous `current` checks the saved
+facts for the original completion transaction. Later isolated reads/lists/writes,
+new original owner input, unknown accounting, revoked authority or missing
+inspection block completion. Actual work-trigger detection prevents treating a
+missing adapter as ordinary work. Exact proposal inspection equality is checked
+at candidate freeze and current review; recollecting after a later call requires
+a new original proposal even when its selected output version did not change.
+
+The initial output adapter materializes bounded UTF-8 text through original
+artifact versions and acceptance links/events. It is delivery of reviewed bytes,
+not source apply. Existing upload/generated-output/shared/native-shared paths
+retain their original contracts.
+
+### Evidence checkpoint and explicit unfinished work
+
+Focused local inspection/business-completion tests pass13/13, including real
+original Fastify operations, original proof/response commits and the original
+Coordinator's checkpoint/candidate transaction. The stale-proposal case first
+failed because the old proposal incorrectly acquired the later inspection; it
+passes after exact inspection pinning. A fresh actual proposal then freezes the
+selected objective successfully. These are local service fixtures, not an
+installed official SDK end-to-end completion result.
+
+Ordinary owner review, business certificate, native completion handshake,
+shared native file delivery and continuation output regressions pass27/27.
+The previously observed loopback-permission case was explicitly excluded from
+that run and remains a separate environment-dependent acceptance case.
+Historical source/response hardening passes3/3 focused cases. Type checking
+passes. Current complete-run/build/disclosure results, the first failed run and
+the corrected Host finding are consolidated below. Earlier successful full
+runs above describe earlier revisions only.
+
+An earlier corrected installed official SDK run passes2/2 (37.7s). Direct work uses
+10 controlled Messages requests/60 reported tokens. Cold wait/reply work uses
+11 requests/66 tokens, restarts Host and Worker, and retains the original work
+Session/Goal, occurrence and complete selected objective. Both prove exactly one
+isolated write, original native completion, owner acceptance and immutable
+artifact delivery with no held/unknown/reserved accounting remainder. Earlier
+pending-subtask and final fixture-query attempts remain failed records; the
+corrected earlier rerun provides that bounded evidence; the final-source result
+is recorded separately below.
+
+Actual SDK investigation also corrected handling of the official typed
+missing-Session error and preserved the execution lease through GoalBridge while
+keeping read-only observation separate. These fixes do not relax scope/lease
+checks or make a name/message alone proof of absent Session. Complete adapter
+regression passes548 total/524 passed/24 existing SDK-dependent skips/zero
+failures (2.75s), without the optional SDK module environment. Explicit SDK2/2
+above is separate evidence. Package dry-run contains54 files including the new
+helper, and an actual unpacked-package import test passes. The SDK model transport is controlled
+scripted local Messages HTTP, so these results do not prove real-provider
+usefulness, production stability or deployment acceptance. Defaults remain
+closed and no production deployment was performed.
+
+The following remain open:
+
+- Authorized isolated native-member execution and its complete ancestry,
+  assignment/closure/output acceptance. Current work members are refused and
+  cannot fall through to shared permissions; recognition is not authorization.
+- Owner-facing complete diff/base/plan inspection. The new complete evidence is
+  frozen internally; the current review product shows selected files/criteria.
+- Separate exact-base apply approval, journaled apply/rollback and explicit
+  reconciliation of unknown isolated replacement outcomes. No automatic retry.
+- Scoped work memory/report integration, automatic discovery/work dispatch and
+  idle/wake/restart controls, original cycle acceptance, retention and Git variants.
+- Same-database shared plus two-isolated-cycle/version collision acceptance,
+  full owner/task/step/producer negative matrix, native-member/restart/crash and
+  binary-producer/native-shell permission coverage. Text IO does not close them.
+- SQLite stability resolution, reviewed publication/readback,
+  real-provider and deployment acceptance. Completed local gates are recorded
+  below; defaults remain disabled and all26 is not complete.
+
+
+### Current full-run and release verification
+
+The first full Gateway run failed:1729 total/1719 passed/three memory-pump
+failures/seven existing or opt-in skips (668.09s). A narrow Workbench schema can
+contain a dangling current-occurrences view without its original task-occurrences
+base table. Session work detection now checks the real base table before reading
+the view; it neither synthesizes task authority nor relaxes work recovery.
+The corrected focused regression passes32/32:20 ordinary Session, two work
+Session, five operation-gate and five memory-pump cases. The failed first run is
+retained as failed evidence.
+
+The corrected complete Gateway run passes1729 total/1722 passed/seven existing
+or opt-in skips/zero failures/zero cancellations (632.263s). Windows Gateway build
+and frontend Vite build pass. Public disclosure tests6/6 and891-working-tree-file
+preflight report zero findings; Brain lint-links passes. Two test fixtures only
+shorten synthetic bearer values to satisfy privacy scanning; their18 targeted
+tests pass, without changing scanner rules or runtime credential handling.
+Root50/50, UI212/212, adapter and explicit SDK runs remain separate evidence.
+
+A new final review reproduces a P2 Host lifecycle gap: when the composer is not
+required and native Session history is missing, the Host can create before
+checking that this is the original first work run with no saved native Goal
+mapping. The Host before-create correction passes35/35 targeted cases; an
+independent fresh review confirms that coverage and has no new specific finding.
+Its final complete adapter run passes556 total/532 passed/24 existing skips/zero
+failures. The latest no-recreate installed-SDK rerun passes2/2 (33.13s), with10
+direct and11 cold Messages requests, retaining the original Session/Goal,
+complete selected objective, exactly one isolated write and original delivery.
+Gateway/build results above precede this Host-only correction; its own targeted,
+complete adapter and SDK evidence are recorded separately. This correction does
+not claim to fix SQLite contention. No production deployment
+or default enablement follows from these gates.
+
+### Prior final-log cold continuation: unresolved SQLite stability
+
+A prior final-log installed-SDK rerun passes1/2. Direct work passes;
+cold continuation fails at original step admission with SQLite
+`database is locked`. The original busy timeout is75ms. The specific lock holder and root
+cause are not established; do not attribute the failure to a guessed component,
+raise timeouts or report a fix without evidence. Earlier2/2 remains valid earlier
+evidence but cannot stand for runtime stability; the newer no-recreate2/2 pass
+also does not establish that this locking failure was fixed. Cold
+continuation contention diagnosis and a corrected full acceptance rerun remain
+open. The Messages transport is controlled local scripted HTTP, not a real
+provider; neither this failure nor the earlier pass proves production acceptance.
+
+A separate read-only cold trace passes1/1 with7552 records from four SQLite
+processes, zero SQL errors and no observed transaction left open across a
+microtask/event-loop boundary. It observes an isolated original-receipt
+transaction of56ms, Worker BEGIN wait46.598ms, complete proposal44ms and adjacent
+Goal-binding/task-state transactions25-31ms. Synchronous cross-process contention
+under the original75ms busy timeout is a possible explanation, not proof of the
+previous failure's holder or root cause. This trace pass does not replace the
+prior final-log SDK1/2 result or close the SQLite stability item.

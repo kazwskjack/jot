@@ -6,6 +6,7 @@ import {normalizeOrdinarySteeringExecution} from './ordinary-steering-authority.
 import {createOrdinaryClaimedSessionComposer} from './ordinary-claimed-composer.js'
 import {createOrdinaryInputAdmissionHost} from './ordinary-input-admission-host.js'
 import { createServer } from 'node:http'
+import {createRequire} from 'node:module'
 import { timingSafeEqual } from 'node:crypto'
 import { isAbsolute } from 'node:path'
 import { createVoiceAdapterHandler } from './voice.js'
@@ -163,7 +164,7 @@ function decodeFilename(headers) {
   return value && Buffer.byteLength(value, 'utf8') <= 255 && !/[\u0000\/\\]/.test(value) ? value : null
 }
 
-export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,nativeIdleObservation=false }) {
+export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,nativeIdleObservation=false,sessionNotFoundError }) {
   const voiceHandler = voiceEnabled ? createVoiceAdapterHandler({ speechController, token }) : null
   const workbenchSessions = new Set()
   const blockedWorkbenchSessions = new Set()
@@ -223,7 +224,7 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
           ||typeof task.objective!=='string'||!task.objective.trim())throw Error('work_workspace_binding_invalid')
         const authority=JSON.stringify({workspace,binding,task,model_budget:context.model_budget})
         if(workWorkspaceAuthority!==undefined&&workWorkspaceAuthority!==authority)throw Error('work_workspace_binding_changed')
-        workWorkspaceAuthority=authority;signal?.throwIfAborted()
+        workWorkspaceAuthority=authority;signal?.throwIfAborted();return context
       }
       if(isolatedWork!==undefined){
         try{
@@ -235,10 +236,26 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
             ||cached&&(cached.id!==sessionId||cached.header?.cwd!==cwd||cached.header?.agentPreset!==requestedPreset))throw Error('work_workspace_binding_changed')}
           check()
           let history
-          try{history=await controller.inspect(sessionId,signal)}catch(error){if(error?.code!=='session/not-found')throw error;history=null}
+          try{history=await controller.inspect(sessionId,signal)}catch(error){
+            // The direct official Controller throws its exported native class;
+            // the remote transport separately maps that class to this code.
+            // Names/messages are never missing-Session evidence.
+            if(error?.code!=='session/not-found'&&!(typeof sessionNotFoundError==='function'&&error instanceof sessionNotFoundError))throw error
+            history=null
+          }
           check()
           if(history!==null&&(history?.meta?.id!==sessionId||history.meta.cwd!==cwd||history.meta.agentPreset!==requestedPreset))throw Error('work_workspace_history_invalid')
           if(history===null&&(resident||cached))throw Error('work_workspace_history_invalid')
+          if(history===null){
+            // Missing native history permits only the first original work
+            // entry. A continuation or saved Goal cannot be repaired by create,
+            // even when the optional claimed-session composer is disabled.
+            const fresh=await checkWorkWorkspace();check()
+            if(fresh.task_binding.continuation_of!==null||fresh.task_binding.root_run_id!==String(workbenchRunId))throw Error('work_workspace_history_invalid')
+            const saved=await workbenchBridge.request('goal-binding',{runId:String(workbenchRunId),sessionRef:sessionId,executionLease:workbenchExecutionLease},{action:'get'},signal)
+            signal?.throwIfAborted();check()
+            if(!saved||typeof saved!=='object'||Array.isArray(saved)||!Object.hasOwn(saved,'binding')||saved.binding!==null)throw Error('work_workspace_history_invalid')
+          }
           await checkWorkWorkspace();check()
         }catch{return json(409,{error:'work_workspace_binding_invalid'})}
       }
@@ -612,8 +629,13 @@ export function apply(ctx, config = {}) {
   if(ordinaryInputRunHost)ctx.effect(()=>()=>ordinaryInputRunHost.dispose())
   const memoryExtractionHost=createOptionalMemoryExtractionHost({config:config.memoryExtraction,bridge:workbenchBridge,llm:ctx.llm,route:config.workbenchModel})
   if(memoryExtractionHost)ctx.effect(()=>()=>memoryExtractionHost.dispose())
+  let ApiSessionNotFound
+  if(workbenchBridge){
+    ({ApiSessionNotFound}=createRequire(ctx.get('profileContext').installAnchor)('@deepseek-ai/dsh-api-session-controller'))
+    if(typeof ApiSessionNotFound!=='function'||!(ApiSessionNotFound.prototype instanceof Error))throw Error('jot_session_controller_incompatible')
+  }
   const handler = createAdapterHandler({ controller: ctx.sessionController, fileUploads: ctx.fileUploads, agents: ctx.agents,
-    sessions:ctx.sessions,persistence:ctx.sessionPersistence,
+    sessions:ctx.sessions,persistence:ctx.sessionPersistence,sessionNotFoundError:ApiSessionNotFound,
     speechController, voiceEnabled, token, workbenchBridge,
     budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,nativeIdleObservation:config.nativeIdleObservation===true })
   const server = createServer(async (req, res) => {

@@ -1,0 +1,400 @@
+// Extends the established gateway-worker fixture in isolation: the loopback
+// Messages endpoint is scripted; Gateway/Worker/SDK/Goal and file IO are real.
+import assert from 'node:assert/strict';
+import {createServer} from 'node:http';
+import {spawn} from 'node:child_process';
+import {randomBytes,createHash} from 'node:crypto';
+import {mkdtemp,mkdir,readFile,writeFile,rm} from 'node:fs/promises';
+import {join} from 'node:path';
+import {fileURLToPath,pathToFileURL} from 'node:url';
+import {createHostProfile} from '../create-profile.mjs';
+const runtime=process.env.JOT_DSH_RUNTIME_MODULES;
+async function listen(server){await new Promise(done=>server.listen(0,'127.0.0.1',done));return 'http://127.0.0.1:'+server.address().port;}
+async function freePort(){const server=createServer();await listen(server);const port=server.address().port;await new Promise(done=>server.close(done));return port;}
+async function until(check){const end=Date.now()+30000;while(Date.now()<end){const value=await check();if(value)return value;await new Promise(done=>setTimeout(done,100));}throw Error('gateway_host_acceptance_timeout');}
+function cleanEnv(){const env={};for(const key of ['PATH','SystemRoot','WINDIR','COMSPEC','PATHEXT'])if(process.env[key])env[key]=process.env[key];env.TEMP=process.env.JOT_TEST_TMP;env.TMP=process.env.JOT_TEST_TMP;return env;}
+function launch(args,cwd,env){const child=spawn(process.execPath,args,{cwd,env,stdio:['ignore','pipe','pipe'],windowsHide:true});let output='',terminal=false;const ended=new Promise(done=>child.once('exit',()=>{terminal=true;done();}));for(const stream of [child.stdout,child.stderr])stream.on('data',value=>{output+=value;});return {child,output:()=>output,terminal:()=>terminal,async stop(){if(!terminal)child.kill('SIGTERM');await ended;}};}
+
+function executionReceipt(value){
+ if(typeof value==='string'){try{return executionReceipt(JSON.parse(value));}catch{return;}}
+ if(!value||typeof value!=='object')return;
+ if(value.execution_receipt?.kind==='tool_receipt')return value.execution_receipt;
+ for(const child of Object.values(value)){const found=executionReceipt(child);if(found)return found;}
+}
+function originalWorkSubtask(value){
+ if(typeof value==='string'){try{return originalWorkSubtask(JSON.parse(value));}catch{return;}}
+ if(!value||typeof value!=='object')return;
+ if(value.title==='Inspect discovery source'&&value.status==='pending'&&typeof value.subtask_id==='string'&&Number.isSafeInteger(value.version))return value;
+ for(const child of Object.values(value)){const found=originalWorkSubtask(child);if(found)return found;}
+}
+
+const userTexts=input=>input.messages.filter(message=>message.role==='user').flatMap(message=>typeof message.content==='string'?[message.content]:(message.content??[]).filter(part=>part.type==='text').map(part=>part.text));
+const occurrences=(text,part)=>text.split(part).length-1;
+
+export async function nativeIsolatedWorkCase(t,{role=false,persistent=false,resume=false,complete=false,automatic=false,unlimited=false,discovery=false,noPlan=false,discoveryWait=false,workWait=false}={}){
+ persistent ||= discovery; complete ||= discovery; unlimited ||= discovery; role ||= persistent;
+ assert.equal(JSON.parse(await readFile(join(runtime,'dsh-api-session-controller/package.json'),'utf8')).version,'0.2.0-rc.2','acceptance requires the reviewed locked SDK');
+ const {buildServer}=await import('../../gateway/src/server.ts');
+ if(!process.env.JOT_TEST_TMP)throw Error('native_work_fixture_tmp_required');
+ const root=await mkdtemp(join(process.env.JOT_TEST_TMP,'jot-native-isolated-work-')),home=join(root,'home'),workspace=join(root,'workspace');await mkdir(workspace);
+ let host,worker,service,succeeded=false,modelFailure,workStarted=false,workStage=0,workSubtask;const requests=[],internalFacts=[];const originalErrors=new WeakMap();
+ const modelKey='sk-'+randomBytes(32).toString('hex'),adapterToken=randomBytes(32).toString('hex'),internalToken=randomBytes(32).toString('hex'),csrfToken=randomBytes(32).toString('hex');
+ const model=createServer(async(req,res)=>{try{
+  const chunks=[];for await(const chunk of req)chunks.push(chunk);const input=JSON.parse(Buffer.concat(chunks).toString());
+  assert.equal(req.method,'POST');assert.match(req.url,/\/messages$/);assert.equal(req.headers['x-api-key'],modelKey);
+  requests.push(input);const ordinal=requests.length;res.writeHead(200,{'content-type':'text/event-stream','cache-control':'no-cache'});
+  let operation='tasks.propose',argumentsValue={intent:complete?'complete':automatic&&ordinal===1?'continue':resume&&ordinal===2?'wait_approval':'wait_user',summary:ordinal===2?'Please review the next step.':'Please confirm the next step.'};
+  if(complete&&!discovery&&ordinal===1){operation='files.write';argumentsValue={path:'acceptance.md',content:'ACCEPTANCE-OK',expected_version:0};}
+  if(complete&&!discovery&&ordinal===2){operation='tasks.upsert';const evidence=executionReceipt(input.messages);assert.ok(evidence,'the model must consume a real file operation receipt');argumentsValue={title:'Write the acceptance file',acceptance:'acceptance.md contains exactly ACCEPTANCE-OK.',status:'completed',evidence:[evidence]};}
+  if(complete&&!discovery&&ordinal===3)argumentsValue.files=[{path:'acceptance.md',description:'Reviewed report'}];
+  if(discovery&&!workStarted){
+   const source=executionReceipt(input.messages);
+   const actions=[['discovery.context',{}],['discovery.source',{revision:1}],['tasks.upsert',{title:'Inspect discovery source',acceptance:'Use the pinned source to support a proposal.',status:'completed',evidence:source?[source]:[]}],
+    ['discovery.plan',{summary:'Clarify the source',rationale:'The inspected source supports a wording improvement.',changes:[{path:'source.md',description:'Clarify wording',steps:['Review wording'],verification:['Compare with the pinned source']}],evidence:source?[source]:[]}],
+    ['discovery.report',{outcome:'proposals',summary:'One source-backed proposal for review.',limitations:[],plan_ids:[],evidence:source?[source]:[]}],['tasks.propose',{intent:'complete',summary:'Review the recorded discovery report.'}]];
+   if(noPlan){actions.splice(3,1);actions[2][1].acceptance='Inspect the pinned source and state supported conclusions.';actions[3][1].outcome='no_plan';actions[3][1].summary='No supported improvement in the inspected source.';}
+   if(discoveryWait){
+    // The second real tool call reads a deliberately corrupted fixture blob.
+    // It must not attest a successful source read or create a report.
+    actions.splice(2,0,['tasks.propose',{intent:'wait_user',summary:'The source failed its integrity check. Please restore the original source bytes.'}],['discovery.source',{revision:1}]);
+    if(ordinal===3){const replies=input.messages.flatMap(m=>Array.isArray(m.content)?m.content.filter(b=>b.type==='tool_result'):[]);assert.ok(JSON.stringify(replies).includes('discovery_source_integrity_failed'),'the wait must follow the actual failed source tool response');}
+   }
+   assert.ok(ordinal<=actions.length,'discovery must not loop past its scripted synthetic responses');[operation,argumentsValue]=actions[ordinal-1];
+  }
+  if(workStarted){
+   workSubtask??=originalWorkSubtask(input.messages);
+   const stage=++workStage,receipt=executionReceipt(input.messages),actions=[
+    ['tasks.subtasks',{}],
+    ['files.write',{path:'source.md',content:'ISOLATED-NATIVE-WORK-OK',expected_version:0}],
+    ...(workWait?[['tasks.propose',{intent:'wait_user',summary:'Please confirm the isolated wording before final review.'}]]:[]),
+    ['tasks.upsert',{subtask_id:workSubtask?.subtask_id,expected_version:workSubtask?.version,title:'Clarify the selected source',acceptance:'source.md contains exactly ISOLATED-NATIVE-WORK-OK.',status:'completed',evidence:receipt?[receipt]:[]}],
+    ['tasks.propose',{intent:'complete',summary:'Review the isolated source result.',files:[{path:'source.md',description:'Selected isolated work output'}]}],
+   ];
+   assert.ok(stage<=actions.length,'native work cannot repeat a completed scripted write');
+   if(stage===actions.length-1){assert.ok(receipt,'work completion must consume the original real isolated write receipt');assert.ok(workSubtask,'the native model must read the original pending task board before updating it');}
+   if(workWait&&stage===4)assert.ok(userTexts(input).join('\n').includes('Proceed with the same isolated wording.'),'the original owner reply must reach the cold resumed Session');
+   [operation,argumentsValue]=actions[stage-1];
+  }
+  const toolEvents=persistent&&!(automatic&&ordinal===2)?[
+   {type:'content_block_start',index:1,content_block:{type:'tool_use',id:'synthetic-wait-call-'+ordinal,name:'jot_workspace',input:{operation,arguments_json:JSON.stringify(argumentsValue)}}},
+   {type:'content_block_stop',index:1},
+  ]:[];
+  for(const event of [
+   {type:'message_start',message:{id:'synthetic-message-'+ordinal,role:'assistant',model:'deepseek-flash',content:[],usage:{input_tokens:5,output_tokens:0}}},
+   {type:'content_block_start',index:0,content_block:{type:'text',text:''}},
+   {type:'content_block_delta',index:0,delta:{type:'text_delta',text:'ACCEPTANCE-OK'}},
+   {type:'content_block_stop',index:0},
+   ...toolEvents,
+   {type:'message_delta',delta:{stop_reason:toolEvents.length?'tool_use':'end_turn'},usage:{output_tokens:1}},
+   {type:'message_stop'},
+  ])res.write('event: '+event.type+'\ndata: '+JSON.stringify(event)+'\n\n');res.end();
+ }catch(error){modelFailure=error;if(!res.headersSent)res.writeHead(500);res.end('synthetic_protocol_request_rejected');}});
+ const modelUrl=await listen(model);
+ const route={provider:'deepseek-official',model:'deepseek-flash',revision:'synthetic-rates-1',context_window:1000000,max_output_tokens:256000,rates:{input:1,output:1,cache_read:1,cache_write:1}};
+ const policy={revision:1,admission_route:{provider:route.provider,model:route.model},routes:[route],limits:Object.fromEntries(['owner_daily','project_daily','agent_daily','task_total','occurrence','chat_root','mailbox_thread'].map(key=>[key,{tokens:10000000,nano_usd:null,model_calls:100}]))};
+ try{
+  await mkdir(join(root,'cycle-artifacts'),{recursive:true});
+  service=await buildServer({databasePath:join(root,'gateway.db'),uploadRoot:join(root,'files'),workbenchRoot:join(root,'workspaces'),templateRoot:fileURLToPath(new URL('../../gateway/file-engine/templates',import.meta.url)),workspaces:['jot'],nativeWorkRoot:join(root,'cycle-artifacts'),internalChannelToken:internalToken,csrfToken,allowedOrigins:['https://fixture.invalid'],...(role?{modelBudgetPolicy:policy,workbenchExecutionReady:true}:{})});
+  service.app.addHook('onError',async(request,_reply,error)=>{originalErrors.set(request,error.message);});
+  service.app.addHook('onSend',async(request,reply,payload)=>{
+   if(!request.routeOptions.url?.startsWith('/internal/v1/workbench/'))return payload;
+   let body;try{body=JSON.parse(Buffer.isBuffer(payload)?payload.toString():String(payload));}catch{return payload;}
+   const context=body?.context;
+   if(context?.work_binding||reply.statusCode>=400){internalFacts.push({endpoint:request.routeOptions.url,status:reply.statusCode,error:originalErrors.get(request),run_id:request.body?.run_id,...(context?{work_binding:context.work_binding,native_workspace:context.native_workspace,task_binding:context.task_binding,model_budget:context.model_budget}:{}),attempts:service.db.prepare('SELECT run_id,attempt_id,state FROM wb_model_budget_attempts ORDER BY created_at').all()});await writeFile(join(root,'internal-work-facts-private.json'),JSON.stringify(internalFacts,null,2));}
+   return payload;
+  });
+  await service.app.listen({host:'127.0.0.1',port:0});const gatewayUrl='http://127.0.0.1:'+service.app.server.address().port;
+  const prepared=await createHostProfile({home,...(role?{workbench:{provider:route.provider,model:route.model,origin:gatewayUrl}}:{})}),port=await freePort(),patchPath=join(prepared.directory,'cordis.patch.yml');
+  let patch=await readFile(patchPath,'utf8');patch=patch.replace('"port": 18841','"port": '+port+(discovery?', "nativeIdleObservation": true':'')).replace('http://127.0.0.1:18831',gatewayUrl).replace('"jotHostReady"','"jotHostReady", "jotHostInspectionReady"');
+  const inspection={insert:[{id:'jot-host-inspection',name:pathToFileURL(fileURLToPath(new URL('./inspect-host-plugin.mjs',import.meta.url))).href,config:{receipt:join(root,'composition.json'),sessionPrefix:'jot-host-acceptance-'}},{id:'jot-native-session-absence-inspection',name:new URL('./native-session-absence-plugin.mjs',import.meta.url).href,config:{receipt:join(root,'native-absence-private.json')}}]};
+  patch=patch.trim().replace(/\]$/,', '+JSON.stringify({id:'llm-deepseek',config:{baseURL:modelUrl,apiKeyEnv:'DEEPSEEK_API_KEY',reasoningEffort:'high'}})+', '+JSON.stringify(inspection)+']');await writeFile(patchPath,patch);
+  host=launch([join(runtime,'dsh/lib/bin.js'),'--profile','jot','--host','127.0.0.1','--port','0','--no-open'],workspace,{...cleanEnv(),DSH_HOME:home,DSH_TELEMETRY_DISABLED:'1',JOT_SESSION_ADAPTER_TOKEN:adapterToken,GENERAL_AGENT_INTERNAL_CHANNEL_TOKEN:internalToken,DEEPSEEK_API_KEY:modelKey});
+  const adapterUrl='http://127.0.0.1:'+port;
+  await until(async()=>{assert.equal(host.terminal(),false,'official host exited');try{return (await fetch(adapterUrl+'/v1/sessions',{method:'POST',headers:{'content-type':'application/json'},body:'{}',signal:AbortSignal.timeout(500)})).status===401;}catch{return false;}});
+  const absence=JSON.parse(await readFile(join(root,'native-absence-private.json'),'utf8'));assert.equal(absence.official_absence,true);assert.equal(absence.code,null);assert.equal(absence.cached,false);assert.equal(absence.agent,false);
+  const tokenFile=join(root,'adapter.token');await writeFile(tokenFile,adapterToken,{mode:0o600});
+  const policyFile=join(root,'budget-policy.json');if(role)await writeFile(policyFile,JSON.stringify(policy));
+  const headers={'x-user-id':'acceptance-owner','content-type':'application/json','x-csrf-token':csrfToken,origin:'https://fixture.invalid','idempotency-key':'acceptance-create'};
+  let conversation_id,messageUrl,messageBody,roleAgent,discoveryController,discoveryScope,sourceBlob,sourceBytes;const observationTimings=[];
+  if(role){const response=await fetch(gatewayUrl+'/v1/agents',{method:'POST',headers,body:JSON.stringify({name:'Acceptance role',workspace_id:'jot',instructions:'Reply clearly using the provided evidence.'})});assert.equal(response.status,201);const agent=await response.json();roleAgent=agent;conversation_id=agent.conversation_id;messageUrl='/v1/agents/'+agent.agent_id+'/messages';messageBody={client_message_id:'acceptance-one',text:'Reply with the single word ACCEPTANCE-OK.'};
+   if(persistent&&!discovery){const created=await fetch(gatewayUrl+'/v1/persistent-tasks',{method:'POST',headers:{...headers,'idempotency-key':'acceptance-task'},body:JSON.stringify({title:'Wait for confirmation',agent_id:agent.agent_id,objective:complete?'Write acceptance.md containing ACCEPTANCE-OK and request owner acceptance.':'Ask the user to confirm before any further work.',trigger:{kind:'once',run_at:'2099-01-01T00:00:00Z'},budget:{max_runs:unlimited?null:1}})});const task=await created.json();assert.equal(created.status,201,JSON.stringify(task));messageUrl='/v1/persistent-tasks/'+task.task_id+'/run-now';messageBody={};}
+  }
+  else{const conversation=await fetch(gatewayUrl+'/v1/conversations',{method:'POST',headers,body:JSON.stringify({title:'Synthetic local model acceptance',workspace_id:'jot',model:{provider:'deepseek-official',model:'deepseek-flash'}})});assert.equal(conversation.status,201);({conversation_id}=await conversation.json());messageUrl='/v1/conversations/'+conversation_id+'/messages';messageBody={client_message_id:'acceptance-one',content:[{type:'text',text:'Reply with the single word ACCEPTANCE-OK.'}]};}
+  if(discovery){
+   const {SessionControllerClient}=await import('../../gateway/src/harness/session-controller-client.ts');
+   const {ProjectActivityObserver}=await import('../../gateway/src/always-on/project-activity.ts');
+   const {DiscoveryAdmissionController}=await import('../../gateway/src/always-on/admission.ts');
+   const {DiscoveryPolicies}=await import('../../gateway/src/always-on/discovery-policy.ts');
+   const {WorkbenchBudgetPolicy}=await import('../../gateway/src/workbench/model-budget-policy.ts');
+   const {HarnessCoordinator}=await import('../../gateway/src/harness/coordinator.ts');
+   const client=new SessionControllerClient(adapterUrl,adapterToken),roleSession='discovery-idle-role';
+   await client.create(roleSession,workspace,'jot-general');assert.equal(requests.length,0,'idle role setup must not call the model');
+   service.db.prepare('INSERT INTO ga_harness_session_bindings VALUES(?,?,?,?,?)').run(roleAgent.conversation_id,'acceptance-owner',roleSession,new Date().toISOString(),new Date().toISOString());
+   assert.equal((await client.nativeIdleObservationReadiness()).ready,true);assert.equal((await client.observeNativeIdle(roleSession)).native_idle,'idle');
+   service.workbench.writeFile('acceptance-owner','jot',{project_id:roleAgent.project_id,path:'source.md',content:'Discovery source observed for ACCEPTANCE-OK.',expected_version:0});
+   if(discoveryWait){
+    const version=service.db.prepare('SELECT blob_name FROM wb_file_versions WHERE owner_id=? AND project_id=? AND path=? AND version=1').get('acceptance-owner',roleAgent.project_id,'source.md');
+    sourceBlob=join(service.workbench.projectRoot('acceptance-owner','jot',roleAgent.project_id),'blobs',version.blob_name);sourceBytes=await readFile(sourceBlob);
+    await writeFile(sourceBlob,'Deliberate isolated-fixture corruption.');
+   }
+   const policyUrl=gatewayUrl+'/v1/agents/'+roleAgent.agent_id+'/discovery-policy';
+   const saved=await fetch(policyUrl,{method:'PATCH',headers:{...headers,'idempotency-key':'discovery-save'},body:JSON.stringify({expected_version:0,expected_role_version:1,expected_role_epoch:1,mode:'discover_only',cooldown_ms:0,recent_input_ms:0,max_cycles:null})});assert.equal(saved.status,200,await saved.clone().text());
+   const enabled=await fetch(policyUrl+'/control',{method:'POST',headers:{...headers,'idempotency-key':'discovery-enable'},body:JSON.stringify({action:'enable',expected_version:1,expected_role_version:1,expected_role_epoch:1})});assert.equal(enabled.status,200,await enabled.clone().text());
+   discoveryScope={project_id:roleAgent.project_id,workspace_id:'jot',agent_id:roleAgent.agent_id};
+   const native={nativeIdleObservationReadiness:signal=>client.nativeIdleObservationReadiness(signal),observeNativeIdle:async(id,signal)=>{const start=Date.now(),monotonic=performance.now(),fact=await client.observeNativeIdle(id,signal),end=Date.now();observationTimings.push({phase:'native',wall_before:start,wall_after:end,host_observed_at:fact.observed_at,elapsed_monotonic_ms:performance.now()-monotonic,age_ms:end-fact.observed_at});return fact;}};
+   const activity=new ProjectActivityObserver({db:service.db,workbench:service.workbench,native,maxAgeMs:5000,now:()=>{const wall=Date.now();observationTimings.push({phase:'clock',wall});return wall;}}),observe=activity.observe.bind(activity);
+   activity.observe=async(...args)=>{const start=Date.now(),fact=await observe(...args);observationTimings.push({phase:'activity',elapsed_ms:Date.now()-start,age_ms:Date.now()-fact.observed_at,reason:fact.reason,session_count:fact.facts.session_count});return fact;};
+   discoveryController=new DiscoveryAdmissionController({db:service.db,workbench:service.workbench,tasks:service.persistentTasks,policies:new DiscoveryPolicies(service.db),activity,coordinator:new HarnessCoordinator(service.db,service.runs,service.events),budgetPolicy:new WorkbenchBudgetPolicy(service.db,policy),maxAgeMs:5000});
+  }
+  const postMessage=()=>fetch(gatewayUrl+messageUrl,{method:'POST',headers:{...headers,'idempotency-key':'acceptance-one'},body:JSON.stringify(messageBody)});
+  const admitFresh=async()=>{
+   // A freshness hold is a normal, non-admitting observation, not permission to
+   // accept stale evidence or restart a process. Re-observe within this fixture
+   // at most three times; every rejected attempt must preserve execution state.
+   let receipt;
+   for(let attempt=0;attempt<3;attempt++){
+    const state=()=>({runs:service.db.prepare('SELECT count(*) n FROM ga_runs').get().n,admissions:service.db.prepare('SELECT count(*) n FROM wb_discovery_admissions').get().n,
+     used:service.persistentTasks.list('acceptance-owner').items[0].runs_used,modelRequests:requests.length,attempts:service.db.prepare('SELECT count(*) n FROM wb_model_budget_attempts').get().n});
+    const before=state();receipt=await discoveryController.admit('acceptance-owner',discoveryScope);
+    if(receipt.reason!=='OBSERVATION_STALE')return receipt;
+    t.diagnostic(JSON.stringify({freshness_hold:true,observations:observationTimings.splice(0)}));
+    assert.deepEqual(state(),before,'expired observations cannot admit runs, spend or reset task usage');
+   }
+   return receipt;
+  };
+  let accepted;
+  if(discovery){const receipt=await admitFresh();assert.equal(receipt.admitted,true,JSON.stringify(receipt));accepted=service.db.prepare('SELECT run_id,conversation_id FROM wb_task_occurrences WHERE occurrence_id=?').get(receipt.occurrence_id);assert.ok(accepted);}
+  else{const posted=await postMessage();assert.equal(posted.status,202);accepted=await posted.json();}
+  const run_id=accepted.run_id;if(persistent)conversation_id=accepted.conversation_id;
+  const startWorker=()=>launch(['--import',new URL('./trace-gateway-fetch.mjs',import.meta.url).href,'--experimental-strip-types',fileURLToPath(new URL('../../gateway/src/harness/main.ts',import.meta.url))],workspace,{...cleanEnv(),JOT_ACCEPTANCE_FETCH_TRACE:join(root,'fetch-status.jsonl'),GENERAL_AGENT_DB:join(root,'gateway.db'),GENERAL_AGENT_NATIVE_WORK_ROOT:join(root,'cycle-artifacts'),GENERAL_AGENT_FILE_ROOT:join(root,'files'),GENERAL_AGENT_WORKBENCH_ROOT:join(root,'workspaces'),GENERAL_AGENT_WORKSPACES:'jot',GENERAL_AGENT_SESSION_ADAPTER_URL:adapterUrl,GENERAL_AGENT_SESSION_ADAPTER_TOKEN_FILE:tokenFile,GENERAL_AGENT_HARNESS_CWD:workspace,GENERAL_AGENT_DSH_AGENT_PRESET:'jot-general',GENERAL_AGENT_DSH_SESSION_PREFIX:'jot-host-acceptance',GENERAL_AGENT_INTERNAL_CHANNEL_TOKEN:internalToken,GENERAL_AGENT_WORKER_POLL_MS:'250',...(role?{GENERAL_AGENT_MODEL_BUDGET_POLICY_FILE:policyFile,GENERAL_AGENT_WORKBENCH_DSH_AGENT_PRESET:'jot-workbench-budgeted',GENERAL_AGENT_WORKBENCH_EXECUTION_READY:'true',GENERAL_AGENT_WORKER_CONCURRENCY:'2'}:{})});
+  worker=startWorker();
+  const run=await until(async()=>{if(modelFailure)throw modelFailure;assert.equal(worker.terminal(),false,'official gateway worker exited');const current=await (await fetch(gatewayUrl+'/v1/runs/'+run_id,{headers})).json();if(['succeeded','failed','interrupted','waiting_user','waiting_approval'].includes(current.status))return current;return false;});
+  assert.equal(run.status,complete&&!discoveryWait?'waiting_approval':persistent?'waiting_user':'succeeded',JSON.stringify(run));const initialCalls=discoveryWait?3:discovery?(noPlan?5:6):complete||automatic?3:1;assert.equal(requests.length,initialCalls);assert.equal(requests[0].model,'deepseek-flash');
+  assert.ok(requests[0].dsh_plugin_packages.packages.some(item=>item.name==='jot-dsh-host-preparation'&&item.version==='0.1.0'));
+  const composition=JSON.parse(await readFile(join(root,'composition.json'),'utf8'));
+  assert.equal(composition.preset,role?'jot-workbench-budgeted':'jot-general');assert.equal(composition.mounted,true);assert.equal(composition.approval,'ask');assert.equal(composition.permission,'workspace-write');assert.equal(composition.sandbox.workspaceRoot,workspace);
+  assert.deepEqual(composition.model,{provider:'deepseek-official',model:'deepseek-flash'});
+  assert.equal(composition.events.filter(event=>event.sourceRpcId===run_id).length,1);
+  const ended=composition.events.findLast(event=>event.type==='turn/end')?.reason;
+  if(persistent){assert.equal(ended.kind,'error');assert.equal(ended.error.message,'workbench_goal_stopped');}
+  else assert.equal(ended.kind,'completed');
+  assert.ok(JSON.stringify(requests[0].messages).includes(discovery?'discovery_signal_batch':complete?'Write acceptance.md':persistent?'Ask the user to confirm':'ACCEPTANCE-OK'));
+  const snapshotResponse=await fetch(gatewayUrl+'/v1/conversations/'+conversation_id+'/snapshot',{headers}),snapshot=await snapshotResponse.json();assert.equal(snapshotResponse.status,200,JSON.stringify(snapshot));assert.ok(Array.isArray(snapshot.messages),'snapshot response must contain messages');
+  const replies=snapshot.messages.filter(message=>message.role==='assistant'&&message.status==='complete');assert.equal(replies.length,persistent?0:1);if(!persistent)assert.ok(JSON.stringify(replies[0]).includes('ACCEPTANCE-OK'));
+  if(persistent)assert.equal(service.db.prepare("SELECT count(*) n FROM ga_messages WHERE run_id=? AND role='assistant'").get(run_id).n,0);
+  if(persistent){const cards=await (await fetch(gatewayUrl+'/v1/conversations/'+conversation_id+'/interactions',{headers})).json();assert.ok(cards.items.length>0);assert.ok(service.db.prepare('SELECT checkpoint_id FROM ga_runs WHERE id=?').get(run_id).checkpoint_id);
+   const response=await fetch(adapterUrl+'/v1/sessions/'+composition.sessionId+'/goal-status',{method:'POST',headers:{authorization:'Bearer '+adapterToken,'content-type':'application/json'},body:'{}'});const observed=await response.json();assert.equal(response.status,200,JSON.stringify(observed));assert.equal(observed.state.goal.phase,'paused');assert.equal(observed.state.goal.activation,'disarmed');assert.equal(observed.state.host_status,'idle');assert.equal(observed.state.task.run_status,complete&&!discoveryWait?'waiting_approval':'waiting_user');
+   if(automatic){const changes=composition.events.filter(event=>event.goalRound!==undefined);assert.equal(changes[0].goalRound,0);assert.equal(observed.state.goal.rounds_started,changes[0].goalRound+1);const ends=composition.events.filter(event=>event.type==='turn/end');assert.equal(ends.length,2);assert.equal(ends[0].reason.kind,'completed');assert.equal(service.db.prepare('SELECT count(*) n FROM ga_runs').get().n,1);assert.equal(service.db.prepare('SELECT count(*) n FROM ga_run_commands').get().n,0);}
+  }
+  if(discovery){assert.equal((await discoveryController.admit('acceptance-owner',discoveryScope)).admitted,false);assert.equal(service.db.prepare('SELECT count(*) n FROM ga_runs').get().n,1);assert.equal(requests.length,initialCalls);}
+  else{const retry=await postMessage();const retried=await retry.json();assert.equal(retry.status,202,JSON.stringify(retried));assert.equal(retried.run_id,run_id);assert.equal(requests.length,initialCalls);}
+  const checkBudget=(runId,calls)=>{const balances=service.modelBudgets.balancesForRun('acceptance-owner',runId);assert.ok(balances.length>0);for(const balance of balances){assert.equal(balance.used.tokens,String(calls*6));assert.equal(balance.used.model_calls,String(calls));assert.equal(balance.held.tokens,'0');assert.equal(balance.held.model_calls,'0');}};
+  if(role){const settled=service.db.prepare("SELECT actual_tokens FROM wb_model_budget_attempts WHERE run_id=? AND state='settled'").all(run_id);assert.equal(settled.length,initialCalls);assert.ok(settled.every(value=>Number(value.actual_tokens)===6));assert.equal(service.db.prepare("SELECT count(*) n FROM wb_model_budget_attempts WHERE run_id=? AND state IN ('reserved','in_flight','unknown')").get(run_id).n,0);checkBudget(run_id,initialCalls);}
+  if(complete&&!discovery){
+   const card=(await (await fetch(gatewayUrl+'/v1/conversations/'+conversation_id+'/interactions',{headers})).json()).items[0];assert.equal(card.purpose,'task_acceptance_review');assert.equal(card.questions.length,1);
+   const file=service.db.prepare('SELECT owner_id,workspace_id,project_id,path FROM wb_files WHERE path=?').get('acceptance.md');assert.ok(file);assert.equal(service.workbench.readFile(file.owner_id,file.workspace_id,file.project_id,file.path).content,'ACCEPTANCE-OK');
+   assert.equal(service.artifacts.listForRun(run_id,'acceptance-owner').items.length,0);
+   // A later authorized owner edit must not replace the already reviewed version.
+   service.workbench.writeFile(file.owner_id,file.workspace_id,{project_id:file.project_id,path:file.path,content:'Later owner replacement',expected_version:1});
+   const reviewUrl=gatewayUrl+'/v1/interactions/'+card.interaction_id+'/outputs';
+   const previewList=await fetch(reviewUrl,{headers});assert.equal(previewList.status,200);const previewFiles=(await previewList.json()).items;assert.equal(previewFiles.length,1);assert.equal(previewFiles[0].version,1);
+   const previewBytes=await fetch(reviewUrl+'/0',{headers});assert.equal(previewBytes.status,200);assert.equal(await previewBytes.text(),'ACCEPTANCE-OK');assert.equal(previewFiles[0].sha256,createHash('sha256').update('ACCEPTANCE-OK').digest('hex'));
+   assert.equal((await fetch(reviewUrl+'/0',{headers:{...headers,'x-user-id':'foreign-owner'}})).status,404);assert.equal(service.artifacts.listForRun(run_id,'acceptance-owner').items.length,0);
+   assert.equal(service.db.prepare('SELECT count(*) n FROM wb_task_execution_receipts').get().n,1);assert.equal(service.db.prepare('SELECT count(*) n FROM wb_task_business_certificates').get().n,0);
+   const post=(extraHeaders={})=>fetch(gatewayUrl+'/v1/interactions/'+card.interaction_id+'/response',{method:'POST',headers:{...headers,'idempotency-key':'accept-business-criteria',...extraHeaders},body:JSON.stringify({expected_version:card.version,answers:card.questions.map(question=>({question_id:question.question_id,selected_option_ids:['accept'],custom_text:''}))})});
+   assert.equal((await post({'x-user-id':'foreign-owner'})).status,404);assert.equal((await post({origin:'https://untrusted.invalid'})).status,403);
+   assert.equal(service.db.prepare('SELECT count(*) n FROM wb_task_business_certificates').get().n,0);assert.equal(service.db.prepare("SELECT count(*) n FROM ga_messages WHERE role='assistant'").get().n,0);
+   const acceptedReview=await post(),review=await acceptedReview.json();assert.equal(acceptedReview.status,202,JSON.stringify(review));
+   assert.equal((await fetch(reviewUrl+'/0',{headers})).status,409);
+   const finished=await until(async()=>{const value=await (await fetch(gatewayUrl+'/v1/runs/'+run_id,{headers})).json();return value.status==='succeeded'&&value;});assert.equal(finished.status,'succeeded');assert.equal(requests.length,3);
+   const retriedReview=await post();assert.equal(retriedReview.status,202);assert.deepEqual(await retriedReview.json(),review);
+   const delivered=await (await fetch(gatewayUrl+'/v1/conversations/'+conversation_id+'/snapshot',{headers})).json();const published=delivered.messages.filter(message=>message.role==='assistant'&&message.status==='complete');assert.equal(published.length,1);assert.ok(JSON.stringify(published[0].blocks).includes('ACCEPTANCE-OK'));checkBudget(run_id,3);
+   assert.equal(delivered.artifacts.length,1);const artifact=delivered.artifacts[0];assert.deepEqual(published[0].attachments,[artifact.artifact_id]);assert.equal(artifact.run_id,run_id);assert.equal(artifact.version,1);assert.equal(artifact.sha256,createHash('sha256').update('ACCEPTANCE-OK').digest('hex'));
+   const downloaded=await fetch(gatewayUrl+'/v1/artifacts/'+artifact.artifact_id+'/download?version=1',{headers});assert.equal(downloaded.status,200);assert.equal(await downloaded.text(),'ACCEPTANCE-OK');
+   assert.equal((await fetch(gatewayUrl+'/v1/artifacts/'+artifact.artifact_id+'/download?version=1',{headers:{...headers,'x-user-id':'foreign-owner'}})).status,404);
+   assert.equal(service.db.prepare('SELECT count(*) n FROM ga_run_artifacts WHERE run_id=?').get(run_id).n,1);
+   assert.equal(service.db.prepare('SELECT count(*) n FROM ga_runs').get().n,1);assert.equal(service.db.prepare('SELECT count(*) n FROM wb_task_finalizations').get().n,1);
+   const proof=JSON.parse(service.db.prepare('SELECT proof_json FROM wb_task_native_completions').get().proof_json);assert.equal(proof.goal.phase,'complete');assert.equal(proof.goal.activation,'disarmed');assert.equal(proof.checkpoint.session_ref,composition.sessionId);
+  }
+  let completionRun=run_id,completedCalls=initialCalls;
+  if(discoveryWait){
+   assert.equal(service.db.prepare('SELECT count(*) n FROM wb_discovery_reports').get().n,0);
+   assert.equal(service.db.prepare('SELECT count(*) n FROM wb_discovery_source_reads').get().n,0);
+   assert.equal(service.db.prepare('SELECT count(*) n FROM wb_task_completion_candidates').get().n,0);
+   const card=(await (await fetch(gatewayUrl+'/v1/conversations/'+conversation_id+'/interactions',{headers})).json()).items[0];assert.equal(card.purpose,'task_input');
+   const nativeState=async()=>{const response=await fetch(adapterUrl+'/v1/sessions/'+composition.sessionId+'/goal-status',{method:'POST',headers:{authorization:'Bearer '+adapterToken,'content-type':'application/json'},body:'{}'});assert.equal(response.status,200);return (await response.json()).state;};
+   const beforeWait=await nativeState();assert.equal(beforeWait.goal.phase,'paused');assert.equal(beforeWait.host_status,'idle');
+   await worker.stop();assert.equal(worker.terminal(),true);await writeFile(sourceBlob,sourceBytes);
+   const answer=()=>fetch(gatewayUrl+'/v1/interactions/'+card.interaction_id+'/response',{method:'POST',headers:{...headers,'idempotency-key':'restore-discovery-source'},body:JSON.stringify({expected_version:card.version,answers:[{question_id:'task-input',selected_option_ids:[],custom_text:'The original source bytes have been restored. Retry the pinned source.'}]})});
+   const answered=await answer(),receipt=await answered.json();assert.equal(answered.status,202,JSON.stringify(receipt));const replay=await answer();assert.equal(replay.status,202);assert.deepEqual(await replay.json(),receipt);
+   const children=service.db.prepare('SELECT id,checkpoint_id FROM ga_runs WHERE continuation_of=?').all(run_id);assert.equal(children.length,1);completionRun=children[0].id;assert.ok(children[0].checkpoint_id);
+   assert.equal(service.db.prepare('SELECT count(*) n FROM wb_task_occurrences').get().n,1);assert.equal(requests.length,initialCalls);
+   worker=startWorker();
+   const waiting=await until(async()=>{if(modelFailure)throw modelFailure;const value=await (await fetch(gatewayUrl+'/v1/runs/'+completionRun,{headers})).json();return ['waiting_approval','waiting_user','failed','interrupted','succeeded'].includes(value.status)&&value;});
+   assert.equal(waiting.status,'waiting_approval',JSON.stringify(waiting));completedCalls=7;assert.equal(requests.length,completedCalls);
+   const continued=JSON.parse(await readFile(join(root,'composition.json'),'utf8'));assert.equal(continued.sessionId,composition.sessionId);assert.equal(continued.events.filter(e=>e.sourceRpcId===completionRun).length,1);
+   const afterWait=await nativeState();assert.equal(afterWait.goal.goal_id,beforeWait.goal.goal_id);assert.ok(afterWait.goal.goal_revision>beforeWait.goal.goal_revision);assert.equal(afterWait.goal.phase,'paused');assert.equal(afterWait.goal.activation,'disarmed');
+   assert.equal(occurrences(userTexts(requests[3]).join('\n'),'The original source bytes have been restored.'),1);checkBudget(completionRun,completedCalls);
+  }
+  if(discovery){
+   const report=service.db.prepare('SELECT report_id,payload_sha256,payload_json FROM wb_discovery_reports').get(),plan=service.db.prepare('SELECT plan_id FROM wb_discovery_plans').get();assert.ok(report);if(noPlan)assert.equal(plan,undefined);else assert.ok(plan);
+   assert.deepEqual(JSON.parse(report.payload_json).plan_ids,noPlan?[]:[plan.plan_id]);assert.equal(JSON.parse(report.payload_json).outcome,noPlan?'no_plan':'proposals');assert.deepEqual(JSON.parse(report.payload_json).coverage,{signal_count:1,fully_read:1});
+   const frozen=JSON.parse(service.db.prepare('SELECT snapshot_json FROM wb_task_completion_candidates WHERE run_id=?').get(completionRun).snapshot_json);assert.equal(frozen.discovery_report.report_id,report.report_id);assert.equal(frozen.discovery_report.sha256,report.payload_sha256);
+   assert.equal(service.db.prepare('SELECT count(*) n FROM wb_file_write_runs WHERE run_id=?').get(run_id).n,0);assert.equal(service.db.prepare('SELECT count(*) n FROM wb_task_business_certificates').get().n,0);
+   const card=(await (await fetch(gatewayUrl+'/v1/conversations/'+conversation_id+'/interactions',{headers})).json()).items[0];assert.equal(card.purpose,'task_acceptance_review');
+   if(noPlan){await worker.stop();assert.equal(worker.terminal(),true);}
+   const review=await fetch(gatewayUrl+'/v1/interactions/'+card.interaction_id+'/response',{method:'POST',headers:{...headers,'idempotency-key':'accept-discovery'},body:JSON.stringify({expected_version:card.version,answers:card.questions.map(q=>({question_id:q.question_id,selected_option_ids:['accept'],custom_text:''}))})});assert.equal(review.status,202,await review.clone().text());
+   if(noPlan){assert.equal(service.db.prepare('SELECT count(*) n FROM wb_task_business_certificates').get().n,1);assert.equal(service.db.prepare('SELECT count(*) n FROM wb_task_finalizations').get().n,0);const {observeDiscoveryDormancy}=await import('../../gateway/src/always-on/dormancy.ts');assert.equal(observeDiscoveryDormancy(service.db,'acceptance-owner',service.db.prepare('SELECT policy_id FROM wb_discovery_policies').get().policy_id).state,'none','owner review without native publication cannot establish dormancy');worker=startWorker();}
+   await until(async()=>{const result=await (await fetch(gatewayUrl+'/v1/runs/'+completionRun,{headers})).json();return result.status==='succeeded';});
+   const delivered=await (await fetch(gatewayUrl+'/v1/conversations/'+conversation_id+'/snapshot',{headers})).json();assert.equal(delivered.messages.filter(m=>m.role==='assistant'&&m.status==='complete').length,1);assert.equal(delivered.artifacts.length,0);checkBudget(completionRun,completedCalls);
+   const historyUrl=gatewayUrl+'/v1/agents/'+roleAgent.agent_id+'/discovery-history';
+   const historyResponse=await fetch(historyUrl,{headers}),history=await historyResponse.json();assert.equal(historyResponse.status,200,JSON.stringify(history.error));assert.equal(history.execution_authorized,false);assert.equal(history.items.length,1);
+   assert.equal(history.items[0].accepted,true,'history must recognize actual native SDK completion, not only fixture status');assert.equal(history.items[0].run.run_id,completionRun);assert.equal(history.items[0].report.report_id,report.report_id);assert.equal(history.items[0].report.sha256,report.payload_sha256);
+   const detailResponse=await fetch(historyUrl+'/'+history.items[0].admission_id,{headers}),detail=await detailResponse.json();assert.equal(detailResponse.status,200,JSON.stringify(detail.error));assert.equal(detail.cycle.accepted,true);assert.equal(detail.report.report_id,report.report_id);assert.equal(detail.plans.length,noPlan?0:1);assert.equal(detail.execution_authorized,false);
+   assert.equal((await fetch(historyUrl,{headers:{...headers,'x-user-id':'foreign-owner'}})).status,404);
+   if(!noPlan){
+    const {WorkCycles}=await import('../../gateway/src/always-on/work-cycles.ts'),cycles=new WorkCycles(service.db);
+    const admission=service.db.prepare('SELECT * FROM wb_discovery_admissions WHERE admission_id=?').get(detail.cycle.admission_id);
+    const counts=()=>['ga_runs','wb_task_occurrences','wb_model_budget_attempts','wb_budget_allocations'].map(table=>service.db.prepare(`SELECT count(*) n FROM ${table}`).get().n);
+    const before=counts(),calls=requests.length,request={admission_id:admission.admission_id,report_sha256:report.payload_sha256,plan_ids:detail.plans.map(p=>p.plan_id),expected_policy_version:admission.policy_version,expected_role_version:admission.role_version,expected_role_epoch:admission.role_epoch};
+    const cycle=cycles.create('acceptance-owner',discoveryScope,request,'sdk-owned-artifact');
+    assert.equal(cycle.execution_authorized,false);assert.equal(cycle.task_id,admission.task_id);assert.equal(cycle.occurrence_id,admission.occurrence_id);
+    assert.deepEqual(cycles.guard('acceptance-owner',discoveryScope,cycle.cycle_id),cycle);
+    assert.deepEqual(new WorkCycles(service.db).create('acceptance-owner',discoveryScope,request,'sdk-owned-artifact'),cycle);
+    const {LogicalWorkCycleWorkspaceManager}=await import('../../gateway/src/always-on/logical-work-cycle-workspace.ts'),storageRoot=join(root,'cycle-artifacts');await mkdir(storageRoot,{recursive:true});
+    const options={db:service.db,workbench:service.workbench,storageRoot},manager=new LogicalWorkCycleWorkspaceManager(options),control={signal:new AbortController().signal};
+    const prepared=await manager.prepare('acceptance-owner',discoveryScope,cycle.cycle_id,control);
+    assert.equal(await readFile(join(prepared.snapshot.isolated_root,'source.md'),'utf8'),'Discovery source observed for ACCEPTANCE-OK.');
+    assert.deepEqual(prepared.plan_paths,['source.md']);assert.equal(prepared.execution_authorized,false);
+    const restored=await new LogicalWorkCycleWorkspaceManager(options).prepare('acceptance-owner',discoveryScope,cycle.cycle_id,control);
+    assert.equal(restored.snapshot.receipt.snapshot_id,prepared.snapshot.receipt.snapshot_id);assert.equal(restored.snapshot.isolated_root,prepared.snapshot.isolated_root);
+    const base=await manager.verifyBase('acceptance-owner',discoveryScope,cycle.cycle_id,control);assert.equal(base.file_count,1);assert.equal(base.execution_authorized,false);
+    assert.deepEqual(counts(),before);assert.equal(requests.length,calls,'artifact resource creation never dispatches a model');
+    await worker.stop();
+    const {WorkGrants}=await import('../../gateway/src/always-on/work-grants.ts');
+    const {WorkAdmissionController}=await import('../../gateway/src/always-on/work-admission.ts');
+    const {DiscoveryPolicies}=await import('../../gateway/src/always-on/discovery-policy.ts');
+    const {WorkbenchBudgetPolicy}=await import('../../gateway/src/workbench/model-budget-policy.ts');
+    const {ProjectActivityObserver}=await import('../../gateway/src/always-on/project-activity.ts');
+    const {HarnessCoordinator}=await import('../../gateway/src/harness/coordinator.ts');
+    const {SessionControllerClient}=await import('../../gateway/src/harness/session-controller-client.ts');
+    const {selectedWorkObjective}=await import('../../gateway/src/always-on/work-run-workspace.ts');
+    const {WorkAdmissionRecords}=await import('../../gateway/src/always-on/work-admission-records.ts');
+    const budgetPolicy=new WorkbenchBudgetPolicy(service.db,policy),grants=new WorkGrants(service.db,budgetPolicy),native=new SessionControllerClient(adapterUrl,adapterToken);
+    const grant=grants.authorize('acceptance-owner',discoveryScope,cycle.cycle_id,{expected_cycle_version:cycle.version,expected_policy_version:cycle.policy_version,expected_role_version:cycle.role_version,expected_role_epoch:cycle.role_epoch,snapshot_id:prepared.snapshot.receipt.snapshot_id,source_sha256:prepared.source_sha256},'select-sdk-native-work');
+    const activity=new ProjectActivityObserver({db:service.db,workbench:service.workbench,native,maxAgeMs:5000}),workAdmission=new WorkAdmissionController({db:service.db,tasks:service.persistentTasks,policies:new DiscoveryPolicies(service.db),workspace:manager,activity,coordinator:new HarnessCoordinator(service.db,service.runs,service.events),budgetPolicy,maxAgeMs:5000});
+    let admitted;
+    for(let attempt=0;attempt<3;attempt++){admitted=await workAdmission.admit('acceptance-owner',discoveryScope,grant.grant_id,new AbortController().signal);if(admitted.reason!=='OBSERVATION_STALE')break;}
+    assert.equal(admitted.admitted,true,JSON.stringify(admitted));const work=admitted.admission;
+    assert.notEqual(work.run_id,run_id);assert.notEqual(work.conversation_id,conversation_id);assert.equal(work.task_id,admission.task_id);
+    assert.equal(service.db.prepare('SELECT count(*) n FROM wb_task_occurrences').get().n,2);assert.equal(service.persistentTasks.get('acceptance-owner',work.task_id).runs_used,2);
+    const sourceBefore=service.db.prepare('SELECT * FROM wb_file_versions WHERE owner_id=? AND project_id=?').all('acceptance-owner',roleAgent.project_id);
+    workStarted=true;worker=startWorker();
+    const getRun=id=>fetch(gatewayUrl+'/v1/runs/'+id,{headers}).then(r=>r.json());
+    let activeRun=work.run_id;
+    const firstStop=await until(async()=>{if(modelFailure)throw modelFailure;assert.equal(worker.terminal(),false,worker.output());const value=await getRun(activeRun);return ['waiting_user','waiting_approval','failed','interrupted','succeeded'].includes(value.status)&&value;});
+    assert.equal(firstStop.status,workWait?'waiting_user':'waiting_approval',JSON.stringify(firstStop));
+    const workSession=service.db.prepare('SELECT session_id FROM ga_harness_session_bindings WHERE conversation_id=?').get(work.conversation_id).session_id;
+    const observed=JSON.parse(await readFile(join(root,'composition.json'),'utf8')),nativeWork=observed.sessions[workSession];assert.ok(nativeWork);
+    assert.equal(nativeWork.header.cwd,prepared.snapshot.isolated_root);assert.equal(nativeWork.header.agentPreset,'jot-workbench-budgeted');assert.equal(nativeWork.sandbox.workspaceRoot,prepared.snapshot.isolated_root);assert.equal(nativeWork.permission,'workspace-write');assert.equal(nativeWork.approval,'ask');
+    const nativeGoal=nativeWork.goals.find(item=>item.goal?.objective)?.goal;assert.ok(nativeGoal);
+    const originalTask=service.db.prepare('SELECT title FROM wb_persistent_tasks WHERE task_id=?').get(work.task_id),role=service.workbench.contextForRun(work.run_id);
+    const objective=selectedWorkObjective(detail.plans),scope={owner_id:'acceptance-owner',agent_id:discoveryScope.agent_id,workspace_id:discoveryScope.workspace_id,project_id:discoveryScope.project_id,capability_epoch:role.capability_epoch,run_id:work.run_id,session_ref:workSession,task_id:work.task_id,occurrence_id:work.occurrence_id,task_version:work.task_version,generation:work.task_generation,objective,title:originalTask.title};
+    assert.equal(nativeGoal.objective,objective+'\n\n[jot-occurrence:'+createHash('sha256').update(JSON.stringify(scope)).digest('hex')+']');
+    assert.notEqual(nativeGoal.id,composition.sessions[composition.sessionId].goals.find(item=>item.goal)?.goal.id);
+    const originalGoal=service.db.prepare('SELECT goal_id FROM wb_native_goal_bindings WHERE run_id=?').get(work.run_id).goal_id;assert.equal(originalGoal,nativeGoal.id);
+    assert.equal(await readFile(join(prepared.snapshot.isolated_root,'source.md'),'utf8'),'ISOLATED-NATIVE-WORK-OK');
+    assert.equal(service.db.prepare('SELECT count(*) n FROM wb_task_isolated_file_execution_receipts').get().n,1);
+    assert.equal(service.db.prepare('SELECT count(*) n FROM wb_file_write_runs WHERE run_id=?').get(work.run_id).n,0);
+    assert.deepEqual(service.db.prepare('SELECT * FROM wb_file_versions WHERE owner_id=? AND project_id=?').all('acceptance-owner',roleAgent.project_id),sourceBefore);
+    if(workWait){
+     const waitCards=(await (await fetch(gatewayUrl+'/v1/conversations/'+work.conversation_id+'/interactions',{headers})).json()).items,card=waitCards[0];assert.equal(card.purpose,'task_input');
+     await worker.stop();await host.stop();
+     const answer=()=>fetch(gatewayUrl+'/v1/interactions/'+card.interaction_id+'/response',{method:'POST',headers:{...headers,'idempotency-key':'cold-isolated-work-answer'},body:JSON.stringify({expected_version:card.version,answers:[{question_id:'task-input',selected_option_ids:[],custom_text:'Proceed with the same isolated wording.'}]})});
+     const response=await answer(),answerReceipt=await response.json();assert.equal(response.status,202,JSON.stringify(answerReceipt));const replay=await answer();assert.equal(replay.status,202);assert.deepEqual(await replay.json(),answerReceipt);
+     const continuation=service.db.prepare('SELECT id,checkpoint_id FROM ga_runs WHERE continuation_of=?').all(work.run_id);assert.equal(continuation.length,1);activeRun=continuation[0].id;assert.ok(continuation[0].checkpoint_id);
+     assert.deepEqual(new WorkAdmissionRecords(service.db).guard('acceptance-owner',activeRun),work);
+     host=launch([join(runtime,'dsh/lib/bin.js'),'--profile','jot','--host','127.0.0.1','--port','0','--no-open'],workspace,{...cleanEnv(),DSH_HOME:home,DSH_TELEMETRY_DISABLED:'1',JOT_SESSION_ADAPTER_TOKEN:adapterToken,GENERAL_AGENT_INTERNAL_CHANNEL_TOKEN:internalToken,DEEPSEEK_API_KEY:modelKey});
+     await until(async()=>{assert.equal(host.terminal(),false,host.output());try{return (await fetch(adapterUrl+'/v1/sessions',{method:'POST',headers:{'content-type':'application/json'},body:'{}',signal:AbortSignal.timeout(500)})).status===401;}catch{return false;}});
+     assert.equal(requests.length,9);worker=startWorker();
+     const continued=await until(async()=>{if(modelFailure)throw modelFailure;const value=await getRun(activeRun);return ['waiting_approval','waiting_user','failed','interrupted','succeeded'].includes(value.status)&&value;});assert.equal(continued.status,'waiting_approval',JSON.stringify(continued));
+     assert.equal(service.db.prepare('SELECT session_id FROM ga_harness_session_bindings WHERE conversation_id=?').get(work.conversation_id).session_id,workSession);
+     assert.equal(service.db.prepare('SELECT goal_id FROM wb_native_goal_bindings WHERE run_id=?').get(work.run_id).goal_id,originalGoal);
+     assert.equal(service.db.prepare('SELECT count(*) n FROM wb_isolated_file_results WHERE version IS NOT NULL').get().n,1);
+     const coldObserved=JSON.parse(await readFile(join(root,'composition.json'),'utf8')).sessions[workSession];assert.equal(coldObserved.header.cwd,prepared.snapshot.isolated_root);assert.equal(coldObserved.header.agentPreset,'jot-workbench-budgeted');
+     assert.ok(coldObserved.goals.filter(item=>item.goal?.id===originalGoal).length>1);assert.ok(coldObserved.goals.filter(item=>item.goal?.id===originalGoal).every(item=>item.goal.objective===nativeGoal.objective));
+    }
+    const reviewCards=(await (await fetch(gatewayUrl+'/v1/conversations/'+work.conversation_id+'/interactions',{headers})).json()).items,reviewCard=reviewCards[0];assert.equal(reviewCard.purpose,'task_acceptance_review');
+    const preview=await fetch(gatewayUrl+'/v1/interactions/'+reviewCard.interaction_id+'/outputs/0',{headers});assert.equal(preview.status,200);assert.equal(await preview.text(),'ISOLATED-NATIVE-WORK-OK');
+    const workReview=await fetch(gatewayUrl+'/v1/interactions/'+reviewCard.interaction_id+'/response',{method:'POST',headers:{...headers,'idempotency-key':'accept-sdk-isolated-output'},body:JSON.stringify({expected_version:reviewCard.version,answers:reviewCard.questions.map(q=>({question_id:q.question_id,selected_option_ids:['accept'],custom_text:''}))})});assert.equal(workReview.status,202,await workReview.clone().text());
+    await until(async()=>{if(modelFailure)throw modelFailure;const value=await getRun(activeRun);return value.status==='succeeded';});
+    const deliveredWork=await (await fetch(gatewayUrl+'/v1/conversations/'+work.conversation_id+'/snapshot',{headers})).json();assert.equal(deliveredWork.artifacts.length,1);assert.equal(deliveredWork.messages.filter(m=>m.role==='assistant'&&m.status==='complete').length,1);
+    // Deliberate fixture drift after canonical completion must not replace the
+    // immutable accepted artifact bytes or its original isolated version.
+    await writeFile(join(prepared.snapshot.isolated_root,'source.md'),'LATER-MUTABLE-TREE-DRIFT');
+    const artifact=deliveredWork.artifacts[0],download=await fetch(gatewayUrl+'/v1/artifacts/'+artifact.artifact_id+'/download?version=1',{headers});assert.equal(download.status,200);assert.equal(await download.text(),'ISOLATED-NATIVE-WORK-OK');
+    assert.equal(Buffer.from(service.db.prepare('SELECT bytes FROM wb_isolated_file_results WHERE version=1').get().bytes).toString('utf8'),'ISOLATED-NATIVE-WORK-OK');
+    const completion=JSON.parse(service.db.prepare('SELECT n.proof_json FROM wb_task_native_completions n JOIN wb_task_completion_intents i ON i.intent_id=n.intent_id WHERE i.run_id=?').get(activeRun).proof_json);assert.equal(completion.goal.phase,'complete');assert.equal(completion.goal.goal_id,originalGoal);assert.equal(completion.checkpoint.session_ref,workSession);
+    assert.equal(service.db.prepare('SELECT count(*) n FROM wb_discovery_admissions').get().n,1);assert.equal(service.db.prepare('SELECT count(*) n FROM wb_discovery_work_admissions').get().n,1);assert.equal(service.db.prepare('SELECT count(*) n FROM wb_task_occurrences').get().n,2);assert.equal(workStage,workWait?5:4);
+    const total=service.db.prepare('SELECT used_model_calls,used_tokens FROM wb_model_budget_scopes WHERE scope_id=?').get(grant.task_budget_scope_id);assert.equal(Number(total.used_model_calls),requests.length);assert.equal(Number(total.used_tokens),requests.length*6);
+    assert.equal(service.db.prepare("SELECT count(*) n FROM wb_model_budget_attempts WHERE state IN ('unknown','in_flight','reserved')").get().n,0);
+    conversation_id=work.conversation_id;
+
+   }
+   assert.equal(service.workbench.readFile('acceptance-owner','jot',roleAgent.project_id,'source.md').content,'Discovery source observed for ACCEPTANCE-OK.');
+  }
+  if(resume){
+   let parent=run_id,priorGoal;
+   for(const [index,purpose,nextStatus] of [[0,'task_input','waiting_approval'],[1,'task_review','waiting_user']]){
+    const cards=await (await fetch(gatewayUrl+'/v1/conversations/'+conversation_id+'/interactions',{headers})).json();
+    assert.equal(cards.items.length,1);const card=cards.items[0];assert.equal(card.purpose,purpose);assert.equal(card.run_id,parent);
+    const goalResponse=await fetch(adapterUrl+'/v1/sessions/'+composition.sessionId+'/goal-status',{method:'POST',headers:{authorization:'Bearer '+adapterToken,'content-type':'application/json'},body:'{}'});
+    const before=(await goalResponse.json()).state;assert.equal(goalResponse.status,200);priorGoal=before.goal;
+    const endpoint='/v1/interactions/'+card.interaction_id+(index===0?'/response':'/decision');
+    const payload=index===0?{expected_version:card.version,answers:[{question_id:card.questions[0].question_id,selected_option_ids:[],custom_text:'Use the Markdown format, preserving the original scope.'}]}:{expected_version:card.version,action_digest:card.action_digest,decision:'approve'};
+    const post=()=>fetch(gatewayUrl+endpoint,{method:'POST',headers:{...headers,'idempotency-key':'resume-check-'+index},body:JSON.stringify(payload)});
+    const answered=await post();const receipt=await answered.json();assert.equal(answered.status,202,JSON.stringify(receipt));
+    const replay=await post();assert.equal(replay.status,202);assert.deepEqual(await replay.json(),receipt);
+    const continuation=service.db.prepare('SELECT id,conversation_id,continuation_of FROM ga_runs WHERE continuation_of=?').all(parent);
+    assert.equal(continuation.length,1);const child=continuation[0];assert.equal(child.conversation_id,conversation_id);
+    const stopped=await until(async()=>{const value=await (await fetch(gatewayUrl+'/v1/runs/'+child.id,{headers})).json();return ['waiting_user','waiting_approval','failed','interrupted','succeeded'].includes(value.status)&&value;});
+    assert.equal(stopped.status,nextStatus,JSON.stringify(stopped));assert.equal(requests.length,index+2);
+    const observed=JSON.parse(await readFile(join(root,'composition.json'),'utf8'));
+    assert.equal(observed.sessionId,composition.sessionId);assert.equal(observed.events.filter(event=>event.sourceRpcId===child.id).length,1);
+    assert.equal(observed.events.filter(event=>event.sourceRpcId===run_id).length,1);
+    const text=userTexts(requests[index+1]).join('\n');assert.equal(occurrences(text,'持续任务：Wait for confirmation'),1);assert.equal(occurrences(text,'Use the Markdown format, preserving the original scope.'),1);
+    const status=await fetch(adapterUrl+'/v1/sessions/'+composition.sessionId+'/goal-status',{method:'POST',headers:{authorization:'Bearer '+adapterToken,'content-type':'application/json'},body:'{}'});const after=(await status.json()).state;
+    assert.equal(status.status,200);assert.equal(after.goal.goal_id,priorGoal.goal_id);assert.ok(after.goal.goal_revision>priorGoal.goal_revision);assert.equal(after.goal.phase,'paused');assert.equal(after.goal.activation,'disarmed');assert.equal(after.host_status,'idle');
+    assert.ok(service.db.prepare('SELECT checkpoint_id FROM ga_runs WHERE id=?').get(child.id).checkpoint_id);
+    assert.equal(service.db.prepare('SELECT count(*) n FROM wb_task_occurrences').get().n,1);assert.equal(service.db.prepare('SELECT runs_used FROM wb_persistent_tasks').get().runs_used,1);
+    assert.equal(service.db.prepare("SELECT count(*) n FROM wb_model_budget_attempts WHERE state='settled'").get().n,index+2);
+    assert.equal(service.db.prepare("SELECT count(*) n FROM wb_model_budget_attempts WHERE state IN ('reserved','in_flight','unknown')").get().n,0);
+    checkBudget(child.id,index+2);
+    assert.equal(service.db.prepare("SELECT count(*) n FROM ga_messages WHERE role='assistant'").get().n,0);
+    parent=child.id;
+   }
+   assert.ok(JSON.stringify(requests[1].messages).includes('Use the Markdown format'));
+   assert.equal(service.db.prepare('SELECT count(*) n FROM ga_runs').get().n,3);
+  }
+  if(persistent){const task=service.persistentTasks.list('acceptance-owner').items[0];assert.equal(task.budget.max_runs,unlimited?null:1);assert.equal(task.runs_used,2);assert.equal(task.status,unlimited?'active':'budget_exhausted');}
+  assert.equal(host.output().includes('entry did not activate'),false);
+  const finalSnapshotResponse=await fetch(gatewayUrl+'/v1/conversations/'+conversation_id+'/snapshot',{headers}),finalSnapshot=await finalSnapshotResponse.json();
+  assert.equal(finalSnapshotResponse.status,200,JSON.stringify(finalSnapshot.error??{code:'snapshot_unavailable'}));
+  t.diagnostic(JSON.stringify({officialLauncher:true,realGateway:true,realWorker:true,nativeIsolatedWork:true,workWait,role,persistent,resume,complete,automatic,unlimited,discovery,noPlan,modelTransport:'synthetic local Messages HTTP',modelRequests:requests.length,replyCount:finalSnapshot.messages.filter(message=>message.role==='assistant'&&message.status==='complete').length,initialStatus:run.status,status:finalSnapshot.runs.at(-1).status,production:false}));
+  let dormancy;
+  if(noPlan){
+   const beforeTask=service.persistentTasks.list('acceptance-owner').items[0];
+   const {observeDiscoveryDormancy}=await import('../../gateway/src/always-on/dormancy.ts'),policyId=service.db.prepare('SELECT policy_id FROM wb_discovery_policies').get().policy_id;
+   const changes=service.db.prepare('SELECT total_changes() n').get().n;assert.deepEqual(observeDiscoveryDormancy(service.db,'acceptance-owner',policyId),{protocol:1,state:'accepted',revision:1,execution_authorized:false});assert.equal(observeDiscoveryDormancy(service.db,'foreign-owner',policyId).state,'none');assert.equal(service.db.prepare('SELECT total_changes() n').get().n,changes);
+   const sleeping=await admitFresh();assert.equal(sleeping.admitted,false);assert.equal(sleeping.reason,'DORMANT_NO_SIGNAL');
+   await worker.stop();assert.equal(worker.terminal(),true);
+   service.workbench.writeFile('acceptance-owner','jot',{project_id:roleAgent.project_id,path:'source.md',content:'A new owned source revision.',expected_version:1});
+   const awake=await admitFresh();assert.equal(awake.admitted,true,JSON.stringify(awake));
+   const afterTask=service.persistentTasks.list('acceptance-owner').items[0];assert.equal(afterTask.task_id,beforeTask.task_id);assert.equal(afterTask.runs_used,2);assert.equal(requests.length,completedCalls);
+   dormancy={dormant_reason:sleeping.reason,woke:awake.admitted,same_task:afterTask.task_id===beforeTask.task_id};
+  }
+  succeeded=true;
+  if(discovery)return {admissions:service.db.prepare('SELECT count(*) n FROM wb_discovery_admissions').get().n,plans:service.db.prepare('SELECT count(*) n FROM wb_discovery_plans').get().n,reports:service.db.prepare('SELECT count(*) n FROM wb_discovery_reports').get().n,source_reads:service.db.prepare('SELECT count(*) n FROM wb_discovery_source_reads').get().n,finalizations:service.db.prepare('SELECT count(*) n FROM wb_task_finalizations').get().n,model_requests:requests.length,...(dormancy??{}),...(discoveryWait?{wait_recovered:true}:{})};
+ }catch(error){await writeFile(join(root,'startup-private.log'),JSON.stringify({host:host?.output(),worker:worker?.output(),modelRequests:requests.length},null,2));throw Error('gateway_host_acceptance_failed; private diagnostics: '+root,{cause:error});}
+ finally{await worker?.stop();await host?.stop();if(service){await service.app.close();service.db.close();}model.closeAllConnections();await new Promise(done=>model.close(done));if(succeeded)await rm(root,{recursive:true,force:true,maxRetries:5,retryDelay:50});}
+}

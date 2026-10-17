@@ -1,3 +1,7 @@
+import {IsolatedWorkFiles,type IsolatedFileIdentity,type IsolatedFileOperation} from '../always-on/isolated-work-files.ts';
+import type {TrustedWorkRunWorkspaceResolver} from '../always-on/work-run-workspace.ts';
+import type {ExecutionLease} from './execution-lease.ts';
+import type {TaskCompletionWorkScope} from '../persistent-tasks/completion-candidates.ts';
 import {TaskReplyDrafts} from '../persistent-tasks/reply-drafts.ts';
 import {DiscoveryPlanning} from '../always-on/planning.ts';
 import {TaskReplySemanticChecks} from '../persistent-tasks/reply-semantic.ts';
@@ -29,6 +33,8 @@ import {installTaskBusinessReviews,currentTaskBusinessCertificate} from '../pers
 import {installTaskCompletionHandshake,preparedTaskCompletion,confirmTaskCompletion} from '../persistent-tasks/completion-handshake.ts';
 import {installTaskFinalizations} from '../persistent-tasks/finalization.ts';
 
+export type NativeWorkExecution={resolver:Pick<TrustedWorkRunWorkspaceResolver,'context'|'resolveFiles'>;inspections:{collect(runId:string,lease:ExecutionLease):Promise<unknown>;current(scope:TaskCompletionWorkScope):unknown}};
+
 export const WORKBENCH_TOOL_IDS = ['universe_capabilities', 'universe_search'];
 
 type Input = Record<string, unknown>;
@@ -52,7 +58,7 @@ function canonical(value: unknown): string {
 
 /** Only the local authenticated DSH host may resolve a product run's identity. */
 export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSync,
-  workbench: WorkbenchService, tasks: PersistentTaskService, token: string | undefined, modelBudgets?: ModelBudgetLedger,collaboration?:TaskCollaborationService,replyJudge?:ReplyJudgeClient) {
+  workbench: WorkbenchService, tasks: PersistentTaskService, token: string | undefined, modelBudgets?: ModelBudgetLedger,collaboration?:TaskCollaborationService,replyJudge?:ReplyJudgeClient,nativeWork?:NativeWorkExecution) {
   db.exec(`CREATE TABLE IF NOT EXISTS wb_tool_receipts (
     run_id TEXT NOT NULL REFERENCES ga_runs(id), call_id TEXT NOT NULL,
     request_hash TEXT NOT NULL, response_json TEXT NOT NULL, created_at TEXT NOT NULL,
@@ -279,7 +285,10 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
     const row=db.prepare(`SELECT t.task_id,t.title,t.objective,t.version AS task_version,o.occurrence_id,o.generation,o.root_run_id,o.parent_run_id AS continuation_of
       FROM wb_task_run_occurrences o JOIN wb_persistent_tasks t ON t.task_id=o.task_id
       WHERE o.run_id=? AND t.owner_id=?`).get(runId,owner) as TaskBinding|undefined;
-    return row ? {...row} : undefined;
+    if(!row)return;
+    const trusted=nativeWork?.resolver.context(runId);
+    if(!nativeWork&&db.prepare(`SELECT 1 FROM wb_discovery_work_admissions WHERE owner_id=? AND occurrence_id=? AND task_id=?`).get(owner,row.occurrence_id,row.task_id))throw Error('work_admission_execution_unavailable');
+    return {...row,...(trusted?{objective:trusted.objective}:{})};
   }
   function requireTask(identity:AgentRunContext):TaskBinding {
     const task=taskBinding(identity.run_id,identity.owner_id);
@@ -304,7 +313,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
     if (!modelBudgets) throw new Error('budget_service_unavailable');
     return {model_budget:{protocol:1,enforced:true}};
   }
-  function context(input: Input): AgentRunContext & {task_binding?:TaskBinding;model_budget?:{protocol:1;enforced:true}} {
+  function context(input: Input): AgentRunContext & {task_binding?:TaskBinding;model_budget?:{protocol:1;enforced:true}} & Partial<Pick<NonNullable<ReturnType<TrustedWorkRunWorkspaceResolver['context']>>,'work_binding'|'native_workspace'>> {
     if (typeof input.run_id !== 'string' || typeof input.session_ref !== 'string') throw new Error('workbench_identity_forbidden');
     const binding = db.prepare(`SELECT b.owner_id,b.conversation_id FROM ga_harness_session_bindings b
       JOIN ga_runs r ON r.conversation_id=b.conversation_id WHERE b.session_id=? AND r.id=?`)
@@ -320,7 +329,12 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
     if(input.tool_name!==undefined)assertTaskHandoffOperation(db,resolved,input.session_ref);
     if(resolved.kind==='task'&&input.tool_name!==undefined&&input.tool_name!=='jot_workspace')
       assertTaskDependenciesReady(db,executionEvidence,resolved.owner_id,requireTask(resolved).task_id,resolved.run_id);
-    return {...resolved,...(resolved.kind==='task'?{task_binding:requireTask(resolved)}:{}),...budgetContext(resolved.owner_id,resolved.run_id)};
+    const trusted=nativeWork?.resolver.context(resolved.run_id,input.execution_lease===undefined?undefined:normalizeExecutionLease(input.execution_lease));
+    if(!trusted&&resolved.kind==='native_team'&&db.prepare(`SELECT 1 FROM wb_native_execution_runs n
+      JOIN wb_task_run_occurrences o ON o.run_id=n.root_run_id
+      JOIN wb_discovery_work_admissions a ON a.occurrence_id=o.occurrence_id AND a.task_id=o.task_id AND a.owner_id=n.owner_id
+      WHERE n.run_id=? AND n.owner_id=?`).get(resolved.run_id,resolved.owner_id))throw Error('work_admission_execution_unavailable');
+    return {...resolved,...(trusted?{work_binding:trusted.work_binding,native_workspace:trusted.native_workspace}:{}),...(resolved.kind==='task'?{task_binding:requireTask(resolved)}:{}),...budgetContext(resolved.owner_id,resolved.run_id)};
   }
   function assertTaskModelAccounting(task:TaskBinding,pendingRunId?:string) {
     const unresolved=db.prepare(`SELECT a.state,a.bound_exceeded FROM wb_model_budget_attempts a
@@ -472,6 +486,15 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       || typeof input.summary!=='string'||!input.summary.trim()||input.summary.length>2000
       || (input.intent!=='continue'&&input.route!==undefined))throw new Error('invalid_goal_proposal');
     const summary=input.summary.trim();
+    let isolatedInspection:unknown;
+    if(input.intent==='complete'&&nativeWork){
+      const identity=context(input),digest=createHash('sha256').update(canonical({operation:'goal-proposal',input})).digest('hex');
+      const cached=savedCall(identity.run_id,String(input.call_id),digest);if(cached!==undefined)return cached;
+      if(nativeWork.resolver.context(identity.run_id)){
+        isolatedInspection=await nativeWork.inspections.collect(identity.run_id,normalizeExecutionLease(input.execution_lease));
+        if(!isolatedInspection||typeof isolatedInspection!=='object')throw Error('task_completion_work_inspection_required');
+      }
+    }
     return withImmediateTransaction(db,()=>{
       const identity=context(input),task=requireTask(identity);
       if(input.intent==='complete')discoveryPlanning.completion(identity.run_id);
@@ -493,7 +516,9 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       }
       const action=input.intent==='continue'?'resume':input.intent==='wait_user'?'pause':'review';
       const proposalId=`goal-proposal-${randomUUID()}`;
-      const snapshot={objective:task.objective,task_version:task.task_version,generation:task.generation,
+      const isolated_work_evidence=isolatedInspection===undefined?undefined:nativeWork!.inspections.current({...task,owner_id:identity.owner_id,runId:identity.run_id,frozen_context:JSON.stringify({workspace_id:identity.workspace_id,project_id:identity.project_id})});
+      if(isolatedInspection!==undefined&&(!isolated_work_evidence||typeof isolated_work_evidence!=='object'||'then' in isolated_work_evidence||canonical(isolatedInspection)!==canonical(isolated_work_evidence)))throw Error('task_completion_work_inspection_changed');
+      const snapshot={...(isolated_work_evidence===undefined?{}:{isolated_work_evidence}),objective:task.objective,task_version:task.task_version,generation:task.generation,
         steps:steps.map(step=>({subtask_id:step.subtask_id,version:step.version,acceptance:step.acceptance,status:step.status,evidence:JSON.parse(step.evidence_json)}))};
       const outputs=input.files===undefined?{}:prepareTaskPresentedFiles(db,{...task,owner_id:identity.owner_id,
         frozen_context:JSON.stringify({workspace_id:identity.workspace_id,project_id:identity.project_id}),steps:snapshot.steps},input.files,identity.run_id);
@@ -514,9 +539,32 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
   app.post('/internal/v1/workbench/tool', async request => {
     authorized(request.headers.authorization);
     const input = object(request.body); fields(input, ['run_id', 'session_ref', 'operation', 'arguments', 'call_id']);
+    if(nativeWork&&['files.list','files.read','files.write'].includes(String(input.operation))){
+      const identity=context({...input,tool_name:'jot_workspace'}),candidate=nativeWork.resolver.context(identity.run_id);
+      if(candidate){
+        const lease=normalizeExecutionLease(input.execution_lease),bound=nativeWork.resolver.context(identity.run_id,lease)!;
+        const operation=String(input.operation),args=object(input.arguments),keys=operation==='files.list'?[]:operation==='files.read'?['path']:['path','content','expected_version'];fields(args,keys);
+        tasks.assertDiscoveryOperation(identity.run_id,operation);
+        if(!validCallId(input.call_id))throw Error('invalid_call_id');
+        const callId=String(input.call_id),digest=createHash('sha256').update(canonical({operation,args})).digest('hex'),prior=savedCall(identity.run_id,callId,digest);if(prior!==undefined)return prior;
+        const task=requireTask(identity);assertTaskDependenciesReady(db,executionEvidence,identity.owner_id,task.task_id,identity.run_id);
+        const fileIdentity:IsolatedFileIdentity={owner_id:identity.owner_id,...bound.admission.scope,run_id:identity.run_id,occurrence_id:bound.admission.occurrence_id,cycle_id:bound.admission.cycle_id,snapshot_id:bound.admission.snapshot_id,call_id:callId};
+        const captured=canonical(bound);
+        const isolated=new IsolatedWorkFiles({db,resolve:value=>nativeWork.resolver.resolveFiles(value,lease),commitReceipt:(_db,result)=>{
+          const current=context({...input,tool_name:'jot_workspace'});assertExecutionLease(db,current.run_id,lease);tasks.assertDiscoveryOperation(current.run_id,operation);
+          if(canonical(nativeWork.resolver.context(current.run_id,lease))!==captured)throw Error('work_workspace_binding_changed');
+          assertTaskDependenciesReady(db,executionEvidence,current.owner_id,task.task_id,current.run_id);
+          if(savedCall(current.run_id,callId,digest)!==undefined)throw Error('isolated_file_original_receipt_conflict');
+          const response={...result,execution_receipt:executionEvidence.record(current.run_id,callId,operation,result)};saveCall(current.run_id,callId,digest,response);
+        }});
+        await isolated.execute(fileIdentity,{operation,...args} as IsolatedFileOperation);
+        const response=savedCall(identity.run_id,callId,digest);if(response===undefined)throw Error('isolated_file_original_receipt_missing');return response;
+      }
+    }
     if (input.operation === 'web.read') {
       const identity = context({...input, tool_name: 'jot_workspace'});
       if(identity.kind==='memory_capture')throw new Error('workbench_operation_forbidden');
+      tasks.assertDiscoveryOperation(identity.run_id,'web.read');
       const args = object(input.arguments); fields(args, ['url']);
       if (typeof args.url !== 'string' || args.url.length > 2048) throw new Error('invalid_page_url');
       const task = identity.task_binding;

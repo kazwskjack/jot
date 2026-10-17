@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import {types as utilTypes} from 'node:util';
 import {configuredTaskRunLimit,storedTaskRunLimit,taskRunLimitExhausted,encodedTaskRunLimit,installTaskRunLimits} from './run-limit.ts';
 import {installDiscoveryTaskBindings} from '../always-on/task-binding.ts';
 import {DiscoveryPolicies} from '../always-on/discovery-policy.ts';
@@ -40,6 +41,8 @@ type Trigger = CalendarTrigger | DialogueTrigger | {kind:'project_discovery';pol
 type Evidence = { kind: string; reference: string; hash?: string };
 export type PersistentTaskOptions = { now?: () => Date; projectionRoot?: string; events?: EventStore;
   modelBudgetPolicy?:WorkbenchBudgetPolicy;
+  /** Host-only live work integration. Missing configuration never grants work. */
+  discoveryWorkOperations?: {assertOperation(runId:string,operation:string):void};
   pageReader?: (url: string) => Promise<{ text: string; url: string }>; maxTasksPerTick?: number };
 const TERMINAL = ['succeeded', 'partial', 'failed', 'cancelled', 'interrupted', 'outcome_unknown'];
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -274,7 +277,7 @@ export class PersistentTaskService {
     const query=(id:string)=>this.db.prepare(`SELECT a.owner_id,o.run_id AS root_run_id FROM wb_discovery_work_admissions a
       JOIN wb_task_run_occurrences o ON o.occurrence_id=a.occurrence_id AND o.task_id=a.task_id WHERE o.run_id=?`).get(id) as Row|undefined;
     const direct=query(runId);if(direct)return direct;
-    if(!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_native_execution_runs'").get())return;
+    if(!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type IN ('table','view') AND name='wb_native_execution_runs'").get())return;
     const native=this.db.prepare('SELECT root_run_id FROM wb_native_execution_runs WHERE run_id=?').get(runId) as Row|undefined;
     return native?query(native.root_run_id):undefined;
   }
@@ -283,14 +286,24 @@ export class PersistentTaskService {
       JOIN wb_discovery_task_bindings b ON b.policy_id=a.policy_id
       JOIN wb_task_run_occurrences o ON o.occurrence_id=a.occurrence_id WHERE o.run_id=?`).get(id) as Row|undefined;
     const direct=query(runId);if(direct)return direct;
-    if(!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_native_execution_runs'").get())return;
+    if(!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type IN ('table','view') AND name='wb_native_execution_runs'").get())return;
     const native=this.db.prepare('SELECT root_run_id FROM wb_native_execution_runs WHERE run_id=?').get(runId) as Row|undefined;
     return native?query(native.root_run_id):undefined;
   }
   /** Planning cycles cannot acquire write/delegate/message authority through the
    * generic workspace tool. A later work phase requires its own isolated scope. */
   assertDiscoveryOperation(runId:string,operation:string){
-    if(this.discoveryWorkForRun(runId)){this.assertRunActive(runId);throw Error('work_admission_execution_unavailable');}
+    if(this.discoveryWorkForRun(runId)){
+      this.assertRunActive(runId);
+      const gate=this.options.discoveryWorkOperations;
+      if(!gate)throw Error('work_admission_execution_unavailable');
+      const result:unknown=gate.assertOperation(runId,operation);
+      if(result!==undefined){
+        if(utilTypes.isPromise(result))void Promise.prototype.then.call(result,()=>{},()=>{});
+        throw Error('work_admission_execution_unavailable');
+      }
+      return;
+    }
     if(!this.discoveryForRun(runId))return;
     this.assertRunActive(runId);
     if(!['agents.list','messages.list','memory.list','files.list','files.read','tasks.get','tasks.subtasks','tasks.next','tasks.reply_drafts',

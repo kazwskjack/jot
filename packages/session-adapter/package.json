@@ -9,6 +9,7 @@
     "voice.js",
     "workbench.js",
     "workbench-goal.js",
+    "host-execution-lease.js",
     "native-idle-observation.js",
     "model-budget-stream.js",
     "checkpoint.js",

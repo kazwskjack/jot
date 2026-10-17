@@ -63,7 +63,7 @@
 
 - **当前路径：** `packages/gateway/src/server.ts:/healthz` 仅 `{ok:true,service}` liveness。`session-adapter/index.js` 已有多个 feature readiness；`harness/main.ts` 在 final recovery 启动时检查 history readiness。`HostResourceObservations` / `readHostResourceObservations` 报 gateway shared process interval（GPU/remote inference 明确 null），不能相加称单任务专属资源。`ModelBudgetLedger` 持久 usage/unknown holds；`events/retention-report.ts`、`retention-plan.ts:buildEventRetentionPlan` 只做 protected/nondeletable inventory。profile 默认关闭 session-log-deepseek、session-telemetry-otel；本地 root、Gateway、Adapter、实际 SDK/scripted provider、UI 测试分别存在。
 - **剩余闭环：** 聚合可依赖 readiness（DB/schema、原 Host/runtime/source manifest、consumer protocol、model policy、storage、browser/desktop/voice 等实际 enabled feature），脱敏 owner task 状态/unknown outcome 诊断，证据矩阵按 source revision/平台/provider 区分；retention 删除前必须 backup + restore + 原 authority/attachment 证明。不能因 liveness 200、历史绿测试或脚本 provider 就提升真实 provider/deployment 状态。
-- **下一代码契约：** 在 `packages/gateway/src/server.ts`、`harness/main.ts`、`harness/session-controller-client.ts`、`packages/dsh-host/` 新增只读 `/readyz` / CLI probe，输出 `{ready,checked_at,source_revision,components:[{name,state:'ready'|'disabled'|'unknown'|'failed',protocol,reason}]}`，禁止读取秘密/创建 Session/模型探测调用；liveness 与 readiness 分开。证据产物位于 `E:/codex/...`，包含 `{source_revision,command,platform,provider_kind:'scripted'|'real',suite,result,features}`，不包含日志原文/用户内容。retention 暂维持 inventory，先实现 isolated restore verification receipt，再让既有 retention policy 消费。
+- **下一代码契约：** 在 `packages/gateway/src/server.ts`、`harness/main.ts`、`harness/session-controller-client.ts`、`packages/dsh-host/` 新增只读 `/readyz` / CLI probe，输出 `{ready,checked_at,source_revision,components:[{name,state:'ready'|'disabled'|'unknown'|'failed',protocol,reason}]}`，禁止读取秘密/创建 Session/模型探测调用；liveness 与 readiness 分开。证据产物保存在不进入发行包的私有测试暂存区，包含 `{source_revision,command,platform,provider_kind:'scripted'|'real',suite,result,features}`，不包含日志原文/用户内容。retention 暂维持 inventory，先实现 isolated restore verification receipt，再让既有 retention policy 消费。
 - **验证/人工：** readiness dependency missing、timeout、mixed consumer versions、disabled != ready、redaction、no model/no mutation、跨 owner diagnostics；已有 health/security tests扩展，保留各 suite 独立运行。自主可完成 probe/manifest/本地 matrix runner；真实 provider、压力/费用、跨 OS、backup restore 部署与 fleet rollout 是 operator 验收。
 
 ## 可立即交付的优先项
@@ -97,3 +97,81 @@ TDD 初始红测：新增 `test/browser-screenshot.test.mjs` 的 10 例中 9 失
 相邻回归首次组合执行截图/tools/runtime/api 共 22 例：21 通过，1 个已有 SSE shutdown 测试因相同 loopback `EACCES` 失败。没有更改该 SSE 测试或把它记作通过。未运行全套、build、真实 Playwright/真实模型、多模态 provider 或生产服务；未提交/推送。
 
 主审后移除截图测试中的私有绝对路径；测试目录取 `JOT_TEST_TMP` 或 `os.tmpdir()`，本地执行由外部 TEMP/TMP/JOT_TEST_TMP 指向获准目录。新增终止 run 的红测复现了无 AbortSignal 时仍可截图登记的问题；现按原 runtime 的 queued/running/waiting_approval 活跃状态检查，terminal/unknown 状态拒绝，并在 driver 返回与登记事务中重复检查。独占文件创建、写入、close 均在清理保护中；即使 DB rollback 抛错也执行文件 close/unlink。
+
+
+## 后续实施记录：内部可信隔离 lead 接线（验收仍有待办）
+
+本轮allowlist只覆盖隔离`jot_workspace`文件及原任务操作接线，不是所有外部工具的总沙箱。
+原allowed external tools仍受原role、lease、依赖、Goal和预算约束；不扩展浏览器或外部动作
+权限，native work成员仍fail-closed。
+
+本节更新后续工作树状态，不把开头只读审计时点或历史测试改写为本轮结果。
+`TrustedWorkRunWorkspaceResolver`、`native-work-runtime` 与原 Gateway/Worker
+接线已连接实际 work admission、continuation、保存 Session、完整 selected
+objective 和隔离 cwd。只有显式可信配置及原执行/预算 readiness 才安装；默认关闭，
+没有生产部署，也没有第二 planner/runtime。原 native work 成员仍拒绝执行，不能退回共享权限。
+
+原 `workbench/execution.ts` 在同步事务外执行 lead 文本 file IO；原短事务内同时提交
+isolated result、原 execution proof、独立 isolated subtype 和原 tool response。
+回放先读原响应，不重复 IO。完整 `WorkInspections` 冻结真实 base/result manifest、diff、
+计划/源哈希和原 call set；原 quiescence、租约、权限、pending/unknown 状态在最终事务复核。
+proposal/candidate/current 必须绑定同一完整 inspection；之后的文件调用或重新检查不能
+静默刷新旧 proposal。selected objective 来自完整已接受计划，原 planning task objective 不改。
+
+本轮针对性 inspection/business-completion13/13、普通 output/acceptance27/27、
+历史 source/response 硬化3/3 通过，typecheck 通过。27 项运行明确排除此前已观察到
+loopback 权限失败的 pending-download 个案，没有把它记作通过。root50/50、UI212/212通过；完整Gateway/build/披露的当前结果与首轮失败统一记录于下文，
+不替代SDK稳定性门槛。较早一次修正后的实际 installed SDK 两例2/2通过（37.7s）：direct
+10条 Messages请求/60 reported tokens，cold wait/reply 11条/66 tokens；后者重启
+Host+Worker，保留原 work Session/Goal/occurrence/完整 selected objective。两例均验证
+exact1 isolated write、原 native completion、owner验收与immutable artifact交付，
+ledger 无 held/unknown/reserved。更早 pending-step 与末尾 fixture 查询失败仍保留失败记录。
+官方 typed missing-Session 兼容、GoalBridge lease 保留与readonly observation 分离已修正；
+完整 adapter 回归548总/524通过/24既有SDK依赖skip/0失败（2.75s，未设置可选SDK模块
+环境）；显式installed SDK两例是另一层证据。package dry-run54文件包含新helper，真实
+解包import测试通过。SDK的Messages端点为受控本地脚本，不证明真实provider质量或生产稳定性。
+
+第1/4/8项仍需原 unknown 恢复和 consumer rollout、通用工具副作用/冲突契约、真实
+readiness/可观测性及跨平台矩阵；本轮只关闭上述内部 lead 文本 IO 与证据接线子链。
+同库 shared + 两个 isolated cycle/version 的完整接受矩阵、授权 native 成员、binary/shell
+权限与实际 SDK 完整回归仍待验。完整 diff 产品 UI、apply/unknown reconciliation、
+report-memory、autodispatch、保留/Git/部署等见
+[当前 native-work 边界](../superpowers/plans/2026-10-17-always-on-discovery.md#current-internal-lead-io-and-frozen-output-integration)。
+
+
+### 当前最终本地 gate、首轮失败与 Host 待修发现
+
+首完整Gateway运行1729总/1719通过/3失败/7既有或opt-in skip（668.09s），3失败全部为
+memory-pump。窄Workbench schema只有悬空current-occurrences view、缺原task-occurrences
+base table时，新Session识别查询view导致普通memory processing失败；现先检查真实base
+再query view，不合成原task权限或放宽work恢复。修后目标回归32/32通过：普通Session20、
+工作Session2、operation-gate5、memory-pump5。首轮全量失败保留失败记录。
+
+修后完整Gateway重跑1729总/1722通过/7既有skip/0失败/0取消（632.263s）。Windows
+Gateway build与前端Vite build通过；public6测试通过，891份working-tree文件preflight
+零findings，Brain lint-links通过。两个test fixture仅缩短合成bearer字符串以通过隐私扫描，
+相关18目标测试全通过；没有修改扫描规则或runtime credential处理。root50、UI212、
+adapter和显式SDK证据分别记录，不相加成总体capability完成。
+
+新final review实证P2 Host生命周期缺口：composer非必选且native Session历史缺失时，
+Host可能先create，尚未确认原首次work run及不存在saved native Goal mapping。Host
+before-create修正的35/35目标测试通过，独立fresh review确认覆盖且无新具体finding。
+最终完整adapter为556总/532通过/24既有skip/0失败；最新no-recreate实际SDK2/2通过
+（33.13s），direct10条Messages、cold11条，保留原Session/Goal、完整selected objective、
+exact1 isolated write和原交付。Gateway/build先于此Host-only变动，因此另列它自己的目标/
+完整adapter/SDK证据；这些通过不宣称修复SQLite锁争用。默认off、未生产部署；SQLite稳定性解决、精确发布readback及真实provider/
+部署接受仍是门槛。
+
+### 此前 final-log SDK 反证：冷 continuation 的 SQLite 稳定性仍开放
+
+此前final-log实际SDK重跑仅1/2通过：direct通过，cold在原step-admission路径遇SQLite
+`database is locked`。原busy_timeout为75ms；具体持锁者和根因没有证据，不能猜测，
+没有提高timeout或盲重试来宣称修复。较早2/2保留为该次真实证据，不能替代最终全通过或
+稳定性结论。cold continuation的SQLite contention/stability、修正后的完整验收重跑仍待解决。
+本次为受控本地脚本Messages传输，不是实际provider调用或生产验收；没有虚构final成功。
+
+另一次只读cold trace为1/1通过：7552 records、4个SQLite进程、零SQL error，未观测到跨
+microtask/event loop未关闭transaction。观测到isolated原receipt事务56ms、Worker BEGIN
+等待46.598ms、complete proposal44ms、相邻Goal binding/task state25–31ms；原75ms
+busy timeout下同步跨进程争用仅是可能解释，不能回推此前具体持锁者/根因。trace通过不覆盖
+此前final-log SDK1/2失败；最新no-recreate2/2亦不能证明锁问题已修复，SQLite contention/stability继续开放。

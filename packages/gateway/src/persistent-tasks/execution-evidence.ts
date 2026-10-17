@@ -1,5 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
+import {installIsolatedOutputSources} from './isolated-output-schema.ts';
+import {isolatedFileFacts} from './isolated-output-source.ts';
 import {withImmediateTransaction} from '../db/database.ts';
 
 export type ExecutionEvidence = { kind: string; reference: string; hash?: string };
@@ -9,10 +11,16 @@ export class TaskExecutionEvidence {
   private readonly db: DatabaseSync;
   constructor(db: DatabaseSync) {
     this.db = db;
+    installIsolatedOutputSources(db);
     db.exec(`CREATE TABLE IF NOT EXISTS wb_task_execution_receipts (
       receipt_id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES ga_runs(id),call_id TEXT NOT NULL,
       operation TEXT NOT NULL,result_hash TEXT NOT NULL,created_at TEXT NOT NULL,UNIQUE(run_id,call_id));
       CREATE TRIGGER IF NOT EXISTS wb_execution_receipt_no_update BEFORE UPDATE ON wb_task_execution_receipts
+        BEGIN SELECT RAISE(ABORT,'execution_receipt_immutable'); END;
+      CREATE TRIGGER IF NOT EXISTS wb_execution_receipt_no_delete BEFORE DELETE ON wb_task_execution_receipts
+        BEGIN SELECT RAISE(ABORT,'execution_receipt_immutable'); END;
+      CREATE TRIGGER IF NOT EXISTS wb_execution_receipt_no_replace BEFORE INSERT ON wb_task_execution_receipts
+        WHEN EXISTS(SELECT 1 FROM wb_task_execution_receipts WHERE receipt_id=NEW.receipt_id OR (run_id=NEW.run_id AND call_id=NEW.call_id))
         BEGIN SELECT RAISE(ABORT,'execution_receipt_immutable'); END;
       CREATE TABLE IF NOT EXISTS wb_task_file_execution_receipts (
         receipt_id TEXT PRIMARY KEY REFERENCES wb_task_execution_receipts(receipt_id),run_id TEXT NOT NULL,
@@ -35,19 +43,22 @@ export class TaskExecutionEvidence {
   private recordInside(runId: string, callId: string, operation: string, result: unknown): ExecutionEvidence {
     if (operation.startsWith('tasks.')) throw new Error('invalid_execution_evidence_operation');
     let file:Record<string,string|number>|undefined;
+    let isolated:Record<string,any>|undefined;
     if(operation==='files.write'){
       if(!this.db.isTransaction)throw new Error('file_execution_receipt_transaction_required');
       if(!result||typeof result!=='object')throw new Error('file_execution_output_unverified');
       const value=result as Record<string,unknown>;
       if(typeof value.path!=='string'||!Number.isSafeInteger(value.version)||typeof value.sha256!=='string'||!Number.isSafeInteger(value.size))throw new Error('file_execution_output_unverified');
-      file=this.db.prepare(`SELECT w.* FROM wb_file_write_runs w
+      if(value.source!==undefined&&value.source!=='workspace'&&value.source!=='isolated')throw new Error('file_execution_output_unverified');
+      if(value.source==='isolated')isolated=isolatedFileFacts(this.db,runId,callId,result,true);
+      else file=this.db.prepare(`SELECT w.* FROM wb_file_write_runs w
         JOIN wb_file_versions v ON v.owner_id=w.owner_id AND v.workspace_id=w.workspace_id AND v.project_id=w.project_id AND v.path=w.path AND v.version=w.version
         JOIN wb_run_bindings b ON b.run_id=w.run_id AND b.owner_id=w.owner_id
         WHERE w.run_id=? AND w.path=? AND w.version=? AND w.sha256=? AND w.size=?
         AND v.sha256=w.sha256 AND v.size=w.size
         AND json_extract(b.context_json,'$.workspace_id')=w.workspace_id AND json_extract(b.context_json,'$.project_id')=w.project_id`)
         .get(runId,value.path,value.version as number,value.sha256,value.size as number) as Record<string,string|number>|undefined;
-      if(!file)throw new Error('file_execution_output_unverified');
+      if(!file&&!isolated)throw new Error('file_execution_output_unverified');
     }
     const serialized=JSON.stringify(result);
     const hash = createHash('sha256').update(serialized).digest('hex');
@@ -56,6 +67,8 @@ export class TaskExecutionEvidence {
       .run(reference, runId, callId, operation, hash, new Date().toISOString());
     if(file)this.db.prepare('INSERT INTO wb_task_file_execution_receipts VALUES(?,?,?,?,?,?,?,?,?)')
       .run(reference,runId,file.owner_id!,file.workspace_id!,file.project_id!,file.path!,file.version!,file.sha256!,file.size!);
+    if(isolated)this.db.prepare('INSERT INTO wb_task_isolated_file_execution_receipts VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+      .run(reference,String((result as Record<string,unknown>).receipt_id),runId,isolated.owner_id,isolated.workspace_id,isolated.project_id,isolated.task_id,isolated.occurrence_id,isolated.cycle_id,isolated.snapshot_id,isolated.path,isolated.version,isolated.sha256,isolated.size,serialized);
     // Store only bounded autonomous web evidence, never every tool result.
     // Oversized results remain attested but cannot be used as full content proof.
     if(operation==='web.read'&&this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_task_reply_scopes'").get()){

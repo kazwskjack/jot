@@ -5,7 +5,9 @@ import { once } from 'node:events';
 import type { DatabaseSync } from 'node:sqlite';
 import { withImmediateTransaction } from '../db/database.ts';
 import { detectContentType } from './content-type.ts';
-import {taskFileSource,type TaskFileScope} from '../persistent-tasks/task-file-source.ts';
+import {sameTaskFileLocation} from '../persistent-tasks/output-content.ts';
+import {readIsolatedTaskFileVersion} from '../persistent-tasks/isolated-output-source.ts';
+import {taskFileSource,type TaskFileScope,type TaskFileLocation} from '../persistent-tasks/task-file-source.ts';
 
 function rejectTaskOutputSymlinks(path:string):void {
   let current=resolve(path);
@@ -44,9 +46,9 @@ export class ArtifactService {
 
   /** Copies only a trusted task write receipt's exact UTF8 bytes. Publication
    * is still the caller's separate business/Goal transaction, never this API. */
-  registerTaskFileVersion(input:{runId:string;receiptId:string;content:string;deliveryRunId?:string}):ReturnType<ArtifactService['get']>{
+  registerTaskFileVersion(input:{runId:string;receiptId:string;content:string;deliveryRunId?:string;location?:TaskFileLocation}):ReturnType<ArtifactService['get']>{
     if(!this.db.isTransaction)throw new Error('task_output_transaction_required');
-    let source=this.db.prepare(`SELECT e.*,r.conversation_id FROM wb_task_file_execution_receipts e
+    let source=this.db.prepare(`SELECT e.*,r.conversation_id,'workspace' AS source FROM wb_task_file_execution_receipts e
       JOIN ga_runs r ON r.id=e.run_id JOIN ga_conversations c ON c.id=r.conversation_id AND c.owner_id=e.owner_id
       JOIN wb_task_run_occurrences o ON o.run_id=e.run_id
       JOIN wb_file_versions v ON v.owner_id=e.owner_id AND v.workspace_id=e.workspace_id AND v.project_id=e.project_id
@@ -57,16 +59,24 @@ export class ArtifactService {
       if(!frozen)throw new Error('task_output_source_unverified');
       const scope=JSON.parse(frozen.snapshot_json) as TaskFileScope&{workspace_file_outputs?:Array<Record<string,unknown>>;file_outputs?:Array<Record<string,unknown>>};
       const native=taskFileSource(this.db,scope,input.receiptId,input.deliveryRunId),pin=[...(scope.workspace_file_outputs??[]),...(scope.file_outputs??[])].find(output=>output.receipt_id===input.receiptId);
-      if(!native?.native||native.run_id!==input.runId||!pin?.verified||pin.content_verified!==true||pin.path!==native.path||pin.version!==native.version||pin.sha256!==native.sha256||pin.size!==native.size)throw new Error('task_output_source_unverified');
+      if(!native||(!native.native&&native.source!=='isolated')||native.run_id!==input.runId||!pin?.verified||pin.content_verified!==true||pin.path!==native.path||pin.version!==native.version||pin.sha256!==native.sha256||pin.size!==native.size
+        ||(pin.source===undefined?native.source!=='workspace':pin.source!==native.source)
+        ||(native.source==='isolated'&&(pin.cycle_id!==native.cycle_id||pin.snapshot_id!==native.snapshot_id||pin.isolated_receipt_id!==native.isolated_receipt_id)))throw new Error('task_output_source_unverified');
       const {native:kind,...value}=native;source=value;
+      if(native.source==='isolated'){
+        const stored=readIsolatedTaskFileVersion(this.db,native);
+        if(stored.content!==input.content)throw new Error('task_output_content_mismatch');
+      }
     }
     if(!source)throw new Error('task_output_source_unverified');
+    if(source.source==='isolated'&&!input.location)throw new Error('task_output_source_unverified');
+    if(input.location&&!sameTaskFileLocation(input.location,source as unknown as TaskFileLocation))throw new Error('task_output_source_unverified');
     if(typeof input.content!=='string')throw new Error('task_output_content_mismatch');
     const raw=Buffer.from(input.content,'utf8'),digest=createHash('sha256').update(raw).digest('hex');
     if(digest!==source.sha256||raw.length!==source.size)throw new Error('task_output_content_mismatch');
-    const identity=input.deliveryRunId===undefined?`task-file:${input.runId}:${input.receiptId}`:`task-native-file:${input.deliveryRunId}:${input.runId}:${input.receiptId}`;
+    const identity=source.source==='isolated'?JSON.stringify(['task-isolated-file',input.deliveryRunId,input.runId,input.receiptId,source.cycle_id,source.snapshot_id,source.isolated_receipt_id]):input.deliveryRunId===undefined?`task-file:${input.runId}:${input.receiptId}`:`task-native-file:${input.deliveryRunId}:${input.runId}:${input.receiptId}`;
     const id=`artifact-${createHash('sha256').update(identity).digest('hex').slice(0,32)}`;
-    const taskFile={run_id:input.runId,receipt_id:input.receiptId,path:source.path,version:source.version,sha256:digest,...(input.deliveryRunId===undefined?{}:{delivery_run_id:input.deliveryRunId})};
+    const taskFile={...(source.source==='isolated'?{source:'isolated',cycle_id:source.cycle_id,snapshot_id:source.snapshot_id,isolated_receipt_id:source.isolated_receipt_id}:{}),run_id:input.runId,receipt_id:input.receiptId,path:source.path,version:source.version,sha256:digest,...(input.deliveryRunId===undefined?{}:{delivery_run_id:input.deliveryRunId})};
     const prior=this.db.prepare('SELECT * FROM ga_artifacts WHERE id=?').get(id) as Record<string,unknown>|undefined;
     if(prior){
       if(prior.owner_id!==source.owner_id||prior.conversation_id!==source.conversation_id||prior.kind!=='task_output_file'||prior.current_version!==1)throw new Error('task_output_artifact_conflict');

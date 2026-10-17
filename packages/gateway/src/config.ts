@@ -27,6 +27,7 @@ export function loadBffConfig() {
     voiceEnabled: process.env.GENERAL_AGENT_VOICE_ENABLED === 'true',
     conversationGoalResumeEnabled:process.env.GENERAL_AGENT_CONVERSATION_GOAL_RESUME_ENABLED==='true',
     workbenchRoot: process.env.GENERAL_AGENT_WORKBENCH_ROOT?.trim() || join(dirname(databasePath), 'jot-workspaces'),
+    ...(process.env.GENERAL_AGENT_NATIVE_WORK_ROOT!==undefined?{nativeWorkRoot:process.env.GENERAL_AGENT_NATIVE_WORK_ROOT.trim()}:{}),
     ...workbenchExecutionConfiguration(process.env),
     voiceAdapterUrl: process.env.GENERAL_AGENT_VOICE_ADAPTER_URL?.trim() || 'http://127.0.0.1:18841',
     voiceAdapterTokenFile: process.env.GENERAL_AGENT_VOICE_ADAPTER_TOKEN_FILE?.trim() || '',

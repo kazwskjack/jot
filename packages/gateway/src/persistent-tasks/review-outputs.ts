@@ -1,12 +1,13 @@
 import type {DatabaseSync} from 'node:sqlite';
 import {currentTaskCompletionCandidate} from './completion-candidates.ts';
 import {taskOutputsDeliverable} from './output-delivery.ts';
+import {taskFileSource} from './task-file-source.ts';
 import {verifyTaskOutputContent} from './output-content.ts';
 import {readFrozenGeneratedPart,withGeneratedOutputReadScope} from './generated-output-content.ts';
 
 type Frozen=ReturnType<typeof currentTaskCompletionCandidate>;
 type Output={source:'workspace'|'native'|'generated';file_name:string;version:number;size_bytes:number;sha256:string;mime_type:string;read:()=>Buffer};
-const unavailable=new Set(['task_completion_state_conflict','budget_usage_unknown','task_completion_output_integrity_failed','task_output_reader_unavailable','task_output_source_unverified','task_auxiliary_pending','generated_artifact_producer_unverified','generated_artifact_content_mismatch','generated_output_reader_unavailable']);
+const unavailable=new Set(['task_completion_state_conflict','budget_usage_unknown','task_completion_output_integrity_failed','task_output_reader_unavailable','task_output_source_unverified','task_auxiliary_pending','task_completion_work_inspection_required','generated_artifact_producer_unverified','generated_artifact_content_mismatch','generated_output_reader_unavailable']);
 
 /** Owned pending review access, not a business certificate or final delivery. */
 export class TaskReviewOutputs{
@@ -29,8 +30,10 @@ export class TaskReviewOutputs{
   for(const [source,files] of [['native',frozen.snapshot.file_outputs??[]],['workspace',frozen.snapshot.workspace_file_outputs??[]]] as const){
    for(const file of files){
     if(!file.verified||!file.version||!file.sha256||file.size===undefined)throw new Error('task_review_output_unavailable');
+    const resolved=taskFileSource(this.db,frozen.snapshot,file.receipt_id!,runId);
+    if(!resolved)throw new Error('task_review_output_unavailable');
     outputs.push({source,file_name:file.path,version:file.version,size_bytes:file.size,sha256:file.sha256,mime_type:file.path.endsWith('.md')?'text/markdown':'text/plain',
-     read:()=>Buffer.from(verifyTaskOutputContent(this.db,{owner:frozen.snapshot.owner_id,workspace:context.workspace_id,project:context.project_id,path:file.path,version:file.version!,runId},{sha256:file.sha256!,size:file.size!}).content,'utf8')});
+     read:()=>Buffer.from(verifyTaskOutputContent(this.db,{owner:frozen.snapshot.owner_id,workspace:context.workspace_id,project:context.project_id,path:file.path,version:file.version!,runId,source:resolved},{sha256:file.sha256!,size:file.size!}).content,'utf8')});
    }
   }
   for(const group of frozen.snapshot.artifact_outputs??[]){

@@ -121,3 +121,79 @@
 | P3 | installer staging / desktop shell | 本地可重复构建与失败恢复，活跃执行不丢失 | release manifest、生命周期合同；签名发布后验 |
 
 这些包可按文件所有权隔离并行，但 schema/contracts、`server.ts`、BFF allowlist、全局导航和 release manifest 应各有单一整合者。独立实现者先定义 contract/fixture，再由整合者串联并按仓库要求执行 root test/build 与 Gateway build/tests；本盘点没有运行这些检查，不能作为合并或生产启用依据。
+
+
+## 后续实施记录：隔离文本输出的原 artifact/review 接线与发布边界
+
+本轮allowlist只覆盖隔离`jot_workspace`文件及原任务操作接线，不是所有外部工具的总沙箱。
+原allowed external tools仍受原role、lease、依赖、Goal和预算约束；不扩展浏览器或外部动作
+权限，native work成员仍fail-closed。
+
+原 completion/review/`ArtifactService` 已连接内部 isolated lead 文本版本：保存明确
+workspace/isolated discriminator、cycle/snapshot/local receipt、原 proof、producing run
+和 delivery run。历史 isolated reader 独立校验原 operation request digest、response/proof
+及 SQLite BLOB hash/size；旧共享 pin 仅经实际原 shared receipt 解码。审核与交付使用冻结
+不可变版本，绝不按同名 path/version 选择可变树或共享 fallback；交付只是复制，不是项目 apply。
+原上传、generated group 和 shared/native-shared artifact 契约保留。
+
+完整 base/result manifests、diff、selected objective 和 plan/source/call-set 哈希已经
+内部冻结，并对 proposal/candidate/current 精确 pin；现有产品 review 仍只展示所选文件/criteria。
+owner 可读的全量 diff/base/plan UI、通用 binary/native producer、文件 checkpoint/fork/restore
+产品链和独立 reviewed apply/rollback/unknown reconciliation 均未由本轮关闭。
+
+本轮 inspection/business-completion13/13、普通 output/acceptance27/27 和历史 reader
+硬化3/3 是不同针对性证据，不能相加当作全套；27 项组排除此前真实 loopback 权限失败个案，
+该个案未改成通过。typecheck、root50/50、UI212/212 通过。完整Gateway/build/披露当前结果及首轮失败统一记录于下文；历史full-suite/build不能替代
+精确发布readback与SDK稳定性门槛。
+
+较早一次修正后的实际 installed SDK两例2/2通过（37.7s）：direct10条Messages请求/60 reported
+tokens；cold wait/reply11条/66 tokens，重启Host+Worker并保留原work Session/Goal、
+occurrence与完整selected objective。两例验证exact1 isolated write、原native completion、
+owner验收、immutable artifact交付和无held/unknown/reserved的ledger。更早pending-step/
+末尾fixture查询失败保留失败状态。官方typed missing-Session兼容与GoalBridge lease保留/
+readonly observation分离已修正。完整adapter回归548总/524通过/24既有SDK依赖skip/
+0失败（2.75s，未设置可选SDK模块环境），与显式installed SDK两例独立记录；package
+dry-run54文件包含新helper，真实解包import测试通过。
+受控脚本本地Messages传输不证明真实provider质量。内部可信配置默认不启用，未生产部署。
+授权 isolated native 成员（目前拒绝）、同库两个 isolated cycle/version 接受矩阵、
+report-memory/autodispatch/retention/Git，以及各产品/发行能力行原有剩余项继续开放。
+参见[当前工作树完整边界](../superpowers/plans/2026-10-17-always-on-discovery.md#current-internal-lead-io-and-frozen-output-integration)；
+本节不宣称全部26完成，不新增总体百分比。
+
+
+### 当前最终本地 gate、首轮失败与 Host 待修发现
+
+首完整Gateway运行1729总/1719通过/3失败/7既有或opt-in skip（668.09s），3失败全部为
+memory-pump。窄Workbench schema只有悬空current-occurrences view、缺原task-occurrences
+base table时，新Session识别查询view导致普通memory processing失败；现先检查真实base
+再query view，不合成原task权限或放宽work恢复。修后目标回归32/32通过：普通Session20、
+工作Session2、operation-gate5、memory-pump5。首轮全量失败保留失败记录。
+
+修后完整Gateway重跑1729总/1722通过/7既有skip/0失败/0取消（632.263s）。Windows
+Gateway build与前端Vite build通过；public6测试通过，891份working-tree文件preflight
+零findings，Brain lint-links通过。两个test fixture仅缩短合成bearer字符串以通过隐私扫描，
+相关18目标测试全通过；没有修改扫描规则或runtime credential处理。root50、UI212、
+adapter和显式SDK证据分别记录，不相加成总体capability完成。
+
+新final review实证P2 Host生命周期缺口：composer非必选且native Session历史缺失时，
+Host可能先create，尚未确认原首次work run及不存在saved native Goal mapping。Host
+before-create修正的35/35目标测试通过，独立fresh review确认覆盖且无新具体finding。
+最终完整adapter为556总/532通过/24既有skip/0失败；最新no-recreate实际SDK2/2通过
+（33.13s），direct10条Messages、cold11条，保留原Session/Goal、完整selected objective、
+exact1 isolated write和原交付。Gateway/build先于此Host-only变动，因此另列它自己的目标/
+完整adapter/SDK证据；这些通过不宣称修复SQLite锁争用。默认off、未生产部署；SQLite稳定性解决、精确发布readback及真实provider/
+部署接受仍是门槛。
+
+### 此前 final-log SDK 反证：冷 continuation 的 SQLite 稳定性仍开放
+
+此前final-log实际SDK重跑仅1/2通过：direct通过，cold在原step-admission路径遇SQLite
+`database is locked`。原busy_timeout为75ms；具体持锁者和根因没有证据，不能猜测，
+没有提高timeout或盲重试来宣称修复。较早2/2保留为该次真实证据，不能替代最终全通过或
+稳定性结论。cold continuation的SQLite contention/stability、修正后的完整验收重跑仍待解决。
+本次为受控本地脚本Messages传输，不是实际provider调用或生产验收；没有虚构final成功。
+
+另一次只读cold trace为1/1通过：7552 records、4个SQLite进程、零SQL error，未观测到跨
+microtask/event loop未关闭transaction。观测到isolated原receipt事务56ms、Worker BEGIN
+等待46.598ms、complete proposal44ms、相邻Goal binding/task state25–31ms；原75ms
+busy timeout下同步跨进程争用仅是可能解释，不能回推此前具体持锁者/根因。trace通过不覆盖
+此前final-log SDK1/2失败；最新no-recreate2/2亦不能证明锁问题已修复，SQLite contention/stability继续开放。

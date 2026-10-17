@@ -7,12 +7,12 @@ const token='t'.repeat(32),cwd=path.resolve(tmpdir(),'isolated-work');
 function fixture(change={}){
  let agent,creates=0,attaches=0,guards=0;
  const cached=change.cached?{id:'work-session',header:{cwd:change.cached,agentPreset:change.cachedPreset??'jot-workbench-budgeted'}}:undefined;
- const trusted={kind:'task',model_budget:{protocol:1,enforced:true},work_binding:{kind:'isolated_work',original_run_id:'work-run',occurrence_id:'work-occurrence'},task_binding:{root_run_id:'work-run',occurrence_id:'work-occurrence',objective:'Frozen plan'},native_workspace:{protocol:1,cwd},...change.context};
- const bridge={async request(){guards++;if(change.guardError)throw Error('guard_unavailable');return{context:change.invalidContext?null:trusted};},async attach(){attaches++;},async guardBudget(){}};
+ const trusted={kind:'task',model_budget:{protocol:1,enforced:true},work_binding:{kind:'isolated_work',original_run_id:'work-run',occurrence_id:'work-occurrence'},task_binding:{root_run_id:'work-run',occurrence_id:'work-occurrence',continuation_of:null,objective:'Frozen plan'},native_workspace:{protocol:1,cwd},...change.context};
+ const bridge={async request(path,binding,payload){guards++;if(change.guardError)throw Error('guard_unavailable');if(path==='goal-binding'){assert.equal(binding.runId,'work-run');assert.equal(binding.sessionRef,'work-session');assert.deepEqual(binding.executionLease,{owner:'worker',generation:1});assert.deepEqual(payload,{action:'get'});if(change.goalBindingError)throw Error('mapping_unavailable');if(change.afterMapping)change.afterMapping(trusted);return Object.hasOwn(change,'goalBindingResponse')?change.goalBindingResponse:{binding:null};}return{context:change.invalidContext?null:trusted};},async attach(){attaches++;},async guardBudget(){}};
  const handler=createAdapterHandler({token,agents:{get:()=>agent},sessions:{get:()=>agent?.session??cached},controller:{
-  async inspect(){if(change.inspectError)throw Error('read_failed');return change.history??null;},
+  async inspect(){if(change.inspectFailure)throw change.inspectFailure;if(change.inspectError)throw Error('read_failed');return change.history??null;},
   async create(){creates++;agent={id:'work-session',session:{id:'work-session',header:{cwd:change.createdCwd??cwd,agentPreset:change.createdPreset??'jot-workbench-budgeted'}}};return{sessionId:'work-session'};}
- },workbenchBridge:bridge,budgetModelSelector:async(agent,check)=>check()});
+ },workbenchBridge:bridge,budgetModelSelector:async(agent,check)=>check(),sessionNotFoundError:change.sessionNotFoundError});
  const invoke=(extra={})=>handler({method:'POST',url:new URL('http://127.0.0.1/v1/sessions'),headers:{authorization:`Bearer ${token}`},body:{session_id:'work-session',cwd,agent_preset:'jot-workbench-budgeted',workbench_context:{run_id:'work-run',execution_lease:{owner:'worker',generation:1},work_workspace:{protocol:1}},...extra}});
  return{invoke,counts:()=>({creates,attaches}),guards:()=>guards};
 }
@@ -48,4 +48,29 @@ for(const change of [{cached:cwd,cachedPreset:'jot-general',history:{meta:{id:'w
 });
 test('actual native header must preserve the selected budget preset before Goal attachment',async()=>{
  const f=fixture({createdPreset:'jot-general'}),response=await f.invoke();assert.equal(response.status,409);assert.deepEqual(f.counts(),{creates:1,attaches:0});
+});
+
+test('an exact official Controller absence type admits a fresh isolated Session',async()=>{
+ class OfficialAbsence extends Error{}
+ const f=fixture({inspectFailure:new OfficialAbsence('absent'),sessionNotFoundError:OfficialAbsence});const response=await f.invoke();assert.equal(response.status,201);assert.deepEqual(f.counts(),{creates:1,attaches:1});
+});
+for(const inspectFailure of [Error('absent'),Object.assign(Error('absent'),{name:'ApiSessionNotFound'}),Object.assign(Error('absent'),{constructor:{name:'ApiSessionNotFound'}})])test('an unknown inspect error cannot impersonate official absence',async()=>{
+ class OfficialAbsence extends Error{}
+ const f=fixture({inspectFailure,sessionNotFoundError:OfficialAbsence});assert.equal((await f.invoke()).status,409);assert.deepEqual(f.counts(),{creates:0,attaches:0});
+});
+test('official typed absence cannot erase a cached Session whose header was not inspected',async()=>{
+ class OfficialAbsence extends Error{}
+ const f=fixture({cached:cwd,inspectFailure:new OfficialAbsence('absent'),sessionNotFoundError:OfficialAbsence});assert.equal((await f.invoke()).status,409);assert.deepEqual(f.counts(),{creates:0,attaches:0});
+});
+for(const task_binding of [{root_run_id:'work-run',occurrence_id:'work-occurrence',continuation_of:'parent-run',objective:'Frozen plan'},{root_run_id:'work-run',occurrence_id:'work-occurrence',objective:'Frozen plan'}])test('missing native history cannot create a replacement for a continuation or incomplete original lineage without composer',async()=>{
+ const f=fixture({context:{task_binding}});assert.equal((await f.invoke()).status,409);assert.deepEqual(f.counts(),{creates:0,attaches:0});
+});
+for(const goalBindingResponse of [{binding:{goal_id:'existing-original-goal',goal_revision:3}},{},null,{binding:undefined}])test('missing native history with an existing or unconfirmed original Goal cannot recreate a Session without composer',async()=>{
+ const f=fixture({goalBindingResponse});assert.equal((await f.invoke()).status,409);assert.deepEqual(f.counts(),{creates:0,attaches:0});
+});
+test('missing native history refuses unavailable original mapping before Session creation',async()=>{
+ const f=fixture({goalBindingError:true});assert.equal((await f.invoke()).status,409);assert.deepEqual(f.counts(),{creates:0,attaches:0});
+});
+test('fresh work rechecks original authority after awaited missing-Goal mapping',async()=>{
+ const f=fixture({afterMapping:context=>{context.task_binding.continuation_of='substituted-parent';}});assert.equal((await f.invoke()).status,409);assert.deepEqual(f.counts(),{creates:0,attaches:0});
 });

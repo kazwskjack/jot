@@ -204,8 +204,8 @@ the correction, followed by a successful Windows Gateway build. The complete
 as a rerun of the corrected source.
 
 
-The subsequent native-work increment implements internal atomic admission,
-isolated file IO and trusted native Session input prerequisites. It keeps work
+The subsequent prerequisite-only native-work increment implemented internal atomic admission,
+isolated file IO and trusted native Session input prerequisites. At that stage it kept work
 tool exposure closed; private resolver/Goal/output integration and all other
 remaining chains above remain required. See the native-work implementation
 appendix for actual boundaries and outstanding acceptance.
@@ -224,3 +224,137 @@ prove actual installed SDK work execution, provider quality or production rollou
 Final independent and scoped re-reviews have no open findings within this internal
 prerequisite scope. Both failed full/focused attempts remain in private records;
 they have not been relabeled as passes. No new dependency or license change.
+
+
+## Current bounded native-work integration and pending acceptance
+
+The new allowlist covers isolated `jot_workspace` file and original task
+operations; it is not a sandbox for every external tool. Existing allowed
+external tools retain original role, lease, dependencies, Goal and budget checks.
+This wiring grants no additional browser or external-action permission, and
+isolated native-member work remains refused.
+
+This subsequent working-tree increment connects the internal trusted runtime;
+it supersedes the earlier prerequisite-only statements about absent private
+resolver/output wiring. It does not close the Always-on row or all26 inventory.
+Configuration is explicit and remains off by default. No production deployment
+or production acceptance has been performed.
+
+- `TrustedWorkRunWorkspaceResolver` derives the original admitted lead run,
+  continuation ancestry, saved Session, exact selected-plan objective and private
+  isolated cwd. Missing work configuration or lineage refuses execution. A work
+  run cannot acquire ordinary shared file permissions by omitting a marker.
+- Original authenticated file tools now dispatch lead text IO asynchronously
+  outside SQL transactions. The short final original transaction commits the
+  immutable isolated result, original execution proof, isolated proof subtype
+  and original operation response together. Replay recovers that response before
+  IO; it does not create a new run, attempt or receipt.
+- Completion proposals, candidate pins, owner output reads and original artifact
+  delivery retain the exact workspace/isolated discriminator, cycle, snapshot,
+  isolated receipt and original proof/producer identities. Historical isolated
+  reads also require the matching original request digest and response/proof.
+  Delivery copies reviewed immutable version bytes; it does not apply a project
+  change or fall back to the mutable tree/shared project.
+- `WorkInspections` performs the complete physical source/result inspection,
+  freezes full base/result manifests, diff, selected objective, plan/source hashes
+  and original call set, then rechecks authority and quiescence in a short
+  transaction. Missing/pending/changed facts block completion. Proposal, candidate
+  and current review must bind the same inspection; a later file call followed
+  by recollection cannot silently update an earlier proposal.
+
+Bounded evidence is recorded separately. Inspection plus ordinary business
+completion tests pass13/13, including the actual original API/Coordinator
+proposal-drift regression and selected-objective check. Ordinary review,
+certificate, completion handshake, native shared-file delivery and continuation
+output regression passes27/27; the previously observed loopback-permission
+failure case was explicitly excluded, not reported as passed. Historical reader
+hardening has its own3/3 focused run. Type checking passes. These focused results
+are not a full final-source Gateway/Windows acceptance result.
+
+An earlier installed official SDK run passes2/2 (37.7s): the direct case uses
+10 scripted Messages requests/60 reported tokens; the cold wait/reply case uses
+11 requests/66 tokens and restarts both Host and Worker. Both verify the original
+work Session/Goal, complete selected objective, exactly one isolated write,
+original native completion, owner acceptance and immutable artifact delivery;
+accounting has no held/unknown/reserved remainder. The cold case retains the
+original work occurrence and saved identity. Earlier pending-step and final
+fixture-query failures remain failed attempts; only the corrected rerun is green.
+This is real installed SDK/Gateway/Worker execution with controlled scripted
+local Messages transport, not real-provider quality or production acceptance.
+Typed official missing-Session compatibility and GoalBridge execution-lease
+preservation/read-only observation separation were corrected. The complete
+adapter suite passes548 total/524 passed/24 existing SDK-dependent skips/zero
+failures (2.75s), with the optional SDK module environment unset; it is separate
+from the explicit installed-SDK2/2 above. Package dry-run verifies54 files,
+including the new helper, and a real unpacked-package import test passes.
+
+Current complete-run, build and disclosure results are consolidated below,
+including the first failed run and the corrected Host review finding. They do
+not replace the separate SDK stability limitation.
+
+Still open: authorized native-member isolated work (currently refused), owner
+full-diff/plan review UI, separately authorized exact-base apply and unknown-write
+reconciliation, scoped memory/report integration, automatic dispatch and wake
+recovery, retention/Git/provider variants, and the complete same-database shared
+plus two-isolated-cycle/version/owner/restart acceptance matrix. Initial isolated
+file production is bounded text IO, not general binary or native shell authority.
+Resolution of SQLite stability, exact publication readback, real-provider and
+deployment acceptance remain release gates. See the
+[updated native-work boundary](2026-10-17-always-on-discovery.md#current-internal-lead-io-and-frozen-output-integration)
+and the three capability audit records for the precise remaining chains.
+
+
+### Current full-run and release verification
+
+The first full Gateway run failed:1729 total/1719 passed/three memory-pump
+failures/seven existing or opt-in skips (668.09s). A narrow Workbench schema can
+contain a dangling current-occurrences view without its original task-occurrences
+base table. Session work detection now checks the real base table before reading
+the view; it neither synthesizes task authority nor relaxes work recovery.
+The corrected focused regression passes32/32:20 ordinary Session, two work
+Session, five operation-gate and five memory-pump cases. The failed first run is
+retained as failed evidence.
+
+The corrected complete Gateway run passes1729 total/1722 passed/seven existing
+or opt-in skips/zero failures/zero cancellations (632.263s). Windows Gateway build
+and frontend Vite build pass. Public disclosure tests6/6 and891-working-tree-file
+preflight report zero findings; Brain lint-links passes. Two test fixtures only
+shorten synthetic bearer values to satisfy privacy scanning; their18 targeted
+tests pass, without changing scanner rules or runtime credential handling.
+Root50/50, UI212/212, adapter and explicit SDK runs remain separate evidence.
+
+A new final review reproduces a P2 Host lifecycle gap: when the composer is not
+required and native Session history is missing, the Host can create before
+checking that this is the original first work run with no saved native Goal
+mapping. The Host before-create correction passes35/35 targeted cases; an
+independent fresh review confirms that coverage and has no new specific finding.
+Its final complete adapter run passes556 total/532 passed/24 existing skips/zero
+failures. The latest no-recreate installed-SDK rerun passes2/2 (33.13s), with10
+direct and11 cold Messages requests, retaining the original Session/Goal,
+complete selected objective, exactly one isolated write and original delivery.
+Gateway/build results above precede this Host-only correction; its own targeted,
+complete adapter and SDK evidence are recorded separately. This correction does
+not claim to fix SQLite contention. No production deployment
+or default enablement follows from these gates.
+
+### Prior final-log SDK failure leaves SQLite stability open
+
+A prior final-log installed-SDK rerun passes only1/2: direct work passes,
+but cold continuation fails at the original step-admission path with SQLite
+`database is locked`. The configured busy timeout is75ms; there is no evidence
+identifying the lock holder or proving a root cause. No speculative attribution,
+raised timeout or retry workaround is recorded as a correction. The earlier
+2/2 result above remains a genuine earlier run, not a stability claim, even after
+the newer no-recreate2/2 run recorded above. Cold continuation contention/
+stability is an explicit unresolved item.
+The fixture uses controlled local Messages transport; this is neither a
+real-provider run nor a successful final production gate.
+
+A separate read-only cold trace passes1/1 with7552 records from four SQLite
+processes, zero SQL errors and no observed transaction left open across a
+microtask/event-loop boundary. It observes an isolated original-receipt
+transaction of56ms, Worker BEGIN wait46.598ms, complete proposal44ms and adjacent
+Goal-binding/task-state transactions25-31ms. Synchronous cross-process contention
+under the original75ms busy timeout is a possible explanation, not proof of the
+previous failure's holder or root cause. This trace pass does not replace the
+prior final-log SDK1/2 result or close the SQLite stability item.
