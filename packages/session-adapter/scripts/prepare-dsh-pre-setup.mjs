@@ -17,7 +17,10 @@ import {patchDshPreSetupSource} from '../dsh-pre-setup-patch.js';
 import {patchDshPendingInputSource} from '../dsh-pending-input-patch.js';
 
 const packageName = '@deepseek-ai/dsh-agent-loop';
-const supportedVersion = '0.2.0-rc.2';
+const auditedManifests = Object.freeze({
+  '0.2.0-rc.2': '../runtime-patches/dsh-agent-loop-rc2-sha256.json',
+  '0.2.1-rc.2': '../runtime-patches/dsh-agent-loop-0.2.1-rc.2-sha256.json',
+});
 const stagingPrefix = '.jot-dsh-pre-setup-';
 
 function fail(code) {
@@ -129,7 +132,7 @@ function collectPackageFiles(packageRoot, pendingInputWake) {
   }
   if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) fail('dsh_pre_setup_package_manifest');
   if (manifest.name !== packageName) fail('dsh_pre_setup_package_name');
-  if (manifest.version !== supportedVersion) fail('dsh_pre_setup_package_version');
+  if (!Object.hasOwn(auditedManifests, manifest.version)) fail('dsh_pre_setup_package_version');
 
   const files = readLibFiles(packageRoot);
   const runtimePath = join('lib', 'index.js');
@@ -173,7 +176,7 @@ function collectPackageFiles(packageRoot, pendingInputWake) {
   upstream.set('package.json', manifestBytes);
   const actual = Object.fromEntries([...upstream].map(([path, bytes]) =>
     [path.replaceAll('\\', '/'), createHash('sha256').update(bytes).digest('hex')]).sort(([a],[b]) => a.localeCompare(b)));
-  const expected = JSON.parse(readFileSync(new URL('../runtime-patches/dsh-agent-loop-rc2-sha256.json', import.meta.url), 'utf8'));
+  const expected = JSON.parse(readFileSync(new URL(auditedManifests[manifest.version], import.meta.url), 'utf8'));
   if (JSON.stringify(Object.keys(actual).sort()) !== JSON.stringify(Object.keys(expected).sort())
     || Object.entries(actual).some(([path, hash]) => expected[path] !== hash)) fail('dsh_pre_setup_package_integrity');
   return files;
@@ -224,7 +227,7 @@ export function prepareDshPreSetupRuntime(sourcePackage, outputPackage, options=
   // Read, validate, and patch the complete permitted file set before creating anything.
   const files = collectPackageFiles(canonicalSource, options.pendingInputWake===true);
   writePreparedPackage(files, canonicalOutput);
-  return Object.freeze({protocol: 2, upstreamVersion: supportedVersion,...(options.pendingInputWake?{pendingInputProtocol:1,pendingWakeRevocationProtocol:1,pendingInputBindingsProtocol:1}:{})});
+  return Object.freeze({protocol: 2, upstreamVersion: JSON.parse(files.get('package.json').toString('utf8')).version,...(options.pendingInputWake?{pendingInputProtocol:1,pendingWakeRevocationProtocol:1,pendingInputBindingsProtocol:1}:{})});
 }
 
 function cli() {

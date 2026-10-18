@@ -191,7 +191,7 @@ test('hard process exit after native Inbox claim characterizes ordinary and Goal
   }
 
   t.diagnostic(JSON.stringify({
-    runtime: '0.2.0-rc.2', actualChildProcesses: true, killTarget: 'spawn-returned ChildProcess only',
+    runtime: '0.2.1-rc.2', actualChildProcesses: true, killTarget: 'spawn-returned ChildProcess only',
     noExternalProvider: true, noNetwork: true, production: false, observations,
   }));
 });

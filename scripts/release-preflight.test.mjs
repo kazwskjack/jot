@@ -13,10 +13,10 @@ async function fixture(t){
  const manifests={'package.json':{name:'jot-ai-bot',version:'0.1.0',engines:{node:'>=24'},dependencies:{fastify:'5.12.5'}},'packages/gateway/package.json':{name:'@jot/gateway',version:'0.1.0',engines:{node:'>=22'},dependencies:{fastify:'5.12.5'}},'packages/dsh-host/package.json':{name:'jot-dsh-host-preparation',version:'0.1.0',engines:{node:'>=24'}}};
  for(const [path,value]of Object.entries(manifests))await put(path,value);
  for(const prefix of ['', 'packages/gateway/'])await put(prefix+'package-lock.json',{lockfileVersion:3,packages:{'':manifests[prefix+'package.json']}});
- await put('packages/dsh-host/runtime-package-lock.json',{lockfileVersion:3,packages:{'':{dependencies:{'@deepseek-ai/dsh':'0.2.0-rc.2'}},'node_modules/@deepseek-ai/dsh':{version:'0.2.0-rc.2',bin:{dsh:'lib/bin.js'}}}});
+ await put('packages/dsh-host/runtime-package-lock.json',{lockfileVersion:3,packages:{'':{dependencies:{'@deepseek-ai/dsh':'0.2.1-rc.2'}},'node_modules/@deepseek-ai/dsh':{version:'0.2.1-rc.2',bin:{dsh:'lib/bin.js'}}}});
  for(const path of ['src/server.mjs','packages/gateway/src/main.ts','packages/gateway/src/harness/main.ts','packages/gateway/contracts/openapi.json','packages/dsh-host/create-profile.mjs','packages/dsh-host/standard-preset.mjs','packages/session-adapter/index.js'])await put(path);
- await put('packages/dsh-host/create-profile.mjs',"const manifest={dependencies:{'@deepseek-ai/dsh':'0.2.0-rc.2'}};return {runtimeVersion:'0.2.0-rc.2'};");
- await put('packages/dsh-host/standard-preset.mjs',"if(manifest.version!=='0.2.0-rc.2')throw Error('jot_host_runtime_version_mismatch');");
+ await put('packages/dsh-host/create-profile.mjs',"const manifest={dependencies:{'@deepseek-ai/dsh':'0.2.1-rc.2'}};return {runtimeVersion:'0.2.1-rc.2'};");
+ await put('packages/dsh-host/standard-preset.mjs',"if(manifest.version!=='0.2.1-rc.2')throw Error('jot_host_runtime_version_mismatch');");
  return {root,put};
 }
 const check=(result,id)=>result.checks.find(row=>row.id===id);
@@ -56,7 +56,7 @@ test('lock drift and malformed manifest fail closed without echoing file content
  await put('package.json','private malformed input');const result=await inspectRelease({root,profile:'standalone',nodeVersion:'24.0.0'});assert.equal(result.ready,false);assert.ok(!JSON.stringify(result).includes('private malformed input'));
 });
 test('Host requires prepared pinned profile and installed official launcher rather than gateway dist',async t=>{
- const {root,put}=await fixture(t);const host=join(root,'prepared');await put('prepared/package.json',{dependencies:{'@deepseek-ai/dsh':'0.2.0-rc.2'}});await put('prepared/package-lock.json',{lockfileVersion:3,packages:{'':{dependencies:{'@deepseek-ai/dsh':'0.2.0-rc.2'}},'node_modules/@deepseek-ai/dsh':{version:'0.2.0-rc.2',bin:{dsh:'lib/bin.js'}}}});await put('prepared/cordis.yml');await put('prepared/cordis.patch.yml');await put('prepared/node_modules/@deepseek-ai/dsh/package.json',{version:'0.2.0-rc.2',bin:{dsh:'lib/bin.js'}});await put('prepared/node_modules/@deepseek-ai/dsh/lib/bin.js');
+ const {root,put}=await fixture(t);const host=join(root,'prepared');await put('prepared/package.json',{dependencies:{'@deepseek-ai/dsh':'0.2.1-rc.2'}});await put('prepared/package-lock.json',{lockfileVersion:3,packages:{'':{dependencies:{'@deepseek-ai/dsh':'0.2.1-rc.2'}},'node_modules/@deepseek-ai/dsh':{version:'0.2.1-rc.2',bin:{dsh:'lib/bin.js'}}}});await put('prepared/cordis.yml');await put('prepared/cordis.patch.yml');await put('prepared/node_modules/@deepseek-ai/dsh/package.json',{version:'0.2.1-rc.2',bin:{dsh:'lib/bin.js'}});await put('prepared/node_modules/@deepseek-ai/dsh/lib/bin.js');
  const options={root,profile:'host',stage:'runtime',cwd:root,hostProfileDir:host,nodeVersion:'24.0.0',env:{JOT_SESSION_ADAPTER_TOKEN:'z'.repeat(32)}};
  assert.equal((await inspectRelease(options)).ready,true);
  await put('prepared/node_modules/@deepseek-ai/dsh/package.json',{version:'wrong',bin:{dsh:'lib/bin.js'}});assert.equal(check(await inspectRelease(options),'host.installed_version').status,'fail');

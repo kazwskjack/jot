@@ -13,7 +13,7 @@ import {WorkbenchBridge} from '../workbench.js';
 const runtime=process.env.JOT_DSH_RUNTIME_MODULES;
 test('actual DSH stages and proposes memory consolidation without applying reviewed facts',{timeout:20000,skip:!runtime},async t=>{
  const names=['cordis','dsh-session','dsh-session-projection','dsh-session-persistence-jsonl','dsh-session-query','dsh-agent','dsh-llm','dsh-tools','dsh-system-prompt','dsh-agent-loop'],modules={};
- for(const name of names){const manifest=JSON.parse(readFileSync(join(runtime,name,'package.json'),'utf8'));if(name!=='cordis')assert.equal(manifest.version,'0.2.0-rc.2');modules[name]=await import(pathToFileURL(join(runtime,name,'lib/index.js')).href);}
+ for(const name of names){const manifest=JSON.parse(readFileSync(join(runtime,name,'package.json'),'utf8'));if(name!=='cordis')assert.equal(manifest.version,'0.2.1-rc.2');modules[name]=await import(pathToFileURL(join(runtime,name,'lib/index.js')).href);}
  const base=resolve('.test-tmp/native-memory-consolidation');mkdirSync(base,{recursive:true});const root=mkdtempSync(join(base,'case-'));let service,ctx,handle;
  t.after(async()=>{if(handle)await handle.dispose();if(ctx)await ctx.fiber.dispose();if(service){await service.app.close();service.db.close();}const child=relative(base,root);assert.ok(child&&!child.startsWith('..')&&!isAbsolute(child));rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:20});});
  const owner='native-memory-fixture',token=randomBytes(32).toString('hex'),route={provider:'local-scripted',model:'scripted',revision:'fixture-rates',context_window:100,max_output_tokens:20,rates:{input:2,output:10,cache_read:1,cache_write:3}},limits={tokens:5000,nano_usd:50000,model_calls:20};

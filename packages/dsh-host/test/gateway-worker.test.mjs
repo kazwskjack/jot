@@ -35,6 +35,7 @@ async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=
  const model=createServer(async(req,res)=>{try{
   const chunks=[];for await(const chunk of req)chunks.push(chunk);const input=JSON.parse(Buffer.concat(chunks).toString());
   assert.equal(req.method,'POST');assert.match(req.url,/\/messages$/);assert.equal(req.headers['x-api-key'],modelKey);
+  assert.equal(input.model,'deepseek-flash');assert.equal(input.thinking?.type,'enabled');assert.equal(input.output_config?.effort,'high');
   requests.push(input);const ordinal=requests.length;res.writeHead(200,{'content-type':'text/event-stream','cache-control':'no-cache'});
   let operation='tasks.propose',argumentsValue={intent:complete?'complete':automatic&&ordinal===1?'continue':resume&&ordinal===2?'wait_approval':'wait_user',summary:ordinal===2?'Please review the next step.':'Please confirm the next step.'};
   if(complete&&!discovery&&ordinal===1){operation='files.write';argumentsValue={path:'acceptance.md',content:'ACCEPTANCE-OK',expected_version:0};}

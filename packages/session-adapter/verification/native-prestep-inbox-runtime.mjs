@@ -66,7 +66,7 @@ async function createHarness(t, { withGoal = false } = {}) {
   const modules = {};
   for (const name of moduleNames) {
     const manifest = JSON.parse(readFileSync(join(runtime, name, 'package.json'), 'utf8'));
-    if (name !== 'cordis') assert.equal(manifest.version, '0.2.0-rc.2', `${name} runtime version`);
+    if (name !== 'cordis') assert.equal(manifest.version, '0.2.1-rc.2', `${name} runtime version`);
     modules[name] = await import(pathToFileURL(join(runtime, name, 'lib/index.js')).href);
   }
 
@@ -246,7 +246,7 @@ test('rc2 claims the original input before pre-step, then consumes original and 
   assert.deepEqual(h.inbox()['next-turn'], []);
 
   t.diagnostic(JSON.stringify({
-    runtime: '0.2.0-rc.2', officialInboxProjection: true, originalClaimedBeforePreStep: true,
+    runtime: '0.2.1-rc.2', officialInboxProjection: true, originalClaimedBeforePreStep: true,
     originalAndSupplementCommittedOnce: true, modelCalls: h.modelInputs.length,
     assistantSettlements: h.events.filter((event) => event.type === 'assistant/message').length,
     provider: 'local scripted; no network', production: false,
@@ -292,7 +292,7 @@ test('native keepInbox cancellation aborts the wait without waking or consuming 
   assert.deepEqual(h.inbox()['next-step'].map((message) => message.id), [pending.id]);
 
   t.diagnostic(JSON.stringify({
-    runtime: '0.2.0-rc.2', officialCancelSignal: true, keepInboxRetainedUnclaimedMessage: true,
+    runtime: '0.2.1-rc.2', officialCancelSignal: true, keepInboxRetainedUnclaimedMessage: true,
     claimedOriginalCommitted: false, selfWakeAfterCancel: false, modelCalls: h.modelInputs.length,
     provider: 'local scripted; no network', production: false,
   }));
@@ -331,7 +331,7 @@ test('Goal round cancellation restores other claimed native input through its of
   assert.equal(goal.phase, 'paused', 'the driver pauses the cancelled active Goal rather than auto-restarting it');
 
   t.diagnostic(JSON.stringify({
-    runtime: '0.2.0-rc.2', actualGoalAndRoundDriver: true, goalRoundClaimedThenNotCommitted: true,
+    runtime: '0.2.1-rc.2', actualGoalAndRoundDriver: true, goalRoundClaimedThenNotCommitted: true,
     otherClaimedInputRestoredToOfficialInbox: true, goalPhase: goal.phase,
     selfWakeAfterCancel: false, modelCalls: h.modelInputs.length,
     provider: 'local scripted; no network', production: false,

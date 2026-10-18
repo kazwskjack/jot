@@ -21,7 +21,7 @@ for(const loseAck of [false,true])test(loseAck?'a held original step survives a 
 
  const runtime=resolve(process.env.JOT_DSH_RUNTIME_MODULES);
  const names=['cordis','dsh-session','dsh-session-projection','dsh-session-persistence-jsonl','dsh-session-query','dsh-agent','dsh-llm','dsh-tools','dsh-system-prompt','dsh-agent-loop','dsh-goal','dsh-goal-round-driver','dsh-subagent','dsh-experimental-agent-team','dsh-typert-registry','dsh-fs','dsh-attachment','dsh-file-reference','dsh-agent-default-model'];
- const modules={};for(const name of names){const manifest=JSON.parse(readFileSync(join(runtime,name,'package.json'),'utf8'));if(name!=='cordis')assert.equal(manifest.version,'0.2.0-rc.2');modules[name]=await import(pathToFileURL(join(runtime,name,'lib/index.js')).href);}
+ const modules={};for(const name of names){const manifest=JSON.parse(readFileSync(join(runtime,name,'package.json'),'utf8'));if(name!=='cordis')assert.equal(manifest.version,'0.2.1-rc.2');modules[name]=await import(pathToFileURL(join(runtime,name,'lib/index.js')).href);}
  const base=resolve('.test-tmp/native-inbox-return-runtime');mkdirSync(base,{recursive:true});const root=mkdtempSync(join(base,'case-'));let service,ctx,leadHandle,host;const tokenEnv='JOT_HTTP_ADAPTER_TEST_'+process.pid,bridgeEnv='JOT_HTTP_BRIDGE_TEST_'+process.pid;
  t.after(async()=>{if(host)await host.dispose();if(ctx)await ctx.fiber.dispose();if(leadHandle)await leadHandle.dispose();delete process.env[tokenEnv];delete process.env[bridgeEnv];if(service){await service.app.close();service.db.close();}const child=relative(base,root);assert.ok(child&&!child.startsWith('..')&&!isAbsolute(child));rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:20});});
  const owner='native-role-fixture',token=randomBytes(32).toString('hex'),route={provider:'local-scripted',model:'scripted',revision:'fixture-rates',context_window:100,max_output_tokens:20,rates:{input:2,output:10,cache_read:1,cache_write:3}},limits={tokens:5000,nano_usd:50000,model_calls:50};
@@ -66,8 +66,8 @@ for(const loseAck of [false,true])test(loseAck?'a held original step survives a 
  if(!loseAck){
   const adapterRoot=fileURLToPath(new URL('..',import.meta.url)),npm=join(resolve(process.execPath,'..'),'node_modules/npm/bin/npm-cli.js');
   const [pack]=JSON.parse(execFileSync(process.execPath,[npm,'pack','--json','--ignore-scripts','--pack-destination',root,'--cache',join(root,'npm-cache')],{cwd:adapterRoot,encoding:'utf8'}));assert.match(pack.filename,/^[A-Za-z0-9._-]+\.tgz$/);execFileSync('tar',['-xzf',join(root,pack.filename),'-C',root]);candidateApply=(await import(pathToFileURL(join(root,'package/index.js')).href)).apply;
-  const invariants=await import(pathToFileURL(join(runtime,'dsh-invariants/lib/index.js')).href),sessionInvariant=await import(pathToFileURL(join(runtime,'dsh-session/lib/invariant.js')).href);
-  composition={nativeHandoff:{policyVersion:1,maxHops:2,validateLog:createNativeInvariantReplay({Context:modules.cordis.Context,Service:modules.cordis.Service,InvariantRegistry:invariants.InvariantRegistry,sessionInvariant})}};
+
+  composition={nativeHandoff:{policyVersion:1,maxHops:2,validateLog:createNativeInvariantReplay({Session:modules['dsh-session'].Session})}};
  }
  candidateApply(ctx,{host:'127.0.0.1',port,tokenEnv,workbenchTokenEnv:bridgeEnv,workbenchOrigin:gateway,nativeContinuation:true,nativeRoles:true,nativeRoleRecovery:true,workbenchModel:{provider:route.provider,model:route.model},...composition,nativeDeferredHandoff:true});await listening;
  const post=async(path,body,authorized=true)=>{const response=await fetch('http://127.0.0.1:'+port+path,{method:'POST',headers:{'content-type':'application/json',...(authorized?{authorization:'Bearer '+adapterToken}:{})},body:JSON.stringify(body)});return {status:response.status,value:await response.json()};};

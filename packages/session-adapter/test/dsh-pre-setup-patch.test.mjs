@@ -12,3 +12,10 @@ test('the exact installed rc2 patch is deterministic, idempotent and retains nat
  assert.equal(patchDshPreSetupSource({...input,runtimeSource:result.runtimeSource,declarationSource:result.declarationSource}).changed,false);
  assert.throws(()=>patchDshPreSetupSource({...input,runtimeSource:result.runtimeSource}));assert.throws(()=>patchDshPreSetupSource({...input,runtimeSource:input.runtimeSource+'\n'}));
 });
+
+test('reviewed SDK versions cannot borrow another artifact identity',{skip:!process.env.JOT_DSH_RUNTIME_MODULES},()=>{
+ const root=join(process.env.JOT_DSH_RUNTIME_MODULES,'dsh-agent-loop'),read=path=>readFileSync(join(root,path),'utf8'),version=JSON.parse(read('package.json')).version;
+ assert.ok(['0.2.0-rc.2','0.2.1-rc.2'].includes(version));
+ const other=version==='0.2.1-rc.2'?'0.2.0-rc.2':'0.2.1-rc.2';
+ assert.throws(()=>patchDshPreSetupSource({version:other,runtimeSource:read('lib/index.js'),declarationSource:read('lib/types/index.d.ts')}),/dsh_pre_setup_patch_source_changed/);
+});

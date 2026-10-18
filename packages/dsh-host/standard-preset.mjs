@@ -11,7 +11,7 @@ export async function apply(ctx,config={}){
  // A source checkout outside node_modules has no package resolver ancestry.
  const anchor=ctx.get('profileContext')?.installAnchor;if(typeof anchor!=='string')throw Error('jot_host_installation_missing');
  const manifest=JSON.parse(await readFile(anchor,'utf8'));
- if(manifest.name!=='@deepseek-ai/dsh'||manifest.version!=='0.2.0-rc.2')throw Error('jot_host_runtime_version_mismatch');
+ if(manifest.name!=='@deepseek-ai/dsh'||manifest.version!=='0.2.1-rc.2')throw Error('jot_host_runtime_version_mismatch');
  const require=createRequire(anchor);
  const {loadOverlayPatches}=await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-app-boot')).href);
  const source=require.resolve('@deepseek-ai/dsh-web-app/presets/standard.patch.yml');

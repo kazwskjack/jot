@@ -7,7 +7,7 @@ A Cordis plugin that connects the extended Jot gateway to an existing DSH Sessio
 The package declares these peer dependencies:
 
 - `@deepseek-ai/cordis` `^4.0.2`
-- `@deepseek-ai/dsh-api-session-controller` `0.1.7-alpha.2` or `0.2.0-rc.2`
+- `@deepseek-ai/dsh-api-session-controller` `0.1.7-alpha.2`, `0.2.0-rc.2`, or `0.2.1-rc.2`
 
 The host must provide `sessionController`, `fileUploads`, `agents`, `sessions` and `sessionPersistence`. When voice is enabled it must also provide `speechController` and a configured speech provider. These services, model credentials, Agent presets and actual tool backends are configured in the host; copying this directory does not create them.
 
@@ -93,8 +93,8 @@ Mocked protocol tests do not establish that a real model, speech provider or bro
 
 ## Runtime compatibility
 
-The peer range includes the legacy `0.1.7-alpha.2` controller and the
-`0.2.0-rc.2` controller. This is not a promise of identical features: budgeted
+The peer range includes the legacy `0.1.7-alpha.2` and `0.2.0-rc.2` controllers
+alongside the current `0.2.1-rc.2` controller. This is not a promise of identical features: budgeted
 role execution requires the newer Session-local model selection and native
 goal/checkpoint capabilities. The adapter checks those capabilities and fails
 closed when they are missing. Do not enable budgeted tasks solely because the
@@ -252,3 +252,5 @@ Product runtime cursors use the Worker's existing deterministic
 Session in `ga_harness_session_bindings`. A shared mapping now prevents the
 history source from confusing those identities. A controller ID substituted
 into the runtime binding is refused rather than treated as an alias.
+
+Compatibility preparation accepts only the separately audited `0.2.0-rc.2` and `0.2.1-rc.2` AgentLoop artifacts, with one exact file manifest per version. Installed-SDK verification targets `0.2.1-rc.2`; the older artifact remains available for explicit compatibility and rollback checks. Memory extraction retains its separately pinned plugin/SDK runtime until that composition is independently verified.

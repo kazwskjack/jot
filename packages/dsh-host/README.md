@@ -1,9 +1,35 @@
 # Official DSH host profile
 
-This prepares a dedicated profile for the official DSH **0.2.0-rc.2** launcher.
+This prepares a dedicated profile for the official DSH **0.2.1-rc.2** launcher.
 The launcher supplies real Session, JSONL persistence, workspace, upload,
 permissions, model and Web services through `dsh-base` + `dsh-web-app`.
 The Jot adapter remains a plugin in that host. It is not a replacement Agent loop.
+The `deepseek-flash` alias currently selects official V4.1-Flash-1017. Keep the
+existing `high` reasoning effort when configuring the official model provider;
+the SDK upgrade preserves native Session, Goal, permission and budget controls.
+
+## Upgrade boundary
+
+The lock pins the explicitly published `0.2.1-rc.2` release; the npm `latest`
+tag can still name an older release. See the [official release notes](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.1-rc.2)
+and [official model catalog](https://api-docs.deepseek.com/quick_start/pricing/).
+The alias is `deepseek-flash`, not a guessed dated model ID. Its SDK default
+output allowance remains 256,000 tokens; the provider's advertised maximum is a
+different setting, not an instruction to increase every request.
+
+Prepare a separate profile and retain the previous installation and a stopped,
+consistent copy of native histories before changing an existing runtime. The new
+SDK has Session format migration; an inspection reporting migration required is
+not proof of an empty inbox or an absent Goal. Do not reseal prior replay-profile
+fingerprints or clear unknown usage while upgrading. Exact existing Sessions
+resume through the original resolver instead of conversation creation, which may
+mint a new identity for a nonblank Session in this SDK.
+
+Optional memory extraction keeps its separately audited runtime and plugin pins.
+Changing the main Host must not silently repoint its `modulesRoot`, skip its
+integrity check or mark an untested plugin combination ready. Local SDK fixtures
+with scripted model transport prove wiring; they do not prove production rollout
+or remote-provider quality.
 
 ## Windows startup
 
@@ -20,7 +46,7 @@ npm ci
 The preparation command refuses an existing profile, installs nothing, reads no
 credentials and starts no services. It copies the reviewed `runtime-package-lock.json`
 as `package-lock.json`: the complete dependency graph is fixed, rather than
-resolving transitive ranges again on each installation. All 607 dependency entries
+resolving transitive ranges again on each installation. All dependency entries
 use the npm registry, carry SHA-512 integrity and contain no local file links.
 Keep that lock unchanged for repeatable installs. Native installation scripts,
 optional platform packages and the resulting binaries still depend on the target

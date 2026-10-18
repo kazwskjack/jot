@@ -7,7 +7,6 @@ export const inject=['jotHostReady','agentPresets','sessionController','permissi
 export async function apply(ctx,{receipt,sessionPrefix}){
  const require=createRequire(ctx.get('profileContext').installAnchor);
  const {scopeOf}=await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-scope')).href);
- const {standingMountFor}=await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-agent-preset-registry')).href);
  const matches=id=>id==='host-canary'||typeof sessionPrefix==='string'&&id.startsWith(sessionPrefix);
  const sessions=existsSync(receipt)?JSON.parse(readFileSync(receipt,'utf8')).sessions??{}:{};
  const sessionRecord=id=>sessions[id]??(sessions[id]={events:[],goals:[]});
@@ -17,7 +16,7 @@ export async function apply(ctx,{receipt,sessionPrefix}){
  ctx.on('agent/created',({agent})=>{
   if(!matches(agent.id))return;
   facts={sessionId:agent.id,header:JSON.parse(JSON.stringify(agent.session.header)),
-   preset:ctx.agentPresets.composedPreset(agent.ctx),mounted:!!standingMountFor(agent.ctx),
+   preset:ctx.agentPresets.composedPreset(agent.ctx),mounted:ctx.agentPresets.inspectCompositions(agent.ctx).some(composition=>composition.id===ctx.agentPresets.composedPreset(agent.ctx)&&composition.modules.length>0&&composition.leakedServices.length===0),
    permission:ctx.permissionPresets.current(agent.session),sandbox:ctx.sandboxPolicy.resolve({session:agent.session}),
    approval:ctx.approval.overrideOf(agent.session)??ctx.approval.config.policy??'ask',
    model:ctx.sessionController.agents.selectionFor(agent).current,

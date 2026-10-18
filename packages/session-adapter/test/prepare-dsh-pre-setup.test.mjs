@@ -110,12 +110,12 @@ test('prepares a fully patched package in a new directory without modifying the 
 
   const result = prepareDshPreSetupRuntime(sourcePackage, outputPackage);
 
-  assert.deepEqual(result, {protocol: 2, upstreamVersion: '0.2.0-rc.2'});
+  assert.deepEqual(result, {protocol: 2, upstreamVersion: sourceManifest.version});
   assert.equal(hashTree(sourcePackage), sourceHash);
   const outputManifest = JSON.parse(readFileSync(join(outputPackage, 'package.json'), 'utf8'));
   assert.equal(outputManifest.name, '@deepseek-ai/dsh-agent-loop');
-  assert.equal(outputManifest.version, '0.2.0-rc.2');
-  assert.deepEqual(outputManifest.jotCompatibilityPatch, {protocol: 2, upstreamVersion: '0.2.0-rc.2'});
+  assert.equal(outputManifest.version, sourceManifest.version);
+  assert.deepEqual(outputManifest.jotCompatibilityPatch, {protocol: 2, upstreamVersion: sourceManifest.version});
   assert.equal(readFileSync(join(outputPackage, 'lib/index.js'), 'utf8'), patch.runtimeSource);
   assert.equal(readFileSync(join(outputPackage, 'lib/types/index.d.ts'), 'utf8'), patch.declarationSource);
 
@@ -195,7 +195,7 @@ test('rejects secondary runtime and manifest drift even when patch anchors match
  const root=createTestRoot(t);
  for(const name of ['secondary','manifest']){
   const source=join(root,name),output=join(root,name+'-out');copySdkFixture(source);
-  const path=join(source,name==='secondary'?'lib/invariant.js':'package.json');
+  const path=join(source,name==='secondary'?'lib/types/inbox.d.ts':'package.json');
   if(name==='secondary')writeFileSync(path,readFileSync(path,'utf8')+'\n// drift\n');
   else{const manifest=JSON.parse(readFileSync(path,'utf8'));manifest.main='lib/invariant.js';writeFileSync(path,JSON.stringify(manifest));}
   assertCode(()=>prepareDshPreSetupRuntime(source,output),'dsh_pre_setup_package_integrity');assert.equal(existsSync(output),false);

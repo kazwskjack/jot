@@ -33,7 +33,7 @@ const occurrences=(text,part)=>text.split(part).length-1;
 
 export async function nativeIsolatedWorkCase(t,{role=false,persistent=false,resume=false,complete=false,automatic=false,unlimited=false,discovery=false,noPlan=false,discoveryWait=false,workWait=false}={}){
  persistent ||= discovery; complete ||= discovery; unlimited ||= discovery; role ||= persistent;
- assert.equal(JSON.parse(await readFile(join(runtime,'dsh-api-session-controller/package.json'),'utf8')).version,'0.2.0-rc.2','acceptance requires the reviewed locked SDK');
+ assert.equal(JSON.parse(await readFile(join(runtime,'dsh-api-session-controller/package.json'),'utf8')).version,'0.2.1-rc.2','acceptance requires the reviewed locked SDK');
  const {buildServer}=await import('../../gateway/src/server.ts');
  if(!process.env.JOT_TEST_TMP)throw Error('native_work_fixture_tmp_required');
  const root=await mkdtemp(join(process.env.JOT_TEST_TMP,'jot-native-isolated-work-')),home=join(root,'home'),workspace=join(root,'workspace');await mkdir(workspace);
@@ -42,6 +42,7 @@ export async function nativeIsolatedWorkCase(t,{role=false,persistent=false,resu
  const model=createServer(async(req,res)=>{try{
   const chunks=[];for await(const chunk of req)chunks.push(chunk);const input=JSON.parse(Buffer.concat(chunks).toString());
   assert.equal(req.method,'POST');assert.match(req.url,/\/messages$/);assert.equal(req.headers['x-api-key'],modelKey);
+  assert.equal(input.model,'deepseek-flash');assert.equal(input.thinking?.type,'enabled');assert.equal(input.output_config?.effort,'high');
   requests.push(input);const ordinal=requests.length;res.writeHead(200,{'content-type':'text/event-stream','cache-control':'no-cache'});
   let operation='tasks.propose',argumentsValue={intent:complete?'complete':automatic&&ordinal===1?'continue':resume&&ordinal===2?'wait_approval':'wait_user',summary:ordinal===2?'Please review the next step.':'Please confirm the next step.'};
   if(complete&&!discovery&&ordinal===1){operation='files.write';argumentsValue={path:'acceptance.md',content:'ACCEPTANCE-OK',expected_version:0};}

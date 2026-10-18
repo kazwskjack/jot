@@ -3,7 +3,10 @@
 import {createHash} from 'node:crypto';
 
 const sha=value=>createHash('sha256').update(value).digest('hex');
-const original={runtime:'00c4814d63f3d1e2754eb09144832d19b30499d6ea444730473f740b587948c2',declarations:'906f202b859b11f7b0a399d8c4921c47384dd6177c990d59b8a93026a9875e8e'};
+const originals=Object.freeze({
+ '0.2.0-rc.2':{runtime:'00c4814d63f3d1e2754eb09144832d19b30499d6ea444730473f740b587948c2',declarations:'906f202b859b11f7b0a399d8c4921c47384dd6177c990d59b8a93026a9875e8e'},
+ '0.2.1-rc.2':{runtime:'cf57e3ecd487ac5c2553455aaa5cef2c6fb41e6bd61be5aa455675d1d7193033',declarations:'906f202b859b11f7b0a399d8c4921c47384dd6177c990d59b8a93026a9875e8e'},
+});
 const classAnchor='var AgentLoop = class extends Service {\n';
 const protocol='\t/** Jot optional host-only setup hooks; not an upstream API. */\n\tjotPreSetupHookProtocol = 2;\n';
 const setupAnchor='\t\t\t\t(await raceAbort(setup?.(prepared.agent.ctx, prepared.agent), prepared.signal, id))?.commit();\n\t\t\t\tawait this.appendUnstoredSuffix(stored, session);\n\t\t\t\treturn await prepared.publish(source);';
@@ -30,9 +33,10 @@ const typeProtocol='    readonly jotPreSetupHookProtocol: 2;\n';
 function once(source,before,after){if(source.split(before).length!==2)throw Error('dsh_pre_setup_patch_anchor');return source.replace(before,after);}
 
 /** Pure transform; never edits a running installation. Only the exact tested
- * upstream rc2 distribution (or this exact complete delta) is accepted. */
+ * upstream distribution for its declared version (or this exact complete delta) is accepted. */
 export function patchDshPreSetupSource({version,runtimeSource,declarationSource}={}){
- if(version!=='0.2.0-rc.2'||typeof runtimeSource!=='string'||typeof declarationSource!=='string')throw Error('dsh_pre_setup_patch_version');
+ const original=Object.hasOwn(originals,version)?originals[version]:undefined;
+ if(!original||typeof runtimeSource!=='string'||typeof declarationSource!=='string')throw Error('dsh_pre_setup_patch_version');
  const runtimePatched=runtimeSource.includes(protocol),typesPatched=declarationSource.includes(typeProtocol);
  if(runtimePatched!==typesPatched)throw Error('dsh_pre_setup_patch_partial');
  let runtime=runtimeSource,types=declarationSource;

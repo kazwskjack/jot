@@ -10,7 +10,7 @@ import {fileURLToPath,pathToFileURL} from 'node:url';
 import {createHostProfile} from '../create-profile.mjs';
 const runtime=process.env.JOT_DSH_RUNTIME_MODULES;
 test('official launcher mounts real host services and reads effective preset policy without inference',{skip:!runtime,timeout:45000},async t=>{
- const measured=[];for(const name of ['dsh','dsh-base','dsh-web-app']){const bytes=await readFile(join(runtime,name,'package.json')),manifest=JSON.parse(bytes);assert.equal(manifest.version,'0.2.0-rc.2');measured.push({name,version:manifest.version,manifest_sha256:createHash('sha256').update(bytes).digest('hex')});}
+ const measured=[];for(const name of ['dsh','dsh-base','dsh-web-app']){const bytes=await readFile(join(runtime,name,'package.json')),manifest=JSON.parse(bytes);assert.equal(manifest.version,'0.2.1-rc.2');measured.push({name,version:manifest.version,manifest_sha256:createHash('sha256').update(bytes).digest('hex')});}
  t.diagnostic(JSON.stringify({kind:'measured-test-installation-not-release-approval',packages:measured}));
  const root=await mkdtemp(join(tmpdir(),'jot-official-host-')),home=join(root,'home'),workspace=join(root,'workspace');await mkdir(workspace);
  const prepared=await createHostProfile({home,name:'jot',adapter:resolve('../session-adapter/index.js')});

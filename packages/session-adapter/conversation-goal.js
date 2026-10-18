@@ -41,6 +41,8 @@ export async function readConversationGoal({agent,agents,persistence,controller,
  });
 }
 function projectedGoal(projection){
+ // Deferred-migration values are cache hints, never an authoritative current baseline.
+ if(projection?.kind!==undefined&&projection.kind!=='sequenced')throw Error('goal_unavailable');
  if(projection===null)return {goal:null};
  if(!projection?.values||!Object.hasOwn(projection.values,'goal'))throw Error('goal_unavailable');
  const state=projection.values.goal;

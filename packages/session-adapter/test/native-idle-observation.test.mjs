@@ -48,3 +48,8 @@ test('bearer authentication, exact request shape and opt-in readiness precede al
  const disabled=createAdapterHandler({token,agents:f.agents,controller:{projections:async()=>cold()}});
  assert.equal((await invoke(disabled,'/v1/sessions/s/idle-observation',{protocol:1})).status,503);assert.equal((await invoke(disabled,'/v1/native-idle-observation/readiness')).value.ready,false);
 });
+
+test('migration-required cache hints cannot prove native quiescence',async()=>{
+ const value=await observation({agents:{get:()=>undefined},controller:{projections:async()=>({kind:'migration-required',...cold()})}});
+ assert.equal(value.native_idle,'unknown');assert.equal(value.reason,'STATE_UNAVAILABLE');assert.equal(value.execution_authorized,false);
+});

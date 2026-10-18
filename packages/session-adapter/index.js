@@ -164,10 +164,84 @@ function decodeFilename(headers) {
   return value && Buffer.byteLength(value, 'utf8') <= 255 && !/[\u0000\/\\]/.test(value) ? value : null
 }
 
+class SessionBindingConflict extends Error {}
+
+// Conversation creation may mint a new id for a nonblank Session. The adapter's
+// endpoint instead names one durable identity: inspect before activation, resume
+// that exact identity, and create only when the official absence contract proves
+// there is no saved Session. Keep this inside the claimed composer's scope.
+async function createOrResumeSession({controller,request,agents,sessions,sessionNotFoundError,signal,beforeAdmission}) {
+  if(typeof controller.inspect!=='function'||typeof controller.resolveAgent!=='function')return controller.create(request)
+  const {sessionId,cwd,agentPreset}=request
+  const identity=header=>JSON.stringify([header?.id,header?.cwd,header?.agentPreset,header?.createdAt,header?.parentSession,header?.origin,header?.delegationDepth,header?.isSeeded])
+  const checkHeader=header=>{
+    if(header?.id!==sessionId||header.cwd!==cwd||agentPreset!==undefined&&header.agentPreset!==agentPreset)throw new SessionBindingConflict()
+  }
+  signal?.throwIfAborted()
+  let saved,absent=false
+  try{saved=await controller.inspect(sessionId,signal)}catch(error){
+    if(error?.code!=='session/not-found'&&!(typeof sessionNotFoundError==='function'&&error instanceof sessionNotFoundError))throw error
+    if(agents?.get?.(sessionId)||sessions?.get?.(sessionId))throw new SessionBindingConflict()
+    absent=true
+  }
+  signal?.throwIfAborted()
+  if(!absent){
+    // Missing/malformed inspection is unavailable history, never native absence.
+    if(!saved?.meta)throw Error('session_inspection_unavailable')
+    checkHeader(saved.meta)
+    const expected=identity(saved.meta),resident=agents?.get?.(sessionId),cached=sessions?.get?.(sessionId)
+    if(resident&&(resident.id!==sessionId||resident.session?.id!==sessionId||identity(resident.session.header)!==expected)
+      ||cached&&(cached.id!==sessionId||identity(cached.header)!==expected))throw new SessionBindingConflict()
+    await beforeAdmission?.();signal?.throwIfAborted()
+    const result=await controller.resolveAgent(sessionId)
+    signal?.throwIfAborted()
+    // A failed exact resume must never be repaired with conversation creation.
+    if(result?.error)throw result.error
+    const agent=result?.agent
+    if(agent?.id!==sessionId||agent.session?.id!==sessionId||identity(agent.session.header)!==expected
+      ||typeof agents?.get==='function'&&agents.get(sessionId)!==agent
+      ||typeof sessions?.get==='function'&&sessions.get(sessionId)!==agent.session)throw new SessionBindingConflict()
+    return{sessionId,...(agent.session.header.agentPreset===undefined?{}:{agentPreset:agent.session.header.agentPreset})}
+  }
+  await beforeAdmission?.();signal?.throwIfAborted()
+  if(agents?.get?.(sessionId)||sessions?.get?.(sessionId))throw new SessionBindingConflict()
+  const value=await controller.create(request)
+  signal?.throwIfAborted()
+  if(value?.sessionId!==sessionId)throw new SessionBindingConflict()
+  const agent=agents?.get?.(sessionId)
+  if(typeof agents?.get==='function'&&!agent)throw new SessionBindingConflict()
+  if(agent){if(agent.id!==sessionId||agent.session?.id!==sessionId)throw new SessionBindingConflict();checkHeader(agent.session.header)
+    if(typeof sessions?.get==='function'&&sessions.get(sessionId)!==agent.session)throw new SessionBindingConflict()}
+  return value
+}
+
 export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,nativeIdleObservation=false,sessionNotFoundError }) {
   const voiceHandler = voiceEnabled ? createVoiceAdapterHandler({ speechController, token }) : null
   const workbenchSessions = new Set()
   const blockedWorkbenchSessions = new Set()
+  const sessionAdmissions = new Map()
+  const admitInOrder=(sessionId,signal,operation)=>{
+    const previous=sessionAdmissions.get(sessionId)??Promise.resolve()
+    const retained=[]
+    const retain=promise=>{retained.push(Promise.resolve(promise).then(()=>{},()=>{}));return promise}
+    const pending=previous.then(()=>{signal.throwIfAborted();return operation(retain)})
+    // A composer may time out before its dispatched native operation settles.
+    // The response can finish immediately; ownership covers every retained
+    // operation. Install rejection handlers at dispatch, never after a timeout.
+    const settled=pending.then(()=>{},()=>{}).then(async()=>{
+      for(let index=0;index<retained.length;index++)await retained[index]
+    })
+    sessionAdmissions.set(sessionId,settled)
+    settled.then(()=>{if(sessionAdmissions.get(sessionId)===settled)sessionAdmissions.delete(sessionId)})
+    return new Promise((resolve,reject)=>{
+      const cleanup=()=>signal.removeEventListener('abort',onAbort)
+      const onAbort=()=>{cleanup();reject(signal.reason)}
+      signal.addEventListener('abort',onAbort,{once:true})
+      pending.then(value=>{cleanup();resolve(value)},error=>{cleanup();reject(error)})
+      if(signal.aborted)onAbort()
+    })
+  }
+
   return async ({ method, url, headers, body, signal = new AbortController().signal }) => {
     if (!authorized(headers.authorization, token)) return json(401, { error: 'unauthorized' })
     if (method !== 'POST') return json(405, { error: 'method_not_allowed' })
@@ -179,6 +253,7 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       const sessionId = String(body?.session_id ?? '')
       const cwd = body?.cwd
       if (!ID.test(sessionId) || typeof cwd !== 'string' || cwd.includes('\u0000') || !isAbsolute(cwd)) return json(422, { error: 'session_input_invalid' })
+      return admitInOrder(sessionId,signal,async retain=>{
       const requestedPreset = body?.agent_preset
       if (requestedPreset !== undefined && !ALLOWED_AGENT_PRESETS.has(requestedPreset)) {
         return json(422, { error: 'agent_preset_not_allowed' })
@@ -267,18 +342,21 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
         }catch{return json(503,{error:'workbench_bridge_unavailable'})}
       }
       if (requestedPreset !== undefined) request.agentPreset = requestedPreset
+      const admitSession=()=>retain(createOrResumeSession({controller,request,agents,sessions,sessionNotFoundError,signal,beforeAdmission:isolatedWork===undefined?undefined:checkWorkWorkspace}))
       let value,inputRecovery
       if(nativeClaimedComposer&&!memoryPurpose){
         try{
           const created=await nativeClaimedComposer.withCreation({sessionId,cwd,presetId:requestedPreset??null,
-            binding:{runId:String(workbenchRunId),sessionRef:sessionId,executionLease:workbenchExecutionLease},signal},()=>controller.create(request))
+            binding:{runId:String(workbenchRunId),sessionRef:sessionId,executionLease:workbenchExecutionLease},signal},admitSession)
           value=created.value;inputRecovery=created.recovery
         }catch(error){
           const code=/^(?:native_claim_composer|native_claim_recovery|native_replay_profile)_[a-z_]+$/.test(error?.message??'')?error.message:'native_input_recovery_failed'
           console.error('[jot-native-input-recovery]',JSON.stringify({code}))
           return json(503,{error:'native_input_recovery_unavailable'})
         }
-      }else value=await controller.create(request)
+      }else{
+        try{value=await admitSession()}catch(error){return json(error instanceof SessionBindingConflict?409:503,{error:error instanceof SessionBindingConflict?'session_binding_invalid':'session_admission_unavailable'})}
+      }
       if(isolatedWork!==undefined){
         try{
           await checkWorkWorkspace()
@@ -308,6 +386,7 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
         if(handoffRecovery?.state!=='blocked')blockedWorkbenchSessions.delete(sessionId)
       }
       return json(201,{...value,...(inputRecovery?{native_input_recovery:inputRecovery}:{}),...(nativeRecovery?{native_dispatch_recovery:nativeRecovery}:{}),...(handoffRecovery?{native_handoff_recovery:handoffRecovery}:{})})
+      })
     }
     if(url.pathname==='/v1/memory-extraction/readiness'){
       if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).length)return json(422,{error:'memory_extraction_input_invalid'});
@@ -630,7 +709,7 @@ export function apply(ctx, config = {}) {
   const memoryExtractionHost=createOptionalMemoryExtractionHost({config:config.memoryExtraction,bridge:workbenchBridge,llm:ctx.llm,route:config.workbenchModel})
   if(memoryExtractionHost)ctx.effect(()=>()=>memoryExtractionHost.dispose())
   let ApiSessionNotFound
-  if(workbenchBridge){
+  if(workbenchBridge||typeof ctx.sessionController.inspect==='function'&&typeof ctx.sessionController.resolveAgent==='function'){
     ({ApiSessionNotFound}=createRequire(ctx.get('profileContext').installAnchor)('@deepseek-ai/dsh-api-session-controller'))
     if(typeof ApiSessionNotFound!=='function'||!(ApiSessionNotFound.prototype instanceof Error))throw Error('jot_session_controller_incompatible')
   }

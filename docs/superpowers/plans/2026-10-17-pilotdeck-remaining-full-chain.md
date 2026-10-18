@@ -358,3 +358,74 @@ Goal-binding/task-state transactions25-31ms. Synchronous cross-process contentio
 under the original75ms busy timeout is a possible explanation, not proof of the
 previous failure's holder or root cause. This trace pass does not replace the
 prior final-log SDK1/2 result or close the SQLite stability item.
+
+## Official runtime upgrade checkpoint — 2026-10-18
+
+The preceding source baseline is commit `bea7b96`. The bounded parallel batch
+delivered five of six assigned slices; this is an assignment count, not a
+weighted percentage of the full26 capabilities. No exact whole-project
+percentage can be recovered from the earlier informal remaining-work estimate.
+All unfinished capability rows and native-work release gates above stay open.
+
+The prepared Host now locks the officially published DSH `0.2.1-rc.2` dependency
+graph. The release is newer than the registry's still-old `latest` tag. The
+official provider selects `deepseek-flash`, currently DeepSeek-V4.1-Flash-1017,
+with `high` reasoning. A controlled local HTTP request checks the actual model,
+enabled thinking and high effort; it does not assert remote-provider quality.
+The SDK's existing 256,000-token output default is retained, distinct from the
+provider's advertised maximum. Budget and permission contracts are unchanged.
+
+Compatibility changes preserve exact Session identity through inspect/resume;
+conversation creation is used only for explicit native absence. Per-Session
+adapter admission is serialized, including cancelled waiters. Unknown lookup
+errors do not authorize replacement. The SDK has no atomic exact-create mode:
+an independent native UI must not concurrently create/prompt the same ID while
+adapter admission is in flight; rejecting a minted ID afterward cannot undo that
+external race's side effect. This boundary is not covered by the local canaries.
+
+The optional setup/pending-input compatibility copy accepts only the separately
+audited full package hashes for each supported SDK. Deferred-migration projection
+hints are not read as current Goal/idle authority. New detached replay uses the
+official Session structural validation plus retained, attributed MIT trace
+relationship checks from the older SDK, rather than dropping those checks when
+the upstream invariant companion disappears. Prior profile fingerprints are not
+resealed as new authorization. Optional memory extraction retains its separate
+audited runtime; no untested plugin combination is marked ready by this upgrade.
+
+Local installed-SDK integration passes14/14 with real Launcher/Gateway/Worker,
+including task waits, original Goal continuation, owner acceptance, PRD and
+direct/cold isolated work delivery, using scripted local Messages transport.
+The new preset observer uses actual official inspection and exact isolated
+generation identity. A separate hard-kill Controller run passes2/2, retaining
+original RPC/message IDs, reviewed tools/permissions and no implicit Goal wake.
+Initial failed attempts and observer API migration failures are retained in
+private diagnostics; they are not reclassified as passes. These checks do not
+resolve the earlier SQLite contention or authorize production/default enablement.
+
+After the serialized-admission correction, direct/cold isolated work and PRD
+installed-SDK acceptance passes3/3. Original-input hard-kill recovery and two
+in-flight supplements pass2/2 through the actual updated HTTP Host. An additional
+Gateway reply asserts `deepseek-flash`, enabled thinking and high effort on the
+actual local Messages request. The final complete adapter regression contains581 tests:
+556 passed,25 SDK-dependent/opt-in skips,zero failures. Root50/50, release
+preflight14/14, official profile1/1 and Windows frontend/Gateway builds pass.
+The public preflight scans893 working-tree files with zero findings; disclosure
+regressions6/6 and Brain links pass. The unchanged Gateway source was exercised
+through these real integration cases and built; its complete1729-test suite was
+not rerun for this SDK-only upgrade. Earlier full-run evidence above is historical.
+
+Final independent review found and closed an admission-lifetime issue: the
+claimed composer can return on cancellation/deadline before its original native
+operation settles. The response and per-Session serialization tail now have
+separate lifetimes; the tail retains the actual dispatched native promise.
+Cancelled queued callers never enter native creation, and early error responses
+do not allow a second request to race the still-running first operation. Two
+new regressions reproduce the old behavior before the correction. Independent
+exact-admission plus actual detached SDK replay verification passes29/29, and
+the final review has no remaining specific P1/P2 within this upgrade scope.
+
+The final reviewed retained-lifetime source also passes4/4 installed-SDK cases:
+direct isolated delivery, cold Host/Worker continuation, original claimed-input
+recovery and two live steering inputs. This rerun uses local scripted Messages
+responses, with zero failures or skips (83.34s); it retains the same limitations
+on real-provider and production acceptance.

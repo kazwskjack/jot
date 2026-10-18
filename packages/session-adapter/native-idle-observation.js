@@ -17,6 +17,8 @@ function liveFact(agent,sessionId){
  return {running:false,nextTurn:agent.inbox.nextTurn.length,nextStep:agent.inbox.nextStep.length,goal:goalFact(service.get(agent))};
 }
 function coldFact(projection,allowedPresets){
+ // Deferred-migration values are cache hints, never an authoritative current baseline.
+ if(projection?.kind!==undefined&&projection.kind!=='sequenced')invalid();
  if(projection===null)return null;
  const values=projection?.values;
  if(!values||typeof values!=='object'||!allowedPresets?.has(values.agentPreset)||!Object.hasOwn(values,'goal')

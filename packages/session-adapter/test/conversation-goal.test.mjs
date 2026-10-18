@@ -74,3 +74,10 @@ test('a parked-input refusal has a fixed recoverable protocol code and performs 
  const handler=createAdapterHandler({...f.context,token:'a'.repeat(32)}),result=await handler({method:'POST',url:new URL('http://127.0.0.1/v1/sessions/cold/conversation-goal'),headers:{authorization:'Bearer '+'a'.repeat(32)},body:{action:'stop',id:'g',revision:3}});
  assert.equal(result.status,409);assert.deepEqual(result.value,{error:'goal_cold_input_pending'});assert.deepEqual(f.calls,[]);
 });
+
+test('migration-required cached Goal hints cannot authorize cold controls or exact observation',async()=>{
+ for(const body of [{},{action:'pause',id:'g',revision:3}]){
+  const f=coldFixture();f.projection.kind='migration-required';
+  await assert.rejects(()=>readConversationGoal({...f.context,body}),/goal_unavailable/);assert.deepEqual(f.calls,[]);
+ }
+});

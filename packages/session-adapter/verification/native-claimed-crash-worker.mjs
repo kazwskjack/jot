@@ -25,7 +25,7 @@ const names = [
 const modules = {};
 for (const name of names) {
   const manifest = JSON.parse(readFileSync(join(runtime, name, 'package.json'), 'utf8'));
-  if (name !== 'cordis') assert.equal(manifest.version, '0.2.0-rc.2', `${name} runtime version`);
+  if (name !== 'cordis') assert.equal(manifest.version, '0.2.1-rc.2', `${name} runtime version`);
   modules[name] = await import(pathToFileURL(join(runtime, name, 'lib/index.js')).href);
 }
 
@@ -170,9 +170,9 @@ const prior = JSON.parse(priorJson ?? 'null');
 assert.ok(prior && prior.kind === 'ready' && prior.sessionId === sessionId);
 let recoverySetup,publishedDurable=false;
 if(stage==='recover'||stage==='recover-hold'){
- const invariants=await import(pathToFileURL(join(runtime,'dsh-invariants/lib/index.js')).href),sessionInvariant=await import(pathToFileURL(join(runtime,'dsh-session/lib/invariant.js')).href);
+
  recoverySetup=createNativeClaimedInputRecoverySetup({Session:modules['dsh-session'].Session,agents:ctx.agents,sessions:ctx.sessions,query:ctx.sessionQuery,projections:ctx.sessionProjections,
-  validateLog:createNativeInvariantReplay({Context:modules.cordis.Context,Service:modules.cordis.Service,InvariantRegistry:invariants.InvariantRegistry,sessionInvariant}),
+  validateLog:createNativeInvariantReplay({Session:modules['dsh-session'].Session}),
   // Fixture-only authority: this probe has no Gateway/user identity and must
   // not be mistaken for production owner/lease authorization.
   authorize:async({agent})=>({authorized:agent.id===prior.sessionId}),confirmReplaySafety:async()=>({safe:true})});
