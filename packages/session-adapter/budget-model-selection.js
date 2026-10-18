@@ -8,7 +8,7 @@ export function createBudgetModelSelector({route,llm,agents}={}){
  return async(agent,check,signal)=>{
   if(!agent||typeof check!=='function'||typeof llm?.resolveCallConfig!=='function'||typeof agents?.selectForNextRequest!=='function')throw new Error('workbench_model_host_incompatible');
   signal?.throwIfAborted();await check();signal?.throwIfAborted();
-  const resolved=await llm.resolveCallConfig({...original});signal?.throwIfAborted();
+  const resolved=await llm.resolveCallConfig({...original},signal);signal?.throwIfAborted();
   if(resolved?.provider!==original.provider||resolved?.model!==original.model)throw new Error('workbench_model_route_changed');
   await check();signal?.throwIfAborted();
   agents.selectForNextRequest(agent,{...original});

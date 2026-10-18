@@ -15,3 +15,16 @@ test('missing route is disabled and malformed host routing cannot carry credenti
  assert.equal(createBudgetModelSelector({}),undefined);
  for(const route of [null,[],{}, {provider:'fixture',model:'pinned',apiKey:'fake'}, {provider:'fixture',model:'bad model'},{provider:'',model:'pinned'}])assert.throws(()=>createBudgetModelSelector({route}),/workbench_model_config_invalid/);
 });
+
+test('cancelling during provider capability lookup aborts resolution before Session selection',async()=>{
+ const controller=new AbortController(),entered=Promise.withResolvers();let selections=0;
+ const select=createBudgetModelSelector({route:{provider:'fixture',model:'pinned'},
+  llm:{resolveCallConfig:async(route,signal)=>{
+   entered.resolve();assert.equal(signal,controller.signal,'forward the original cancellation signal to the official resolver');
+   await new Promise((resolve,reject)=>{signal.addEventListener('abort',()=>reject(signal.reason),{once:true});});
+   return route;
+  }},agents:{selectForNextRequest:()=>selections++}});
+ const pending=select({},async()=>{},controller.signal);
+ const rejected=assert.rejects(pending,error=>error.name==='AbortError');
+ await entered.promise;controller.abort();await rejected;assert.equal(selections,0);
+});

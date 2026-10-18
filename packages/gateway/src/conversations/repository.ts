@@ -67,11 +67,15 @@ export class ConversationRepository {
   }
 
   update(id: string, ownerId: string, input: Record<string, unknown>) {
+    return withImmediateTransaction(this.db,()=>this.updateInside(id,ownerId,input));
+  }
+
+  private updateInside(id: string, ownerId: string, input: Record<string, unknown>) {
     const current = this.db.prepare('SELECT version FROM ga_conversations WHERE id=? AND owner_id=?').get(id, ownerId) as { version: number } | undefined;
     if (!current) throw new Error('conversation_not_found');
     if (current.version !== Number(input.expected_version)) throw new Error('version_conflict');
     if (input.model !== undefined) {
-      const active = this.db.prepare("SELECT 1 FROM ga_runs WHERE conversation_id=? AND status IN ('starting','running','waiting_user','waiting_approval','cancelling') LIMIT 1").get(id);
+      const active = this.db.prepare("SELECT 1 FROM ga_runs WHERE conversation_id=? AND status IN ('queued','starting','running','waiting_user','waiting_approval','cancelling') LIMIT 1").get(id);
       if (active) throw new Error('active_run_model_change');
     }
     const prior = this.get(id, ownerId);
