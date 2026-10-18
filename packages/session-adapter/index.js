@@ -1,3 +1,4 @@
+import {createChatCompactionManager} from './chat-compaction-manager.js'
 import {createOrdinaryCompletionReader} from './ordinary-completion.js'
 import {createOrdinaryRunCompletionReader,createLiveChatRunCompletionReader} from './ordinary-run-completion.js'
 import {createChatMaintenanceObserver} from './chat-maintenance-observation.js'
@@ -655,6 +656,7 @@ export function apply(ctx, config = {}) {
   }
   if(config.ordinaryChatContext!==undefined&&typeof config.ordinaryChatContext!=='boolean'||config.ordinaryChatContext===true&&!chatExecutionPolicy)throw Error('chat_context_config_invalid')
   if(config.ordinaryChatWeb!==undefined&&typeof config.ordinaryChatWeb!=='boolean'||config.ordinaryChatWeb===true&&(!chatExecutionPolicy||config.ordinaryChatContext!==true))throw Error('chat_web_config_invalid')
+  if(config.ordinaryChatCompaction!==undefined&&typeof config.ordinaryChatCompaction!=='boolean'||config.ordinaryChatCompaction===true&&(!config.ordinaryChatMaintenanceObservation||ctx.get?.('jotChatCompactionRuntime')?.protocol!==1))throw Error('chat_compaction_config_invalid')
   const ordinaryPresets=new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted'))
   if(chatExecutionPolicy)ordinaryPresets.add('jot-chat')
   const host = config.host || '127.0.0.1'
@@ -738,12 +740,18 @@ export function apply(ctx, config = {}) {
     for(const agent of ctx.agents.list())webSelector.prepareAgent(agent)
     ctx.effect(()=>()=>webSelector.dispose())
   }
-  const ordinaryInputAdmissionHost=config.ordinaryInputAdmission===undefined?undefined:createOrdinaryInputAdmissionHost({ctx,agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets,...config.ordinaryInputAdmission,...(ordinaryModelSelector?{modelSelector:ordinaryModelSelector}:{}),...(contextSelector?{contextSelector}:{}),...(webSelector?{webSelector}:{})})
+  let chatCompactionManager
+  const ordinaryInputAdmissionHost=config.ordinaryInputAdmission===undefined?undefined:createOrdinaryInputAdmissionHost({ctx,agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets,...config.ordinaryInputAdmission,...(ordinaryModelSelector?{modelSelector:ordinaryModelSelector}:{}),...(contextSelector?{contextSelector}:{}),...(webSelector?{webSelector}:{}),...(config.ordinaryChatCompaction===true?{beforeInput:request=>{if(!chatCompactionManager)throw Error('chat_compaction_manager_unavailable');return chatCompactionManager.beforeInput(request)}}:{})})
   if(ordinaryInputAdmissionHost)ctx.effect(()=>()=>ordinaryInputAdmissionHost.dispose())
   const ordinaryCompletionReader=config.ordinaryInputAdmission===undefined?undefined:createOrdinaryCompletionReader({agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets,readGoal:agent=>nativeGoalsFor(agent)?.get(agent),...config.ordinaryInputAdmission})
   const ordinarySteeringObservationReader=config.ordinaryInputHistory===undefined?undefined:createOrdinarySteeringObservationReader({agents:ctx.agents,sessions:ctx.sessions,persistence:ctx.sessionPersistence,bridge:workbenchBridge,admissions:config.ordinaryInputAdmission.admissions,ordinaryPresets,...config.ordinaryInputHistory})
   const ordinaryRunCompletionReader=config.ordinaryRunHistory===undefined?undefined:createOrdinaryRunCompletionReader({agents:ctx.agents,sessions:ctx.sessions,persistence:ctx.sessionPersistence,bridge:workbenchBridge,admissions:config.ordinaryInputAdmission.admissions,projections:ctx.sessionProjections,ordinaryPresets,...config.ordinaryRunHistory})
   const chatMaintenanceObserver=config.ordinaryChatMaintenanceObservation===undefined?undefined:createChatMaintenanceObserver({bridge:workbenchBridge,agents:ctx.agents,tokenMeter:ctx.get('tokenMeter'),llm:ctx.llm,pressurePolicy:config.ordinaryChatMaintenanceObservation,completionReader:createLiveChatRunCompletionReader({agents:ctx.agents,sessions:ctx.sessions,persistence:ctx.sessionPersistence,bridge:workbenchBridge,admissions:config.ordinaryInputAdmission.admissions,projections:ctx.sessionProjections,ordinaryPresets,...config.ordinaryRunHistory})})
+  if(config.ordinaryChatCompaction===true){
+    chatCompactionManager=createChatCompactionManager({ctx,bridge:workbenchBridge,agents:ctx.agents,presets:ctx.get('agentPresets'),runtime:ctx.get('jotChatCompactionRuntime'),observe:chatMaintenanceObserver,tokenMeter:ctx.get('tokenMeter'),llm:ctx.llm,completionReader:createLiveChatRunCompletionReader({agents:ctx.agents,sessions:ctx.sessions,persistence:ctx.sessionPersistence,bridge:workbenchBridge,admissions:config.ordinaryInputAdmission.admissions,projections:ctx.sessionProjections,ordinaryPresets,...config.ordinaryRunHistory})})
+    ctx.provide('jotChatCompactionManager',chatCompactionManager)
+    ctx.effect(()=>()=>chatCompactionManager.dispose())
+  }
   const ordinaryClaimedComposer=config.ordinaryInputRecovery?.claimedInput===undefined?undefined:createOrdinaryClaimedSessionComposer({ctx,bridge:workbenchBridge,agents:ctx.agents,sessions:ctx.sessions,query:typeof ctx.get==='function'?ctx.get('sessionQuery'):ctx.sessionQuery,projections:ctx.sessionProjections,ordinaryPresets,...config.ordinaryInputAdmission,...config.ordinaryInputRecovery.claimedInput})
   if(ordinaryClaimedComposer)ctx.effect(()=>()=>ordinaryClaimedComposer.dispose())
   const ordinaryInputRunHost=config.ordinaryInputRecovery===undefined?undefined:createOrdinaryInputRunHost({controller:ctx.sessionController,agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets,verifyComposition:config.ordinaryInputRecovery.verifyComposition,inputAdmissionHost:ordinaryInputAdmissionHost,claimedComposer:ordinaryClaimedComposer})

@@ -7,8 +7,21 @@ pressure, unavailable capacity or changing state quietly skips. A `needed`
 result is advisory with `execution_authorized: false`; it is neither native
 completion/idle proof nor a model grant. It is not wired into execution or an
 execution endpoint. The opt-in observation composition below can consume it.
-Background inference, independent accounting, cancellation and
-checkpoint handoff remain pending in the [Chat/Work plan](../../docs/superpowers/plans/2026-10-18-portable-chat-work.md).
+The opt-in official engine and independent accounting/cancellation are now
+implemented; automatic scheduling and useful checkpoint handoff remain pending in the [Chat/Work plan](../../docs/superpowers/plans/2026-10-18-portable-chat-work.md).
+
+### Optional original Chat engine
+
+The Host-only `ordinaryChatCompaction: true` option composes the owned operation
+manager with the original isolated official engine. It requires the existing
+observation/context/policy prerequisites and an independently mounted
+`jotChatCompactionRuntime` service. The optional Chat preset uses
+`maintenance: true`, a runtime-service injection dependency, and revision
+`chat-native-compaction-v1`. The engine remains `auto: false`.
+Only trusted programmatic requests start maintenance; generated profiles,
+browser endpoints and worker timers do not start it. New original input cancels
+and drains its own operation after authority checks. See
+[implementation, actual SDK evidence and remaining checkpoint gates](../../docs/implementation/2026-10-18-chat-native-compaction.md).
 
 ### Optional Chat maintenance observation
 

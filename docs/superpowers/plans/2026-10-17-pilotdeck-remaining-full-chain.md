@@ -551,12 +551,15 @@ canonical answers and eleven auxiliary tokens, with no native log change or
 summary/checkpoint publication. The [accounting evidence](../../implementation/2026-10-18-chat-compaction-accounting.md)
 separates real SDK/local scripted-provider behavior from live provider billing.
 
+The subsequent [original native engine increment](../../implementation/2026-10-18-chat-native-compaction.md)
+now composes an isolated Chat-only official engine with foreground automation
+disabled. Actual SDK fixtures prove high-pressure summary/settlement, quiet
+low-pressure skips and owned cancellation/drain before a new original input.
+Native markers and replacement are flushed and replayed by the original SDK;
+partial cancellation remains unknown usage rather than zero cost.
+
 This does not complete the Chat/Work plan or any remaining full capability by
-itself. The Chat preset still does not compose automatic native compaction;
-own-operation cancellation/drain, source-backed checkpoint consumption,
-provider/cache metrics, UI/standalone integration and the broader gates above
-remain open. General readiness and generated profiles remain default-off.
-This is a metadata prerequisite only. Native idle/pressure admission, actual
-post-answer compaction, cancellation, auxiliary usage, useful checkpoint handoff
-and Chat-only activity filtering still remain in the Chat/Work plan. No general
-Chat readiness or full-ledger completion is claimed.
+itself. Useful owner-checkpoint publication and consumption, automatic starts,
+restart/recovery, Chat-only activity filtering, provider/cache metrics,
+UI/standalone integration and the broader gates remain open. General readiness
+and generated profiles remain default-off. No full-ledger completion is claimed.

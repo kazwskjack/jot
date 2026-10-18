@@ -125,6 +125,14 @@ scheduler. Completing its first step does not complete background compaction.
    another foreground task or infer permission from a stale "current run".
    Capture dispatched/partial/unknown usage even after cancellation; a lost
    receipt is observation/recovery work, not permission for another inference.
+   Implemented explicit prerequisite: [original native engine and input cancellation](../../implementation/2026-10-18-chat-native-compaction.md).
+   Actual SDK tests verify high-pressure summary/settlement, low-pressure skip,
+   and a new original question cancelling/draining a live auxiliary stream.
+   The inherited official engine supplies native markers, replacement, flush
+   and replay. The manager resolves isolated services through official
+   `serviceFor`, preserving stable implementation identity across Cordis proxies.
+   There is no automatic start, user-facing execution endpoint, production
+   activation or useful next-request checkpoint consumer yet.
 5. **Useful checkpoint handoff:** retain the official summary event, source
    span/generation and hashes as an owner-scoped checkpoint. Verify its source
    again before publication. A subsequent Chat acceptance may use a verified
