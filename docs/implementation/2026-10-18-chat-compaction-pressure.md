@@ -5,6 +5,11 @@ unwired, read-only prerequisite, not completed background compaction. No HTTP
 route, readiness switch, inference, write, idle certification or execution
 grant was added. General Chat readiness remains unavailable.
 
+That describes the pressure-only increment. The subsequent
+[native observation composition](2026-10-18-chat-maintenance-observation.md)
+now consumes this module behind an opt-in read-only Host endpoint. It still
+does not authorize or execute compaction.
+
 The caller supplies the actual official token meter and LLM metadata service,
 the original Session, exact resolved model and resolved host pressure policy.
 The observer uses `tokenMeter.measure(session)`, not stored transcript length.

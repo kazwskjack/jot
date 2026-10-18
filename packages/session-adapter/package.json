@@ -21,6 +21,7 @@
     "ordinary-execution-policy.js",
     "chat-context.js",
     "chat-compaction-pressure.js",
+    "chat-maintenance-observation.js",
     "chat-web.js",
     "model-catalog.js",
     "conversation-goal.js",

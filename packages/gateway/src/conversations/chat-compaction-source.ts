@@ -65,3 +65,20 @@ export function readChatCompactionIntent(db:DatabaseSync,scope:Scope,id:string){
   if(!row)return fail();return intentValue(row,source);
  });
 }
+/** Compare trusted Host native facts against the original canonical answer.
+ * This is a read-only observation, not a persisted grant or usage receipt. */
+export function inspectChatCompactionNative(db:DatabaseSync,scope:Scope,expectedSourceSha256:string,witness:unknown){
+ return withImmediateTransaction(db,()=>{
+  const source=inspectChatCompactionSource(db,scope);if(!validHash(expectedSourceSha256)||digest(source)!==expectedSourceSha256)return fail();
+  const history=inspectOrdinaryRunHistory(db,scope),{session_ref,...historyScope}=scope,coverage=ordinaryRunCompletionSource(session_ref,historyScope,history),native=witness as Record<string,unknown>;
+  if(!native||typeof native!=='object'||Array.isArray(native)||Object.keys(native).sort().join(',')!=='answer_seq,answer_sha256,command_ids_sha256,execution_authorized,history_sha256,kind,native_message_count,native_message_ids_sha256,profile_fingerprint,proof_sha256,protocol,raw_event_count,raw_sha256,run_id,run_version,session_id,turn_end_seq'
+   ||native.protocol!==1||native.kind!=='chat_compaction_native_witness'||native.execution_authorized!==false||native.run_id!==scope.run_id||native.run_version!==scope.expected_run_version||native.session_id!==session_ref||native.history_sha256!==coverage.source_sha256
+   ||!['answer_sha256','command_ids_sha256','native_message_ids_sha256','profile_fingerprint','proof_sha256','raw_sha256'].every(k=>validHash(native[k]))||native.command_ids_sha256!==digest(coverage.command_ids)||native.native_message_count!==coverage.command_ids.length+1
+   ||!['answer_seq','turn_end_seq','raw_event_count'].every(k=>Number.isSafeInteger(native[k]))||Number(native.answer_seq)<0||!(Number(native.answer_seq)<Number(native.turn_end_seq)&&Number(native.turn_end_seq)<Number(native.raw_event_count)))return fail();
+  const answer=db.prepare('SELECT content_json FROM ga_messages WHERE id=? AND run_id=?').get(source.answer_message_id,scope.run_id);
+  if(typeof answer?.content_json!=='string'||sha(answer.content_json)!==source.answer_content_sha256)return fail();
+  const text=decodeStoredContent(answer.content_json).blocks.filter(b=>b.kind==='text').map(b=>b.text).join('').trim();
+  if(!text||sha(text)!==native.answer_sha256)return fail();
+  return Object.freeze({protocol:1,kind:'chat_compaction_native',run_id:scope.run_id,session_id:scope.session_ref,source_sha256:expectedSourceSha256,proof_sha256:native.proof_sha256,witness_sha256:digest(native),raw_sha256:native.raw_sha256,raw_event_count:native.raw_event_count,answer_sha256:native.answer_sha256,answer_seq:native.answer_seq,turn_end_seq:native.turn_end_seq,profile_fingerprint:native.profile_fingerprint,execution_authorized:false});
+ });
+}

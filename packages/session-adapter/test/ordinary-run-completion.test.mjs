@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 const create=(await import('../ordinary-run-completion.js').catch(()=>({}))).createOrdinaryRunCompletionReader;
+import * as completion from '../ordinary-run-completion.js';
 const canonical=v=>JSON.stringify(v,(_k,x)=>x&&typeof x==='object'&&!Array.isArray(x)?Object.fromEntries(Object.keys(x).sort().map(k=>[k,x[k]])):x);
 const sha=v=>createHash('sha256').update(v).digest('hex');
 function fixture(count=2){
@@ -57,4 +58,25 @@ test('new unfinished assistant chunks cannot be replaced by an older settled ans
 
 test('a supplement committed before its original input cannot borrow that original lineage',async()=>{
  const f=fixture(1);[f.events[3],f.events[4]]=[f.events[4],f.events[3]];f.resequence();await assert.rejects(create(f.options)(f.request()));
+});
+
+function liveChatFixture(){
+ const f=fixture(0);f.options.ordinaryPresets.add('jot-chat');f.header.agentPreset='jot-chat';f.source.run_status='succeeded';f.source.canonical={message_id:'answer',status:'complete',content_sha256:'3'.repeat(64),record_sha256:'4'.repeat(64)};
+ const session={id:'s',header:f.header,inheritedEventCount:0,get seq(){return f.events.length;},snapshotEvents:()=>structuredClone(f.events)};
+ const agent={id:'s',session,status:'idle',inbox:{nextStep:[],nextTurn:[]},whenIdle:async()=>{}};
+ f.options.agents.get=()=>agent;f.options.sessions.get=()=>session;return{...f,agent,session};
+}
+test('live Chat completion reuses original immutable admissions without a foreground lease or persisted-session open',async()=>{
+ assert.equal(typeof completion.createLiveChatRunCompletionReader,'function');const f=liveChatFixture(),before=canonical(f.events);
+ const proof=await completion.createLiveChatRunCompletionReader(f.options)(f.request());assert.equal(proof.answer_sha256,sha('Synthetic answer'));assert.equal(proof.execution_authorized,false);assert.deepEqual(f.counts(),{opens:0,closes:0});assert.equal(canonical(f.events),before);
+});
+test('live maintenance completion refuses busy, pending, foreign, non-Chat and unpublished state',async()=>{
+ for(const mode of ['running','pending','foreign','work','unpublished','wrong-session','changed']){
+  const f=liveChatFixture();if(mode==='running')f.agent.status='running';if(mode==='pending')f.agent.inbox.nextStep.push({});if(mode==='foreign')f.agent.id='foreign';if(mode==='work')f.header.agentPreset='jot-general';if(mode==='unpublished')f.source.canonical=null;if(mode==='wrong-session')f.options.sessions.get=()=>({...f.session});if(mode==='changed')f.agent.whenIdle=async()=>{f.events.push({seq:f.events.length,type:'turn/start',data:{turn:2}});};
+  await assert.rejects(()=>completion.createLiveChatRunCompletionReader(f.options)(f.request()),undefined,mode);assert.deepEqual(f.counts(),{opens:0,closes:0});
+ }
+});
+test('live completion waits for native maintenance boundary and aborts without cancelling another activity',async()=>{
+ const f=liveChatFixture(),abort=new AbortController();let entered;const ready=new Promise(resolve=>entered=resolve);
+ f.agent.whenIdle=()=>{entered();return new Promise(()=>{});};const promise=completion.createLiveChatRunCompletionReader(f.options)({...f.request(),signal:abort.signal});await ready;abort.abort(Error('new input'));await assert.rejects(()=>promise,/new input/);assert.deepEqual(f.counts(),{opens:0,closes:0});
 });

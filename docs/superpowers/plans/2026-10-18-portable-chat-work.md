@@ -87,6 +87,17 @@ scheduler. Completing its first step does not complete background compaction.
    cover low/equal pressure, route drift, missing capacity, raw-history
    exclusion and cancellation. This is unwired advice only, not native
    completion/idle proof, SDK execution acceptance or independent admission.
+   The subsequent [native observation composition](../../implementation/2026-10-18-chat-maintenance-observation.md)
+   now joins the original completed source, shared native completion parser,
+   exact canonical answer verification and actual effective meter. The actual
+   official Host verifies two completed questions, low-pressure skips and no
+   extra model call/answer/database write. It waits for native `whenIdle()`
+   rather than treating the SDK's maintenance `status: idle` as a reservation.
+   Original cold-history recovery retains its registry-empty contract.
+   This completes the observational prerequisite only: independent dispatch,
+   official inference/accounting, checkpoint consumption and readiness remain
+   open. Any future dispatch must recheck source under its own maintenance
+   boundary; these observations are not reusable grants.
 3. **Dispatch/accounting boundary:** record a separately fenced background
    attempt before inference. Bind it to the immutable intent and original
    source. Never reuse the completed foreground execution lease, create a

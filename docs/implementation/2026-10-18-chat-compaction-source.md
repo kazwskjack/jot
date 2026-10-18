@@ -44,6 +44,12 @@ scope (`read` also requires the intent ID). It rejects a foreground
 records source provenance. No inference or maintenance action is accepted.
 It retains bearer authorization when browser CSRF is configured.
 
+The subsequent [native observation increment](2026-10-18-chat-maintenance-observation.md)
+adds `verify-native` with the exact source hash and trusted Host completion
+metadata witness. The owned Host uses the original full parser; Gateway checks
+source/command coverage and the native answer hash against the canonical
+answer, without copying tool bodies, writes, publication or a grant.
+
 Every read/prepare rechecks the live source. A newer accepted question,
 changed answer/policy/binding or invalid authority makes the old intent
 unavailable for execution, while its frozen record remains available to the

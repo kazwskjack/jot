@@ -6,8 +6,33 @@ meter, exact routed model metadata and explicitly resolved host policy. Low
 pressure, unavailable capacity or changing state quietly skips. A `needed`
 result is advisory with `execution_authorized: false`; it is neither native
 completion/idle proof nor a model grant. It is not wired into execution or an
-HTTP endpoint. Background inference, independent accounting, cancellation and
+execution endpoint. The opt-in observation composition below can consume it.
+Background inference, independent accounting, cancellation and
 checkpoint handoff remain pending in the [Chat/Work plan](../../docs/superpowers/plans/2026-10-18-portable-chat-work.md).
+
+### Optional Chat maintenance observation
+
+`ordinaryChatMaintenanceObservation: {thresholdRatio: 0.8, headroomTokens: 1000}`
+enables only the authenticated read-only
+`POST /v1/sessions/:id/chat-maintenance-observation` prerequisite. It requires
+the original Chat policy/context, immutable input admissions, `ordinaryRunHistory`
+with the official `Session` and native invariant validator, and the actual host
+token meter/LLM metadata services. Add `tokenMeter` to the Host plugin's dependency
+list when enabling this optional composition. Generated profiles do not enable this option.
+The body contains `history: {owner_id, conversation_id, run_id,
+expected_run_version}` and the Gateway's completed `source_sha256`; foreground
+leases and additional fields are rejected. A cold or busy Session is refused,
+never created, resumed or woken.
+
+The live Chat reader shares the original full native completion parser and
+immutable admissions. It sends a bounded metadata witness, keeping full tool
+and answer bodies local; Gateway verifies source/command coverage and compares
+its answer hash to the committed canonical answer. It waits for the public native `whenIdle()` boundary because
+the official SDK also reports `status: idle` during maintenance. Pressure is
+measured on the effective request surface and native evidence is checked again
+after metadata resolution. Returned identities/digests/numbers are advisory:
+`execution_authorized: false`. They do not reserve idleness or authorize a later
+model call. See [validation and remaining execution gates](../../docs/implementation/2026-10-18-chat-maintenance-observation.md).
 
 A Cordis plugin that connects the extended Jot gateway to an existing DSH Session Controller. It is not a standalone model server and cannot be launched with `node index.js` to create a complete runtime.
 

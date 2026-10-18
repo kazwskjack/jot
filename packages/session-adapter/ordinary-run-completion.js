@@ -27,16 +27,33 @@ function validateSource(row,scope){
  * tool, wake, flush, lease acquisition, product publication or fee settlement.
  * Output events are scoped native evidence for the shared Gateway interpreter;
  * they do not certify output ownership, integrity or successful business work. */
-export function createOrdinaryRunCompletionReader({bridge,persistence,admissions,agents,sessions,Session,validateLog,projections,ordinaryPresets}){
+export function createOrdinaryRunCompletionReader(options){return createRunCompletionReader(options,false);}
+/** Live Chat maintenance observation shares the original native proof parser.
+ * It reads an already registered Session only, never resolves or opens one and
+ * never reuses a foreground execution lease. The cold recovery reader above
+ * retains its original registry-empty contract. Neither reader grants work. */
+export function createLiveChatRunCompletionReader(options){return createRunCompletionReader(options,true);}
+function waitForNativeIdle(agent,signal){return new Promise((resolve,reject)=>{
+ const abort=()=>{signal.removeEventListener('abort',abort);reject(signal.reason);};signal.addEventListener('abort',abort,{once:true});
+ Promise.resolve().then(()=>{signal.throwIfAborted();return agent.whenIdle();}).then(value=>{signal.removeEventListener('abort',abort);signal.aborted?reject(signal.reason):resolve(value);},error=>{signal.removeEventListener('abort',abort);reject(error);});if(signal.aborted)abort();
+});}
+function createRunCompletionReader({bridge,persistence,admissions,agents,sessions,Session,validateLog,projections,ordinaryPresets},liveChat){
  if(typeof bridge?.request!=='function'||typeof persistence?.open!=='function'||admissions?.entryInspectionProtocol!==1||typeof admissions.read!=='function'||typeof admissions.inspectEntry!=='function'
   ||typeof agents?.get!=='function'||typeof sessions?.get!=='function'||typeof Session?.create!=='function'||typeof validateLog!=='function'||typeof projections?.snapshot!=='function'||!(ordinaryPresets instanceof Set)||!ordinaryPresets.size)fail();
  return async({scope,expectedSourceSha256,signal})=>{
   if(!scope||Object.keys(scope).sort().join(',')!=='conversation_id,expected_run_version,owner_id,run_id,session_ref'||!['owner_id','conversation_id','run_id','session_ref'].every(k=>valid(scope[k]))||!Number.isSafeInteger(scope.expected_run_version)||scope.expected_run_version<1||!hash(expectedSourceSha256)||!signal)fail();
   scope=structuredClone(scope);
-  const check=()=>{signal.throwIfAborted();if(agents.get(scope.session_ref)!==undefined||sessions.get(scope.session_ref)!==undefined)fail();};
+  const live=liveChat?agents.get(scope.session_ref):undefined,liveSession=live?.session,liveSeq=liveSession?.seq;
+  const check=()=>{
+   signal.throwIfAborted();if(!liveChat){if(agents.get(scope.session_ref)!==undefined||sessions.get(scope.session_ref)!==undefined)fail();return;}
+   if(!live||live.id!==scope.session_ref||live.session!==liveSession||liveSession?.id!==scope.session_ref||liveSession.header?.agentPreset!=='jot-chat'||!ordinaryPresets.has('jot-chat')
+    ||agents.get(scope.session_ref)!==live||sessions.get(scope.session_ref)!==liveSession||live.status!=='idle'||!Number.isSafeInteger(liveSeq)||liveSession.seq!==liveSeq
+    ||!Array.isArray(live.inbox?.nextStep)||!Array.isArray(live.inbox?.nextTurn)||live.inbox.nextStep.length||live.inbox.nextTurn.length||typeof live.whenIdle!=='function'||typeof liveSession.snapshotEvents!=='function')fail();
+  };
   const readSource=async()=>{check();const result=await bridge.request('ordinary-run-history',{runId:scope.run_id,sessionRef:scope.session_ref},{owner_id:scope.owner_id,conversation_id:scope.conversation_id,expected_run_version:scope.expected_run_version},signal);check();return validateSource(result?.history,scope);};
   const source=await readSource();if(sha(canonical(source))!==expectedSourceSha256)fail();
-  const readRaw=async()=>{check();const handle=await persistence.open(scope.session_ref,'read',{signal});try{check();const result=await handle.read(0,undefined,{signal});check();return structuredClone({header:handle.header,inheritedEventCount:handle.inheritedEventCount,events:result.events});}finally{await handle.close();}};
+  if(liveChat){if(source.canonical?.status!=='complete'||source.commands.some(c=>c.command_status==='pending'))fail();await waitForNativeIdle(live,signal);check();}
+  const readRaw=async()=>{check();if(liveChat)return structuredClone({header:liveSession.header,inheritedEventCount:liveSession.inheritedEventCount,events:liveSession.snapshotEvents(0)});const handle=await persistence.open(scope.session_ref,'read',{signal});try{check();const result=await handle.read(0,undefined,{signal});check();return structuredClone({header:handle.header,inheritedEventCount:handle.inheritedEventCount,events:result.events});}finally{await handle.close();}};
   const raw=await readRaw(),{header,events}=raw;
   if(header?.id!==scope.session_ref||!Number.isSafeInteger(header.createdAt)||header.createdAt<0||header.isSeeded!==false||raw.inheritedEventCount!==0||header.parentSession!==undefined||header.origin==='subagent'||!ordinaryPresets.has(header.agentPreset)||!Array.isArray(events)||events.some((e,i)=>e?.seq!==i||typeof e.type!=='string'))fail();
   const detached=Session.create(scope.session_ref,structuredClone(events),structuredClone(header),0);
