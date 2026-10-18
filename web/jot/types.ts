@@ -8,14 +8,14 @@ export type ModelSelection = { provider: string; model: string; reasoning_effort
 
 export type CapabilitySet = { search: boolean; fetch: boolean; browser_interaction: boolean; file_read: boolean; file_edit: boolean; command_execution: boolean; questions: boolean; approvals: boolean; artifact_download: boolean; resume_checkpoint: boolean };
 
-export type Capabilities = { api_version: string; event_schema_version: string; adapter_version: string; capabilities: CapabilitySet; models: Array<{ provider: string; model: string; reasoning_output: "provider" | "summary" | "none"; supported_reasoning_efforts: Array<string> }>; limits: { max_upload_bytes: number; max_active_runs_per_conversation: 1; replay_retention_hours: number; idempotency_retention_hours: number }; voice?: { enabled: boolean; status: "disabled" | "unavailable" | "preparing" | "ready"; max_duration_ms: number; max_bytes: number; accepted_mime_types: string[]; languages: string[] }; workspaces: Array<{ workspace_id: string; title: string; can_read: boolean; can_write: boolean }> };
+export type Capabilities = { conversation_modes?:{default:'chat'|'work';work:{supported:true};chat:{ready:boolean}};api_version: string; event_schema_version: string; adapter_version: string; capabilities: CapabilitySet; models: Array<{ provider: string; model: string; reasoning_output: "provider" | "summary" | "none"; supported_reasoning_efforts: Array<string> }>; limits: { max_upload_bytes: number; max_active_runs_per_conversation: 1; replay_retention_hours: number; idempotency_retention_hours: number }; voice?: { enabled: boolean; status: "disabled" | "unavailable" | "preparing" | "ready"; max_duration_ms: number; max_bytes: number; accepted_mime_types: string[]; languages: string[] }; workspaces: Array<{ workspace_id: string; title: string; can_read: boolean; can_write: boolean }> };
 
 export type Project = {project_id:string;title:string;is_default:boolean;version:number;created_at:string;updated_at:string;active_conversation_count?:number;archived_conversation_count?:number};
-export type Conversation = { project_id?:string;pinned_at?:string|null;archived_at?:string|null; conversation_id: string; title: string; workspace_id: string; model: ModelSelection; created_at: string; updated_at: string; version: number };
+export type Conversation = { mode?:'chat'|'work';project_id?:string;pinned_at?:string|null;archived_at?:string|null; conversation_id: string; title: string; workspace_id: string; model: ModelSelection; created_at: string; updated_at: string; version: number };
 
-export type CreateConversation = { title?: string; workspace_id: string; model: ModelSelection };
+export type CreateConversation = { mode?:'chat'|'work';title?: string; workspace_id: string; model: ModelSelection };
 
-export type UpdateConversation = { expected_version: number; title?: string; model?: ModelSelection };
+export type UpdateConversation = { mode?:'chat'|'work';expected_version: number; title?: string; model?: ModelSelection };
 
 export type ConversationPage = { items: Array<Conversation>; next_cursor?: string };
 

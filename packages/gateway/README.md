@@ -127,3 +127,12 @@ production acceptance claims.
 `src/artifacts/main.ts` expects a separately supplied document exporter and runtime bridge; the fallback exporter path is not a bundled executable. `src/channels/main.ts` expects a separately supplied enterprise messaging provider module and runtime bridge. `src/artifacts/archive-main.ts` needs a configured external archive CLI and credentials. These extension points are source code, not ready-to-run bundled providers. Do not enable them merely because the gateway builds successfully.
 
 Event retention reports are read-only inventories. A seven-day event cutoff and ninety-day cold-conversation cutoff do not authorize deletion: the included retention planner marks candidates protected while complete restore evidence is absent.
+
+Conversation creation and versioned PATCH now accept `mode: work | chat`.
+Omitting mode preserves Work for existing clients. Modes have separate immutable
+native Session mappings; accepted runs retain their original policy and lineage.
+Switches require no pending run/control, confirmed native idle state and no
+active/armed Work Goal. Chat is default-off and requires a verified Host policy
+plus a mode-capable Worker; the real Chat Host preset/readiness and frontend
+integration are still pending. A flag alone does not enable them. See
+[mode admission, configuration and evidence](../../docs/implementation/2026-10-18-conversation-mode-admission.md).

@@ -4,6 +4,8 @@ import { withImmediateTransaction } from '../db/database.ts';
 import { EventStore } from '../events/event-store.ts';
 import { decodeStoredContent, encodeInputContent } from '../messages/content.ts';
 import {snapshotAcceptedModelPolicy} from '../conversations/model-policy.ts';
+import {acceptedExecutionPolicy,conversationMode,chatModePolicy,type ChatModePolicy} from '../conversations/mode-policy.ts';
+import {ensureModeSession} from '../conversations/mode-sessions.ts';
 
 const AUTOMATIC_TITLES = new Set(['New conversation', '新对话']);
 
@@ -28,9 +30,10 @@ function automaticTitle(input: unknown): string | null {
 export class RunRepository {
   private readonly db: DatabaseSync;
   private readonly events: EventStore;
-  constructor(db: DatabaseSync, events: EventStore) { this.db = db; this.events = events; }
+  private readonly options:{workAgentPreset?:string};
+  constructor(db: DatabaseSync, events: EventStore,options:{workAgentPreset?:string}={}) { this.db = db; this.events = events;this.options=options; }
 
-  enqueue(conversationId: string, ownerId: string, input: Record<string, unknown>,options:{executionMode?:'native'}={}) {
+  enqueue(conversationId: string, ownerId: string, input: Record<string, unknown>,options:{executionMode?:'native';modePolicy?:ChatModePolicy;expectedConversationVersion?:number}={}) {
     const conversation = this.db.prepare('SELECT id,title FROM ga_conversations WHERE id=? AND owner_id=?')
       .get(conversationId, ownerId) as { id: string; title: string } | undefined;
     if (!conversation) throw new Error('conversation_not_found');
@@ -43,7 +46,15 @@ export class RunRepository {
     const content = encodeInputContent(messageId, input.content);
     const generatedTitle = AUTOMATIC_TITLES.has(conversation.title) ? automaticTitle(input.content) : null;
     withImmediateTransaction(this.db, () => {
-      const modelPolicy=snapshotAcceptedModelPolicy(this.db,conversationId,ownerId);
+      const current=this.db.prepare('SELECT mode,version FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId)!;
+      if(options.expectedConversationVersion!==undefined&&options.expectedConversationVersion!==current.version)throw Error('version_conflict');
+      const mode=conversationMode(current.mode),chat=mode==='chat'?chatModePolicy(options.modePolicy):undefined;
+      if(options.executionMode==='native'&&mode!=='work')throw Error('conversation_mode_scope_invalid');
+      if(mode==='work'&&options.modePolicy!==undefined)throw Error('conversation_mode_policy_invalid');
+      const modelPolicy=snapshotAcceptedModelPolicy(this.db,conversationId,ownerId,chat?.model);
+      // Native child preparation retains its original reservation/role/archived
+      // conversation contract; it is not ordinary Chat/Work input admission.
+      const executionPolicy=options.executionMode==='native'?null:acceptedExecutionPolicy(mode,Number(current.version),modelPolicy,this.options.workAgentPreset??'jot-general',chat);
       if (generatedTitle) {
         this.db.prepare(`UPDATE ga_conversations
           SET title=?,version=version+1,updated_at=?
@@ -56,9 +67,10 @@ export class RunRepository {
       }
       this.db.prepare('INSERT INTO ga_messages(id,conversation_id,run_id,role,status,content_json,client_message_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)')
         .run(messageId, conversationId, runId, 'user', 'complete', JSON.stringify(content), String(input.client_message_id), now, now);
-      const native=this.db.prepare('SELECT session_id FROM ga_harness_session_bindings WHERE conversation_id=? AND owner_id=?').get(conversationId,ownerId);
-      this.db.prepare('INSERT INTO ga_runs(id,conversation_id,input_message_id,status,version,created_at,updated_at,model_policy_json,native_session_ref,native_owner_id,native_conversation_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
-        .run(runId, conversationId, messageId, options.executionMode==='native'?'starting':'queued', 1, now, now,modelPolicy,native?.session_id??null,native?ownerId:null,native?conversationId:null);
+      const saved=options.executionMode==='native'?this.db.prepare('SELECT session_id FROM ga_harness_session_bindings WHERE conversation_id=? AND owner_id=?').get(conversationId,ownerId):undefined;
+      const native=options.executionMode==='native'?(saved?String(saved.session_id):undefined):ensureModeSession(this.db,ownerId,conversationId,mode);
+      this.db.prepare('INSERT INTO ga_runs(id,conversation_id,input_message_id,status,version,created_at,updated_at,model_policy_json,execution_policy_json,native_session_ref,native_owner_id,native_conversation_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
+        .run(runId, conversationId, messageId, options.executionMode==='native'?'starting':'queued', 1, now, now,modelPolicy,executionPolicy,native??null,native?ownerId:null,native?conversationId:null);
       this.events.append(conversationId, runId, 'message.created', this.message(messageId));
       this.events.append(conversationId, runId, 'run.state', this.get(runId, ownerId));
       this.db.prepare('INSERT INTO ga_outbox(conversation_id,aggregate_type,aggregate_id,event_type,payload_json,created_at) VALUES(?,?,?,?,?,?)')

@@ -49,7 +49,7 @@ const fileRoot = process.env.GENERAL_AGENT_FILE_ROOT?.trim()
   || process.env.GENERAL_AGENT_UPLOAD_ROOT?.trim() || '/var/lib/jot/jot-files';
 const db = openProductDatabase(databasePath);
 const events = new EventStore(db);
-const runs = new RunRepository(db, events);
+const runs = new RunRepository(db, events,{workAgentPreset:agentPreset});
 const workbenchRoot = process.env.GENERAL_AGENT_WORKBENCH_ROOT?.trim() || join(dirname(databasePath), 'jot-workspaces');
 const budgetPolicy=budgetConfig?new WorkbenchBudgetPolicy(db,budgetConfig):undefined;
 const workbench = new WorkbenchService(db, {
@@ -92,6 +92,7 @@ const runtimeClient = runtimeBaseUrl && runtimeSecretFile
 const sessionClient = new SessionControllerClient(adapterBaseUrl, readFileSync(adapterTokenFile, 'utf8').trim(),
   globalThis.fetch, leafBridgeBaseUrl);
 const runner = new OfficialSessionRunner(sessionClient, {
+  ...(process.env.GENERAL_AGENT_CHAT_ENABLED==='true'?{chatAgentPreset:'jot-chat' as const}:{}),
   cwd: harnessCwd, agentPreset,...(process.env.GENERAL_AGENT_WORKBENCH_DSH_AGENT_PRESET?.trim()?{workbenchAgentPreset:process.env.GENERAL_AGENT_WORKBENCH_DSH_AGENT_PRESET.trim()}:{}),
 });
 const ordinarySteeringEnabled=process.env.GENERAL_AGENT_ORDINARY_STEERING_ENABLED==='true';

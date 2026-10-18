@@ -2,6 +2,7 @@ import {assistantText,assistantBlocks,collectArtifactRefs,presentedFiles} from '
 import {createHash} from 'node:crypto'
 import {isDeepStrictEqual} from 'node:util'
 import {validateOrdinaryCompletion} from './ordinary-completion.ts'
+import {executionPolicy} from '../conversations/mode-policy.ts'
 import { readFile } from 'node:fs/promises'
 import type { DshRunner, DshRunResult,DshRunInput } from './worker.ts'
 import {assertTrustedWorkWorkspace} from './worker.ts'
@@ -133,11 +134,13 @@ async function attachmentText(attachment: ResolvedAttachment): Promise<string> {
 }
 
 export class OfficialSessionRunner implements DshRunner {
+  readonly conversationModeProtocol?:1
   readonly ordinaryCompletionProtocol=1 as const
   private readonly client: OfficialSessionClient
-  private readonly options: { cwd: string; timeoutMs?: number; agentPreset: string;workbenchAgentPreset?:string; deltaFlushMs: number; deltaMaxChars: number; maxCrawlAutoContinues: number; webOperationPollIntervalMs: number }
-  constructor(client: OfficialSessionClient, options: { cwd: string; timeoutMs?: number; agentPreset: string;workbenchAgentPreset?:string;
+  private readonly options: { cwd: string; timeoutMs?: number; agentPreset: string;chatAgentPreset?:'jot-chat';workbenchAgentPreset?:string; deltaFlushMs: number; deltaMaxChars: number; maxCrawlAutoContinues: number; webOperationPollIntervalMs: number }
+  constructor(client: OfficialSessionClient, options: { cwd: string; timeoutMs?: number; agentPreset: string;chatAgentPreset?:'jot-chat';workbenchAgentPreset?:string;
     deltaFlushMs?: number; deltaMaxChars?: number; maxCrawlAutoContinues?: number; webOperationPollIntervalMs?: number }) {
+    if(options.chatAgentPreset==='jot-chat')this.conversationModeProtocol=1;
     this.client = client; this.options = { ...options, deltaFlushMs: Math.max(50, options.deltaFlushMs ?? 250),
       deltaMaxChars: Math.max(32, options.deltaMaxChars ?? 256),
       maxCrawlAutoContinues: Math.max(0, Math.min(16, options.maxCrawlAutoContinues ?? 8)),
@@ -172,7 +175,11 @@ export class OfficialSessionRunner implements DshRunner {
     try {
       const workWorkspace=assertTrustedWorkWorkspace(input);
       if(input.workbenchBudgetEnforced!==undefined&&typeof input.workbenchBudgetEnforced!=='boolean')throw new Error('workbench_preset_binding_invalid');
-      const preset=input.workbenchBudgetEnforced?this.options.workbenchAgentPreset:this.options.agentPreset;
+      const policy=input.conversationPolicy===undefined?undefined:executionPolicy(input.conversationPolicy);
+      if(policy&&(input.workbenchRunId||workWorkspace||input.checkpointTask||goalControl))throw Error('conversation_mode_scope_invalid');
+      const expectedPreset=policy?.mode==='chat'?this.options.chatAgentPreset:this.options.agentPreset;
+      if(policy&&(policy.preset_id!==expectedPreset||policy.mode==='chat'&&!admission&&!ordinaryInput))throw Error('conversation_mode_unavailable');
+      const preset=input.workbenchBudgetEnforced?this.options.workbenchAgentPreset:policy?.preset_id??this.options.agentPreset;
       if(input.workbenchBudgetEnforced&&(!input.workbenchRunId||!input.workbenchExecutionLease||typeof preset!=='string'||!preset.trim()))throw new Error('workbench_budget_preset_required');
       if(goalControl&&!this.client.resumeGoal)throw Error('goal_resume_unavailable');
       if(ordinaryInput&&!this.client.recoverInput)throw Error('ordinary_input_recovery_unavailable');

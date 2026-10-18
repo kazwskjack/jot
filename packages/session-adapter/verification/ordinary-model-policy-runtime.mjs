@@ -13,10 +13,11 @@ import {EventStore} from '../../gateway/src/events/event-store.ts';
 import {SessionControllerClient} from '../../gateway/src/harness/session-controller-client.ts';
 import {OfficialSessionRunner} from '../../gateway/src/harness/official-session-runner.ts';
 import {HarnessWorker} from '../../gateway/src/harness/worker.ts';
+import {inspectOrdinaryRunHistory} from '../../gateway/src/conversations/ordinary-run-history.ts';
 import {createOrdinaryInputAdmissions} from '../ordinary-input-admissions.js';
 import {apply} from '../index.js';
 
-for(const scenario of ['explicit','provider-default','unsupported','worker','worker-pinned'])test('actual ordinary model policy: '+scenario,{
+for(const scenario of ['explicit','provider-default','unsupported','worker','worker-pinned','worker-mode-switch'])test('actual ordinary model policy: '+scenario,{
  timeout:30000,skip:!process.env.JOT_DSH_RUNTIME_MODULES,
 },async()=>{
  const runtime=resolve(process.env.JOT_DSH_RUNTIME_MODULES),modules={};
@@ -31,11 +32,14 @@ for(const scenario of ['explicit','provider-default','unsupported','worker','wor
  const owner='model-fixture',token=randomBytes(32).toString('hex'),adapterToken=randomBytes(32).toString('hex');
  let service,ctx,handle,adapterUrl;
  try{
-  service=await buildServer({databasePath:':memory:',workspaces:['ws'],internalChannelToken:token,workbenchRoot:join(root,'workspaces'),uploadRoot:join(root,'uploads'),templateRoot:fileURLToPath(new URL('../../gateway/file-engine/templates/',import.meta.url)),modelCatalogClient:{modelCatalog:signal=>new SessionControllerClient(adapterUrl,adapterToken).modelCatalog(signal)}});
+  // Chat readiness is scripted in this contract probe; no Chat preset is
+  // mounted or executed. Work execution and idle/Goal observations are real SDK.
+  const modeClient={conversationModeReadiness:async()=>({protocol:1,ready:true,policy:{protocol:1,mode:'chat',model:{provider:'local-scripted',model:'chosen'},thinking:'disabled',preset_id:'jot-chat',preset_revision:'fixture-v1',context_revision:'fixture-v1'}}),observeNativeIdle:(session,signal)=>new SessionControllerClient(adapterUrl,adapterToken).observeNativeIdle(session,signal),conversationGoal:(session,body,signal)=>new SessionControllerClient(adapterUrl,adapterToken).conversationGoal(session,body,signal)};
+  service=await buildServer({databasePath:':memory:',workspaces:['ws'],internalChannelToken:token,...(scenario==='worker-mode-switch'?{chatModeEnabled:true,conversationModeClient:modeClient}:{}),workbenchRoot:join(root,'workspaces'),uploadRoot:join(root,'uploads'),templateRoot:fileURLToPath(new URL('../../gateway/file-engine/templates/',import.meta.url)),modelCatalogClient:{modelCatalog:signal=>new SessionControllerClient(adapterUrl,adapterToken).modelCatalog(signal)}});
   const headers={'x-user-id':owner},selected={provider:'local-scripted',model:'chosen',...(scenario==='provider-default'?{}:{reasoning_effort:'high'})},expectedEffort=scenario==='provider-default'?'low':'high';
   const created=await service.app.inject({method:'POST',url:'/v1/conversations',headers,payload:{workspace_id:'ws',title:'Model fixture',model:selected}});
   assert.equal(created.statusCode,201);const conversation=created.json();
-  if(scenario==='worker-pinned')new SessionBindingRepository(service.db).getOrCreate(owner,conversation.conversation_id);
+  if(scenario==='worker-pinned'||scenario==='worker-mode-switch')new SessionBindingRepository(service.db).getOrCreate(owner,conversation.conversation_id);
   const input=await service.app.inject({method:'POST',url:`/v1/conversations/${conversation.conversation_id}/messages`,headers,payload:{client_message_id:'original-input',content:[{type:'text',text:'Give the synthetic fixture answer.'}]}});
   assert.equal(input.statusCode,202);const runId=input.json().run_id;
   // A later stored conversation value must not change the already accepted input.
@@ -63,7 +67,7 @@ for(const scenario of ['explicit','provider-default','unsupported','worker','wor
    const probe=createServer();await new Promise(r=>probe.listen(0,'127.0.0.1',r));const port=probe.address().port;await new Promise(r=>probe.close(r));
    process.env[tokenEnv]=adapterToken;process.env[bridgeEnv]=token;
    const listening=Promise.withResolvers();ctx.on('jot-session-adapter/ready',()=>listening.resolve());
-   apply(ctx,{host:'127.0.0.1',port,tokenEnv,workbenchTokenEnv:bridgeEnv,workbenchOrigin:gateway,ordinaryModelSelection:true,
+   apply(ctx,{host:'127.0.0.1',port,tokenEnv,workbenchTokenEnv:bridgeEnv,workbenchOrigin:gateway,ordinaryModelSelection:true,nativeIdleObservation:true,
     ordinaryInputAdmission:{admissions:createOrdinaryInputAdmissions({root:join(root,'admissions')}),profile:{read:async()=>({protocol:1,profile_id:'model-fixture',preset_id:'jot-general',audit_id:'scripted-audit',fingerprint:'a'.repeat(64)})}},
    });
    await listening.promise;adapterUrl=`http://127.0.0.1:${port}`;
@@ -83,7 +87,17 @@ for(const scenario of ['explicit','provider-default','unsupported','worker','wor
    assert.equal(service.runs.get(runId,owner).status,'succeeded',JSON.stringify({outcome,failure,requests,transport,header:handle.agent.session.header,session}));
    assert.deepEqual(requests,[{provider:'local-scripted',model:'chosen',effort:'high'}]);
    const answers=service.db.prepare("SELECT content_json FROM ga_messages WHERE role='assistant' AND run_id=?").all(runId);assert.equal(answers.length,1);assert.ok(answers[0].content_json.includes('Synthetic model answer.'));
-   assert.equal(await worker.processNext(),null);assert.equal(requests.length,1);return;
+   assert.equal(await worker.processNext(),null);assert.equal(requests.length,1);
+   if(scenario==='worker-mode-switch'){
+    await handle.agent.whenIdle();const id=conversation.conversation_id,current=service.conversations.get(id,owner);
+    const changed=await service.app.inject({method:'PATCH',url:`/v1/conversations/${id}`,headers,payload:{expected_version:current.version,mode:'chat'}});assert.equal(changed.statusCode,200,changed.body);
+    const mappings=service.db.prepare('SELECT mode,session_id FROM ga_conversation_mode_sessions WHERE conversation_id=? ORDER BY mode').all(id);assert.equal(mappings.length,2);assert.equal(mappings[1].session_id,session.session_id);assert.notEqual(mappings[0].session_id,session.session_id);
+    assert.equal(ctx.agents.get(mappings[0].session_id),undefined);
+    const history=inspectOrdinaryRunHistory(service.db,{run_id:runId,conversation_id:id,owner_id:owner,session_ref:session.session_id,expected_run_version:service.runs.get(runId,owner).version});assert.equal(history.session_id,session.session_id);
+    const restored=await service.app.inject({method:'PATCH',url:`/v1/conversations/${id}`,headers,payload:{expected_version:changed.json().version,mode:'work'}});assert.equal(restored.statusCode,200,restored.body);
+    assert.equal(service.db.prepare('SELECT session_id FROM ga_harness_session_bindings WHERE conversation_id=?').get(id).session_id,session.session_id);assert.equal(requests.length,1);
+   }
+   return;
   }
   const original={request_id:runId,text:'Give the synthetic fixture answer.',ordinary_input:{run_id:runId,execution_lease:{owner:lease.owner,generation:lease.generation}}};
   const response=await post(original);

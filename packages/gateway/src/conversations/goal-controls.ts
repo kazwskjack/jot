@@ -28,14 +28,16 @@ export class ConversationGoalControls {
  private readonly runs:RunRepository;
  constructor(db:DatabaseSync,events:EventStore,runs:RunRepository){this.db=db;this.events=events;this.runs=runs;}
  private static scope(db:DatabaseSync,ownerId:string,conversationId:string,sessionId:string,sourceRunId?:string){
-  const c=db.prepare('SELECT owner_id,archived_at FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId);
+  const c=db.prepare('SELECT owner_id,archived_at,mode FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId);
   if(!c)throw Error('conversation_not_found');
   if(c.archived_at)throw Error('goal_control_run_revoked');
+  if(sourceRunId===undefined&&c.mode!=='work')throw Error('goal_control_scope_invalid');
   const table=(name:string)=>!!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
   if((table('wb_agents')&&db.prepare('SELECT 1 FROM wb_agents WHERE conversation_id=? AND owner_id=?').get(conversationId,ownerId))
    ||(table('wb_run_bindings')&&db.prepare('SELECT 1 FROM wb_run_bindings b JOIN ga_runs r ON r.id=b.run_id WHERE r.conversation_id=? AND b.owner_id=? LIMIT 1').get(conversationId,ownerId)))throw Error('goal_control_scope_invalid');
   const binding=sourceRunId===undefined
-   ?db.prepare('SELECT session_id FROM ga_harness_session_bindings WHERE conversation_id=? AND owner_id=?').get(conversationId,ownerId)
+   ?(db.prepare("SELECT session_id FROM ga_conversation_mode_sessions WHERE conversation_id=? AND owner_id=? AND mode='work'").get(conversationId,ownerId)
+     ??db.prepare('SELECT session_id FROM ga_harness_session_bindings WHERE conversation_id=? AND owner_id=?').get(conversationId,ownerId))
    :db.prepare('SELECT session_id FROM ga_run_native_sessions WHERE run_id=? AND conversation_id=? AND owner_id=?').get(sourceRunId,conversationId,ownerId);
   if(!binding||binding.session_id!==sessionId)throw Error('goal_control_session_changed');
  }

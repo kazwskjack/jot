@@ -31,6 +31,20 @@ export function openProductDatabase(path: string): DatabaseSync {
   ensureColumn(db, 'ga_conversations', 'project_id', 'TEXT');
   ensureColumn(db, 'ga_conversations', 'pinned_at', 'TEXT');
   ensureColumn(db, 'ga_conversations', 'archived_at', 'TEXT');
+  ensureColumn(db,'ga_conversations','mode',"TEXT NOT NULL DEFAULT 'work'");
+  ensureColumn(db,'ga_runs','execution_policy_json','TEXT');
+  db.exec(`CREATE TABLE IF NOT EXISTS ga_conversation_mode_sessions (
+    conversation_id TEXT NOT NULL REFERENCES ga_conversations(id) ON DELETE CASCADE,
+    owner_id TEXT NOT NULL,mode TEXT NOT NULL CHECK(mode IN ('work','chat')),
+    session_id TEXT NOT NULL UNIQUE,created_at TEXT NOT NULL,PRIMARY KEY(conversation_id,mode));
+    CREATE TRIGGER IF NOT EXISTS ga_mode_session_immutable BEFORE UPDATE ON ga_conversation_mode_sessions
+      BEGIN SELECT RAISE(ABORT,'mode_session_immutable'); END;
+    INSERT OR IGNORE INTO ga_conversation_mode_sessions(conversation_id,owner_id,mode,session_id,created_at)
+      SELECT b.conversation_id,b.owner_id,'work',b.session_id,b.created_at FROM ga_harness_session_bindings b
+      JOIN ga_conversations c ON c.id=b.conversation_id AND c.owner_id=b.owner_id;
+    CREATE TRIGGER IF NOT EXISTS ga_execution_policy_immutable BEFORE UPDATE OF execution_policy_json ON ga_runs
+      WHEN NEW.execution_policy_json IS NOT OLD.execution_policy_json
+      BEGIN SELECT RAISE(ABORT,'execution_policy_immutable'); END;`);
   ensureColumn(db,'ga_runs','model_policy_json','TEXT');
   ensureColumn(db,'ga_runs','model_resolution_json','TEXT');
   ensureColumn(db,'ga_runs','native_session_ref','TEXT');

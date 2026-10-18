@@ -590,8 +590,8 @@
       },
       "patch": {
         "operationId": "updateConversation",
-        "summary": "更改标题或模型",
-        "description": "乐观锁 expected_version；更改模型要求无活动运行，否则 409。仅改标题不影响运行。",
+        "summary": "Update conversation metadata or execution mode",
+        "description": "Owned expected_version CAS. Model/mode changes refuse queued or active work. Mode switches additionally require native Goal and legacy identity reconciliation; Chat requires verified host readiness.",
         "tags": [
           "conversations"
         ],
@@ -13347,6 +13347,48 @@
           },
           "workbench": {
             "$ref": "#/components/schemas/WorkbenchCapabilities"
+          },
+          "conversation_modes": {
+            "type": "object",
+            "required": [
+              "default",
+              "work",
+              "chat"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "default": {
+                "type": "string",
+                "enum": [
+                  "chat",
+                  "work"
+                ]
+              },
+              "work": {
+                "type": "object",
+                "required": [
+                  "supported"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "supported": {
+                    "const": true
+                  }
+                }
+              },
+              "chat": {
+                "type": "object",
+                "required": [
+                  "ready"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "ready": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
           }
         },
         "required": [
@@ -13460,6 +13502,13 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "chat",
+              "work"
+            ]
           }
         },
         "required": [
@@ -13494,6 +13543,13 @@
           },
           "project_id": {
             "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "chat",
+              "work"
+            ]
           }
         },
         "required": [
@@ -13524,6 +13580,13 @@
           },
           "archived": {
             "type": "boolean"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "chat",
+              "work"
+            ]
           }
         },
         "required": [
@@ -13554,6 +13617,11 @@
           {
             "required": [
               "archived"
+            ]
+          },
+          {
+            "required": [
+              "mode"
             ]
           }
         ]

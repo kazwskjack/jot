@@ -5,6 +5,8 @@ import { decodeStoredContent } from '../messages/content.ts';
 import { ProjectRepository } from '../projects/repository.ts';
 import {ConversationListCursor} from './list-cursor.ts';
 import {withImmediateTransaction} from '../db/database.ts';
+import {conversationMode,chatModePolicy,type ChatModePolicy} from './mode-policy.ts';
+import {assertModeSwitchAllowed,ensureModeSession} from './mode-sessions.ts';
 
 export class ConversationRepository {
   private readonly db: DatabaseSync;
@@ -12,7 +14,8 @@ export class ConversationRepository {
   private readonly cursor:ConversationListCursor;
   constructor(db: DatabaseSync, projects = new ProjectRepository(db)) { this.db = db; this.projects = projects;this.cursor=new ConversationListCursor(db); }
 
-  create(ownerId: string, input: Record<string, unknown>) {
+  create(ownerId: string, input: Record<string, unknown>,options:{chatPolicy?:ChatModePolicy}={}) {
+    const mode=conversationMode(input.mode??'work');if(mode==='chat')chatModePolicy(options.chatPolicy);
     const id = `conv-${randomUUID()}`;
     const now = new Date().toISOString();
     const model = input.model as Record<string, unknown>;
@@ -21,8 +24,9 @@ export class ConversationRepository {
       : String(input.project_id);
     this.projects.assertOwned(projectId, ownerId);
     this.db.prepare(
-      'INSERT INTO ga_conversations(id,owner_id,workspace_id,title,model,version,created_at,updated_at,project_id) VALUES(?,?,?,?,?,?,?,?,?)',
-    ).run(id, ownerId, String(input.workspace_id), String(input.title || 'New conversation'), JSON.stringify(model), 1, now, now, projectId);
+      'INSERT INTO ga_conversations(id,owner_id,workspace_id,title,model,version,created_at,updated_at,project_id,mode) VALUES(?,?,?,?,?,?,?,?,?,?)',
+    ).run(id, ownerId, String(input.workspace_id), String(input.title || 'New conversation'), JSON.stringify(model), 1, now, now, projectId,mode);
+    if(mode==='chat')ensureModeSession(this.db,ownerId,id,mode);
     return this.get(id, ownerId);
   }
 
@@ -34,7 +38,7 @@ export class ConversationRepository {
       row=this.db.prepare('SELECT * FROM ga_conversations WHERE id=? AND owner_id=?').get(id,ownerId) as Record<string,unknown>;
     }
     return {
-      conversation_id: String(row.id), title: String(row.title), workspace_id: String(row.workspace_id),
+      conversation_id: String(row.id), title: String(row.title), workspace_id: String(row.workspace_id),mode:conversationMode(row.mode),
       model: JSON.parse(String(row.model)), created_at: String(row.created_at), updated_at: String(row.updated_at),
       version: Number(row.version), project_id: String(row.project_id), pinned: row.pinned_at !== null,
       pinned_at: row.pinned_at === null ? null : String(row.pinned_at), archived: row.archived_at !== null,
@@ -66,29 +70,31 @@ export class ConversationRepository {
     const selected=rows.slice(0,limit),last=selected.at(-1);return { items: selected.map(row => this.get(row.id, ownerId)),...(rows.length>limit&&last?{next_cursor:this.cursor.encode(ownerId,options.project_id,state,{rank:last.pinned_at===null?1:0,pin:last.pinned_at??'',updated:last.updated_at,id:last.id})}:{}) };
   }
 
-  update(id: string, ownerId: string, input: Record<string, unknown>) {
-    return withImmediateTransaction(this.db,()=>this.updateInside(id,ownerId,input));
+  update(id: string, ownerId: string, input: Record<string, unknown>,modeGuard?:()=>void) {
+    return withImmediateTransaction(this.db,()=>this.updateInside(id,ownerId,input,modeGuard));
   }
 
-  private updateInside(id: string, ownerId: string, input: Record<string, unknown>) {
+  private updateInside(id: string, ownerId: string, input: Record<string, unknown>,modeGuard?:()=>void) {
     const current = this.db.prepare('SELECT version FROM ga_conversations WHERE id=? AND owner_id=?').get(id, ownerId) as { version: number } | undefined;
     if (!current) throw new Error('conversation_not_found');
     if (current.version !== Number(input.expected_version)) throw new Error('version_conflict');
+    const prior=this.get(id,ownerId),mode=conversationMode(input.mode??prior.mode);
+    if(mode!==prior.mode){assertModeSwitchAllowed(this.db,id,ownerId);if(!modeGuard)throw Error('conversation_mode_admission_required');modeGuard();ensureModeSession(this.db,ownerId,id,'work');ensureModeSession(this.db,ownerId,id,mode);}
+    if(mode==='chat'&&input.model!==undefined)throw Error('chat_model_fixed');
     if (input.model !== undefined) {
       const active = this.db.prepare("SELECT 1 FROM ga_runs WHERE conversation_id=? AND status IN ('queued','starting','running','waiting_user','waiting_approval','cancelling') LIMIT 1").get(id);
       if (active) throw new Error('active_run_model_change');
     }
-    const prior = this.get(id, ownerId);
     const projectId = input.project_id === undefined ? prior.project_id : String(input.project_id);
     this.projects.assertOwned(projectId, ownerId);
     const now = new Date().toISOString();
     const pinnedAt = input.pinned === undefined ? prior.pinned_at : input.pinned === true ? now : null;
     const archivedAt = input.archived === undefined ? prior.archived_at : input.archived === true ? now : null;
     const updated = this.db.prepare(`UPDATE ga_conversations SET
-      title=?,model=?,project_id=?,pinned_at=?,archived_at=?,version=version+1,updated_at=?
+      title=?,model=?,project_id=?,pinned_at=?,archived_at=?,mode=?,version=version+1,updated_at=?
       WHERE id=? AND owner_id=? AND version=?`)
       .run(String(input.title ?? prior.title), JSON.stringify(input.model ?? prior.model), projectId,
-        pinnedAt, archivedAt, now, id, ownerId, current.version);
+        pinnedAt, archivedAt,mode, now, id, ownerId, current.version);
     if (updated.changes !== 1) throw new Error('version_conflict');
     return this.get(id, ownerId);
   }

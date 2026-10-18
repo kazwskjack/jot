@@ -41,13 +41,13 @@ Acceptance freezes an existing owned destination; the first Worker pins an
 unallocated one under its live lease. Execution, recovery, cancellation,
 ordinary history/final delivery and accepted Goal controls use that original
 binding. Installed-SDK tests include pointer movement and abrupt Host exit.
-This does not complete the items below: separate mode mappings, legacy
-ambiguity gates, native Goal preflight, mode-aware policy and UI remain open.
+Backend acceptance is now implemented in [mode admission and native identity](../../implementation/2026-10-18-conversation-mode-admission.md).
+The live Chat preset, UI default and standalone profile remain open.
 
-- [ ] Add contract tests for explicit Chat/Work creation, existing Work migration, capability-gated UI defaults, unknown fields, owner/version rejection and active/unknown native Goal conflicts.
-- [ ] Persist current conversation mode and immutable per-run policy plus exact native Session binding. Backfill original Work bindings without recreating native Sessions or Goals.
-- [ ] Update all original input/steering/history/final/Goal consumers to resolve per-run identity; tests must catch a switch trying to recover an earlier run through the new mode's pointer.
-- [ ] Refuse unavailable Chat configuration before acceptance. Preserve pending-message idempotency; a retry cannot change mode, model, context or attachments.
+- [x] Add backend contract tests for explicit Chat/Work creation, Work migration, unknown fields, owner/version rejection, active/unknown native Goal conflicts and readiness metadata. Capability-gated UI defaults remain in task 5.
+- [x] Persist current conversation mode and immutable per-run policy plus exact native Session binding. Backfill original Work bindings without recreating native Sessions or Goals.
+- [x] Keep original input/steering/history/final consumers on per-run identity and new Goal controls on the saved Work mapping; verify real Work history after a mode switch. Role/native child and mailbox authority remain separate and unchanged.
+- [x] Refuse unavailable Chat configuration before acceptance. Preserve atomic input/mode receipts and original message retries; test outage after a lost response and no duplicate run. No new attachment/context execution is claimed before task 4.
 
 ## 4. Implement the Chat preset and bounded context
 

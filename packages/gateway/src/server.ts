@@ -6,6 +6,9 @@ import {registerConversationGoalExecution} from './conversations/goal-control-ex
 import {registerOrdinaryInputBinding} from './conversations/ordinary-input-binding.ts';
 import {registerOrdinaryModelPolicy} from './conversations/model-policy.ts';
 import {readHostModelCatalog,type ModelCatalogClient} from './harness/model-catalog.ts';
+import {ConversationModes} from './conversations/modes.ts';
+import {registerOrdinaryExecutionPolicy} from './conversations/execution-policy.ts';
+import type {ConversationModeClient} from './conversations/mode-policy.ts';
 import {TaskReplyDrafts} from './persistent-tasks/reply-drafts.ts';
 import Fastify from 'fastify';
 import multipart from '@fastify/multipart';
@@ -73,6 +76,9 @@ function actor(request: { headers: Record<string, unknown> }) {
 
 export async function buildServer(config: {
   modelCatalogClient?:ModelCatalogClient;
+  conversationModeClient?:ConversationModeClient;
+  chatModeEnabled?:boolean;
+  workAgentPreset?:string;
   databasePath: string;
   workspaces: string[];
   uploadRoot?: string;
@@ -103,7 +109,8 @@ export async function buildServer(config: {
   const events = new EventStore(db);
   const projects = new ProjectRepository(db);
   const conversations = new ConversationRepository(db, projects);
-  const runs = new RunRepository(db, events);
+  const runs = new RunRepository(db, events,{workAgentPreset:config.workAgentPreset??'jot-general'});
+  const conversationModes=new ConversationModes(db,conversations,runs,config.conversationModeClient,config.chatModeEnabled===true);
   const commands = new RunCommandService(db, events);
   const artifacts = new ArtifactService(db, config.uploadRoot ?? join(dirname(config.databasePath), 'general-agent-uploads'));
   const sources = new SourceRepository(db);
@@ -147,7 +154,8 @@ export async function buildServer(config: {
   const isMemoryCaptureRoute=(request:any)=>(request.method==='PATCH'&&request.routeOptions.url==='/v1/agents/:agentId/memory-capture-policy')||(request.method==='POST'&&['/v1/agents/:agentId/memory-capture-policy/collect',...['apply','reject'].map(action=>`/v1/agents/:agentId/memory-captures/:captureId/${action}`)].includes(request.routeOptions.url));
   const isGoalResumeRoute=(request:any)=>request.method==='POST'&&request.routeOptions.url==='/v1/conversations/:conversationId/goal'&&request.body?.action==='resume';
   const isDiscoveryPolicyRoute=(request:any)=>(request.method==='PATCH'&&request.routeOptions.url==='/v1/agents/:agentId/discovery-policy')||(request.method==='POST'&&request.routeOptions.url==='/v1/agents/:agentId/discovery-policy/control');
-  const atomicProtocol=(request:any)=>isDiscoveryPolicyRoute(request)?'discovery-policy-atomic-v1':isGoalResumeRoute(request)?'conversation-goal-resume-atomic-v1':isUploadRoute(request)?'upload-atomic-v1':isMemoryRestoreRoute(request)?'memory-restore-atomic-v1':isMemoryConsolidationRoute(request)?'memory-consolidation-atomic-v1':isMemoryCaptureRoute(request)?'memory-capture-atomic-v1':null;
+  const isModeMutationRoute=(request:any)=>request.method==='POST'&&['/v1/conversations','/v1/conversations/:conversationId/messages'].includes(request.routeOptions.url)||request.method==='PATCH'&&request.routeOptions.url==='/v1/conversations/:conversationId'&&request.body?.mode!==undefined;
+  const atomicProtocol=(request:any)=>isModeMutationRoute(request)?'conversation-mode-atomic-v1':isDiscoveryPolicyRoute(request)?'discovery-policy-atomic-v1':isGoalResumeRoute(request)?'conversation-goal-resume-atomic-v1':isUploadRoute(request)?'upload-atomic-v1':isMemoryRestoreRoute(request)?'memory-restore-atomic-v1':isMemoryConsolidationRoute(request)?'memory-consolidation-atomic-v1':isMemoryCaptureRoute(request)?'memory-capture-atomic-v1':null;
   // Receipt protocol is reserved with the original request. Legacy pending rows
   // have no proof of an atomic business boundary and must not be re-executed.
   const atomicCommand=<T>(request:any,status:number,operation:()=>T):T=>{
@@ -178,7 +186,7 @@ export async function buildServer(config: {
   });
 
   app.addHook('preHandler', async (request, reply) => {
-    if (['/internal/v1/workbench/ordinary-run-history', '/internal/v1/workbench/ordinary-steering-history', '/internal/v1/workbench/ordinary-steering-binding', '/internal/v1/workbench/ordinary-input-binding', '/internal/v1/workbench/ordinary-model-policy', '/internal/v1/workbench/conversation-goal-control', '/internal/v1/channel/messages', '/internal/v1/file-tools', '/internal/v1/crawl-batches/bind', '/internal/v1/crawl-batches/events', '/internal/v1/workbench/guard', '/internal/v1/workbench/handoff', '/internal/v1/workbench/native-task-intent', '/internal/v1/workbench/native-task-intents', '/internal/v1/workbench/native-child-reservation', '/internal/v1/workbench/native-child-request', '/internal/v1/workbench/native-child-abort', '/internal/v1/workbench/native-child-published', '/internal/v1/workbench/native-child-bind', '/internal/v1/workbench/native-child-close', '/internal/v1/workbench/native-child-activate', '/internal/v1/workbench/native-child-source', '/internal/v1/workbench/native-model-recovery', '/internal/v1/workbench/tool', '/internal/v1/workbench/goal-binding', '/internal/v1/workbench/model-budget','/internal/v1/workbench/web-budget-grant','/internal/v1/workbench/web-budget-grant/close','/internal/v1/workbench/web-model-budget','/internal/v1/workbench/checkpoint','/internal/v1/workbench/task-state','/internal/v1/workbench/step-admission','/internal/v1/workbench/goal-proposal','/internal/v1/workbench/completion-intent','/internal/v1/workbench/completion-confirm','/internal/v1/workbench/completion-recovery'].includes(request.url.split('?')[0]!)) return;
+    if (['/internal/v1/workbench/ordinary-execution-policy', '/internal/v1/workbench/ordinary-run-history', '/internal/v1/workbench/ordinary-steering-history', '/internal/v1/workbench/ordinary-steering-binding', '/internal/v1/workbench/ordinary-input-binding', '/internal/v1/workbench/ordinary-model-policy', '/internal/v1/workbench/conversation-goal-control', '/internal/v1/channel/messages', '/internal/v1/file-tools', '/internal/v1/crawl-batches/bind', '/internal/v1/crawl-batches/events', '/internal/v1/workbench/guard', '/internal/v1/workbench/handoff', '/internal/v1/workbench/native-task-intent', '/internal/v1/workbench/native-task-intents', '/internal/v1/workbench/native-child-reservation', '/internal/v1/workbench/native-child-request', '/internal/v1/workbench/native-child-abort', '/internal/v1/workbench/native-child-published', '/internal/v1/workbench/native-child-bind', '/internal/v1/workbench/native-child-close', '/internal/v1/workbench/native-child-activate', '/internal/v1/workbench/native-child-source', '/internal/v1/workbench/native-model-recovery', '/internal/v1/workbench/tool', '/internal/v1/workbench/goal-binding', '/internal/v1/workbench/model-budget','/internal/v1/workbench/web-budget-grant','/internal/v1/workbench/web-budget-grant/close','/internal/v1/workbench/web-model-budget','/internal/v1/workbench/checkpoint','/internal/v1/workbench/task-state','/internal/v1/workbench/step-admission','/internal/v1/workbench/goal-proposal','/internal/v1/workbench/completion-intent','/internal/v1/workbench/completion-confirm','/internal/v1/workbench/completion-recovery'].includes(request.url.split('?')[0]!)) return;
     if (!config.csrfToken || request.method === 'GET' || request.method === 'HEAD' || request.method === 'OPTIONS') return;
     actor(request as any);
     const origin = String(request.headers.origin ?? '');
@@ -215,7 +223,7 @@ export async function buildServer(config: {
     if (existing) {
       if (existing.request_sha256 !== requestHash) throw new Error('idempotency_conflict');
       if (existing.response_status === null) {
-        if((isDiscoveryPolicyRoute(request)||isGoalResumeRoute(request)||isMemoryRestoreRoute(request)||isMemoryConsolidationRoute(request)||isMemoryCaptureRoute(request))&&existing.receipt_protocol===atomicProtocol(request)){idempotencyRequests.set(request,{owner,operation,key:idempotencyKey});return;}
+        if((isModeMutationRoute(request)||isDiscoveryPolicyRoute(request)||isGoalResumeRoute(request)||isMemoryRestoreRoute(request)||isMemoryConsolidationRoute(request)||isMemoryCaptureRoute(request))&&existing.receipt_protocol===atomicProtocol(request)){idempotencyRequests.set(request,{owner,operation,key:idempotencyKey});return;}
         if(isUploadRoute(request)&&existing.receipt_protocol==='upload-atomic-v1'){
           if(request.method==='PUT'){
             const upload=db.prepare('SELECT status,declared_size,received_size,declared_sha256,actual_sha256,writer_token,writer_lease_until FROM ga_uploads WHERE id=? AND owner_id=?').get(String((request.params as Record<string,unknown>).uploadId),owner) as Record<string,unknown>|undefined;
@@ -280,6 +288,10 @@ export async function buildServer(config: {
 
   app.setErrorHandler((error, _request, reply) => {
     const code = error instanceof Error ? error.message : 'internal_error';
+    if(code==='contract_response_invalid')return reply.code(500).send({error:{code:'CONTRACT_RESPONSE_INVALID'}});
+    if(code==='chat_mode_unavailable')return reply.code(503).send({error:{code:'CHAT_MODE_UNAVAILABLE'}});
+    if(code==='conversation_mode_invalid')return reply.code(400).send({error:{code:'CONVERSATION_MODE_INVALID'}});
+    if(['active_run_mode_change','chat_model_fixed','conversation_mode_conflict','conversation_mode_scope_invalid','conversation_mode_goal_active','conversation_mode_goal_unconfirmed','conversation_mode_legacy_unconfirmed','conversation_mode_session_missing','conversation_mode_admission_required'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
     if(code==='task_run_limit_unconfirmed')return reply.code(409).send({error:{code:'TASK_RUN_LIMIT_UNCONFIRMED'}});
     if(['memory_capture_policy_stale','memory_capture_source_conflict','memory_capture_not_ready','memory_restore_expired','memory_restore_source_conflict','memory_consolidation_state_conflict','memory_consolidation_source_conflict','memory_consolidation_pending_limit','memory_consolidation_source_limit'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
     if(['native_creation_aborted','native_creation_outcome_unknown'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
@@ -397,6 +409,7 @@ export async function buildServer(config: {
   registerConversationGoalExecution(app,new ConversationGoalControls(db,events,runs),config.internalChannelToken);
   registerOrdinaryInputBinding(app,db,config.internalChannelToken);
   registerOrdinaryModelPolicy(app,db,config.internalChannelToken);
+  registerOrdinaryExecutionPolicy(app,db,config.internalChannelToken);
   registerOrdinarySteeringBinding(app,db,config.internalChannelToken);
   registerOrdinarySteeringHistory(app,db,config.internalChannelToken);
   registerOrdinaryRunHistory(app,db,config.internalChannelToken);
@@ -489,8 +502,8 @@ export async function buildServer(config: {
     const ownerId = actor(request as any);
     const cancelled=new AbortController();const abort=()=>{if(!reply.raw.writableEnded)cancelled.abort();};
     request.raw.once('aborted',abort);reply.raw.once('close',abort);
-    let voice,models;
-    try{[voice,models]=await Promise.all([voiceTranscriptions.capability(),readHostModelCatalog(config.modelCatalogClient,cancelled.signal)]);}
+    let voice,models,modes;
+    try{[voice,models,modes]=await Promise.all([voiceTranscriptions.capability(),readHostModelCatalog(config.modelCatalogClient,cancelled.signal),conversationModes.capability(cancelled.signal)]);}
     finally{request.raw.removeListener('aborted',abort);reply.raw.removeListener('close',abort);}
     if (config.csrfToken && request.headers['sec-fetch-site'] !== 'cross-site') {
       reply.header('x-csrf-token', config.csrfToken).header('cache-control', 'no-store');
@@ -504,7 +517,7 @@ export async function buildServer(config: {
       models, limits: { max_upload_bytes: 104857600, max_active_runs_per_conversation: 1,
         max_concurrent_sessions: 5,
         replay_retention_hours: 168, idempotency_retention_hours: 24 },
-      voice,
+      voice,conversation_modes:modes,
       workbench: { enabled: true, agent_roles: true, independent_teams: true, agent_messages: true,
         shared_workspace: true, memory_scopes: ['project', 'private'], memory_lifecycle: true, memory_restore: true, memory_consolidation: true, memory_retrieval_traces: true, memory_capture:true, memory_retrieval: 'local_keyword',task_readiness:true,task_prd:true,task_unlimited_runs:true,task_run_limit_protocol:1,model_budget:budgetPolicy!==undefined,
         task_reply_policy:true,task_reply_execution:false,task_create_delivery:true,task_notifications:true,channel_bindings:!!config.internalChannelToken||!!config.emailBindingSend,email_bindings:!!config.emailBindingSend,wecom_bindings:!!config.internalChannelToken,task_notification_events:['changed','completed','failed','needs_confirmation'],
@@ -539,12 +552,16 @@ export async function buildServer(config: {
   app.post('/v1/conversations', async (request, reply) => {
     const input = request.body as Record<string, unknown>;
     if (!config.workspaces.includes(String(input.workspace_id))) return reply.code(403).send({ error: { code: 'WORKSPACE_FORBIDDEN' } });
-    return reply.code(201).send(conversations.create(actor(request as any), input));
+    const commit=await conversationModes.prepareCreate(actor(request as any),input);
+    return reply.code(201).send(atomicCommand(request,201,commit));
   });
   app.get('/v1/conversations/:conversationId', async request =>
     conversations.get((request.params as { conversationId: string }).conversationId, actor(request as any)));
-  app.patch('/v1/conversations/:conversationId', async request =>
-    conversations.update((request.params as { conversationId: string }).conversationId, actor(request as any), request.body as Record<string, unknown>));
+  app.patch('/v1/conversations/:conversationId', async request => {
+    const id=(request.params as {conversationId:string}).conversationId,owner=actor(request as any),input=request.body as Record<string,unknown>;
+    if(input.mode===undefined)return conversations.update(id,owner,input);
+    const commit=await conversationModes.prepareUpdate(id,owner,input);return atomicCommand(request,200,commit);
+  });
   app.get('/v1/conversations/:conversationId/messages', async request => {
     const query = request.query as { limit?: string };
     return conversations.messages((request.params as { conversationId: string }).conversationId,
@@ -553,9 +570,13 @@ export async function buildServer(config: {
   app.post('/v1/conversations/:conversationId/messages', async (request, reply) => {
     const id = (request.params as { conversationId: string }).conversationId;
     const owner = actor(request as any);
-    const result = withImmediateTransaction(db, () => {
-      const agent = workbench.agentForConversation(owner, id);
-      if (agent && agent.conversation_id !== id) throw new Error('task_conversation_read_only');
+    const agent = workbench.agentForConversation(owner, id);
+    if (agent && agent.conversation_id !== id) throw new Error('task_conversation_read_only');
+    const ordinary=agent?undefined:await conversationModes.prepareEnqueue(id,owner,request.body as Record<string,unknown>);
+    const result = atomicCommand(request,202, () => {
+      const current=workbench.agentForConversation(owner,id);
+      if(current?.agent_id!==agent?.agent_id)throw Error('conversation_mode_scope_invalid');
+      if(ordinary)return ordinary();
       const run = runs.enqueue(id, owner, request.body as Record<string, unknown>);
       if (agent) workbench.bindRun(owner, agent.agent_id, String(run.run_id), 'chat');
       return run;

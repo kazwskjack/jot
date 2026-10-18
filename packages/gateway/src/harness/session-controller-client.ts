@@ -110,6 +110,7 @@ export class SessionControllerClient {
   }
 
   async modelCatalog(signal:AbortSignal){return this.post('/v1/models',{},signal);}
+  async conversationModeReadiness(signal:AbortSignal){return this.post('/v1/conversation-modes/readiness',{},signal);}
 
   async prompt(sessionId: string, requestId: string, content: string | SessionPromptPart[],
     mode: 'queue' | 'steer' = 'queue', signal?: AbortSignal, original?:OriginalInputExecution) {

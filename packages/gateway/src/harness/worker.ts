@@ -1,6 +1,7 @@
 import {validateOrdinaryCompletion,type OrdinaryCompletionProof} from './ordinary-completion.ts';
 import {runtimeSessionRefForRun} from './run-session-identity.ts';
 import {pinRunNativeSession} from './run-native-session.ts';
+import {executionPolicy,type ExecutionPolicy} from '../conversations/mode-policy.ts';
 import {inspectOrdinarySteeringBinding} from '../conversations/ordinary-steering-binding.ts';
 import {assertExecutionLease,type ExecutionLease} from '../workbench/execution-lease.ts';
 import {isDeepStrictEqual} from 'node:util';
@@ -51,7 +52,7 @@ export interface DshRunResult {
   task_candidate?: {text:string;blocks?:Array<{kind:'text'|'reasoning';text:string}>};
 }
 
-export interface DshRunInput { enabled: true; taskRequestId: string; message: string; sessionRef: string;
+export interface DshRunInput { enabled: true; taskRequestId: string; message: string; sessionRef: string;conversationPolicy?:ExecutionPolicy;
     requiresWorkWorkspace?:true;
     trustedWorkWorkspace?:TrustedWorkRunWorkspace;
     deferCompletionProbe: true; attachments?: ResolvedAttachment[]; universeSessionRef?: string;
@@ -68,6 +69,7 @@ export interface DshRunInput { enabled: true; taskRequestId: string; message: st
     onWebOperationCursor?: (toolCallId: string) => number;
     onWebOperationSnapshot?: (toolCallId: string, snapshot: Record<string, unknown>) => number }
 export interface DshRunner {
+  readonly conversationModeProtocol?:1;
   readonly ordinaryCompletionProtocol?:1;
   run(input:DshRunInput):Promise<DshRunResult>;
   recoverInput?(input:DshRunInput & {originalInput:Readonly<{inputMessageId:string;executionLease:Readonly<{owner:string;generation:number}>}>}):Promise<DshRunResult>;
@@ -154,6 +156,15 @@ export class HarnessWorker {
       return{run_id:lease.run_id,runtime_status:'work_workspace_unavailable'};
     }
     const hasWorkbenchBinding=!!(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_run_bindings'").get()&&this.db.prepare('SELECT 1 FROM wb_run_bindings WHERE run_id=?').get(lease.run_id));
+    let conversationPolicy:ExecutionPolicy|undefined;
+    if(!goalControl&&!workbenchContext&&!hasWorkbenchBinding&&lease.input_message_id){
+      const row=this.db.prepare('SELECT r.execution_policy_json,r.model_policy_json,c.mode FROM ga_runs r JOIN ga_conversations c ON c.id=r.conversation_id WHERE r.id=?').get(lease.run_id);
+      try{
+        if(typeof row?.execution_policy_json==='string')conversationPolicy=executionPolicy(JSON.parse(row.execution_policy_json),String(row.model_policy_json));
+        else if(row?.mode==='chat')throw Error('conversation_mode_policy_invalid');
+        if(conversationPolicy?.mode==='chat'&&(!this.ordinaryInputRecoveryEnabled||!this.ordinarySteeringEnabled||this.runner.conversationModeProtocol!==1))throw Error('conversation_mode_policy_invalid');
+      }catch{this.coordinator.interruptWithoutRuntime(lease,'CONVERSATION_MODE_UNAVAILABLE');return{run_id:lease.run_id,runtime_status:'conversation_mode_unavailable'};}
+    }
     const ordinaryDelivery=this.ordinarySteeringEnabled&&!!lease.input_message_id&&!goalControl&&!workbenchContext&&!hasWorkbenchBinding;
     if(ordinaryDelivery&&this.runner.ordinaryCompletionProtocol!==1){this.coordinator.interruptWithoutRuntime(lease,'ORDINARY_COMPLETION_UNAVAILABLE');return{run_id:lease.run_id,runtime_status:'ordinary_completion_unavailable'};}
     const originalRecovery=this.ordinaryInputRecoveryEnabled&&lease.generation>1&&!goalControl&&!workbenchContext&&!hasWorkbenchBinding;
@@ -289,6 +300,7 @@ export class HarnessWorker {
         }
       };
       const runInput:DshRunInput={ enabled: true, taskRequestId: lease.run_id, message, attachments,
+        ...(conversationPolicy?{conversationPolicy}:{}),
         ...(trustedWorkWorkspace?{requiresWorkWorkspace:true as const,trustedWorkWorkspace}:{}),
         ...(this.ordinaryInputRecoveryEnabled&&lease.generation===1&&lease.input_message_id&&!goalControl&&!workbenchContext&&!hasWorkbenchBinding?{originalAdmission:Object.freeze({executionLease:Object.freeze({owner:lease.owner,generation:lease.generation})})}:{}),
         ...(workbenchContext ? { workbenchRunId: lease.run_id,workbenchExecutionLease:Object.freeze({owner:lease.owner,generation:lease.generation}),workbenchBudgetEnforced:!!(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_model_budget_bindings'").get()&&this.db.prepare('SELECT 1 FROM wb_model_budget_bindings WHERE owner_id=? AND run_id=?').get(input.ownerId,lease.run_id)) } : {}),

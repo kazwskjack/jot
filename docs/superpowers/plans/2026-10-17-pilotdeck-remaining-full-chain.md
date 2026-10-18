@@ -470,3 +470,14 @@ final publication/delivery and accepted Goal controls now use the original run
 identity. See [migration and residual scope](../../implementation/2026-10-18-original-run-session-binding.md).
 Legacy rows are not guessed/backfilled. Separate mode mappings, native Goal
 switch preflight and the remaining Work-only scopes are not marked complete.
+
+### 2026-10-18 mode-aware acceptance increment
+
+The extended Gateway now has explicit Chat/Work contracts, immutable per-mode
+Session mappings and original-run execution policy. Native idle/Work Goal
+preflight precedes a versioned switch, with source revalidation and atomic
+receipts. Existing role/native child, mailbox and budget contracts are retained.
+See [activation requirements and evidence](../../implementation/2026-10-18-conversation-mode-admission.md).
+The real Chat Host readiness/preset, bounded tools/context, UI default and
+standalone implementation are still open. This supersedes the mode-mapping gap
+above without declaring the full capability ledger complete.

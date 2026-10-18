@@ -15,11 +15,11 @@ function selection(value:unknown):Selection{
  return{provider:value.provider,model:value.model,...(value.reasoning_effort===undefined?{}:{reasoning_effort:value.reasoning_effort as string})};
 }
 /** Called inside acceptance's existing transaction, never from mutable metadata at dispatch. */
-export function snapshotAcceptedModelPolicy(db:DatabaseSync,conversationId:string,ownerId:string){
+export function snapshotAcceptedModelPolicy(db:DatabaseSync,conversationId:string,ownerId:string,modelOverride?:Selection){
  if(!db.isTransaction)throw Error('model_policy_acceptance_transaction_required');
  const row=db.prepare('SELECT model,version FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId);
  if(!row||typeof row.model!=='string'||!Number.isSafeInteger(row.version)||Number(row.version)<1)throw Error('model_policy_invalid');
- return canonicalModelJson({protocol:1,conversation_version:row.version,model:JSON.parse(row.model)});
+ return canonicalModelJson({protocol:1,conversation_version:row.version,model:modelOverride===undefined?JSON.parse(row.model):selection(modelOverride)});
 }
 function readPolicyInside(db:DatabaseSync,runId:string,sessionId:string,lease:unknown){
  const authority=inspectOrdinaryInputBinding(db,runId,sessionId,lease);

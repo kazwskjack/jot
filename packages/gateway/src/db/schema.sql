@@ -2,7 +2,7 @@ CREATE TABLE IF NOT EXISTS ga_conversations (
   id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
   title TEXT NOT NULL, model TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1,
   next_seq INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-  project_id TEXT, pinned_at TEXT, archived_at TEXT
+  project_id TEXT, pinned_at TEXT, archived_at TEXT,mode TEXT NOT NULL DEFAULT 'work'
 );
 CREATE INDEX IF NOT EXISTS idx_ga_conversations_owner_updated ON ga_conversations(owner_id,updated_at DESC,id);
 
@@ -86,7 +86,7 @@ CREATE TABLE IF NOT EXISTS ga_runs (
   continuation_of TEXT REFERENCES ga_runs(id), runtime_run_id TEXT,
   runtime_revision INTEGER NOT NULL DEFAULT 0, version INTEGER NOT NULL DEFAULT 1,
   checkpoint_id TEXT, reason_code TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-  model_policy_json TEXT, model_resolution_json TEXT,
+  model_policy_json TEXT, model_resolution_json TEXT,execution_policy_json TEXT,
   native_session_ref TEXT, native_owner_id TEXT, native_conversation_id TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ga_one_executing_run ON ga_runs(conversation_id)

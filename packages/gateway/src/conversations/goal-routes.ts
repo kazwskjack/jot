@@ -11,10 +11,12 @@ type Admission={enabled:boolean;controls:ConversationGoalControls;atomic:<T>(req
 export function registerConversationGoalRoutes(app:FastifyInstance,{db,conversations,actor,client,resumeAdmission}:{db:DatabaseSync;conversations:ConversationRepository;actor:(request:FastifyRequest)=>string;client?:ConversationGoalClient|undefined;resumeAdmission?:Admission}){
   function session(request:FastifyRequest){
     const id=String((request.params as Record<string,unknown>).conversationId),owner=actor(request);
-    conversations.get(id,owner);
+    const conversation=conversations.get(id,owner);
+    if(conversation.mode!=='work'&&(request.method==='POST'&&(request.body as Record<string,unknown>)?.action==='resume'||request.url.split('?')[0]!.endsWith('/goal/resume-readiness')))return {forbidden:true as const};
     if(db.prepare('SELECT 1 FROM wb_agents WHERE conversation_id=? AND owner_id=?').get(id,owner)
       ||db.prepare('SELECT 1 FROM wb_run_bindings b JOIN ga_runs r ON r.id=b.run_id WHERE r.conversation_id=? AND b.owner_id=? LIMIT 1').get(id,owner))return {forbidden:true as const};
-    const binding=db.prepare('SELECT session_id FROM ga_harness_session_bindings WHERE conversation_id=? AND owner_id=?').get(id,owner) as {session_id:string}|undefined;
+    const binding=(db.prepare("SELECT session_id FROM ga_conversation_mode_sessions WHERE conversation_id=? AND owner_id=? AND mode='work'").get(id,owner)
+      ??db.prepare('SELECT session_id FROM ga_harness_session_bindings WHERE conversation_id=? AND owner_id=?').get(id,owner)) as {session_id:string}|undefined;
     return {id,owner,sessionId:binding?.session_id};
   }
   async function readiness(binding:{id:string;sessionId:string|undefined}){
