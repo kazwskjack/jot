@@ -149,3 +149,10 @@ reservation route. Immutable per-run groups and consumed calls prevent second
 search/fetch rounds and repeated URLs after uncertain outcomes or restarts.
 Reservations are not successful fetch receipts. The full Chat readiness gate
 remains off; see [Web allowance implementation](../../docs/implementation/2026-10-18-chat-web-allowances.md).
+
+Completed Chat runs can supply an internal, owner/version-bound maintenance
+source and immutable intent. This metadata-only route rejects foreground
+leases, rechecks the original publication and becomes unavailable after a
+new input/source change. It grants no inference, Session maintenance or answer
+publication. The compaction executor/accounting and readiness remain open;
+see [source prerequisite and actual Host evidence](../../docs/implementation/2026-10-18-chat-compaction-source.md).

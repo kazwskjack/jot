@@ -17,12 +17,12 @@ import {OfficialSessionRunner} from '../../gateway/src/harness/official-session-
 import {SessionCommandDispatcher} from '../../gateway/src/harness/command-dispatcher.ts';
 const runtime=process.env.JOT_DSH_RUNTIME_MODULES;
 const listen=async server=>{await new Promise(done=>server.listen(0,'127.0.0.1',done));return'http://127.0.0.1:'+server.address().port;};
-async function chatCase(t,{bounded=false,web=false}={}){
+async function chatCase(t,{bounded=false,web=false,maintenance=false}={}){
  const root=await mkdtemp(join(tmpdir(),'jot-chat-native-')),home=join(root,'home'),workspace=join(root,'workspace');await mkdir(workspace);
  const token=randomBytes(32).toString('hex'),adapterToken=randomBytes(32).toString('hex'),modelKey='sk-'+randomBytes(32).toString('hex'),requests=[];
  let service,host,exit,done,execution,output='',succeeded=false,modelFailure;
  let releaseSupplement;const supplementGate=new Promise(resolve=>releaseSupplement=resolve);
- let expectedContext,expectedQuestion;
+ let expectedContext,expectedQuestion,maintenanceIntent,maintenanceScope;
  const policy={protocol:1,mode:'chat',model:{provider:'deepseek-official',model:'deepseek-flash'},thinking:'disabled',preset_id:'jot-chat',preset_revision:CHAT_PRESET_REVISION,context_revision:'fixture-context-v1'};
  const model=createServer(async(req,res)=>{try{
   const chunks=[];for await(const chunk of req)chunks.push(chunk);const input=JSON.parse(Buffer.concat(chunks).toString());
@@ -90,6 +90,12 @@ async function chatCase(t,{bounded=false,web=false}={}){
   assert.equal(requests.length,web?4:1);assert.equal(await worker.processNext(),null);
   const answers=service.db.prepare("SELECT content_json FROM ga_messages WHERE role='assistant' AND run_id=?").all(run.run_id);assert.equal(answers.length,1);assert.match(answers[0].content_json,/CHAT-NATIVE-OK/);
   assert.deepEqual(JSON.parse(await readFile(join(root,'composition.json'),'utf8')),{preset:'jot-chat',tools:['web_fetch','web_search'],mounted:true});
+  const prepareMaintenance=async runId=>{
+   const row=service.db.prepare('SELECT * FROM ga_runs WHERE id=?').get(runId),scope={owner_id:'chat-owner',conversation_id:conversation.conversation_id,run_id:runId,session_ref:row.native_session_ref,expected_run_version:row.version};
+   const before=service.db.prepare('SELECT total_changes() n').get().n,inspected=await service.app.inject({method:'POST',url:'/internal/v1/workbench/chat-compaction-source',headers:{authorization:'Bearer '+token},payload:{action:'inspect',...scope}});assert.equal(inspected.statusCode,200,inspected.body);assert.equal(service.db.prepare('SELECT total_changes() n').get().n,before);
+   const request=()=>service.app.inject({method:'POST',url:'/internal/v1/workbench/chat-compaction-source',headers:{authorization:'Bearer '+token},payload:{action:'prepare',...scope}}),prepared=await request();assert.equal(prepared.statusCode,200,prepared.body);const intent=prepared.json().intent;assert.equal(intent.execution_authorized,false);assert.equal(intent.source.execution_authorized,false);assert.equal(intent.source.answer_message_id,service.db.prepare("SELECT id FROM ga_messages WHERE run_id=? AND role='assistant'").get(runId).id);assert.deepEqual((await request()).json().intent,intent);return{scope,intent};
+  };
+  if(maintenance){const prepared=await prepareMaintenance(run.run_id);maintenanceIntent=prepared.intent;maintenanceScope=prepared.scope;assert.equal(requests.length,1);}
   if(web){
    const receipt=JSON.parse(await readFile(join(root,'web-receipt.json'),'utf8'));assert.deepEqual(receipt.search.sort(),['synthetic one','synthetic three','synthetic two']);assert.deepEqual(receipt.fetch.sort(),['https://example.com/failed','https://example.com/page']);assert.ok(receipt.peak>=2);assert.equal(receipt.active,0);
    assert.equal(service.db.prepare('SELECT count(*) n FROM ga_chat_web_groups').get().n,2);assert.equal(service.db.prepare('SELECT count(*) n FROM ga_chat_web_calls').get().n,4);
@@ -103,14 +109,16 @@ async function chatCase(t,{bounded=false,web=false}={}){
   if(bounded){
    const firstQuestion=expectedQuestion;expectedQuestion='Answer this second synthetic question.';
    const next=await service.app.inject({method:'POST',url:`/v1/conversations/${conversation.conversation_id}/messages`,headers:{'x-user-id':'chat-owner'},payload:{client_message_id:'chat-input-two',content:[{type:'text',text:expectedQuestion}]}});assert.equal(next.statusCode,202,next.body);
+   if(maintenance){const rejected=await service.app.inject({method:'POST',url:'/internal/v1/workbench/chat-compaction-source',headers:{authorization:'Bearer '+token},payload:{action:'read',...maintenanceScope,intent_id:maintenanceIntent.intent_id}});assert.equal(rejected.statusCode,409);}
    expectedContext=JSON.parse(service.db.prepare('SELECT chat_context_json FROM ga_runs WHERE id=?').get(next.json().run_id).chat_context_json);assert.ok(expectedContext.model_text.includes('CHAT-NATIVE-OK'));
    await worker.processNext();if(modelFailure)throw modelFailure;assert.equal(service.runs.get(next.json().run_id,'chat-owner').status,'succeeded');assert.equal(requests.length,2);
    assert.equal(requests[1].system,requests[0].system);assert.deepEqual(requests[1].tools,requests[0].tools);
    const history=JSON.parse(await readFile(join(root,'context-history.json'),'utf8'));assert.equal(history.contexts.length,2);assert.deepEqual(history.user_rpcs,[accepted.json().run_id,next.json().run_id]);assert.ok(history.replace_generation>=1);
    const sent=JSON.stringify(requests[1].messages);assert.equal(sent.split(firstQuestion).length-1,1);assert.equal(service.db.prepare("SELECT count(*) n FROM ga_messages WHERE conversation_id=? AND role='user'").get(conversation.conversation_id).n,22);
    assert.equal(service.db.prepare("SELECT count(*) n FROM ga_messages WHERE conversation_id=? AND role='assistant' AND run_id IS NOT NULL").get(conversation.conversation_id).n,2);
+   if(maintenance){const prepared=await prepareMaintenance(next.json().run_id);assert.notEqual(prepared.intent.intent_id,maintenanceIntent.intent_id);assert.equal(service.db.prepare('SELECT count(*) n FROM ga_chat_compaction_intents').get().n,2);assert.equal(requests.length,2);}
   }
-  t.diagnostic(JSON.stringify({officialLauncher:true,chatPresetMounted:true,thinking:'disabled',tools:['web_fetch','web_search'],boundedContext:bounded,webAllowance:web,modelRequests:web?8:bounded?2:1,replyCount:web||bounded?2:1,production:false,readiness:'scripted-fixture'}));succeeded=true;
+  t.diagnostic(JSON.stringify({officialLauncher:true,chatPresetMounted:true,thinking:'disabled',tools:['web_fetch','web_search'],boundedContext:bounded,webAllowance:web,maintenanceSource:maintenance,compactionExecuted:false,modelRequests:web?8:bounded?2:1,replyCount:web||bounded?2:1,production:false,readiness:'scripted-fixture'}));succeeded=true;
  }catch(error){await writeFile(join(root,'startup-private.log'),output);throw Error('chat_native_host_failed; private diagnostics: '+root,{cause:error});}
  finally{releaseSupplement();if(host&&!exit)host.kill('SIGTERM');if(done)await done;await execution?.catch(()=>{});if(service){await service.app.close();service.db.close();}model.closeAllConnections();await new Promise(done=>model.close(done));if(succeeded)await rm(root,{recursive:true,force:true});}
 }
@@ -118,3 +126,5 @@ test('actual official Chat preset sends thinking disabled, exposes only web tool
 test('actual Chat Host uses the accepted bounded context on first and next input without duplicating or erasing transcript messages',{skip:!runtime,timeout:60000},t=>chatCase(t,{bounded:true}));
 
 test('actual Chat Host enforces durable Web groups before official parallel search/fetch effects and still publishes one answer',{skip:!runtime,timeout:60000},t=>chatCase(t,{web:true}));
+
+test('actual completed Chat answers prepare immutable maintenance sources without inference, publication or foreground lease reuse',{skip:!runtime,timeout:60000},t=>chatCase(t,{bounded:true,maintenance:true}));

@@ -59,6 +59,58 @@ Files: a separate declaration in `packages/dsh-host/`, focused modules in `packa
 - [ ] Implement post-answer-only native compaction, cancellation on new input, no second answer and complete background usage. Work compaction remains visible.
 - [ ] Verify stable request prefixes and actual provider cache metrics when configured. Do not send periodic model probes or fabricate hit counters.
 
+### Background compaction sequence within task 4
+
+Keep this sequence under the original Gateway authority and original DSH
+Session. The intent journal below is provenance, not another planner or task
+scheduler. Completing its first step does not complete background compaction.
+
+1. **Completed-source prerequisite:** implemented in
+   [source and immutable-intent evidence](../../implementation/2026-10-18-chat-compaction-source.md).
+   Require the original completed canonical answer/publication, policy,
+   resolved model, bounded-context digest, owner and native Session. Refuse
+   live foreground authority, unapplied supplements, newer inputs, changed
+   sources and Work scopes. A valid historical publication may retain the
+   original interrupted run status. Inspect/prepare/read never grant execution.
+2. **Native need/idle check:** in a focused Session-adapter module, confirm the
+   actual owned native completion and idle/empty-inbox state. Use the pinned
+   official token meter, routed-model metadata and effective context pressure;
+   do not measure the raw stored transcript as if it were the next request.
+   Low pressure, missing reliable metadata or a busy Session means a quiet
+   no-op, not a forced summary or foreground retry.
+3. **Dispatch/accounting boundary:** record a separately fenced background
+   attempt before inference. Bind it to the immutable intent and original
+   source. Never reuse the completed foreground execution lease, create a
+   replacement conversation/run, or grant a model from browser parameters.
+   Verify the exact resolved provider/model and Chat's thinking-disabled
+   policy on the actual auxiliary request. The SDK's default summarization
+   call uses `purpose: compaction` but does not automatically copy Chat's
+   reasoning effort. Do not mutate frozen request options to fix that.
+4. **Official execution and cancellation:** compose the original compaction
+   engine for Chat with automatic foreground compaction disabled; preserve
+   Work's composition. Only after the pressure and independent admission
+   checks, call official idle maintenance (`compactNow`/`runMaintenance`).
+   New input cancels the background operation's own signal and drains that
+   maintenance boundary before the original native input enters. Do not cancel
+   another foreground task or infer permission from a stale "current run".
+   Capture dispatched/partial/unknown usage even after cancellation; a lost
+   receipt is observation/recovery work, not permission for another inference.
+5. **Useful checkpoint handoff:** retain the official summary event, source
+   span/generation and hashes as an owner-scoped checkpoint. Verify its source
+   again before publication. A subsequent Chat acceptance may use a verified
+   checkpoint plus recent text within the existing total bound; version the
+   context algorithm/revision explicitly. Do not invent a canonical human or
+   assistant message, discard original history, or summarize content that the
+   next seed will simply throw away. New-input/source conflicts suppress the
+   checkpoint without erasing incurred usage.
+6. **End-to-end gate:** actual SDK/Host tests must show no foreground summary,
+   a pressure-driven post-answer summary, exactly one user-facing answer,
+   correct thinking/provider identity, new-input cancellation, stable retry/
+   restart accounting and use of the exact checkpoint in the next native
+   request. UI tests must hide only Chat's background activity and preserve
+   Work's visible official compaction. Keep real readiness off until these
+   execution, accounting and presentation gates pass.
+
 ## 5. Connect the UI and standalone profile
 
 Files: `web/jot/RoleConversation.tsx`, `PromptComposer.tsx`, `client.ts`, `types.ts`, owned mutation receipt/controller tests; separately `src/server.mjs`, `src/model.mjs`, standalone schemas and API tests.

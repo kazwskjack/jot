@@ -1,0 +1,20 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {randomBytes} from 'node:crypto';
+import {buildServer} from '../../src/server.ts';
+import {HarnessCoordinator} from '../../src/harness/coordinator.ts';
+import {inspectOrdinaryModelPolicy,bindOrdinaryModelResolution} from '../../src/conversations/model-policy.ts';
+const policy={protocol:1,mode:'chat',model:{provider:'fixture',model:'fast'},thinking:'disabled',preset_id:'jot-chat',preset_revision:'chat-native-v1',context_revision:'bounded-text-v1'};
+test('completed maintenance-source transport is bearer-only, rejects foreground leases, and never grants execution',async t=>{
+ const token=randomBytes(32).toString('hex'),f=await buildServer({databasePath:':memory:',workspaces:['ws'],internalChannelToken:token,csrfToken:randomBytes(32).toString('hex')});t.after(async()=>{await f.app.close();f.db.close();});
+ const c=f.conversations.create('compact-owner',{workspace_id:'ws',mode:'chat',model:{provider:'fixture',model:'fast'}},{chatPolicy:policy}),run=f.runs.enqueue(c.conversation_id,'compact-owner',{client_message_id:'compact-input',content:[{type:'text',text:'Synthetic original input.'}]},{modePolicy:policy}),coordinator=new HarnessCoordinator(f.db,f.runs,f.events),lease=coordinator.claimNext('compact-worker',30000);coordinator.start(lease);
+ const native=f.db.prepare('SELECT native_session_ref FROM ga_runs WHERE id=?').get(run.run_id).native_session_ref,execution={owner:lease.owner,generation:lease.generation},model=inspectOrdinaryModelPolicy(f.db,run.run_id,native,execution);bindOrdinaryModelResolution(f.db,run.run_id,native,execution,model.policy_sha256,{...policy.model,reasoning_effort:'off'});
+ const body=action=>({action,owner_id:'compact-owner',conversation_id:c.conversation_id,run_id:run.run_id,session_ref:native,expected_run_version:f.runs.get(run.run_id,'compact-owner').version});
+ const call=(payload,authorization='Bearer '+token)=>f.app.inject({method:'POST',url:'/internal/v1/workbench/chat-compaction-source',headers:{authorization},payload});
+ assert.equal((await call(body('prepare'))).statusCode,409);
+ coordinator.recordCandidate(lease,'Synthetic final answer.');coordinator.setCandidateStatus(lease,'verified',[]);coordinator.recordAssistant(lease,'Synthetic final answer.');coordinator.finalizePublication(lease,'succeeded',null);
+ const before=f.db.prepare('SELECT total_changes() n').get().n,inspection=await call(body('inspect'));assert.equal(inspection.statusCode,200,inspection.body);assert.equal(inspection.json().source.execution_authorized,false);assert.equal(f.db.prepare('SELECT total_changes() n').get().n,before);
+ const prepared=await call(body('prepare'));assert.equal(prepared.statusCode,200,prepared.body);const intent=prepared.json().intent;assert.equal(intent.execution_authorized,false);assert.deepEqual((await call(body('prepare'))).json().intent,intent);assert.deepEqual((await call({...body('read'),intent_id:intent.intent_id})).json().intent,intent);
+ assert.equal((await call(body('inspect'),'Bearer wrong')).statusCode,401);assert.equal((await call({...body('prepare'),execution_lease:execution})).statusCode,422);assert.equal((await call({...body('prepare'),owner_id:'foreign'})).statusCode,409);assert.equal((await call({...body('read'),intent_id:'foreign-intent'})).statusCode,409);
+ assert.equal(f.db.prepare('SELECT count(*) n FROM ga_runs').get().n,1);assert.equal(f.db.prepare("SELECT count(*) n FROM ga_messages WHERE role='assistant'").get().n,1);
+});

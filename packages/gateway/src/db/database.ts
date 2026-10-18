@@ -35,6 +35,12 @@ export function openProductDatabase(path: string): DatabaseSync {
   ensureColumn(db,'ga_runs','execution_policy_json','TEXT');
   ensureColumn(db,'ga_runs','chat_context_json','TEXT');
   ensureColumn(db,'ga_runs','chat_context_sha256','TEXT');
+  db.exec(`CREATE TABLE IF NOT EXISTS ga_chat_compaction_intents (
+    intent_id TEXT PRIMARY KEY,run_id TEXT NOT NULL UNIQUE REFERENCES ga_runs(id) ON DELETE CASCADE,
+    owner_id TEXT NOT NULL,conversation_id TEXT NOT NULL,session_id TEXT NOT NULL,
+    source_json TEXT NOT NULL,source_sha256 TEXT NOT NULL,created_at TEXT NOT NULL);
+   CREATE TRIGGER IF NOT EXISTS ga_chat_compaction_intent_immutable BEFORE UPDATE ON ga_chat_compaction_intents
+    BEGIN SELECT RAISE(ABORT,'chat_compaction_intent_immutable'); END;`);
   db.exec(`CREATE TABLE IF NOT EXISTS ga_chat_web_groups (
     run_id TEXT NOT NULL REFERENCES ga_runs(id) ON DELETE CASCADE,
     kind TEXT NOT NULL CHECK(kind IN ('search','fetch')),session_id TEXT NOT NULL,

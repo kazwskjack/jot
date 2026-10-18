@@ -519,3 +519,18 @@ an actual SDK Session reopen refuses a second uncertain effect. See
 This closes the durable Web allowance item only. Background post-answer
 compaction, actual provider metrics, real readiness, UI/standalone and the
 remaining full ledger remain open.
+
+### 2026-10-18 completed-source prerequisite for Chat maintenance
+
+An internal reader/immutable intent now pins the original committed Chat
+answer, owner, exact run-native identity, policy, resolved model and context
+digest without reusing foreground authority. New input, pending supplements,
+changed sources and Work scopes refuse eligibility. The original historical
+publisher remains authoritative for reconciled answers; no execution status is
+rewritten. Actual Host evidence observes two questions/two answers and no extra
+model calls when preparing records. See
+[source evidence and remaining execution boundary](../../implementation/2026-10-18-chat-compaction-source.md).
+This is a metadata prerequisite only. Native idle/pressure admission, actual
+post-answer compaction, cancellation, auxiliary usage, useful checkpoint handoff
+and Chat-only activity filtering still remain in the Chat/Work plan. No general
+Chat readiness or full-ledger completion is claimed.
