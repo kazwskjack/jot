@@ -1,3 +1,4 @@
+@import './jot/prompt-composer.css';
 .workbench-application{max-width:1280px;margin:auto;padding:0 24px 40px;--jot-glass-bg:var(--panel);--jot-glass-border:var(--line)}
 .workbench-application header{position:relative;padding:20px 0;display:flex;justify-content:space-between}
 .workbench-application .wb-layout{min-width:0;--wb-surface:var(--panel);--wb-border:var(--line);--wb-muted:var(--muted);font-family:inherit}

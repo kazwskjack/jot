@@ -429,3 +429,13 @@ direct isolated delivery, cold Host/Worker continuation, original claimed-input
 recovery and two live steering inputs. This rerun uses local scripted Messages
 responses, with zero failures or skips (83.34s); it retains the same limitations
 on real-provider and production acceptance.
+
+
+### 2026-10-18 — shared prompt composer follow-up (local code)
+
+- Independently implemented the public AI Chat Input preview interaction: compact/expanded layout, capability-derived model and effort menus, attachments/drop, IME-safe Enter, multiline, voice, cancellation and Goal menu. Host styles retain the existing glass material; no locked component source was obtained or copied.
+- Ordinary model changes use the existing owned conversation PATCH with expected version and an unchanged mutation key on uncertain receipts. Role models remain read-only. Existing voice and pending-message retry behavior remains covered by real local browser tests.
+- Private chat entry prioritizes an explicit entry, then a visible pinned ordinary conversation, then a valid saved choice; otherwise it opens an immediately usable empty input. It does not prompt to create a chat or create one merely on entry. Owner-scoped restore and conservative role filtering remain in place.
+- Review fixed the unknown-message retry event handler, froze drafts/attachments while the original send is unconfirmed, retained cancellation during slow acceptance, and allowed host voice Escape handling.
+- Search status is unchanged: the new SDK provides the optional Search/Fetch API plugin and controlled localhost wiring passed. Existing provider defaults remain unchanged; this is not a production provider or credential acceptance result.
+- This follow-up does not deploy production, claim completion of the full capability plan, or change execution permissions and readiness gates.

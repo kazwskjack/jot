@@ -1,0 +1,44 @@
+/* Geometry and interaction only. The host's jot-composer-glass supplies material. */
+.jot-prompt-composer{box-sizing:border-box;position:relative;isolation:isolate;display:flex;flex-direction:column;gap:0;width:min(320px,100%);min-width:0;max-width:100%;min-height:52px;margin-inline:auto;padding:12px 56px 12px 16px;border-radius:28px;color:inherit;transition:width .38s cubic-bezier(.22,1,.36,1),border-radius .32s cubic-bezier(.22,1,.36,1),padding .32s cubic-bezier(.22,1,.36,1);text-align:left}
+.jot-prompt-composer[data-expanded="true"]{width:min(480px,100%);min-height:120px;padding:14px 12px 10px 16px;border-radius:24px;gap:12px}
+.jot-prompt-composer *{box-sizing:border-box}
+.jot-prompt-composer .jot-prompt-textarea{display:block;width:100%;min-width:0;min-height:24px;max-height:176px;margin:0;padding:0;border:0;border-radius:0;outline:0;resize:none;background:transparent;color:inherit;font:inherit;font-size:16px;line-height:24px;box-shadow:none;overscroll-behavior:contain}
+.jot-prompt-textarea::placeholder{color:var(--muted,currentColor);opacity:.7}
+.jot-prompt-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0;margin-top:auto;min-height:32px;flex-wrap:wrap}
+.jot-prompt-composer[data-expanded="false"] .jot-prompt-toolbar{position:absolute;right:9px;top:50%;transform:translateY(-50%);min-height:32px}
+.jot-prompt-composer[data-expanded="false"] .jot-prompt-settings,.jot-prompt-composer[data-expanded="false"] .jot-prompt-more-anchor{display:none}
+.jot-prompt-settings,.jot-prompt-actions{display:flex;align-items:center;gap:6px;min-width:0;max-width:100%}
+.jot-prompt-actions{margin-left:auto;flex-wrap:wrap;justify-content:flex-end}
+.jot-prompt-settings{flex:1;gap:4px}
+.jot-prompt-model-anchor{position:relative;min-width:0;max-width:65%}
+.jot-prompt-more-anchor{position:relative;flex-shrink:0}
+.jot-prompt-composer button{font:inherit;color:inherit;cursor:pointer}
+.jot-prompt-composer .jot-prompt-setting,.jot-prompt-composer .jot-prompt-plus,.jot-prompt-composer .jot-prompt-primary{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:32px;margin:0;padding:5px 6px;border:0;background:transparent;border-radius:9px;font-size:12px;line-height:20px}
+.jot-prompt-setting{max-width:100%}
+.jot-prompt-setting span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.jot-prompt-effort{max-width:40%;flex-shrink:0}
+.jot-prompt-composer svg{width:16px;height:16px;flex-shrink:0}
+.jot-prompt-composer .jot-prompt-plus{width:32px;padding:6px;border-radius:50%}
+.jot-prompt-composer .jot-prompt-primary{width:32px;flex-shrink:0;padding:7px;border-radius:50%;background:var(--composer-action-bg,var(--text,#202020));color:var(--composer-action-color,var(--panel,#fff))}
+.jot-prompt-composer button:disabled{cursor:default;opacity:.45}
+.jot-prompt-composer button:focus-visible{outline:2px solid var(--accent,currentColor);outline-offset:3px}
+.jot-prompt-composer .jot-prompt-setting:not(:disabled):hover,.jot-prompt-composer .jot-prompt-plus:not(:disabled):hover{background:var(--composer-hover,rgba(127,127,127,.12))}
+.jot-prompt-menu{position:absolute;bottom:calc(100% + 12px);left:0;z-index:20;display:flex;flex-direction:column;gap:2px;width:max-content;min-width:176px;max-width:min(280px,calc(100vw - 40px));max-height:min(360px,50dvh);overflow:auto;padding:8px;border-radius:16px;animation:jot-prompt-menu-in .18s ease-out;overscroll-behavior:contain}
+.jot-prompt-composer .jot-prompt-menu button{display:flex;align-items:center;gap:8px;width:100%;min-height:36px;margin:0;padding:8px;border:0;border-radius:8px;background:transparent;text-align:left;font-size:13px;line-height:20px}
+.jot-prompt-menu button span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.jot-prompt-menu small{margin-left:auto;opacity:.6;font-size:10px;overflow-wrap:anywhere}
+.jot-prompt-menu button:not(:disabled):hover,.jot-prompt-menu button[aria-checked="true"]{background:var(--composer-hover,rgba(127,127,127,.12))}
+.jot-prompt-more-menu{left:auto;right:0}
+.jot-prompt-attachments{display:flex;flex-wrap:wrap;gap:8px;min-width:0;max-height:180px;overflow:auto;overflow-wrap:anywhere}
+.jot-prompt-attachments>*{min-width:0;max-width:100%}
+.jot-prompt-voice{display:flex;align-items:center;min-width:0}
+.jot-prompt-voice .jot-voice-input{position:relative;display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.jot-prompt-voice .jot-voice-input>span[role="status"]{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.jot-prompt-voice .jot-voice-input>button{margin:0;padding:6px;border-radius:50%;font-size:12px;min-height:32px}
+.jot-prompt-voice .jot-voice-input[aria-busy="false"]>button{width:32px;height:32px;font-size:0;display:inline-flex;align-items:center;justify-content:center;background:var(--composer-action-bg,var(--text,#202020));color:var(--composer-action-color,var(--panel,#fff));border:0}
+.jot-prompt-voice .jot-voice-input[aria-busy="false"]>button::before{content:"";width:16px;height:16px;background:currentColor;mask:center/contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Zm-6 8v1a6 6 0 0 0 12 0v-1M12 18v3m-3 0h6' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E")}
+.jot-prompt-voice .jot-voice-input>[role="alert"]{position:absolute;bottom:100%;right:0;width:240px;max-width:calc(100vw - 40px);font-size:12px}
+.jot-prompt-drop-hint{position:absolute;inset:0;z-index:30;display:grid;place-items:center;border:2px dashed var(--accent,currentColor);border-radius:inherit;pointer-events:none;background:var(--composer-drop-bg,var(--panel,#fff))}
+@keyframes jot-prompt-menu-in{from{opacity:0;transform:translateY(6px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
+@media(max-width:540px){.jot-prompt-composer,.jot-prompt-composer[data-expanded="true"]{max-width:100%}.jot-prompt-composer[data-expanded="true"]{padding-left:12px;padding-right:8px}.jot-prompt-settings,.jot-prompt-actions{gap:2px}.jot-prompt-model-anchor{max-width:60%}.jot-prompt-setting span{max-width:120px}.jot-prompt-menu{max-width:calc(100vw - 40px)}}
+@media(prefers-reduced-motion:reduce){.jot-prompt-composer{transition:none}.jot-prompt-menu{animation:none}}
