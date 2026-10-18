@@ -277,3 +277,11 @@ request; it cannot fall through to a Work/default route. The option requires
 `ordinaryModelSelection` and original input admission. It does not expose
 general Chat readiness or implement turn allowances/context compaction. See
 [native Chat boundaries and actual Host evidence](../../docs/implementation/2026-10-18-native-chat-preset.md).
+
+`ordinaryChatContext: true` optionally consumes the original run's immutable,
+owned text window through the official Session surface API. It requires the
+trusted execution policy and original model/admission configuration above.
+The first batch preserves native system-prompt order; subsequent inputs replace
+only the model-facing conversation body and retain stored transcript events.
+It remains default-off and does not enable general Chat readiness. See
+[bounds, retry/reopen behavior and actual SDK/Host evidence](../../docs/implementation/2026-10-18-chat-context-window.md).

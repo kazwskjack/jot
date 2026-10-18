@@ -9,8 +9,9 @@ const fail=()=>{throw Error('ordinary_input_admission_unconfirmed');};
 function wait(promise,signal){const source=Promise.resolve(promise);if(signal.aborted){source.catch(()=>{});signal.throwIfAborted();}return new Promise((done,reject)=>{const abort=()=>{cleanup();reject(signal.reason);},cleanup=()=>signal.removeEventListener('abort',abort);signal.addEventListener('abort',abort,{once:true});source.then(value=>{cleanup();done(value);},error=>{cleanup();reject(error);});});}
 /** Observe the actual Controller's final native message. Persist its hash before
  * the original pre-step may enter, without changing attachment admission/send. */
-export function createOrdinaryInputAdmissionHost({ctx,agents,bridge,profile,admissions,ordinaryPresets,modelSelector}){
+export function createOrdinaryInputAdmissionHost({ctx,agents,bridge,profile,admissions,ordinaryPresets,modelSelector,contextSelector}){
  if(modelSelector!==undefined&&typeof modelSelector!=='function')fail();
+ if(contextSelector!==undefined&&typeof contextSelector!=='function')fail();
  if(typeof ctx?.on!=='function'||typeof ctx.sessions?.flush!=='function'||typeof agents?.get!=='function'||typeof bridge?.request!=='function'||typeof profile?.read!=='function'||typeof admissions?.create!=='function'||typeof admissions?.read!=='function'||admissions.entryReservationProtocol!==1||typeof admissions.reserveEntry!=='function'||typeof admissions.readReplayCandidate!=='function'||!(ordinaryPresets instanceof Set)||!ordinaryPresets.size)fail();
  const storage=new AsyncLocalStorage(),records=new Map(),busy=new Set(),pending=new Set(),modelHooks=new Map(),shutdown=new AbortController();let disposed=false;
  const check=record=>{record.signal.throwIfAborted();if(disposed||agents.get(record.agent.id)!==record.agent||record.agent.session!==record.session||record.agent.id!==record.binding.sessionRef||record.session.id!==record.binding.sessionRef||!ordinaryPresets.has(record.session.header.agentPreset))fail();};
@@ -42,7 +43,19 @@ export function createOrdinaryInputAdmissionHost({ctx,agents,bridge,profile,admi
  },{prepend:true});modelHooks.set(agent,remove);};
  on('agent/pre-step',async(payload,next)=>{const owned=[...(records.get(payload.agent)??[])].filter(r=>payload.messages?.some(m=>r.observed.has(m.id)||m.id===r.message?.id||m.source?.kind==='user'&&m.source.rpcId===r.requestId));
   for(const record of owned){record.context=payload;try{payload.signal?.throwIfAborted();await verify(record);payload.signal?.throwIfAborted();}catch{try{return reject(record,payload);}finally{record.context=null;}}}
-  const decision=await next();if(decision.kind==='reject'){for(const record of owned)record.context=null;return decision;}
+  let decision=await next();if(decision.kind==='reject'){for(const record of owned)record.context=null;return decision;}
+  if(contextSelector&&owned.length){
+   const original=owned[0],signal=AbortSignal.any([original.signal,...(payload.signal?[payload.signal]:[])]);
+   try{
+    if(owned.some(record=>record.binding.runId!==original.binding.runId||record.binding.sessionRef!==original.binding.sessionRef||!isDeepStrictEqual(record.binding.executionLease,original.binding.executionLease)))fail();
+    const prepared=await wait(contextSelector({agent:payload.agent,binding:{runId:original.binding.runId,sessionRef:original.binding.sessionRef,executionLease:original.binding.executionLease},signal,check:async()=>{for(const record of owned)await verify(record);}}),signal);
+    if(prepared!==undefined){
+     if(!prepared||!['startsRequestSeries','contextMessage,startsRequestSeries'].includes(Object.keys(prepared).sort().join(','))||prepared.startsRequestSeries!==true)fail();
+     if(prepared.contextMessage!==undefined){const message=prepared.contextMessage;if(message?.role!=='user'||message.source?.kind!=='jot-chat-context'||message.source.run_id!==original.binding.runId||typeof message.source.context_sha256!=='string'||!/^[a-f0-9]{64}$/.test(message.source.context_sha256)||!Array.isArray(message.content)||message.content.length!==1||message.content[0]?.type!=='text'||typeof message.content[0].text!=='string'||message.content[0].text.length>14000||decision.messages.some(item=>item.id===message.id))fail();decision={...decision,messages:[message,...decision.messages]};}
+     decision={...decision,startsRequestSeries:true};
+    }
+   }catch{try{return reject(original,{...payload,messages:[...payload.messages,...(decision.messages??[])]});}finally{for(const record of owned)record.context=null;}}
+  }
   for(const record of owned){try{payload.signal?.throwIfAborted();await verify(record);payload.signal?.throwIfAborted();const originals=decision.messages?.filter(m=>m.id===record.message.id);if(originals?.length!==1||digest(originals[0])!==digest(record.message))fail();await wait(admissions.reserveEntry(record.session,receipt(record,record.message),record.entry,{signal:record.signal}),record.signal);await audit(record);payload.signal?.throwIfAborted();}catch{return reject(record,{...payload,messages:[...payload.messages,...(decision.messages??[])]});}finally{record.context=null;}}return decision;
  });
  on('session/event',(session,event)=>{if(event.type!=='user/message')return;for(const record of records.get(agents.get(session.id))??[]){if(record.session===session&&record.message?.id===event.data?.id){record.entered=true;records.get(record.agent).delete(record);if(!records.get(record.agent).size)records.delete(record.agent);}}});

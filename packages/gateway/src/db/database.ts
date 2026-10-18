@@ -33,6 +33,11 @@ export function openProductDatabase(path: string): DatabaseSync {
   ensureColumn(db, 'ga_conversations', 'archived_at', 'TEXT');
   ensureColumn(db,'ga_conversations','mode',"TEXT NOT NULL DEFAULT 'work'");
   ensureColumn(db,'ga_runs','execution_policy_json','TEXT');
+  ensureColumn(db,'ga_runs','chat_context_json','TEXT');
+  ensureColumn(db,'ga_runs','chat_context_sha256','TEXT');
+  db.exec(`CREATE TRIGGER IF NOT EXISTS ga_chat_context_immutable BEFORE UPDATE OF chat_context_json,chat_context_sha256 ON ga_runs
+   WHEN NEW.chat_context_json IS NOT OLD.chat_context_json OR NEW.chat_context_sha256 IS NOT OLD.chat_context_sha256
+   BEGIN SELECT RAISE(ABORT,'chat_context_immutable'); END;`);
   db.exec(`CREATE TABLE IF NOT EXISTS ga_conversation_mode_sessions (
     conversation_id TEXT NOT NULL REFERENCES ga_conversations(id) ON DELETE CASCADE,
     owner_id TEXT NOT NULL,mode TEXT NOT NULL CHECK(mode IN ('work','chat')),

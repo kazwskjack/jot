@@ -65,3 +65,11 @@ test('an already reserved original input cannot be adopted by a replacement atte
 test('pending original input adoption refuses unavailable binary references before rebinding or wake',async()=>{
  const f=fixture(),host=create(f.options);await host.withPrompt({binding:f.binding},async()=>{f.hooks.get('agent/inbox/inserted')({agent:f.agent,message:f.message});return{accepted:true};});f.agent.status='idle';f.agent.inbox.nextTurn.push(f.message);f.options.ctx.attachments.readImage=async()=>{throw Error('private missing object path');};await assert.rejects(host.adoptRecovered({agent:f.agent,binding:f.binding}),e=>e.message==='ordinary_input_attachments_unconfirmed');assert.equal(f.writes.length,1);assert.equal(f.agent.inbox.nextTurn.length,1);await host.dispose();
 });
+
+test('context preparation precedes native entry and preserves the exact admitted message',async()=>{
+ const f=fixture();let prepared=false,step;
+ f.options.contextSelector=async({agent,binding,check,signal})=>{assert.equal(agent,f.agent);assert.deepEqual(binding,f.binding);assert.ok(signal instanceof AbortSignal);await check();prepared=true;return{startsRequestSeries:true};};
+ f.options.admissions.reserveEntry=async()=>{assert.equal(prepared,true);};const host=create(f.options);
+ const response=await host.withPrompt({binding:f.binding},async()=>{f.hooks.get('agent/inbox/inserted')({agent:f.agent,message:f.message});step=f.hooks.get('agent/pre-step')({agent:f.agent,messages:[f.message],signal:new AbortController().signal},async()=>({kind:'enter',messages:[f.message]}));return{accepted:true};});
+ assert.equal(response.accepted,true);const decision=await step;assert.equal(decision.startsRequestSeries,true);assert.equal(decision.messages[0],f.message);await host.dispose();
+});

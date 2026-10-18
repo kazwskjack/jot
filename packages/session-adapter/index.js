@@ -13,6 +13,7 @@ import { createVoiceAdapterHandler } from './voice.js'
 import {createBudgetModelSelector} from './budget-model-selection.js'
 import {createOrdinaryModelSelector} from './ordinary-model-selection.js'
 import {createOrdinaryExecutionPolicyReader,normalizeChatExecutionPolicy} from './ordinary-execution-policy.js'
+import {createChatContextSelector} from './chat-context.js'
 import {createModelCatalogReader} from './model-catalog.js'
 import {createNativeTaskDispatcher} from './native-task-dispatch.js'
 import {createNativeTaskScheduler} from './native-task-scheduler.js'
@@ -643,6 +644,7 @@ export function apply(ctx, config = {}) {
   if(config.ordinaryExecutionPolicy!==undefined){
     try{if(config.ordinaryModelSelection!==true||!config.ordinaryInputAdmission)throw Error();chatExecutionPolicy=normalizeChatExecutionPolicy(config.ordinaryExecutionPolicy)}catch{throw Error('ordinary_execution_policy_config_invalid')}
   }
+  if(config.ordinaryChatContext!==undefined&&typeof config.ordinaryChatContext!=='boolean'||config.ordinaryChatContext===true&&!chatExecutionPolicy)throw Error('chat_context_config_invalid')
   const ordinaryPresets=new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted'))
   if(chatExecutionPolicy)ordinaryPresets.add('jot-chat')
   const host = config.host || '127.0.0.1'
@@ -717,7 +719,8 @@ export function apply(ctx, config = {}) {
   if(conversationGoalRunHost)ctx.effect(()=>()=>conversationGoalRunHost.dispose())
   const executionPolicyReader=chatExecutionPolicy?createOrdinaryExecutionPolicyReader({bridge:workbenchBridge,chatPolicy:chatExecutionPolicy}):undefined
   const ordinaryModelSelector=config.ordinaryModelSelection===true?createOrdinaryModelSelector({bridge:workbenchBridge,llm:ctx.llm,agents:ctx.sessionController.agents,registry:ctx.agents,...(executionPolicyReader?{executionPolicyReader}:{})}):undefined
-  const ordinaryInputAdmissionHost=config.ordinaryInputAdmission===undefined?undefined:createOrdinaryInputAdmissionHost({ctx,agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets,...config.ordinaryInputAdmission,...(ordinaryModelSelector?{modelSelector:ordinaryModelSelector}:{})})
+  const contextSelector=config.ordinaryChatContext===true?createChatContextSelector({bridge:workbenchBridge,sessions:ctx.sessions,chatPolicy:chatExecutionPolicy,createUserMessage:createRequire(ctx.get('profileContext').installAnchor)('@deepseek-ai/dsh-llm').createUserMessage}):undefined
+  const ordinaryInputAdmissionHost=config.ordinaryInputAdmission===undefined?undefined:createOrdinaryInputAdmissionHost({ctx,agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets,...config.ordinaryInputAdmission,...(ordinaryModelSelector?{modelSelector:ordinaryModelSelector}:{}),...(contextSelector?{contextSelector}:{})})
   if(ordinaryInputAdmissionHost)ctx.effect(()=>()=>ordinaryInputAdmissionHost.dispose())
   const ordinaryCompletionReader=config.ordinaryInputAdmission===undefined?undefined:createOrdinaryCompletionReader({agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets,readGoal:agent=>nativeGoalsFor(agent)?.get(agent),...config.ordinaryInputAdmission})
   const ordinarySteeringObservationReader=config.ordinaryInputHistory===undefined?undefined:createOrdinarySteeringObservationReader({agents:ctx.agents,sessions:ctx.sessions,persistence:ctx.sessionPersistence,bridge:workbenchBridge,admissions:config.ordinaryInputAdmission.admissions,ordinaryPresets,...config.ordinaryInputHistory})

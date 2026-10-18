@@ -493,3 +493,15 @@ monotonic guard fence inherited Work capabilities. See
 Bounded context, durable per-turn Search/Fetch allowances, background compaction,
 real readiness and UI/standalone integration remain open. No full-ledger or
 production completion follows from this protocol increment.
+
+### 2026-10-18 bounded Chat context increment
+
+Original Chat acceptance now freezes an immutable ordered text window with
+source identities/hashes. The optional original adapter applies it through
+the official native Session surface, retaining the system prefix, current
+human input and stored transcript. Actual two-turn Host and SDK reopen tests
+cover frozen source reuse and no duplicate context marker. See
+[verification and remaining activation gates](../../implementation/2026-10-18-chat-context-window.md).
+This closes only task 4's bounded-context item. Durable Web allowances,
+background compaction, provider metrics, real readiness, UI/standalone and the
+rest of this full ledger remain open.

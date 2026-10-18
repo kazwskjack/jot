@@ -136,3 +136,10 @@ active/armed Work Goal. Chat is default-off and requires a verified Host policy
 plus a mode-capable Worker; the real Chat Host preset/readiness and frontend
 integration are still pending. A flag alone does not enable them. See
 [mode admission, configuration and evidence](../../docs/implementation/2026-10-18-conversation-mode-admission.md).
+
+New accepted Chat runs also freeze a bounded ordered text snapshot and digest
+within original input acceptance. The internal bearer-only context reader
+rechecks the original run/Session/live lease; legacy rows remain null and Work
+does not receive a Chat seed. The original adapter can opt into official native
+surface integration; real readiness and UI/standalone enablement remain open.
+See [context implementation and verification](../../docs/implementation/2026-10-18-chat-context-window.md).

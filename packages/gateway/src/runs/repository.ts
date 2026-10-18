@@ -6,6 +6,7 @@ import { decodeStoredContent, encodeInputContent } from '../messages/content.ts'
 import {snapshotAcceptedModelPolicy} from '../conversations/model-policy.ts';
 import {acceptedExecutionPolicy,conversationMode,chatModePolicy,type ChatModePolicy} from '../conversations/mode-policy.ts';
 import {ensureModeSession} from '../conversations/mode-sessions.ts';
+import {snapshotChatContext,chatContextHash} from '../conversations/chat-context.ts';
 
 const AUTOMATIC_TITLES = new Set(['New conversation', '新对话']);
 
@@ -55,6 +56,7 @@ export class RunRepository {
       // Native child preparation retains its original reservation/role/archived
       // conversation contract; it is not ordinary Chat/Work input admission.
       const executionPolicy=options.executionMode==='native'?null:acceptedExecutionPolicy(mode,Number(current.version),modelPolicy,this.options.workAgentPreset??'jot-general',chat);
+      const chatContext=mode==='chat'?snapshotChatContext(this.db,conversationId,ownerId,chat!.context_revision):null;
       if (generatedTitle) {
         this.db.prepare(`UPDATE ga_conversations
           SET title=?,version=version+1,updated_at=?
@@ -69,8 +71,8 @@ export class RunRepository {
         .run(messageId, conversationId, runId, 'user', 'complete', JSON.stringify(content), String(input.client_message_id), now, now);
       const saved=options.executionMode==='native'?this.db.prepare('SELECT session_id FROM ga_harness_session_bindings WHERE conversation_id=? AND owner_id=?').get(conversationId,ownerId):undefined;
       const native=options.executionMode==='native'?(saved?String(saved.session_id):undefined):ensureModeSession(this.db,ownerId,conversationId,mode);
-      this.db.prepare('INSERT INTO ga_runs(id,conversation_id,input_message_id,status,version,created_at,updated_at,model_policy_json,execution_policy_json,native_session_ref,native_owner_id,native_conversation_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
-        .run(runId, conversationId, messageId, options.executionMode==='native'?'starting':'queued', 1, now, now,modelPolicy,executionPolicy,native??null,native?ownerId:null,native?conversationId:null);
+      this.db.prepare('INSERT INTO ga_runs(id,conversation_id,input_message_id,status,version,created_at,updated_at,model_policy_json,execution_policy_json,native_session_ref,native_owner_id,native_conversation_id,chat_context_json,chat_context_sha256) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+        .run(runId, conversationId, messageId, options.executionMode==='native'?'starting':'queued', 1, now, now,modelPolicy,executionPolicy,native??null,native?ownerId:null,native?conversationId:null,chatContext,chatContext===null?null:chatContextHash(chatContext));
       this.events.append(conversationId, runId, 'message.created', this.message(messageId));
       this.events.append(conversationId, runId, 'run.state', this.get(runId, ownerId));
       this.db.prepare('INSERT INTO ga_outbox(conversation_id,aggregate_type,aggregate_id,event_type,payload_json,created_at) VALUES(?,?,?,?,?,?)')

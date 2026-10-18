@@ -16,18 +16,20 @@ import {SessionControllerClient} from '../../gateway/src/harness/session-control
 import {OfficialSessionRunner} from '../../gateway/src/harness/official-session-runner.ts';
 const runtime=process.env.JOT_DSH_RUNTIME_MODULES;
 const listen=async server=>{await new Promise(done=>server.listen(0,'127.0.0.1',done));return'http://127.0.0.1:'+server.address().port;};
-test('actual official Chat preset sends thinking disabled, exposes only web tools and publishes one original answer',{skip:!runtime,timeout:60000},async t=>{
+async function chatCase(t,{bounded=false}={}){
  const root=await mkdtemp(join(tmpdir(),'jot-chat-native-')),home=join(root,'home'),workspace=join(root,'workspace');await mkdir(workspace);
  const token=randomBytes(32).toString('hex'),adapterToken=randomBytes(32).toString('hex'),modelKey='sk-'+randomBytes(32).toString('hex'),requests=[];
  let service,host,exit,done,output='',succeeded=false,modelFailure;
+ let expectedContext,expectedQuestion;
  const policy={protocol:1,mode:'chat',model:{provider:'deepseek-official',model:'deepseek-flash'},thinking:'disabled',preset_id:'jot-chat',preset_revision:CHAT_PRESET_REVISION,context_revision:'fixture-context-v1'};
  const model=createServer(async(req,res)=>{try{
   const chunks=[];for await(const chunk of req)chunks.push(chunk);const input=JSON.parse(Buffer.concat(chunks).toString());
   assert.equal(req.headers['x-api-key'],modelKey);assert.match(req.url,/\/messages$/);assert.equal(input.thinking.type,'disabled');assert.equal(input.output_config,undefined);
   assert.deepEqual(input.tools.map(tool=>tool.name).sort(),['web_fetch','web_search']);assert.match(input.system,/useful solutions/);requests.push(input);
+  if(bounded){const text=input.messages.flatMap(message=>typeof message.content==='string'?[message.content]:(message.content??[]).filter(block=>block.type==='text').map(block=>block.text)).join('\n');assert.ok(text.includes(expectedContext.model_text));assert.ok(text.includes(expectedQuestion));assert.ok(!text.includes('RAW-REASONING-NEVER-SEND'));assert.ok(!text.includes('data:image/png;base64,'));assert.ok(!text.includes('HISTORY-00'));assert.ok(expectedContext.model_text.length<=14000);}
   res.writeHead(200,{'content-type':'text/event-stream'});
   for(const event of [
-   {type:'message_start',message:{id:'synthetic-chat',type:'message',role:'assistant',content:[],model:'deepseek-flash',usage:{input_tokens:10,output_tokens:0}}},
+   {type:'message_start',message:{id:'synthetic-chat-'+requests.length,type:'message',role:'assistant',content:[],model:'deepseek-flash',usage:{input_tokens:10,output_tokens:0}}},
    {type:'content_block_start',index:0,content_block:{type:'text',text:''}},
    {type:'content_block_delta',index:0,delta:{type:'text_delta',text:'CHAT-NATIVE-OK'}},
    {type:'content_block_stop',index:0},
@@ -45,7 +47,7 @@ test('actual official Chat preset sends thinking disabled, exposes only web tool
   const probe=createServer();await listen(probe);const port=probe.address().port;await new Promise(done=>probe.close(done));
   const patchPath=join(prepared.directory,'cordis.patch.yml');let patch=await readFile(patchPath,'utf8');
   const parsed=JSON.parse(patch.replace('!!js process.cwd()','null')),adapter=parsed.find(row=>row.insert).insert.find(row=>row.id==='jot-session-adapter');
-  adapter.config={...adapter.config,port,workbenchOrigin:gateway,ordinaryExecutionPolicy:policy,chatFixture:{admissions:join(root,'admissions'),receipt:join(root,'composition.json')}};
+  adapter.config={...adapter.config,port,workbenchOrigin:gateway,ordinaryExecutionPolicy:policy,...(bounded?{ordinaryChatContext:true}:{}),chatFixture:{admissions:join(root,'admissions'),receipt:join(root,'composition.json'),...(bounded?{history:join(root,'context-history.json')}:{})}};
   adapter.inject.push('jotChatPresetReady');
   parsed.find(row=>row.insert).insert.unshift({id:'preset-jot-chat',name:pathToFileURL(fileURLToPath(new URL('../chat-preset.mjs',import.meta.url))).href});
   parsed.push({id:'llm-deepseek',config:{baseURL:modelUrl,apiKeyEnv:'DEEPSEEK_API_KEY',reasoningEffort:'high'}});
@@ -57,7 +59,11 @@ test('actual official Chat preset sends thinking disabled, exposes only web tool
   while(Date.now()<deadline&&!exit){try{const response=await fetch(adapterUrl+'/v1/sessions',{method:'POST',headers:{'content-type':'application/json'},body:'{}',signal:AbortSignal.timeout(500)});if(response.status===401){ready=true;break;}}catch{}await new Promise(done=>setTimeout(done,100));}
   assert.equal(ready,true,'official Chat Host readiness deadline');
   const created=await service.app.inject({method:'POST',url:'/v1/conversations',headers:{'x-user-id':'chat-owner'},payload:{workspace_id:'ws',mode:'chat',model:{provider:'deepseek-official',model:'deepseek-flash',reasoning_effort:'high'}}});assert.equal(created.statusCode,201,created.body);
-  const conversation=created.json(),accepted=await service.app.inject({method:'POST',url:`/v1/conversations/${conversation.conversation_id}/messages`,headers:{'x-user-id':'chat-owner'},payload:{client_message_id:'chat-input',content:[{type:'text',text:'Give the synthetic fixture answer.'}]}});assert.equal(accepted.statusCode,202,accepted.body);
+  const conversation=created.json();
+  if(bounded)for(let i=0;i<40;i++){const at=new Date(Date.UTC(2020,0,1,0,i)).toISOString();service.db.prepare('INSERT INTO ga_messages(id,conversation_id,role,status,content_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run('context-history-'+String(i).padStart(2,'0'),conversation.conversation_id,i%2?'assistant':'user','complete',JSON.stringify({blocks:[{kind:'reasoning',text:'RAW-REASONING-NEVER-SEND'},{kind:'text',text:'HISTORY-'+String(i).padStart(2,'0')+' '+(i===39?'![image](data:image/png;base64,QUJDREVGRw==) ':'')+'x'.repeat(3000)}],attachments:[]}),at,at);}
+  expectedQuestion='Give the synthetic fixture answer.';
+  const accepted=await service.app.inject({method:'POST',url:`/v1/conversations/${conversation.conversation_id}/messages`,headers:{'x-user-id':'chat-owner'},payload:{client_message_id:'chat-input',content:[{type:'text',text:expectedQuestion}]}});assert.equal(accepted.statusCode,202,accepted.body);
+  if(bounded){expectedContext=JSON.parse(service.db.prepare('SELECT chat_context_json FROM ga_runs WHERE id=?').get(accepted.json().run_id).chat_context_json);assert.ok(expectedContext.messages.length<=12);service.db.prepare("UPDATE ga_messages SET content_json='[]',updated_at='later-version' WHERE id='context-history-39'").run();}
   const failures=[];const client=new SessionControllerClient(adapterUrl,adapterToken,async(url,options)=>{const response=await fetch(url,options);if(!response.ok)failures.push({path:new URL(url).pathname,status:response.status,body:await response.clone().json()});return response;}),runner=new OfficialSessionRunner(client,{cwd:workspace,agentPreset:'jot-general',chatAgentPreset:'jot-chat'}),coordinator=new HarnessCoordinator(service.db,service.runs,service.events);
   const execute=runner.run.bind(runner);let runnerFailure;runner.run=async input=>{try{return await execute(input);}catch(error){runnerFailure={message:error.message,reason:error.reasonCode};throw error;}};
   const worker=new HarnessWorker(service.db,coordinator,runner,{workerId:'chat-fixture',leaseMs:60000,ordinaryInputRecoveryEnabled:true,ordinarySteeringEnabled:true});
@@ -66,7 +72,19 @@ test('actual official Chat preset sends thinking disabled, exposes only web tool
   assert.equal(requests.length,1);assert.equal(await worker.processNext(),null);
   const answers=service.db.prepare("SELECT content_json FROM ga_messages WHERE role='assistant' AND run_id=?").all(run.run_id);assert.equal(answers.length,1);assert.match(answers[0].content_json,/CHAT-NATIVE-OK/);
   assert.deepEqual(JSON.parse(await readFile(join(root,'composition.json'),'utf8')),{preset:'jot-chat',tools:['web_fetch','web_search'],mounted:true});
-  t.diagnostic(JSON.stringify({officialLauncher:true,chatPresetMounted:true,thinking:'disabled',tools:['web_fetch','web_search'],modelRequests:1,replyCount:1,production:false,readiness:'scripted-fixture'}));succeeded=true;
+  if(bounded){
+   const firstQuestion=expectedQuestion;expectedQuestion='Answer this second synthetic question.';
+   const next=await service.app.inject({method:'POST',url:`/v1/conversations/${conversation.conversation_id}/messages`,headers:{'x-user-id':'chat-owner'},payload:{client_message_id:'chat-input-two',content:[{type:'text',text:expectedQuestion}]}});assert.equal(next.statusCode,202,next.body);
+   expectedContext=JSON.parse(service.db.prepare('SELECT chat_context_json FROM ga_runs WHERE id=?').get(next.json().run_id).chat_context_json);assert.ok(expectedContext.model_text.includes('CHAT-NATIVE-OK'));
+   await worker.processNext();if(modelFailure)throw modelFailure;assert.equal(service.runs.get(next.json().run_id,'chat-owner').status,'succeeded');assert.equal(requests.length,2);
+   assert.equal(requests[1].system,requests[0].system);assert.deepEqual(requests[1].tools,requests[0].tools);
+   const history=JSON.parse(await readFile(join(root,'context-history.json'),'utf8'));assert.equal(history.contexts.length,2);assert.deepEqual(history.user_rpcs,[accepted.json().run_id,next.json().run_id]);assert.ok(history.replace_generation>=1);
+   const sent=JSON.stringify(requests[1].messages);assert.equal(sent.split(firstQuestion).length-1,1);assert.equal(service.db.prepare("SELECT count(*) n FROM ga_messages WHERE conversation_id=? AND role='user'").get(conversation.conversation_id).n,22);
+   assert.equal(service.db.prepare("SELECT count(*) n FROM ga_messages WHERE conversation_id=? AND role='assistant' AND run_id IS NOT NULL").get(conversation.conversation_id).n,2);
+  }
+  t.diagnostic(JSON.stringify({officialLauncher:true,chatPresetMounted:true,thinking:'disabled',tools:['web_fetch','web_search'],boundedContext:bounded,modelRequests:bounded?2:1,replyCount:bounded?2:1,production:false,readiness:'scripted-fixture'}));succeeded=true;
  }catch(error){await writeFile(join(root,'startup-private.log'),output);throw Error('chat_native_host_failed; private diagnostics: '+root,{cause:error});}
  finally{if(host&&!exit)host.kill('SIGTERM');if(done)await done;if(service){await service.app.close();service.db.close();}model.closeAllConnections();await new Promise(done=>model.close(done));if(succeeded)await rm(root,{recursive:true,force:true});}
-});
+}
+test('actual official Chat preset sends thinking disabled, exposes only web tools and publishes one original answer',{skip:!runtime,timeout:60000},t=>chatCase(t));
+test('actual Chat Host uses the accepted bounded context on first and next input without duplicating or erasing transcript messages',{skip:!runtime,timeout:60000},t=>chatCase(t,{bounded:true}));

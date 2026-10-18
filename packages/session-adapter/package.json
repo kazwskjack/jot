@@ -19,6 +19,7 @@
     "budget-model-selection.js",
     "ordinary-model-selection.js",
     "ordinary-execution-policy.js",
+    "chat-context.js",
     "model-catalog.js",
     "conversation-goal.js",
     "conversation-goal-run-host.js",
