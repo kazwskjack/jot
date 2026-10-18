@@ -17,7 +17,7 @@ import {inspectOrdinaryRunHistory} from '../../gateway/src/conversations/ordinar
 import {createOrdinaryInputAdmissions} from '../ordinary-input-admissions.js';
 import {apply} from '../index.js';
 
-for(const scenario of ['explicit','provider-default','unsupported','worker','worker-pinned','worker-mode-switch'])test('actual ordinary model policy: '+scenario,{
+for(const scenario of ['explicit','provider-default','unsupported','worker','worker-pinned','worker-mode-switch','worker-chat'])test('actual ordinary model policy: '+scenario,{
  timeout:30000,skip:!process.env.JOT_DSH_RUNTIME_MODULES,
 },async()=>{
  const runtime=resolve(process.env.JOT_DSH_RUNTIME_MODULES),modules={};
@@ -32,19 +32,20 @@ for(const scenario of ['explicit','provider-default','unsupported','worker','wor
  const owner='model-fixture',token=randomBytes(32).toString('hex'),adapterToken=randomBytes(32).toString('hex');
  let service,ctx,handle,adapterUrl;
  try{
-  // Chat readiness is scripted in this contract probe; no Chat preset is
-  // mounted or executed. Work execution and idle/Goal observations are real SDK.
-  const modeClient={conversationModeReadiness:async()=>({protocol:1,ready:true,policy:{protocol:1,mode:'chat',model:{provider:'local-scripted',model:'chosen'},thinking:'disabled',preset_id:'jot-chat',preset_revision:'fixture-v1',context_revision:'fixture-v1'}}),observeNativeIdle:(session,signal)=>new SessionControllerClient(adapterUrl,adapterToken).observeNativeIdle(session,signal),conversationGoal:(session,body,signal)=>new SessionControllerClient(adapterUrl,adapterToken).conversationGoal(session,body,signal)};
-  service=await buildServer({databasePath:':memory:',workspaces:['ws'],internalChannelToken:token,...(scenario==='worker-mode-switch'?{chatModeEnabled:true,conversationModeClient:modeClient}:{}),workbenchRoot:join(root,'workspaces'),uploadRoot:join(root,'uploads'),templateRoot:fileURLToPath(new URL('../../gateway/file-engine/templates/',import.meta.url)),modelCatalogClient:{modelCatalog:signal=>new SessionControllerClient(adapterUrl,adapterToken).modelCatalog(signal)}});
-  const headers={'x-user-id':owner},selected={provider:'local-scripted',model:'chosen',...(scenario==='provider-default'?{}:{reasoning_effort:'high'})},expectedEffort=scenario==='provider-default'?'low':'high';
-  const created=await service.app.inject({method:'POST',url:'/v1/conversations',headers,payload:{workspace_id:'ws',title:'Model fixture',model:selected}});
+  // Readiness is scripted. worker-chat executes a real SDK Agent with explicit
+  // fixture services; it does not claim a mounted production Chat preset.
+  const isChat=scenario==='worker-chat',chatPolicy={protocol:1,mode:'chat',model:{provider:'local-scripted',model:'chosen'},thinking:'disabled',preset_id:'jot-chat',preset_revision:'fixture-v1',context_revision:'fixture-v1'};
+  const modeClient={conversationModeReadiness:async()=>({protocol:1,ready:true,policy:chatPolicy}),observeNativeIdle:(session,signal)=>new SessionControllerClient(adapterUrl,adapterToken).observeNativeIdle(session,signal),conversationGoal:(session,body,signal)=>new SessionControllerClient(adapterUrl,adapterToken).conversationGoal(session,body,signal)};
+  service=await buildServer({databasePath:':memory:',workspaces:['ws'],internalChannelToken:token,...(scenario==='worker-mode-switch'||isChat?{chatModeEnabled:true,conversationModeClient:modeClient}:{}),workbenchRoot:join(root,'workspaces'),uploadRoot:join(root,'uploads'),templateRoot:fileURLToPath(new URL('../../gateway/file-engine/templates/',import.meta.url)),modelCatalogClient:{modelCatalog:signal=>new SessionControllerClient(adapterUrl,adapterToken).modelCatalog(signal)}});
+  const headers={'x-user-id':owner},selected={provider:'local-scripted',model:'chosen',...(scenario==='provider-default'?{}:{reasoning_effort:'high'})},expectedEffort=isChat?'off':scenario==='provider-default'?'low':'high';
+  const created=await service.app.inject({method:'POST',url:'/v1/conversations',headers,payload:{workspace_id:'ws',title:'Model fixture',model:selected,...(isChat?{mode:'chat'}:{})}});
   assert.equal(created.statusCode,201);const conversation=created.json();
   if(scenario==='worker-pinned'||scenario==='worker-mode-switch')new SessionBindingRepository(service.db).getOrCreate(owner,conversation.conversation_id);
   const input=await service.app.inject({method:'POST',url:`/v1/conversations/${conversation.conversation_id}/messages`,headers,payload:{client_message_id:'original-input',content:[{type:'text',text:'Give the synthetic fixture answer.'}]}});
   assert.equal(input.statusCode,202);const runId=input.json().run_id;
   // A later stored conversation value must not change the already accepted input.
   service.db.prepare('UPDATE ga_conversations SET model=? WHERE id=?').run(JSON.stringify({...selected,model:'later',reasoning_effort:'low'}),conversation.conversation_id);
-  const session=new SessionBindingRepository(service.db).getOrCreate(owner,conversation.conversation_id);
+  const session=isChat?{session_id:service.db.prepare('SELECT native_session_ref FROM ga_runs WHERE id=?').get(runId).native_session_ref}:new SessionBindingRepository(service.db).getOrCreate(owner,conversation.conversation_id);
   const coordinator=new HarnessCoordinator(service.db,service.runs,new EventStore(service.db));
   let lease;if(!scenario.startsWith('worker')){lease=coordinator.claimNext('model-fixture-worker',60000);assert.equal(lease.run_id,runId);coordinator.start(lease);}
   const gateway=await service.app.listen({host:'127.0.0.1',port:0});
@@ -54,7 +55,7 @@ for(const scenario of ['explicit','provider-default','unsupported','worker','wor
   const requests=[],finished=Promise.withResolvers();let providerDefault='low',available=scenario!=='unsupported';
   class Scripted extends modules['dsh-llm'].LlmAdapter{
    async listModels(provider){return ['chosen','later'].map(id=>({provider,id,name:id}));}
-   async resolveModel(provider,model){if(!available&&model==='chosen')throw Error('fixture_model_unavailable');return{provider,id:model,name:model,reasoning:{efforts:[{id:'low',name:'Low'},{id:'high',name:'High'}],defaultEffort:providerDefault}};}
+   async resolveModel(provider,model){if(!available&&model==='chosen')throw Error('fixture_model_unavailable');return{provider,id:model,name:model,reasoning:{efforts:[...(isChat?[{id:'off',name:'Off'}]:[]),{id:'low',name:'Low'},{id:'high',name:'High'}],defaultEffort:providerDefault}};}
    async *stream(options){requests.push({provider:options.provider,model:options.model,effort:options.reasoningEffort});yield{type:'text-delta',index:0,text:'Synthetic model answer.'};yield{type:'finish',reason:{kind:'stop'}};finished.resolve();}
   }
   const boot=async restore=>{
@@ -63,29 +64,30 @@ for(const scenario of ['explicit','provider-default','unsupported','worker','wor
    ctx.sessionProjections.register(modules['dsh-agent-preset-registry'].agentPresetProjectionDefinition);
    await ctx.plugin(Uploads);await ctx.plugin(Workspace);await ctx.plugin(controller.default,{nativeOpen:false});
    ctx.llm.registerAdapter(['local-scripted'],new Scripted());
-   if(!restore)handle=await ctx.agents.create({sessionId:session.session_id,meta:{cwd:root,agentPreset:'jot-general'},agentOptions:{provider:'local-scripted',model:'default'}});
+   if(!restore)handle=await ctx.agents.create({sessionId:session.session_id,meta:{cwd:root,agentPreset:isChat?'jot-chat':'jot-general'},agentOptions:{provider:'local-scripted',model:'default'}});
    const probe=createServer();await new Promise(r=>probe.listen(0,'127.0.0.1',r));const port=probe.address().port;await new Promise(r=>probe.close(r));
    process.env[tokenEnv]=adapterToken;process.env[bridgeEnv]=token;
    const listening=Promise.withResolvers();ctx.on('jot-session-adapter/ready',()=>listening.resolve());
    apply(ctx,{host:'127.0.0.1',port,tokenEnv,workbenchTokenEnv:bridgeEnv,workbenchOrigin:gateway,ordinaryModelSelection:true,nativeIdleObservation:true,
-    ordinaryInputAdmission:{admissions:createOrdinaryInputAdmissions({root:join(root,'admissions')}),profile:{read:async()=>({protocol:1,profile_id:'model-fixture',preset_id:'jot-general',audit_id:'scripted-audit',fingerprint:'a'.repeat(64)})}},
+    ...(isChat?{ordinaryExecutionPolicy:chatPolicy}:{}),
+    ordinaryInputAdmission:{admissions:createOrdinaryInputAdmissions({root:join(root,'admissions')}),profile:{read:async()=>({protocol:1,profile_id:'model-fixture',preset_id:isChat?'jot-chat':'jot-general',audit_id:'scripted-audit',fingerprint:'a'.repeat(64)})}},
    });
    await listening.promise;adapterUrl=`http://127.0.0.1:${port}`;
   };
   await boot(false);
   const catalog=await service.app.inject({method:'GET',url:'/v1/capabilities',headers});assert.equal(catalog.statusCode,200);assert.equal(requests.length,0);
-  assert.deepEqual(catalog.json().models,!available?[]:['chosen','later'].map(model=>({provider:'local-scripted',model,reasoning_output:'none',supported_reasoning_efforts:['low','high']})));
+  assert.deepEqual(catalog.json().models,!available?[]:['chosen','later'].map(model=>({provider:'local-scripted',model,reasoning_output:'none',supported_reasoning_efforts:[...(isChat?['off']:[]),'low','high']})));
   const post=body=>fetch(`${adapterUrl}/v1/sessions/${session.session_id}/prompts`,{method:'POST',headers:{authorization:`Bearer ${adapterToken}`,'content-type':'application/json'},body:JSON.stringify(body)});
   const unscoped=await post({request_id:'unowned-request',text:'Not admitted'});assert.equal(unscoped.status,409);await unscoped.body?.cancel();assert.equal(requests.length,0);
   if(scenario.startsWith('worker')){
    if(scenario==='worker-pinned')service.db.prepare('UPDATE ga_harness_session_bindings SET session_id=? WHERE conversation_id=?').run('later-native-fixture',conversation.conversation_id);
-   const transport=[];const client=new SessionControllerClient(adapterUrl,adapterToken,async(url,options)=>{const response=await fetch(url,options);if(!response.ok)transport.push({path:new URL(url).pathname,status:response.status,body:await response.clone().json(),request:JSON.parse(options.body)});return response;}),runner=new OfficialSessionRunner(client,{cwd:root,agentPreset:'jot-general'});
+   const transport=[];const client=new SessionControllerClient(adapterUrl,adapterToken,async(url,options)=>{const response=await fetch(url,options);if(!response.ok)transport.push({path:new URL(url).pathname,status:response.status,body:await response.clone().json(),request:JSON.parse(options.body)});return response;}),runner=new OfficialSessionRunner(client,{cwd:root,agentPreset:'jot-general',...(isChat?{chatAgentPreset:'jot-chat'}:{})});
    let failure;const run=runner.run.bind(runner);runner.run=async input=>{try{return await run(input);}catch(error){failure={message:error.message,status:error.status,reason:error.reasonCode};throw error;}};
    const worker=new HarnessWorker(service.db,coordinator,runner,{workerId:'actual-model-worker',leaseMs:60000,ordinaryInputRecoveryEnabled:true,ordinarySteeringEnabled:true,
     sessionResolver:conversationId=>{if(scenario==='worker-pinned')throw Error('current_pointer_must_not_be_read');return new SessionBindingRepository(service.db).getOrCreateForConversation(conversationId).session_id;}});
    const outcome=await worker.processNext();assert.equal(outcome.run_id,runId);
    assert.equal(service.runs.get(runId,owner).status,'succeeded',JSON.stringify({outcome,failure,requests,transport,header:handle.agent.session.header,session}));
-   assert.deepEqual(requests,[{provider:'local-scripted',model:'chosen',effort:'high'}]);
+   assert.deepEqual(requests,[{provider:'local-scripted',model:'chosen',effort:expectedEffort}]);
    const answers=service.db.prepare("SELECT content_json FROM ga_messages WHERE role='assistant' AND run_id=?").all(runId);assert.equal(answers.length,1);assert.ok(answers[0].content_json.includes('Synthetic model answer.'));
    assert.equal(await worker.processNext(),null);assert.equal(requests.length,1);
    if(scenario==='worker-mode-switch'){

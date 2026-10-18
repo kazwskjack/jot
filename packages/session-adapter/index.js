@@ -12,6 +12,7 @@ import { isAbsolute } from 'node:path'
 import { createVoiceAdapterHandler } from './voice.js'
 import {createBudgetModelSelector} from './budget-model-selection.js'
 import {createOrdinaryModelSelector} from './ordinary-model-selection.js'
+import {createOrdinaryExecutionPolicyReader,normalizeChatExecutionPolicy} from './ordinary-execution-policy.js'
 import {createModelCatalogReader} from './model-catalog.js'
 import {createNativeTaskDispatcher} from './native-task-dispatch.js'
 import {createNativeTaskScheduler} from './native-task-scheduler.js'
@@ -217,7 +218,9 @@ async function createOrResumeSession({controller,request,agents,sessions,session
   return value
 }
 
-export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,nativeIdleObservation=false,sessionNotFoundError,modelCatalogReader,requireOrdinaryModelPolicy=false }) {
+export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,nativeIdleObservation=false,sessionNotFoundError,modelCatalogReader,requireOrdinaryModelPolicy=false,chatExecutionPolicy }) {
+  const allowedPresets=new Set(ALLOWED_AGENT_PRESETS)
+  if(chatExecutionPolicy!==undefined){normalizeChatExecutionPolicy(chatExecutionPolicy);if(!requireOrdinaryModelPolicy||!ordinaryInputAdmissionHost)throw Error('ordinary_execution_policy_config_invalid');allowedPresets.add('jot-chat')}
   const voiceHandler = voiceEnabled ? createVoiceAdapterHandler({ speechController, token }) : null
   const workbenchSessions = new Set()
   const blockedWorkbenchSessions = new Set()
@@ -262,7 +265,7 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       if (!ID.test(sessionId) || typeof cwd !== 'string' || cwd.includes('\u0000') || !isAbsolute(cwd)) return json(422, { error: 'session_input_invalid' })
       return admitInOrder(sessionId,signal,async retain=>{
       const requestedPreset = body?.agent_preset
-      if (requestedPreset !== undefined && !ALLOWED_AGENT_PRESETS.has(requestedPreset)) {
+      if (requestedPreset !== undefined && !allowedPresets.has(requestedPreset)) {
         return json(422, { error: 'agent_preset_not_allowed' })
       }
       const request = { sessionId, cwd }
@@ -486,7 +489,7 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       let sessionId;try{sessionId=decodeURIComponent(idleObservation[1]);}catch{return json(422,{error:'native_idle_observation_input_invalid'});}
       if(!ID.test(sessionId)||!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).join(',')!=='protocol'||body.protocol!==1)return json(422,{error:'native_idle_observation_input_invalid'});
       if(nativeIdleObservation!==true||typeof agents?.get!=='function'||typeof controller?.projections!=='function')return json(503,{error:'native_idle_observation_unavailable'});
-      try{return json(200,await readNativeIdleObservation({agents,controller,sessionId,signal,allowedPresets:ALLOWED_AGENT_PRESETS}));}catch{return json(409,{error:'native_idle_observation_unconfirmed'});}
+      try{return json(200,await readNativeIdleObservation({agents,controller,sessionId,signal,allowedPresets}));}catch{return json(409,{error:'native_idle_observation_unconfirmed'});}
     }
     const chatGoal=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/conversation-goal$/)
     if(chatGoal){
@@ -636,6 +639,12 @@ async function readJson(req, limit = 1024 * 1024) {
 
 export function apply(ctx, config = {}) {
   if(config.ordinaryModelSelection!==undefined&&typeof config.ordinaryModelSelection!=='boolean'||config.ordinaryModelSelection===true&&config.ordinaryInputAdmission===undefined)throw Error('ordinary_model_policy_config_invalid')
+  let chatExecutionPolicy
+  if(config.ordinaryExecutionPolicy!==undefined){
+    try{if(config.ordinaryModelSelection!==true||!config.ordinaryInputAdmission)throw Error();chatExecutionPolicy=normalizeChatExecutionPolicy(config.ordinaryExecutionPolicy)}catch{throw Error('ordinary_execution_policy_config_invalid')}
+  }
+  const ordinaryPresets=new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted'))
+  if(chatExecutionPolicy)ordinaryPresets.add('jot-chat')
   const host = config.host || '127.0.0.1'
   const port = Number(config.port || 18841)
   const token = String(process.env[config.tokenEnv || 'JOT_SESSION_ADAPTER_TOKEN'] || '')
@@ -706,15 +715,16 @@ export function apply(ctx, config = {}) {
   }
   const conversationGoalRunHost=config.conversationGoalResume===true?createConversationGoalRunHost({controller:ctx.sessionController,agents:ctx.agents,persistence:ctx.sessionPersistence,bridge:workbenchBridge,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted'))}):undefined
   if(conversationGoalRunHost)ctx.effect(()=>()=>conversationGoalRunHost.dispose())
-  const ordinaryModelSelector=config.ordinaryModelSelection===true?createOrdinaryModelSelector({bridge:workbenchBridge,llm:ctx.llm,agents:ctx.sessionController.agents,registry:ctx.agents}):undefined
-  const ordinaryInputAdmissionHost=config.ordinaryInputAdmission===undefined?undefined:createOrdinaryInputAdmissionHost({ctx,agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted')),...config.ordinaryInputAdmission,...(ordinaryModelSelector?{modelSelector:ordinaryModelSelector}:{})})
+  const executionPolicyReader=chatExecutionPolicy?createOrdinaryExecutionPolicyReader({bridge:workbenchBridge,chatPolicy:chatExecutionPolicy}):undefined
+  const ordinaryModelSelector=config.ordinaryModelSelection===true?createOrdinaryModelSelector({bridge:workbenchBridge,llm:ctx.llm,agents:ctx.sessionController.agents,registry:ctx.agents,...(executionPolicyReader?{executionPolicyReader}:{})}):undefined
+  const ordinaryInputAdmissionHost=config.ordinaryInputAdmission===undefined?undefined:createOrdinaryInputAdmissionHost({ctx,agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets,...config.ordinaryInputAdmission,...(ordinaryModelSelector?{modelSelector:ordinaryModelSelector}:{})})
   if(ordinaryInputAdmissionHost)ctx.effect(()=>()=>ordinaryInputAdmissionHost.dispose())
-  const ordinaryCompletionReader=config.ordinaryInputAdmission===undefined?undefined:createOrdinaryCompletionReader({agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted')),readGoal:agent=>nativeGoalsFor(agent)?.get(agent),...config.ordinaryInputAdmission})
-  const ordinarySteeringObservationReader=config.ordinaryInputHistory===undefined?undefined:createOrdinarySteeringObservationReader({agents:ctx.agents,sessions:ctx.sessions,persistence:ctx.sessionPersistence,bridge:workbenchBridge,admissions:config.ordinaryInputAdmission.admissions,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted')),...config.ordinaryInputHistory})
-  const ordinaryRunCompletionReader=config.ordinaryRunHistory===undefined?undefined:createOrdinaryRunCompletionReader({agents:ctx.agents,sessions:ctx.sessions,persistence:ctx.sessionPersistence,bridge:workbenchBridge,admissions:config.ordinaryInputAdmission.admissions,projections:ctx.sessionProjections,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted')),...config.ordinaryRunHistory})
-  const ordinaryClaimedComposer=config.ordinaryInputRecovery?.claimedInput===undefined?undefined:createOrdinaryClaimedSessionComposer({ctx,bridge:workbenchBridge,agents:ctx.agents,sessions:ctx.sessions,query:typeof ctx.get==='function'?ctx.get('sessionQuery'):ctx.sessionQuery,projections:ctx.sessionProjections,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted')),...config.ordinaryInputAdmission,...config.ordinaryInputRecovery.claimedInput})
+  const ordinaryCompletionReader=config.ordinaryInputAdmission===undefined?undefined:createOrdinaryCompletionReader({agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets,readGoal:agent=>nativeGoalsFor(agent)?.get(agent),...config.ordinaryInputAdmission})
+  const ordinarySteeringObservationReader=config.ordinaryInputHistory===undefined?undefined:createOrdinarySteeringObservationReader({agents:ctx.agents,sessions:ctx.sessions,persistence:ctx.sessionPersistence,bridge:workbenchBridge,admissions:config.ordinaryInputAdmission.admissions,ordinaryPresets,...config.ordinaryInputHistory})
+  const ordinaryRunCompletionReader=config.ordinaryRunHistory===undefined?undefined:createOrdinaryRunCompletionReader({agents:ctx.agents,sessions:ctx.sessions,persistence:ctx.sessionPersistence,bridge:workbenchBridge,admissions:config.ordinaryInputAdmission.admissions,projections:ctx.sessionProjections,ordinaryPresets,...config.ordinaryRunHistory})
+  const ordinaryClaimedComposer=config.ordinaryInputRecovery?.claimedInput===undefined?undefined:createOrdinaryClaimedSessionComposer({ctx,bridge:workbenchBridge,agents:ctx.agents,sessions:ctx.sessions,query:typeof ctx.get==='function'?ctx.get('sessionQuery'):ctx.sessionQuery,projections:ctx.sessionProjections,ordinaryPresets,...config.ordinaryInputAdmission,...config.ordinaryInputRecovery.claimedInput})
   if(ordinaryClaimedComposer)ctx.effect(()=>()=>ordinaryClaimedComposer.dispose())
-  const ordinaryInputRunHost=config.ordinaryInputRecovery===undefined?undefined:createOrdinaryInputRunHost({controller:ctx.sessionController,agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted')),verifyComposition:config.ordinaryInputRecovery.verifyComposition,inputAdmissionHost:ordinaryInputAdmissionHost,claimedComposer:ordinaryClaimedComposer})
+  const ordinaryInputRunHost=config.ordinaryInputRecovery===undefined?undefined:createOrdinaryInputRunHost({controller:ctx.sessionController,agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets,verifyComposition:config.ordinaryInputRecovery.verifyComposition,inputAdmissionHost:ordinaryInputAdmissionHost,claimedComposer:ordinaryClaimedComposer})
   if(ordinaryInputRunHost)ctx.effect(()=>()=>ordinaryInputRunHost.dispose())
   const memoryExtractionHost=createOptionalMemoryExtractionHost({config:config.memoryExtraction,bridge:workbenchBridge,llm:ctx.llm,route:config.workbenchModel})
   if(memoryExtractionHost)ctx.effect(()=>()=>memoryExtractionHost.dispose())
@@ -727,7 +737,7 @@ export function apply(ctx, config = {}) {
     sessions:ctx.sessions,persistence:ctx.sessionPersistence,sessionNotFoundError:ApiSessionNotFound,
     speechController, voiceEnabled, token, workbenchBridge,
     budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,nativeIdleObservation:config.nativeIdleObservation===true,
-    modelCatalogReader:createModelCatalogReader({llm:ctx.llm,enabled:config.ordinaryModelSelection===true}),requireOrdinaryModelPolicy:config.ordinaryModelSelection===true })
+    modelCatalogReader:createModelCatalogReader({llm:ctx.llm,enabled:config.ordinaryModelSelection===true}),requireOrdinaryModelPolicy:config.ordinaryModelSelection===true,...(chatExecutionPolicy?{chatExecutionPolicy}:{}) })
   const server = createServer(async (req, res) => {
     const abort = new AbortController()
     req.once('aborted', () => abort.abort())

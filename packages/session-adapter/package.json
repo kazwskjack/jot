@@ -18,6 +18,7 @@
     "image-output.js",
     "budget-model-selection.js",
     "ordinary-model-selection.js",
+    "ordinary-execution-policy.js",
     "model-catalog.js",
     "conversation-goal.js",
     "conversation-goal-run-host.js",

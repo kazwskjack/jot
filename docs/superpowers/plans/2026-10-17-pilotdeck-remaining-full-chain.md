@@ -481,3 +481,15 @@ See [activation requirements and evidence](../../implementation/2026-10-18-conve
 The real Chat Host readiness/preset, bounded tools/context, UI default and
 standalone implementation are still open. This supersedes the mode-mapping gap
 above without declaring the full capability ledger complete.
+
+### 2026-10-18 native Chat preset and actual thinking policy
+
+The next Chat increment consumes the immutable accepted execution policy and
+selects the official `off` effort. An actual official Host test verifies
+`thinking: disabled`, precisely two Web tools and one original final answer.
+The separate Chat declaration does not simplify Work; a scoped mask and
+monotonic guard fence inherited Work capabilities. See
+[verification and explicit activation limits](../../implementation/2026-10-18-native-chat-preset.md).
+Bounded context, durable per-turn Search/Fetch allowances, background compaction,
+real readiness and UI/standalone integration remain open. No full-ledger or
+production completion follows from this protocol increment.

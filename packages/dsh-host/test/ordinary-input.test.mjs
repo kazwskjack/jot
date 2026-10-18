@@ -115,7 +115,18 @@ for(const mode of ['execute','lease','disconnect','worker','goal-active','goal-c
     assert.equal(requests.length,1);assert.equal((await observed()).created,0);assert.equal(service.db.prepare('SELECT count(*) n FROM ga_runs').get().n,1);assert.equal(service.db.prepare("SELECT count(*) n FROM ga_messages WHERE role='assistant'").get().n,0);assert.equal(service.db.prepare('SELECT status FROM ga_run_commands WHERE id=?').get(command.command_id).status,'applied');assert.deepEqual((await readdir(join(root,'host-admissions'))).sort(),names);assert.deepEqual(await Promise.all(names.map(n=>readFile(join(root,'host-admissions',n),'utf8'))),before);assert.deepEqual(await readFile(nativePath),nativeBytes,'raw native log bytes must be unchanged');return;
    }
    if(mode.endsWith('-reserved')){const {createOrdinaryInputAdmissions}=await import('../../session-adapter/ordinary-input-admissions.js');await createOrdinaryInputAdmissions({root:join(root,'host-admissions')}).reserveEntry({id:sessionId,header:{createdAt:commandStamp.session_created_at}},commandStamp,{execution_lease:executionLease,observer_id:'competing-entry-observer'});}
-   if(mode.endsWith('-changed')){const row=service.db.prepare('SELECT payload_json FROM ga_run_commands WHERE id=?').get(command.command_id),payload=JSON.parse(row.payload_json);payload.text='Altered command after original admission';service.db.prepare('UPDATE ga_run_commands SET payload_json=? WHERE id=?').run(JSON.stringify(payload),command.command_id);}
+   if(mode.endsWith('-changed')){
+    const row=service.db.prepare('SELECT payload_json FROM ga_run_commands WHERE id=?').get(command.command_id),payload=JSON.parse(row.payload_json);payload.text='Altered command after original admission';
+    const change=()=>service.db.prepare('UPDATE ga_run_commands SET payload_json=? WHERE id=?').run(JSON.stringify(payload),command.command_id);
+    assert.throws(change,/ordinary_steering_custody_immutable/);
+    assert.equal(service.db.prepare('SELECT payload_json FROM ga_run_commands WHERE id=?').get(command.command_id).payload_json,row.payload_json);
+    // Isolated adversarial fixture only: prove the SQL guard first, then
+    // simulate legacy/on-disk corruption so native hash validation still runs.
+    // Restore the exact original trigger before starting another Host/Worker.
+    const trigger=service.db.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='ga_ordinary_steering_command_identity'").get();assert.ok(trigger?.sql);
+    service.db.exec('DROP TRIGGER ga_ordinary_steering_command_identity');
+    try{change();}finally{service.db.exec(trigger.sql);}
+   }
    const savedAdmissionNames=(await readdir(join(root,'host-admissions'))).sort(),savedAdmissions=await Promise.all(savedAdmissionNames.map(n=>readFile(join(root,'host-admissions',n),'utf8')));
    service.db.prepare('UPDATE ga_worker_leases SET expires_at=? WHERE resource_id=?').run(String(Date.now()-1),source.run_id);await start();assert.deepEqual((await observed()).startupPending,coldPartial?[secondStamp.native_message_id]:coldClaimed?[]:[commandStamp.native_message_id,...(coldTwo?[secondStamp.native_message_id]:[])]);
    const recovering=new HarnessWorker(service.db,coordinator,new OfficialSessionRunner(testClient(),{cwd:workspace,agentPreset:'jot-general'}),{workerId:'cold-command-worker',leaseMs:120000,ordinaryInputRecoveryEnabled:true,sessionResolver:()=>{throw Error('must reuse original Session');},contextStager:{stageContext:()=>{throw Error('must not restage');}}});

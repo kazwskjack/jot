@@ -268,3 +268,13 @@ provider quality or production deployment acceptance.
 
 Set `JOT_HOST_DIAGNOSTIC_DIR` to an untracked private directory to retain startup
 failure diagnostics. The probes otherwise clean up their temporary profiles.
+
+`chat-preset.mjs` is a separate read-only composition built from the installed
+official persona and Web modules. It masks inherited Work capabilities and
+denies non-Web execution; the Work preset keeps its complete original tree.
+It is not automatically installed by the profile generator. Actual Host tests
+verify the two Web schemas and a thinking-disabled Messages request through the
+original Gateway/Worker path. Product readiness remains unavailable while
+context, durable turn allowances and post-answer compaction are unfinished;
+[configuration and evidence](../../docs/implementation/2026-10-18-native-chat-preset.md)
+distinguish these boundaries from a complete Chat feature.

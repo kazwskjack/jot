@@ -53,7 +53,7 @@ The live Chat preset, UI default and standalone profile remain open.
 
 Files: a separate declaration in `packages/dsh-host/`, focused modules in `packages/session-adapter/`, actual SDK verification scripts, native policy fixtures.
 
-- [ ] Test fixed Chat route, thinking disabled, official Search/Fetch discovery and no arbitrary writes or browser mutation tools.
+- [x] Test fixed Chat route, thinking disabled, official Search/Fetch discovery and no arbitrary writes or browser mutation tools. The actual official Host sends `thinking: disabled` and exactly two Web schemas through original Gateway/Worker admission; [native preset evidence and remaining scope](../../implementation/2026-10-18-native-chat-preset.md). Readiness stays unavailable until the remaining items below are implemented.
 - [ ] Implement the exact bounded ordered seed in the spec, retaining original message/source/version identities. Keep full Work history stored and never fork it wholesale into Chat.
 - [ ] Persist one parallel search allowance and one parallel fetch allowance per native turn, including interrupted/uncertain operations. Test steering/restart cannot reset consumption.
 - [ ] Implement post-answer-only native compaction, cancellation on new input, no second answer and complete background usage. Work compaction remains visible.

@@ -269,3 +269,11 @@ The same opt-in enables the detached bearer-authenticated `POST /v1/models`
 catalog (`{}` only). Metadata is advisory and never grants execution; missing
 readiness or failed resolution is not a reason to fall back silently to a
 different model. See [activation, evidence and limitations](../../docs/implementation/2026-10-18-native-model-policy.md).
+
+An optional `ordinaryExecutionPolicy` trusted Chat declaration additionally
+checks the original execution-policy bridge, native preset and policy digests.
+Chat selects the official `off` effort, yielding a real thinking-disabled
+request; it cannot fall through to a Work/default route. The option requires
+`ordinaryModelSelection` and original input admission. It does not expose
+general Chat readiness or implement turn allowances/context compaction. See
+[native Chat boundaries and actual Host evidence](../../docs/implementation/2026-10-18-native-chat-preset.md).

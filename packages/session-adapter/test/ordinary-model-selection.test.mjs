@@ -58,3 +58,33 @@ test('cancellation reaches a pending resolver and no model is selected afterward
 test('model policy cannot be enabled without original admission and malformed flags fail before setup',()=>{
  for(const config of [{ordinaryModelSelection:true},{ordinaryModelSelection:'true'},{ordinaryModelSelection:1}])assert.throws(()=>apply({},config),/ordinary_model_policy_config_invalid/);
 });
+
+test('a frozen Chat policy selects the official off effort rather than a changing provider default',async()=>{
+ const f=fixture({provider:'fixture',model:'chosen'});f.agent.session.header={agentPreset:'jot-chat'};
+ f.options.executionPolicyReader=async()=>({mode:'chat',thinking:'disabled'});
+ await f.invoke();assert.equal(f.calls[0].config.reasoningEffort,'off');
+ assert.equal(f.policy.resolved_model.reasoning_effort,'off');assert.equal(f.installed[0].reasoningEffort,'off');
+ f.defaultEffort='high';await f.invoke();assert.equal(f.calls.at(-1).config.reasoningEffort,'off');assert.equal(f.binds,1);
+});
+
+test('Chat refuses a resolver that cannot honor off before binding or selecting the native model',async()=>{
+ const f=fixture({provider:'fixture',model:'chosen'});f.agent.session.header={agentPreset:'jot-chat'};
+ f.options.executionPolicyReader=async()=>({mode:'chat',thinking:'disabled'});
+ f.options.llm.resolveCallConfig=async config=>({...config,reasoningEffort:'high'});
+ await assert.rejects(()=>f.invoke());assert.equal(f.binds,0);assert.equal(f.installed.length,0);
+});
+
+test('a Chat native Session cannot use legacy Work model selection without execution policy',async()=>{
+ const f=fixture();f.agent.session.header={agentPreset:'jot-chat'};
+ await assert.rejects(()=>f.invoke());assert.equal(f.calls.length,0);assert.equal(f.installed.length,0);
+});
+
+test('execution policy drift after provider resolution cannot install the selected Chat model',async()=>{
+ const f=fixture({provider:'fixture',model:'chosen'});f.agent.session.header={agentPreset:'jot-chat'};let reads=0;
+ f.options.executionPolicyReader=async()=>({mode:'chat',thinking:'disabled',context_revision:++reads===1?'original':'changed'});
+ await assert.rejects(()=>f.invoke());assert.equal(f.installed.length,0);
+});
+
+test('invalid execution policy opt-in fails before any Host setup',()=>{
+ for(const config of [{ordinaryExecutionPolicy:null},{ordinaryExecutionPolicy:{}},{ordinaryExecutionPolicy:{mode:'chat'},ordinaryModelSelection:true,ordinaryInputAdmission:{}}])assert.throws(()=>apply({},config),/ordinary_execution_policy_config_invalid/);
+});

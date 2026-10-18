@@ -13,8 +13,8 @@ function selection(value){
  return structuredClone(value);
 }
 /** Only original run authority selects the native route. No default setting is saved. */
-export function createOrdinaryModelSelector({bridge,llm,agents,registry}){
- if(typeof bridge?.request!=='function'||typeof llm?.resolveCallConfig!=='function'||typeof agents?.selectForNextRequest!=='function'||typeof agents?.selectionFor!=='function'||typeof registry?.get!=='function')fail();
+export function createOrdinaryModelSelector({bridge,llm,agents,registry,executionPolicyReader}){
+ if(typeof bridge?.request!=='function'||typeof llm?.resolveCallConfig!=='function'||typeof agents?.selectForNextRequest!=='function'||typeof agents?.selectionFor!=='function'||typeof registry?.get!=='function'||executionPolicyReader!==undefined&&typeof executionPolicyReader!=='function')fail();
  const select=async({agent,binding,check,signal})=>{
   if(typeof check!=='function'||!binding||!ID.test(binding.runId??'')||!ID.test(binding.sessionRef??'')||agent?.id!==binding.sessionRef||agent.session?.id!==binding.sessionRef)fail();
   const owned=Object.freeze({runId:binding.runId,sessionRef:binding.sessionRef,executionLease:normalizeHostExecutionLease(binding.executionLease)}),session=agent.session;
@@ -32,14 +32,20 @@ export function createOrdinaryModelSelector({bridge,llm,agents,registry}){
    return structuredClone({...base,model:selected,conversation_version,policy_sha256,resolved_model:resolved});
   };
   const original=await read(),requested=original.resolved_model??original.model;
-  const config={provider:requested.provider,model:requested.model,...(requested.reasoning_effort===undefined?{}:{reasoningEffort:requested.reasoning_effort})};
+  const modePolicy=executionPolicyReader?await executionPolicyReader({agent,binding:owned,modelPolicy:original,signal,check:fence}):undefined;
+  await fence();
+  if(agent.session.header?.agentPreset==='jot-chat'&&modePolicy?.mode!=='chat'||modePolicy&&(!['chat','work'].includes(modePolicy.mode)||modePolicy.thinking!==(modePolicy.mode==='chat'?'disabled':'provider')))fail();
+  const effort=modePolicy?.mode==='chat'?'off':requested.reasoning_effort;
+  if(modePolicy?.mode==='chat'&&requested.reasoning_effort!==undefined&&requested.reasoning_effort!=='off')fail();
+  const config={provider:requested.provider,model:requested.model,...(effort===undefined?{}:{reasoningEffort:effort})};
   const resolved=await llm.resolveCallConfig(config,signal);await fence();
   const chosen=selection({provider:resolved?.provider,model:resolved?.model,...(resolved?.reasoningEffort===undefined?{}:{reasoning_effort:resolved.reasoningEffort})});
-  if(chosen.provider!==requested.provider||chosen.model!==requested.model||requested.reasoning_effort!==undefined&&chosen.reasoning_effort!==requested.reasoning_effort
+  if(chosen.provider!==requested.provider||chosen.model!==requested.model||effort!==undefined&&chosen.reasoning_effort!==effort
    ||original.resolved_model&&!isDeepStrictEqual(chosen,original.resolved_model))fail();
   const bound=original.resolved_model?await read():await read({action:'bind',policy_sha256:original.policy_sha256,model:chosen});
   const {resolved_model:oldResolution,...oldPolicy}=original,{resolved_model:newResolution,...newPolicy}=bound;
   if(!isDeepStrictEqual(oldPolicy,newPolicy)||!isDeepStrictEqual(newResolution,chosen))fail();
+  if(executionPolicyReader&&!isDeepStrictEqual(await executionPolicyReader({agent,binding:owned,modelPolicy:bound,signal,check:fence}),modePolicy))fail();
   await fence();
   const native={provider:chosen.provider,model:chosen.model,...(chosen.reasoning_effort===undefined?{}:{reasoningEffort:chosen.reasoning_effort})};
   if(typeof agents.selectionFor!=='function'||!isDeepStrictEqual(agents.selectionFor(agent).current,native))agents.selectForNextRequest(agent,native);
