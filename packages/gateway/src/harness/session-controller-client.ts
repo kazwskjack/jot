@@ -109,6 +109,8 @@ export class SessionControllerClient {
     }, signal)
   }
 
+  async modelCatalog(signal:AbortSignal){return this.post('/v1/models',{},signal);}
+
   async prompt(sessionId: string, requestId: string, content: string | SessionPromptPart[],
     mode: 'queue' | 'steer' = 'queue', signal?: AbortSignal, original?:OriginalInputExecution) {
     const admission=original===undefined?undefined:normalizeOriginalInputExecution(original);if(admission&&admission.run_id!==requestId)throw Error('ordinary_input_binding_invalid');

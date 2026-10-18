@@ -9,9 +9,10 @@ const fail=()=>{throw Error('ordinary_input_admission_unconfirmed');};
 function wait(promise,signal){const source=Promise.resolve(promise);if(signal.aborted){source.catch(()=>{});signal.throwIfAborted();}return new Promise((done,reject)=>{const abort=()=>{cleanup();reject(signal.reason);},cleanup=()=>signal.removeEventListener('abort',abort);signal.addEventListener('abort',abort,{once:true});source.then(value=>{cleanup();done(value);},error=>{cleanup();reject(error);});});}
 /** Observe the actual Controller's final native message. Persist its hash before
  * the original pre-step may enter, without changing attachment admission/send. */
-export function createOrdinaryInputAdmissionHost({ctx,agents,bridge,profile,admissions,ordinaryPresets}){
+export function createOrdinaryInputAdmissionHost({ctx,agents,bridge,profile,admissions,ordinaryPresets,modelSelector}){
+ if(modelSelector!==undefined&&typeof modelSelector!=='function')fail();
  if(typeof ctx?.on!=='function'||typeof ctx.sessions?.flush!=='function'||typeof agents?.get!=='function'||typeof bridge?.request!=='function'||typeof profile?.read!=='function'||typeof admissions?.create!=='function'||typeof admissions?.read!=='function'||admissions.entryReservationProtocol!==1||typeof admissions.reserveEntry!=='function'||typeof admissions.readReplayCandidate!=='function'||!(ordinaryPresets instanceof Set)||!ordinaryPresets.size)fail();
- const storage=new AsyncLocalStorage(),records=new Map(),busy=new Set(),pending=new Set(),shutdown=new AbortController();let disposed=false;
+ const storage=new AsyncLocalStorage(),records=new Map(),busy=new Set(),pending=new Set(),modelHooks=new Map(),shutdown=new AbortController();let disposed=false;
  const check=record=>{record.signal.throwIfAborted();if(disposed||agents.get(record.agent.id)!==record.agent||record.agent.session!==record.session||record.agent.id!==record.binding.sessionRef||record.session.id!==record.binding.sessionRef||!ordinaryPresets.has(record.session.header.agentPreset))fail();};
  const readAuthority=record=>(record.steering?readOrdinarySteeringAuthority:readOrdinaryInputAuthority)({bridge,binding:record.binding,signal:record.signal,assertActive:()=>check(record)});
  const audit=async record=>{check(record);const authority=await readAuthority(record);if(record.authority&&!isDeepStrictEqual(authority,record.authority))fail();record.authority??=authority;
@@ -30,16 +31,27 @@ export function createOrdinaryInputAdmissionHost({ctx,agents,bridge,profile,admi
   record.observed.add(message.id);if(record.closed||record.message||message.source.rpcId!==record.requestId||!valid(message.id)){record.error=true;return;}
   record.native=message;record.message=freeze(structuredClone(message));record.persisting=Promise.resolve().then(async()=>{check(record);if(record.steering&&hashNativeSteeringContent(record.message.content)!==record.authority.native_content_sha256)fail();if(await wait(ctx.sessions.flush(record.session),record.signal)!==true)fail();check(record);return admissions.create(record.session,receipt(record,record.message),{signal:record.signal});});record.persisting.catch(()=>{});
  });
+ const ensureModelHook=agent=>{if(!modelSelector||modelHooks.has(agent))return;modelSelector.prepareAgent?.(agent);const remove=agent.ctx.on('system-prompt/assemble',async(_assembly,context,next)=>{
+  const owned=[...(records.get(context.agent)??[])];if(!owned.length)return next();
+  const original=owned[0],signal=AbortSignal.any([original.signal,...(context.signal?[context.signal]:[])]);
+  try{
+   if(owned.some(record=>record.binding.runId!==original.binding.runId||!isDeepStrictEqual(record.binding.executionLease,original.binding.executionLease)))fail();
+   await wait(modelSelector({agent:context.agent,binding:original.binding,signal,check:async()=>{for(const record of owned)await verify(record);}}),signal);
+   return await next();
+  }catch(error){reject(original,{agent:context.agent,signal:context.signal,messages:owned.map(record=>record.message).filter(Boolean)});throw error;}
+ },{prepend:true});modelHooks.set(agent,remove);};
  on('agent/pre-step',async(payload,next)=>{const owned=[...(records.get(payload.agent)??[])].filter(r=>payload.messages?.some(m=>r.observed.has(m.id)||m.id===r.message?.id||m.source?.kind==='user'&&m.source.rpcId===r.requestId));
   for(const record of owned){record.context=payload;try{payload.signal?.throwIfAborted();await verify(record);payload.signal?.throwIfAborted();}catch{try{return reject(record,payload);}finally{record.context=null;}}}
-  const decision=await next();if(decision.kind==='reject'){for(const record of owned)record.context=null;return decision;}for(const record of owned){try{payload.signal?.throwIfAborted();await verify(record);payload.signal?.throwIfAborted();const originals=decision.messages?.filter(m=>m.id===record.message.id);if(originals?.length!==1||digest(originals[0])!==digest(record.message))fail();await wait(admissions.reserveEntry(record.session,receipt(record,record.message),record.entry,{signal:record.signal}),record.signal);await audit(record);payload.signal?.throwIfAborted();}catch{return reject(record,{...payload,messages:[...payload.messages,...(decision.messages??[])]});}finally{record.context=null;}}return decision;
+  const decision=await next();if(decision.kind==='reject'){for(const record of owned)record.context=null;return decision;}
+  for(const record of owned){try{payload.signal?.throwIfAborted();await verify(record);payload.signal?.throwIfAborted();const originals=decision.messages?.filter(m=>m.id===record.message.id);if(originals?.length!==1||digest(originals[0])!==digest(record.message))fail();await wait(admissions.reserveEntry(record.session,receipt(record,record.message),record.entry,{signal:record.signal}),record.signal);await audit(record);payload.signal?.throwIfAborted();}catch{return reject(record,{...payload,messages:[...payload.messages,...(decision.messages??[])]});}finally{record.context=null;}}return decision;
  });
  on('session/event',(session,event)=>{if(event.type!=='user/message')return;for(const record of records.get(agents.get(session.id))??[]){if(record.session===session&&record.message?.id===event.data?.id){record.entered=true;records.get(record.agent).delete(record);if(!records.get(record.agent).size)records.delete(record.agent);}}});
- on('agent/disposed',({agent})=>records.delete(agent));
+ on('agent/disposed',({agent})=>{records.delete(agent);modelHooks.get(agent)?.();modelHooks.delete(agent);});
  const submit=({binding,signal=new AbortController().signal,content},operation,steering=false)=>{const task=(async()=>{
    if(disposed||!binding||Object.keys(binding).sort().join(',')!==(steering?'commandId,executionLease,runId,sessionRef':'executionLease,runId,sessionRef')||steering&&(!valid(binding.commandId)||binding.commandId===binding.runId||admissions.steeringAdmissionProtocol!==1)||!valid(binding.runId)||!valid(binding.sessionRef)||typeof operation!=='function'||busy.has(binding.sessionRef))fail();
    const requestId=steering?binding.commandId:binding.runId,expectedContent=steering?freeze(structuredClone(content)):undefined;const owned=freeze({runId:binding.runId,sessionRef:binding.sessionRef,...(steering?{commandId:binding.commandId}:{}),executionLease:normalizeHostExecutionLease(binding.executionLease)}),agent=agents.get(owned.sessionRef),session=agent?.session;
    if(!session||!Number.isSafeInteger(session.header?.createdAt)||session.header.createdAt<0||session.header.parentSession!==undefined||session.header.origin==='subagent')fail();
+   ensureModelHook(agent);
    const record={binding:owned,requestId,steering,agent,session,signal:AbortSignal.any([signal,shutdown.signal]),entry:freeze({execution_lease:owned.executionLease,observer_id:randomUUID()}),observed:new Set(),closed:false};busy.add(owned.sessionRef);
    try{await audit(record);if(steering&&hashNativeSteeringContent(expectedContent)!==record.authority.native_content_sha256)fail();const previous=[...(records.get(agent)??[])].filter(r=>r.binding.runId===owned.runId&&r.requestId===requestId);if(previous.length){if(previous.length!==1||!isDeepStrictEqual(previous[0].binding,owned))fail();await verify(previous[0]);return {accepted:true};}const history=session.snapshotEvents(0),existing=[...history.filter(e=>e.type==='user/message').map(e=>e.data),...agent.inbox.nextStep,...agent.inbox.nextTurn].filter(m=>m.source?.kind==='user'&&m.source.rpcId===requestId);if(existing.length>1)fail();
     if(existing.length){const row=await wait(admissions.read({session,runId:owned.runId,messageId:existing[0].id,signal:record.signal}),record.signal);if(!isDeepStrictEqual(row,receipt(record,existing[0])))fail();await audit(record);return await wait(Promise.resolve().then(()=>{check(record);return operation();}),record.signal);}
@@ -55,6 +67,7 @@ export function createOrdinaryInputAdmissionHost({ctx,agents,bridge,profile,admi
   async ownsNativeInput({agent,message,binding}){const found=[...(records.get(agent)??[])].filter(r=>r.message?.id===message?.id&&r.binding.runId===binding.runId&&r.binding.sessionRef===agent.id&&isDeepStrictEqual(r.binding.executionLease,binding.executionLease));if(found.length!==1)return false;const record=found[0];if(digest(message)!==digest(record.message))fail();await verify(record);return true;},
   async adoptRecovered({agent,binding,signal=new AbortController().signal}){
    if(disposed||!binding||Object.keys(binding).sort().join(',')!=='executionLease,runId,sessionRef'||!valid(binding.runId)||!valid(binding.sessionRef)||!agent||agent.id!==binding.sessionRef||agents.get(agent.id)!==agent||agent.status!=='idle'||!Number.isSafeInteger(agent.session?.seq)||busy.has(agent.id))fail();
+   ensureModelHook(agent);
    const owned=freeze({runId:binding.runId,sessionRef:binding.sessionRef,executionLease:normalizeHostExecutionLease(binding.executionLease)}),session=agent.session,seq=session.seq,pendingMessages=[...agent.inbox.nextStep,...agent.inbox.nextTurn],prepared=[];
    const idle=()=>{signal.throwIfAborted();if(disposed||agents.get(agent.id)!==agent||agent.session!==session||agent.status!=='idle'||session.seq!==seq)fail();};
    if(!pendingMessages.length||new Set(pendingMessages.map(m=>m.id)).size!==pendingMessages.length)fail();
@@ -69,6 +82,6 @@ export function createOrdinaryInputAdmissionHost({ctx,agents,bridge,profile,admi
    return{execution_authorized:false,message_ids:prepared.map(record=>record.message.id)};
    }finally{busy.delete(agent.id);}
   },
-  async dispose(){if(disposed)return;disposed=true;shutdown.abort(Error('ordinary_admission_host_disposed'));for(const group of records.values())for(const record of group){if(record.context)try{preserve(record,record.context);}catch{}if(agents.get(record.agent.id)===record.agent)record.agent.cancel({kind:'parent'},{keepInbox:true});}await Promise.allSettled([...pending]);if(!records.size){removers.forEach(remove=>remove());storage.disable();}}
+  async dispose(){if(disposed)return;disposed=true;shutdown.abort(Error('ordinary_admission_host_disposed'));for(const group of records.values())for(const record of group){if(record.context)try{preserve(record,record.context);}catch{}if(agents.get(record.agent.id)===record.agent)record.agent.cancel({kind:'parent'},{keepInbox:true});}await Promise.allSettled([...pending]);for(const remove of modelHooks.values())remove();modelHooks.clear();if(!records.size){removers.forEach(remove=>remove());storage.disable();}}
  };
 }

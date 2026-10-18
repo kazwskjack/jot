@@ -31,6 +31,14 @@ export function openProductDatabase(path: string): DatabaseSync {
   ensureColumn(db, 'ga_conversations', 'project_id', 'TEXT');
   ensureColumn(db, 'ga_conversations', 'pinned_at', 'TEXT');
   ensureColumn(db, 'ga_conversations', 'archived_at', 'TEXT');
+  ensureColumn(db,'ga_runs','model_policy_json','TEXT');
+  ensureColumn(db,'ga_runs','model_resolution_json','TEXT');
+  db.exec(`CREATE TRIGGER IF NOT EXISTS ga_run_model_policy_immutable BEFORE UPDATE OF model_policy_json ON ga_runs
+    WHEN NEW.model_policy_json IS NOT OLD.model_policy_json
+    BEGIN SELECT RAISE(ABORT,'model_policy_immutable'); END;
+    CREATE TRIGGER IF NOT EXISTS ga_run_model_resolution_immutable BEFORE UPDATE OF model_resolution_json ON ga_runs
+    WHEN OLD.model_resolution_json IS NOT NULL AND NEW.model_resolution_json IS NOT OLD.model_resolution_json
+    BEGIN SELECT RAISE(ABORT,'model_resolution_immutable'); END;`);
   ensureColumn(db, 'ga_channel_deliveries', 'payload_json', 'TEXT');
   ensureColumn(db, 'ga_idempotency', 'receipt_protocol', 'TEXT');
   ensureColumn(db, 'ga_uploads', 'writer_token', 'TEXT');

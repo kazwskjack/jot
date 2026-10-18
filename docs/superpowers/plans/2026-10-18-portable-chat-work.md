@@ -23,12 +23,14 @@
 Files: `packages/gateway/src/harness/worker.ts`, `official-session-runner.ts`, `session-controller-client.ts`; `packages/session-adapter/index.js`, original input/recovery modules and `budget-model-selection.js`; corresponding harness, adapter and installed-SDK tests.
 
 - [x] Forward cancellation to the existing budgeted host model resolver. The installed official `LlmRuntime` cancellation probe passed with a local scripted capability resolver, without inference or Session selection. This is a prerequisite, not ordinary conversation model integration.
-- [ ] Add a failing installed-SDK test that sets an ordinary conversation's approved model/effort and observes the actual next native request. Database persistence alone must not pass.
-- [ ] Replace the hard-coded empty capabilities catalog with an authenticated, detached host metadata projection; test owner isolation, cancellation, supported effort identifiers and absence of keys/private endpoints. The official catalog is advisory: operator-permitted unlisted models still require exact provider resolution, not an invented catalog-membership rule.
-- [ ] Trace first admission, steering, warm reuse, cold replay and original final publication. Identify every reader currently relying on a mutable conversation Session pointer.
-- [ ] Freeze server-validated model policy on the original accepted run and carry an authenticated revision/hash reference through original host admission. Browser-supplied host policy is rejected.
-- [ ] Use official resolution/selection APIs to apply that exact model before the original input executes; verify supported effort/thinking options and refuse identity drift. Preserve separately configured budgeted role selection.
-- [ ] Verify cancellation, unsupported providers, forged policy, lost receipts and cold recovery without creating a replacement native input.
+- [x] Add a failing installed-SDK test that sets an ordinary conversation's approved model/effort and observes the actual next native request. Database persistence alone must not pass.
+- [x] Replace the hard-coded empty capabilities catalog with an authenticated, detached host metadata projection; test owner isolation, cancellation, supported effort identifiers and absence of keys/private endpoints. The official catalog is advisory: operator-permitted unlisted models still require exact provider resolution, not an invented catalog-membership rule.
+- [x] Trace first admission, steering, warm reuse, cold replay and original final publication. Identify every reader currently relying on a mutable conversation Session pointer.
+- [x] Freeze server-validated model policy on the original accepted run and carry an authenticated revision/hash reference through original host admission. Browser-supplied host policy is rejected.
+- [x] Use official resolution/selection APIs to apply that exact model and supported effort before the original input executes; refuse identity drift. Preserve separately configured budgeted role selection. Chat's separate thinking-disabled policy remains in task 4.
+- [x] Verify cancellation, unsupported providers, forged policy, lost receipts and cold recovery without creating a replacement native input.
+
+Evidence: [original-run model policy](../../implementation/2026-10-18-native-model-policy.md). The installed SDK's four ordinary cases, one hard-exit recovery case and one resolver-cancellation case passed using local scripted providers. Gateway: 1,734 passed / seven skipped; adapter: 578 passed / 25 skipped; root: 50 passed; Gateway and root builds passed. Generated profiles remain default-off; live provider and deployed preset acceptance remain pending.
 
 ## 3. Add mode-aware acceptance and Session identity
 

@@ -100,6 +100,15 @@ Local product data defaults to `.data/jot.db` and `.data/files` relative to the 
 5. Start the DSH host, gateway API (`npm start`) and harness worker (`npm run start:worker`) as separate supervised processes. Only start `npm run start:file-worker` after its processing dependencies are installed.
 6. Place an authenticated reverse proxy before the gateway for remote users. Strip client-provided `x-user-id` and inject the authenticated owner. Give the browser a CSRF token through your authenticated UI, enforce the origin allow-list, and keep internal routes private. The root demo does not implement this gateway authentication layer.
 
+Original-run model/effort selection is an explicit host opt-in, separate from
+model metadata editing. Follow the [activation and migration notes](docs/implementation/2026-10-18-native-model-policy.md)
+before enabling `ordinaryModelSelection`; it requires verified original-input
+admission/recovery and refuses pre-upgrade runs without a frozen policy. The
+API projects detached model metadata from its existing authenticated host
+client; an unconfigured or unready host exposes an empty catalog. Generated
+profiles retain their existing default-off behavior. This is not yet a
+complete fast Chat/Work deployment.
+
 For Node processes launched from another directory, explicitly load the same private env file, for example `node --env-file=/private/path/gateway.env /opt/jot/packages/gateway/dist/src/main.js`. This is an installation example, not an existing deployment path. Relative paths depend on the service working directory; absolute configured paths avoid accidental creation of a second database.
 
 ## Existing tuning preserved in the extended path

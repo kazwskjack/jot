@@ -3,6 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { withImmediateTransaction } from '../db/database.ts';
 import { EventStore } from '../events/event-store.ts';
 import { decodeStoredContent, encodeInputContent } from '../messages/content.ts';
+import {snapshotAcceptedModelPolicy} from '../conversations/model-policy.ts';
 
 const AUTOMATIC_TITLES = new Set(['New conversation', '新对话']);
 
@@ -42,6 +43,7 @@ export class RunRepository {
     const content = encodeInputContent(messageId, input.content);
     const generatedTitle = AUTOMATIC_TITLES.has(conversation.title) ? automaticTitle(input.content) : null;
     withImmediateTransaction(this.db, () => {
+      const modelPolicy=snapshotAcceptedModelPolicy(this.db,conversationId,ownerId);
       if (generatedTitle) {
         this.db.prepare(`UPDATE ga_conversations
           SET title=?,version=version+1,updated_at=?
@@ -54,8 +56,8 @@ export class RunRepository {
       }
       this.db.prepare('INSERT INTO ga_messages(id,conversation_id,run_id,role,status,content_json,client_message_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)')
         .run(messageId, conversationId, runId, 'user', 'complete', JSON.stringify(content), String(input.client_message_id), now, now);
-      this.db.prepare('INSERT INTO ga_runs(id,conversation_id,input_message_id,status,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?)')
-        .run(runId, conversationId, messageId, options.executionMode==='native'?'starting':'queued', 1, now, now);
+      this.db.prepare('INSERT INTO ga_runs(id,conversation_id,input_message_id,status,version,created_at,updated_at,model_policy_json) VALUES(?,?,?,?,?,?,?,?)')
+        .run(runId, conversationId, messageId, options.executionMode==='native'?'starting':'queued', 1, now, now,modelPolicy);
       this.events.append(conversationId, runId, 'message.created', this.message(messageId));
       this.events.append(conversationId, runId, 'run.state', this.get(runId, ownerId));
       this.db.prepare('INSERT INTO ga_outbox(conversation_id,aggregate_type,aggregate_id,event_type,payload_json,created_at) VALUES(?,?,?,?,?,?)')

@@ -447,3 +447,15 @@ The shared extended composer now displays a real microphone-level waveform and c
 ### 2026-10-18 model authority and cancellation follow-up
 
 A failing API test reproduced a model change while its accepted message was still queued. The queued/active guard and transactional metadata validation are now tested, including original receipt replay. The existing budgeted model selector also propagates cancellation into the official resolver; an actual installed-SDK scripted capability probe confirms no model selection or inference after cancellation. See [verification](../../implementation/2026-10-18-model-policy-boundaries.md). The public model catalog and ordinary inference selection remain incomplete; [portable Chat/Work integration](2026-10-18-portable-chat-work.md) records their ordered implementation and full acceptance. No production deployment or overall capability completion is claimed.
+
+### 2026-10-18 original-run model selection increment
+
+The next increment closes the catalog and ordinary-selection gaps above through
+an authenticated host metadata projection, immutable accepted model policy and
+official Session-local resolution/selection. Actual SDK checks cover first
+input, steering, warm reuse, unsupported-model retention, forced Host exit with
+original-input recovery, and Worker/Runner canonical final publication. See
+[activation, evidence and limits](../../implementation/2026-10-18-native-model-policy.md).
+Generated profiles remain default-off. Mode-specific Session mapping, fast Chat
+context/tools/compaction and mode UI remain open; this increment does not close
+the whole 26-capability plan or establish production/provider acceptance.

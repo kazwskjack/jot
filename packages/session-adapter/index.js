@@ -11,6 +11,8 @@ import { timingSafeEqual } from 'node:crypto'
 import { isAbsolute } from 'node:path'
 import { createVoiceAdapterHandler } from './voice.js'
 import {createBudgetModelSelector} from './budget-model-selection.js'
+import {createOrdinaryModelSelector} from './ordinary-model-selection.js'
+import {createModelCatalogReader} from './model-catalog.js'
 import {createNativeTaskDispatcher} from './native-task-dispatch.js'
 import {createNativeTaskScheduler} from './native-task-scheduler.js'
 import {createNativeRoleHost} from './native-role-host.js'
@@ -215,7 +217,7 @@ async function createOrResumeSession({controller,request,agents,sessions,session
   return value
 }
 
-export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,nativeIdleObservation=false,sessionNotFoundError }) {
+export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,nativeIdleObservation=false,sessionNotFoundError,modelCatalogReader,requireOrdinaryModelPolicy=false }) {
   const voiceHandler = voiceEnabled ? createVoiceAdapterHandler({ speechController, token }) : null
   const workbenchSessions = new Set()
   const blockedWorkbenchSessions = new Set()
@@ -244,6 +246,11 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
 
   return async ({ method, url, headers, body, signal = new AbortController().signal }) => {
     if (!authorized(headers.authorization, token)) return json(401, { error: 'unauthorized' })
+    if(url.pathname==='/v1/models'){
+      if(method!=='POST')return json(405,{error:'method_not_allowed'});
+      if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).length)return json(422,{error:'model_catalog_input_invalid'});
+      return json(200,typeof modelCatalogReader==='function'?await modelCatalogReader(signal):{protocol:1,ready:false,models:[]});
+    }
     if (method !== 'POST') return json(405, { error: 'method_not_allowed' })
     if (url.pathname.startsWith('/v1/voice/')) {
       if (!voiceHandler) return json(404, { error: 'not_found' })
@@ -559,6 +566,7 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       const content = promptContent(body)
       const mode = body?.mode === 'steer' ? 'steer' : 'queue'
       if (!ID.test(sessionId) || !ID.test(requestId) || !content) return json(422, { error: 'prompt_input_invalid' })
+      if(requireOrdinaryModelPolicy&&!workbenchSessions.has(sessionId)&&body.ordinary_input===undefined&&body.ordinary_steer===undefined)return json(409,{error:'ordinary_model_policy_required',reason_code:'DSH_PROMPT_REJECTED'})
       if (workbenchSessions.has(sessionId)) {
         if (blockedWorkbenchSessions.has(sessionId) || !workbenchBridge?.guard || !agents?.get) return json(503, { error: 'workbench_bridge_unavailable' })
         try { await workbenchBridge.guard(agents.get(sessionId), signal) }
@@ -627,6 +635,7 @@ async function readJson(req, limit = 1024 * 1024) {
 }
 
 export function apply(ctx, config = {}) {
+  if(config.ordinaryModelSelection!==undefined&&typeof config.ordinaryModelSelection!=='boolean'||config.ordinaryModelSelection===true&&config.ordinaryInputAdmission===undefined)throw Error('ordinary_model_policy_config_invalid')
   const host = config.host || '127.0.0.1'
   const port = Number(config.port || 18841)
   const token = String(process.env[config.tokenEnv || 'JOT_SESSION_ADAPTER_TOKEN'] || '')
@@ -697,7 +706,8 @@ export function apply(ctx, config = {}) {
   }
   const conversationGoalRunHost=config.conversationGoalResume===true?createConversationGoalRunHost({controller:ctx.sessionController,agents:ctx.agents,persistence:ctx.sessionPersistence,bridge:workbenchBridge,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted'))}):undefined
   if(conversationGoalRunHost)ctx.effect(()=>()=>conversationGoalRunHost.dispose())
-  const ordinaryInputAdmissionHost=config.ordinaryInputAdmission===undefined?undefined:createOrdinaryInputAdmissionHost({ctx,agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted')),...config.ordinaryInputAdmission})
+  const ordinaryModelSelector=config.ordinaryModelSelection===true?createOrdinaryModelSelector({bridge:workbenchBridge,llm:ctx.llm,agents:ctx.sessionController.agents,registry:ctx.agents}):undefined
+  const ordinaryInputAdmissionHost=config.ordinaryInputAdmission===undefined?undefined:createOrdinaryInputAdmissionHost({ctx,agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted')),...config.ordinaryInputAdmission,...(ordinaryModelSelector?{modelSelector:ordinaryModelSelector}:{})})
   if(ordinaryInputAdmissionHost)ctx.effect(()=>()=>ordinaryInputAdmissionHost.dispose())
   const ordinaryCompletionReader=config.ordinaryInputAdmission===undefined?undefined:createOrdinaryCompletionReader({agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted')),readGoal:agent=>nativeGoalsFor(agent)?.get(agent),...config.ordinaryInputAdmission})
   const ordinarySteeringObservationReader=config.ordinaryInputHistory===undefined?undefined:createOrdinarySteeringObservationReader({agents:ctx.agents,sessions:ctx.sessions,persistence:ctx.sessionPersistence,bridge:workbenchBridge,admissions:config.ordinaryInputAdmission.admissions,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted')),...config.ordinaryInputHistory})
@@ -716,7 +726,8 @@ export function apply(ctx, config = {}) {
   const handler = createAdapterHandler({ controller: ctx.sessionController, fileUploads: ctx.fileUploads, agents: ctx.agents,
     sessions:ctx.sessions,persistence:ctx.sessionPersistence,sessionNotFoundError:ApiSessionNotFound,
     speechController, voiceEnabled, token, workbenchBridge,
-    budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,nativeIdleObservation:config.nativeIdleObservation===true })
+    budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,nativeIdleObservation:config.nativeIdleObservation===true,
+    modelCatalogReader:createModelCatalogReader({llm:ctx.llm,enabled:config.ordinaryModelSelection===true}),requireOrdinaryModelPolicy:config.ordinaryModelSelection===true })
   const server = createServer(async (req, res) => {
     const abort = new AbortController()
     req.once('aborted', () => abort.abort())

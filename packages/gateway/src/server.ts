@@ -4,6 +4,8 @@ import {registerOrdinaryRunHistory} from './conversations/ordinary-run-history.t
 import {ConversationGoalControls} from './conversations/goal-controls.ts';
 import {registerConversationGoalExecution} from './conversations/goal-control-execution.ts';
 import {registerOrdinaryInputBinding} from './conversations/ordinary-input-binding.ts';
+import {registerOrdinaryModelPolicy} from './conversations/model-policy.ts';
+import {readHostModelCatalog,type ModelCatalogClient} from './harness/model-catalog.ts';
 import {TaskReplyDrafts} from './persistent-tasks/reply-drafts.ts';
 import Fastify from 'fastify';
 import multipart from '@fastify/multipart';
@@ -70,6 +72,7 @@ function actor(request: { headers: Record<string, unknown> }) {
 }
 
 export async function buildServer(config: {
+  modelCatalogClient?:ModelCatalogClient;
   databasePath: string;
   workspaces: string[];
   uploadRoot?: string;
@@ -175,7 +178,7 @@ export async function buildServer(config: {
   });
 
   app.addHook('preHandler', async (request, reply) => {
-    if (['/internal/v1/workbench/ordinary-run-history', '/internal/v1/workbench/ordinary-steering-history', '/internal/v1/workbench/ordinary-steering-binding', '/internal/v1/workbench/ordinary-input-binding', '/internal/v1/workbench/conversation-goal-control', '/internal/v1/channel/messages', '/internal/v1/file-tools', '/internal/v1/crawl-batches/bind', '/internal/v1/crawl-batches/events', '/internal/v1/workbench/guard', '/internal/v1/workbench/handoff', '/internal/v1/workbench/native-task-intent', '/internal/v1/workbench/native-task-intents', '/internal/v1/workbench/native-child-reservation', '/internal/v1/workbench/native-child-request', '/internal/v1/workbench/native-child-abort', '/internal/v1/workbench/native-child-published', '/internal/v1/workbench/native-child-bind', '/internal/v1/workbench/native-child-close', '/internal/v1/workbench/native-child-activate', '/internal/v1/workbench/native-child-source', '/internal/v1/workbench/native-model-recovery', '/internal/v1/workbench/tool', '/internal/v1/workbench/goal-binding', '/internal/v1/workbench/model-budget','/internal/v1/workbench/web-budget-grant','/internal/v1/workbench/web-budget-grant/close','/internal/v1/workbench/web-model-budget','/internal/v1/workbench/checkpoint','/internal/v1/workbench/task-state','/internal/v1/workbench/step-admission','/internal/v1/workbench/goal-proposal','/internal/v1/workbench/completion-intent','/internal/v1/workbench/completion-confirm','/internal/v1/workbench/completion-recovery'].includes(request.url.split('?')[0]!)) return;
+    if (['/internal/v1/workbench/ordinary-run-history', '/internal/v1/workbench/ordinary-steering-history', '/internal/v1/workbench/ordinary-steering-binding', '/internal/v1/workbench/ordinary-input-binding', '/internal/v1/workbench/ordinary-model-policy', '/internal/v1/workbench/conversation-goal-control', '/internal/v1/channel/messages', '/internal/v1/file-tools', '/internal/v1/crawl-batches/bind', '/internal/v1/crawl-batches/events', '/internal/v1/workbench/guard', '/internal/v1/workbench/handoff', '/internal/v1/workbench/native-task-intent', '/internal/v1/workbench/native-task-intents', '/internal/v1/workbench/native-child-reservation', '/internal/v1/workbench/native-child-request', '/internal/v1/workbench/native-child-abort', '/internal/v1/workbench/native-child-published', '/internal/v1/workbench/native-child-bind', '/internal/v1/workbench/native-child-close', '/internal/v1/workbench/native-child-activate', '/internal/v1/workbench/native-child-source', '/internal/v1/workbench/native-model-recovery', '/internal/v1/workbench/tool', '/internal/v1/workbench/goal-binding', '/internal/v1/workbench/model-budget','/internal/v1/workbench/web-budget-grant','/internal/v1/workbench/web-budget-grant/close','/internal/v1/workbench/web-model-budget','/internal/v1/workbench/checkpoint','/internal/v1/workbench/task-state','/internal/v1/workbench/step-admission','/internal/v1/workbench/goal-proposal','/internal/v1/workbench/completion-intent','/internal/v1/workbench/completion-confirm','/internal/v1/workbench/completion-recovery'].includes(request.url.split('?')[0]!)) return;
     if (!config.csrfToken || request.method === 'GET' || request.method === 'HEAD' || request.method === 'OPTIONS') return;
     actor(request as any);
     const origin = String(request.headers.origin ?? '');
@@ -393,6 +396,7 @@ export async function buildServer(config: {
   registerWorkbenchExecution(app, db, workbench, persistentTasks, config.internalChannelToken, modelBudgets,taskCollaboration,config.replyJudge,nativeWork);
   registerConversationGoalExecution(app,new ConversationGoalControls(db,events,runs),config.internalChannelToken);
   registerOrdinaryInputBinding(app,db,config.internalChannelToken);
+  registerOrdinaryModelPolicy(app,db,config.internalChannelToken);
   registerOrdinarySteeringBinding(app,db,config.internalChannelToken);
   registerOrdinarySteeringHistory(app,db,config.internalChannelToken);
   registerOrdinaryRunHistory(app,db,config.internalChannelToken);
@@ -478,7 +482,11 @@ export async function buildServer(config: {
   registerConversationGoalRoutes(app,{db,conversations,actor,client:config.conversationGoalClient,resumeAdmission:{enabled:config.conversationGoalResumeEnabled===true,controls:new ConversationGoalControls(db,events,runs),atomic:atomicCommand}});
   app.get('/v1/capabilities', async (request, reply) => {
     const ownerId = actor(request as any);
-    const voice = await voiceTranscriptions.capability();
+    const cancelled=new AbortController();const abort=()=>{if(!reply.raw.writableEnded)cancelled.abort();};
+    request.raw.once('aborted',abort);reply.raw.once('close',abort);
+    let voice,models;
+    try{[voice,models]=await Promise.all([voiceTranscriptions.capability(),readHostModelCatalog(config.modelCatalogClient,cancelled.signal)]);}
+    finally{request.raw.removeListener('aborted',abort);reply.raw.removeListener('close',abort);}
     if (config.csrfToken && request.headers['sec-fetch-site'] !== 'cross-site') {
       reply.header('x-csrf-token', config.csrfToken).header('cache-control', 'no-store');
       reply.header('x-workbench-draft-scope', createHmac('sha256', config.csrfToken).update(`workbench-draft/v1/${ownerId}`).digest('hex'));
@@ -488,7 +496,7 @@ export async function buildServer(config: {
       capabilities: { search: true, fetch: true, browser_interaction: false, file_read: true,
         file_edit: true, command_execution: true, questions: true, approvals: true,
         artifact_download: true, resume_checkpoint: true },
-      models: [], limits: { max_upload_bytes: 104857600, max_active_runs_per_conversation: 1,
+      models, limits: { max_upload_bytes: 104857600, max_active_runs_per_conversation: 1,
         max_concurrent_sessions: 5,
         replay_retention_hours: 168, idempotency_retention_hours: 24 },
       voice,

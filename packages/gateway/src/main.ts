@@ -19,7 +19,7 @@ if (config.voiceEnabled) {
 }
 const emailProvider=process.env.GENERAL_AGENT_EMAIL_BINDINGS_ENABLED==='true'?await createEmailProvider(emailConfiguration(process.env)):undefined;
 const replyJudge=loadReplyJudgeClient(process.env,config.modelBudgetPolicy?.routes??[]);
-const service = await buildServer({ ...config, ...(conversationGoalClient?{conversationGoalClient}:{}),...(voiceAdapter ? { voiceAdapter } : {}),...(emailProvider?{emailBindingSend:emailProvider.send.bind(emailProvider)}:{}),...(replyJudge?{replyJudge}:{}) });
+const service = await buildServer({ ...config, ...(conversationGoalClient?{conversationGoalClient,modelCatalogClient:conversationGoalClient}:{}),...(voiceAdapter ? { voiceAdapter } : {}),...(emailProvider?{emailBindingSend:emailProvider.send.bind(emailProvider)}:{}),...(replyJudge?{replyJudge}:{}) });
 await service.app.listen({ host: config.host, port: config.port });
 
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, async () => {

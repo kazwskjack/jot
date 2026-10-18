@@ -17,6 +17,8 @@
     "web-budget-tool.js",
     "image-output.js",
     "budget-model-selection.js",
+    "ordinary-model-selection.js",
+    "model-catalog.js",
     "conversation-goal.js",
     "conversation-goal-run-host.js",
     "ordinary-input-resume.js",

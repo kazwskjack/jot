@@ -254,3 +254,18 @@ history source from confusing those identities. A controller ID substituted
 into the runtime binding is refused rather than treated as an alias.
 
 Compatibility preparation accepts only the separately audited `0.2.0-rc.2` and `0.2.1-rc.2` AgentLoop artifacts, with one exact file manifest per version. Installed-SDK verification targets `0.2.1-rc.2`; the older artifact remains available for explicit compatibility and rollback checks. Memory extraction retains its separately pinned plugin/SDK runtime until that composition is independently verified.
+
+### Optional original-run model policy
+
+`ordinaryModelSelection: true` requires the existing `ordinaryInputAdmission`
+store/profile and internal product bridge. It applies the original accepted
+run's frozen model/effort through official resolution and Session-local
+selection before prompt assembly. Exact original ownership and live lease
+checks remain required. Steering and recovery reuse the original policy;
+legacy runs without a snapshot are refused, never guessed from current
+conversation metadata. Generated profiles keep the option off.
+
+The same opt-in enables the detached bearer-authenticated `POST /v1/models`
+catalog (`{}` only). Metadata is advisory and never grants execution; missing
+readiness or failed resolution is not a reason to fall back silently to a
+different model. See [activation, evidence and limitations](../../docs/implementation/2026-10-18-native-model-policy.md).
