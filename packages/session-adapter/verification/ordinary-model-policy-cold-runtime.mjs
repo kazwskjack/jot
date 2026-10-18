@@ -25,8 +25,9 @@ test('actual Host exit and replacement lease recover the same frozen model witho
  try{
   service=await buildServer({databasePath:join(root,'product.db'),workspaces:['ws'],internalChannelToken:internalToken,workbenchRoot:join(root,'workspaces'),uploadRoot:join(root,'uploads'),templateRoot:fileURLToPath(new URL('../../gateway/file-engine/templates/',import.meta.url))});
   const owner='cold-model-owner',conversation=service.conversations.create(owner,{workspace_id:'ws',title:'Cold model fixture',model:{provider:'local-scripted',model:'chosen',reasoning_effort:'high'}});
+  const session=new SessionBindingRepository(service.db).getOrCreate(owner,conversation.conversation_id);
   const source=service.runs.enqueue(conversation.conversation_id,owner,{client_message_id:'original-model-input',content:[{type:'text',text:'Synthetic original model input.'}]});
-  const session=new SessionBindingRepository(service.db).getOrCreate(owner,conversation.conversation_id),coordinator=new HarnessCoordinator(service.db,service.runs,new EventStore(service.db));
+  const coordinator=new HarnessCoordinator(service.db,service.runs,new EventStore(service.db));
   const originalLease=coordinator.claimNext('original-model-worker',60000);coordinator.start(originalLease);
   const gateway=await service.app.listen({host:'127.0.0.1',port:0});
   const scoped=join(root,'compat/node_modules/@deepseek-ai');await mkdir(scoped,{recursive:true});
@@ -58,6 +59,7 @@ test('actual Host exit and replacement lease recover the same frozen model witho
   const replacement=coordinator.claimNext('replacement-model-worker',60000);assert.equal(replacement.run_id,source.run_id);assert.equal(replacement.generation,2);coordinator.start(replacement);
   // Change mutable conversation defaults after the accepted snapshot and Host exit.
   service.db.prepare('UPDATE ga_conversations SET model=? WHERE id=?').run(JSON.stringify({provider:'local-scripted',model:'later',reasoning_effort:'low'}),conversation.conversation_id);
+  service.db.prepare('UPDATE ga_harness_session_bindings SET session_id=? WHERE conversation_id=?').run('later-cold-native-fixture',conversation.conversation_id);
   const next=await start(false,true),client=new SessionControllerClient(next.url,adapterToken),scope={run_id:source.run_id,execution_lease:{owner:replacement.owner,generation:replacement.generation}};
   follower=new AbortController();stream=client.follow(session.session_id,follower.signal,undefined,scope)[Symbol.asyncIterator]();assert.equal((await stream.next()).value.type,'snapshot');
   let receipt;try{receipt=await client.recoverInput(session.session_id,scope,follower.signal);}catch(error){throw Error('fixture recovery diagnostics '+JSON.stringify(next.messages)+' '+next.output,{cause:error});}assert.equal(receipt.accepted,true);assert.deepEqual(receipt.native_message_ids,[originalId]);

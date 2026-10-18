@@ -16,7 +16,7 @@ import {HarnessWorker} from '../../gateway/src/harness/worker.ts';
 import {createOrdinaryInputAdmissions} from '../ordinary-input-admissions.js';
 import {apply} from '../index.js';
 
-for(const scenario of ['explicit','provider-default','unsupported','worker'])test('actual ordinary model policy: '+scenario,{
+for(const scenario of ['explicit','provider-default','unsupported','worker','worker-pinned'])test('actual ordinary model policy: '+scenario,{
  timeout:30000,skip:!process.env.JOT_DSH_RUNTIME_MODULES,
 },async()=>{
  const runtime=resolve(process.env.JOT_DSH_RUNTIME_MODULES),modules={};
@@ -35,13 +35,14 @@ for(const scenario of ['explicit','provider-default','unsupported','worker'])tes
   const headers={'x-user-id':owner},selected={provider:'local-scripted',model:'chosen',...(scenario==='provider-default'?{}:{reasoning_effort:'high'})},expectedEffort=scenario==='provider-default'?'low':'high';
   const created=await service.app.inject({method:'POST',url:'/v1/conversations',headers,payload:{workspace_id:'ws',title:'Model fixture',model:selected}});
   assert.equal(created.statusCode,201);const conversation=created.json();
+  if(scenario==='worker-pinned')new SessionBindingRepository(service.db).getOrCreate(owner,conversation.conversation_id);
   const input=await service.app.inject({method:'POST',url:`/v1/conversations/${conversation.conversation_id}/messages`,headers,payload:{client_message_id:'original-input',content:[{type:'text',text:'Give the synthetic fixture answer.'}]}});
   assert.equal(input.statusCode,202);const runId=input.json().run_id;
   // A later stored conversation value must not change the already accepted input.
   service.db.prepare('UPDATE ga_conversations SET model=? WHERE id=?').run(JSON.stringify({...selected,model:'later',reasoning_effort:'low'}),conversation.conversation_id);
   const session=new SessionBindingRepository(service.db).getOrCreate(owner,conversation.conversation_id);
   const coordinator=new HarnessCoordinator(service.db,service.runs,new EventStore(service.db));
-  let lease;if(scenario!=='worker'){lease=coordinator.claimNext('model-fixture-worker',60000);assert.equal(lease.run_id,runId);coordinator.start(lease);}
+  let lease;if(!scenario.startsWith('worker')){lease=coordinator.claimNext('model-fixture-worker',60000);assert.equal(lease.run_id,runId);coordinator.start(lease);}
   const gateway=await service.app.listen({host:'127.0.0.1',port:0});
   class Uploads extends modules.cordis.Service{constructor(ctx){super(ctx,'fileUploads');}registerAgentResolver(){return()=>{};}bindPrompt(){return{commit(){},[Symbol.dispose](){}};}}
   class Workspace extends modules.cordis.Service{constructor(ctx){super(ctx,'workspaceRegistry');this.archivedSessionIds=[];}list(){return [];}}
@@ -72,11 +73,12 @@ for(const scenario of ['explicit','provider-default','unsupported','worker'])tes
   assert.deepEqual(catalog.json().models,!available?[]:['chosen','later'].map(model=>({provider:'local-scripted',model,reasoning_output:'none',supported_reasoning_efforts:['low','high']})));
   const post=body=>fetch(`${adapterUrl}/v1/sessions/${session.session_id}/prompts`,{method:'POST',headers:{authorization:`Bearer ${adapterToken}`,'content-type':'application/json'},body:JSON.stringify(body)});
   const unscoped=await post({request_id:'unowned-request',text:'Not admitted'});assert.equal(unscoped.status,409);await unscoped.body?.cancel();assert.equal(requests.length,0);
-  if(scenario==='worker'){
+  if(scenario.startsWith('worker')){
+   if(scenario==='worker-pinned')service.db.prepare('UPDATE ga_harness_session_bindings SET session_id=? WHERE conversation_id=?').run('later-native-fixture',conversation.conversation_id);
    const transport=[];const client=new SessionControllerClient(adapterUrl,adapterToken,async(url,options)=>{const response=await fetch(url,options);if(!response.ok)transport.push({path:new URL(url).pathname,status:response.status,body:await response.clone().json(),request:JSON.parse(options.body)});return response;}),runner=new OfficialSessionRunner(client,{cwd:root,agentPreset:'jot-general'});
    let failure;const run=runner.run.bind(runner);runner.run=async input=>{try{return await run(input);}catch(error){failure={message:error.message,status:error.status,reason:error.reasonCode};throw error;}};
    const worker=new HarnessWorker(service.db,coordinator,runner,{workerId:'actual-model-worker',leaseMs:60000,ordinaryInputRecoveryEnabled:true,ordinarySteeringEnabled:true,
-    sessionResolver:conversationId=>new SessionBindingRepository(service.db).getOrCreateForConversation(conversationId).session_id});
+    sessionResolver:conversationId=>{if(scenario==='worker-pinned')throw Error('current_pointer_must_not_be_read');return new SessionBindingRepository(service.db).getOrCreateForConversation(conversationId).session_id;}});
    const outcome=await worker.processNext();assert.equal(outcome.run_id,runId);
    assert.equal(service.runs.get(runId,owner).status,'succeeded',JSON.stringify({outcome,failure,requests,transport,header:handle.agent.session.header,session}));
    assert.deepEqual(requests,[{provider:'local-scripted',model:'chosen',effort:'high'}]);

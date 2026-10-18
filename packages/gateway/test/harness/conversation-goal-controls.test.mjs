@@ -59,10 +59,12 @@ test('unconfirmed dispatch survives a new service and fences replacement attempt
  assert.throws(()=>recovered.enqueue({...f.request,idempotencyKey:'different-intent'},view),/goal_control_dispatch_unknown/);
  assert.equal(f.db.prepare('SELECT count(*) n FROM ga_runs').get().n,2);
 });
-test('Session rebinding, cancellation and stale lease revoke a pending control before mutation',t=>{
+test('a pending control retains its original Session while cancellation still revokes mutation',t=>{
  const f=fixture(t),r=f.controls.enqueue(f.request,view),coordinator=new HarnessCoordinator(f.db,f.runs,f.events),lease=coordinator.claimNext('worker-a',30000);coordinator.start(lease);const execution={owner:lease.owner,generation:lease.generation};
- f.db.prepare("UPDATE ga_harness_session_bindings SET session_id='replacement' WHERE conversation_id='conv-a'").run();assert.throws(()=>f.controls.begin(r.control_id,execution,1,'observer-fixture'),/goal_control_session_changed/);
- f.db.prepare("UPDATE ga_harness_session_bindings SET session_id='native-fixture' WHERE conversation_id='conv-a'").run();f.db.prepare("UPDATE ga_runs SET status='cancelling' WHERE id=?").run(r.run_id);assert.throws(()=>f.controls.begin(r.control_id,execution,1,'observer-fixture'),/goal_control_run_revoked/);
+ f.db.prepare("UPDATE ga_harness_session_bindings SET session_id='replacement' WHERE conversation_id='conv-a'").run();
+ assert.deepEqual(f.controls.acceptedFor(f.request),r);assert.equal(f.controls.inspect(r.control_id,execution).session_id,'native-fixture');
+ assert.equal(f.controls.begin(r.control_id,execution,1,'observer-fixture').acquired,true);
+ f.db.prepare("UPDATE ga_runs SET status='cancelling' WHERE id=?").run(r.run_id);assert.throws(()=>f.controls.begin(r.control_id,execution,1,'observer-fixture'),/goal_control_run_revoked/);
 });
 test('old workers refuse a Goal continuation instead of replaying original input',async t=>{
  const f=fixture(t),r=f.controls.enqueue(f.request,view);let calls=0,stages=0;

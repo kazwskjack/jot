@@ -27,20 +27,22 @@ export class ConversationGoalControls {
  private readonly events:EventStore;
  private readonly runs:RunRepository;
  constructor(db:DatabaseSync,events:EventStore,runs:RunRepository){this.db=db;this.events=events;this.runs=runs;}
- private static scope(db:DatabaseSync,ownerId:string,conversationId:string,sessionId:string){
+ private static scope(db:DatabaseSync,ownerId:string,conversationId:string,sessionId:string,sourceRunId?:string){
   const c=db.prepare('SELECT owner_id,archived_at FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId);
   if(!c)throw Error('conversation_not_found');
   if(c.archived_at)throw Error('goal_control_run_revoked');
   const table=(name:string)=>!!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
   if((table('wb_agents')&&db.prepare('SELECT 1 FROM wb_agents WHERE conversation_id=? AND owner_id=?').get(conversationId,ownerId))
    ||(table('wb_run_bindings')&&db.prepare('SELECT 1 FROM wb_run_bindings b JOIN ga_runs r ON r.id=b.run_id WHERE r.conversation_id=? AND b.owner_id=? LIMIT 1').get(conversationId,ownerId)))throw Error('goal_control_scope_invalid');
-  const binding=db.prepare('SELECT session_id FROM ga_harness_session_bindings WHERE conversation_id=? AND owner_id=?').get(conversationId,ownerId);
+  const binding=sourceRunId===undefined
+   ?db.prepare('SELECT session_id FROM ga_harness_session_bindings WHERE conversation_id=? AND owner_id=?').get(conversationId,ownerId)
+   :db.prepare('SELECT session_id FROM ga_run_native_sessions WHERE run_id=? AND conversation_id=? AND owner_id=?').get(sourceRunId,conversationId,ownerId);
   if(!binding||binding.session_id!==sessionId)throw Error('goal_control_session_changed');
  }
  private accepted(row:ControlRow):Accepted{return {accepted:true,control_id:row.control_id,run_id:row.run_id,conversation_id:row.conversation_id};}
  acceptedFor(input:ResumeRequest):Accepted|undefined{
-  ConversationGoalControls.scope(this.db,input.ownerId,input.conversationId,input.sessionId);
   const prior=this.db.prepare('SELECT * FROM ga_conversation_goal_controls WHERE owner_id=? AND conversation_id=? AND idempotency_key=?').get(input.ownerId,input.conversationId,input.idempotencyKey) as ControlRow|undefined;
+  ConversationGoalControls.scope(this.db,input.ownerId,input.conversationId,input.sessionId,prior?.source_run_id);
   if(!prior)return undefined;
   const digest=createHash('sha256').update(JSON.stringify({action:'resume',id:input.ref.id,revision:input.ref.revision,session_id:input.sessionId})).digest('hex');
   if(prior.request_sha256!==digest)throw Error('goal_control_idempotency_conflict');
@@ -52,20 +54,20 @@ export class ConversationGoalControls {
     ||typeof input.idempotencyKey!=='string'||!/^[\x21-\x7e]{8,128}$/.test(input.idempotencyKey))throw Error('goal_control_input_invalid');
   const digest=createHash('sha256').update(JSON.stringify({action:'resume',id:input.ref.id,revision:input.ref.revision,session_id:input.sessionId})).digest('hex');
   return withImmediateTransaction(this.db,()=>{
-   ConversationGoalControls.scope(this.db,input.ownerId,input.conversationId,input.sessionId);
    const prior=this.db.prepare('SELECT * FROM ga_conversation_goal_controls WHERE owner_id=? AND conversation_id=? AND idempotency_key=?').get(input.ownerId,input.conversationId,input.idempotencyKey) as ControlRow|undefined;
+   ConversationGoalControls.scope(this.db,input.ownerId,input.conversationId,input.sessionId,prior?.source_run_id);
    if(prior){if(prior.request_sha256!==digest)throw Error('goal_control_idempotency_conflict');return this.accepted(prior);}
    if(this.db.prepare("SELECT 1 FROM ga_conversation_goal_controls WHERE conversation_id=? AND state='dispatching'").get(input.conversationId))throw Error('goal_control_dispatch_unknown');
    if(this.db.prepare(`SELECT 1 FROM ga_runs WHERE conversation_id=? AND status IN (${active}) LIMIT 1`).get(input.conversationId))throw Error('goal_control_run_busy');
    const {goal}=validateConversationGoalView(nativeView);
    if(!goal||goal.id!==input.ref.id||goal.revision!==input.ref.revision)throw Error('goal_control_revision_changed');
    if(goal.phase==='complete'||goal.activation==='armed'||(goal.maxGoalRounds!==undefined&&goal.roundsStarted!==undefined&&goal.roundsStarted>=goal.maxGoalRounds))throw Error('goal_control_not_resumable');
-   const source=this.db.prepare("SELECT id,input_message_id FROM ga_runs WHERE conversation_id=? AND input_message_id IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT 1").get(input.conversationId) as {id:string;input_message_id:string}|undefined;
+   const source=this.db.prepare("SELECT r.id,r.input_message_id FROM ga_runs r JOIN ga_run_native_sessions s ON s.run_id=r.id WHERE r.conversation_id=? AND s.session_id=? AND r.input_message_id IS NOT NULL ORDER BY r.created_at DESC,r.id DESC LIMIT 1").get(input.conversationId,input.sessionId) as {id:string;input_message_id:string}|undefined;
    if(!source)throw Error('goal_control_source_missing');
    const controlId=`goal-control-${randomUUID()}`,runId=`run-${randomUUID()}`,now=new Date().toISOString();
    // Keep lineage through the original run, with no replayable input message.
    // A legacy input join must not recover the original human prompt.
-   this.db.prepare('INSERT INTO ga_runs(id,conversation_id,input_message_id,status,continuation_of,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)').run(runId,input.conversationId,null,'queued',source.id,1,now,now);
+   this.db.prepare('INSERT INTO ga_runs(id,conversation_id,input_message_id,status,continuation_of,version,created_at,updated_at,native_session_ref,native_owner_id,native_conversation_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(runId,input.conversationId,null,'queued',source.id,1,now,now,input.sessionId,input.ownerId,input.conversationId);
    this.db.prepare("INSERT INTO ga_conversation_goal_controls(control_id,owner_id,conversation_id,session_id,source_run_id,run_id,goal_id,goal_revision,idempotency_key,request_sha256,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,'queued',?,?)").run(controlId,input.ownerId,input.conversationId,input.sessionId,source.id,runId,input.ref.id,input.ref.revision,input.idempotencyKey,digest,now,now);
    this.events.append(input.conversationId,runId,'run.state',this.runs.get(runId,input.ownerId));
    this.db.prepare('INSERT INTO ga_outbox(conversation_id,aggregate_type,aggregate_id,event_type,payload_json,created_at) VALUES(?,?,?,?,?,?)').run(input.conversationId,'run',runId,'run.queued',JSON.stringify({run_id:runId}),now);
@@ -75,7 +77,7 @@ export class ConversationGoalControls {
  static assertExecution(db:DatabaseSync,controlId:string,lease:unknown):ControlRow{
   const row=db.prepare('SELECT * FROM ga_conversation_goal_controls WHERE control_id=?').get(controlId) as ControlRow|undefined;
   if(!row)throw Error('goal_control_not_found');
-  const execution=assertExecutionLease(db,row.run_id,lease);ConversationGoalControls.scope(db,row.owner_id,row.conversation_id,row.session_id);
+  const execution=assertExecutionLease(db,row.run_id,lease);ConversationGoalControls.scope(db,row.owner_id,row.conversation_id,row.session_id,row.source_run_id);
   const run=db.prepare('SELECT status,conversation_id,input_message_id,continuation_of FROM ga_runs WHERE id=?').get(row.run_id);
   const source=db.prepare('SELECT conversation_id,input_message_id FROM ga_runs WHERE id=?').get(row.source_run_id);
   if(!run||run.status!=='running'||run.conversation_id!==row.conversation_id||run.continuation_of!==row.source_run_id||!source||source.conversation_id!==row.conversation_id||typeof source.input_message_id!=='string'||run.input_message_id!==null)throw Error('goal_control_run_revoked');

@@ -15,7 +15,7 @@ export function inspectOrdinaryInputBinding(db:DatabaseSync,runId:string,session
    m.role,m.content_json,b.session_id FROM ga_runs r
    JOIN ga_conversations c ON c.id=r.conversation_id
    JOIN ga_messages m ON m.id=r.input_message_id
-   JOIN ga_harness_session_bindings b ON b.conversation_id=c.id AND b.owner_id=c.owner_id
+   JOIN ga_run_native_sessions b ON b.run_id=r.id AND b.conversation_id=c.id AND b.owner_id=c.owner_id
    WHERE r.id=?`).get(runId);
   if(!row||row.status!=='running'||row.archived_at||row.session_id!==sessionId||row.role!=='user'
    ||row.message_run_id!==runId||row.message_conversation_id!==row.conversation_id

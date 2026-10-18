@@ -36,6 +36,14 @@ Evidence: [original-run model policy](../../implementation/2026-10-18-native-mod
 
 Files: Gateway database migration, conversation repository, run admission, contracts in `packages/gateway/contracts/`, original binding/history/control modules, native host adapter, `web/jot/types.ts` and client types.
 
+Implemented prerequisite: [original-run Session binding](../../implementation/2026-10-18-original-run-session-binding.md).
+Acceptance freezes an existing owned destination; the first Worker pins an
+unallocated one under its live lease. Execution, recovery, cancellation,
+ordinary history/final delivery and accepted Goal controls use that original
+binding. Installed-SDK tests include pointer movement and abrupt Host exit.
+This does not complete the items below: separate mode mappings, legacy
+ambiguity gates, native Goal preflight, mode-aware policy and UI remain open.
+
 - [ ] Add contract tests for explicit Chat/Work creation, existing Work migration, capability-gated UI defaults, unknown fields, owner/version rejection and active/unknown native Goal conflicts.
 - [ ] Persist current conversation mode and immutable per-run policy plus exact native Session binding. Backfill original Work bindings without recreating native Sessions or Goals.
 - [ ] Update all original input/steering/history/final/Goal consumers to resolve per-run identity; tests must catch a switch trying to recover an earlier run through the new mode's pointer.

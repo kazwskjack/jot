@@ -415,8 +415,13 @@ export async function buildServer(config: {
       return reply.code(401).send({ error: { code: 'UNAUTHORIZED' } });
     }
     const body = request.body as Record<string, any>;
-    const binding = db.prepare(`SELECT conversation_id,owner_id FROM ga_harness_session_bindings WHERE session_id=?`)
-      .get(String(body.session_ref || '')) as { conversation_id?: string; owner_id?: string } | undefined;
+    const nativeRef=String(body.session_ref || '');
+    const bindings = db.prepare(`SELECT conversation_id,owner_id FROM ga_harness_session_bindings WHERE session_id=?
+      UNION SELECT r.native_conversation_id AS conversation_id,r.native_owner_id AS owner_id
+        FROM ga_runs r JOIN ga_conversations c ON c.id=r.conversation_id
+        WHERE r.native_session_ref=? AND r.native_owner_id=c.owner_id AND r.native_conversation_id=c.id`)
+      .all(nativeRef,nativeRef) as Array<{conversation_id:string;owner_id:string}>;
+    const binding=bindings.length===1?bindings[0]:undefined;
     if (!binding?.conversation_id || !binding.owner_id) throw new Error('UNAUTHORIZED_FILE');
     const args = body.arguments as Record<string, unknown>;
     if (String(args.operation) === 'document.templates') return { templates: templates.list() };

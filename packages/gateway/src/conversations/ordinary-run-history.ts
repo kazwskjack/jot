@@ -18,7 +18,7 @@ export function inspectOrdinaryRunHistory(db:DatabaseSync,scope:Scope){
  return withImmediateTransaction(db,()=>{
   if(!validScope(scope))rejected();
   const run=db.prepare('SELECT rowid source_rowid,* FROM ga_runs WHERE id=? AND conversation_id=?').get(scope.run_id,scope.conversation_id);
-  const conversation=db.prepare('SELECT * FROM ga_conversations WHERE id=?').get(scope.conversation_id),binding=db.prepare('SELECT * FROM ga_harness_session_bindings WHERE conversation_id=? AND owner_id=?').get(scope.conversation_id,scope.owner_id);
+  const conversation=db.prepare('SELECT * FROM ga_conversations WHERE id=?').get(scope.conversation_id),binding=db.prepare('SELECT * FROM ga_run_native_sessions WHERE run_id=? AND conversation_id=? AND owner_id=?').get(scope.run_id,scope.conversation_id,scope.owner_id);
   if(!run||!['succeeded','failed','interrupted','partial'].includes(String(run.status))||run.version!==scope.expected_run_version||typeof run.input_message_id!=='string'||conversation?.owner_id!==scope.owner_id||conversation.archived_at!==null||binding?.session_id!==scope.session_ref||run.continuation_of!==null)rejected();
   if(db.prepare('SELECT 1 FROM ga_runs WHERE conversation_id=? AND rowid>?').get(scope.conversation_id,run.source_rowid!)||db.prepare("SELECT 1 FROM ga_run_commands WHERE run_id=? AND kind<>'steer'").get(scope.run_id))rejected();
   const table=(name:string)=>!!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);

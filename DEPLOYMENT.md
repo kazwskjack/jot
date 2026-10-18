@@ -109,6 +109,14 @@ client; an unconfigured or unready host exposes an empty catalog. Generated
 profiles retain their existing default-off behavior. This is not yet a
 complete fast Chat/Work deployment.
 
+The Gateway also freezes an existing native Session identity with each newly
+accepted run, or pins its first allocation under the original Worker lease.
+Execution/recovery and cancellation then use that run's saved identity.
+Database upgrades preserve legacy pointers without guessing historical run
+bindings. Review the [migration and remaining scope](docs/implementation/2026-10-18-original-run-session-binding.md)
+before enabling future cross-mode switching; an old unbound task is not proven
+to belong to today's pointer.
+
 For Node processes launched from another directory, explicitly load the same private env file, for example `node --env-file=/private/path/gateway.env /opt/jot/packages/gateway/dist/src/main.js`. This is an installation example, not an existing deployment path. Relative paths depend on the service working directory; absolute configured paths avoid accidental creation of a second database.
 
 ## Existing tuning preserved in the extended path

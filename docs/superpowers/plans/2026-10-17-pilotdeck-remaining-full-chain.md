@@ -459,3 +459,14 @@ original-input recovery, and Worker/Runner canonical final publication. See
 Generated profiles remain default-off. Mode-specific Session mapping, fast Chat
 context/tools/compaction and mode UI remain open; this increment does not close
 the whole 26-capability plan or establish production/provider acceptance.
+
+### 2026-10-18 original-run native identity prerequisite
+
+The next-input Session pointer no longer chooses the destination for a newly
+accepted run that already has a saved owned identity. A first unallocated
+destination is pinned under the original Worker lease before execution.
+Ordinary admission, steering, cancellation, original-input recovery, historical
+final publication/delivery and accepted Goal controls now use the original run
+identity. See [migration and residual scope](../../implementation/2026-10-18-original-run-session-binding.md).
+Legacy rows are not guessed/backfilled. Separate mode mappings, native Goal
+switch preflight and the remaining Work-only scopes are not marked complete.

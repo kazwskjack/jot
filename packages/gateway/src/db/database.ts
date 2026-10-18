@@ -33,6 +33,23 @@ export function openProductDatabase(path: string): DatabaseSync {
   ensureColumn(db, 'ga_conversations', 'archived_at', 'TEXT');
   ensureColumn(db,'ga_runs','model_policy_json','TEXT');
   ensureColumn(db,'ga_runs','model_resolution_json','TEXT');
+  ensureColumn(db,'ga_runs','native_session_ref','TEXT');
+  ensureColumn(db,'ga_runs','native_owner_id','TEXT');
+  ensureColumn(db,'ga_runs','native_conversation_id','TEXT');
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_ga_runs_native_session ON ga_runs(native_session_ref,native_owner_id,native_conversation_id) WHERE native_session_ref IS NOT NULL;
+    CREATE TRIGGER IF NOT EXISTS ga_run_native_session_immutable BEFORE UPDATE OF native_session_ref,native_owner_id,native_conversation_id ON ga_runs
+    WHEN OLD.native_session_ref IS NOT NULL AND (NEW.native_session_ref IS NOT OLD.native_session_ref
+      OR NEW.native_owner_id IS NOT OLD.native_owner_id OR NEW.native_conversation_id IS NOT OLD.native_conversation_id)
+    BEGIN SELECT RAISE(ABORT,'run_native_session_immutable'); END;
+    CREATE VIEW IF NOT EXISTS ga_run_native_sessions AS
+      SELECT r.id AS run_id,r.conversation_id,c.owner_id,
+        COALESCE(r.native_session_ref,b.session_id) AS session_id,
+        r.created_at,r.updated_at
+      FROM ga_runs r JOIN ga_conversations c ON c.id=r.conversation_id
+      LEFT JOIN ga_harness_session_bindings b ON b.conversation_id=c.id
+      WHERE COALESCE(r.native_session_ref,b.session_id) IS NOT NULL
+        AND (b.owner_id IS NULL OR b.owner_id=c.owner_id)
+        AND (r.native_session_ref IS NULL OR (r.native_owner_id=c.owner_id AND r.native_conversation_id=c.id));`);
   db.exec(`CREATE TRIGGER IF NOT EXISTS ga_run_model_policy_immutable BEFORE UPDATE OF model_policy_json ON ga_runs
     WHEN NEW.model_policy_json IS NOT OLD.model_policy_json
     BEGIN SELECT RAISE(ABORT,'model_policy_immutable'); END;

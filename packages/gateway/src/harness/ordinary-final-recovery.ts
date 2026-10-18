@@ -29,7 +29,7 @@ export class OrdinaryFinalRecoveryPump{
    const row=this.db.prepare(`SELECT r.id run_id,r.conversation_id,c.owner_id,b.session_id,
     CASE WHEN p.run_id IS NULL THEN 'publication' ELSE 'delivery' END phase
     FROM ga_runs r JOIN ga_conversations c ON c.id=r.conversation_id
-    JOIN ga_harness_session_bindings b ON b.conversation_id=c.id AND b.owner_id=c.owner_id
+    JOIN ga_run_native_sessions b ON b.run_id=r.id AND b.conversation_id=c.id AND b.owner_id=c.owner_id
     LEFT JOIN ga_ordinary_final_publications p ON p.run_id=r.id
     LEFT JOIN ga_historical_final_delivery_batches h ON h.run_id=r.id
     LEFT JOIN ga_ordinary_final_observers o ON o.run_id=r.id

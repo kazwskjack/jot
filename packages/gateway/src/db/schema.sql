@@ -86,7 +86,8 @@ CREATE TABLE IF NOT EXISTS ga_runs (
   continuation_of TEXT REFERENCES ga_runs(id), runtime_run_id TEXT,
   runtime_revision INTEGER NOT NULL DEFAULT 0, version INTEGER NOT NULL DEFAULT 1,
   checkpoint_id TEXT, reason_code TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-  model_policy_json TEXT, model_resolution_json TEXT
+  model_policy_json TEXT, model_resolution_json TEXT,
+  native_session_ref TEXT, native_owner_id TEXT, native_conversation_id TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ga_one_executing_run ON ga_runs(conversation_id)
   WHERE status IN ('starting','running','waiting_user','waiting_approval','cancelling');

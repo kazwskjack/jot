@@ -28,7 +28,7 @@ export class SessionCommandDispatcher {
   const rows=this.db.prepare(`SELECT c.*,r.status run_status,r.conversation_id,r.input_message_id,
    r.created_at run_created_at,r.version,b.session_id,l.expires_at
    FROM ga_run_commands c JOIN ga_runs r ON r.id=c.run_id
-   LEFT JOIN ga_harness_session_bindings b ON b.conversation_id=r.conversation_id
+   LEFT JOIN ga_run_native_sessions b ON b.run_id=r.id AND b.conversation_id=r.conversation_id
    LEFT JOIN ga_worker_leases l ON l.resource_id=r.id
    WHERE c.status='pending' AND c.kind IN ('cancel','steer') ORDER BY CASE c.kind WHEN 'cancel' THEN 0 ELSE 1 END,c.created_at`).all() as Array<Record<string,any>>;
   for(const row of rows){

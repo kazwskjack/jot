@@ -1,6 +1,6 @@
 # Portable Chat and Work execution
 
-Status: integration design, not an implemented capability. This preserves the already requested product behavior while adapting it to the public runtime's current authority contracts.
+Status: integration design; native model policy and original-run Session binding prerequisites are implemented, but the complete mode capability is not. This preserves the already requested product behavior while adapting it to the public runtime's current authority contracts.
 
 ## Product behavior
 
@@ -10,7 +10,14 @@ Chat supplies a direct, useful answer from its knowledge and the available evide
 
 Chat performs no foreground context compression. When needed, compaction may run after the committed answer, remains absent from the Chat activity display and yields to new input. Actual model usage, including background attempts, remains accounted. Work retains visible official compaction events. A fixed prompt/tool prefix avoids timestamps, random identifiers and dynamic history before shared instructions; actual provider cache usage, not a local hash, proves a cache hit. No periodic model traffic is required for this feature.
 
-## Current source evidence
+## Design baseline and implemented prerequisites
+
+The source findings below were the starting baseline. Native model selection
+and the catalog have since been connected through the [model policy increment](../../implementation/2026-10-18-native-model-policy.md).
+The [original-run Session binding increment](../../implementation/2026-10-18-original-run-session-binding.md)
+also replaces ordinary execution/recovery consumers of the mutable pointer.
+Separate mode mappings and the remaining Work-only readers are still open;
+these prerequisites do not establish fast Chat support.
 
 - `web/jot/RoleConversation.tsx` updates ordinary model metadata through the existing versioned conversation PATCH. Role selectors remain read-only.
 - `packages/gateway/src/conversations/repository.ts` persists that metadata. Its queued-run exclusion was incomplete; the new pending-model regression demonstrates the gap and the accompanying fix includes queued execution and transactional validation.

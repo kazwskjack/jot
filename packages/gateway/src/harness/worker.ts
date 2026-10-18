@@ -1,5 +1,6 @@
 import {validateOrdinaryCompletion,type OrdinaryCompletionProof} from './ordinary-completion.ts';
 import {runtimeSessionRefForRun} from './run-session-identity.ts';
+import {pinRunNativeSession} from './run-native-session.ts';
 import {inspectOrdinarySteeringBinding} from '../conversations/ordinary-steering-binding.ts';
 import {assertExecutionLease,type ExecutionLease} from '../workbench/execution-lease.ts';
 import {isDeepStrictEqual} from 'node:util';
@@ -156,12 +157,15 @@ export class HarnessWorker {
     const ordinaryDelivery=this.ordinarySteeringEnabled&&!!lease.input_message_id&&!goalControl&&!workbenchContext&&!hasWorkbenchBinding;
     if(ordinaryDelivery&&this.runner.ordinaryCompletionProtocol!==1){this.coordinator.interruptWithoutRuntime(lease,'ORDINARY_COMPLETION_UNAVAILABLE');return{run_id:lease.run_id,runtime_status:'ordinary_completion_unavailable'};}
     const originalRecovery=this.ordinaryInputRecoveryEnabled&&lease.generation>1&&!goalControl&&!workbenchContext&&!hasWorkbenchBinding;
-    const originalSession=originalRecovery?this.db.prepare('SELECT b.session_id FROM ga_harness_session_bindings b JOIN ga_conversations c ON c.id=b.conversation_id AND c.owner_id=b.owner_id WHERE c.id=? AND c.archived_at IS NULL').get(lease.conversation_id):undefined;
-    if(originalRecovery&&(!this.runner.recoverInput||!lease.input_message_id||typeof originalSession?.session_id!=='string')){
+    const acceptedSession=this.db.prepare('SELECT native_session_ref FROM ga_runs WHERE id=?').get(lease.run_id);
+    const originalSession=originalRecovery?this.db.prepare('SELECT b.session_id FROM ga_run_native_sessions b JOIN ga_conversations c ON c.id=b.conversation_id AND c.owner_id=b.owner_id WHERE b.run_id=? AND c.archived_at IS NULL').get(lease.run_id):undefined;
+    if(originalRecovery&&(!this.runner.recoverInput||!lease.input_message_id||typeof acceptedSession?.native_session_ref!=='string'||typeof originalSession?.session_id!=='string')){
       this.coordinator.interruptWithoutRuntime(lease,'ORIGINAL_INPUT_RECOVERY_UNAVAILABLE');return{run_id:lease.run_id,runtime_status:'original_input_recovery_unavailable'};
     }
-    const controllerSessionRef = (originalSession?.session_id as string|undefined) ?? goalControl?.session_id ?? this.sessionResolver?.(lease.conversation_id)
+    const controllerSessionRef = (acceptedSession?.native_session_ref as string|null) ?? (originalSession?.session_id as string|undefined) ?? goalControl?.session_id ?? this.sessionResolver?.(lease.conversation_id)
       ?? `session-${createHash('sha256').update(lease.run_id).digest('hex').slice(0, 32)}`;
+    try{pinRunNativeSession(this.db,lease.run_id,{owner:lease.owner,generation:lease.generation},controllerSessionRef);}
+    catch{this.coordinator.interruptWithoutRuntime(lease,'RUN_NATIVE_SESSION_CONFLICT');return{run_id:lease.run_id,runtime_status:'native_session_conflict'};}
     const runtimeSessionRef = runtimeSessionRefForRun(lease.run_id);
     this.coordinator.bindSession(lease, runtimeSessionRef);
     const input = goalControl?{text:'',attachmentIds:[],ownerId:goalControl.owner_id,receivedAt:0}:this.messageInput(lease.run_id);

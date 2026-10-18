@@ -12,7 +12,7 @@ export function historicalFinalBatchValid(db:DatabaseSync,batch:Row):boolean{
    FROM ga_messages m JOIN ga_runs r ON r.id=m.run_id JOIN ga_conversations c ON c.id=r.conversation_id
    WHERE m.id=? AND m.run_id=? AND m.conversation_id=? AND m.role='assistant'`).get(batch.message_id,batch.run_id,batch.conversation_id) as Row|undefined;
   const publication=db.prepare('SELECT * FROM ga_ordinary_final_publications WHERE run_id=?').get(batch.run_id) as Row|undefined;
-  const session=publication?db.prepare('SELECT session_id FROM ga_harness_session_bindings WHERE conversation_id=? AND owner_id=?').get(batch.conversation_id,batch.owner_id) as Row|undefined:undefined;
+  const session=publication?db.prepare('SELECT session_id FROM ga_run_native_sessions WHERE run_id=? AND conversation_id=? AND owner_id=?').get(batch.run_id,batch.conversation_id,batch.owner_id) as Row|undefined:undefined;
   return !!row&&row.owner_id===batch.owner_id&&row.archived_at===null&&row.status==='complete'
    &&['succeeded','failed','partial','interrupted'].includes(row.run_status)&&sha(row.content_json)===batch.content_sha256
    &&!db.prepare("SELECT 1 FROM ga_run_commands WHERE run_id=? AND kind<>'steer'").get(batch.run_id)

@@ -23,7 +23,7 @@ export function inspectOrdinarySteeringHistory(db:DatabaseSync,scope:Scope){
   const row=db.prepare(`SELECT r.status,r.version,r.input_message_id,m.content_json,
    m.run_id message_run_id,m.conversation_id message_conversation_id,m.role,m.status message_status
    FROM ga_runs r JOIN ga_conversations c ON c.id=r.conversation_id
-   JOIN ga_harness_session_bindings b ON b.conversation_id=c.id AND b.owner_id=c.owner_id
+   JOIN ga_run_native_sessions b ON b.run_id=r.id AND b.conversation_id=c.id AND b.owner_id=c.owner_id
    JOIN ga_messages m ON m.id=r.input_message_id
    WHERE r.id=? AND c.id=? AND c.owner_id=? AND c.archived_at IS NULL AND b.session_id=?`)
    .get(scope.run_id,scope.conversation_id,scope.owner_id,scope.session_ref);
