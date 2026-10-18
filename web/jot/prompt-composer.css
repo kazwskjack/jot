@@ -32,6 +32,10 @@
 .jot-prompt-attachments{display:flex;flex-wrap:wrap;gap:8px;min-width:0;max-height:180px;overflow:auto;overflow-wrap:anywhere}
 .jot-prompt-attachments>*{min-width:0;max-width:100%}
 .jot-prompt-voice{display:flex;align-items:center;min-width:0}
+.jot-voice-meter{display:flex;align-items:center;gap:8px;font-size:12px;font-variant-numeric:tabular-nums}
+.jot-voice-wave{display:flex;align-items:center;justify-content:center;gap:2px;height:28px;width:36px}
+.jot-voice-wave i{display:block;flex:0 0 3px;background:currentColor;border-radius:3px;transition:height .08s linear}
+@media(prefers-reduced-motion:reduce){.jot-voice-wave i{transition:none}}
 .jot-prompt-voice .jot-voice-input{position:relative;display:flex;align-items:center;gap:4px;flex-wrap:wrap}
 .jot-prompt-voice .jot-voice-input>span[role="status"]{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .jot-prompt-voice .jot-voice-input>button{margin:0;padding:6px;border-radius:50%;font-size:12px;min-height:32px}

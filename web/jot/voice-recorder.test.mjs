@@ -32,3 +32,29 @@ test('configured recording limit never captures more bytes than the backend acce
  p.processor.onaudioprocess({inputBuffer:{getChannelData:()=>new Float32Array(10000).fill(.25)}});
  assert.equal(reached,1);const audio=r.finish();assert.equal(audio.length,3244);assert.equal(validateVoiceWave(Buffer.from(audio)),.1);assert.equal(p.stopped,1);
 });
+
+test('permission startup times out and releases a microphone granted afterwards',async t=>{
+ t.mock.timers.enable({apis:['setTimeout']});
+ const pending=Promise.withResolvers(),p=platform(pending.promise);
+ const result=mod.recordVoice({env:p.env});
+ const rejected=assert.rejects(result,/VOICE_MICROPHONE_TIMEOUT/);
+ t.mock.timers.tick(20001);await rejected;
+ pending.resolve(p.stream);await new Promise(r=>setImmediate(r));
+ assert.equal(p.closed,1);assert.equal(p.stopped,1);
+});
+
+test('recording reports bounded microphone levels and captured duration only while active',async()=>{
+ const p=platform(),frames=[];
+ const r=await mod.recordVoice({env:p.env,onLevel:frame=>frames.push(frame)});
+ p.processor.onaudioprocess({inputBuffer:{getChannelData:()=>new Float32Array(4800).fill(.5)}});
+ assert.equal(frames.length,1);assert.equal(frames[0].level,.5);assert.equal(frames[0].elapsedMs,100);
+ r.cancel();assert.equal(p.processor.onaudioprocess,null);
+});
+
+test('startup deadline also bounds an AudioContext that never resumes',async t=>{
+ t.mock.timers.enable({apis:['setTimeout']});const p=platform();
+ p.env.AudioContext.prototype.resume=()=>new Promise(()=>{});
+ const result=mod.recordVoice({env:p.env});const rejected=assert.rejects(result,/VOICE_MICROPHONE_TIMEOUT/);
+ await Promise.resolve();t.mock.timers.tick(20001);await rejected;
+ assert.equal(p.stopped,1);assert.equal(p.closed,1);
+});

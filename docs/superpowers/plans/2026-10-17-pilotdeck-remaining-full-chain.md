@@ -439,3 +439,7 @@ on real-provider and production acceptance.
 - Review fixed the unknown-message retry event handler, froze drafts/attachments while the original send is unconfirmed, retained cancellation during slow acceptance, and allowed host voice Escape handling.
 - Search status is unchanged: the new SDK provides the optional Search/Fetch API plugin and controlled localhost wiring passed. Existing provider defaults remain unchanged; this is not a production provider or credential acceptance result.
 - This follow-up does not deploy production, claim completion of the full capability plan, or change execution permissions and readiness gates.
+
+### 2026-10-18 voice feedback release increment
+
+The shared extended composer now displays a real microphone-level waveform and captured duration. Permission acquisition and AudioContext resume share a 20-second startup deadline, with cleanup of streams granted after cancellation/timeout. Existing owned transcription jobs and draft-only delivery remain unchanged. See [verification and remaining scope](../../implementation/2026-10-18-voice-feedback-release.md). This closes bounded capture feedback, not live ASR quality or the complete Voice capability. Fast Chat/Work mode still needs explicit gateway/native-host integration; the newer public Session recovery adapter must not be replaced by an older application adapter.

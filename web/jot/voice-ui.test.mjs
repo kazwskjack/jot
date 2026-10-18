@@ -66,7 +66,13 @@ test('browser voice draft uses actual composer, PCM capture and existing explici
   const stopped=()=>page.waitForFunction(()=>window.__voiceTracks.length>0&&window.__voiceTracks.every(track=>track.readyState==='ended'));
   const draft=()=>page.getByRole('textbox',{name:'对话消息',exact:true});
   const waitJob=async predicate=>{for(let i=0;i<160;i++){const found=[...jobs.values()].find(predicate);if(found)return found;await page.waitForTimeout(25);}assert.fail('accepted voice job did not reach expected poll state');};
-  await draft().fill('已有草稿');await record();await page.getByRole('button',{name:'停止并转写',exact:true}).click();await stopped();
+  await draft().fill('已有草稿');await record();
+  assert.equal(await page.locator('.jot-voice-wave i').count(),7);
+  assert.equal(await page.locator('.jot-voice-meter').isVisible(),true);
+  assert.notEqual(await page.getByLabel('录音时长',{exact:true}).innerText(),'0:00');
+  assert.ok(await page.locator('.jot-voice-wave i').evaluateAll(bars=>bars.some(bar=>parseFloat(bar.style.height)>4)));
+  await page.getByRole('button',{name:'停止并转写',exact:true}).click();await stopped();
+  assert.equal(await page.locator('.jot-voice-meter').count(),0);
   await page.waitForFunction(()=>document.querySelector('textarea')?.value.includes('合成识别文字'));
   assert.equal(await draft().inputValue(),'已有草稿\n合成识别文字');assert.equal(await draft().isEditable(),true);assert.equal(messages.length,0,'transcription must never send a message');assert.ok([...jobs.values()][0].polls>=2,'actual async status polling required');
   await draft().fill('人工修改后的识别文字');await page.getByRole('button',{name:'发送',exact:true}).click();await page.waitForFunction(()=>document.querySelector('textarea')?.value==='');assert.equal(messages.length,1);assert.equal(messages[0].path,'/conversations/ordinary-a/messages');assert.deepEqual(messages[0].body.content,[{type:'text',text:'人工修改后的识别文字'}]);assert.ok(messages[0].body.client_message_id);
