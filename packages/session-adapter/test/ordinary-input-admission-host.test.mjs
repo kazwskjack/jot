@@ -73,3 +73,11 @@ test('context preparation precedes native entry and preserves the exact admitted
  const response=await host.withPrompt({binding:f.binding},async()=>{f.hooks.get('agent/inbox/inserted')({agent:f.agent,message:f.message});step=f.hooks.get('agent/pre-step')({agent:f.agent,messages:[f.message],signal:new AbortController().signal},async()=>({kind:'enter',messages:[f.message]}));return{accepted:true};});
  assert.equal(response.accepted,true);const decision=await step;assert.equal(decision.startsRequestSeries,true);assert.equal(decision.messages[0],f.message);await host.dispose();
 });
+
+test('Web enforcement is prepared before original native entry, and a failed preparation preserves the original input',async()=>{
+ for(const failure of [false,true]){const f=fixture();let prepared=false,installed=false,step;
+ f.options.webSelector=Object.assign(async({agent,binding,check})=>{assert.equal(agent,f.agent);assert.deepEqual(binding,f.binding);await check();if(failure)throw Error('synthetic Web admission failure');prepared=true;},{prepareAgent(agent){assert.equal(agent,f.agent);installed=true;}});
+ f.options.admissions.reserveEntry=async()=>{assert.equal(prepared,true);};const host=create(f.options);
+ await host.withPrompt({binding:f.binding},async()=>{f.hooks.get('agent/inbox/inserted')({agent:f.agent,message:f.message});step=f.hooks.get('agent/pre-step')({agent:f.agent,messages:[f.message],signal:new AbortController().signal},async()=>({kind:'enter',messages:[f.message]}));return{accepted:true};});
+ const decision=await step;assert.equal(installed,true);assert.equal(decision.kind,failure?'reject':'enter');if(failure)assert.equal(f.agent.inbox.nextStep[0].id,f.message.id);else assert.equal(decision.messages[0],f.message);await host.dispose();}
+});

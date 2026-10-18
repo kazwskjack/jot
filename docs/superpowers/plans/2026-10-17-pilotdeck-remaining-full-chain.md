@@ -505,3 +505,17 @@ cover frozen source reuse and no duplicate context marker. See
 This closes only task 4's bounded-context item. Durable Web allowances,
 background compaction, provider metrics, real readiness, UI/standalone and the
 rest of this full ledger remain open.
+
+### 2026-10-18 durable Chat Web allowance increment
+
+The original accepted Chat run now owns immutable search/fetch group manifests
+and consumed-call reservations. The original adapter derives exact groups from
+native assistant/tool events, flushes provenance and reserves before the
+official provider runs. Duplicate URLs, unknown outcomes, replacement leases
+and supplemental input do not replenish consumption. Actual two-question
+Host tests include a real original-dispatcher supplement and provider receipts;
+an actual SDK Session reopen refuses a second uncertain effect. See
+[verification and explicit limits](../../implementation/2026-10-18-chat-web-allowances.md).
+This closes the durable Web allowance item only. Background post-answer
+compaction, actual provider metrics, real readiness, UI/standalone and the
+remaining full ledger remain open.

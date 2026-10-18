@@ -143,3 +143,9 @@ rechecks the original run/Session/live lease; legacy rows remain null and Work
 does not receive a Chat seed. The original adapter can opt into official native
 surface integration; real readiness and UI/standalone enablement remain open.
 See [context implementation and verification](../../docs/implementation/2026-10-18-chat-context-window.md).
+
+The optional original Chat Web guard uses a bearer/lease-scoped internal
+reservation route. Immutable per-run groups and consumed calls prevent second
+search/fetch rounds and repeated URLs after uncertain outcomes or restarts.
+Reservations are not successful fetch receipts. The full Chat readiness gate
+remains off; see [Web allowance implementation](../../docs/implementation/2026-10-18-chat-web-allowances.md).

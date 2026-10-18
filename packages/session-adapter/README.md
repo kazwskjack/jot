@@ -285,3 +285,12 @@ The first batch preserves native system-prompt order; subsequent inputs replace
 only the model-facing conversation body and retain stored transcript events.
 It remains default-off and does not enable general Chat readiness. See
 [bounds, retry/reopen behavior and actual SDK/Host evidence](../../docs/implementation/2026-10-18-chat-context-window.md).
+
+`ordinaryChatWeb: true` additionally requires the trusted Chat declaration,
+original input/model admission and `ordinaryChatContext: true`. It derives
+search/fetch groups from committed native assistant steps and consumes each
+call in the Gateway before the official provider executes. Steering, lost
+acknowledgements and replacement leases do not reset the original run's
+allowance. A fresh/restored Chat agent refuses Web effects until its original
+binding is confirmed. Work and provider selection remain unchanged. See
+[semantics, uncertainty and actual Host evidence](../../docs/implementation/2026-10-18-chat-web-allowances.md).

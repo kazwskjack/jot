@@ -9,9 +9,10 @@ const fail=()=>{throw Error('ordinary_input_admission_unconfirmed');};
 function wait(promise,signal){const source=Promise.resolve(promise);if(signal.aborted){source.catch(()=>{});signal.throwIfAborted();}return new Promise((done,reject)=>{const abort=()=>{cleanup();reject(signal.reason);},cleanup=()=>signal.removeEventListener('abort',abort);signal.addEventListener('abort',abort,{once:true});source.then(value=>{cleanup();done(value);},error=>{cleanup();reject(error);});});}
 /** Observe the actual Controller's final native message. Persist its hash before
  * the original pre-step may enter, without changing attachment admission/send. */
-export function createOrdinaryInputAdmissionHost({ctx,agents,bridge,profile,admissions,ordinaryPresets,modelSelector,contextSelector}){
+export function createOrdinaryInputAdmissionHost({ctx,agents,bridge,profile,admissions,ordinaryPresets,modelSelector,contextSelector,webSelector}){
  if(modelSelector!==undefined&&typeof modelSelector!=='function')fail();
  if(contextSelector!==undefined&&typeof contextSelector!=='function')fail();
+ if(webSelector!==undefined&&(typeof webSelector!=='function'||typeof webSelector.prepareAgent!=='function'))fail();
  if(typeof ctx?.on!=='function'||typeof ctx.sessions?.flush!=='function'||typeof agents?.get!=='function'||typeof bridge?.request!=='function'||typeof profile?.read!=='function'||typeof admissions?.create!=='function'||typeof admissions?.read!=='function'||admissions.entryReservationProtocol!==1||typeof admissions.reserveEntry!=='function'||typeof admissions.readReplayCandidate!=='function'||!(ordinaryPresets instanceof Set)||!ordinaryPresets.size)fail();
  const storage=new AsyncLocalStorage(),records=new Map(),busy=new Set(),pending=new Set(),modelHooks=new Map(),shutdown=new AbortController();let disposed=false;
  const check=record=>{record.signal.throwIfAborted();if(disposed||agents.get(record.agent.id)!==record.agent||record.agent.session!==record.session||record.agent.id!==record.binding.sessionRef||record.session.id!==record.binding.sessionRef||!ordinaryPresets.has(record.session.header.agentPreset))fail();};
@@ -32,7 +33,7 @@ export function createOrdinaryInputAdmissionHost({ctx,agents,bridge,profile,admi
   record.observed.add(message.id);if(record.closed||record.message||message.source.rpcId!==record.requestId||!valid(message.id)){record.error=true;return;}
   record.native=message;record.message=freeze(structuredClone(message));record.persisting=Promise.resolve().then(async()=>{check(record);if(record.steering&&hashNativeSteeringContent(record.message.content)!==record.authority.native_content_sha256)fail();if(await wait(ctx.sessions.flush(record.session),record.signal)!==true)fail();check(record);return admissions.create(record.session,receipt(record,record.message),{signal:record.signal});});record.persisting.catch(()=>{});
  });
- const ensureModelHook=agent=>{if(!modelSelector||modelHooks.has(agent))return;modelSelector.prepareAgent?.(agent);const remove=agent.ctx.on('system-prompt/assemble',async(_assembly,context,next)=>{
+ const ensureModelHook=agent=>{webSelector?.prepareAgent(agent);if(!modelSelector||modelHooks.has(agent))return;modelSelector.prepareAgent?.(agent);const remove=agent.ctx.on('system-prompt/assemble',async(_assembly,context,next)=>{
   const owned=[...(records.get(context.agent)??[])];if(!owned.length)return next();
   const original=owned[0],signal=AbortSignal.any([original.signal,...(context.signal?[context.signal]:[])]);
   try{
@@ -56,10 +57,17 @@ export function createOrdinaryInputAdmissionHost({ctx,agents,bridge,profile,admi
     }
    }catch{try{return reject(original,{...payload,messages:[...payload.messages,...(decision.messages??[])]});}finally{for(const record of owned)record.context=null;}}
   }
+  if(webSelector&&owned.length){
+   const original=owned[0],signal=AbortSignal.any([original.signal,...(payload.signal?[payload.signal]:[])]);
+   try{
+    if(owned.some(record=>record.binding.runId!==original.binding.runId||record.binding.sessionRef!==original.binding.sessionRef||!isDeepStrictEqual(record.binding.executionLease,original.binding.executionLease)))fail();
+    await wait(webSelector({agent:payload.agent,binding:{runId:original.binding.runId,sessionRef:original.binding.sessionRef,executionLease:original.binding.executionLease},signal,check:async()=>{for(const record of owned)await verify(record);}}),signal);
+   }catch{try{return reject(original,{...payload,messages:[...payload.messages,...(decision.messages??[])]});}finally{for(const record of owned)record.context=null;}}
+  }
   for(const record of owned){try{payload.signal?.throwIfAborted();await verify(record);payload.signal?.throwIfAborted();const originals=decision.messages?.filter(m=>m.id===record.message.id);if(originals?.length!==1||digest(originals[0])!==digest(record.message))fail();await wait(admissions.reserveEntry(record.session,receipt(record,record.message),record.entry,{signal:record.signal}),record.signal);await audit(record);payload.signal?.throwIfAborted();}catch{return reject(record,{...payload,messages:[...payload.messages,...(decision.messages??[])]});}finally{record.context=null;}}return decision;
  });
  on('session/event',(session,event)=>{if(event.type!=='user/message')return;for(const record of records.get(agents.get(session.id))??[]){if(record.session===session&&record.message?.id===event.data?.id){record.entered=true;records.get(record.agent).delete(record);if(!records.get(record.agent).size)records.delete(record.agent);}}});
- on('agent/disposed',({agent})=>{records.delete(agent);modelHooks.get(agent)?.();modelHooks.delete(agent);});
+ on('agent/disposed',({agent})=>{records.delete(agent);modelHooks.get(agent)?.();modelHooks.delete(agent);webSelector?.disposeAgent?.(agent);});
  const submit=({binding,signal=new AbortController().signal,content},operation,steering=false)=>{const task=(async()=>{
    if(disposed||!binding||Object.keys(binding).sort().join(',')!==(steering?'commandId,executionLease,runId,sessionRef':'executionLease,runId,sessionRef')||steering&&(!valid(binding.commandId)||binding.commandId===binding.runId||admissions.steeringAdmissionProtocol!==1)||!valid(binding.runId)||!valid(binding.sessionRef)||typeof operation!=='function'||busy.has(binding.sessionRef))fail();
    const requestId=steering?binding.commandId:binding.runId,expectedContent=steering?freeze(structuredClone(content)):undefined;const owned=freeze({runId:binding.runId,sessionRef:binding.sessionRef,...(steering?{commandId:binding.commandId}:{}),executionLease:normalizeHostExecutionLease(binding.executionLease)}),agent=agents.get(owned.sessionRef),session=agent?.session;

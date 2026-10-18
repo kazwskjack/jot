@@ -129,6 +129,10 @@ export class WorkbenchBridge {
       signal: signal ? AbortSignal.any([signal, timed]) : timed,
     });
     if (!response.ok) {
+      if(path==='ordinary-chat-web'&&response.status===409){
+        let code;try{code=(await response.json())?.error?.code;}catch{}
+        if(code==='CHAT_WEB_ALLOWANCE_CONSUMED')throw Error('CHAT_WEB_ALLOWANCE_CONSUMED');
+      }
       if(path==='native-child-abort'&&response.status===409){
         let code;try{code=(await response.json())?.error?.code;}catch{}
         if(code==='NATIVE_CREATION_OUTCOME_UNKNOWN')throw Error('native_creation_outcome_unknown');

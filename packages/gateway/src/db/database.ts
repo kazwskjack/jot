@@ -35,6 +35,21 @@ export function openProductDatabase(path: string): DatabaseSync {
   ensureColumn(db,'ga_runs','execution_policy_json','TEXT');
   ensureColumn(db,'ga_runs','chat_context_json','TEXT');
   ensureColumn(db,'ga_runs','chat_context_sha256','TEXT');
+  db.exec(`CREATE TABLE IF NOT EXISTS ga_chat_web_groups (
+    run_id TEXT NOT NULL REFERENCES ga_runs(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK(kind IN ('search','fetch')),session_id TEXT NOT NULL,
+    native_turn INTEGER NOT NULL,native_step INTEGER NOT NULL,assistant_seq INTEGER NOT NULL,
+    group_json TEXT NOT NULL,group_sha256 TEXT NOT NULL,policy_sha256 TEXT NOT NULL,created_at TEXT NOT NULL,
+    PRIMARY KEY(run_id,kind));
+   CREATE TABLE IF NOT EXISTS ga_chat_web_calls (
+    run_id TEXT NOT NULL REFERENCES ga_runs(id) ON DELETE CASCADE,call_id TEXT NOT NULL,
+    kind TEXT NOT NULL,request_sha256 TEXT NOT NULL,url_sha256 TEXT,created_at TEXT NOT NULL,
+    PRIMARY KEY(run_id,call_id),UNIQUE(run_id,url_sha256),
+    FOREIGN KEY(run_id,kind) REFERENCES ga_chat_web_groups(run_id,kind) ON DELETE CASCADE);
+   CREATE TRIGGER IF NOT EXISTS ga_chat_web_group_immutable BEFORE UPDATE ON ga_chat_web_groups
+    BEGIN SELECT RAISE(ABORT,'chat_web_group_immutable'); END;
+   CREATE TRIGGER IF NOT EXISTS ga_chat_web_call_immutable BEFORE UPDATE ON ga_chat_web_calls
+    BEGIN SELECT RAISE(ABORT,'chat_web_call_immutable'); END;`);
   db.exec(`CREATE TRIGGER IF NOT EXISTS ga_chat_context_immutable BEFORE UPDATE OF chat_context_json,chat_context_sha256 ON ga_runs
    WHEN NEW.chat_context_json IS NOT OLD.chat_context_json OR NEW.chat_context_sha256 IS NOT OLD.chat_context_sha256
    BEGIN SELECT RAISE(ABORT,'chat_context_immutable'); END;`);

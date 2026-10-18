@@ -9,9 +9,16 @@ import {apply as applyAdapter,inject as adapterInject} from '../../session-adapt
 import {createOrdinaryInputAdmissions} from '../../session-adapter/ordinary-input-admissions.js';
 import {createNativeReplayProfile} from '../../session-adapter/native-replay-profile.js';
 export const name='jot-chat-native-fixture';
-export const inject=[...adapterInject,'jotChatPresetReady','agentPresets','tools'];
+export const inject=[...adapterInject,'jotChatPresetReady','agentPresets','tools','web'];
 export async function apply(ctx,config){
  const {chatFixture,...adapterConfig}=config,require=createRequire(ctx.get('profileContext').installAnchor);
+ if(chatFixture.webReceipt){
+  const receipt={search:[],fetch:[],active:0,peak:0,events:[]},save=()=>writeFileSync(chatFixture.webReceipt,JSON.stringify(receipt));save();
+  ctx.on('session/event',(session,event)=>{if(session.header.agentPreset!=='jot-chat')return;if(['user/message','assistant/message','tool/call','tool/result'].includes(event.type)){receipt.events.push({seq:event.seq,type:event.type,keys:Object.keys(event.data),turn:event.data.turn,step:event.data.step,source:event.data.source,call:event.data.callId,result:event.type==='tool/result'?event.data.message.content:undefined});save();}});
+  const run=async(kind,value,signal,body)=>{signal.throwIfAborted();receipt[kind].push(value);receipt.active++;receipt.peak=Math.max(receipt.peak,receipt.active);save();try{await new Promise(done=>setTimeout(done,40));signal.throwIfAborted();return body();}finally{receipt.active--;save();}};
+  ctx.web.registerSearchProvider({id:'jot-web-fixture',available:()=>true,search:async(request,signal)=>run('search',request.query,signal,()=>({sources:[{url:'https://example.com/source',title:'Synthetic fixture',snippet:'Synthetic source text.'}],truncated:false}))});
+  ctx.web.registerFetchProvider({id:'jot-web-fixture',available:()=>true,fetch:async(request,signal)=>run('fetch',request.url,signal,()=>{if(request.url.includes('/failed'))throw Error('synthetic fetch failure');return{url:request.url,statusCode:200,body:{kind:'text',content:'Synthetic page text.'},truncated:false};})});
+ }
  const {scopeOf}=await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-scope')).href);
  const artifacts=await Promise.all(['chat-preset.mjs','chat-tools-policy.mjs'].map(async name=>{const path=fileURLToPath(new URL('../'+name,import.meta.url));return{id:name.replaceAll('.','-'),path,sha256:createHash('sha256').update(await readFile(path)).digest('hex')};}));
  const facts=agent=>({preset:ctx.agentPresets.composedPreset(agent.ctx),tools:ctx.tools.schemas(scopeOf(agent.ctx)).map(tool=>tool.name).sort(),
