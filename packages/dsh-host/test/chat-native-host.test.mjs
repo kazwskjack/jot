@@ -17,7 +17,7 @@ import {OfficialSessionRunner} from '../../gateway/src/harness/official-session-
 import {SessionCommandDispatcher} from '../../gateway/src/harness/command-dispatcher.ts';
 const runtime=process.env.JOT_DSH_RUNTIME_MODULES;
 const listen=async server=>{await new Promise(done=>server.listen(0,'127.0.0.1',done));return'http://127.0.0.1:'+server.address().port;};
-async function chatCase(t,{bounded=false,web=false,maintenance=false}={}){
+async function chatCase(t,{bounded=false,web=false,maintenance=false,accounting=false}={}){
  const root=await mkdtemp(join(tmpdir(),'jot-chat-native-')),home=join(root,'home'),workspace=join(root,'workspace');await mkdir(workspace);
  const token=randomBytes(32).toString('hex'),adapterToken=randomBytes(32).toString('hex'),modelKey='sk-'+randomBytes(32).toString('hex'),requests=[];
  let service,host,exit,done,execution,output='',succeeded=false,modelFailure;
@@ -27,9 +27,10 @@ async function chatCase(t,{bounded=false,web=false,maintenance=false}={}){
  const model=createServer(async(req,res)=>{try{
   const chunks=[];for await(const chunk of req)chunks.push(chunk);const input=JSON.parse(Buffer.concat(chunks).toString());
   assert.equal(req.headers['x-api-key'],modelKey);assert.match(req.url,/\/messages$/);assert.equal(input.thinking.type,'disabled');assert.equal(input.output_config,undefined);
-  assert.deepEqual(input.tools.map(tool=>tool.name).sort(),['web_fetch','web_search']);assert.match(input.system,/useful solutions/);requests.push(input);
+  const accountingRequest=JSON.stringify(input.messages).includes('SYNTHETIC-COMPACTION-ACCOUNTING-PROBE');
+  if(accountingRequest){assert.equal(accounting,true);assert.equal((input.tools??[]).length,0);}else{assert.deepEqual(input.tools.map(tool=>tool.name).sort(),['web_fetch','web_search']);assert.match(input.system,/useful solutions/);}requests.push(input);
   if(web&&requests.length===2)await supplementGate;
-  if(bounded){const text=input.messages.flatMap(message=>typeof message.content==='string'?[message.content]:(message.content??[]).filter(block=>block.type==='text').map(block=>block.text)).join('\n');assert.ok(text.includes(expectedContext.model_text));assert.ok(text.includes(expectedQuestion));assert.ok(!text.includes('RAW-REASONING-NEVER-SEND'));assert.ok(!text.includes('data:image/png;base64,'));assert.ok(!text.includes('HISTORY-00'));assert.ok(expectedContext.model_text.length<=14000);}
+  if(bounded&&!accountingRequest){const text=input.messages.flatMap(message=>typeof message.content==='string'?[message.content]:(message.content??[]).filter(block=>block.type==='text').map(block=>block.text)).join('\n');assert.ok(text.includes(expectedContext.model_text));assert.ok(text.includes(expectedQuestion));assert.ok(!text.includes('RAW-REASONING-NEVER-SEND'));assert.ok(!text.includes('data:image/png;base64,'));assert.ok(!text.includes('HISTORY-00'));assert.ok(expectedContext.model_text.length<=14000);}
   const planned=web?[
    [['search-a','web_search',{queries:['synthetic one','synthetic two']}],['search-b','web_search',{queries:['synthetic three']}]],
    [['fetch-a','web_fetch',{url:'https://example.com/page'}],['fetch-b','web_fetch',{url:'https://example.com/failed'}],['fetch-duplicate','web_fetch',{url:'https://EXAMPLE.com:443/page#duplicate'}]],
@@ -58,7 +59,7 @@ async function chatCase(t,{bounded=false,web=false,maintenance=false}={}){
   const probe=createServer();await listen(probe);const port=probe.address().port;await new Promise(done=>probe.close(done));
   const patchPath=join(prepared.directory,'cordis.patch.yml');let patch=await readFile(patchPath,'utf8');
   const parsed=JSON.parse(patch.replace('!!js process.cwd()','null')),adapter=parsed.find(row=>row.insert).insert.find(row=>row.id==='jot-session-adapter');
-  adapter.config={...adapter.config,port,workbenchOrigin:gateway,ordinaryExecutionPolicy:policy,...(bounded||web?{ordinaryChatContext:true}:{}),...(web?{ordinaryChatWeb:true}:{}),chatFixture:{admissions:join(root,'admissions'),receipt:join(root,'composition.json'),...(maintenance?{maintenance:true}:{}),...(bounded?{history:join(root,'context-history.json')}:{}),...(web?{webReceipt:join(root,'web-receipt.json')}:{})}};
+  adapter.config={...adapter.config,port,workbenchOrigin:gateway,ordinaryExecutionPolicy:policy,...(bounded||web?{ordinaryChatContext:true}:{}),...(web?{ordinaryChatWeb:true}:{}),chatFixture:{admissions:join(root,'admissions'),receipt:join(root,'composition.json'),...(maintenance?{maintenance:true}:{}),...(accounting?{accounting:{request:join(root,'accounting-request.json'),receipt:join(root,'accounting-receipt.json')}}:{}),...(bounded?{history:join(root,'context-history.json')}:{}),...(web?{webReceipt:join(root,'web-receipt.json')}:{})}};
   adapter.inject.push('jotChatPresetReady');
   parsed.find(row=>row.insert).insert.unshift({id:'preset-jot-chat',name:pathToFileURL(fileURLToPath(new URL('../chat-preset.mjs',import.meta.url))).href});
   parsed.push({id:'llm-deepseek',config:{baseURL:modelUrl,apiKeyEnv:'DEEPSEEK_API_KEY',reasoningEffort:'high'}});
@@ -117,9 +118,10 @@ async function chatCase(t,{bounded=false,web=false,maintenance=false}={}){
    const history=JSON.parse(await readFile(join(root,'context-history.json'),'utf8'));assert.equal(history.contexts.length,2);assert.deepEqual(history.user_rpcs,[accepted.json().run_id,next.json().run_id]);assert.ok(history.replace_generation>=1);
    const sent=JSON.stringify(requests[1].messages);assert.equal(sent.split(firstQuestion).length-1,1);assert.equal(service.db.prepare("SELECT count(*) n FROM ga_messages WHERE conversation_id=? AND role='user'").get(conversation.conversation_id).n,22);
    assert.equal(service.db.prepare("SELECT count(*) n FROM ga_messages WHERE conversation_id=? AND role='assistant' AND run_id IS NOT NULL").get(conversation.conversation_id).n,2);
-   if(maintenance){const prepared=await prepareMaintenance(next.json().run_id);assert.notEqual(prepared.intent.intent_id,maintenanceIntent.intent_id);assert.equal(service.db.prepare('SELECT count(*) n FROM ga_chat_compaction_intents').get().n,2);assert.equal(requests.length,2);}
+   if(maintenance){const prepared=await prepareMaintenance(next.json().run_id);assert.notEqual(prepared.intent.intent_id,maintenanceIntent.intent_id);assert.equal(service.db.prepare('SELECT count(*) n FROM ga_chat_compaction_intents').get().n,2);assert.equal(requests.length,2);maintenanceIntent=prepared.intent;maintenanceScope=prepared.scope;}
   }
-  t.diagnostic(JSON.stringify({officialLauncher:true,chatPresetMounted:true,thinking:'disabled',tools:['web_fetch','web_search'],boundedContext:bounded,webAllowance:web,maintenanceSource:maintenance,maintenanceObservation:maintenance,compactionExecuted:false,modelRequests:web?8:bounded?2:1,replyCount:web||bounded?2:1,production:false,readiness:'scripted-fixture'}));succeeded=true;
+  if(accounting){await writeFile(join(root,'accounting-request.json'),JSON.stringify({scope:maintenanceScope,intent_id:maintenanceIntent.intent_id}));const deadline=Date.now()+20000;let receipt;while(Date.now()<deadline&&!receipt){try{receipt=JSON.parse(await readFile(join(root,'accounting-receipt.json'),'utf8'));}catch{await new Promise(done=>setTimeout(done,40));}}assert.ok(receipt,'explicit SDK accounting probe receipt');assert.equal(receipt.finished,true,JSON.stringify(receipt));assert.equal(receipt.sessionUnchanged,true);assert.equal(receipt.checkpointPublished,false);assert.equal(requests.length,3);const row=service.db.prepare('SELECT * FROM ga_chat_compaction_attempts').get();assert.equal(row.state,'settled');assert.equal(row.actual_tokens,'11');assert.equal(row.intent_id,maintenanceIntent.intent_id);assert.equal(service.db.prepare("SELECT count(*) n FROM ga_messages WHERE conversation_id=? AND role='assistant' AND run_id IS NOT NULL").get(conversation.conversation_id).n,2);}
+  t.diagnostic(JSON.stringify({officialLauncher:true,chatPresetMounted:true,thinking:'disabled',tools:['web_fetch','web_search'],boundedContext:bounded,webAllowance:web,maintenanceSource:maintenance,maintenanceObservation:maintenance,accountingProbe:accounting,compactionExecuted:false,modelRequests:requests.length,replyCount:web||bounded?2:1,production:false,readiness:'scripted-fixture'}));succeeded=true;
  }catch(error){await writeFile(join(root,'startup-private.log'),output);throw Error('chat_native_host_failed; private diagnostics: '+root,{cause:error});}
  finally{releaseSupplement();if(host&&!exit)host.kill('SIGTERM');if(done)await done;await execution?.catch(()=>{});if(service){await service.app.close();service.db.close();}model.closeAllConnections();await new Promise(done=>model.close(done));if(succeeded)await rm(root,{recursive:true,force:true});}
 }
@@ -129,3 +131,4 @@ test('actual Chat Host uses the accepted bounded context on first and next input
 test('actual Chat Host enforces durable Web groups before official parallel search/fetch effects and still publishes one answer',{skip:!runtime,timeout:60000},t=>chatCase(t,{web:true}));
 
 test('actual completed Chat answers prepare immutable maintenance sources without inference, publication or foreground lease reuse',{skip:!runtime,timeout:60000},t=>chatCase(t,{bounded:true,maintenance:true}));
+test('actual official Chat auxiliary call uses native maintenance and independent exact usage accounting without another answer',{skip:!runtime,timeout:60000},t=>chatCase(t,{bounded:true,maintenance:true,accounting:true}));

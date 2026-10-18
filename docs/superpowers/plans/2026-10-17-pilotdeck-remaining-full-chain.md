@@ -530,6 +530,32 @@ publisher remains authoritative for reconciled answers; no execution status is
 rewritten. Actual Host evidence observes two questions/two answers and no extra
 model calls when preparing records. See
 [source evidence and remaining execution boundary](../../implementation/2026-10-18-chat-compaction-source.md).
+
+### 2026-10-18 native Chat maintenance observation and call accounting
+
+The completed-source prerequisite now has an opt-in original-Session observer:
+shared full native completion parsing, public native idle boundary, exact
+canonical-answer verification and actual effective token-meter pressure.
+Bounded metadata witnesses keep full tool/answer bodies local rather than
+exceeding the Gateway transport limit. These facts remain advisory, not a
+reusable inference grant; see [native observation evidence](../../implementation/2026-10-18-chat-maintenance-observation.md).
+
+The independent auxiliary-call journal now freezes original intent/source,
+owner/Session, Host fence, native witness and thinking-disabled request hash.
+Only the first dispatch transition can advance a separate native guard. New
+input revokes execution but does not revoke late accounting; partial/unknown
+usage and unpriced cost are not zeroed. Lost acknowledgements do not replay a
+model request. The actual official SDK test makes two original Chat answers
+and one explicit auxiliary call inside `runMaintenance`: three requests, two
+canonical answers and eleven auxiliary tokens, with no native log change or
+summary/checkpoint publication. The [accounting evidence](../../implementation/2026-10-18-chat-compaction-accounting.md)
+separates real SDK/local scripted-provider behavior from live provider billing.
+
+This does not complete the Chat/Work plan or any remaining full capability by
+itself. The Chat preset still does not compose automatic native compaction;
+own-operation cancellation/drain, source-backed checkpoint consumption,
+provider/cache metrics, UI/standalone integration and the broader gates above
+remain open. General readiness and generated profiles remain default-off.
 This is a metadata prerequisite only. Native idle/pressure admission, actual
 post-answer compaction, cancellation, auxiliary usage, useful checkpoint handoff
 and Chat-only activity filtering still remain in the Chat/Work plan. No general

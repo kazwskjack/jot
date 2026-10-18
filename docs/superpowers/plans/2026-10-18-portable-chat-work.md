@@ -106,6 +106,16 @@ scheduler. Completing its first step does not complete background compaction.
    policy on the actual auxiliary request. The SDK's default summarization
    call uses `purpose: compaction` but does not automatically copy Chat's
    reasoning effort. Do not mutate frozen request options to fix that.
+   Implemented prerequisite: [independent call journal and stream accounting](../../implementation/2026-10-18-chat-compaction-accounting.md).
+   One immutable intent/attempt binds original scope, Host observer/fence,
+   native witness and exact thinking-off compaction call. Only a first durable
+   dispatch transition lets the separate native guard advance. New input and
+   ticket expiry revoke dispatch; frozen original identity still accepts late
+   actual usage. Unknown/partial tokens and unpriced cost are never zeroed.
+   The real official SDK probe uses `runMaintenance` and an explicit auxiliary
+   call: three requests total, two canonical answers, eleven auxiliary tokens,
+   no native log change or checkpoint. It does not compose the compaction
+   engine or enable automatic execution/readiness.
 4. **Official execution and cancellation:** compose the original compaction
    engine for Chat with automatic foreground compaction disabled; preserve
    Work's composition. Only after the pressure and independent admission

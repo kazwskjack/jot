@@ -9,6 +9,7 @@ import {apply as applyAdapter,inject as adapterInject} from '../../session-adapt
 import {createOrdinaryInputAdmissions} from '../../session-adapter/ordinary-input-admissions.js';
 import {createNativeReplayProfile} from '../../session-adapter/native-replay-profile.js';
 import {createNativeInvariantReplay} from '../../session-adapter/native-invariant-replay.js';
+import {installChatAccountingProbe} from './chat-accounting-probe.mjs';
 export const name='jot-chat-native-fixture';
 export const inject=[...adapterInject,'jotChatPresetReady','agentPresets','tools','web','tokenMeter'];
 export async function apply(ctx,config){
@@ -30,6 +31,7 @@ export async function apply(ctx,config){
  ctx.on('agent/created',async({agent})=>{if(agent.session.header.agentPreset==='jot-chat')await writeFile(chatFixture.receipt,JSON.stringify(facts(agent)));});
  const history={contexts:[],user_rpcs:[],replace_generation:0};
  if(chatFixture.history)ctx.on('session/event',(session,event)=>{if(session.header.agentPreset!=='jot-chat')return;if(event.type==='user/message'){const source=event.data.source;if(source.kind==='jot-chat-context')history.contexts.push({message_id:event.data.id,run_id:source.run_id,context_sha256:source.context_sha256});if(source.kind==='user')history.user_rpcs.push(source.rpcId);}history.replace_generation=session.surface.replaceGeneration;writeFileSync(chatFixture.history,JSON.stringify(history));});
- let maintenance={};if(chatFixture.maintenance){const {Session}=await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-session')).href);maintenance={ordinaryRunHistory:{Session,validateLog:createNativeInvariantReplay({Session})},ordinaryChatMaintenanceObservation:{thresholdRatio:.8,headroomTokens:1000}};}
- return applyAdapter(ctx,{...adapterConfig,...maintenance,ordinaryModelSelection:true,ordinaryInputAdmission:{admissions:createOrdinaryInputAdmissions({root:chatFixture.admissions}),profile}});
+ const admissions=createOrdinaryInputAdmissions({root:chatFixture.admissions});let maintenance={};if(chatFixture.maintenance){const {Session}=await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-session')).href);maintenance={ordinaryRunHistory:{Session,validateLog:createNativeInvariantReplay({Session})},ordinaryChatMaintenanceObservation:{thresholdRatio:.8,headroomTokens:1000}};}
+ if(chatFixture.accounting)installChatAccountingProbe(ctx,{requestPath:chatFixture.accounting.request,receiptPath:chatFixture.accounting.receipt,origin:adapterConfig.workbenchOrigin,admissions,kit:maintenance.ordinaryRunHistory});
+ return applyAdapter(ctx,{...adapterConfig,...maintenance,ordinaryModelSelection:true,ordinaryInputAdmission:{admissions,profile}});
 }

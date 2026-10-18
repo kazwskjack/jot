@@ -154,5 +154,15 @@ Completed Chat runs can supply an internal, owner/version-bound maintenance
 source and immutable intent. This metadata-only route rejects foreground
 leases, rechecks the original publication and becomes unavailable after a
 new input/source change. It grants no inference, Session maintenance or answer
-publication. The compaction executor/accounting and readiness remain open;
+publication. The automatic compaction executor and readiness remain open;
 see [source prerequisite and actual Host evidence](../../docs/implementation/2026-10-18-chat-compaction-source.md).
+
+The bearer-only internal `chat-compaction-attempt` endpoint now journals one
+independently fenced compaction call per completed intent. It freezes original
+owner/Session/source, native witness and call hash before dispatch; lost replies
+cannot authorize a second provider call. New input revokes execution while
+original accounting can still record actual/partial/unknown usage. No foreground
+lease, run, answer or monetary quota is created. Missing measurements/unpriced
+cost stay unknown. [Protocol and actual SDK evidence](../../docs/implementation/2026-10-18-chat-compaction-accounting.md)
+distinguish this prerequisite from automatic summary execution and useful
+checkpoint handoff, which are still pending.

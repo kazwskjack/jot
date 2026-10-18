@@ -6,6 +6,9 @@ const digest=v=>createHash('sha256').update(canonical(v)).digest('hex');
 const valid=v=>typeof v==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(v);
 const hash=v=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v);
 const fail=()=>{throw Error('chat_maintenance_observation_unconfirmed');};
+/** Project only after the owned native completion reader has verified the log.
+ * This bounded attestation is not independently an execution grant. */
+export function chatMaintenanceNativeWitness(proof){return{protocol:1,kind:'chat_compaction_native_witness',run_id:proof.run_id,run_version:proof.run_version,session_id:proof.session_id,history_sha256:proof.source_sha256,proof_sha256:digest(proof),raw_sha256:proof.raw_sha256,raw_event_count:proof.raw_event_count,profile_fingerprint:proof.profile_fingerprint,command_ids_sha256:digest(proof.command_ids),native_message_ids_sha256:digest(proof.native_message_ids),native_message_count:proof.native_message_ids.length,answer_sha256:proof.answer_sha256,answer_seq:proof.answer_seq,turn_end_seq:proof.turn_end_seq,execution_authorized:false};}
 /** Source-backed facts, never a maintenance reservation, inference or receipt.
  * The registered Agent stays under the original DSH scheduler. */
 export function createChatMaintenanceObserver({bridge,agents,completionReader,tokenMeter,llm,pressurePolicy}){
@@ -26,7 +29,7 @@ export function createChatMaintenanceObserver({bridge,agents,completionReader,to
   if(pressure.reason==='STATE_CHANGED'||pressure.reason==='ROUTE_UNCONFIRMED'||!isDeepStrictEqual(await completionReader(nativeRequest),proof))fail();check();
   // Full native tool/answer bodies remain local. The authenticated Host attests
   // its shared parser's complete proof via a fixed-size metadata witness.
-  const witness={protocol:1,kind:'chat_compaction_native_witness',run_id:proof.run_id,run_version:proof.run_version,session_id:proof.session_id,history_sha256:proof.source_sha256,proof_sha256:digest(proof),raw_sha256:proof.raw_sha256,raw_event_count:proof.raw_event_count,profile_fingerprint:proof.profile_fingerprint,command_ids_sha256:digest(proof.command_ids),native_message_ids_sha256:digest(proof.native_message_ids),native_message_count:proof.native_message_ids.length,answer_sha256:proof.answer_sha256,answer_seq:proof.answer_seq,turn_end_seq:proof.turn_end_seq,execution_authorized:false};
+  const witness=chatMaintenanceNativeWitness(proof);
   const verified=await bridge.request('chat-compaction-source',binding,{action:'verify-native',...scope,source_sha256:expectedSourceSha256,witness},signal);check();if(session.seq!==proof.raw_event_count)fail();
   const expected={protocol:1,kind:'chat_compaction_native',run_id:scope.run_id,session_id:scope.session_ref,source_sha256:expectedSourceSha256,proof_sha256:digest(proof),witness_sha256:digest(witness),raw_sha256:proof.raw_sha256,raw_event_count:proof.raw_event_count,answer_sha256:proof.answer_sha256,answer_seq:proof.answer_seq,turn_end_seq:proof.turn_end_seq,profile_fingerprint:proof.profile_fingerprint,execution_authorized:false};
   if(!isDeepStrictEqual(verified?.observation,expected))fail();

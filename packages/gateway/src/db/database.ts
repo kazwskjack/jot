@@ -9,6 +9,7 @@ import {installHistoricalFinalDeliveryIntents} from '../channels/historical-fina
 import {installOrdinaryFinalObservers} from '../harness/ordinary-final-recovery-schema.ts';
 import {installHistoricalDispatchProtocol} from '../channels/historical-final-queue.ts';
 import {installOrdinarySteeringCustody} from '../harness/ordinary-steering-custody.ts';
+import {installChatCompactionAttempts} from '../conversations/chat-compaction-attempt-schema.ts';
 
 const schemaUrl = new URL('./schema.sql', import.meta.url);
 let savepointSequence = 0;
@@ -41,6 +42,7 @@ export function openProductDatabase(path: string): DatabaseSync {
     source_json TEXT NOT NULL,source_sha256 TEXT NOT NULL,created_at TEXT NOT NULL);
    CREATE TRIGGER IF NOT EXISTS ga_chat_compaction_intent_immutable BEFORE UPDATE ON ga_chat_compaction_intents
     BEGIN SELECT RAISE(ABORT,'chat_compaction_intent_immutable'); END;`);
+  installChatCompactionAttempts(db);
   db.exec(`CREATE TABLE IF NOT EXISTS ga_chat_web_groups (
     run_id TEXT NOT NULL REFERENCES ga_runs(id) ON DELETE CASCADE,
     kind TEXT NOT NULL CHECK(kind IN ('search','fetch')),session_id TEXT NOT NULL,

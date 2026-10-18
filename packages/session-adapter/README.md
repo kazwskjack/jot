@@ -38,6 +38,15 @@ A Cordis plugin that connects the extended Jot gateway to an existing DSH Sessio
 
 ## Host requirements
 
+`chat-compaction-stream.js` exports an optional independent auxiliary-call
+decorator. It is not registered on ordinary or Work/role streams. Its caller
+must own official native maintenance and cancellation guards; the separate
+Gateway journal records original source/call identity, one-time dispatch and
+late usage without borrowing a foreground lease. Receipts are not execution
+permission. [Accounting protocol and evidence](../../docs/implementation/2026-10-18-chat-compaction-accounting.md)
+describe unknown/partial usage and the remaining automatic-summary/checkpoint
+gates. No new model probe, user token cap or production readiness is enabled.
+
 The package declares these peer dependencies:
 
 - `@deepseek-ai/cordis` `^4.0.2`
