@@ -1,5 +1,14 @@
 # Jot DSH Session adapter
 
+`chat-compaction-pressure.js` provides a read-only effective-request pressure
+inspection prerequisite for Chat maintenance. It uses the host's official token
+meter, exact routed model metadata and explicitly resolved host policy. Low
+pressure, unavailable capacity or changing state quietly skips. A `needed`
+result is advisory with `execution_authorized: false`; it is neither native
+completion/idle proof nor a model grant. It is not wired into execution or an
+HTTP endpoint. Background inference, independent accounting, cancellation and
+checkpoint handoff remain pending in the [Chat/Work plan](../../docs/superpowers/plans/2026-10-18-portable-chat-work.md).
+
 A Cordis plugin that connects the extended Jot gateway to an existing DSH Session Controller. It is not a standalone model server and cannot be launched with `node index.js` to create a complete runtime.
 
 ## Host requirements

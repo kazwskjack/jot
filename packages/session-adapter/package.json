@@ -20,6 +20,7 @@
     "ordinary-model-selection.js",
     "ordinary-execution-policy.js",
     "chat-context.js",
+    "chat-compaction-pressure.js",
     "chat-web.js",
     "model-catalog.js",
     "conversation-goal.js",

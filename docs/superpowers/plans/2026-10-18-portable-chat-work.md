@@ -78,6 +78,15 @@ scheduler. Completing its first step does not complete background compaction.
    do not measure the raw stored transcript as if it were the next request.
    Low pressure, missing reliable metadata or a busy Session means a quiet
    no-op, not a forced summary or foreground retry.
+   Partial prerequisite implemented: [effective-pressure evidence](../../implementation/2026-10-18-chat-compaction-pressure.md).
+   `chat-compaction-pressure.js` reads the
+   official effective meter and exact routed capacity, snapshots the request
+   envelope/surface measurement around metadata resolution and quietly refuses
+   missing or changing facts. Threshold includes effective output reservation
+   and headroom, matching the pinned SDK calculation. Thirteen focused tests
+   cover low/equal pressure, route drift, missing capacity, raw-history
+   exclusion and cancellation. This is unwired advice only, not native
+   completion/idle proof, SDK execution acceptance or independent admission.
 3. **Dispatch/accounting boundary:** record a separately fenced background
    attempt before inference. Bind it to the immutable intent and original
    source. Never reuse the completed foreground execution lease, create a
