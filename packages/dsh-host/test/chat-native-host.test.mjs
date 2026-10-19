@@ -18,7 +18,7 @@ import {SessionCommandDispatcher} from '../../gateway/src/harness/command-dispat
 import {notifyCommittedChatAnswer} from '../../gateway/src/harness/chat-post-answer.ts';
 const runtime=process.env.JOT_DSH_RUNTIME_MODULES;
 const listen=async server=>{await new Promise(done=>server.listen(0,'127.0.0.1',done));return'http://127.0.0.1:'+server.address().port;};
-async function chatCase(t,{bounded=false,web=false,maintenance=false,accounting=false,compaction=false,lowPressure=false,cancelCompaction=false,checkpoint=false,contextV2=false,replacedSurface=false,recovery=null,automatic=null,ui=false,uiCancel=false}={}){
+async function chatCase(t,{bounded=false,web=false,maintenance=false,accounting=false,compaction=false,lowPressure=false,cancelCompaction=false,checkpoint=false,contextV2=false,replacedSurface=false,recovery=null,automatic=null,ui=false,uiCancel=false,uiSteer=false}={}){
  const root=await mkdtemp(join(tmpdir(),'jot-chat-native-')),home=join(root,'home'),workspace=join(root,'workspace');await mkdir(workspace);
  const token=randomBytes(32).toString('hex'),adapterToken=randomBytes(32).toString('hex'),modelKey='sk-'+randomBytes(32).toString('hex'),requests=[];
  let service,host,exit,done,execution,uiSurface,nativeClient,output='',succeeded=false,modelFailure;
@@ -53,12 +53,12 @@ async function chatCase(t,{bounded=false,web=false,maintenance=false,accounting=
    {type:'content_block_stop',index:0});
   events.push({type:'message_delta',delta:{stop_reason:planned?'tool_use':'end_turn'},usage:{output_tokens:1}},{type:'message_stop'});
   if((cancelCompaction||recovery==='partial'||automatic==='cancel')&&compactionRequest){for(const event of events.slice(0,-2))res.write('event: '+event.type+'\ndata: '+JSON.stringify(event)+'\n\n');await new Promise(resolve=>res.once('close',resolve));return;}
-  if(ui){for(const event of events.slice(0,-2))res.write('event: '+event.type+'\ndata: '+JSON.stringify(event)+'\n\n');await (uiCancel?Promise.race([uiGate,new Promise(r=>res.once('close',r))]):uiGate);if(res.destroyed)return;for(const event of events.slice(-2))res.write('event: '+event.type+'\ndata: '+JSON.stringify(event)+'\n\n');res.end();return;}
+  if(ui&&!uiSteer){for(const event of events.slice(0,-2))res.write('event: '+event.type+'\ndata: '+JSON.stringify(event)+'\n\n');await (uiCancel?Promise.race([uiGate,new Promise(r=>res.once('close',r))]):uiGate);if(res.destroyed)return;for(const event of events.slice(-2))res.write('event: '+event.type+'\ndata: '+JSON.stringify(event)+'\n\n');res.end();return;}
   for(const event of events)res.write('event: '+event.type+'\ndata: '+JSON.stringify(event)+'\n\n');res.end();
  }catch(error){modelFailure=error;res.writeHead(500);res.end('synthetic_request_rejected');}});
  const modelUrl=await listen(model);
  try{
-  service=await buildServer({databasePath:join(root,'gateway.db'),workspaces:['ws'],internalChannelToken:token,uploadRoot:join(root,'uploads'),workbenchRoot:join(root,'workspaces'),templateRoot:fileURLToPath(new URL('../../gateway/file-engine/templates/',import.meta.url)),chatModeEnabled:true,...(ui?{csrfToken:uiCsrf,allowedOrigins:uiOrigins,modelCatalogClient:{modelCatalog:async()=>nativeClient.modelCatalog(AbortSignal.timeout(5000))}}:{}),
+  service=await buildServer({databasePath:join(root,'gateway.db'),workspaces:['ws'],internalChannelToken:token,uploadRoot:join(root,'uploads'),workbenchRoot:join(root,'workspaces'),templateRoot:fileURLToPath(new URL('../../gateway/file-engine/templates/',import.meta.url)),chatModeEnabled:true,ordinarySteeringEnabled:uiSteer,ordinaryInputRecoveryEnabled:uiSteer,...(ui?{csrfToken:uiCsrf,allowedOrigins:uiOrigins,modelCatalogClient:{modelCatalog:async()=>nativeClient.modelCatalog(AbortSignal.timeout(5000))}}:{}),
    // Explicit fixture readiness; no production readiness claim is made.
    conversationModeClient:{conversationModeReadiness:async()=>ui?nativeClient.conversationModeReadiness(AbortSignal.timeout(5000)):({protocol:1,ready:true,policy}),...(ui?{observeNativeIdle:(...args)=>nativeClient.observeNativeIdle(...args),conversationGoal:(...args)=>nativeClient.conversationGoal(...args)}:{})}});
   const matchesPublish=request=>recovery&&!faultInjected&&request.url==='/internal/v1/workbench/chat-compaction-checkpoint'&&request.body?.action==='publish';
@@ -108,7 +108,7 @@ async function chatCase(t,{bounded=false,web=false,maintenance=false,accounting=
   const execute=runner.run.bind(runner);let runnerFailure;runner.run=async input=>{try{return await execute(input);}catch(error){runnerFailure={message:error.message,reason:error.reasonCode};throw error;}};
   const worker=new HarnessWorker(service.db,coordinator,runner,{workerId:'chat-fixture',leaseMs:60000,ordinaryInputRecoveryEnabled:true,ordinarySteeringEnabled:true,...(automatic?{chatPostAnswer:runId=>notifyCommittedChatAnswer(service.db,runId,client,AbortSignal.timeout(10000))}:{})});
   execution=worker.processNext();execution.catch(()=>{});
-  if(ui){const page=uiSurface.page;await page.locator('article.assistant').filter({hasText:'CHAT-NATIVE-OK'}).waitFor();assert.equal(await page.getByRole('button',{name:'切换到 work',exact:true}).isDisabled(),true);assert.equal(service.db.prepare("SELECT count(*) n FROM ga_messages WHERE role='assistant' AND status='complete' AND run_id=?").get(acceptedRunId).n,0);
+  if(ui&&!uiSteer){const page=uiSurface.page;await page.locator('article.assistant').filter({hasText:'CHAT-NATIVE-OK'}).waitFor();assert.equal(await page.getByRole('button',{name:'切换到 work',exact:true}).isDisabled(),true);assert.equal(service.db.prepare("SELECT count(*) n FROM ga_messages WHERE role='assistant' AND status='complete' AND run_id=?").get(acceptedRunId).n,0);
    if(uiCancel){
     const receipt=page.waitForResponse(r=>r.request().method()==='POST'&&r.url().endsWith('/cancel'));await page.getByRole('button',{name:'停止生成',exact:true}).click();const response=await receipt;assert.equal(response.status(),202);const acceptedCancel=await response.json();assert.equal(acceptedCancel.run_id,acceptedRunId);
     let nativeCancels=0;const cancel=client.cancel.bind(client);client.cancel=async(...args)=>{nativeCancels++;return cancel(...args);};
@@ -117,7 +117,9 @@ async function chatCase(t,{bounded=false,web=false,maintenance=false,accounting=
    }releaseUi();}
   if(web){
    const deadline=Date.now()+20000;while(requests.length<2&&Date.now()<deadline&&!exit)await new Promise(done=>setTimeout(done,30));assert.equal(requests.length,2,'first Web group has finished before steering');
-   const original=acceptedRunId,command=service.commands.steer(original,'chat-owner',{text:'Keep using the existing evidence after this synthetic supplement.',client_message_id:'web-supplement',expected_run_version:service.runs.get(original,'chat-owner').version},'web-supplement');
+   const original=acceptedRunId;let command;
+   if(uiSteer){const page=uiSurface.page,accepted=page.waitForResponse(r=>r.request().method()==='POST'&&r.url().endsWith('/steer'));await page.getByRole('textbox',{name:'对话消息',exact:true}).fill('Keep using the existing evidence after this synthetic supplement.');await page.getByRole('button',{name:'补充当前任务',exact:true}).click();const response=await accepted;assert.equal(response.status(),202);command=await response.json();assert.equal(service.db.prepare('SELECT count(*) n FROM ga_ordinary_steering_custody').get().n,1);assert.equal(service.db.prepare('SELECT count(*) n FROM ga_runs').get().n,1);}
+   else command=service.commands.steer(original,'chat-owner',{text:'Keep using the existing evidence after this synthetic supplement.',client_message_id:'web-supplement',expected_run_version:service.runs.get(original,'chat-owner').version},'web-supplement');
    const dispatcher=new SessionCommandDispatcher(service.db,service.events,client,id=>worker.isReady(id),undefined,{currentExecutionFor:id=>worker.readyExecutionFor(id)});assert.equal(await dispatcher.processNext(),true);assert.equal(command.run_id,original);releaseSupplement();
   }
   await execution;if(modelFailure)throw modelFailure;
@@ -153,7 +155,7 @@ async function chatCase(t,{bounded=false,web=false,maintenance=false,accounting=
    assert.equal(service.db.prepare('SELECT count(*) n FROM ga_chat_web_groups').get().n,2);assert.equal(service.db.prepare('SELECT count(*) n FROM ga_chat_web_calls').get().n,4);
    const results=requests[3].messages.flatMap(message=>Array.isArray(message.content)?message.content:[]).filter(block=>block.type==='tool_result');for(const id of ['fetch-duplicate','search-again','fetch-again'])assert.equal(results.find(r=>r.tool_use_id===id)?.is_error,true,'must be a native error result: '+id);
    assert.ok(JSON.stringify(requests[2].messages).includes('existing evidence after this synthetic supplement'));for(const id of ['search-again','fetch-again'])assert.ok(JSON.stringify(results.find(r=>r.tool_use_id===id)).includes('CHAT_WEB_ALLOWANCE_CONSUMED'));
-   const next=await service.app.inject({method:'POST',url:`/v1/conversations/${conversation.conversation_id}/messages`,headers:{'x-user-id':'chat-owner'},payload:{client_message_id:'web-input-two',content:[{type:'text',text:'A new synthetic question receives its own Web allowance.'}]}});assert.equal(next.statusCode,202,next.body);
+   const next=await service.app.inject({method:'POST',url:`/v1/conversations/${conversation.conversation_id}/messages`,headers:{'x-user-id':'chat-owner',...(uiSteer?{'x-jot-actor':'web','x-csrf-token':uiCsrf,origin:uiOrigins[0],'idempotency-key':'web-input-two'}:{})},payload:{client_message_id:'web-input-two',content:[{type:'text',text:'A new synthetic question receives its own Web allowance.'}]}});assert.equal(next.statusCode,202,next.body);
    await worker.processNext();if(modelFailure)throw modelFailure;assert.equal(service.runs.get(next.json().run_id,'chat-owner').status,'succeeded');assert.equal(requests.length,8);
    const repeated=JSON.parse(await readFile(join(root,'web-receipt.json'),'utf8'));assert.equal(repeated.search.length,6);assert.equal(repeated.fetch.length,4);assert.equal(service.db.prepare('SELECT count(*) n FROM ga_chat_web_groups').get().n,4);assert.equal(service.db.prepare('SELECT count(*) n FROM ga_chat_web_calls').get().n,8);
    assert.equal(service.db.prepare("SELECT count(*) n FROM ga_messages WHERE run_id=? AND role='assistant'").get(next.json().run_id).n,1);
@@ -246,3 +248,5 @@ for(const mode of ['high','low','cancel','early'])test('actual official Chat aut
 test('actual mobile React through original BFF and Chat SDK streams before commit and reloads one answer',{skip:!runtime,timeout:60000},t=>chatCase(t,{ui:true}));
 
 test('actual mobile React cancellation reaches original Dispatcher and native SDK with no completed answer',{skip:!runtime,timeout:60000},t=>chatCase(t,{ui:true,uiCancel:true}));
+
+test('actual mobile original supplement reaches owning Dispatcher and native SDK without a fresh-run fallback',{skip:!runtime,timeout:60000},t=>chatCase(t,{ui:true,web:true,uiSteer:true}));

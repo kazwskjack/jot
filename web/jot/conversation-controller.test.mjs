@@ -58,3 +58,17 @@ test('a sequence gap reloads authoritative state before the next stream and stop
  }});
  const running=controller.start();await reached;controller.stop();await running;assert.equal(snapshots,2);assert.equal(streams,2);
 });
+
+
+test('original supplement retries its frozen run/version/key after terminal state and capability changes',async()=>{
+ const calls=[];let reply=Error('lost');const c=new RoleChatController('role-1',{request:async(path,method,body,key)=>{calls.push(structuredClone({path,method,body,key}));if(reply instanceof Error)throw reply;return reply;}});
+ c.state={runs:{r:{run_id:'r',conversation_id:'role-1',status:'running',version:3}}};
+ await assert.rejects(()=>c.send('Original supplement',[],{originalTask:true,steeringConfigured:true}));assert.equal(c.pendingMessage,true);assert.equal(calls[0].path,'/runs/r/steer');assert.deepEqual(calls[0].body,{delivery:'original',text:'Original supplement',client_message_id:calls[0].body.client_message_id,expected_run_version:3});
+ c.state.runs.r.status='succeeded';reply={accepted:true,command_id:'cmd-one',run_id:'wrong'};await assert.rejects(()=>c.send('Changed'),/发送结果尚未确认/);assert.equal(c.pendingMessage,true);
+ reply=Object.assign(Error('IDEMPOTENCY_IN_PROGRESS'),{status:409});await assert.rejects(()=>c.send('Changed'));assert.equal(c.pendingMessage,true);
+ reply={accepted:true,command_id:'cmd-one',run_id:'r'};await c.send('Changed');assert.equal(c.pendingMessage,false);for(const call of calls)assert.deepEqual(call,calls[0]);
+});
+for(const scenario of ['unconfigured','queued','attachments','foreign'])test('ordinary active supplement refuses '+scenario+' without creating another message',async()=>{
+ let calls=0;const c=new RoleChatController('role-1',{request:async()=>{calls++;}});c.state={runs:{r:{run_id:'r',conversation_id:scenario==='foreign'?'another':'role-1',status:scenario==='queued'?'queued':'running',version:3}}};
+ await assert.rejects(()=>c.send('Supplement',scenario==='attachments'?['image']:[],{originalTask:true,steeringConfigured:scenario!=='unconfigured'}));assert.equal(calls,0);assert.equal(c.pendingMessage,false);
+});

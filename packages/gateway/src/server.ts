@@ -1,4 +1,5 @@
 import {registerChatCompactionCheckpoints} from './conversations/chat-compaction-checkpoint-route.ts';
+import {reserveOrdinarySteeringCustody} from './harness/ordinary-steering-custody.ts';
 import {registerOrdinarySteeringBinding} from './conversations/ordinary-steering-binding.ts';
 import {registerOrdinarySteeringHistory} from './conversations/ordinary-steering-history.ts';
 import {registerOrdinaryRunHistory} from './conversations/ordinary-run-history.ts';
@@ -83,6 +84,8 @@ export async function buildServer(config: {
   modelCatalogClient?:ModelCatalogClient;
   conversationModeClient?:ConversationModeClient;
   chatModeEnabled?:boolean;
+  ordinarySteeringEnabled?:boolean;
+  ordinaryInputRecoveryEnabled?:boolean;
   workAgentPreset?:string;
   databasePath: string;
   workspaces: string[];
@@ -105,6 +108,8 @@ export async function buildServer(config: {
   /** Server-only trusted provider configuration; never populated from request bodies. */
   emotion?: {env?:NodeJS.ProcessEnv;transport?:typeof fetch;accountingRoutes?:EmotionAccounting['routes']};
 }) {
+  for(const value of [config.ordinarySteeringEnabled,config.ordinaryInputRecoveryEnabled]){if(value!==undefined&&typeof value!=='boolean')throw Error('ordinary_steering_configuration_invalid');}
+  if(config.ordinarySteeringEnabled===true&&config.ordinaryInputRecoveryEnabled!==true)throw Error('ordinary_steering_recovery_required');
   const app = Fastify({ logger: false, bodyLimit: 1024 * 1024 });
   await app.register(multipart, { limits: { fileSize: VOICE_MAX_BYTES, files: 1, fields: 2, parts: 3, fieldSize: 256 } });
   const db = openProductDatabase(config.databasePath);
@@ -363,6 +368,8 @@ export async function buildServer(config: {
     if (['upload_state_conflict'].includes(code)) return reply.code(409).send({ error: { code: code.toUpperCase() } });
     if (code === 'origin_forbidden' || code === 'csrf_invalid') return reply.code(403).send({ error: { code: code.toUpperCase() } });
     if (code === 'idempotency_key_invalid') return reply.code(400).send({ error: { code: 'IDEMPOTENCY_KEY_INVALID' } });
+    if(code==='ordinary_steering_unavailable')return reply.code(503).send({error:{code:'ORDINARY_STEERING_UNAVAILABLE'}});
+    if(code==='ordinary_steering_scope_unconfirmed')return reply.code(409).send({error:{code:'ORDINARY_STEERING_SCOPE_UNCONFIRMED'}});
     if (code === 'contract_request_invalid') return reply.code(400).send({ error: { code: 'CONTRACT_REQUEST_INVALID' } });
     if (code === 'voice_multipart_required') return reply.code(415).send({ error: { code: 'VOICE_MULTIPART_REQUIRED' } });
     if (code === 'voice_busy') return reply.code(429).send({ error: { code: 'VOICE_BUSY' } });
@@ -531,6 +538,7 @@ export async function buildServer(config: {
         max_concurrent_sessions: 5,
         replay_retention_hours: 168, idempotency_retention_hours: 24 },
       voice,conversation_modes:modes,
+      conversation_commands:{protocol:1,ordinary_steer:{configured:config.ordinarySteeringEnabled===true,delivery:'original',attachments:false}},
       workbench: { enabled: true, agent_roles: true, independent_teams: true, agent_messages: true,
         shared_workspace: true, memory_scopes: ['project', 'private'], memory_lifecycle: true, memory_restore: true, memory_consolidation: true, memory_retrieval_traces: true, memory_capture:true, memory_retrieval: 'local_keyword',task_readiness:true,task_prd:true,task_unlimited_runs:true,task_run_limit_protocol:1,model_budget:budgetPolicy!==undefined,
         task_reply_policy:true,task_reply_execution:false,task_create_delivery:true,task_notifications:true,channel_bindings:!!config.internalChannelToken||!!config.emailBindingSend,email_bindings:!!config.emailBindingSend,wecom_bindings:!!config.internalChannelToken,task_notification_events:['changed','completed','failed','needs_confirmation'],
@@ -602,7 +610,18 @@ export async function buildServer(config: {
     const owner = actor(request as any); runs.get(runId, owner);
     return reply.code(202).send(atomicCommand(request,202, () => {
       workbench.assertRunActive(runId); persistentTasks.assertRunActive(runId);
-      return commands.steer(runId, owner, request.body as Record<string, unknown>, String(request.headers['idempotency-key'] || ''));
+      const input=request.body as Record<string,unknown>;
+      if(input.delivery!=='original')return commands.steer(runId,owner,input,String(request.headers['idempotency-key']||''));
+      if(config.ordinarySteeringEnabled!==true)throw Error('ordinary_steering_unavailable');
+      // Native source proofs retain their original exact text payload. Delivery
+      // metadata remains in the HTTP request hash and never grants execution.
+      const receipt=commands.steer(runId,owner,{text:input.text,client_message_id:input.client_message_id,expected_run_version:input.expected_run_version},String(request.headers['idempotency-key']||''));
+      const binding=db.prepare('SELECT session_id FROM ga_run_native_sessions WHERE run_id=?').get(runId);
+      const lease=db.prepare('SELECT owner,generation FROM ga_worker_leases WHERE resource_id=?').get(runId);
+      if(typeof binding?.session_id!=='string'||!lease)throw Error('ordinary_steering_scope_unconfirmed');
+      try{reserveOrdinarySteeringCustody(db,runId,binding.session_id,receipt.command_id,{owner:lease.owner,generation:lease.generation});}
+      catch(error){if(['ordinary_input_binding_rejected','ordinary_steering_binding_rejected','workbench_execution_lease_revoked'].includes((error as Error).message))throw Error('ordinary_steering_scope_unconfirmed');throw error;}
+      return receipt;
     }));
   });
   app.post('/v1/runs/:runId/cancel', async (request, reply) => {

@@ -13389,6 +13389,42 @@
                 }
               }
             }
+          },
+          "conversation_commands": {
+            "type": "object",
+            "properties": {
+              "protocol": {
+                "type": "integer",
+                "const": 1
+              },
+              "ordinary_steer": {
+                "type": "object",
+                "properties": {
+                  "configured": {
+                    "type": "boolean"
+                  },
+                  "delivery": {
+                    "type": "string",
+                    "const": "original"
+                  },
+                  "attachments": {
+                    "type": "boolean",
+                    "const": false
+                  }
+                },
+                "required": [
+                  "configured",
+                  "delivery",
+                  "attachments"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "protocol",
+              "ordinary_steer"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
@@ -13864,6 +13900,12 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 100000
+          },
+          "delivery": {
+            "type": "string",
+            "enum": [
+              "original"
+            ]
           }
         },
         "required": [

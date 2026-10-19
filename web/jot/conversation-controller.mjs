@@ -27,10 +27,20 @@ export class RoleChatController {
    if(!text.trim()&&!attachments.length)throw new Error('empty_message');
    if(options.goalMode&&!text.trim())throw new Error('goal_objective_required');
    const content=[...(text.trim()?[{type:'text',text:goalPrompt(text,options.goalMode===true)}]:[]),...attachments.map(artifact_id=>({type:'file',artifact_id}))];
-   this.pending={key:crypto.randomUUID(),body:{client_message_id:crypto.randomUUID(),content,client_time_zone:Intl.DateTimeFormat().resolvedOptions().timeZone}};
+   const active=options.originalTask?Object.values(this.state?.runs??{}).filter(run=>['queued','starting','running','waiting_user','waiting_approval','cancelling'].includes(run.status)):[];
+   if(active.length){
+    const run=active[0];
+    if(active.length!==1||run.conversation_id!==this.id||!ID.test(run.run_id??'')||!Number.isSafeInteger(run.version)||run.version<1||run.status!=='running'||options.steeringConfigured!==true)throw Error('当前任务暂不能接收补充，请稍后重试');
+    if(attachments.length)throw Error('当前任务暂不支持补充附件，附件已保留');
+    this.pending={kind:'steer',runId:run.run_id,path:`/runs/${encodeURIComponent(run.run_id)}/steer`,key:crypto.randomUUID(),body:{delivery:'original',text:text.trim(),client_message_id:crypto.randomUUID(),expected_run_version:run.version}};
+   }else this.pending={kind:'message',path:`/conversations/${encodeURIComponent(this.id)}/messages`,key:crypto.randomUUID(),body:{client_message_id:crypto.randomUUID(),content,client_time_zone:Intl.DateTimeFormat().resolvedOptions().timeZone}};
   }
   this.sending=true;this.changed();const pending=this.pending;
-  try{const result=await this.api.request(`/conversations/${encodeURIComponent(this.id)}/messages`,'POST',pending.body,pending.key);if(!result||Object.keys(result).sort().join(',')!=='accepted,conversation_id,message_id,run_id'||result.accepted!==true||result.conversation_id!==this.id||typeof result.message_id!=='string'||typeof result.run_id!=='string'||!ID.test(result.message_id??'')||!ID.test(result.run_id??''))throw Error('发送结果尚未确认，请重试原消息');this.pending=null;return result;}
+  try{const result=await this.api.request(pending.path,'POST',pending.body,pending.key);
+   const valid=pending.kind==='steer'
+    ?result&&Object.keys(result).sort().join(',')==='accepted,command_id,run_id'&&result.accepted===true&&result.run_id===pending.runId&&typeof result.command_id==='string'&&ID.test(result.command_id)
+    :result&&Object.keys(result).sort().join(',')==='accepted,conversation_id,message_id,run_id'&&result.accepted===true&&result.conversation_id===this.id&&typeof result.message_id==='string'&&typeof result.run_id==='string'&&ID.test(result.message_id)&&ID.test(result.run_id);
+   if(!valid)throw Error('发送结果尚未确认，请重试原消息');this.pending=null;return result;}
   catch(error){if(error?.status>=400&&error.status<500&&error.status!==408&&error.message!=='IDEMPOTENCY_IN_PROGRESS')this.pending=null;throw error;}
   finally{this.sending=false;this.changed();}
  }

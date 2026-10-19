@@ -8,7 +8,7 @@ export type ModelSelection = { provider: string; model: string; reasoning_effort
 
 export type CapabilitySet = { search: boolean; fetch: boolean; browser_interaction: boolean; file_read: boolean; file_edit: boolean; command_execution: boolean; questions: boolean; approvals: boolean; artifact_download: boolean; resume_checkpoint: boolean };
 
-export type Capabilities = { conversation_modes?:{default:'chat'|'work';work:{supported:true};chat:{ready:boolean}};api_version: string; event_schema_version: string; adapter_version: string; capabilities: CapabilitySet; models: Array<{ provider: string; model: string; reasoning_output: "provider" | "summary" | "none"; supported_reasoning_efforts: Array<string> }>; limits: { max_upload_bytes: number; max_active_runs_per_conversation: 1; max_concurrent_sessions: 5; replay_retention_hours: number; idempotency_retention_hours: number }; voice?: { enabled: boolean; status: "disabled" | "unavailable" | "preparing" | "ready"; max_duration_ms: number; max_bytes: number; accepted_mime_types: string[]; languages: string[] }; workbench?: WorkbenchCapabilities; workspaces: Array<{ workspace_id: string; title: string; can_read: boolean; can_write: boolean }> };
+export type Capabilities = { conversation_commands?:{protocol:1;ordinary_steer:{configured:boolean;delivery:"original";attachments:false}}; conversation_modes?:{default:'chat'|'work';work:{supported:true};chat:{ready:boolean}};api_version: string; event_schema_version: string; adapter_version: string; capabilities: CapabilitySet; models: Array<{ provider: string; model: string; reasoning_output: "provider" | "summary" | "none"; supported_reasoning_efforts: Array<string> }>; limits: { max_upload_bytes: number; max_active_runs_per_conversation: 1; max_concurrent_sessions: 5; replay_retention_hours: number; idempotency_retention_hours: number }; voice?: { enabled: boolean; status: "disabled" | "unavailable" | "preparing" | "ready"; max_duration_ms: number; max_bytes: number; accepted_mime_types: string[]; languages: string[] }; workbench?: WorkbenchCapabilities; workspaces: Array<{ workspace_id: string; title: string; can_read: boolean; can_write: boolean }> };
 
 export type VoiceTranscriptionRequest = { client_request_id: string; language?: string; audio: Blob };
 export type VoiceTranscription = { transcription_id: string; status: "queued" | "transcribing" | "succeeded" | "failed" | "cancelled"; text?: string; language?: string; error_code?: "transcription_failed" | "result_expired" | "worker_restarted"; created_at: string; updated_at?: string };
@@ -35,7 +35,7 @@ export type SendMessage = { client_message_id: string; content: Array<InputBlock
 
 export type MessageReceipt = { accepted: true; message_id: string; run_id: string; conversation_id: string };
 
-export type SteerRequest = { client_message_id: string; expected_run_version: number; text: string };
+export type SteerRequest = { delivery?: "original"; client_message_id: string; expected_run_version: number; text: string };
 
 export type CancelRequest = { expected_run_version: number; reason?: string };
 

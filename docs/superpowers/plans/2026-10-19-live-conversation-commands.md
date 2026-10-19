@@ -44,6 +44,31 @@ ambiguous replies. Finally use original BFF/Gateway/Worker/Dispatcher/installed
 SDK for live supplementation and cancellation, observing actual command receipts
 and one final answer rather than creating another conversation/run.
 
+### Text delivery implementation boundary
+
+Use an optional `delivery: "original"` in the existing SteerRequest. Legacy
+omitted requests keep their existing contract. A trusted API opt-in shares the
+original Worker's steering/recovery prerequisites; capabilities report configured
+support, not invented Worker liveness. New UI ordinary active-task sends request
+that explicit delivery and never silently fall back to a new conversation input.
+
+Inside the already atomic original command callback, strip only that delivery
+metadata from the existing three-field native command payload. Then reserve the
+existing `reserveOrdinarySteeringCustody` against the original saved Session and
+current Worker lease. Its original-input scope checks and existing SQL rollback
+guards remain authoritative. Missing/foreign/expired/not-running scope rolls the
+command back. The HTTP request hash still includes delivery, so a cached legacy
+request cannot masquerade as original-only delivery. No new custody store or
+native admission version is needed for this text metadata.
+
+Test acceptance-time custody, exact lost-receipt recovery, flag rollback and the
+pinned earlier Dispatcher's forbidden new-run fallback. Native execution must
+still use the original owning Worker's ready path and admission checks. UI
+acceptance only means a command is retained for that original task; actual
+message events establish native delivery. Attachments remain a separate versioned
+contract rather than a hidden text conversion.
+
+
 ## 3. Attachment continuation is a separate required boundary
 
 Current SteerRequest, Dispatcher, native steering transport and immutable source
@@ -73,7 +98,15 @@ original cancelled state and no canonical answer. Final local regression passes
 1,832 Gateway tests (seven explicit skips), 237 UI and 67 root tests. Actual SDK
 Chat serial tests pass 21 plus the selected original Work case, with no skips.
 
-Step 2's immediate text steering and step 3's attachment continuation remain open.
-The UI still labels active new input as queueing; do not claim otherwise. Match
-trusted owning Worker/admission readiness and prohibit fallback before changing
-that flow. External provider and full capability acceptance remain independent.
+Ordinary Step 2 text steering is now connected through explicit original-only
+API custody and the original owning Dispatcher/native admission. The ordinary UI
+uses supplement semantics; Role/Goal authority stays separate. Actual mobile
+HTTP lost-receipt and installed-SDK native delivery cases pass. See
+[text delivery evidence and limitations](../../implementation/2026-10-19-original-text-steering.md).
+Step 3 attachment continuation, durable browser receipt recovery across forced
+reload, external-provider and full capability acceptance remain open.
+
+Final text-delivery batch: Gateway 1,841 passed/seven explicit skips; root 67, UI
+243, actual installed SDK Chat 22 plus selected Work compaction one passed.
+Windows builds/typecheck passed. See the linked implementation record for exact
+scope, privacy review and remaining attachment/browser-recovery requirements.
