@@ -10,6 +10,7 @@ Jot 用简洁的界面连接提问、执行和结果：看到任务进度，确�
 
 - 配置模型后可进行真实对话与工具调用的本地 Agent。
 - 多会话、SQLite 持久化、事件回放与实时回复。
+- Chat/Work 两种模式：Chat 使用单独配置的关闭思考路线、精简上下文与只读工具；Work 保留 Agent 工具流程。
 - 取消任务、操作确认、新文件生成和下载。
 - 显式允许的网页读取、可选搜索和隔离的浏览器操作。
 - TXT、Markdown、JSON、CSV 文件上传与新文件生成。
@@ -31,6 +32,8 @@ npm run demo
 ```
 
 访问 `http://127.0.0.1:3030`。真实 Agent 使用时，将 `.env.example` 复制为 `.env`，填写模型地址、名称和密钥，再运行 `npm start`。模型需要支持流式 Chat Completions 与函数工具。
+
+Chat 需要[单独配置](docs/implementation/2026-10-19-standalone-chat-execution.md)，仅在其执行器就绪后成为新对话默认模式。Demo 仍是合成响应。[模式切换与重试说明](docs/implementation/2026-10-19-standalone-mode-ui.md)列出了草稿保留、防重复请求及当前页面内的恢复限制。
 
 读取网页前配置允许的 HTTPS 来源；浏览器功能需安装 Chromium 并设置 `JOT_BROWSER=true`。文档扩展需要 Python 3.12 和按需安装的文档处理依赖。
 

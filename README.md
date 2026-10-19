@@ -10,6 +10,8 @@ Jot puts a small interface around useful Agent work: ask a question, follow the 
 
 - A runnable local Agent with a configurable model endpoint and a bounded tool loop.
 - Separate conversations, SQLite persistence and replayable progress events.
+- Chat/Work modes: a separately configured thinking-disabled Chat route for
+  bounded conversations and read-only tools; Work keeps the Agent tool loop.
 - Live text updates, task cancellation and explicit action approval.
 - Allowlisted web reading, optional JSON search and isolated browser actions.
 - Text, Markdown, JSON and CSV uploads and new downloadable files without overwriting uploads.
@@ -34,6 +36,12 @@ npm run demo
 Open `http://127.0.0.1:3030`. Demo mode does not contact a model or external website.
 
 For real tasks, copy `.env.example` to `.env`, configure `JOT_MODEL_URL`, `JOT_MODEL` and a provider key if required, then run `npm start`. The endpoint must support streaming Chat Completions and function tools. Explicitly allow HTTPS origins before reading pages. Optional browser support requires `npx playwright install chromium` and `JOT_BROWSER=true`.
+
+Chat is a separate explicit configuration, not an alias for the Work model.
+See [Chat setup and supported behavior](docs/implementation/2026-10-19-standalone-chat-execution.md).
+New conversations use Chat only when its configured executor is ready; demo
+output remains synthetic. [Mode switching and retry limits](docs/implementation/2026-10-19-standalone-mode-ui.md)
+describe the tested interface and its current-page recovery boundary.
 
 The first code release is maintained on `feat/standalone-agent`; switch to that branch if the default branch contains documentation only.
 

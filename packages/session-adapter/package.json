@@ -30,6 +30,7 @@
     "chat-compaction-checkpoint.js",
     "chat-checkpoint-recovery.js",
     "chat-post-answer.js",
+    "chat-mode-readiness.js",
     "chat-web.js",
     "model-catalog.js",
     "conversation-goal.js",

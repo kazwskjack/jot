@@ -276,8 +276,13 @@ It is not automatically installed by the profile generator. Actual Host tests
 verify the two Web schemas and a thinking-disabled Messages request through the
 original Gateway/Worker path. Bounded context, durable turn allowances and native
 post-answer compaction now have opt-in implementations and scripted-provider
-SDK acceptance. Product readiness remains unavailable while UI/standalone,
-Work's visible compaction presentation and real-provider gates are unfinished;
+SDK acceptance. Native mode readiness defaults off; explicit trusted
+`ordinaryChatModeReadiness` requires the matching mounted Chat preset, original
+model/input admission, bounded context and read-only Web composition. See
+[actual UI/BFF/Gateway/SDK composition and remaining gates](../../docs/implementation/2026-10-19-chat-native-composition.md).
+This configured capability is not external-provider authentication or production
+acceptance. Standalone and extended interfaces have distinct tested protocols;
+real-provider and the complete portability gates remain open;
 [configuration and evidence](../../docs/implementation/2026-10-18-native-chat-preset.md)
 distinguish these boundaries from a complete Chat feature.
 

@@ -1,6 +1,7 @@
 import {createChatCompactionManager} from './chat-compaction-manager.js'
 import {createChatCheckpointRecovery} from './chat-checkpoint-recovery.js'
 import {createChatPostAnswer} from './chat-post-answer.js'
+import {createChatModeReadiness} from './chat-mode-readiness.js'
 import {createOrdinaryCompletionReader} from './ordinary-completion.js'
 import {createOrdinaryRunCompletionReader,createLiveChatRunCompletionReader} from './ordinary-run-completion.js'
 import {createChatMaintenanceObserver} from './chat-maintenance-observation.js'
@@ -224,7 +225,7 @@ async function createOrResumeSession({controller,request,agents,sessions,session
   return value
 }
 
-export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation=false,sessionNotFoundError,modelCatalogReader,requireOrdinaryModelPolicy=false,chatExecutionPolicy }) {
+export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation=false,sessionNotFoundError,modelCatalogReader,requireOrdinaryModelPolicy=false,chatExecutionPolicy,chatModeReadiness }) {
   const allowedPresets=new Set(ALLOWED_AGENT_PRESETS)
   if(chatExecutionPolicy!==undefined){normalizeChatExecutionPolicy(chatExecutionPolicy);if(!requireOrdinaryModelPolicy||!ordinaryInputAdmissionHost)throw Error('ordinary_execution_policy_config_invalid');allowedPresets.add('jot-chat')}
   const voiceHandler = voiceEnabled ? createVoiceAdapterHandler({ speechController, token }) : null
@@ -255,6 +256,11 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
 
   return async ({ method, url, headers, body, signal = new AbortController().signal }) => {
     if (!authorized(headers.authorization, token)) return json(401, { error: 'unauthorized' })
+    if(url.pathname==='/v1/conversation-modes/readiness'){
+      if(method!=='POST')return json(405,{error:'method_not_allowed'});
+      if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).length)return json(422,{error:'chat_mode_readiness_input_invalid'});
+      return json(200,typeof chatModeReadiness==='function'?chatModeReadiness():{protocol:1,ready:false,policy:null});
+    }
     if(url.pathname==='/v1/models'){
       if(method!=='POST')return json(405,{error:'method_not_allowed'});
       if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).length)return json(422,{error:'model_catalog_input_invalid'});
@@ -784,11 +790,12 @@ export function apply(ctx, config = {}) {
     ({ApiSessionNotFound}=createRequire(ctx.get('profileContext').installAnchor)('@deepseek-ai/dsh-api-session-controller'))
     if(typeof ApiSessionNotFound!=='function'||!(ApiSessionNotFound.prototype instanceof Error))throw Error('jot_session_controller_incompatible')
   }
+  const chatModeReadiness=createChatModeReadiness({enabled:config.ordinaryChatModeReadiness,policy:chatExecutionPolicy,mounted:ctx.get?.('jotChatPresetReady'),context:config.ordinaryChatContext,web:config.ordinaryChatWeb,modelSelection:config.ordinaryModelSelection,admission:!!ordinaryInputAdmissionHost});
   const handler = createAdapterHandler({ controller: ctx.sessionController, fileUploads: ctx.fileUploads, agents: ctx.agents,
     sessions:ctx.sessions,persistence:ctx.sessionPersistence,sessionNotFoundError:ApiSessionNotFound,
     speechController, voiceEnabled, token, workbenchBridge,
     budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation:config.nativeIdleObservation===true,
-    modelCatalogReader:createModelCatalogReader({llm:ctx.llm,enabled:config.ordinaryModelSelection===true}),requireOrdinaryModelPolicy:config.ordinaryModelSelection===true,...(chatExecutionPolicy?{chatExecutionPolicy}:{}) })
+    chatModeReadiness,modelCatalogReader:createModelCatalogReader({llm:ctx.llm,enabled:config.ordinaryModelSelection===true}),requireOrdinaryModelPolicy:config.ordinaryModelSelection===true,...(chatExecutionPolicy?{chatExecutionPolicy}:{}) })
   const server = createServer(async (req, res) => {
     const abort = new AbortController()
     req.once('aborted', () => abort.abort())

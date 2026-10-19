@@ -170,6 +170,7 @@ export class OfficialSessionRunner implements DshRunner {
   private async execute(input:DshRunInput,goalControl?:ConversationGoalExecution,goalRef?:Readonly<{id:string;revision:number}>,ordinaryInput?:OriginalInputExecution,inputMessageId?:string,admission?:OriginalInputExecution):Promise<DshRunResult>{
     const controller = new AbortController()
     const preparation=new PreparationTiming(input.taskRequestId,input.conversationPolicy?.mode,controller.signal,this.options.onPreparationTiming);
+    let drainAnswerFlush:()=>Promise<void>=async()=>{};
     const webOperationPollers = new Map<string, { stop: () => void; promise: Promise<void> }>()
     const persistedWebOperationCalls = new Set<string>()
     const timer = this.options.timeoutMs && this.options.timeoutMs > 0
@@ -388,16 +389,28 @@ export class OfficialSessionRunner implements DshRunner {
           if (observation.terminal && state.syncStartedAt === undefined) state.syncStartedAt = Date.now() / 1000
         }
       }
-      const flushBuffer = async (buffer: { attemptId: string; blockIndex: number; kind: 'text' | 'reasoning';
-        text: string; deltaIndex: number; lastFlushAt: number }) => {
-        if (!buffer.text) return
-        const text = buffer.text; buffer.text = ''
-        const projected = projectSessionFrame({ type: 'assistant-stream', frame: { type: 'chunk',
-          chunk: { type: `${buffer.kind}-delta`, text } } },
-        projectionContext(buffer.attemptId, buffer.blockIndex, buffer.deltaIndex))
-        await emit(projected); buffer.deltaIndex += 1; buffer.lastFlushAt = Date.now()
-      }
-      const flushAll = async () => { for (const buffer of buffers.values()) await flushBuffer(buffer) }
+      let flushTimer:ReturnType<typeof setTimeout>|undefined;
+      let flushQueue:Promise<void>=Promise.resolve(),flushError:unknown,flushFailed=false;
+      const clearFlushTimer=()=>{if(flushTimer!==undefined){clearTimeout(flushTimer);flushTimer=undefined;}};
+      const flushBuffer = (buffer: { attemptId: string; blockIndex: number; kind: 'text' | 'reasoning';
+        text: string; deltaIndex: number; lastFlushAt: number }):Promise<void> => {
+        const next=flushQueue.then(async()=>{
+          if(flushFailed)throw flushError;
+          if (!buffer.text||controller.signal.aborted) return;
+          const text = buffer.text; buffer.text = '';
+          const projected = projectSessionFrame({ type: 'assistant-stream', frame: { type: 'chunk',
+            chunk: { type: `${buffer.kind}-delta`, text } } },
+          projectionContext(buffer.attemptId, buffer.blockIndex, buffer.deltaIndex));
+          await emit(projected); buffer.deltaIndex += 1; buffer.lastFlushAt = Date.now();
+        });
+        flushQueue=next.catch(error=>{flushError=error;flushFailed=true;});return next;
+      };
+      const flushAll = async () => {clearFlushTimer();for (const buffer of buffers.values()) await flushBuffer(buffer);};
+      const scheduleFlush=()=>{
+        if(flushTimer!==undefined)return;
+        flushTimer=setTimeout(()=>{flushTimer=undefined;void flushAll().catch(error=>controller.abort(error));},this.options.deltaFlushMs);
+      };
+      drainAnswerFlush=async()=>{clearFlushTimer();await flushQueue;};
       const queueChunk = async (chunk: Record<string, unknown>, attemptId: string) => {
         if ((chunk.type !== 'text-delta' && chunk.type !== 'reasoning-delta') || typeof chunk.text !== 'string') return
         const stepKey = attemptSteps.get(attemptId) ?? activeStepKey
@@ -409,6 +422,7 @@ export class OfficialSessionRunner implements DshRunner {
         buffer.text += chunk.text; buffers.set(key, buffer)
         if (buffer.text.length >= this.options.deltaMaxChars
           || Date.now() - buffer.lastFlushAt >= this.options.deltaFlushMs) await flushBuffer(buffer)
+        else if(buffer.text)scheduleFlush()
       }
       const commitOrdinary=async()=>{
         while(true){
@@ -624,6 +638,7 @@ export class OfficialSessionRunner implements DshRunner {
     } finally {
       if (timer) clearTimeout(timer)
       controller.abort()
+      await drainAnswerFlush();
       for (const poller of webOperationPollers.values()) poller.stop()
       await Promise.allSettled([...webOperationPollers.values()].map(poller => poller.promise))
     }
