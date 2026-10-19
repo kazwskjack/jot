@@ -38,7 +38,7 @@
 - [x] Add a Git workbench view that selects an owned configured project, displays branch/HEAD/status and bounded staged/working patches, and refreshes after a conflict. Binary/unsafe/unavailable states are clear.
 - [x] Reuse `useResource` cancellation/identity rules; a late response from a different project or selection must never appear in the current view.
 - [x] Exercise the real mobile React/BFF/Gateway UI with a temporary local repository. Verify source edits invalidate a prior snapshot and no commit/discard/push is inferred from a view.
-- [ ] Run appropriate targeted and complete root/UI/Gateway tests and Windows builds, source/staged/history privacy review, then publish a scoped reviewed increment. Keep the full Git capability open.
+- [x] Run appropriate targeted and complete root/UI/Gateway tests and Windows builds, source/staged/history privacy review, then publish a scoped reviewed increment. Keep the full Git capability open.
 
 ## Task 4: reviewed local mutations
 
