@@ -71,8 +71,10 @@ now binds original approval protocol 2, immutable request/dispatch/outcome rows
 and the existing Worker lease to actual selected effects. New-process fixtures
 recover original publication without replay and release proven owned locks.
 The [detailed continuation plan](2026-10-19-git-durable-index-execution.md) keeps
-incomplete lock acquisition, explicit not-published disposition and original
-API/UI execution admission open; these are required before closing task 4.
+explicit not-published disposition and original API/UI execution admission open;
+these are required before closing task 4. Partial lock acquisition now commits
+owned-file identities before exclusive placement and has actual process-exit
+coverage through the link/unlink gaps. Cleanup does not close the full task.
 
 - [ ] Freeze repository identity, HEAD, index and selected worktree bytes in an original owner-approved intent; separate stage/unstage, commit and destructive discard/revert/untracked-delete operations.
 - [ ] Revalidate original authority and all witnesses before dispatch and receipt publication. A stale review never applies to changed bytes. Preserve exact original request on unknown response.

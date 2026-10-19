@@ -71,9 +71,22 @@ rows, original transaction helper and actual child-process crash fixtures.
 - [x] Reconcile after process loss against the original record. Active workers
   are not dead merely because a timer elapsed: revoke/fence the original lease
   before owned-lock recovery, preserving the final synchronous commit fence.
-- [ ] Recover incomplete lock acquisition from durable owned-file identities;
+- [x] Recover incomplete lock acquisition from durable owned-file identities;
   do not delete unproven conventional Git locks. Keep execution admission closed
-  until this failure boundary is resolved and tested.
+  until the remaining disposition and original API/UI boundaries are resolved.
+  Prepare private same-filesystem files first; commit their strict identity/hash
+  manifest in a root transaction before exclusive hard-link placement at Git
+  lock names. Place synchronously inside a separate original lease/approval
+  transaction. Exercise actual exit before manifest commit and before/after
+  link/unlink, including a two-name inode. Preserve unknown links/files.
+- [ ] Add explicit original owner-reviewed disposition for unresolved execution
+  records. Lock cleanup is not task success, rollback or permission to replay.
+  Distinguish protocol-2 pre-dispatch evidence from legacy unknown acquisitions;
+  preserve original applied receipts and exact control acknowledgements.
+  Preserve unresolved-repository exclusion across stamp-encoding/program changes
+  for the same project/configured repository; a changed fingerprint is not a
+  free execution slot. Exercise old stored bindings rather than only old table
+  schemas populated with newly generated witnesses.
 
 ## 4. Original API/UI execution admission and release
 

@@ -91,10 +91,8 @@ are involved. Complete regression/build/privacy publication gates are separate.
 
 ## Still open before execution admission
 
-- A process can exit partway through conventional lock acquisition, before the
-  complete dispatch evidence has committed. Do not delete those unproven locks
-  or call them owned merely because they are old. Durable ownership must precede
-  placement at conventional lock names, with actual crash coverage at each gap.
+- Partial lock acquisition now has the durable ownership boundary described
+  below. No automatic replay or public execution admission follows from cleanup.
 - A recorded pre-publication dispatch currently returns an observation without
   becoming an automatically retried mutation. Add an explicitly reviewed durable
   not-published/abandon disposition and owned-lock handling; unknown outcomes
@@ -106,3 +104,71 @@ are involved. Complete regression/build/privacy publication gates are separate.
 
 Follow the [durable execution plan](../superpowers/plans/2026-10-19-git-durable-index-execution.md)
 without bypassing the original Session, permission, accounting or receipt chain.
+
+## Durable ownership before conventional lock placement
+
+Execution protocol 2 first creates and syncs candidate lock files at private,
+random scratch names in the corresponding configured Git/common directory. No
+conventional lock exists yet. The original immutable preparation row commits
+their exact identities, hashes and canonical destinations before any placement.
+A separate original database transaction checks current approval/ownership and
+the Worker lease, then synchronously creates exclusive hard links at standard
+lock names and unlinks the scratch names. This preserves the journaled physical
+identity without overwriting another writer. A filesystem that cannot provide
+exclusive same-filesystem hard links fails closed; there is no copy or unsafe
+rename fallback. The complete original dispatch still commits before source
+object writes, and publication retains its existing final transaction fence.
+
+A process can exit between link and unlink, leaving two names for one owned
+inode. Recovery first fences the old lease, then validates every known name,
+identity, content hash and complete link count. A third unknown hard link,
+changed bytes, foreign lock, symlink or changed repository is preserved and
+reported, never deleted based on age. The source index is not a cleanup target.
+An exit before the preparation row commits may leave unproven scratch files;
+they are deliberately preserved and no conventional Git locks have been taken.
+
+Existing execution rows migrate with protocol 1; they cannot silently gain the
+new ordering guarantee. A legacy row lacking dispatch remains unknown and
+blocks fresh execution for the same stored repository binding. Historical evidence is never rewritten to match a new
+physical binding. Original applied receipts remain byte-compatible; physical
+reconciliation still requires the stored identity to match exactly.
+New protocol-2 preparation records are immutable, and unresolved preparations
+join dispatches in the repository admission barrier. Cleanup reports
+`not_dispatched` only for a committed new-protocol preparation with no original
+dispatch; its execution remains unknown pending an explicit owner disposition.
+
+Actual child-process exits cover before preparation commit, before the first
+link, and after each of four links and scratch unlinks. Tests also exercise
+failed preparation persistence, extra hard links, changed bytes, replacement
+locks, strict manifest parsing, immutable rows, original-request replay refusal
+and migration from the previous table schema. Sandbox hard-link restrictions
+are distinct from product behavior; tests run in the Windows user context on
+synthetic local repositories. No production setting or web page is changed.
+
+## Exact Windows file identities and runtime cleanup
+
+The first complete run exposed a real NTFS identity defect: some 64-bit file
+IDs exceed JavaScript's exact Number range. Adjacent distinct IDs then rounded
+to the same number, invalidating the preparation manifest. A deterministic test
+reproduces that collision on every platform without relaxing manifest checks.
+Inspection, directory binding, descriptor/path checks and index recovery now
+obtain BigInt filesystem stats and serialize identity/nanosecond fields directly
+as decimal strings. They never convert file IDs through Number. Bounded mode
+bits and timestamp arguments needed by `utimes` have separate explicit numeric
+conversions. Review snapshots made with the old stamp encoding require fresh
+review; mismatched historical physical evidence stays unknown rather than
+being rounded, migrated or reexecuted.
+
+Runtime source fences now hash every guard lock as well as the candidate index.
+The ordinary failure cleanup also checks exact identity, content and accounted
+link count, preserving a file modified by an outside writer. This is exercised
+separately from restarted recovery. A cleanup failure retains the original
+internal cause instead of concealing the earlier preparation error. These
+changes do not grant public mutation authority or complete the full Git task.
+
+The original admission key includes the repository/program stamp. Before public
+execution admission, exclusion must also cover unresolved original records when
+a new stamp encoding or program upgrade changes that key for the same project
+or configured repository. A changed fingerprint must not be treated as a free
+execution slot. This remains part of the explicit-disposition/admission work;
+neither old evidence rewriting nor approval replay is an acceptable migration.

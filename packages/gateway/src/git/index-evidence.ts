@@ -37,3 +37,22 @@ export function indexEvidence(value:unknown):GitIndexEvidence{
   if(size>64*1024*1024)throw Error();return structuredClone(e);
  }catch{throw Error('git_index_evidence_invalid');}
 }
+
+/** Ownership is committed before any canonical Git lock name is occupied. */
+export type GitIndexPreparation={protocol:1;evidence:GitIndexEvidence;pending:Array<{scope:'git'|'common';target:string;path:string;identity:string;sha256:string}>};
+export function indexPreparation(value:unknown):GitIndexPreparation{
+ try{
+  const p=value as GitIndexPreparation;
+  if(!shape(p,['protocol','evidence','pending'])||p.protocol!==1)throw Error();
+  const evidence=indexEvidence(p.evidence);
+  if(!Array.isArray(p.pending)||p.pending.length!==evidence.locks.length)throw Error();
+  const names=new Set<string>(),targets=new Set<string>(),identities=new Set<string>();
+  for(const file of p.pending){
+   if(!shape(file,['scope','target','path','identity','sha256'])||typeof file.path!=='string'||!/^jot-index-lock-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.pending$/.test(file.path))throw Error();
+   const target=evidence.locks.find(lock=>lock.scope===file.scope&&lock.path===file.target);
+   if(!target||target.identity!==file.identity||target.sha256!==file.sha256||names.has(file.path)||targets.has(file.scope+':'+file.target)||identities.has(file.identity))throw Error();
+   names.add(file.path);targets.add(file.scope+':'+file.target);identities.add(file.identity);
+  }
+  return{protocol:1,evidence,pending:structuredClone(p.pending)};
+ }catch{throw Error('git_index_preparation_invalid');}
+}

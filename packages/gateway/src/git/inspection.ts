@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 import {constants} from 'node:fs';
-import {lstat,open,realpath,readdir,mkdir,mkdtemp,writeFile,rm,utimes} from 'node:fs/promises';
+import {lstat as nativeLstat,open,realpath,readdir,mkdir,mkdtemp,writeFile,rm,utimes} from 'node:fs/promises';
 import {isAbsolute,resolve,join,dirname,relative,sep,basename} from 'node:path';
 import {tmpdir} from 'node:os';
 import {workspaceRelativePath} from '../always-on/workspace-provider.ts';
@@ -16,8 +16,11 @@ const hash=(value:string|Buffer)=>createHash('sha256').update(value).digest('hex
 const same=(a:string,b:string)=>process.platform==='win32'?a.toLowerCase()===b.toLowerCase():a===b;
 const within=(root:string,path:string)=>same(root,path)||same(root+sep,path.slice(0,root.length+1));
 const text=(value:Buffer)=>new TextDecoder('utf-8',{fatal:true}).decode(value);
+// NTFS file IDs can exceed Number's exact integer range. Never round physical
+// identities or nanosecond witnesses before approval, execution or recovery.
+const lstat=(path:string)=>nativeLstat(path,{bigint:true});
 const identity=(s:Awaited<ReturnType<typeof lstat>>)=>[String(s.dev),String(s.ino)].join(':');
-const witness=(s:Awaited<ReturnType<typeof lstat>>)=>[identity(s),String(s.size),String(s.mtimeMs),String(s.ctimeMs),String(s.nlink)].join(':');
+const witness=(s:Awaited<ReturnType<typeof lstat>>)=>[identity(s),String(s.size),String(s.mtimeNs),String(s.ctimeNs),String(s.nlink)].join(':');
 const safe=(path:string)=>{if(path.startsWith('-'))throw Error('git_path_unavailable');return workspaceRelativePath(path);};
 export type GitReadContext={directory:string;metadata:string;index:string|null;remotes:GitRemote[];dispose():Promise<void>};
 type ReadContext=GitReadContext;
@@ -60,10 +63,10 @@ export class GitRepositoryInspection{
   return{repository:hash(facts),metadata:await this.metadata(signal)};
  }
  protected async bytes(path:string,max:number,expected?:string){
-  const before=await lstat(path);if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1||before.size>max||expected!==undefined&&witness(before)!==expected)throw Error('git_path_unavailable');
+  const before=await lstat(path);if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1n||before.size>max||expected!==undefined&&witness(before)!==expected)throw Error('git_path_unavailable');
   const file=await open(path,constants.O_RDONLY|(constants.O_NOFOLLOW??0));try{
-   if(witness(await file.stat())!==witness(before))throw Error('git_snapshot_changed');const bytes=await file.readFile();
-   if(bytes.length>max||witness(await file.stat())!==witness(before)||witness(await lstat(path))!==witness(before))throw Error('git_snapshot_changed');return bytes;
+   if(witness(await file.stat({bigint:true}))!==witness(before))throw Error('git_snapshot_changed');const bytes=await file.readFile();
+   if(bytes.length>max||witness(await file.stat({bigint:true}))!==witness(before)||witness(await lstat(path))!==witness(before))throw Error('git_snapshot_changed');return bytes;
   }finally{await file.close();}
  }
  protected async run(context:ReadContext,args:string[],signal?:AbortSignal,allowMissing=false){
@@ -95,7 +98,7 @@ export class GitRepositoryInspection{
    let total=0;const copy=async(source:string,target:string,optional=false)=>{signal?.throwIfAborted();let bytes;try{bytes=await this.bytes(source,32*1024*1024);}catch(error){if(optional&&(error as NodeJS.ErrnoException).code==='ENOENT')return;throw error;}const original=await lstat(source);total+=bytes.length;if(total>64*1024*1024)throw Error('git_metadata_limit');await mkdir(dirname(target),{recursive:true});await writeFile(target,bytes,{mode:0o600});
     // Git uses the index mtime to rehash racily clean stat-cache entries. Giving
     // a copy a newer timestamp can silently hide same-size/same-second edits.
-    if(source===join(this.gitDirectory,'index')||/^sharedindex\.[a-f0-9]+$/.test(basename(source)))await utimes(target,original.atimeMs/1000,original.mtimeMs/1000);
+    if(source===join(this.gitDirectory,'index')||/^sharedindex\.[a-f0-9]+$/.test(basename(source))){const seconds=(ns:bigint)=>Number(ns/1000000000n)+Number(ns%1000000000n)/1e9;await utimes(target,seconds(original.atimeNs),seconds(original.mtimeNs));}
     if(source===join(this.gitDirectory,'index'))context.index=hash(bytes);};
    await copy(join(this.gitDirectory,'HEAD'),join(directory,'HEAD'));
    await copy(join(this.gitDirectory,'index'),join(directory,'index'),true);
@@ -113,7 +116,7 @@ export class GitRepositoryInspection{
   for(let index=0;index<parts.length;index++){
    current=join(current,parts[index]!);let s;try{s=await lstat(current);}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return{kind:'missing',stamp:'missing'};throw Error('git_path_unavailable');}
    if(index<parts.length-1){if(!s.isDirectory()||s.isSymbolicLink())throw Error('git_path_unavailable');}
-   else return{kind:s.isSymbolicLink()?'symlink':s.isFile()&&s.nlink===1?'file':s.isDirectory()?'directory':'other',stamp:witness(s)};
+   else return{kind:s.isSymbolicLink()?'symlink':s.isFile()&&s.nlink===1n?'file':s.isDirectory()?'directory':'other',stamp:witness(s)};
   }throw Error('git_path_unavailable');
  }
  private async collect(context:ReadContext,signal?:AbortSignal){
@@ -153,7 +156,7 @@ export class GitRepositoryInspection{
     signal?.throwIfAborted();const entry=before.entries.find(value=>value.path===path);if(!entry||!['file','missing'].includes(entry.kind))throw Error('git_path_unavailable');
     const original=await this.file(path);if(original.kind==='missing'){files.push({path,kind:'missing',sha256:null,size:0,mode:0});continue;}
     if(original.kind!=='file')throw Error('git_path_unavailable');const bytes=await this.bytes(join(this.root,path),32*1024*1024,original.stamp);size+=bytes.length;if(size>64*1024*1024)throw Error('git_output_limit');
-    files.push({path,kind:'file',sha256:hash(bytes),size:bytes.length,mode:(await lstat(join(this.root,path))).mode&0o777});
+    files.push({path,kind:'file',sha256:hash(bytes),size:bytes.length,mode:Number((await lstat(join(this.root,path))).mode&0o777n)});
    }
    if((await this.inspectContext(context,signal)).snapshot_id!==before.snapshot_id||JSON.stringify(await this.attributeManifest(paths,signal))!==JSON.stringify(attributes))throw Error('git_snapshot_changed');
    return{protocol:2,snapshot_id:before.snapshot_id,repository_sha256:before.repository_sha256,head:before.head,index_sha256:context.index,files,attributes};
@@ -165,7 +168,7 @@ export class GitRepositoryInspection{
   let bytes:Buffer;
   if(entry.index_status==='?'&&entry.worktree_status==='?'){
    if(input.stage==='staged')bytes=Buffer.alloc(0);else{const file=await this.file(entry.path),source=await this.bytes(join(this.root,entry.path),this.limits.maxDiffBytes,file.stamp);
-    try{const content=text(source),lines=content?(content.endsWith('\n')?content.slice(0,-1):content).split('\n'):[],mode=(await lstat(join(this.root,entry.path))).mode&0o111?'100755':'100644';
+    try{const content=text(source),lines=content?(content.endsWith('\n')?content.slice(0,-1):content).split('\n'):[],mode=(await lstat(join(this.root,entry.path))).mode&0o111n?'100755':'100644';
      bytes=source.includes(0)?Buffer.from([0]):Buffer.from('diff --git a/'+entry.path+' b/'+entry.path+'\nnew file mode '+mode+'\n--- /dev/null\n+++ b/'+entry.path+'\n'+(lines.length?'@@ -0,0 +1,'+lines.length+' @@\n'+lines.map(line=>'+'+line).join('\n')+'\n'+(content.endsWith('\n')?'':'\\ No newline at end of file\n'):''));
     }catch{bytes=Buffer.from([0]);}}
   }else bytes=(await this.run(context,['diff',...(input.stage==='staged'?['--cached']:[]),'--no-ext-diff','--no-textconv','--no-color','--no-renames','--src-prefix=a/','--dst-prefix=b/','--',...(entry.original_path?[entry.original_path]:[]),entry.path],signal)).bytes;
