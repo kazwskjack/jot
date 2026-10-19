@@ -73,6 +73,8 @@ import { WorkbenchBudgetPolicy, type ModelBudgetPolicyConfig } from './workbench
 import { TaskBudgetService, registerTaskBudgetRoutes } from './workbench/budget-public.ts';
 import {createAuxiliaryRunGuard} from './workbench/auxiliary-run-guard.ts';
 import {registerConversationGoalRoutes,type ConversationGoalClient} from './conversations/goal-routes.ts';
+import {AttachmentResolver} from './artifacts/resolver.ts';
+import {readAttachmentSteeringReadiness,type OrdinaryAttachmentSteeringClient} from './harness/ordinary-attachment-readiness.ts';
 
 function actor(request: { headers: Record<string, unknown> }) {
   const id = String(request.headers['x-user-id'] || '');
@@ -86,6 +88,8 @@ export async function buildServer(config: {
   chatModeEnabled?:boolean;
   ordinarySteeringEnabled?:boolean;
   ordinaryInputRecoveryEnabled?:boolean;
+  ordinaryAttachmentSteeringEnabled?:boolean;
+  ordinaryAttachmentSteeringClient?:OrdinaryAttachmentSteeringClient;
   workAgentPreset?:string;
   databasePath: string;
   workspaces: string[];
@@ -108,8 +112,9 @@ export async function buildServer(config: {
   /** Server-only trusted provider configuration; never populated from request bodies. */
   emotion?: {env?:NodeJS.ProcessEnv;transport?:typeof fetch;accountingRoutes?:EmotionAccounting['routes']};
 }) {
-  for(const value of [config.ordinarySteeringEnabled,config.ordinaryInputRecoveryEnabled]){if(value!==undefined&&typeof value!=='boolean')throw Error('ordinary_steering_configuration_invalid');}
+  for(const value of [config.ordinarySteeringEnabled,config.ordinaryInputRecoveryEnabled,config.ordinaryAttachmentSteeringEnabled]){if(value!==undefined&&typeof value!=='boolean')throw Error('ordinary_steering_configuration_invalid');}
   if(config.ordinarySteeringEnabled===true&&config.ordinaryInputRecoveryEnabled!==true)throw Error('ordinary_steering_recovery_required');
+  if(config.ordinaryAttachmentSteeringEnabled===true&&(config.ordinarySteeringEnabled!==true||config.ordinaryInputRecoveryEnabled!==true||typeof config.ordinaryAttachmentSteeringClient?.steeringAttachmentsReadiness!=='function'))throw Error('ordinary_attachment_steering_configuration_invalid');
   const app = Fastify({ logger: false, bodyLimit: 1024 * 1024 });
   await app.register(multipart, { limits: { fileSize: VOICE_MAX_BYTES, files: 1, fields: 2, parts: 3, fieldSize: 256 } });
   const db = openProductDatabase(config.databasePath);
@@ -368,6 +373,7 @@ export async function buildServer(config: {
     if (['upload_state_conflict'].includes(code)) return reply.code(409).send({ error: { code: code.toUpperCase() } });
     if (code === 'origin_forbidden' || code === 'csrf_invalid') return reply.code(403).send({ error: { code: code.toUpperCase() } });
     if (code === 'idempotency_key_invalid') return reply.code(400).send({ error: { code: 'IDEMPOTENCY_KEY_INVALID' } });
+    if(code==='ordinary_attachment_steering_unavailable')return reply.code(503).send({error:{code:'ORDINARY_ATTACHMENT_STEERING_UNAVAILABLE'}});
     if(code==='ordinary_steering_unavailable')return reply.code(503).send({error:{code:'ORDINARY_STEERING_UNAVAILABLE'}});
     if(code==='ordinary_steering_scope_unconfirmed')return reply.code(409).send({error:{code:'ORDINARY_STEERING_SCOPE_UNCONFIRMED'}});
     if (code === 'contract_request_invalid') return reply.code(400).send({ error: { code: 'CONTRACT_REQUEST_INVALID' } });
@@ -522,8 +528,8 @@ export async function buildServer(config: {
     const ownerId = actor(request as any);
     const cancelled=new AbortController();const abort=()=>{if(!reply.raw.writableEnded)cancelled.abort();};
     request.raw.once('aborted',abort);reply.raw.once('close',abort);
-    let voice,models,modes;
-    try{[voice,models,modes]=await Promise.all([voiceTranscriptions.capability(),readHostModelCatalog(config.modelCatalogClient,cancelled.signal),conversationModes.capability(cancelled.signal)]);}
+    let voice,models,modes,attachmentSteeringReady;
+    try{[voice,models,modes,attachmentSteeringReady]=await Promise.all([voiceTranscriptions.capability(),readHostModelCatalog(config.modelCatalogClient,cancelled.signal),conversationModes.capability(cancelled.signal),readAttachmentSteeringReadiness(config.ordinaryAttachmentSteeringEnabled===true,config.ordinaryAttachmentSteeringClient,cancelled.signal)]);}
     finally{request.raw.removeListener('aborted',abort);reply.raw.removeListener('close',abort);}
     if (config.csrfToken && request.headers['sec-fetch-site'] !== 'cross-site') {
       reply.header('x-csrf-token', config.csrfToken).header('cache-control', 'no-store');
@@ -538,7 +544,7 @@ export async function buildServer(config: {
         max_concurrent_sessions: 5,
         replay_retention_hours: 168, idempotency_retention_hours: 24 },
       voice,conversation_modes:modes,
-      conversation_commands:{protocol:1,ordinary_steer:{configured:config.ordinarySteeringEnabled===true,delivery:'original',attachments:false}},
+      conversation_commands:{protocol:1,ordinary_steer:{configured:config.ordinarySteeringEnabled===true,delivery:'original',attachments:attachmentSteeringReady}},
       workbench: { enabled: true, agent_roles: true, independent_teams: true, agent_messages: true,
         shared_workspace: true, memory_scopes: ['project', 'private'], memory_lifecycle: true, memory_restore: true, memory_consolidation: true, memory_retrieval_traces: true, memory_capture:true, memory_retrieval: 'local_keyword',task_readiness:true,task_prd:true,task_unlimited_runs:true,task_run_limit_protocol:1,model_budget:budgetPolicy!==undefined,
         task_reply_policy:true,task_reply_execution:false,task_create_delivery:true,task_notifications:true,channel_bindings:!!config.internalChannelToken||!!config.emailBindingSend,email_bindings:!!config.emailBindingSend,wecom_bindings:!!config.internalChannelToken,task_notification_events:['changed','completed','failed','needs_confirmation'],
@@ -608,6 +614,8 @@ export async function buildServer(config: {
   app.post('/v1/runs/:runId/steer', async (request, reply) => {
     const runId = (request.params as {runId: string}).runId;
     const owner = actor(request as any); runs.get(runId, owner);
+    const requested=request.body as Record<string,unknown>;
+    if(Array.isArray(requested.attachments)&&requested.attachments.length&&!(await readAttachmentSteeringReadiness(config.ordinaryAttachmentSteeringEnabled===true,config.ordinaryAttachmentSteeringClient)))throw Error('ordinary_attachment_steering_unavailable');
     return reply.code(202).send(atomicCommand(request,202, () => {
       workbench.assertRunActive(runId); persistentTasks.assertRunActive(runId);
       const input=request.body as Record<string,unknown>;
@@ -615,7 +623,9 @@ export async function buildServer(config: {
       if(config.ordinarySteeringEnabled!==true)throw Error('ordinary_steering_unavailable');
       // Native source proofs retain their original exact text payload. Delivery
       // metadata remains in the HTTP request hash and never grants execution.
-      const receipt=commands.steer(runId,owner,{text:input.text,client_message_id:input.client_message_id,expected_run_version:input.expected_run_version},String(request.headers['idempotency-key']||''));
+      const source={text:input.text,client_message_id:input.client_message_id,expected_run_version:input.expected_run_version};
+      const attachmentManifest=Array.isArray(input.attachments)&&input.attachments.length?new AttachmentResolver(db,config.uploadRoot??join(dirname(config.databasePath),'general-agent-uploads')).pinForMessage(owner,String(runs.get(runId,owner).conversation_id),input.attachments as string[],`steer-source:${runId}:${input.client_message_id}`):undefined;
+      const receipt=commands.steer(runId,owner,{...source,...(attachmentManifest?{content_protocol:1,attachment_manifest:attachmentManifest}:{})},String(request.headers['idempotency-key']||''));
       const binding=db.prepare('SELECT session_id FROM ga_run_native_sessions WHERE run_id=?').get(runId);
       const lease=db.prepare('SELECT owner,generation FROM ga_worker_leases WHERE resource_id=?').get(runId);
       if(typeof binding?.session_id!=='string'||!lease)throw Error('ordinary_steering_scope_unconfirmed');

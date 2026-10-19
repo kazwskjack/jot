@@ -1,3 +1,5 @@
+import {withImmediateTransaction} from '../db/database.ts';
+import {manifestFromAttachments,resolvePinnedManifest,snapshotPinnedManifest,type PinnedAttachmentSnapshot,type AttachmentManifest} from './pinned-manifest.ts';
 import { existsSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
@@ -23,6 +25,20 @@ export class AttachmentResolver {
     }) {
     this.db = db; this.root = root;
     this.limits = { ...limits, leaseMs: limits.leaseMs ?? 30 * 60 * 1000 };
+  }
+
+  /** Pin source identity for later original-command storage; no native send. */
+  pinForMessage(ownerId:string,conversationId:string,artifactIds:string[],leaseId:string):AttachmentManifest {
+    if(!Array.isArray(artifactIds)||new Set(artifactIds).size!==artifactIds.length)throw Error('attachment_manifest_invalid');
+    return withImmediateTransaction(this.db,()=>manifestFromAttachments(this.resolveForMessage(ownerId,conversationId,artifactIds,leaseId),this.limits));
+  }
+
+  resolvePinnedForMessage(ownerId:string,conversationId:string,manifest:unknown,leaseId:string,signal?:AbortSignal):Promise<ResolvedAttachment[]> {
+    return resolvePinnedManifest(this.db,this.root,this.limits,ownerId,conversationId,manifest,leaseId,signal);
+  }
+
+  snapshotPinnedForMessage(ownerId:string,conversationId:string,manifest:unknown,leaseId:string,snapshotRoot:string,signal?:AbortSignal):Promise<PinnedAttachmentSnapshot> {
+    return snapshotPinnedManifest(this.db,this.root,this.limits,ownerId,conversationId,manifest,leaseId,snapshotRoot,signal);
   }
 
   resolveForMessage(ownerId: string, conversationId: string, artifactIds: string[], leaseId: string): ResolvedAttachment[] {

@@ -1,4 +1,5 @@
 import type {DatabaseSync} from 'node:sqlite';
+import {pinnedAttachmentRefs} from '../messages/pinned-attachments.ts';
 import type {EventStore} from '../events/event-store.ts';
 import {withImmediateTransaction} from '../db/database.ts';
 import {inspectOrdinarySteeringHistory} from '../conversations/ordinary-steering-history.ts';
@@ -41,8 +42,8 @@ export class OrdinarySteeringReconciler{
     const current=this.snapshot(runId,session,command);if(current.hash!==before.hash||current.source.command_status!=='pending')return false;
     const raw=this.db.prepare('SELECT payload_json FROM ga_run_commands WHERE id=? AND run_id=?').get(command,runId) as {payload_json:string};
     const payload=JSON.parse(raw.payload_json) as {text:string;client_message_id:string},now=new Date().toISOString(),messageId=current.source.input_message_id;
-    const blocks=[{block_id:messageId+':text',kind:'text',text:payload.text}],content=JSON.stringify({blocks,attachments:[]});
-    if(!current.source.product_message_present){this.db.prepare("INSERT INTO ga_messages(id,conversation_id,run_id,role,status,content_json,client_message_id,created_at,updated_at) VALUES(?,?,?,'user','complete',?,?,?,?)").run(messageId,current.scope.conversation_id,runId,content,payload.client_message_id,now,now);this.events.append(current.scope.conversation_id,runId,'message.created',{message_id:messageId,run_id:runId,role:'user',status:'complete',blocks,created_at:now});}
+    const blocks=payload.text.trim()?[{block_id:messageId+':text',kind:'text',text:payload.text}]:[],attachments=current.source.protocol===2?current.source.attachment_manifest.attachments.map(item=>item.artifact_id):[],content=JSON.stringify({blocks,attachments});
+    if(!current.source.product_message_present){this.db.prepare("INSERT INTO ga_messages(id,conversation_id,run_id,role,status,content_json,client_message_id,created_at,updated_at) VALUES(?,?,?,'user','complete',?,?,?,?)").run(messageId,current.scope.conversation_id,runId,content,payload.client_message_id,now,now);this.events.append(current.scope.conversation_id,runId,'message.created',{message_id:messageId,run_id:runId,role:'user',status:'complete',blocks,...(attachments.length?{attachments}:{}),...(current.source.protocol===2?{attachment_refs:pinnedAttachmentRefs(current.source.attachment_manifest)}:{}),created_at:now});}
     if(this.db.prepare("UPDATE ga_run_commands SET status='applied',applied_at=? WHERE id=? AND run_id=? AND status='pending'").run(now,command,runId).changes!==1)throw Error('ordinary_steering_repair_unconfirmed');
     this.db.prepare('INSERT INTO ga_ordinary_steering_reconciliations(command_id,run_id,conversation_id,owner_id,session_id,source_sha256,observation_sha256,source_json,observation_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)')
      .run(command,runId,current.scope.conversation_id,current.scope.owner_id,session,before.hash,ordinaryHistorySourceSha256(proof),JSON.stringify(before.source),JSON.stringify(proof),now);

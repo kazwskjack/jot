@@ -18,3 +18,24 @@ test('final downloads retain message attachment order across reverse-ordered sna
  const a={...output,artifact_id:'a'},b={...output,artifact_id:'b'},answer={...final,attachments:['a','b']};
  assert.deepEqual(messageFiles({...state,messages:{answer},artifacts:{b,a}},answer),[a,b]);
 });
+
+test('historical upload previews use the sent version even after current metadata changes',()=>{
+ const pin={artifact_id:'input',version:1,sha256:'a'.repeat(64),size_bytes:12,media_type:'text/plain',file_name:'sent.txt'};
+ const newer={...upload,version:2,sha256:'b'.repeat(64),size_bytes:30,media_type:'image/png',file_name:'new.png',preview_kind:'image'};
+ const result=messageFiles({...state,artifacts:{input:newer}},{...user,attachment_refs:[pin]});
+ assert.equal(result.length,1);for(const [key,value] of Object.entries(pin))assert.equal(result[0][key],value);
+ assert.equal(result[0].preview_kind,'text');
+});
+
+test('pinned uploads survive current inventory eviction without borrowing unrelated metadata',()=>{
+ const pin={artifact_id:'input',version:1,sha256:'a'.repeat(64),size_bytes:12,media_type:'text/plain',file_name:'sent.txt'};
+ const result=messageFiles({...state,artifacts:{}},{...user,attachment_refs:[pin]});
+ assert.equal(result.length,1);assert.equal(result[0].version,1);assert.equal(result[0].file_name,'sent.txt');
+ assert.equal(result[0].origin,'upload');assert.equal('remote_path' in result[0],false);
+});
+
+test('unavailable or inconsistent pins never fall back to a current upload',()=>{
+ assert.deepEqual(messageFiles(state,{...user,attachment_refs:[]}),[]);
+ assert.deepEqual(messageFiles(state,{...user,attachment_refs:[{artifact_id:'foreign',version:1}]}),[]);
+ assert.deepEqual(messageFiles(state,{...user,attachment_refs:[{artifact_id:'input',version:0}]}),[]);
+});

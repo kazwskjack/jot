@@ -3,6 +3,18 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const contracts = new URL('../../contracts/', import.meta.url);
+test('pinned message references are bounded public metadata in REST, SSE and YAML',async()=>{
+ const spec=await json('openapi.json'),event=await json('agent-event.schema.json'),ref=spec.components.schemas.MessageAttachmentRef;
+ assert.ok(ref);const {default:Ajv}=await import('ajv/dist/2020.js'),validate=new Ajv({strict:false}).compile(ref);
+ const pin={artifact_id:'file',version:1,sha256:'a'.repeat(64),size_bytes:12,media_type:'text/plain',file_name:'sent.txt'};
+ assert.equal(validate(pin),true);
+ for(const invalid of [{...pin,version:0},{...pin,sha256:'unknown'},{...pin,server_path:'private'},{...pin,receipt_id:'private'},{...pin,size_bytes:-1}])assert.equal(validate(invalid),false);
+ assert.deepEqual(event.$defs.MessageAttachmentRef,ref);
+ assert.equal(spec.components.schemas.Message.properties.attachment_refs.maxItems,10);
+ assert.equal(event.$defs.Message.properties.attachment_refs.maxItems,10);
+ const yaml=await readFile(new URL('openapi.yaml',contracts),'utf8');
+ for(const name of ['Message','MessageAttachmentRef']){const line=yaml.split('\n').find(s=>s.startsWith('    '+name+': '));assert.ok(line);assert.deepEqual(JSON.parse(line.slice(line.indexOf(':')+1)),spec.components.schemas[name]);}
+});
 test('task run-limit schemas preserve finite limits and explicit unlimited null in JSON and YAML',async()=>{
  const spec=await json('openapi.json'),{default:Ajv}=await import('ajv/dist/2020.js'),schema=spec.components.schemas.PersistentTaskBudget;
  const validate=new Ajv({strict:false}).compile(schema);

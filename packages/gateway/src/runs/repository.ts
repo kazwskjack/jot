@@ -3,6 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { withImmediateTransaction } from '../db/database.ts';
 import { EventStore } from '../events/event-store.ts';
 import { decodeStoredContent, encodeInputContent } from '../messages/content.ts';
+import {messageAttachmentProjection} from '../messages/pinned-attachments.ts';
 import {snapshotAcceptedModelPolicy} from '../conversations/model-policy.ts';
 import {acceptedExecutionPolicy,conversationMode,chatModePolicy,type ChatModePolicy} from '../conversations/mode-policy.ts';
 import {ensureModeSession} from '../conversations/mode-sessions.ts';
@@ -174,7 +175,7 @@ export class RunRepository {
     const row = this.db.prepare('SELECT * FROM ga_messages WHERE id=?').get(id) as Record<string, unknown>;
     const content = decodeStoredContent(String(row.content_json));
     return { message_id: row.id, run_id: row.run_id, role: row.role, status: row.status,
-      blocks: content.blocks, ...(content.attachments.length ? { attachments: content.attachments } : {}), created_at: row.created_at };
+      blocks: content.blocks, ...(content.attachments.length ? { attachments: content.attachments } : {}), ...messageAttachmentProjection(this.db,row), created_at: row.created_at };
   }
   private getById(id: string) { return this.runValue(this.db.prepare('SELECT * FROM ga_runs WHERE id=?').get(id) as Record<string, unknown>); }
   private runValue(row: Record<string, unknown>) {

@@ -1,3 +1,4 @@
+import type {PinnedByteSource} from '../artifacts/pinned-byte-source.ts';
 import {normalizeExecutionLease,type ExecutionLease} from '../workbench/execution-lease.ts'
 import {ordinaryRunCompletionSource,validateOrdinaryRunCompletion,normalizeOrdinaryRunHistoryScope,type OrdinaryRunHistoryScope} from './ordinary-run-completion.ts'
 import {normalizeOrdinaryHistoryScope,validateOrdinarySteeringObservation,validateBoundOrdinarySteeringObservation,type OrdinaryHistoryScope} from './ordinary-steering-observation.ts'
@@ -14,6 +15,7 @@ export function normalizeOriginalInputExecution(value:unknown):OriginalInputExec
  return Object.freeze({run_id:row.run_id,execution_lease:normalizeExecutionLease(row.execution_lease)});
 }
 export type OrdinarySteeringExecution=Readonly<{run_id:string;command_id:string;execution_lease:ExecutionLease}>;
+export type OrdinarySteeringAdmission=Readonly<{protocol:1;kind:'ordinary_steering_admission';run_id:string;command_id:string;session_id:string;source_sha256:string;state:'accepted'|'unproven';execution_authorized:false}>;
 export function normalizeOrdinarySteeringExecution(value:unknown):OrdinarySteeringExecution{
  if(!value||typeof value!=='object'||Array.isArray(value))throw Error('ordinary_steering_binding_invalid');const row=value as Record<string,unknown>;
  if(Object.keys(row).sort().join(',')!=='command_id,execution_lease,run_id'||typeof row.run_id!=='string'||typeof row.command_id!=='string'||![row.run_id,row.command_id].every(id=>/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(id))||row.run_id===row.command_id)throw Error('ordinary_steering_binding_invalid');
@@ -157,6 +159,24 @@ export class SessionControllerClient {
     return this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/prompts`,{request_id:requestId,text,mode:'steer',ordinary_steer:proof},signal);
   }
 
+  async steerOriginalContent(sessionId:string,requestId:string,content:SessionPromptPart[],execution:OrdinarySteeringExecution,signal?:AbortSignal){
+    const proof=normalizeOrdinarySteeringExecution(execution);if(proof.command_id!==requestId)throw Error('ordinary_steering_binding_invalid');
+    return this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/prompts`,{request_id:requestId,content,mode:'steer',ordinary_steer:proof},signal);
+  }
+
+  async observeOriginalSteeringAdmission(sessionId:string,execution:OrdinarySteeringExecution,sourceHash:string,signal?:AbortSignal):Promise<OrdinarySteeringAdmission>{
+    nativeIdleSessionId(sessionId);const scope=normalizeOrdinarySteeringExecution(execution);if(!/^[a-f0-9]{64}$/.test(sourceHash))throw Error('ordinary_steering_admission_unconfirmed');
+    const deadline=AbortSignal.timeout(5000),value=await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/steering-admission`,{ordinary_steer:scope},signal?AbortSignal.any([signal,deadline]):deadline);
+    if(!value||Object.keys(value).sort().join(',')!=='command_id,execution_authorized,kind,protocol,run_id,session_id,source_sha256,state'||value.protocol!==1||value.kind!=='ordinary_steering_admission'||value.execution_authorized!==false||value.run_id!==scope.run_id||value.command_id!==scope.command_id||value.session_id!==sessionId||value.source_sha256!==sourceHash||!['accepted','unproven'].includes(String(value.state)))throw Error('ordinary_steering_admission_unconfirmed');
+    return Object.freeze(value as unknown as OrdinarySteeringAdmission);
+  }
+
+  async steeringAttachmentsReadiness(signal?:AbortSignal){
+    const deadline=AbortSignal.timeout(5000),value=await this.post('/v1/ordinary-steering-attachments/readiness',{},signal?AbortSignal.any([signal,deadline]):deadline);
+    if(!value||Object.keys(value).sort().join(',')!=='execution_authorized,protocol,ready'||value.protocol!==1||typeof value.ready!=='boolean'||value.execution_authorized!==false)throw Error('ordinary_attachment_readiness_unconfirmed');
+    return Object.freeze({protocol:1 as const,ready:value.ready,execution_authorized:false as const});
+  }
+
   /**
    * Call the loopback DSH leaf bridge's native Universe route for internal
    * durable batch-event polling and timing metadata. The model never receives
@@ -186,6 +206,21 @@ export class SessionControllerClient {
     const value = await response.json() as Record<string, unknown>
     if (!response.ok) throw new SessionAdapterError(response.status, 'DSH_NO_RUNTIME_OUTCOME')
     return value as { receipt_id: string; file?: Record<string, unknown> }
+  }
+
+  /** Upload exact anonymous snapshot bytes; no path reopen or native prompt.
+   * A confirmed staged file is not command admission or model understanding. */
+  async stageVerifiedFile(sessionId:string,source:PinnedByteSource,displayName:string,signal?:AbortSignal){
+    if(typeof sessionId!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(sessionId)||typeof displayName!=='string'||!displayName||displayName.length>255||!source||typeof source.stream!=='function'||!Number.isSafeInteger(source.sizeBytes)||source.sizeBytes<0||typeof source.sha256!=='string'||!/^[a-f0-9]{64}$/.test(source.sha256))throw Error('session_file_source_invalid');
+    const response=await this.fetchImpl(`${this.baseUrl}/v1/sessions/${encodeURIComponent(sessionId)}/files`,{
+      method:'POST',headers:{authorization:`Bearer ${this.token}`,'content-type':'application/octet-stream','x-file-name-b64':Buffer.from(displayName,'utf8').toString('base64url')},
+      body:Readable.toWeb(Readable.from(source.stream(signal))) as BodyInit,...(signal?{signal}:{}),...({duplex:'half'} as Record<string,unknown>),
+    });
+    if(!response.ok)throw new SessionAdapterError(response.status,'DSH_NO_RUNTIME_OUTCOME');
+    let value:Record<string,unknown>;try{value=await response.json() as Record<string,unknown>;}catch{throw Error('session_file_receipt_unconfirmed');}
+    const file=value?.file as Record<string,unknown>|undefined;
+    if(!value||Object.keys(value).sort().join(',')!=='file,receipt_id'||typeof value.receipt_id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(value.receipt_id)||!file||Object.keys(file).sort().join(',')!=='attachmentId,bytes,name'||file.attachmentId!=='sha256:'+source.sha256||file.bytes!==source.sizeBytes||typeof file.name!=='string'||!file.name||file.name.length>255||['.','..'].includes(file.name)||/[\\/\0\r\n]/.test(file.name))throw Error('session_file_receipt_unconfirmed');
+    return Object.freeze({receipt_id:value.receipt_id,file:Object.freeze({attachmentId:String(file.attachmentId),bytes:source.sizeBytes,name:file.name})});
   }
 
   async memoryExtractionReadiness(signal:AbortSignal){

@@ -2,6 +2,7 @@ import {storedConversationMessageRows} from '../messages/order.ts';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { decodeStoredContent } from '../messages/content.ts';
+import {messageAttachmentProjection} from '../messages/pinned-attachments.ts';
 import { ProjectRepository } from '../projects/repository.ts';
 import {ConversationListCursor} from './list-cursor.ts';
 import {withImmediateTransaction} from '../db/database.ts';
@@ -106,7 +107,7 @@ export class ConversationRepository {
       const content = decodeStoredContent(String(row.content_json));
       return { message_id: row.id, run_id: row.run_id, role: row.role,
         status: row.status, blocks: content.blocks,
-        ...(content.attachments.length ? { attachments: content.attachments } : {}), created_at: row.created_at };
+        ...(content.attachments.length ? { attachments: content.attachments } : {}), ...messageAttachmentProjection(this.db,row), created_at: row.created_at };
     }) };
   }
 }

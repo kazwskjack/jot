@@ -15,7 +15,8 @@ function wait(operation,signal){
 }
 /** Cold ordinary-input restoration inside the original unpublished factory.
  * No prompt, driver wake, Goal activation or admission creation is performed. */
-export function createOrdinaryClaimedSessionComposer({ctx,bridge,Session,agents,sessions,query,projections,validateLog,profile,admissions,ordinaryPresets}){
+export function createOrdinaryClaimedSessionComposer({ctx,bridge,Session,agents,sessions,query,projections,validateLog,profile,admissions,ordinaryPresets,attachmentSteeringProtocol}){
+ if(attachmentSteeringProtocol!==undefined&&attachmentSteeringProtocol!==1||attachmentSteeringProtocol===1&&admissions?.steeringAttachmentAdmissionProtocol!==1)fail();
  const loop=typeof ctx?.get==='function'?ctx.get('agentLoop'):ctx?.agentLoop;
  if(loop?.jotPreSetupHookProtocol!==2||typeof ctx?.on!=='function'||typeof bridge?.request!=='function'||typeof Session?.create!=='function'||typeof agents?.get!=='function'||typeof sessions?.get!=='function'||typeof query?.readSession!=='function'||typeof projections?.snapshot!=='function'||typeof validateLog!=='function'||typeof profile?.read!=='function'||admissions?.entryReservationProtocol!==1||typeof admissions.readReplayCandidate!=='function'||!(ordinaryPresets instanceof Set)||!ordinaryPresets.size)fail();
  const storage=new AsyncLocalStorage(),shutdown=new AbortController(),operations=new Set(),pending=new Set(),busy=new Set();let disposed=false,cleaned=false,disposal;
@@ -27,7 +28,7 @@ export function createOrdinaryClaimedSessionComposer({ctx,bridge,Session,agents,
  removers.push(ctx.on('agent/before-setup',async({agent,source,signal:nativeSignal,bindAbortSignal})=>{
   const record=storage.getStore();if(!record)return;if(record.observed||source!=='resume'||typeof bindAbortSignal!=='function')fail();bindAbortSignal(record.signal);record.signal=AbortSignal.any([record.signal,nativeSignal]);check(record,agent);record.session=agent.session;record.header=freeze(structuredClone(agent.session.header));await authority(record);check(record,agent);
   record.profile=freeze(structuredClone(await wait(()=>profile.read({agent,presetId:agent.session.header.agentPreset,phase:'prepared',signal:record.signal}),record.signal)));check(record,agent);
-  const setup=createOrdinaryClaimedInputRecoverySetup({binding:record.binding,bridge,Session,agents,sessions,query,projections,validateLog,admissions,ordinaryPresets,signal:record.signal,profile:{read:async request=>{const current=await wait(()=>profile.read(request),record.signal);if(!isDeepStrictEqual(current,record.profile))fail();return current;}}});
+  const setup=createOrdinaryClaimedInputRecoverySetup({binding:record.binding,bridge,Session,agents,sessions,query,projections,validateLog,admissions,ordinaryPresets,...(attachmentSteeringProtocol===1?{attachmentSteeringProtocol:1}:{}),signal:record.signal,profile:{read:async request=>{const current=await wait(()=>profile.read(request),record.signal);if(!isDeepStrictEqual(current,record.profile))fail();return current;}}});
   await wait(()=>setup(agent.ctx,agent),record.signal);check(record,agent);const report=setup.resultFor(agent),items=inbox(agent),messages=[...items['next-step'],...items['next-turn']];
   if(report?.execution_authorized!==false||!(report.state==='restored'&&report.restored>0||record.allowPending&&report.state==='none'&&report.restored===0)||report.goal_owned!==0||!messages.length||messages.some(m=>m?.role!=='user'||m.source?.kind!=='user'||!valid(m.source.rpcId))||new Set(messages.map(m=>m.id)).size!==messages.length)fail();
   record.recheckClaims=()=>setup.recheckFor(agent);await record.recheckClaims();
@@ -40,6 +41,7 @@ export function createOrdinaryClaimedSessionComposer({ctx,bridge,Session,agents,
  },{prepend:true}));
  const cleanup=()=>{if(disposed&&!operations.size&&!cleaned){cleaned=true;removers.forEach(remove=>remove());storage.disable();}};
  return {
+  ...(attachmentSteeringProtocol===1?{steeringAttachmentAdmissionProtocol:1}:{}),
   withResolution({binding,signal=new AbortController().signal,allowPending=false},operation){
    const task=(async()=>{if(typeof allowPending!=='boolean'||disposed||!binding||Object.keys(binding).sort().join(',')!=='executionLease,runId,sessionRef'||!valid(binding.runId)||!valid(binding.sessionRef)||typeof operation!=='function'||busy.has(binding.sessionRef)||agents.get(binding.sessionRef)!==undefined||sessions.get(binding.sessionRef)!==undefined)fail();
     const owned=freeze({runId:binding.runId,sessionRef:binding.sessionRef,executionLease:normalizeHostExecutionLease(binding.executionLease)}),combined=AbortSignal.any([signal,shutdown.signal]);combined.throwIfAborted();busy.add(owned.sessionRef);const record={binding:owned,signal:combined,allowPending,closed:false};

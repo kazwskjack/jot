@@ -4,7 +4,7 @@ title: Keep native Goal state and continuation in DSH
 category: decision
 status: active
 created: "2026-10-16T11:44:16"
-updated: "2026-10-17T03:41:39"
+updated: "2026-10-19T15:44:35"
 ---
 
 <!-- compiled_truth -->
@@ -407,4 +407,16 @@ Historical final-output verification hashes actual bounded bytes outside the SQL
   kind: decision
   summary: "Always-on discovery must use original DSH planning/task occurrences and existing budgets, with owner opt-in, isolated work cycles and explicit reviewed apply. Pure eligibility is non-authorizing; empty channel presence cannot prove native idle. Upstream unattended permission bypass must not replace Gateway permissions. Full plan includes collector, durable admission, native execution/report, workspace/apply, UI and deployment."
   source: docs/superpowers/plans/2026-10-17-always-on-discovery.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-19T14:01:22
+  kind: decision
+  summary: "Original-task attachment continuation must pin exact owned artifact versions and content hashes before dispatch, never resolve a retry from current_version. Product source manifests omit server paths. Native normalized-image identities and staged file receipts require separately versioned admission/source proof; protocol-3 text checks must not be loosened. File handles or text-only image placeholders never prove recognition. Resolver-only prerequisites do not enable continuation."
+  source: docs/superpowers/plans/2026-10-19-live-conversation-commands.md
+  affects: [native-goal-boundary]
+
+- time: 2026-10-19T15:44:35
+  kind: decision
+  summary: "Absence from a compacted logical Session surface must never be used as proof that an original attachment command was not admitted. Acceptance lookup uses the existing private immutable admission store, with a request-to-primary metadata index written before the primary protocol-4 record and a read-only primary scan for missing legacy indexes. Partial, conflicting or corrupt metadata fails closed; this index grants no execution and cannot manufacture receipts."
+  source: docs/implementation/2026-10-19-pinned-attachment-sources.md
   affects: [native-goal-boundary]

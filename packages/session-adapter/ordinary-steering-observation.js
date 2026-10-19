@@ -1,5 +1,6 @@
 import {createHash} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
+import {validateOrdinarySteeringAttachmentSource} from './ordinary-steering-attachments.js';
 const valid=v=>typeof v==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(v);
 const digest=v=>createHash('sha256').update(v).digest('hex');
 const canonical=v=>JSON.stringify(v,(_k,x)=>x&&typeof x==='object'&&!Array.isArray(x)?Object.fromEntries(Object.keys(x).sort().map(k=>[k,x[k]])):x);
@@ -11,19 +12,21 @@ function validateScope(scope){
   ||!['command_id','conversation_id','owner_id','run_id','session_ref'].every(k=>valid(scope[k]))||scope.command_id===scope.run_id||!Number.isSafeInteger(scope.expected_run_version)||scope.expected_run_version<1)fail();
 }
 export function normalizeOrdinaryHistoryScope(scope){validateScope(scope);return structuredClone(scope);}
-function validateSource(row,scope){
- if(!row||Object.keys(row).sort().join(',')!==sourceKeys||row.protocol!==1||row.kind!=='ordinary_steer_history'||row.execution_authorized!==false||row.native_acceptance!=='unverified'
+function validateSource(row,scope,attachmentEnabled){
+ const attachment=row?.protocol===2,keys=attachment?sourceKeys.split(',').filter(key=>key!=='native_content_sha256').concat(['attachment_manifest','attachment_manifest_sha256','text_sha256']).sort().join(','):sourceKeys;
+ if(!row||Object.keys(row).sort().join(',')!==keys||(!attachment&&row.protocol!==1)||(attachment&&!attachmentEnabled)||row.kind!=='ordinary_steer_history'||row.execution_authorized!==false||row.native_acceptance!=='unverified'
   ||row.run_id!==scope.run_id||row.command_id!==scope.command_id||row.conversation_id!==scope.conversation_id||row.owner_id!==scope.owner_id||row.session_id!==scope.session_ref||row.run_version!==scope.expected_run_version
   ||!['succeeded','failed','cancelled','interrupted','partial'].includes(row.run_status)||!['pending','applied','superseded','rejected'].includes(row.command_status)
-  ||!valid(row.original_input_message_id)||row.input_message_id!=='message-'+scope.command_id||!['original_input_sha256','command_sha256','input_sha256','native_content_sha256'].every(k=>hash(row[k]))
+  ||!valid(row.original_input_message_id)||row.input_message_id!=='message-'+scope.command_id||!['original_input_sha256','command_sha256','input_sha256',...(attachment?[]:['native_content_sha256'])].every(k=>hash(row[k]))
   ||typeof row.product_message_present!=='boolean'||row.command_status==='applied'&&!row.product_message_present)fail();
- return structuredClone(row);
+ if(attachment)validateOrdinarySteeringAttachmentSource({...row,kind:'ordinary_steer_attachments'});return structuredClone(row);
 }
 
 /** Read-only historical facts. It never resolves an Agent, creates a Session
  * store entry, repairs an inbox/ACK, prompts, reserves, flushes or settles cost.
  * Neither absent input nor an absent reservation authorizes redelivery. */
-export function createOrdinarySteeringObservationReader({bridge,persistence,admissions,agents,sessions,Session,validateLog,ordinaryPresets}){
+export function createOrdinarySteeringObservationReader({bridge,persistence,admissions,agents,sessions,Session,validateLog,ordinaryPresets,attachmentSteeringProtocol}){
+ if(attachmentSteeringProtocol!==undefined&&attachmentSteeringProtocol!==1||attachmentSteeringProtocol===1&&admissions?.steeringAttachmentAdmissionProtocol!==1)fail();
  if(typeof bridge?.request!=='function'||typeof persistence?.open!=='function'||admissions?.entryInspectionProtocol!==1||typeof admissions.read!=='function'||typeof admissions.inspectEntry!=='function'
   ||typeof agents?.get!=='function'||typeof sessions?.get!=='function'||typeof Session?.create!=='function'||typeof validateLog!=='function'||!(ordinaryPresets instanceof Set)||!ordinaryPresets.size)fail();
  return async({scope:input,signal,protocol=1,expectedSourceSha256})=>{
@@ -31,7 +34,7 @@ export function createOrdinarySteeringObservationReader({bridge,persistence,admi
   const scope=normalizeOrdinaryHistoryScope(input);if(!signal)fail();
   const check=()=>{signal.throwIfAborted();if(agents.get(scope.session_ref)!==undefined||sessions.get(scope.session_ref)!==undefined)fail();};
   const readSource=async()=>{check();const value=await bridge.request('ordinary-steering-history',{runId:scope.run_id,sessionRef:scope.session_ref},
-   {owner_id:scope.owner_id,conversation_id:scope.conversation_id,command_id:scope.command_id,expected_run_version:scope.expected_run_version},signal);check();return validateSource(value?.history,scope);};
+   {owner_id:scope.owner_id,conversation_id:scope.conversation_id,command_id:scope.command_id,expected_run_version:scope.expected_run_version},signal);check();return validateSource(value?.history,scope,attachmentSteeringProtocol===1&&protocol===2);};
   const source=await readSource(),sourceHash=digest(canonical(source));if(protocol===2&&sourceHash!==expectedSourceSha256)fail();
   const readRaw=async()=>{
    check();const handle=await persistence.open(scope.session_ref,'read',{signal});
@@ -63,11 +66,12 @@ export function createOrdinarySteeringObservationReader({bridge,persistence,admi
   const verify=async(message,steering)=>{
    const request={session,runId:scope.run_id,messageId:message.id,signal},stamp=await admissions.read(request);check();
    if(!hash(stamp?.profile_fingerprint)||profile!==null&&stamp.profile_fingerprint!==profile)fail();profile=stamp.profile_fingerprint;
-   const expected={protocol:steering?3:2,run_id:scope.run_id,input_message_id:steering?source.input_message_id:source.original_input_message_id,conversation_id:scope.conversation_id,owner_id:scope.owner_id,
+   const attachment=steering&&source.protocol===2;
+   const expected={protocol:steering?(attachment?4:3):2,run_id:scope.run_id,input_message_id:steering?source.input_message_id:source.original_input_message_id,conversation_id:scope.conversation_id,owner_id:scope.owner_id,
     session_id:scope.session_ref,session_created_at:header.createdAt,input_sha256:steering?source.input_sha256:source.original_input_sha256,native_message_id:message.id,native_message_sha256:digest(canonical(message)),profile_fingerprint:profile,
-    ...(steering?{request_id:scope.command_id,original_input_message_id:source.original_input_message_id,original_input_sha256:source.original_input_sha256,command_sha256:source.command_sha256,native_content_sha256:source.native_content_sha256}:{})};
+    ...(steering?{request_id:scope.command_id,original_input_message_id:source.original_input_message_id,original_input_sha256:source.original_input_sha256,command_sha256:source.command_sha256,native_content_sha256:attachment?digest(JSON.stringify(message.content)):source.native_content_sha256,...(attachment?{attachment_manifest_sha256:source.attachment_manifest_sha256}:{})}:{})};
    if(!isDeepStrictEqual(stamp,expected))fail();
-   if(steering&&(message.content.length!==1||message.content[0]?.type!=='text'||Object.keys(message.content[0]).sort().join(',')!=='text,type'||digest(JSON.stringify(message.content))!==source.native_content_sha256))fail();
+   if(steering&&!attachment&&(message.content.length!==1||message.content[0]?.type!=='text'||Object.keys(message.content[0]).sort().join(',')!=='text,type'||digest(JSON.stringify(message.content))!==source.native_content_sha256))fail();
    const view=await admissions.inspectEntry(request);check();
    if(!view||Object.keys(view).sort().join(',')!=='admission_sha256,entry,execution_authorized,protocol,state'||view.protocol!==1||view.execution_authorized!==false||!['reserved','unreserved'].includes(view.state)||view.admission_sha256!==digest(canonical(stamp))||view.state==='unreserved'&&view.entry!==null||view.state==='reserved'&&view.entry?.admission_sha256!==view.admission_sha256)fail();
    if(!isDeepStrictEqual(await admissions.read(request),stamp))fail();check();return view.state;

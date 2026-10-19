@@ -84,6 +84,12 @@ test('the actual loopback gateway accepts a BFF upload and the same owned attach
  const completed=await service.app.inject({method:'POST',url:`/workbench-api/v1/uploads/${id}/complete`,headers,payload:{sha256:sha}});assert.equal(completed.statusCode,201,completed.body);const artifact=completed.json();assert.equal(artifact.sha256,sha);assert.equal(artifact.origin,'upload');
  const message=await service.app.inject({method:'POST',url:`/workbench-api/v1/conversations/${conversation.conversation_id}/messages`,headers:{...headers,'idempotency-key':'test-message-upload'},payload:{client_message_id:'test-message-upload',content:[{type:'text',text:'Read this attachment'},{type:'file',artifact_id:artifact.artifact_id}]}});assert.equal(message.statusCode,202,message.body);
  const downloaded=await service.app.inject({url:`/workbench-api/v1/artifacts/${artifact.artifact_id}/download`,headers:{host}});assert.equal(downloaded.statusCode,200,downloaded.body);assert.deepEqual(downloaded.rawPayload,bytes);
+ const {syntheticAttachmentPng}=await import('../packages/dsh-host/test/attachment-fixture.mjs'),imageBytes=syntheticAttachmentPng(),imageHash=createHash('sha256').update(imageBytes).digest('hex');
+ const imageUpload=gateway.artifacts.initUpload(conversation.conversation_id,'local-user',{file_name:'fixture.png',media_type:'image/png',size_bytes:imageBytes.length,sha256:imageHash});
+ await gateway.artifacts.writeContent(imageUpload.upload_id,'local-user',(async function*(){yield imageBytes;})());
+ const image=gateway.artifacts.complete(imageUpload.upload_id,'local-user',{sha256:imageHash});
+ const imageDownload=await service.app.inject({url:`/workbench-api/v1/artifacts/${image.artifact_id}/download?version=1`,headers:{host}});
+ assert.equal(imageDownload.statusCode,200,imageDownload.body);assert.deepEqual(imageDownload.rawPayload,imageBytes);
  const snapshot=await service.app.inject({url:`/workbench-api/v1/conversations/${conversation.conversation_id}/snapshot`,headers:{host}});assert.equal(snapshot.statusCode,200,snapshot.body);assert.deepEqual(snapshot.json().messages[0].attachments,[artifact.artifact_id]);
  assert.equal((await gateway.app.inject({url:`/v1/artifacts/${artifact.artifact_id}`,headers:{'x-user-id':'other-user'}})).statusCode,404);assert.equal(gateway.db.prepare('SELECT count(*) n FROM ga_runs').get().n,1);
 });

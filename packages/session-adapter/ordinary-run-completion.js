@@ -1,5 +1,6 @@
 import {createHash} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
+import {validateOrdinarySteeringAttachmentSource} from './ordinary-steering-attachments.js';
 const valid=v=>typeof v==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(v);
 const hash=v=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v);
 const canonical=v=>JSON.stringify(v,(_k,x)=>x&&typeof x==='object'&&!Array.isArray(x)?Object.fromEntries(Object.keys(x).sort().map(k=>[k,x[k]])):x);
@@ -7,17 +8,18 @@ const sha=v=>createHash('sha256').update(v).digest('hex');
 const fail=()=>{throw Error('ordinary_run_completion_unconfirmed');};
 const sourceKeys='candidates,canonical,commands,conversation_id,conversation_state_sha256,execution_authorized,input_message_id,input_sha256,kind,owner_id,protocol,run_id,run_state_sha256,run_status,run_version,runtime_binding_sha256,session_binding_sha256,session_id,worker_lease_sha256';
 const commandKeys='command_id,command_sha256,command_status,conversation_id,execution_authorized,input_message_id,input_sha256,kind,native_acceptance,native_content_sha256,original_input_message_id,original_input_sha256,owner_id,position,product_message_present,protocol,record_sha256,run_id,run_status,run_version,session_id';
-function validateSource(row,scope){
+function validateSource(row,scope,attachmentEnabled){
  if(!row||Object.keys(row).sort().join(',')!==sourceKeys||row.protocol!==1||row.kind!=='ordinary_run_history'||row.execution_authorized!==false
   ||row.owner_id!==scope.owner_id||row.conversation_id!==scope.conversation_id||row.session_id!==scope.session_ref||row.run_id!==scope.run_id||row.run_version!==scope.expected_run_version
   ||!['succeeded','failed','interrupted','partial'].includes(row.run_status)||!valid(row.input_message_id)||!['input_sha256','run_state_sha256','conversation_state_sha256','session_binding_sha256'].every(k=>hash(row[k]))
   ||!['runtime_binding_sha256','worker_lease_sha256'].every(k=>row[k]===null||hash(row[k]))||!Array.isArray(row.commands)||!Array.isArray(row.candidates))fail();
  const ids=new Set();for(const [position,c] of row.commands.entries()){
-  if(!c||Object.keys(c).sort().join(',')!==commandKeys||c.protocol!==1||c.kind!=='ordinary_steer_history'||c.execution_authorized!==false||c.native_acceptance!=='unverified'
+  const attachment=c?.protocol===2,keys=attachment?commandKeys.split(',').filter(key=>key!=='native_content_sha256').concat(['attachment_manifest','attachment_manifest_sha256','text_sha256']).sort().join(','):commandKeys;
+  if(!c||Object.keys(c).sort().join(',')!==keys||(!attachment&&c.protocol!==1)||(attachment&&!attachmentEnabled)||c.kind!=='ordinary_steer_history'||c.execution_authorized!==false||c.native_acceptance!=='unverified'
    ||c.owner_id!==row.owner_id||c.conversation_id!==row.conversation_id||c.session_id!==row.session_id||c.run_id!==row.run_id||c.run_status!==row.run_status||c.run_version!==row.run_version
    ||c.original_input_message_id!==row.input_message_id||c.original_input_sha256!==row.input_sha256||!valid(c.command_id)||c.command_id===row.run_id||ids.has(c.command_id)||c.position!==position
    ||c.input_message_id!=='message-'+c.command_id||!['pending','applied','superseded','rejected'].includes(c.command_status)||typeof c.product_message_present!=='boolean'||c.command_status==='applied'&&!c.product_message_present
-   ||!['command_sha256','input_sha256','native_content_sha256','record_sha256'].every(k=>hash(c[k])))fail();ids.add(c.command_id);
+   ||!['command_sha256','input_sha256','record_sha256',...(attachment?[]:['native_content_sha256'])].every(k=>hash(c[k])))fail();if(attachment)validateOrdinarySteeringAttachmentSource({...c,kind:'ordinary_steer_attachments'});ids.add(c.command_id);
  }
  if(row.canonical!==null){const c=row.canonical;if(!c||Object.keys(c).sort().join(',')!=='content_sha256,message_id,record_sha256,status'||!valid(c.message_id)||!['complete','streaming','partial','failed'].includes(c.status)||!hash(c.content_sha256)||!hash(c.record_sha256))fail();}
  for(const c of row.candidates)if(!c||Object.keys(c).sort().join(',')!=='attempt,evidence_sha256,id,record_sha256,source_sha256,source_version_sha256,status,text_sha256'||!valid(c.id)||!Number.isSafeInteger(c.attempt)||c.attempt<1||!['pending','verified','partial','failed','outcome_unknown'].includes(c.status)||!['evidence_sha256','record_sha256','source_sha256','source_version_sha256','text_sha256'].every(k=>hash(c[k])))fail();
@@ -37,7 +39,8 @@ function waitForNativeIdle(agent,signal){return new Promise((resolve,reject)=>{
  const abort=()=>{signal.removeEventListener('abort',abort);reject(signal.reason);};signal.addEventListener('abort',abort,{once:true});
  Promise.resolve().then(()=>{signal.throwIfAborted();return agent.whenIdle();}).then(value=>{signal.removeEventListener('abort',abort);signal.aborted?reject(signal.reason):resolve(value);},error=>{signal.removeEventListener('abort',abort);reject(error);});if(signal.aborted)abort();
 });}
-function createRunCompletionReader({bridge,persistence,admissions,agents,sessions,Session,validateLog,projections,ordinaryPresets},liveChat){
+function createRunCompletionReader({bridge,persistence,admissions,agents,sessions,Session,validateLog,projections,ordinaryPresets,attachmentSteeringProtocol},liveChat){
+ if(attachmentSteeringProtocol!==undefined&&attachmentSteeringProtocol!==1||attachmentSteeringProtocol===1&&admissions?.steeringAttachmentAdmissionProtocol!==1)fail();
  if(typeof bridge?.request!=='function'||typeof persistence?.open!=='function'||admissions?.entryInspectionProtocol!==1||typeof admissions.read!=='function'||typeof admissions.inspectEntry!=='function'
   ||typeof agents?.get!=='function'||typeof sessions?.get!=='function'||typeof Session?.create!=='function'||typeof validateLog!=='function'||typeof projections?.snapshot!=='function'||!(ordinaryPresets instanceof Set)||!ordinaryPresets.size)fail();
  return async({scope,expectedSourceSha256,signal})=>{
@@ -50,7 +53,7 @@ function createRunCompletionReader({bridge,persistence,admissions,agents,session
     ||agents.get(scope.session_ref)!==live||sessions.get(scope.session_ref)!==liveSession||live.status!=='idle'||!Number.isSafeInteger(liveSeq)||liveSession.seq!==liveSeq
     ||!Array.isArray(live.inbox?.nextStep)||!Array.isArray(live.inbox?.nextTurn)||live.inbox.nextStep.length||live.inbox.nextTurn.length||typeof live.whenIdle!=='function'||typeof liveSession.snapshotEvents!=='function')fail();
   };
-  const readSource=async()=>{check();const result=await bridge.request('ordinary-run-history',{runId:scope.run_id,sessionRef:scope.session_ref},{owner_id:scope.owner_id,conversation_id:scope.conversation_id,expected_run_version:scope.expected_run_version},signal);check();return validateSource(result?.history,scope);};
+  const readSource=async()=>{check();const result=await bridge.request('ordinary-run-history',{runId:scope.run_id,sessionRef:scope.session_ref},{owner_id:scope.owner_id,conversation_id:scope.conversation_id,expected_run_version:scope.expected_run_version},signal);check();return validateSource(result?.history,scope,attachmentSteeringProtocol===1);};
   const source=await readSource();if(sha(canonical(source))!==expectedSourceSha256)fail();
   if(liveChat){if(source.canonical?.status!=='complete'||source.commands.some(c=>c.command_status==='pending'))fail();await waitForNativeIdle(live,signal);check();}
   const readRaw=async()=>{check();if(liveChat)return structuredClone({header:liveSession.header,inheritedEventCount:liveSession.inheritedEventCount,events:liveSession.snapshotEvents(0)});const handle=await persistence.open(scope.session_ref,'read',{signal});try{check();const result=await handle.read(0,undefined,{signal});check();return structuredClone({header:handle.header,inheritedEventCount:handle.inheritedEventCount,events:result.events});}finally{await handle.close();}};
@@ -88,8 +91,9 @@ function createRunCompletionReader({bridge,persistence,admissions,agents,session
    const rpc=c?c.command_id:scope.run_id,event=committed.get(rpc),message=event?.data;if(!event||event.seq>=answer.seq||c&&event.seq<=root.seq)fail();
    const request={session:{id:scope.session_ref,header},runId:scope.run_id,messageId:message.id,signal},stamp=await admissions.read(request);check();
    if(!hash(stamp?.profile_fingerprint)||profile!==null&&profile!==stamp.profile_fingerprint)fail();profile=stamp.profile_fingerprint;
-   const expected={protocol:c?3:2,run_id:scope.run_id,input_message_id:c?c.input_message_id:source.input_message_id,conversation_id:scope.conversation_id,owner_id:scope.owner_id,session_id:scope.session_ref,session_created_at:header.createdAt,input_sha256:c?c.input_sha256:source.input_sha256,native_message_id:message.id,native_message_sha256:sha(canonical(message)),profile_fingerprint:profile,...(c?{request_id:c.command_id,original_input_message_id:source.input_message_id,original_input_sha256:source.input_sha256,command_sha256:c.command_sha256,native_content_sha256:c.native_content_sha256}:{})};
-   if(!isDeepStrictEqual(stamp,expected)||c&&(message.content.length!==1||Object.keys(message.content[0]).sort().join(',')!=='text,type'||message.content[0].type!=='text'||sha(JSON.stringify(message.content))!==c.native_content_sha256))fail();
+   const attachment=c?.protocol===2;
+   const expected={protocol:c?(attachment?4:3):2,run_id:scope.run_id,input_message_id:c?c.input_message_id:source.input_message_id,conversation_id:scope.conversation_id,owner_id:scope.owner_id,session_id:scope.session_ref,session_created_at:header.createdAt,input_sha256:c?c.input_sha256:source.input_sha256,native_message_id:message.id,native_message_sha256:sha(canonical(message)),profile_fingerprint:profile,...(c?{request_id:c.command_id,original_input_message_id:source.input_message_id,original_input_sha256:source.input_sha256,command_sha256:c.command_sha256,native_content_sha256:attachment?sha(JSON.stringify(message.content)):c.native_content_sha256,...(attachment?{attachment_manifest_sha256:c.attachment_manifest_sha256}:{})}:{})};
+   if(!isDeepStrictEqual(stamp,expected)||c&&!attachment&&(message.content.length!==1||Object.keys(message.content[0]).sort().join(',')!=='text,type'||message.content[0].type!=='text'||sha(JSON.stringify(message.content))!==c.native_content_sha256))fail();
    const entry=await admissions.inspectEntry(request);check();if(!entry||Object.keys(entry).sort().join(',')!=='admission_sha256,entry,execution_authorized,protocol,state'||entry.protocol!==1||entry.execution_authorized!==false||entry.admission_sha256!==sha(canonical(stamp))||!['reserved','unreserved'].includes(entry.state)||entry.state==='unreserved'&&entry.entry!==null||entry.state==='reserved'&&entry.entry?.admission_sha256!==entry.admission_sha256)fail();
    proofs.push({request,stamp,entry});nativeIds.push(message.id);
   }

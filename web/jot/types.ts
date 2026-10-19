@@ -8,7 +8,7 @@ export type ModelSelection = { provider: string; model: string; reasoning_effort
 
 export type CapabilitySet = { search: boolean; fetch: boolean; browser_interaction: boolean; file_read: boolean; file_edit: boolean; command_execution: boolean; questions: boolean; approvals: boolean; artifact_download: boolean; resume_checkpoint: boolean };
 
-export type Capabilities = { conversation_commands?:{protocol:1;ordinary_steer:{configured:boolean;delivery:"original";attachments:false}}; conversation_modes?:{default:'chat'|'work';work:{supported:true};chat:{ready:boolean}};api_version: string; event_schema_version: string; adapter_version: string; capabilities: CapabilitySet; models: Array<{ provider: string; model: string; reasoning_output: "provider" | "summary" | "none"; supported_reasoning_efforts: Array<string> }>; limits: { max_upload_bytes: number; max_active_runs_per_conversation: 1; replay_retention_hours: number; idempotency_retention_hours: number }; voice?: { enabled: boolean; status: "disabled" | "unavailable" | "preparing" | "ready"; max_duration_ms: number; max_bytes: number; accepted_mime_types: string[]; languages: string[] }; workspaces: Array<{ workspace_id: string; title: string; can_read: boolean; can_write: boolean }> };
+export type Capabilities = { conversation_commands?:{protocol:1;ordinary_steer:{configured:boolean;delivery:"original";attachments:boolean}}; conversation_modes?:{default:'chat'|'work';work:{supported:true};chat:{ready:boolean}};api_version: string; event_schema_version: string; adapter_version: string; capabilities: CapabilitySet; models: Array<{ provider: string; model: string; reasoning_output: "provider" | "summary" | "none"; supported_reasoning_efforts: Array<string> }>; limits: { max_upload_bytes: number; max_active_runs_per_conversation: 1; replay_retention_hours: number; idempotency_retention_hours: number }; voice?: { enabled: boolean; status: "disabled" | "unavailable" | "preparing" | "ready"; max_duration_ms: number; max_bytes: number; accepted_mime_types: string[]; languages: string[] }; workspaces: Array<{ workspace_id: string; title: string; can_read: boolean; can_write: boolean }> };
 
 export type Project = {project_id:string;title:string;is_default:boolean;version:number;created_at:string;updated_at:string;active_conversation_count?:number;archived_conversation_count?:number};
 export type Conversation = { mode?:'chat'|'work';project_id?:string;pinned_at?:string|null;archived_at?:string|null; conversation_id: string; title: string; workspace_id: string; model: ModelSelection; created_at: string; updated_at: string; version: number };
@@ -27,7 +27,7 @@ export type SendMessage = { client_message_id: string; content: Array<InputBlock
 
 export type MessageReceipt = { accepted: true; message_id: string; run_id: string; conversation_id: string };
 
-export type SteerRequest = { delivery?: "original"; client_message_id: string; expected_run_version: number; text: string };
+export type SteerRequest = { attachments?: string[]; delivery?: "original"; client_message_id: string; expected_run_version: number; text: string };
 
 export type CancelRequest = { expected_run_version: number; reason?: string };
 
@@ -39,7 +39,9 @@ export type ResumeReceipt = { accepted: true; run_id: string; continuation_of: s
 
 export type ContentBlock = { block_id: string; kind: "text" | "reasoning" | "summary"; text: string; source_ids?: Array<string>; exposure?: "provider" | "summary" | "public" };
 
-export type Message = { message_id: string; run_id: string | null; role: "user" | "assistant"; status: "streaming" | "complete" | "partial" | "failed"; blocks: Array<ContentBlock>; attachments?: Array<string>; created_at: string };
+export type MessageAttachmentRef = { artifact_id: string; version: number; sha256: string; size_bytes: number; media_type: string; file_name: string };
+
+export type Message = { message_id: string; run_id: string | null; role: "user" | "assistant"; status: "streaming" | "complete" | "partial" | "failed"; blocks: Array<ContentBlock>; attachments?: Array<string>; attachment_refs?: Array<MessageAttachmentRef>; created_at: string };
 
 export type Source = { source_id: string; activity_id: string; url: string; title: string; host: string; access: "discovered" | "snippet" | "fetched" | "read" | "failed"; retrieved_at: string; excerpt?: string; error_code?: string };
 

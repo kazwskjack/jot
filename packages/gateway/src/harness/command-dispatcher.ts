@@ -1,16 +1,25 @@
 import {isDeepStrictEqual} from 'node:util';
 import {inspectOrdinarySteeringBinding} from '../conversations/ordinary-steering-binding.ts';
 import {hasOrdinarySteeringCustody,reserveOrdinarySteeringCustody} from './ordinary-steering-custody.ts';
-import type {OrdinarySteeringExecution} from './session-controller-client.ts';
+import type {OrdinarySteeringExecution,OrdinarySteeringAdmission,SessionPromptPart} from './session-controller-client.ts';
+import type {PinnedByteSource} from '../artifacts/pinned-byte-source.ts';
+import type {AttachmentResolver} from '../artifacts/resolver.ts';
+import {canonicalJson} from '../db/canonical-json.ts';
+import {createHash} from 'node:crypto';
+import {isAbsolute} from 'node:path';
 import type {ExecutionLease} from '../workbench/execution-lease.ts';
 import type {DatabaseSync} from 'node:sqlite';
 import {withImmediateTransaction} from '../db/database.ts';
 import type {EventStore} from '../events/event-store.ts';
 import {RunRepository} from '../runs/repository.ts';
 
-interface OrdinarySteering {currentExecutionFor(runId:string):Readonly<{sessionRef:string;ordinary:boolean;executionLease:ExecutionLease}>|undefined;reconcileHistorical?(runId:string,sessionId:string,commandId:string):Promise<boolean>;}
+type ReadyExecution=Readonly<{sessionRef:string;ordinary:boolean;executionLease:ExecutionLease}>;
+interface OrdinarySteering {currentExecutionFor(runId:string):ReadyExecution|undefined;reconcileHistorical?(runId:string,sessionId:string,commandId:string):Promise<boolean>;attachments?:Readonly<{protocol:1;resolver:Pick<AttachmentResolver,'snapshotPinnedForMessage'>;snapshotRoot:string}>;}
 interface ControlClient {
  steerOriginal?(sessionId:string,commandId:string,text:string,proof:OrdinarySteeringExecution,signal?:AbortSignal):Promise<Record<string,unknown>>;
+ steerOriginalContent?(sessionId:string,commandId:string,content:SessionPromptPart[],proof:OrdinarySteeringExecution,signal?:AbortSignal):Promise<Record<string,unknown>>;
+ observeOriginalSteeringAdmission?(sessionId:string,proof:OrdinarySteeringExecution,sourceHash:string,signal?:AbortSignal):Promise<OrdinarySteeringAdmission>;
+ stageVerifiedFile?(sessionId:string,source:PinnedByteSource,name:string,signal?:AbortSignal):Promise<{receipt_id:string}>;
  prompt(sessionId:string,requestId:string,text:string,mode:'steer',signal?:AbortSignal):Promise<Record<string,unknown>>;
  cancel(sessionId:string):Promise<Record<string,unknown>>;
 }
@@ -23,7 +32,7 @@ interface ExecutionGuard {
 export class SessionCommandDispatcher {
  private db:DatabaseSync;private events:EventStore;private client:ControlClient;private ready:(runId:string)=>boolean;
  private executionGuard:ExecutionGuard|undefined;private ordinarySteering:OrdinarySteering|undefined;
- constructor(db:DatabaseSync,events:EventStore,client:ControlClient,ready:(runId:string)=>boolean,executionGuard?:ExecutionGuard,ordinarySteering?:OrdinarySteering){if(ordinarySteering&&(typeof ordinarySteering.currentExecutionFor!=='function'||ordinarySteering.reconcileHistorical!==undefined&&typeof ordinarySteering.reconcileHistorical!=='function'))throw Error('ordinary_steering_dispatch_config_invalid');this.ordinarySteering=ordinarySteering;this.db=db;this.events=events;this.client=client;this.ready=ready;this.executionGuard=executionGuard;}
+ constructor(db:DatabaseSync,events:EventStore,client:ControlClient,ready:(runId:string)=>boolean,executionGuard?:ExecutionGuard,ordinarySteering?:OrdinarySteering){if(ordinarySteering&&(typeof ordinarySteering.currentExecutionFor!=='function'||ordinarySteering.reconcileHistorical!==undefined&&typeof ordinarySteering.reconcileHistorical!=='function'))throw Error('ordinary_steering_dispatch_config_invalid');const attachments=ordinarySteering?.attachments;if(attachments!==undefined&&(!attachments||attachments.protocol!==1||typeof attachments.snapshotRoot!=='string'||!isAbsolute(attachments.snapshotRoot)||typeof attachments.resolver?.snapshotPinnedForMessage!=='function'||typeof client.observeOriginalSteeringAdmission!=='function'||typeof client.stageVerifiedFile!=='function'||typeof client.steerOriginalContent!=='function'))throw Error('ordinary_attachment_dispatch_config_invalid');this.ordinarySteering=ordinarySteering;this.db=db;this.events=events;this.client=client;this.ready=ready;this.executionGuard=executionGuard;}
  async processNext():Promise<boolean>{
   const rows=this.db.prepare(`SELECT c.*,r.status run_status,r.conversation_id,r.input_message_id,
    r.created_at run_created_at,r.version,b.session_id,l.expires_at
@@ -76,26 +85,42 @@ export class SessionCommandDispatcher {
     if(!row.session_id)continue;
     try { this.executionGuard?.assertRunActive(row.run_id); }
     catch { this.superseded(row.id); continue; }
-    const ready=this.ordinarySteering?.currentExecutionFor(row.run_id);if(this.ordinarySteering&&!ready)throw Error('ordinary_steering_execution_unavailable');
+    const currentReady=this.ordinarySteering?.currentExecutionFor(row.run_id),ready=currentReady?structuredClone(currentReady):undefined;if(this.ordinarySteering&&!ready)throw Error('ordinary_steering_execution_unavailable');
     const ordinary=ready?.ordinary===true;
     if(hasOrdinarySteeringCustody(this.db,row.id)&&!ordinary)continue;
     let proof:ReturnType<typeof inspectOrdinarySteeringBinding>|undefined;
-    if(ordinary){if(!this.client.steerOriginal||ready.sessionRef!==row.session_id)throw Error('ordinary_steering_execution_unavailable');proof=reserveOrdinarySteeringCustody(this.db,row.run_id,row.session_id,row.id,ready.executionLease);const receipt=await this.client.steerOriginal(row.session_id,row.id,String(payload.text),{run_id:row.run_id,command_id:row.id,execution_lease:ready.executionLease},AbortSignal.timeout(20_000));if(receipt.accepted!==true)throw Error('ordinary_steering_admission_unconfirmed');}
+    if(ordinary){if(!this.client.steerOriginal||ready.sessionRef!==row.session_id)throw Error('ordinary_steering_execution_unavailable');proof=reserveOrdinarySteeringCustody(this.db,row.run_id,row.session_id,row.id,ready.executionLease);if(proof.protocol===2)await this.sendAttachments(proof,ready,String(payload.text));else{const receipt=await this.client.steerOriginal(row.session_id,row.id,String(payload.text),{run_id:row.run_id,command_id:row.id,execution_lease:ready.executionLease},AbortSignal.timeout(20_000));if(receipt.accepted!==true)throw Error('ordinary_steering_admission_unconfirmed');}}
     else await this.client.prompt(row.session_id,row.id,String(payload.text),'steer',AbortSignal.timeout(20_000));
     withImmediateTransaction(this.db,()=>{
      if(ordinary){if(!isDeepStrictEqual(this.ordinarySteering!.currentExecutionFor(row.run_id),ready)||!isDeepStrictEqual(inspectOrdinarySteeringBinding(this.db,row.run_id,row.session_id,row.id,ready!.executionLease),proof))throw Error('ordinary_steering_admission_unconfirmed');}
 
      const now=new Date().toISOString();const messageId=`message-${row.id}`;
-     const blocks=[{block_id:`${messageId}:text`,kind:'text',text:String(payload.text)}];
+     const blocks=proof?.protocol===2&&!String(payload.text).trim()?[]:[{block_id:`${messageId}:text`,kind:'text',text:String(payload.text)}],attachments=proof?.protocol===2?proof.attachment_manifest.attachments.map(pin=>pin.artifact_id):[];
      const inserted=this.db.prepare("INSERT OR IGNORE INTO ga_messages(id,conversation_id,run_id,role,status,content_json,client_message_id,created_at,updated_at) VALUES(?,?,?,'user','complete',?,?,?,?)")
-      .run(messageId,row.conversation_id,row.run_id,JSON.stringify({blocks,attachments:[]}),String(payload.client_message_id),now,now).changes;
-     if(inserted)this.events.append(row.conversation_id,row.run_id,'message.created',{message_id:messageId,run_id:row.run_id,role:'user',status:'complete',blocks,created_at:now});
+      .run(messageId,row.conversation_id,row.run_id,JSON.stringify({blocks,attachments}),String(payload.client_message_id),now,now).changes;
+     if(inserted)this.events.append(row.conversation_id,row.run_id,'message.created',{message_id:messageId,run_id:row.run_id,role:'user',status:'complete',blocks,...(attachments.length?{attachments}:{}),...(proof?.protocol===2?{attachment_refs:pinnedAttachmentRefs(proof.attachment_manifest)}:{}),created_at:now});
      this.applied(row.id);
     });
    }
    return true;
   }
   return false;
+ }
+ private async sendAttachments(proof:Extract<ReturnType<typeof inspectOrdinarySteeringBinding>,{protocol:2}>,ready:ReadyExecution,text:string){
+  const options=this.ordinarySteering?.attachments;if(!options||!this.client.observeOriginalSteeringAdmission||!this.client.steerOriginalContent||!this.client.stageVerifiedFile)throw Error('ordinary_attachment_steering_unavailable');
+  const signal=AbortSignal.timeout(120_000),scope={run_id:proof.run_id,command_id:proof.command_id,execution_lease:ready.executionLease},sourceHash=createHash('sha256').update(canonicalJson(proof)).digest('hex');
+  const check=()=>{signal.throwIfAborted();this.executionGuard?.assertRunActive(proof.run_id);if(!this.ready(proof.run_id)||!isDeepStrictEqual(this.ordinarySteering!.currentExecutionFor(proof.run_id),ready)||!isDeepStrictEqual(inspectOrdinarySteeringBinding(this.db,proof.run_id,proof.session_id,proof.command_id,ready.executionLease),proof))throw Error('ordinary_steering_admission_unconfirmed');};check();
+  const observed=await this.client.observeOriginalSteeringAdmission(proof.session_id,scope,sourceHash,signal);check();
+  if(!observed||Object.keys(observed).sort().join(',')!=='command_id,execution_authorized,kind,protocol,run_id,session_id,source_sha256,state'||observed.protocol!==1||observed.kind!=='ordinary_steering_admission'||observed.execution_authorized!==false||observed.run_id!==proof.run_id||observed.command_id!==proof.command_id||observed.session_id!==proof.session_id||observed.source_sha256!==sourceHash||!['accepted','unproven'].includes(observed.state))throw Error('ordinary_steering_admission_unconfirmed');
+  if(observed.state==='accepted')return;
+  const snapshot=await options.resolver.snapshotPinnedForMessage(proof.owner_id,proof.conversation_id,proof.attachment_manifest,proof.command_id,options.snapshotRoot,signal);
+  try{check();const content:SessionPromptPart[]=text.trim()?[{type:'text',text:text.trim()}]:[];
+   for(const [index,pin] of proof.attachment_manifest.attachments.entries()){check();const source=snapshot.sources[index];if(!source||source.sha256!==pin.sha256||source.sizeBytes!==pin.size_bytes)throw Error('ordinary_attachment_source_unconfirmed');
+    if(pin.kind==='image'){if(pin.size_bytes>20*1024*1024)throw Error('ordinary_attachment_image_too_large');const chunks:Buffer[]=[];for await(const chunk of source.stream(signal)){check();chunks.push(chunk);}content.push({type:'image',media_type:pin.media_type,name:pin.file_name,data:Buffer.concat(chunks).toString('base64')});}
+    else{const file=await this.client.stageVerifiedFile(proof.session_id,source,pin.file_name,signal);check();if(typeof file?.receipt_id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(file.receipt_id))throw Error('ordinary_attachment_file_unconfirmed');content.push({type:'file',receipt_id:file.receipt_id});}
+   }
+   check();const receipt=await this.client.steerOriginalContent(proof.session_id,proof.command_id,content,scope,signal);if(receipt.accepted!==true)throw Error('ordinary_steering_admission_unconfirmed');check();
+  }finally{await snapshot.dispose();}
  }
  /** Classification for conservative terminal handling only, never authority. */
  private isOrdinaryParent(runId:string){
@@ -106,3 +131,4 @@ export class SessionCommandDispatcher {
  private applied(id:string){this.db.prepare("UPDATE ga_run_commands SET status='applied',applied_at=? WHERE id=?").run(new Date().toISOString(),id);}
  private superseded(id:string){this.db.prepare("UPDATE ga_run_commands SET status='superseded',applied_at=? WHERE id=? AND status='pending'").run(new Date().toISOString(),id);}
 }
+import {pinnedAttachmentRefs} from '../messages/pinned-attachments.ts';

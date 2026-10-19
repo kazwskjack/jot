@@ -27,6 +27,12 @@ test('cold pending steering preserves its command RPC and accepts prior consumed
  prepared.check();await prepared.recheck();f.proof.command_sha256='d'.repeat(64);await assert.rejects(()=>prepared.guardExecution(new AbortController().signal),/ordinary_input_/);
 });
 
+function attachmentFixture(){const f=steeringFixture(),sha='e'.repeat(64),manifest={protocol:1,attachments:[{artifact_id:'artifact-a',version:1,sha256:sha,size_bytes:5,media_type:'application/octet-stream',file_name:'file.bin',kind:'file'}]},canonical=value=>JSON.stringify(value,(_k,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.keys(item).sort().map(k=>[k,item[k]])):item),hash=value=>createHash('sha256').update(value).digest('hex');f.message.content.push({type:'file',attachment:{attachmentId:'sha256:'+sha,bytes:5,name:'file.bin'}});Object.assign(f.proof,{protocol:2,kind:'ordinary_steer_attachments',attachment_manifest:manifest,attachment_manifest_sha256:hash(canonical(manifest)),text_sha256:hash(f.message.content[0].text)});delete f.proof.native_content_sha256;f.options.attachmentSteeringProtocol=1;return f;}
+
+test('attachment recovery preflight preserves native sources without uploading, admitting or waking',async()=>{const f=attachmentFixture(),result=await prepare(f.options);assert.deepEqual(result.request.inputSources,[{messageId:f.message.id,requestId:'cmd-a'}]);assert.equal('admission' in result,false);await result.recheck();f.proof.command_sha256='f'.repeat(64);await assert.rejects(result.guardExecution(new AbortController().signal));});
+
+for(const mutation of ['disabled','text','bytes','sha','shape'])test('attachment recovery preflight refuses '+mutation+' before Agent resolution',async()=>{const f=attachmentFixture();if(mutation==='disabled')delete f.options.attachmentSteeringProtocol;if(mutation==='text')f.message.content[0].text='Changed';if(mutation==='bytes')f.message.content[1].attachment.bytes=6;if(mutation==='sha')f.message.content[1].attachment.attachmentId='sha256:'+'f'.repeat(64);if(mutation==='shape')f.message.content[1].path='private';await assert.rejects(prepare(f.options));assert.equal(f.calls.includes('resolve'),false);});
+
 test('cold steering refuses a foreign parent, changed text, already consumed RPC and missing binding capability',async()=>{
  for(const kind of ['parent','text','entered','capability']){
   const f=steeringFixture();if(kind==='parent')f.proof.original_input_sha256='d'.repeat(64);

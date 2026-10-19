@@ -2,6 +2,8 @@ import type {DatabaseSync} from 'node:sqlite';
 import type {FastifyInstance} from 'fastify';
 import {createHash,timingSafeEqual} from 'node:crypto';
 import {withImmediateTransaction} from '../db/database.ts';
+import {inspectPinnedAttachmentManifest,type AttachmentManifest} from '../artifacts/pinned-manifest.ts';
+import {canonicalJson} from '../db/canonical-json.ts';
 
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 const sha=(text:string)=>createHash('sha256').update(text).digest('hex');
@@ -38,15 +40,22 @@ export function inspectOrdinarySteeringHistory(db:DatabaseSync,scope:Scope){
   const cmd=db.prepare('SELECT kind,status,payload_json FROM ga_run_commands WHERE id=? AND run_id=?').get(scope.command_id,scope.run_id);
   if(!cmd||cmd.kind!=='steer'||!['pending','applied','superseded','rejected'].includes(String(cmd.status))||typeof cmd.payload_json!=='string')rejected();
   const payload=JSON.parse(cmd.payload_json) as Record<string,unknown>;
-  if(!payload||typeof payload!=='object'||Array.isArray(payload)||Object.keys(payload).sort().join(',')!=='client_message_id,expected_run_version,text'
-   ||typeof payload.text!=='string'||!payload.text.trim()||typeof payload.client_message_id!=='string'||!ID.test(payload.client_message_id)
+  const attachments=payload?.content_protocol===1;
+  if(!payload||typeof payload!=='object'||Array.isArray(payload)||Object.keys(payload).sort().join(',')!==(attachments?'attachment_manifest,client_message_id,content_protocol,expected_run_version,text':'client_message_id,expected_run_version,text')
+   ||typeof payload.text!=='string'||(!attachments&&!payload.text.trim())||(attachments&&payload.text.length>100000)||typeof payload.client_message_id!=='string'||!ID.test(payload.client_message_id)
    ||!Number.isSafeInteger(payload.expected_run_version)||Number(payload.expected_run_version)<1||Number(payload.expected_run_version)>scope.expected_run_version)rejected();
-  const messageId='message-'+scope.command_id,content=JSON.stringify({blocks:[{block_id:messageId+':text',kind:'text',text:payload.text}],attachments:[]});
+  let manifest:AttachmentManifest|undefined;if(attachments){try{manifest=inspectPinnedAttachmentManifest(db,scope.owner_id,scope.conversation_id,payload.attachment_manifest);}catch{rejected();}}
+  const messageId='message-'+scope.command_id,content=JSON.stringify({blocks:payload.text.trim()?[{block_id:messageId+':text',kind:'text',text:payload.text}]:[],attachments:manifest?.attachments.map(item=>item.artifact_id)??[]});
   const existing=db.prepare(`SELECT id,run_id,conversation_id,role,status,content_json,client_message_id FROM ga_messages
    WHERE id=? OR (conversation_id=? AND client_message_id=?)`).all(messageId,scope.conversation_id,payload.client_message_id);
   if(existing.length>1||cmd.status==='applied'&&existing.length!==1)rejected();
   if(existing.length){const m=existing[0]!;if(m.id!==messageId||m.run_id!==scope.run_id||m.conversation_id!==scope.conversation_id||m.role!=='user'||m.status!=='complete'||m.content_json!==content||m.client_message_id!==payload.client_message_id)rejected();}
-  return Object.freeze({protocol:1,kind:'ordinary_steer_history',owner_id:scope.owner_id,conversation_id:scope.conversation_id,session_id:scope.session_ref,
+  if(manifest)return Object.freeze({protocol:2 as const,kind:'ordinary_steer_history',owner_id:scope.owner_id,conversation_id:scope.conversation_id,session_id:scope.session_ref,
+   run_id:scope.run_id,run_version:row.version,run_status:row.status,command_id:scope.command_id,command_status:cmd.status,
+   original_input_message_id:row.input_message_id,input_message_id:messageId,original_input_sha256:sha(row.content_json),command_sha256:sha(cmd.payload_json),
+   input_sha256:sha(content),attachment_manifest:manifest,attachment_manifest_sha256:sha(canonicalJson(manifest)),text_sha256:sha(payload.text.trim()),product_message_present:existing.length===1,
+   native_acceptance:'unverified',execution_authorized:false});
+  return Object.freeze({protocol:1 as const,kind:'ordinary_steer_history',owner_id:scope.owner_id,conversation_id:scope.conversation_id,session_id:scope.session_ref,
    run_id:scope.run_id,run_version:row.version,run_status:row.status,command_id:scope.command_id,command_status:cmd.status,
    original_input_message_id:row.input_message_id,input_message_id:messageId,original_input_sha256:sha(row.content_json),command_sha256:sha(cmd.payload_json),
    input_sha256:sha(content),native_content_sha256:sha(JSON.stringify([{type:'text',text:payload.text.trim()}])),product_message_present:existing.length===1,

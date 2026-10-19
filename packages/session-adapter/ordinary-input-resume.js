@@ -1,5 +1,6 @@
 import {isDeepStrictEqual} from 'node:util';
 import {readOrdinarySteeringAuthority,hashNativeSteeringContent} from './ordinary-steering-authority.js';
+import {validateNormalizedOrdinarySteeringAttachments} from './ordinary-steering-attachments.js';
 import {normalizeHostExecutionLease} from './workbench.js';
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 const valid=value=>typeof value==='string'&&ID.test(value);
@@ -18,7 +19,8 @@ export async function readOrdinaryInputAuthority({bridge,binding:owned,signal,as
 
 /** Identity/composition preflight only. The caller must own an actual parked
  * observer; this neither opens a stream, restores claims nor wakes execution. */
-export async function prepareOrdinaryInputResume({binding,controller,agents,bridge,ordinaryPresets,verifyComposition,observer,signal,claimedComposer}={}){
+export async function prepareOrdinaryInputResume({binding,controller,agents,bridge,ordinaryPresets,verifyComposition,observer,signal,claimedComposer,attachmentSteeringProtocol}={}){
+ if(attachmentSteeringProtocol!==undefined&&attachmentSteeringProtocol!==1)fail();
  if(!binding||Object.keys(binding).sort().join(',')!=='executionLease,runId,sessionRef'||!valid(binding.runId)||!valid(binding.sessionRef)
   ||typeof controller?.projections!=='function'||typeof controller?.inspect!=='function'||typeof controller?.resolveAgent!=='function'||typeof agents?.get!=='function'
   ||typeof bridge?.request!=='function'||typeof verifyComposition!=='function'||typeof observer?.assertActive!=='function'||!(ordinaryPresets instanceof Set)||!ordinaryPresets.size)fail();
@@ -31,13 +33,14 @@ export async function prepareOrdinaryInputResume({binding,controller,agents,brid
   if(result?.verified!==true||typeof result.fingerprint!=='string'||!/^[a-f0-9]{64}$/.test(result.fingerprint))fail();return result.fingerprint;
  };
  const authority=await readAuthority();let projection,history;const commands=new Map();
- const auditCommands=async()=>{for(const [commandId,proof] of commands){let current;try{current=await readOrdinarySteeringAuthority({bridge,binding:{...owned,commandId},signal,assertActive:active});}catch{fail();}if(!isDeepStrictEqual(current,proof))fail();}};
+ const attachmentOptions=attachmentSteeringProtocol===1?{attachmentProtocol:1}:{};
+ const auditCommands=async()=>{for(const [commandId,proof] of commands){let current;try{current=await readOrdinarySteeringAuthority({bridge,binding:{...owned,commandId},signal,assertActive:active,...attachmentOptions});}catch{fail();}if(!isDeepStrictEqual(current,proof))fail();}};
  const bindPending=async messages=>{const rpcIds=new Set();for(const message of messages){
   if(!valid(message?.id)||message.role!=='user'||message.source?.kind!=='user'||!valid(message.source.rpcId)||rpcIds.has(message.source.rpcId))fail();rpcIds.add(message.source.rpcId);
   if(message.source.rpcId===owned.runId)continue;
-  const commandId=message.source.rpcId;let proof;try{proof=await readOrdinarySteeringAuthority({bridge,binding:{...owned,commandId},signal,assertActive:active});}catch{fail();}
+  const commandId=message.source.rpcId;let proof;try{proof=await readOrdinarySteeringAuthority({bridge,binding:{...owned,commandId},signal,assertActive:active,...attachmentOptions});}catch{fail();}
   if(proof.owner_id!==authority.owner_id||proof.conversation_id!==authority.conversation_id||proof.original_input_message_id!==authority.input_message_id||proof.original_input_sha256!==authority.input_sha256)fail();
-  try{if(hashNativeSteeringContent(message.content)!==proof.native_content_sha256)fail();}catch{fail();}
+  try{if(proof.protocol===2)validateNormalizedOrdinarySteeringAttachments(proof,message.content);else if(hashNativeSteeringContent(message.content)!==proof.native_content_sha256)fail();}catch{fail();}
   if(commands.has(commandId)&&!isDeepStrictEqual(commands.get(commandId),proof))fail();commands.set(commandId,proof);
  }};
  try{projection=frozen(structuredClone(await controller.projections({sessionId:owned.sessionRef},signal)));active();history=frozen(structuredClone(await controller.inspect(owned.sessionRef,signal)));}catch{fail();}active();

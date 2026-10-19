@@ -574,3 +574,17 @@ itself. Useful owner-checkpoint publication/consumption is now implemented in th
 Automatic starts, native crash/restart recovery, Chat-only activity filtering, provider/cache metrics,
 UI/standalone integration and the broader gates remain open. General readiness
 and generated profiles remain default-off. No full-ledger completion is claimed.
+
+### 2026-10-19 original live attachment delivery and fixed-version previews
+
+The [live command plan](2026-10-19-live-conversation-commands.md) now carries
+attachments through the original API, Dispatcher, native admission and recovery
+contracts, with exact manifest custody and acceptance lookup before repeat
+upload. The [implementation evidence](../../implementation/2026-10-19-pinned-attachment-sources.md)
+includes an actual mobile React/BFF upload and original-task supplement, a
+historical preview after a newer artifact version and reload, and native cold
+recovery with one original task and canonical answer. Public preview metadata
+does not change serialized messages or native hashes. Local scripted SDK results
+remain separate from real-provider file/vision quality. Remaining mobile matrix,
+full regression/publication gates and all other capability rows stay in scope;
+no production flag or full-ledger completion is implied.

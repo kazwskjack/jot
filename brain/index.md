@@ -1,6 +1,6 @@
 # Brain Index
 
-_Auto-generated. Last updated 2026-10-19T01:36:24.418Z._
+_Auto-generated. Last updated 2026-10-19T07:44:35.691Z._
 
 - [always-on-discovery](pages/always-on-discovery.md) — category: decision | Project discovery covers the full lifecycle: explicit owner project/workspace/role policy, factual idle/source collection, original occurren
 - [licensing-policy](pages/licensing-policy.md) — category: decision | tags: [licensing, release] | Current original Jot source and documentation use Apache-2.0. Preserve separately attributed third-party licenses, copyright notices and pro

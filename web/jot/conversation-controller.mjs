@@ -31,8 +31,8 @@ export class RoleChatController {
    if(active.length){
     const run=active[0];
     if(active.length!==1||run.conversation_id!==this.id||!ID.test(run.run_id??'')||!Number.isSafeInteger(run.version)||run.version<1||run.status!=='running'||options.steeringConfigured!==true)throw Error('当前任务暂不能接收补充，请稍后重试');
-    if(attachments.length)throw Error('当前任务暂不支持补充附件，附件已保留');
-    this.pending={kind:'steer',runId:run.run_id,path:`/runs/${encodeURIComponent(run.run_id)}/steer`,key:crypto.randomUUID(),body:{delivery:'original',text:text.trim(),client_message_id:crypto.randomUUID(),expected_run_version:run.version}};
+    if(attachments.length&&(options.attachmentSteeringConfigured!==true||attachments.length>10))throw Error('当前任务暂不支持补充这些附件，附件已保留');
+    this.pending={kind:'steer',runId:run.run_id,path:`/runs/${encodeURIComponent(run.run_id)}/steer`,key:crypto.randomUUID(),body:{delivery:'original',text:text.trim(),client_message_id:crypto.randomUUID(),expected_run_version:run.version,...(attachments.length?{attachments:[...attachments]}:{})}};
    }else this.pending={kind:'message',path:`/conversations/${encodeURIComponent(this.id)}/messages`,key:crypto.randomUUID(),body:{client_message_id:crypto.randomUUID(),content,client_time_zone:Intl.DateTimeFormat().resolvedOptions().timeZone}};
   }
   this.sending=true;this.changed();const pending=this.pending;

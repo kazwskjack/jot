@@ -13408,8 +13408,7 @@
                     "const": "original"
                   },
                   "attachments": {
-                    "type": "boolean",
-                    "const": false
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -13898,7 +13897,6 @@
           },
           "text": {
             "type": "string",
-            "minLength": 1,
             "maxLength": 100000
           },
           "delivery": {
@@ -13906,6 +13904,16 @@
             "enum": [
               "original"
             ]
+          },
+          "attachments": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 10,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"
+            }
           }
         },
         "required": [
@@ -13913,7 +13921,46 @@
           "expected_run_version",
           "text"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "properties": {
+              "text": {
+                "minLength": 1
+              }
+            }
+          },
+          {
+            "required": [
+              "attachments",
+              "delivery"
+            ],
+            "properties": {
+              "delivery": {
+                "const": "original"
+              }
+            }
+          }
+        ],
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "attachments"
+              ]
+            },
+            "then": {
+              "required": [
+                "delivery"
+              ],
+              "properties": {
+                "delivery": {
+                  "const": "original"
+                }
+              }
+            }
+          }
+        ]
       },
       "CancelRequest": {
         "type": "object",
@@ -14081,6 +14128,13 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "attachment_refs": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {
+              "$ref": "#/components/schemas/MessageAttachmentRef"
+            }
           }
         },
         "required": [
@@ -23653,6 +23707,47 @@
             }
           }
         ]
+      },
+      "MessageAttachmentRef": {
+        "type": "object",
+        "properties": {
+          "artifact_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 209715200
+          },
+          "media_type": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "file_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          }
+        },
+        "required": [
+          "artifact_id",
+          "version",
+          "sha256",
+          "size_bytes",
+          "media_type",
+          "file_name"
+        ],
+        "additionalProperties": false
       }
     },
     "parameters": {
