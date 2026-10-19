@@ -42,4 +42,4 @@ npm run demo
 
 React 和 TypeScript 用于界面与接口约束；Fastify 负责 API；SQLite 保存会话、任务和事件；SSE 传递进度与回复；Python 文档工作进程处理文件。选型原因、优势和限制见 [技术栈](TECH_STACK.md)。
 
-原创代码与文档采用 MIT 许可证，第三方依赖保留各自许可。
+原创代码与文档采用 [Apache-2.0 许可证](LICENSE)，第三方依赖保留各自许可，详见[第三方声明](THIRD_PARTY_NOTICES.md)。

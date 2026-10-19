@@ -1,6 +1,10 @@
 # Dependency notices
 
-Jot's original source and documentation use the repository MIT license. Third-party software retains its own license and authorship. No third-party Agent runtime source, model weights or private browser profiles are vendored here.
+Jot's original source and documentation use the repository Apache-2.0 license.
+Previously published MIT snapshots retain their original terms; their notice is
+preserved at `licenses/JOT-LEGACY-MIT.txt`. Third-party software retains its own
+license and authorship. No third-party Agent runtime source, model weights or
+private browser profiles are vendored here.
 
 Direct installed package manifests report:
 
