@@ -269,6 +269,8 @@ Files: `web/jot/RoleConversation.tsx`, `PromptComposer.tsx`, `client.ts`, `types
 - [x] Show one clickable Chat/Work label; hide model/effort controls in Chat. Use the existing immutable retry and versioned mutation flow; preserve mobile pointer/focus, keyboard, uploads and voice behavior. See [UI implementation and limits](../../implementation/2026-10-19-chat-work-ui.md).
 - [x] New UI conversations request Chat only when the returned readiness supports it; display actual unavailable state otherwise. Keep older clients compatible.
 - [ ] Expose the same explicit behavior in the standalone profile through its own tested protocol. Do not proxy it silently to an extended host or label synthetic demo output as a live answer.
+  The [standalone sequence](2026-10-19-standalone-chat-work.md) records its mode
+  persistence/acceptance prerequisite and the remaining executor/UI work.
 - [ ] Test accepted and unconfirmed sends, cancellation, steering, attachments, reload and mode switches through actual local React/API/SDK boundaries.
 
 ### Native Work compaction presentation sequence

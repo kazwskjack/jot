@@ -36,12 +36,18 @@ export async function buildServer(options={}){
   });
   app.setErrorHandler((error,req,reply)=>{const frameworkStatus=typeof error.code==='string'&&error.code.startsWith('FST_ERR_')&&Number.isInteger(error.statusCode)&&error.statusCode>=400&&error.statusCode<500?error.statusCode:500;const status=error.validation?400:reply.statusCode>=400?reply.statusCode:frameworkStatus;reply.code(status).send({error:error.validation?'invalid_input':status===500?'request_failed':error.message});});
   registerWorkbenchProxy(app,workbench,csrf);
-  app.get('/api/capabilities',async()=>({mode:demo?'demo':'agent',csrf,model_configured:Boolean(process.env.JOT_MODEL_URL&&process.env.JOT_MODEL)||Boolean(options.provider),tools:tools.definitions.map(t=>t.function.name),limits:{max_message_chars:8000,max_file_bytes:1000000,workers:agent.maxWorkers,per_conversation:1,max_steps:agent.maxSteps,approval_timeout_ms:agent.approvalTimeoutMs}}));
+  app.get('/api/capabilities',async()=>({mode:demo?'demo':'agent',csrf,model_configured:Boolean(process.env.JOT_MODEL_URL&&process.env.JOT_MODEL)||Boolean(options.provider),conversation_modes:{default:'work',work:{supported:true},chat:{ready:false}},tools:tools.definitions.map(t=>t.function.name),limits:{max_message_chars:8000,max_file_bytes:1000000,workers:agent.maxWorkers,per_conversation:1,max_steps:agent.maxSteps,approval_timeout_ms:agent.approvalTimeoutMs}}));
   app.get('/api/conversations',async()=>store.conversations());
-  app.post('/api/conversations',{schema:{body:object({title:{type:'string',maxLength:100}},[])}},async req=>store.createConversation(req.body.title||'New chat'));
+  const conversationMode={type:'string',enum:['chat','work']};
+  app.post('/api/conversations',{schema:{body:object({title:{type:'string',maxLength:100},mode:conversationMode},[])}},async(req,reply)=>req.body.mode==='chat'?reply.code(409).send({error:'chat_unavailable'}):store.createConversation(req.body.title||'New chat','work'));
+  app.patch('/api/conversations/:id',{schema:{body:object({mode:conversationMode,expected_version:{type:'integer',minimum:1}},['mode','expected_version'])}},async(req,reply)=>{
+    if(req.body.mode==='chat')return reply.code(409).send({error:'chat_unavailable'});
+    try{return store.changeMode(req.params.id,req.body.mode,req.body.expected_version);}
+    catch(error){return reply.code(error.message==='conversation_not_found'?404:409).send({error:error.message});}
+  });
   app.get('/api/conversations/:id/snapshot',async(req,reply)=>{if(!store.conversation(req.params.id))return reply.code(404).send({error:'not_found'});return store.snapshot(req.params.id);});
   app.post('/api/conversations/:id/messages',{schema:{body:object({text:string,request_id:{type:'string',minLength:1,maxLength:100}},['text','request_id'])}},async(req,reply)=>{
-    try {const accepted=store.accept(req.params.id,req.body.text,req.body.request_id);if(!accepted.duplicate)void agent.execute(accepted.run);return reply.code(202).send(accepted);}
+    try {const accepted=store.accept(req.params.id,req.body.text,req.body.request_id,{chatReady:false});if(!accepted.duplicate)void agent.execute(accepted.run);return reply.code(202).send(accepted);}
     catch(e){return reply.code(e.message==='conversation_not_found'?404:409).send({error:e.message});}
   });
   app.post('/api/runs/:id/cancel',async(req,reply)=>{if(!store.run(req.params.id))return reply.code(404).send({error:'not_found'});agent.cancel(req.params.id);return {accepted:true};});
