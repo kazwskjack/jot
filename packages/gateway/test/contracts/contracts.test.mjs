@@ -11,6 +11,16 @@ test('Git workbench schemas expose bounded read-only state and no host paths, co
  for(const name of ['GitSnapshot','GitDiff','GitEntry','GitRemote'])for(const forbidden of ['root','git_directory','executable','command','url','credentials'])assert.equal(forbidden in schemas[name].properties,false);
  const yaml=await readFile(new URL('openapi.yaml',contracts),'utf8');for(const name of ['Capabilities','GitSnapshot','GitDiff','GitEntry','GitRemote','GitWorkbenchCapability']){const line=yaml.split('\n').find(s=>s.startsWith('    '+name+': '));assert.ok(line);assert.deepEqual(JSON.parse(line.slice(line.indexOf(':')+1)),schemas[name]);}
 });
+test('Git review contracts reject execution claims and keep commit messages operation-specific',async()=>{
+ const spec=await json('openapi.json'),event=await json('agent-event.schema.json'),yaml=await readFile(new URL('openapi.yaml',contracts),'utf8'),{ContractValidator}=await import('../../src/contracts/validator.ts'),validator=new ContractValidator();
+ const operation=validator.operationFor('POST','/v1/projects/{projectId}/git/intents'),base={request_id:'review-1',action:'stage',paths:['note.txt'],snapshot_id:'a'.repeat(64)};
+ assert.equal(validator.validateRequest(operation,base).valid,true);assert.equal(validator.validateRequest(operation,{...base,action:'commit',message:'Reviewed change'}).valid,true);
+ for(const patch of [{action:'commit'},{message:'Unexpected stage message'},{paths:[]},{paths:['note.txt','note.txt']},{root:'untrusted'},{owner_id:'other'},{action:'push'},{execution_authorized:true}])assert.equal(validator.validateRequest(operation,{...base,...patch}).valid,false);
+ const receipt={intent_id:'intent',project_id:'project',action:'stage',paths:['note.txt'],snapshot_id:base.snapshot_id,review_sha256:'b'.repeat(64),version:1,state:'prepared',created_at:'2026-10-19T00:00:00Z',updated_at:'2026-10-19T00:00:00Z',execution_authorized:false};
+ assert.equal(validator.validateResponse(operation,201,receipt).valid,true);
+ for(const patch of [{execution_authorized:true},{state:'applied'},{root:'untrusted'},{version:0}])assert.equal(validator.validateResponse(operation,201,{...receipt,...patch}).valid,false);
+ for(const name of ['GitReviewPrepare','GitReviewControl','GitReviewIntent']){assert.deepEqual(event.$defs[name],spec.components.schemas[name]);const line=yaml.split('\n').find(value=>value.startsWith('    '+name+': '));assert.ok(line);assert.deepEqual(JSON.parse(line.slice(line.indexOf(':')+1)),spec.components.schemas[name]);}
+});
 test('pinned message references are bounded public metadata in REST, SSE and YAML',async()=>{
  const spec=await json('openapi.json'),event=await json('agent-event.schema.json'),ref=spec.components.schemas.MessageAttachmentRef;
  assert.ok(ref);const {default:Ajv}=await import('ajv/dist/2020.js'),validate=new Ajv({strict:false}).compile(ref);

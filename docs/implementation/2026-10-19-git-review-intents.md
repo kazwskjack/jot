@@ -1,5 +1,9 @@
 # Exact Git review intents (in progress)
 
+The subsequent [owned API increment](2026-10-19-git-review-api.md) connects this
+journal to original authenticated HTTP acknowledgement transactions. The record
+below describes the earlier internal foundation and its separate release scope.
+
 This is an internal prerequisite for the local-mutation phase of the
 [Git workbench plan](../superpowers/plans/2026-10-19-git-workbench.md), not an
 enabled Git write feature. No API mutation route, model tool or dispatcher mounts

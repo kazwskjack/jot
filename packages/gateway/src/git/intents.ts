@@ -6,15 +6,16 @@ import type {GitWorkbench} from './service.ts';
 import {workspaceRelativePath} from '../always-on/workspace-provider.ts';
 
 type Operation='stage'|'unstage'|'commit'|'discard'|'delete-untracked';
-type Prepare={request_id:string;action:Operation;paths:string[];snapshot_id:string;message?:string};
-type Control={request_id:string;expected_version:number;action:'approve'|'cancel';review_sha256:string};
+export type GitReviewPrepare={request_id:string;action:Operation;paths:string[];snapshot_id:string;message?:string};
+export type GitReviewControl={request_id:string;expected_version:number;action:'approve'|'cancel';review_sha256:string};
+type Prepare=GitReviewPrepare;type Control=GitReviewControl;
 type State='prepared'|'approved'|'cancelled';
 type Row={intent_id:string;owner_id:string;project_id:string;request_id:string;request_sha256:string;action:Operation;selection_json:string;witness_json:string;review_sha256:string;created_at:string};
 type Event={version:number;state:State;request_id:string|null;request_sha256:string|null;created_at:string};
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/,SHA=/^[a-f0-9]{64}$/;
 const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 /** Original owner review journal, not a planner, executor or execution grant.
- * No HTTP mutation routes or background dispatcher mount this partial phase. */
+ * Synchronous commit closures join the original HTTP receipt transaction. */
 export class GitMutationIntents{
  private readonly db:DatabaseSync;private readonly projects:ProjectRepository;private readonly git:GitWorkbench;
  constructor(db:DatabaseSync,projects:ProjectRepository,git:GitWorkbench){
@@ -50,10 +51,11 @@ export class GitMutationIntents{
   if(input.action==='commit'?(typeof input.message!=='string'||!input.message.trim()||input.message.length>4096||input.message.includes('\0')):input.message!==undefined)throw Error('git_intent_invalid');
   return{request_id:input.request_id,action:input.action,paths,snapshot_id:input.snapshot_id,...(input.message===undefined?{}:{message:input.message})};
  }
- async prepare(owner:string,project:string,value:Prepare,signal?:AbortSignal){
+ async prepare(owner:string,project:string,value:Prepare,signal?:AbortSignal){return (await this.prepareChange(owner,project,value,signal))();}
+ async prepareChange(owner:string,project:string,value:Prepare,signal?:AbortSignal){
   this.projects.assertOwned(project,owner);const input=this.normalize(value),requestHash=digest(input);
   const prior=this.db.prepare('SELECT * FROM wb_git_mutation_intents WHERE owner_id=? AND project_id=? AND request_id=?').get(owner,project,input.request_id) as Row|undefined;
-  if(prior){if(prior.request_sha256!==requestHash)throw Error('idempotency_conflict');return this.view(prior,this.db.prepare('SELECT * FROM wb_git_mutation_events WHERE intent_id=? AND version=1').get(prior.intent_id) as Event);}
+  if(prior){if(prior.request_sha256!==requestHash)throw Error('idempotency_conflict');return ()=>{signal?.throwIfAborted();const current=this.row(owner,project,prior.intent_id);return this.view(current,this.db.prepare('SELECT * FROM wb_git_mutation_events WHERE intent_id=? AND version=1').get(prior.intent_id) as Event);};}
   const snapshot=await this.git.inspect(owner,project,signal);if(snapshot.snapshot_id!==input.snapshot_id)throw Error('git_snapshot_changed');
   const selected=snapshot.entries.filter(entry=>input.paths.includes(entry.path));
   if(selected.length!==input.paths.length||selected.some(entry=>entry.conflicted||!['file','missing'].includes(entry.kind)))throw Error('git_selection_invalid');
@@ -64,7 +66,8 @@ export class GitMutationIntents{
    ||input.action==='discard'&&selected.some(entry=>entry.index_status==='?'||entry.worktree_status===' ')
    ||input.action==='delete-untracked'&&selected.some(entry=>entry.index_status!=='?'||entry.worktree_status!=='?'))throw Error('git_selection_invalid');
   const witness=await this.git.freeze(owner,project,input.snapshot_id,input.paths,signal);signal?.throwIfAborted();
-  return withImmediateTransaction(this.db,()=>{
+  return ()=>withImmediateTransaction(this.db,()=>{
+   signal?.throwIfAborted();
    this.projects.assertOwned(project,owner);
    const existing=this.db.prepare('SELECT * FROM wb_git_mutation_intents WHERE owner_id=? AND project_id=? AND request_id=?').get(owner,project,input.request_id) as Row|undefined;
    if(existing){if(existing.request_sha256!==requestHash)throw Error('idempotency_conflict');return this.view(existing,this.db.prepare('SELECT * FROM wb_git_mutation_events WHERE intent_id=? AND version=1').get(existing.intent_id) as Event);}
@@ -74,17 +77,19 @@ export class GitMutationIntents{
    return this.get(owner,project,id);
   });
  }
- async control(owner:string,project:string,id:string,input:Control,signal?:AbortSignal){
+ async control(owner:string,project:string,id:string,input:Control,signal?:AbortSignal){return (await this.prepareControl(owner,project,id,input,signal))();}
+ async prepareControl(owner:string,project:string,id:string,input:Control,signal?:AbortSignal){
   if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(key=>!['request_id','expected_version','action','review_sha256'].includes(key))||typeof input.request_id!=='string'||!ID.test(input.request_id)||!Number.isSafeInteger(input.expected_version)||input.expected_version<1||!['approve','cancel'].includes(input.action)||typeof input.review_sha256!=='string'||!SHA.test(input.review_sha256))throw Error('git_intent_invalid');
   const row=this.row(owner,project,id),requestHash=digest({request_id:input.request_id,expected_version:input.expected_version,action:input.action,review_sha256:input.review_sha256});
   const replay=()=>{const prior=this.db.prepare('SELECT * FROM wb_git_mutation_events WHERE intent_id=? AND request_id=?').get(id,input.request_id) as Event|undefined;if(prior&&prior.request_sha256!==requestHash)throw Error('idempotency_conflict');return prior?this.view(row,prior):undefined;};
-  const cached=replay();if(cached)return cached;
+  const cached=replay();if(cached)return ()=>{signal?.throwIfAborted();this.row(owner,project,id);return cached;};
   const assertCurrent=()=>{this.row(owner,project,id);const event=this.latest(id);if(event.version!==input.expected_version)throw Error('version_conflict');if(row.review_sha256!==input.review_sha256)throw Error('git_review_changed');if(event.state==='cancelled'||input.action==='approve'&&event.state!=='prepared')throw Error('git_intent_closed');return event;};
   assertCurrent();if(input.action==='approve'){
    const selection=JSON.parse(row.selection_json) as Prepare,witness=await this.git.freeze(owner,project,selection.snapshot_id,selection.paths,signal);
    if(JSON.stringify(witness)!==row.witness_json)throw Error('git_review_changed');
   }
-  signal?.throwIfAborted();return withImmediateTransaction(this.db,()=>{
+  signal?.throwIfAborted();return ()=>withImmediateTransaction(this.db,()=>{
+   signal?.throwIfAborted();
    this.row(owner,project,id);const cached=replay();if(cached)return cached;const event=assertCurrent();
    this.db.prepare('INSERT INTO wb_git_mutation_events VALUES(?,?,?,?,?,?)').run(id,event.version+1,input.action==='approve'?'approved':'cancelled',input.request_id,requestHash,new Date().toISOString());return this.get(owner,project,id);
   });

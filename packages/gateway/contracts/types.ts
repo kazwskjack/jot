@@ -297,3 +297,7 @@ export type TaskPrdBindRequest = {source:TaskPrdSelection;preview_sha256:string}
 export type TaskPrdReceipt = {binding_id:string;task_id:string;task_version:number;revision:number;source:TaskPrdSource;content_sha256:string;objective_sha256:string;created_at:string;execution_authorized:false};
 export type TaskPrdPreview = {task_id:string;task_version:number;role:{agent_id:string;version:number;capability_epoch:number};source:TaskPrdSource;content:string;objective:string;preview_sha256:string;execution_authorized:false};
 export type TaskPrdSources = {task_id:string;task_version:number;readiness:{ready:boolean;reasons:string[]};sources:TaskPrdSource[];truncated:boolean;binding:TaskPrdReceipt|null};
+
+export type GitReviewPrepare = {request_id:string;action:"stage"|"unstage"|"commit"|"discard"|"delete-untracked";paths:string[];snapshot_id:string;message?:string};
+export type GitReviewControl = {request_id:string;expected_version:number;action:"approve"|"cancel";review_sha256:string};
+export type GitReviewIntent = {intent_id:string;project_id:string;action:GitReviewPrepare["action"];paths:string[];message?:string;snapshot_id:string;review_sha256:string;version:number;state:"prepared"|"approved"|"cancelled";created_at:string;updated_at:string;execution_authorized:false};

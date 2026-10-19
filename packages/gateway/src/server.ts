@@ -25,6 +25,8 @@ import { ConversationRepository } from './conversations/repository.ts';
 import { ProjectRepository } from './projects/repository.ts';
 import {GitWorkbench,type GitRepositoryBinding} from './git/service.ts';
 import {registerGitRoutes} from './git/routes.ts';
+import {GitMutationIntents} from './git/intents.ts';
+import {registerGitReviewRoutes} from './git/review-routes.ts';
 import { EventStore, ExpiredCursorError, FutureCursorError } from './events/event-store.ts';
 import { RunRepository } from './runs/repository.ts';
 import { buildSnapshot } from './events/snapshot.ts';
@@ -128,6 +130,7 @@ export async function buildServer(config: {
   const events = new EventStore(db);
   const projects = new ProjectRepository(db);
   const gitWorkbench=new GitWorkbench(projects,config.gitRepositories??[],config.gitExecutable);
+  const gitReviewIntents=new GitMutationIntents(db,projects,gitWorkbench);
   const conversations = new ConversationRepository(db, projects);
   const runs = new RunRepository(db, events,{workAgentPreset:config.workAgentPreset??'jot-general'});
   const conversationModes=new ConversationModes(db,conversations,runs,config.conversationModeClient,config.chatModeEnabled===true);
@@ -176,7 +179,8 @@ export async function buildServer(config: {
   const isDiscoveryPolicyRoute=(request:any)=>(request.method==='PATCH'&&request.routeOptions.url==='/v1/agents/:agentId/discovery-policy')||(request.method==='POST'&&request.routeOptions.url==='/v1/agents/:agentId/discovery-policy/control');
   const isModeMutationRoute=(request:any)=>request.method==='POST'&&['/v1/conversations','/v1/conversations/:conversationId/messages'].includes(request.routeOptions.url)||request.method==='PATCH'&&request.routeOptions.url==='/v1/conversations/:conversationId'&&request.body?.mode!==undefined;
   const isRunCommandRoute=(request:any)=>request.method==='POST'&&['/v1/runs/:runId/steer','/v1/runs/:runId/cancel'].includes(request.routeOptions.url);
-  const atomicProtocol=(request:any)=>isRunCommandRoute(request)?'run-command-atomic-v1':isModeMutationRoute(request)?'conversation-mode-atomic-v1':isDiscoveryPolicyRoute(request)?'discovery-policy-atomic-v1':isGoalResumeRoute(request)?'conversation-goal-resume-atomic-v1':isUploadRoute(request)?'upload-atomic-v1':isMemoryRestoreRoute(request)?'memory-restore-atomic-v1':isMemoryConsolidationRoute(request)?'memory-consolidation-atomic-v1':isMemoryCaptureRoute(request)?'memory-capture-atomic-v1':null;
+  const isGitReviewRoute=(request:any)=>request.method==='POST'&&['/v1/projects/:projectId/git/intents','/v1/projects/:projectId/git/intents/:intentId/control'].includes(request.routeOptions.url);
+  const atomicProtocol=(request:any)=>isGitReviewRoute(request)?'git-review-atomic-v1':isRunCommandRoute(request)?'run-command-atomic-v1':isModeMutationRoute(request)?'conversation-mode-atomic-v1':isDiscoveryPolicyRoute(request)?'discovery-policy-atomic-v1':isGoalResumeRoute(request)?'conversation-goal-resume-atomic-v1':isUploadRoute(request)?'upload-atomic-v1':isMemoryRestoreRoute(request)?'memory-restore-atomic-v1':isMemoryConsolidationRoute(request)?'memory-consolidation-atomic-v1':isMemoryCaptureRoute(request)?'memory-capture-atomic-v1':null;
   // Receipt protocol is reserved with the original request. Legacy pending rows
   // have no proof of an atomic business boundary and must not be re-executed.
   const atomicCommand=<T>(request:any,status:number,operation:()=>T):T=>{
@@ -223,6 +227,10 @@ export async function buildServer(config: {
     // Preview only computes a schedule; retain authentication and CSRF without persisting requests.
     if (request.method === 'POST' && request.url.split('?')[0] === '/v1/persistent-tasks/preview') return;
     if ((request.routeOptions.url ?? request.url).includes('/voice/transcriptions')) return;
+    if(isGitReviewRoute(request)){
+      projects.assertOwned(String((request.params as {projectId:string}).projectId),actor(request as any));
+      reply.header('cache-control','private, no-store');
+    }
     const idempotencyKey = String(request.headers['idempotency-key'] ?? '');
     if (!/^[\x21-\x7E]{8,128}$/.test(idempotencyKey)) throw new Error('idempotency_key_invalid');
     // Binding codes are one-time secrets: the service deduplicates this request
@@ -246,7 +254,7 @@ export async function buildServer(config: {
     if (existing) {
       if (existing.request_sha256 !== requestHash) throw new Error('idempotency_conflict');
       if (existing.response_status === null) {
-        if((isRunCommandRoute(request)||isModeMutationRoute(request)||isDiscoveryPolicyRoute(request)||isGoalResumeRoute(request)||isMemoryRestoreRoute(request)||isMemoryConsolidationRoute(request)||isMemoryCaptureRoute(request))&&existing.receipt_protocol===atomicProtocol(request)){idempotencyRequests.set(request,{owner,operation,key:idempotencyKey});return;}
+        if((isGitReviewRoute(request)||isRunCommandRoute(request)||isModeMutationRoute(request)||isDiscoveryPolicyRoute(request)||isGoalResumeRoute(request)||isMemoryRestoreRoute(request)||isMemoryConsolidationRoute(request)||isMemoryCaptureRoute(request))&&existing.receipt_protocol===atomicProtocol(request)){idempotencyRequests.set(request,{owner,operation,key:idempotencyKey});return;}
         if(isUploadRoute(request)&&existing.receipt_protocol==='upload-atomic-v1'){
           if(request.method==='PUT'){
             const upload=db.prepare('SELECT status,declared_size,received_size,declared_sha256,actual_sha256,writer_token,writer_lease_until FROM ga_uploads WHERE id=? AND owner_id=?').get(String((request.params as Record<string,unknown>).uploadId),owner) as Record<string,unknown>|undefined;
@@ -568,6 +576,7 @@ export async function buildServer(config: {
     };
   });
   registerGitRoutes(app,gitWorkbench,actor);
+  registerGitReviewRoutes(app,{intents:gitReviewIntents,actor,atomic:atomicCommand});
   app.get('/v1/projects', async request => projects.list(actor(request as any)));
   app.post('/v1/projects', async (request, reply) =>
     reply.code(201).send(projects.create(actor(request as any), request.body as Record<string, unknown>)));

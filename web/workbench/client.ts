@@ -1,5 +1,6 @@
 import type {MemoryRetrieval,MemoryRetrievalPage} from './types';
 import type {ProjectPage,GitSnapshot,GitDiff} from './types';
+import type {GitReviewIntent} from './types';
 import type {DiscoveryPolicyView} from './types';
 import type {DiscoveryHistoryPage,DiscoveryHistoryDetail} from './types';
 import type {MemoryCapturePolicy,MemoryCapture,MemoryCapturePage} from './types';
@@ -19,6 +20,7 @@ export const workbenchApi={
  projects:(signal?:AbortSignal)=>request<ProjectPage>('/projects','GET',undefined,undefined,signal),
  git:(project:string,signal?:AbortSignal)=>request<GitSnapshot>(`/projects/${pathId(project)}/git`,'GET',undefined,undefined,signal),
  gitDiff:(project:string,snapshot:string,file:string,stage:'working'|'staged',signal?:AbortSignal)=>request<GitDiff>(`/projects/${pathId(project)}/git/diff?snapshot_id=${pathId(snapshot)}&path=${pathId(file)}&stage=${stage}`,'GET',undefined,undefined,signal),
+ gitReview:(project:string,intent:string,signal?:AbortSignal)=>request<GitReviewIntent>(`/projects/${pathId(project)}/git/intents/${pathId(intent)}`,'GET',undefined,undefined,signal),
  files:(workspace:string,project:string,options:WorkspaceFileListOptions={},signal?:AbortSignal)=>request<WorkspaceFilePage>(`/workspaces/${pathId(workspace)}/files?project_id=${pathId(project)}${options.limit===undefined?'':`&limit=${options.limit}`}${options.cursor===undefined?'':`&cursor=${pathId(options.cursor)}`}`,'GET',undefined,undefined,signal),
  discoveryPolicy:(agentId:string,signal?:AbortSignal)=>request<DiscoveryPolicyView>(`/agents/${pathId(agentId)}/discovery-policy`,'GET',undefined,undefined,signal),
  discoveryHistory:(agentId:string,before?:string,signal?:AbortSignal)=>request<DiscoveryHistoryPage>(`/agents/${pathId(agentId)}/discovery-history${before?`?before_id=${pathId(before)}`:''}`,'GET',undefined,undefined,signal),

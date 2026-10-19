@@ -49,6 +49,16 @@ acknowledgements. Nine new intent cases and all 29 Git cases pass. The tasks
 below remain open until the original authenticated command path, user controls,
 actual writes and crash recovery are connected and accepted.
 
+The subsequent [review API increment](../../implementation/2026-10-19-git-review-api.md)
+connects owner/CSRF checks and the original atomic HTTP receipt, with explicit
+rollback/restart/replay tests. No write capability follows from approval alone.
+The [review workbench](../../implementation/2026-10-19-git-review-ui.md) now joins
+the actual mobile React/BFF/API path for all five review types, exact current-page
+request recovery and current-state reconciliation after another device cancels.
+Full UI250/root67 and API Gateway1952pass7skip are separate executed gates.
+Actual local effects, original execution authority, immutable outcome publication
+and crash recovery remain open in the tasks below.
+
 - [ ] Freeze repository identity, HEAD, index and selected worktree bytes in an original owner-approved intent; separate stage/unstage, commit and destructive discard/revert/untracked-delete operations.
 - [ ] Revalidate original authority and all witnesses before dispatch and receipt publication. A stale review never applies to changed bytes. Preserve exact original request on unknown response.
 - [ ] Recover original effects from Git object/index/worktree evidence without replaying an unknown mutation. Test crash boundaries, conflicts, concurrent processes and cancellation.

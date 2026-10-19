@@ -1051,5 +1051,32 @@
     "GitDiff",
     "200",
     "Owned bounded read-only Git state; no host paths or execution authority."
+  ],
+  [
+    "POST",
+    "/v1/projects/{projectId}/git/intents",
+    "prepareProjectGitReview",
+    "GitReviewPrepare",
+    "GitReviewIntent",
+    "201",
+    "Original owner/project review acknowledgement; no Git execution or credential authority."
+  ],
+  [
+    "GET",
+    "/v1/projects/{projectId}/git/intents/{intentId}",
+    "getProjectGitReview",
+    null,
+    "GitReviewIntent",
+    "200",
+    "Original owner/project review acknowledgement; no Git execution or credential authority."
+  ],
+  [
+    "POST",
+    "/v1/projects/{projectId}/git/intents/{intentId}/control",
+    "controlProjectGitReview",
+    "GitReviewControl",
+    "GitReviewIntent",
+    "200",
+    "Original owner/project review acknowledgement; no Git execution or credential authority."
   ]
 ]

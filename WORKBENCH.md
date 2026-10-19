@@ -8,6 +8,12 @@ external change; a stale review cannot display a patch for newer bytes. This is
 currently a read-only workflow. Configuration, constraints and verification are
 in the [Git workbench record](docs/implementation/2026-10-19-git-workbench.md).
 
+The [review editor](docs/implementation/2026-10-19-git-review-ui.md) prepares,
+approves and cancels an exact proposed local operation. Approval does not execute
+a repository change; local writes and remote operations remain unavailable.
+Unknown replies retain the original request on the current page, and the UI
+reads current review state separately from historical acknowledgements.
+
 ## Unlimited task runs
 
 The task wizard offers **不限运行次数** when the connected Gateway advertises
