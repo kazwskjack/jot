@@ -1,3 +1,4 @@
+import {PreparationTiming,type PreparationTimingReporter} from './preparation-timing.ts';
 import {assistantText,assistantBlocks,collectArtifactRefs,presentedFiles} from './session-output.ts'
 import {createHash} from 'node:crypto'
 import {isDeepStrictEqual} from 'node:util'
@@ -137,9 +138,9 @@ export class OfficialSessionRunner implements DshRunner {
   readonly conversationModeProtocol?:1
   readonly ordinaryCompletionProtocol=1 as const
   private readonly client: OfficialSessionClient
-  private readonly options: { cwd: string; timeoutMs?: number; agentPreset: string;chatAgentPreset?:'jot-chat';workbenchAgentPreset?:string; deltaFlushMs: number; deltaMaxChars: number; maxCrawlAutoContinues: number; webOperationPollIntervalMs: number; visibleWorkCompaction?:boolean }
+  private readonly options: { cwd: string; timeoutMs?: number; agentPreset: string;chatAgentPreset?:'jot-chat';workbenchAgentPreset?:string; deltaFlushMs: number; deltaMaxChars: number; maxCrawlAutoContinues: number; webOperationPollIntervalMs: number; visibleWorkCompaction?:boolean;onPreparationTiming?:PreparationTimingReporter }
   constructor(client: OfficialSessionClient, options: { cwd: string; timeoutMs?: number; agentPreset: string;chatAgentPreset?:'jot-chat';workbenchAgentPreset?:string;
-    deltaFlushMs?: number; deltaMaxChars?: number; maxCrawlAutoContinues?: number; webOperationPollIntervalMs?: number; visibleWorkCompaction?:boolean }) {
+    deltaFlushMs?: number; deltaMaxChars?: number; maxCrawlAutoContinues?: number; webOperationPollIntervalMs?: number; visibleWorkCompaction?:boolean;onPreparationTiming?:PreparationTimingReporter }) {
     if(options.visibleWorkCompaction!==undefined&&typeof options.visibleWorkCompaction!=='boolean')throw Error('work_compaction_projection_config_invalid');
     if(options.chatAgentPreset==='jot-chat')this.conversationModeProtocol=1;
     this.client = client; this.options = { ...options, deltaFlushMs: Math.max(50, options.deltaFlushMs ?? 250),
@@ -168,6 +169,7 @@ export class OfficialSessionRunner implements DshRunner {
 
   private async execute(input:DshRunInput,goalControl?:ConversationGoalExecution,goalRef?:Readonly<{id:string;revision:number}>,ordinaryInput?:OriginalInputExecution,inputMessageId?:string,admission?:OriginalInputExecution):Promise<DshRunResult>{
     const controller = new AbortController()
+    const preparation=new PreparationTiming(input.taskRequestId,input.conversationPolicy?.mode,controller.signal,this.options.onPreparationTiming);
     const webOperationPollers = new Map<string, { stop: () => void; promise: Promise<void> }>()
     const persistedWebOperationCalls = new Set<string>()
     const timer = this.options.timeoutMs && this.options.timeoutMs > 0
@@ -186,20 +188,22 @@ export class OfficialSessionRunner implements DshRunner {
       if(ordinaryInput&&!this.client.recoverInput)throw Error('ordinary_input_recovery_unavailable');
       const completion=input.ordinaryCompletion;let completionScope:OriginalInputExecution|undefined;
       if(completion){completionScope=normalizeOriginalInputExecution({run_id:input.taskRequestId,execution_lease:completion.executionLease});if(typeof completion.commands!=='function'||typeof completion.publish!=='function'||!this.client.inputCompletion||input.workbenchRunId||input.checkpointTask||goalControl||!isDeepStrictEqual(completionScope,ordinaryInput??admission))throw Error('ordinary_completion_unavailable');}
-      if(!goalControl&&!ordinaryInput)await this.client.create(input.sessionRef, workWorkspace?.cwd??this.options.cwd, preset!, controller.signal, input.workbenchRunId,input.workbenchExecutionLease,...(workWorkspace?[Object.freeze({protocol:1 as const})]:[]))
+      if(!goalControl&&!ordinaryInput)await preparation.measure('session_confirm',()=>this.client.create(input.sessionRef, workWorkspace?.cwd??this.options.cwd, preset!, controller.signal, input.workbenchRunId,input.workbenchExecutionLease,...(workWorkspace?[Object.freeze({protocol:1 as const})]:[])))
       let iterator = (goalControl||ordinaryInput?this.client.follow(input.sessionRef,controller.signal,goalControl,ordinaryInput):this.client.follow(input.sessionRef, controller.signal))[Symbol.asyncIterator]()
-      let opening = await iterator.next()
-      if (opening.done || opening.value.type !== 'snapshot') throw new Error('session_follow_snapshot_missing')
+      let opening:IteratorResult<Record<string,unknown>> = await preparation.measure('opening_snapshot',async()=>{
+        const value=await iterator.next();if(value.done||value.value.type!=='snapshot')throw Error('session_follow_snapshot_missing');return value;
+      },value=>({...(Array.isArray(value.value.records)?{snapshot_records:value.value.records.length}:{}),...(typeof value.value.hasMore==='boolean'?{snapshot_has_more:value.value.hasMore}:{})}))
       let cursor = Number(opening.value.cursor ?? -1)
       if(ordinaryInput){
         if(!Number.isSafeInteger(opening.value.cursor)||cursor<0)throw Error('ordinary_input_snapshot_invalid');
-        const receipt=await this.client.recoverInput!(input.sessionRef,ordinaryInput,controller.signal);
+        const receipt=await preparation.measure('input_recovery',()=>this.client.recoverInput!(input.sessionRef,ordinaryInput,controller.signal));
         if(!receipt||Object.keys(receipt).sort().join(',')!=='accepted,input_message_id,native_message_ids,run_id,session_id'||receipt.accepted!==true||receipt.run_id!==input.taskRequestId||receipt.session_id!==input.sessionRef||receipt.input_message_id!==inputMessageId||!Array.isArray(receipt.native_message_ids)||!receipt.native_message_ids.length||new Set(receipt.native_message_ids).size!==receipt.native_message_ids.length||receipt.native_message_ids.some(id=>typeof id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(id)))throw Error('ordinary_input_receipt_invalid');
       }else if(goalControl){
         if(!Number.isSafeInteger(opening.value.cursor)||cursor<0)throw Error('goal_observer_snapshot_invalid');
-        const resumed=validateConversationGoalView(await this.client.resumeGoal!(input.sessionRef,goalControl,controller.signal));
+        const resumed=validateConversationGoalView(await preparation.measure('goal_resume',()=>this.client.resumeGoal!(input.sessionRef,goalControl,controller.signal)));
         if(!resumed.goal||resumed.goal.id!==goalRef?.id||resumed.goal.revision!==goalRef.revision+1||resumed.goal.phase!=='active'||resumed.goal.activation!=='armed')throw Error('goal_control_receipt_invalid');
       }else{
+        const content=await preparation.measure('attachments',async()=>{
         const content: SessionPromptPart[] = input.message ? [{ type: 'text', text: input.message }] : []
         for (const attachment of input.attachments ?? []) {
           if (attachment.kind === 'image') {
@@ -223,8 +227,11 @@ export class OfficialSessionRunner implements DshRunner {
           content.push({ type: 'file', receipt_id: receipt.receipt_id })
         }
         if (!content.length) throw new Error('session_prompt_empty')
-        await this.client.prompt(input.sessionRef, input.taskRequestId, content, 'queue', controller.signal,admission)
+        return content;
+        },()=>({attachment_count:input.attachments?.length??0}));
+        await preparation.measure('prompt_submit',()=>this.client.prompt(input.sessionRef, input.taskRequestId, content, 'queue', controller.signal,admission))
       }
+      preparation.finish('succeeded');
       input.onReady?.()
       let finalText = ''; let finalBlocks: Array<{ kind: 'text' | 'reasoning'; text: string }> = []
       let observationOrdinal = 0; let lastSettledOrdinal = 0; let lastUnsettledAssistantOrdinal = 0
@@ -612,6 +619,8 @@ export class OfficialSessionRunner implements DshRunner {
         ...(taskStop&&!unresolvedUsage&&finalText?{task_candidate:{text:finalText,blocks:finalBlocks}}:{}),
         ...(outputArtifactRefs.size ? { output_artifact_refs: [...outputArtifactRefs] } : {}),
         ...(outputFiles.size ? { presented_files: [...outputFiles.values()] } : {}), tool_marker: toolMarker }
+    } catch(error){
+      preparation.finish(controller.signal.aborted?'cancelled':'failed');throw error;
     } finally {
       if (timer) clearTimeout(timer)
       controller.abort()
