@@ -1,5 +1,6 @@
 import {fromSnapshot,reduceEvent} from './projection.ts';
 import {goalPrompt} from './goal-controller.mjs';
+const ID=/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/;
 export class RoleChatController {
  constructor(id,api,onChange=()=>{}){this.id=id;this.api=api;this.onChange=onChange;this.state=null;this.pending=null;this.connection='connecting';this.error='';this.abort=null;this.sending=false;}
  get pendingMessage(){return Boolean(this.pending);}
@@ -29,8 +30,8 @@ export class RoleChatController {
    this.pending={key:crypto.randomUUID(),body:{client_message_id:crypto.randomUUID(),content,client_time_zone:Intl.DateTimeFormat().resolvedOptions().timeZone}};
   }
   this.sending=true;this.changed();const pending=this.pending;
-  try{const result=await this.api.request(`/conversations/${encodeURIComponent(this.id)}/messages`,'POST',pending.body,pending.key);this.pending=null;return result;}
-  catch(error){if(error?.status>=400&&error.status<500&&error.status!==408)this.pending=null;throw error;}
+  try{const result=await this.api.request(`/conversations/${encodeURIComponent(this.id)}/messages`,'POST',pending.body,pending.key);if(!result||Object.keys(result).sort().join(',')!=='accepted,conversation_id,message_id,run_id'||result.accepted!==true||result.conversation_id!==this.id||typeof result.message_id!=='string'||typeof result.run_id!=='string'||!ID.test(result.message_id??'')||!ID.test(result.run_id??''))throw Error('发送结果尚未确认，请重试原消息');this.pending=null;return result;}
+  catch(error){if(error?.status>=400&&error.status<500&&error.status!==408&&error.message!=='IDEMPOTENCY_IN_PROGRESS')this.pending=null;throw error;}
   finally{this.sending=false;this.changed();}
  }
 }

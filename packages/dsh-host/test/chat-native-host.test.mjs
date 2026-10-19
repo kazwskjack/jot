@@ -18,7 +18,7 @@ import {SessionCommandDispatcher} from '../../gateway/src/harness/command-dispat
 import {notifyCommittedChatAnswer} from '../../gateway/src/harness/chat-post-answer.ts';
 const runtime=process.env.JOT_DSH_RUNTIME_MODULES;
 const listen=async server=>{await new Promise(done=>server.listen(0,'127.0.0.1',done));return'http://127.0.0.1:'+server.address().port;};
-async function chatCase(t,{bounded=false,web=false,maintenance=false,accounting=false,compaction=false,lowPressure=false,cancelCompaction=false,checkpoint=false,contextV2=false,replacedSurface=false,recovery=null,automatic=null,ui=false}={}){
+async function chatCase(t,{bounded=false,web=false,maintenance=false,accounting=false,compaction=false,lowPressure=false,cancelCompaction=false,checkpoint=false,contextV2=false,replacedSurface=false,recovery=null,automatic=null,ui=false,uiCancel=false}={}){
  const root=await mkdtemp(join(tmpdir(),'jot-chat-native-')),home=join(root,'home'),workspace=join(root,'workspace');await mkdir(workspace);
  const token=randomBytes(32).toString('hex'),adapterToken=randomBytes(32).toString('hex'),modelKey='sk-'+randomBytes(32).toString('hex'),requests=[];
  let service,host,exit,done,execution,uiSurface,nativeClient,output='',succeeded=false,modelFailure;
@@ -53,7 +53,7 @@ async function chatCase(t,{bounded=false,web=false,maintenance=false,accounting=
    {type:'content_block_stop',index:0});
   events.push({type:'message_delta',delta:{stop_reason:planned?'tool_use':'end_turn'},usage:{output_tokens:1}},{type:'message_stop'});
   if((cancelCompaction||recovery==='partial'||automatic==='cancel')&&compactionRequest){for(const event of events.slice(0,-2))res.write('event: '+event.type+'\ndata: '+JSON.stringify(event)+'\n\n');await new Promise(resolve=>res.once('close',resolve));return;}
-  if(ui){for(const event of events.slice(0,-2))res.write('event: '+event.type+'\ndata: '+JSON.stringify(event)+'\n\n');await uiGate;for(const event of events.slice(-2))res.write('event: '+event.type+'\ndata: '+JSON.stringify(event)+'\n\n');res.end();return;}
+  if(ui){for(const event of events.slice(0,-2))res.write('event: '+event.type+'\ndata: '+JSON.stringify(event)+'\n\n');await (uiCancel?Promise.race([uiGate,new Promise(r=>res.once('close',r))]):uiGate);if(res.destroyed)return;for(const event of events.slice(-2))res.write('event: '+event.type+'\ndata: '+JSON.stringify(event)+'\n\n');res.end();return;}
   for(const event of events)res.write('event: '+event.type+'\ndata: '+JSON.stringify(event)+'\n\n');res.end();
  }catch(error){modelFailure=error;res.writeHead(500);res.end('synthetic_request_rejected');}});
  const modelUrl=await listen(model);
@@ -108,7 +108,13 @@ async function chatCase(t,{bounded=false,web=false,maintenance=false,accounting=
   const execute=runner.run.bind(runner);let runnerFailure;runner.run=async input=>{try{return await execute(input);}catch(error){runnerFailure={message:error.message,reason:error.reasonCode};throw error;}};
   const worker=new HarnessWorker(service.db,coordinator,runner,{workerId:'chat-fixture',leaseMs:60000,ordinaryInputRecoveryEnabled:true,ordinarySteeringEnabled:true,...(automatic?{chatPostAnswer:runId=>notifyCommittedChatAnswer(service.db,runId,client,AbortSignal.timeout(10000))}:{})});
   execution=worker.processNext();execution.catch(()=>{});
-  if(ui){const page=uiSurface.page;await page.locator('article.assistant').filter({hasText:'CHAT-NATIVE-OK'}).waitFor();assert.equal(await page.getByRole('button',{name:'切换到 work',exact:true}).isDisabled(),true);assert.equal(service.db.prepare("SELECT count(*) n FROM ga_messages WHERE role='assistant' AND status='complete' AND run_id=?").get(acceptedRunId).n,0);releaseUi();}
+  if(ui){const page=uiSurface.page;await page.locator('article.assistant').filter({hasText:'CHAT-NATIVE-OK'}).waitFor();assert.equal(await page.getByRole('button',{name:'切换到 work',exact:true}).isDisabled(),true);assert.equal(service.db.prepare("SELECT count(*) n FROM ga_messages WHERE role='assistant' AND status='complete' AND run_id=?").get(acceptedRunId).n,0);
+   if(uiCancel){
+    const receipt=page.waitForResponse(r=>r.request().method()==='POST'&&r.url().endsWith('/cancel'));await page.getByRole('button',{name:'停止生成',exact:true}).click();const response=await receipt;assert.equal(response.status(),202);const acceptedCancel=await response.json();assert.equal(acceptedCancel.run_id,acceptedRunId);
+    let nativeCancels=0;const cancel=client.cancel.bind(client);client.cancel=async(...args)=>{nativeCancels++;return cancel(...args);};
+    const dispatcher=new SessionCommandDispatcher(service.db,service.events,client,id=>worker.isReady(id),undefined,{currentExecutionFor:id=>worker.readyExecutionFor(id)});assert.equal(await dispatcher.processNext(),true);await execution;
+    assert.equal(nativeCancels,1);assert.equal(service.runs.get(acceptedRunId,'chat-owner').status,'cancelled');assert.equal(service.db.prepare('SELECT count(*) n FROM ga_runs').get().n,1);assert.equal(service.db.prepare("SELECT count(*) n FROM ga_messages WHERE role='assistant' AND status='complete'").get().n,0);assert.equal(service.db.prepare('SELECT status FROM ga_run_commands WHERE id=?').get(acceptedCancel.command_id).status,'applied');assert.deepEqual(uiSurface.faults,[]);t.diagnostic(JSON.stringify({browserCancellation:true,originalDispatcher:true,nativeCancels,canonicalAnswers:0,production:false}));succeeded=true;return;
+   }releaseUi();}
   if(web){
    const deadline=Date.now()+20000;while(requests.length<2&&Date.now()<deadline&&!exit)await new Promise(done=>setTimeout(done,30));assert.equal(requests.length,2,'first Web group has finished before steering');
    const original=acceptedRunId,command=service.commands.steer(original,'chat-owner',{text:'Keep using the existing evidence after this synthetic supplement.',client_message_id:'web-supplement',expected_run_version:service.runs.get(original,'chat-owner').version},'web-supplement');
@@ -238,3 +244,5 @@ for(const mode of ['high','low','cancel','early'])test('actual official Chat aut
 
 // Full local composition: real UI/BFF/API/Worker/installed SDK, scripted provider.
 test('actual mobile React through original BFF and Chat SDK streams before commit and reloads one answer',{skip:!runtime,timeout:60000},t=>chatCase(t,{ui:true}));
+
+test('actual mobile React cancellation reaches original Dispatcher and native SDK with no completed answer',{skip:!runtime,timeout:60000},t=>chatCase(t,{ui:true,uiCancel:true}));

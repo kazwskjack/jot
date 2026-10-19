@@ -160,7 +160,8 @@ export async function buildServer(config: {
   const isGoalResumeRoute=(request:any)=>request.method==='POST'&&request.routeOptions.url==='/v1/conversations/:conversationId/goal'&&request.body?.action==='resume';
   const isDiscoveryPolicyRoute=(request:any)=>(request.method==='PATCH'&&request.routeOptions.url==='/v1/agents/:agentId/discovery-policy')||(request.method==='POST'&&request.routeOptions.url==='/v1/agents/:agentId/discovery-policy/control');
   const isModeMutationRoute=(request:any)=>request.method==='POST'&&['/v1/conversations','/v1/conversations/:conversationId/messages'].includes(request.routeOptions.url)||request.method==='PATCH'&&request.routeOptions.url==='/v1/conversations/:conversationId'&&request.body?.mode!==undefined;
-  const atomicProtocol=(request:any)=>isModeMutationRoute(request)?'conversation-mode-atomic-v1':isDiscoveryPolicyRoute(request)?'discovery-policy-atomic-v1':isGoalResumeRoute(request)?'conversation-goal-resume-atomic-v1':isUploadRoute(request)?'upload-atomic-v1':isMemoryRestoreRoute(request)?'memory-restore-atomic-v1':isMemoryConsolidationRoute(request)?'memory-consolidation-atomic-v1':isMemoryCaptureRoute(request)?'memory-capture-atomic-v1':null;
+  const isRunCommandRoute=(request:any)=>request.method==='POST'&&['/v1/runs/:runId/steer','/v1/runs/:runId/cancel'].includes(request.routeOptions.url);
+  const atomicProtocol=(request:any)=>isRunCommandRoute(request)?'run-command-atomic-v1':isModeMutationRoute(request)?'conversation-mode-atomic-v1':isDiscoveryPolicyRoute(request)?'discovery-policy-atomic-v1':isGoalResumeRoute(request)?'conversation-goal-resume-atomic-v1':isUploadRoute(request)?'upload-atomic-v1':isMemoryRestoreRoute(request)?'memory-restore-atomic-v1':isMemoryConsolidationRoute(request)?'memory-consolidation-atomic-v1':isMemoryCaptureRoute(request)?'memory-capture-atomic-v1':null;
   // Receipt protocol is reserved with the original request. Legacy pending rows
   // have no proof of an atomic business boundary and must not be re-executed.
   const atomicCommand=<T>(request:any,status:number,operation:()=>T):T=>{
@@ -230,7 +231,7 @@ export async function buildServer(config: {
     if (existing) {
       if (existing.request_sha256 !== requestHash) throw new Error('idempotency_conflict');
       if (existing.response_status === null) {
-        if((isModeMutationRoute(request)||isDiscoveryPolicyRoute(request)||isGoalResumeRoute(request)||isMemoryRestoreRoute(request)||isMemoryConsolidationRoute(request)||isMemoryCaptureRoute(request))&&existing.receipt_protocol===atomicProtocol(request)){idempotencyRequests.set(request,{owner,operation,key:idempotencyKey});return;}
+        if((isRunCommandRoute(request)||isModeMutationRoute(request)||isDiscoveryPolicyRoute(request)||isGoalResumeRoute(request)||isMemoryRestoreRoute(request)||isMemoryConsolidationRoute(request)||isMemoryCaptureRoute(request))&&existing.receipt_protocol===atomicProtocol(request)){idempotencyRequests.set(request,{owner,operation,key:idempotencyKey});return;}
         if(isUploadRoute(request)&&existing.receipt_protocol==='upload-atomic-v1'){
           if(request.method==='PUT'){
             const upload=db.prepare('SELECT status,declared_size,received_size,declared_sha256,actual_sha256,writer_token,writer_lease_until FROM ga_uploads WHERE id=? AND owner_id=?').get(String((request.params as Record<string,unknown>).uploadId),owner) as Record<string,unknown>|undefined;
@@ -599,7 +600,7 @@ export async function buildServer(config: {
   app.post('/v1/runs/:runId/steer', async (request, reply) => {
     const runId = (request.params as {runId: string}).runId;
     const owner = actor(request as any); runs.get(runId, owner);
-    return reply.code(202).send(withImmediateTransaction(db, () => {
+    return reply.code(202).send(atomicCommand(request,202, () => {
       workbench.assertRunActive(runId); persistentTasks.assertRunActive(runId);
       return commands.steer(runId, owner, request.body as Record<string, unknown>, String(request.headers['idempotency-key'] || ''));
     }));
@@ -608,10 +609,12 @@ export async function buildServer(config: {
     const runId = (request.params as { runId: string }).runId;
     const ownerId = actor(request as any);
     const input = request.body as Record<string, unknown>;
-    const receipt = commands.cancel(runId, ownerId, input, String(request.headers['idempotency-key'] || ''));
-    // The run command remains authoritative for the product run. Batch cancel
-    // is a durable side effect for C and may settle later.
-    try { crawlBatches.cancel(ownerId, runId, String(input.reason ?? 'USER_CANCELLED')); } catch { /* no active batch is valid */ }
+    const receipt=atomicCommand(request,202,()=>{
+      const accepted=commands.cancel(runId,ownerId,input,String(request.headers['idempotency-key']||''));
+      // This is the existing durable outbox side effect, not a direct C request.
+      try{crawlBatches.cancel(ownerId,runId,String(input.reason??'USER_CANCELLED'));}catch{}
+      return accepted;
+    });
     return reply.code(202).send(receipt);
   });
   app.post('/v1/runs/:runId/resume', async (request, reply) => {

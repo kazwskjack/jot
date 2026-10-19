@@ -2,13 +2,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {RoleChatController} from './conversation-controller.mjs';
 const snapshot={conversation:{conversation_id:'role-1'},as_of_seq:'0',messages:[],runs:[],activities:[],sources:[],interactions:[],artifacts:[],stream_cursors:[]};
+
+test('pending server reservations retain the original message and malformed success cannot erase the draft receipt',async()=>{
+ const calls=[];let reply=Object.assign(Error('IDEMPOTENCY_IN_PROGRESS'),{status:409});const c=new RoleChatController('role-1',{request:async(path,method,body,key)=>{calls.push(structuredClone({path,method,body,key}));if(reply instanceof Error)throw reply;return reply;}});
+ await assert.rejects(()=>c.send('Original message'));assert.equal(c.pendingMessage,true);
+ reply={accepted:true,message_id:'server-message',run_id:'original-run',conversation_id:'foreign'};await assert.rejects(()=>c.send('Changed message'),/发送结果尚未确认/);assert.equal(c.pendingMessage,true);
+ reply={accepted:true,message_id:'server-message',run_id:'original-run',conversation_id:'role-1'};await c.send('Another changed message');assert.deepEqual(calls[1],calls[0]);assert.deepEqual(calls[2],calls[0]);assert.equal(c.pendingMessage,false);
+});
 test('existing run.artifact events become generated files without reconnecting or inventing an uploaded origin',()=>{
  const controller=new RoleChatController('role-1',{});controller.restore(snapshot);
  controller.apply({schema_version:'1.0',conversation_id:'role-1',seq:'1',run_id:'r',type:'run.artifact',payload:{run_id:'r',conversation_id:'role-1',artifact_id:'output',version:1,file_name:'report.md',media_type:'text/markdown',size_bytes:5,sha256:'0'.repeat(64),status:'ready',created_at:'now',download_url:'/v1/artifacts/output/download?version=1'}});
  assert.equal(controller.state.seq,'1');assert.equal(controller.state.artifacts.output.run_id,'r');assert.equal(controller.state.artifacts.output.origin,'generated');
 });
 test('lost send receipt retries the frozen message and key rather than changing the task',async()=>{
- const calls=[];let fail=true;const controller=new RoleChatController('role-1',{request:async(path,method,body,key)=>{calls.push({path,body,key});if(fail){fail=false;throw new Error('connection_lost');}return {accepted:true,run_id:'r'};},snapshot:async()=>snapshot,follow:async()=>{}});
+ const calls=[];let fail=true;const controller=new RoleChatController('role-1',{request:async(path,method,body,key)=>{calls.push({path,body,key});if(fail){fail=false;throw new Error('connection_lost');}return {accepted:true,run_id:'r',message_id:'message-r',conversation_id:'role-1'};},snapshot:async()=>snapshot,follow:async()=>{}});
  await assert.rejects(()=>controller.send('original text'),/connection_lost/);assert.equal(controller.pendingMessage,true);
  await controller.send('different draft');assert.deepEqual(calls[1],calls[0]);assert.equal(calls[0].body.content[0].text,'original text');assert.equal(controller.pendingMessage,false);
 });
@@ -17,13 +24,13 @@ test('a rejected request is not retained as an uncertain accepted message',async
  await assert.rejects(()=>controller.send('message'),/denied/);assert.equal(controller.pendingMessage,false);
 });
 test('ordinary Goal send freezes the native instruction on lost receipt and default messages stay unchanged',async()=>{
- const calls=[];let fail=true;const c=new RoleChatController('ordinary',{request:async(path,method,body,key)=>{calls.push(structuredClone({body,key}));if(fail){fail=false;throw Error('lost');}return {};}});
+ const calls=[];let fail=true;const c=new RoleChatController('ordinary',{request:async(path,method,body,key)=>{calls.push(structuredClone({body,key}));if(fail){fail=false;throw Error('lost');}return {accepted:true,run_id:'r',message_id:'message-r',conversation_id:'ordinary'};}});
  await assert.rejects(()=>c.send('Find sources',[],{goalMode:true}));assert.match(calls[0].body.content[0].text,/create_goal/);
  await c.send('Changed draft',[],{goalMode:false});assert.deepEqual(calls[0],calls[1]);await c.send('Normal message');assert.equal(calls[2].body.content[0].text,'Normal message');
 });
 
 test('attachment-only messages and unknown sends freeze the exact uploaded file references',async()=>{
- const calls=[];let fail=true;const controller=new RoleChatController('role-1',{request:async(path,method,body,key)=>{calls.push(structuredClone({body,key}));if(fail){fail=false;throw new Error('connection_lost');}return {accepted:true};}});
+ const calls=[];let fail=true;const controller=new RoleChatController('role-1',{request:async(path,method,body,key)=>{calls.push(structuredClone({body,key}));if(fail){fail=false;throw new Error('connection_lost');}return {accepted:true,run_id:'r',message_id:'message-r',conversation_id:'role-1'};}});
  await assert.rejects(()=>controller.send('', ['test-uploaded-file']),/connection_lost/);assert.equal(controller.pendingMessage,true);
  await controller.send('different draft',['different-file']);assert.deepEqual(calls[0],calls[1]);assert.deepEqual(calls[0].body.content,[{type:'file',artifact_id:'test-uploaded-file'}]);
 });

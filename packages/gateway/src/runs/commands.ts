@@ -36,11 +36,11 @@ export class RunCommandService {
   }
 
   cancel(runId: string, ownerId: string, input: Record<string, unknown>, key: string) {
+    return withImmediateTransaction(this.db, () => {
     const row = this.row(runId, ownerId);
     if (Number(row.version) !== Number(input.expected_run_version)) throw new Error('run_version_conflict');
     if (['succeeded', 'failed', 'cancelled'].includes(String(row.status))) throw new Error('run_state_conflict');
     const now = new Date().toISOString();
-    return withImmediateTransaction(this.db, () => {
       const commandId = this.insert(runId, 'cancel', input, key, now);
       const status = row.status === 'queued' ? 'cancelled' : 'cancelling';
       this.db.prepare('UPDATE ga_runs SET status=?,version=version+1,updated_at=? WHERE id=?').run(status, now, runId);
