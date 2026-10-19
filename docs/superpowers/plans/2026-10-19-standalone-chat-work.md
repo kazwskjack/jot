@@ -22,10 +22,11 @@ It does not proxy to Gateway or substitute another extended Session planner.
    not claim image interpretation. Prove an actual streamed local model request
    and resulting committed answer before readiness can become true. See
    [executor evidence and remaining integration](../../implementation/2026-10-19-standalone-chat-execution.md).
-3. Connect the standalone React interface to its own mode contract: one mode
+3. **Interface implemented:** connect the standalone React interface to its own mode contract: one mode
    label, readiness-aware new conversations, versioned changes, unchanged drafts,
    original-request retries, active-run exclusion and unavailable status. Test
    real browser/API/provider transitions and reload, not a static mock label.
+   See [actual local composition and remaining limits](../../implementation/2026-10-19-standalone-mode-ui.md).
 4. Document configuration and deployment limits; run root/UI tests, local build,
    source/staged/history audits, then publish explicit reviewed files. Provider
    cache/latency and the complete extended React/API/SDK acceptance remain separate

@@ -1,5 +1,5 @@
 import {DatabaseSync} from 'node:sqlite';
-import {randomUUID} from 'node:crypto';
+import {randomUUID,createHash} from 'node:crypto';
 import {mkdirSync} from 'node:fs';
 import {dirname} from 'node:path';
 import * as chat from './chat-store.mjs';
@@ -14,6 +14,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY,conversation_id TEXT NOT NULL REFERENCES conversations(id),request_id TEXT NOT NULL,input TEXT NOT NULL,status TEXT NOT NULL,error TEXT,created_at TEXT NOT NULL,UNIQUE(conversation_id,request_id));
       CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,conversation_id TEXT NOT NULL REFERENCES conversations(id),type TEXT NOT NULL,data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS artifacts(id TEXT PRIMARY KEY,conversation_id TEXT NOT NULL REFERENCES conversations(id),run_id TEXT,name TEXT NOT NULL,path TEXT NOT NULL,size INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS conversation_commands(request_id TEXT PRIMARY KEY,kind TEXT NOT NULL,fingerprint TEXT NOT NULL,result_json TEXT NOT NULL);
     `);
     if(!this.db.prepare('PRAGMA table_info(messages)').all().some(c=>c.name==='run_id'))this.db.exec('ALTER TABLE messages ADD COLUMN run_id TEXT');
     // Legacy rows retain their original Work meaning. A later mode change never
@@ -30,17 +31,29 @@ export class Store {
     }catch(error){this.db.exec('ROLLBACK');this.db.close();throw error;}
     chat.initChatTables(this.db);
   }
-  createConversation(title='New chat',mode='work') {if(!['chat','work'].includes(mode))throw new Error('invalid_mode');const c={id:randomUUID(),title,created_at:now(),mode,version:1};this.db.prepare('INSERT INTO conversations(id,title,created_at,mode,version) VALUES(?,?,?,?,?)').run(c.id,c.title,c.created_at,c.mode,c.version);return c;}
-  changeMode(id,mode,expectedVersion){
+  commandReceipt(requestId,kind,payload){
+    if(requestId===undefined)return null;if(typeof requestId!=='string'||!requestId||requestId.length>100)throw Error('invalid_request_id');
+    const fingerprint=createHash('sha256').update(JSON.stringify(payload)).digest('hex'),saved=this.db.prepare('SELECT * FROM conversation_commands WHERE request_id=?').get(requestId);
+    if(!saved)return null;if(saved.kind!==kind||saved.fingerprint!==fingerprint)throw Error('idempotency_conflict');return JSON.parse(saved.result_json);
+  }
+  saveCommand(requestId,kind,payload,result){if(requestId!==undefined)this.db.prepare('INSERT INTO conversation_commands VALUES(?,?,?,?)').run(requestId,kind,createHash('sha256').update(JSON.stringify(payload)).digest('hex'),JSON.stringify(result));}
+  createConversation(title='New chat',mode='work',{requestId,chatReady=true}={}) {
+    if(!['chat','work'].includes(mode))throw new Error('invalid_mode');const intent={title,mode};this.db.exec('BEGIN IMMEDIATE');
+    try{const receipt=this.commandReceipt(requestId,'create',intent);if(receipt){this.db.exec('COMMIT');return receipt;}if(mode==='chat'&&!chatReady)throw Error('chat_unavailable');const c={id:randomUUID(),title,created_at:now(),mode,version:1};this.db.prepare('INSERT INTO conversations(id,title,created_at,mode,version) VALUES(?,?,?,?,?)').run(c.id,c.title,c.created_at,c.mode,c.version);this.saveCommand(requestId,'create',intent,c);this.db.exec('COMMIT');return c;}
+    catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  changeMode(id,mode,expectedVersion,{requestId,chatReady=true}={}){
     if(!['chat','work'].includes(mode))throw new Error('invalid_mode');
     if(!Number.isSafeInteger(expectedVersion)||expectedVersion<1)throw new Error('invalid_version');
     this.db.exec('BEGIN IMMEDIATE');
     try{
+      const intent={id,mode,expected_version:expectedVersion},receipt=this.commandReceipt(requestId,'mode',intent);if(receipt){this.db.exec('COMMIT');return receipt;}
       const c=this.conversation(id);if(!c)throw new Error('conversation_not_found');
+      if(mode==='chat'&&!chatReady)throw Error('chat_unavailable');
       if(c.version!==expectedVersion)throw new Error('version_conflict');
       if(this.db.prepare("SELECT id FROM runs WHERE conversation_id=? AND status IN ('queued','running','waiting_approval')").get(id))throw new Error('conversation_busy');
       this.db.prepare('UPDATE conversations SET mode=?,version=version+1 WHERE id=? AND version=?').run(mode,id,expectedVersion);
-      const saved=this.conversation(id);this.db.exec('COMMIT');return saved;
+      const saved={...this.conversation(id)};this.saveCommand(requestId,'mode',intent,saved);this.db.exec('COMMIT');return saved;
     }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   conversations(){return this.db.prepare('SELECT * FROM conversations ORDER BY created_at DESC').all();}

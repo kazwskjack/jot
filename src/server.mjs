@@ -42,10 +42,10 @@ export async function buildServer(options={}){
   app.get('/api/capabilities',async()=>({mode:demo?'demo':'agent',csrf,model_configured:Boolean(process.env.JOT_MODEL_URL&&process.env.JOT_MODEL)||Boolean(options.provider),conversation_modes:{default:chat?'chat':'work',work:{supported:true},chat:{ready:Boolean(chat)}},tools:tools.definitions.map(t=>t.function.name),limits:{max_message_chars:8000,max_file_bytes:1000000,workers:agent.maxWorkers,per_conversation:1,max_steps:agent.maxSteps,approval_timeout_ms:agent.approvalTimeoutMs}}));
   app.get('/api/conversations',async()=>store.conversations());
   const conversationMode={type:'string',enum:['chat','work']};
-  app.post('/api/conversations',{schema:{body:object({title:{type:'string',maxLength:100},mode:conversationMode},[])}},async(req,reply)=>req.body.mode==='chat'&&!chat?reply.code(409).send({error:'chat_unavailable'}):store.createConversation(req.body.title||'New chat',req.body.mode??'work'));
-  app.patch('/api/conversations/:id',{schema:{body:object({mode:conversationMode,expected_version:{type:'integer',minimum:1}},['mode','expected_version'])}},async(req,reply)=>{
-    if(req.body.mode==='chat'&&!chat)return reply.code(409).send({error:'chat_unavailable'});
-    try{return store.changeMode(req.params.id,req.body.mode,req.body.expected_version);}
+  const commandId={type:'string',minLength:1,maxLength:100};
+  app.post('/api/conversations',{schema:{body:object({title:{type:'string',maxLength:100},mode:conversationMode,request_id:commandId},[])}},async(req,reply)=>{try{return store.createConversation(req.body.title||'New chat',req.body.mode??'work',{requestId:req.body.request_id,chatReady:Boolean(chat)});}catch(error){return reply.code(409).send({error:error.message});}});
+  app.patch('/api/conversations/:id',{schema:{body:object({mode:conversationMode,expected_version:{type:'integer',minimum:1},request_id:commandId},['mode','expected_version'])}},async(req,reply)=>{
+    try{return store.changeMode(req.params.id,req.body.mode,req.body.expected_version,{requestId:req.body.request_id,chatReady:Boolean(chat)});}
     catch(error){return reply.code(error.message==='conversation_not_found'?404:409).send({error:error.message});}
   });
   app.get('/api/conversations/:id/snapshot',async(req,reply)=>{if(!store.conversation(req.params.id))return reply.code(404).send({error:'not_found'});return store.snapshot(req.params.id);});
