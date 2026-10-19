@@ -25,5 +25,6 @@ export class GitWorkbench{
  }
  private repository(owner:string,project:string){this.projects.assertOwned(project,owner);const repository=this.repositories.get(owner+'\0'+project);if(!repository)throw Error('git_repository_unconfigured');return repository;}
  async inspect(owner:string,project:string,signal?:AbortSignal){const result=await this.repository(owner,project).inspect(signal);this.projects.assertOwned(project,owner);return{project_id:project,...result};}
+ async freeze(owner:string,project:string,snapshotId:string,paths:readonly string[],signal?:AbortSignal){const result=await this.repository(owner,project).freeze(snapshotId,paths,signal);this.projects.assertOwned(project,owner);return result;}
  async diff(owner:string,project:string,input:{snapshot_id:string;path:string;stage:'working'|'staged'},signal?:AbortSignal){const result=await this.repository(owner,project).diff(input,signal);this.projects.assertOwned(project,owner);return{project_id:project,...result};}
 }

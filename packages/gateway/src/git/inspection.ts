@@ -11,6 +11,7 @@ export type GitEntry={path:string;original_path?:string;index_status:string;work
 export type GitRemote={name:string;kind:'https'|'ssh'|'local'|'other';host?:string};
 export type GitSnapshot={snapshot_id:string;repository_sha256:string;head:{oid:string|null;branch:string|null;detached:boolean};entries:GitEntry[];remotes:GitRemote[];omitted_count:number;read_only:true;execution_authorized:false};
 export type GitDiff={snapshot_id:string;path:string;stage:'working'|'staged';kind:'text'|'binary';patch:string;read_only:true;execution_authorized:false};
+export type GitReviewWitness={snapshot_id:string;repository_sha256:string;head:GitSnapshot['head'];index_sha256:string|null;files:Array<{path:string;kind:'file'|'missing';sha256:string|null;size:number;mode:number}>};
 const hash=(value:string|Buffer)=>createHash('sha256').update(value).digest('hex');
 const same=(a:string,b:string)=>process.platform==='win32'?a.toLowerCase()===b.toLowerCase():a===b;
 const within=(root:string,path:string)=>same(root,path)||same(root+sep,path.slice(0,root.length+1));
@@ -130,6 +131,23 @@ export class GitRepositoryInspection{
  }
  private async inspectContext(context:ReadContext,signal?:AbortSignal):Promise<GitSnapshot>{const first=await this.collect(context,signal),second=await this.collect(context,signal);if(first.value.snapshot_id!==second.value.snapshot_id)throw Error('git_snapshot_changed');return second.value;}
  async inspect(signal?:AbortSignal):Promise<GitSnapshot>{const context=await this.context(signal);try{return await this.inspectContext(context,signal);}finally{await context.dispose();}}
+ /** Exact-byte review only. Never writes source files, index, refs or objects. */
+ async freeze(snapshotId:string,paths:readonly string[],signal?:AbortSignal):Promise<GitReviewWitness>{
+  if(!/^[a-f0-9]{64}$/.test(snapshotId)||!Array.isArray(paths)||!paths.length||paths.length>100||new Set(paths).size!==paths.length)throw Error('git_intent_invalid');
+  for(const path of paths){if(typeof path!=='string')throw Error('git_intent_invalid');safe(path);}
+  const context=await this.context(signal);try{
+   const before=await this.inspectContext(context,signal);if(before.snapshot_id!==snapshotId)throw Error('git_snapshot_changed');
+   const files:GitReviewWitness['files']=[];let size=0;
+   for(const path of [...paths].sort()){
+    signal?.throwIfAborted();const entry=before.entries.find(value=>value.path===path);if(!entry||!['file','missing'].includes(entry.kind))throw Error('git_path_unavailable');
+    const original=await this.file(path);if(original.kind==='missing'){files.push({path,kind:'missing',sha256:null,size:0,mode:0});continue;}
+    if(original.kind!=='file')throw Error('git_path_unavailable');const bytes=await this.bytes(join(this.root,path),32*1024*1024,original.stamp);size+=bytes.length;if(size>64*1024*1024)throw Error('git_output_limit');
+    files.push({path,kind:'file',sha256:hash(bytes),size:bytes.length,mode:(await lstat(join(this.root,path))).mode&0o777});
+   }
+   if((await this.inspectContext(context,signal)).snapshot_id!==before.snapshot_id)throw Error('git_snapshot_changed');
+   return{snapshot_id:before.snapshot_id,repository_sha256:before.repository_sha256,head:before.head,index_sha256:context.index,files};
+  }finally{await context.dispose();}
+ }
  async diff(input:{snapshot_id:string;path:string;stage:'working'|'staged'},signal?:AbortSignal):Promise<GitDiff>{
   if(!input||!/^[a-f0-9]{64}$/.test(input.snapshot_id)||!['working','staged'].includes(input.stage))throw Error('git_diff_invalid');safe(input.path);
   const context=await this.context(signal);try{const before=await this.inspectContext(context,signal);if(before.snapshot_id!==input.snapshot_id)throw Error('git_snapshot_changed');const entry=before.entries.find(row=>row.path===input.path);if(!entry||!['file','missing'].includes(entry.kind))throw Error('git_path_unavailable');
