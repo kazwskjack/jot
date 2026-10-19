@@ -172,6 +172,11 @@ scheduler. Completing its first step does not complete background compaction.
    reopen and immutable retry are covered. Automatic starts, crash recovery
    across native Host termination, presentation and real-provider gates remain
    open; the enclosing post-answer-compaction checkbox is not yet complete.
+   The [native surface-order correction](../../implementation/2026-10-19-chat-native-surface-order.md)
+   additionally verifies protocol-2 positional coverage after a real official
+   context replacement, including hidden historical markers and retained
+   answers. Existing protocol-1 records remain compatible. Host-exit recovery
+   and automatic post-answer dispatch still require their original gates.
 6. **End-to-end gate:** actual SDK/Host tests must show no foreground summary,
    a pressure-driven post-answer summary, exactly one user-facing answer,
    correct thinking/provider identity, new-input cancellation, stable retry/
@@ -179,6 +184,39 @@ scheduler. Completing its first step does not complete background compaction.
    request. UI tests must hide only Chat's background activity and preserve
    Work's visible official compaction. Keep real readiness off until these
    execution, accounting and presentation gates pass.
+
+### Host-exit publication recovery before automatic starts
+
+The following implementation sequence remains pending. Recovery must consume
+the original result; it is never permission to repeat a model call.
+
+- Add an exact bearer-only inspection of the original attempt by owned
+  intent/run/Session/version, plus an exact historical checkpoint read. Return
+  original binding and receipt metadata only; never allocate an attempt,
+  dispatch, extend its fence or expose a browser-selectable scope. An existing
+  published receipt remains historical even after another input.
+- When no checkpoint exists, inspect the cold original native log without
+  registering or waking an Agent/Session. Require the unchanged original raw
+  prefix hash/count, and exactly its successful standalone four-event tail.
+  Reconstruct the prefix with the official Session API and reuse original
+  admission/history/invariant proof logic; do not invent native input IDs from
+  a summary or bypass the registry-empty cold-reader boundary.
+- Derive the exact native result from its stored summary/replacement/end,
+  including positional coverage, generation, model and usage. Reuse the live
+  evidence validator. Read the complete cold log again and recheck original
+  source/ownership before returning evidence. Partial, ambiguous, changed,
+  error-ended or subsequently active logs cannot publish a new checkpoint.
+- Complete known native usage through the original immutable attempt journal
+  if its settlement reply was lost. Unknown or absent usage remains unknown;
+  reserved/released state cannot imply inference. Do not repeat dispatch or
+  zero/refund usage. Then call original checkpoint publication, which still
+  performs its current-source check; exact committed reads do not renew it.
+- Add actual process-exit tests after native durability but before publication,
+  after committed publication but before acknowledgement, and during partial
+  summary/unknown usage. Restart must recover the original receipt/next seed
+  without another summary or answer. Add newer-input, foreign, modified prefix,
+  active registry, changed model/usage and repeated-recovery refusals. Keep
+  automatic starts off until these and the original presentation gates pass.
 
 ## 5. Connect the UI and standalone profile
 

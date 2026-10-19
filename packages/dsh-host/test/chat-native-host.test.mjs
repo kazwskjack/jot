@@ -17,7 +17,7 @@ import {OfficialSessionRunner} from '../../gateway/src/harness/official-session-
 import {SessionCommandDispatcher} from '../../gateway/src/harness/command-dispatcher.ts';
 const runtime=process.env.JOT_DSH_RUNTIME_MODULES;
 const listen=async server=>{await new Promise(done=>server.listen(0,'127.0.0.1',done));return'http://127.0.0.1:'+server.address().port;};
-async function chatCase(t,{bounded=false,web=false,maintenance=false,accounting=false,compaction=false,lowPressure=false,cancelCompaction=false,checkpoint=false,contextV2=false}={}){
+async function chatCase(t,{bounded=false,web=false,maintenance=false,accounting=false,compaction=false,lowPressure=false,cancelCompaction=false,checkpoint=false,contextV2=false,replacedSurface=false}={}){
  const root=await mkdtemp(join(tmpdir(),'jot-chat-native-')),home=join(root,'home'),workspace=join(root,'workspace');await mkdir(workspace);
  const token=randomBytes(32).toString('hex'),adapterToken=randomBytes(32).toString('hex'),modelKey='sk-'+randomBytes(32).toString('hex'),requests=[];
  let service,host,exit,done,execution,output='',succeeded=false,modelFailure;
@@ -125,7 +125,7 @@ async function chatCase(t,{bounded=false,web=false,maintenance=false,accounting=
   }
   if(accounting){await writeFile(join(root,'accounting-request.json'),JSON.stringify({scope:maintenanceScope,intent_id:maintenanceIntent.intent_id}));const deadline=Date.now()+20000;let receipt;while(Date.now()<deadline&&!receipt){try{receipt=JSON.parse(await readFile(join(root,'accounting-receipt.json'),'utf8'));}catch{await new Promise(done=>setTimeout(done,40));}}assert.ok(receipt,'explicit SDK accounting probe receipt');assert.equal(receipt.finished,true,JSON.stringify(receipt));assert.equal(receipt.sessionUnchanged,true);assert.equal(receipt.checkpointPublished,false);assert.equal(requests.length,3);const row=service.db.prepare('SELECT * FROM ga_chat_compaction_attempts').get();assert.equal(row.state,'settled');assert.equal(row.actual_tokens,'11');assert.equal(row.intent_id,maintenanceIntent.intent_id);assert.equal(service.db.prepare("SELECT count(*) n FROM ga_messages WHERE conversation_id=? AND role='assistant' AND run_id IS NOT NULL").get(conversation.conversation_id).n,2);}
   if(compaction){
-   await writeFile(join(root,'compaction-request.json'),JSON.stringify({scope:maintenanceScope,intent_id:maintenanceIntent.intent_id,source_sha256:maintenanceIntent.source_sha256}));
+   await writeFile(join(root,'compaction-request.json'),JSON.stringify({scope:maintenanceScope,intent_id:maintenanceIntent.intent_id,source_sha256:maintenanceIntent.source_sha256,...(replacedSurface?{replaceContext:true}:{})}));
    if(cancelCompaction){
     const ready=Date.now()+20000;while(requests.length<3&&Date.now()<ready)await new Promise(done=>setTimeout(done,30));assert.equal(requests.length,3,'actual auxiliary HTTP stream must be active before new input');
     expectedQuestion='Continue with this new synthetic question after cancelling maintenance.';
@@ -142,6 +142,7 @@ async function chatCase(t,{bounded=false,web=false,maintenance=false,accounting=
   }
   if(checkpoint){
    assert.equal(service.db.prepare('SELECT count(*) n FROM ga_chat_compaction_checkpoints').get().n,1);
+   if(replacedSurface){const {witness:w}=JSON.parse(service.db.prepare('SELECT checkpoint_json FROM ga_chat_compaction_checkpoints').get().checkpoint_json);assert.equal(w.protocol,2);assert.ok(w.shadowed_start>w.shadowed_end);assert.ok(w.shadowed_start_position<w.shadowed_end_position);assert.equal(w.answer_covered,false);}
    expectedQuestion='Use the verified summary for this third synthetic question.';
    const next=await service.app.inject({method:'POST',url:`/v1/conversations/${conversation.conversation_id}/messages`,headers:{'x-user-id':'chat-owner'},payload:{client_message_id:'checkpoint-third-question',content:[{type:'text',text:expectedQuestion}]}});assert.equal(next.statusCode,202,next.body);
    expectedContext=JSON.parse(service.db.prepare('SELECT chat_context_json FROM ga_runs WHERE id=?').get(next.json().run_id).chat_context_json);assert.equal(expectedContext.algorithm,'checkpoint-text-v2');assert.equal(expectedContext.checkpoint.summary_text,'SYNTHETIC-CHECKPOINT-ALPHA');
@@ -173,3 +174,5 @@ test('actual official Chat maintenance cancels and drains before a new original 
 test('actual official Chat checkpoint is published once and consumed by the next original bounded request',{skip:!runtime,timeout:60000},t=>chatCase(t,{bounded:true,maintenance:true,compaction:true,checkpoint:true}));
 
 test('actual official Chat v2 cancellation cannot publish a stale checkpoint while the next question succeeds',{skip:!runtime,timeout:60000},t=>chatCase(t,{bounded:true,maintenance:true,compaction:true,cancelCompaction:true,contextV2:true}));
+
+test('actual official Chat checkpoint follows surface order after a prior native context replacement',{skip:!runtime,timeout:60000},t=>chatCase(t,{bounded:true,maintenance:true,compaction:true,checkpoint:true,replacedSurface:true}));

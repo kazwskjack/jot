@@ -99,9 +99,9 @@ capability ledger remain open. A native summary that cannot be published is not
 silently claimed as a useful handoff. General readiness and generated profiles
 remain default-off until the remaining end-to-end gates pass.
 
-The pinned SDK defines `shadowedSeqs` in surface order, not numeric sequence
-order; a prior replacement can make `shadowedRange.start` greater than `end`.
-The current tests prove Chat's fresh bounded-body path and two handoffs. Before
-automatic activation, add a real native replacement-order case and remove any
-numeric interval assumptions from checkpoint evidence validation. Do not infer
-coverage by comparing sequence numbers or call a refused shape successful.
+The replacement-order gap identified by this review is now addressed in the
+[native surface-order increment](2026-10-19-chat-native-surface-order.md).
+Protocol-2 evidence follows actual surface positions and visible markers; its
+actual SDK test replaces a context node before original compaction. Existing
+protocol-1 records keep their original validation. This closes that specific
+prerequisite, not the remaining automatic activation or recovery gates.
