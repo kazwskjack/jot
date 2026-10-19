@@ -26,13 +26,13 @@
 
 ## 15. Git workbench
 
-**现状**：当前 `web/workbench/Workbench.tsx` 仅注册 agents、teams、shared-workspace、persistent-tasks 四个视图。未找到 Jot 的 Git status/branch/commit/remote 管理路由与页面。DSH 原生工具可以拥有 shell/Git 能力；这不等于 Jot 的 owner-scoped Git 工作台。`scripts/verify-git-public.mjs` 检查公开提交安全，不是产品 Git 后端。
+**现状（2026-10-19 更新）**：已有 owner/project 归属的 Git 状态、分支与 staged/working diff API 和移动端 Git 页，以及精确快照的审批界面。内部 stage/unstage 执行具有原始请求、准备/派发/结果/处置记录与真实崩溃恢复测试；本轮新增原始受理事务及受理/当前结果分别查询的 API、BFF 和客户端。实际 UI 写入仍未开放。DSH 原生 shell/Git 能力和公开提交扫描均不能代替产品写入授权。详见[原始受理与历史查询](2026-10-19-git-original-admission-history.md)。
 
-**真实剩余链**：可信 project/workspace root → Git 可用性与 repo identity → status/diff/branch/remote 的有界只读展示 → 对已审阅精确 diff/HEAD/index 的操作授权 → commit/revert/discard/untracked delete → remote fetch/pull/push/publish → 冲突/未知结果恢复。每一步需防止 pathspec 注入、shell 拼接、仓库 root 替换、跨 owner、符号链接和大输出泄漏。显示 remote 必须脱敏凭证。
+**真实剩余链**：原始工作区协调（Agent turn、共享写入、检查点恢复）→ 原受理 HTTP 事务与 producer 生命周期 → 实际 stage/unstage UI、取消/重启/未知结果恢复 → commit/revert/discard/untracked delete → 分别授权的 remote fetch/pull/push/publish 及远端冲突/未知结果恢复。已完成的有界只读展示和内部物理执行不重复计为新完成项。每一步继续防止 pathspec 注入、shell 拼接、仓库 root 替换、跨 owner、符号链接和大输出泄漏；remote 展示必须脱敏。
 
-**可独立闭合**：优先实现只读 `GitRepositoryInspection`，使用 `spawn` 参数数组、固定 `cwd`、限制输出/超时、禁用外部 diff/helper，并将返回值绑定 repo root identity 与 HEAD；UI 增加只读 Git 页。随后独立实现本地 commit 的 intent/receipt/CAS；远程与破坏性操作各用单独 intent，不把「查看 diff」变成写入授权。
+**接续顺序**：按[HTTP 与工作台执行计划](../superpowers/plans/2026-10-19-git-index-http-workflow.md)接入原工作区协调与原始 producer，随后开放移动端本地操作。索引独占租约不能代替整个工作区的互斥；历史受理不意味着后台正在执行。commit、破坏性与远程操作各用单独意图，不把「查看 diff」变成写入授权。
 
-**验证入口/依赖**：可新增 `packages/gateway/src/git/{inspection,intents,routes}.ts` 和同名 `test/git`、`web/workbench/GitPanel.tsx`，先用临时本地 repo 覆盖普通/unborn/detached HEAD、untracked、rename、binary、冲突、空仓库、非法参数、跨 owner、并发 HEAD/index 变化。依赖 project ownership、工作区路径边界与现有审批；远端账户/推送发布由操作者授权验收，不妨碍只读与本地意图链完成。
+**验证入口/依赖**：现有 `packages/gateway/test/git/`、`test/contracts/contracts.test.mjs` 与 `web/workbench/` 测试已覆盖只读/审批/内部执行及历史查询。接下来补原工作区并发互斥和实际 React/BFF/Gateway 变更链的端到端验收。依赖原 project ownership、工作区/Session/run/角色身份和现有审批；远端账户及推送发布仍须单独的真实授权验收。
 
 ## 16. Commands / skills
 

@@ -1078,5 +1078,23 @@
     "GitReviewIntent",
     "200",
     "Original owner/project review acknowledgement; no Git execution or credential authority."
+  ],
+  [
+    "GET",
+    "/v1/projects/{projectId}/git/admissions/{requestId}",
+    "getProjectGitAcceptance",
+    null,
+    "GitIndexAcceptance",
+    "200",
+    "Read original accepted request; never dispatch Git; current ownership is required and historical acceptance grants no execution authority."
+  ],
+  [
+    "GET",
+    "/v1/projects/{projectId}/git/executions/{executionId}",
+    "getProjectGitExecution",
+    null,
+    "GitIndexExecutionResult",
+    "200",
+    "Read current result of an originally admitted Git execution; current ownership is required and historical acceptance grants no execution authority."
   ]
 ]

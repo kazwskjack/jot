@@ -7,6 +7,14 @@ await mkdir(output,{recursive:true});
 await build({entryPoints:[new URL('./client.ts',import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')],bundle:true,platform:'node',format:'esm',outfile:new URL('client.mjs',output).pathname.replace(/^\/([A-Z]:)/,'$1')});
 const {workbenchApi}=await import(new URL('client.mjs',output));
 
+test('Git accepted receipt and current outcome use distinct read-only no-store requests with original IDs',async t=>{
+ const original=globalThis.fetch,calls=[];t.after(()=>{globalThis.fetch=original});globalThis.fetch=async(url,init)=>{calls.push({url,init});return new Response('{"execution_authorized":false}')};const abort=new AbortController();
+ await workbenchApi.gitAcceptance('project /1','original:request',abort.signal);await workbenchApi.gitExecution('project /1','original:execution',abort.signal);
+ assert.equal(calls[0].url,'/workbench-api/v1/projects/project%20%2F1/git/admissions/original%3Arequest');assert.equal(calls[1].url,'/workbench-api/v1/projects/project%20%2F1/git/executions/original%3Aexecution');
+ for(const {init}of calls){assert.equal(init.method,'GET');assert.equal(init.body,undefined);assert.equal(init.cache,'no-store');assert.equal(init.credentials,'same-origin');assert.ok(init.signal instanceof AbortSignal)}
+ globalThis.fetch=async(_url,init)=>new Promise((_resolve,reject)=>init.signal.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true}));const pending=workbenchApi.gitExecution('project','execution',abort.signal);abort.abort();await assert.rejects(pending,{name:'AbortError'});
+});
+
 test('file list pages encode scope and cursor and use authenticated read-only BFF requests',async t=>{
  const original=globalThis.fetch;t.after(()=>{globalThis.fetch=original;});const calls=[];
  globalThis.fetch=async(url,init)=>{calls.push({url,init});return new Response('{"items":[],"next_cursor":null}');};

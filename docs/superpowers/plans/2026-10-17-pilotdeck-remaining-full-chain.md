@@ -607,3 +607,12 @@ changed-root fixtures verify the recovery boundary. Original API/UI execution
 admission, commit/destructive/revert, separately approved remote effects and
 the complete Git/portable-product release gates retain their own requirements;
 this internal increment does not close capability 15 or the full ledger.
+
+The [original admission/history increment](../../implementation/2026-10-19-git-original-admission-history.md)
+separates the caller's synchronous atomic acceptance from asynchronous original
+index effects. Two owned history reads and their shared contracts/BFF/client
+path now distinguish immutable acceptance from current pending, unknown, applied
+or explicitly disposed outcomes. Real process-loss tests cover admission on both
+sides of commit. This closes neither write activation nor capability 15:
+original workspace coordination, producer lifecycle, mutation UI, commit,
+destructive/revert and remote operations remain in the full workflow plan.

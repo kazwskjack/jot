@@ -1,6 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {createHash} from 'node:crypto';import {linkSync} from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';import {mkdtemp,mkdir,writeFile,readFile,rm,readdir,rename} from 'node:fs/promises';import {lstatSync} from 'node:fs';import {tmpdir} from 'node:os';import {join,resolve,sep,dirname} from 'node:path';import {execFileSync,spawnSync} from 'node:child_process';import {fileURLToPath} from 'node:url';
 import {ProjectRepository} from '../../src/projects/repository.ts';import {GitWorkbench} from '../../src/git/service.ts';import {GitMutationIntents} from '../../src/git/intents.ts';
+import {withImmediateTransaction} from '../../src/db/database.ts';
 async function fixture(t,{legacy=false}={}){
  const {GitIndexExecutions}=await import('../../src/git/index-executions.ts'),parent=await mkdtemp(join(tmpdir(),'jot-git-execution-')),root=join(parent,'repo'),database=join(parent,'journal.sqlite'),childTemp=join(parent,'child-temp');await mkdir(root);await mkdir(childTemp);const git=(...args)=>execFileSync('git',['-c','user.name=Test Contributor','-c','user.email=test@example.invalid',...args],{cwd:root,encoding:'utf8',stdio:['ignore','pipe','pipe']});git('init','--initial-branch=main');git('config','core.autocrlf','false');await writeFile(join(root,'note.txt'),'before\n');git('add','.');git('commit','-m','Synthetic execution fixture');await writeFile(join(root,'note.txt'),'after\n');
  let db=new DatabaseSync(database);db.exec('PRAGMA foreign_keys=ON;CREATE TABLE ga_projects(id TEXT PRIMARY KEY,owner_id TEXT,title TEXT,is_default INTEGER,version INTEGER,created_at TEXT,updated_at TEXT);CREATE TABLE ga_worker_leases(resource_id TEXT PRIMARY KEY,owner TEXT,generation INTEGER,expires_at TEXT,updated_at TEXT)');db.prepare('INSERT INTO ga_projects VALUES(?,?,?,?,?,?,?)').run('project','owner','Test',0,1,'now','now');
@@ -237,4 +238,47 @@ test('a fenced original executor cannot clean lock files after another Worker ta
 test('a cached applied control receipt cannot conceal a corrupted original request digest',async t=>{
  const f=await fixture(t),{approved,input}=await f.review();f.db.exec("CREATE TRIGGER corrupt_receipt_setup BEFORE INSERT ON wb_git_index_outcomes BEGIN SELECT RAISE(ABORT,'test_corrupt_receipt_setup'); END");await assert.rejects(f.current.executions.execute('owner','project',approved.intent_id,input),/test_corrupt_receipt_setup/);f.db.exec('DROP TRIGGER corrupt_receipt_setup');const row=f.db.prepare('SELECT * FROM wb_git_index_executions').get(),view=f.current.executions.inspect('owner','project',row.execution_id),control={request_id:'cached-original-control',expected_state_sha256:view.state_sha256,acknowledge_unknown:true};await f.current.executions.abandon('owner','project',row.execution_id,control);
  f.db.exec('DROP TRIGGER wb_git_index_controls_no_update');f.db.prepare('UPDATE wb_git_index_controls SET request_sha256=?').run('0'.repeat(64));assert.throws(()=>f.current.executions.getControl('owner','project',row.execution_id,control.request_id),/git_execution_evidence_corrupt/);
+});
+
+test('original acceptance commits atomically without an index effect and dispatch uses only its stored request',async t=>{
+ const f=await fixture(t),{approved,input}=await f.review(),before=await readFile(join(f.root,'.git/index'));
+ assert.throws(()=>f.current.executions.admit('owner','project',approved.intent_id,input),/git_admission_transaction_required/);
+ const accepted=withImmediateTransaction(f.db,()=>f.current.executions.admit('owner','project',approved.intent_id,input));
+ assert.equal(accepted.accepted,true);assert.equal(accepted.request_id,input.request_id);assert.equal(accepted.execution_authorized,false);assert.equal(JSON.stringify(accepted).includes(f.root),false);
+ assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM ga_worker_leases').get().n,0);assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM wb_git_index_dispatches').get().n,0);assert.deepEqual(await readFile(join(f.root,'.git/index')),before);
+ const restarted=f.restart();assert.deepEqual(restarted.executions.getAdmission('owner','project',input.request_id),accepted);assert.deepEqual(withImmediateTransaction(f.db,()=>restarted.executions.admit('owner','project',approved.intent_id,input)),accepted);
+ const result=await restarted.executions.perform('owner','project',accepted.execution_id);assert.equal(result.state,'applied');assert.equal(f.git('show',':note.txt'),'after\n');assert.deepEqual(restarted.executions.getAdmission('owner','project',input.request_id),accepted);
+ const identity=lstatSync(join(f.root,'.git/index'),{bigint:true}).ino;assert.deepEqual(await restarted.executions.perform('owner','project',accepted.execution_id),result);assert.equal(lstatSync(join(f.root,'.git/index'),{bigint:true}).ino,identity);
+});
+
+test('failed original HTTP-style acknowledgement rolls acceptance back and cannot leave an executable job',async t=>{
+ const f=await fixture(t),{approved,input}=await f.review(),before=await readFile(join(f.root,'.git/index'));
+ assert.throws(()=>withImmediateTransaction(f.db,()=>{f.current.executions.admit('owner','project',approved.intent_id,input);throw Error('test_http_ack_failure');}),/test_http_ack_failure/);
+ assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM wb_git_index_executions').get().n,0);assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM wb_git_index_admissions').get().n,0);assert.deepEqual(await readFile(join(f.root,'.git/index')),before);
+ const accepted=withImmediateTransaction(f.db,()=>f.current.executions.admit('owner','project',approved.intent_id,input));assert.equal((await f.current.executions.perform('owner','project',accepted.execution_id)).state,'applied');
+});
+
+test('historical acceptance neither revives cancelled approval nor adopts an internal execution',async t=>{
+ const f=await fixture(t),{approved,input}=await f.review(),accepted=withImmediateTransaction(f.db,()=>f.current.executions.admit('owner','project',approved.intent_id,input));
+ await f.current.intents.control('owner','project',approved.intent_id,{request_id:'cancel-accepted-original',action:'cancel',expected_version:2,review_sha256:approved.review_sha256});
+ assert.deepEqual(withImmediateTransaction(f.db,()=>f.current.executions.admit('owner','project',approved.intent_id,input)),accepted);await assert.rejects(f.current.executions.perform('owner','project',accepted.execution_id),/git_execution_revoked/);assert.equal(f.git('show',':note.txt'),'before\n');
+ assert.throws(()=>withImmediateTransaction(f.db,()=>f.current.executions.admit('owner','project',approved.intent_id,{...input,review_sha256:'0'.repeat(64)})),/idempotency_conflict/);
+ const view=f.current.executions.inspect('owner','project',accepted.execution_id);await f.current.executions.abandon('owner','project',accepted.execution_id,{request_id:'close-unstarted-original',expected_state_sha256:view.state_sha256,acknowledge_unknown:true});
+ const next=await f.review(),result=await f.current.executions.execute('owner','project',next.approved.intent_id,next.input);assert.equal(result.state,'applied');await assert.rejects(f.current.executions.perform('owner','project',result.execution_id),/git_admission_not_found/);
+ assert.throws(()=>withImmediateTransaction(f.db,()=>f.current.executions.admit('owner','project',next.approved.intent_id,next.input)),/git_execution_origin_conflict/);
+});
+
+test('accepted history rejects a corrupted original request rather than trusting its cached projection',async t=>{
+ const f=await fixture(t),{approved,input}=await f.review(),accepted=withImmediateTransaction(f.db,()=>f.current.executions.admit('owner','project',approved.intent_id,input));
+ f.db.exec('DROP TRIGGER wb_git_index_executions_no_update');f.db.prepare('UPDATE wb_git_index_executions SET request_sha256=?').run('0'.repeat(64));
+ assert.throws(()=>f.current.executions.getAdmission('owner','project',input.request_id),/git_admission_receipt_corrupt/);assert.throws(()=>f.current.executions.getAdmitted('owner','project',accepted.execution_id),/git_admission_receipt_corrupt/);await assert.rejects(f.current.executions.perform('owner','project',accepted.execution_id),/git_admission_receipt_corrupt/);assert.equal(f.git('show',':note.txt'),'before\n');
+});
+
+for(const phase of ['before-commit','after-commit'])test('original admission process loss: '+phase,async t=>{
+ const f=await fixture(t),{approved,input}=await f.review(),before=await readFile(join(f.root,'.git/index'));
+ const child=spawnSync(process.execPath,[fileURLToPath(new URL('./fixtures/admission-crash-worker.mjs',import.meta.url)),f.root,f.database,approved.intent_id,input.request_id,phase],{encoding:'utf8',env:{...process.env,TEMP:f.childTemp,TMP:f.childTemp},timeout:30000,windowsHide:true});assert.equal(child.error,undefined);assert.equal(child.status,73,child.stderr);
+ const current=f.restart(),count=phase==='before-commit'?0:1;for(const table of ['wb_git_index_executions','wb_git_index_admissions'])assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM '+table).get().n,count);
+ assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM ga_worker_leases').get().n,0);assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM wb_git_index_dispatches').get().n,0);assert.deepEqual(await readFile(join(f.root,'.git/index')),before);assert.equal((await readdir(join(f.root,'.git'))).some(name=>name.endsWith('.lock')),false);
+ const original=phase==='after-commit'?current.executions.getAdmission('owner','project',input.request_id):null,accepted=withImmediateTransaction(f.db,()=>current.executions.admit('owner','project',approved.intent_id,input));if(original)assert.deepEqual(accepted,original);
+ assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM wb_git_index_admissions').get().n,1);assert.equal((await current.executions.perform('owner','project',accepted.execution_id)).state,'applied');assert.equal(f.git('show',':note.txt'),'after\n');
 });

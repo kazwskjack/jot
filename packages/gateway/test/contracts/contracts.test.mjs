@@ -21,6 +21,18 @@ test('Git review contracts reject execution claims and keep commit messages oper
  for(const patch of [{execution_authorized:true},{state:'applied'},{root:'untrusted'},{version:0}])assert.equal(validator.validateResponse(operation,201,{...receipt,...patch}).valid,false);
  for(const name of ['GitReviewPrepare','GitReviewControl','GitReviewIntent']){assert.deepEqual(event.$defs[name],spec.components.schemas[name]);const line=yaml.split('\n').find(value=>value.startsWith('    '+name+': '));assert.ok(line);assert.deepEqual(JSON.parse(line.slice(line.indexOf(':')+1)),spec.components.schemas[name]);}
 });
+test('Git execution history contracts distinguish original acceptance, pending, applied and explicitly closed results',async()=>{
+ const spec=await json('openapi.json'),event=await json('agent-event.schema.json'),yaml=await readFile(new URL('openapi.yaml',contracts),'utf8'),{ContractValidator}=await import('../../src/contracts/validator.ts'),validator=new ContractValidator();
+ const receiptOperation=validator.operationFor('GET','/v1/projects/:projectId/git/admissions/:requestId'),resultOperation=validator.operationFor('GET','/v1/projects/:projectId/git/executions/:executionId');assert.ok(receiptOperation);assert.ok(resultOperation);
+ const base={execution_id:'execution',project_id:'project',intent_id:'intent',request_id:'request',action:'stage',execution_authorized:false},accepted={...base,accepted:true};
+ assert.equal(validator.validateResponse(receiptOperation,200,accepted).valid,true);
+ for(const patch of [{accepted:false},{execution_authorized:true},{paths:['note.txt']},{root:'untrusted'}])assert.equal(validator.validateResponse(receiptOperation,200,{...accepted,...patch}).valid,false);
+ const pending={...base,paths:['note.txt'],state:'pending'},applied={...pending,state:'applied',before_index_sha256:'a'.repeat(64),index_sha256:'b'.repeat(64)},closed={...pending,state:'abandoned_unknown',disposition_id:'control'};
+ for(const result of [pending,{...pending,state:'unknown'},applied,{...applied,before_index_sha256:null},closed,{...closed,state:'not_dispatched'}])assert.equal(validator.validateResponse(resultOperation,200,result).valid,true);
+ for(const result of [{...pending,state:'applied'},{...applied,state:'pending'},{...closed,disposition_id:undefined},{...closed,state:'failed'},{...pending,execution_authorized:true},{...pending,paths:['../escape']},{...pending,paths:[]},{...pending,paths:['note.txt','note.txt']},{...pending,root:'untrusted'}])assert.equal(validator.validateResponse(resultOperation,200,result).valid,false);
+ for(const name of ['GitIndexAcceptance','GitIndexExecutionResult']){assert.deepEqual(event.$defs[name],spec.components.schemas[name]);const line=yaml.split('\n').find(value=>value.startsWith('    '+name+': '));assert.ok(line);assert.deepEqual(JSON.parse(line.slice(line.indexOf(':')+1)),spec.components.schemas[name]);}
+});
+
 test('pinned message references are bounded public metadata in REST, SSE and YAML',async()=>{
  const spec=await json('openapi.json'),event=await json('agent-event.schema.json'),ref=spec.components.schemas.MessageAttachmentRef;
  assert.ok(ref);const {default:Ajv}=await import('ajv/dist/2020.js'),validate=new Ajv({strict:false}).compile(ref);

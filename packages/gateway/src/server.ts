@@ -27,6 +27,8 @@ import {GitWorkbench,type GitRepositoryBinding} from './git/service.ts';
 import {registerGitRoutes} from './git/routes.ts';
 import {GitMutationIntents} from './git/intents.ts';
 import {registerGitReviewRoutes} from './git/review-routes.ts';
+import {GitIndexExecutions} from './git/index-executions.ts';
+import {registerGitExecutionHistoryRoutes} from './git/execution-history-routes.ts';
 import { EventStore, ExpiredCursorError, FutureCursorError } from './events/event-store.ts';
 import { RunRepository } from './runs/repository.ts';
 import { buildSnapshot } from './events/snapshot.ts';
@@ -577,6 +579,7 @@ export async function buildServer(config: {
   });
   registerGitRoutes(app,gitWorkbench,actor);
   registerGitReviewRoutes(app,{intents:gitReviewIntents,actor,atomic:atomicCommand});
+  registerGitExecutionHistoryRoutes(app,new GitIndexExecutions(db,projects,gitWorkbench,gitReviewIntents),actor);
   app.get('/v1/projects', async request => projects.list(actor(request as any)));
   app.post('/v1/projects', async (request, reply) =>
     reply.code(201).send(projects.create(actor(request as any), request.body as Record<string, unknown>)));

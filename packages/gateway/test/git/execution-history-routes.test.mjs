@@ -1,0 +1,56 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join,resolve,sep} from 'node:path';import {execFileSync} from 'node:child_process';import {fileURLToPath} from 'node:url';
+import {buildServer} from '../../src/server.ts';import {GitWorkbench} from '../../src/git/service.ts';import {GitMutationIntents} from '../../src/git/intents.ts';import {GitIndexExecutions} from '../../src/git/index-executions.ts';import {withImmediateTransaction} from '../../src/db/database.ts';
+const templateRoot=fileURLToPath(new URL('../../file-engine/templates/',import.meta.url));
+async function fixture(t,{unborn=false}={}){
+ const parent=await mkdtemp(join(tmpdir(),'jot-git-history-api-')),root=join(parent,'repo');await mkdir(root);
+ const git=(...args)=>execFileSync('git',['-c','user.name=Test Contributor','-c','user.email=test@example.invalid',...args],{cwd:root,encoding:'utf8',stdio:['ignore','pipe','pipe']});
+ git('init','--initial-branch=main');git('config','core.autocrlf','false');await writeFile(join(root,'note.txt'),'before\n');if(!unborn){git('add','.');git('commit','-m','Synthetic history fixture')}await writeFile(join(root,'note.txt'),'after\n');
+ const bindings=[{owner_id:'owner',project_id:'project',root}],config={databasePath:join(parent,'product.sqlite'),templateRoot,workspaces:['ws'],csrfToken:'test-csrf-history-token',allowedOrigins:['http://127.0.0.1:3030'],gitRepositories:bindings};let service=await buildServer(config);
+ service.db.prepare('INSERT INTO ga_projects VALUES(?,?,?,?,?,?,?)').run('project','owner','History project',0,1,'now','now');
+ const request=(url,owner='owner')=>service.app.inject({method:'GET',url,headers:{'x-user-id':owner}});
+ const connect=()=>{const workbench=new GitWorkbench(service.projects,bindings),intents=new GitMutationIntents(service.db,service.projects,workbench);return{workbench,intents,executions:new GitIndexExecutions(service.db,service.projects,workbench,intents)}};let current=connect();
+ t.after(async()=>{await service.app.close();service.db.close();assert.ok(resolve(parent).startsWith(resolve(tmpdir())+sep));await rm(parent,{recursive:true,force:true,maxRetries:5,retryDelay:20});});
+ return{root,git,request,inject:options=>service.app.inject(options),get db(){return service.db},get current(){return current},async restart(){await service.app.close();service.db.close();service=await buildServer(config);current=connect()},async review(){const snapshot=await current.workbench.inspect('owner','project'),p=await current.intents.prepare('owner','project',{request_id:'history-review',action:'stage',paths:['note.txt'],snapshot_id:snapshot.snapshot_id}),a=await current.intents.control('owner','project',p.intent_id,{request_id:'history-approve',action:'approve',expected_version:1,review_sha256:p.review_sha256});return{approved:a,input:{request_id:'history-execute',expected_version:a.version,review_sha256:a.review_sha256}}}};
+}
+test('HTTP history separates immutable acceptance from actual current result across cancellation and restart',async t=>{
+ const f=await fixture(t),{approved,input}=await f.review(),before=await readFile(join(f.root,'.git/index')),accepted=withImmediateTransaction(f.db,()=>f.current.executions.admit('owner','project',approved.intent_id,input)),receiptUrl='/v1/projects/project/git/admissions/'+input.request_id,resultUrl='/v1/projects/project/git/executions/'+accepted.execution_id;
+ const receipt=await f.request(receiptUrl);assert.equal(receipt.statusCode,200,receipt.body);assert.deepEqual(receipt.json(),accepted);assert.match(receipt.headers['cache-control'],/private, no-store/);
+ const pending=await f.request(resultUrl);assert.equal(pending.statusCode,200,pending.body);assert.equal(pending.json().state,'pending');assert.equal(pending.json().execution_authorized,false);assert.equal(receipt.body.includes(f.root),false);
+ await f.restart();assert.deepEqual((await f.request(receiptUrl)).json(),accepted);await f.current.intents.control('owner','project',approved.intent_id,{request_id:'history-cancel',action:'cancel',expected_version:2,review_sha256:approved.review_sha256});
+ assert.deepEqual((await f.request(receiptUrl)).json(),accepted);assert.equal((await f.request(resultUrl)).json().state,'pending');assert.deepEqual(await readFile(join(f.root,'.git/index')),before);assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM ga_worker_leases').get().n,0);
+ const view=f.current.executions.inspect('owner','project',accepted.execution_id),closed=await f.current.executions.abandon('owner','project',accepted.execution_id,{request_id:'history-close',expected_state_sha256:view.state_sha256,acknowledge_unknown:true});assert.equal(closed.result.state,'not_dispatched');assert.deepEqual((await f.request(resultUrl)).json(),closed.result);assert.deepEqual((await f.request(receiptUrl)).json(),accepted);
+ f.db.prepare("UPDATE ga_projects SET owner_id='new-owner' WHERE id='project'").run();for(const url of [receiptUrl,resultUrl]){assert.equal((await f.request(url)).statusCode,404);assert.equal((await f.request(url,'new-owner')).statusCode,404)}
+});
+test('HTTP current result reflects original publication and never dispatches or rewrites it on read',async t=>{
+ const f=await fixture(t),{approved,input}=await f.review(),accepted=withImmediateTransaction(f.db,()=>f.current.executions.admit('owner','project',approved.intent_id,input)),result=await f.current.executions.perform('owner','project',accepted.execution_id),bytes=await readFile(join(f.root,'.git/index'));
+ await f.restart();for(let i=0;i<2;i++){const response=await f.request('/v1/projects/project/git/executions/'+accepted.execution_id);assert.equal(response.statusCode,200,response.body);assert.deepEqual(response.json(),result);assert.match(response.headers['cache-control'],/no-store/)}
+ assert.equal(f.git('show',':note.txt'),'after\n');assert.deepEqual(await readFile(join(f.root,'.git/index')),bytes);assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM wb_git_index_dispatches').get().n,1);assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM ga_idempotency').get().n,0);
+});
+test('HTTP applied history preserves a genuinely absent original index as null',async t=>{
+ const f=await fixture(t,{unborn:true}),{approved,input}=await f.review(),accepted=withImmediateTransaction(f.db,()=>f.current.executions.admit('owner','project',approved.intent_id,input)),result=await f.current.executions.perform('owner','project',accepted.execution_id);assert.equal(result.before_index_sha256,null);
+ const response=await f.request('/v1/projects/project/git/executions/'+accepted.execution_id);assert.equal(response.statusCode,200,response.body);assert.deepEqual(response.json(),result);assert.equal(f.git('show',':note.txt'),'after\n');
+});
+test('HTTP history cannot adopt internal requests or disclose receipts after owner revocation',async t=>{
+ const f=await fixture(t),{approved,input}=await f.review(),result=await f.current.executions.execute('owner','project',approved.intent_id,input),url='/v1/projects/project/git/executions/'+result.execution_id;
+ assert.equal((await f.request(url)).statusCode,404);assert.equal((await f.request('/v1/projects/project/git/admissions/'+input.request_id)).statusCode,404);assert.equal((await f.request(url,'foreign')).statusCode,404);
+ f.db.prepare("UPDATE ga_projects SET owner_id='new-owner' WHERE id='project'").run();const response=await f.request(url);assert.equal(response.statusCode,404);assert.equal(response.body.includes('note.txt'),false);assert.equal(response.body.includes(f.root),false);
+});
+test('HTTP history preserves an unknown physical publication without retrying or claiming completion',async t=>{
+ const f=await fixture(t),{approved,input}=await f.review(),accepted=withImmediateTransaction(f.db,()=>f.current.executions.admit('owner','project',approved.intent_id,input));
+ f.db.exec("CREATE TRIGGER history_publication_ack_failure BEFORE INSERT ON wb_git_index_outcomes BEGIN SELECT RAISE(ABORT,'test_history_unknown'); END");await assert.rejects(f.current.executions.perform('owner','project',accepted.execution_id),/test_history_unknown/);f.db.exec('DROP TRIGGER history_publication_ack_failure');const bytes=await readFile(join(f.root,'.git/index'));
+ await f.restart();for(let i=0;i<2;i++){const result=await f.request('/v1/projects/project/git/executions/'+accepted.execution_id);assert.equal(result.statusCode,200,result.body);assert.equal(result.json().state,'unknown');assert.deepEqual((await f.request('/v1/projects/project/git/admissions/'+input.request_id)).json(),accepted)}
+ assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM wb_git_index_dispatches').get().n,1);assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM wb_git_index_outcomes').get().n,0);assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM ga_worker_leases').get().n,0);assert.deepEqual(await readFile(join(f.root,'.git/index')),bytes);
+});
+test('history rejects extra selectors and corrupt admission evidence without exposing internals',async t=>{
+ const f=await fixture(t),{approved,input}=await f.review(),accepted=withImmediateTransaction(f.db,()=>f.current.executions.admit('owner','project',approved.intent_id,input)),url='/v1/projects/project/git/admissions/'+input.request_id;
+ assert.equal((await f.request(url+'?root=other')).statusCode,400);assert.equal((await f.request('/v1/projects/project/git/executions/'+accepted.execution_id+'?dispatch=true')).statusCode,400);
+ f.db.exec('DROP TRIGGER wb_git_index_admissions_no_update');f.db.prepare('UPDATE wb_git_index_admissions SET receipt_sha256=?').run('0'.repeat(64));const response=await f.request(url);assert.equal(response.statusCode,503);assert.deepEqual(response.json(),{error:{code:'GIT_EXECUTION_HISTORY_UNAVAILABLE'}});
+});
+
+test('Git receipt history crosses the original BFF with a fixed owner and no write authority',async t=>{
+ const f=await fixture(t),{approved,input}=await f.review(),accepted=withImmediateTransaction(f.db,()=>f.current.executions.admit('owner','project',approved.intent_id,input)),{buildServer:buildBff}=await import('../../../../src/server.mjs'),calls=[];
+ const bff=await buildBff({demo:true,database:':memory:',root:join(f.root,'synthetic-bff-files'),workbench:{url:'http://127.0.0.1:18831',owner:'owner',csrf:'test-csrf-history-token',fetch:async(url,init)=>{calls.push({url,init});const upstream=await f.inject({method:init.method,url:new URL(url).pathname,headers:init.headers});return new Response(upstream.body,{status:upstream.statusCode,headers:upstream.headers})}}});t.after(()=>bff.close());
+ const response=await bff.app.inject({url:'/workbench-api/v1/projects/project/git/admissions/'+input.request_id,headers:{'x-user-id':'forged-owner'}});assert.equal(response.statusCode,200,response.body);assert.deepEqual(response.json(),accepted);assert.match(response.headers['cache-control'],/no-store/);assert.equal(response.headers['x-csrf-token'],undefined);assert.equal(calls[0].init.headers['x-user-id'],'owner');assert.equal(calls[0].init.body,undefined);
+ assert.equal((await f.inject({method:'GET',url:'/v1/projects/project/git/admissions/'+input.request_id})).statusCode,401);
+});

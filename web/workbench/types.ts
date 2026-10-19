@@ -1,6 +1,7 @@
 import type {Capabilities} from '../jot/types';
 export type {ProjectPage,GitSnapshot,GitDiff,GitEntry} from '../../packages/gateway/contracts/types';
 export type {GitReviewPrepare,GitReviewControl,GitReviewIntent} from '../../packages/gateway/contracts/types';
+export type {GitIndexAcceptance,GitIndexExecutionResult} from '../../packages/gateway/contracts/types';
 export type {CreateTaskDelegation,TaskDelegationReceipt} from '../../packages/gateway/contracts/types';
 export type {SaveTaskCollaboration,TaskCollaboration} from '../../packages/gateway/contracts/types';
 export type {ChannelBinding,ChannelBindingChallenge,TaskNotificationSettings,UpdateTaskNotifications,TaskNotificationDelivery,TaskNotificationHistoryPage} from '../../packages/gateway/contracts/types';

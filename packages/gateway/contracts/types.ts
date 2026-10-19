@@ -301,3 +301,6 @@ export type TaskPrdSources = {task_id:string;task_version:number;readiness:{read
 export type GitReviewPrepare = {request_id:string;action:"stage"|"unstage"|"commit"|"discard"|"delete-untracked";paths:string[];snapshot_id:string;message?:string};
 export type GitReviewControl = {request_id:string;expected_version:number;action:"approve"|"cancel";review_sha256:string};
 export type GitReviewIntent = {intent_id:string;project_id:string;action:GitReviewPrepare["action"];paths:string[];message?:string;snapshot_id:string;review_sha256:string;version:number;state:"prepared"|"approved"|"cancelled";created_at:string;updated_at:string;execution_authorized:false};
+
+export type GitIndexAcceptance = {execution_id:string;project_id:string;intent_id:string;request_id:string;action:"stage"|"unstage";accepted:true;execution_authorized:false};
+export type GitIndexExecutionResult = Omit<GitIndexAcceptance,"accepted"> & {paths:string[]} & ({state:"pending"|"unknown"}|{state:"applied";before_index_sha256:string|null;index_sha256:string}|{state:"not_dispatched"|"abandoned_unknown";disposition_id:string});

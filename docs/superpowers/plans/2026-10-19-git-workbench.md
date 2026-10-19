@@ -81,6 +81,13 @@ now adds stable configured exclusion, original owner acknowledgements and fenced
 cleanup. Its complete release gates and original API/UI admission remain open;
 this does not close commit/destructive/revert or the full task 4 requirements.
 
+The [original admission/history increment](../../implementation/2026-10-19-git-original-admission-history.md)
+separates caller-transaction acceptance from original physical dispatch and adds
+owned receipt/current-result reads through the shared API/BFF/client contracts.
+The [HTTP continuation plan](2026-10-19-git-index-http-workflow.md) retains
+workspace coordination, producer lifecycle and actual mutation UI as prerequisites
+to write activation. These history reads do not close task 4.
+
 - [ ] Freeze repository identity, HEAD, index and selected worktree bytes in an original owner-approved intent; separate stage/unstage, commit and destructive discard/revert/untracked-delete operations.
 - [ ] Revalidate original authority and all witnesses before dispatch and receipt publication. A stale review never applies to changed bytes. Preserve exact original request on unknown response.
 - [ ] Recover original effects from Git object/index/worktree evidence without replaying an unknown mutation. Test crash boundaries, conflicts, concurrent processes and cancellation.

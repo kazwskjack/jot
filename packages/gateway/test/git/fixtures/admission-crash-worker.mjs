@@ -1,0 +1,11 @@
+import {DatabaseSync} from 'node:sqlite';
+import {ProjectRepository} from '../../../src/projects/repository.ts';
+import {GitWorkbench} from '../../../src/git/service.ts';
+import {GitMutationIntents} from '../../../src/git/intents.ts';
+import {GitIndexExecutions} from '../../../src/git/index-executions.ts';
+import {withImmediateTransaction} from '../../../src/db/database.ts';
+const [root,database,intent,request,phase]=process.argv.slice(2),db=new DatabaseSync(database);db.exec('PRAGMA foreign_keys=ON');
+const projects=new ProjectRepository(db),workbench=new GitWorkbench(projects,[{owner_id:'owner',project_id:'project',root}]),intents=new GitMutationIntents(db,projects,workbench),executions=new GitIndexExecutions(db,projects,workbench,intents),review=intents.get('owner','project',intent);
+withImmediateTransaction(db,()=>{executions.admit('owner','project',intent,{request_id:request,expected_version:review.version,review_sha256:review.review_sha256});if(phase==='before-commit')process.exit(73)});
+if(phase==='after-commit')process.exit(73);
+throw Error('test_admission_crash_not_reached');
