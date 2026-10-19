@@ -93,10 +93,10 @@ are involved. Complete regression/build/privacy publication gates are separate.
 
 - Partial lock acquisition now has the durable ownership boundary described
   below. No automatic replay or public execution admission follows from cleanup.
-- A recorded pre-publication dispatch currently returns an observation without
-  becoming an automatically retried mutation. Add an explicitly reviewed durable
-  not-published/abandon disposition and owned-lock handling; unknown outcomes
-  must continue to block blind fresh requests.
+- A recorded pre-publication dispatch is not automatically retried. The internal
+  [explicit owner disposition](2026-10-19-git-execution-disposition.md) now retains
+  not-dispatched/abandoned-unknown acknowledgements; original API/UI admission
+  and complete release acceptance remain required before exposing it.
 - API/BFF/shared-schema integration, original HTTP acknowledgement recovery,
   mobile execute/result controls and complete UI restart acceptance are pending.
 - Rename scopes, commit, destructive operations, independent revert, remote
@@ -166,9 +166,8 @@ separately from restarted recovery. A cleanup failure retains the original
 internal cause instead of concealing the earlier preparation error. These
 changes do not grant public mutation authority or complete the full Git task.
 
-The original admission key includes the repository/program stamp. Before public
-execution admission, exclusion must also cover unresolved original records when
-a new stamp encoding or program upgrade changes that key for the same project
-or configured repository. A changed fingerprint must not be treated as a free
-execution slot. This remains part of the explicit-disposition/admission work;
-neither old evidence rewriting nor approval replay is an acceptable migration.
+The [subsequent original disposition increment](2026-10-19-git-execution-disposition.md)
+adds a stable configured exclusion binding for new executions and explicit
+original receipts for unresolved records. A changed program/stat fingerprint
+cannot create a free slot; old evidence is never rewritten and approvals are
+not replayed. Complete original API/UI execution admission is still open.

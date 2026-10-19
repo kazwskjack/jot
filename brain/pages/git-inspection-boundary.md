@@ -4,7 +4,7 @@ title: Git views use owned read-only repository snapshots
 category: decision
 status: active
 created: "2026-10-19T17:04:32"
-updated: "2026-10-19T17:05:12"
+updated: "2026-10-19T21:23:49"
 ---
 
 <!-- compiled_truth -->
@@ -13,6 +13,9 @@ Git workbench reads are bound by operator configuration to an existing owner and
 Read Git through a disposable controlled metadata copy containing the exact original HEAD, index and refs and a fixed verified object directory. Copy only allowlisted nonexecutable repository configuration. Do not activate source include files, hooks, clean/process filters, fsmonitor, external diff/textconv, lazy fetch or interactive credentials. Disabling external diff alone did not prevent clean-filter handling. The copy is private temporary read machinery, not a replacement repository, mutation target, planner or receipt store; source metadata and working-file witnesses must still match before results are published.
 
 Keep bounded output/cancellation and credential-free remote projections. Future local and remote mutations must target the original trusted repository under separate reviewed intents and immutable recovery receipts. Read-only acceptance does not complete the full Git capability or the PilotDeck ledger.
+Git 执行的配置占用范围与程序／stat 见证分离：原始记录固定 operator 配置的 common-directory 绑定，程序升级或项目别名不能使未决执行变成空闲槽位。旧记录缺少可靠绑定时保留升级阻塞，不猜测归属，也不改写旧证据。物理根、原审批、当前 owner 和原 Worker 租约仍分别核验，DSH 仍是唯一规划者。
+
+未知效果只能通过原归属用户的明确确认处置。控制请求固定 request ID、原状态摘要和未知结果确认；原回执不可变，不能将物理清理视为回滚或新的执行权限。已证实的效果返回原 applied 回执，其余明确区分 not_dispatched 与 abandoned_unknown；同一请求不得重跑。正常退出、恢复和处置的归属文件清理均与原租约事务一起核验；旧版本执行进程需先停止／排空，才能开放升级后的写入入口。
 
 
 ## Timeline
@@ -27,4 +30,10 @@ Keep bounded output/cancellation and credential-free remote projections. Future 
   kind: decision
   summary: Bind Git inspection to original project ownership and isolated nonexecuting metadata reads
   source: docs/superpowers/plans/2026-10-19-git-workbench.md
+  affects: [git-inspection-boundary]
+
+- time: 2026-10-19T21:23:49
+  kind: decision
+  summary: "固定 Git 占用与未知处置边界，保持原规划、归属和租约校验"
+  source: docs/implementation/2026-10-19-git-execution-disposition.md
   affects: [git-inspection-boundary]

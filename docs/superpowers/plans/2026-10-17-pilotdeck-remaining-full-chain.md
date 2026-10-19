@@ -599,3 +599,11 @@ source filter isolation, 1,936 passing Gateway tests with seven conditional
 skips, 249 UI tests, 67 root tests and Windows builds. Local mutations, separately
 authorized remote effects and their recovery remain open; read-only inspection
 does not complete capability 15 or the full ledger.
+
+The subsequent [original execution disposition](../../implementation/2026-10-19-git-execution-disposition.md)
+adds internal durable selected index effects, original owner acknowledgements,
+stable configured exclusion and fenced cleanup. Actual process-exit and
+changed-root fixtures verify the recovery boundary. Original API/UI execution
+admission, commit/destructive/revert, separately approved remote effects and
+the complete Git/portable-product release gates retain their own requirements;
+this internal increment does not close capability 15 or the full ledger.

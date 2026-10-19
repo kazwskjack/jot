@@ -79,7 +79,7 @@ rows, original transaction helper and actual child-process crash fixtures.
   lock names. Place synchronously inside a separate original lease/approval
   transaction. Exercise actual exit before manifest commit and before/after
   link/unlink, including a two-name inode. Preserve unknown links/files.
-- [ ] Add explicit original owner-reviewed disposition for unresolved execution
+- [x] Add explicit original owner-reviewed disposition for unresolved execution
   records. Lock cleanup is not task success, rollback or permission to replay.
   Distinguish protocol-2 pre-dispatch evidence from legacy unknown acquisitions;
   preserve original applied receipts and exact control acknowledgements.
@@ -87,6 +87,10 @@ rows, original transaction helper and actual child-process crash fixtures.
   for the same project/configured repository; a changed fingerprint is not a
   free execution slot. Exercise old stored bindings rather than only old table
   schemas populated with newly generated witnesses.
+  Internal acceptance: 92 Git cases pass, including actual root replacement,
+  project reconfiguration, real control-process exits, original receipt recovery
+  and fenced synchronous cleanup. Complete release gates and public API/UI
+  execution admission remain separate open tasks below.
 
 ## 4. Original API/UI execution admission and release
 
@@ -99,3 +103,37 @@ rows, original transaction helper and actual child-process crash fixtures.
 - [ ] Run focused and complete regressions and local builds, inspect source and
   exact staged/history objects, publish the scoped commit and compare remote
   commit identity. Keep commit/destructive/revert/remote/full-ledger work open.
+
+## Continuation sequence: exclusion and explicit disposition
+
+1. Add a versioned internal binding derived from the operator-configured,
+   normalized common-directory path, independent of the program/stat witness.
+   Pin it only on new original execution rows and use it for their original
+   Worker lease. Preserve existing row/evidence/receipt bytes. Old rows without
+   a provable binding remain an upgrade admission barrier until their original
+   owner resolves them; never guess an unrelated binding to make admission pass.
+   New outstanding records exclude another request for the same project or
+   binding, including a project alias after configuration reload. Test actual
+   directory replacement, not just hand-written alternate hashes.
+2. Add an owner-readable original state digest over immutable execution,
+   preparation, dispatch, outcome and disposition facts. It grants no execution
+   or lease authority. Preserve the old applied response body unchanged.
+3. Add an explicit owner control with frozen request ID/body, expected state
+   digest and literal unknown-outcome acknowledgement. Use append-only original
+   control/disposition receipts; check current ownership even for cached reads.
+   Fence the original lease before observing or cleaning known owned files.
+   Proven publication records its original applied outcome; it is not abandoned.
+4. Before original dispatch, new acquisition protocols can report original
+   `not_dispatched`; old unsafe acquisition and dispatched unproven effects can
+   only become `abandoned_unknown`. Neither is rollback, success, or permission
+   to reexecute the same request. Preserve unproven files and use a fresh review
+   for any new mutation. A changed/unconfigured physical binding cannot become
+   a cleanup target merely because the owner acknowledges uncertainty.
+5. Exercise active/replaced leases, cancellation, foreign owner, state conflicts,
+   strict input, same-ID changed-body conflicts, database reopen and lost control
+   acknowledgement. Failed receipt storage must never cause an index mutation
+   to replay. Releasing admission requires a committed original outcome or
+   explicit disposition, never just a cleanup return value.
+6. Only then join the existing original HTTP admission/atomic receipt contracts,
+   shared manifest/schema/BFF and mobile execution/result UI. Do not run the
+   asynchronous physical kernel inside a caller's root HTTP transaction.
