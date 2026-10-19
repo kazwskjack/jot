@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile,rm,rename,symlink} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,rm,rename,symlink,utimes,lstat} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
@@ -117,4 +117,14 @@ test('untracked multi-line and non-newline content produces an accurate unified 
  const f=await fixture(t);await writeFile(join(f.root,'new.txt'),'one\ntwo');const state=await f.repository.inspect();
  const patch=await f.repository.diff({snapshot_id:state.snapshot_id,path:'new.txt',stage:'working'});
  assert.match(patch.patch,/@@ -0,0 \+1,2 @@\n\+one\n\+two\n\\ No newline at end of file\n$/);
+});
+
+test('ignored attribute changes invalidate the original snapshot and patch selection',async t=>{
+ const f=await fixture(t);await writeFile(join(f.root,'.git/info/exclude'),'.gitattributes\n');await writeFile(join(f.root,'note.txt'),'changed\r\n');await writeFile(join(f.root,'.gitattributes'),'note.txt text eol=lf\n');const before=await f.repository.inspect();await writeFile(join(f.root,'.gitattributes'),'note.txt -text\n');const after=await f.repository.inspect();assert.notEqual(after.snapshot_id,before.snapshot_id);
+ await assert.rejects(f.repository.diff({snapshot_id:before.snapshot_id,path:'note.txt',stage:'working'}),/git_snapshot_changed/);
+});
+
+test('controlled copies preserve the original index timestamp needed by Git racy-stat detection',async t=>{
+ const f=await fixture(t),index=join(f.root,'.git/index'),older=new Date(Date.now()-10000);await utimes(index,older,older);const before=await lstat(index),bytes=await readFile(index),context=await f.repository.context();
+ try{const copied=await lstat(join(context.directory,'index'));assert.ok(Math.abs(copied.mtimeMs-before.mtimeMs)<1,'a newer copy timestamp hides same-size same-second edits from Git');assert.deepEqual(await readFile(index),bytes);assert.equal((await lstat(index)).mtimeMs,before.mtimeMs);}finally{await context.dispose();}
 });

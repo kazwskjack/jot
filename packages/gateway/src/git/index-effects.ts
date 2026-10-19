@@ -5,15 +5,16 @@ import {join,dirname,resolve,relative,sep} from 'node:path';
 import {GitRepositoryInspection,type GitReviewWitness,type GitReadContext} from './inspection.ts';
 import {readGit} from './process.ts';
 import {workspaceRelativePath} from '../always-on/workspace-provider.ts';
+import {indexEvidence,type GitIndexEvidence} from './index-evidence.ts';
 
 type Action='stage'|'unstage';
 export type GitIndexPlan=Readonly<{plan_id:string;action:Action;paths:readonly string[];repository_sha256:string;before_index_sha256:string|null;index_sha256:string;execution_authorized:false}>;
 type Blob={oid:string;bytes:Buffer;sha256:string;write:boolean};
 type Lock={path:string;identity:string};
-type Stored={witness:GitReviewWitness;index:Buffer;blobs:Blob[];ref:string|null;metadata:string;directories:Map<string,string>;dot:string;rawRefs:Map<string,string|null>;attributes:Map<string,string|null>;mode:number;dispatch?:GitIndexDispatch;state:'ready'|'locking'|'consumed'};
+type Stored={witness:GitReviewWitness;index:Buffer;blobs:Blob[];ref:string|null;metadata:string;directories:Map<string,string>;dot:string;rawRefs:Map<string,string|null>;attributes:Map<string,string|null>;mode:number;dispatch?:GitIndexDispatch;owned?:{locks:Lock[];created:Map<string,string>};state:'ready'|'locking'|'consumed'};
 export type GitIndexReceipt={plan_id:string;action:Action;repository_sha256:string;before_index_sha256:string|null;index_sha256:string;paths:string[]};
 export type GitIndexDispatch={plan_id:string;action:Action;repository_sha256:string;source_sha256:string;index_sha256:string;index_lock_identity:string};
-type Authority={authorize:(proof?:GitIndexDispatch)=>void;commit:(publish:()=>GitIndexReceipt,proof:GitIndexDispatch)=>GitIndexReceipt};
+type Authority={authorize:(proof?:GitIndexDispatch)=>void;dispatch?:(evidence:GitIndexEvidence)=>void;commit:(publish:()=>GitIndexReceipt,proof:GitIndexDispatch)=>GitIndexReceipt};
 const hash=(bytes:string|Buffer)=>createHash('sha256').update(bytes).digest('hex');
 const id=(value:{dev:number;ino:number|bigint})=>String(value.dev)+':'+String(value.ino);
 const stamp=(s:Stats)=>[id(s),s.size,s.mtimeMs,s.ctimeMs,s.nlink,s.mode].join(':');
@@ -45,7 +46,7 @@ export class GitIndexEffects extends GitRepositoryInspection{
   if(result.code!==0)throw Error('git_index_prepare_failed');return result.bytes;
  }
  async prepareIndex(input:GitReviewWitness,action:Action,signal?:AbortSignal):Promise<GitIndexPlan>{
-  if(!input||!['stage','unstage'].includes(action))throw Error('git_index_plan_invalid');const witness=structuredClone(input),paths=witness.files.map(file=>file.path);
+  if(!input||input.protocol!==2||!Array.isArray(input.attributes)||!['stage','unstage'].includes(action))throw Error('git_index_plan_invalid');const witness=structuredClone(input),paths=witness.files.map(file=>file.path);
   if(JSON.stringify(await this.freeze(witness.snapshot_id,paths,signal))!==JSON.stringify(witness))throw Error('git_review_changed');
   const context=await this.context(signal);try{
    const snapshot=await this.inspectContext(context,signal);if(snapshot.snapshot_id!==witness.snapshot_id)throw Error('git_review_changed');
@@ -100,6 +101,15 @@ export class GitIndexEffects extends GitRepositoryInspection{
   const base=this.commonDirectory,rel=relative(base,path);if(rel.startsWith('..')||resolve(base,rel)!==path)throw Error('git_repository_changed');let current=base;
   for(const part of rel.split(sep).filter(Boolean)){current=join(current,part);try{await this.directory(current);}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;try{await mkdir(current,{mode:0o700});created.set(current,await this.directory(current));}catch(next){if((next as NodeJS.ErrnoException).code!=='EEXIST')throw next;await this.directory(current);}}}
  }
+ private evidence(plan:GitIndexPlan,stored:Stored):GitIndexEvidence{
+  if(!stored.dispatch||!stored.owned)throw Error('git_index_evidence_invalid');
+  return indexEvidence({protocol:1,plan,source_sha256:hash(JSON.stringify(stored.witness)),index_lock_identity:stored.dispatch.index_lock_identity,
+   directories:{root:stored.directories.get(this.root),git:stored.directories.get(this.gitDirectory),common:stored.directories.get(this.commonDirectory),objects:stored.directories.get(join(this.commonDirectory,'objects'))},dot_witness:stored.dot,
+   refs:{ref:stored.ref,head_sha256:stored.rawRefs.get(join(this.gitDirectory,'HEAD')),packed_sha256:stored.rawRefs.get(join(this.commonDirectory,'packed-refs')),branch_sha256:stored.ref?stored.rawRefs.get(join(this.commonDirectory,stored.ref)):null},
+   blobs:stored.blobs.map(blob=>({oid:blob.oid,sha256:blob.sha256,size:blob.bytes.length})),
+   locks:stored.owned.locks.map(lock=>{const scope=equalPath(lock.path,join(this.gitDirectory,'index.lock'))||equalPath(lock.path,join(this.gitDirectory,'HEAD.lock'))?'git':'common';return{scope,path:relative(scope==='git'?this.gitDirectory:this.commonDirectory,lock.path).split(sep).join('/'),identity:lock.identity,sha256:scope==='git'&&equalPath(lock.path,join(this.gitDirectory,'index.lock'))?plan.index_sha256:hash(Buffer.alloc(0))};}),
+   parents:[...stored.owned.created].map(([path,identity])=>({path:relative(this.commonDirectory,path).split(sep).join('/'),identity}))});
+ }
  async applyIndex(plan:GitIndexPlan,authority:Authority,signal?:AbortSignal):Promise<GitIndexReceipt>{
   const stored=this.plans.get(plan);if(!stored)throw Error('git_index_plan_invalid');if(stored.state!=='ready')throw Error('git_index_plan_consumed');
   if(!authority||typeof authority.authorize!=='function'||typeof authority.commit!=='function'||authority.commit.constructor.name==='AsyncFunction')throw Error('git_execution_authority_missing');
@@ -111,7 +121,10 @@ export class GitIndexEffects extends GitRepositoryInspection{
     let handle;try{handle=await open(path,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|(constants.O_NOFOLLOW??0),stored.mode);}catch(error){if((error as NodeJS.ErrnoException).code==='EEXIST')throw Error('git_repository_busy');throw error;}
     try{const s=await handle.stat();locks.push({path,identity:id(s)});if(equalPath(path,join(this.gitDirectory,'index.lock')))await handle.writeFile(stored.index);await handle.sync();}finally{await handle.close();}
    }
-   this.assertSource(stored,locks,created);const proof:GitIndexDispatch={plan_id:plan.plan_id,action:plan.action,repository_sha256:plan.repository_sha256,source_sha256:hash(JSON.stringify(stored.witness)),index_sha256:plan.index_sha256,index_lock_identity:locks.find(lock=>equalPath(lock.path,join(this.gitDirectory,'index.lock')))!.identity};authority.authorize(proof);stored.dispatch=proof;context=await this.context(signal);
+   this.assertSource(stored,locks,created);const proof:GitIndexDispatch={plan_id:plan.plan_id,action:plan.action,repository_sha256:plan.repository_sha256,source_sha256:hash(JSON.stringify(stored.witness)),index_sha256:plan.index_sha256,index_lock_identity:locks.find(lock=>equalPath(lock.path,join(this.gitDirectory,'index.lock')))!.identity};authority.authorize(proof);stored.dispatch=proof;
+   stored.owned={locks:locks.map(lock=>({...lock})),created:new Map(created)};
+   if(authority.dispatch){if(authority.dispatch.constructor.name==='AsyncFunction')throw Error('git_execution_authority_missing');const result=authority.dispatch(this.evidence(plan,stored)) as unknown;if(result&&typeof (result as {then?:unknown}).then==='function')throw Error('git_index_dispatch_invalid');}
+   context=await this.context(signal);
    for(const blob of stored.blobs){signal?.throwIfAborted();authority.authorize(proof);if(blob.write){stored.state='consumed';const oid=decoded(await this.controlled(context,['hash-object','-w','--stdin','--no-filters'],blob.bytes,signal,true)).trim();if(oid!==blob.oid)throw Error('git_index_object_mismatch');}const actual=await this.controlled(context,['cat-file','blob',blob.oid],undefined,signal,true);if(hash(actual)!==blob.sha256)throw Error('git_index_object_mismatch');}
    this.assertSource(stored,locks,created);signal?.throwIfAborted();
    const result=authority.commit(()=>{
@@ -128,10 +141,27 @@ export class GitIndexEffects extends GitRepositoryInspection{
  }
  async observeIndex(plan:GitIndexPlan,signal?:AbortSignal){
   const stored=this.plans.get(plan);if(!stored)throw Error('git_index_plan_invalid');
-  if((await this.anchors(signal)).repository!==plan.repository_sha256)throw Error('git_repository_changed');const index=this.raw(join(this.gitDirectory,'index')),current=index===null?null:hash(index);
-  if(current!==plan.index_sha256)return{state:current===plan.before_index_sha256?'not_observed':'unknown',index_sha256:current,execution_authorized:false as const};
-  if(!stored.dispatch||id(lstatSync(join(this.gitDirectory,'index')))!==stored.dispatch.index_lock_identity)return{state:'unknown',index_sha256:current,execution_authorized:false as const};
-  for(const [path,expected] of stored.rawRefs){const value=this.raw(path);if((value===null?null:hash(value))!==expected)return{state:'unknown',index_sha256:current,execution_authorized:false as const};}
-  const context=await this.context(signal);try{for(const blob of stored.blobs){const actual=await this.controlled(context,['cat-file','blob',blob.oid],undefined,signal,true);if(hash(actual)!==blob.sha256)return{state:'unknown',index_sha256:current,execution_authorized:false as const};}const after=this.raw(join(this.gitDirectory,'index'));return{state:after!==null&&hash(after)===current&&id(lstatSync(join(this.gitDirectory,'index')))===stored.dispatch.index_lock_identity?'applied':'unknown',index_sha256:current,execution_authorized:false as const};}finally{await context.dispose();}
+  if(stored.dispatch)return this.observeEvidence(this.evidence(plan,stored),signal);
+  if((await this.anchors(signal)).repository!==plan.repository_sha256)throw Error('git_repository_changed');const bytes=this.raw(join(this.gitDirectory,'index')),current=bytes===null?null:hash(bytes);return{state:current===plan.before_index_sha256?'not_observed':'unknown',index_sha256:current,execution_authorized:false as const};
+ }
+ /** Rebuild observation only. Persisted JSON can never become a writable plan. */
+ async observeEvidence(input:unknown,signal?:AbortSignal){
+  const evidence=indexEvidence(input),plan=evidence.plan;
+  if((await this.anchors(signal)).repository!==plan.repository_sha256)throw Error('git_repository_changed');
+  for(const [path,expected] of [[this.root,evidence.directories.root],[this.gitDirectory,evidence.directories.git],[this.commonDirectory,evidence.directories.common],[join(this.commonDirectory,'objects'),evidence.directories.objects]])if(this.directorySync(path!)!==expected)throw Error('git_repository_changed');if(this.dotWitness()!==evidence.dot_witness)throw Error('git_repository_changed');
+  const bytes=this.raw(join(this.gitDirectory,'index')),current=bytes===null?null:hash(bytes),result=(state:'applied'|'not_observed'|'unknown')=>({state,index_sha256:current,execution_authorized:false as const});
+  if(current!==plan.index_sha256)return result(current===plan.before_index_sha256?'not_observed':'unknown');
+  if(id(lstatSync(join(this.gitDirectory,'index')))!==evidence.index_lock_identity)return result('unknown');
+  for(const [path,expected] of [[join(this.gitDirectory,'HEAD'),evidence.refs.head_sha256],[join(this.commonDirectory,'packed-refs'),evidence.refs.packed_sha256],...(evidence.refs.ref?[[join(this.commonDirectory,evidence.refs.ref),evidence.refs.branch_sha256]]:[])] as Array<[string,string|null]>){const value=this.raw(path);if((value===null?null:hash(value))!==expected)return result('unknown');}
+  const context=await this.context(signal);try{for(const blob of evidence.blobs){let actual:Buffer;try{actual=await this.controlled(context,['cat-file','blob',blob.oid],undefined,signal,true);}catch{signal?.throwIfAborted();return result('unknown');}if(actual.length!==blob.size||hash(actual)!==blob.sha256)return result('unknown');}const after=this.raw(join(this.gitDirectory,'index'));return result(after!==null&&hash(after)===current&&id(lstatSync(join(this.gitDirectory,'index')))===evidence.index_lock_identity?'applied':'unknown');}finally{await context.dispose();}
+ }
+ /** Trusted original recovery must fence the prior Worker before calling this.
+  * Only exact persisted owned files are removable; no timestamp-based cleanup. */
+ async cleanupEvidence(input:unknown,guard:()=>void,signal?:AbortSignal){
+  const evidence=indexEvidence(input);if(typeof guard!=='function'||guard.constructor.name==='AsyncFunction')throw Error('git_execution_authority_missing');
+  const check=()=>{signal?.throwIfAborted();const value=guard() as unknown;if(value&&typeof(value as {then?:unknown}).then==='function')throw Error('git_execution_authority_missing');for(const [path,expected] of [[this.root,evidence.directories.root],[this.gitDirectory,evidence.directories.git],[this.commonDirectory,evidence.directories.common],[join(this.commonDirectory,'objects'),evidence.directories.objects]])if(this.directorySync(path!)!==expected)throw Error('git_repository_changed');if(this.dotWitness()!==evidence.dot_witness)throw Error('git_repository_changed');};
+  check();if((await this.anchors(signal)).repository!==evidence.plan.repository_sha256)throw Error('git_repository_changed');check();
+  for(const lock of [...evidence.locks].reverse()){check();const path=join(lock.scope==='git'?this.gitDirectory:this.commonDirectory,lock.path),bytes=this.raw(path);if(bytes===null)continue;const s=lstatSync(path);if(id(s)!==lock.identity||hash(bytes)!==lock.sha256)throw Error('git_index_lock_unverified');unlinkSync(path);}
+  for(const parent of [...evidence.parents].reverse()){check();const path=join(this.commonDirectory,parent.path);try{if(this.directorySync(path)!==parent.identity)throw Error('git_index_lock_unverified');rmdirSync(path);}catch(error){if(!['ENOENT','ENOTEMPTY','EEXIST'].includes((error as NodeJS.ErrnoException).code??''))throw error;}}
  }
 }

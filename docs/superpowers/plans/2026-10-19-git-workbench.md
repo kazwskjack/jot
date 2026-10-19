@@ -66,6 +66,14 @@ including lost acknowledgement and outside matching-byte interference. It is
 not mounted in the API/UI and does not provide durable cross-process recovery;
 none of the full mutation checkboxes below is closed by this prerequisite.
 
+The [internal durable execution increment](../../implementation/2026-10-19-git-durable-index-execution.md)
+now binds original approval protocol 2, immutable request/dispatch/outcome rows
+and the existing Worker lease to actual selected effects. New-process fixtures
+recover original publication without replay and release proven owned locks.
+The [detailed continuation plan](2026-10-19-git-durable-index-execution.md) keeps
+incomplete lock acquisition, explicit not-published disposition and original
+API/UI execution admission open; these are required before closing task 4.
+
 - [ ] Freeze repository identity, HEAD, index and selected worktree bytes in an original owner-approved intent; separate stage/unstage, commit and destructive discard/revert/untracked-delete operations.
 - [ ] Revalidate original authority and all witnesses before dispatch and receipt publication. A stale review never applies to changed bytes. Preserve exact original request on unknown response.
 - [ ] Recover original effects from Git object/index/worktree evidence without replaying an unknown mutation. Test crash boundaries, conflicts, concurrent processes and cancellation.

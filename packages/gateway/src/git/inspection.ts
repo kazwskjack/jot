@@ -1,7 +1,7 @@
 import {createHash} from 'node:crypto';
 import {constants} from 'node:fs';
-import {lstat,open,realpath,readdir,mkdir,mkdtemp,writeFile,rm} from 'node:fs/promises';
-import {isAbsolute,resolve,join,dirname,relative,sep} from 'node:path';
+import {lstat,open,realpath,readdir,mkdir,mkdtemp,writeFile,rm,utimes} from 'node:fs/promises';
+import {isAbsolute,resolve,join,dirname,relative,sep,basename} from 'node:path';
 import {tmpdir} from 'node:os';
 import {workspaceRelativePath} from '../always-on/workspace-provider.ts';
 import {gitExecutable,readGit} from './process.ts';
@@ -11,7 +11,7 @@ export type GitEntry={path:string;original_path?:string;index_status:string;work
 export type GitRemote={name:string;kind:'https'|'ssh'|'local'|'other';host?:string};
 export type GitSnapshot={snapshot_id:string;repository_sha256:string;head:{oid:string|null;branch:string|null;detached:boolean};entries:GitEntry[];remotes:GitRemote[];omitted_count:number;read_only:true;execution_authorized:false};
 export type GitDiff={snapshot_id:string;path:string;stage:'working'|'staged';kind:'text'|'binary';patch:string;read_only:true;execution_authorized:false};
-export type GitReviewWitness={snapshot_id:string;repository_sha256:string;head:GitSnapshot['head'];index_sha256:string|null;files:Array<{path:string;kind:'file'|'missing';sha256:string|null;size:number;mode:number}>};
+export type GitReviewWitness={protocol:2;snapshot_id:string;repository_sha256:string;head:GitSnapshot['head'];index_sha256:string|null;files:Array<{path:string;kind:'file'|'missing';sha256:string|null;size:number;mode:number}>;attributes:Array<{path:string;sha256:string|null}>};
 const hash=(value:string|Buffer)=>createHash('sha256').update(value).digest('hex');
 const same=(a:string,b:string)=>process.platform==='win32'?a.toLowerCase()===b.toLowerCase():a===b;
 const within=(root:string,path:string)=>same(root,path)||same(root+sep,path.slice(0,root.length+1));
@@ -92,7 +92,11 @@ export class GitRepositoryInspection{
    for(const [key,url] of settings){const match=/^remote\.([A-Za-z0-9][A-Za-z0-9._-]{0,127})\.url$/.exec(key);if(!match)continue;const name=match[1]!;let remote:GitRemote={name,kind:'other'};
     try{const parsed=new URL(url);if(['https:','http:','ssh:'].includes(parsed.protocol)&&/^[A-Za-z0-9.:[\]-]{1,255}$/.test(parsed.hostname))remote={name,kind:parsed.protocol==='ssh:'?'ssh':'https',host:parsed.hostname};else if(parsed.protocol==='file:')remote={name,kind:'local'};}catch{const ssh=/^(?:[^@\s]+@)?([A-Za-z0-9.-]+):[^\s]+$/.exec(url);remote=ssh?{name,kind:'ssh',host:ssh[1]!}:{name,kind:'local'};}if(context.remotes.length>=100)throw Error('git_entry_limit');context.remotes.push(remote);
    }
-   let total=0;const copy=async(source:string,target:string,optional=false)=>{signal?.throwIfAborted();let bytes;try{bytes=await this.bytes(source,32*1024*1024);}catch(error){if(optional&&(error as NodeJS.ErrnoException).code==='ENOENT')return;throw error;}total+=bytes.length;if(total>64*1024*1024)throw Error('git_metadata_limit');await mkdir(dirname(target),{recursive:true});await writeFile(target,bytes,{mode:0o600});if(source===join(this.gitDirectory,'index'))context.index=hash(bytes);};
+   let total=0;const copy=async(source:string,target:string,optional=false)=>{signal?.throwIfAborted();let bytes;try{bytes=await this.bytes(source,32*1024*1024);}catch(error){if(optional&&(error as NodeJS.ErrnoException).code==='ENOENT')return;throw error;}const original=await lstat(source);total+=bytes.length;if(total>64*1024*1024)throw Error('git_metadata_limit');await mkdir(dirname(target),{recursive:true});await writeFile(target,bytes,{mode:0o600});
+    // Git uses the index mtime to rehash racily clean stat-cache entries. Giving
+    // a copy a newer timestamp can silently hide same-size/same-second edits.
+    if(source===join(this.gitDirectory,'index')||/^sharedindex\.[a-f0-9]+$/.test(basename(source)))await utimes(target,original.atimeMs/1000,original.mtimeMs/1000);
+    if(source===join(this.gitDirectory,'index'))context.index=hash(bytes);};
    await copy(join(this.gitDirectory,'HEAD'),join(directory,'HEAD'));
    await copy(join(this.gitDirectory,'index'),join(directory,'index'),true);
    await copy(join(this.commonDirectory,'packed-refs'),join(directory,'packed-refs'),true);
@@ -126,27 +130,33 @@ export class GitRepositoryInspection{
    entries.push({path,...(original?{original_path:original}:{}),index_status:x,worktree_status:y,conflicted:x==='U'||y==='U'||['DD','AA'].includes(x+y),kind:file.kind});
   }
   entries.sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
-  const remotes=context.remotes,index=context.index;
-  const head={oid,branch,detached:branch===null&&oid!==null},snapshot_id=hash(JSON.stringify({anchors,head,index,status:hash(raw),files,remotes}));
+  const remotes=context.remotes,index=context.index,attributes=await this.attributeManifest(entries.flatMap(entry=>[entry.path,...(entry.original_path?[entry.original_path]:[])]),signal);
+  const head={oid,branch,detached:branch===null&&oid!==null},snapshot_id=hash(JSON.stringify({anchors,head,index,status:hash(raw),files,remotes,attributes}));
   return{value:{snapshot_id,repository_sha256:anchors.repository,head,entries,remotes,omitted_count:omitted,read_only:true,execution_authorized:false} as GitSnapshot,files};
  }
  protected async inspectContext(context:ReadContext,signal?:AbortSignal):Promise<GitSnapshot>{const first=await this.collect(context,signal),second=await this.collect(context,signal);if(first.value.snapshot_id!==second.value.snapshot_id)throw Error('git_snapshot_changed');return second.value;}
  async inspect(signal?:AbortSignal):Promise<GitSnapshot>{const context=await this.context(signal);try{return await this.inspectContext(context,signal);}finally{await context.dispose();}}
+ private async attributeManifest(paths:readonly string[],signal?:AbortSignal):Promise<GitReviewWitness['attributes']>{
+  const names=new Set<string>();for(const path of paths){const parts=path.split('/');parts.pop();while(true){names.add([...parts,'.gitattributes'].join('/'));if(names.size>this.limits.maxMetadataEntries)throw Error('git_metadata_limit');if(!parts.length)break;parts.pop();}}
+  if(names.size>this.limits.maxMetadataEntries)throw Error('git_metadata_limit');const result:GitReviewWitness['attributes']=[];let size=0;
+  for(const path of [...names].sort()){signal?.throwIfAborted();const fact=await this.file(path);if(fact.kind==='missing'){result.push({path,sha256:null});continue;}if(fact.kind!=='file')throw Error('git_path_unavailable');const bytes=await this.bytes(join(this.root,path),1024*1024,fact.stamp);size+=bytes.length;if(size>4*1024*1024)throw Error('git_metadata_limit');result.push({path,sha256:hash(bytes)});}
+  return result;
+ }
  /** Exact-byte review only. Never writes source files, index, refs or objects. */
  async freeze(snapshotId:string,paths:readonly string[],signal?:AbortSignal):Promise<GitReviewWitness>{
   if(!/^[a-f0-9]{64}$/.test(snapshotId)||!Array.isArray(paths)||!paths.length||paths.length>100||new Set(paths).size!==paths.length)throw Error('git_intent_invalid');
   for(const path of paths){if(typeof path!=='string')throw Error('git_intent_invalid');safe(path);}
   const context=await this.context(signal);try{
    const before=await this.inspectContext(context,signal);if(before.snapshot_id!==snapshotId)throw Error('git_snapshot_changed');
-   const files:GitReviewWitness['files']=[];let size=0;
+   const attributes=await this.attributeManifest(paths,signal),files:GitReviewWitness['files']=[];let size=0;
    for(const path of [...paths].sort()){
     signal?.throwIfAborted();const entry=before.entries.find(value=>value.path===path);if(!entry||!['file','missing'].includes(entry.kind))throw Error('git_path_unavailable');
     const original=await this.file(path);if(original.kind==='missing'){files.push({path,kind:'missing',sha256:null,size:0,mode:0});continue;}
     if(original.kind!=='file')throw Error('git_path_unavailable');const bytes=await this.bytes(join(this.root,path),32*1024*1024,original.stamp);size+=bytes.length;if(size>64*1024*1024)throw Error('git_output_limit');
     files.push({path,kind:'file',sha256:hash(bytes),size:bytes.length,mode:(await lstat(join(this.root,path))).mode&0o777});
    }
-   if((await this.inspectContext(context,signal)).snapshot_id!==before.snapshot_id)throw Error('git_snapshot_changed');
-   return{snapshot_id:before.snapshot_id,repository_sha256:before.repository_sha256,head:before.head,index_sha256:context.index,files};
+   if((await this.inspectContext(context,signal)).snapshot_id!==before.snapshot_id||JSON.stringify(await this.attributeManifest(paths,signal))!==JSON.stringify(attributes))throw Error('git_snapshot_changed');
+   return{protocol:2,snapshot_id:before.snapshot_id,repository_sha256:before.repository_sha256,head:before.head,index_sha256:context.index,files,attributes};
   }finally{await context.dispose();}
  }
  async diff(input:{snapshot_id:string;path:string;stage:'working'|'staged'},signal?:AbortSignal):Promise<GitDiff>{

@@ -69,3 +69,13 @@ test('binary staging preserves exact bytes and held ref locks prevent a competin
  await f.effects.applyIndex(plan,{authorize:r.authorize,commit:publish=>r.commit(()=>{assert.throws(()=>f.git('update-ref','refs/heads/main',head));return publish();})});
  const staged=execFileSync('git',['show',':asset.bin'],{cwd:f.root,stdio:['ignore','pipe','pipe']});assert.deepEqual(staged,bytes);assert.deepEqual(await readFile(join(f.root,'asset.bin')),bytes);assert.equal(f.git('rev-parse','HEAD').trim(),head);assert.equal((await f.effects.observeIndex(plan)).state,'applied');
 });
+
+test('ignored attributes are part of the original approval rather than execution-time assumptions',async t=>{
+ const f=await fixture(t);await writeFile(join(f.root,'.git/info/exclude'),'.gitattributes\n');await writeFile(join(f.root,'.gitattributes'),'note.txt text eol=lf\n');const r=await f.review('stage');await writeFile(join(f.root,'.gitattributes'),'note.txt -text\n');
+ await assert.rejects(f.effects.prepareIndex(r.witness,'stage'),/git_review_changed|git_snapshot_changed/);
+});
+
+test('a missing ignored attribute file cannot appear between preparation and approval',async t=>{
+ const f=await fixture(t);await writeFile(join(f.root,'.git/info/exclude'),'.gitattributes\n');const snapshot=await f.workbench.inspect('owner','project'),p=await f.intents.prepare('owner','project',{request_id:'missing-attributes',action:'stage',paths:['note.txt'],snapshot_id:snapshot.snapshot_id});await writeFile(join(f.root,'.gitattributes'),'note.txt -text\n');
+ await assert.rejects(f.intents.control('owner','project',p.intent_id,{request_id:'approve-missing-attributes',expected_version:1,action:'approve',review_sha256:p.review_sha256}),/git_review_changed|git_snapshot_changed/);
+});

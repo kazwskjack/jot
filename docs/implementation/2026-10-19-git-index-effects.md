@@ -49,12 +49,12 @@ Additional cases cover final-transaction revocation, deletion of a nested
 working directory, exact binary bytes and competing native ref updates.
 All fixture contents are synthetic. These tests do not contact remote providers.
 
-This increment has no durable cross-process execution journal, restart recovery
-or HTTP/UI execution admission. The current observer requires the original
-in-memory plan. A database rollback does not undo a Git index replacement; a
-future executor must persist dispatch before the first source object write and
-reconcile the original physical effect before publishing an immutable outcome.
-Power-loss durability and a real process-crash recovery path remain unverified.
+The subsequent [internal durable execution increment](2026-10-19-git-durable-index-execution.md)
+adds original request/dispatch/outcome rows, the existing Worker lease fence and
+a strict cross-process observer. Real child exits now exercise before/after
+publication, original outcome recovery and proven lock cleanup. HTTP/UI execution
+admission and power-loss durability remain unverified. A database rollback does
+not undo a Git index replacement, and an unknown outcome must never be replayed.
 
 Rename unstaging is explicitly refused when the original and destination paths
 are not both within the approved selection. Supporting that requires an exact
@@ -62,10 +62,10 @@ two-path review contract; it must not silently alter an unreviewed source path.
 Commit, discard, untracked deletion, independently reviewed revert and remote
 operations remain separate uncompleted parts of the full Git capability.
 
-Before mounting any execution route, implement the original owner-bound request,
-durable dispatch/outcome records, cancellation and active-execution exclusion,
-recovery after process loss, and user-visible unknown-outcome handling. Freeze
-the canonical transformation dependencies in that durable approval contract,
-including ignored attribute files; preparation-time fences alone do not prove
-what an earlier approval covered. Do not substitute a new planner, a general
-shell command or a successful review acknowledgement for execution authority.
+Before mounting any execution route, finish partial lock-acquisition recovery,
+not-published/abandon disposition, the original HTTP command contract and
+user-visible unknown-outcome handling. Original review protocol 2 now freezes
+canonical transformation dependencies, including ignored/missing attributes;
+preparation-time fences alone did not prove what an earlier approval covered.
+Do not substitute a new planner, a general shell command or a successful review
+acknowledgement for execution authority.

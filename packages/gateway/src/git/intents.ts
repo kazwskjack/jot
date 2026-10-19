@@ -4,6 +4,7 @@ import {withImmediateTransaction} from '../db/database.ts';
 import type {ProjectRepository} from '../projects/repository.ts';
 import type {GitWorkbench} from './service.ts';
 import {workspaceRelativePath} from '../always-on/workspace-provider.ts';
+import type {GitReviewWitness} from './inspection.ts';
 
 type Operation='stage'|'unstage'|'commit'|'discard'|'delete-untracked';
 export type GitReviewPrepare={request_id:string;action:Operation;paths:string[];snapshot_id:string;message?:string};
@@ -45,6 +46,15 @@ export class GitMutationIntents{
  private latest(id:string){const event=this.db.prepare('SELECT * FROM wb_git_mutation_events WHERE intent_id=? ORDER BY version DESC LIMIT 1').get(id) as Event|undefined;if(!event)throw Error('git_intent_unavailable');return event;}
  private view(row:Row,event:Event){const selection=JSON.parse(row.selection_json) as Prepare;return{intent_id:row.intent_id,project_id:row.project_id,action:row.action,paths:selection.paths,...(selection.message===undefined?{}:{message:selection.message}),snapshot_id:selection.snapshot_id,review_sha256:row.review_sha256,version:event.version,state:event.state,created_at:row.created_at,updated_at:event.created_at,execution_authorized:false as const};}
  get(owner:string,project:string,id:string){const row=this.row(owner,project,id);return this.view(row,this.latest(id));}
+ /** Internal original approval fence, not a browser-supplied execution source. */
+ executionSource(owner:string,project:string,id:string,version:number,review:string){
+  const row=this.row(owner,project,id),event=this.latest(id);
+  if(event.state!=='approved'||event.version!==version||row.review_sha256!==review)throw Error('git_execution_revoked');
+  if(!['stage','unstage'].includes(row.action))throw Error('git_execution_unsupported');
+  const selection=JSON.parse(row.selection_json) as Prepare,witness=JSON.parse(row.witness_json) as GitReviewWitness;
+  if(witness.protocol!==2||!Array.isArray(witness.attributes)||selection.action!==row.action||digest({action:selection.action,paths:selection.paths,message:selection.message??null,witness})!==review)throw Error('git_execution_source_invalid');
+  return{action:row.action as 'stage'|'unstage',paths:selection.paths,witness};
+ }
  private normalize(input:Prepare):Prepare{
   if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(key=>!['request_id','action','paths','snapshot_id','message'].includes(key))||typeof input.request_id!=='string'||!ID.test(input.request_id)||!['stage','unstage','commit','discard','delete-untracked'].includes(input.action)||typeof input.snapshot_id!=='string'||!SHA.test(input.snapshot_id)||!Array.isArray(input.paths)||!input.paths.length||input.paths.length>100||new Set(input.paths).size!==input.paths.length)throw Error('git_intent_invalid');
   const paths=input.paths.map(path=>{if(typeof path!=='string'||path.startsWith('-'))throw Error('git_intent_invalid');return workspaceRelativePath(path);}).sort();
