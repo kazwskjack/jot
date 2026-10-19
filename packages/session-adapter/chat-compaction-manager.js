@@ -1,3 +1,4 @@
+import {readNativeChatCheckpoint} from './chat-compaction-checkpoint.js';
 import {createHash,randomUUID} from 'node:crypto';
 import {chatMaintenanceNativeWitness} from './chat-maintenance-observation.js';
 import {inspectChatCompactionPressure} from './chat-compaction-pressure.js';
@@ -29,11 +30,21 @@ export function createChatCompactionManager({ctx,bridge,agents,presets,runtime,o
     const pressure=await inspectChatCompactionPressure({session,expectedModel:intent.source.model,policy:{thresholdRatio:engine.config.thresholdRatio,headroomTokens:engine.config.headroomTokens},tokenMeter,llm,signal:active});identity();
     if(pressure.decision!=='needed')return{protocol:1,status:'skipped',reason:pressure.reason,compaction_executed:false,execution_authorized:false};
     const proof=await completionReader({scope,expectedSourceSha256:intent.source.history_sha256,signal:active});identity();if(digest(proof)!==observed.native?.proof_sha256||session.seq!==proof.raw_event_count)fail();
-    const attempt=Object.freeze({scope,intent_id,attempt_id:'chat-compact-'+randomUUID(),observer_id:observer,witness:chatMaintenanceNativeWitness(proof)});let entry;
-    const check=async scoped=>{scoped.throwIfAborted();identity();if(runtime.get(agent)!==entry||presets.serviceFor(agent,'compaction')?.jotChatCompactionIdentity!==engineIdentity)fail();await read();scoped.throwIfAborted();};
-    entry=Object.freeze({attempt,model:Object.freeze(structuredClone(intent.source.model)),signal:active,check,request:bridge.request.bind(bridge)});
-    await read();const result=await runtime.withOperation(agent,entry,()=>engine.compactNow(agent,active,attempt.attempt_id));await read();
-    return{protocol:1,status:result?'compacted':'skipped',reason:result?null:'NO_SAFE_RANGE',compaction_executed:!!result,attempt_id:attempt.attempt_id,source_sha256,result,execution_authorized:false};
+    const publishesCheckpoint=intent.source.policy.context_revision==='checkpoint-text-v2';
+    const before=publishesCheckpoint?{header:structuredClone(session.header),inheritedEventCount:session.inheritedEventCount,events:structuredClone(session.snapshotEvents(0)),surface_nodes:[...session.surface.nodes],surface_generation:session.surface.replaceGeneration}:null;
+    if(before&&digest({header:before.header,inheritedEventCount:before.inheritedEventCount,events:before.events})!==proof.raw_sha256)fail();
+    const attempt=Object.freeze({scope,intent_id,attempt_id:'chat-compact-'+randomUUID(),observer_id:observer,witness:chatMaintenanceNativeWitness(proof)});let entry,settled;
+    const check=async scoped=>{scoped.throwIfAborted();identity();if(before){const events=session.snapshotEvents(0),start=events.at(-1);if(events.length!==proof.raw_event_count+1||digest({header:session.header,inheritedEventCount:session.inheritedEventCount,events:events.slice(0,proof.raw_event_count)})!==proof.raw_sha256||start.type!=='compaction/start'||start.data.sourceCommandId!==attempt.attempt_id||start.data.turn!==null)fail();}if(runtime.get(agent)!==entry||presets.serviceFor(agent,'compaction')?.jotChatCompactionIdentity!==engineIdentity)fail();await read();scoped.throwIfAborted();};
+    entry=Object.freeze({attempt,model:Object.freeze(structuredClone(intent.source.model)),signal:active,check,request:async(...args)=>{const response=await bridge.request(...args);if(args[2]?.action==='settle'&&response?.receipt?.state==='settled')settled=response.receipt;return response;}});
+    await read();const result=await runtime.withOperation(agent,entry,()=>engine.compactNow(agent,active,attempt.attempt_id));await read();let checkpoint;
+    if(publishesCheckpoint&&result){
+     if(!settled||settled.attempt_id!==attempt.attempt_id||typeof ctx.sessions?.flush!=='function')fail();
+     const evidence=readNativeChatCheckpoint({agent,before,proof,result,source:intent.source,attempt_id:attempt.attempt_id});
+     if(await ctx.sessions.flush(session)!==true)fail();await read();
+     const reply=await bridge.request('chat-compaction-checkpoint',binding,{action:'publish',...scope,intent_id,attempt_id:attempt.attempt_id,observer_id:observer,fence_id:settled.fence_id,source_sha256,...evidence},active);identity();checkpoint=reply?.checkpoint;
+     if(checkpoint?.protocol!==1||checkpoint.kind!=='chat_compaction_checkpoint'||!id(checkpoint.checkpoint_id)||!hash(checkpoint.checkpoint_sha256)||checkpoint.run_id!==scope.run_id||checkpoint.session_id!==scope.session_ref||checkpoint.source_sha256!==source_sha256||checkpoint.native_summary_sha256!==evidence.witness.summary_sha256||checkpoint.summary_text_sha256!==evidence.witness.summary_text_sha256||checkpoint.execution_authorized!==false)fail();
+    }
+    return{protocol:1,status:result?'compacted':'skipped',reason:result?null:'NO_SAFE_RANGE',compaction_executed:!!result,attempt_id:attempt.attempt_id,source_sha256,result,...(checkpoint?{checkpoint}:{}),execution_authorized:false};
    }finally{if(jobs.get(scope.session_ref)===job)jobs.delete(scope.session_ref);}
   })();if(job)job.task=task;return task;
  };

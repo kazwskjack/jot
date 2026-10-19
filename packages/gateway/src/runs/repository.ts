@@ -56,7 +56,7 @@ export class RunRepository {
       // Native child preparation retains its original reservation/role/archived
       // conversation contract; it is not ordinary Chat/Work input admission.
       const executionPolicy=options.executionMode==='native'?null:acceptedExecutionPolicy(mode,Number(current.version),modelPolicy,this.options.workAgentPreset??'jot-general',chat);
-      const chatContext=mode==='chat'?snapshotChatContext(this.db,conversationId,ownerId,chat!.context_revision):null;
+      const chatContext=mode==='chat'?snapshotChatContext(this.db,conversationId,ownerId,chat!.context_revision,chat):null;
       if (generatedTitle) {
         this.db.prepare(`UPDATE ga_conversations
           SET title=?,version=version+1,updated_at=?

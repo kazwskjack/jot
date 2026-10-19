@@ -8,7 +8,7 @@ result is advisory with `execution_authorized: false`; it is neither native
 completion/idle proof nor a model grant. It is not wired into execution or an
 execution endpoint. The opt-in observation composition below can consume it.
 The opt-in official engine and independent accounting/cancellation are now
-implemented; automatic scheduling and useful checkpoint handoff remain pending in the [Chat/Work plan](../../docs/superpowers/plans/2026-10-18-portable-chat-work.md).
+implemented; automatic scheduling and remaining activation gates remain pending in the [Chat/Work plan](../../docs/superpowers/plans/2026-10-18-portable-chat-work.md).
 
 ### Optional original Chat engine
 
@@ -22,6 +22,13 @@ Only trusted programmatic requests start maintenance; generated profiles,
 browser endpoints and worker timers do not start it. New original input cancels
 and drains its own operation after authority checks. See
 [implementation, actual SDK evidence and remaining checkpoint gates](../../docs/implementation/2026-10-18-chat-native-compaction.md).
+
+The optional `checkpoint-text-v2` context revision publishes a source-bound
+native summary only after exact SDK record validation and settled accounting.
+The next original acceptance freezes that summary plus recent uncovered text;
+retained final answers remain recent text and edited sources re-enter the seed.
+The total bound stays 14,000 characters. Prior revisions keep `recent-text-v1`.
+See [checkpoint evidence and remaining activation gates](../../docs/implementation/2026-10-18-chat-checkpoint-handoff.md).
 
 ### Optional Chat maintenance observation
 

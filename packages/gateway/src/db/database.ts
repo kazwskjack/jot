@@ -1,3 +1,4 @@
+import {installChatCheckpoints} from '../conversations/chat-checkpoint-store.ts';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import {installSessionCheckpoints} from '../harness/session-checkpoints.ts';
@@ -43,6 +44,7 @@ export function openProductDatabase(path: string): DatabaseSync {
    CREATE TRIGGER IF NOT EXISTS ga_chat_compaction_intent_immutable BEFORE UPDATE ON ga_chat_compaction_intents
     BEGIN SELECT RAISE(ABORT,'chat_compaction_intent_immutable'); END;`);
   installChatCompactionAttempts(db);
+  installChatCheckpoints(db);
   db.exec(`CREATE TABLE IF NOT EXISTS ga_chat_web_groups (
     run_id TEXT NOT NULL REFERENCES ga_runs(id) ON DELETE CASCADE,
     kind TEXT NOT NULL CHECK(kind IN ('search','fetch')),session_id TEXT NOT NULL,

@@ -74,3 +74,5 @@ export class ChatCompactionAttempts{
   this.db.prepare("UPDATE ga_chat_compaction_attempts SET state='settled',usage_json=?,usage_status='complete',actual_tokens=?,reason=NULL,updated_at=? WHERE attempt_id=?").run(usage.json,usage.tokens,new Date(this.time()).toISOString(),binding.attempt_id);const changed=this.load(scope,binding);this.event(changed);return this.receipt(changed);
  });}
 }
+
+export {usageValue as chatCompactionUsageValue};

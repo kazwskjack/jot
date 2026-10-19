@@ -26,6 +26,7 @@
     "chat-compaction-runtime.js",
     "chat-compaction-engine.js",
     "chat-compaction-manager.js",
+    "chat-compaction-checkpoint.js",
     "chat-web.js",
     "model-catalog.js",
     "conversation-goal.js",

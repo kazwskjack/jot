@@ -9,6 +9,13 @@ real-provider quality and deployment acceptance are separate facts.
 Gateway contracts, verify each deliverable, and publish reviewed source without
 private deployment data.
 
+**Execution order:** finish this existing full capability plan and its release
+gates before beginning a separate DeepSeek-Bot reference pass. That later pass
+can inform role/group collaboration, memory/context automation, capability
+configuration and usage presentation; it does not replace the current ledger
+or authorize a second planner, task scheduler or permission system. Current
+execution follows the user's single-agent restriction.
+
 **Architecture:** DSH owns planning and native Session/Goal execution. Gateway
 owns original owner/role identities, tasks, occurrences, permissions, leases,
 cumulative budgets, immutable receipts and delivery acceptance. Standalone local
@@ -559,7 +566,8 @@ Native markers and replacement are flushed and replayed by the original SDK;
 partial cancellation remains unknown usage rather than zero cost.
 
 This does not complete the Chat/Work plan or any remaining full capability by
-itself. Useful owner-checkpoint publication and consumption, automatic starts,
-restart/recovery, Chat-only activity filtering, provider/cache metrics,
+itself. Useful owner-checkpoint publication/consumption is now implemented in the
+[versioned native handoff](../../implementation/2026-10-18-chat-checkpoint-handoff.md).
+Automatic starts, native crash/restart recovery, Chat-only activity filtering, provider/cache metrics,
 UI/standalone integration and the broader gates remain open. General readiness
 and generated profiles remain default-off. No full-ledger completion is claimed.

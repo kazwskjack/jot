@@ -141,6 +141,37 @@ scheduler. Completing its first step does not complete background compaction.
    assistant message, discard original history, or summarize content that the
    next seed will simply throw away. New-input/source conflicts suppress the
    checkpoint without erasing incurred usage.
+   Execution detail for the checkpoint handoff:
+   - Add an empty immutable owner/Session checkpoint journal, one record per
+     settled original auxiliary attempt. Keep native summary/span/generation
+     hashes and bounded text, original source and parent checkpoint identity.
+     No legacy backfill, canonical message or new user-facing event.
+   - The Host validates the unchanged raw prefix and exact official standalone
+     start/summary/adjacent replacement/end result, selected original input and
+     accepted context marker, exact retained-answer coverage, durable flush and surface generation.
+     Send bounded authenticated evidence, never the full native transcript.
+   - Publish only against the still-current completed source and settled call.
+     Exact persisted retries may return the same immutable receipt; late new
+     publication after another input is rejected without erasing usage.
+   - Opt in through context revision/algorithm `checkpoint-text-v2`. Freeze a
+     verified checkpoint plus recent text at original acceptance. Preserve v1
+     for existing clients. Exclude covered text only when its exact content hash
+     and revision still match; changed text re-enters the recent window.
+     Parent references retain older coverage without copying all prior records.
+   - The native selector validates the new schema, hashes and framing before
+     replacing its conversation body. Preserve the original system/tool prefix,
+     actual current input, immutable retry and full stored history.
+   - Prove publish/consumption, foreign and stale refusal, duplicate/reopen,
+     source drift, cancelled-stream suppression, bounds and actual next native
+     request use. Automatic starts/readiness stay off until the remaining gates.
+   Implemented: [verified native checkpoint handoff](../../implementation/2026-10-18-chat-checkpoint-handoff.md).
+   The opt-in v2 acceptance/native path freezes and consumes exact summaries,
+   actual selected coverage and parent lineage. Actual SDK tests carry two
+   checkpoint generations into subsequent original requests without duplicate
+   summaries or answers; cancellation publishes no stale checkpoint. Disk
+   reopen and immutable retry are covered. Automatic starts, crash recovery
+   across native Host termination, presentation and real-provider gates remain
+   open; the enclosing post-answer-compaction checkbox is not yet complete.
 6. **End-to-end gate:** actual SDK/Host tests must show no foreground summary,
    a pressure-driven post-answer summary, exactly one user-facing answer,
    correct thinking/provider identity, new-input cancellation, stable retry/
