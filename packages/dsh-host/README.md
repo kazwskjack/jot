@@ -289,3 +289,11 @@ recovery and steering. Defaults remain off. A trusted notification carries only
 original owned history scope after canonical publication; it is not a public
 tool, foreground lease or automatic startup scan. Notification acceptance is not
 successful inference. See [automatic execution and limits](../../docs/implementation/2026-10-19-chat-automatic-post-answer.md).
+
+### Work compaction visibility
+
+The paired Gateway/UI can opt into explicit native Work compaction metadata with
+`GENERAL_AGENT_WORK_COMPACTION_PROJECTION_ENABLED=true`; the default is false.
+It requires an accepted Work execution policy and upgraded activity consumers.
+It never displays native summary text or enables Chat background activities.
+See [the native lifecycle and acceptance record](../../docs/implementation/2026-10-19-work-native-compaction-ui.md).

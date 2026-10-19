@@ -26,7 +26,7 @@ function executionReceipt(value){
 const userTexts=input=>input.messages.filter(message=>message.role==='user').flatMap(message=>typeof message.content==='string'?[message.content]:(message.content??[]).filter(part=>part.type==='text').map(part=>part.text));
 const occurrences=(text,part)=>text.split(part).length-1;
 
-async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=false,automatic=false,unlimited=false,discovery=false,noPlan=false,discoveryWait=false}={}){
+async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=false,automatic=false,unlimited=false,discovery=false,noPlan=false,discoveryWait=false,workCompaction=false}={}){
  persistent ||= discovery; complete ||= discovery; unlimited ||= discovery; role ||= persistent;
  const {buildServer}=await import('../../gateway/src/server.ts');
  const root=await mkdtemp(join(tmpdir(),'jot-gateway-host-')),home=join(root,'home'),workspace=join(root,'workspace');await mkdir(workspace);
@@ -36,6 +36,7 @@ async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=
   const chunks=[];for await(const chunk of req)chunks.push(chunk);const input=JSON.parse(Buffer.concat(chunks).toString());
   assert.equal(req.method,'POST');assert.match(req.url,/\/messages$/);assert.equal(req.headers['x-api-key'],modelKey);
   assert.equal(input.model,'deepseek-flash');assert.equal(input.thinking?.type,'enabled');assert.equal(input.output_config?.effort,'high');
+  const summaryRequest=JSON.stringify(input.messages).includes('You are now acting as a compaction engine');
   requests.push(input);const ordinal=requests.length;res.writeHead(200,{'content-type':'text/event-stream','cache-control':'no-cache'});
   let operation='tasks.propose',argumentsValue={intent:complete?'complete':automatic&&ordinal===1?'continue':resume&&ordinal===2?'wait_approval':'wait_user',summary:ordinal===2?'Please review the next step.':'Please confirm the next step.'};
   if(complete&&!discovery&&ordinal===1){operation='files.write';argumentsValue={path:'acceptance.md',content:'ACCEPTANCE-OK',expected_version:0};}
@@ -60,9 +61,9 @@ async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=
    {type:'content_block_stop',index:1},
   ]:[];
   for(const event of [
-   {type:'message_start',message:{id:'synthetic-message-'+ordinal,role:'assistant',model:'deepseek-flash',content:[],usage:{input_tokens:5,output_tokens:0}}},
+   {type:'message_start',message:{id:'synthetic-message-'+ordinal,role:'assistant',model:'deepseek-flash',content:[],usage:{input_tokens:workCompaction&&ordinal===1?950000:5,output_tokens:0}}},
    {type:'content_block_start',index:0,content_block:{type:'text',text:''}},
-   {type:'content_block_delta',index:0,delta:{type:'text_delta',text:'ACCEPTANCE-OK'}},
+   {type:'content_block_delta',index:0,delta:{type:'text_delta',text:workCompaction&&summaryRequest?'WORK-COMPACTION-SUMMARY':'ACCEPTANCE-OK'}},
    {type:'content_block_stop',index:0},
    ...toolEvents,
    {type:'message_delta',delta:{stop_reason:toolEvents.length?'tool_use':'end_turn'},usage:{output_tokens:1}},
@@ -77,6 +78,7 @@ async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=
   await service.app.listen({host:'127.0.0.1',port:0});const gatewayUrl='http://127.0.0.1:'+service.app.server.address().port;
   const prepared=await createHostProfile({home,...(role?{workbench:{provider:route.provider,model:route.model,origin:gatewayUrl}}:{})}),port=await freePort(),patchPath=join(prepared.directory,'cordis.patch.yml');
   let patch=await readFile(patchPath,'utf8');patch=patch.replace('"port": 18841','"port": '+port+(discovery?', "nativeIdleObservation": true':'')).replace('http://127.0.0.1:18831',gatewayUrl).replace('"jotHostReady"','"jotHostReady", "jotHostInspectionReady"');
+  if(workCompaction)patch=patch.replace(pathToFileURL(fileURLToPath(new URL('../standard-preset.mjs',import.meta.url))).href,pathToFileURL(fileURLToPath(new URL('./work-compaction-preset.mjs',import.meta.url))).href);
   const inspection={insert:[{id:'jot-host-inspection',name:pathToFileURL(fileURLToPath(new URL('./inspect-host-plugin.mjs',import.meta.url))).href,config:{receipt:join(root,'composition.json'),sessionPrefix:'jot-host-acceptance-'}}]};
   patch=patch.trim().replace(/\]$/,', '+JSON.stringify({id:'llm-deepseek',config:{baseURL:modelUrl,apiKeyEnv:'DEEPSEEK_API_KEY',reasoningEffort:'high'}})+', '+JSON.stringify(inspection)+']');await writeFile(patchPath,patch);
   host=launch([join(runtime,'dsh/lib/bin.js'),'--profile','jot','--host','127.0.0.1','--port','0','--no-open'],workspace,{...cleanEnv(),DSH_HOME:home,DSH_TELEMETRY_DISABLED:'1',JOT_SESSION_ADAPTER_TOKEN:adapterToken,GENERAL_AGENT_INTERNAL_CHANNEL_TOKEN:internalToken,DEEPSEEK_API_KEY:modelKey});
@@ -89,7 +91,7 @@ async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=
   if(role){const response=await fetch(gatewayUrl+'/v1/agents',{method:'POST',headers,body:JSON.stringify({name:'Acceptance role',workspace_id:'jot',instructions:'Reply clearly using the provided evidence.'})});assert.equal(response.status,201);const agent=await response.json();roleAgent=agent;conversation_id=agent.conversation_id;messageUrl='/v1/agents/'+agent.agent_id+'/messages';messageBody={client_message_id:'acceptance-one',text:'Reply with the single word ACCEPTANCE-OK.'};
    if(persistent&&!discovery){const created=await fetch(gatewayUrl+'/v1/persistent-tasks',{method:'POST',headers:{...headers,'idempotency-key':'acceptance-task'},body:JSON.stringify({title:'Wait for confirmation',agent_id:agent.agent_id,objective:complete?'Write acceptance.md containing ACCEPTANCE-OK and request owner acceptance.':'Ask the user to confirm before any further work.',trigger:{kind:'once',run_at:'2099-01-01T00:00:00Z'},budget:{max_runs:unlimited?null:1}})});const task=await created.json();assert.equal(created.status,201,JSON.stringify(task));messageUrl='/v1/persistent-tasks/'+task.task_id+'/run-now';messageBody={};}
   }
-  else{const conversation=await fetch(gatewayUrl+'/v1/conversations',{method:'POST',headers,body:JSON.stringify({title:'Synthetic local model acceptance',workspace_id:'jot',model:{provider:'deepseek-official',model:'deepseek-flash'}})});assert.equal(conversation.status,201);({conversation_id}=await conversation.json());messageUrl='/v1/conversations/'+conversation_id+'/messages';messageBody={client_message_id:'acceptance-one',content:[{type:'text',text:'Reply with the single word ACCEPTANCE-OK.'}]};}
+  else{const conversation=await fetch(gatewayUrl+'/v1/conversations',{method:'POST',headers,body:JSON.stringify({title:'Synthetic local model acceptance',workspace_id:'jot',model:{provider:'deepseek-official',model:'deepseek-flash'}})});assert.equal(conversation.status,201);({conversation_id}=await conversation.json());messageUrl='/v1/conversations/'+conversation_id+'/messages';messageBody={client_message_id:'acceptance-one',content:[{type:'text',text:workCompaction?'Synthetic older context '.repeat(600)+' Reply ACCEPTANCE-OK.':'Reply with the single word ACCEPTANCE-OK.'}]};}
   if(discovery){
    const {SessionControllerClient}=await import('../../gateway/src/harness/session-controller-client.ts');
    const {ProjectActivityObserver}=await import('../../gateway/src/always-on/project-activity.ts');
@@ -136,7 +138,7 @@ async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=
   if(discovery){const receipt=await admitFresh();assert.equal(receipt.admitted,true,JSON.stringify(receipt));accepted=service.db.prepare('SELECT run_id,conversation_id FROM wb_task_occurrences WHERE occurrence_id=?').get(receipt.occurrence_id);assert.ok(accepted);}
   else{const posted=await postMessage();assert.equal(posted.status,202);accepted=await posted.json();}
   const run_id=accepted.run_id;if(persistent)conversation_id=accepted.conversation_id;
-  const startWorker=()=>launch(['--import',new URL('./trace-gateway-fetch.mjs',import.meta.url).href,'--experimental-strip-types',fileURLToPath(new URL('../../gateway/src/harness/main.ts',import.meta.url))],workspace,{...cleanEnv(),JOT_ACCEPTANCE_FETCH_TRACE:join(root,'fetch-status.jsonl'),GENERAL_AGENT_DB:join(root,'gateway.db'),GENERAL_AGENT_FILE_ROOT:join(root,'files'),GENERAL_AGENT_WORKBENCH_ROOT:join(root,'workspaces'),GENERAL_AGENT_WORKSPACES:'jot',GENERAL_AGENT_SESSION_ADAPTER_URL:adapterUrl,GENERAL_AGENT_SESSION_ADAPTER_TOKEN_FILE:tokenFile,GENERAL_AGENT_HARNESS_CWD:workspace,GENERAL_AGENT_DSH_AGENT_PRESET:'jot-general',GENERAL_AGENT_DSH_SESSION_PREFIX:'jot-host-acceptance',GENERAL_AGENT_INTERNAL_CHANNEL_TOKEN:internalToken,GENERAL_AGENT_WORKER_POLL_MS:'250',...(role?{GENERAL_AGENT_MODEL_BUDGET_POLICY_FILE:policyFile,GENERAL_AGENT_WORKBENCH_DSH_AGENT_PRESET:'jot-workbench-budgeted',GENERAL_AGENT_WORKBENCH_EXECUTION_READY:'true',GENERAL_AGENT_WORKER_CONCURRENCY:'2'}:{})});
+  const startWorker=()=>launch(['--import',new URL('./trace-gateway-fetch.mjs',import.meta.url).href,'--experimental-strip-types',fileURLToPath(new URL('../../gateway/src/harness/main.ts',import.meta.url))],workspace,{...cleanEnv(),JOT_ACCEPTANCE_FETCH_TRACE:join(root,'fetch-status.jsonl'),GENERAL_AGENT_DB:join(root,'gateway.db'),GENERAL_AGENT_FILE_ROOT:join(root,'files'),GENERAL_AGENT_WORKBENCH_ROOT:join(root,'workspaces'),GENERAL_AGENT_WORKSPACES:'jot',GENERAL_AGENT_SESSION_ADAPTER_URL:adapterUrl,GENERAL_AGENT_SESSION_ADAPTER_TOKEN_FILE:tokenFile,GENERAL_AGENT_HARNESS_CWD:workspace,GENERAL_AGENT_DSH_AGENT_PRESET:'jot-general',GENERAL_AGENT_DSH_SESSION_PREFIX:'jot-host-acceptance',GENERAL_AGENT_INTERNAL_CHANNEL_TOKEN:internalToken,GENERAL_AGENT_WORKER_POLL_MS:'250',...(workCompaction?{GENERAL_AGENT_WORK_COMPACTION_PROJECTION_ENABLED:'true'}:{}),...(role?{GENERAL_AGENT_MODEL_BUDGET_POLICY_FILE:policyFile,GENERAL_AGENT_WORKBENCH_DSH_AGENT_PRESET:'jot-workbench-budgeted',GENERAL_AGENT_WORKBENCH_EXECUTION_READY:'true',GENERAL_AGENT_WORKER_CONCURRENCY:'2'}:{})});
   worker=startWorker();
   const run=await until(async()=>{if(modelFailure)throw modelFailure;assert.equal(worker.terminal(),false,'official gateway worker exited');const current=await (await fetch(gatewayUrl+'/v1/runs/'+run_id,{headers})).json();if(['succeeded','failed','interrupted','waiting_user','waiting_approval'].includes(current.status))return current;return false;});
   assert.equal(run.status,complete&&!discoveryWait?'waiting_approval':persistent?'waiting_user':'succeeded',JSON.stringify(run));const initialCalls=discoveryWait?3:discovery?(noPlan?5:6):complete||automatic?3:1;assert.equal(requests.length,initialCalls);assert.equal(requests[0].model,'deepseek-flash');
@@ -150,6 +152,18 @@ async function gatewayCase(t,{role=false,persistent=false,resume=false,complete=
   else assert.equal(ended.kind,'completed');
   assert.ok(JSON.stringify(requests[0].messages).includes(discovery?'discovery_signal_batch':complete?'Write acceptance.md':persistent?'Ask the user to confirm':'ACCEPTANCE-OK'));
   const snapshotResponse=await fetch(gatewayUrl+'/v1/conversations/'+conversation_id+'/snapshot',{headers}),snapshot=await snapshotResponse.json();assert.equal(snapshotResponse.status,200,JSON.stringify(snapshot));assert.ok(Array.isArray(snapshot.messages),'snapshot response must contain messages');
+  if(workCompaction){
+   const nextResponse=await fetch(gatewayUrl+messageUrl,{method:'POST',headers:{...headers,'idempotency-key':'acceptance-two'},body:JSON.stringify({client_message_id:'acceptance-two',content:[{type:'text',text:'Reply again with ACCEPTANCE-OK.'}]})});assert.equal(nextResponse.status,202);const next=await nextResponse.json();
+   const second=await until(async()=>{if(modelFailure)throw modelFailure;const value=await (await fetch(gatewayUrl+'/v1/runs/'+next.run_id,{headers})).json();return ['succeeded','failed','interrupted'].includes(value.status)&&value;});assert.equal(second.status,'succeeded');
+   const view=await (await fetch(gatewayUrl+'/v1/conversations/'+conversation_id+'/snapshot',{headers})).json();const compactions=view.activities.filter(a=>a.kind==='compaction');assert.equal(compactions.length,1);assert.equal(compactions[0].status,'succeeded');assert.equal(compactions[0].run_id,next.run_id);
+   const records=service.db.prepare("SELECT payload_json FROM ga_events WHERE run_id=? AND type='activity.upsert'").all(next.run_id).map(r=>JSON.parse(r.payload_json)).filter(a=>a.kind==='compaction');assert.deepEqual(records.map(a=>a.status),['running','succeeded']);assert.equal(records[0].activity_id,records[1].activity_id);
+   assert.equal(requests.length,3);assert.equal(requests.filter(r=>JSON.stringify(r.messages).includes('You are now acting as a compaction engine')).length,1);assert.equal(occurrences(JSON.stringify(requests[2].messages),'WORK-COMPACTION-SUMMARY'),1);
+   assert.equal(view.messages.filter(m=>m.role==='assistant'&&m.status==='complete').length,2);assert.ok(view.messages.filter(m=>m.role==='assistant').every(m=>!JSON.stringify(m.blocks).includes('WORK-COMPACTION-SUMMARY')));assert.doesNotMatch(JSON.stringify(compactions),/WORK-COMPACTION-SUMMARY/);
+   const visible=service.db.prepare("SELECT payload_json FROM ga_events WHERE conversation_id=? AND type IN ('assistant.delta','assistant.settled','activity.upsert','message.created')").all(conversation_id);assert.ok(visible.every(row=>!row.payload_json.includes('WORK-COMPACTION-SUMMARY')),'native auxiliary summary never enters a provisional or final visible event');
+   const native=JSON.parse(await readFile(join(root,'composition.json'),'utf8'));assert.ok(native.events.some(e=>e.type==='compaction/start'));assert.ok(native.events.some(e=>e.type==='compaction/summary'));assert.ok(native.events.some(e=>e.type==='compaction/end'));
+   t.diagnostic(JSON.stringify({officialLauncher:true,realGateway:true,realWorker:true,nativeWorkCompaction:true,modelRequests:3,replyCount:2,compactionActivities:1,fixtureRetentionTokens:64,production:false}));succeeded=true;return;
+  }
+
   const replies=snapshot.messages.filter(message=>message.role==='assistant'&&message.status==='complete');assert.equal(replies.length,persistent?0:1);if(!persistent)assert.ok(JSON.stringify(replies[0]).includes('ACCEPTANCE-OK'));
   if(persistent)assert.equal(service.db.prepare("SELECT count(*) n FROM ga_messages WHERE run_id=? AND role='assistant'").get(run_id).n,0);
   if(persistent){const cards=await (await fetch(gatewayUrl+'/v1/conversations/'+conversation_id+'/interactions',{headers})).json();assert.ok(cards.items.length>0);assert.ok(service.db.prepare('SELECT checkpoint_id FROM ga_runs WHERE id=?').get(run_id).checkpoint_id);
@@ -326,3 +340,5 @@ test('a discovery source integrity failure waits and resumes its original Goal b
  const proof=await gatewayCase(t,{discovery:true,noPlan:true,discoveryWait:true});
  assert.deepEqual(proof,{admissions:2,plans:0,reports:1,source_reads:1,finalizations:1,model_requests:7,dormant_reason:'DORMANT_NO_SIGNAL',woke:true,same_task:true,wait_recovered:true});
 });
+
+test('actual Work automatically projects native compaction through Gateway and original Worker',{skip:!runtime,timeout:60000},t=>gatewayCase(t,{workCompaction:true}));

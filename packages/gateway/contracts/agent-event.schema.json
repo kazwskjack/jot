@@ -2450,6 +2450,9 @@
         },
         {
           "$ref": "#/$defs/Activity_subagent"
+        },
+        {
+          "$ref": "#/$defs/Activity_compaction"
         }
       ]
     },
@@ -3322,6 +3325,121 @@
         "download_url"
       ],
       "additionalProperties": false
+    },
+    "Activity_compaction": {
+      "type": "object",
+      "properties": {
+        "activity_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"
+        },
+        "run_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"
+        },
+        "attempt_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "running",
+            "succeeded",
+            "failed",
+            "cancelled",
+            "unknown"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "ended_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "kind": {
+          "type": "string",
+          "const": "compaction"
+        },
+        "detail": {
+          "type": "object",
+          "properties": {
+            "compaction_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+            },
+            "phase": {
+              "type": "string",
+              "enum": [
+                "start",
+                "end"
+              ]
+            }
+          },
+          "required": [
+            "compaction_id",
+            "phase"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "activity_id",
+        "run_id",
+        "kind",
+        "status",
+        "title",
+        "started_at",
+        "detail"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "detail": {
+                "properties": {
+                  "phase": {
+                    "const": "start"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": "running"
+              }
+            },
+            "not": {
+              "required": [
+                "ended_at"
+              ]
+            }
+          },
+          "else": {
+            "required": [
+              "ended_at"
+            ],
+            "properties": {
+              "status": {
+                "enum": [
+                  "succeeded",
+                  "failed",
+                  "cancelled",
+                  "unknown"
+                ]
+              }
+            }
+          }
+        }
+      ]
     }
   }
 }

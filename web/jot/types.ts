@@ -57,7 +57,9 @@ export type Activity_command = { activity_id: string; run_id: string; tool_call_
 export type Activity_subagent = { activity_id: string; run_id: string; tool_call_id: string; attempt_id?: string; parent_activity_id?: string; status: "pending" | "running" | "waiting" | "succeeded" | "failed" | "cancelled" | "unknown"; title: string; started_at: string; ended_at?: string; error_code?: string; kind: "subagent"; detail: { tool_name?: string; action?: string; urls?: string[]; url?: string; child_run_id: string; summary?: string } };
 export type Activity_crawl = { activity_id: string; run_id: string; tool_call_id: string; attempt_id?: string; parent_activity_id?: string; status: "pending" | "running" | "waiting" | "succeeded" | "partial" | "failed" | "cancelled" | "unknown"; title: string; started_at: string; ended_at?: string; error_code?: string; kind: "crawl"; detail: { tool_name?: string; action?: string; urls?: string[]; operation: "open" | "fetch" | "read" | "cancel"; batch_id: string; requested_count: number; completed_count: number; failed_count: number; errors?: Array<{ input_index: number; error_code: string; url?: string }> } };
 
-export type Activity = (Activity_search) | (Activity_browse) | (Activity_file_edit) | (Activity_file_read) | (Activity_command) | (Activity_subagent) | (Activity_crawl);
+export type Activity_compaction = { activity_id:string; run_id:string; attempt_id?:string; kind:"compaction"; status:"running"|"succeeded"|"failed"|"cancelled"|"unknown"; title:string; started_at:string; ended_at?:string; detail:{compaction_id:string;phase:"start"|"end"} };
+
+export type Activity = (Activity_search) | (Activity_browse) | (Activity_file_edit) | (Activity_file_read) | (Activity_command) | (Activity_subagent) | (Activity_crawl) | (Activity_compaction);
 
 export type Question = { question_id: string; prompt: string; description?: string; options: Array<{ option_id: string; label: string; description?: string }>; multiple: boolean; allow_custom: boolean };
 

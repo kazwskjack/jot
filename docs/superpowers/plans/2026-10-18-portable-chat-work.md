@@ -273,6 +273,11 @@ Files: `web/jot/RoleConversation.tsx`, `PromptComposer.tsx`, `client.ts`, `types
 
 ### Native Work compaction presentation sequence
 
+Implementation and distinct native/synthetic acceptance are recorded in
+[Work compaction activity](../../implementation/2026-10-19-work-native-compaction-ui.md).
+Final full regression and release checks remain separate gates.
+
+
 Current source inspection confirms that `session-event-projector.ts` drops
 native compaction events and `RoleConversation.tsx` does not render activities.
 The pinned official event contract supplies `compaction/start` and

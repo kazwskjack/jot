@@ -92,7 +92,10 @@ const runtimeClient = runtimeBaseUrl && runtimeSecretFile
   : undefined;
 const sessionClient = new SessionControllerClient(adapterBaseUrl, readFileSync(adapterTokenFile, 'utf8').trim(),
   globalThis.fetch, leafBridgeBaseUrl);
+const workCompactionFlag=process.env.GENERAL_AGENT_WORK_COMPACTION_PROJECTION_ENABLED;
+if(workCompactionFlag!==undefined&&workCompactionFlag!=='true'&&workCompactionFlag!=='false')throw Error('work_compaction_projection_config_invalid');
 const runner = new OfficialSessionRunner(sessionClient, {
+  visibleWorkCompaction:workCompactionFlag==='true',
   ...(process.env.GENERAL_AGENT_CHAT_ENABLED==='true'?{chatAgentPreset:'jot-chat' as const}:{}),
   cwd: harnessCwd, agentPreset,...(process.env.GENERAL_AGENT_WORKBENCH_DSH_AGENT_PRESET?.trim()?{workbenchAgentPreset:process.env.GENERAL_AGENT_WORKBENCH_DSH_AGENT_PRESET.trim()}:{}),
 });

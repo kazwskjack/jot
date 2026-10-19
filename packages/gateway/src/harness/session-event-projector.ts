@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto'
 import {
   safeWebOperationCounts, safeWebOperationId, safeWebOperationItems, safeWebOperationUrl,
   safeWebOperationKind, safeWebOperationStatus, webOperationPresentation,
@@ -18,6 +19,8 @@ export interface ProjectionContext {
   /** Background task text is provisional until the business review publishes it. */
   deferCompletion?: boolean
   knownTools?: Map<string, ToolPresentation>
+  /** Supplied only by a paired, opt-in consumer using accepted execution policy. */
+  compaction?: {mode: 'chat'|'work'; states: Map<string,{activityId:string;startedAt:string;ended:boolean}>}
 }
 
 interface ToolPresentation {
@@ -335,6 +338,22 @@ function settledAssistant(data: Record<string, unknown>, context: ProjectionCont
   } } }
 }
 
+function nativeCompaction(type: string, data: Record<string,unknown>, context: ProjectionContext): JotProjection|null {
+  const scope=context.compaction, id=data.compactionId
+  if(scope?.mode!=='work'||!(scope.states instanceof Map)||typeof id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(id)||!Number.isFinite(Date.parse(context.at)))return null
+  const prior=scope.states.get(id)
+  if(type==='compaction/start'){
+    if(prior)return null
+    const value={activityId:'compaction-'+createHash('sha256').update(JSON.stringify([context.runId,id])).digest('hex'),startedAt:context.at,ended:false}
+    scope.states.set(id,value)
+    return {type:'activity.upsert',payload:{activity_id:value.activityId,run_id:context.runId,attempt_id:context.attemptId,kind:'compaction',status:'running',title:'正在压缩上下文',started_at:value.startedAt,detail:{compaction_id:id,phase:'start'}}}
+  }
+  if(!prior||prior.ended||data.error!==undefined&&typeof data.error!=='string')return null
+  prior.ended=true
+  const failed=data.error!==undefined
+  return {type:'activity.upsert',payload:{activity_id:prior.activityId,run_id:context.runId,attempt_id:context.attemptId,kind:'compaction',status:failed?'failed':'succeeded',title:failed?'上下文整理失败':'上下文已整理',started_at:prior.startedAt,ended_at:context.at,detail:{compaction_id:id,phase:'end'}}}
+}
+
 export function projectSessionFrame(frameValue: unknown, context: ProjectionContext): JotProjection | null {
   const frame = record(frameValue)
   if (!frame) return null
@@ -362,6 +381,7 @@ export function projectSessionFrame(frameValue: unknown, context: ProjectionCont
   const event = record(frame.event)
   const data = record(event?.data)
   if (!event || !data) return null
+  if(event.type==='compaction/start'||event.type==='compaction/end')return nativeCompaction(event.type,data,context)
   if (event.type === 'tool/call') return toolActivity(data, context, false)
   if (event.type === 'tool/result') return toolActivity(data, context, true)
   if (event.type === 'assistant/message') return settledAssistant(data, context)

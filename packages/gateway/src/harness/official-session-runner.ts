@@ -137,9 +137,10 @@ export class OfficialSessionRunner implements DshRunner {
   readonly conversationModeProtocol?:1
   readonly ordinaryCompletionProtocol=1 as const
   private readonly client: OfficialSessionClient
-  private readonly options: { cwd: string; timeoutMs?: number; agentPreset: string;chatAgentPreset?:'jot-chat';workbenchAgentPreset?:string; deltaFlushMs: number; deltaMaxChars: number; maxCrawlAutoContinues: number; webOperationPollIntervalMs: number }
+  private readonly options: { cwd: string; timeoutMs?: number; agentPreset: string;chatAgentPreset?:'jot-chat';workbenchAgentPreset?:string; deltaFlushMs: number; deltaMaxChars: number; maxCrawlAutoContinues: number; webOperationPollIntervalMs: number; visibleWorkCompaction?:boolean }
   constructor(client: OfficialSessionClient, options: { cwd: string; timeoutMs?: number; agentPreset: string;chatAgentPreset?:'jot-chat';workbenchAgentPreset?:string;
-    deltaFlushMs?: number; deltaMaxChars?: number; maxCrawlAutoContinues?: number; webOperationPollIntervalMs?: number }) {
+    deltaFlushMs?: number; deltaMaxChars?: number; maxCrawlAutoContinues?: number; webOperationPollIntervalMs?: number; visibleWorkCompaction?:boolean }) {
+    if(options.visibleWorkCompaction!==undefined&&typeof options.visibleWorkCompaction!=='boolean')throw Error('work_compaction_projection_config_invalid');
     if(options.chatAgentPreset==='jot-chat')this.conversationModeProtocol=1;
     this.client = client; this.options = { ...options, deltaFlushMs: Math.max(50, options.deltaFlushMs ?? 250),
       deltaMaxChars: Math.max(32, options.deltaMaxChars ?? 256),
@@ -249,10 +250,12 @@ export class OfficialSessionRunner implements DshRunner {
       const knownTools = new Map(); const buffers = new Map<string, {
         attemptId: string; blockIndex: number; kind: 'text' | 'reasoning'; text: string; deltaIndex: number; lastFlushAt: number
       }>()
+      const compaction=this.options.visibleWorkCompaction===true&&policy?.mode==='work'?{mode:'work' as const,states:new Map<string,{activityId:string;startedAt:string;ended:boolean}>()}:undefined
       const projectionContext = (attemptId = activeAttemptId, blockIndex = 0, deltaIndex = 0): ProjectionContext => ({
         runId: input.taskRequestId, attemptId, messageId: `stream-${input.taskRequestId}`,
         blockId: `stream-${input.taskRequestId}:${blockIndex}`, deltaIndex, at: new Date().toISOString(), knownTools,
         deferCompletion: input.checkpointTask === true,
+        ...(compaction?{compaction}:{}),
       })
       const emit = async (projection: JotProjection | null) => { if (projection && input.onProjection) await input.onProjection(projection) }
       const startWebOperationPolling = (meta: SessionToolCallMeta) => {
@@ -455,6 +458,7 @@ export class OfficialSessionRunner implements DshRunner {
             if (chunk) await queueChunk(chunk, activeAttemptId)
             continue
           }
+          if(event.type==='compaction/start'||event.type==='compaction/end'){await flushAll();await emit(projectSessionFrame(frame,projectionContext()));continue}
           if (event.type === 'tool/call') {
             toolMarker = true
             const meta = toolCallMeta(event)
