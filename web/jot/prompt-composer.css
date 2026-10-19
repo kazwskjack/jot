@@ -1,6 +1,10 @@
 /* Geometry and interaction only. The host's jot-composer-glass supplies material. */
 .jot-prompt-composer{box-sizing:border-box;position:relative;isolation:isolate;display:flex;flex-direction:column;gap:0;width:min(320px,100%);min-width:0;max-width:100%;min-height:52px;margin-inline:auto;padding:12px 56px 12px 16px;border-radius:28px;color:inherit;transition:width .38s cubic-bezier(.22,1,.36,1),border-radius .32s cubic-bezier(.22,1,.36,1),padding .32s cubic-bezier(.22,1,.36,1);text-align:left}
 .jot-prompt-composer[data-expanded="true"]{width:min(480px,100%);min-height:120px;padding:14px 12px 10px 16px;border-radius:24px;gap:12px}
+.jot-prompt-composer.jot-prompt-chat[data-expanded="true"]{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;min-height:64px;gap:8px;padding:10px 8px 10px 16px}
+.jot-prompt-chat[data-expanded="true"] .jot-prompt-toolbar{margin-top:0;flex-wrap:nowrap}
+.jot-prompt-chat[data-expanded="true"] .jot-prompt-settings{display:none}
+.jot-prompt-chat[data-expanded="true"] .jot-prompt-attachments{grid-column:1/-1}
 .jot-prompt-composer *{box-sizing:border-box}
 .jot-prompt-composer .jot-prompt-textarea{display:block;width:100%;min-width:0;min-height:24px;max-height:176px;margin:0;padding:0;border:0;border-radius:0;outline:0;resize:none;background:transparent;color:inherit;font:inherit;font-size:16px;line-height:24px;box-shadow:none;overscroll-behavior:contain}
 .jot-prompt-textarea::placeholder{color:var(--muted,currentColor);opacity:.7}

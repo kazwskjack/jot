@@ -264,10 +264,10 @@ Its original Worker/Host tests are separate from UI and real-provider readiness.
    retry, next-request consumption and cancellation. A request file or manual
    probe is not automatic-start acceptance. Keep UI/provider gates separate.
 
-Files: `web/jot/RoleConversation.tsx`, `PromptComposer.tsx`, `client.ts`, `types.ts`, owned mutation receipt/controller tests; separately `src/server.mjs`, `src/model.mjs`, standalone schemas and API tests.
+Files: `web/jot/RoleConversation.tsx`, `PromptComposer.tsx`, `client.ts`, `types.ts`, owned mutation receipt/controller tests; separately `src/server.mjs`, `src/provider.mjs`, standalone schemas and API tests.
 
-- [ ] Show one clickable Chat/Work label; hide model/effort controls in Chat. Use the existing immutable retry and versioned mutation flow; preserve mobile pointer/focus, keyboard, uploads and voice behavior.
-- [ ] New UI conversations request Chat only when the returned readiness supports it; display actual unavailable state otherwise. Keep older clients compatible.
+- [x] Show one clickable Chat/Work label; hide model/effort controls in Chat. Use the existing immutable retry and versioned mutation flow; preserve mobile pointer/focus, keyboard, uploads and voice behavior. See [UI implementation and limits](../../implementation/2026-10-19-chat-work-ui.md).
+- [x] New UI conversations request Chat only when the returned readiness supports it; display actual unavailable state otherwise. Keep older clients compatible.
 - [ ] Expose the same explicit behavior in the standalone profile through its own tested protocol. Do not proxy it silently to an extended host or label synthetic demo output as a live answer.
 - [ ] Test accepted and unconfirmed sends, cancellation, steering, attachments, reload and mode switches through actual local React/API/SDK boundaries.
 
@@ -278,8 +278,10 @@ Implementation and distinct native/synthetic acceptance are recorded in
 Final full regression and release checks remain separate gates.
 
 
-Current source inspection confirms that `session-event-projector.ts` drops
-native compaction events and `RoleConversation.tsx` does not render activities.
+At the initial inspection, `session-event-projector.ts` dropped native
+compaction events and `RoleConversation.tsx` did not render activities. The
+linked Work compaction increment now supplies the opt-in projection and UI;
+general activation and the broader acceptance gates remain separate.
 The pinned official event contract supplies `compaction/start` and
 `compaction/end` with one `compactionId`; its `compaction/summary` includes
 summary/model/raw-output fields that must not become public chat content.
