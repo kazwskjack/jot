@@ -274,7 +274,18 @@ official persona and Web modules. It masks inherited Work capabilities and
 denies non-Web execution; the Work preset keeps its complete original tree.
 It is not automatically installed by the profile generator. Actual Host tests
 verify the two Web schemas and a thinking-disabled Messages request through the
-original Gateway/Worker path. Product readiness remains unavailable while
-context, durable turn allowances and post-answer compaction are unfinished;
+original Gateway/Worker path. Bounded context, durable turn allowances and native
+post-answer compaction now have opt-in implementations and scripted-provider
+SDK acceptance. Product readiness remains unavailable while UI/standalone,
+Work's visible compaction presentation and real-provider gates are unfinished;
 [configuration and evidence](../../docs/implementation/2026-10-18-native-chat-preset.md)
 distinguish these boundaries from a complete Chat feature.
+
+Automatic post-answer maintenance additionally requires
+`ordinaryChatCompactionAuto: true`, the existing original compaction/context
+composition and `ordinaryChatCompactionRecovery: true`. The Worker independently
+requires `GENERAL_AGENT_CHAT_COMPACTION_AUTO_ENABLED=true`, Chat, original input
+recovery and steering. Defaults remain off. A trusted notification carries only
+original owned history scope after canonical publication; it is not a public
+tool, foreground lease or automatic startup scan. Notification acceptance is not
+successful inference. See [automatic execution and limits](../../docs/implementation/2026-10-19-chat-automatic-post-answer.md).

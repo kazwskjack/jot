@@ -11,10 +11,10 @@ import {OfficialSessionRunner} from '../../src/harness/official-session-runner.t
 import {inspectOrdinaryExecutionPolicy} from '../../src/conversations/execution-policy.ts';
 const hash=text=>createHash('sha256').update(text).digest('hex');
 const chat={protocol:1,mode:'chat',model:{provider:'local-scripted',model:'fast'},thinking:'disabled',preset_id:'jot-chat',preset_revision:'chat-v1',context_revision:'bounded-v1'};
-function fixture(t){
+function fixture(t,chatPolicy=chat){
  const db=openProductDatabase(':memory:');t.after(()=>db.close());const events=new EventStore(db),runs=new RunRepository(db,events),conversations=new ConversationRepository(db);
- const c=conversations.create('owner',{workspace_id:'ws',title:'Synthetic mode execution',model:{provider:'local-scripted',model:'work',reasoning_effort:'high'},mode:'chat'},{chatPolicy:chat});
- const source=runs.enqueue(c.conversation_id,'owner',{client_message_id:'original',content:[{type:'text',text:'Synthetic question'}]},{modePolicy:chat});
+ const c=conversations.create('owner',{workspace_id:'ws',title:'Synthetic mode execution',model:{provider:'local-scripted',model:'work',reasoning_effort:'high'},mode:'chat'},{chatPolicy});
+ const source=runs.enqueue(c.conversation_id,'owner',{client_message_id:'original',content:[{type:'text',text:'Synthetic question'}]},{modePolicy:chatPolicy});
  const row=db.prepare('SELECT * FROM ga_runs WHERE id=?').get(source.run_id),policy=JSON.parse(row.execution_policy_json);
  return{db,events,runs,c,source,row,policy,coordinator:new HarnessCoordinator(db,runs,events)};
 }
@@ -50,4 +50,12 @@ test('the official Runner targets the accepted Chat preset only with explicit co
  const runner=new OfficialSessionRunner(client,{cwd:'/fixture',agentPreset:'jot-general',chatAgentPreset:'jot-chat'});
  await assert.rejects(()=>runner.run({...input,originalAdmission:undefined}),/ordinary_input_admission_invalid|conversation_mode_unavailable/);assert.equal(calls.length,0);
  const result=await runner.run(input);assert.equal(result.final_text,'Synthetic native response');assert.deepEqual(calls,[['create','jot-chat']]);
+});
+
+test('post-answer notification follows committed v2 Chat publication without holding the foreground lease or awaiting delivery', {timeout:3000},async t=>{
+ for(const mode of ['success','rollback','delivery-error','legacy']){const f=fixture(t,{...chat,context_revision:mode==='legacy'?chat.context_revision:'checkpoint-text-v2'});let notified=0;
+  const runner={conversationModeProtocol:1,ordinaryCompletionProtocol:1,run:async input=>{input.onReady();const text='Synthetic committed answer',candidate={observed:true,completed:true,runtime_status:'not_required',reason_code:'SESSION_TURN_COMPLETED',final_text:text},proof={protocol:1,status:'complete',run_id:f.source.run_id,session_id:input.sessionRef,execution_lease:input.originalAdmission.executionLease,input_sha256:hash(f.db.prepare('SELECT content_json FROM ga_messages WHERE id=?').get(f.source.message_id).content_json),command_ids:[],native_message_ids:['original-native'],answer_sha256:hash(text),answer_seq:2,turn_end_seq:3,snapshot_seq:4,execution_authorized:false};if(mode==='rollback')f.db.exec("CREATE TEMP TRIGGER reject_chat_final BEFORE INSERT ON ga_messages WHEN NEW.role='assistant' BEGIN SELECT RAISE(ABORT,'synthetic_final_rejected'); END");assert.equal(await input.ordinaryCompletion.publish(candidate,proof,new AbortController().signal),true);return candidate;}};
+  const worker=new HarnessWorker(f.db,f.coordinator,runner,{workerId:'chat-post-answer-worker',leaseMs:30000,ordinaryInputRecoveryEnabled:true,ordinarySteeringEnabled:true,chatPostAnswer:async(...args)=>{notified++;assert.deepEqual(args,[f.source.run_id]);assert.equal(f.runs.get(f.source.run_id,'owner').status,'succeeded');assert.equal(f.db.prepare('SELECT count(*) n FROM ga_worker_leases WHERE resource_id=?').get(f.source.run_id).n,0);assert.equal(f.db.prepare("SELECT count(*) n FROM ga_messages WHERE run_id=? AND role='assistant'").get(f.source.run_id).n,1);if(mode==='delivery-error')throw Error('synthetic_notification_failed');return new Promise(()=>{});}});
+  await worker.processNext();await new Promise(resolve=>setImmediate(resolve));assert.equal(notified,['success','delivery-error'].includes(mode)?1:0,mode);if(mode!=='rollback')assert.equal(f.runs.get(f.source.run_id,'owner').status,'succeeded');
+ }
 });

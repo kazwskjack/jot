@@ -103,6 +103,7 @@ export class HarnessWorker {
   private readonly channelDelivery: ChannelTextDelivery | undefined;
   private readonly executionGuard: { assertRunActive(runId: string): void; contextForRun(runId: string): unknown } | undefined;
   private readonly workRunWorkspaceResolver:WorkRunWorkspaceResolver|undefined;
+  private readonly chatPostAnswer:((runId:string)=>Promise<unknown>)|undefined;
 
   constructor(db: DatabaseSync, coordinator: HarnessCoordinator, runner: DshRunner,
     options: { workerId: string; leaseMs: number; ordinaryInputRecoveryEnabled?:boolean;ordinarySteeringEnabled?:boolean; contextStager?: RuntimeContextStager;
@@ -110,6 +111,7 @@ export class HarnessWorker {
       attachmentResolver?: Pick<AttachmentResolver, 'resolveForMessage' | 'resolveOutputs' | 'releaseLease'>;
       channelDelivery?: ChannelTextDelivery;
       workRunWorkspaceResolver?:WorkRunWorkspaceResolver;
+      chatPostAnswer?:(runId:string)=>Promise<unknown>;
       executionGuard?: { assertRunActive(runId: string): void; contextForRun(runId: string): unknown } }) {
     this.db = db; this.coordinator = coordinator; this.runner = runner;
     this.workerId = options.workerId; this.leaseMs = options.leaseMs;
@@ -122,6 +124,8 @@ export class HarnessWorker {
     this.channelDelivery = options.channelDelivery;
     this.executionGuard = options.executionGuard;
     this.workRunWorkspaceResolver=options.workRunWorkspaceResolver;
+    if(options.chatPostAnswer!==undefined&&(typeof options.chatPostAnswer!=='function'||!this.ordinaryInputRecoveryEnabled||!this.ordinarySteeringEnabled))throw Error('chat_post_answer_config_invalid');
+    this.chatPostAnswer=options.chatPostAnswer;
   }
 
   async processNext(): Promise<{ run_id: string; runtime_status: string } | null> {
@@ -247,7 +251,12 @@ export class HarnessWorker {
 
         return true;
       });
-      if(committed&&ordinaryDelivery){published=true;publishedRuntime=candidate.tool_marker?'runtime_observed':'not_required';clearInterval(renewal);}
+      if(committed&&ordinaryDelivery){published=true;publishedRuntime=candidate.tool_marker?'runtime_observed':'not_required';clearInterval(renewal);
+        // The original answer and terminal state are already committed. This
+        // best-effort notification carries no foreground lease and cannot
+        // change publication success or block the user-facing response.
+        if(conversationPolicy?.mode==='chat'&&conversationPolicy.context_revision==='checkpoint-text-v2'&&this.chatPostAnswer){const notify=this.chatPostAnswer;void Promise.resolve().then(()=>notify(lease.run_id)).catch(()=>{});}
+      }
       return committed;
       }finally{if(outputAttachments.length)this.attachmentResolver?.releaseLease(outputLeaseId);}
     };

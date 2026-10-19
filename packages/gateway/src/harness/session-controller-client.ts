@@ -1,5 +1,5 @@
 import {normalizeExecutionLease,type ExecutionLease} from '../workbench/execution-lease.ts'
-import {ordinaryRunCompletionSource,validateOrdinaryRunCompletion,type OrdinaryRunHistoryScope} from './ordinary-run-completion.ts'
+import {ordinaryRunCompletionSource,validateOrdinaryRunCompletion,normalizeOrdinaryRunHistoryScope,type OrdinaryRunHistoryScope} from './ordinary-run-completion.ts'
 import {normalizeOrdinaryHistoryScope,validateOrdinarySteeringObservation,validateBoundOrdinarySteeringObservation,type OrdinaryHistoryScope} from './ordinary-steering-observation.ts'
 import { createReadStream } from 'node:fs'
 import { Readable } from 'node:stream'
@@ -142,6 +142,14 @@ export class SessionControllerClient {
     const deadline=AbortSignal.timeout(15000),value=await this.post('/v1/ordinary-run-history/readiness',{},signal?AbortSignal.any([signal,deadline]):deadline);
     if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!=='execution_authorized,protocol,ready'||typeof value.ready!=='boolean'||value.protocol!==1||value.execution_authorized!==false)throw Error('ordinary_run_history_readiness_invalid');
     return{ready:value.ready,protocol:1 as const,execution_authorized:false as const};
+  }
+
+  /** Trusted post-publication notification. Acceptance is not inference or a
+   * checkpoint receipt; the original Host revalidates all source authority. */
+  async notifyChatPostAnswer(sessionId:string,input:OrdinaryRunHistoryScope,signal?:AbortSignal){
+    const scope=normalizeOrdinaryRunHistoryScope(sessionId,input),value=await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/chat-post-answer`,{history:scope},signal);
+    if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!=='execution_authorized,kind,protocol,run_id,run_version,session_id,status'||value.protocol!==1||value.kind!=='chat_post_answer'||value.status!=='accepted'||value.run_id!==scope.run_id||value.session_id!==sessionId||value.run_version!==scope.expected_run_version||value.execution_authorized!==false)throw Error('chat_post_answer_receipt_invalid');
+    return value;
   }
 
   async steerOriginal(sessionId:string,requestId:string,text:string,execution:OrdinarySteeringExecution,signal?:AbortSignal){

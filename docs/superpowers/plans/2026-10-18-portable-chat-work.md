@@ -131,8 +131,9 @@ scheduler. Completing its first step does not complete background compaction.
    The inherited official engine supplies native markers, replacement, flush
    and replay. The manager resolves isolated services through official
    `serviceFor`, preserving stable implementation identity across Cordis proxies.
-   There is no automatic start, user-facing execution endpoint, production
-   activation or useful next-request checkpoint consumer yet.
+   That increment supplied explicit execution only. The useful checkpoint,
+   Host-exit recovery and automatic-start follow-ups are recorded below; default
+   readiness and production activation remain off.
 5. **Useful checkpoint handoff:** retain the official summary event, source
    span/generation and hashes as an owner-scoped checkpoint. Verify its source
    again before publication. A subsequent Chat acceptance may use a verified
@@ -169,14 +170,15 @@ scheduler. Completing its first step does not complete background compaction.
    actual selected coverage and parent lineage. Actual SDK tests carry two
    checkpoint generations into subsequent original requests without duplicate
    summaries or answers; cancellation publishes no stale checkpoint. Disk
-   reopen and immutable retry are covered. Automatic starts, crash recovery
-   across native Host termination, presentation and real-provider gates remain
+   reopen and immutable retry are covered. Host-exit recovery and automatic
+   starts have follow-ups below. Presentation and real-provider gates remain
    open; the enclosing post-answer-compaction checkbox is not yet complete.
    The [native surface-order correction](../../implementation/2026-10-19-chat-native-surface-order.md)
    additionally verifies protocol-2 positional coverage after a real official
    context replacement, including hidden historical markers and retained
    answers. Existing protocol-1 records remain compatible. Host-exit recovery
-   and automatic post-answer dispatch still require their original gates.
+   and automatic post-answer dispatch retain the original authority gates in
+   their later implementations below.
 6. **End-to-end gate:** actual SDK/Host tests must show no foreground summary,
    a pressure-driven post-answer summary, exactly one user-facing answer,
    correct thinking/provider identity, new-input cancellation, stable retry/
@@ -222,12 +224,80 @@ never permission to repeat a model call.
 
 ## 5. Connect the UI and standalone profile
 
+### Automatic post-answer start implementation sequence
+
+Complete this sequence before enabling general Chat readiness:
+
+The opt-in execution is implemented in
+[automatic post-answer maintenance](../../implementation/2026-10-19-chat-automatic-post-answer.md).
+Its original Worker/Host tests are separate from UI and real-provider readiness.
+
+1. Add a Host-local post-answer notification handler. An exact original scope
+   is accepted on the authenticated internal adapter channel only. Coalesce an
+   in-flight duplicate for that same scope; do not reuse a different run's job.
+   A notification is not a foreground lease or permission to change a model.
+2. In the detached background operation, prepare the existing immutable source
+   intent and inspect its original attempt. A prior attempt goes through the
+   already implemented receipt/result recovery, never a fresh manager dispatch.
+   A fresh attempt requires the same live original Chat Agent and its official
+   idle boundary, then delegates to the existing compaction manager. The manager
+   keeps all native admission, pressure, model, source and usage checks.
+3. Add an exact bearer-only `chat-post-answer` adapter entry and matching trusted
+   Session client method. It acknowledges only notification acceptance, without
+   waiting for inference or exposing this entry to model/browser tools. Its
+   job has its own lifetime signal; a closed notification HTTP request cannot
+   cancel an already accepted job. Shutdown aborts and drains owned jobs.
+4. Notify only after the original Worker has committed a canonical Chat answer
+   and finalized that original run. Read the resulting original owner, Session,
+   policy and version from trusted rows. Do not notify Work, unfinished, failed
+   or superseded answers; do not carry the foreground execution lease. This is
+   best-effort background maintenance, not a new persistent job queue or task
+   scheduler. Lost delivery may skip the optimization; it cannot repeat a model
+   call. Original intent/attempt recovery governs any explicit exact retry.
+5. Keep admission's existing manager cancellation/drain hook. Verify both a new
+   input arriving before the manager starts and one arriving during its model
+   stream. Neither path may publish a stale checkpoint or delay the next input
+   behind a non-owned foreground cancellation.
+6. Wire independent opt-in switches with strict prerequisite checks and default
+   off. Add unit/transport and original Worker tests, then actual SDK cases
+   showing automatic low-pressure skip, high-pressure useful summary, immutable
+   retry, next-request consumption and cancellation. A request file or manual
+   probe is not automatic-start acceptance. Keep UI/provider gates separate.
+
 Files: `web/jot/RoleConversation.tsx`, `PromptComposer.tsx`, `client.ts`, `types.ts`, owned mutation receipt/controller tests; separately `src/server.mjs`, `src/model.mjs`, standalone schemas and API tests.
 
 - [ ] Show one clickable Chat/Work label; hide model/effort controls in Chat. Use the existing immutable retry and versioned mutation flow; preserve mobile pointer/focus, keyboard, uploads and voice behavior.
 - [ ] New UI conversations request Chat only when the returned readiness supports it; display actual unavailable state otherwise. Keep older clients compatible.
 - [ ] Expose the same explicit behavior in the standalone profile through its own tested protocol. Do not proxy it silently to an extended host or label synthetic demo output as a live answer.
 - [ ] Test accepted and unconfirmed sends, cancellation, steering, attachments, reload and mode switches through actual local React/API/SDK boundaries.
+
+### Native Work compaction presentation sequence
+
+Current source inspection confirms that `session-event-projector.ts` drops
+native compaction events and `RoleConversation.tsx` does not render activities.
+The pinned official event contract supplies `compaction/start` and
+`compaction/end` with one `compactionId`; its `compaction/summary` includes
+summary/model/raw-output fields that must not become public chat content.
+
+1. Add an explicit compaction activity contract and synchronize the checked-in
+   schema, OpenAPI and UI type consumers. Keep new producer output opt-in until
+   the paired consumer supports that activity kind; never disguise it as a
+   command, file edit or assistant reply.
+2. Derive Work/Chat visibility from the original accepted immutable policy in
+   the Runner, not browser input or current mutable conversation settings.
+   Only Work projects start/end metadata. Chat background maintenance stays
+   absent from the public message and activity stream.
+3. Bind one activity to the original run and native compaction ID, carrying
+   bounded phase/status/times only. Do not project native summary, raw output,
+   error text, model identifiers or another authorization token. An end event
+   without a matching observed start must not manufacture successful progress.
+4. Verify real Runner/event-store/snapshot/UI transitions: start, success,
+   native error, cancellation, duplicate replay and reconnect. A missing end
+   is unknown or interrupted when the original run ends, never inferred success.
+   Preserve existing tool activity and answer rendering.
+5. Exercise the installed SDK boundary with an actual native event sequence,
+   and separately verify quiet Chat behavior. Static rendering or a helper-only
+   fixture cannot close the complete producer-to-consumer acceptance gate.
 
 ## 6. Release gates
 

@@ -5,6 +5,7 @@ import { EventStore } from '../events/event-store.ts';
 import { RunRepository } from '../runs/repository.ts';
 import { HarnessCoordinator } from './coordinator.ts';
 import { HarnessWorker } from './worker.ts';
+import {chatPostAnswerEnabled,notifyCommittedChatAnswer} from './chat-post-answer.ts';
 import {MemoryExtractionPump} from './memory-extraction-pump.ts';
 import { RuntimeEventClient } from './runtime-events.ts';
 import { SessionControllerClient } from './session-controller-client.ts';
@@ -108,6 +109,7 @@ const finalRecovery=finalRecoveryEnabled?new OrdinaryFinalRecoveryPump(db,
 const worker = new HarnessWorker(db, coordinator, runner, {
   workerId, leaseMs,
   ordinaryInputRecoveryEnabled:process.env.GENERAL_AGENT_ORDINARY_INPUT_RECOVERY_ENABLED==='true',ordinarySteeringEnabled,
+  ...(chatPostAnswerEnabled(process.env)?{chatPostAnswer:(runId:string)=>notifyCommittedChatAnswer(db,runId,sessionClient,AbortSignal.timeout(15000))}:{}),
   sessionResolver: conversationId => sessionBindings.getOrCreateForConversation(conversationId).session_id,
   attachmentResolver,
   channelDelivery,

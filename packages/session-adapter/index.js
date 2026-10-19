@@ -1,5 +1,6 @@
 import {createChatCompactionManager} from './chat-compaction-manager.js'
 import {createChatCheckpointRecovery} from './chat-checkpoint-recovery.js'
+import {createChatPostAnswer} from './chat-post-answer.js'
 import {createOrdinaryCompletionReader} from './ordinary-completion.js'
 import {createOrdinaryRunCompletionReader,createLiveChatRunCompletionReader} from './ordinary-run-completion.js'
 import {createChatMaintenanceObserver} from './chat-maintenance-observation.js'
@@ -223,7 +224,7 @@ async function createOrResumeSession({controller,request,agents,sessions,session
   return value
 }
 
-export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,nativeIdleObservation=false,sessionNotFoundError,modelCatalogReader,requireOrdinaryModelPolicy=false,chatExecutionPolicy }) {
+export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation=false,sessionNotFoundError,modelCatalogReader,requireOrdinaryModelPolicy=false,chatExecutionPolicy }) {
   const allowedPresets=new Set(ALLOWED_AGENT_PRESETS)
   if(chatExecutionPolicy!==undefined){normalizeChatExecutionPolicy(chatExecutionPolicy);if(!requireOrdinaryModelPolicy||!ordinaryInputAdmissionHost)throw Error('ordinary_execution_policy_config_invalid');allowedPresets.add('jot-chat')}
   const voiceHandler = voiceEnabled ? createVoiceAdapterHandler({ speechController, token }) : null
@@ -450,6 +451,13 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).length)return json(422,{error:'ordinary_run_history_input_invalid'});
       return json(200,{ready:typeof ordinaryRunCompletionReader==='function',protocol:1,execution_authorized:false});
     }
+    const postAnswer=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/chat-post-answer$/)
+    if(postAnswer){
+      let sessionId;try{sessionId=decodeURIComponent(postAnswer[1]);}catch{return json(422,{error:'chat_post_answer_invalid'});}const history=body?.history;
+      if(!ID.test(sessionId)||!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).join(',')!=='history'||!history||typeof history!=='object'||Array.isArray(history)||Object.keys(history).sort().join(',')!=='conversation_id,expected_run_version,owner_id,run_id'||!['owner_id','conversation_id','run_id'].every(k=>typeof history[k]==='string'&&ID.test(history[k]))||!Number.isSafeInteger(history.expected_run_version)||history.expected_run_version<1||workbenchSessions.has(sessionId)||blockedWorkbenchSessions.has(sessionId))return json(422,{error:'chat_post_answer_invalid'});
+      if(typeof chatPostAnswer?.notify!=='function')return json(503,{error:'chat_post_answer_unavailable'});
+      try{return json(202,chatPostAnswer.notify({scope:{...history,session_ref:sessionId},signal}).receipt);}catch{return json(409,{error:'chat_post_answer_unconfirmed'})}
+    }
     const checkpointRecovery=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/chat-checkpoint-recovery$/)
     if(checkpointRecovery){
       let sessionId;try{sessionId=decodeURIComponent(checkpointRecovery[1]);}catch{return json(422,{error:'chat_checkpoint_recovery_invalid'});}const history=body?.history;
@@ -666,6 +674,7 @@ export function apply(ctx, config = {}) {
   if(config.ordinaryChatWeb!==undefined&&typeof config.ordinaryChatWeb!=='boolean'||config.ordinaryChatWeb===true&&(!chatExecutionPolicy||config.ordinaryChatContext!==true))throw Error('chat_web_config_invalid')
   if(config.ordinaryChatCompaction!==undefined&&typeof config.ordinaryChatCompaction!=='boolean'||config.ordinaryChatCompaction===true&&(!config.ordinaryChatMaintenanceObservation||ctx.get?.('jotChatCompactionRuntime')?.protocol!==1))throw Error('chat_compaction_config_invalid')
   if(config.ordinaryChatCompactionRecovery!==undefined&&typeof config.ordinaryChatCompactionRecovery!=='boolean'||config.ordinaryChatCompactionRecovery===true&&(!config.ordinaryRunHistory||config.ordinaryChatContext!==true||!config.ordinaryInputAdmission))throw Error('chat_checkpoint_recovery_config_invalid')
+  if(config.ordinaryChatCompactionAuto!==undefined&&typeof config.ordinaryChatCompactionAuto!=='boolean'||config.ordinaryChatCompactionAuto===true&&(config.ordinaryChatCompaction!==true||config.ordinaryChatCompactionRecovery!==true||config.ordinaryChatContext!==true))throw Error('chat_post_answer_config_invalid')
   const ordinaryPresets=new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted'))
   if(chatExecutionPolicy)ordinaryPresets.add('jot-chat')
   const host = config.host || '127.0.0.1'
@@ -762,6 +771,8 @@ export function apply(ctx, config = {}) {
     ctx.provide('jotChatCompactionManager',chatCompactionManager)
     ctx.effect(()=>()=>chatCompactionManager.dispose())
   }
+  const chatPostAnswer=config.ordinaryChatCompactionAuto===true?createChatPostAnswer({bridge:workbenchBridge,agents:ctx.agents,manager:chatCompactionManager,recover:chatCheckpointRecovery,...(typeof ctx.emit==='function'?{onSettled:value=>ctx.emit('jot/chat-post-answer-settled',value)}:{})}):undefined
+  if(chatPostAnswer){ctx.provide('jotChatPostAnswer',chatPostAnswer);ctx.effect(()=>()=>chatPostAnswer.dispose())}
   const ordinaryClaimedComposer=config.ordinaryInputRecovery?.claimedInput===undefined?undefined:createOrdinaryClaimedSessionComposer({ctx,bridge:workbenchBridge,agents:ctx.agents,sessions:ctx.sessions,query:typeof ctx.get==='function'?ctx.get('sessionQuery'):ctx.sessionQuery,projections:ctx.sessionProjections,ordinaryPresets,...config.ordinaryInputAdmission,...config.ordinaryInputRecovery.claimedInput})
   if(ordinaryClaimedComposer)ctx.effect(()=>()=>ordinaryClaimedComposer.dispose())
   const ordinaryInputRunHost=config.ordinaryInputRecovery===undefined?undefined:createOrdinaryInputRunHost({controller:ctx.sessionController,agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets,verifyComposition:config.ordinaryInputRecovery.verifyComposition,inputAdmissionHost:ordinaryInputAdmissionHost,claimedComposer:ordinaryClaimedComposer})
@@ -776,7 +787,7 @@ export function apply(ctx, config = {}) {
   const handler = createAdapterHandler({ controller: ctx.sessionController, fileUploads: ctx.fileUploads, agents: ctx.agents,
     sessions:ctx.sessions,persistence:ctx.sessionPersistence,sessionNotFoundError:ApiSessionNotFound,
     speechController, voiceEnabled, token, workbenchBridge,
-    budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,nativeIdleObservation:config.nativeIdleObservation===true,
+    budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation:config.nativeIdleObservation===true,
     modelCatalogReader:createModelCatalogReader({llm:ctx.llm,enabled:config.ordinaryModelSelection===true}),requireOrdinaryModelPolicy:config.ordinaryModelSelection===true,...(chatExecutionPolicy?{chatExecutionPolicy}:{}) })
   const server = createServer(async (req, res) => {
     const abort = new AbortController()
