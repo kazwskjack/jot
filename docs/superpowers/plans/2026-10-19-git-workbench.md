@@ -59,6 +59,13 @@ Full UI250/root67 and API Gateway1952pass7skip are separate executed gates.
 Actual local effects, original execution authority, immutable outcome publication
 and crash recovery remain open in the tasks below.
 
+The [internal stage/unstage kernel](../../implementation/2026-10-19-git-index-effects.md)
+now calculates and publishes exact selected index bytes under original Git
+locks and final authority/source fences. Its tests use real local repositories,
+including lost acknowledgement and outside matching-byte interference. It is
+not mounted in the API/UI and does not provide durable cross-process recovery;
+none of the full mutation checkboxes below is closed by this prerequisite.
+
 - [ ] Freeze repository identity, HEAD, index and selected worktree bytes in an original owner-approved intent; separate stage/unstage, commit and destructive discard/revert/untracked-delete operations.
 - [ ] Revalidate original authority and all witnesses before dispatch and receipt publication. A stale review never applies to changed bytes. Preserve exact original request on unknown response.
 - [ ] Recover original effects from Git object/index/worktree evidence without replaying an unknown mutation. Test crash boundaries, conflicts, concurrent processes and cancellation.

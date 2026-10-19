@@ -19,20 +19,21 @@ const text=(value:Buffer)=>new TextDecoder('utf-8',{fatal:true}).decode(value);
 const identity=(s:Awaited<ReturnType<typeof lstat>>)=>[String(s.dev),String(s.ino)].join(':');
 const witness=(s:Awaited<ReturnType<typeof lstat>>)=>[identity(s),String(s.size),String(s.mtimeMs),String(s.ctimeMs),String(s.nlink)].join(':');
 const safe=(path:string)=>{if(path.startsWith('-'))throw Error('git_path_unavailable');return workspaceRelativePath(path);};
-type ReadContext={directory:string;metadata:string;index:string|null;remotes:GitRemote[];dispose():Promise<void>};
+export type GitReadContext={directory:string;metadata:string;index:string|null;remotes:GitRemote[];dispose():Promise<void>};
+type ReadContext=GitReadContext;
 
 /** Operator-bound, read-only physical repository. No caller-controlled root,
  * generic command, write intent, inference, credential or execution authority. */
 export class GitRepositoryInspection{
- private readonly root:string;private readonly gitDirectory:string;private readonly commonDirectory:string;
+ protected readonly root:string;protected readonly gitDirectory:string;protected readonly commonDirectory:string;
  private readonly limits={maxOutputBytes:2*1024*1024,timeoutMs:5000,maxEntries:5000,maxMetadataEntries:100000,maxDiffBytes:256*1024};
- private readonly configuredExecutable:string|undefined;private binding?:string;private executable?:string;
+ private readonly configuredExecutable:string|undefined;private binding?:string;protected executable?:string;
  constructor(options:GitInspectionOptions){
   if(!options||!isAbsolute(options.root)||options.gitDirectory!==undefined&&!isAbsolute(options.gitDirectory)||options.commonDirectory!==undefined&&!isAbsolute(options.commonDirectory)||options.executable!==undefined&&!isAbsolute(options.executable))throw Error('git_configuration_invalid');
   this.root=resolve(options.root);this.gitDirectory=resolve(options.gitDirectory??join(this.root,'.git'));this.commonDirectory=resolve(options.commonDirectory??this.gitDirectory);this.configuredExecutable=options.executable;
   if(options.limits)for(const [key,value] of Object.entries(options.limits)){if(!(key in this.limits)||!Number.isSafeInteger(value)||Number(value)<1||Number(value)>100*1024*1024)throw Error('git_configuration_invalid');(this.limits as Record<string,number>)[key]=Number(value);}
  }
- private async directory(path:string){
+ protected async directory(path:string){
   let current=path;while(true){const value=await lstat(current);if(!value.isDirectory()||value.isSymbolicLink())throw Error('git_repository_changed');const parent=dirname(current);if(parent===current)break;current=parent;}
   if(!same(await realpath(path),path))throw Error('git_repository_changed');return identity(await lstat(path));
  }
@@ -46,7 +47,7 @@ export class GitRepositoryInspection{
    }
   }}return hash(facts.sort().join('\n'));
  }
- private async anchors(signal?:AbortSignal){
+ protected async anchors(signal?:AbortSignal){
   signal?.throwIfAborted();const directories=await Promise.all([this.directory(this.root),this.directory(this.gitDirectory),this.directory(this.commonDirectory)]);
   const dot=join(this.root,'.git'),entry=await lstat(dot);if(entry.isSymbolicLink())throw Error('git_repository_changed');
   if(entry.isFile()){
@@ -58,20 +59,20 @@ export class GitRepositoryInspection{
   if(this.binding!==undefined&&facts!==this.binding)throw Error('git_repository_changed');this.binding=facts;this.executable=executable;
   return{repository:hash(facts),metadata:await this.metadata(signal)};
  }
- private async bytes(path:string,max:number,expected?:string){
+ protected async bytes(path:string,max:number,expected?:string){
   const before=await lstat(path);if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1||before.size>max||expected!==undefined&&witness(before)!==expected)throw Error('git_path_unavailable');
   const file=await open(path,constants.O_RDONLY|(constants.O_NOFOLLOW??0));try{
    if(witness(await file.stat())!==witness(before))throw Error('git_snapshot_changed');const bytes=await file.readFile();
    if(bytes.length>max||witness(await file.stat())!==witness(before)||witness(await lstat(path))!==witness(before))throw Error('git_snapshot_changed');return bytes;
   }finally{await file.close();}
  }
- private async run(context:ReadContext,args:string[],signal?:AbortSignal,allowMissing=false){
+ protected async run(context:ReadContext,args:string[],signal?:AbortSignal,allowMissing=false){
   const result=await readGit(this.executable!,this.root,context.directory,args,this.limits,signal,join(this.commonDirectory,'objects'));
   if(result.code!==0&&!(allowMissing&&result.code===1))throw Error('git_read_unavailable');return result;
  }
  /** Private disposable read-copy, never an execution target or another Git
   * authority. Source config/hooks/filters are not loaded by Git operations. */
- private async context(signal?:AbortSignal):Promise<ReadContext>{
+ protected async context(signal?:AbortSignal):Promise<ReadContext>{
   const before=await this.anchors(signal),scratchBase=resolve(tmpdir()),directory=await mkdtemp(join(scratchBase,'jot-git-read-'));
   const context:ReadContext={directory,metadata:before.metadata,index:null,remotes:[],dispose:async()=>{if(!within(scratchBase,directory)||same(scratchBase,directory)||(await lstat(directory)).isSymbolicLink())throw Error('git_cleanup_unavailable');await rm(directory,{recursive:true,force:true,maxRetries:5,retryDelay:20});}};
   try{
@@ -103,7 +104,7 @@ export class GitRepositoryInspection{
    if((await this.anchors(signal)).metadata!==before.metadata)throw Error('git_snapshot_changed');return context;
   }catch(error){await context.dispose();throw error;}
  }
- private async file(path:string):Promise<{kind:GitEntry['kind'];stamp:string}>{
+ protected async file(path:string):Promise<{kind:GitEntry['kind'];stamp:string}>{
   const parts=safe(path).split('/');let current=this.root;
   for(let index=0;index<parts.length;index++){
    current=join(current,parts[index]!);let s;try{s=await lstat(current);}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return{kind:'missing',stamp:'missing'};throw Error('git_path_unavailable');}
@@ -129,7 +130,7 @@ export class GitRepositoryInspection{
   const head={oid,branch,detached:branch===null&&oid!==null},snapshot_id=hash(JSON.stringify({anchors,head,index,status:hash(raw),files,remotes}));
   return{value:{snapshot_id,repository_sha256:anchors.repository,head,entries,remotes,omitted_count:omitted,read_only:true,execution_authorized:false} as GitSnapshot,files};
  }
- private async inspectContext(context:ReadContext,signal?:AbortSignal):Promise<GitSnapshot>{const first=await this.collect(context,signal),second=await this.collect(context,signal);if(first.value.snapshot_id!==second.value.snapshot_id)throw Error('git_snapshot_changed');return second.value;}
+ protected async inspectContext(context:ReadContext,signal?:AbortSignal):Promise<GitSnapshot>{const first=await this.collect(context,signal),second=await this.collect(context,signal);if(first.value.snapshot_id!==second.value.snapshot_id)throw Error('git_snapshot_changed');return second.value;}
  async inspect(signal?:AbortSignal):Promise<GitSnapshot>{const context=await this.context(signal);try{return await this.inspectContext(context,signal);}finally{await context.dispose();}}
  /** Exact-byte review only. Never writes source files, index, refs or objects. */
  async freeze(snapshotId:string,paths:readonly string[],signal?:AbortSignal):Promise<GitReviewWitness>{
