@@ -7,6 +7,7 @@ import {Store} from './store.mjs';
 import {Agent} from './agent.mjs';
 import {createTools,safeName,readArtifact} from './tools.mjs';
 import {modelProvider} from './provider.mjs';
+import {chatRoute} from './chat-policy.mjs';
 import {workbenchConfig,registerWorkbenchProxy} from './workbench-proxy.mjs';
 const publicRoot=fileURLToPath(new URL('../dist/',import.meta.url));
 const string={type:'string',minLength:1,maxLength:8000};
@@ -15,6 +16,8 @@ const sameToken=(a,b)=>typeof a==='string'&&Buffer.byteLength(a)===Buffer.byteLe
 
 export async function buildServer(options={}){
   const demo=options.demo??false,csrf=randomBytes(24).toString('hex');
+  const flag=value=>{if(value===undefined||value==='false')return false;if(value==='true')return true;throw Error('invalid_chat_configuration');};
+  const chat=demo?undefined:chatRoute(options.chat??{enabled:flag(process.env.JOT_CHAT_ENABLED),baseUrl:process.env.JOT_CHAT_MODEL_URL,model:process.env.JOT_CHAT_MODEL,key:process.env.JOT_CHAT_MODEL_KEY,thinkingDisabledSupported:flag(process.env.JOT_CHAT_THINKING_DISABLED_SUPPORTED)});
   const staticRoot=resolve(options.publicRoot??publicRoot);
   const workbench=workbenchConfig(options.workbench??{url:process.env.JOT_WORKBENCH_URL,owner:process.env.JOT_WORKBENCH_OWNER,csrf:process.env.JOT_WORKBENCH_CSRF_TOKEN});
   const root=resolve(options.root??'.data/files'),store=new Store(options.database??'.data/jot.db');store.recover();
@@ -24,7 +27,7 @@ export async function buildServer(options={}){
     const text='This is a local demonstration, not a model response. Jot can show task progress, preserve conversations, request approval and deliver files. Configure a model endpoint to perform real tasks.';
     for(const word of text.split(' ')){await new Promise((resolve,reject)=>{if(signal.aborted)return reject(new Error('cancelled'));const done=()=>{signal.removeEventListener('abort',abort);resolve();},timer=setTimeout(done,35);const abort=()=>{clearTimeout(timer);reject(new Error('cancelled'));};signal.addEventListener('abort',abort,{once:true});});onText(word+' ');}return {role:'assistant',content:text};
   };
-  const agent=new Agent(store,{provider:options.provider??(demo?demoProvider:modelProvider({baseUrl:process.env.JOT_MODEL_URL,key:process.env.JOT_MODEL_KEY,model:process.env.JOT_MODEL})),tools,maxWorkers:options.maxWorkers??process.env.JOT_WORKERS,maxSteps:options.maxSteps??process.env.JOT_MAX_STEPS,approvalTimeoutMs:options.approvalTimeoutMs??process.env.JOT_APPROVAL_TIMEOUT_MS});
+  const agent=new Agent(store,{provider:options.provider??(demo?demoProvider:modelProvider({baseUrl:process.env.JOT_MODEL_URL,key:process.env.JOT_MODEL_KEY,model:process.env.JOT_MODEL})),chatRoute:chat,tools,maxWorkers:options.maxWorkers??process.env.JOT_WORKERS,maxSteps:options.maxSteps??process.env.JOT_MAX_STEPS,approvalTimeoutMs:options.approvalTimeoutMs??process.env.JOT_APPROVAL_TIMEOUT_MS});
   const app=Fastify({logger:false,bodyLimit:1500000}),streams=new Set();
   app.addHook('onRequest',async(req,reply)=>{
     const host=req.headers.host??'localhost';
@@ -36,18 +39,18 @@ export async function buildServer(options={}){
   });
   app.setErrorHandler((error,req,reply)=>{const frameworkStatus=typeof error.code==='string'&&error.code.startsWith('FST_ERR_')&&Number.isInteger(error.statusCode)&&error.statusCode>=400&&error.statusCode<500?error.statusCode:500;const status=error.validation?400:reply.statusCode>=400?reply.statusCode:frameworkStatus;reply.code(status).send({error:error.validation?'invalid_input':status===500?'request_failed':error.message});});
   registerWorkbenchProxy(app,workbench,csrf);
-  app.get('/api/capabilities',async()=>({mode:demo?'demo':'agent',csrf,model_configured:Boolean(process.env.JOT_MODEL_URL&&process.env.JOT_MODEL)||Boolean(options.provider),conversation_modes:{default:'work',work:{supported:true},chat:{ready:false}},tools:tools.definitions.map(t=>t.function.name),limits:{max_message_chars:8000,max_file_bytes:1000000,workers:agent.maxWorkers,per_conversation:1,max_steps:agent.maxSteps,approval_timeout_ms:agent.approvalTimeoutMs}}));
+  app.get('/api/capabilities',async()=>({mode:demo?'demo':'agent',csrf,model_configured:Boolean(process.env.JOT_MODEL_URL&&process.env.JOT_MODEL)||Boolean(options.provider),conversation_modes:{default:chat?'chat':'work',work:{supported:true},chat:{ready:Boolean(chat)}},tools:tools.definitions.map(t=>t.function.name),limits:{max_message_chars:8000,max_file_bytes:1000000,workers:agent.maxWorkers,per_conversation:1,max_steps:agent.maxSteps,approval_timeout_ms:agent.approvalTimeoutMs}}));
   app.get('/api/conversations',async()=>store.conversations());
   const conversationMode={type:'string',enum:['chat','work']};
-  app.post('/api/conversations',{schema:{body:object({title:{type:'string',maxLength:100},mode:conversationMode},[])}},async(req,reply)=>req.body.mode==='chat'?reply.code(409).send({error:'chat_unavailable'}):store.createConversation(req.body.title||'New chat','work'));
+  app.post('/api/conversations',{schema:{body:object({title:{type:'string',maxLength:100},mode:conversationMode},[])}},async(req,reply)=>req.body.mode==='chat'&&!chat?reply.code(409).send({error:'chat_unavailable'}):store.createConversation(req.body.title||'New chat',req.body.mode??'work'));
   app.patch('/api/conversations/:id',{schema:{body:object({mode:conversationMode,expected_version:{type:'integer',minimum:1}},['mode','expected_version'])}},async(req,reply)=>{
-    if(req.body.mode==='chat')return reply.code(409).send({error:'chat_unavailable'});
+    if(req.body.mode==='chat'&&!chat)return reply.code(409).send({error:'chat_unavailable'});
     try{return store.changeMode(req.params.id,req.body.mode,req.body.expected_version);}
     catch(error){return reply.code(error.message==='conversation_not_found'?404:409).send({error:error.message});}
   });
   app.get('/api/conversations/:id/snapshot',async(req,reply)=>{if(!store.conversation(req.params.id))return reply.code(404).send({error:'not_found'});return store.snapshot(req.params.id);});
   app.post('/api/conversations/:id/messages',{schema:{body:object({text:string,request_id:{type:'string',minLength:1,maxLength:100}},['text','request_id'])}},async(req,reply)=>{
-    try {const accepted=store.accept(req.params.id,req.body.text,req.body.request_id,{chatReady:false});if(!accepted.duplicate)void agent.execute(accepted.run);return reply.code(202).send(accepted);}
+    try {const accepted=store.accept(req.params.id,req.body.text,req.body.request_id,{chatReady:Boolean(chat),chatPolicy:chat?.policy});if(!accepted.duplicate)void agent.execute(accepted.run);return reply.code(202).send(accepted);}
     catch(e){return reply.code(e.message==='conversation_not_found'?404:409).send({error:e.message});}
   });
   app.post('/api/runs/:id/cancel',async(req,reply)=>{if(!store.run(req.params.id))return reply.code(404).send({error:'not_found'});agent.cancel(req.params.id);return {accepted:true};});

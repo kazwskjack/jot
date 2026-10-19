@@ -1,9 +1,10 @@
-export function modelProvider({baseUrl,key,model}){
-  return async (messages,tools,signal,onText=()=>{})=>{
+export function modelProvider({baseUrl,key,model,thinking}){
+  if(thinking!==undefined&&thinking!=='disabled')throw new Error('invalid_model_thinking');
+  return async (messages,tools,signal,onText=()=>{},onUsage=()=>{})=>{
     if(!baseUrl||!model)throw new Error('model_not_configured');
     const url=new URL(baseUrl.replace(/\/$/,'')+'/chat/completions');
     if(!['http:','https:'].includes(url.protocol)||url.username||url.password)throw new Error('invalid_model_url');
-    const response=await fetch(url,{method:'POST',signal:AbortSignal.any([signal,AbortSignal.timeout(120000)]),headers:{'content-type':'application/json',...(key?{authorization:`Bearer ${key}`}:{})},body:JSON.stringify({model,messages,tools,stream:true})});
+    const response=await fetch(url,{method:'POST',signal:AbortSignal.any([signal,AbortSignal.timeout(120000)]),headers:{'content-type':'application/json',...(key?{authorization:`Bearer ${key}`}:{})},body:JSON.stringify({model,messages,tools,stream:true,...(thinking==='disabled'?{thinking:{type:'disabled'},stream_options:{include_usage:true}}:{})})});
     if(!response.ok)throw new Error(`model_http_${response.status}`);
     if(!response.body)throw new Error('model_stream_missing');
     let buffer='',text='',ended=false;const calls=new Map(),decoder=new TextDecoder();
@@ -13,7 +14,7 @@ export function modelProvider({baseUrl,key,model}){
       while((boundary=buffer.indexOf('\n'))>=0){
         const line=buffer.slice(0,boundary).trim();buffer=buffer.slice(boundary+1);if(!line.startsWith('data:'))continue;
         const data=line.slice(5).trim();if(data==='[DONE]'){ended=true;continue;}if(!data)continue;
-        const value=JSON.parse(data);if(value.error)throw new Error('model_stream_error');const choice=value.choices?.[0],delta=choice?.delta??{};
+        const value=JSON.parse(data);if(value.error)throw new Error('model_stream_error');if(value.usage!==undefined)onUsage(value.usage);const choice=value.choices?.[0],delta=choice?.delta??{};
         if(choice?.finish_reason==='length')throw new Error('model_output_truncated');
         if(choice?.finish_reason==='content_filter')throw new Error('model_content_filtered');
         if(choice?.finish_reason&&!['stop','tool_calls'].includes(choice.finish_reason))throw new Error('model_finish_reason_invalid');

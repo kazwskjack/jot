@@ -53,6 +53,13 @@ Start at one task worker. Increase through two, three and five only after measur
 
 ## Portable Agent: Windows, Linux or macOS
 
+The portable API has an optional separate Chat executor. See
+[Chat configuration, evidence and limits](docs/implementation/2026-10-19-standalone-chat-execution.md).
+It defaults off and requires a streaming provider compatible with the explicit
+thinking-disabled request. Configuration readiness is not a successful external
+provider probe. The root conversation UI's mode controls are a separate remaining
+integration; the extended workbench controls use their own Gateway contract.
+
 Install Node.js 24 or later. From the repository root:
 
 ```sh

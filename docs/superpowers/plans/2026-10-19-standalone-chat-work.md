@@ -12,7 +12,7 @@ It does not proxy to Gateway or substitute another extended Session planner.
    Verify migration, disk reopen, transactional CAS, idempotent original input,
    all active states, CSRF/origin checks and unchanged existing API behavior.
    See [executed evidence and remaining scope](../../implementation/2026-10-19-standalone-mode-admission.md).
-2. Add a trusted standalone Chat route to `src/provider.mjs` and the Agent,
+2. **Executor implemented:** add a trusted standalone Chat route to `src/provider.mjs` and the Agent,
    freezing its nonsecret policy and bounded ordered text seed at acceptance.
    Explicitly declare actual thinking-disabled support. Use separate configured
    read-only search/page-read tools; these are standalone tools, not the native
@@ -20,7 +20,8 @@ It does not proxy to Gateway or substitute another extended Session planner.
    keep duplicate/unknown outcomes from repeating and preserve cancellation.
    Keep uploaded text readable under its original conversation authority; do
    not claim image interpretation. Prove an actual streamed local model request
-   and resulting committed answer before readiness can become true.
+   and resulting committed answer before readiness can become true. See
+   [executor evidence and remaining integration](../../implementation/2026-10-19-standalone-chat-execution.md).
 3. Connect the standalone React interface to its own mode contract: one mode
    label, readiness-aware new conversations, versioned changes, unchanged drafts,
    original-request retries, active-run exclusion and unavailable status. Test

@@ -2,6 +2,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {randomUUID} from 'node:crypto';
 import {mkdirSync} from 'node:fs';
 import {dirname} from 'node:path';
+import * as chat from './chat-store.mjs';
 const now=()=>new Date().toISOString();
 export class Store {
   constructor(path) {
@@ -27,6 +28,7 @@ export class Store {
       if(!runColumns.has('conversation_version'))this.db.exec('ALTER TABLE runs ADD COLUMN conversation_version INTEGER NOT NULL DEFAULT 1 CHECK(conversation_version>=1)');
       this.db.exec('COMMIT');
     }catch(error){this.db.exec('ROLLBACK');this.db.close();throw error;}
+    chat.initChatTables(this.db);
   }
   createConversation(title='New chat',mode='work') {if(!['chat','work'].includes(mode))throw new Error('invalid_mode');const c={id:randomUUID(),title,created_at:now(),mode,version:1};this.db.prepare('INSERT INTO conversations(id,title,created_at,mode,version) VALUES(?,?,?,?,?)').run(c.id,c.title,c.created_at,c.mode,c.version);return c;}
   changeMode(id,mode,expectedVersion){
@@ -47,7 +49,7 @@ export class Store {
   message(id,role,content,runId=null){const m={id:randomUUID(),conversation_id:id,role,content,created_at:now(),run_id:runId};this.db.prepare('INSERT INTO messages(id,conversation_id,role,content,created_at,run_id) VALUES(?,?,?,?,?,?)').run(m.id,id,role,content,m.created_at,runId);return m;}
   event(id,type,data){const r=this.db.prepare('INSERT INTO events(conversation_id,type,data) VALUES(?,?,?)').run(id,type,JSON.stringify(data));return {seq:Number(r.lastInsertRowid),type,data};}
   events(id,after){return this.db.prepare('SELECT seq,type,data FROM events WHERE conversation_id=? AND seq>? ORDER BY seq LIMIT 500').all(id,after).map(e=>({...e,data:JSON.parse(e.data)}));}
-  accept(id,text,requestId,{chatReady=false}={}){
+  accept(id,text,requestId,{chatReady=false,chatPolicy}={}){
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const conversation=this.conversation(id);if(!conversation)throw new Error('conversation_not_found');
@@ -57,10 +59,17 @@ export class Store {
       if(this.db.prepare("SELECT id FROM runs WHERE conversation_id=? AND status IN ('queued','running','waiting_approval')").get(id))throw new Error('conversation_busy');
       const run={id:randomUUID(),conversation_id:id,request_id:requestId,input:text,status:'queued',created_at:now(),mode:conversation.mode,conversation_version:conversation.version};
       this.db.prepare('INSERT INTO runs(id,conversation_id,request_id,input,status,created_at,mode,conversation_version) VALUES(?,?,?,?,?,?,?,?)').run(run.id,id,requestId,text,run.status,run.created_at,run.mode,run.conversation_version);
-      this.message(id,'user',text,run.id);this.event(id,'run.state',{run});this.db.exec('COMMIT');return {run,duplicate:false};
+      this.message(id,'user',text,run.id);if(run.mode==='chat'&&chatPolicy)chat.saveChatExecution(this,run,chatPolicy);this.event(id,'run.state',{run});this.db.exec('COMMIT');return {run,duplicate:false};
     } catch(e){this.db.exec('ROLLBACK');throw e;}
   }
   run(id){return this.db.prepare('SELECT * FROM runs WHERE id=?').get(id);}
+  chatExecution(id){return chat.chatExecution(this.db,id);}
+  chatWebKinds(id){return this.db.prepare('SELECT kind FROM chat_web_groups WHERE run_id=?').all(id).map(row=>row.kind);}
+  reserveChatGroup(id,kind,calls){return chat.reserveChatGroup(this.db,id,kind,calls);}
+  settleChatTool(id,call,result){return chat.settleChatTool(this.db,id,call,result);}
+  startChatModelCall(id,step,hash){return chat.startChatModelCall(this.db,id,step,hash);}
+  finishChatModelCall(id,step,status,usage){return chat.finishChatModelCall(this.db,id,step,status,usage);}
+  chatModelCalls(id){return chat.chatModelCalls(this.db,id);}
   runs(id){return this.db.prepare('SELECT * FROM runs WHERE conversation_id=? ORDER BY rowid').all(id);}
   state(id,status,error=null){this.db.prepare('UPDATE runs SET status=?,error=? WHERE id=?').run(status,error,id);const run=this.run(id);this.event(run.conversation_id,'run.state',{run});return run;}
   artifact(a){this.db.prepare('INSERT INTO artifacts(id,conversation_id,run_id,name,path,size) VALUES(?,?,?,?,?,?)').run(a.id,a.conversation_id,a.run_id??null,a.name,a.path,a.size);}

@@ -1,5 +1,9 @@
 # Standalone mode acceptance prerequisite
 
+The subsequent [Chat executor increment](2026-10-19-standalone-chat-execution.md)
+now supplies opt-in execution. The unavailable behavior below describes this
+prerequisite and remains the default when that route is not configured.
+
 This implements step 1 of the [standalone sequence](../superpowers/plans/2026-10-19-standalone-chat-work.md).
 The local `/api` server and extended `/v1` Gateway keep distinct contracts and
 execution models. The existing standalone Work Agent remains its executor.
