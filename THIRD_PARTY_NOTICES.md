@@ -1,6 +1,12 @@
 # Dependency notices
 
-Jot's original source and documentation use the repository MIT license. Third-party software retains its own license and authorship. No complete third-party Agent runtime distribution, model weights or private browser profiles are vendored here.
+Jot's original source and documentation use the repository Apache-2.0 license.
+This changes the current Jot licensing declaration; previously published MIT
+snapshots retain their original terms. Their notice is preserved at
+`licenses/JOT-LEGACY-MIT.txt`. Third-party software retains its own license and
+authorship, including the attributed MIT DSH replay code and compatibility
+patches. No complete third-party Agent runtime distribution, model weights or
+private browser profiles are vendored here.
 
 `BRAIN.md`, its CLI-generated project scaffolding and the marked Agent guidance
 originate from [mindmuxai/brain.md](https://github.com/mindmuxai/brain.md),

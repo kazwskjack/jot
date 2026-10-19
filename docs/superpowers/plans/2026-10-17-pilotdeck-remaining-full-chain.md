@@ -11,8 +11,11 @@ private deployment data.
 
 **Execution order:** finish this existing full capability plan and its release
 gates before beginning a separate DeepSeek-Bot reference pass. That later pass
-can inform role/group collaboration, memory/context automation, capability
-configuration and usage presentation; it does not replace the current ledger
+prioritizes repository presentation: README structure, clear installation and
+quick start, demonstrations, supported-feature evidence, documentation navigation,
+contribution entry points and releases. It can also inform role/group
+collaboration, memory/context automation, capability configuration and usage
+presentation; it does not replace the current ledger
 or authorize a second planner, task scheduler or permission system. Current
 execution follows the user's single-agent restriction.
 

@@ -187,8 +187,10 @@ scheduler. Completing its first step does not complete background compaction.
 
 ### Host-exit publication recovery before automatic starts
 
-The following implementation sequence remains pending. Recovery must consume
-the original result; it is never permission to repeat a model call.
+The following recovery sequence is implemented in the opt-in
+[original Host-exit recovery](../../implementation/2026-10-19-chat-host-exit-recovery.md).
+Automatic starts remain pending. Recovery consumes the original result; it is
+never permission to repeat a model call.
 
 - Add an exact bearer-only inspection of the original attempt by owned
   intent/run/Session/version, plus an exact historical checkpoint read. Return

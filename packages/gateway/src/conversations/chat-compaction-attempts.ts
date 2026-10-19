@@ -45,6 +45,17 @@ export class ChatCompactionAttempts{
   const source=JSON.parse(String(row.source_json));if(source.owner_id!==scope.owner_id||source.conversation_id!==scope.conversation_id||source.run_id!==scope.run_id||source.session_id!==scope.session_ref||source.run_version!==scope.expected_run_version||source.kind!=='chat_compaction_source'||source.execution_authorized!==false)fail();requestValue(JSON.parse(String(row.request_json)),source);return row;
  }
  read(scope:Scope,binding:Binding){return withImmediateTransaction(this.db,()=>this.receipt(this.load(scope,binding)));}
+ /** Historical metadata for the exact original intent. No new attempt, native
+  * observation, fence renewal or inference permission is produced here. */
+ inspect(scope:Scope,intentId:string){return withImmediateTransaction(this.db,()=>{
+  validateScope(scope);if(!id(intentId))return fail();
+  const row=this.db.prepare('SELECT * FROM ga_chat_compaction_intents WHERE intent_id=?').get(intentId);
+  if(!row||row.owner_id!==scope.owner_id||row.conversation_id!==scope.conversation_id||row.run_id!==scope.run_id||row.session_id!==scope.session_ref||typeof row.source_json!=='string'||sha(row.source_json)!==row.source_sha256)return fail();
+  const source=JSON.parse(row.source_json),run=this.db.prepare('SELECT r.native_owner_id,r.native_conversation_id,r.native_session_ref,c.owner_id FROM ga_runs r JOIN ga_conversations c ON c.id=r.conversation_id WHERE r.id=?').get(scope.run_id);
+  if(!run||run.owner_id!==scope.owner_id||run.native_owner_id!==scope.owner_id||run.native_conversation_id!==scope.conversation_id||run.native_session_ref!==scope.session_ref||canonicalModelJson(source)!==row.source_json||source.protocol!==1||source.kind!=='chat_compaction_source'||source.execution_authorized!==false||source.owner_id!==scope.owner_id||source.conversation_id!==scope.conversation_id||source.run_id!==scope.run_id||source.session_id!==scope.session_ref||source.run_version!==scope.expected_run_version)return fail();
+  const saved=this.db.prepare('SELECT attempt_id,observer_id,fence_id FROM ga_chat_compaction_attempts WHERE intent_id=?').get(intentId),attempt=saved?this.load(scope,{intent_id:intentId,attempt_id:String(saved.attempt_id),observer_id:String(saved.observer_id),fence_id:String(saved.fence_id)}):null;
+  return{protocol:1,kind:'chat_compaction_attempt_inspection',intent_id:intentId,owner_id:scope.owner_id,conversation_id:scope.conversation_id,run_id:scope.run_id,run_version:scope.expected_run_version,session_id:scope.session_ref,source_sha256:row.source_sha256,source:structuredClone(source),receipt:attempt?this.receipt(attempt):null,native_witness:attempt?JSON.parse(String(attempt.witness_json)):null,execution_authorized:false};
+ });}
  reserve(scope:Scope,input:{intent_id:string;attempt_id:string;observer_id:string;request:unknown;witness:unknown}){
   return withImmediateTransaction(this.db,()=>{
    validateScope(scope);if(!input||Object.keys(input).sort().join(',')!=='attempt_id,intent_id,observer_id,request,witness'||![input.intent_id,input.attempt_id,input.observer_id].every(id))fail();

@@ -1,4 +1,5 @@
 import {createChatCompactionManager} from './chat-compaction-manager.js'
+import {createChatCheckpointRecovery} from './chat-checkpoint-recovery.js'
 import {createOrdinaryCompletionReader} from './ordinary-completion.js'
 import {createOrdinaryRunCompletionReader,createLiveChatRunCompletionReader} from './ordinary-run-completion.js'
 import {createChatMaintenanceObserver} from './chat-maintenance-observation.js'
@@ -222,7 +223,7 @@ async function createOrResumeSession({controller,request,agents,sessions,session
   return value
 }
 
-export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,nativeIdleObservation=false,sessionNotFoundError,modelCatalogReader,requireOrdinaryModelPolicy=false,chatExecutionPolicy }) {
+export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,nativeIdleObservation=false,sessionNotFoundError,modelCatalogReader,requireOrdinaryModelPolicy=false,chatExecutionPolicy }) {
   const allowedPresets=new Set(ALLOWED_AGENT_PRESETS)
   if(chatExecutionPolicy!==undefined){normalizeChatExecutionPolicy(chatExecutionPolicy);if(!requireOrdinaryModelPolicy||!ordinaryInputAdmissionHost)throw Error('ordinary_execution_policy_config_invalid');allowedPresets.add('jot-chat')}
   const voiceHandler = voiceEnabled ? createVoiceAdapterHandler({ speechController, token }) : null
@@ -449,6 +450,13 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).length)return json(422,{error:'ordinary_run_history_input_invalid'});
       return json(200,{ready:typeof ordinaryRunCompletionReader==='function',protocol:1,execution_authorized:false});
     }
+    const checkpointRecovery=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/chat-checkpoint-recovery$/)
+    if(checkpointRecovery){
+      let sessionId;try{sessionId=decodeURIComponent(checkpointRecovery[1]);}catch{return json(422,{error:'chat_checkpoint_recovery_invalid'});}const history=body?.history;
+      if(!ID.test(sessionId)||!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).sort().join(',')!=='history,intent_id'||typeof body.intent_id!=='string'||!ID.test(body.intent_id)||!history||typeof history!=='object'||Array.isArray(history)||Object.keys(history).sort().join(',')!=='conversation_id,expected_run_version,owner_id,run_id'||!['owner_id','conversation_id','run_id'].every(k=>typeof history[k]==='string'&&ID.test(history[k]))||!Number.isSafeInteger(history.expected_run_version)||history.expected_run_version<1||workbenchSessions.has(sessionId)||blockedWorkbenchSessions.has(sessionId))return json(422,{error:'chat_checkpoint_recovery_invalid'});
+      if(typeof chatCheckpointRecovery!=='function')return json(503,{error:'chat_checkpoint_recovery_unavailable'});
+      try{return json(200,await chatCheckpointRecovery({scope:{...history,session_ref:sessionId},intent_id:body.intent_id,signal}));}catch{return json(409,{error:'chat_checkpoint_recovery_unconfirmed'})}
+    }
     const maintenanceObservation=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/chat-maintenance-observation$/)
     if(maintenanceObservation){
       const sessionId=decodeURIComponent(maintenanceObservation[1]),history=body?.history;
@@ -657,6 +665,7 @@ export function apply(ctx, config = {}) {
   if(config.ordinaryChatContext!==undefined&&typeof config.ordinaryChatContext!=='boolean'||config.ordinaryChatContext===true&&!chatExecutionPolicy)throw Error('chat_context_config_invalid')
   if(config.ordinaryChatWeb!==undefined&&typeof config.ordinaryChatWeb!=='boolean'||config.ordinaryChatWeb===true&&(!chatExecutionPolicy||config.ordinaryChatContext!==true))throw Error('chat_web_config_invalid')
   if(config.ordinaryChatCompaction!==undefined&&typeof config.ordinaryChatCompaction!=='boolean'||config.ordinaryChatCompaction===true&&(!config.ordinaryChatMaintenanceObservation||ctx.get?.('jotChatCompactionRuntime')?.protocol!==1))throw Error('chat_compaction_config_invalid')
+  if(config.ordinaryChatCompactionRecovery!==undefined&&typeof config.ordinaryChatCompactionRecovery!=='boolean'||config.ordinaryChatCompactionRecovery===true&&(!config.ordinaryRunHistory||config.ordinaryChatContext!==true||!config.ordinaryInputAdmission))throw Error('chat_checkpoint_recovery_config_invalid')
   const ordinaryPresets=new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted'))
   if(chatExecutionPolicy)ordinaryPresets.add('jot-chat')
   const host = config.host || '127.0.0.1'
@@ -746,6 +755,7 @@ export function apply(ctx, config = {}) {
   const ordinaryCompletionReader=config.ordinaryInputAdmission===undefined?undefined:createOrdinaryCompletionReader({agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets,readGoal:agent=>nativeGoalsFor(agent)?.get(agent),...config.ordinaryInputAdmission})
   const ordinarySteeringObservationReader=config.ordinaryInputHistory===undefined?undefined:createOrdinarySteeringObservationReader({agents:ctx.agents,sessions:ctx.sessions,persistence:ctx.sessionPersistence,bridge:workbenchBridge,admissions:config.ordinaryInputAdmission.admissions,ordinaryPresets,...config.ordinaryInputHistory})
   const ordinaryRunCompletionReader=config.ordinaryRunHistory===undefined?undefined:createOrdinaryRunCompletionReader({agents:ctx.agents,sessions:ctx.sessions,persistence:ctx.sessionPersistence,bridge:workbenchBridge,admissions:config.ordinaryInputAdmission.admissions,projections:ctx.sessionProjections,ordinaryPresets,...config.ordinaryRunHistory})
+  const chatCheckpointRecovery=config.ordinaryChatCompactionRecovery===true?createChatCheckpointRecovery({agents:ctx.agents,sessions:ctx.sessions,persistence:ctx.sessionPersistence,bridge:workbenchBridge,admissions:config.ordinaryInputAdmission.admissions,projections:ctx.sessionProjections,ordinaryPresets,...config.ordinaryRunHistory}):undefined
   const chatMaintenanceObserver=config.ordinaryChatMaintenanceObservation===undefined?undefined:createChatMaintenanceObserver({bridge:workbenchBridge,agents:ctx.agents,tokenMeter:ctx.get('tokenMeter'),llm:ctx.llm,pressurePolicy:config.ordinaryChatMaintenanceObservation,completionReader:createLiveChatRunCompletionReader({agents:ctx.agents,sessions:ctx.sessions,persistence:ctx.sessionPersistence,bridge:workbenchBridge,admissions:config.ordinaryInputAdmission.admissions,projections:ctx.sessionProjections,ordinaryPresets,...config.ordinaryRunHistory})})
   if(config.ordinaryChatCompaction===true){
     chatCompactionManager=createChatCompactionManager({ctx,bridge:workbenchBridge,agents:ctx.agents,presets:ctx.get('agentPresets'),runtime:ctx.get('jotChatCompactionRuntime'),observe:chatMaintenanceObserver,tokenMeter:ctx.get('tokenMeter'),llm:ctx.llm,completionReader:createLiveChatRunCompletionReader({agents:ctx.agents,sessions:ctx.sessions,persistence:ctx.sessionPersistence,bridge:workbenchBridge,admissions:config.ordinaryInputAdmission.admissions,projections:ctx.sessionProjections,ordinaryPresets,...config.ordinaryRunHistory})})
@@ -766,7 +776,7 @@ export function apply(ctx, config = {}) {
   const handler = createAdapterHandler({ controller: ctx.sessionController, fileUploads: ctx.fileUploads, agents: ctx.agents,
     sessions:ctx.sessions,persistence:ctx.sessionPersistence,sessionNotFoundError:ApiSessionNotFound,
     speechController, voiceEnabled, token, workbenchBridge,
-    budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,nativeIdleObservation:config.nativeIdleObservation===true,
+    budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,nativeIdleObservation:config.nativeIdleObservation===true,
     modelCatalogReader:createModelCatalogReader({llm:ctx.llm,enabled:config.ordinaryModelSelection===true}),requireOrdinaryModelPolicy:config.ordinaryModelSelection===true,...(chatExecutionPolicy?{chatExecutionPolicy}:{}) })
   const server = createServer(async (req, res) => {
     const abort = new AbortController()

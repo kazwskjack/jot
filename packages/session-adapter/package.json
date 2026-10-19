@@ -1,6 +1,7 @@
 {
   "name": "jot-session-adapter",
   "version": "0.1.0",
+  "license": "Apache-2.0",
   "private": true,
   "type": "module",
   "main": "index.js",
@@ -27,6 +28,7 @@
     "chat-compaction-engine.js",
     "chat-compaction-manager.js",
     "chat-compaction-checkpoint.js",
+    "chat-checkpoint-recovery.js",
     "chat-web.js",
     "model-catalog.js",
     "conversation-goal.js",

@@ -66,4 +66,4 @@ For extended module checks, follow [DEPLOYMENT.md](DEPLOYMENT.md). Performance d
 
 ## License
 
-Original code and prose are MIT licensed. Dependencies retain their own licenses. The technical explanation is written for Jot and does not imply ownership of dependency implementations.
+Original code and prose are licensed under [Apache-2.0](LICENSE). Dependencies and attributed third-party code retain their own licenses; see [dependency notices](THIRD_PARTY_NOTICES.md). The technical explanation is written for Jot and does not imply ownership of dependency implementations.
