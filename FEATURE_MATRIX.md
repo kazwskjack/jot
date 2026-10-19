@@ -18,6 +18,7 @@ This inventory distinguishes code availability from end-to-end readiness. The po
 | Browser | Optional isolated Playwright read/click/fill with approval | Chromium installation; one page per conversation; no shared batch executor |
 | Batch progress | Gateway ownership, persisted progress and external operation binding | Actual parallel read/action executor must be supplied |
 | Files | Portable UTF-8 upload/read/new-file creation/download; extended versions and jobs | Portable files have no version chain; office/PDF dependencies are optional |
+| Git workbench | Extended owned-project branch/status view and snapshot-bound staged/working diffs with actual mobile acceptance | Operator-bound local repository and Git executable required; read-only. Local writes and authorized remote recovery remain planned; see [evidence](docs/implementation/2026-10-19-git-workbench.md). |
 | Speech | Extended composer recording, microphone waveform/timer, bounded startup, PCM WAV upload, owned transcription jobs and editable draft | Configure a real speech controller/provider; physical mobile capture and recognition quality require acceptance. The standalone root composer has no recording UI |
 | Events | SQLite events, SSE, snapshots and cursors | Extended snapshot does not restore pending interaction records in every path |
 | Approvals | Portable exact-operation approvals | Gateway interaction contracts need complete host dispatch |

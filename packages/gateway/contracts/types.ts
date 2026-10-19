@@ -8,13 +8,21 @@ export type ModelSelection = { provider: string; model: string; reasoning_effort
 
 export type CapabilitySet = { search: boolean; fetch: boolean; browser_interaction: boolean; file_read: boolean; file_edit: boolean; command_execution: boolean; questions: boolean; approvals: boolean; artifact_download: boolean; resume_checkpoint: boolean };
 
-export type Capabilities = { conversation_commands?:{protocol:1;ordinary_steer:{configured:boolean;delivery:"original";attachments:boolean}}; conversation_modes?:{default:'chat'|'work';work:{supported:true};chat:{ready:boolean}};api_version: string; event_schema_version: string; adapter_version: string; capabilities: CapabilitySet; models: Array<{ provider: string; model: string; reasoning_output: "provider" | "summary" | "none"; supported_reasoning_efforts: Array<string> }>; limits: { max_upload_bytes: number; max_active_runs_per_conversation: 1; max_concurrent_sessions: 5; replay_retention_hours: number; idempotency_retention_hours: number }; voice?: { enabled: boolean; status: "disabled" | "unavailable" | "preparing" | "ready"; max_duration_ms: number; max_bytes: number; accepted_mime_types: string[]; languages: string[] }; workbench?: WorkbenchCapabilities; workspaces: Array<{ workspace_id: string; title: string; can_read: boolean; can_write: boolean }> };
+export type GitWorkbenchCapability = {configured_projects:string[];read_only:true};
+
+export type Capabilities = { git_workbench?:GitWorkbenchCapability; conversation_commands?:{protocol:1;ordinary_steer:{configured:boolean;delivery:"original";attachments:boolean}}; conversation_modes?:{default:'chat'|'work';work:{supported:true};chat:{ready:boolean}};api_version: string; event_schema_version: string; adapter_version: string; capabilities: CapabilitySet; models: Array<{ provider: string; model: string; reasoning_output: "provider" | "summary" | "none"; supported_reasoning_efforts: Array<string> }>; limits: { max_upload_bytes: number; max_active_runs_per_conversation: 1; max_concurrent_sessions: 5; replay_retention_hours: number; idempotency_retention_hours: number }; voice?: { enabled: boolean; status: "disabled" | "unavailable" | "preparing" | "ready"; max_duration_ms: number; max_bytes: number; accepted_mime_types: string[]; languages: string[] }; workbench?: WorkbenchCapabilities; workspaces: Array<{ workspace_id: string; title: string; can_read: boolean; can_write: boolean }> };
 
 export type VoiceTranscriptionRequest = { client_request_id: string; language?: string; audio: Blob };
 export type VoiceTranscription = { transcription_id: string; status: "queued" | "transcribing" | "succeeded" | "failed" | "cancelled"; text?: string; language?: string; error_code?: "transcription_failed" | "result_expired" | "worker_restarted"; created_at: string; updated_at?: string };
 
 export type Project = { project_id: string; title: string; is_default: boolean; version: number; created_at: string; updated_at: string; active_conversation_count?: number; archived_conversation_count?: number };
 export type ProjectPage = { items: Project[] };
+
+export type GitHead = {oid:string|null;branch:string|null;detached:boolean};
+export type GitEntry = {path:string;original_path?:string;index_status:string;worktree_status:string;conflicted:boolean;kind:'file'|'directory'|'symlink'|'missing'|'other'};
+export type GitRemote = {name:string;kind:'https'|'ssh'|'local'|'other';host?:string};
+export type GitSnapshot = {project_id:string;snapshot_id:string;repository_sha256:string;head:GitHead;entries:GitEntry[];remotes:GitRemote[];omitted_count:number;read_only:true;execution_authorized:false};
+export type GitDiff = {project_id:string;snapshot_id:string;path:string;stage:'working'|'staged';kind:'text'|'binary';patch:string;read_only:true;execution_authorized:false};
 export type CreateProject = { title: string };
 export type UpdateProject = { expected_version: number; title: string };
 

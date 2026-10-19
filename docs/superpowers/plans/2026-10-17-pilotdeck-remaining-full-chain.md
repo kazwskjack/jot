@@ -588,3 +588,14 @@ does not change serialized messages or native hashes. Local scripted SDK results
 remain separate from real-provider file/vision quality. Remaining mobile matrix,
 full regression/publication gates and all other capability rows stay in scope;
 no production flag or full-ledger completion is implied.
+
+### 2026-10-19 owned Git repository inspection
+
+The [Git workbench plan](2026-10-19-git-workbench.md) now has an actual owned
+project/status/diff API and mobile workbench workflow. The
+[implementation evidence](../../implementation/2026-10-19-git-workbench.md)
+records physical repository/snapshot checks, controlled read-only Git metadata,
+source filter isolation, 1,936 passing Gateway tests with seven conditional
+skips, 249 UI tests, 67 root tests and Windows builds. Local mutations, separately
+authorized remote effects and their recovery remain open; read-only inspection
+does not complete capability 15 or the full ledger.

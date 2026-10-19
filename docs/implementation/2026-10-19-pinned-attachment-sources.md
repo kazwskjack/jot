@@ -253,3 +253,9 @@ the same seven known historical findings, with no additional findings from this
 increment. This increment targets the existing feature branch; production flags
 remain off. The broader capability ledger and larger batch acceptance remain
 open and are not replaced by these attachment results.
+
+The subsequent complete installed-SDK original-input regression also terminated
+successfully: 44 cases passed with zero skips. It uses the actual pinned SDK and
+local scripted inference and extends the original-input/recovery evidence for
+this attachment baseline. It is not live-provider file-understanding evidence
+or acceptance of subsequently added unrelated Gateway features.

@@ -1,5 +1,6 @@
 import { dirname, join } from 'node:path';
 import { workbenchExecutionConfiguration } from './workbench/model-budget-policy.ts';
+import {gitConfiguration} from './git/config.ts';
 function required(name: string): string {
   const value = String(process.env[name] ?? '').trim();
   if (!value) throw new Error(`config_${name.toLowerCase()}_required`);
@@ -29,6 +30,7 @@ export function loadBffConfig() {
     workbenchRoot: process.env.GENERAL_AGENT_WORKBENCH_ROOT?.trim() || join(dirname(databasePath), 'jot-workspaces'),
     ...(process.env.GENERAL_AGENT_NATIVE_WORK_ROOT!==undefined?{nativeWorkRoot:process.env.GENERAL_AGENT_NATIVE_WORK_ROOT.trim()}:{}),
     ...workbenchExecutionConfiguration(process.env),
+    ...gitConfiguration(process.env),
     voiceAdapterUrl: process.env.GENERAL_AGENT_VOICE_ADAPTER_URL?.trim() || 'http://127.0.0.1:18841',
     voiceAdapterTokenFile: process.env.GENERAL_AGENT_VOICE_ADAPTER_TOKEN_FILE?.trim() || '',
   };

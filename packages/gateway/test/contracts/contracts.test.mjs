@@ -3,6 +3,14 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const contracts = new URL('../../contracts/', import.meta.url);
+test('Git workbench schemas expose bounded read-only state and no host paths, commands or credentials',async()=>{
+ const spec=await json('openapi.json'),event=await json('agent-event.schema.json'),schemas=spec.components.schemas;
+ assert.ok(schemas.GitSnapshot);assert.equal(schemas.GitSnapshot.properties.read_only.const,true);assert.equal(schemas.GitSnapshot.properties.execution_authorized.const,false);
+ assert.equal(schemas.GitSnapshot.properties.entries.maxItems,5000);
+ assert.deepEqual(schemas.GitWorkbenchCapability,event.$defs.GitWorkbenchCapability);
+ for(const name of ['GitSnapshot','GitDiff','GitEntry','GitRemote'])for(const forbidden of ['root','git_directory','executable','command','url','credentials'])assert.equal(forbidden in schemas[name].properties,false);
+ const yaml=await readFile(new URL('openapi.yaml',contracts),'utf8');for(const name of ['Capabilities','GitSnapshot','GitDiff','GitEntry','GitRemote','GitWorkbenchCapability']){const line=yaml.split('\n').find(s=>s.startsWith('    '+name+': '));assert.ok(line);assert.deepEqual(JSON.parse(line.slice(line.indexOf(':')+1)),schemas[name]);}
+});
 test('pinned message references are bounded public metadata in REST, SSE and YAML',async()=>{
  const spec=await json('openapi.json'),event=await json('agent-event.schema.json'),ref=spec.components.schemas.MessageAttachmentRef;
  assert.ok(ref);const {default:Ajv}=await import('ajv/dist/2020.js'),validate=new Ajv({strict:false}).compile(ref);

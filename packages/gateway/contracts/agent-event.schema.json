@@ -931,6 +931,9 @@
             ],
             "additionalProperties": false
           }
+        },
+        "git_workbench": {
+          "$ref": "#/$defs/GitWorkbenchCapability"
         }
       },
       "required": [
@@ -3540,6 +3543,231 @@
         "size_bytes",
         "media_type",
         "file_name"
+      ],
+      "additionalProperties": false
+    },
+    "GitWorkbenchCapability": {
+      "type": "object",
+      "properties": {
+        "configured_projects": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "read_only": {
+          "const": true
+        }
+      },
+      "required": [
+        "configured_projects",
+        "read_only"
+      ],
+      "additionalProperties": false
+    },
+    "GitHead": {
+      "type": "object",
+      "properties": {
+        "oid": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-f0-9]{40,64}$"
+        },
+        "branch": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 1024
+        },
+        "detached": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "oid",
+        "branch",
+        "detached"
+      ],
+      "additionalProperties": false
+    },
+    "GitEntry": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "original_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "index_status": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1
+        },
+        "worktree_status": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1
+        },
+        "conflicted": {
+          "type": "boolean"
+        },
+        "kind": {
+          "enum": [
+            "file",
+            "directory",
+            "symlink",
+            "missing",
+            "other"
+          ]
+        }
+      },
+      "required": [
+        "path",
+        "index_status",
+        "worktree_status",
+        "conflicted",
+        "kind"
+      ],
+      "additionalProperties": false
+    },
+    "GitRemote": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+        },
+        "kind": {
+          "enum": [
+            "https",
+            "ssh",
+            "local",
+            "other"
+          ]
+        },
+        "host": {
+          "type": "string",
+          "maxLength": 255
+        }
+      },
+      "required": [
+        "name",
+        "kind"
+      ],
+      "additionalProperties": false
+    },
+    "GitSnapshot": {
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "type": "string"
+        },
+        "snapshot_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "read_only": {
+          "const": true
+        },
+        "execution_authorized": {
+          "const": false
+        },
+        "repository_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "head": {
+          "$ref": "#/$defs/GitHead"
+        },
+        "entries": {
+          "type": "array",
+          "maxItems": 5000,
+          "items": {
+            "$ref": "#/$defs/GitEntry"
+          }
+        },
+        "remotes": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/GitRemote"
+          }
+        },
+        "omitted_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "project_id",
+        "snapshot_id",
+        "read_only",
+        "execution_authorized",
+        "repository_sha256",
+        "head",
+        "entries",
+        "remotes",
+        "omitted_count"
+      ],
+      "additionalProperties": false
+    },
+    "GitDiff": {
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "type": "string"
+        },
+        "snapshot_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "read_only": {
+          "const": true
+        },
+        "execution_authorized": {
+          "const": false
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "stage": {
+          "enum": [
+            "working",
+            "staged"
+          ]
+        },
+        "kind": {
+          "enum": [
+            "text",
+            "binary"
+          ]
+        },
+        "patch": {
+          "type": "string",
+          "maxLength": 1048576
+        }
+      },
+      "required": [
+        "project_id",
+        "snapshot_id",
+        "read_only",
+        "execution_authorized",
+        "path",
+        "stage",
+        "kind",
+        "patch"
       ],
       "additionalProperties": false
     }

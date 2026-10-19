@@ -1,5 +1,13 @@
 # Persistent tasks and shared workspaces
 
+## Git repositories
+
+The Git view selects an owned, operator-configured project repository and shows
+its branch, staged/working files and snapshot-bound patches. Refresh after an
+external change; a stale review cannot display a patch for newer bytes. This is
+currently a read-only workflow. Configuration, constraints and verification are
+in the [Git workbench record](docs/implementation/2026-10-19-git-workbench.md).
+
 ## Unlimited task runs
 
 The task wizard offers **不限运行次数** when the connected Gateway advertises

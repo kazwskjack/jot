@@ -23,6 +23,8 @@ import { openProductDatabase, withImmediateTransaction } from './db/database.ts'
 import {canonicalJson} from './db/canonical-json.ts';
 import { ConversationRepository } from './conversations/repository.ts';
 import { ProjectRepository } from './projects/repository.ts';
+import {GitWorkbench,type GitRepositoryBinding} from './git/service.ts';
+import {registerGitRoutes} from './git/routes.ts';
 import { EventStore, ExpiredCursorError, FutureCursorError } from './events/event-store.ts';
 import { RunRepository } from './runs/repository.ts';
 import { buildSnapshot } from './events/snapshot.ts';
@@ -103,6 +105,8 @@ export async function buildServer(config: {
   voiceAdapter?: VoiceAdapter;
   workbenchRoot?: string;
   nativeWorkRoot?: string;
+  gitRepositories?:GitRepositoryBinding[];
+  gitExecutable?:string;
   workbenchExecutionReady?: boolean;
   modelBudgetRoutes?: ModelBudgetRoute[];
   modelBudgetPolicy?: ModelBudgetPolicyConfig | undefined;
@@ -123,6 +127,7 @@ export async function buildServer(config: {
   const modelBudgets = budgetPolicy?.ledger ?? (config.modelBudgetRoutes === undefined ? undefined : new ModelBudgetLedger(db,{routes: config.modelBudgetRoutes}));
   const events = new EventStore(db);
   const projects = new ProjectRepository(db);
+  const gitWorkbench=new GitWorkbench(projects,config.gitRepositories??[],config.gitExecutable);
   const conversations = new ConversationRepository(db, projects);
   const runs = new RunRepository(db, events,{workAgentPreset:config.workAgentPreset??'jot-general'});
   const conversationModes=new ConversationModes(db,conversations,runs,config.conversationModeClient,config.chatModeEnabled===true);
@@ -537,6 +542,7 @@ export async function buildServer(config: {
     }
     return {
       api_version: '1.0', event_schema_version: '1.0', adapter_version: '0.1.0',
+      git_workbench:gitWorkbench.capability(ownerId),
       capabilities: { search: true, fetch: true, browser_interaction: false, file_read: true,
         file_edit: true, command_execution: true, questions: true, approvals: true,
         artifact_download: true, resume_checkpoint: true },
@@ -561,6 +567,7 @@ export async function buildServer(config: {
         .map(({ owner_id: _ignored, ...workspace }) => workspace),
     };
   });
+  registerGitRoutes(app,gitWorkbench,actor);
   app.get('/v1/projects', async request => projects.list(actor(request as any)));
   app.post('/v1/projects', async (request, reply) =>
     reply.code(201).send(projects.create(actor(request as any), request.body as Record<string, unknown>)));

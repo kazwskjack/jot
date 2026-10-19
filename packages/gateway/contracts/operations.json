@@ -1033,5 +1033,23 @@
     "TaskPrdReceipt",
     "200",
     "Explicit PRD source preview and binding to the existing paused task. No new task, run, budget, resume or execution authorization."
+  ],
+  [
+    "GET",
+    "/v1/projects/{projectId}/git",
+    "getProjectGit",
+    null,
+    "GitSnapshot",
+    "200",
+    "Owned bounded read-only Git state; no host paths or execution authority."
+  ],
+  [
+    "GET",
+    "/v1/projects/{projectId}/git/diff",
+    "getProjectGitDiff",
+    null,
+    "GitDiff",
+    "200",
+    "Owned bounded read-only Git state; no host paths or execution authority."
   ]
 ]
