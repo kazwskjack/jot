@@ -41,6 +41,9 @@ export function installWorkspaceCoordination(db:DatabaseSync){
   CREATE TABLE IF NOT EXISTS wb_workspace_reservation_families(
   reservation_id TEXT PRIMARY KEY REFERENCES wb_workspace_reservations(reservation_id),
   family_json TEXT NOT NULL,record_sha256 TEXT NOT NULL,created_at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS wb_workspace_reservation_settlements(
+  reservation_id TEXT PRIMARY KEY REFERENCES wb_workspace_reservations(reservation_id),
+  record_json TEXT NOT NULL,record_sha256 TEXT NOT NULL);
   CREATE TRIGGER IF NOT EXISTS wb_workspace_reservations_no_original_replace BEFORE INSERT ON wb_workspace_reservations
    WHEN EXISTS(SELECT 1 FROM wb_workspace_reservations WHERE operation_kind=NEW.operation_kind AND operation_id=NEW.operation_id)
    BEGIN SELECT RAISE(ABORT,'workspace_coordination_immutable'); END;`);
@@ -52,7 +55,7 @@ export function installWorkspaceCoordination(db:DatabaseSync){
    WHEN NEW.status IN('starting','running','waiting_user','waiting_approval','cancelling')
     AND EXISTS(SELECT 1 FROM ga_conversations c WHERE c.id=NEW.conversation_id AND EXISTS(${WORKSPACE_RESERVATION_MATCH}))
    BEGIN SELECT RAISE(ABORT,'workspace_coordination_required'); END;`);
- for(const table of ['wb_workspace_reservations','wb_workspace_reservation_releases','wb_workspace_reservation_families'])db.exec(`
+ for(const table of ['wb_workspace_reservations','wb_workspace_reservation_releases','wb_workspace_reservation_families','wb_workspace_reservation_settlements'])db.exec(`
   CREATE TRIGGER IF NOT EXISTS ${table}_no_update BEFORE UPDATE ON ${table} BEGIN SELECT RAISE(ABORT,'workspace_coordination_immutable'); END;
   CREATE TRIGGER IF NOT EXISTS ${table}_no_delete BEFORE DELETE ON ${table} BEGIN SELECT RAISE(ABORT,'workspace_coordination_immutable'); END;
   CREATE TRIGGER IF NOT EXISTS ${table}_no_replace BEFORE INSERT ON ${table}
@@ -142,8 +145,14 @@ function record(db:DatabaseSync,source:Source):Reservation|undefined{
  if(digest(value)!==row.record_sha256||Object.keys(source).some(key=>source[key as keyof Source]!==value[key as keyof Source]))throw Error('workspace_reservation_source_changed');
  return value;
 }
-function view(db:DatabaseSync,value:Reservation){return{reservation_id:value.reservation_id,project_id:value.project_id,
- state:db.prepare('SELECT 1 FROM wb_workspace_reservation_releases WHERE reservation_id=?').get(value.reservation_id)?'released_unstarted' as const:'reserved' as const,execution_authorized:false as const};}
+function view(db:DatabaseSync,value:Reservation){
+ const released=!!db.prepare('SELECT 1 FROM wb_workspace_reservation_releases WHERE reservation_id=?').get(value.reservation_id),settled=db.prepare('SELECT * FROM wb_workspace_reservation_settlements WHERE reservation_id=?').get(value.reservation_id);
+ if(settled){let proof;try{proof=JSON.parse(String(settled.record_json));}catch{throw Error('workspace_settlement_corrupt');}
+  if(!released||digest(proof)!==settled.record_sha256||Object.keys(proof).sort().join(',')!=='execution_id,finish_sha256,outcome_sha256,producer_sha256,reservation_id,settled_at'
+   ||proof.reservation_id!==value.reservation_id||proof.execution_id!==value.operation_id||!['outcome_sha256','producer_sha256','finish_sha256'].every(key=>typeof proof[key]==='string'&&/^[a-f0-9]{64}$/.test(proof[key]))||!Number.isFinite(Date.parse(proof.settled_at)))throw Error('workspace_settlement_corrupt');
+ }
+ return{reservation_id:value.reservation_id,project_id:value.project_id,state:released?(settled?'released_settled' as const:'released_unstarted' as const):'reserved' as const,execution_authorized:false as const};
+}
 /** Trusted owning-service call, inside its original admission transaction. The
  * caller must verify its immutable original operation; this is not a wire API. */
 export function reserveWorkspaceOperation(db:DatabaseSync,source:Source){
@@ -162,7 +171,25 @@ export function releaseUnstartedWorkspaceOperation(db:DatabaseSync,source:Source
  if(!db.isTransaction||!available(db))throw Error('workspace_coordination_unavailable');
  const value=record(db,source);if(!value)throw Error('workspace_reservation_not_found');
  if(view(db,value).state==='released_unstarted')return view(db,value);
+ if(view(db,value).state!=='reserved')throw Error('workspace_reservation_closed');
  db.prepare('INSERT INTO wb_workspace_reservation_releases VALUES(?,?)').run(value.reservation_id,new Date().toISOString());return view(db,value);
+}
+
+/** Original owning service only, after its awaited physical/native callback
+ * and cleanup returned successfully. A stored outcome alone cannot call this. */
+export function settleWorkspaceOperation(db:DatabaseSync,source:Source){
+ if(!db.isTransaction||!available(db))throw Error('workspace_coordination_unavailable');
+ const value=record(db,source);if(!value||view(db,value).state!=='reserved')throw Error('workspace_reservation_closed');
+ const execution=db.prepare('SELECT * FROM wb_git_index_executions WHERE execution_id=? AND owner_id=? AND project_id=? AND binding_sha256=? AND protocol=4').get(source.operation_id,source.owner_id,source.project_id,source.binding_sha256);
+ const outcome=db.prepare('SELECT * FROM wb_git_index_outcomes WHERE execution_id=?').get(source.operation_id),producer=db.prepare('SELECT * FROM wb_git_index_producers WHERE execution_id=?').get(source.operation_id),finish=db.prepare('SELECT * FROM wb_git_index_producer_finishes WHERE execution_id=?').get(source.operation_id);
+ let result,start,end;try{result=JSON.parse(String(outcome?.receipt_json));start=JSON.parse(String(producer?.record_json));end=JSON.parse(String(finish?.record_json));}catch{throw Error('workspace_reservation_producer_unsettled');}
+ if(!execution||digest(result)!==outcome?.receipt_sha256||result.execution_id!==source.operation_id||result.state!=='applied'||result.execution_authorized!==false
+  ||digest(start)!==producer?.record_sha256||start.execution_id!==source.operation_id||start.request_sha256!==execution.request_sha256||start.binding_sha256!==source.binding_sha256
+  ||digest(end)!==finish?.record_sha256||end.execution_id!==source.operation_id||end.producer_sha256!==producer?.record_sha256||end.state!=='applied'
+  ||db.prepare('SELECT 1 FROM ga_worker_leases WHERE resource_id=?').get('git-index-binding:'+source.binding_sha256))throw Error('workspace_reservation_producer_unsettled');
+ const proof={reservation_id:value.reservation_id,execution_id:source.operation_id,outcome_sha256:String(outcome!.receipt_sha256),producer_sha256:String(producer!.record_sha256),finish_sha256:String(finish!.record_sha256),settled_at:new Date().toISOString()};
+ db.prepare('INSERT INTO wb_workspace_reservation_settlements VALUES(?,?,?)').run(value.reservation_id,JSON.stringify(proof),digest(proof));
+ db.prepare('INSERT INTO wb_workspace_reservation_releases VALUES(?,?)').run(value.reservation_id,proof.settled_at);return view(db,value);
 }
 
 type FamilyMember={session_ref:string;scopes:Array<{conversation_id:string;workspace_id:string}>;source_kinds:string[]};

@@ -141,6 +141,16 @@ Continue the original integration in this order:
 5. Only then expose original HTTP execution and mobile stage/unstage controls,
    including lost acknowledgements, restart, cancellation and conflicts.
 
+The [reserved original native executor](../../implementation/2026-10-20-reserved-native-index-execution.md)
+now composes actual same-Host startup admission, live native maintenance,
+configured-root identity and the original executor through physical stage/unstage.
+Success settles original producer evidence and reservation release atomically;
+lost callback/settlement acknowledgements retain the reservation without replay.
+The uncoordinated path still cannot bypass its own held reservation. This is the
+real local composition, not the remote/cached bridge or shared/isolated publication
+association; keep the broader coordination and UI checkboxes open until those
+remaining original paths are joined and accepted.
+
 ## 4. Actual mobile workbench and release
 
 ### Cross-process restart admission continuation

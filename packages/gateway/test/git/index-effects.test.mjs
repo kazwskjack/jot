@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {DatabaseSync} from 'node:sqlite';import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join,resolve,sep} from 'node:path';import {execFileSync} from 'node:child_process';
+import {DatabaseSync} from 'node:sqlite';import {mkdtemp,mkdir,writeFile,readFile,rm,rename} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join,resolve,sep} from 'node:path';import {execFileSync} from 'node:child_process';
 import {ProjectRepository} from '../../src/projects/repository.ts';import {GitWorkbench} from '../../src/git/service.ts';import {GitMutationIntents} from '../../src/git/intents.ts';import {withImmediateTransaction} from '../../src/db/database.ts';
 import {readFileSync,writeFileSync} from 'node:fs';
 async function fixture(t,{commit=true}={}){
@@ -11,6 +11,26 @@ async function fixture(t,{commit=true}={}){
  const review=async(action,paths=['note.txt'])=>{const snapshot=await workbench.inspect('owner','project'),p=await intents.prepare('owner','project',{request_id:'prepare-'+(++request),action,paths,snapshot_id:snapshot.snapshot_id}),approved=await intents.control('owner','project',p.intent_id,{request_id:'approve-'+request,expected_version:1,action:'approve',review_sha256:p.review_sha256}),row=db.prepare('SELECT witness_json FROM wb_git_mutation_intents WHERE intent_id=?').get(p.intent_id);const authorize=()=>{const current=intents.get('owner','project',p.intent_id);if(current.state!=='approved'||current.version!==approved.version||current.review_sha256!==approved.review_sha256)throw Error('git_execution_revoked');};return{witness:JSON.parse(row.witness_json),approved,authorize,commit:publish=>withImmediateTransaction(db,()=>{authorize();return publish();})};};
  return{root,parent,db,git,workbench,intents,effects,review,GitIndexEffects};
 }
+
+test('native workspace placement retains the actual configured root identity without granting an effect',async t=>{
+ const f=await fixture(t),index=await readFile(join(f.root,'.git/index'));
+ assert.equal(typeof f.effects.retainNativeWorkspaceRoots,'function');
+ const members=[{session_ref:'original',custody:'resident',cwd:f.root,header_sha256:'a'.repeat(64)},{session_ref:'absent',custody:'absent',cwd:null,header_sha256:null}];
+ const current=f.effects.retainNativeWorkspaceRoots(members);current();members[0].cwd=f.parent;current();
+ assert.deepEqual(await readFile(join(f.root,'.git/index')),index);
+ await rename(f.root,join(f.parent,'original-repo'));await mkdir(f.root);
+ assert.throws(current,/git_native_workspace_changed/);
+});
+
+test('native workspace placement cannot equate another native directory or invented absent cwd with the repository',async t=>{
+ const f=await fixture(t);assert.equal(typeof f.effects.retainNativeWorkspaceRoots,'function');
+ for(const member of [
+  {session_ref:'original',custody:'resident',cwd:f.parent,header_sha256:'a'.repeat(64)},
+  {session_ref:'original',custody:'cold',cwd:null,header_sha256:'a'.repeat(64)},
+  {session_ref:'absent',custody:'absent',cwd:f.root,header_sha256:null},
+  {session_ref:'original',custody:'resident',cwd:f.root,header_sha256:null}
+ ])assert.throws(()=>f.effects.retainNativeWorkspaceRoots([member]),/git_native_workspace_association_required/);
+});
 test('actual selected staging and unstaging publish exact index bytes without altering HEAD or worktree',async t=>{
  const f=await fixture(t),head=f.git('rev-parse','HEAD').trim(),original=await readFile(join(f.root,'.git/index')),r=await f.review('stage'),plan=await f.effects.prepareIndex(r.witness,'stage');assert.deepEqual(await readFile(join(f.root,'.git/index')),original);assert.equal(plan.execution_authorized,false);
  const receipt=await f.effects.applyIndex(plan,r);assert.equal(receipt.action,'stage');assert.equal(receipt.index_sha256,plan.index_sha256);assert.equal(f.git('show',':note.txt'),'after\n');assert.equal(f.git('diff','--cached','--name-only').trim(),'note.txt');assert.equal(f.git('rev-parse','HEAD').trim(),head);assert.equal(await readFile(join(f.root,'other.txt'),'utf8'),'other after\n');assert.equal((await f.effects.observeIndex(plan)).state,'applied');

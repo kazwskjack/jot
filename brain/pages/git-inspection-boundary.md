@@ -4,7 +4,7 @@ title: Git views use owned read-only repository snapshots
 category: decision
 status: active
 created: "2026-10-19T17:04:32"
-updated: "2026-10-20T13:31:16"
+updated: "2026-10-20T13:57:07"
 ---
 
 <!-- compiled_truth -->
@@ -90,4 +90,9 @@ Git 执行的配置占用范围与程序／stat 见证分离：原始记录固�
 - time: 2026-10-20T13:31:16
   kind: evidence
   summary: "A native family seal identifies Sessions, not their filesystem placement. Maintained source contexts now expose exact resident/cold header cwd and digest only during original live custody; copies and expired contexts are refused. Working-directory changes invalidate resident maintenance. A native cwd, configured Git root and logical blob publication remain separate identities and require the original coordinator to establish their actual association before effects."
+  affects: [git-inspection-boundary]
+
+- time: 2026-10-20T13:57:07
+  kind: evidence
+  summary: "The original reserved Git executor can retain live native source custody, same-Host active pre-storage admission, exact configured root identities and its original Worker lease through real stage/unstage effects. A process-local custody object replaces no public permission or generic workspace check. Native cancellation reaches preparation. Only a fully successful awaited native/kernel lifecycle may settle and release; lost acknowledgement or settlement writes keep the original reservation, even with a known applied receipt. Isolated/shared source publication and cross-process production hosting remain separate unfinished integration."
   affects: [git-inspection-boundary]

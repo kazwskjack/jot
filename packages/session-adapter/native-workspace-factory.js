@@ -1,6 +1,6 @@
 // Host-only namespace exclusion around the reviewed optional protocol-2 setup
 // hooks. This is not an upstream API, a persistence lock or an execution grant.
-const holds=new WeakMap(),gates=new WeakMap(),trustedGates=new WeakSet();
+const holds=new WeakMap(),gates=new WeakMap(),trustedGates=new WeakSet(),admissionGates=new WeakMap();
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 export function claimNativeWorkspaceFactory(gate,ids){
  if(!gate||!trustedGates.has(gate))throw Error('native_workspace_factory_unavailable');
@@ -11,6 +11,12 @@ export function assertNativeWorkspaceFactoryHold(token,{sessionRef,registry,sess
  if(!record||record.released||!record.ids.has(sessionRef)||record.registry!==registry||record.sessions!==sessions||record.persistence!==persistence
   ||record.currentPersistence()?.identity!==record.persistenceIdentity)throw Error('native_workspace_factory_hold_invalid');
  record.signal.throwIfAborted();return Object.freeze({notFoundError:record.notFoundError});
+}
+/** The pre-storage startup guard and held factory must belong to the same
+ * original Host. This is a live check, never a serializable readiness grant. */
+export function assertNativeWorkspaceAdmissionGate(admissionGate,factoryGate){
+ const record=admissionGate&&admissionGates.get(admissionGate);
+ if(!record||!record.active()||!factoryGate||!trustedGates.has(factoryGate)||gates.get(record.ctx)!==factoryGate)throw Error('native_workspace_admission_unavailable');
 }
 
 export function createNativeWorkspaceFactoryGate({ctx,registry,sessions,persistence,currentPersistence,notFoundError}={}){
@@ -62,8 +68,8 @@ export function createNativeWorkspaceAdmissionGate({ctx,bridge}={}){
  };
  try{for(const event of ['agent-loop/before-storage','agent/before-setup','agent/after-setup'])removers.push(ctx.on(event,fence,{prepend:true}));}
  catch(error){for(const remove of removers.reverse())remove();throw error;}
- return Object.freeze({dispose(){
+ const gate=Object.freeze({dispose(){
   if(disposal)return disposal;stopped=true;for(const abort of controllers)abort.abort(Error('native_workspace_admission_shutdown'));
   disposal=Promise.allSettled([...pending]).then(()=>{for(const remove of removers.reverse())remove();});return disposal;
- }});
+ }});admissionGates.set(gate,{ctx,active:()=>!stopped});return gate;
 }

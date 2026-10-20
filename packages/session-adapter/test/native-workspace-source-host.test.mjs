@@ -99,11 +99,12 @@ test('only a currently held original source context exposes native working-direc
  assert.equal(typeof sourceModule.inspectNativeWorkspaceSource,'function');
  await f.host.withReservedFamily(scope,f.controls,async context=>{
   retained=context;const view=sourceModule.inspectNativeWorkspaceSource(context);
-  assert.equal(view.source.execution_id,scope.execution_id);assert.equal(view.execution_authorized,false);
+  assert.equal(view.source.execution_id,scope.execution_id);assert.equal(view.execution_authorized,false);assert.equal(view.signal,context.signal);
   assert.deepEqual(view.workspaces.map(({session_ref,custody,cwd})=>({session_ref,custody,cwd})),[{session_ref:'native',custody:'resident',cwd:'/original/project'}]);
   assert.equal(Object.isFrozen(view.workspaces[0]),true);assert.equal(Object.isFrozen(view),true);
   assert.throws(()=>sourceModule.inspectNativeWorkspaceSource({...context}),/native_workspace_source_context_invalid/);
   assert.throws(()=>sourceModule.inspectNativeWorkspaceSource(JSON.parse(JSON.stringify(context))),/native_workspace_source_context_invalid/);
+  assert.throws(()=>sourceModule.assertNativeWorkspaceSourceAdmission(context),/native_workspace_admission_unavailable/,'read-only host custody is not proof of pre-storage startup admission');
   await context.recheck();assert.equal(sourceModule.inspectNativeWorkspaceSource(context),view);
  });
  assert.throws(()=>sourceModule.inspectNativeWorkspaceSource(retained),/native_workspace_source_context_invalid/);

@@ -14,6 +14,7 @@ type Lock={path:string;identity:string};
 type Stored={witness:GitReviewWitness;index:Buffer;blobs:Blob[];ref:string|null;metadata:string;directories:Map<string,string>;dot:string;rawRefs:Map<string,string|null>;attributes:Map<string,string|null>;mode:number;dispatch?:GitIndexDispatch;owned?:{locks:Lock[];created:Map<string,string>};state:'ready'|'locking'|'consumed'};
 export type GitIndexReceipt={plan_id:string;action:Action;repository_sha256:string;before_index_sha256:string|null;index_sha256:string;paths:string[]};
 export type GitIndexDispatch={plan_id:string;action:Action;repository_sha256:string;source_sha256:string;index_sha256:string;index_lock_identity:string};
+export type GitNativeWorkspaceObservation=Readonly<{session_ref:string;custody:'resident'|'cold'|'absent';cwd:string|null;header_sha256:string|null}>;
 type Authority={authorize:(proof?:GitIndexDispatch)=>void;prepared?:(preparation:GitIndexPreparation)=>void;acquire?:(preparation:GitIndexPreparation,install:()=>void)=>void;dispatch?:(evidence:GitIndexEvidence)=>void;cleanup?:(remove:()=>void)=>void;commit:(publish:()=>GitIndexReceipt,proof:GitIndexDispatch)=>GitIndexReceipt};
 const hash=(bytes:string|Buffer)=>createHash('sha256').update(bytes).digest('hex');
 const lstatSync=(path:string)=>nativeLstatSync(path,{bigint:true});
@@ -28,6 +29,22 @@ const decoded=(value:Buffer)=>new TextDecoder('utf-8',{fatal:true}).decode(value
  * Temporary metadata computes bytes; only the original index is published. */
 export class GitIndexEffects extends GitRepositoryInspection{
  private readonly plans=new WeakMap<GitIndexPlan,Stored>();
+ /** Host-only root association, not execution authority. The original caller
+  * must retain actual native custody and recheck these physical identities. */
+ retainNativeWorkspaceRoots(input:readonly GitNativeWorkspaceObservation[]){
+  if(!Array.isArray(input)||input.length>256)throw Error('git_native_workspace_association_required');
+  const seen=new Set<string>(),paths:string[]=[];
+  for(const member of input){
+   if(!member||Object.keys(member).sort().join(',')!=='custody,cwd,header_sha256,session_ref'||typeof member.session_ref!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(member.session_ref)||seen.has(member.session_ref))throw Error('git_native_workspace_association_required');seen.add(member.session_ref);
+   if(member.custody==='absent'){if(member.cwd!==null||member.header_sha256!==null)throw Error('git_native_workspace_association_required');continue;}
+   if(!['resident','cold'].includes(member.custody)||typeof member.cwd!=='string'||!member.cwd||member.cwd.includes('\0')||typeof member.header_sha256!=='string'||!/^[a-f0-9]{64}$/.test(member.header_sha256)
+    ||!equalPath(resolve(member.cwd),this.root)||!equalPath(member.cwd,resolve(member.cwd)))throw Error('git_native_workspace_association_required');
+   paths.push(member.cwd);
+  }
+  const rootIdentity=this.directorySync(this.root);
+  const check=()=>{try{if(this.directorySync(this.root)!==rootIdentity||paths.some(path=>this.directorySync(path)!==rootIdentity))throw Error();}catch{throw Error('git_native_workspace_changed');}};
+  check();return check;
+ }
  private cleanupAtomically(remove:()=>void,atomic?:((remove:()=>void)=>void)){
   let called=false,active=true;const apply=()=>{if(!active||called)throw Error('git_index_cleanup_invalid');called=true;remove();};
   try{if(atomic){if(atomic.constructor.name==='AsyncFunction')throw Error('git_execution_authority_missing');const result=atomic(apply) as unknown;if(result&&typeof(result as {then?:unknown}).then==='function')throw Error('git_execution_authority_missing');}else apply();if(!called)throw Error('git_execution_authority_missing');}finally{active=false;}

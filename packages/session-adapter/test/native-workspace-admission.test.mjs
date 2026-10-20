@@ -55,3 +55,14 @@ test('admission must mount before eager configured startup or any pre-existing r
   assert.throws(()=>factory.createNativeWorkspaceAdmissionGate({ctx:{...f.ctx,agents:{list:()=>[{id:'resident'}]}},bridge:f.bridge}),/native_workspace_admission_unavailable/);
  }finally{await f.gate.dispose();}
 });
+
+test('physical custody requires live startup admission and a factory from the same original Host',async()=>{
+ const f=fixture(),other=fixture(),persistence={identity:Symbol('original-store')};class Missing extends Error{}
+ const gate=factory.createNativeWorkspaceFactoryGate({ctx:f.ctx,registry:{get:()=>undefined},sessions:{get:()=>undefined},persistence,currentPersistence:()=>persistence,notFoundError:Missing});
+ try{
+  assert.equal(factory.assertNativeWorkspaceAdmissionGate(f.gate,gate),undefined);
+  for(const candidate of [{...f.gate},other.gate,undefined])assert.throws(()=>factory.assertNativeWorkspaceAdmissionGate(candidate,gate),/native_workspace_admission_unavailable/);
+  assert.throws(()=>factory.assertNativeWorkspaceAdmissionGate(f.gate,{...gate}),/native_workspace_admission_unavailable/);
+  await f.gate.dispose();assert.throws(()=>factory.assertNativeWorkspaceAdmissionGate(f.gate,gate),/native_workspace_admission_unavailable/);
+ }finally{await gate.dispose();await f.gate.dispose();await other.gate.dispose();}
+});

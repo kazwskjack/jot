@@ -3,10 +3,12 @@ import {mkdtemp,mkdir,writeFile,readFile,rm,readdir,symlink} from 'node:fs/promi
 import {buildServer} from '../../src/server.ts';import {GitWorkbench} from '../../src/git/service.ts';import {GitMutationIntents} from '../../src/git/intents.ts';import {GitIndexExecutions} from '../../src/git/index-executions.ts';import {withImmediateTransaction} from '../../src/db/database.ts';
 import {WorkbenchBridge} from '../../../session-adapter/workbench.js';
 import {createNativeWorkspaceSourceHost,inspectNativeWorkspaceSource} from '../../../session-adapter/native-workspace-source.js';
+import * as nativeWorkspaceSource from '../../../session-adapter/native-workspace-source.js';
 import {createNativeWorkspaceFactoryGate,createNativeWorkspaceAdmissionGate} from '../../../session-adapter/native-workspace-factory.js';
 import {createNativeInvariantReplay} from '../../../session-adapter/native-invariant-replay.js';
 import {prepareDshPreSetupRuntime} from '../../../session-adapter/scripts/prepare-dsh-pre-setup.mjs';
 import {reserveWorkspaceOperation} from '../../src/workbench/workspace-coordination.ts';
+import {ProjectRepository} from '../../src/projects/repository.ts';
 const token='test-workspace-service-token',url='/internal/v1/workbench/git-workspace-source';
 async function fixture(t){
  const parent=await mkdtemp(join(tmpdir(),'jot-git-workspace-source-')),root=join(parent,'repo');await mkdir(root);
@@ -21,6 +23,15 @@ async function fixture(t){
  t.after(async()=>{await service.app.close();service.db.close();assert.ok(resolve(parent).startsWith(resolve(tmpdir())+sep));await rm(parent,{recursive:true,force:true,maxRetries:5,retryDelay:20});});
  return{scope,root,accepted,approved,get db(){return service.db},get current(){return current},inject:options=>service.app.inject(options),listen:()=>service.app.listen({host:'127.0.0.1',port:0}),request:(payload=scope,authorization='Bearer '+token)=>service.app.inject({method:'POST',url,headers:{authorization},payload}),nativeRequest:(session_ref,authorization='Bearer '+token)=>service.app.inject({method:'POST',url:'/internal/v1/workbench/native-workspace-admission',headers:{authorization},payload:{session_ref}}),async restart(){await service.app.close();service.db.close();service=await buildServer(config);current=connect();}};
 }
+
+test('reserved dispatch without the original native host remains unavailable and creates no producer',async t=>{
+ const f=await fixture(t),index=await readFile(join(f.root,'.git/index'));
+ assert.equal(typeof f.current.executions.performReserved,'function');
+ await assert.rejects(f.current.executions.performReserved('owner','project',f.accepted.execution_id),/git_native_workspace_host_unavailable/);
+ assert.deepEqual(await readFile(join(f.root,'.git/index')),index);
+ assert.equal(f.db.prepare('SELECT count(*) n FROM wb_git_index_producers').get().n,0);
+ assert.equal(f.db.prepare('SELECT count(*) n FROM wb_workspace_reservations').get().n,0);
+});
 test('original Gateway source requires service authentication even when a browser owner is present',async t=>{
  const f=await fixture(t);f.current.executions.reserveWorkspace('owner','project',f.accepted.execution_id);
  for(const authorization of ['','Bearer wrong','Bearer '+token+'extra']){const response=await f.request(f.scope,authorization);assert.equal(response.statusCode,401,response.body);assert.equal(response.body.includes(f.accepted.execution_id),false);}
@@ -155,4 +166,151 @@ test('original Gateway authority and real native custody remain joined through a
   assert.equal(modelCalls,0);assert.deepEqual(await readFile(join(f.root,'.git/index')),index);
   assert.equal(f.db.prepare('SELECT count(*) n FROM wb_git_index_producers').get().n,0);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_worker_leases').get().n,0);
  }finally{if(admissionGate)await admissionGate.dispose();if(gate)await gate.dispose();if(handle)await handle.dispose();if(ctx)await ctx.fiber.dispose();}
+});
+
+async function nativeDispatchFixture(f,matching,{guarded=true}={}){
+ const runtime=process.env.JOT_DSH_RUNTIME_MODULES,base=join(dirname(f.root),'native-dispatch'),scoped=join(base,'node_modules','@deepseek-ai');let ctx,gate,handle,admissionGate,closed=false;
+ const close=async()=>{if(closed)return;closed=true;if(gate)await gate.dispose();if(handle)await handle.dispose();if(admissionGate)await admissionGate.dispose();if(ctx)await ctx.fiber.dispose();};
+ try{
+  await mkdir(scoped,{recursive:true});prepareDshPreSetupRuntime(join(runtime,'dsh-agent-loop'),join(scoped,'dsh-agent-loop'),{nativeAdmission:true,pendingInputWake:true});
+  for(const entry of await readdir(runtime,{withFileTypes:true}))if(entry.name!=='dsh-agent-loop'&&entry.isDirectory())await symlink(join(runtime,entry.name),join(scoped,entry.name),'junction');
+  await symlink(join(dirname(runtime),'zod'),join(base,'node_modules','zod'),'junction');
+  const names=['cordis','dsh-session','dsh-session-projection','dsh-session-persistence-jsonl','dsh-session-query','dsh-agent','dsh-llm','dsh-tools','dsh-system-prompt','dsh-agent-loop','dsh-goal'],modules={};
+  for(const name of [...names,'dsh-session-persistence'])modules[name]=await import(pathToFileURL(join(name==='dsh-agent-loop'?scoped:runtime,name,'lib/index.js')).href);
+  ctx=new modules.cordis.Context();for(const name of names.filter(n=>n!=='cordis'))await ctx.plugin(modules[name].default??modules[name],name==='dsh-session-persistence-jsonl'?{root:join(base,'sessions'),compression:'none'}:{});
+  let modelCalls=0;class Local extends modules['dsh-llm'].LlmAdapter{async *stream(){modelCalls++;assert.fail('Git coordination must not invoke a model');}}
+  ctx.llm.registerAdapter(['native-index'],new Local());const bridge=new WorkbenchBridge({origin:await f.listen(),token});if(guarded)admissionGate=createNativeWorkspaceAdmissionGate({ctx,bridge});
+  handle=await ctx.agents.create({sessionId:'native-index-session',meta:{agentPreset:'jot-general',cwd:matching?f.root:base},agentOptions:{provider:'native-index',model:'synthetic'}});
+  f.db.prepare('INSERT INTO ga_conversations(id,owner_id,workspace_id,title,model,version,created_at,updated_at,project_id) VALUES(?,?,?,?,?,?,?,?,?)').run('native-index-conversation','owner','ws','Synthetic','{}',1,'now','now','project');
+  f.db.prepare('INSERT INTO ga_harness_session_bindings(owner_id,conversation_id,session_id,created_at,updated_at) VALUES(?,?,?,?,?)').run('owner','native-index-conversation','native-index-session','now','now');
+  const persistence=ctx.sessionPersistence,registry=ctx.agents,sessions=ctx.sessions;
+  gate=createNativeWorkspaceFactoryGate({ctx,registry,sessions,persistence,currentPersistence:()=>ctx.sessionPersistence,notFoundError:modules['dsh-session-persistence'].SessionPersistenceNotFoundError});
+  const host=createNativeWorkspaceSourceHost({bridge,registry,sessions,persistence,currentPersistence:()=>ctx.sessionPersistence,backendClass:modules['dsh-session-persistence'].SessionPersistence,
+   allowedPresets:new Set(['jot-general']),validateLog:createNativeInvariantReplay({Session:modules['dsh-session'].Session}),projections:ctx.sessionProjections,factoryGate:gate,admissionGate});
+  let entries=0;const originalHost={withReservedFamily:(scope,controls,operation)=>host.withReservedFamily(scope,controls,async context=>{entries++;assert.throws(()=>handle.agent.runMaintenance(()=>{}),/already has active work/);return operation(context);}),inspect:inspectNativeWorkspaceSource,assertAdmission:nativeWorkspaceSource.assertNativeWorkspaceSourceAdmission};
+  const executions=new GitIndexExecutions(f.db,new ProjectRepository(f.db),f.current.kernel,f.current.intents,{nativeWorkspaceHost:originalHost});
+  return{executions,close,nativeHost:originalHost,admissionGate,agent:handle.agent,get entries(){return entries;},get modelCalls(){return modelCalls;}};
+ }catch(error){await close();throw error;}
+}
+
+test('the original reserved executor stages and unstages the configured tree under actual native custody and settles once',
+ {skip:!process.env.JOT_DSH_RUNTIME_MODULES,timeout:45000},async t=>{
+ const f=await fixture(t),n=await nativeDispatchFixture(f,true);let result;
+ try{
+  n.executions.reserveWorkspace('owner','project',f.accepted.execution_id);
+  await assert.rejects(f.current.executions.perform('owner','project',f.accepted.execution_id),/workspace_coordination_required/);
+  result=await n.executions.performReserved('owner','project',f.accepted.execution_id);assert.equal(result.state,'applied');
+  assert.equal(execFileSync('git',['show',':note.txt'],{cwd:f.root,encoding:'utf8'}),'after\n');assert.equal(n.modelCalls,0);assert.equal(n.entries,1);
+  assert.equal(JSON.stringify(result).includes(f.root),false);assert.equal(f.db.prepare('SELECT count(*) n FROM wb_git_index_producers').get().n,1);
+  assert.equal(f.db.prepare('SELECT count(*) n FROM wb_workspace_reservation_releases').get().n,1);assert.equal(f.db.prepare('SELECT count(*) n FROM wb_workspace_reservation_settlements').get().n,1);
+  assert.equal(f.db.prepare('SELECT count(*) n FROM ga_worker_leases').get().n,0);
+  assert.deepEqual(await n.executions.performReserved('owner','project',f.accepted.execution_id),result);assert.equal(n.entries,1,'historical success must not reenter native custody or dispatch');
+  const snapshot=await f.current.kernel.inspect('owner','project'),review=await f.current.intents.prepare('owner','project',{request_id:'unstage-review',action:'unstage',paths:['note.txt'],snapshot_id:snapshot.snapshot_id}),approved=await f.current.intents.control('owner','project',review.intent_id,{request_id:'unstage-approve',action:'approve',expected_version:1,review_sha256:review.review_sha256});
+  const unstage=withImmediateTransaction(f.db,()=>n.executions.admit('owner','project',approved.intent_id,{request_id:'unstage-execute',expected_version:approved.version,review_sha256:approved.review_sha256}));
+  assert.equal((await n.executions.performReserved('owner','project',unstage.execution_id)).state,'applied');assert.equal(n.entries,2);
+  assert.equal(execFileSync('git',['diff','--cached','--name-only'],{cwd:f.root,encoding:'utf8'}),'');assert.equal(await readFile(join(f.root,'note.txt'),'utf8'),'after\n');
+  assert.equal(f.db.prepare('SELECT count(*) n FROM wb_workspace_reservation_settlements').get().n,2);
+  for(const operation of ['DELETE FROM wb_workspace_reservation_settlements','UPDATE wb_workspace_reservation_settlements SET record_sha256=record_sha256','INSERT OR REPLACE INTO wb_workspace_reservation_settlements SELECT * FROM wb_workspace_reservation_settlements'])assert.throws(()=>f.db.exec(operation),/workspace_coordination_immutable/);
+  await n.agent.runMaintenance(async()=>{});
+ }finally{await n.close();}
+ await f.restart();assert.deepEqual(f.current.executions.getAdmitted('owner','project',f.accepted.execution_id),result);
+ assert.equal(f.db.prepare('SELECT count(*) n FROM wb_workspace_reservation_settlements').get().n,2);
+});
+
+test('the reserved executor refuses a real but unrelated native directory before acquiring any effect producer',
+ {skip:!process.env.JOT_DSH_RUNTIME_MODULES,timeout:45000},async t=>{
+ const f=await fixture(t),n=await nativeDispatchFixture(f,false),index=await readFile(join(f.root,'.git/index'));
+ try{
+  await assert.rejects(n.executions.performReserved('owner','project',f.accepted.execution_id),/git_native_workspace_association_required/);
+  assert.deepEqual(await readFile(join(f.root,'.git/index')),index);assert.equal(n.modelCalls,0);assert.equal(n.entries,1);
+  assert.equal(f.db.prepare('SELECT count(*) n FROM wb_git_index_producers').get().n,0);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_worker_leases').get().n,0);
+  assert.equal(f.db.prepare('SELECT count(*) n FROM wb_workspace_reservation_releases').get().n,0);
+  n.executions.releaseUnstartedWorkspace('owner','project',f.accepted.execution_id);
+ }finally{await n.close();}
+});
+
+test('native maintenance cancellation reaches original index preparation and retains unsettled reservation evidence',
+ {skip:!process.env.JOT_DSH_RUNTIME_MODULES,timeout:45000},async t=>{
+ const f=await fixture(t),n=await nativeDispatchFixture(f,true),kernel=f.current.kernel.indexEffects('owner','project'),prepare=kernel.prepareIndex.bind(kernel),index=await readFile(join(f.root,'.git/index')),cause={kind:'user'};let sawNativeAbort=false;
+ kernel.prepareIndex=async(witness,action,signal)=>{n.agent.cancel(cause,{keepInbox:true});sawNativeAbort=signal.aborted;return prepare(witness,action,signal);};
+ try{
+  await assert.rejects(n.executions.performReserved('owner','project',f.accepted.execution_id),error=>error===cause);
+  assert.equal(sawNativeAbort,true,'the original preparation must receive the actual native cancellation signal');
+  assert.deepEqual(await readFile(join(f.root,'.git/index')),index);assert.equal(n.executions.producer('owner','project',f.accepted.execution_id).state,'cancelled_before_preparation');
+  assert.equal(f.db.prepare('SELECT count(*) n FROM wb_workspace_reservation_releases').get().n,0);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_worker_leases').get().n,0);
+  await assert.rejects(n.executions.performReserved('owner','project',f.accepted.execution_id),/git_execution_producer_closed/);assert.equal(n.entries,1);
+ }finally{await n.close();}
+});
+
+test('approval revocation during real preparation cannot inherit native custody as another execution grant',
+ {skip:!process.env.JOT_DSH_RUNTIME_MODULES,timeout:45000},async t=>{
+ const f=await fixture(t),n=await nativeDispatchFixture(f,true),kernel=f.current.kernel.indexEffects('owner','project'),prepare=kernel.prepareIndex.bind(kernel),index=await readFile(join(f.root,'.git/index'));
+ kernel.prepareIndex=async(...args)=>{const plan=await prepare(...args);await f.current.intents.control('owner','project',f.approved.intent_id,{request_id:'revoke-during-preparation',action:'cancel',expected_version:f.approved.version,review_sha256:f.approved.review_sha256});return plan;};
+ try{
+  await assert.rejects(n.executions.performReserved('owner','project',f.accepted.execution_id),/git_execution_revoked/);
+  assert.deepEqual(await readFile(join(f.root,'.git/index')),index);assert.deepEqual(n.executions.getAdmission('owner','project','execute'),f.accepted);
+  assert.equal(f.db.prepare('SELECT count(*) n FROM wb_git_index_dispatches').get().n,0);assert.equal(f.db.prepare('SELECT count(*) n FROM wb_workspace_reservation_releases').get().n,0);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_worker_leases').get().n,0);
+ }finally{await n.close();}
+});
+
+for(const failure of ['host_ack','settlement_write','release_write'])test('known publication retains original reservation on incomplete native settlement: '+failure,
+ {skip:!process.env.JOT_DSH_RUNTIME_MODULES,timeout:45000},async t=>{
+ const f=await fixture(t),n=await nativeDispatchFixture(f,true);let executions=n.executions;
+ try{
+  if(failure==='host_ack'){
+   const original=n.nativeHost;
+   executions=new GitIndexExecutions(f.db,new ProjectRepository(f.db),f.current.kernel,f.current.intents,{nativeWorkspaceHost:{inspect:original.inspect,assertAdmission:original.assertAdmission,async withReservedFamily(...args){await original.withReservedFamily(...args);throw Error('synthetic_native_ack_lost');}}});
+  }else f.db.exec('CREATE TRIGGER synthetic_settlement_failure BEFORE INSERT ON '+(failure==='settlement_write'?'wb_workspace_reservation_settlements':'wb_workspace_reservation_releases')+" BEGIN SELECT RAISE(ABORT,'synthetic_settlement_write_failure'); END");
+  await assert.rejects(executions.performReserved('owner','project',f.accepted.execution_id),/synthetic_native_ack_lost|synthetic_settlement_write_failure/);
+  assert.equal(execFileSync('git',['show',':note.txt'],{cwd:f.root,encoding:'utf8'}),'after\n');const bytes=await readFile(join(f.root,'.git/index'));
+  assert.equal(f.db.prepare('SELECT count(*) n FROM wb_workspace_reservation_releases').get().n,0);assert.equal(f.db.prepare('SELECT count(*) n FROM wb_workspace_reservation_settlements').get().n,0);
+  assert.equal(f.db.prepare('SELECT count(*) n FROM ga_worker_leases').get().n,0);assert.equal(executions.producer('owner','project',f.accepted.execution_id).state,'applied');
+  assert.equal((await executions.performReserved('owner','project',f.accepted.execution_id)).state,'applied');assert.equal(n.entries,1);assert.deepEqual(await readFile(join(f.root,'.git/index')),bytes);
+  assert.throws(()=>executions.releaseUnstartedWorkspace('owner','project',f.accepted.execution_id),/workspace_reservation_producer_unsettled/);
+ }finally{await n.close();}
+});
+
+test('actual native maintenance without original startup admission cannot authorize reserved effects',
+ {skip:!process.env.JOT_DSH_RUNTIME_MODULES,timeout:45000},async t=>{
+ const f=await fixture(t),n=await nativeDispatchFixture(f,true,{guarded:false}),index=await readFile(join(f.root,'.git/index'));
+ try{
+  await assert.rejects(n.executions.performReserved('owner','project',f.accepted.execution_id),/native_workspace_admission_unavailable/);
+  assert.deepEqual(await readFile(join(f.root,'.git/index')),index);assert.equal(f.db.prepare('SELECT count(*) n FROM wb_git_index_producers').get().n,0);
+  n.executions.releaseUnstartedWorkspace('owner','project',f.accepted.execution_id);
+ }finally{await n.close();}
+});
+
+test('disposing original startup admission during preparation revokes the held effect authority',
+ {skip:!process.env.JOT_DSH_RUNTIME_MODULES,timeout:45000},async t=>{
+ const f=await fixture(t),n=await nativeDispatchFixture(f,true),kernel=f.current.kernel.indexEffects('owner','project'),prepare=kernel.prepareIndex.bind(kernel),index=await readFile(join(f.root,'.git/index'));
+ kernel.prepareIndex=async(...args)=>{const plan=await prepare(...args);await n.admissionGate.dispose();return plan;};
+ try{
+  await assert.rejects(n.executions.performReserved('owner','project',f.accepted.execution_id),/native_workspace_admission_unavailable/);
+  assert.deepEqual(await readFile(join(f.root,'.git/index')),index);assert.equal(f.db.prepare('SELECT count(*) n FROM wb_git_index_dispatches').get().n,0);
+  assert.equal(f.db.prepare('SELECT count(*) n FROM wb_workspace_reservation_releases').get().n,0);
+ }finally{await n.close();}
+});
+
+test('an async startup-admission callback cannot replace the original synchronous physical check',
+ {skip:!process.env.JOT_DSH_RUNTIME_MODULES,timeout:45000},async t=>{
+ const f=await fixture(t),n=await nativeDispatchFixture(f,true),index=await readFile(join(f.root,'.git/index'));
+ const executions=new GitIndexExecutions(f.db,new ProjectRepository(f.db),f.current.kernel,f.current.intents,{nativeWorkspaceHost:{...n.nativeHost,assertAdmission:()=>Promise.resolve()}});
+ try{
+  await assert.rejects(executions.performReserved('owner','project',f.accepted.execution_id),/git_native_workspace_host_unavailable/);
+  assert.deepEqual(await readFile(join(f.root,'.git/index')),index);assert.equal(f.db.prepare('SELECT count(*) n FROM wb_git_index_producers').get().n,0);
+  executions.releaseUnstartedWorkspace('owner','project',f.accepted.execution_id);
+ }finally{await n.close();}
+});
+
+test('native custody cannot publish or clean up through a replaced original Worker lease',
+ {skip:!process.env.JOT_DSH_RUNTIME_MODULES,timeout:45000},async t=>{
+ const f=await fixture(t),n=await nativeDispatchFixture(f,true),kernel=f.current.kernel.indexEffects('owner','project'),prepare=kernel.prepareIndex.bind(kernel),index=await readFile(join(f.root,'.git/index'));
+ kernel.prepareIndex=async(...args)=>{const plan=await prepare(...args);f.db.prepare("UPDATE ga_worker_leases SET owner='replacement-worker',generation=generation+1 WHERE resource_id LIKE 'git-index-binding:%'").run();return plan;};
+ try{
+  await assert.rejects(n.executions.performReserved('owner','project',f.accepted.execution_id),/workbench_execution_lease_revoked/);
+  assert.deepEqual(await readFile(join(f.root,'.git/index')),index);assert.equal(f.db.prepare('SELECT count(*) n FROM wb_git_index_dispatches').get().n,0);
+  assert.equal(f.db.prepare('SELECT owner FROM ga_worker_leases').get().owner,'replacement-worker');assert.equal(n.executions.producer('owner','project',f.accepted.execution_id).state,'interrupted');
+  assert.equal(f.db.prepare('SELECT count(*) n FROM wb_workspace_reservation_releases').get().n,0);
+  await assert.rejects(n.executions.performReserved('owner','project',f.accepted.execution_id),/git_execution_producer_unsettled/);assert.equal(n.entries,1);
+ }finally{await n.close();}
 });

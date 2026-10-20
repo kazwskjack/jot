@@ -1,5 +1,6 @@
 import {createHash} from 'node:crypto';
 import {withNativeWorkspaceBarrier} from './native-workspace-barrier.js';
+import {assertNativeWorkspaceAdmissionGate} from './native-workspace-factory.js';
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/,SHA=/^[a-f0-9]{64}$/;
 const KINDS=new Set(['work_binding','mode_binding','runtime','run_native','checkpoint','goal_control','native_parent','native_child']);
 const fields=(value,keys)=>!!value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join(',')===[...keys].sort().join(',');
@@ -10,6 +11,9 @@ const contexts=new WeakMap();
 export function inspectNativeWorkspaceSource(context){
  const held=context&&contexts.get(context);if(!held)throw Error('native_workspace_source_context_invalid');
  held.check();return held.view;
+}
+export function assertNativeWorkspaceSourceAdmission(context){
+ const held=context&&contexts.get(context);if(!held)throw Error('native_workspace_source_context_invalid');held.check();held.assertAdmission();
 }
 function freeze(value){if(value&&typeof value==='object'){for(const child of Object.values(value))freeze(child);Object.freeze(value);}return value;}
 function verified(value,scope){
@@ -62,7 +66,7 @@ export async function readNativeWorkspaceFamily(bridge,input,signal){
  * effect grant, root association or cross-process admission lock is added.
  */
 export function createNativeWorkspaceSourceHost(options={}){
- const {registry,sessions,persistence,currentPersistence,backendClass,validateLog,projections,factoryGate,reconcileOperations}=options;
+ const {registry,sessions,persistence,currentPersistence,backendClass,validateLog,projections,factoryGate,admissionGate,reconcileOperations}=options;
  if(typeof registry?.get!=='function'||typeof sessions?.get!=='function'||typeof persistence?.open!=='function'||typeof persistence?.stat!=='function'
   ||typeof currentPersistence!=='function'||typeof backendClass!=='function'||!(persistence instanceof backendClass)
   ||!(options.allowedPresets instanceof Set)||!options.allowedPresets.size||typeof validateLog!=='function'||!projections||!factoryGate
@@ -106,7 +110,7 @@ export function createNativeWorkspaceSourceHost(options={}){
    const current=()=>{if(!contexts.has(context))throw Error('native_workspace_source_context_invalid');check();nativeCheck();};
    const recheck=async()=>{current();await observe();current();};
    context=Object.freeze({source,proofs,workspaces,check:current,recheck,signal:nativeSignal});
-   const view=Object.freeze({source,proofs,workspaces,execution_authorized:false});contexts.set(context,{check:current,view});
+   const view=Object.freeze({source,proofs,workspaces,signal:nativeSignal,execution_authorized:false});contexts.set(context,{check:current,view,assertAdmission:()=>assertNativeWorkspaceAdmissionGate(admissionGate,factoryGate)});
    let result;try{result=await operation(context);}finally{contexts.delete(context);}
    await observe();return result;
   });
