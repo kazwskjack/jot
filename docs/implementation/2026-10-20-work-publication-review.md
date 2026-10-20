@@ -111,11 +111,11 @@ claim rollback. Only after those paths pass should HTTP/mobile apply/current/
 disposition controls and Git/checkpoint write activation be connected. The full
 26-capability and portable Chat/Work scope remains open.
 
-The original reservation schema currently constrains `operation_kind` to
-`git_index`, and settlement resolves index-specific execution, outcome, producer
-and finish rows. File publication needs a distinct typed operation through this
-same coordinator, with an atomic, quiescent migration that preserves original
-rows, hashes, member fences and foreign keys. It must not be cast as an index
-operation or settled by unrelated Git receipts. The existing authenticated native
-hosting must retain its complete family and original producer lifecycle for that
-new operation; a second mutex table or approval-only shortcut would not close it.
+The default legacy reservation schema constrains `operation_kind` to `git_index`.
+The subsequent [explicit original-schema upgrade and admission](2026-10-20-workspace-publication-admission.md)
+adds `work_publication` through that same coordinator while preserving original
+rows, hashes, member fences and foreign keys. It does not integrate a physical
+producer or settlement; index-only evidence is explicitly refused for publication.
+Existing authenticated native hosting must still retain its complete family and
+original producer lifecycle for the new operation. A second mutex table or
+approval-only shortcut would not close it.

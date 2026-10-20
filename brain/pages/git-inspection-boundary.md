@@ -4,7 +4,7 @@ title: Git views use owned read-only repository snapshots
 category: decision
 status: active
 created: "2026-10-19T17:04:32"
-updated: "2026-10-20T17:38:55"
+updated: "2026-10-20T18:30:08"
 ---
 
 <!-- compiled_truth -->
@@ -119,4 +119,10 @@ Git 执行的配置占用范围与程序／stat 见证分离：原始记录固�
   kind: decision
   summary: "Publication review is a distinct immutable intent in the original physical WAL database. Read clean or absent configured targets without widening Git stage selection; bind original finalized source, actual target bytes/ancestors/HEAD/index, configuration scope and owner review version. Historical acknowledgements cannot dispatch or revive approval. Nested repositories and unsupported producer changes refuse; original native/project/Worker custody and interrupted physical publication remain separate required integration."
   source: docs/superpowers/plans/2026-10-20-work-review-publication-chain.md
+  affects: [git-inspection-boundary]
+
+- time: 2026-10-20T18:30:08
+  kind: decision
+  summary: "Publication admission uses a distinct work_publication kind in the SAME original project reservation and family seals. Explicit offline schema maintenance preserves original receipt/dependency hashes, triggers and FKs; durable quiescence checks cannot prove idle pools stopped, so migration reports no observed pool drain and grants no execution. Historical acceptance does not restore revoked review. Publication cannot settle with index-only proof, and unknown future producer storage blocks pre-dispatch release until the owning lifecycle is understood."
+  source: docs/implementation/2026-10-20-workspace-publication-admission.md
   affects: [git-inspection-boundary]

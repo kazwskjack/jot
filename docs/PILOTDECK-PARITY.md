@@ -73,6 +73,12 @@ binds original source and configured target in a separate immutable owner review
 It does not dispatch writes; producer custody, recovery and product entry remain
 unimplemented parts of that chain.
 
+The [original publication admission](implementation/2026-10-20-workspace-publication-admission.md)
+adds an explicit source-bound acceptance and a distinct operation kind to the
+same project reservation/family system, with tested offline schema preservation
+and crash rollback. It blocks original shared writes and Worker claims; it does
+not dispatch files, prove deployed pool drain or complete native publication.
+
 Optional original native hosting uses an authenticated local pipe/socket.
 Separate-process installed-SDK tests stage reviewed bytes and observe parent
 approval revocation in the same physical database. This is internal hosting,

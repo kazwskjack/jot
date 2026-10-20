@@ -73,6 +73,17 @@ export class WorkPublicationIntents{
  private view(row:Row,event:Row){return freezeWorkAdmission({intent_id:row.intent_id,project_id:row.project_id,source:json(row.source_json),target:json(row.target_json),changes:json(row.changes_json),paths:json(row.selection_json).paths,
   review_sha256:row.review_sha256,version:Number(event.version),state:event.state,created_at:row.created_at,updated_at:event.created_at,execution_authorized:false as const});}
  get(owner:string,project:string,id:string){return this.read(()=>{const row=this.row(owner,project,id);return this.view(row,this.latest(id));});}
+ /** Original service-only prerequisite, not a serializable execution grant. */
+ executionSource(owner:string,project:string,id:string,version:number,reviewSha256:string){
+  return this.read(()=>{
+   if(!Number.isSafeInteger(version)||version<1||!SHA.test(reviewSha256))fail('invalid');
+   const row=this.row(owner,project,id),event=this.latest(id);if(event.state!=='approved'||event.version!==version||row.review_sha256!==reviewSha256)fail('review_changed');
+   const input=json(row.selection_json) as WorkPublicationPrepare,source=this.selected(owner,project,input);
+   if(canonicalJson(source.summary)!==row.source_json||this.git.executionBinding(owner,project)!==row.target_binding_sha256)fail('review_changed');
+   return freezeWorkAdmission({intent_id:id,review_version:version,review_sha256:reviewSha256,source:source.summary,target:json(row.target_json),changes:json(row.changes_json),paths:input.paths,
+    binding_sha256:row.target_binding_sha256,database_sha256:row.database_sha256,execution_authorized:false as const});
+  });
+ }
  private input(value:unknown):WorkPublicationPrepare{
   if(!exact(value,['request_id','source_run_id','source_sha256','paths'])||typeof value.request_id!=='string'||!ID.test(value.request_id)||typeof value.source_run_id!=='string'||!ID.test(value.source_run_id)
    ||typeof value.source_sha256!=='string'||!SHA.test(value.source_sha256)||!Array.isArray(value.paths)||!value.paths.length||value.paths.length>100)fail('invalid');

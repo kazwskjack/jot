@@ -130,12 +130,14 @@ nonexecuting metadata copy, cancellation and owner checks after awaits.
    project reservation and complete native-family custody. Retain the existing
    shared write/checkpoint barriers and original Worker lease through awaited
    preparation, per-file publication and settlement. Journal before effects.
-   The current `workspace-coordination.ts` source type and table constraint
-   accept only `git_index`; its settlement reads original Git index producer and
-   outcome tables. Extend that original typed protocol and controlled schema
-   migration for publication, preserving existing reservations, immutable hashes,
-   member fences and foreign keys. Do not label file publication `git_index`,
-   release it through index-only evidence, or create a parallel exclusion store.
+   The default legacy table still accepts only `git_index`. The explicit
+   [original-schema upgrade and publication admission](../../implementation/2026-10-20-workspace-publication-admission.md)
+   now add a distinct `work_publication` source to the same reservation and
+   family seals, preserving original rows, immutable hashes, member fences and
+   foreign keys. This is metadata admission only. Publication settlement refuses
+   index-only proof until its actual producer/outcome lifecycle is integrated.
+   Do not label file publication `git_index`, release it through index-only
+   evidence, or create a parallel exclusion store.
    The original authenticated native-family hosting must carry the distinct
    approved publication/source identity through the same live custody boundary.
    Follow SQLite's [generalized table-change procedure](https://www.sqlite.org/lang_altertable.html#otheralter)
@@ -143,8 +145,10 @@ nonexecuting metadata copy, cancellation and owner checks after awaits.
    dependent triggers/views, full foreign-key checks and rollback. A synthetic
    Node/SQLite probe reproduced deferred-only replacement failing at commit;
    the maintenance procedure retained original/dependent rows and triggers and
-   rejected a genuine injected foreign-key violation. This is mechanism evidence,
-   not acceptance for the original schema or permission to modify a live service.
+   rejected a genuine injected foreign-key violation. The subsequent actual
+   original-schema tests include child-process crash rollback, retained native
+   family/history and original Worker fencing. Neither level proves that deployed
+   pools have drained or grants permission to modify a live service.
 7. Prove separate-process interruption before preparation, between files, after
    effect/before acknowledgement, and after acknowledgement/before settlement.
    A restart reads original evidence; it cannot infer rollback, replay unknown
@@ -156,7 +160,8 @@ tracked files, a new nested target, unrelated local modifications, changed HEAD
 or index, root replacement, symlink ancestors, cancellation during reads,
 ownership transfer and a source finalized in another database. Successful review
 must leave both working tree and index byte-for-byte unchanged and create no
-model call. These cases remain unimplemented until backed by executed evidence.
+model call. The internal target review now has local executed evidence in its
+linked implementation record; product entry and actual publication remain open.
 
 ## 3. Original Git/checkpoint/mobile closure and release
 

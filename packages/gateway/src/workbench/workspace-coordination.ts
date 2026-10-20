@@ -1,7 +1,9 @@
 import {createHash,randomUUID} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
+import {workspacePublicationSchema} from './workspace-coordination-upgrade.ts';
 
-type Source={owner_id:string;project_id:string;operation_kind:'git_index';operation_id:string;binding_sha256:string};
+export type WorkspaceOperationSource={owner_id:string;project_id:string;operation_kind:'git_index'|'work_publication';operation_id:string;binding_sha256:string};
+type Source=WorkspaceOperationSource;
 type Reservation=Source&{reservation_id:string;created_at:string};
 const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
@@ -141,7 +143,7 @@ export function assertWorkspaceWritable(db:DatabaseSync,_owner:string,project:st
 function record(db:DatabaseSync,source:Source):Reservation|undefined{
  const row=db.prepare('SELECT * FROM wb_workspace_reservations WHERE operation_kind=? AND operation_id=?').get(source.operation_kind,source.operation_id);
  if(!row)return;
- const value:Reservation={owner_id:String(row.owner_id),project_id:String(row.project_id),operation_kind:row.operation_kind as 'git_index',operation_id:String(row.operation_id),binding_sha256:String(row.binding_sha256),reservation_id:String(row.reservation_id),created_at:String(row.created_at)};
+ const value:Reservation={owner_id:String(row.owner_id),project_id:String(row.project_id),operation_kind:row.operation_kind as Source['operation_kind'],operation_id:String(row.operation_id),binding_sha256:String(row.binding_sha256),reservation_id:String(row.reservation_id),created_at:String(row.created_at)};
  if(digest(value)!==row.record_sha256||Object.keys(source).some(key=>source[key as keyof Source]!==value[key as keyof Source]))throw Error('workspace_reservation_source_changed');
  return value;
 }
@@ -157,7 +159,8 @@ function view(db:DatabaseSync,value:Reservation){
  * caller must verify its immutable original operation; this is not a wire API. */
 export function reserveWorkspaceOperation(db:DatabaseSync,source:Source){
  if(!db.isTransaction||!available(db))throw Error('workspace_coordination_unavailable');
- if(![source.owner_id,source.project_id,source.operation_id].every(value=>typeof value==='string'&&ID.test(value))||source.operation_kind!=='git_index'||!/^[a-f0-9]{64}$/.test(source.binding_sha256))throw Error('workspace_reservation_source_invalid');
+ if(![source.owner_id,source.project_id,source.operation_id].every(value=>typeof value==='string'&&ID.test(value))||!['git_index','work_publication'].includes(source.operation_kind)||!/^[a-f0-9]{64}$/.test(source.binding_sha256))throw Error('workspace_reservation_source_invalid');
+ if(source.operation_kind==='work_publication'&&workspacePublicationSchema(db)!=='publication')throw Error('workspace_publication_upgrade_required');
  const prior=record(db,source);if(prior){const current=view(db,prior);if(current.state!=='reserved')throw Error('workspace_reservation_closed');return current;}
  assertWorkspaceWritable(db,source.owner_id,source.project_id);
  if(db.prepare(`SELECT 1 FROM ga_runs r JOIN ga_conversations c ON c.id=r.conversation_id
@@ -180,6 +183,7 @@ export function releaseUnstartedWorkspaceOperation(db:DatabaseSync,source:Source
 export function settleWorkspaceOperation(db:DatabaseSync,source:Source){
  if(!db.isTransaction||!available(db))throw Error('workspace_coordination_unavailable');
  const value=record(db,source);if(!value||view(db,value).state!=='reserved')throw Error('workspace_reservation_closed');
+ if(source.operation_kind==='work_publication')throw Error('workspace_publication_producer_unsettled');
  const execution=db.prepare('SELECT * FROM wb_git_index_executions WHERE execution_id=? AND owner_id=? AND project_id=? AND binding_sha256=? AND protocol=4').get(source.operation_id,source.owner_id,source.project_id,source.binding_sha256);
  const outcome=db.prepare('SELECT * FROM wb_git_index_outcomes WHERE execution_id=?').get(source.operation_id),producer=db.prepare('SELECT * FROM wb_git_index_producers WHERE execution_id=?').get(source.operation_id),finish=db.prepare('SELECT * FROM wb_git_index_producer_finishes WHERE execution_id=?').get(source.operation_id);
  let result,start,end;try{result=JSON.parse(String(outcome?.receipt_json));start=JSON.parse(String(producer?.record_json));end=JSON.parse(String(finish?.record_json));}catch{throw Error('workspace_reservation_producer_unsettled');}
@@ -281,7 +285,7 @@ export function assertNativeWorkspaceAdmission(db:DatabaseSync,sessionRef:string
  if(holds.length>1000)throw Error('workspace_namespace_unconfirmed');
  if(!holds.length)return;
  for(const held of holds){
-  const source={owner_id:String(held.owner_id),project_id:String(held.project_id),operation_kind:held.operation_kind as 'git_index',operation_id:String(held.operation_id),binding_sha256:String(held.binding_sha256)};
+  const source={owner_id:String(held.owner_id),project_id:String(held.project_id),operation_kind:held.operation_kind as Source['operation_kind'],operation_id:String(held.operation_id),binding_sha256:String(held.binding_sha256)};
   record(db,source);
   let family;try{family=JSON.parse(String(held.family_json));}catch{throw Error('workspace_namespace_unconfirmed');}
   if(!family||family.reservation_id!==held.reservation_id||family.owner_id!==held.owner_id||family.project_id!==held.project_id||family.binding_sha256!==held.binding_sha256
