@@ -1,6 +1,6 @@
 import React,{useEffect,useRef,useState} from 'react';
 import type {GitIndexAcceptance,GitIndexStatus,GitIndexControlInput,GitReviewIntent} from './types';
-import {pathId,workbenchApi} from './client';import {useMutationReceipt} from './useMutationReceipt';
+import {pathId,workbenchApi} from './client';import {useGitMutationReceipt} from './useGitMutationReceipt';
 type Pending={kind:'admit'|'control'|'review-cancel';path:string;body:Record<string,unknown>};
 function checkAcceptance(a:GitIndexAcceptance,project:string,intent:string){if(a.project_id!==project||a.intent_id!==intent||a.accepted!==true||a.execution_authorized!==false||!['stage','unstage'].includes(a.action))throw Error('GIT_INDEX_SCOPE_CHANGED');return a}
 function checkedStatus(s:GitIndexStatus,a:GitIndexAcceptance){const e=s.execution;if(e.execution_id!==a.execution_id||e.project_id!==a.project_id||e.intent_id!==a.intent_id||e.request_id!==a.request_id||e.action!==a.action||s.producer.execution_id!==a.execution_id||s.execution_authorized!==false||e.execution_authorized!==false||s.producer.execution_authorized!==false)throw Error('GIT_INDEX_SCOPE_CHANGED');return s}
@@ -10,7 +10,7 @@ const finished=(s:GitIndexStatus)=>s.execution.state==='applied'&&s.workspace_st
 /** Same original admission/receipt authority. Native response loss triggers
  * read-only reconciliation, never an automatic replay of physical effects. */
 export default function GitIndexOperation({project,review,acceptance,allowDispatch,onBusy,onReviewChange,onChanged,refreshToken=0}:{project:string;review?:GitReviewIntent;acceptance?:GitIndexAcceptance;allowDispatch:boolean;onBusy?:(value:boolean)=>void;onReviewChange?:(review:GitReviewIntent)=>void;onChanged?:()=>void;refreshToken?:number}){
- const mutation=useMutationReceipt(),[accepted,setAccepted]=useState<GitIndexAcceptance|null>(acceptance??null),[status,setStatus]=useState<GitIndexStatus|null>(null),[currentReview,setCurrentReview]=useState<GitReviewIntent|null>(review??null),[verified,setVerified]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[ack,setAck]=useState(false),[attempted,setAttempted]=useState(false);
+ const mutation=useGitMutationReceipt(project),[accepted,setAccepted]=useState<GitIndexAcceptance|null>(acceptance??null),[status,setStatus]=useState<GitIndexStatus|null>(null),[currentReview,setCurrentReview]=useState<GitReviewIntent|null>(review??null),[verified,setVerified]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[ack,setAck]=useState(false),[attempted,setAttempted]=useState(false);
  const command=useRef<Pending|null>(null),alive=useRef(true),inflight=useRef(false),active=useRef<AbortController|null>(null),report=useRef(onBusy),changed=useRef(onChanged),reviewChanged=useRef(onReviewChange),reviewSnapshot=useRef<GitReviewIntent|null>(review??null);report.current=onBusy;changed.current=onChanged;reviewChanged.current=onReviewChange;
  const intent=acceptance?.intent_id??review?.intent_id??'',base=`/projects/${pathId(project)}/git`,isClosed=!!status&&finished(status);
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;active.current?.abort();report.current?.(false)}},[project,intent]);

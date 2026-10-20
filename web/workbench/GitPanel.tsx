@@ -5,6 +5,7 @@ import {useResource} from './useResource';
 import {ResourceStatus} from './AgentsPanel';
 import GitReview,{type GitReviewDraft} from './GitReview';
 import GitHistory from './GitHistory';
+import GitPendingRequests from './GitPendingRequests';
 import {MutationPendingState} from './useMutationReceipt';
 
 function message(code:string){
@@ -16,7 +17,7 @@ const label=(value:string)=>({M:'修改',A:'新增',D:'删除',R:'重命名',C:'
 export default function GitPanel({caps}:{caps:Caps}){
  const configured=caps.git_workbench?.configured_projects??[],projects=useResource(workbenchApi.projects,'git-projects',configured.length>0);
  const [selected,setSelected]=useState(''),[selection,setSelection]=useState<{project:string;snapshot:string;path:string;stage:'working'|'staged'}>();
- const [draft,setDraft]=useState<GitReviewDraft|null>(null),[reviewBusy,setReviewBusy]=useState(false),pending=useContext(MutationPendingState),locked=pending||reviewBusy;
+ const [draft,setDraft]=useState<GitReviewDraft|null>(null),[reviewBusy,setReviewBusy]=useState(false),[recoveryPending,setRecoveryPending]=useState(false),pending=useContext(MutationPendingState),locked=pending||reviewBusy||recoveryPending;
  const available=projects.data?.items.filter(project=>configured.includes(project.project_id))??[],project=available.some(value=>value.project_id===selected)?selected:available[0]?.project_id??'';
  const snapshot=useResource(signal=>workbenchApi.git(project,signal),'git-snapshot:'+project,Boolean(project)),state=!snapshot.error&&!snapshot.loading&&snapshot.data?.project_id===project?snapshot.data:null;
  const active=selection?.project===project&&state?.snapshot_id===selection.snapshot?selection:undefined;
@@ -29,7 +30,8 @@ export default function GitPanel({caps}:{caps:Caps}){
   <h2>Git 工作台</h2><p className="wb-page-intro">查看项目的分支与文件变化。<span className="wb-badge">{caps.git_workbench?.read_only===false?'可审核暂存':'只读'}</span></p>
   {!configured.length?<p role="status">尚未绑定项目仓库，请先完成服务端配置。</p>:<>
    <ResourceStatus {...projects} onRetry={projects.reload}/><div className="wb-toolbar"><label>项目仓库<select aria-label="项目仓库" disabled={locked} value={project} onChange={event=>{setDraft(null);setSelection(undefined);setSelected(event.target.value);}}>{available.map(value=><option key={value.project_id} value={value.project_id}>{value.title}</option>)}</select></label><button type="button" disabled={locked||!project||snapshot.loading} onClick={refresh}>刷新仓库</button></div>
-   {project&&<GitHistory key={project} project={project} locked={locked} allowDispatch={caps.git_workbench?.read_only===false} onBusy={setReviewBusy}/>}
+   {project&&<GitPendingRequests key={'pending:'+project} project={project} allowDispatch={caps.git_workbench?.read_only===false} onPending={setRecoveryPending}/>}
+   {project&&<GitHistory key={project} project={project} locked={reviewBusy} allowDispatch={caps.git_workbench?.read_only===false} onBusy={setReviewBusy}/>}
    <ResourceStatus loading={snapshot.loading} error={message(snapshot.error)} onRetry={refresh}/>
    {state&&<>
     <div className="wb-git-head"><strong>{state.head.branch??(state.head.detached?'分离 HEAD':'未命名分支')}</strong><code>{state.head.oid?.slice(0,12)??'尚无提交'}</code></div>

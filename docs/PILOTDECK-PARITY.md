@@ -657,3 +657,10 @@ transactional schema verification cannot pollute its committed cache. Large
 project materialization still has significant guard/IO overhead. This completes
 the logical source artifact connection, not original DSH work admission,
 plan-only isolated file execution, reviewed application or production acceptance.
+
+
+The [original request remount continuation](implementation/2026-10-21-git-original-request-remount.md)
+also retains unconfirmed atomic commands across page reload in an authenticated
+owner/project browser namespace. Explicit same-key confirmation is separate
+from fresh original server reads and later native dispatch. This closes the
+pre-commit page-loss gap locally, not broader Git or all26 acceptance.

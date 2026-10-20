@@ -702,3 +702,14 @@ mobile selected Apply/recovery, the remaining process-effect matrix, broader
 producers and separately authorized Git workflows remain in the ledger. All26
 capabilities and portable Chat/Work/provider/deployment acceptance stay in scope;
 this increment does not substitute native transport for complete product behavior.
+
+
+### Original atomic request remount continuation
+
+The [request recovery increment](../../implementation/2026-10-21-git-original-request-remount.md)
+continues the same original index workflow: browser hints retain an unconfirmed
+atomic command before commit, while the original server receipts remain the
+only acceptance authority. Page mount and refresh perform no effects. Explicit
+retry preserves original body/key and fresh reads restore the existing review
+or operation UI. Original broader Git, all26 and portable deployment requirements
+remain unchanged; local browser persistence does not certify them.

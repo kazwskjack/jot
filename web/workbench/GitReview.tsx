@@ -1,13 +1,13 @@
 import React,{useEffect,useRef,useState} from 'react';
 import type {GitReviewPrepare,GitReviewIntent} from './types';
 import {pathId,workbenchApi} from './client';
-import {useMutationReceipt} from './useMutationReceipt';
+import {useGitMutationReceipt} from './useGitMutationReceipt';
 import GitIndexOperation from './GitIndexOperation';
 export type GitReviewDraft={project:string;snapshot:string;paths:string[];action:GitReviewPrepare['action'];actions:GitReviewPrepare['action'][]};
 const titles:Record<GitReviewPrepare['action'],string>={stage:'暂存选定文件',unstage:'取消选定文件的暂存',commit:'提交全部已暂存文件',discard:'丢弃选定的工作区修改','delete-untracked':'删除选定的未跟踪文件'};
 type Command={path:string;body:unknown};
-export default function GitReview({draft,onClose,onBusy,allowIndexExecution=false}:{draft:GitReviewDraft;onClose:()=>void;onBusy:(busy:boolean)=>void;allowIndexExecution?:boolean}){
- const mutation=useMutationReceipt(),[action,setAction]=useState(draft.action),[message,setMessage]=useState(''),[review,setReview]=useState<GitReviewIntent|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[verified,setVerified]=useState(false),[stale,setStale]=useState(false);
+export default function GitReview({draft,onClose,onBusy,allowIndexExecution=false,initialReview}:{draft:GitReviewDraft;onClose:()=>void;onBusy:(busy:boolean)=>void;allowIndexExecution?:boolean;initialReview?:GitReviewIntent}){
+ const mutation=useGitMutationReceipt(draft.project),[action,setAction]=useState(draft.action),[message,setMessage]=useState(''),[review,setReview]=useState<GitReviewIntent|null>(initialReview??null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[verified,setVerified]=useState(!!initialReview),[stale,setStale]=useState(false);
  const command=useRef<Command|null>(null),alive=useRef(true),inflight=useRef(false),base=`/projects/${pathId(draft.project)}/git/intents`;
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;onBusy(false);};},[onBusy]);
  const [executionBusy,setExecutionBusy]=useState(false),locked=busy||mutation.pending||executionBusy;
