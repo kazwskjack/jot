@@ -67,7 +67,11 @@ Finalized isolated text work also has an internal historical source reader that
 verifies original acceptance, inspection, native completion and every written
 version's immutable bytes. It works against read-only SQLite without renewing
 execution authority. [Source evidence and limits](implementation/2026-10-20-finalized-work-sources.md)
-remain distinct from the unimplemented target review, publication and recovery.
+remain distinct from target publication and recovery. The subsequent
+[internal target review](implementation/2026-10-20-work-publication-review.md)
+binds original source and configured target in a separate immutable owner review.
+It does not dispatch writes; producer custody, recovery and product entry remain
+unimplemented parts of that chain.
 
 Optional original native hosting uses an authenticated local pipe/socket.
 Separate-process installed-SDK tests stage reviewed bytes and observe parent

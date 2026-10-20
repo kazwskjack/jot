@@ -80,3 +80,11 @@ test('historical reads retain the caller transaction and never commit unrelated 
  }finally{f.db.exec('ROLLBACK')}
  assert.equal(f.db.prepare('SELECT title FROM ga_conversations WHERE id=?').get(f.admission.conversation_id).title,before);
 });
+
+
+test('one read selection resolves exact immutable bytes in one original read boundary',async t=>{
+ const f=await completedWorkFixture(t),service=new FinalizedWorkSources(f.db),source=service.summary('owner',f.admission.run_id),before=counters(f.db);
+ assert.equal(typeof service.readSelection,'function');const selection=service.readSelection('owner',f.admission.run_id,['source.md'],source.source_sha256);
+ assert.deepEqual(selection.summary,source);assert.equal(selection.files.get('source.md').toString(),'Exact reviewed work content');assert.deepEqual(counters(f.db),before);
+ assert.throws(()=>service.readSelection('owner',f.admission.run_id,['source.md','../other'],source.source_sha256),/completed_work_source_not_found/);
+});

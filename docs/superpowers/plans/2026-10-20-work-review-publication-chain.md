@@ -77,6 +77,11 @@ visible as unfinished integration, not silently excluded from the final goal.
   owner/project/workspace, source versions, chosen paths, base/result manifests,
   original inspection and actual configured target identity in a distinct intent.
   No request-supplied root, executor, shell or mutable latest-version fallback.
+  Internal target observation and immutable review are now implemented for the
+  supported text-file source paths; see
+  [target review implementation](../../implementation/2026-10-20-work-publication-review.md).
+  This item remains open until original producer consumption and product entry
+  are connected; an internal prepared/approved record grants no file effect.
 - [ ] Review the actual target diff against its original base. Changed targets
   conflict before effects. A task acceptance/delivery cannot authorize apply.
 - [ ] Retain original project reservation and native maintenance, including source
@@ -125,6 +130,21 @@ nonexecuting metadata copy, cancellation and owner checks after awaits.
    project reservation and complete native-family custody. Retain the existing
    shared write/checkpoint barriers and original Worker lease through awaited
    preparation, per-file publication and settlement. Journal before effects.
+   The current `workspace-coordination.ts` source type and table constraint
+   accept only `git_index`; its settlement reads original Git index producer and
+   outcome tables. Extend that original typed protocol and controlled schema
+   migration for publication, preserving existing reservations, immutable hashes,
+   member fences and foreign keys. Do not label file publication `git_index`,
+   release it through index-only evidence, or create a parallel exclusion store.
+   The original authenticated native-family hosting must carry the distinct
+   approved publication/source identity through the same live custody boundary.
+   Follow SQLite's [generalized table-change procedure](https://www.sqlite.org/lang_altertable.html#otheralter)
+   on a controlled, quiescent maintenance connection, including preservation of
+   dependent triggers/views, full foreign-key checks and rollback. A synthetic
+   Node/SQLite probe reproduced deferred-only replacement failing at commit;
+   the maintenance procedure retained original/dependent rows and triggers and
+   rejected a genuine injected foreign-key violation. This is mechanism evidence,
+   not acceptance for the original schema or permission to modify a live service.
 7. Prove separate-process interruption before preparation, between files, after
    effect/before acknowledgement, and after acknowledgement/before settlement.
    A restart reads original evidence; it cannot infer rollback, replay unknown

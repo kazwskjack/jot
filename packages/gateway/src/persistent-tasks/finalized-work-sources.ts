@@ -155,8 +155,15 @@ export class FinalizedWorkSources{
   return {summary:freezeWorkAdmission({...facts,source_sha256:hash(facts)}),versions};
  }
  summary(owner:string,runId:string){return this.snapshot(()=>this.material(owner,runId).summary);}
+ readSelection(owner:string,runId:string,paths:readonly string[],expectedSourceSha256:string){
+  return this.snapshot(()=>{
+   if(!Array.isArray(paths)||!paths.length||paths.length>100||new Set(paths).size!==paths.length)throw Error('completed_work_source_not_found');
+   const value=this.material(owner,runId);if(value.summary.source_sha256!==expectedSourceSha256)throw Error('completed_work_source_conflict');
+   const files=new Map<string,Buffer>();for(const path of paths){const file=value.versions.get(path);if(!file)throw Error('completed_work_source_not_found');files.set(path,Buffer.from(file.content,'utf8'));}
+   return{summary:value.summary,files};
+  });
+ }
  content(owner:string,runId:string,path:string,expectedSourceSha256:string):Buffer{
-  return this.snapshot(()=>{const value=this.material(owner,runId);if(value.summary.source_sha256!==expectedSourceSha256)throw Error('completed_work_source_conflict');
-   const file=value.versions.get(path);if(!file)throw Error('completed_work_source_not_found');return Buffer.from(file.content,'utf8');});
+  return this.readSelection(owner,runId,[path],expectedSourceSha256).files.get(path)!;
  }
 }

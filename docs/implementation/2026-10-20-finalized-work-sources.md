@@ -47,22 +47,26 @@ until it validates their original producer-specific bytes. Rename, deletion,
 mode changes, binary/generated/shared output and unchanged original base content
 are not implemented as a complete publication mechanism by this reader.
 
-There is no new HTTP endpoint, target intent, apply approval or filesystem effect.
-The next implementation must bind the source digest, selected paths and both
-source inventories to the fresh identity and before-state of the actual configured
-target. It must show the owner that target diff, retain original project/native
-producer custody, and journal interrupted publication without replaying unknown
-effects. Historical acceptance alone cannot authorize any of those operations.
+The source reader creates no HTTP endpoint, target intent, apply approval or
+filesystem effect. The subsequent [internal target review](2026-10-20-work-publication-review.md)
+binds its digest and selected versions to the actual configured target, with a
+separate owner review. `readSelection` supplies the selected exact versions in
+one original read snapshot rather than rescanning all receipts per file. That
+review still requires original project/native producer custody and interrupted
+publication journals before any effects. Historical acceptance alone cannot
+authorize those operations.
 
 ## Verification
 
-Eight dedicated tests pass using the real isolated write, inspection, proposal,
+The initial eight dedicated tests passed using the real isolated write, inspection, proposal,
 owner review, native completion handshake and original finalization paths. They
 cover exact bytes and versions, later mutable changes, no read-side effects,
 current policy pause, unfinalized/foreign/missing/transferred sources, invalid
 digest/path, original candidate/certificate/inspection/tool-proof corruption,
 both versions of a rewritten file, rehashed native proof replacement, physically
 read-only SQLite, ordinary discovery rejection and caller transaction ownership.
+The subsequent batch-selection case and current integrated regression are
+recorded with the [publication review](2026-10-20-work-publication-review.md).
 
 The final complete Gateway run passed **2,098 tests**, with **20 skipped**, zero
 failures and zero cancellations (2,118 total). All 591 enumerated Gateway source,

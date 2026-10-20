@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import {canonicalJson} from '../db/canonical-json.ts';
 import {constants} from 'node:fs';
 import {lstat as nativeLstat,open,realpath,readdir,mkdir,mkdtemp,writeFile,rm,utimes} from 'node:fs/promises';
 import {isAbsolute,resolve,join,dirname,relative,sep,basename} from 'node:path';
@@ -12,6 +13,11 @@ export type GitRemote={name:string;kind:'https'|'ssh'|'local'|'other';host?:stri
 export type GitSnapshot={snapshot_id:string;repository_sha256:string;head:{oid:string|null;branch:string|null;detached:boolean};entries:GitEntry[];remotes:GitRemote[];omitted_count:number;read_only:true;execution_authorized:false};
 export type GitDiff={snapshot_id:string;path:string;stage:'working'|'staged';kind:'text'|'binary';patch:string;read_only:true;execution_authorized:false};
 export type GitReviewWitness={protocol:2;snapshot_id:string;repository_sha256:string;head:GitSnapshot['head'];index_sha256:string|null;files:Array<{path:string;kind:'file'|'missing';sha256:string|null;size:number;mode:number}>;attributes:Array<{path:string;sha256:string|null}>};
+export type GitPublicationTargetFile={path:string;kind:'file'|'missing';sha256:string|null;size:number;mode:number;stat_sha256:string|null;
+ ancestors:Array<{path:string|null;kind:'directory'|'missing';identity_sha256:string|null}>};
+export type GitPublicationTargetWitness={protocol:1;kind:'publication_target';snapshot_id:string;repository_sha256:string;
+ head:GitSnapshot['head'];index_sha256:string|null;files:GitPublicationTargetFile[];attributes:GitReviewWitness['attributes'];execution_authorized:false;target_sha256:string};
+export type GitPublicationTargetRead={witness:GitPublicationTargetWitness;contents:Map<string,Buffer>};
 const hash=(value:string|Buffer)=>createHash('sha256').update(value).digest('hex');
 const same=(a:string,b:string)=>process.platform==='win32'?a.toLowerCase()===b.toLowerCase():a===b;
 const within=(root:string,path:string)=>same(root,path)||same(root+sep,path.slice(0,root.length+1));
@@ -144,6 +150,55 @@ export class GitRepositoryInspection{
   if(names.size>this.limits.maxMetadataEntries)throw Error('git_metadata_limit');const result:GitReviewWitness['attributes']=[];let size=0;
   for(const path of [...names].sort()){signal?.throwIfAborted();const fact=await this.file(path);if(fact.kind==='missing'){result.push({path,sha256:null});continue;}if(fact.kind!=='file')throw Error('git_path_unavailable');const bytes=await this.bytes(join(this.root,path),1024*1024,fact.stamp);size+=bytes.length;if(size>4*1024*1024)throw Error('git_metadata_limit');result.push({path,sha256:hash(bytes)});}
   return result;
+ }
+ /** A distinct before-state read for publication, including clean and absent
+  * targets. It does not widen the dirty-only stage/unstage witness. */
+ private async publicationPath(path:string,signal?:AbortSignal):Promise<Omit<GitPublicationTargetFile,'sha256'>>{
+  signal?.throwIfAborted();const parts=path.split('/'),ancestors:GitPublicationTargetFile['ancestors']=[{path:null,kind:'directory',identity_sha256:hash(await this.directory(this.root))}];let current=this.root;
+  const missing=():Omit<GitPublicationTargetFile,'sha256'>=>({path,kind:'missing',size:0,mode:0,stat_sha256:null,ancestors});
+  for(let index=0;index<parts.length;index++){
+   signal?.throwIfAborted();const part=parts[index]!,names=await readdir(current);
+   if(names.length>this.limits.maxMetadataEntries)throw Error('git_metadata_limit');
+   if(index>0&&names.some(name=>name.toLowerCase()==='.git'))throw Error('git_path_unavailable');
+   const aliases=names.filter(name=>name.normalize('NFC').toLowerCase()===part.normalize('NFC').toLowerCase());
+   if(aliases.length>1||aliases.length===1&&aliases[0]!==part)throw Error('git_path_unavailable');
+   if(!aliases.length){if(index<parts.length-1)ancestors.push({path:parts.slice(0,index+1).join('/'),kind:'missing',identity_sha256:null});return missing();}
+   current=join(current,part);const stat=await lstat(current);
+   if(stat.isSymbolicLink())throw Error('git_path_unavailable');
+   if(index<parts.length-1){
+    if(!stat.isDirectory())throw Error('git_path_unavailable');
+    ancestors.push({path:parts.slice(0,index+1).join('/'),kind:'directory',identity_sha256:hash(identity(stat))});
+   }else{
+    if(!stat.isFile()||stat.nlink!==1n||stat.size>32n*1024n*1024n)throw Error('git_path_unavailable');
+    return{path,kind:'file',size:Number(stat.size),mode:Number(stat.mode&0o777n),stat_sha256:hash(witness(stat)),ancestors};
+   }
+  }throw Error('git_path_unavailable');
+ }
+ async publicationTarget(paths:readonly string[],signal?:AbortSignal):Promise<GitPublicationTargetRead>{
+  if(!Array.isArray(paths)||!paths.length||paths.length>100)throw Error('git_intent_invalid');
+  const selected=paths.map(path=>{if(typeof path!=='string')throw Error('git_intent_invalid');return safe(path);}).sort();
+  const folded=selected.map(path=>path.normalize('NFC').toLowerCase());
+  if(new Set(folded).size!==selected.length||folded.some(path=>folded.some(other=>other!==path&&path.startsWith(other+'/'))))throw Error('git_intent_invalid');
+  const context=await this.context(signal);try{
+   const before=await this.inspectContext(context,signal),attributes=await this.attributeManifest(selected,signal),files:GitPublicationTargetFile[]=[],contents=new Map<string,Buffer>();let size=0;
+   for(const path of selected){
+    signal?.throwIfAborted();const entry=before.entries.find(row=>row.path===path);
+    if(entry?.conflicted||entry?.original_path)throw Error('git_path_unavailable');
+    const fact=await this.publicationPath(path,signal);
+    if(fact.kind==='missing'){files.push({...fact,sha256:null});continue;}
+    const stat=await lstat(join(this.root,path));if(hash(witness(stat))!==fact.stat_sha256)throw Error('git_publication_target_changed');
+    const bytes=await this.bytes(join(this.root,path),32*1024*1024,witness(stat));size+=bytes.length;if(size>64*1024*1024)throw Error('git_output_limit');
+    signal?.throwIfAborted();if(canonicalJson(await this.publicationPath(path,signal))!==canonicalJson(fact))throw Error('git_publication_target_changed');
+    files.push({...fact,sha256:hash(bytes)});contents.set(path,bytes);
+   }
+   if((await this.inspectContext(context,signal)).snapshot_id!==before.snapshot_id||canonicalJson(await this.attributeManifest(selected,signal))!==canonicalJson(attributes))throw Error('git_snapshot_changed');
+   for(const file of files){const {sha256,...fact}=file;if(canonicalJson(await this.publicationPath(file.path,signal))!==canonicalJson(fact))throw Error('git_publication_target_changed');}
+   // The last await is followed by another original anchor check. A changed root
+   // or metadata context must not leave a successful before-state observation.
+   if((await this.anchors(signal)).metadata!==context.metadata)throw Error('git_snapshot_changed');signal?.throwIfAborted();
+   const payload={protocol:1 as const,kind:'publication_target' as const,snapshot_id:before.snapshot_id,repository_sha256:before.repository_sha256,head:before.head,index_sha256:context.index,files,attributes,execution_authorized:false as const};
+   return{witness:{...payload,target_sha256:hash(canonicalJson(payload))},contents};
+  }finally{await context.dispose();}
  }
  /** Exact-byte review only. Never writes source files, index, refs or objects. */
  async freeze(snapshotId:string,paths:readonly string[],signal?:AbortSignal):Promise<GitReviewWitness>{

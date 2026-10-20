@@ -4,7 +4,7 @@ title: Git views use owned read-only repository snapshots
 category: decision
 status: active
 created: "2026-10-19T17:04:32"
-updated: "2026-10-20T17:02:01"
+updated: "2026-10-20T17:38:55"
 ---
 
 <!-- compiled_truth -->
@@ -112,5 +112,11 @@ Git 执行的配置占用范围与程序／stat 见证分离：原始记录固�
 - time: 2026-10-20T17:02:01
   kind: decision
   summary: "Historical finalized-work sources must follow the original same-database finalization, owner acceptance, immutable inspection, native completion proof and exact per-version tool receipts. Completed reads neither revive pending review authority nor read mutable trees; task delivery still grants no permission to publish into a configured target. Unsupported producers remain explicit until their original byte provenance is integrated."
+  source: docs/superpowers/plans/2026-10-20-work-review-publication-chain.md
+  affects: [git-inspection-boundary]
+
+- time: 2026-10-20T17:38:55
+  kind: decision
+  summary: "Publication review is a distinct immutable intent in the original physical WAL database. Read clean or absent configured targets without widening Git stage selection; bind original finalized source, actual target bytes/ancestors/HEAD/index, configuration scope and owner review version. Historical acknowledgements cannot dispatch or revive approval. Nested repositories and unsupported producer changes refuse; original native/project/Worker custody and interrupted physical publication remain separate required integration."
   source: docs/superpowers/plans/2026-10-20-work-review-publication-chain.md
   affects: [git-inspection-boundary]
