@@ -47,6 +47,28 @@ test('one member changing while another is captured invalidates the entire famil
  assert.equal(f.held.size,0);
 });
 
+test('changing a resident working directory while another member is captured invalidates the family',async()=>{
+ const f=fixture(['a','b']);f.members[0].agent.session.header.cwd='/original/project';
+ f.members[1].persistence.flush=async()=>{f.members[0].agent.session.header.cwd='/other/project';};
+ await assert.rejects(withNativeWorkspaceBarrier(f.input,()=>assert.fail('changed root must never reach a physical operation')),/native_handoff_changed/);
+ assert.equal(f.held.size,0);
+});
+
+test('maintained workspace observations come from exact native headers and remain immutable',async()=>{
+ const f=fixture(['a']);f.members[0].agent.session.header.cwd='/original/project';
+ await withNativeWorkspaceBarrier(f.input,async(_proofs,check,_signal,_recheck,workspaces)=>{
+  assert.equal(workspaces.length,1);assert.deepEqual(workspaces.map(({session_ref,custody,cwd})=>({session_ref,custody,cwd})),[{session_ref:'a',custody:'resident',cwd:'/original/project'}]);
+  assert.match(workspaces[0].header_sha256,/^[a-f0-9]{64}$/);assert.equal(Object.isFrozen(workspaces),true);assert.equal(Object.isFrozen(workspaces[0]),true);check();
+  assert.throws(()=>{workspaces[0].cwd='/forged';},TypeError);
+ });
+});
+
+test('resident header changes during the operation fail the final check without claiming rollback',async()=>{
+ const f=fixture(['a']);let effects=0;
+ await assert.rejects(withNativeWorkspaceBarrier(f.input,async()=>{effects++;f.members[0].agent.session.header.cwd='/changed';}),/native_handoff_changed/);
+ assert.equal(effects,1);assert.equal(f.held.size,0);
+});
+
 test('queued user input during a mutation is detected, never cleared or consumed',async()=>{
  const f=fixture(),pending=[];f.members[0].projections.stateOf=()=>({'next-turn':pending,'next-step':[]});
  await assert.rejects(withNativeWorkspaceBarrier(f.input,async(_proofs,check)=>{pending.push({id:'original-user-input'});check();}),/native_handoff_changed/);
@@ -121,7 +143,8 @@ test('one original family can retain resident maintenance and cold storage owner
  class Backend{identity=Symbol('cold-backend');async stat(){return{header,formatStatus:'current',revision:'one'};}async open(id,access){assert.equal(access,'write');owned=true;return{id,access,header,inheritedEventCount:0,read:async()=>({events:[]}),close:async()=>{owned=false;}};}}
  const persistence=new Backend();f.members.push({sessionRef:'a-cold',registry:f.registry,sessions:{get:()=>undefined},persistence,currentPersistence:()=>persistence,backendClass:Backend,
   allowedPresets:new Set(['jot-general']),validateLog:async()=>({validated:true}),projections:{snapshot:()=>({asOfSeq:-1,values:{inbox:{'next-turn':[],'next-step':[]},goal:null}})}});
- await withNativeWorkspaceBarrier(f.input,async(proofs,check,_signal,recheck)=>{assert.equal(owned,true);assert.equal(f.held.has('lead'),true);assert.deepEqual(proofs.map(proof=>proof.session_ref),['a-cold','lead']);assert.equal(proofs[0].storage_owned,true);check();await recheck();});
+ await withNativeWorkspaceBarrier(f.input,async(proofs,check,_signal,recheck,workspaces)=>{assert.equal(owned,true);assert.equal(f.held.has('lead'),true);assert.deepEqual(proofs.map(proof=>proof.session_ref),['a-cold','lead']);assert.equal(proofs[0].storage_owned,true);
+  assert.deepEqual(workspaces.map(({session_ref,custody,cwd})=>({session_ref,custody,cwd})),[{session_ref:'a-cold',custody:'cold',cwd:null},{session_ref:'lead',custody:'resident',cwd:null}]);assert.match(workspaces[0].header_sha256,/^[a-f0-9]{64}$/);check();await recheck();});
  assert.equal(owned,false);assert.equal(f.held.size,0);
 });
 
@@ -131,7 +154,7 @@ test('family claims its factory namespace before awaiting storage and releases a
  class Backend{identity=Symbol('storage');async stat(){probed=true;return undefined;}async open(id){throw new Missing(id);}}
  const persistence=new Backend(),gate=createNativeWorkspaceFactoryGate({ctx:{get:()=>({jotPreSetupHookProtocol:2}),on:(name,fn)=>{hooks.set(name,fn);return()=>hooks.delete(name);}},registry,sessions,persistence,currentPersistence:()=>persistence,notFoundError:Missing});
  const input={factoryGate:gate,assertReservation:()=>{},members:[{sessionRef:'absent',registry,sessions,persistence,currentPersistence:()=>persistence,backendClass:Backend,allowedPresets:new Set(['jot-general']),validateLog:async()=>({validated:true}),projections:{snapshot:()=>assert.fail('no fake log')}}]};
- const work=withNativeWorkspaceBarrier(input,async proofs=>{assert.equal(proofs[0].storage_absent,true);entered();await drain;});
+ const work=withNativeWorkspaceBarrier(input,async(proofs,_check,_signal,_recheck,workspaces)=>{assert.equal(proofs[0].storage_absent,true);assert.deepEqual(workspaces,[{session_ref:'absent',custody:'absent',cwd:null,header_sha256:null}]);entered();await drain;});
  try{
   assert.equal(probed,true);assert.throws(()=>hooks.get('agent/before-setup')({agent:{id:'absent'}}),/native_workspace_factory_fenced/);
   await reached;const disposed=gate.dispose();assert.equal(hooks.size,3);finish();await assert.rejects(work,/native_workspace_factory_shutdown/);await disposed;assert.equal(hooks.size,0);

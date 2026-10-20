@@ -4,6 +4,13 @@ const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/,SHA=/^[a-f0-9]{64}$/;
 const KINDS=new Set(['work_binding','mode_binding','runtime','run_native','checkpoint','goal_control','native_parent','native_child']);
 const fields=(value,keys)=>!!value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join(',')===[...keys].sort().join(',');
 const id=value=>typeof value==='string'&&ID.test(value);
+const contexts=new WeakMap();
+/** Host-only observation while the original native custody is still held.
+ * Neither these facts nor a serialized copy grant Git or publication rights. */
+export function inspectNativeWorkspaceSource(context){
+ const held=context&&contexts.get(context);if(!held)throw Error('native_workspace_source_context_invalid');
+ held.check();return held.view;
+}
 function freeze(value){if(value&&typeof value==='object'){for(const child of Object.values(value))freeze(child);Object.freeze(value);}return value;}
 function verified(value,scope){
  const fail=()=>{throw Error('native_workspace_source_unconfirmed');};
@@ -89,13 +96,18 @@ export function createNativeWorkspaceSourceHost(options={}){
    return{...dependencies,sessionRef,...(agent===undefined?{}:{agent})};
   });
   check();
-  return withNativeWorkspaceBarrier({members,assertReservation:check,signal,factoryGate},async(proofs,nativeCheck,nativeSignal,nativeRecheck)=>{
+  return withNativeWorkspaceBarrier({members,assertReservation:check,signal,factoryGate},async(proofs,nativeCheck,nativeSignal,nativeRecheck,workspaces)=>{
    const observe=async()=>{
     await nativeRecheck();check();const current=await read(nativeCheck,nativeSignal);
     if(current.reservation_id!==source.reservation_id||current.binding_sha256!==source.binding_sha256||current.family_sha256!==source.family_sha256)throw Error('native_workspace_source_changed');
     await nativeRecheck();check();
    };
-   await observe();const result=await operation(Object.freeze({source,proofs,check:nativeCheck,recheck:observe,signal:nativeSignal}));
+   await observe();let context;
+   const current=()=>{if(!contexts.has(context))throw Error('native_workspace_source_context_invalid');check();nativeCheck();};
+   const recheck=async()=>{current();await observe();current();};
+   context=Object.freeze({source,proofs,workspaces,check:current,recheck,signal:nativeSignal});
+   const view=Object.freeze({source,proofs,workspaces,execution_authorized:false});contexts.set(context,{check:current,view});
+   let result;try{result=await operation(context);}finally{contexts.delete(context);}
    await observe();return result;
   });
  }});

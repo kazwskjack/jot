@@ -118,6 +118,29 @@ Integration points to inspect and wire, rather than a standalone Git scheduler:
   temporary repository, or exclude native/shared workspace integration from the
   intended final capability merely to pass an HTTP test.
 
+The [maintained source-context increment](../../implementation/2026-10-20-native-workspace-source-context.md)
+now exposes actual resident/cold header cwd and digest inside original live
+custody, with no invented cwd for absent storage. Original context inspection
+rejects copies and expired callbacks; resident header changes invalidate the
+maintenance check. Actual Gateway/native acceptance retains and reports its
+different native and Git directories. This does not close root association.
+
+Continue the original integration in this order:
+
+1. Resolve each maintained native directory through its original Work binding,
+   source journal and operator-configured Git project. Validate physical roots,
+   not just path strings, project membership or matching bytes.
+2. Bind any shared/isolated publication to its original reviewed source and
+   result versions. A selected-index approval must not implicitly copy files
+   into another tree or replace a logical source with a temporary repository.
+3. Retain the original live native handles, project reservation and exact Worker
+   producer custody throughout original index callbacks and checkpoint restore.
+   Recheck synchronous authority and source identities at physical effects.
+4. Settle the original producer before releasing workspace custody. Preserve
+   cancelled/failed/unknown outcomes and exact receipts without replay.
+5. Only then expose original HTTP execution and mobile stage/unstage controls,
+   including lost acknowledgements, restart, cancellation and conflicts.
+
 ## 4. Actual mobile workbench and release
 
 ### Cross-process restart admission continuation

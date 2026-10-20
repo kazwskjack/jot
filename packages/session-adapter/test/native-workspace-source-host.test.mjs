@@ -93,3 +93,32 @@ test('request cancellation during source reading and callback failure preserve c
  await assert.rejects(f.host.withReservedFamily(scope,f.controls,()=>{throw error;}),e=>e===error);
  assert.equal(f.held.size,0);
 });
+
+test('only a currently held original source context exposes native working-directory observations',async t=>{
+ const f=fixture();t.after(()=>f.gate.dispose());f.agent.session.header.cwd='/original/project';let retained;
+ assert.equal(typeof sourceModule.inspectNativeWorkspaceSource,'function');
+ await f.host.withReservedFamily(scope,f.controls,async context=>{
+  retained=context;const view=sourceModule.inspectNativeWorkspaceSource(context);
+  assert.equal(view.source.execution_id,scope.execution_id);assert.equal(view.execution_authorized,false);
+  assert.deepEqual(view.workspaces.map(({session_ref,custody,cwd})=>({session_ref,custody,cwd})),[{session_ref:'native',custody:'resident',cwd:'/original/project'}]);
+  assert.equal(Object.isFrozen(view.workspaces[0]),true);assert.equal(Object.isFrozen(view),true);
+  assert.throws(()=>sourceModule.inspectNativeWorkspaceSource({...context}),/native_workspace_source_context_invalid/);
+  assert.throws(()=>sourceModule.inspectNativeWorkspaceSource(JSON.parse(JSON.stringify(context))),/native_workspace_source_context_invalid/);
+  await context.recheck();assert.equal(sourceModule.inspectNativeWorkspaceSource(context),view);
+ });
+ assert.throws(()=>sourceModule.inspectNativeWorkspaceSource(retained),/native_workspace_source_context_invalid/);
+ assert.throws(()=>retained.check(),/native_workspace_source_context_invalid/);
+ await assert.rejects(retained.recheck(),/native_workspace_source_context_invalid/);assert.equal(f.held.size,0);
+});
+
+test('source-context observation rechecks original authority and native header, and revokes on callback failure',async t=>{
+ const f=fixture();t.after(()=>f.gate.dispose());let retained;
+ assert.equal(typeof sourceModule.inspectNativeWorkspaceSource,'function');
+ await assert.rejects(f.host.withReservedFamily(scope,f.controls,async context=>{
+  retained=context;f.agent.session.header.cwd='/changed';
+  sourceModule.inspectNativeWorkspaceSource(context);
+ }),/native_handoff_changed/);
+ assert.throws(()=>sourceModule.inspectNativeWorkspaceSource(retained),/native_workspace_source_context_invalid/);assert.equal(f.held.size,0);
+ const second=fixture();t.after(()=>second.gate.dispose());
+ await assert.rejects(second.host.withReservedFamily(scope,second.controls,async context=>{second.revoke();sourceModule.inspectNativeWorkspaceSource(context);}),/original_reservation_revoked/);
+});

@@ -11,13 +11,13 @@ export async function withNativeHandoffBarrier(input,operation){
 }
 async function runBarrier(input,operation){
  const agent=input.agent,session=agent.session,signal=input.signal;
- const count=session.seq;let removeModel;const removeTool=agent.ctx.tools.guard(()=> 'NATIVE_HANDOFF_PENDING');
+ const count=session.seq,header=JSON.stringify(session.header);let removeModel;const removeTool=agent.ctx.tools.guard(()=> 'NATIVE_HANDOFF_PENDING');
  try{
   removeModel=agent.ctx.on('llm/stream',(options,next)=>{if(options?.sessionId===agent.id)throw Error('native_handoff_pending');return next();},{prepend:true});
   const check=()=>{
    signal?.throwIfAborted();
    const inbox=input.projections.stateOf(session,'inbox');
-   if(agent.status!=='idle'||agent.session!==session||session.seq!==count||input.registry.get(agent.id)!==agent
+   if(agent.status!=='idle'||agent.session!==session||session.seq!==count||JSON.stringify(session.header)!==header||input.registry.get(agent.id)!==agent
     ||!Array.isArray(inbox?.['next-turn'])||!Array.isArray(inbox?.['next-step'])||inbox['next-turn'].length||inbox['next-step'].length)throw Error('native_handoff_changed');
   };
   check();const proof=await captureNativeHandoffQuiescence(input,signal);check();

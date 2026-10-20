@@ -20,11 +20,12 @@ test('installed native maintenance holds all drivers; new input stays queued unt
   for(const name of names.filter(name=>name!=='cordis'))await ctx.plugin(modules[name].default??modules[name],name==='dsh-session-persistence-jsonl'?{root:join(root,'sessions'),compression:'none'}:{});
   let calls=0;class LocalModel extends modules['dsh-llm'].LlmAdapter{async *stream(){calls++;yield{type:'text-delta',index:0,text:'Synthetic input consumed.'};yield{type:'usage',usage:{inputTokens:5,outputTokens:1,totalTokens:6}};yield{type:'finish',reason:{kind:'stop'}};}}
   ctx.llm.registerAdapter(['local-workspace'],new LocalModel());
-  for(const id of ['lead','child'])handles.push(await ctx.agents.create({sessionId:id,agentOptions:{provider:'local-workspace',model:'scripted'}}));
+  for(const id of ['lead','child'])handles.push(await ctx.agents.create({sessionId:id,meta:{cwd:root,agentPreset:'jot-general'},agentOptions:{provider:'local-workspace',model:'scripted'}}));
   const members=handles.map(handle=>({agent:handle.agent,registry:ctx.agents,persistence:ctx.sessionPersistence,projections:ctx.sessionProjections}));
   const input={members,assertReservation:()=>{for(const {agent} of members)assert.equal(ctx.agents.get(agent.id),agent);}};
-  await withNativeWorkspaceBarrier(input,async(proofs,check)=>{
+  await withNativeWorkspaceBarrier(input,async(proofs,check,_signal,_recheck,workspaces)=>{
    assert.deepEqual(proofs.map(proof=>proof.session_ref),['child','lead']);
+   assert.deepEqual(workspaces.map(({session_ref,custody,cwd})=>({session_ref,custody,cwd})),['child','lead'].map(session_ref=>({session_ref,custody:'resident',cwd:root})));
    for(const {agent} of members)assert.throws(()=>agent.runMaintenance(()=>{}),/already has active work/);
    await writeFile(join(root,'physical-result.txt'),'original callback');check();assert.equal(calls,0);
   });
@@ -64,8 +65,9 @@ test('installed JSONL ownership excludes both native resume and another process 
   const persistence=ctx.sessionPersistence,source={sessionRef:'cold',registry:ctx.agents,sessions:ctx.sessions,persistence,currentPersistence:()=>ctx.sessionPersistence,
    backendClass:modules['dsh-session-persistence'].SessionPersistence,allowedPresets:new Set(['jot-general']),validateLog:createNativeInvariantReplay({Session:modules['dsh-session'].Session}),projections:ctx.sessionProjections};
   const members=[source,{agent:lead.agent,registry:ctx.agents,persistence,projections:ctx.sessionProjections}];
-  await withNativeWorkspaceBarrier({members,assertReservation:()=>{}},async(proofs,check,_signal,recheck)=>{
+  await withNativeWorkspaceBarrier({members,assertReservation:()=>{}},async(proofs,check,_signal,recheck,workspaces)=>{
    assert.equal(proofs[0].session_ref,'cold');assert.equal(proofs[0].storage_owned,true);assert.equal(proofs[0].seq_exclusive,before.events.length);
+   assert.deepEqual(workspaces.map(({session_ref,custody,cwd})=>({session_ref,custody,cwd})),[{session_ref:'cold',custody:'cold',cwd:root},{session_ref:'lead',custody:'resident',cwd:root}]);
    assert.equal(JSON.stringify(proofs).includes('PRIVATE-SYNTHETIC-BODY'),false);assert.equal(JSON.stringify(proofs).includes(root),false);
    await assert.rejects(ctx.agents.resume({resumeSessionId:'cold',agentOptions:options}),{name:'SessionAlreadyOwnedError'});
    const readable=await persistence.open('cold','read');try{assert.equal((await readable.read()).events.length,before.events.length);}finally{await readable.close();}

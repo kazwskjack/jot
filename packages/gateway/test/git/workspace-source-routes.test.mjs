@@ -2,7 +2,7 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,readFile,rm,readdir,symlink} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join,resolve,sep,dirname} from 'node:path';import {execFileSync} from 'node:child_process';import {fileURLToPath,pathToFileURL} from 'node:url';
 import {buildServer} from '../../src/server.ts';import {GitWorkbench} from '../../src/git/service.ts';import {GitMutationIntents} from '../../src/git/intents.ts';import {GitIndexExecutions} from '../../src/git/index-executions.ts';import {withImmediateTransaction} from '../../src/db/database.ts';
 import {WorkbenchBridge} from '../../../session-adapter/workbench.js';
-import {createNativeWorkspaceSourceHost} from '../../../session-adapter/native-workspace-source.js';
+import {createNativeWorkspaceSourceHost,inspectNativeWorkspaceSource} from '../../../session-adapter/native-workspace-source.js';
 import {createNativeWorkspaceFactoryGate,createNativeWorkspaceAdmissionGate} from '../../../session-adapter/native-workspace-factory.js';
 import {createNativeInvariantReplay} from '../../../session-adapter/native-invariant-replay.js';
 import {prepareDshPreSetupRuntime} from '../../../session-adapter/scripts/prepare-dsh-pre-setup.mjs';
@@ -128,9 +128,15 @@ test('original Gateway authority and real native custody remain joined through a
   const host=createNativeWorkspaceSourceHost({bridge,registry,sessions,persistence,currentPersistence:()=>ctx.sessionPersistence,
    backendClass:modules['dsh-session-persistence'].SessionPersistence,allowedPresets:new Set(['jot-general']),validateLog:createNativeInvariantReplay({Session:modules['dsh-session'].Session}),projections:ctx.sessionProjections,factoryGate:gate});
   const controls={assertReservation:()=>{const current=f.current.executions.workspaceFamily('owner','project',f.accepted.execution_id);assert.equal(current.reservation_id,original.reservation_id);assert.equal(current.family_sha256,original.family_sha256);}};
-  await host.withReservedFamily(f.scope,controls,async({source,proofs,check,recheck})=>{
+  let heldContext;
+  await host.withReservedFamily(f.scope,controls,async context=>{
+   heldContext=context;const {source,proofs,check,recheck}=context;
    assert.equal(source.family_sha256,original.family_sha256);assert.deepEqual(proofs.map(p=>p.session_ref),['original-session']);check();await recheck();assert.equal(modelCalls,0);
+   const observed=inspectNativeWorkspaceSource(context);assert.equal(observed.execution_authorized,false);
+   assert.deepEqual(observed.workspaces.map(({session_ref,custody,cwd})=>({session_ref,custody,cwd})),[{session_ref:'original-session',custody:'resident',cwd:base}]);
+   assert.notEqual(observed.workspaces[0].cwd,f.root,'an original family identity must not silently equate the native cwd and configured Git root');
   });
+  assert.throws(()=>inspectNativeWorkspaceSource(heldContext),/native_workspace_source_context_invalid/);
   await assert.rejects(host.withReservedFamily(f.scope,controls,async()=>{
    await f.current.intents.control('owner','project',f.approved.intent_id,{request_id:'cancel-held',action:'cancel',expected_version:f.approved.version,review_sha256:f.approved.review_sha256});
   }),/git_execution_revoked/);

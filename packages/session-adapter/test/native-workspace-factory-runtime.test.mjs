@@ -9,7 +9,7 @@ import {createNativeWorkspaceFactoryGate} from '../native-workspace-factory.js';
 import {withNativeWorkspaceBarrier} from '../native-workspace-barrier.js';
 import {createNativeInvariantReplay} from '../native-invariant-replay.js';
 import {createHash} from 'node:crypto';
-import {createNativeWorkspaceSourceHost} from '../native-workspace-source.js';
+import {createNativeWorkspaceSourceHost,inspectNativeWorkspaceSource} from '../native-workspace-source.js';
 const runtime=process.env.JOT_DSH_RUNTIME_MODULES;
 test('installed original factory cannot create held absent members; an already preparing writer blocks maintenance',
  {skip:!runtime,timeout:30000},async()=>{
@@ -38,17 +38,23 @@ test('installed original factory cannot create held absent members; an already p
    return Response.json({source:{protocol:1,...original,execution_id:'execution',members,family_sha256:createHash('sha256').update(JSON.stringify(original)).digest('hex'),execution_authorized:false}});
   }}});
   let setups=0;const removeCount=ctx.on('agent/after-setup',({agent})=>{if(agent.id==='absent')setups++;});
-  await host.withReservedFamily(scope,{assertReservation:()=>{}},async({proofs,signal,recheck})=>{
+  let retained;
+  await host.withReservedFamily(scope,{assertReservation:()=>{}},async context=>{
+   retained=context;const {proofs,signal,recheck}=context;
    assert.equal(proofs[0].storage_absent,true);assert.equal(proofs[0].storage_owned,false);assert.equal(signal.aborted,false);
+   assert.deepEqual(inspectNativeWorkspaceSource(context).workspaces,[{session_ref:'absent',custody:'absent',cwd:null,header_sha256:null}]);
    await assert.rejects(ctx.agents.create({sessionId:'absent',meta:{agentPreset:'jot-general',cwd:root},agentOptions}),/native_workspace_factory_fenced/);
    await assert.rejects(ctx.agents.resume({resumeSessionId:'absent',agentOptions}));
    assert.equal(setups,0);assert.equal(calls,0);assert.equal(ctx.agents.get('absent'),undefined);assert.equal(await persistence.stat('absent'),undefined);await recheck();
   });
+  assert.throws(()=>inspectNativeWorkspaceSource(retained),/native_workspace_source_context_invalid/);
   assert.equal(sourceReads,4,'original source is rechecked while actual native handles remain held');
   const created=await ctx.agents.create({sessionId:'absent',meta:{agentPreset:'jot-general',cwd:root},agentOptions});handles.push(created);assert.equal(setups,1);removeCount();
-  await host.withReservedFamily(scope,{assertReservation:()=>{}},async({proofs,check})=>{assert.equal(proofs[0].session_ref,'absent');check();assert.equal(calls,0);});
+  await host.withReservedFamily(scope,{assertReservation:()=>{}},async context=>{const {proofs,check}=context;assert.equal(proofs[0].session_ref,'absent');check();assert.equal(calls,0);
+   const view=inspectNativeWorkspaceSource(context);assert.equal(view.workspaces[0].custody,'resident');assert.equal(view.workspaces[0].cwd,root);assert.match(view.workspaces[0].header_sha256,/^[a-f0-9]{64}$/);});
   await persistence.flush();await created.dispose();handles.pop();
-  await host.withReservedFamily(scope,{assertReservation:()=>{}},async({proofs,recheck})=>{
+  await host.withReservedFamily(scope,{assertReservation:()=>{}},async context=>{
+   const {proofs,recheck}=context;assert.equal(inspectNativeWorkspaceSource(context).workspaces[0].custody,'cold');assert.equal(inspectNativeWorkspaceSource(context).workspaces[0].cwd,root);
    assert.equal(proofs[0].driver_nonresident,true);assert.equal(proofs[0].storage_owned,true);
    await assert.rejects(ctx.agents.resume({resumeSessionId:'absent',agentOptions}),{name:'SessionAlreadyOwnedError'});
    assert.equal(calls,0);await recheck();

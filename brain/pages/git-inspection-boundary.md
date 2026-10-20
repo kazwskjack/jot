@@ -4,7 +4,7 @@ title: Git views use owned read-only repository snapshots
 category: decision
 status: active
 created: "2026-10-19T17:04:32"
-updated: "2026-10-20T13:05:58"
+updated: "2026-10-20T13:31:16"
 ---
 
 <!-- compiled_truth -->
@@ -85,4 +85,9 @@ Git 执行的配置占用范围与程序／stat 见证分离：原始记录固�
 - time: 2026-10-20T13:05:58
   kind: evidence
   summary: "Native resume can append seed markers before setup; restart admission must run before original storage opening. Immutable original family seals survive owner or approval changes. Fresh authenticated observations deny unsafe create/resume but grant no Git effect rights; original synchronous authority, native custody, source association and producer settlement remain mandatory."
+  affects: [git-inspection-boundary]
+
+- time: 2026-10-20T13:31:16
+  kind: evidence
+  summary: "A native family seal identifies Sessions, not their filesystem placement. Maintained source contexts now expose exact resident/cold header cwd and digest only during original live custody; copies and expired contexts are refused. Working-directory changes invalidate resident maintenance. A native cwd, configured Git root and logical blob publication remain separate identities and require the original coordinator to establish their actual association before effects."
   affects: [git-inspection-boundary]
