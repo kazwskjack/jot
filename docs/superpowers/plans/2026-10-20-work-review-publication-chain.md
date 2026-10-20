@@ -68,7 +68,12 @@ verified isolated text proofs currently exist; other producers need their own
 original byte/receipt validation. Unsupported binary/generated/shared paths stay
 visible as unfinished integration, not silently excluded from the final goal.
 
-- [ ] Derive the source from the original candidate and its immutable proof; bind
+- [x] Read finalized isolated text sources from their original same-database
+  finalization, accepted certificate, candidate, native completion proof,
+  inspection and immutable per-version receipts. A physically read-only database
+  is supported; no current execution permission or target publication is implied.
+  See [historical source implementation](../../implementation/2026-10-20-finalized-work-sources.md).
+- [ ] Bind that original source and its immutable proof to
   owner/project/workspace, source versions, chosen paths, base/result manifests,
   original inspection and actual configured target identity in a distinct intent.
   No request-supplied root, executor, shell or mutable latest-version fallback.
@@ -84,6 +89,54 @@ visible as unfinished integration, not silently excluded from the final goal.
 - [ ] Expose apply/current/disposition only after original recovery semantics and
   cross-process acceptance pass. Verify changed/missing roots, cancelled approval,
   process loss before/after publication, restart and foreign owner rejection.
+
+### Target review implementation sequence
+
+The current Git `freeze` intentionally accepts paths present in the dirty status
+inventory. Publication also needs unchanged tracked targets and absent new files.
+Do not loosen stage/unstage selection or manufacture dirty files to reuse that
+method. Add a distinct read on the same configured repository inspection that
+retains its original physical-root/program checks, bounded no-follow byte reads,
+nonexecuting metadata copy, cancellation and owner checks after awaits.
+
+1. Read the original finalized source by owner and run, retaining its complete
+   source digest and explicit unsupported changes. Select only exact relative
+   paths in that frozen source; caller input supplies no root or replacement bytes.
+   Reject unsupported operations rather than approving a partial tree silently.
+2. Collect the actual configured target's fresh repository/root identity, HEAD,
+   index and selected path witnesses, including clean files and missing paths.
+   Recheck physical directories and all selected bytes after asynchronous reads.
+   Missing ancestors, symlinks, hardlinks, case aliases and secret/metadata paths
+   require explicit rejection or their own implemented semantics.
+3. Compare each selected target with the reviewed source base. An absent source
+   base path requires an absent target. An existing base requires exact bytes and
+   supported mode/type. Show source-base/result and actual target-before hashes
+   together with the actual proposed changes; never silently rebase onto drift.
+4. Save a distinct immutable intent in the original database after those reads.
+   Bind original source/candidate/inspection IDs, selected paths, before/result
+   hashes, target configuration scope and physical witnesses. Retries with the
+   same request ID return that intent; changed payloads conflict. No filesystem
+   mutation or SQL transaction spans an await.
+5. Approval binds the owner's exact intent version and review digest, then
+   revalidates current ownership, source history and target witness. Revocation,
+   target change and changed source are terminal conflicts for that review;
+   approval does not dispatch work or acquire a substitute lease.
+6. Only the original producer coordinator may consume an approved intent, under
+   project reservation and complete native-family custody. Retain the existing
+   shared write/checkpoint barriers and original Worker lease through awaited
+   preparation, per-file publication and settlement. Journal before effects.
+7. Prove separate-process interruption before preparation, between files, after
+   effect/before acknowledgement, and after acknowledgement/before settlement.
+   A restart reads original evidence; it cannot infer rollback, replay unknown
+   writes or release custody merely because a timer expired. Connect mobile/API
+   apply and disposition controls only after those exact paths pass.
+
+Target-read acceptance must exercise a real configured repository with clean
+tracked files, a new nested target, unrelated local modifications, changed HEAD
+or index, root replacement, symlink ancestors, cancellation during reads,
+ownership transfer and a source finalized in another database. Successful review
+must leave both working tree and index byte-for-byte unchanged and create no
+model call. These cases remain unimplemented until backed by executed evidence.
 
 ## 3. Original Git/checkpoint/mobile closure and release
 

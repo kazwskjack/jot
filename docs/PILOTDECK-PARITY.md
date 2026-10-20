@@ -63,6 +63,12 @@ read. See [review evidence and remaining publication](implementation/2026-10-20-
 Task acceptance and artifact delivery remain distinct from applying results to
 the configured checkout; Git/checkpoint activation still depends on that chain.
 
+Finalized isolated text work also has an internal historical source reader that
+verifies original acceptance, inspection, native completion and every written
+version's immutable bytes. It works against read-only SQLite without renewing
+execution authority. [Source evidence and limits](implementation/2026-10-20-finalized-work-sources.md)
+remain distinct from the unimplemented target review, publication and recovery.
+
 Optional original native hosting uses an authenticated local pipe/socket.
 Separate-process installed-SDK tests stage reviewed bytes and observe parent
 approval revocation in the same physical database. This is internal hosting,

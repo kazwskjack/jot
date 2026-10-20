@@ -19,6 +19,8 @@ function boundary(value:unknown):NativeBoundary{
   ||!Number.isSafeInteger(g.max_goal_rounds)||Number(g.max_goal_rounds)<1||Number(g.rounds_started)>Number(g.max_goal_rounds))throw new Error('task_completion_handshake_invalid');
  return structuredClone(value) as NativeBoundary;
 }
+// Pure historical parsing only; this export grants no completion or execution.
+export {boundary as validateTaskCompletionBoundary};
 export function installTaskCompletionHandshake(db:DatabaseSync){
  db.exec(`CREATE TABLE IF NOT EXISTS wb_task_completion_intents (
   intent_id TEXT PRIMARY KEY,certificate_id TEXT NOT NULL UNIQUE REFERENCES wb_task_business_certificates(certificate_id),

@@ -4,7 +4,7 @@ title: Git views use owned read-only repository snapshots
 category: decision
 status: active
 created: "2026-10-19T17:04:32"
-updated: "2026-10-20T15:37:39"
+updated: "2026-10-20T17:02:01"
 ---
 
 <!-- compiled_truth -->
@@ -106,5 +106,11 @@ Git 执行的配置占用范围与程序／stat 见证分离：原始记录固�
 - time: 2026-10-20T15:37:39
   kind: evidence
   summary: "Task acceptance and artifact delivery do not establish publication into a configured Git checkout. The existing owned pending-review response now projects the original frozen isolated base/result manifests, selected objective and recomputed diff, retaining candidate/proof/current-state validation and exposing no host roots. Explicit publication needs its own target review, original source/version custody and interrupted-outcome reconciliation before Git write UI activation."
+  source: docs/superpowers/plans/2026-10-20-work-review-publication-chain.md
+  affects: [git-inspection-boundary]
+
+- time: 2026-10-20T17:02:01
+  kind: decision
+  summary: "Historical finalized-work sources must follow the original same-database finalization, owner acceptance, immutable inspection, native completion proof and exact per-version tool receipts. Completed reads neither revive pending review authority nor read mutable trees; task delivery still grants no permission to publish into a configured target. Unsupported producers remain explicit until their original byte provenance is integrated."
   source: docs/superpowers/plans/2026-10-20-work-review-publication-chain.md
   affects: [git-inspection-boundary]
