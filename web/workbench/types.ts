@@ -7,6 +7,8 @@ export type {WorkPublicationHistory,WorkPublicationHistoryItem} from '../../pack
 export type {WorkPublicationSettlementCommand,WorkPublicationSettlementReceipt,WorkPublicationSettlementResult} from '../../packages/gateway/contracts/types';
 export type {GitIndexAcceptance,GitIndexExecutionResult} from '../../packages/gateway/contracts/types';
 export type {GitIndexAdmissionInput,GitIndexControlInput,GitIndexControlAcceptance,GitIndexInspection,GitIndexControlReceipt} from '../../packages/gateway/contracts/types';
+export type {GitIndexDispatchInput,GitIndexProducer,GitIndexStatus,GitIndexResolutionResult} from '../../packages/gateway/contracts/types';
+export type {GitIndexHistory,GitIndexHistoryItem} from '../../packages/gateway/contracts/types';
 export type {CreateTaskDelegation,TaskDelegationReceipt} from '../../packages/gateway/contracts/types';
 export type {SaveTaskCollaboration,TaskCollaboration} from '../../packages/gateway/contracts/types';
 export type {ChannelBinding,ChannelBindingChallenge,TaskNotificationSettings,UpdateTaskNotifications,TaskNotificationDelivery,TaskNotificationHistoryPage} from '../../packages/gateway/contracts/types';

@@ -1,5 +1,18 @@
 # Original index Apply and recovery continuation
 
+## Latest continuation checkpoint
+
+The admission/evidence foundation was published as `fb73112`; its exact remote
+head and original-policy history audit were verified. A separate continuation
+now adds explicit authenticated native dispatch/resolution, read-only original
+status/history and mobile operation-history reads. Repeated preparation exposed
+source alternate-object freshening; bounded private-object isolation repairs it
+without changing original snapshot or approval fences. The actual separate
+native BFF stage/unstage/cancellation/recovery acceptance passes with zero model
+calls. Selected Apply/recovery UI and the remaining full process/cross-device
+matrix are still open, as is the full all26 scope. See the current
+[implementation evidence](../../implementation/2026-10-21-index-native-dispatch-status-and-recovery.md).
+
 This continues the existing Git index HTTP/workbench and work publication plans.
 Keep DSH planning, original owner/CSRF/approval, original physical database,
 workspace reservation/family, native admission and Worker fences. Reuse original

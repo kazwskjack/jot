@@ -16,15 +16,21 @@ export function registerGitExecutionHistoryRoutes(app:FastifyInstance,executions
    }
   });
  }
- const respond=(request:any,reply:any,kind:'admit'|'control'|'inspection'|'control-acceptance'|'control-receipt')=>{
+ const respond=(request:any,reply:any,kind:'admit'|'control'|'inspection'|'status'|'history'|'control-acceptance'|'control-receipt')=>{
   reply.header('cache-control','private, no-store');
   try{
    const owner=actor(request),params=request.params as {projectId:string;intentId?:string;executionId?:string;requestId?:string};
+   if(kind==='history'){
+    const query=request.query as Record<string,unknown>;
+    if(Object.keys(query).some(key=>!['before','limit'].includes(key))||query.before!==undefined&&typeof query.before!=='string'||query.limit!==undefined&&(typeof query.limit!=='string'||!/^\d{1,2}$/.test(query.limit)))throw Error('git_execution_invalid');
+    return executions.history(owner,params.projectId,query.before as string|undefined,query.limit===undefined?20:Number(query.limit));
+   }
    if(Object.keys(request.query as object).length)throw Error('git_execution_invalid');
    if(kind==='admit')return reply.code(202).send(atomic(request,202,()=>executions.admit(owner,params.projectId,params.intentId!,request.body)));
    executions.getAdmitted(owner,params.projectId,params.executionId!);
    if(kind==='control')return reply.code(202).send(atomic(request,202,()=>executions.admitResolution(owner,params.projectId,params.executionId!,request.body)));
    if(kind==='inspection')return executions.inspect(owner,params.projectId,params.executionId!);
+   if(kind==='status')return executions.status(owner,params.projectId,params.executionId!);
    if(kind==='control-acceptance')return executions.getResolutionAdmission(owner,params.projectId,params.executionId!,params.requestId!);
    return executions.getControl(owner,params.projectId,params.executionId!,params.requestId!);
   }catch(error){
@@ -37,6 +43,8 @@ export function registerGitExecutionHistoryRoutes(app:FastifyInstance,executions
  app.post('/v1/projects/:projectId/git/intents/:intentId/admissions',(request,reply)=>respond(request,reply,'admit'));
  app.post('/v1/projects/:projectId/git/executions/:executionId/controls',(request,reply)=>respond(request,reply,'control'));
  app.get('/v1/projects/:projectId/git/executions/:executionId/inspection',(request,reply)=>respond(request,reply,'inspection'));
+ app.get('/v1/projects/:projectId/git/executions/:executionId/status',(request,reply)=>respond(request,reply,'status'));
+ app.get('/v1/projects/:projectId/git/history',(request,reply)=>respond(request,reply,'history'));
  app.get('/v1/projects/:projectId/git/executions/:executionId/control-admissions/:requestId',(request,reply)=>respond(request,reply,'control-acceptance'));
  app.get('/v1/projects/:projectId/git/executions/:executionId/controls/:requestId',(request,reply)=>respond(request,reply,'control-receipt'));
 }

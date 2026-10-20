@@ -5547,6 +5547,2533 @@
           ]
         }
       ]
+    },
+    "GitIndexDispatchInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {},
+      "required": []
+    },
+    "GitIndexProducer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "execution_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+        },
+        "execution_authorized": {
+          "const": false
+        },
+        "state": {
+          "enum": [
+            "not_started",
+            "legacy_untracked",
+            "running",
+            "interrupted",
+            "failed_before_preparation",
+            "cancelled_before_preparation",
+            "prepared",
+            "unknown",
+            "applied"
+          ]
+        }
+      },
+      "required": [
+        "execution_id",
+        "execution_authorized",
+        "state"
+      ]
+    },
+    "GitIndexStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "execution": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "execution_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                },
+                "project_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                },
+                "intent_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                },
+                "request_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                },
+                "action": {
+                  "enum": [
+                    "stage",
+                    "unstage"
+                  ]
+                },
+                "execution_authorized": {
+                  "const": false
+                },
+                "paths": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 100,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096,
+                    "pattern": "^(?!/|[A-Za-z]:|.*\\\\|(?:.*?/)?\\.\\.(?:/|$)).+$"
+                  }
+                },
+                "state": {
+                  "enum": [
+                    "pending",
+                    "unknown"
+                  ]
+                }
+              },
+              "required": [
+                "execution_id",
+                "project_id",
+                "intent_id",
+                "request_id",
+                "action",
+                "execution_authorized",
+                "paths",
+                "state"
+              ]
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "execution_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                },
+                "project_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                },
+                "intent_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                },
+                "request_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                },
+                "action": {
+                  "enum": [
+                    "stage",
+                    "unstage"
+                  ]
+                },
+                "execution_authorized": {
+                  "const": false
+                },
+                "paths": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 100,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096,
+                    "pattern": "^(?!/|[A-Za-z]:|.*\\\\|(?:.*?/)?\\.\\.(?:/|$)).+$"
+                  }
+                },
+                "state": {
+                  "const": "applied"
+                },
+                "before_index_sha256": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "index_sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              },
+              "required": [
+                "execution_id",
+                "project_id",
+                "intent_id",
+                "request_id",
+                "action",
+                "execution_authorized",
+                "paths",
+                "state",
+                "before_index_sha256",
+                "index_sha256"
+              ]
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "execution_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                },
+                "project_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                },
+                "intent_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                },
+                "request_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                },
+                "action": {
+                  "enum": [
+                    "stage",
+                    "unstage"
+                  ]
+                },
+                "execution_authorized": {
+                  "const": false
+                },
+                "paths": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 100,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096,
+                    "pattern": "^(?!/|[A-Za-z]:|.*\\\\|(?:.*?/)?\\.\\.(?:/|$)).+$"
+                  }
+                },
+                "state": {
+                  "enum": [
+                    "not_dispatched",
+                    "abandoned_unknown"
+                  ]
+                },
+                "disposition_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                }
+              },
+              "required": [
+                "execution_id",
+                "project_id",
+                "intent_id",
+                "request_id",
+                "action",
+                "execution_authorized",
+                "paths",
+                "state",
+                "disposition_id"
+              ]
+            }
+          ]
+        },
+        "state_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "requires_unknown_acknowledgement": {
+          "type": "boolean"
+        },
+        "execution_authorized": {
+          "const": false
+        },
+        "producer": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "execution_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+            },
+            "execution_authorized": {
+              "const": false
+            },
+            "state": {
+              "enum": [
+                "not_started",
+                "legacy_untracked",
+                "running",
+                "interrupted",
+                "failed_before_preparation",
+                "cancelled_before_preparation",
+                "prepared",
+                "unknown",
+                "applied"
+              ]
+            }
+          },
+          "required": [
+            "execution_id",
+            "execution_authorized",
+            "state"
+          ]
+        },
+        "workspace_state": {
+          "enum": [
+            "not_reserved",
+            "reserved",
+            "released_unstarted",
+            "released_settled"
+          ]
+        },
+        "control": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "control_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                },
+                "execution_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                },
+                "project_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                },
+                "request_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                },
+                "expected_state_sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "accepted": {
+                  "const": true
+                },
+                "execution_authorized": {
+                  "const": false
+                }
+              },
+              "required": [
+                "control_id",
+                "execution_id",
+                "project_id",
+                "request_id",
+                "expected_state_sha256",
+                "accepted",
+                "execution_authorized"
+              ]
+            }
+          ]
+        },
+        "control_receipt": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "control_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "execution_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "state": {
+                      "const": "pending"
+                    },
+                    "execution_authorized": {
+                      "const": false
+                    }
+                  },
+                  "required": [
+                    "control_id",
+                    "execution_id",
+                    "request_id",
+                    "state",
+                    "execution_authorized"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "control_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "execution_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "state": {
+                      "const": "completed"
+                    },
+                    "execution_authorized": {
+                      "const": false
+                    },
+                    "result": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "execution_id": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                            },
+                            "project_id": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                            },
+                            "intent_id": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                            },
+                            "request_id": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                            },
+                            "action": {
+                              "enum": [
+                                "stage",
+                                "unstage"
+                              ]
+                            },
+                            "execution_authorized": {
+                              "const": false
+                            },
+                            "paths": {
+                              "type": "array",
+                              "minItems": 1,
+                              "maxItems": 100,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 4096,
+                                "pattern": "^(?!/|[A-Za-z]:|.*\\\\|(?:.*?/)?\\.\\.(?:/|$)).+$"
+                              }
+                            },
+                            "state": {
+                              "const": "applied"
+                            },
+                            "before_index_sha256": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "index_sha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            }
+                          },
+                          "required": [
+                            "execution_id",
+                            "project_id",
+                            "intent_id",
+                            "request_id",
+                            "action",
+                            "execution_authorized",
+                            "paths",
+                            "state",
+                            "before_index_sha256",
+                            "index_sha256"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "execution_id": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                            },
+                            "project_id": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                            },
+                            "intent_id": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                            },
+                            "request_id": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                            },
+                            "action": {
+                              "enum": [
+                                "stage",
+                                "unstage"
+                              ]
+                            },
+                            "execution_authorized": {
+                              "const": false
+                            },
+                            "paths": {
+                              "type": "array",
+                              "minItems": 1,
+                              "maxItems": 100,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 4096,
+                                "pattern": "^(?!/|[A-Za-z]:|.*\\\\|(?:.*?/)?\\.\\.(?:/|$)).+$"
+                              }
+                            },
+                            "state": {
+                              "enum": [
+                                "not_dispatched",
+                                "abandoned_unknown"
+                              ]
+                            },
+                            "disposition_id": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                            }
+                          },
+                          "required": [
+                            "execution_id",
+                            "project_id",
+                            "intent_id",
+                            "request_id",
+                            "action",
+                            "execution_authorized",
+                            "paths",
+                            "state",
+                            "disposition_id"
+                          ]
+                        }
+                      ]
+                    },
+                    "cleanup": {
+                      "enum": [
+                        "verified",
+                        "unverified",
+                        "not_recorded",
+                        "not_attempted"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "control_id",
+                    "execution_id",
+                    "request_id",
+                    "state",
+                    "execution_authorized",
+                    "result",
+                    "cleanup"
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "required": [
+        "execution",
+        "state_sha256",
+        "requires_unknown_acknowledgement",
+        "execution_authorized",
+        "producer",
+        "workspace_state",
+        "control",
+        "control_receipt"
+      ]
+    },
+    "GitIndexResolutionResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "receipt": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "control_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+            },
+            "execution_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+            },
+            "request_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+            },
+            "state": {
+              "const": "completed"
+            },
+            "execution_authorized": {
+              "const": false
+            },
+            "result": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "execution_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "project_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "intent_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "action": {
+                      "enum": [
+                        "stage",
+                        "unstage"
+                      ]
+                    },
+                    "execution_authorized": {
+                      "const": false
+                    },
+                    "paths": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 100,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096,
+                        "pattern": "^(?!/|[A-Za-z]:|.*\\\\|(?:.*?/)?\\.\\.(?:/|$)).+$"
+                      }
+                    },
+                    "state": {
+                      "const": "applied"
+                    },
+                    "before_index_sha256": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "index_sha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  },
+                  "required": [
+                    "execution_id",
+                    "project_id",
+                    "intent_id",
+                    "request_id",
+                    "action",
+                    "execution_authorized",
+                    "paths",
+                    "state",
+                    "before_index_sha256",
+                    "index_sha256"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "execution_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "project_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "intent_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "action": {
+                      "enum": [
+                        "stage",
+                        "unstage"
+                      ]
+                    },
+                    "execution_authorized": {
+                      "const": false
+                    },
+                    "paths": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 100,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096,
+                        "pattern": "^(?!/|[A-Za-z]:|.*\\\\|(?:.*?/)?\\.\\.(?:/|$)).+$"
+                      }
+                    },
+                    "state": {
+                      "enum": [
+                        "not_dispatched",
+                        "abandoned_unknown"
+                      ]
+                    },
+                    "disposition_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    }
+                  },
+                  "required": [
+                    "execution_id",
+                    "project_id",
+                    "intent_id",
+                    "request_id",
+                    "action",
+                    "execution_authorized",
+                    "paths",
+                    "state",
+                    "disposition_id"
+                  ]
+                }
+              ]
+            },
+            "cleanup": {
+              "enum": [
+                "verified",
+                "unverified",
+                "not_recorded",
+                "not_attempted"
+              ]
+            }
+          },
+          "required": [
+            "control_id",
+            "execution_id",
+            "request_id",
+            "state",
+            "execution_authorized",
+            "result",
+            "cleanup"
+          ]
+        },
+        "status": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "execution": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "execution_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "project_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "intent_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "action": {
+                      "enum": [
+                        "stage",
+                        "unstage"
+                      ]
+                    },
+                    "execution_authorized": {
+                      "const": false
+                    },
+                    "paths": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 100,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096,
+                        "pattern": "^(?!/|[A-Za-z]:|.*\\\\|(?:.*?/)?\\.\\.(?:/|$)).+$"
+                      }
+                    },
+                    "state": {
+                      "enum": [
+                        "pending",
+                        "unknown"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "execution_id",
+                    "project_id",
+                    "intent_id",
+                    "request_id",
+                    "action",
+                    "execution_authorized",
+                    "paths",
+                    "state"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "execution_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "project_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "intent_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "action": {
+                      "enum": [
+                        "stage",
+                        "unstage"
+                      ]
+                    },
+                    "execution_authorized": {
+                      "const": false
+                    },
+                    "paths": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 100,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096,
+                        "pattern": "^(?!/|[A-Za-z]:|.*\\\\|(?:.*?/)?\\.\\.(?:/|$)).+$"
+                      }
+                    },
+                    "state": {
+                      "const": "applied"
+                    },
+                    "before_index_sha256": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "index_sha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  },
+                  "required": [
+                    "execution_id",
+                    "project_id",
+                    "intent_id",
+                    "request_id",
+                    "action",
+                    "execution_authorized",
+                    "paths",
+                    "state",
+                    "before_index_sha256",
+                    "index_sha256"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "execution_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "project_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "intent_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "action": {
+                      "enum": [
+                        "stage",
+                        "unstage"
+                      ]
+                    },
+                    "execution_authorized": {
+                      "const": false
+                    },
+                    "paths": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 100,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096,
+                        "pattern": "^(?!/|[A-Za-z]:|.*\\\\|(?:.*?/)?\\.\\.(?:/|$)).+$"
+                      }
+                    },
+                    "state": {
+                      "enum": [
+                        "not_dispatched",
+                        "abandoned_unknown"
+                      ]
+                    },
+                    "disposition_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    }
+                  },
+                  "required": [
+                    "execution_id",
+                    "project_id",
+                    "intent_id",
+                    "request_id",
+                    "action",
+                    "execution_authorized",
+                    "paths",
+                    "state",
+                    "disposition_id"
+                  ]
+                }
+              ]
+            },
+            "state_sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "requires_unknown_acknowledgement": {
+              "type": "boolean"
+            },
+            "execution_authorized": {
+              "const": false
+            },
+            "producer": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "execution_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                },
+                "execution_authorized": {
+                  "const": false
+                },
+                "state": {
+                  "enum": [
+                    "not_started",
+                    "legacy_untracked",
+                    "running",
+                    "interrupted",
+                    "failed_before_preparation",
+                    "cancelled_before_preparation",
+                    "prepared",
+                    "unknown",
+                    "applied"
+                  ]
+                }
+              },
+              "required": [
+                "execution_id",
+                "execution_authorized",
+                "state"
+              ]
+            },
+            "workspace_state": {
+              "enum": [
+                "not_reserved",
+                "reserved",
+                "released_unstarted",
+                "released_settled"
+              ]
+            },
+            "control": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "control_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "execution_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "project_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "expected_state_sha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "accepted": {
+                      "const": true
+                    },
+                    "execution_authorized": {
+                      "const": false
+                    }
+                  },
+                  "required": [
+                    "control_id",
+                    "execution_id",
+                    "project_id",
+                    "request_id",
+                    "expected_state_sha256",
+                    "accepted",
+                    "execution_authorized"
+                  ]
+                }
+              ]
+            },
+            "control_receipt": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "control_id": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                        },
+                        "execution_id": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                        },
+                        "request_id": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                        },
+                        "state": {
+                          "const": "pending"
+                        },
+                        "execution_authorized": {
+                          "const": false
+                        }
+                      },
+                      "required": [
+                        "control_id",
+                        "execution_id",
+                        "request_id",
+                        "state",
+                        "execution_authorized"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "control_id": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                        },
+                        "execution_id": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                        },
+                        "request_id": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                        },
+                        "state": {
+                          "const": "completed"
+                        },
+                        "execution_authorized": {
+                          "const": false
+                        },
+                        "result": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "execution_id": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                                },
+                                "project_id": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                                },
+                                "intent_id": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                                },
+                                "request_id": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                                },
+                                "action": {
+                                  "enum": [
+                                    "stage",
+                                    "unstage"
+                                  ]
+                                },
+                                "execution_authorized": {
+                                  "const": false
+                                },
+                                "paths": {
+                                  "type": "array",
+                                  "minItems": 1,
+                                  "maxItems": 100,
+                                  "uniqueItems": true,
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 4096,
+                                    "pattern": "^(?!/|[A-Za-z]:|.*\\\\|(?:.*?/)?\\.\\.(?:/|$)).+$"
+                                  }
+                                },
+                                "state": {
+                                  "const": "applied"
+                                },
+                                "before_index_sha256": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "pattern": "^[a-f0-9]{64}$"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "index_sha256": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                }
+                              },
+                              "required": [
+                                "execution_id",
+                                "project_id",
+                                "intent_id",
+                                "request_id",
+                                "action",
+                                "execution_authorized",
+                                "paths",
+                                "state",
+                                "before_index_sha256",
+                                "index_sha256"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "execution_id": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                                },
+                                "project_id": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                                },
+                                "intent_id": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                                },
+                                "request_id": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                                },
+                                "action": {
+                                  "enum": [
+                                    "stage",
+                                    "unstage"
+                                  ]
+                                },
+                                "execution_authorized": {
+                                  "const": false
+                                },
+                                "paths": {
+                                  "type": "array",
+                                  "minItems": 1,
+                                  "maxItems": 100,
+                                  "uniqueItems": true,
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 4096,
+                                    "pattern": "^(?!/|[A-Za-z]:|.*\\\\|(?:.*?/)?\\.\\.(?:/|$)).+$"
+                                  }
+                                },
+                                "state": {
+                                  "enum": [
+                                    "not_dispatched",
+                                    "abandoned_unknown"
+                                  ]
+                                },
+                                "disposition_id": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                                }
+                              },
+                              "required": [
+                                "execution_id",
+                                "project_id",
+                                "intent_id",
+                                "request_id",
+                                "action",
+                                "execution_authorized",
+                                "paths",
+                                "state",
+                                "disposition_id"
+                              ]
+                            }
+                          ]
+                        },
+                        "cleanup": {
+                          "enum": [
+                            "verified",
+                            "unverified",
+                            "not_recorded",
+                            "not_attempted"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "control_id",
+                        "execution_id",
+                        "request_id",
+                        "state",
+                        "execution_authorized",
+                        "result",
+                        "cleanup"
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "required": [
+            "execution",
+            "state_sha256",
+            "requires_unknown_acknowledgement",
+            "execution_authorized",
+            "producer",
+            "workspace_state",
+            "control",
+            "control_receipt"
+          ]
+        }
+      },
+      "required": [
+        "receipt",
+        "status"
+      ]
+    },
+    "GitIndexHistoryItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "acceptance": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "execution_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+            },
+            "project_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+            },
+            "intent_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+            },
+            "request_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+            },
+            "action": {
+              "enum": [
+                "stage",
+                "unstage"
+              ]
+            },
+            "execution_authorized": {
+              "const": false
+            },
+            "accepted": {
+              "const": true
+            }
+          },
+          "required": [
+            "execution_id",
+            "project_id",
+            "intent_id",
+            "request_id",
+            "action",
+            "execution_authorized",
+            "accepted"
+          ]
+        },
+        "status": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "execution": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "execution_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "project_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "intent_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "action": {
+                      "enum": [
+                        "stage",
+                        "unstage"
+                      ]
+                    },
+                    "execution_authorized": {
+                      "const": false
+                    },
+                    "paths": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 100,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096,
+                        "pattern": "^(?!/|[A-Za-z]:|.*\\\\|(?:.*?/)?\\.\\.(?:/|$)).+$"
+                      }
+                    },
+                    "state": {
+                      "enum": [
+                        "pending",
+                        "unknown"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "execution_id",
+                    "project_id",
+                    "intent_id",
+                    "request_id",
+                    "action",
+                    "execution_authorized",
+                    "paths",
+                    "state"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "execution_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "project_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "intent_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "action": {
+                      "enum": [
+                        "stage",
+                        "unstage"
+                      ]
+                    },
+                    "execution_authorized": {
+                      "const": false
+                    },
+                    "paths": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 100,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096,
+                        "pattern": "^(?!/|[A-Za-z]:|.*\\\\|(?:.*?/)?\\.\\.(?:/|$)).+$"
+                      }
+                    },
+                    "state": {
+                      "const": "applied"
+                    },
+                    "before_index_sha256": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "index_sha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  },
+                  "required": [
+                    "execution_id",
+                    "project_id",
+                    "intent_id",
+                    "request_id",
+                    "action",
+                    "execution_authorized",
+                    "paths",
+                    "state",
+                    "before_index_sha256",
+                    "index_sha256"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "execution_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "project_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "intent_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "action": {
+                      "enum": [
+                        "stage",
+                        "unstage"
+                      ]
+                    },
+                    "execution_authorized": {
+                      "const": false
+                    },
+                    "paths": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 100,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096,
+                        "pattern": "^(?!/|[A-Za-z]:|.*\\\\|(?:.*?/)?\\.\\.(?:/|$)).+$"
+                      }
+                    },
+                    "state": {
+                      "enum": [
+                        "not_dispatched",
+                        "abandoned_unknown"
+                      ]
+                    },
+                    "disposition_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    }
+                  },
+                  "required": [
+                    "execution_id",
+                    "project_id",
+                    "intent_id",
+                    "request_id",
+                    "action",
+                    "execution_authorized",
+                    "paths",
+                    "state",
+                    "disposition_id"
+                  ]
+                }
+              ]
+            },
+            "state_sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "requires_unknown_acknowledgement": {
+              "type": "boolean"
+            },
+            "execution_authorized": {
+              "const": false
+            },
+            "producer": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "execution_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                },
+                "execution_authorized": {
+                  "const": false
+                },
+                "state": {
+                  "enum": [
+                    "not_started",
+                    "legacy_untracked",
+                    "running",
+                    "interrupted",
+                    "failed_before_preparation",
+                    "cancelled_before_preparation",
+                    "prepared",
+                    "unknown",
+                    "applied"
+                  ]
+                }
+              },
+              "required": [
+                "execution_id",
+                "execution_authorized",
+                "state"
+              ]
+            },
+            "workspace_state": {
+              "enum": [
+                "not_reserved",
+                "reserved",
+                "released_unstarted",
+                "released_settled"
+              ]
+            },
+            "control": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "control_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "execution_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "project_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                    },
+                    "expected_state_sha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "accepted": {
+                      "const": true
+                    },
+                    "execution_authorized": {
+                      "const": false
+                    }
+                  },
+                  "required": [
+                    "control_id",
+                    "execution_id",
+                    "project_id",
+                    "request_id",
+                    "expected_state_sha256",
+                    "accepted",
+                    "execution_authorized"
+                  ]
+                }
+              ]
+            },
+            "control_receipt": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "control_id": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                        },
+                        "execution_id": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                        },
+                        "request_id": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                        },
+                        "state": {
+                          "const": "pending"
+                        },
+                        "execution_authorized": {
+                          "const": false
+                        }
+                      },
+                      "required": [
+                        "control_id",
+                        "execution_id",
+                        "request_id",
+                        "state",
+                        "execution_authorized"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "control_id": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                        },
+                        "execution_id": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                        },
+                        "request_id": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                        },
+                        "state": {
+                          "const": "completed"
+                        },
+                        "execution_authorized": {
+                          "const": false
+                        },
+                        "result": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "execution_id": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                                },
+                                "project_id": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                                },
+                                "intent_id": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                                },
+                                "request_id": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                                },
+                                "action": {
+                                  "enum": [
+                                    "stage",
+                                    "unstage"
+                                  ]
+                                },
+                                "execution_authorized": {
+                                  "const": false
+                                },
+                                "paths": {
+                                  "type": "array",
+                                  "minItems": 1,
+                                  "maxItems": 100,
+                                  "uniqueItems": true,
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 4096,
+                                    "pattern": "^(?!/|[A-Za-z]:|.*\\\\|(?:.*?/)?\\.\\.(?:/|$)).+$"
+                                  }
+                                },
+                                "state": {
+                                  "const": "applied"
+                                },
+                                "before_index_sha256": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "pattern": "^[a-f0-9]{64}$"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "index_sha256": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                }
+                              },
+                              "required": [
+                                "execution_id",
+                                "project_id",
+                                "intent_id",
+                                "request_id",
+                                "action",
+                                "execution_authorized",
+                                "paths",
+                                "state",
+                                "before_index_sha256",
+                                "index_sha256"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "execution_id": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                                },
+                                "project_id": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                                },
+                                "intent_id": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                                },
+                                "request_id": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                                },
+                                "action": {
+                                  "enum": [
+                                    "stage",
+                                    "unstage"
+                                  ]
+                                },
+                                "execution_authorized": {
+                                  "const": false
+                                },
+                                "paths": {
+                                  "type": "array",
+                                  "minItems": 1,
+                                  "maxItems": 100,
+                                  "uniqueItems": true,
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 4096,
+                                    "pattern": "^(?!/|[A-Za-z]:|.*\\\\|(?:.*?/)?\\.\\.(?:/|$)).+$"
+                                  }
+                                },
+                                "state": {
+                                  "enum": [
+                                    "not_dispatched",
+                                    "abandoned_unknown"
+                                  ]
+                                },
+                                "disposition_id": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                                }
+                              },
+                              "required": [
+                                "execution_id",
+                                "project_id",
+                                "intent_id",
+                                "request_id",
+                                "action",
+                                "execution_authorized",
+                                "paths",
+                                "state",
+                                "disposition_id"
+                              ]
+                            }
+                          ]
+                        },
+                        "cleanup": {
+                          "enum": [
+                            "verified",
+                            "unverified",
+                            "not_recorded",
+                            "not_attempted"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "control_id",
+                        "execution_id",
+                        "request_id",
+                        "state",
+                        "execution_authorized",
+                        "result",
+                        "cleanup"
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "required": [
+            "execution",
+            "state_sha256",
+            "requires_unknown_acknowledgement",
+            "execution_authorized",
+            "producer",
+            "workspace_state",
+            "control",
+            "control_receipt"
+          ]
+        }
+      },
+      "required": [
+        "created_at",
+        "acceptance",
+        "status"
+      ]
+    },
+    "GitIndexHistory": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "created_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "acceptance": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "execution_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                  },
+                  "project_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                  },
+                  "intent_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                  },
+                  "request_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                  },
+                  "action": {
+                    "enum": [
+                      "stage",
+                      "unstage"
+                    ]
+                  },
+                  "execution_authorized": {
+                    "const": false
+                  },
+                  "accepted": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "execution_id",
+                  "project_id",
+                  "intent_id",
+                  "request_id",
+                  "action",
+                  "execution_authorized",
+                  "accepted"
+                ]
+              },
+              "status": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "execution": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "execution_id": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                          },
+                          "project_id": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                          },
+                          "intent_id": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                          },
+                          "request_id": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                          },
+                          "action": {
+                            "enum": [
+                              "stage",
+                              "unstage"
+                            ]
+                          },
+                          "execution_authorized": {
+                            "const": false
+                          },
+                          "paths": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 100,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 4096,
+                              "pattern": "^(?!/|[A-Za-z]:|.*\\\\|(?:.*?/)?\\.\\.(?:/|$)).+$"
+                            }
+                          },
+                          "state": {
+                            "enum": [
+                              "pending",
+                              "unknown"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "execution_id",
+                          "project_id",
+                          "intent_id",
+                          "request_id",
+                          "action",
+                          "execution_authorized",
+                          "paths",
+                          "state"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "execution_id": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                          },
+                          "project_id": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                          },
+                          "intent_id": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                          },
+                          "request_id": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                          },
+                          "action": {
+                            "enum": [
+                              "stage",
+                              "unstage"
+                            ]
+                          },
+                          "execution_authorized": {
+                            "const": false
+                          },
+                          "paths": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 100,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 4096,
+                              "pattern": "^(?!/|[A-Za-z]:|.*\\\\|(?:.*?/)?\\.\\.(?:/|$)).+$"
+                            }
+                          },
+                          "state": {
+                            "const": "applied"
+                          },
+                          "before_index_sha256": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "index_sha256": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          }
+                        },
+                        "required": [
+                          "execution_id",
+                          "project_id",
+                          "intent_id",
+                          "request_id",
+                          "action",
+                          "execution_authorized",
+                          "paths",
+                          "state",
+                          "before_index_sha256",
+                          "index_sha256"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "execution_id": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                          },
+                          "project_id": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                          },
+                          "intent_id": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                          },
+                          "request_id": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                          },
+                          "action": {
+                            "enum": [
+                              "stage",
+                              "unstage"
+                            ]
+                          },
+                          "execution_authorized": {
+                            "const": false
+                          },
+                          "paths": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 100,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 4096,
+                              "pattern": "^(?!/|[A-Za-z]:|.*\\\\|(?:.*?/)?\\.\\.(?:/|$)).+$"
+                            }
+                          },
+                          "state": {
+                            "enum": [
+                              "not_dispatched",
+                              "abandoned_unknown"
+                            ]
+                          },
+                          "disposition_id": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                          }
+                        },
+                        "required": [
+                          "execution_id",
+                          "project_id",
+                          "intent_id",
+                          "request_id",
+                          "action",
+                          "execution_authorized",
+                          "paths",
+                          "state",
+                          "disposition_id"
+                        ]
+                      }
+                    ]
+                  },
+                  "state_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "requires_unknown_acknowledgement": {
+                    "type": "boolean"
+                  },
+                  "execution_authorized": {
+                    "const": false
+                  },
+                  "producer": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "execution_id": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                      },
+                      "execution_authorized": {
+                        "const": false
+                      },
+                      "state": {
+                        "enum": [
+                          "not_started",
+                          "legacy_untracked",
+                          "running",
+                          "interrupted",
+                          "failed_before_preparation",
+                          "cancelled_before_preparation",
+                          "prepared",
+                          "unknown",
+                          "applied"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "execution_id",
+                      "execution_authorized",
+                      "state"
+                    ]
+                  },
+                  "workspace_state": {
+                    "enum": [
+                      "not_reserved",
+                      "reserved",
+                      "released_unstarted",
+                      "released_settled"
+                    ]
+                  },
+                  "control": {
+                    "anyOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "control_id": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                          },
+                          "execution_id": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                          },
+                          "project_id": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                          },
+                          "request_id": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                          },
+                          "expected_state_sha256": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "accepted": {
+                            "const": true
+                          },
+                          "execution_authorized": {
+                            "const": false
+                          }
+                        },
+                        "required": [
+                          "control_id",
+                          "execution_id",
+                          "project_id",
+                          "request_id",
+                          "expected_state_sha256",
+                          "accepted",
+                          "execution_authorized"
+                        ]
+                      }
+                    ]
+                  },
+                  "control_receipt": {
+                    "anyOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "control_id": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                              },
+                              "execution_id": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                              },
+                              "request_id": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                              },
+                              "state": {
+                                "const": "pending"
+                              },
+                              "execution_authorized": {
+                                "const": false
+                              }
+                            },
+                            "required": [
+                              "control_id",
+                              "execution_id",
+                              "request_id",
+                              "state",
+                              "execution_authorized"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "control_id": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                              },
+                              "execution_id": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                              },
+                              "request_id": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                              },
+                              "state": {
+                                "const": "completed"
+                              },
+                              "execution_authorized": {
+                                "const": false
+                              },
+                              "result": {
+                                "oneOf": [
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "execution_id": {
+                                        "type": "string",
+                                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                                      },
+                                      "project_id": {
+                                        "type": "string",
+                                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                                      },
+                                      "intent_id": {
+                                        "type": "string",
+                                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                                      },
+                                      "request_id": {
+                                        "type": "string",
+                                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                                      },
+                                      "action": {
+                                        "enum": [
+                                          "stage",
+                                          "unstage"
+                                        ]
+                                      },
+                                      "execution_authorized": {
+                                        "const": false
+                                      },
+                                      "paths": {
+                                        "type": "array",
+                                        "minItems": 1,
+                                        "maxItems": 100,
+                                        "uniqueItems": true,
+                                        "items": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 4096,
+                                          "pattern": "^(?!/|[A-Za-z]:|.*\\\\|(?:.*?/)?\\.\\.(?:/|$)).+$"
+                                        }
+                                      },
+                                      "state": {
+                                        "const": "applied"
+                                      },
+                                      "before_index_sha256": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "pattern": "^[a-f0-9]{64}$"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
+                                      },
+                                      "index_sha256": {
+                                        "type": "string",
+                                        "pattern": "^[a-f0-9]{64}$"
+                                      }
+                                    },
+                                    "required": [
+                                      "execution_id",
+                                      "project_id",
+                                      "intent_id",
+                                      "request_id",
+                                      "action",
+                                      "execution_authorized",
+                                      "paths",
+                                      "state",
+                                      "before_index_sha256",
+                                      "index_sha256"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "execution_id": {
+                                        "type": "string",
+                                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                                      },
+                                      "project_id": {
+                                        "type": "string",
+                                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                                      },
+                                      "intent_id": {
+                                        "type": "string",
+                                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                                      },
+                                      "request_id": {
+                                        "type": "string",
+                                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                                      },
+                                      "action": {
+                                        "enum": [
+                                          "stage",
+                                          "unstage"
+                                        ]
+                                      },
+                                      "execution_authorized": {
+                                        "const": false
+                                      },
+                                      "paths": {
+                                        "type": "array",
+                                        "minItems": 1,
+                                        "maxItems": 100,
+                                        "uniqueItems": true,
+                                        "items": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 4096,
+                                          "pattern": "^(?!/|[A-Za-z]:|.*\\\\|(?:.*?/)?\\.\\.(?:/|$)).+$"
+                                        }
+                                      },
+                                      "state": {
+                                        "enum": [
+                                          "not_dispatched",
+                                          "abandoned_unknown"
+                                        ]
+                                      },
+                                      "disposition_id": {
+                                        "type": "string",
+                                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                                      }
+                                    },
+                                    "required": [
+                                      "execution_id",
+                                      "project_id",
+                                      "intent_id",
+                                      "request_id",
+                                      "action",
+                                      "execution_authorized",
+                                      "paths",
+                                      "state",
+                                      "disposition_id"
+                                    ]
+                                  }
+                                ]
+                              },
+                              "cleanup": {
+                                "enum": [
+                                  "verified",
+                                  "unverified",
+                                  "not_recorded",
+                                  "not_attempted"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "control_id",
+                              "execution_id",
+                              "request_id",
+                              "state",
+                              "execution_authorized",
+                              "result",
+                              "cleanup"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "execution",
+                  "state_sha256",
+                  "requires_unknown_acknowledgement",
+                  "execution_authorized",
+                  "producer",
+                  "workspace_state",
+                  "control",
+                  "control_receipt"
+                ]
+              }
+            },
+            "required": [
+              "created_at",
+              "acceptance",
+              "status"
+            ]
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "execution_authorized": {
+          "const": false
+        }
+      },
+      "required": [
+        "project_id",
+        "items",
+        "next_cursor",
+        "execution_authorized"
+      ]
     }
   }
 }

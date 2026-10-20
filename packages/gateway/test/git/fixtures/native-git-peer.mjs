@@ -35,6 +35,8 @@ process.on('message',async message=>{
   // Fixture-only actual exits at original control/settlement boundaries. No
   // product option, fake runtime identity or replacement receipt is supplied.
   const {GitIndexExecutions}=await import('../../../dist/src/git/index-executions.js'),readControl=GitIndexExecutions.prototype.getControl,recover=GitIndexExecutions.prototype.resolveReserved;
+  const originalPerform=GitIndexExecutions.prototype.performReserved;
+  GitIndexExecutions.prototype.performReserved=async function(...args){try{return await originalPerform.apply(this,args)}catch(error){process.send?.({type:'index-perform-error',code:String(error?.message).slice(0,160)});throw error}};
   GitIndexExecutions.prototype.getControl=function(...args){const result=readControl.apply(this,args);if(controlExit==='before-settlement'&&result.state==='completed')process.exit(74);return result};
   GitIndexExecutions.prototype.resolveReserved=async function(...args){const result=await recover.apply(this,args);if(controlExit==='after-settlement')process.exit(75);return result};
   process.env.JOT_NATIVE_GIT_TEST_TOKEN=config.transportToken;

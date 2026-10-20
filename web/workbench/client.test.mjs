@@ -7,6 +7,14 @@ await mkdir(output,{recursive:true});
 await build({entryPoints:[new URL('./client.ts',import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')],bundle:true,platform:'node',format:'esm',outfile:new URL('client.mjs',output).pathname.replace(/^\/([A-Z]:)/,'$1')});
 const {workbenchApi}=await import(new URL('client.mjs',output));
 
+test('Git history discovers original operations through bounded abortable reads without local acceptance metadata',async t=>{
+ const original=globalThis.fetch,calls=[];t.after(()=>{globalThis.fetch=original});globalThis.fetch=async(url,init)=>{calls.push({url,init});return new Response('{"items":[],"next_cursor":null,"execution_authorized":false}')};
+ const controller=new AbortController();await workbenchApi.gitHistory('project /1',{},controller.signal);await workbenchApi.gitHistory('project /1',{before:'execution:/ original',limit:10},controller.signal);
+ assert.equal(calls[0].url,'/workbench-api/v1/projects/project%20%2F1/git/history');assert.equal(calls[1].url,'/workbench-api/v1/projects/project%20%2F1/git/history?before=execution%3A%2F+original&limit=10');
+ for(const {init}of calls){assert.equal(init.method,'GET');assert.equal(init.body,undefined);assert.equal(init.cache,'no-store');assert.equal(init.credentials,'same-origin');assert.ok(init.signal instanceof AbortSignal);assert.equal(init.signal.aborted,false)}
+ globalThis.fetch=async(_url,init)=>new Promise((_resolve,reject)=>init.signal.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true}));const pending=workbenchApi.gitHistory('project',{},controller.signal);controller.abort();await assert.rejects(pending,{name:'AbortError'});assert.equal(calls.length,2);
+});
+
 test('publication recovery receipts have explicit latest and original-command read paths without native dispatch',async t=>{
  const original=globalThis.fetch,calls=[];t.after(()=>{globalThis.fetch=original});globalThis.fetch=async(url,init)=>{calls.push({url,init});return new Response('{"execution_authorized":false}')};
  const signal=new AbortController().signal;
@@ -66,6 +74,16 @@ test('original Git index admissions preserve exact command bodies and keys while
  for(const {init}of calls){assert.equal(init.cache,'no-store');assert.equal(init.credentials,'same-origin');assert.ok(init.signal instanceof AbortSignal)}
  for(const {init}of calls.slice(3)){assert.equal(init.method,'GET');assert.equal(init.body,undefined)}
  globalThis.fetch=async(_url,init)=>new Promise((_resolve,reject)=>init.signal.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true}));const pending=workbenchApi.gitInspection('project','execution',abort.signal);abort.abort();await assert.rejects(pending,{name:'AbortError'});
+});
+
+test('explicit Git dispatch and resolution retain original keys and never infer native completion from the client',async t=>{
+ const original=globalThis.fetch,calls=[];t.after(()=>{globalThis.fetch=original});globalThis.fetch=async(url,init)=>{calls.push({url,init});return new Response('{"execution_authorized":false}')};const abort=new AbortController(),command={request_id:'original-control',expected_state_sha256:'c'.repeat(64),acknowledge_unknown:true};
+ await workbenchApi.gitStatus('project','execution',abort.signal);await workbenchApi.gitDispatch('project','execution','explicit-dispatch-key',abort.signal);await workbenchApi.gitResolve('project','execution',command,'explicit-resolution-key',abort.signal);
+ assert.equal(calls[0].url,'/workbench-api/v1/projects/project/git/executions/execution/status');assert.equal(calls[0].init.method,'GET');assert.equal(calls[0].init.body,undefined);
+ assert.equal(calls[1].url,'/workbench-api/v1/projects/project/git/executions/execution/dispatch');assert.equal(calls[1].init.method,'POST');assert.equal(calls[1].init.body,'{}');assert.equal(calls[1].init.headers['Idempotency-Key'],'explicit-dispatch-key');
+ assert.equal(calls[2].url,'/workbench-api/v1/projects/project/git/executions/execution/resolve');assert.equal(calls[2].init.body,JSON.stringify(command));assert.equal(calls[2].init.headers['Idempotency-Key'],'explicit-resolution-key');
+ for(const {init}of calls){assert.equal(init.cache,'no-store');assert.equal(init.credentials,'same-origin');assert.ok(init.signal instanceof AbortSignal)}
+ globalThis.fetch=async(_url,init)=>new Promise((_resolve,reject)=>init.signal.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true}));const pending=workbenchApi.gitDispatch('project','execution','same-original-key',abort.signal);abort.abort();await assert.rejects(pending,{name:'AbortError'});assert.equal(calls.length,3);
 });
 
 test('discovery policy read uses the encoded owned role route and never sends an enable command',async t=>{

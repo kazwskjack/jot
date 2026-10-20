@@ -1249,5 +1249,41 @@
     "GitIndexControlReceipt",
     "200",
     "Original owner, CSRF and atomic receipt boundaries; no effect dispatch."
+  ],
+  [
+    "GET",
+    "/v1/projects/{projectId}/git/executions/{executionId}/status",
+    "Original Git index status or explicit native command",
+    null,
+    "GitIndexStatus",
+    "200",
+    "Original ownership, review, native custody and database drain proof; no automatic retry."
+  ],
+  [
+    "POST",
+    "/v1/projects/{projectId}/git/executions/{executionId}/dispatch",
+    "Original Git index status or explicit native command",
+    "GitIndexDispatchInput",
+    "GitIndexStatus",
+    "200",
+    "Original ownership, review, native custody and database drain proof; no automatic retry."
+  ],
+  [
+    "POST",
+    "/v1/projects/{projectId}/git/executions/{executionId}/resolve",
+    "Original Git index status or explicit native command",
+    "GitIndexControlInput",
+    "GitIndexResolutionResult",
+    "200",
+    "Original ownership, review, native custody and database drain proof; no automatic retry."
+  ],
+  [
+    "GET",
+    "/v1/projects/{projectId}/git/history",
+    "Owned original UI index acceptance and current-state history",
+    null,
+    "GitIndexHistory",
+    "200",
+    "Original owned UI journal and bounded cursor reads; no effect dispatch."
   ]
 ]

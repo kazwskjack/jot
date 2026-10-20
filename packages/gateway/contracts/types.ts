@@ -340,3 +340,11 @@ export type GitIndexControlInput = {request_id:string;expected_state_sha256:stri
 export type GitIndexControlAcceptance = {control_id:string;execution_id:string;project_id:string;request_id:string;expected_state_sha256:string;accepted:true;execution_authorized:false};
 export type GitIndexInspection = {execution:GitIndexExecutionResult;state_sha256:string;requires_unknown_acknowledgement:boolean;execution_authorized:false};
 export type GitIndexControlReceipt = {control_id:string;execution_id:string;request_id:string;execution_authorized:false} & ({state:"pending"}|{state:"completed";result:Exclude<GitIndexExecutionResult,{state:"pending"|"unknown"}>;cleanup:"verified"|"unverified"|"not_recorded"|"not_attempted"});
+
+export type GitIndexDispatchInput = Record<string,never>;
+export type GitIndexProducer = {execution_id:string;execution_authorized:false;state:"not_started"|"legacy_untracked"|"running"|"interrupted"|"failed_before_preparation"|"cancelled_before_preparation"|"prepared"|"unknown"|"applied"};
+export type GitIndexStatus = GitIndexInspection & {producer:GitIndexProducer;workspace_state:"not_reserved"|"reserved"|"released_unstarted"|"released_settled";control:GitIndexControlAcceptance|null;control_receipt:GitIndexControlReceipt|null};
+export type GitIndexResolutionResult = {receipt:Extract<GitIndexControlReceipt,{state:"completed"}>;status:GitIndexStatus};
+
+export type GitIndexHistoryItem = {created_at:string;acceptance:GitIndexAcceptance;status:GitIndexStatus};
+export type GitIndexHistory = {project_id:string;items:GitIndexHistoryItem[];next_cursor:string|null;execution_authorized:false};

@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join,resolve,sep} from 'node:path';import {execFileSync} from 'node:child_process';
 import {openProductDatabase,withImmediateTransaction} from '../../src/db/database.ts';import {ProjectRepository} from '../../src/projects/repository.ts';import {GitWorkbench} from '../../src/git/service.ts';import {GitMutationIntents} from '../../src/git/intents.ts';import {GitIndexExecutions} from '../../src/git/index-executions.ts';
-export async function indexResolutionFixture(t){
+export async function indexResolutionFixture(t,{objectFormat='sha1'}={}){
+ assert.ok(['sha1','sha256'].includes(objectFormat));
  const root=await mkdtemp(join(tmpdir(),'jot-index-resolution-')),repository=join(root,'repo'),database=join(root,'db.sqlite');await mkdir(repository);
  const git=(...args)=>execFileSync('git',['-c','user.name=Test Contributor','-c','user.email=test@example.invalid',...args],{cwd:repository,encoding:'utf8',stdio:['ignore','pipe','pipe']});
- git('init','--initial-branch=main');git('config','core.autocrlf','false');await writeFile(join(repository,'note.txt'),'before\n');git('add','.');git('commit','-m','Synthetic original resolution fixture');await writeFile(join(repository,'note.txt'),'after\n');
+ git('init','--initial-branch=main','--object-format='+objectFormat);git('config','core.autocrlf','false');await writeFile(join(repository,'note.txt'),'before\n');git('add','.');git('commit','-m','Synthetic original resolution fixture');await writeFile(join(repository,'note.txt'),'after\n');
  let db=openProductDatabase(database);db.prepare('INSERT INTO ga_projects VALUES(?,?,?,?,?,?,?)').run('project','owner','Synthetic',0,1,'now','now');
  const connect=()=>{const projects=new ProjectRepository(db),workbench=new GitWorkbench(projects,[{owner_id:'owner',project_id:'project',root:repository}]),intents=new GitMutationIntents(db,projects,workbench),executions=new GitIndexExecutions(db,projects,workbench,intents);return{projects,workbench,intents,executions}};let current=connect(),seq=0;
  t.after(async()=>{db.close();assert.ok(resolve(root).startsWith(resolve(tmpdir())+sep));await rm(root,{recursive:true,force:true,maxRetries:5,retryDelay:30})});

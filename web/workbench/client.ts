@@ -4,6 +4,8 @@ import type {GitReviewIntent} from './types';
 import type {WorkPublicationReview,WorkPublicationSource,WorkPublicationAcceptance,WorkPublicationStatus,WorkPublicationSettlementReceipt,WorkPublicationHistory} from './types';
 import type {GitIndexAcceptance,GitIndexExecutionResult} from './types';
 import type {GitIndexAdmissionInput,GitIndexControlInput,GitIndexControlAcceptance,GitIndexInspection,GitIndexControlReceipt} from './types';
+import type {GitIndexStatus,GitIndexResolutionResult} from './types';
+import type {GitIndexHistory} from './types';
 import type {DiscoveryPolicyView} from './types';
 import type {DiscoveryHistoryPage,DiscoveryHistoryDetail} from './types';
 import type {MemoryCapturePolicy,MemoryCapture,MemoryCapturePage} from './types';
@@ -20,6 +22,10 @@ import type {Run,ResumeReceipt} from '../jot/types';
 import type {ChannelBinding,ChannelBindingChallenge,TaskNotificationSettings,UpdateTaskNotifications,TaskNotificationDelivery,TaskNotificationHistoryPage} from './types';
 export const pathId=(value:string)=>encodeURIComponent(value);
 export const workbenchApi={
+ gitHistory:(project:string,options:{before?:string;limit?:number}={},signal?:AbortSignal)=>{const query=new URLSearchParams();if(options.before!==undefined)query.set('before',options.before);if(options.limit!==undefined)query.set('limit',String(options.limit));return request<GitIndexHistory>(`/projects/${pathId(project)}/git/history${query.size?'?'+query.toString():''}`,'GET',undefined,undefined,signal)},
+ gitStatus:(project:string,execution:string,signal?:AbortSignal)=>request<GitIndexStatus>(`/projects/${pathId(project)}/git/executions/${pathId(execution)}/status`,'GET',undefined,undefined,signal),
+ gitDispatch:(project:string,execution:string,key:string,signal?:AbortSignal)=>request<GitIndexStatus>(`/projects/${pathId(project)}/git/executions/${pathId(execution)}/dispatch`,'POST',{},key,signal),
+ gitResolve:(project:string,execution:string,input:GitIndexControlInput,key:string,signal?:AbortSignal)=>request<GitIndexResolutionResult>(`/projects/${pathId(project)}/git/executions/${pathId(execution)}/resolve`,'POST',input,key,signal),
  gitAdmit:(project:string,intent:string,input:GitIndexAdmissionInput,key:string,signal?:AbortSignal)=>request<GitIndexAcceptance>(`/projects/${pathId(project)}/git/intents/${pathId(intent)}/admissions`,'POST',input,key,signal),
  gitAdmitControl:(project:string,execution:string,input:GitIndexControlInput,key:string,signal?:AbortSignal)=>request<GitIndexControlAcceptance>(`/projects/${pathId(project)}/git/executions/${pathId(execution)}/controls`,'POST',input,key,signal),
  gitInspection:(project:string,execution:string,signal?:AbortSignal)=>request<GitIndexInspection>(`/projects/${pathId(project)}/git/executions/${pathId(execution)}/inspection`,'GET',undefined,undefined,signal),

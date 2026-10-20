@@ -132,9 +132,25 @@ export class GitIndexEffects extends GitRepositoryInspection{
   for(const root of [...new Set([this.gitDirectory,this.commonDirectory])]){const queue=[root];while(queue.length){const folder=queue.pop()!;for(const entry of readdirSync(folder,{withFileTypes:true})){if(++entries>100000)throw Error('git_metadata_limit');const path=join(folder,entry.name);if(locks.has(path)||equalPath(path,objects))continue;const s=lstatSync(path);if(s.isSymbolicLink()||!s.isFile()&&!s.isDirectory())throw Error('git_repository_changed');if(s.isDirectory()){if(!created.has(path))facts.push(path+':dir:'+id(s)+':'+s.mode);queue.push(path);}else facts.push(path+':file:'+stamp(s));}}}
   return hash(facts.sort().join('\n'));
  }
- private async controlled(context:GitReadContext,args:string[],input?:Buffer,signal?:AbortSignal,sourceObjects=false){
-  const objects=join(this.commonDirectory,'objects'),result=await readGit(this.executable!,this.root,context.directory,args,{maxOutputBytes:32*1024*1024,timeoutMs:5000},signal,sourceObjects?objects:join(context.directory,'objects'),input,sourceObjects?undefined:objects);
+ private async controlled(context:GitReadContext,args:string[],input?:Buffer,signal?:AbortSignal,sourceObjects=false,readAlternates=true){
+  const objects=join(this.commonDirectory,'objects'),result=await readGit(this.executable!,this.root,context.directory,args,{maxOutputBytes:32*1024*1024,timeoutMs:5000},signal,sourceObjects?objects:join(context.directory,'objects'),input,sourceObjects||!readAlternates?undefined:objects);
   if(result.code!==0)throw Error('git_index_prepare_failed');return result.bytes;
+ }
+ /** Git may freshen an existing alternate object during hash-object -w.
+  * Preload only the selected index blobs and inherited indexed attributes,
+  * through read-only source commands. Canonicalization can then write with no
+  * source alternates at all, retaining Git's own attribute/EOL behavior. */
+ private async isolatePlanningObjects(context:GitReadContext,witness:GitReviewWitness,signal?:AbortSignal){
+  const paths=new Set([...witness.files.map(file=>file.path),...witness.attributes.map(file=>file.path)]),loaded=new Set<string>();let total=0;
+  const entries=decoded(await this.controlled(context,['ls-files','--stage','-z'],undefined,signal));
+  for(const entry of entries.split('\0')){
+   if(!entry)continue;const tab=entry.indexOf('\t');if(tab<0)throw Error('git_index_prepare_failed');if(!paths.has(entry.slice(tab+1)))continue;
+   const match=/^(100644|100755|120000|160000) ([a-f0-9]{40,64}) [0-3]$/.exec(entry.slice(0,tab));if(!match)throw Error('git_index_prepare_failed');
+   if(match[1]==='160000'||loaded.has(match[2]!))continue;const oid=match[2]!,bytes=await this.controlled(context,['cat-file','blob',oid],undefined,signal);
+   total+=bytes.length;if(total>64*1024*1024)throw Error('git_output_limit');
+   if(createHash(oid.length===64?'sha256':'sha1').update('blob '+bytes.length+'\0').update(bytes).digest('hex')!==oid)throw Error('git_index_object_mismatch');
+   const copied=decoded(await this.controlled(context,['hash-object','-w','--stdin','--no-filters'],bytes,signal,false,false)).trim();if(copied!==oid)throw Error('git_index_object_mismatch');loaded.add(oid);
+  }
  }
  async prepareIndex(input:GitReviewWitness,action:Action,signal?:AbortSignal):Promise<GitIndexPlan>{
   if(!input||input.protocol!==2||!Array.isArray(input.attributes)||!['stage','unstage'].includes(action))throw Error('git_index_plan_invalid');const witness=structuredClone(input),paths=witness.files.map(file=>file.path);
@@ -147,6 +163,7 @@ export class GitIndexEffects extends GitRepositoryInspection{
    const metadata=this.sourceMetadata(),dot=this.dotWitness(),blobs:Blob[]=[],attributes=new Map<string,string|null>();let total=0;
    for(const path of paths){let folder=dirname(join(this.root,path));while(true){const attribute=join(folder,'.gitattributes'),value=this.raw(attribute,1024*1024);attributes.set(attribute,value===null?null:hash(value));if(equalPath(folder,this.root))break;const parent=dirname(folder);if(parent===folder||relative(this.root,parent).startsWith('..'))throw Error('git_repository_changed');folder=parent;}}
    const remember=(oid:string,bytes:Buffer,write:boolean)=>{if(createHash(oid.length===64?'sha256':'sha1').update('blob '+bytes.length+'\0').update(bytes).digest('hex')!==oid)throw Error('git_index_object_mismatch');if(!blobs.some(blob=>blob.oid===oid)){total+=bytes.length;if(total>64*1024*1024)throw Error('git_output_limit');blobs.push({oid,bytes,sha256:hash(bytes),write});}};
+   await this.isolatePlanningObjects(context,witness,signal);
    await this.controlled(context,['update-index','--no-split-index'],undefined,signal);
    const modeResult=await this.run(context,['config','--bool','--get','core.filemode'],signal,true),filemode=modeResult.code===1||decoded(modeResult.bytes).trim()!=='false';
    for(const path of paths){
@@ -158,7 +175,7 @@ export class GitIndexEffects extends GitRepositoryInspection{
      if(selected.kind==='missing'){await this.controlled(context,['update-index','--force-remove','--',path],undefined,signal);continue;}
      const attributes=decoded(await this.run(context,['check-attr','-z','filter','--',path],signal).then(result=>result.bytes)).split('\0');if(!['unspecified','unset'].includes(attributes[2]??''))throw Error('git_filter_requires_explicit_support');
      const raw=this.raw(join(this.root,path));if(raw===null||hash(raw)!==selected.sha256)throw Error('git_review_changed');
-     const oid=decoded(await this.controlled(context,['hash-object','-w','--stdin','--path='+path],raw,signal)).trim();if(!/^[a-f0-9]{40,64}$/.test(oid))throw Error('git_index_prepare_failed');
+     const oid=decoded(await this.controlled(context,['hash-object','-w','--stdin','--path='+path],raw,signal,false,false)).trim();if(!/^[a-f0-9]{40,64}$/.test(oid))throw Error('git_index_prepare_failed');
      const canonical=await this.controlled(context,['cat-file','blob',oid],undefined,signal);remember(oid,canonical,true);
      const current=decoded((await this.run(context,['ls-files','--stage','-z','--',path],signal)).bytes),old=/^(100644|100755) /.exec(current)?.[1],mode=filemode?(selected.mode&0o111?'100755':'100644'):(old??'100644');
      await this.controlled(context,['update-index','--add','--cacheinfo',mode+','+oid+','+path],undefined,signal);

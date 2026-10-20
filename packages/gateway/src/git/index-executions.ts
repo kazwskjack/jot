@@ -251,6 +251,32 @@ export class GitIndexExecutions{
   this.producers.record(row);return digest({protocol:1,execution:row,preparation:record('wb_git_index_preparations'),dispatch:record('wb_git_index_dispatches'),outcome:record('wb_git_index_outcomes'),producer:record('wb_git_index_producers'),producer_finish:record('wb_git_index_producer_finishes'),disposition:record('wb_git_index_dispositions')});
  }
  inspect(owner:string,project:string,id:string){const row=this.row(owner,project,id),execution=this.get(owner,project,id);return{execution,state_sha256:this.stateHash(row),requires_unknown_acknowledgement:execution.state==='pending'||execution.state==='unknown',execution_authorized:false as const};}
+ /** Original UI evidence in one read snapshot. A physical result/control is
+  * distinct from native workspace settlement and is never execution authority. */
+ status(owner:string,project:string,id:string){
+  const outer=this.db.isTransaction;if(!outer)this.db.exec('BEGIN DEFERRED');
+  try{
+   const row=this.admittedRow(owner,project,id),inspection=this.inspect(owner,project,id),producer=this.producers.view(row,this.resource(row));
+   const workspace=row.binding_sha256?readWorkspaceOperation(this.db,{owner_id:owner,project_id:project,operation_kind:'git_index',operation_id:id,binding_sha256:row.binding_sha256}):undefined;
+   const commands=this.db.prepare('SELECT request_id FROM wb_git_index_controls WHERE execution_id=? AND owner_id=? AND project_id=?').all(id,owner,project) as {request_id:string}[];
+   if(commands.length>1)throw Error('git_execution_evidence_corrupt');
+   const control=commands[0]?this.getResolutionAdmission(owner,project,id,commands[0].request_id):null;
+   return{...inspection,producer,workspace_state:workspace?.state??'not_reserved' as const,control,control_receipt:control?this.getControl(owner,project,id,control.request_id):null};
+  }finally{if(!outer&&this.db.isTransaction)this.db.exec('ROLLBACK')}
+ }
+ /** Discover original UI operations from their original admission journal,
+  * never browser storage or arbitrary trusted/internal pending executions. */
+ history(owner:string,project:string,before?:string,limit=20){
+  const outer=this.db.isTransaction;if(!outer)this.db.exec('BEGIN DEFERRED');
+  try{
+   this.projects.assertOwned(project,owner);if(!Number.isSafeInteger(limit)||limit<1||limit>50||before!==undefined&&(typeof before!=='string'||!ID.test(before)))throw Error('git_execution_invalid');
+   const cursor=before===undefined?undefined:this.admittedRow(owner,project,before);
+   const predicate=cursor?' AND (e.created_at<? OR(e.created_at=? AND e.execution_id<?))':'';
+   const rows=this.db.prepare('SELECT e.execution_id FROM wb_git_index_executions e JOIN wb_git_index_admissions a ON a.execution_id=e.execution_id WHERE e.owner_id=? AND e.project_id=?'+predicate+' ORDER BY e.created_at DESC,e.execution_id DESC LIMIT ?').all(owner,project,...(cursor?[cursor.created_at,cursor.created_at,cursor.execution_id]:[]),limit+1) as {execution_id:string}[];
+   const items=rows.slice(0,limit).map(value=>{const row=this.admittedRow(owner,project,value.execution_id);return{created_at:row.created_at,acceptance:this.getAdmission(owner,project,row.request_id),status:this.status(owner,project,row.execution_id)}});
+   return{project_id:project,items,next_cursor:rows.length>limit?items[items.length-1]!.acceptance.execution_id:null,execution_authorized:false as const};
+  }finally{if(!outer&&this.db.isTransaction)this.db.exec('ROLLBACK')}
+ }
  private makeControlReceipt(control:Control,result:AppliedResult|ClosedResult,cleanup:Cleanup):ControlReceipt{return indexControlReceipt(this.db,control,result,cleanup);}
  private validateControl(row:Row,control:Control){return validateIndexControl(this.db,row,control);}
  private insertControl(row:Row,input:ControlInput):Control{

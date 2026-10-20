@@ -4,6 +4,7 @@ import {workbenchApi} from './client';
 import {useResource} from './useResource';
 import {ResourceStatus} from './AgentsPanel';
 import GitReview,{type GitReviewDraft} from './GitReview';
+import GitHistory from './GitHistory';
 import {MutationPendingState} from './useMutationReceipt';
 
 function message(code:string){
@@ -28,6 +29,7 @@ export default function GitPanel({caps}:{caps:Caps}){
   <h2>Git 工作台</h2><p className="wb-page-intro">查看项目的分支与文件变化。<span className="wb-badge">只读</span></p>
   {!configured.length?<p role="status">尚未绑定项目仓库，请先完成服务端配置。</p>:<>
    <ResourceStatus {...projects} onRetry={projects.reload}/><div className="wb-toolbar"><label>项目仓库<select aria-label="项目仓库" disabled={locked} value={project} onChange={event=>{setDraft(null);setSelection(undefined);setSelected(event.target.value);}}>{available.map(value=><option key={value.project_id} value={value.project_id}>{value.title}</option>)}</select></label><button type="button" disabled={locked||!project||snapshot.loading} onClick={refresh}>刷新仓库</button></div>
+   {project&&<GitHistory key={project} project={project} locked={locked}/>}
    <ResourceStatus loading={snapshot.loading} error={message(snapshot.error)} onRetry={refresh}/>
    {state&&<>
     <div className="wb-git-head"><strong>{state.head.branch??(state.head.detached?'分离 HEAD':'未命名分支')}</strong><code>{state.head.oid?.slice(0,12)??'尚无提交'}</code></div>

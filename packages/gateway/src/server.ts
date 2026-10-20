@@ -29,6 +29,7 @@ import {GitMutationIntents} from './git/intents.ts';
 import {registerGitReviewRoutes} from './git/review-routes.ts';
 import {GitIndexExecutions} from './git/index-executions.ts';
 import {registerGitExecutionHistoryRoutes} from './git/execution-history-routes.ts';
+import {registerIndexDispatchRoutes} from './git/index-dispatch-routes.ts';
 import {registerGitWorkspaceSource} from './git/workspace-source-route.ts';
 import {WorkPublicationIntents} from './persistent-tasks/work-publication-intents.ts';
 import {FinalizedWorkSources} from './persistent-tasks/finalized-work-sources.ts';
@@ -192,6 +193,7 @@ export async function buildServer(config: {
   const isRunCommandRoute=(request:any)=>request.method==='POST'&&['/v1/runs/:runId/steer','/v1/runs/:runId/cancel'].includes(request.routeOptions.url);
   const isGitReviewRoute=(request:any)=>request.method==='POST'&&['/v1/projects/:projectId/git/intents','/v1/projects/:projectId/git/intents/:intentId/control'].includes(request.routeOptions.url);
   const isIndexAdmissionRoute=(request:any)=>request.method==='POST'&&request.routeOptions.url==='/v1/projects/:projectId/git/intents/:intentId/admissions';
+  const isIndexTransportRoute=(request:any)=>request.method==='POST'&&['/v1/projects/:projectId/git/executions/:executionId/dispatch','/v1/projects/:projectId/git/executions/:executionId/resolve'].includes(request.routeOptions.url);
   const isIndexControlAdmissionRoute=(request:any)=>request.method==='POST'&&request.routeOptions.url==='/v1/projects/:projectId/git/executions/:executionId/controls';
   const isPublicationReviewRoute=(request:any)=>request.method==='POST'&&['/v1/projects/:projectId/work-publications','/v1/projects/:projectId/work-publications/:intentId/control'].includes(request.routeOptions.url);
   const isPublicationAdmissionRoute=(request:any)=>request.method==='POST'&&request.routeOptions.url==='/v1/projects/:projectId/work-publications/:intentId/admissions';
@@ -243,9 +245,9 @@ export async function buildServer(config: {
     // Preview only computes a schedule; retain authentication and CSRF without persisting requests.
     if (request.method === 'POST' && request.url.split('?')[0] === '/v1/persistent-tasks/preview') return;
     if ((request.routeOptions.url ?? request.url).includes('/voice/transcriptions')) return;
-    if(isGitReviewRoute(request)||isIndexAdmissionRoute(request)||isIndexControlAdmissionRoute(request)||isPublicationReviewRoute(request)||isPublicationAdmissionRoute(request)||isPublicationTransportRoute(request)){
+    if(isGitReviewRoute(request)||isIndexAdmissionRoute(request)||isIndexControlAdmissionRoute(request)||isIndexTransportRoute(request)||isPublicationReviewRoute(request)||isPublicationAdmissionRoute(request)||isPublicationTransportRoute(request)){
       projects.assertOwned(String((request.params as {projectId:string}).projectId),actor(request as any));
-      if(isIndexAdmissionRoute(request)||isIndexControlAdmissionRoute(request))gitWorkbench.executionBinding(actor(request as any),String((request.params as {projectId:string}).projectId));
+      if(isIndexAdmissionRoute(request)||isIndexControlAdmissionRoute(request)||isIndexTransportRoute(request))gitWorkbench.executionBinding(actor(request as any),String((request.params as {projectId:string}).projectId));
       reply.header('cache-control','private, no-store');
     }
     const idempotencyKey = String(request.headers['idempotency-key'] ?? '');
@@ -597,6 +599,7 @@ export async function buildServer(config: {
   registerGitReviewRoutes(app,{intents:gitReviewIntents,actor,atomic:atomicCommand});
   const gitIndexExecutions=new GitIndexExecutions(db,projects,gitWorkbench,gitReviewIntents);
   registerGitExecutionHistoryRoutes(app,gitIndexExecutions,actor,atomicCommand);
+  registerIndexDispatchRoutes(app,{executions:gitIndexExecutions,client:config.nativeGitClient,actor});
   // These constructors observe the original database only. Publication schema
   // readiness still requires the explicit maintenance upgrade, never a request.
   const workPublicationIntents=config.gitRepositories?.length?new WorkPublicationIntents(db,gitWorkbench):undefined;
