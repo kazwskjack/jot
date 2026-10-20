@@ -78,6 +78,14 @@ checks preserve the original index and producer state. This read channel does
 not itself establish held native custody, original physical dispatch or an
 asynchronous replacement for the original dispatch guard.
 
+The adapter's original `createNativeWorkspaceSourceHost` now composes that
+authenticated source with actual resident/cold/absent custody. It resolves no
+caller-selected member and retains native handles across fresh source reads.
+Actual Gateway/HTTP/installed-native acceptance also verifies original approval
+revocation and untouched index/producer/lease state. The original synchronous
+reservation check is still mandatory. The composition is not an activated
+cross-process Git executor and does not close the coordination checks below.
+
 - [ ] Follow the reference Gateway/checkpoint coordination: Git mutation cannot
   race an Agent turn, shared-workspace writer or checkpoint restore. Reuse the
   owning workspace coordinator, not a second planner or a Git-only busy flag.

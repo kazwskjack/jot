@@ -1,7 +1,11 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join,resolve,sep} from 'node:path';import {execFileSync} from 'node:child_process';import {fileURLToPath} from 'node:url';
+import {mkdtemp,mkdir,writeFile,readFile,rm,readdir,symlink} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join,resolve,sep,dirname} from 'node:path';import {execFileSync} from 'node:child_process';import {fileURLToPath,pathToFileURL} from 'node:url';
 import {buildServer} from '../../src/server.ts';import {GitWorkbench} from '../../src/git/service.ts';import {GitMutationIntents} from '../../src/git/intents.ts';import {GitIndexExecutions} from '../../src/git/index-executions.ts';import {withImmediateTransaction} from '../../src/db/database.ts';
 import {WorkbenchBridge} from '../../../session-adapter/workbench.js';
+import {createNativeWorkspaceSourceHost} from '../../../session-adapter/native-workspace-source.js';
+import {createNativeWorkspaceFactoryGate} from '../../../session-adapter/native-workspace-factory.js';
+import {createNativeInvariantReplay} from '../../../session-adapter/native-invariant-replay.js';
+import {prepareDshPreSetupRuntime} from '../../../session-adapter/scripts/prepare-dsh-pre-setup.mjs';
 const token='test-workspace-service-token',url='/internal/v1/workbench/git-workspace-source';
 async function fixture(t){
  const parent=await mkdtemp(join(tmpdir(),'jot-git-workspace-source-')),root=join(parent,'repo');await mkdir(root);
@@ -50,4 +54,40 @@ test('original adapter reads the reserved source over actual loopback HTTP and n
  await assert.rejects(new WorkbenchBridge({origin,token:'test-incorrect-service-token'}).workspaceFamily(f.scope),/native_workspace_source_unavailable/);
  f.current.executions.releaseUnstartedWorkspace('owner','project',f.accepted.execution_id);await assert.rejects(bridge.workspaceFamily(f.scope),/native_workspace_source_unavailable/);
  assert.equal(f.db.prepare('SELECT count(*) n FROM wb_git_index_producers').get().n,0);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_worker_leases').get().n,0);
+});
+
+test('original Gateway authority and real native custody remain joined through authenticated source observations',
+ {skip:!process.env.JOT_DSH_RUNTIME_MODULES,timeout:45000},async t=>{
+ const f=await fixture(t),runtime=process.env.JOT_DSH_RUNTIME_MODULES,base=join(dirname(f.root),'native'),scoped=join(base,'node_modules','@deepseek-ai');let ctx,gate,handle;
+ try{
+  await mkdir(scoped,{recursive:true});prepareDshPreSetupRuntime(join(runtime,'dsh-agent-loop'),join(scoped,'dsh-agent-loop'));
+  for(const entry of await readdir(runtime,{withFileTypes:true}))if(entry.name!=='dsh-agent-loop'&&entry.isDirectory())await symlink(join(runtime,entry.name),join(scoped,entry.name),'junction');
+  await symlink(join(dirname(runtime),'zod'),join(base,'node_modules','zod'),'junction');
+  const names=['cordis','dsh-session','dsh-session-projection','dsh-session-persistence-jsonl','dsh-session-query','dsh-agent','dsh-llm','dsh-tools','dsh-system-prompt','dsh-agent-loop','dsh-goal'],modules={};
+  for(const name of [...names,'dsh-session-persistence'])modules[name]=await import(pathToFileURL(join(name==='dsh-agent-loop'?scoped:runtime,name,'lib/index.js')).href);
+  ctx=new modules.cordis.Context();for(const name of names.filter(n=>n!=='cordis'))await ctx.plugin(modules[name].default??modules[name],name==='dsh-session-persistence-jsonl'?{root:join(base,'sessions'),compression:'none'}:{});
+  let modelCalls=0;class Local extends modules['dsh-llm'].LlmAdapter{async *stream(){modelCalls++;assert.fail('custody must not invoke a model');}}
+  ctx.llm.registerAdapter(['source-custody'],new Local());
+  handle=await ctx.agents.create({sessionId:'original-session',meta:{agentPreset:'jot-general',cwd:base},agentOptions:{provider:'source-custody',model:'synthetic'}});
+  f.db.prepare('INSERT INTO ga_conversations(id,owner_id,workspace_id,title,model,version,created_at,updated_at,project_id) VALUES(?,?,?,?,?,?,?,?,?)').run('original-conversation','owner','ws','Synthetic','{}',1,'now','now','project');
+  f.db.prepare('INSERT INTO ga_harness_session_bindings(owner_id,conversation_id,session_id,created_at,updated_at) VALUES(?,?,?,?,?)').run('owner','original-conversation','original-session','now','now');
+  f.current.executions.reserveWorkspace('owner','project',f.accepted.execution_id);
+  const original=f.current.executions.workspaceFamily('owner','project',f.accepted.execution_id),index=await readFile(join(f.root,'.git/index'));
+  // Cordis may wrap each service access in a distinct proxy. Retain the same
+  // original registry and Session references for both owning gate and host.
+  const bridge=new WorkbenchBridge({origin:await f.listen(),token}),persistence=ctx.sessionPersistence,registry=ctx.agents,sessions=ctx.sessions;
+  gate=createNativeWorkspaceFactoryGate({ctx,registry,sessions,persistence,currentPersistence:()=>ctx.sessionPersistence,notFoundError:modules['dsh-session-persistence'].SessionPersistenceNotFoundError});
+  const host=createNativeWorkspaceSourceHost({bridge,registry,sessions,persistence,currentPersistence:()=>ctx.sessionPersistence,
+   backendClass:modules['dsh-session-persistence'].SessionPersistence,allowedPresets:new Set(['jot-general']),validateLog:createNativeInvariantReplay({Session:modules['dsh-session'].Session}),projections:ctx.sessionProjections,factoryGate:gate});
+  const controls={assertReservation:()=>{const current=f.current.executions.workspaceFamily('owner','project',f.accepted.execution_id);assert.equal(current.reservation_id,original.reservation_id);assert.equal(current.family_sha256,original.family_sha256);}};
+  await host.withReservedFamily(f.scope,controls,async({source,proofs,check,recheck})=>{
+   assert.equal(source.family_sha256,original.family_sha256);assert.deepEqual(proofs.map(p=>p.session_ref),['original-session']);check();await recheck();assert.equal(modelCalls,0);
+  });
+  await assert.rejects(host.withReservedFamily(f.scope,controls,async()=>{
+   await f.current.intents.control('owner','project',f.approved.intent_id,{request_id:'cancel-held',action:'cancel',expected_version:f.approved.version,review_sha256:f.approved.review_sha256});
+  }),/git_execution_revoked/);
+  await handle.agent.runMaintenance(async()=>{});
+  assert.equal(modelCalls,0);assert.deepEqual(await readFile(join(f.root,'.git/index')),index);
+  assert.equal(f.db.prepare('SELECT count(*) n FROM wb_git_index_producers').get().n,0);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_worker_leases').get().n,0);
+ }finally{if(gate)await gate.dispose();if(handle)await handle.dispose();if(ctx)await ctx.fiber.dispose();}
 });

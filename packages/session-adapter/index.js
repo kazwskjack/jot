@@ -853,3 +853,4 @@ export {createOrdinaryInputAdmissionHost}
 export {createOrdinaryInputAdmissions} from './ordinary-input-admissions.js'
 
 export {createOrdinaryClaimedSessionComposer}
+export {createNativeWorkspaceSourceHost} from './native-workspace-source.js'

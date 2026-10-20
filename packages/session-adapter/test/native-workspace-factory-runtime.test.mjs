@@ -8,6 +8,8 @@ import {prepareDshPreSetupRuntime} from '../scripts/prepare-dsh-pre-setup.mjs';
 import {createNativeWorkspaceFactoryGate} from '../native-workspace-factory.js';
 import {withNativeWorkspaceBarrier} from '../native-workspace-barrier.js';
 import {createNativeInvariantReplay} from '../native-invariant-replay.js';
+import {createHash} from 'node:crypto';
+import {createNativeWorkspaceSourceHost} from '../native-workspace-source.js';
 const runtime=process.env.JOT_DSH_RUNTIME_MODULES;
 test('installed original factory cannot create held absent members; an already preparing writer blocks maintenance',
  {skip:!runtime,timeout:30000},async()=>{
@@ -27,14 +29,30 @@ test('installed original factory cannot create held absent members; an already p
   gate=createNativeWorkspaceFactoryGate({ctx,registry,sessions,persistence,currentPersistence:()=>ctx.sessionPersistence,notFoundError:modules['dsh-session-persistence'].SessionPersistenceNotFoundError});
   const source=id=>({sessionRef:id,registry,sessions,persistence,currentPersistence:()=>ctx.sessionPersistence,backendClass:modules['dsh-session-persistence'].SessionPersistence,
    allowedPresets:new Set(['jot-general']),validateLog:createNativeInvariantReplay({Session:modules['dsh-session'].Session}),projections:ctx.sessionProjections});
+  const {sessionRef:unused,...hostDependencies}=source('absent'),scope={owner_id:'owner',project_id:'project',execution_id:'execution'};
+  let sourceReads=0;
+  const members=[{session_ref:'absent',scopes:[{conversation_id:'conversation',workspace_id:'workspace'}],source_kinds:['work_binding']}];
+  const original={reservation_id:'reservation',owner_id:'owner',project_id:'project',binding_sha256:'b'.repeat(64),members:members.map(({session_ref,scopes})=>({session_ref,scopes}))};
+  const host=createNativeWorkspaceSourceHost({...hostDependencies,factoryGate:gate,bridge:{origin:'http://127.0.0.1:7654',token:'test-native-source-token',fetch:async(_url,request)=>{
+   assert.deepEqual(JSON.parse(request.body),scope);sourceReads++;
+   return Response.json({source:{protocol:1,...original,execution_id:'execution',members,family_sha256:createHash('sha256').update(JSON.stringify(original)).digest('hex'),execution_authorized:false}});
+  }}});
   let setups=0;const removeCount=ctx.on('agent/after-setup',({agent})=>{if(agent.id==='absent')setups++;});
-  await withNativeWorkspaceBarrier({factoryGate:gate,members:[source('absent')],assertReservation:()=>{}},async(proofs,_check,signal,recheck)=>{
+  await host.withReservedFamily(scope,{assertReservation:()=>{}},async({proofs,signal,recheck})=>{
    assert.equal(proofs[0].storage_absent,true);assert.equal(proofs[0].storage_owned,false);assert.equal(signal.aborted,false);
    await assert.rejects(ctx.agents.create({sessionId:'absent',meta:{agentPreset:'jot-general',cwd:root},agentOptions}),/native_workspace_factory_fenced/);
    await assert.rejects(ctx.agents.resume({resumeSessionId:'absent',agentOptions}));
    assert.equal(setups,0);assert.equal(calls,0);assert.equal(ctx.agents.get('absent'),undefined);assert.equal(await persistence.stat('absent'),undefined);await recheck();
   });
+  assert.equal(sourceReads,4,'original source is rechecked while actual native handles remain held');
   const created=await ctx.agents.create({sessionId:'absent',meta:{agentPreset:'jot-general',cwd:root},agentOptions});handles.push(created);assert.equal(setups,1);removeCount();
+  await host.withReservedFamily(scope,{assertReservation:()=>{}},async({proofs,check})=>{assert.equal(proofs[0].session_ref,'absent');check();assert.equal(calls,0);});
+  await persistence.flush();await created.dispose();handles.pop();
+  await host.withReservedFamily(scope,{assertReservation:()=>{}},async({proofs,recheck})=>{
+   assert.equal(proofs[0].driver_nonresident,true);assert.equal(proofs[0].storage_owned,true);
+   await assert.rejects(ctx.agents.resume({resumeSessionId:'absent',agentOptions}),{name:'SessionAlreadyOwnedError'});
+   assert.equal(calls,0);await recheck();
+  });
   let entered;const arrived=new Promise(resolve=>{entered=resolve;}),wait=new Promise(resolve=>{unblock=resolve;});
   const removeWait=ctx.on('agent/before-setup',async({agent})=>{if(agent.id==='pending'){entered();await wait;}});
   pending=ctx.agents.create({sessionId:'pending',meta:{agentPreset:'jot-general',cwd:root},agentOptions});pending.catch(()=>{});await arrived;

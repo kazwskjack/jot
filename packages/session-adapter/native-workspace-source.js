@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import {withNativeWorkspaceBarrier} from './native-workspace-barrier.js';
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/,SHA=/^[a-f0-9]{64}$/;
 const KINDS=new Set(['work_binding','mode_binding','runtime','run_native','checkpoint','goal_control','native_parent','native_child']);
 const fields=(value,keys)=>!!value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join(',')===[...keys].sort().join(',');
@@ -46,4 +47,56 @@ export async function readNativeWorkspaceFamily(bridge,input,signal){
  finally{if(!done)await reader.cancel().catch(()=>{});reader.releaseLock();}
  let parsed;try{parsed=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw Error('native_workspace_source_unconfirmed');}
  combined.throwIfAborted();if(!fields(parsed,['source']))throw Error('native_workspace_source_unconfirmed');return verified(parsed.source,scope);
+}
+
+/** Trusted original-host composition. The inventory is never its synchronous
+ * reservation authority: the original owning coordinator must supply that
+ * check and retain its Worker/producer custody. No route, runtime loader, Git
+ * effect grant, root association or cross-process admission lock is added.
+ */
+export function createNativeWorkspaceSourceHost(options={}){
+ const {registry,sessions,persistence,currentPersistence,backendClass,validateLog,projections,factoryGate,reconcileOperations}=options;
+ if(typeof registry?.get!=='function'||typeof sessions?.get!=='function'||typeof persistence?.open!=='function'||typeof persistence?.stat!=='function'
+  ||typeof currentPersistence!=='function'||typeof backendClass!=='function'||!(persistence instanceof backendClass)
+  ||!(options.allowedPresets instanceof Set)||!options.allowedPresets.size||typeof validateLog!=='function'||!projections||!factoryGate
+  ||typeof options.bridge?.fetch!=='function'||typeof options.bridge?.origin!=='string'||typeof options.bridge?.token!=='string')throw Error('native_workspace_source_host_unavailable');
+ // Snapshot dependency selectors and transport, never retain a mutable caller
+ // descriptor that could substitute another registry/store/identity mid-await.
+ const bridge=Object.freeze({origin:options.bridge.origin,token:options.bridge.token,fetch:options.bridge.fetch.bind(options.bridge)});
+ const allowedPresets=new Set(options.allowedPresets);
+ const dependencies={registry,sessions,persistence,currentPersistence,backendClass,allowedPresets,validateLog,projections,reconcileOperations};
+ return Object.freeze({async withReservedFamily(input,controls,operation){
+  if(!fields(input,['owner_id','project_id','execution_id'])||!Object.values(input).every(id))throw Error('native_workspace_source_invalid');
+  if(!controls||typeof controls!=='object'||Array.isArray(controls)||Object.keys(controls).some(key=>!['assertReservation','signal'].includes(key))
+   ||typeof controls.assertReservation!=='function'||controls.signal!==undefined&&!(controls.signal instanceof AbortSignal)
+   ||typeof operation!=='function')throw Error('native_workspace_host_controls_invalid');
+  const scope=Object.freeze({...input}),reservation=controls.assertReservation,signal=controls.signal;let residents=[];
+  const check=()=>{
+   signal?.throwIfAborted();const value=reservation();
+   if(value!==undefined){if(value&&typeof value.then==='function')Promise.resolve(value).catch(()=>{});throw Error('native_workspace_reservation_invalid');}
+   for(const {agent,session,preset} of residents)if(registry.get(agent.id)!==agent||sessions.get(agent.id)!==session||agent.session!==session
+    ||session.header?.agentPreset!==preset)throw Error('native_workspace_source_member_changed');
+  };
+  const read=async(nativeCheck=check,nativeSignal=signal)=>{
+   check();nativeCheck();const result=await readNativeWorkspaceFamily(bridge,scope,nativeSignal);check();nativeCheck();return result;
+  };
+  const source=await read();
+  const members=source.members.map(member=>{
+   const sessionRef=member.session_ref,agent=registry.get(sessionRef),session=sessions.get(sessionRef);
+   if(agent!==undefined&&(agent?.id!==sessionRef||agent.session?.id!==sessionRef||agent.session!==session||!allowedPresets.has(session?.header?.agentPreset))
+    ||agent===undefined&&session!==undefined)throw Error('native_workspace_source_member_changed');
+   if(agent!==undefined)residents.push({agent,session,preset:session.header.agentPreset});
+   return{...dependencies,sessionRef,...(agent===undefined?{}:{agent})};
+  });
+  check();
+  return withNativeWorkspaceBarrier({members,assertReservation:check,signal,factoryGate},async(proofs,nativeCheck,nativeSignal,nativeRecheck)=>{
+   const observe=async()=>{
+    await nativeRecheck();check();const current=await read(nativeCheck,nativeSignal);
+    if(current.reservation_id!==source.reservation_id||current.binding_sha256!==source.binding_sha256||current.family_sha256!==source.family_sha256)throw Error('native_workspace_source_changed');
+    await nativeRecheck();check();
+   };
+   await observe();const result=await operation(Object.freeze({source,proofs,check:nativeCheck,recheck:observe,signal:nativeSignal}));
+   await observe();return result;
+  });
+ }});
 }

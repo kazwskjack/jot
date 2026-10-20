@@ -184,6 +184,51 @@ result into a pass. The complete publishable source scan passes 1,129 files.
 
 ## Remaining original-chain integration
 
+### Authenticated source and native custody composition
+
+`createNativeWorkspaceSourceHost`, exported by the original adapter package,
+joins the verified original source reader to the native maintenance barrier.
+The trusted host captures its original registry, Session service, persistence
+epoch, preset allowlist and factory gate once. Requests contain only the original
+owner, project and execution identities. They cannot supply members, roots,
+runtime dependencies or a dispatch grant. The coordinator must still provide
+its original **synchronous** reservation check: an asynchronous HTTP read is
+never substituted for that authority.
+
+The host selects resident, stored and absent members from the verified source.
+It neither loads an Agent nor creates a missing log. Resident identity and
+preset checks remain in force across awaited reads. The original factory and
+maintenance handles stay held during a fresh authenticated source check before
+the callback, any explicit recheck, and the final source observation. A changed
+reservation, binding, family, owner, approval or cancellation rejects the operation.
+Failure after callback entry does not prove that its effects did not happen;
+there is no automatic retry or fabricated no-effect result.
+
+The new source-host cases first failed because the composition did not exist;
+a further resident-preset case then exposed a missing profile check. Both were
+implemented without loosening original native identity checks. Nine source-host
+cases pass; source/barrier combined verification has 32 passes. Installed-native
+verification has 49 passes without skips, including actual absent, resident and
+stored members. The complete default adapter has 793 passes and 28 conditional
+skips. Standalone 67 tests and the local frontend build pass.
+
+An additional six-case original-Gateway test passes with actual authenticated
+loopback HTTP and the installed DSH runtime. It uses the original product
+database reservation check, observes the actual native maintenance handles and
+revokes the original approval during a callback. The native handles drain, the
+Git index is unchanged, no model is called and no Git producer or Worker lease
+is minted. Its first run exposed a fixture using separately wrapped Cordis
+service proxies; retaining one original reference set fixed the fixture, while
+the strict factory identity comparison remained unchanged. The installed-native
+factory test uses the existing reviewed Jot protocol-2 compatibility hooks;
+those are not claimed as upstream APIs.
+
+This is a composable original-host entry, not an activated production mutation
+endpoint. Cross-process producer admission after restart, physical root/source
+publication association, the original execution lease and effect journal,
+checkpoint coordination and mobile writes remain required below. None of the
+above tests substitutes for that unfinished physical execution path.
+
 The final frozen-source Gateway run completed in 973,019.4979 ms with 2,077
 passing tests and seven conditional skips out of 2,084 total. The intermediate
 source-cut run had 2,072 pass / seven skips / zero failures out of 2,079; it
