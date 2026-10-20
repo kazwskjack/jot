@@ -6,6 +6,7 @@ import {isAbsolute,resolve,join,dirname,relative,sep,basename} from 'node:path';
 import {tmpdir} from 'node:os';
 import {workspaceRelativePath} from '../always-on/workspace-provider.ts';
 import {gitExecutable,readGit} from './process.ts';
+import {readCommitTree,type GitCommitReviewWitness} from './commit-tree.ts';
 
 export type GitInspectionOptions={root:string;gitDirectory?:string;commonDirectory?:string;executable?:string;limits?:Partial<{maxOutputBytes:number;timeoutMs:number;maxEntries:number;maxMetadataEntries:number;maxDiffBytes:number}>};
 export type GitEntry={path:string;original_path?:string;index_status:string;worktree_status:string;conflicted:boolean;kind:'file'|'directory'|'symlink'|'missing'|'other'};
@@ -215,6 +216,17 @@ export class GitRepositoryInspection{
    }
    if((await this.inspectContext(context,signal)).snapshot_id!==before.snapshot_id||JSON.stringify(await this.attributeManifest(paths,signal))!==JSON.stringify(attributes))throw Error('git_snapshot_changed');
    return{protocol:2,snapshot_id:before.snapshot_id,repository_sha256:before.repository_sha256,head:before.head,index_sha256:context.index,files,attributes};
+  }finally{await context.dispose();}
+ }
+ /** Complete staged-tree proof for the original commit review. It grants no
+  * commit effect authority and does not change stage/unstage witness encoding. */
+ async freezeCommit(snapshotId:string,paths:readonly string[],signal?:AbortSignal):Promise<GitCommitReviewWitness>{
+  const witness=await this.freeze(snapshotId,paths,signal),context=await this.context(signal);
+  try{
+   if((await this.inspectContext(context,signal)).snapshot_id!==snapshotId||context.index!==witness.index_sha256)throw Error('git_snapshot_changed');
+   const commit_tree=await readCommitTree(this.executable!,this.root,context,join(this.commonDirectory,'objects'),this.limits,signal);
+   if((await this.inspectContext(context,signal)).snapshot_id!==snapshotId||(await this.anchors(signal)).metadata!==context.metadata)throw Error('git_snapshot_changed');signal?.throwIfAborted();
+   return{...witness,commit_tree};
   }finally{await context.dispose();}
  }
  async diff(input:{snapshot_id:string;path:string;stage:'working'|'staged'},signal?:AbortSignal):Promise<GitDiff>{

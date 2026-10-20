@@ -713,3 +713,14 @@ only acceptance authority. Page mount and refresh perform no effects. Explicit
 retry preserves original body/key and fresh reads restore the existing review
 or operation UI. Original broader Git, all26 and portable deployment requirements
 remain unchanged; local browser persistence does not certify them.
+
+### Original commit staged-tree evidence
+
+The [commit review increment](../../implementation/2026-10-21-commit-staged-tree-review.md) strengthens the existing original review
+with exact staged-tree/object evidence. Real missing/wrong-type objects cannot
+obtain a new review, and legacy reviews cannot silently gain that proof.
+The frozen full Gateway gate passes2322 of2329 cases with seven conditional skips;
+root67/UI289/builds pass. Commit remains explicitly unsupported by the original
+execution-source guard until its distinct original metadata/admission/native
+CAS/ref/log/recovery/mobile chain is complete. This does not complete Git row15
+or reduce the original all26/portable/provider/platform/deployment scope.

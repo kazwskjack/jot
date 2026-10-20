@@ -76,7 +76,7 @@ export class GitMutationIntents{
    ||input.action==='unstage'&&selected.some(entry=>!staged(entry))
    ||input.action==='discard'&&selected.some(entry=>entry.index_status==='?'||entry.worktree_status===' ')
    ||input.action==='delete-untracked'&&selected.some(entry=>entry.index_status!=='?'||entry.worktree_status!=='?'))throw Error('git_selection_invalid');
-  const witness=await this.git.freeze(owner,project,input.snapshot_id,input.paths,signal);signal?.throwIfAborted();
+  const witness=await (input.action==='commit'?this.git.freezeCommit(owner,project,input.snapshot_id,input.paths,signal):this.git.freeze(owner,project,input.snapshot_id,input.paths,signal));signal?.throwIfAborted();
   return ()=>withImmediateTransaction(this.db,()=>{
    signal?.throwIfAborted();
    this.projects.assertOwned(project,owner);
@@ -96,7 +96,7 @@ export class GitMutationIntents{
   const cached=replay();if(cached)return ()=>{signal?.throwIfAborted();this.row(owner,project,id);return cached;};
   const assertCurrent=()=>{this.row(owner,project,id);const event=this.latest(id);if(event.version!==input.expected_version)throw Error('version_conflict');if(row.review_sha256!==input.review_sha256)throw Error('git_review_changed');if(event.state==='cancelled'||input.action==='approve'&&event.state!=='prepared')throw Error('git_intent_closed');return event;};
   assertCurrent();if(input.action==='approve'){
-   const selection=JSON.parse(row.selection_json) as Prepare,witness=await this.git.freeze(owner,project,selection.snapshot_id,selection.paths,signal);
+   const selection=JSON.parse(row.selection_json) as Prepare,witness=await (selection.action==='commit'?this.git.freezeCommit(owner,project,selection.snapshot_id,selection.paths,signal):this.git.freeze(owner,project,selection.snapshot_id,selection.paths,signal));
    if(JSON.stringify(witness)!==row.witness_json)throw Error('git_review_changed');
   }
   signal?.throwIfAborted();return ()=>withImmediateTransaction(this.db,()=>{
