@@ -4,7 +4,7 @@ title: Git views use owned read-only repository snapshots
 category: decision
 status: active
 created: "2026-10-19T17:04:32"
-updated: "2026-10-20T13:57:07"
+updated: "2026-10-20T15:06:41"
 ---
 
 <!-- compiled_truth -->
@@ -95,4 +95,10 @@ Git 执行的配置占用范围与程序／stat 见证分离：原始记录固�
 - time: 2026-10-20T13:57:07
   kind: evidence
   summary: "The original reserved Git executor can retain live native source custody, same-Host active pre-storage admission, exact configured root identities and its original Worker lease through real stage/unstage effects. A process-local custody object replaces no public permission or generic workspace check. Native cancellation reaches preparation. Only a fully successful awaited native/kernel lifecycle may settle and release; lost acknowledgement or settlement writes keep the original reservation, even with a known applied receipt. Isolated/shared source publication and cross-process production hosting remain separate unfinished integration."
+  affects: [git-inspection-boundary]
+
+- time: 2026-10-20T15:06:41
+  kind: evidence
+  summary: "Original native Git hosting now uses authenticated local pipe/socket transport beside the existing Host, with ID-only requests and no second runtime. Fresh Gateway physical-database observation matches the native process and synchronous guards retain original DB/root/native custody. Actual installed-SDK separate-process staging and parent approval revocation pass; constructor startup cannot migrate schema/data. Transport availability is not public write activation; shared/isolated publication, profile deployment and HTTP/UI closure remain open."
+  source: docs/implementation/2026-10-20-native-git-local-transport.md
   affects: [git-inspection-boundary]

@@ -173,6 +173,11 @@ creation after process restart; it is not permission to execute Git. The origina
 synchronous Gateway authority, exact producer lease, actual native maintenance
 handles, root/source association and journal remain required at physical effects.
 
+- Local native hosting is now implemented through the original adapter and a
+  protected pipe/socket; see [local transport](../../implementation/2026-10-20-native-git-local-transport.md).
+  Shared/isolated publication and actual operator profile acceptance remain
+  prerequisites; transport readiness does not open the UI write path.
+
 - [ ] Add execute/current-result/disposition controls to the existing review UI.
   Show exact historical acceptance separately from running/current/unknown state.
   Preserve the original pending request across remount/lost responses and require

@@ -55,6 +55,15 @@ Track **inventoried**, **source reviewed**, **implemented**, **locally tested**,
 
 The reference core/UI have been built in an isolated Windows environment, and its Web server passed a no-credential startup smoke test. Core tests still contain failures and cancellations, including Windows path/symlink and timer behavior requiring investigation. This is not production acceptance or complete integration.
 
+## Current native Git hosting milestone
+
+Optional original native hosting uses an authenticated local pipe/socket.
+Separate-process installed-SDK tests stage reviewed bytes and observe parent
+approval revocation in the same physical database. This is internal hosting,
+not public Git write activation or full parity. See
+[native Git transport](implementation/2026-10-20-native-git-local-transport.md)
+for prerequisites, verification and remaining publication/UI/deployment gates.
+
 ## Current consolidation milestone
 
 Reviewed staging/proposal, immutable source trace, owner-confirmed atomic rewrite/duplicate merge, conflict checks and version-safe rollback are connected through the original DSH workspace tool and the workbench UI. They reuse the existing model budget and permissions. This does not complete automated message extraction, retrieval traces or idle-triggered consolidation. Real SDK tests use a scripted local provider; real-provider consolidation quality and production acceptance remain unverified.

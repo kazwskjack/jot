@@ -54,6 +54,8 @@
     "native-workspace-barrier.js",
     "native-workspace-factory.js",
     "native-workspace-source.js",
+    "native-git-transport.js",
+    "native-git-host.js",
     "native-handoff-admission.js",
     "native-handoff-return.js",
     "native-handoff-inbox.js",

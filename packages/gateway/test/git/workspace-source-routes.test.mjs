@@ -10,6 +10,13 @@ import {prepareDshPreSetupRuntime} from '../../../session-adapter/scripts/prepar
 import {reserveWorkspaceOperation} from '../../src/workbench/workspace-coordination.ts';
 import {ProjectRepository} from '../../src/projects/repository.ts';
 const token='test-workspace-service-token',url='/internal/v1/workbench/git-workspace-source';
+test('physical database observation is internal, selector-free and exposes no file path',async t=>{
+ const f=await fixture(t),endpoint='/internal/v1/workbench/native-git-database';
+ assert.equal((await f.inject({method:'POST',url:endpoint,payload:{}})).statusCode,401);
+ for(const [path,payload] of [[endpoint,{root:'untrusted'}],[endpoint+'?root=untrusted',{}]])assert.equal((await f.inject({method:'POST',url:path,headers:{authorization:'Bearer '+token},payload})).statusCode,422);
+ const result=await f.inject({method:'POST',url:endpoint,headers:{authorization:'Bearer '+token},payload:{}});
+ assert.equal(result.statusCode,200);const value=result.json();assert.deepEqual(Object.keys(value).sort(),['database_sha256','execution_authorized','protocol']);assert.match(value.database_sha256,/^[a-f0-9]{64}$/);assert.equal(value.execution_authorized,false);assert.match(result.headers['cache-control'],/no-store/);
+});
 async function fixture(t){
  const parent=await mkdtemp(join(tmpdir(),'jot-git-workspace-source-')),root=join(parent,'repo');await mkdir(root);
  const git=(...args)=>execFileSync('git',['-c','user.name=Test Contributor','-c','user.email=test@example.invalid',...args],{cwd:root,encoding:'utf8',stdio:['ignore','pipe','pipe']});

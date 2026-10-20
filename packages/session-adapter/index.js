@@ -33,6 +33,7 @@ import {createOrdinaryInputRunHost,normalizeOrdinaryInputExecution} from './ordi
 import {createOptionalMemoryExtractionHost} from './optional-memory-extraction.js'
 import { WorkbenchBridge,normalizeHostExecutionLease } from './workbench.js'
 import {createNativeWorkspaceAdmissionGate} from './native-workspace-factory.js'
+import {createNativeGitHost,normalizeNativeGitHostConfig} from './native-git-host.js'
 
 export const name = 'jot-jot-session-adapter'
 export const inject = ['sessionController', 'fileUploads', 'agents','sessions','sessionPersistence','sessionProjections','llm']
@@ -684,6 +685,8 @@ async function readJson(req, limit = 1024 * 1024) {
 }
 
 export function apply(ctx, config = {}) {
+  const nativeGitConfig=config.nativeGit===undefined?undefined:normalizeNativeGitHostConfig(config.nativeGit)
+  if(nativeGitConfig&&config.nativeWorkspaceAdmission!==true)throw Error('native_git_host_config_invalid')
   if(config.ordinaryModelSelection!==undefined&&typeof config.ordinaryModelSelection!=='boolean'||config.ordinaryModelSelection===true&&config.ordinaryInputAdmission===undefined)throw Error('ordinary_model_policy_config_invalid')
   let chatExecutionPolicy
   if(config.ordinaryExecutionPolicy!==undefined){
@@ -742,9 +745,20 @@ export function apply(ctx, config = {}) {
     nativeContinuation: config.nativeContinuation ?? false,
     modelRouteFor:config.workbenchModel?agent=>ctx.sessionController.agents.selectionFor(agent).current:undefined,
   }) : undefined
+  let nativeWorkspaceAdmissionGate
   if(config.nativeWorkspaceAdmission===true){
-    const gate=createNativeWorkspaceAdmissionGate({ctx,bridge:workbenchBridge})
-    ctx.effect(()=>()=>gate.dispose())
+    nativeWorkspaceAdmissionGate=createNativeWorkspaceAdmissionGate({ctx,bridge:workbenchBridge})
+    ctx.effect(()=>()=>nativeWorkspaceAdmissionGate.dispose())
+  }
+  if(nativeGitConfig){
+    let stopped=false,nativeGitHost,ready=false
+    const prepared=createNativeGitHost({ctx,bridge:workbenchBridge,admissionGate:nativeWorkspaceAdmissionGate,allowedPresets:new Set(ALLOWED_AGENT_PRESETS),config:nativeGitConfig}).then(async host=>{
+      nativeGitHost=host
+      if(stopped){await host.dispose();return}
+      ready=true;ctx.emit('jot/native-git-readiness',{ready:true})
+    }).catch(()=>{if(!stopped)ctx.emit('jot/native-git-readiness',{ready:false,reason:'native_git_host_unavailable'})})
+    ctx.provide('jotNativeGitHost',Object.freeze({async readiness(){await prepared;return{ready:ready&&!stopped}}}))
+    ctx.effect(()=>async()=>{stopped=true;ready=false;await prepared;await nativeGitHost?.dispose()})
   }
   const budgetModelSelector=createBudgetModelSelector({route:config.workbenchModel,llm:ctx.llm,agents:ctx.sessionController.agents})
   const nativeClaimedComposer=config.nativeClaimedInputRecovery===undefined?undefined:createNativeClaimedSessionComposer({

@@ -68,6 +68,16 @@ must explicitly state which part it closes and what evidence was executed.
 |25|Install/update|Offline preflight, then platform deployment/migration/update/rollback acceptance.|Windows local builds, dependency licenses and exact release contents.|
 |26|Observability/testing|Actual runtime/usage/health projection; complete crash, portability, retention and real-provider/deployment matrix.|Separate source inspection, synthetic fixture, actual SDK and production evidence.|
 
+## 2026-10-20 original native Git transport increment
+
+The existing original Host now optionally mounts a protected local pipe/socket
+and original executor against the same physical product DB and checkout.
+Actual installed-SDK separate-process staging and parent revocation pass;
+original review, native custody and synchronous authority remain in place.
+See [implementation and remaining gates](../../implementation/2026-10-20-native-git-local-transport.md).
+This closes the local-hosting substep only. It does not close row15, open browser
+mutation controls or reduce the complete 26-capability/portable Chat/Work scope.
+
 ## Current parallel assignments
 
 The coordinator integrates interfaces and runs final shared regression/builds.

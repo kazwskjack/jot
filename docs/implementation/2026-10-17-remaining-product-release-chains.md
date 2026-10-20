@@ -26,6 +26,12 @@
 
 ## 15. Git workbench
 
+2026-10-20 增量：[原生 Git 本地通道](2026-10-20-native-git-local-transport.md)
+已接入现有 adapter，可在共享原数据库和物理仓库的两个进程间调用原执行器。
+实际 SDK 验收完成暂存，并在准备下一次撤销暂存时验证原审批撤销确实阻止写入。
+这不等于前端写入口已开放；共享／隔离产物发布、检查点、原 HTTP/BFF/UI 和部署
+验收仍按下方剩余链推进，不能以通道 ready 代替整条功能验收。
+
 **现状（2026-10-19 更新）**：已有 owner/project 归属的 Git 状态、分支与 staged/working diff API 和移动端 Git 页，以及精确快照的审批界面。内部 stage/unstage 执行具有原始请求、准备/派发/结果/处置记录与真实崩溃恢复测试；本轮新增原始受理事务及受理/当前结果分别查询的 API、BFF 和客户端。实际 UI 写入仍未开放。DSH 原生 shell/Git 能力和公开提交扫描均不能代替产品写入授权。详见[原始受理与历史查询](2026-10-19-git-original-admission-history.md)。
 
 **真实剩余链**：原始工作区协调（Agent turn、共享写入、检查点恢复）→ 原受理 HTTP 事务与 producer 生命周期 → 实际 stage/unstage UI、取消/重启/未知结果恢复 → commit/revert/discard/untracked delete → 分别授权的 remote fetch/pull/push/publish 及远端冲突/未知结果恢复。已完成的有界只读展示和内部物理执行不重复计为新完成项。每一步继续防止 pathspec 注入、shell 拼接、仓库 root 替换、跨 owner、符号链接和大输出泄漏；remote 展示必须脱敏。
