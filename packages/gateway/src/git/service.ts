@@ -22,9 +22,10 @@ export class GitWorkbench{
    this.executionBindings.set(key,createHash('sha256').update('git-common-binding:v1\0'+identity).digest('hex'));
   }
  }
- capability(owner:string){
+ capability(owner:string,nativeIndexConfigured=false){
   const configured_projects:string[]=[];for(const key of this.repositories.keys()){const [candidate,project]=key.split('\0');if(candidate!==owner)continue;try{this.projects.assertOwned(project!,owner);configured_projects.push(project!);}catch{}}
-  return{configured_projects:configured_projects.sort(),read_only:true as const};
+  configured_projects.sort();
+  return nativeIndexConfigured&&configured_projects.length?{configured_projects,read_only:false as const,index_actions:['stage','unstage'] as ['stage','unstage']}:{configured_projects,read_only:true as const};
  }
  private repository(owner:string,project:string){this.projects.assertOwned(project,owner);const repository=this.repositories.get(owner+'\0'+project);if(!repository)throw Error('git_repository_unconfigured');return repository;}
  /** Trusted execution service only; not a route, tool or permission grant. */

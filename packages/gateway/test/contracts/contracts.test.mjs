@@ -11,6 +11,13 @@ test('Git workbench schemas expose bounded read-only state and no host paths, co
  for(const name of ['GitSnapshot','GitDiff','GitEntry','GitRemote'])for(const forbidden of ['root','git_directory','executable','command','url','credentials'])assert.equal(forbidden in schemas[name].properties,false);
  const yaml=await readFile(new URL('openapi.yaml',contracts),'utf8');for(const name of ['Capabilities','GitSnapshot','GitDiff','GitEntry','GitRemote','GitWorkbenchCapability']){const line=yaml.split('\n').find(s=>s.startsWith('    '+name+': '));assert.ok(line);assert.deepEqual(JSON.parse(line.slice(line.indexOf(':')+1)),schemas[name]);}
 });
+test('Git capability keeps default reads separate from explicitly configured reviewed index actions',async()=>{
+ const spec=await json('openapi.json'),event=await json('agent-event.schema.json'),yaml=await readFile(new URL('openapi.yaml',contracts),'utf8'),{default:Ajv}=await import('ajv/dist/2020.js'),schema=spec.components.schemas.GitWorkbenchCapability,validate=new Ajv({strict:false}).compile(schema);
+ for(const value of [{configured_projects:[],read_only:true},{configured_projects:['project'],read_only:true},{configured_projects:['project'],read_only:false,index_actions:['stage','unstage']}])assert.equal(validate(value),true,JSON.stringify(validate.errors));
+ for(const value of [{configured_projects:['project'],read_only:false},{configured_projects:['project'],read_only:true,index_actions:['stage','unstage']},{configured_projects:[],read_only:false,index_actions:['stage','unstage']},{configured_projects:['project'],read_only:false,index_actions:['stage','commit']},{configured_projects:['project'],read_only:false,index_actions:['stage','unstage','discard']},{configured_projects:['project'],read_only:'false'}])assert.equal(validate(value),false);
+ assert.deepEqual(event.$defs.GitWorkbenchCapability,schema);const line=yaml.split('\n').find(value=>value.startsWith('    GitWorkbenchCapability: '));assert.ok(line);assert.deepEqual(JSON.parse(line.slice(line.indexOf(':')+1)),schema);
+});
+
 test('Git review contracts reject execution claims and keep commit messages operation-specific',async()=>{
  const spec=await json('openapi.json'),event=await json('agent-event.schema.json'),yaml=await readFile(new URL('openapi.yaml',contracts),'utf8'),{ContractValidator}=await import('../../src/contracts/validator.ts'),validator=new ContractValidator();
  const operation=validator.operationFor('POST','/v1/projects/{projectId}/git/intents'),base={request_id:'review-1',action:'stage',paths:['note.txt'],snapshot_id:'a'.repeat(64)};

@@ -1,9 +1,19 @@
 # PilotDeck capability and implementation reference
 
-The original owner publication review now has a public Gateway preparation,
-current-state and approval/cancellation boundary with atomic original receipts;
-see [implementation and acceptance](implementation/2026-10-20-publication-owner-review-api.md).
-Apply admission, native dispatch/status/recovery and mobile controls remain open.
+The original owner publication chain now includes preparation, separate target
+approval, admission, native file Apply, original history and explicit mobile
+recovery. Selected index stage/unstage has its own original admission, native
+dispatch/status/control and workbench entry; see the
+[selected-index implementation and acceptance](implementation/2026-10-21-index-selected-apply-and-mobile-recovery.md).
+These paths reuse the original physical database, native family, Worker and owner
+review. Configured native index actions do not enable commits, destructive or
+remote operations. Local synthetic/SDK/browser evidence remains distinct from
+the still-open complete process/platform/provider/deployment matrix.
+
+The dated milestones below are retained as development history. Their earlier
+"not implemented" statements describe those increments, not the current total
+state. Use the linked implementation records and complete ledger together;
+neither the newer Git entry nor a green local gate certifies all26 capabilities.
 
 Jot's reference scope covers all PilotDeck functions and implementation mechanisms, not only its interface or headline features. This checklist is not a claim of complete parity.
 

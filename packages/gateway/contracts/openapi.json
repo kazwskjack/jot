@@ -27029,14 +27029,47 @@
             }
           },
           "read_only": {
-            "const": true
+            "type": "boolean"
+          },
+          "index_actions": {
+            "const": [
+              "stage",
+              "unstage"
+            ]
           }
         },
         "required": [
           "configured_projects",
           "read_only"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "oneOf": [
+          {
+            "properties": {
+              "read_only": {
+                "const": true
+              }
+            },
+            "not": {
+              "required": [
+                "index_actions"
+              ]
+            }
+          },
+          {
+            "properties": {
+              "read_only": {
+                "const": false
+              },
+              "configured_projects": {
+                "minItems": 1
+              }
+            },
+            "required": [
+              "index_actions"
+            ]
+          }
+        ]
       },
       "GitHead": {
         "type": "object",

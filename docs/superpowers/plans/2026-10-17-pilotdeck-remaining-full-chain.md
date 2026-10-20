@@ -1,4 +1,4 @@
-# Remaining full capability chains and parallel implementation
+# Remaining full capability chains and implementation ledger
 
 This execution ledger keeps all26 capabilities in scope. It consolidates the
 current source audit rather than treating historical milestone paragraphs as a
@@ -62,7 +62,7 @@ must explicitly state which part it closes and what evidence was executed.
 |12|Browser|On-demand screenshots, persistent owner profiles, control discovery and health/recovery through a real configured driver.|Standalone capture and Gateway browser interaction remain distinct.|
 |13|Computer Use/desktop|Repo-owned driver protocol, actual OS permission, coordinates and disconnect recovery.|Real desktop is distinct from a browser page or remote viewer.|
 |14|Checkpoints/artifacts|User version/diff/archive/restore flow; independent file checkpoints/forks with frozen manifests.|Existing immutable artifact versions and native history proofs.|
-|15|Git workbench|Trusted root/status/diff UI, then reviewed local writes and separately authorized remote operations/recovery.|Exact repo/HEAD/index identity, path and credential boundaries.|
+|15|Git workbench|Complete remaining selected-index process/platform/deployment acceptance; branch/commit/destructive/revert and separately authorized fetch/pull/push/publish workflows and recovery.|Exact repo/HEAD/index identity, path and credential boundaries; current local index/file Apply does not authorize broader mutations.|
 |16|Commands/skills|Scoped discovery/load/configuration/install and reviewed execution entry.|Loading never grants tool or shell authority.|
 |17|MCP/plugins/hooks|Registry projection, lifecycle/configuration/permission changes and result/reload recovery.|Existing runtime tool boundaries, explicit installation changes.|
 |18|Voice|Actual recording→existing ASR→editable draft→explicit send; cancellation and context isolation.|Current same-origin BFF and owned voice jobs, no second ASR service.|
@@ -85,7 +85,37 @@ See [implementation and remaining gates](../../implementation/2026-10-20-native-
 This closes the local-hosting substep only. It does not close row15, open browser
 mutation controls or reduce the complete 26-capability/portable Chat/Work scope.
 
-## Current parallel assignments
+## Latest local Git evidence and remaining scope
+
+Published `065a872` adds original index dispatch/status/history, explicit native
+resolution and physically isolated preparation writes. Its complete Gateway gate
+finished2313 tests:2306 passes, seven conditional skips and no failures, alongside
+root67/UI271, configured adapter852 and local builds. The original private source,
+staging and complete-history checks found no new disclosure findings.
+
+The [selected-index UI continuation](../../implementation/2026-10-21-index-selected-apply-and-mobile-recovery.md)
+adds explicit reviewed stage/unstage, lost-response reconciliation, history reload,
+another-page cancellation and original control continuation. All273 UI cases
+pass on unchanged code with test-file concurrency2; the original unbounded run's
+two loading timeouts remain in the acceptance record. The configured capability
+and strict schema cases pass. The new full Gateway gate completed2315 cases:
+2308 passes, seven conditional skips and no failures, on1145 unchanged inputs.
+A separate actual mobile process-loss probe preserves an unexpired old lease,
+waits for its real expiration and explicitly completes original cold native
+recovery without rewriting the index. Its initial post-recovery loading timeout
+under concurrent gate load and subsequent same-assertion pass are retained
+separately. This still does not complete row15 or platform/deployment acceptance.
+
+The next Git work still includes process-loss/lease/root and platform acceptance,
+commit/destructive/revert and remote workflows. The other25 capability rows and
+portable Chat/Work/provider/deployment requirements retain their full scope.
+Do not convert this local index milestone into a reduced definition of parity.
+
+## Historical implementation assignments
+
+The assignments below are retained for provenance. Current execution follows
+the user's single-agent restriction; this historical list is not a request to
+start agents or resume old assignments.
 
 ### Original isolated review continuation
 

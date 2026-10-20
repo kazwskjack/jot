@@ -2,14 +2,15 @@ import React,{useEffect,useRef,useState} from 'react';
 import type {GitReviewPrepare,GitReviewIntent} from './types';
 import {pathId,workbenchApi} from './client';
 import {useMutationReceipt} from './useMutationReceipt';
+import GitIndexOperation from './GitIndexOperation';
 export type GitReviewDraft={project:string;snapshot:string;paths:string[];action:GitReviewPrepare['action'];actions:GitReviewPrepare['action'][]};
 const titles:Record<GitReviewPrepare['action'],string>={stage:'暂存选定文件',unstage:'取消选定文件的暂存',commit:'提交全部已暂存文件',discard:'丢弃选定的工作区修改','delete-untracked':'删除选定的未跟踪文件'};
 type Command={path:string;body:unknown};
-export default function GitReview({draft,onClose,onBusy}:{draft:GitReviewDraft;onClose:()=>void;onBusy:(busy:boolean)=>void}){
+export default function GitReview({draft,onClose,onBusy,allowIndexExecution=false}:{draft:GitReviewDraft;onClose:()=>void;onBusy:(busy:boolean)=>void;allowIndexExecution?:boolean}){
  const mutation=useMutationReceipt(),[action,setAction]=useState(draft.action),[message,setMessage]=useState(''),[review,setReview]=useState<GitReviewIntent|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[verified,setVerified]=useState(false),[stale,setStale]=useState(false);
  const command=useRef<Command|null>(null),alive=useRef(true),inflight=useRef(false),base=`/projects/${pathId(draft.project)}/git/intents`;
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;onBusy(false);};},[onBusy]);
- const locked=busy||mutation.pending;
+ const [executionBusy,setExecutionBusy]=useState(false),locked=busy||mutation.pending||executionBusy;
  const begin=()=>{if(inflight.current)return false;inflight.current=true;setBusy(true);setError('');onBusy(true);return true;};
  const end=()=>{inflight.current=false;if(alive.current){setBusy(false);onBusy(false);}};
  const readCurrent=async(id:string)=>{const current=await workbenchApi.gitReview(draft.project,id);if(current.project_id!==draft.project||current.snapshot_id!==draft.snapshot||current.intent_id!==id)throw Error('GIT_REVIEW_SCOPE_CHANGED');if(alive.current){setReview(current);setVerified(true);}};
@@ -37,6 +38,7 @@ export default function GitReview({draft,onClose,onBusy}:{draft:GitReviewDraft;o
  return <section className="wb-form wb-git-review" aria-label="Git 变更审核"><div className="wb-toolbar"><h3>变更审核</h3><button type="button" disabled={locked} onClick={onClose}>关闭审核</button></div><p>审核不会修改仓库。</p><ul>{draft.paths.map(path=><li key={path}><code>{path}</code></li>)}</ul>
   {!review?<><fieldset disabled={locked}><label>计划操作<select aria-label="计划操作" value={action} onChange={e=>setAction(e.target.value as GitReviewPrepare['action'])}>{draft.actions.map(value=><option key={value} value={value}>{titles[value]}</option>)}</select></label>{action==='commit'&&<label>提交说明<textarea aria-label="提交说明" maxLength={4096} value={message} onChange={e=>setMessage(e.target.value)}/></label>}</fieldset><button type="button" disabled={busy||mutation.pending||action==='commit'&&!message.trim()} onClick={()=>void send('prepare')}>生成审核</button></>
    :<><p><strong>{titles[review.action]}</strong></p>{review.message&&<p>{review.message}</p>}<p role="status">{!verified?'当前审核状态尚未确认。':review.state==='prepared'?'等待批准，尚未执行。':review.state==='approved'?'审核已批准，尚未执行。':'审核已取消。'}</p><div className="wb-actions">{review.state==='prepared'&&<button type="button" disabled={locked||!verified||stale} onClick={()=>void send('approve')}>批准审核</button>}{review.state!=='cancelled'&&<button type="button" disabled={locked||!verified} onClick={()=>void send('cancel')}>取消审核</button>}<button type="button" disabled={locked} onClick={()=>void refresh()}>刷新审核状态</button></div></>}
+  {review&&verified&&allowIndexExecution&&['stage','unstage'].includes(review.action)&&<GitIndexOperation key={review.intent_id} project={draft.project} review={review} allowDispatch={allowIndexExecution} onReviewChange={setReview} onBusy={value=>{setExecutionBusy(value);onBusy(value)}}/>}
   {error&&<p role="alert" className="wb-error">{error}</p>}{mutation.pending&&<button type="button" disabled={busy} onClick={()=>void send('retry')}>重试原请求</button>}
  </section>;
 }
