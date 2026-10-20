@@ -1,12 +1,12 @@
 import {isAbsolute,resolve,join} from 'node:path';
 import {createHash} from 'node:crypto';
 import type {ProjectRepository} from '../projects/repository.ts';
-import {GitIndexEffects} from './index-effects.ts';
+import {GitPublicationEffects} from './publication-effects.ts';
 
 export type GitRepositoryBinding={owner_id:string;project_id:string;root:string;git_directory?:string;common_directory?:string};
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 export class GitWorkbench{
- private readonly repositories=new Map<string,GitIndexEffects>();
+ private readonly repositories=new Map<string,GitPublicationEffects>();
  private readonly executionBindings=new Map<string,string>();
  private readonly projects:ProjectRepository;
  constructor(projects:ProjectRepository,bindings:readonly GitRepositoryBinding[]=[],executable?:string){
@@ -18,7 +18,7 @@ export class GitWorkbench{
    for(const path of [raw.git_directory,raw.common_directory])if(path!==undefined&&(typeof path!=='string'||!isAbsolute(path)))throw Error('git_configuration_invalid');
    const key=raw.owner_id+'\0'+raw.project_id,common=resolve(raw.common_directory??raw.git_directory??join(raw.root,'.git')),identity=process.platform==='win32'?common.toLowerCase():common;
    if(this.repositories.has(key)||roots.has(identity))throw Error('git_configuration_invalid');roots.add(identity);
-   this.repositories.set(key,new GitIndexEffects({root:raw.root,...(raw.git_directory?{gitDirectory:raw.git_directory}:{}),...(raw.common_directory?{commonDirectory:raw.common_directory}:{}),...(executable?{executable}:{})}));
+   this.repositories.set(key,new GitPublicationEffects({root:raw.root,...(raw.git_directory?{gitDirectory:raw.git_directory}:{}),...(raw.common_directory?{commonDirectory:raw.common_directory}:{}),...(executable?{executable}:{})}));
    this.executionBindings.set(key,createHash('sha256').update('git-common-binding:v1\0'+identity).digest('hex'));
   }
  }

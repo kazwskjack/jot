@@ -3,6 +3,17 @@
 **Goal:** Complete the existing isolated-result review, explicit publication and
 Git/checkpoint coordination without replacing DSH or its original authority.
 
+Source porting and existing-code reuse must follow the
+[module comparison and strengthening decisions](../../implementation/2026-10-20-pilotdeck-reuse-strengthening-review.md).
+Reuse actual upstream algorithms where appropriate, preserve provenance and
+licenses, and strengthen only demonstrated gaps. Next close real publication and
+recovery rather than treating another admission prerequisite as feature completion.
+
+Current native source custody and local physical-effects verification are
+recorded in [the implementation evidence](../../implementation/2026-10-20-publication-native-source-and-effects.md).
+The original producer journal, restart reconciliation and product Apply entry
+remain required; local kernel tests do not close those steps.
+
 The existing frozen candidate already retains the complete inspected base/result
 manifests, diff, selected objective, source, plans, call-set and inspection hashes.
 `TaskReviewOutputs` currently returns only selected file downloads. Expose the

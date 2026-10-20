@@ -6,6 +6,12 @@ const KINDS=new Set(['work_binding','mode_binding','runtime','run_native','check
 const fields=(value,keys)=>!!value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join(',')===[...keys].sort().join(',');
 const id=value=>typeof value==='string'&&ID.test(value);
 const contexts=new WeakMap();
+function operationScope(input){
+ const modern=fields(input,['owner_id','project_id','execution_id','operation_kind']);
+ if(!modern&&!fields(input,['owner_id','project_id','execution_id'])||!['owner_id','project_id','execution_id'].every(key=>id(input?.[key]))
+  ||modern&&!['git_index','work_publication'].includes(input.operation_kind))throw Error('native_workspace_source_invalid');
+ return Object.freeze({...input});
+}
 /** Host-only observation while the original native custody is still held.
  * Neither these facts nor a serialized copy grant Git or publication rights. */
 export function inspectNativeWorkspaceSource(context){
@@ -18,7 +24,8 @@ export function assertNativeWorkspaceSourceAdmission(context){
 function freeze(value){if(value&&typeof value==='object'){for(const child of Object.values(value))freeze(child);Object.freeze(value);}return value;}
 function verified(value,scope){
  const fail=()=>{throw Error('native_workspace_source_unconfirmed');};
- if(!fields(value,['protocol','reservation_id','execution_id','owner_id','project_id','binding_sha256','family_sha256','members','execution_authorized'])
+ const typed=Object.hasOwn(scope,'operation_kind');
+ if(!fields(value,['protocol','reservation_id','execution_id','owner_id','project_id','binding_sha256','family_sha256','members','execution_authorized',...(typed?['operation_kind']:[])])
   ||value.protocol!==1||value.execution_authorized!==false||!id(value.reservation_id)||!SHA.test(value.binding_sha256)||!SHA.test(value.family_sha256)
   ||Object.keys(scope).some(key=>value[key]!==scope[key])||!Array.isArray(value.members)||value.members.length>256)fail();
  const ids=new Set();let count=0,previous;
@@ -38,14 +45,13 @@ function verified(value,scope){
  const base={reservation_id:value.reservation_id,owner_id:scope.owner_id,project_id:scope.project_id,binding_sha256:value.binding_sha256,
   members:members.map(({session_ref,scopes})=>({session_ref,scopes}))};
  if(createHash('sha256').update(JSON.stringify(base)).digest('hex')!==value.family_sha256)fail();
- return freeze({protocol:1,...base,execution_id:scope.execution_id,family_sha256:value.family_sha256,members,execution_authorized:false});
+ return freeze({protocol:1,...base,execution_id:scope.execution_id,...(typed?{operation_kind:scope.operation_kind}:{}),family_sha256:value.family_sha256,members,execution_authorized:false});
 }
 
 /** Original authenticated inventory only. No cache, Agent resolution, namespace
  * claim, cwd derivation, lease or Git execution permission is minted here. */
 export async function readNativeWorkspaceFamily(bridge,input,signal){
- if(!fields(input,['owner_id','project_id','execution_id'])||!Object.values(input).every(id))throw Error('native_workspace_source_invalid');
- const scope=Object.freeze({...input}),timed=AbortSignal.timeout(15000),combined=AbortSignal.any([timed,...(signal?[signal]:[])]);combined.throwIfAborted();
+ const scope=operationScope(input),timed=AbortSignal.timeout(15000),combined=AbortSignal.any([timed,...(signal?[signal]:[])]);combined.throwIfAborted();
  let response;
  try{response=await bridge.fetch(`${bridge.origin}/internal/v1/workbench/git-workspace-source`,{method:'POST',redirect:'error',
   headers:{authorization:`Bearer ${bridge.token}`,'content-type':'application/json'},body:JSON.stringify(scope),signal:combined});}
@@ -77,11 +83,11 @@ export function createNativeWorkspaceSourceHost(options={}){
  const allowedPresets=new Set(options.allowedPresets);
  const dependencies={registry,sessions,persistence,currentPersistence,backendClass,allowedPresets,validateLog,projections,reconcileOperations};
  return Object.freeze({async withReservedFamily(input,controls,operation){
-  if(!fields(input,['owner_id','project_id','execution_id'])||!Object.values(input).every(id))throw Error('native_workspace_source_invalid');
+  const scope=operationScope(input);
   if(!controls||typeof controls!=='object'||Array.isArray(controls)||Object.keys(controls).some(key=>!['assertReservation','signal'].includes(key))
    ||typeof controls.assertReservation!=='function'||controls.signal!==undefined&&!(controls.signal instanceof AbortSignal)
    ||typeof operation!=='function')throw Error('native_workspace_host_controls_invalid');
-  const scope=Object.freeze({...input}),reservation=controls.assertReservation,signal=controls.signal;let residents=[];
+  const reservation=controls.assertReservation,signal=controls.signal;let residents=[];
   const check=()=>{
    signal?.throwIfAborted();const value=reservation();
    if(value!==undefined){if(value&&typeof value.then==='function')Promise.resolve(value).catch(()=>{});throw Error('native_workspace_reservation_invalid');}

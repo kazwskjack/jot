@@ -94,7 +94,16 @@ export class WorkPublicationIntents{
  private selected(owner:string,project:string,input:WorkPublicationPrepare){
   this.projects.assertOwned(project,owner);const result=this.sources.readSelection(owner,input.source_run_id,input.paths,input.source_sha256),source=result.summary;
   if(source.project_id!==project||source.owner_id!==owner)fail('source_scope');
-  if(source.unsupported_changes.length)fail('source_unsupported');
+  // Keep the original inventory unchanged. A directory has no independent
+  // file-version receipt, but creating an original selected new file necessarily
+  // creates its missing ancestors. Permit only those exact structural additions;
+  // unrelated directories and every other unsupported change still refuse.
+  for(const unsupported of source.unsupported_changes){
+   const change=source.work_review.diff.changes.find(entry=>entry.path===unsupported.path&&entry.kind===unsupported.kind);
+   if(change?.kind!=='add'||change.after.kind!=='directory'
+    ||!input.paths.some(path=>path.startsWith(change.path+'/')&&source.work_review.diff.changes.some(entry=>entry.path===path&&entry.kind==='add'&&entry.after.kind==='file')))
+    fail('source_unsupported');
+  }
   for(const path of input.paths){const change=source.work_review.diff.changes.find(entry=>entry.path===path);if(!change||!['add','modify'].includes(change.kind))fail('selection_invalid');}
   return result;
  }

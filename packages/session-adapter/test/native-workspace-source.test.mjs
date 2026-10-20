@@ -29,3 +29,12 @@ test('oversized source streams are cancelled without returning a partial member 
  const response=new Response(new ReadableStream({pull(controller){controller.enqueue(new Uint8Array(65536));},cancel(){cancelled=true;}}));
  await assert.rejects(bridge(async()=>response).workspaceFamily(scope),/native_workspace_source_unconfirmed/);assert.equal(cancelled,true);
 });
+
+test('publication family retains its distinct original operation kind and cannot downgrade to index inventory',async()=>{
+ const request={...scope,operation_kind:'work_publication'};let sent;
+ const response={...source(),operation_kind:'work_publication'};
+ const client=bridge(async(_url,init)=>{sent=JSON.parse(init.body);return Response.json({source:response});});
+ const value=await client.workspaceFamily(request);assert.deepEqual(sent,request);assert.equal(value.operation_kind,'work_publication');assert.equal(value.execution_authorized,false);
+ for(const changed of [{...response,operation_kind:'git_index'},source()])await assert.rejects(bridge(async()=>Response.json({source:changed})).workspaceFamily(request),/native_workspace_source_unconfirmed/);
+ await assert.rejects(client.workspaceFamily({...request,operation_kind:'invented'}),/native_workspace_source_invalid/);
+});

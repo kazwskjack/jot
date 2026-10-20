@@ -9,12 +9,20 @@ import {assertWorkspaceWritable,reserveWorkspaceOperation,readReservedWorkspaceF
 import {workspacePublicationSchema} from '../workbench/workspace-coordination-upgrade.ts';
 import {freezeWorkAdmission} from '../always-on/work-admission-records.ts';
 import type {WorkPublicationIntents} from './work-publication-intents.ts';
+import {FinalizedWorkSources,type FinalizedWorkNativePlacement} from './finalized-work-sources.ts';
+import type {GitNativeWorkspaceObservation} from '../git/index-effects.ts';
 
 type Row=Record<string,any>;
 export type WorkPublicationAdmissionInput={request_id:string;expected_version:number;review_sha256:string};
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/,SHA=/^[a-f0-9]{64}$/;
 const hash=(value:unknown)=>createHash('sha256').update(canonicalJson(value)).digest('hex');
 function fail(code:string):never{throw Error('work_publication_'+code);}
+type NativeView=Readonly<{source:ReturnType<WorkPublicationExecutions['workspaceFamily']>;workspaces:readonly GitNativeWorkspaceObservation[];signal:AbortSignal;execution_authorized:false}>;
+type NativeHost=Readonly<{
+ withReservedFamily<T>(scope:Readonly<{owner_id:string;project_id:string;execution_id:string;operation_kind:'work_publication'}>,controls:Readonly<{assertReservation:()=>void;signal?:AbortSignal}>,operation:(context:unknown)=>Promise<T>):Promise<T>;
+ inspect(context:unknown):NativeView;assertAdmission(context:unknown):void;
+}>;
+type HeldSourceView=Readonly<{source:ReturnType<WorkPublicationIntents['executionSource']>;family:ReturnType<WorkPublicationExecutions['workspaceFamily']>;placement:FinalizedWorkNativePlacement;signal:AbortSignal;execution_authorized:false}>;
 
 /** Explicit owning bootstrap only. This installs original acceptance facts,
  * never an executor, task scheduler or native producer. */
@@ -40,7 +48,13 @@ export function installWorkPublicationExecutions(db:DatabaseSync){
 export class WorkPublicationExecutions{
  private readonly db:DatabaseSync;private readonly git:GitWorkbench;private readonly intents:WorkPublicationIntents;
  private readonly projects:ProjectRepository;private readonly originalDb:ReturnType<typeof retainOriginalGitDatabase>;
- constructor(db:DatabaseSync,git:GitWorkbench,intents:WorkPublicationIntents){this.db=db;this.git=git;this.intents=intents;this.projects=new ProjectRepository(db);this.originalDb=retainOriginalGitDatabase(db);}
+ private readonly nativeHost:NativeHost|undefined;private readonly nativeSources=new WeakMap<object,{view:HeldSourceView;check:()=>void}>();
+ constructor(db:DatabaseSync,git:GitWorkbench,intents:WorkPublicationIntents,options:{nativeWorkspaceHost?:NativeHost}={}){
+  this.db=db;this.git=git;this.intents=intents;this.projects=new ProjectRepository(db);this.originalDb=retainOriginalGitDatabase(db);
+  if(!options||typeof options!=='object'||Object.keys(options).some(key=>key!=='nativeWorkspaceHost'))fail('native_host_invalid');
+  const host=options.nativeWorkspaceHost;if(host!==undefined){if(!host||typeof host.withReservedFamily!=='function'||typeof host.inspect!=='function'||typeof host.assertAdmission!=='function')fail('native_host_invalid');
+   this.nativeHost=Object.freeze({withReservedFamily:host.withReservedFamily.bind(host),inspect:host.inspect.bind(host),assertAdmission:host.assertAdmission.bind(host)});}
+ }
  private read<T>(fn:()=>T):T{const outer=this.db.isTransaction;if(!outer)this.db.exec('BEGIN DEFERRED');try{this.originalDb.assertCurrent();return fn();}finally{if(!outer&&this.db.isTransaction)this.db.exec('ROLLBACK');}}
  private row(owner:string,project:string,id:string){this.originalDb.assertCurrent();this.projects.assertOwned(project,owner);const row=this.db.prepare('SELECT * FROM wb_work_publication_executions WHERE execution_id=? AND owner_id=? AND project_id=?').get(id,owner,project) as Row|undefined;if(!row)fail('execution_not_found');if(row.protocol!==1||row.database_sha256!==this.originalDb.sha256)fail('execution_source_changed');return row;}
  private acceptance(row:Row){return{protocol:1 as const,execution_id:row.execution_id,operation_kind:'work_publication' as const,project_id:row.project_id,intent_id:row.intent_id,request_id:row.request_id,
@@ -74,6 +88,37 @@ export class WorkPublicationExecutions{
  getAdmission(owner:string,project:string,requestId:string){return this.read(()=>{if(typeof requestId!=='string'||!ID.test(requestId))fail('execution_invalid');this.projects.assertOwned(project,owner);const row=this.db.prepare('SELECT execution_id FROM wb_work_publication_executions WHERE owner_id=? AND project_id=? AND request_id=?').get(owner,project,requestId) as Row|undefined;if(!row)fail('execution_not_found');return this.receipt(this.row(owner,project,row.execution_id));});}
  reserveWorkspace(owner:string,project:string,id:string){return withImmediateTransaction(this.db,()=>{const row=this.row(owner,project,id);this.current(row);const scope=this.scope(row),result=reserveWorkspaceOperation(this.db,scope);sealWorkspaceFamily(this.db,scope);return result;});}
  workspaceFamily(owner:string,project:string,id:string){return withImmediateTransaction(this.db,()=>{const row=this.row(owner,project,id);this.current(row);return{...readReservedWorkspaceFamily(this.db,this.scope(row)),operation_kind:'work_publication' as const};});}
+ /** Original-host composition prerequisite, not physical dispatch or a public
+  * callback API. The operation receives an ephemeral private token, never a
+  * root selector or serializable execution grant. An actual producer must also
+  * retain its exact original Worker lease and effect journal before writing. */
+ async withReservedNativeSource<T>(owner:string,project:string,id:string,operation:(context:object)=>Promise<T>,signal?:AbortSignal):Promise<T>{
+  if(this.db.isTransaction)fail('async_transaction');if(typeof operation!=='function')fail('native_host_invalid');signal?.throwIfAborted();
+  const host=this.nativeHost;if(!host)fail('native_host_unavailable');
+  const row=this.row(owner,project,id),source=this.current(row);this.reserveWorkspace(owner,project,id);const family=freezeWorkAdmission(this.workspaceFamily(owner,project,id));
+  const sources=new FinalizedWorkSources(this.db),placement=sources.nativePlacement(owner,source.source.run_id,source.source.source_sha256);
+  const original=canonicalJson(placement);
+  const checkReservation=()=>{signal?.throwIfAborted();const current=this.workspaceFamily(owner,project,id);if(current.reservation_id!==family.reservation_id||current.family_sha256!==family.family_sha256)fail('native_source_changed');};
+  const checkPlacement=()=>{checkReservation();if(canonicalJson(sources.nativePlacement(owner,source.source.run_id,source.source.source_sha256))!==original)fail('native_source_changed');};
+  let finalCheck:(()=>void)|undefined;
+  const result=await host.withReservedFamily({owner_id:owner,project_id:project,execution_id:id,operation_kind:'work_publication'},{assertReservation:checkPlacement,...(signal?{signal}:{})},async nativeContext=>{
+   const admission=()=>{const value=host.assertAdmission(nativeContext) as unknown;if(value!==undefined){if(value&&typeof(value as {then?:unknown}).then==='function')Promise.resolve(value).catch(()=>{});fail('native_host_invalid');}};
+   checkPlacement();admission();const observed=host.inspect(nativeContext),nativeSource=observed?.source;
+   if(!observed||observed.execution_authorized!==false||!nativeSource||nativeSource.execution_authorized!==false||nativeSource.operation_kind!=='work_publication'
+    ||nativeSource.reservation_id!==family.reservation_id||nativeSource.family_sha256!==family.family_sha256||nativeSource.binding_sha256!==family.binding_sha256
+    ||nativeSource.execution_id!==id||nativeSource.owner_id!==owner||nativeSource.project_id!==project||!(observed.signal instanceof AbortSignal)||!Array.isArray(observed.workspaces)
+    ||canonicalJson(observed.workspaces.map(member=>member.session_ref))!==canonicalJson(family.members.map(member=>member.session_ref)))fail('native_source_changed');
+   const roots=this.git.indexEffects(owner,project).retainPublicationNativeWorkspaceRoots(placement,observed.workspaces);
+   const check=()=>{observed.signal.throwIfAborted();checkPlacement();admission();if(host.inspect(nativeContext)!==observed)fail('native_context_invalid');roots();};
+   finalCheck=()=>{checkPlacement();roots();};check();const context=Object.freeze({});
+   this.nativeSources.set(context,{view:Object.freeze({source,family,placement,signal:observed.signal,execution_authorized:false}),check});
+   try{const value=await operation(context);check();return value;}finally{this.nativeSources.delete(context);}
+  });
+  if(!finalCheck)fail('native_context_invalid');finalCheck();return result;
+ }
+ /** Private, nonserializable source custody observation; no effect permission. */
+ assertNativeSource(context:object){const held=this.nativeSources.get(context);if(!held)fail('native_context_invalid');held.check();}
+ inspectNativeSource(context:object){this.assertNativeSource(context);return this.nativeSources.get(context)!.view;}
  releaseUnstartedWorkspace(owner:string,project:string,id:string){return withImmediateTransaction(this.db,()=>{
   const row=this.row(owner,project,id);this.receipt(row);
   // This admission-only version cannot start a producer. A future/unrecognized

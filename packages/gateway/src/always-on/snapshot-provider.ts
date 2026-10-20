@@ -50,6 +50,9 @@ function validateRecovery(value:unknown,id:string):SnapshotRecoveryRecord{
  if(isolated_root.path!==join(storage_root.path,id)||!inside(storage_root.canonical,isolated_root.canonical)||relative(storage_root.canonical,isolated_root.canonical)!==id)throw failure('workspace_recovery_invalid');
  return Object.freeze({protocol:1,provider:'snapshot-copy',snapshot_id:id,storage_root,isolated_root,manifest,receipt:Object.freeze({...receipt}) as WorkspaceCreationReceipt,selection:Object.freeze(kinds),limits:Object.freeze(limits)});
 }
+/** Pure original-record validation for trusted historical consumers. This does
+ * not open or recover a workspace and supplies no live execution authority. */
+export function validateWorkspaceRecoveryRecord(value:unknown,id:string):SnapshotRecoveryRecord{return validateRecovery(value,recoveryId(id));}
 async function inventory(root:Root,paths:readonly string[],limits:Limits,guard:WorkspaceGuard,signal:AbortSignal,id:string,selection?:Map<string,'file'|'directory'>):Promise<Entry[]>{
  const values=new Map<string,Entry>(),folded=new Map<string,string>();let bytes=0;
  const add=async(path:string,recurse:boolean)=>{

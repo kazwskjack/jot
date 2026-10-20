@@ -16,6 +16,7 @@ dist/
 .cache/
 test-results/
 .test-tmp/
+.source-checkpoint-test-tmp/
 notification-archives/
 notification-backups/
 *.json.gz

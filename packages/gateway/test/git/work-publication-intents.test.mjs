@@ -37,6 +37,25 @@ test('new file publication reviews require actual absence and retain exact bytes
  await assert.rejects(()=>f.service.prepare('owner',f.scope.project_id,{...f.input,request_id:'changed-base'}),/work_publication_target_base_changed/);
 });
 
+test('nested additions retain structural directory evidence and approve only the original selected file',async t=>{
+ const f=await fixture(t,{outputPath:'nested/deep/result.md'}),before=counters(f.db);
+ assert.deepEqual(f.source.unsupported_changes,[{kind:'add',path:'nested'},{kind:'add',path:'nested/deep'}]);
+ const prepared=await f.service.prepare('owner',f.scope.project_id,f.input);
+ assert.deepEqual(prepared.paths,['nested/deep/result.md']);assert.deepEqual(prepared.source.unsupported_changes,f.source.unsupported_changes);
+ assert.deepEqual(prepared.changes.map(change=>[change.kind,change.path]),[['add','nested/deep/result.md']]);
+ await assert.rejects(readFile(join(f.rootTarget,'nested/deep/result.md')),{code:'ENOENT'});
+ await assert.rejects(()=>f.service.prepare('owner',f.scope.project_id,{...f.input,request_id:'directory-not-file',paths:['nested']}),/completed_work_source_not_found/);
+ const approved=await f.service.control('owner',f.scope.project_id,prepared.intent_id,{request_id:'approve-nested',action:'approve',expected_version:1,review_sha256:prepared.review_sha256});
+ assert.equal(approved.state,'approved');assert.deepEqual(counters(f.db),before);assert.equal(approved.execution_authorized,false);
+});
+
+test('nested additions cannot approve through a parent that became a file',async t=>{
+ const f=await fixture(t,{outputPath:'nested/deep/result.md'}),prepared=await f.service.prepare('owner',f.scope.project_id,f.input);
+ await writeFile(join(f.rootTarget,'nested'),'Unrelated parent file');
+ await assert.rejects(()=>f.service.control('owner',f.scope.project_id,prepared.intent_id,{request_id:'approve-nested-conflict',action:'approve',expected_version:1,review_sha256:prepared.review_sha256}),/git_path_unavailable/);
+ assert.equal(f.service.get('owner',f.scope.project_id,prepared.intent_id).state,'prepared');assert.equal(await readFile(join(f.rootTarget,'nested'),'utf8'),'Unrelated parent file');
+});
+
 test('target drift, changed source and foreign or invalid requests cannot create approval',async t=>{
  const f=await fixture(t),prepared=await f.service.prepare('owner',f.scope.project_id,f.input),approve={request_id:'approve-drift',action:'approve',expected_version:1,review_sha256:prepared.review_sha256};
  await writeFile(join(f.rootTarget,'source.md'),'Changed after review');await assert.rejects(()=>f.service.control('owner',f.scope.project_id,prepared.intent_id,approve),/work_publication_review_changed/);assert.equal(f.service.get('owner',f.scope.project_id,prepared.intent_id).state,'prepared');

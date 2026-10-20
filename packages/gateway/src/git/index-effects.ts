@@ -6,6 +6,8 @@ import {GitRepositoryInspection,type GitReviewWitness,type GitReadContext} from 
 import {readGit} from './process.ts';
 import {workspaceRelativePath} from '../always-on/workspace-provider.ts';
 import {indexEvidence,indexPreparation,type GitIndexEvidence,type GitIndexPreparation} from './index-evidence.ts';
+import {canonicalJson} from '../db/canonical-json.ts';
+import type {FinalizedWorkNativePlacement} from '../persistent-tasks/finalized-work-sources.ts';
 
 type Action='stage'|'unstage';
 export type GitIndexPlan=Readonly<{plan_id:string;action:Action;paths:readonly string[];repository_sha256:string;before_index_sha256:string|null;index_sha256:string;execution_authorized:false}>;
@@ -29,6 +31,31 @@ const decoded=(value:Buffer)=>new TextDecoder('utf-8',{fatal:true}).decode(value
  * Temporary metadata computes bytes; only the original index is published. */
 export class GitIndexEffects extends GitRepositoryInspection{
  private readonly plans=new WeakMap<GitIndexPlan,Stored>();
+ /** Original HOST-PRIVATE source/target association only. It must be retained
+  * inside actual native family custody and an original producer lease before
+  * any effect. A serialized placement or this check grants no file permission. */
+ retainPublicationNativeWorkspaceRoots(raw:FinalizedWorkNativePlacement,input:readonly GitNativeWorkspaceObservation[]){
+  const invalid=()=>{throw Error('git_publication_native_workspace_association_required');};
+  if(!raw||typeof raw!=='object'||!Array.isArray(input)||input.length>256)invalid();
+  const placement=structuredClone(raw),{placement_sha256,...facts}=placement;
+  if(Object.keys(placement).sort().join(',')!=='execution_authorized,isolated_root,owner_id,placement_sha256,project_id,protocol,record_sha256,session_ref,snapshot_id,source_sha256,storage_root'
+   ||placement.protocol!==1||placement.execution_authorized!==false||hash(canonicalJson(facts))!==placement_sha256
+   ||!['owner_id','project_id','session_ref','snapshot_id'].every(key=>typeof placement[key as keyof typeof placement]==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(placement[key as keyof typeof placement] as string))
+   ||!['source_sha256','record_sha256','placement_sha256'].every(key=>typeof placement[key as keyof typeof placement]==='string'&&/^[a-f0-9]{64}$/.test(placement[key as keyof typeof placement] as string)))invalid();
+  const roots=[placement.storage_root,placement.isolated_root];
+  for(const root of roots)if(!root||Object.keys(root).sort().join(',')!=='canonical,dev,ino,path'||typeof root.path!=='string'||typeof root.canonical!=='string'
+   ||resolve(root.path)!==root.path||resolve(root.canonical)!==root.canonical||![root.dev,root.ino].every(value=>typeof value==='string'&&/^(0|[1-9][0-9]{0,127})$/.test(value)))invalid();
+  if(!equalPath(join(placement.storage_root.path,placement.snapshot_id),placement.isolated_root.path))invalid();
+  const observations=structuredClone(input),producer=observations.filter(member=>member?.session_ref===placement.session_ref);
+  if(producer.length!==1)invalid();const original=producer[0]!;
+  if(Object.keys(original).sort().join(',')!=='custody,cwd,header_sha256,session_ref'||!['resident','cold'].includes(original.custody)||typeof original.cwd!=='string'
+   ||!equalPath(original.cwd,placement.isolated_root.path)||typeof original.header_sha256!=='string'||!/^[a-f0-9]{64}$/.test(original.header_sha256))invalid();
+  let target:()=>void;try{target=this.retainNativeWorkspaceRoots(observations.filter(member=>member.session_ref!==placement.session_ref));}catch{invalid();}
+  const check=()=>{try{
+   target!();for(const root of roots)if(this.directorySync(root.path)!==root.dev+':'+root.ino||!equalPath(realpathSync(root.path),root.canonical))throw Error();
+  }catch{throw Error('git_publication_native_workspace_changed');}};
+  check();return check;
+ }
  /** Host-only root association, not execution authority. The original caller
   * must retain actual native custody and recheck these physical identities. */
  retainNativeWorkspaceRoots(input:readonly GitNativeWorkspaceObservation[]){

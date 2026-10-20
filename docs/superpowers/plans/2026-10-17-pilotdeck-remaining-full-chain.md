@@ -29,6 +29,13 @@ runtime capabilities do not automatically become extended Gateway capabilities.
 
 ## Audit records
 
+The user additionally authorized module-by-module source porting while retaining
+Jot and DSH. Every module review must cover original code, complete behavior and
+design reasons, compare existing reusable Jot code, and justify any strengthening
+with a concrete gap and acceptance case. See the initial
+[source reuse and strengthening review](../../implementation/2026-10-20-pilotdeck-reuse-strengthening-review.md).
+This review does not certify all 26 modules or replace their remaining ledger.
+
 - [Execution, routing, browser, desktop, security and observability](../../implementation/2026-10-17-remaining-execution-chains.md):8 capabilities.
 - [Workspaces, roles, memory, tasks, delivery and Always-on](../../implementation/2026-10-17-remaining-memory-task-chains.md):9 capabilities.
 - [Artifacts, Git, extensions, voice, interface and distribution](../../implementation/2026-10-17-remaining-product-release-chains.md):9 capabilities.
