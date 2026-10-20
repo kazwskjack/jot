@@ -11,6 +11,7 @@ import {installOrdinaryFinalObservers} from '../harness/ordinary-final-recovery-
 import {installHistoricalDispatchProtocol} from '../channels/historical-final-queue.ts';
 import {installOrdinarySteeringCustody} from '../harness/ordinary-steering-custody.ts';
 import {installChatCompactionAttempts} from '../conversations/chat-compaction-attempt-schema.ts';
+import {installWorkspaceCoordination} from '../workbench/workspace-coordination.ts';
 
 const schemaUrl = new URL('./schema.sql', import.meta.url);
 let savepointSequence = 0;
@@ -113,6 +114,7 @@ export function openProductDatabase(path: string): DatabaseSync {
     CREATE INDEX IF NOT EXISTS idx_ga_conversations_project_state
       ON ga_conversations(owner_id,project_id,archived_at,pinned_at DESC,updated_at DESC,id DESC);
   `);
+  installWorkspaceCoordination(db);
   return db;
 }
 

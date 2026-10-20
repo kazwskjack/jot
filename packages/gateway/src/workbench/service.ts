@@ -1,4 +1,5 @@
 import {MemoryCaptureService} from './memory-capture.ts';
+import {assertWorkspaceWritable} from './workspace-coordination.ts';
 import {listProjectFiles,type FileListOptions} from './file-list.ts';
 import {installWorkbenchSourceRevisions} from '../always-on/workbench-source-revisions.ts';
 import {MemoryProcessingRegistry} from './memory-processing.ts';
@@ -1085,9 +1086,13 @@ export class WorkbenchService {
     if (context && context.project_id !== project) throw new Error('file_scope_forbidden');
     const path = this.filePath(input.path);
     if (typeof input.content !== 'string' || Buffer.byteLength(input.content) > 1_048_576) throw new Error('invalid_file_content');
-    const content = input.content, expected = integer(input.expected_version), root = this.projectRoot(owner, workspace, project);
+    const content = input.content, expected = integer(input.expected_version);
+    this.projects.assertOwned(project,owner);
     // Immutable blobs + database CAS make a committed version authoritative even across process crashes.
     return this.transaction(() => {
+      this.projects.assertOwned(project,owner);
+      assertWorkspaceWritable(this.db,owner,project);
+      const root=this.projectRoot(owner,workspace,project);
       this.safeLogicalPath(root, path, true);
       const old = this.db.prepare('SELECT version FROM wb_files WHERE owner_id=? AND workspace_id=? AND project_id=? AND path=?').get(owner, workspace, project, path) as Row | undefined;
       if (Number(old?.version ?? 0) !== expected) throw new Error('version_conflict');

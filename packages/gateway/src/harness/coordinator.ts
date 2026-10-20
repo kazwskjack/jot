@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import {assertMemoryProcessingIdentity} from '../workbench/memory-processing.ts';
+import {WORKSPACE_RESERVATION_MATCH} from '../workbench/workspace-coordination.ts';
 import { withImmediateTransaction } from '../db/database.ts';
 import type { EventStore } from '../events/event-store.ts';
 import type { RunRepository } from '../runs/repository.ts';
@@ -74,6 +75,8 @@ export class HarnessCoordinator {
     const now = this.now();
     return withImmediateTransaction(this.db, () => {
       const hasBindings=Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_run_bindings'").get());
+      const workspaceAdmission=this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_workspace_reservations'").get()
+        ? `AND NOT EXISTS(SELECT 1 FROM ga_conversations c WHERE c.id=r.conversation_id AND EXISTS(${WORKSPACE_RESERVATION_MATCH}))` : '';
       if(memoryRunId!==undefined){
         if(!hasBindings||!this.backgroundOptions.allowBackgroundRuns||this.backgroundOptions.maxBackgroundRuns<1||!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_memory_processing_runs'").get())return null;
         const job=this.db.prepare('SELECT owner_id FROM wb_memory_processing_runs WHERE processor_run_id=?').get(memoryRunId) as {owner_id:string}|undefined;if(!job)return null;
@@ -100,7 +103,7 @@ export class HarnessCoordinator {
            SELECT 1 FROM ga_runs active WHERE active.conversation_id=r.conversation_id
            AND active.id<>r.id AND active.status IN ('starting','running','waiting_user','waiting_approval','cancelling')
          )) OR (r.status IN ('starting','running') AND (l.resource_id IS NULL OR CAST(l.expires_at AS INTEGER)<=?)))
-         ${admission}
+         ${admission} ${workspaceAdmission}
          ORDER BY ${order} CASE r.status WHEN 'queued' THEN 0 ELSE 1 END,r.created_at,r.id LIMIT 1`,
       ).get(...queryParameters) as Record<string, unknown> | undefined;
       if (!row) return null;

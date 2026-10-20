@@ -4,7 +4,7 @@ title: Git views use owned read-only repository snapshots
 category: decision
 status: active
 created: "2026-10-19T17:04:32"
-updated: "2026-10-20T09:47:17"
+updated: "2026-10-20T09:59:39"
 ---
 
 <!-- compiled_truth -->
@@ -56,4 +56,10 @@ Git 执行的配置占用范围与程序／stat 见证分离：原始记录固�
   kind: evidence
   summary: "Installed native driver evidence: idle status is not workspace exclusivity. Hold every original resident Session with runMaintenance through the physical callback, preserve queued input, and propagate all native cancellation signals. The family primitive still requires the owning project reservation, complete membership and shared/checkpoint admission fences; it does not enable Git writes."
   source: docs/implementation/2026-10-20-native-workspace-barrier.md
+  affects: [git-inspection-boundary]
+
+- time: 2026-10-20T09:59:39
+  kind: decision
+  summary: "Original project reservations fence the existing Worker claim and shared-file CAS transactions; active or unbound legacy producers and expired leases cannot prove a workspace free. A reservation grants no Git/native execution, never expires automatically, and only an original admitted execution with no producer/effect facts may use pre-dispatch release. Complete native membership, original publication/root validation and checkpoint restore remain prerequisites for write activation."
+  source: docs/implementation/2026-10-20-project-workspace-reservations.md
   affects: [git-inspection-boundary]

@@ -9,6 +9,7 @@ import type {GitIndexReceipt} from './index-effects.ts';
 import type {GitIndexAcceptance,GitIndexExecutionResult} from '../../contracts/types.ts';
 import {indexEvidence,indexPreparation,type GitIndexEvidence,type GitIndexPreparation} from './index-evidence.ts';
 import {GitIndexProducers} from './index-producers.ts';
+import {assertWorkspaceWritable,reserveWorkspaceOperation,releaseUnstartedWorkspaceOperation} from '../workbench/workspace-coordination.ts';
 
 type Input={request_id:string;expected_version:number;review_sha256:string};
 type Row={execution_id:string;owner_id:string;project_id:string;intent_id:string;request_id:string;request_sha256:string;review_version:number;review_sha256:string;action:'stage'|'unstage';witness_sha256:string;repository_sha256:string;created_at:string;protocol:number;binding_sha256:string|null};
@@ -93,12 +94,14 @@ export class GitIndexExecutions{
  }
  private authority(row:Row,lease:ExecutionLease){
   this.row(row.owner_id,row.project_id,row.execution_id);assertExecutionLease(this.db,this.resource(row),lease,this.now);
+  assertWorkspaceWritable(this.db,row.owner_id,row.project_id);
   if(this.db.prepare('SELECT 1 FROM wb_git_index_dispositions WHERE execution_id=?').get(row.execution_id))throw Error('git_execution_closed');
   if(row.binding_sha256&&this.git.executionBinding(row.owner_id,row.project_id)!==row.binding_sha256)throw Error('git_repository_changed');
   const original=this.intents.executionSource(row.owner_id,row.project_id,row.intent_id,row.review_version,row.review_sha256);
   if(original.action!==row.action||digest(original.witness)!==row.witness_sha256||original.witness.repository_sha256!==row.repository_sha256)throw Error('git_execution_source_invalid');
  }
  private claim(row:Row):ExecutionLease{
+  assertWorkspaceWritable(this.db,row.owner_id,row.project_id);
   const resource=this.resource(row),old=this.db.prepare('SELECT owner,generation,expires_at FROM ga_worker_leases WHERE resource_id=?').get(resource),expiry=old?Number(old.expires_at):0;
   if(old&&(!Number.isSafeInteger(expiry)||!Number.isSafeInteger(Number(old.generation))||Number(old.generation)<1||expiry>this.now()))throw Error('git_execution_busy');
   const lease={owner:'git-executor-'+randomUUID(),generation:old?Number(old.generation)+1:1};if(!Number.isSafeInteger(lease.generation))throw Error('git_execution_busy');
@@ -137,6 +140,26 @@ export class GitIndexExecutions{
  }
  /** Dispatch the admitted original only. This is not a public route/Worker and
   * must not be automatically scheduled until workspace coordination is ready. */
+ /** Reserve project coordination only, never native quiescence or Git effects. */
+ reserveWorkspace(owner:string,project:string,id:string){
+  return withImmediateTransaction(this.db,()=>{
+   const row=this.row(owner,project,id);this.admission(row);
+   if(this.get(owner,project,id).state!=='pending')throw Error('workspace_reservation_source_closed');
+   this.producers.assertStartable(row,this.resource(row));
+   this.intents.executionSource(owner,project,row.intent_id,row.review_version,row.review_sha256);
+   if(row.protocol!==4||row.binding_sha256!==this.git.executionBinding(owner,project))throw Error('workspace_reservation_source_changed');
+   return reserveWorkspaceOperation(this.db,{owner_id:owner,project_id:project,operation_kind:'git_index',operation_id:id,binding_sha256:row.binding_sha256});
+  });
+ }
+ releaseUnstartedWorkspace(owner:string,project:string,id:string){
+  return withImmediateTransaction(this.db,()=>{
+   const row=this.row(owner,project,id);this.admission(row);
+   for(const table of ['wb_git_index_producers','wb_git_index_preparations','wb_git_index_dispatches','wb_git_index_outcomes'])
+    if(this.db.prepare('SELECT 1 FROM '+table+' WHERE execution_id=?').get(id))throw Error('workspace_reservation_producer_unsettled');
+   if(row.protocol!==4||row.binding_sha256!==this.git.executionBinding(owner,project))throw Error('workspace_reservation_source_changed');
+   return releaseUnstartedWorkspaceOperation(this.db,{owner_id:owner,project_id:project,operation_kind:'git_index',operation_id:id,binding_sha256:row.binding_sha256});
+  });
+ }
  async perform(owner:string,project:string,id:string,signal?:AbortSignal){
   if(this.db.isTransaction)throw Error('git_execution_transaction_invalid');signal?.throwIfAborted();const row=this.row(owner,project,id);this.admission(row);
   return this.execute(owner,project,row.intent_id,{request_id:row.request_id,expected_version:row.review_version,review_sha256:row.review_sha256},signal);

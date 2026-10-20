@@ -55,6 +55,12 @@ and has installed-driver evidence for queued input. It requires the owning
 reservation and authoritative family membership; neither is manufactured by the
 primitive. Actual Gateway/shared/checkpoint coordination remains open below.
 
+The [original project reservation groundwork](../../implementation/2026-10-20-project-workspace-reservations.md)
+now fences actual Worker claims, direct run activation and shared-file allocation
+in their product-database boundary. It verifies original Git admission and only
+supports unstarted release; joining complete native membership, physical root
+publication, settled producer drain and checkpoint restore remains required.
+
 - [ ] Follow the reference Gateway/checkpoint coordination: Git mutation cannot
   race an Agent turn, shared-workspace writer or checkpoint restore. Reuse the
   owning workspace coordinator, not a second planner or a Git-only busy flag.
