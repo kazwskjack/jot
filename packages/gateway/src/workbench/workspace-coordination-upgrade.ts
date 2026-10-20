@@ -61,6 +61,17 @@ function inventory(db:DatabaseSync,tables:readonly string[]){return tables.map(t
  return{table,rows:count,sha256:hash.digest('hex')};
 });}
 export type WorkspaceUpgradePhase='captured'|'copied'|'recreated'|'verified';
+
+/** Explicit maintenance preflight, including an already-upgraded coordinator.
+ * Durable checks cannot observe stopped idle pools and grant no execution. */
+export function assertWorkspacePublicationMaintenance(db:DatabaseSync){
+ retainOriginalGitDatabase(db).assertCurrent();
+ if(workspacePublicationSchema(db)==='unsupported')fail('schema_unsupported');
+ if(Number((db.prepare('PRAGMA foreign_keys').get() as Row).foreign_keys)!==1
+  ||Number((db.prepare('PRAGMA writable_schema').get() as Row).writable_schema)!==0
+  ||db.prepare("SELECT 1 FROM sqlite_temp_schema WHERE name NOT LIKE 'sqlite_%' LIMIT 1").get())fail('connection_unconfirmed');
+ quiescent(db);if(db.prepare('PRAGMA foreign_key_check').all().length)fail('integrity');
+}
 /** Trusted OFFLINE maintenance only. Durable DB checks do not prove that idle
  * native processes or external pools stopped. No automatic bootstrap, live
  * force override, producer lease, publication permission or repair is supplied. */

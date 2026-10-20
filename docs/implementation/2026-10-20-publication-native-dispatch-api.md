@@ -81,8 +81,9 @@ and native Host, retain a consistent original database backup, and use the
 existing `upgradeWorkspacePublicationCoordination`,
 `installWorkPublicationIntents` and `installWorkPublicationExecutions` sequence
 before enabling the client. The original schema/lease/unknown-outcome checks must
-not be bypassed. A packaged operator maintenance entry and real deployment
-acceptance remain required; this increment has not provisioned any live account,
+not be bypassed. The [packaged offline maintenance entry](2026-10-21-publication-offline-maintenance.md)
+now wraps that original sequence; its publication and real deployment acceptance
+remain separate. This increment has not provisioned any live account,
 secret, service or production database.
 
 ## Executed acceptance and remaining work

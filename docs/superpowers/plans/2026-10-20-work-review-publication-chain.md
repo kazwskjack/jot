@@ -11,6 +11,14 @@ response-loss and explicit recovery tests with zero model calls. Complete
 changed-tree regression, packaged maintenance and deployment acceptance remain
 separate; do not mark the complete publication or full26 item done from this.
 
+The [offline maintenance command](../../implementation/2026-10-21-publication-offline-maintenance.md)
+now packages the original coordination upgrade and publication storage sequence.
+It requires the inspected physical DB identity and explicit stopped-pool
+acknowledgement, refuses active/unknown original facts and retains the receipt's
+`offline_pool_drain_observed: false`. Its integrated release gates and actual
+operator deployment acceptance remain distinct from the already published Apply
+and mobile recovery increment.
+
 - [x] Original owned finalized-source read and exact-digest preparation; immutable
   file versions and inspected inventories share the same safe source projection.
 - [x] Separate original execution admission/acceptance/current-status APIs, with

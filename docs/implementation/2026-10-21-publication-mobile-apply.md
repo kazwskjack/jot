@@ -58,6 +58,7 @@ original current execution can establish successful application.
   zero failures/cancellations, with the SDK enabled and source hashes unchanged.
 
 Only synthetic local data and isolated browser profiles were used. This does not
-enable production Apply or prove deployed pool quiescence. Packaged operator
-maintenance, broader platform/provider acceptance, final disclosure/remote
+enable production Apply or prove deployed pool quiescence. The subsequent
+[offline maintenance entry](2026-10-21-publication-offline-maintenance.md) packages
+the original schema sequence. Its release, broader platform/provider acceptance, final disclosure/remote
 verification and the full PilotDeck/portable Chat/Work scope remain open.
