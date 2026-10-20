@@ -14,6 +14,12 @@ recorded in [the implementation evidence](../../implementation/2026-10-20-public
 The original producer journal, restart reconciliation and product Apply entry
 remain required; local kernel tests do not close those steps.
 
+The subsequent original foreground producer, per-file journal and explicit
+interrupted owner resolution now have focused implementation evidence in
+[producer and recovery](../../implementation/2026-10-20-publication-producer-recovery.md).
+Their whole-suite gate, multiple-history-root support and product/transport
+integration remain distinct requirements; do not mark the full chain complete.
+
 The existing frozen candidate already retains the complete inspected base/result
 manifests, diff, selected objective, source, plans, call-set and inspection hashes.
 `TaskReviewOutputs` currently returns only selected file downloads. Expose the
@@ -145,8 +151,10 @@ nonexecuting metadata copy, cancellation and owner checks after awaits.
    [original-schema upgrade and publication admission](../../implementation/2026-10-20-workspace-publication-admission.md)
    now add a distinct `work_publication` source to the same reservation and
    family seals, preserving original rows, immutable hashes, member fences and
-   foreign keys. This is metadata admission only. Publication settlement refuses
-   index-only proof until its actual producer/outcome lifecycle is integrated.
+   foreign keys. That upgrade covers metadata admission; the subsequent
+   foreground producer and journal now provide local text-file effect and
+   settlement evidence. Index-only proof remains insufficient. Whole-suite,
+   multi-history-root, transport and product acceptance are still separate.
    Do not label file publication `git_index`, release it through index-only
    evidence, or create a parallel exclusion store.
    The original authenticated native-family hosting must carry the distinct
@@ -175,6 +183,57 @@ model call. The internal target review now has local executed evidence in its
 linked implementation record; product entry and actual publication remain open.
 
 ## 3. Original Git/checkpoint/mobile closure and release
+
+### Next source-association and transport acceptance
+
+The current `retainPublicationNativeWorkspaceRoots` associates the producing
+Session with its finalized isolated placement and requires other non-absent
+members to use the configured target root. This is insufficient for a project
+with multiple historical isolated work Sessions. Do not omit those members from
+`readReservedWorkspaceFamily`, trust their current cwd as authority, or call a
+live work-run resolver for a completed/failed historical admission.
+
+- [ ] Derive each retained member's private placement from its original native
+  references and scope in the sealed family, original `WorkAdmissionRecords`,
+  immutable `WorkGrants` and `WorkspaceJournal` snapshot/intent records. Reuse
+  their canonical-hash and owner/project checks. A historical read must not
+  renew a work grant or require an old task to become active again. Keep this
+  lookup separate from finalized output eligibility: failed work may still own
+  a historical native directory without becoming a publishable result.
+  A local original-API probe created two distinct work admissions, conversations
+  and snapshots in one project after closing the first artifact cycle. It
+  confirmed `WorkAdmissionRecords.byRun` can read the old admission, while
+  `WorkspaceJournal.intent` refuses the closed cycle. Preserve that live refusal;
+  extract/reuse the immutable intent/record validation for a separate historical
+  read rather than weakening the existing live journal guard.
+- [ ] Preserve original parent/child reservation and activation lineage for
+  delegated members; reconcile original root-run admission and the frozen child
+  snapshot instead of assigning all children the currently selected root.
+  Reject contradictory scopes, missing original facts and cross-owner aliases.
+- [ ] Retain the complete private placement set under original native custody;
+  recheck its original database evidence after awaits, and pin every physical
+  storage/snapshot/target directory identity. No caller-supplied root allowlist,
+  public path projection or serialized write permission is introduced.
+- [ ] Add real original-database tests with two historical work admissions in
+  one project, including a failed older run and delegated member. Exercise cold
+  and resident custody, absent histories, changed original placement, root
+  replacement, foreign owner and ambiguous native aliases. Assert all family
+  members remain in the original seal and no model call or source write occurs.
+- [ ] Extend `native-git-transport.js` and `native-git-host.js` through distinct
+  `work_publication` dispatch while preserving existing three-ID index requests.
+  Reuse authenticated local transport, cancellation, original database identity
+  and configured repositories. Construct the original publication services
+  without schema installation; forward held checkpoint verification to the
+  original native source Host. A missing publication schema must refuse rather
+  than migrate another process's database.
+- [ ] Verify the compiled original Host in another process with the same
+  accepted execution, real native persistence and configured target. Include
+  cancellation, disconnected acknowledgement, restart status, explicit owner
+  resolution, wrong database/operation kind, and legacy index compatibility.
+  Only then connect the existing HTTP/BFF/mobile owner Apply/recovery controls.
+
+These are remaining requirements, not acceptance claims for the local
+foreground producer increment.
 
 - [ ] Use the established publication provenance to associate maintained native
   workspaces with configured Git roots; preserve distinct shared/isolated roots.

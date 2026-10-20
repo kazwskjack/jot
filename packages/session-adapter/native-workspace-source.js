@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import {withNativeWorkspaceBarrier} from './native-workspace-barrier.js';
 import {assertNativeWorkspaceAdmissionGate} from './native-workspace-factory.js';
+import {verifyHeldSessionCheckpoint} from './checkpoint.js';
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/,SHA=/^[a-f0-9]{64}$/;
 const KINDS=new Set(['work_binding','mode_binding','runtime','run_native','checkpoint','goal_control','native_parent','native_child']);
 const fields=(value,keys)=>!!value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join(',')===[...keys].sort().join(',');
@@ -20,6 +21,12 @@ export function inspectNativeWorkspaceSource(context){
 }
 export function assertNativeWorkspaceSourceAdmission(context){
  const held=context&&contexts.get(context);if(!held)throw Error('native_workspace_source_context_invalid');held.check();held.assertAdmission();
+}
+/** Verify only an original held family member, without waiting for the
+ * maintenance callback itself. This is a private read, never effect authority. */
+export async function verifyNativeWorkspaceSourceCheckpoint(context,checkpoint){
+ const held=context&&contexts.get(context);if(!held)throw Error('native_workspace_source_context_invalid');
+ const receipt=structuredClone(checkpoint);held.check();await held.verifyCheckpoint(receipt);held.check();
 }
 function freeze(value){if(value&&typeof value==='object'){for(const child of Object.values(value))freeze(child);Object.freeze(value);}return value;}
 function verified(value,scope){
@@ -106,7 +113,7 @@ export function createNativeWorkspaceSourceHost(options={}){
    return{...dependencies,sessionRef,...(agent===undefined?{}:{agent})};
   });
   check();
-  return withNativeWorkspaceBarrier({members,assertReservation:check,signal,factoryGate},async(proofs,nativeCheck,nativeSignal,nativeRecheck,workspaces)=>{
+  return withNativeWorkspaceBarrier({members,assertReservation:check,signal,factoryGate},async(proofs,nativeCheck,nativeSignal,nativeRecheck,workspaces,headers)=>{
    const observe=async()=>{
     await nativeRecheck();check();const current=await read(nativeCheck,nativeSignal);
     if(current.reservation_id!==source.reservation_id||current.binding_sha256!==source.binding_sha256||current.family_sha256!==source.family_sha256)throw Error('native_workspace_source_changed');
@@ -116,7 +123,13 @@ export function createNativeWorkspaceSourceHost(options={}){
    const current=()=>{if(!contexts.has(context))throw Error('native_workspace_source_context_invalid');check();nativeCheck();};
    const recheck=async()=>{current();await observe();current();};
    context=Object.freeze({source,proofs,workspaces,check:current,recheck,signal:nativeSignal});
-   const view=Object.freeze({source,proofs,workspaces,signal:nativeSignal,execution_authorized:false});contexts.set(context,{check:current,view,assertAdmission:()=>assertNativeWorkspaceAdmissionGate(admissionGate,factoryGate)});
+   const admission=()=>assertNativeWorkspaceAdmissionGate(admissionGate,factoryGate);
+   const verifyCheckpoint=async receipt=>{
+    current();admission();const retained=headers.find(value=>value.session_ref===receipt?.session_ref);
+    if(!retained||retained.header===null)throw Error('native_workspace_checkpoint_unavailable');
+    await recheck();await verifyHeldSessionCheckpoint({persistence,header:retained.header,checkpoint:receipt,assertCurrent:()=>{current();admission()},signal:nativeSignal});await recheck();current();admission();
+   };
+   const view=Object.freeze({source,proofs,workspaces,signal:nativeSignal,execution_authorized:false});contexts.set(context,{check:current,view,verifyCheckpoint,assertAdmission:admission});
    let result;try{result=await operation(context);}finally{contexts.delete(context);}
    await observe();return result;
   });

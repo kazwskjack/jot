@@ -38,7 +38,7 @@ export class GitIndexEffects extends GitRepositoryInspection{
   const invalid=()=>{throw Error('git_publication_native_workspace_association_required');};
   if(!raw||typeof raw!=='object'||!Array.isArray(input)||input.length>256)invalid();
   const placement=structuredClone(raw),{placement_sha256,...facts}=placement;
-  if(Object.keys(placement).sort().join(',')!=='execution_authorized,isolated_root,owner_id,placement_sha256,project_id,protocol,record_sha256,session_ref,snapshot_id,source_sha256,storage_root'
+  if(Object.keys(placement).sort().join(',')!=='completed_checkpoint,execution_authorized,isolated_root,owner_id,placement_sha256,project_id,protocol,record_sha256,session_ref,snapshot_id,source_sha256,storage_root'
    ||placement.protocol!==1||placement.execution_authorized!==false||hash(canonicalJson(facts))!==placement_sha256
    ||!['owner_id','project_id','session_ref','snapshot_id'].every(key=>typeof placement[key as keyof typeof placement]==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(placement[key as keyof typeof placement] as string))
    ||!['source_sha256','record_sha256','placement_sha256'].every(key=>typeof placement[key as keyof typeof placement]==='string'&&/^[a-f0-9]{64}$/.test(placement[key as keyof typeof placement] as string)))invalid();
@@ -86,7 +86,7 @@ export class GitIndexEffects extends GitRepositoryInspection{
  /** Keep every non-object metadata file pinned. Ignore only exact owned locks
   * and newly created lock-parent directories; directory identities still hold.
   * Content-addressed object bytes are checked separately, never treated as refs. */
- private sourceMetadata(locks:ReadonlySet<string>=new Set(),created:ReadonlySet<string>=new Set()){
+ protected sourceMetadata(locks:ReadonlySet<string>=new Set(),created:ReadonlySet<string>=new Set()){
   const facts:string[]=[];let entries=0;const objects=join(this.commonDirectory,'objects');
   for(const root of [...new Set([this.gitDirectory,this.commonDirectory])]){const queue=[root];while(queue.length){const folder=queue.pop()!;for(const entry of readdirSync(folder,{withFileTypes:true})){if(++entries>100000)throw Error('git_metadata_limit');const path=join(folder,entry.name);if(locks.has(path)||equalPath(path,objects))continue;const s=lstatSync(path);if(s.isSymbolicLink()||!s.isFile()&&!s.isDirectory())throw Error('git_repository_changed');if(s.isDirectory()){if(!created.has(path))facts.push(path+':dir:'+id(s)+':'+s.mode);queue.push(path);}else facts.push(path+':file:'+stamp(s));}}}
   return hash(facts.sort().join('\n'));

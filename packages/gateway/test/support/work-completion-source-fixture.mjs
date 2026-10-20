@@ -28,7 +28,7 @@ async function fixture(t,options={}){
 
 
 /** Real original isolated IO -> inspection -> proposal -> review -> native completion -> finalization. */
-export async function completedWorkFixture(t,{finalize=true,rewrite=false,outputPath='source.md'}={}){
+export async function completedWorkFixture(t,{finalize=true,rewrite=false,outputPath='source.md',nativeLifecycle}={}){
  const f=await fixture(t,{planPath:outputPath}),runtime=createNativeWorkRuntime({db:f.db,workbench:f.workbench,root:join(f.root,'grant-snapshots'),executionReady:true,budgetPolicy:f.budget});
  configureTaskOutputReader(f.db,input=>readIsolatedTaskFileVersion(f.db,input.source));
  configureTaskOutputDelivery(f.db,new ArtifactService(f.db,join(f.root,'review-artifacts')),f.events);
@@ -41,13 +41,18 @@ export async function completedWorkFixture(t,{finalize=true,rewrite=false,output
  let write=await tool('files.write',{path:outputPath,content:'Exact reviewed work content',expected_version:0},'source-original-write');assert.equal(write.statusCode,200,write.body);
  if(rewrite){write=await tool('files.write',{path:outputPath,content:'Second exact reviewed content',expected_version:1},'source-second-write');assert.equal(write.statusCode,200,write.body);}
  for(const step of tasks.subtasks('owner',f.admission.task_id).items){const response=await tool('tasks.upsert',{subtask_id:step.subtask_id,expected_version:step.version,status:'completed',evidence:[write.json().execution_receipt]},'source-complete-'+step.subtask_id);assert.equal(response.statusCode,200,response.body);}
- assert.equal((await post('goal-binding',{action:'save',goal_id:'source-goal',goal_revision:1})).statusCode,200);
- const proposal=await post('goal-proposal',{call_id:'source-complete-proposal',goal_id:'source-goal',goal_revision:1,intent:'complete',summary:'Review exact work content',files:[{path:outputPath}]});assert.equal(proposal.statusCode,200,proposal.body);
- assert.equal((await post('goal-binding',{action:'save',goal_id:'source-goal',goal_revision:2})).statusCode,200);
- f.coordinator.recordCheckpoint(f.claimed,'work-test-session',{session_ref:'work-test-session',seq_exclusive:3,turn_end_seq:2,goal_id:'source-goal',goal_revision:2,log_sha256:'a'.repeat(64)});
- f.coordinator.waitForTask(f.claimed,{goal_id:'source-goal',goal_revision:2,phase:'paused',turn_end_seq:2},'SESSION_GOAL_WAITING_APPROVAL',{text:'Owner-reviewed exact work result'});
+ const native=await nativeLifecycle?.(f),goalId=native?.goal_id??'source-goal';
+ assert.equal((await post('goal-binding',{action:'save',goal_id:goalId,goal_revision:1})).statusCode,200);
+ const proposal=await post('goal-proposal',{call_id:'source-complete-proposal',goal_id:goalId,goal_revision:1,intent:'complete',summary:'Review exact work content',files:[{path:outputPath}]});assert.equal(proposal.statusCode,200,proposal.body);
+ const paused=native?await native.pause():undefined;
+ assert.equal((await post('goal-binding',{action:'save',goal_id:goalId,goal_revision:2})).statusCode,200);
+ const checkpoint=paused?.checkpoint??{session_ref:'work-test-session',seq_exclusive:3,turn_end_seq:2,goal_id:goalId,goal_revision:2,log_sha256:'a'.repeat(64)};
+ f.coordinator.recordCheckpoint(f.claimed,'work-test-session',checkpoint);
+ f.coordinator.waitForTask(f.claimed,{goal_id:goalId,goal_revision:2,phase:'paused',turn_end_seq:checkpoint.turn_end_seq},'SESSION_GOAL_WAITING_APPROVAL',{text:'Owner-reviewed exact work result'});
  const interactions=new InteractionService(f.db,f.events,new TaskWaitResponder(f.db,f.workbench,new RunCommandService(f.db))),card=interactions.list(f.admission.conversation_id,'owner').items[0];assert.ok(card);
  const accept=()=>interactions.respond(card.interaction_id,'owner',{expected_version:card.version,answers:card.questions.map(q=>({question_id:q.question_id,selected_option_ids:['accept'],custom_text:''}))},'source-owner-review');
- const complete=()=>{accept();const before={host_status:'idle',goal:{goal_id:'source-goal',goal_revision:2,phase:'paused',activation:'disarmed',rounds_started:1,max_goal_rounds:1}},intent=withImmediateTransaction(f.db,()=>prepareTaskCompletion(f.db,'owner',f.admission.run_id,before));withImmediateTransaction(f.db,()=>confirmTaskCompletion(f.db,'owner',f.admission.run_id,intent.intent_id,{host_status:'idle',goal:{...before.goal,phase:'complete',goal_revision:3},checkpoint:{session_ref:'work-test-session',seq_exclusive:4,turn_end_seq:2,goal_id:'source-goal',goal_revision:3,log_sha256:'b'.repeat(64)}}));return f.coordinator.finalizeReviewedTask('owner',f.admission.run_id,intent.intent_id)};
- const finalization=finalize?complete():undefined;return {...f,runtime,card,finalization,complete,write:write.json()};
+ const prepareCompletion=()=>{accept();const before=paused?.boundary??{host_status:'idle',goal:{goal_id:goalId,goal_revision:2,phase:'paused',activation:'disarmed',rounds_started:1,max_goal_rounds:1}};return withImmediateTransaction(f.db,()=>prepareTaskCompletion(f.db,'owner',f.admission.run_id,before));};
+ const finish=(intent,proof)=>{withImmediateTransaction(f.db,()=>confirmTaskCompletion(f.db,'owner',f.admission.run_id,intent.intent_id,proof));return f.coordinator.finalizeReviewedTask('owner',f.admission.run_id,intent.intent_id)};
+ const complete=native?async()=>{const intent=prepareCompletion();return finish(intent,await native.complete())}:()=>{const intent=prepareCompletion();return finish(intent,{host_status:'idle',goal:{goal_id:goalId,goal_revision:3,phase:'complete',activation:'disarmed',rounds_started:1,max_goal_rounds:1},checkpoint:{session_ref:'work-test-session',seq_exclusive:4,turn_end_seq:2,goal_id:goalId,goal_revision:3,log_sha256:'b'.repeat(64)}})};
+ const finalization=finalize?await complete():undefined;return {...f,runtime,card,finalization,complete,write:write.json()};
 }

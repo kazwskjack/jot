@@ -1,5 +1,10 @@
 # Original publication source custody and local file effects
 
+This record describes the earlier source-custody/local-kernel increment.
+The subsequent foreground producer and recovery implementation is tracked in
+[producer and interrupted recovery](2026-10-20-publication-producer-recovery.md).
+The remaining items below describe what that earlier increment did not certify.
+
 ## What changed
 
 Completed work can now derive a private native placement from its original

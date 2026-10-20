@@ -82,3 +82,25 @@ export async function verifySessionCheckpoint(agent,sessions,persistence,receipt
  const observed=await inspect(agent,sessions,persistence,receipt.turn_end_seq,receipt.seq_exclusive,signal);
  if(observed.log_sha256!==receipt.log_sha256)throw new Error('checkpoint_storage_conflict');
 }
+
+/** Original readback while the caller already holds native maintenance/storage
+ * custody. Never waits for idle, rewinds history or grants effect permission.
+ * The owning Host supplies the retained header and synchronous custody check. */
+export async function verifyHeldSessionCheckpoint({persistence,header,checkpoint,assertCurrent,signal}){
+ validate(checkpoint);const receipt=structuredClone(checkpoint),expectedHeader=headerJson(structuredClone(header));
+ if(typeof persistence?.open!=='function'||typeof assertCurrent!=='function')throw Error('checkpoint_custody_invalid');
+ const check=()=>{signal?.throwIfAborted();const value=assertCurrent();if(value!==undefined){if(value&&typeof value.then==='function')Promise.resolve(value).catch(()=>{});throw Error('checkpoint_custody_invalid');}};
+ check();const handle=await persistence.open(receipt.session_ref,'read',{signal});
+ try{
+  check();if(handle?.id!==receipt.session_ref||handle.access!=='read'||headerJson(handle.header)!==expectedHeader)throw Error('checkpoint_storage_conflict');
+  const hash=createHash('sha256').update(expectedHeader+'\n');let boundary=false;
+  for(let offset=0;offset<receipt.seq_exclusive;){
+   check();const length=Math.min(256,receipt.seq_exclusive-offset),result=await handle.read(offset,length,{signal});check();
+   if(!Array.isArray(result?.events)||result.events.length!==length)throw Error('checkpoint_storage_conflict');
+   for(const event of result.events){if(event?.seq!==offset)throw Error('checkpoint_storage_conflict');if(offset===receipt.turn_end_seq)boundary=event.type==='turn/end';hash.update(json(event)+'\n');offset++;}
+  }
+  if(!boundary)throw Error('checkpoint_boundary_invalid');
+  if(hash.digest('hex')!==receipt.log_sha256)throw Error('checkpoint_storage_conflict');check();
+ }finally{await handle.close();}
+ check();
+}

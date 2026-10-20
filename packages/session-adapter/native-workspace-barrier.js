@@ -36,7 +36,7 @@ export async function withNativeWorkspaceBarrier(input,operation){
   if(typeof id!=='string'||!ID.test(id)||ids.has(id))throw Error('native_workspace_members_invalid');
   ids.add(id);return {...member,sessionRef:id};
  }).sort((a,b)=>a.sessionRef.localeCompare(b.sessionRef,'en'));
- const reservation=input.assertReservation,requestSignal=input.signal,held=[],proofs=[],signals=[],workspaces=[];let factoryLease;
+ const reservation=input.assertReservation,requestSignal=input.signal,held=[],proofs=[],signals=[],workspaces=[],headers=[];let factoryLease;
  const checkReservation=()=>{
   requestSignal?.throwIfAborted();
   factoryLease?.signal.throwIfAborted();
@@ -60,20 +60,20 @@ export async function withNativeWorkspaceBarrier(input,operation){
   if(index===members.length){
    const signal=AbortSignal.any([...(requestSignal?[requestSignal]:[]),...(factoryLease?[factoryLease.signal]:[]),...signals]);
    const snapshots=Object.freeze(proofs.map(proof=>Object.freeze(structuredClone(proof))));
-   await recheck();const result=await operation(snapshots,check,signal,recheck,Object.freeze([...workspaces]));await recheck();return result;
+   await recheck();const result=await operation(snapshots,check,signal,recheck,Object.freeze([...workspaces]),Object.freeze(headers.map(value=>Object.freeze(structuredClone(value)))));await recheck();return result;
   }
   const member=members[index];
   const captureSignal=AbortSignal.any([...(requestSignal?[requestSignal]:[]),...(factoryLease?[factoryLease.signal]:[]),...signals]);
   if(!member.agent)return withColdWorkspaceSession({...member,factoryHold:factoryLease?.token,assertReservation:checkReservation,signal:captureSignal},async cold=>{
-   held.push({check:cold.check,recheck:cold.recheck});proofs.push(cold.proof);signals.push(captureSignal);workspaces.push(workspaceHeader(member.sessionRef,cold.header===null?'absent':'cold',cold.header));
+   held.push({check:cold.check,recheck:cold.recheck});proofs.push(cold.proof);signals.push(captureSignal);workspaces.push(workspaceHeader(member.sessionRef,cold.header===null?'absent':'cold',cold.header));headers.push({session_ref:member.sessionRef,header:cold.header});
    try{check();return await enter(index+1);}
-   finally{held.pop();proofs.pop();signals.pop();workspaces.pop();}
+   finally{held.pop();proofs.pop();signals.pop();workspaces.pop();headers.pop();}
   });
   const goal=goalStamp(member.agent);
   return withNativeHandoffBarrier({...member,signal:captureSignal},async(proof,memberCheck,signal)=>{
-   held.push({agent:member.agent,check:memberCheck,goal});proofs.push(proof);signals.push(signal);workspaces.push(workspaceHeader(member.sessionRef,'resident',member.agent.session.header));
+   held.push({agent:member.agent,check:memberCheck,goal});proofs.push(proof);signals.push(signal);workspaces.push(workspaceHeader(member.sessionRef,'resident',member.agent.session.header));headers.push({session_ref:member.sessionRef,header:member.agent.session.header});
    try{check();return await enter(index+1);}
-   finally{held.pop();proofs.pop();signals.pop();workspaces.pop();}
+   finally{held.pop();proofs.pop();signals.pop();workspaces.pop();headers.pop();}
   });
  };
  checkReservation();

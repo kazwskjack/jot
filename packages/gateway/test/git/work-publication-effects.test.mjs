@@ -18,7 +18,7 @@ test('original reviewed text publishes exact bytes while preserving Git index an
 });
 test('a reviewed new nested file creates only its missing parents and never touches unrelated source files',async t=>{
  const f=await fixture(t,'nested/deep/result.md'),plan=await f.kernel.preparePublication(f.review.target,f.review.changes,f.materials),auth=authority();
- await f.kernel.applyPublication(plan,auth);assert.equal(await readFile(join(f.rootTarget,'nested/deep/result.md'),'utf8'),'Exact reviewed work content');assert.equal(await readFile(join(f.rootTarget,'source.md'),'utf8'),f.base);
+ const receipt=await f.kernel.applyPublication(plan,auth);assert.equal(receipt.files[0].mode,plan.files[0].mode,'the applied permission mode must match the prepared plan on the current platform');assert.equal(await readFile(join(f.rootTarget,'nested/deep/result.md'),'utf8'),'Exact reviewed work content');assert.equal(await readFile(join(f.rootTarget,'source.md'),'utf8'),f.base);
  assert.deepEqual(auth.facts.filter(f=>f.kind==='intent').map(f=>f.value.phase),['directory','directory','stage','publish']);assert.deepEqual((await readdir(join(f.rootTarget,'nested/deep'))).sort(),['result.md']);
 });
 test('changed original target bytes refuse preparation without scratch files or target writes',async t=>{
@@ -38,4 +38,16 @@ test('a lost post-publication acknowledgement is not rolled back, replayed or pr
 test('an outside writer at a new target cannot be overwritten by a reviewed add',async t=>{
  const f=await fixture(t,'new.md'),plan=await f.kernel.preparePublication(f.review.target,f.review.changes,f.materials),auth=authority({intent(step){auth.facts.push({kind:'intent',value:step});if(step.phase==='publish')writeFileSync(join(f.rootTarget,'new.md'),'Outside new file');}});
  await assert.rejects(f.kernel.applyPublication(plan,auth),/git_publication_target_changed/);assert.equal(await readFile(join(f.rootTarget,'new.md'),'utf8'),'Outside new file');assert.equal(auth.facts.filter(f=>f.kind==='completed').length,0);
+});
+
+test('unrelated content-addressed Git object growth does not invalidate reviewed working-file publication',async t=>{
+ const f=await fixture(t),index=await readFile(join(f.rootTarget,'.git/index')),head=f.git('rev-parse','HEAD'),plan=await f.kernel.preparePublication(f.review.target,f.review.changes,f.materials);
+ const auth=authority({intent(step){auth.facts.push({kind:'intent',value:step});if(step.phase==='stage')f.git('hash-object','-w','--stdin');}});
+ await f.kernel.applyPublication(plan,auth);assert.equal(await readFile(join(f.rootTarget,'source.md'),'utf8'),'Exact reviewed work content');assert.deepEqual(await readFile(join(f.rootTarget,'.git/index')),index);assert.equal(f.git('rev-parse','HEAD'),head);
+});
+
+test('non-object Git configuration drift still refuses the original working-file publication',async t=>{
+ const f=await fixture(t),plan=await f.kernel.preparePublication(f.review.target,f.review.changes,f.materials);
+ const auth=authority({intent(step){auth.facts.push({kind:'intent',value:step});if(step.phase==='stage')writeFileSync(join(f.rootTarget,'.git/config'),'[core]\nrepositoryformatversion = 0\n');}});
+ await assert.rejects(f.kernel.applyPublication(plan,auth),/git_publication_target_changed/);assert.equal(await readFile(join(f.rootTarget,'source.md'),'utf8'),f.base);
 });

@@ -1,6 +1,7 @@
 import {createHash,randomUUID} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
 import {workspacePublicationSchema} from './workspace-coordination-upgrade.ts';
+import {publicationSettlementEvidence} from '../persistent-tasks/work-publication-journal.ts';
 
 export type WorkspaceOperationSource={owner_id:string;project_id:string;operation_kind:'git_index'|'work_publication';operation_id:string;binding_sha256:string};
 type Source=WorkspaceOperationSource;
@@ -155,6 +156,8 @@ function view(db:DatabaseSync,value:Reservation){
  }
  return{reservation_id:value.reservation_id,project_id:value.project_id,state:released?(settled?'released_settled' as const:'released_unstarted' as const):'reserved' as const,execution_authorized:false as const};
 }
+/** Historical owning-service projection; no reservation or release is minted. */
+export function readWorkspaceOperation(db:DatabaseSync,source:Source){const value=record(db,source);return value?view(db,value):undefined;}
 /** Trusted owning-service call, inside its original admission transaction. The
  * caller must verify its immutable original operation; this is not a wire API. */
 export function reserveWorkspaceOperation(db:DatabaseSync,source:Source){
@@ -183,7 +186,11 @@ export function releaseUnstartedWorkspaceOperation(db:DatabaseSync,source:Source
 export function settleWorkspaceOperation(db:DatabaseSync,source:Source){
  if(!db.isTransaction||!available(db))throw Error('workspace_coordination_unavailable');
  const value=record(db,source);if(!value||view(db,value).state!=='reserved')throw Error('workspace_reservation_closed');
- if(source.operation_kind==='work_publication')throw Error('workspace_publication_producer_unsettled');
+ if(source.operation_kind==='work_publication'){
+  const evidence=publicationSettlementEvidence(db,source),proof={reservation_id:value.reservation_id,execution_id:source.operation_id,...evidence,settled_at:new Date().toISOString()};
+  db.prepare('INSERT INTO wb_workspace_reservation_settlements VALUES(?,?,?)').run(value.reservation_id,JSON.stringify(proof),digest(proof));
+  db.prepare('INSERT INTO wb_workspace_reservation_releases VALUES(?,?)').run(value.reservation_id,proof.settled_at);return view(db,value);
+ }
  const execution=db.prepare('SELECT * FROM wb_git_index_executions WHERE execution_id=? AND owner_id=? AND project_id=? AND binding_sha256=? AND protocol=4').get(source.operation_id,source.owner_id,source.project_id,source.binding_sha256);
  const outcome=db.prepare('SELECT * FROM wb_git_index_outcomes WHERE execution_id=?').get(source.operation_id),producer=db.prepare('SELECT * FROM wb_git_index_producers WHERE execution_id=?').get(source.operation_id),finish=db.prepare('SELECT * FROM wb_git_index_producer_finishes WHERE execution_id=?').get(source.operation_id);
  let result,start,end;try{result=JSON.parse(String(outcome?.receipt_json));start=JSON.parse(String(producer?.record_json));end=JSON.parse(String(finish?.record_json));}catch{throw Error('workspace_reservation_producer_unsettled');}

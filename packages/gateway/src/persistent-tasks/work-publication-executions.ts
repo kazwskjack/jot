@@ -5,12 +5,14 @@ import {withImmediateTransaction} from '../db/database.ts';
 import {retainOriginalGitDatabase} from '../git/database-identity.ts';
 import type {GitWorkbench} from '../git/service.ts';
 import {ProjectRepository} from '../projects/repository.ts';
-import {assertWorkspaceWritable,reserveWorkspaceOperation,readReservedWorkspaceFamily,sealWorkspaceFamily,releaseUnstartedWorkspaceOperation,type WorkspaceOperationSource} from '../workbench/workspace-coordination.ts';
+import {assertWorkspaceWritable,reserveWorkspaceOperation,readReservedWorkspaceFamily,sealWorkspaceFamily,releaseUnstartedWorkspaceOperation,readWorkspaceOperation,settleWorkspaceOperation,type WorkspaceOperationSource} from '../workbench/workspace-coordination.ts';
 import {workspacePublicationSchema} from '../workbench/workspace-coordination-upgrade.ts';
 import {freezeWorkAdmission} from '../always-on/work-admission-records.ts';
 import type {WorkPublicationIntents} from './work-publication-intents.ts';
 import {FinalizedWorkSources,type FinalizedWorkNativePlacement} from './finalized-work-sources.ts';
 import type {GitNativeWorkspaceObservation} from '../git/index-effects.ts';
+import {installWorkPublicationJournal,readWorkPublicationJournal,appendWorkPublicationJournal,publicationWorkerResource} from './work-publication-journal.ts';
+import {produceWorkPublication} from './work-publication-producer.ts';
 
 type Row=Record<string,any>;
 export type WorkPublicationAdmissionInput={request_id:string;expected_version:number;review_sha256:string};
@@ -20,7 +22,7 @@ function fail(code:string):never{throw Error('work_publication_'+code);}
 type NativeView=Readonly<{source:ReturnType<WorkPublicationExecutions['workspaceFamily']>;workspaces:readonly GitNativeWorkspaceObservation[];signal:AbortSignal;execution_authorized:false}>;
 type NativeHost=Readonly<{
  withReservedFamily<T>(scope:Readonly<{owner_id:string;project_id:string;execution_id:string;operation_kind:'work_publication'}>,controls:Readonly<{assertReservation:()=>void;signal?:AbortSignal}>,operation:(context:unknown)=>Promise<T>):Promise<T>;
- inspect(context:unknown):NativeView;assertAdmission(context:unknown):void;
+ inspect(context:unknown):NativeView;assertAdmission(context:unknown):void;verifyCheckpoint?:(context:unknown,checkpoint:FinalizedWorkNativePlacement['completed_checkpoint'])=>Promise<void>;
 }>;
 type HeldSourceView=Readonly<{source:ReturnType<WorkPublicationIntents['executionSource']>;family:ReturnType<WorkPublicationExecutions['workspaceFamily']>;placement:FinalizedWorkNativePlacement;signal:AbortSignal;execution_authorized:false}>;
 
@@ -35,6 +37,7 @@ export function installWorkPublicationExecutions(db:DatabaseSync){
    binding_sha256 TEXT NOT NULL,database_sha256 TEXT NOT NULL,created_at TEXT NOT NULL,protocol INTEGER NOT NULL CHECK(protocol=1),
    UNIQUE(owner_id,project_id,request_id));
   CREATE TABLE IF NOT EXISTS wb_work_publication_admissions(execution_id TEXT PRIMARY KEY REFERENCES wb_work_publication_executions(execution_id),record_json TEXT NOT NULL,record_sha256 TEXT NOT NULL);`);
+  installWorkPublicationJournal(db);
   for(const table of ['wb_work_publication_executions','wb_work_publication_admissions']){
    for(const action of ['UPDATE','DELETE'])db.exec(`CREATE TRIGGER IF NOT EXISTS ${table}_no_${action.toLowerCase()} BEFORE ${action} ON ${table} BEGIN SELECT RAISE(ABORT,'work_publication_execution_immutable'); END;`);
    db.exec(`CREATE TRIGGER IF NOT EXISTS ${table}_no_replace BEFORE INSERT ON ${table} WHEN EXISTS(SELECT 1 FROM ${table} WHERE execution_id=NEW.execution_id${table==='wb_work_publication_executions'?' OR intent_id=NEW.intent_id OR owner_id=NEW.owner_id AND project_id=NEW.project_id AND request_id=NEW.request_id':''}) BEGIN SELECT RAISE(ABORT,'work_publication_execution_immutable'); END;`);
@@ -43,17 +46,18 @@ export function installWorkPublicationExecutions(db:DatabaseSync){
  if(db.isTransaction)install();else withImmediateTransaction(db,install);
 }
 
-/** Immutable admission and original project-family custody prerequisite only.
- * No method here dispatches files, native work, models or a background Worker. */
+/** Original publication admission, native custody and foreground file producer.
+ * No route, planner, model invocation or background Worker is installed here. */
 export class WorkPublicationExecutions{
  private readonly db:DatabaseSync;private readonly git:GitWorkbench;private readonly intents:WorkPublicationIntents;
  private readonly projects:ProjectRepository;private readonly originalDb:ReturnType<typeof retainOriginalGitDatabase>;
- private readonly nativeHost:NativeHost|undefined;private readonly nativeSources=new WeakMap<object,{view:HeldSourceView;check:()=>void}>();
+ private readonly nativeHost:NativeHost|undefined;private readonly nativeSources=new WeakMap<object,{view:HeldSourceView;check:()=>void;verify:()=>Promise<void>}>();
  constructor(db:DatabaseSync,git:GitWorkbench,intents:WorkPublicationIntents,options:{nativeWorkspaceHost?:NativeHost}={}){
   this.db=db;this.git=git;this.intents=intents;this.projects=new ProjectRepository(db);this.originalDb=retainOriginalGitDatabase(db);
   if(!options||typeof options!=='object'||Object.keys(options).some(key=>key!=='nativeWorkspaceHost'))fail('native_host_invalid');
   const host=options.nativeWorkspaceHost;if(host!==undefined){if(!host||typeof host.withReservedFamily!=='function'||typeof host.inspect!=='function'||typeof host.assertAdmission!=='function')fail('native_host_invalid');
-   this.nativeHost=Object.freeze({withReservedFamily:host.withReservedFamily.bind(host),inspect:host.inspect.bind(host),assertAdmission:host.assertAdmission.bind(host)});}
+   if(host.verifyCheckpoint!==undefined&&typeof host.verifyCheckpoint!=='function')fail('native_host_invalid');
+   this.nativeHost=Object.freeze({withReservedFamily:host.withReservedFamily.bind(host),inspect:host.inspect.bind(host),assertAdmission:host.assertAdmission.bind(host),...(host.verifyCheckpoint?{verifyCheckpoint:host.verifyCheckpoint.bind(host)}:{})});}
  }
  private read<T>(fn:()=>T):T{const outer=this.db.isTransaction;if(!outer)this.db.exec('BEGIN DEFERRED');try{this.originalDb.assertCurrent();return fn();}finally{if(!outer&&this.db.isTransaction)this.db.exec('ROLLBACK');}}
  private row(owner:string,project:string,id:string){this.originalDb.assertCurrent();this.projects.assertOwned(project,owner);const row=this.db.prepare('SELECT * FROM wb_work_publication_executions WHERE execution_id=? AND owner_id=? AND project_id=?').get(id,owner,project) as Row|undefined;if(!row)fail('execution_not_found');if(row.protocol!==1||row.database_sha256!==this.originalDb.sha256)fail('execution_source_changed');return row;}
@@ -87,7 +91,12 @@ export class WorkPublicationExecutions{
  }
  getAdmission(owner:string,project:string,requestId:string){return this.read(()=>{if(typeof requestId!=='string'||!ID.test(requestId))fail('execution_invalid');this.projects.assertOwned(project,owner);const row=this.db.prepare('SELECT execution_id FROM wb_work_publication_executions WHERE owner_id=? AND project_id=? AND request_id=?').get(owner,project,requestId) as Row|undefined;if(!row)fail('execution_not_found');return this.receipt(this.row(owner,project,row.execution_id));});}
  reserveWorkspace(owner:string,project:string,id:string){return withImmediateTransaction(this.db,()=>{const row=this.row(owner,project,id);this.current(row);const scope=this.scope(row),result=reserveWorkspaceOperation(this.db,scope);sealWorkspaceFamily(this.db,scope);return result;});}
- workspaceFamily(owner:string,project:string,id:string){return withImmediateTransaction(this.db,()=>{const row=this.row(owner,project,id);this.current(row);return{...readReservedWorkspaceFamily(this.db,this.scope(row)),operation_kind:'work_publication' as const};});}
+ workspaceFamily(owner:string,project:string,id:string){return withImmediateTransaction(this.db,()=>{
+  const row=this.row(owner,project,id);this.receipt(row);
+  if(!readWorkPublicationJournal(this.db,row).start)this.current(row);
+  else if(this.git.executionBinding(owner,project)!==row.binding_sha256)fail('execution_source_changed');
+  return{...readReservedWorkspaceFamily(this.db,this.scope(row)),operation_kind:'work_publication' as const};
+ });}
  /** Original-host composition prerequisite, not physical dispatch or a public
   * callback API. The operation receives an ephemeral private token, never a
   * root selector or serializable execution grant. An actual producer must also
@@ -98,7 +107,7 @@ export class WorkPublicationExecutions{
   const row=this.row(owner,project,id),source=this.current(row);this.reserveWorkspace(owner,project,id);const family=freezeWorkAdmission(this.workspaceFamily(owner,project,id));
   const sources=new FinalizedWorkSources(this.db),placement=sources.nativePlacement(owner,source.source.run_id,source.source.source_sha256);
   const original=canonicalJson(placement);
-  const checkReservation=()=>{signal?.throwIfAborted();const current=this.workspaceFamily(owner,project,id);if(current.reservation_id!==family.reservation_id||current.family_sha256!==family.family_sha256)fail('native_source_changed');};
+  const checkReservation=()=>{signal?.throwIfAborted();this.current(row);const current=this.workspaceFamily(owner,project,id);if(current.reservation_id!==family.reservation_id||current.family_sha256!==family.family_sha256)fail('native_source_changed');};
   const checkPlacement=()=>{checkReservation();if(canonicalJson(sources.nativePlacement(owner,source.source.run_id,source.source.source_sha256))!==original)fail('native_source_changed');};
   let finalCheck:(()=>void)|undefined;
   const result=await host.withReservedFamily({owner_id:owner,project_id:project,execution_id:id,operation_kind:'work_publication'},{assertReservation:checkPlacement,...(signal?{signal}:{})},async nativeContext=>{
@@ -111,7 +120,8 @@ export class WorkPublicationExecutions{
    const roots=this.git.indexEffects(owner,project).retainPublicationNativeWorkspaceRoots(placement,observed.workspaces);
    const check=()=>{observed.signal.throwIfAborted();checkPlacement();admission();if(host.inspect(nativeContext)!==observed)fail('native_context_invalid');roots();};
    finalCheck=()=>{checkPlacement();roots();};check();const context=Object.freeze({});
-   this.nativeSources.set(context,{view:Object.freeze({source,family,placement,signal:observed.signal,execution_authorized:false}),check});
+   const verify=async()=>{check();if(!host.verifyCheckpoint)fail('native_checkpoint_unavailable');await host.verifyCheckpoint(nativeContext,placement.completed_checkpoint);check();};
+   this.nativeSources.set(context,{view:Object.freeze({source,family,placement,signal:observed.signal,execution_authorized:false}),check,verify});
    try{const value=await operation(context);check();return value;}finally{this.nativeSources.delete(context);}
   });
   if(!finalCheck)fail('native_context_invalid');finalCheck();return result;
@@ -119,13 +129,66 @@ export class WorkPublicationExecutions{
  /** Private, nonserializable source custody observation; no effect permission. */
  assertNativeSource(context:object){const held=this.nativeSources.get(context);if(!held)fail('native_context_invalid');held.check();}
  inspectNativeSource(context:object){this.assertNativeSource(context);return this.nativeSources.get(context)!.view;}
+ /** Held source history readback only. A subsequent producer must still retain
+  * its exact original Worker lease and durable per-file intent/receipt. */
+ async verifyNativeSource(context:object){this.assertNativeSource(context);await this.nativeSources.get(context)!.verify();this.assertNativeSource(context);}
+ /** Historical projection only; interrupted effects are not inferred away and
+  * a completed producer still needs the original post-native settlement. */
+ publicationStatus(owner:string,project:string,id:string){return this.read(()=>{
+  const row=this.row(owner,project,id);this.receipt(row);const journal=readWorkPublicationJournal(this.db,row),reservation=readWorkspaceOperation(this.db,this.scope(row));
+  const state=reservation?.state!=='released_settled'?(journal.applied?'applied_pending_settlement':journal.disposition?'abandon_pending_settlement':journal.state):journal.state;
+  return freezeWorkAdmission({execution_id:id,project_id:project,intent_id:row.intent_id,request_id:row.request_id,state,
+   files:journal.effects.filter(effect=>effect.phase==='publish').map(effect=>({path:effect.path,sha256:effect.sha256,size:effect.size})),
+   pending_path:journal.pending?.path??null,journal_sha256:journal.tail_sha256,execution_authorized:false as const});
+ });}
+ async executePublication(owner:string,project:string,id:string,signal?:AbortSignal){
+  if(this.db.isTransaction)fail('async_transaction');signal?.throwIfAborted();const row=this.row(owner,project,id),before=this.publicationStatus(owner,project,id);
+  if(before.state==='applied')return before;
+  if(readWorkPublicationJournal(this.db,row).start)fail('producer_closed');
+  await this.withReservedNativeSource(owner,project,id,context=>produceWorkPublication({db:this.db,row,source:this,context,kernel:this.git.indexEffects(owner,project)}),signal);
+  return withImmediateTransaction(this.db,()=>{this.row(owner,project,id);this.current(row);settleWorkspaceOperation(this.db,this.scope(row));return this.publicationStatus(owner,project,id);});
+ }
+ /** Explicit owner resolution of the original journal. No file is deleted,
+  * replayed or rolled back. A cancelled review cannot grant another effect. */
+ async settlePublication(owner:string,project:string,id:string,value:{request_id:string;action:'abandon_unknown'|'confirm_recorded';expected_journal_sha256:string;acknowledge_unknown:true},signal?:AbortSignal){
+  if(this.db.isTransaction)fail('async_transaction');
+  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!=='acknowledge_unknown,action,expected_journal_sha256,request_id'
+   ||typeof value.request_id!=='string'||typeof value.expected_journal_sha256!=='string'||!ID.test(value.request_id)||!SHA.test(value.expected_journal_sha256)||!['abandon_unknown','confirm_recorded'].includes(value.action)||value.acknowledge_unknown!==true)fail('disposition_invalid');
+  const command=structuredClone(value),row=this.row(owner,project,id);this.receipt(row);const initial=readWorkPublicationJournal(this.db,row);
+  if(initial.disposition){const {settled_at,...original}=initial.disposition.payload;if(canonicalJson(original)!==canonicalJson(command))throw Error('idempotency_conflict');if(readWorkspaceOperation(this.db,this.scope(row))?.state==='released_settled')return this.publicationStatus(owner,project,id);}
+  if(!initial.disposition&&initial.tail_sha256!==command.expected_journal_sha256)fail('disposition_conflict');
+  if(!initial.start||command.action==='confirm_recorded'&&!initial.applied||command.action==='abandon_unknown'&&initial.applied)fail('disposition_invalid');
+  const host=this.nativeHost;if(!host)fail('native_host_unavailable');
+  let resolution:string|undefined=initial.disposition?.sha256;const lease=initial.start.payload.lease,resource=publicationWorkerResource(row),family=freezeWorkAdmission(this.workspaceFamily(owner,project,id));
+  const check=()=>{
+   signal?.throwIfAborted();this.row(owner,project,id);this.receipt(row);
+   if(this.git.executionBinding(owner,project)!==row.binding_sha256)fail('execution_source_changed');
+   const journal=readWorkPublicationJournal(this.db,row),current=this.workspaceFamily(owner,project,id);
+   if(journal.tail_sha256!==(resolution??command.expected_journal_sha256)||current.reservation_id!==family.reservation_id||current.family_sha256!==family.family_sha256)fail('disposition_conflict');
+   const active=this.db.prepare('SELECT owner,generation,expires_at FROM ga_worker_leases WHERE resource_id=?').get(resource) as Row|undefined;
+   if(active&&(active.owner!==lease.owner||active.generation!==lease.generation||!Number.isSafeInteger(Number(active.expires_at))||Number(active.expires_at)>Date.now()))fail('producer_busy');
+  };
+  await host.withReservedFamily({owner_id:owner,project_id:project,execution_id:id,operation_kind:'work_publication'},{assertReservation:check,...(signal?{signal}:{})},async nativeContext=>{
+   const admission=()=>{const admitted=host.assertAdmission(nativeContext) as unknown;if(admitted!==undefined){if(admitted&&typeof(admitted as {then?:unknown}).then==='function')Promise.resolve(admitted).catch(()=>{});fail('native_host_invalid');}};
+   check();admission();
+   const observed=host.inspect(nativeContext);if(observed?.execution_authorized!==false||observed.source?.execution_authorized!==false||observed.source.operation_kind!=='work_publication'
+    ||observed.source.reservation_id!==family.reservation_id||observed.source.binding_sha256!==family.binding_sha256||observed.source.family_sha256!==family.family_sha256||observed.source.execution_id!==id||observed.source.owner_id!==owner||observed.source.project_id!==project||!(observed.signal instanceof AbortSignal)
+    ||canonicalJson(observed.workspaces.map(member=>member.session_ref))!==canonicalJson(family.members.map(member=>member.session_ref)))fail('native_source_changed');
+   if(!resolution)withImmediateTransaction(this.db,()=>{check();observed.signal.throwIfAborted();admission();
+    const current=appendWorkPublicationJournal(this.db,row,'disposition',{...command,settled_at:new Date().toISOString()});resolution=current.tail_sha256!;
+    this.db.prepare('DELETE FROM ga_worker_leases WHERE resource_id=? AND owner=? AND generation=? AND CAST(expires_at AS INTEGER)<=?').run(resource,lease.owner,lease.generation,Date.now());
+   });check();observed.signal.throwIfAborted();admission();if(host.inspect(nativeContext)!==observed)fail('native_context_invalid');
+  });
+  return withImmediateTransaction(this.db,()=>{check();settleWorkspaceOperation(this.db,this.scope(row));return this.publicationStatus(owner,project,id);});
+ }
  releaseUnstartedWorkspace(owner:string,project:string,id:string){return withImmediateTransaction(this.db,()=>{
   const row=this.row(owner,project,id);this.receipt(row);
-  // This admission-only version cannot start a producer. A future/unrecognized
-  // lifecycle schema is never interpreted as proof of no producer or no effect.
-  const known=new Set(['wb_work_publication_intents','wb_work_publication_events','wb_work_publication_executions','wb_work_publication_admissions']);
+  // An original started producer is never released through the unstarted path.
+  // Unknown future lifecycle schema also remains unproven.
+  const known=new Set(['wb_work_publication_intents','wb_work_publication_events','wb_work_publication_executions','wb_work_publication_admissions','wb_work_publication_journal']);
   const tables=this.db.prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name GLOB 'wb_work_publication_*'").all() as {name:string}[];
   if(tables.some(table=>!known.has(table.name)))fail('producer_unconfirmed');
+  if(tables.some(table=>table.name==='wb_work_publication_journal')&&this.db.prepare('SELECT 1 FROM wb_work_publication_journal WHERE execution_id=?').get(id))fail('producer_unconfirmed');
   if(this.git.executionBinding(owner,project)!==row.binding_sha256)fail('execution_source_changed');return releaseUnstartedWorkspaceOperation(this.db,this.scope(row));
  });}
 }

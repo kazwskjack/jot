@@ -1,6 +1,6 @@
 # Brain Index
 
-_Auto-generated. Last updated 2026-10-20T11:48:44.898Z._
+_Auto-generated. Last updated 2026-10-20T12:47:50.352Z._
 
 - [always-on-discovery](pages/always-on-discovery.md) — category: decision | Project discovery covers the full lifecycle: explicit owner project/workspace/role policy, factual idle/source collection, original occurren
 - [chat-answer-evidence](pages/chat-answer-evidence.md) — category: decision | Across all topics, Chat proactively searches when facts essential to the answer are uncertain, potentially outdated or unsupported. Stable c
@@ -8,4 +8,4 @@ _Auto-generated. Last updated 2026-10-20T11:48:44.898Z._
 - [licensing-policy](pages/licensing-policy.md) — category: decision | tags: [licensing, release] | Current original Jot source and documentation use Apache-2.0. Preserve separately attributed third-party licenses, copyright notices and pro
 - [memory-authority](pages/memory-authority.md) — category: decision | The original DSH runtime owns planning, permissions, cancellation and model accounting. Jot's scoped, versioned ledger is the only live-memo
 - [native-goal-boundary](pages/native-goal-boundary.md) — category: decision | DSH is the sole conversation planner and native Goal authority. Gateway owns product identity, owner/permissions, leases, accounting and can
-- [pilotdeck-reuse-strengthening-20261020](pages/pilotdeck-reuse-strengthening-20261020.md) — category: decision | <current best understanding — replace this with the real content>
+- [pilotdeck-reuse-strengthening-20261020](pages/pilotdeck-reuse-strengthening-20261020.md) — category: decision | Retain Jot and DSH as the original planner, native Session/Goal lifecycle and authority. Integrate PilotDeck module by module, reviewing act

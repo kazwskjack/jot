@@ -44,9 +44,9 @@ export class GitPublicationEffects extends GitIndexEffects{
   }finally{closeSync(fd);}
  }
  private metadataWitness(){
-  const values:string[]=[];let count=0;
-  for(const root of [...new Set([this.gitDirectory,this.commonDirectory])]){const queue=[root];while(queue.length){const path=queue.pop()!;for(const name of readdirSync(path)){if(++count>100000)fail('metadata_limit');const child=join(path,name),s=stat(child);if(s.isSymbolicLink()||!s.isFile()&&!s.isDirectory())fail('target_changed');values.push(child+':'+stamp(s)+':'+s.mode);if(s.isDirectory())queue.push(child);}}}
-  return hash(values.sort().join('\n'));
+  // Reuse the original non-object metadata witness. File publication never
+  // reads or changes object bytes; root identity is retained separately.
+  return this.sourceMetadata();
  }
  private publicationDotWitness(){const path=join(this.root,'.git'),s=stat(path);if(s.isSymbolicLink())fail('target_changed');return s.isDirectory()?'directory:'+identity(s):'file:'+digest(this.fileFact(path));}
  private relativeCurrent(path:string){
@@ -76,13 +76,13 @@ export class GitPublicationEffects extends GitIndexEffects{
    if(change.kind==='add'){if(change.before!==null||before.kind!=='missing')fail('source_changed');}
    else if(change.kind==='modify'){if(change.before?.kind!=='file'||before.kind!=='file'||change.before.sha256!==before.sha256||change.before.bytes!==before.size)fail('source_changed');}else fail('source_unsupported');
    bytes.set(change.path,copied);const folder=dirname(change.path),scratch=(folder==='.'?'':folder+'/')+'.jot-publication-'+randomUUID()+'.tmp';
-   return{path:change.path as string,kind:change.kind as 'add'|'modify',scratch,sha256:hash(copied),size:copied.length,mode:before.kind==='file'?before.mode:0o644};
+   return{path:change.path as string,kind:change.kind as 'add'|'modify',scratch,sha256:hash(copied),size:copied.length,mode:before.kind==='file'?before.mode:process.platform==='win32'?0o666:0o644};
   });
   const current=await this.publicationTarget(paths,signal);if(canonicalJson(current.witness)!==canonicalJson(witness))fail('target_changed');signal?.throwIfAborted();
   const parents=new Map<string,string|null>(),facts=new Map<string,FileFact|null>();
   for(const file of witness.files){facts.set(file.path,this.fileFact(join(this.root,file.path)));const parts=file.path.split('/');parts.pop();for(let n=1;n<=parts.length;n++){const parent=parts.slice(0,n).join('/');if(parents.has(parent))continue;try{parents.set(parent,this.directoryIdentity(join(this.root,parent)));}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;parents.set(parent,null);}}}
   for(const file of witness.files){const fact=facts.get(file.path);if(file.kind==='missing'?fact!==null:!fact||fact.stat_sha256!==file.stat_sha256||fact.sha256!==file.sha256||fact.mode!==file.mode)fail('target_changed');}
-  const stored:Stored={state:'ready',witness,bytes,facts,parents,directories:new Map([...new Set([this.root,this.gitDirectory,this.commonDirectory])].map(path=>[path,this.directoryIdentity(path)])),metadata:this.metadataWitness(),dot:this.publicationDotWitness(),scratch:new Map()};
+  const stored:Stored={state:'ready',witness,bytes,facts,parents,directories:new Map([...new Set([this.root,this.gitDirectory,this.commonDirectory,join(this.commonDirectory,'objects')])].map(path=>[path,this.directoryIdentity(path)])),metadata:this.metadataWitness(),dot:this.publicationDotWitness(),scratch:new Map()};
   this.checkPublication(stored);const plan=freezeWorkAdmission({protocol:1 as const,plan_id:id,target_sha256,repository_sha256:witness.repository_sha256,files,execution_authorized:false as const});this.publicationPlans.set(plan,stored);return plan;
  }
  async applyPublication(plan:PublicationPlan,authority:PublicationAuthority,signal?:AbortSignal):Promise<PublicationReceipt>{
@@ -97,18 +97,18 @@ export class GitPublicationEffects extends GitIndexEffects{
    await new Promise<void>(done=>setImmediate(done));guard();
   };
   guard();sync(()=>authority.prepared(plan));guard();
-  for(const [path,id] of [...stored.parents].sort(([a],[b])=>a.split('/').length-b.split('/').length||a.localeCompare(b))){if(id!==null)continue;
+  for(const [path,id] of [...stored.parents].sort(([a],[b])=>a.split('/').length-b.split('/').length||(a<b?-1:a>b?1:0))){if(id!==null)continue;
    const evidence:PublicationStep={plan_id:plan.plan_id,step_id:'directory:'+path,phase:'directory',path};
    await step(evidence,()=>{mkdirSync(join(this.root,path),{mode:0o700});const identity=this.directoryIdentity(join(this.root,path));stored.parents.set(path,identity);return{...evidence,fact:{kind:'directory',identity}};});
   }
   for(const file of plan.files){
    const stage:PublicationStep={plan_id:plan.plan_id,step_id:'stage:'+file.path,phase:'stage',path:file.path,scratch:file.scratch,sha256:file.sha256,size:file.size};
    await step(stage,()=>{const path=join(this.root,file.scratch);this.relativeCurrent(file.scratch);const fd=openSync(path,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|(constants.O_NOFOLLOW??0),file.mode);
-    try{writeFileSync(fd,stored.bytes.get(file.path)!);fchmodSync(fd,file.mode);fsyncSync(fd);}finally{closeSync(fd);}const fact=this.fileFact(path);if(!fact||fact.sha256!==file.sha256||fact.size!==file.size)fail('target_changed');stored.scratch.set(file.scratch,fact);return{...stage,fact};});
+    try{writeFileSync(fd,stored.bytes.get(file.path)!);fchmodSync(fd,file.mode);fsyncSync(fd);}finally{closeSync(fd);}const fact=this.fileFact(path);if(!fact||fact.sha256!==file.sha256||fact.size!==file.size||fact.mode!==file.mode)fail('target_changed');stored.scratch.set(file.scratch,fact);return{...stage,fact};});
    const publish:PublicationStep={...stage,step_id:'publish:'+file.path,phase:'publish'};
    await step(publish,()=>{const scratch=join(this.root,file.scratch),target=join(this.root,file.path),owned=stored.scratch.get(file.scratch)!;
     if(file.kind==='add'){linkSync(scratch,target);unlinkSync(scratch);}else renameSync(scratch,target);
-    const fact=this.fileFact(target);if(!fact||fact.identity!==owned.identity||fact.sha256!==file.sha256||fact.size!==file.size)fail('target_changed');stored.scratch.delete(file.scratch);stored.facts.set(file.path,fact);return{...publish,fact};});
+    const fact=this.fileFact(target);if(!fact||fact.identity!==owned.identity||fact.sha256!==file.sha256||fact.size!==file.size||fact.mode!==file.mode)fail('target_changed');stored.scratch.delete(file.scratch);stored.facts.set(file.path,fact);return{...publish,fact};});
   }
   guard();const result:PublicationReceipt=freezeWorkAdmission({protocol:1,plan_id:plan.plan_id,target_sha256:plan.target_sha256,state:'applied',files:plan.files.map(file=>({path:file.path,...stored.facts.get(file.path)!})).map(({kind,...file})=>file),execution_authorized:false});
   sync(()=>authority.completed(result));guard();return result;

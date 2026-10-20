@@ -4,11 +4,18 @@ title: PilotDeck source reuse and strengthening
 category: decision
 status: active
 created: "2026-10-20T19:22:05"
-updated: "2026-10-20T19:48:44"
+updated: "2026-10-20T20:47:50"
 ---
 
 <!-- compiled_truth -->
-<current best understanding — replace this with the real content>
+Retain Jot and DSH as the original planner, native Session/Goal lifecycle and authority. Integrate PilotDeck module by module, reviewing actual code, complete behavior and design reasons. Compare reusable Jot and upstream modules; strengthen demonstrated gaps with executable acceptance rather than rewriting sufficient implementations. Preserve upstream authorship and license obligations before copying source.
+
+Reviewed physical file publication is separate from accepting a completed task. It consumes original immutable source proofs and a distinct exact owner-approved target review, under the original workspace family and original Worker lease namespace. The foreground producer and append-only per-file journal stay in the same Gateway database; no parallel planner, queue or lock authority is introduced.
+
+Verify the original native checkpoint prefix inside retained maintenance without invoking an idle-waiting wrapper that waits for itself. Unknown file effects must remain explicit. Never replay, delete or claim rollback merely because an acknowledgement is missing or a lease expired. Original owner commands bind an exact journal digest and explicit acknowledgement; fresh native custody and Worker fencing are still required to confirm recorded application or abandon uncertainty.
+
+Local implementation and synthetic SDK/process tests are distinct from full-suite, transport/UI, real-provider, platform and production acceptance. Multiple historical isolated native roots and the full 26-capability/portable Chat-Work ledger remain independent completion requirements.
+
 
 ## Timeline
 
@@ -34,4 +41,10 @@ updated: "2026-10-20T19:48:44"
   kind: evidence
   summary: "Full Gateway regression reached terminal exit0:2180 total,2158 pass,22 conditional skips,0fail/0cancel;605 enumerated Gateway code/test/contracts/scripts/templates/package files unchanged. Focused35 and explicitly enabled installed SDK2 passed separately. This verifies the source-custody/local-effects increment, not end-to-end owner Apply or production activation."
   source: docs/implementation/2026-10-20-publication-native-source-and-effects.md
+  affects: [pilotdeck-reuse-strengthening-20261020]
+
+- time: 2026-10-20T20:47:50
+  kind: decision
+  summary: Capture retained-authority source reuse and original publication recovery boundaries
+  source: docs/implementation/2026-10-20-publication-producer-recovery.md
   affects: [pilotdeck-reuse-strengthening-20261020]
