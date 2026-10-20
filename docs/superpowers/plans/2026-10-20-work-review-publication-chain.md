@@ -186,6 +186,12 @@ linked implementation record; product entry and actual publication remain open.
 
 ### Next source-association and transport acceptance
 
+Implementation and evidence for this sequence are now recorded in
+[original publication family and native transport](../../implementation/2026-10-20-publication-family-and-native-transport.md).
+The complete acceptance bullets below remain open until all their scenarios,
+the current full-tree gate and product entry are verified; a subset of passing
+SDK or process tests does not close an entire bullet.
+
 The current `retainPublicationNativeWorkspaceRoots` associates the producing
 Session with its finalized isolated placement and requires other non-absent
 members to use the configured target root. This is insufficient for a project

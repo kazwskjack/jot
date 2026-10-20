@@ -13,6 +13,7 @@ import {FinalizedWorkSources,type FinalizedWorkNativePlacement} from './finalize
 import type {GitNativeWorkspaceObservation} from '../git/index-effects.ts';
 import {installWorkPublicationJournal,readWorkPublicationJournal,appendWorkPublicationJournal,publicationWorkerResource} from './work-publication-journal.ts';
 import {produceWorkPublication} from './work-publication-producer.ts';
+import {readReservedPublicationPlacements} from './publication-native-placements.ts';
 
 type Row=Record<string,any>;
 export type WorkPublicationAdmissionInput={request_id:string;expected_version:number;review_sha256:string};
@@ -106,9 +107,25 @@ export class WorkPublicationExecutions{
   const host=this.nativeHost;if(!host)fail('native_host_unavailable');
   const row=this.row(owner,project,id),source=this.current(row);this.reserveWorkspace(owner,project,id);const family=freezeWorkAdmission(this.workspaceFamily(owner,project,id));
   const sources=new FinalizedWorkSources(this.db),placement=sources.nativePlacement(owner,source.source.run_id,source.source.source_sha256);
-  const original=canonicalJson(placement);
+  const original=canonicalJson(placement);let placementStamp:string|undefined,cachedPlacements:ReturnType<typeof readReservedPublicationPlacements>|undefined;
+  const databaseStamp=()=>{
+   const values=[this.db.prepare('PRAGMA data_version').get()!.data_version,this.db.prepare('PRAGMA schema_version').get()!.schema_version,this.db.prepare('SELECT total_changes() AS n').get()!.n];
+   if(values.some(value=>!(typeof value==='number'&&Number.isSafeInteger(value)&&value>=0||typeof value==='bigint'&&value>=0n)))fail('native_source_changed');
+   return values.map(String).join(':');
+  };
+  const readPlacements=()=>this.read(()=>{
+   // Cache only immutable placement derivation inside this held operation.
+   // Own writes (including rolled-back changes), schema changes and commits
+   // through another connection invalidate it. Original owner/approval/family,
+   // database identity, native admission and physical-root checks stay live.
+   const stamp=databaseStamp();if(cachedPlacements&&placementStamp===stamp)return cachedPlacements;
+   const value=readReservedPublicationPlacements(this.db,this.scope(row));if(databaseStamp()!==stamp)fail('native_source_changed');
+   cachedPlacements=value;placementStamp=stamp;return value;
+  }),memberPlacements=readPlacements();
+  if(memberPlacements.family_sha256!==family.family_sha256||memberPlacements.binding_sha256!==family.binding_sha256)fail('native_source_changed');
+  const originalMembers=canonicalJson(memberPlacements);
   const checkReservation=()=>{signal?.throwIfAborted();this.current(row);const current=this.workspaceFamily(owner,project,id);if(current.reservation_id!==family.reservation_id||current.family_sha256!==family.family_sha256)fail('native_source_changed');};
-  const checkPlacement=()=>{checkReservation();if(canonicalJson(sources.nativePlacement(owner,source.source.run_id,source.source.source_sha256))!==original)fail('native_source_changed');};
+  const checkPlacement=()=>{checkReservation();if(canonicalJson(sources.nativePlacement(owner,source.source.run_id,source.source.source_sha256))!==original||canonicalJson(readPlacements())!==originalMembers)fail('native_source_changed');};
   let finalCheck:(()=>void)|undefined;
   const result=await host.withReservedFamily({owner_id:owner,project_id:project,execution_id:id,operation_kind:'work_publication'},{assertReservation:checkPlacement,...(signal?{signal}:{})},async nativeContext=>{
    const admission=()=>{const value=host.assertAdmission(nativeContext) as unknown;if(value!==undefined){if(value&&typeof(value as {then?:unknown}).then==='function')Promise.resolve(value).catch(()=>{});fail('native_host_invalid');}};
@@ -117,7 +134,7 @@ export class WorkPublicationExecutions{
     ||nativeSource.reservation_id!==family.reservation_id||nativeSource.family_sha256!==family.family_sha256||nativeSource.binding_sha256!==family.binding_sha256
     ||nativeSource.execution_id!==id||nativeSource.owner_id!==owner||nativeSource.project_id!==project||!(observed.signal instanceof AbortSignal)||!Array.isArray(observed.workspaces)
     ||canonicalJson(observed.workspaces.map(member=>member.session_ref))!==canonicalJson(family.members.map(member=>member.session_ref)))fail('native_source_changed');
-   const roots=this.git.indexEffects(owner,project).retainPublicationNativeWorkspaceRoots(placement,observed.workspaces);
+   const roots=this.git.indexEffects(owner,project).retainPublicationNativeWorkspaceRoots(placement,observed.workspaces,memberPlacements);
    const check=()=>{observed.signal.throwIfAborted();checkPlacement();admission();if(host.inspect(nativeContext)!==observed)fail('native_context_invalid');roots();};
    finalCheck=()=>{checkPlacement();roots();};check();const context=Object.freeze({});
    const verify=async()=>{check();if(!host.verifyCheckpoint)fail('native_checkpoint_unavailable');await host.verifyCheckpoint(nativeContext,placement.completed_checkpoint);check();};

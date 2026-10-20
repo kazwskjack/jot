@@ -13,13 +13,16 @@ import {createNativeWorkspaceSourceHost,inspectNativeWorkspaceSource,assertNativ
 import {nativePublicationRuntime} from './native-publication-runtime.mjs';
 import {createNativeWorkspaceFactoryGate} from '../../../session-adapter/native-workspace-factory.js';
 import {createNativeInvariantReplay} from '../../../session-adapter/native-invariant-replay.js';
+import {addHistoricalWork} from './publication-history-fixture.mjs';
 const runtime=process.env.JOT_DSH_RUNTIME_MODULES,token='test-publication-native-token';
-export async function publicationNativeHostFixture(t,{badCheckpoint=false,outputPath='source.md'}={}){
+export async function publicationNativeHostFixture(t,{badCheckpoint=false,outputPath='source.md',additionalHistory=false}={}){
  const sdk=nativePublicationRuntime(t,runtime),nativeLifecycle=async original=>{
   const lifecycle=await sdk.lifecycle(original);if(!badCheckpoint)return lifecycle;
   return{...lifecycle,async complete(){const proof=await lifecycle.complete();return{...proof,checkpoint:{...proof.checkpoint,log_sha256:'0'.repeat(64)}}}};
  };
- const f=await publicationReviewFixture(t,{nativeLifecycle,outputPath}),review=await f.service.prepare('owner',f.scope.project_id,f.input),approved=await f.service.control('owner',f.scope.project_id,review.intent_id,{request_id:'approve',action:'approve',expected_version:1,review_sha256:review.review_sha256});
+ const f=await publicationReviewFixture(t,{nativeLifecycle,outputPath});
+ const history=additionalHistory?await addHistoricalWork(f,{duringRun:({session,prepared})=>sdk.historicalSession({session,cwd:prepared.snapshot.isolated_root,cold:additionalHistory==='cold'})}):undefined;
+ const review=await f.service.prepare('owner',f.scope.project_id,f.input),approved=await f.service.control('owner',f.scope.project_id,review.intent_id,{request_id:'approve',action:'approve',expected_version:1,review_sha256:review.review_sha256});
  upgradeWorkspacePublicationCoordination(f.db);installWorkPublicationExecutions(f.db);
  const plain=new WorkPublicationExecutions(f.db,f.workbench,f.service),accepted=withImmediateTransaction(f.db,()=>plain.admit('owner',f.scope.project_id,review.intent_id,{request_id:'native-publication',expected_version:approved.version,review_sha256:approved.review_sha256}));
  assert.equal(typeof plain.withReservedNativeSource,'function');
@@ -32,6 +35,7 @@ export async function publicationNativeHostFixture(t,{badCheckpoint=false,output
  gate=createNativeWorkspaceFactoryGate({ctx,registry,sessions,persistence,currentPersistence:()=>ctx.sessionPersistence,notFoundError:modules['dsh-session-persistence'].SessionPersistenceNotFoundError});
  const host=createNativeWorkspaceSourceHost({bridge,registry,sessions,persistence,currentPersistence:()=>ctx.sessionPersistence,backendClass:modules['dsh-session-persistence'].SessionPersistence,
   allowedPresets:new Set(['jot-workbench-budgeted']),validateLog:createNativeInvariantReplay({Session:modules['dsh-session'].Session}),projections:ctx.sessionProjections,factoryGate:gate,admissionGate});
- const executions=new WorkPublicationExecutions(f.db,f.workbench,f.service,{nativeWorkspaceHost:{withReservedFamily:host.withReservedFamily,inspect:inspectNativeWorkspaceSource,assertAdmission:assertNativeWorkspaceSourceAdmission,...(nativeSource.verifyNativeWorkspaceSourceCheckpoint?{verifyCheckpoint:nativeSource.verifyNativeWorkspaceSourceCheckpoint}:{})}});
- return{...f,review,accepted,executions,plain,host,placement,agent:sdk.agent,close,get calls(){return sdk.calls;}};
+ const observations=new Set(),inspect=context=>{const value=inspectNativeWorkspaceSource(context);observations.add(value);return value;};
+ const executions=new WorkPublicationExecutions(f.db,f.workbench,f.service,{nativeWorkspaceHost:{withReservedFamily:host.withReservedFamily,inspect,assertAdmission:assertNativeWorkspaceSourceAdmission,...(nativeSource.verifyNativeWorkspaceSourceCheckpoint?{verifyCheckpoint:nativeSource.verifyNativeWorkspaceSourceCheckpoint}:{})}});
+ return{...f,review,accepted,executions,plain,host,placement,history,observations,agent:sdk.agent,close,get calls(){return sdk.calls;}};
 }

@@ -7,8 +7,7 @@ import {readIsolatedTaskFileVersion} from './isolated-output-source.ts';
 import {validateTaskCompletionBoundary} from './completion-handshake.ts';
 import {validateCheckpoint} from '../harness/session-checkpoints.ts';
 import type {TaskFileSource} from './task-file-source.ts';
-import {WorkGrants} from '../always-on/work-grants.ts';
-import {validateWorkspaceRecoveryRecord} from '../always-on/snapshot-provider.ts';
+import {readHistoricalWorkSnapshot} from '../always-on/work-snapshot-history.ts';
 
 type Row=Record<string,any>;
 const hash=(value:unknown)=>createHash('sha256').update(canonicalJson(value)).digest('hex');
@@ -163,18 +162,11 @@ export class FinalizedWorkSources{
   * snapshot/grant and native completion, not a current tree or caller root. */
  nativePlacement(owner:string,runId:string,expectedSourceSha256:string){return this.snapshot(()=>{
   const {summary,admission,session_ref,completed_checkpoint}=this.material(owner,runId);if(summary.source_sha256!==expectedSourceSha256)throw Error('completed_work_source_conflict');
-  const grant=new WorkGrants(this.db).get(owner,admission.scope,admission.grant_id);
-  const row=this.db.prepare('SELECT * FROM wb_discovery_workspace_records WHERE cycle_id=? AND snapshot_id=?').get(admission.cycle_id,admission.snapshot_id) as Row|undefined;
-  const intent=this.db.prepare('SELECT * FROM wb_discovery_workspace_intents WHERE cycle_id=? AND snapshot_id=?').get(admission.cycle_id,admission.snapshot_id) as Row|undefined;
-  requireFact(row&&intent&&intent.owner_id===owner&&intent.project_id===summary.project_id&&intent.workspace_id===summary.workspace_id&&intent.agent_id===summary.agent_id
-   &&intent.cycle_version===grant.cycle_version&&intent.root_binding_sha256===grant.root_binding_sha256&&intent.selection_sha256===grant.selection_sha256);
-  const originalIntent=originalJson(intent.intent_json),originalRecord=originalJson(row.record_json);
-  requireFact(hash(originalIntent)===intent.intent_sha256&&hash(originalRecord)===row.record_sha256&&row.record_sha256===grant.snapshot_record_sha256
-   &&canonicalJson(originalIntent)===canonicalJson({cycle_id:admission.cycle_id,cycle_version:grant.cycle_version,snapshot_id:admission.snapshot_id,root_binding_sha256:grant.root_binding_sha256,selection_sha256:grant.selection_sha256,execution_authorized:false}));
-  const record=validateWorkspaceRecoveryRecord(originalRecord,admission.snapshot_id);
-  requireFact(canonicalJson(record)===row.record_json&&canonicalJson(record.manifest)===canonicalJson(summary.work_review.base_manifest));
+  const history=readHistoricalWorkSnapshot(this.db,owner,runId),{record}=history;
+  requireFact(canonicalJson(history.admission)===canonicalJson(admission)&&history.project_id===summary.project_id&&history.workspace_id===summary.workspace_id
+   &&history.admission.scope.agent_id===summary.agent_id&&canonicalJson(record.manifest)===canonicalJson(summary.work_review.base_manifest));
   const facts={protocol:1 as const,owner_id:owner,project_id:summary.project_id,source_sha256:summary.source_sha256,snapshot_id:admission.snapshot_id,session_ref,completed_checkpoint,
-   storage_root:record.storage_root,isolated_root:record.isolated_root,record_sha256:row.record_sha256 as string,execution_authorized:false as const};
+   storage_root:record.storage_root,isolated_root:record.isolated_root,record_sha256:history.record_sha256,execution_authorized:false as const};
   return freezeWorkAdmission({...facts,placement_sha256:hash(facts)});
  });}
  readSelection(owner:string,runId:string,paths:readonly string[],expectedSourceSha256:string){

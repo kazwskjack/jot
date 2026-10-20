@@ -7,8 +7,19 @@ const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 const keys='execution_id,owner_id,project_id';
 const rejected=()=>Error('native_git_transport_rejected');
 function scopeOf(input){
- if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).sort().join(',')!==keys||!Object.values(input).every(v=>typeof v==='string'&&ID.test(v)))throw Error('native_git_transport_input_invalid');
- return Object.freeze({...input});
+ const invalid=()=>{throw Error('native_git_transport_input_invalid');};
+ if(!input||typeof input!=='object'||Array.isArray(input))invalid();
+ const value={...input},typed=Object.hasOwn(value,'operation_kind'),recovery=Object.hasOwn(value,'command');
+ const expected=typed?(recovery?'command,execution_id,operation_kind,owner_id,project_id':'execution_id,operation_kind,owner_id,project_id'):keys;
+ if(Object.keys(value).sort().join(',')!==expected||!['owner_id','project_id','execution_id'].every(key=>typeof value[key]==='string'&&ID.test(value[key]))
+  ||typed&&!['git_index','work_publication'].includes(value.operation_kind)||recovery&&value.operation_kind!=='work_publication')invalid();
+ if(recovery){
+  if(!value.command||typeof value.command!=='object'||Array.isArray(value.command))invalid();const command={...value.command};
+  if(Object.keys(command).sort().join(',')!=='acknowledge_unknown,action,expected_journal_sha256,request_id'||typeof command.request_id!=='string'||!ID.test(command.request_id)
+   ||!['confirm_recorded','abandon_unknown'].includes(command.action)||command.acknowledge_unknown!==true||typeof command.expected_journal_sha256!=='string'||!/^[a-f0-9]{64}$/.test(command.expected_journal_sha256))invalid();
+  value.command=Object.freeze(command);
+ }
+ return Object.freeze(value);
 }
 function configuration(options){
  if(!options||typeof options.socket!=='string'||typeof options.token!=='string'||options.token.length<32||options.token.length>256||/[\r\n]/.test(options.token))throw Error('native_git_transport_config_invalid');
@@ -21,9 +32,11 @@ function configuration(options){
 const digest=value=>createHash('sha256').update(value).digest();
 const publicCodes=new Set(['git_execution_revoked','git_execution_not_found','git_native_workspace_host_unavailable','native_git_database_changed','native_git_transport_busy']);
 
-/** Local transport only. The constructor's original perform function retains
- * all execution authority; an authenticated message supplies three IDs only.
- * Requests are never retried, replayed or treated as approvals by this layer. */
+/** Local transport only. The original perform function retains all authority.
+ * Preserve legacy three-ID index requests; typed publication requests carry
+ * only original IDs and, for recovery, an exact original-owner command. No
+ * root, source bytes, planner or approval can be supplied through this layer.
+ * Requests are never automatically retried, replayed or treated as approvals. */
 export async function createNativeGitTransport(options){
  const {socket,token}=configuration(options),perform=options.perform;
  if(typeof perform!=='function')throw Error('native_git_transport_config_invalid');

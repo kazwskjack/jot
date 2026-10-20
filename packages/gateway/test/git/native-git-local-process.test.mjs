@@ -25,6 +25,11 @@ test('separate original native Host executes reviewed Git and sees parent revoca
   peer.on('exit',code=>{if(code){childFailure=Error('native_git_peer_exit:'+code+':'+diagnostic);for(const item of pending.splice(0))item.reject(childFailure);}});
   peer.send({type:'start',config:{root,database,privateRoot,socket,origin,channelToken,transportToken,runtime:resolve(process.env.JOT_DSH_RUNTIME_MODULES)}});
   assert.equal((await take('ready')).modelCalls,0);
+  const schemaBefore=service.db.prepare('PRAGMA schema_version').get().schema_version;
+  assert.equal(service.db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='wb_work_publication_journal'").get(),undefined);
+  await assert.rejects(callNativeGitTransport({socket,token:transportToken},{...first.scope,operation_kind:'work_publication'}),/native_git_transport_rejected/);
+  assert.equal(service.db.prepare('PRAGMA schema_version').get().schema_version,schemaBefore,'publication requests cannot install or upgrade an index-only deployment');
+  assert.equal(service.db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='wb_work_publication_journal'").get(),undefined);
   const applied=await callNativeGitTransport({socket,token:transportToken},first.scope);assert.equal(applied.state,'applied');assert.equal(git('show',':note.txt'),'after\n');assert.equal(service.db.prepare('SELECT count(*) n FROM wb_workspace_reservation_settlements').get().n,1);
   const second=await prepare('unstage','second'),index=await readFile(join(root,'.git/index'));peer.send({type:'pause-next'});await take('pause-armed');const operation=callNativeGitTransport({socket,token:transportToken},second.scope);operation.catch(()=>{});await take('prepared');
   await intents.control('owner','project',second.approved.intent_id,{request_id:'cancel-second',action:'cancel',expected_version:second.approved.version,review_sha256:second.approved.review_sha256});peer.send({type:'continue'});

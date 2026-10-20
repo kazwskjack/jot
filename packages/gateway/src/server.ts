@@ -30,6 +30,8 @@ import {registerGitReviewRoutes} from './git/review-routes.ts';
 import {GitIndexExecutions} from './git/index-executions.ts';
 import {registerGitExecutionHistoryRoutes} from './git/execution-history-routes.ts';
 import {registerGitWorkspaceSource} from './git/workspace-source-route.ts';
+import {WorkPublicationIntents} from './persistent-tasks/work-publication-intents.ts';
+import {WorkPublicationExecutions} from './persistent-tasks/work-publication-executions.ts';
 import { EventStore, ExpiredCursorError, FutureCursorError } from './events/event-store.ts';
 import { RunRepository } from './runs/repository.ts';
 import { buildSnapshot } from './events/snapshot.ts';
@@ -582,7 +584,11 @@ export async function buildServer(config: {
   registerGitReviewRoutes(app,{intents:gitReviewIntents,actor,atomic:atomicCommand});
   const gitIndexExecutions=new GitIndexExecutions(db,projects,gitWorkbench,gitReviewIntents);
   registerGitExecutionHistoryRoutes(app,gitIndexExecutions,actor);
-  registerGitWorkspaceSource(app,gitIndexExecutions,config.internalChannelToken,db);
+  // These constructors observe the original database only. Publication schema
+  // readiness still requires the explicit maintenance upgrade, never a request.
+  const workPublicationExecutions=config.gitRepositories?.length
+    ?new WorkPublicationExecutions(db,gitWorkbench,new WorkPublicationIntents(db,gitWorkbench)):undefined;
+  registerGitWorkspaceSource(app,gitIndexExecutions,config.internalChannelToken,db,workPublicationExecutions);
   app.get('/v1/projects', async request => projects.list(actor(request as any)));
   app.post('/v1/projects', async (request, reply) =>
     reply.code(201).send(projects.create(actor(request as any), request.body as Record<string, unknown>)));

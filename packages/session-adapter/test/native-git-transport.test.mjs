@@ -19,6 +19,31 @@ test('local transport sends only original IDs and returns the original receipt',
  try{assert.deepEqual(await callNativeGitTransport({socket:f.socket,token},scope),{state:'pending',execution_id:'execution'});assert.equal(calls,1);}
  finally{await f.close();}
 });
+
+test('the same authenticated transport preserves a distinct publication kind and exact immutable owner recovery command',async()=>{
+ const publication={...scope,operation_kind:'work_publication'},command={request_id:'owner-recovery',action:'abandon_unknown',expected_journal_sha256:'a'.repeat(64),acknowledge_unknown:true},seen=[];
+ const f=await fixture(async input=>{seen.push(input);assert.ok(Object.isFrozen(input));if(input.command)assert.ok(Object.isFrozen(input.command));return{state:input.command?'abandoned_unknown':'applied',execution_id:input.execution_id};});
+ try{
+  assert.equal((await callNativeGitTransport({socket:f.socket,token},publication)).state,'applied');
+  const pending=callNativeGitTransport({socket:f.socket,token},{...publication,command});command.action='confirm_recorded';
+  assert.equal((await pending).state,'abandoned_unknown');assert.deepEqual(seen[0],publication);assert.equal(seen[1].command.action,'abandon_unknown');assert.equal(seen.length,2);
+  assert.deepEqual(await callNativeGitTransport({socket:f.socket,token},{...scope,operation_kind:'git_index'}),{state:'applied',execution_id:scope.execution_id});
+ }finally{await f.close()}
+});
+
+test('publication transport refuses unknown kinds, injected roots and ambiguous recovery commands before original dispatch',async()=>{
+ let calls=0;const f=await fixture(async()=>{calls++;return{};});
+ const command={request_id:'owner-command',action:'confirm_recorded',expected_journal_sha256:'a'.repeat(64),acknowledge_unknown:true};
+ try{
+  for(const bad of [{...scope,operation_kind:'unknown'},{...scope,operation_kind:'work_publication',root:'/untrusted'},
+   {...scope,operation_kind:'work_publication',command:{...command,acknowledge_unknown:false}},
+   {...scope,operation_kind:'work_publication',command:{...command,root:'/untrusted'}},
+   {...scope,operation_kind:'work_publication',command:{...command,expected_journal_sha256:'bad'}},
+   {...scope,operation_kind:'git_index',command}])await assert.rejects(callNativeGitTransport({socket:f.socket,token},bad),/native_git_transport_input_invalid/);
+  const raw=body=>new Promise((done,reject)=>{const req=request({socketPath:f.socket,path:'/execute',method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json'}},res=>{res.resume();res.on('end',()=>done(res.statusCode));});req.on('error',reject);req.end(JSON.stringify(body));});
+  assert.equal(await raw({...scope,operation_kind:'work_publication',command:{...command,root:'/untrusted'}}),409);assert.equal(calls,0);
+ }finally{await f.close()}
+});
 test('wrong authentication and injected selectors never reach native execution',async()=>{
  let calls=0;const f=await fixture(async()=>{calls++;return{};});
  try{

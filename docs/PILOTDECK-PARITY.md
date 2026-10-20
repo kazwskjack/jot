@@ -57,6 +57,13 @@ The reference core/UI have been built in an isolated Windows environment, and it
 
 ## Current native Git hosting milestone
 
+The latest [original publication family and native transport increment](implementation/2026-10-20-publication-family-and-native-transport.md)
+adds per-member historical work placement, resident/cold SDK custody and
+authenticated publication dispatch through the original Host. Actual Gateway
+composition and separate-process recovery have focused acceptance. Public
+owner Apply/recovery controls, broader Git/file operations and full-ledger
+acceptance remain open; this does not complete capabilities 8, 14 or 15.
+
 The original pending work review now displays complete frozen base/result
 inventories, selected objective and recomputed diff through the existing owned
 read. See [review evidence and remaining publication](implementation/2026-10-20-complete-work-review.md).

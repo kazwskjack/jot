@@ -1,7 +1,8 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {readFile} from 'node:fs/promises';import {join} from 'node:path';
+import {readFile,rename,mkdir,rmdir} from 'node:fs/promises';import {join} from 'node:path';
 import {WorkPublicationExecutions} from '../../src/persistent-tasks/work-publication-executions.ts';
 import {publicationNativeHostFixture as fixture} from '../support/publication-native-host-fixture.mjs';
+import {DatabaseSync} from 'node:sqlite';
 const runtime=process.env.JOT_DSH_RUNTIME_MODULES;
 
 test('original installed Host holds the distinct publication family and exact isolated placement through an awaited source callback',{skip:!runtime,timeout:45000},async t=>{
@@ -156,6 +157,47 @@ test('a replacement original Worker lease fences publication and cannot be remov
   assert.equal(f.db.prepare('SELECT count(*) n FROM wb_workspace_reservation_releases').get().n,0);assert.equal(f.calls,0);
  }finally{await f.close()}
 });
+for(const custody of ['resident','cold'])test('actual original producer retains both historical isolated native Sessions, including failed work: '+custody,{skip:!runtime,timeout:60000},async t=>{
+ const f=await fixture(t,{additionalHistory:custody==='cold'?'cold':true});try{
+  const before=f.executions.reserveWorkspace('owner',f.scope.project_id,f.accepted.execution_id);assert.equal(before.state,'reserved');
+  const family=f.executions.workspaceFamily('owner',f.scope.project_id,f.accepted.execution_id);assert.ok(family.members.some(member=>member.session_ref===f.history.session));assert.ok(family.members.some(member=>member.session_ref==='work-test-session'));
+  const result=await f.executions.executePublication('owner',f.scope.project_id,f.accepted.execution_id);assert.equal(result.state,'applied');
+  assert.equal(await readFile(join(f.rootTarget,'source.md'),'utf8'),'Exact reviewed work content');
+  assert.equal(f.db.prepare('SELECT status FROM ga_runs WHERE id=?').get(f.history.admission.run_id).status,'failed');assert.equal(f.calls,0);
+  assert.ok([...f.observations].some(view=>view.workspaces.some(member=>member.session_ref===f.history.session&&member.custody===custody)),'the original Host must actually observe the requested custody');
+  assert.equal(f.db.prepare('SELECT count(*) n FROM wb_workspace_reservation_settlements').get().n,1);
+ }finally{await f.close()}
+});
+
+test('physical replacement of an older failed native workspace during retained source custody refuses before publication',{skip:!runtime,timeout:60000},async t=>{
+ const f=await fixture(t,{additionalHistory:true});try{
+  await assert.rejects(f.executions.withReservedNativeSource('owner',f.scope.project_id,f.accepted.execution_id,async context=>{
+   const root=f.history.prepared.snapshot.isolated_root;await rename(root,root+'-original');await mkdir(root);
+   try{f.executions.assertNativeSource(context)}finally{await rmdir(root);await rename(root+'-original',root)}
+  }),/git_publication_native_workspace_changed/);
+  assert.equal(f.db.prepare('SELECT count(*) n FROM wb_work_publication_journal').get().n,0);assert.equal(await readFile(join(f.rootTarget,'source.md'),'utf8'),f.base);assert.equal(f.calls,0);
+  f.executions.releaseUnstartedWorkspace('owner',f.scope.project_id,f.accepted.execution_id);
+ }finally{await f.close()}
+});
+
+test('unchanged original database reuses only historical placement derivation while own and external commits invalidate it',{skip:!runtime,timeout:60000},async t=>{
+ const f=await fixture(t,{additionalHistory:true}),prepare=f.db.prepare;let scans=0;
+ f.db.prepare=function(sql,...args){if(sql.includes('SELECT DISTINCT r.id FROM ga_runs r'))scans++;return prepare.call(this,sql,...args)};
+ try{
+  await f.executions.withReservedNativeSource('owner',f.scope.project_id,f.accepted.execution_id,async context=>{
+   const before=scans;for(let i=0;i<4;i++)f.executions.assertNativeSource(context);
+   assert.equal(scans,before,'unchanged original evidence must not be fully rederived for every synchronous native guard');
+   f.db.prepare('UPDATE ga_projects SET title=title WHERE id=?').run(f.scope.project_id);f.executions.assertNativeSource(context);assert.ok(scans>before,'same-connection writes must invalidate');const own=scans;
+   const other=new DatabaseSync(join(f.root,'db.sqlite'));try{other.prepare("UPDATE ga_projects SET title=title||' ' WHERE id=?").run(f.scope.project_id)}finally{other.close()}
+   f.executions.assertNativeSource(context);assert.ok(scans>own,'a different original DB connection must invalidate');const external=scans;
+   f.db.exec('CREATE TABLE synthetic_placement_cache_marker(value TEXT)');f.executions.assertNativeSource(context);assert.ok(scans>external,'schema changes must invalidate');f.db.exec('DROP TABLE synthetic_placement_cache_marker');
+   f.executions.assertNativeSource(context);const beforeRollback=scans;f.db.exec('SAVEPOINT synthetic_cache_rollback');f.db.prepare('UPDATE ga_projects SET title=title WHERE id=?').run(f.scope.project_id);f.db.exec('ROLLBACK TO synthetic_cache_rollback; RELEASE synthetic_cache_rollback');
+   f.executions.assertNativeSource(context);assert.ok(scans>beforeRollback,'rolled-back own writes must not restore a stale cache stamp');
+  });
+  assert.equal(f.calls,0);assert.equal(f.db.prepare('SELECT count(*) n FROM wb_work_publication_journal').get().n,0);f.executions.releaseUnstartedWorkspace('owner',f.scope.project_id,f.accepted.execution_id);
+ }finally{f.db.prepare=prepare;await f.close()}
+});
+
 test('original review revocation during held native source invalidates it and leaves custody unresolved',{skip:!runtime,timeout:45000},async t=>{
  const f=await fixture(t);
  await assert.rejects(f.executions.withReservedNativeSource('owner',f.scope.project_id,f.accepted.execution_id,async context=>{

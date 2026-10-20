@@ -98,6 +98,12 @@ working user path over duplicating mature infrastructure.
 
 ## Apply this comparison to the remaining ledger
 
+The [scheduling source review](2026-10-20-pilotdeck-scheduling-source-review.md)
+applies the same source/function/design-reason and reuse comparison to capability
+09. It identifies general cron/delay inputs as gaps while retaining original
+task storage, calendar rules, occurrence admission and Worker authority. This is
+source-review evidence, not scheduling parity or a completed implementation.
+
 For each of the 26 existing rows, attach a module record with:
 
 1. Pinned upstream files/symbols, dependencies and relevant existing tests.
