@@ -3,9 +3,10 @@ import {mkdtemp,mkdir,writeFile,readFile,rm,readdir,symlink} from 'node:fs/promi
 import {buildServer} from '../../src/server.ts';import {GitWorkbench} from '../../src/git/service.ts';import {GitMutationIntents} from '../../src/git/intents.ts';import {GitIndexExecutions} from '../../src/git/index-executions.ts';import {withImmediateTransaction} from '../../src/db/database.ts';
 import {WorkbenchBridge} from '../../../session-adapter/workbench.js';
 import {createNativeWorkspaceSourceHost} from '../../../session-adapter/native-workspace-source.js';
-import {createNativeWorkspaceFactoryGate} from '../../../session-adapter/native-workspace-factory.js';
+import {createNativeWorkspaceFactoryGate,createNativeWorkspaceAdmissionGate} from '../../../session-adapter/native-workspace-factory.js';
 import {createNativeInvariantReplay} from '../../../session-adapter/native-invariant-replay.js';
 import {prepareDshPreSetupRuntime} from '../../../session-adapter/scripts/prepare-dsh-pre-setup.mjs';
+import {reserveWorkspaceOperation} from '../../src/workbench/workspace-coordination.ts';
 const token='test-workspace-service-token',url='/internal/v1/workbench/git-workspace-source';
 async function fixture(t){
  const parent=await mkdtemp(join(tmpdir(),'jot-git-workspace-source-')),root=join(parent,'repo');await mkdir(root);
@@ -18,7 +19,7 @@ async function fixture(t){
  const accepted=withImmediateTransaction(service.db,()=>current.executions.admit('owner','project',approved.intent_id,{request_id:'execute',expected_version:approved.version,review_sha256:approved.review_sha256}));
  const scope={owner_id:'owner',project_id:'project',execution_id:accepted.execution_id};
  t.after(async()=>{await service.app.close();service.db.close();assert.ok(resolve(parent).startsWith(resolve(tmpdir())+sep));await rm(parent,{recursive:true,force:true,maxRetries:5,retryDelay:20});});
- return{scope,root,accepted,approved,get db(){return service.db},get current(){return current},inject:options=>service.app.inject(options),listen:()=>service.app.listen({host:'127.0.0.1',port:0}),request:(payload=scope,authorization='Bearer '+token)=>service.app.inject({method:'POST',url,headers:{authorization},payload}),async restart(){await service.app.close();service.db.close();service=await buildServer(config);current=connect();}};
+ return{scope,root,accepted,approved,get db(){return service.db},get current(){return current},inject:options=>service.app.inject(options),listen:()=>service.app.listen({host:'127.0.0.1',port:0}),request:(payload=scope,authorization='Bearer '+token)=>service.app.inject({method:'POST',url,headers:{authorization},payload}),nativeRequest:(session_ref,authorization='Bearer '+token)=>service.app.inject({method:'POST',url:'/internal/v1/workbench/native-workspace-admission',headers:{authorization},payload:{session_ref}}),async restart(){await service.app.close();service.db.close();service=await buildServer(config);current=connect();}};
 }
 test('original Gateway source requires service authentication even when a browser owner is present',async t=>{
  const f=await fixture(t);f.current.executions.reserveWorkspace('owner','project',f.accepted.execution_id);
@@ -56,11 +57,58 @@ test('original adapter reads the reserved source over actual loopback HTTP and n
  assert.equal(f.db.prepare('SELECT count(*) n FROM wb_git_index_producers').get().n,0);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_worker_leases').get().n,0);
 });
 
+test('native admission observes the durable original family across restart and original approval revocation',async t=>{
+ const f=await fixture(t);
+ f.db.prepare('INSERT INTO ga_conversations(id,owner_id,workspace_id,title,model,version,created_at,updated_at,project_id) VALUES(?,?,?,?,?,?,?,?,?)').run('original-conversation','owner','ws','Synthetic','{}',1,'now','now','project');
+ f.db.prepare('INSERT INTO ga_harness_session_bindings(owner_id,conversation_id,session_id,created_at,updated_at) VALUES(?,?,?,?,?)').run('owner','original-conversation','original-session','now','now');
+ const before=await f.nativeRequest('original-session');assert.equal(before.statusCode,200,before.body);assert.equal(before.json().execution_authorized,false);
+ f.current.executions.reserveWorkspace('owner','project',f.accepted.execution_id);
+ assert.equal((await f.nativeRequest('original-session')).statusCode,409);
+ assert.equal((await f.nativeRequest('unknown-session')).statusCode,409,'unbound namespace cannot bypass a durable hold');
+ await f.restart();assert.equal((await f.nativeRequest('original-session')).statusCode,409);
+ await f.current.intents.control('owner','project',f.approved.intent_id,{request_id:'cancel-native-held',action:'cancel',expected_version:f.approved.version,review_sha256:f.approved.review_sha256});
+ assert.equal((await f.nativeRequest('original-session')).statusCode,409,'approval revocation is not native producer drain');
+ f.db.prepare("UPDATE ga_projects SET owner_id='replacement' WHERE id='project'").run();
+ assert.equal((await f.nativeRequest('original-session')).statusCode,409,'ownership transfer must retain the original namespace fence');
+ f.db.prepare("UPDATE ga_projects SET owner_id='owner' WHERE id='project'").run();
+ f.current.executions.releaseUnstartedWorkspace('owner','project',f.accepted.execution_id);
+ assert.equal((await f.nativeRequest('original-session')).statusCode,200);
+ assert.equal(f.db.prepare('SELECT count(*) n FROM wb_git_index_producers').get().n,0);
+});
+
+test('native namespace observation is service-only and accepts no owner, root, member or permission selector',async t=>{
+ const f=await fixture(t),nativeUrl='/internal/v1/workbench/native-workspace-admission';
+ assert.equal((await f.nativeRequest('original-session','')).statusCode,401);
+ for(const extra of [{owner_id:'owner'},{root:'untrusted'},{members:[]},{execution_authorized:true}]){
+  const result=await f.inject({method:'POST',url:nativeUrl,headers:{authorization:'Bearer '+token},payload:{session_ref:'original-session',...extra}});assert.equal(result.statusCode,422);
+ }
+ assert.equal((await f.inject({method:'POST',url:nativeUrl+'?root=untrusted',headers:{authorization:'Bearer '+token},payload:{session_ref:'original-session'}})).statusCode,422);
+});
+
+test('known unrelated members retain admission and the sealed family is immutable',async t=>{
+ const f=await fixture(t);
+ f.db.prepare('INSERT INTO ga_projects VALUES(?,?,?,?,?,?,?)').run('other-project','other-owner','Synthetic other',0,1,'now','now');
+ f.db.prepare('INSERT INTO ga_conversations(id,owner_id,workspace_id,title,model,version,created_at,updated_at,project_id) VALUES(?,?,?,?,?,?,?,?,?)').run('other-conversation','other-owner','ws','Synthetic','{}',1,'now','now','other-project');
+ f.db.prepare('INSERT INTO ga_harness_session_bindings(owner_id,conversation_id,session_id,created_at,updated_at) VALUES(?,?,?,?,?)').run('other-owner','other-conversation','other-session','now','now');
+ f.current.executions.reserveWorkspace('owner','project',f.accepted.execution_id);
+ assert.equal((await f.nativeRequest('other-session')).statusCode,200);
+ for(const sql of ['DELETE FROM wb_workspace_reservation_families','UPDATE wb_workspace_reservation_families SET family_json=\'{}\''])assert.throws(()=>f.db.exec(sql),/workspace_coordination_immutable/);
+ assert.throws(()=>f.db.exec('INSERT OR REPLACE INTO wb_workspace_reservation_families SELECT * FROM wb_workspace_reservation_families'),/workspace_coordination_immutable/);
+});
+
+test('an unresolved older reservation without sealed membership fails closed after reopening',async t=>{
+ const f=await fixture(t);
+ withImmediateTransaction(f.db,()=>reserveWorkspaceOperation(f.db,{owner_id:'owner',project_id:'project',operation_kind:'git_index',operation_id:f.accepted.execution_id,binding_sha256:f.current.kernel.executionBinding('owner','project')}));
+ assert.equal(f.db.prepare('SELECT count(*) n FROM wb_workspace_reservation_families').get().n,0);
+ await f.restart();assert.equal((await f.nativeRequest('unbound-session')).statusCode,409);
+ assert.equal(f.db.prepare('SELECT count(*) n FROM wb_workspace_reservation_families').get().n,0,'observation cannot invent a legacy membership seal');
+});
+
 test('original Gateway authority and real native custody remain joined through authenticated source observations',
  {skip:!process.env.JOT_DSH_RUNTIME_MODULES,timeout:45000},async t=>{
- const f=await fixture(t),runtime=process.env.JOT_DSH_RUNTIME_MODULES,base=join(dirname(f.root),'native'),scoped=join(base,'node_modules','@deepseek-ai');let ctx,gate,handle;
+ const f=await fixture(t),runtime=process.env.JOT_DSH_RUNTIME_MODULES,base=join(dirname(f.root),'native'),scoped=join(base,'node_modules','@deepseek-ai');let ctx,gate,handle,admissionGate;
  try{
-  await mkdir(scoped,{recursive:true});prepareDshPreSetupRuntime(join(runtime,'dsh-agent-loop'),join(scoped,'dsh-agent-loop'));
+  await mkdir(scoped,{recursive:true});prepareDshPreSetupRuntime(join(runtime,'dsh-agent-loop'),join(scoped,'dsh-agent-loop'),{nativeAdmission:true,pendingInputWake:true});
   for(const entry of await readdir(runtime,{withFileTypes:true}))if(entry.name!=='dsh-agent-loop'&&entry.isDirectory())await symlink(join(runtime,entry.name),join(scoped,entry.name),'junction');
   await symlink(join(dirname(runtime),'zod'),join(base,'node_modules','zod'),'junction');
   const names=['cordis','dsh-session','dsh-session-projection','dsh-session-persistence-jsonl','dsh-session-query','dsh-agent','dsh-llm','dsh-tools','dsh-system-prompt','dsh-agent-loop','dsh-goal'],modules={};
@@ -87,7 +135,18 @@ test('original Gateway authority and real native custody remain joined through a
    await f.current.intents.control('owner','project',f.approved.intent_id,{request_id:'cancel-held',action:'cancel',expected_version:f.approved.version,review_sha256:f.approved.review_sha256});
   }),/git_execution_revoked/);
   await handle.agent.runMaintenance(async()=>{});
+  await persistence.flush();const beforeRestart=await ctx.sessionQuery.readSession('original-session');
+  await gate.dispose();gate=undefined;await handle.dispose();handle=undefined;await ctx.fiber.dispose();
+  ctx=new modules.cordis.Context();for(const name of names.filter(n=>n!=='cordis'))await ctx.plugin(modules[name].default??modules[name],name==='dsh-session-persistence-jsonl'?{root:join(base,'sessions'),compression:'none'}:{});
+  ctx.llm.registerAdapter(['source-custody'],new Local());
+  admissionGate=createNativeWorkspaceAdmissionGate({ctx,bridge});
+  const resume=()=>ctx.agents.resume({resumeSessionId:'original-session',agentOptions:{provider:'source-custody',model:'synthetic'}});
+  await assert.rejects(resume(),/native_workspace_admission_unconfirmed/);
+  assert.equal(ctx.agents.get('original-session'),undefined);
+  assert.deepEqual((await ctx.sessionQuery.readSession('original-session')).events,beforeRestart.events,'denied resume must preserve original history');
+  f.current.executions.releaseUnstartedWorkspace('owner','project',f.accepted.execution_id);
+  handle=await resume();assert.equal(handle.agent.id,'original-session');assert.equal(handle.agent.jotPendingInputProtocol,1);assert.equal(typeof handle.agent.jotResumePendingInputs,'function');
   assert.equal(modelCalls,0);assert.deepEqual(await readFile(join(f.root,'.git/index')),index);
   assert.equal(f.db.prepare('SELECT count(*) n FROM wb_git_index_producers').get().n,0);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_worker_leases').get().n,0);
- }finally{if(gate)await gate.dispose();if(handle)await handle.dispose();if(ctx)await ctx.fiber.dispose();}
+ }finally{if(admissionGate)await admissionGate.dispose();if(gate)await gate.dispose();if(handle)await handle.dispose();if(ctx)await ctx.fiber.dispose();}
 });

@@ -4,7 +4,7 @@ title: Git views use owned read-only repository snapshots
 category: decision
 status: active
 created: "2026-10-19T17:04:32"
-updated: "2026-10-20T12:07:21"
+updated: "2026-10-20T13:05:58"
 ---
 
 <!-- compiled_truth -->
@@ -80,4 +80,9 @@ Git 执行的配置占用范围与程序／stat 见证分离：原始记录固�
   kind: decision
   summary: "Unsettled workspace custody follows the original project resource across ownership transfer; revocation never releases a producer or grants a new owner its execution. Unbound legacy scopes retain original-owner protection. Module-owned fence SQL upgrades atomically, failed installation rolls back, and unchanged definitions must not churn schema revisions used by immutable source witnesses."
   source: docs/implementation/2026-10-20-workspace-family-cold-storage.md
+  affects: [git-inspection-boundary]
+
+- time: 2026-10-20T13:05:58
+  kind: evidence
+  summary: "Native resume can append seed markers before setup; restart admission must run before original storage opening. Immutable original family seals survive owner or approval changes. Fresh authenticated observations deny unsafe create/resume but grant no Git effect rights; original synchronous authority, native custody, source association and producer settlement remain mandatory."
   affects: [git-inspection-boundary]

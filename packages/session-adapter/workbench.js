@@ -120,6 +120,21 @@ export class WorkbenchBridge {
   }
 
   workspaceFamily(scope,signal){return readNativeWorkspaceFamily(this,scope,signal);}
+  async nativeAdmission(sessionRef,signal){
+    if(typeof sessionRef!=='string'||!ID.test(sessionRef))throw Error('native_workspace_admission_invalid');
+    const combined=AbortSignal.any([AbortSignal.timeout(15000),...(signal?[signal]:[])]);combined.throwIfAborted();
+    try{
+      const response=await this.fetch(`${this.origin}/internal/v1/workbench/native-workspace-admission`,{method:'POST',redirect:'error',headers:{authorization:`Bearer ${this.token}`,'content-type':'application/json'},body:JSON.stringify({session_ref:sessionRef}),signal:combined});
+      combined.throwIfAborted();if(!response.ok)throw Error('native_workspace_admission_unconfirmed');
+      const reader=response.body?.getReader();if(!reader)throw Error('native_workspace_admission_unconfirmed');
+      const chunks=[];let size=0,done=false;
+      try{for(;;){const part=await reader.read();combined.throwIfAborted();if(part.done){done=true;break;}size+=part.value.byteLength;if(size>1024)throw Error('native_workspace_admission_unconfirmed');chunks.push(Buffer.from(part.value));}}
+      finally{if(!done)await reader.cancel().catch(()=>{});reader.releaseLock();}
+      const value=JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      if(!value||Object.keys(value).sort().join(',')!=='execution_authorized,protocol,session_ref'||value.protocol!==1||value.session_ref!==sessionRef||value.execution_authorized!==false)throw Error('native_workspace_admission_unconfirmed');
+      combined.throwIfAborted();return Object.freeze(value);
+    }catch{combined.throwIfAborted();throw Error('native_workspace_admission_unconfirmed');}
+  }
 
   async request(path, binding, payload = {}, signal) {
     signal?.throwIfAborted();

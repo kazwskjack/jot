@@ -9,7 +9,7 @@ import type {GitIndexReceipt} from './index-effects.ts';
 import type {GitIndexAcceptance,GitIndexExecutionResult} from '../../contracts/types.ts';
 import {indexEvidence,indexPreparation,type GitIndexEvidence,type GitIndexPreparation} from './index-evidence.ts';
 import {GitIndexProducers} from './index-producers.ts';
-import {assertWorkspaceWritable,reserveWorkspaceOperation,releaseUnstartedWorkspaceOperation,readReservedWorkspaceFamily} from '../workbench/workspace-coordination.ts';
+import {assertWorkspaceWritable,reserveWorkspaceOperation,releaseUnstartedWorkspaceOperation,readReservedWorkspaceFamily,sealWorkspaceFamily,assertNativeWorkspaceAdmission} from '../workbench/workspace-coordination.ts';
 
 type Input={request_id:string;expected_version:number;review_sha256:string};
 type Row={execution_id:string;owner_id:string;project_id:string;intent_id:string;request_id:string;request_sha256:string;review_version:number;review_sha256:string;action:'stage'|'unstage';witness_sha256:string;repository_sha256:string;created_at:string;protocol:number;binding_sha256:string|null};
@@ -146,7 +146,8 @@ export class GitIndexExecutions{
    this.producers.assertStartable(row,this.resource(row));
    this.intents.executionSource(owner,project,row.intent_id,row.review_version,row.review_sha256);
    if(row.protocol!==4||row.binding_sha256!==this.git.executionBinding(owner,project))throw Error('workspace_reservation_source_changed');
-   return reserveWorkspaceOperation(this.db,{owner_id:owner,project_id:project,operation_kind:'git_index',operation_id:id,binding_sha256:row.binding_sha256});
+   const source={owner_id:owner,project_id:project,operation_kind:'git_index' as const,operation_id:id,binding_sha256:row.binding_sha256};
+   const reserved=reserveWorkspaceOperation(this.db,source);sealWorkspaceFamily(this.db,source);return reserved;
   });
  }
  releaseUnstartedWorkspace(owner:string,project:string,id:string){
@@ -157,6 +158,10 @@ export class GitIndexExecutions{
    if(row.protocol!==4||row.binding_sha256!==this.git.executionBinding(owner,project))throw Error('workspace_reservation_source_changed');
    return releaseUnstartedWorkspaceOperation(this.db,{owner_id:owner,project_id:project,operation_kind:'git_index',operation_id:id,binding_sha256:row.binding_sha256});
   });
+ }
+ /** Trusted inventory only; the caller cannot supply members, roots or grants. */
+ observeNativeAdmission(sessionRef:string){
+  return withImmediateTransaction(this.db,()=>{assertNativeWorkspaceAdmission(this.db,sessionRef);return{protocol:1 as const,session_ref:sessionRef,execution_authorized:false as const};});
  }
  /** Trusted inventory only; the caller cannot supply members, roots or grants. */
  workspaceFamily(owner:string,project:string,id:string){

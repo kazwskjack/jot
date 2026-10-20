@@ -38,6 +38,9 @@ export function installWorkspaceCoordination(db:DatabaseSync){
   CREATE INDEX IF NOT EXISTS wb_workspace_reservations_resource ON wb_workspace_reservations(project_id);
   CREATE TABLE IF NOT EXISTS wb_workspace_reservation_releases(
   reservation_id TEXT PRIMARY KEY REFERENCES wb_workspace_reservations(reservation_id),released_at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS wb_workspace_reservation_families(
+  reservation_id TEXT PRIMARY KEY REFERENCES wb_workspace_reservations(reservation_id),
+  family_json TEXT NOT NULL,record_sha256 TEXT NOT NULL,created_at TEXT NOT NULL);
   CREATE TRIGGER IF NOT EXISTS wb_workspace_reservations_no_original_replace BEFORE INSERT ON wb_workspace_reservations
    WHEN EXISTS(SELECT 1 FROM wb_workspace_reservations WHERE operation_kind=NEW.operation_kind AND operation_id=NEW.operation_id)
    BEGIN SELECT RAISE(ABORT,'workspace_coordination_immutable'); END;`);
@@ -49,7 +52,7 @@ export function installWorkspaceCoordination(db:DatabaseSync){
    WHEN NEW.status IN('starting','running','waiting_user','waiting_approval','cancelling')
     AND EXISTS(SELECT 1 FROM ga_conversations c WHERE c.id=NEW.conversation_id AND EXISTS(${WORKSPACE_RESERVATION_MATCH}))
    BEGIN SELECT RAISE(ABORT,'workspace_coordination_required'); END;`);
- for(const table of ['wb_workspace_reservations','wb_workspace_reservation_releases'])db.exec(`
+ for(const table of ['wb_workspace_reservations','wb_workspace_reservation_releases','wb_workspace_reservation_families'])db.exec(`
   CREATE TRIGGER IF NOT EXISTS ${table}_no_update BEFORE UPDATE ON ${table} BEGIN SELECT RAISE(ABORT,'workspace_coordination_immutable'); END;
   CREATE TRIGGER IF NOT EXISTS ${table}_no_delete BEFORE DELETE ON ${table} BEGIN SELECT RAISE(ABORT,'workspace_coordination_immutable'); END;
   CREATE TRIGGER IF NOT EXISTS ${table}_no_replace BEFORE INSERT ON ${table}
@@ -163,6 +166,14 @@ export function releaseUnstartedWorkspaceOperation(db:DatabaseSync,source:Source
 }
 
 type FamilyMember={session_ref:string;scopes:Array<{conversation_id:string;workspace_id:string}>;source_kinds:string[]};
+function nativeReferenceQueries(){return [
+ `SELECT 'work_binding' kind,b.session_id session_ref,b.owner_id record_owner,c.id conversation_id,c.owner_id,c.workspace_id,c.project_id,c.id bound_conversation FROM ga_harness_session_bindings b JOIN ga_conversations c ON c.id=b.conversation_id`,
+ `SELECT 'mode_binding',b.session_id,b.owner_id,c.id,c.owner_id,c.workspace_id,c.project_id,c.id FROM ga_conversation_mode_sessions b JOIN ga_conversations c ON c.id=b.conversation_id`,
+ `SELECT 'runtime',b.harness_session_ref,c.owner_id,c.id,c.owner_id,c.workspace_id,c.project_id,c.id FROM ga_runtime_bindings b JOIN ga_runs r ON r.id=b.run_id JOIN ga_conversations c ON c.id=r.conversation_id`,
+ `SELECT 'run_native',r.native_session_ref,r.native_owner_id,c.id,c.owner_id,c.workspace_id,c.project_id,r.native_conversation_id FROM ga_runs r JOIN ga_conversations c ON c.id=r.conversation_id WHERE r.native_session_ref IS NOT NULL`,
+ `SELECT 'checkpoint',b.session_ref,c.owner_id,c.id,c.owner_id,c.workspace_id,c.project_id,r.conversation_id FROM ga_session_checkpoints b JOIN ga_runs r ON r.id=b.run_id JOIN ga_conversations c ON c.id=b.conversation_id`,
+ `SELECT 'goal_control',b.session_id,b.owner_id,c.id,c.owner_id,c.workspace_id,c.project_id,c.id FROM ga_conversation_goal_controls b JOIN ga_conversations c ON c.id=b.conversation_id`,
+ ];}
 /** Trusted original-family inventory under the held reservation. It includes
  * archived and historical references, never resolves an Agent, and does not
  * certify native quiescence, a physical root or permission to execute. */
@@ -171,14 +182,7 @@ export function readReservedWorkspaceFamily(db:DatabaseSync,source:Source){
  if(!db.prepare('SELECT 1 FROM ga_projects WHERE id=? AND owner_id=?').get(source.project_id,source.owner_id))throw Error('project_not_found');
  const saved=record(db,source);if(!saved)throw Error('workspace_reservation_not_found');
  if(view(db,saved).state!=='reserved')throw Error('workspace_reservation_closed');
- const queries=[
-  `SELECT 'work_binding' kind,b.session_id session_ref,b.owner_id record_owner,c.id conversation_id,c.owner_id,c.workspace_id,c.project_id,c.id bound_conversation FROM ga_harness_session_bindings b JOIN ga_conversations c ON c.id=b.conversation_id`,
-  `SELECT 'mode_binding',b.session_id,b.owner_id,c.id,c.owner_id,c.workspace_id,c.project_id,c.id FROM ga_conversation_mode_sessions b JOIN ga_conversations c ON c.id=b.conversation_id`,
-  `SELECT 'runtime',b.harness_session_ref,c.owner_id,c.id,c.owner_id,c.workspace_id,c.project_id,c.id FROM ga_runtime_bindings b JOIN ga_runs r ON r.id=b.run_id JOIN ga_conversations c ON c.id=r.conversation_id`,
-  `SELECT 'run_native',r.native_session_ref,r.native_owner_id,c.id,c.owner_id,c.workspace_id,c.project_id,r.native_conversation_id FROM ga_runs r JOIN ga_conversations c ON c.id=r.conversation_id WHERE r.native_session_ref IS NOT NULL`,
-  `SELECT 'checkpoint',b.session_ref,c.owner_id,c.id,c.owner_id,c.workspace_id,c.project_id,r.conversation_id FROM ga_session_checkpoints b JOIN ga_runs r ON r.id=b.run_id JOIN ga_conversations c ON c.id=b.conversation_id`,
-  `SELECT 'goal_control',b.session_id,b.owner_id,c.id,c.owner_id,c.workspace_id,c.project_id,c.id FROM ga_conversation_goal_controls b JOIN ga_conversations c ON c.id=b.conversation_id`,
- ];
+ const queries=nativeReferenceQueries();
  const members=new Map<string,{scopes:Map<string,{conversation_id:string;workspace_id:string}>;kinds:Set<string>}>();
  const add=(row:Record<string,unknown>)=>{
   if(!['session_ref','conversation_id','workspace_id'].every(key=>typeof row[key]==='string'&&ID.test(row[key] as string))
@@ -226,4 +230,52 @@ export function readReservedWorkspaceFamily(db:DatabaseSync,source:Source){
   members:result.map(({session_ref,scopes})=>({session_ref,scopes}))});
  return {protocol:1 as const,reservation_id:saved.reservation_id,execution_id:source.operation_id,owner_id:source.owner_id,project_id:source.project_id,
   binding_sha256:source.binding_sha256,family_sha256,members:result,execution_authorized:false as const};
+}
+
+/** Original reservation transaction only. This immutable namespace evidence
+ * survives native-host restart; it grants no native or Git execution rights. */
+export function sealWorkspaceFamily(db:DatabaseSync,source:Source){
+ const family=readReservedWorkspaceFamily(db,source);
+ const value={reservation_id:family.reservation_id,owner_id:family.owner_id,project_id:family.project_id,binding_sha256:family.binding_sha256,
+  members:family.members.map(({session_ref,scopes})=>({session_ref,scopes}))};
+ const raw=JSON.stringify(value),prior=db.prepare('SELECT family_json,record_sha256 FROM wb_workspace_reservation_families WHERE reservation_id=?').get(family.reservation_id);
+ if(prior){if(prior.family_json!==raw||prior.record_sha256!==digest(value))throw Error('workspace_namespace_unconfirmed');return;}
+ db.prepare('INSERT INTO wb_workspace_reservation_families VALUES(?,?,?,?)').run(family.reservation_id,raw,digest(value),new Date().toISOString());
+}
+
+/** Fresh service-only negative fence, not a capability or dispatch grant.
+ * Do not infer drain from current approval/owner or native in-memory state. */
+export function assertNativeWorkspaceAdmission(db:DatabaseSync,sessionRef:string){
+ if(!db.isTransaction||!available(db))throw Error('workspace_coordination_unavailable');
+ if(typeof sessionRef!=='string'||!ID.test(sessionRef))throw Error('workspace_namespace_invalid');
+ const holds=db.prepare(`SELECT wr.*,f.family_json,f.record_sha256 family_record_sha256 FROM wb_workspace_reservations wr
+  LEFT JOIN wb_workspace_reservation_releases wx ON wx.reservation_id=wr.reservation_id
+  LEFT JOIN wb_workspace_reservation_families f ON f.reservation_id=wr.reservation_id WHERE wx.reservation_id IS NULL LIMIT 1001`).all();
+ if(holds.length>1000)throw Error('workspace_namespace_unconfirmed');
+ if(!holds.length)return;
+ for(const held of holds){
+  const source={owner_id:String(held.owner_id),project_id:String(held.project_id),operation_kind:held.operation_kind as 'git_index',operation_id:String(held.operation_id),binding_sha256:String(held.binding_sha256)};
+  record(db,source);
+  let family;try{family=JSON.parse(String(held.family_json));}catch{throw Error('workspace_namespace_unconfirmed');}
+  if(!family||family.reservation_id!==held.reservation_id||family.owner_id!==held.owner_id||family.project_id!==held.project_id||family.binding_sha256!==held.binding_sha256
+   ||!Array.isArray(family.members)||family.members.length>256||digest(family)!==held.family_record_sha256)throw Error('workspace_namespace_unconfirmed');
+  for(const member of family.members){
+   if(!member||typeof member.session_ref!=='string'||!ID.test(member.session_ref)||!Array.isArray(member.scopes))throw Error('workspace_namespace_unconfirmed');
+   if(member.session_ref===sessionRef)throw Error('workspace_coordination_required');
+  }
+ }
+ const queries=nativeReferenceQueries();
+ if(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_native_child_reservations'").get()){
+  for(const ref of ['b.child_session_ref',"CASE WHEN json_valid(b.snapshot_json) THEN json_extract(b.snapshot_json,'$.parent_session_ref') END"])
+   queries.push(`SELECT 'native_child',${ref},b.owner_id,c.id,c.owner_id,c.workspace_id,c.project_id,c.id FROM wb_native_child_reservations b JOIN ga_runs r ON r.id=b.root_run_id JOIN ga_conversations c ON c.id=r.conversation_id`);
+ }
+ const known=db.prepare(`SELECT DISTINCT * FROM (${queries.join(' UNION ALL ')}) WHERE session_ref=? LIMIT 257`).all(sessionRef);
+ if(!known.length||known.length>256)throw Error('workspace_namespace_unconfirmed');
+ const scopes=new Set<string>();
+ for(const row of known){
+  if(row.record_owner!==row.owner_id||row.bound_conversation!==row.conversation_id||typeof row.project_id!=='string'||typeof row.owner_id!=='string'
+   ||!ID.test(row.project_id)||!ID.test(row.owner_id)||holds.some(held=>held.project_id===row.project_id))throw Error('workspace_namespace_unconfirmed');
+  scopes.add(String(row.owner_id)+'\0'+String(row.project_id));
+ }
+ if(scopes.size!==1)throw Error('workspace_namespace_unconfirmed');
 }

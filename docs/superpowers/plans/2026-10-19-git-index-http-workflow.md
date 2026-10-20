@@ -120,6 +120,26 @@ Integration points to inspect and wire, rather than a standalone Git scheduler:
 
 ## 4. Actual mobile workbench and release
 
+### Cross-process restart admission continuation
+
+See the [original restart admission implementation](../../implementation/2026-10-20-native-workspace-restart-admission.md)
+for the durable seal, pre-storage boundary and actual Host-recreation evidence.
+
+Before enabling physical dispatch, seal the server-derived family in the original
+reservation transaction. Keep its immutable identity separate from current
+approval: revocation does not prove that a native producer drained. Original
+Gateway service-only native admission observations must use that durable source,
+survive reopen and retain the fence after ownership or approval changes. A live
+hold with missing or corrupt membership must fail closed; an unbound namespace
+must not be assumed unrelated. Known unrelated project members retain their scope.
+
+Join those observations to the existing reviewed original pre/after-setup hooks,
+including resume. Capture original services once, propagate cancellation, never
+cache a previous observation or load another runtime. This denies unsafe native
+creation after process restart; it is not permission to execute Git. The original
+synchronous Gateway authority, exact producer lease, actual native maintenance
+handles, root/source association and journal remain required at physical effects.
+
 - [ ] Add execute/current-result/disposition controls to the existing review UI.
   Show exact historical acceptance separately from running/current/unknown state.
   Preserve the original pending request across remount/lost responses and require

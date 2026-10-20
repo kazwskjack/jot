@@ -6,6 +6,16 @@ const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
  * executor derives membership from its admitted operation and held reservation;
  * no supplied member list, root, run or permission is accepted here. */
 export function registerGitWorkspaceSource(app:FastifyInstance,executions:GitIndexExecutions,token:string|undefined){
+ app.post('/internal/v1/workbench/native-workspace-admission',async(request,reply)=>{
+  reply.header('cache-control','private, no-store');
+  const actual=Buffer.from(String(request.headers.authorization??'')),expected=Buffer.from(`Bearer ${token??''}`);
+  if(!token||token.length<16||actual.length!==expected.length||!timingSafeEqual(actual,expected))return reply.code(401).send({error:{code:'UNAUTHORIZED'}});
+  const input=request.body as Record<string,unknown>;
+  if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).join(',')!=='session_ref'||typeof input.session_ref!=='string'||!ID.test(input.session_ref)
+   ||Object.keys(request.query as object).length)return reply.code(422).send({error:{code:'NATIVE_WORKSPACE_ADMISSION_INVALID'}});
+  try{return executions.observeNativeAdmission(input.session_ref);}
+  catch{return reply.code(409).send({error:{code:'NATIVE_WORKSPACE_ADMISSION_UNCONFIRMED'}});}
+ });
  app.post('/internal/v1/workbench/git-workspace-source',async(request,reply)=>{
   reply.header('cache-control','private, no-store');
   const actual=Buffer.from(String(request.headers.authorization??'')),expected=Buffer.from(`Bearer ${token??''}`);

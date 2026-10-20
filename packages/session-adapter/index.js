@@ -32,6 +32,7 @@ import {createConversationGoalRunHost} from './conversation-goal-run-host.js'
 import {createOrdinaryInputRunHost,normalizeOrdinaryInputExecution} from './ordinary-input-run-host.js'
 import {createOptionalMemoryExtractionHost} from './optional-memory-extraction.js'
 import { WorkbenchBridge,normalizeHostExecutionLease } from './workbench.js'
+import {createNativeWorkspaceAdmissionGate} from './native-workspace-factory.js'
 
 export const name = 'jot-jot-session-adapter'
 export const inject = ['sessionController', 'fileUploads', 'agents','sessions','sessionPersistence','sessionProjections','llm']
@@ -701,6 +702,8 @@ export function apply(ctx, config = {}) {
   const voiceEnabled = config.voiceEnabled === true
   const workbenchToken = String(process.env[config.workbenchTokenEnv || 'GENERAL_AGENT_INTERNAL_CHANNEL_TOKEN'] || '')
   if (host !== '127.0.0.1' || !Number.isInteger(port) || port < 1024 || token.length < 32
+    || (config.nativeWorkspaceAdmission!==undefined&&typeof config.nativeWorkspaceAdmission!=='boolean')
+    || (config.nativeWorkspaceAdmission===true&&workbenchToken.length<16)
     || (config.conversationGoalResume!==undefined&&typeof config.conversationGoalResume!=='boolean')
     || (config.conversationGoalResume===true&&workbenchToken.length<16)
     || (config.ordinaryRunHistory!==undefined&&(!config.ordinaryRunHistory||typeof config.ordinaryRunHistory!=='object'||Array.isArray(config.ordinaryRunHistory)||Object.keys(config.ordinaryRunHistory).sort().join(',')!=='Session,validateLog'||typeof config.ordinaryRunHistory.Session?.create!=='function'||typeof config.ordinaryRunHistory.validateLog!=='function'||config.ordinaryInputAdmission?.admissions?.entryInspectionProtocol!==1||typeof config.ordinaryInputAdmission?.admissions?.read!=='function'||typeof config.ordinaryInputAdmission?.admissions?.inspectEntry!=='function'||typeof ctx.sessionProjections?.snapshot!=='function'||workbenchToken.length<16))
@@ -739,6 +742,10 @@ export function apply(ctx, config = {}) {
     nativeContinuation: config.nativeContinuation ?? false,
     modelRouteFor:config.workbenchModel?agent=>ctx.sessionController.agents.selectionFor(agent).current:undefined,
   }) : undefined
+  if(config.nativeWorkspaceAdmission===true){
+    const gate=createNativeWorkspaceAdmissionGate({ctx,bridge:workbenchBridge})
+    ctx.effect(()=>()=>gate.dispose())
+  }
   const budgetModelSelector=createBudgetModelSelector({route:config.workbenchModel,llm:ctx.llm,agents:ctx.sessionController.agents})
   const nativeClaimedComposer=config.nativeClaimedInputRecovery===undefined?undefined:createNativeClaimedSessionComposer({
     ctx,bridge:workbenchBridge,agents:ctx.agents,sessions:ctx.sessions,

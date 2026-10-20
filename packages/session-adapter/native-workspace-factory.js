@@ -43,3 +43,27 @@ export function createNativeWorkspaceFactoryGate({ctx,registry,sessions,persiste
  };
  gates.set(ctx,gate);trustedGates.add(gate);return Object.freeze(gate);
 }
+
+/** Deny unsafe original create/resume after host restart using a fresh
+ * original-Gateway observation. Not native maintenance or Git permission. */
+export function createNativeWorkspaceAdmissionGate({ctx,bridge}={}){
+ const loop=ctx?.get?.('agentLoop');
+ if(loop?.jotPreSetupHookProtocol!==2||loop.jotStorageAdmissionHookProtocol!==1||!Array.isArray(loop.config?.agents)||loop.config.agents.length
+  ||typeof ctx?.agents?.list!=='function'||ctx.agents.list().length||typeof ctx?.on!=='function'||typeof bridge?.nativeAdmission!=='function')throw Error('native_workspace_admission_unavailable');
+ const observe=bridge.nativeAdmission.bind(bridge),pending=new Set(),controllers=new Set(),removers=[];let stopped=false,disposal;
+ const fence=(payload={})=>{
+  const {agent,signal}=payload,sessionRef=agent?.id??payload.sessionId;
+  if(stopped||typeof sessionRef!=='string'||!ID.test(sessionRef))return Promise.reject(Error('native_workspace_admission_unavailable'));
+  const abort=new AbortController(),combined=AbortSignal.any([abort.signal,...(signal?[signal]:[])]);controllers.add(abort);
+  const check=()=>{combined.throwIfAborted();if(stopped||(agent?agent.id:payload.sessionId)!==sessionRef)throw Error('native_workspace_admission_unavailable');};
+  const work=Promise.resolve().then(async()=>{check();const value=await observe(sessionRef,combined);check();
+   if(!value||value.protocol!==1||value.session_ref!==sessionRef||value.execution_authorized!==false)throw Error('native_workspace_admission_unconfirmed');
+  }).finally(()=>{pending.delete(work);controllers.delete(abort);});pending.add(work);return work;
+ };
+ try{for(const event of ['agent-loop/before-storage','agent/before-setup','agent/after-setup'])removers.push(ctx.on(event,fence,{prepend:true}));}
+ catch(error){for(const remove of removers.reverse())remove();throw error;}
+ return Object.freeze({dispose(){
+  if(disposal)return disposal;stopped=true;for(const abort of controllers)abort.abort(Error('native_workspace_admission_shutdown'));
+  disposal=Promise.allSettled([...pending]).then(()=>{for(const remove of removers.reverse())remove();});return disposal;
+ }});
+}

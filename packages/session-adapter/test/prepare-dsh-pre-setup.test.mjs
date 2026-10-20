@@ -181,13 +181,13 @@ test('rejects unsupported package versions and modified upstream files before cr
   assert.equal(existsSync(hashOutput), false);
 });
 
-test('CLI requires two paths and only the explicit pending-input opt-in flag', () => {
+test('CLI requires two paths and only explicit nonduplicated compatibility opt-ins', () => {
   assert.equal(existsSync(scriptPath), true, 'prepare-dsh-pre-setup.mjs must exist');
-  for (const args of [[], ['source'], ['source', 'output', 'extra']]) {
+  for (const args of [[], ['source'], ['source', 'output', 'extra'], ['source','output','--native-admission','--native-admission']]) {
     const result = spawnSync(process.execPath, [scriptPath, ...args], {cwd: workspaceRoot, encoding: 'utf8'});
     assert.equal(result.status, 2);
     assert.equal(result.stdout, '');
-    assert.equal(result.stderr, 'Usage: node prepare-dsh-pre-setup.mjs <source-package> <output-package> [--pending-input-wake]\n');
+    assert.equal(result.stderr, 'Usage: node prepare-dsh-pre-setup.mjs <source-package> <output-package> [--pending-input-wake] [--native-admission]\n');
   }
 });
 
