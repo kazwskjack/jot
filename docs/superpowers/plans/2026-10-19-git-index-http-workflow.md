@@ -49,6 +49,12 @@ within section 2, not completion of its HTTP/Worker lifecycle or any coordinatio
 checkbox below. Original admission, effect and producer observations remain
 separate; existing pre-upgrade pending producers require explicit reconciliation.
 
+The [native family maintenance primitive](../../implementation/2026-10-20-native-workspace-barrier.md)
+now holds every supplied original resident Session through one awaited callback
+and has installed-driver evidence for queued input. It requires the owning
+reservation and authoritative family membership; neither is manufactured by the
+primitive. Actual Gateway/shared/checkpoint coordination remains open below.
+
 - [ ] Follow the reference Gateway/checkpoint coordination: Git mutation cannot
   race an Agent turn, shared-workspace writer or checkpoint restore. Reuse the
   owning workspace coordinator, not a second planner or a Git-only busy flag.

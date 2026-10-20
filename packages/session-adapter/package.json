@@ -51,6 +51,7 @@
     "native-invariant-replay.js",
     "native-role-host.js",
     "native-handoff-barrier.js",
+    "native-workspace-barrier.js",
     "native-handoff-admission.js",
     "native-handoff-return.js",
     "native-handoff-inbox.js",

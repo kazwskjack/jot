@@ -4,7 +4,7 @@ title: Git views use owned read-only repository snapshots
 category: decision
 status: active
 created: "2026-10-19T17:04:32"
-updated: "2026-10-20T07:53:02"
+updated: "2026-10-20T09:47:17"
 ---
 
 <!-- compiled_truth -->
@@ -50,4 +50,10 @@ Git 执行的配置占用范围与程序／stat 见证分离：原始记录固�
   kind: decision
   summary: "Original Git producer custody commits with its exact Worker lease before effects; known preparation failure and interrupted starts never grant an automatic retry, while existing accepted history and explicit disposition remain separate."
   source: docs/implementation/2026-10-20-git-producer-lifecycle.md
+  affects: [git-inspection-boundary]
+
+- time: 2026-10-20T09:47:17
+  kind: evidence
+  summary: "Installed native driver evidence: idle status is not workspace exclusivity. Hold every original resident Session with runMaintenance through the physical callback, preserve queued input, and propagate all native cancellation signals. The family primitive still requires the owning project reservation, complete membership and shared/checkpoint admission fences; it does not enable Git writes."
+  source: docs/implementation/2026-10-20-native-workspace-barrier.md
   affects: [git-inspection-boundary]
