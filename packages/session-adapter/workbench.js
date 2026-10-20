@@ -3,6 +3,7 @@ import { budgetedModelStream,BudgetedModelStreamQueue } from './model-budget-str
 import {runNativeBudgetedTool} from './web-budget-tool.js';
 import {captureSessionCheckpoint,verifySessionCheckpoint} from './checkpoint.js';
 import {normalizeHostExecutionLease} from './host-execution-lease.js';
+import {readNativeWorkspaceFamily} from './native-workspace-source.js';
 export {normalizeHostExecutionLease} from './host-execution-lease.js';
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 const OPERATIONS = ['agents.list', 'messages.list', 'messages.send', 'memory.list', 'memory.save', 'memory.stage', 'memory.propose', 'memory.consolidation', 'memory.capture.pending', 'memory.capture.read', 'memory.capture.propose', 'files.list', 'files.read', 'files.write', 'web.read','tasks.get','tasks.subtasks','tasks.upsert','tasks.delegate','tasks.evidence','tasks.assessment','tasks.observe','tasks.assess','tasks.next','tasks.propose','tasks.reply_draft','tasks.reply_drafts','discovery.context','discovery.source','discovery.plan','discovery.report'];
@@ -117,6 +118,8 @@ export class WorkbenchBridge {
       return {restored:true,session_ref:sessionRef,...(intentId===undefined?{}:{intent_id:intentId})};
     }catch(error){if(handle)await handle.dispose();throw error;}
   }
+
+  workspaceFamily(scope,signal){return readNativeWorkspaceFamily(this,scope,signal);}
 
   async request(path, binding, payload = {}, signal) {
     signal?.throwIfAborted();

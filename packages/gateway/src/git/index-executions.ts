@@ -9,7 +9,7 @@ import type {GitIndexReceipt} from './index-effects.ts';
 import type {GitIndexAcceptance,GitIndexExecutionResult} from '../../contracts/types.ts';
 import {indexEvidence,indexPreparation,type GitIndexEvidence,type GitIndexPreparation} from './index-evidence.ts';
 import {GitIndexProducers} from './index-producers.ts';
-import {assertWorkspaceWritable,reserveWorkspaceOperation,releaseUnstartedWorkspaceOperation} from '../workbench/workspace-coordination.ts';
+import {assertWorkspaceWritable,reserveWorkspaceOperation,releaseUnstartedWorkspaceOperation,readReservedWorkspaceFamily} from '../workbench/workspace-coordination.ts';
 
 type Input={request_id:string;expected_version:number;review_sha256:string};
 type Row={execution_id:string;owner_id:string;project_id:string;intent_id:string;request_id:string;request_sha256:string;review_version:number;review_sha256:string;action:'stage'|'unstage';witness_sha256:string;repository_sha256:string;created_at:string;protocol:number;binding_sha256:string|null};
@@ -138,8 +138,6 @@ export class GitIndexExecutions{
  getAdmitted(owner:string,project:string,id:string):ExecutionResult{
   if(typeof id!=='string'||!ID.test(id))throw Error('git_execution_invalid');this.admission(this.row(owner,project,id));return this.get(owner,project,id);
  }
- /** Dispatch the admitted original only. This is not a public route/Worker and
-  * must not be automatically scheduled until workspace coordination is ready. */
  /** Reserve project coordination only, never native quiescence or Git effects. */
  reserveWorkspace(owner:string,project:string,id:string){
   return withImmediateTransaction(this.db,()=>{
@@ -160,6 +158,17 @@ export class GitIndexExecutions{
    return releaseUnstartedWorkspaceOperation(this.db,{owner_id:owner,project_id:project,operation_kind:'git_index',operation_id:id,binding_sha256:row.binding_sha256});
   });
  }
+ /** Trusted inventory only; the caller cannot supply members, roots or grants. */
+ workspaceFamily(owner:string,project:string,id:string){
+  return withImmediateTransaction(this.db,()=>{
+   const row=this.row(owner,project,id);this.admission(row);
+   this.intents.executionSource(owner,project,row.intent_id,row.review_version,row.review_sha256);
+   if(row.protocol!==4||row.binding_sha256!==this.git.executionBinding(owner,project))throw Error('workspace_reservation_source_changed');
+   return readReservedWorkspaceFamily(this.db,{owner_id:owner,project_id:project,operation_kind:'git_index',operation_id:id,binding_sha256:row.binding_sha256});
+  });
+ }
+ /** Dispatch the admitted original only. This is not a public route/Worker and
+  * must not be automatically scheduled until workspace coordination is ready. */
  async perform(owner:string,project:string,id:string,signal?:AbortSignal){
   if(this.db.isTransaction)throw Error('git_execution_transaction_invalid');signal?.throwIfAborted();const row=this.row(owner,project,id);this.admission(row);
   return this.execute(owner,project,row.intent_id,{request_id:row.request_id,expected_version:row.review_version,review_sha256:row.review_sha256},signal);

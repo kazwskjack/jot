@@ -1,6 +1,6 @@
 # Brain Index
 
-_Auto-generated. Last updated 2026-10-20T01:59:39.169Z._
+_Auto-generated. Last updated 2026-10-20T04:07:21.392Z._
 
 - [always-on-discovery](pages/always-on-discovery.md) — category: decision | Project discovery covers the full lifecycle: explicit owner project/workspace/role policy, factual idle/source collection, original occurren
 - [chat-answer-evidence](pages/chat-answer-evidence.md) — category: decision | Across all topics, Chat proactively searches when facts essential to the answer are uncertain, potentially outdated or unsupported. Stable c

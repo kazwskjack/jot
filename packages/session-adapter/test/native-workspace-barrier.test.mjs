@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {withNativeWorkspaceBarrier} from '../native-workspace-barrier.js';
+import {createNativeWorkspaceFactoryGate} from '../native-workspace-factory.js';
 
 function fixture(ids=['lead','child']) {
  const held=new Set(),guards=new Map(),members=[],registry=new Map(),goals=new Map();
@@ -112,4 +113,27 @@ test('an authoritatively empty family still checks the owning reservation and ca
  const f=fixture([]);let checks=0;f.input.assertReservation=()=>{checks++;};
  assert.equal(await withNativeWorkspaceBarrier(f.input,async(proofs,check)=>{assert.deepEqual(proofs,[]);check();return 42;}),42);assert.ok(checks>=3);
  const abort=new AbortController();abort.abort();await assert.rejects(withNativeWorkspaceBarrier({...f.input,signal:abort.signal},()=>assert.fail('no effect')),{name:'AbortError'});
+});
+
+test('one original family can retain resident maintenance and cold storage ownership together',async()=>{
+ const f=fixture(['lead']);let owned=false;
+ const header={id:'a-cold',agentPreset:'jot-general',isSeeded:false};
+ class Backend{identity=Symbol('cold-backend');async stat(){return{header,formatStatus:'current',revision:'one'};}async open(id,access){assert.equal(access,'write');owned=true;return{id,access,header,inheritedEventCount:0,read:async()=>({events:[]}),close:async()=>{owned=false;}};}}
+ const persistence=new Backend();f.members.push({sessionRef:'a-cold',registry:f.registry,sessions:{get:()=>undefined},persistence,currentPersistence:()=>persistence,backendClass:Backend,
+  allowedPresets:new Set(['jot-general']),validateLog:async()=>({validated:true}),projections:{snapshot:()=>({asOfSeq:-1,values:{inbox:{'next-turn':[],'next-step':[]},goal:null}})}});
+ await withNativeWorkspaceBarrier(f.input,async(proofs,check,_signal,recheck)=>{assert.equal(owned,true);assert.equal(f.held.has('lead'),true);assert.deepEqual(proofs.map(proof=>proof.session_ref),['a-cold','lead']);assert.equal(proofs[0].storage_owned,true);check();await recheck();});
+ assert.equal(owned,false);assert.equal(f.held.size,0);
+});
+
+test('family claims its factory namespace before awaiting storage and releases after the callback drains',async()=>{
+ const hooks=new Map(),registry={get:()=>undefined},sessions={get:()=>undefined};class Missing extends Error{constructor(id){super('missing');this.sessionId=id;}}
+ let probed=false,finish,entered;const reached=new Promise(resolve=>{entered=resolve;}),drain=new Promise(resolve=>{finish=resolve;});
+ class Backend{identity=Symbol('storage');async stat(){probed=true;return undefined;}async open(id){throw new Missing(id);}}
+ const persistence=new Backend(),gate=createNativeWorkspaceFactoryGate({ctx:{get:()=>({jotPreSetupHookProtocol:2}),on:(name,fn)=>{hooks.set(name,fn);return()=>hooks.delete(name);}},registry,sessions,persistence,currentPersistence:()=>persistence,notFoundError:Missing});
+ const input={factoryGate:gate,assertReservation:()=>{},members:[{sessionRef:'absent',registry,sessions,persistence,currentPersistence:()=>persistence,backendClass:Backend,allowedPresets:new Set(['jot-general']),validateLog:async()=>({validated:true}),projections:{snapshot:()=>assert.fail('no fake log')}}]};
+ const work=withNativeWorkspaceBarrier(input,async proofs=>{assert.equal(proofs[0].storage_absent,true);entered();await drain;});
+ try{
+  assert.equal(probed,true);assert.throws(()=>hooks.get('agent/before-setup')({agent:{id:'absent'}}),/native_workspace_factory_fenced/);
+  await reached;const disposed=gate.dispose();assert.equal(hooks.size,3);finish();await assert.rejects(work,/native_workspace_factory_shutdown/);await disposed;assert.equal(hooks.size,0);
+ }finally{finish();await work.catch(()=>{});await gate.dispose();}
 });

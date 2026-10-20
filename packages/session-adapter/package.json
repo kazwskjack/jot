@@ -52,6 +52,8 @@
     "native-role-host.js",
     "native-handoff-barrier.js",
     "native-workspace-barrier.js",
+    "native-workspace-factory.js",
+    "native-workspace-source.js",
     "native-handoff-admission.js",
     "native-handoff-return.js",
     "native-handoff-inbox.js",

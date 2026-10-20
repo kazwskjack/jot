@@ -1,5 +1,7 @@
 import {withNativeHandoffBarrier} from './native-handoff-barrier.js';
 import {nativeGoalsFor} from './workbench-goal.js';
+import {withColdWorkspaceSession} from './native-child-closure.js';
+import {claimNativeWorkspaceFactory,assertNativeWorkspaceFactoryHold} from './native-workspace-factory.js';
 
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 function goalStamp(agent){
@@ -25,13 +27,15 @@ export async function withNativeWorkspaceBarrier(input,operation){
  if(typeof input?.assertReservation!=='function')throw Error('native_workspace_reservation_invalid');
  if(typeof operation!=='function'||!Array.isArray(input.members)||input.members.length>256)throw Error('native_workspace_members_invalid');
  const ids=new Set(),members=input.members.map(member=>{
-  const id=member?.agent?.id;
+  const id=member?.agent?.id??member?.sessionRef;
   if(typeof id!=='string'||!ID.test(id)||ids.has(id))throw Error('native_workspace_members_invalid');
-  ids.add(id);return {...member};
- }).sort((a,b)=>a.agent.id.localeCompare(b.agent.id,'en'));
- const reservation=input.assertReservation,requestSignal=input.signal,held=[],proofs=[],signals=[];
+  ids.add(id);return {...member,sessionRef:id};
+ }).sort((a,b)=>a.sessionRef.localeCompare(b.sessionRef,'en'));
+ const reservation=input.assertReservation,requestSignal=input.signal,held=[],proofs=[],signals=[];let factoryLease;
  const checkReservation=()=>{
   requestSignal?.throwIfAborted();
+  factoryLease?.signal.throwIfAborted();
+  if(factoryLease)for(const member of members)assertNativeWorkspaceFactoryHold(factoryLease.token,member);
   const value=reservation();
   if(value!==undefined){
    // Observe a mistakenly asynchronous check without an unhandled rejection;
@@ -43,22 +47,31 @@ export async function withNativeWorkspaceBarrier(input,operation){
  const check=()=>{
   checkReservation();
   for(const signal of signals)signal.throwIfAborted();
-  for(const item of held){item.check();if(goalStamp(item.agent)!==item.goal)throw Error('native_workspace_goal_changed');}
+  for(const item of held){item.check();if(item.agent&&goalStamp(item.agent)!==item.goal)throw Error('native_workspace_goal_changed');}
  };
+ const recheck=async()=>{check();for(const item of held)if(item.recheck){await item.recheck();check();}};
  const enter=async index=>{
   check();
   if(index===members.length){
-   const signal=AbortSignal.any([...(requestSignal?[requestSignal]:[]),...signals]);
+   const signal=AbortSignal.any([...(requestSignal?[requestSignal]:[]),...(factoryLease?[factoryLease.signal]:[]),...signals]);
    const snapshots=Object.freeze(proofs.map(proof=>Object.freeze(structuredClone(proof))));
-   const result=await operation(snapshots,check,signal);check();return result;
+   await recheck();const result=await operation(snapshots,check,signal,recheck);await recheck();return result;
   }
-  const member=members[index],goal=goalStamp(member.agent);
-  const captureSignal=AbortSignal.any([...(requestSignal?[requestSignal]:[]),...signals]);
+  const member=members[index];
+  const captureSignal=AbortSignal.any([...(requestSignal?[requestSignal]:[]),...(factoryLease?[factoryLease.signal]:[]),...signals]);
+  if(!member.agent)return withColdWorkspaceSession({...member,factoryHold:factoryLease?.token,assertReservation:checkReservation,signal:captureSignal},async cold=>{
+   held.push({check:cold.check,recheck:cold.recheck});proofs.push(cold.proof);signals.push(captureSignal);
+   try{check();return await enter(index+1);}
+   finally{held.pop();proofs.pop();signals.pop();}
+  });
+  const goal=goalStamp(member.agent);
   return withNativeHandoffBarrier({...member,signal:captureSignal},async(proof,memberCheck,signal)=>{
    held.push({agent:member.agent,check:memberCheck,goal});proofs.push(proof);signals.push(signal);
    try{check();return await enter(index+1);}
    finally{held.pop();proofs.pop();signals.pop();}
   });
  };
- checkReservation();return enter(0);
+ checkReservation();
+ if(input.factoryGate!==undefined)factoryLease=claimNativeWorkspaceFactory(input.factoryGate,members.map(member=>member.sessionRef));
+ try{return await enter(0);}finally{factoryLease?.release();}
 }

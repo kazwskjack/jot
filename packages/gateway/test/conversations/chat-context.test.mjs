@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {stripNewMemberFencesForLegacyFixture,assertReopenedMemberFences} from '../support/workspace-legacy-fixture.mjs';
 import {openProductDatabase} from '../../src/db/database.ts';
 import {ConversationRepository} from '../../src/conversations/repository.ts';
 import {RunRepository} from '../../src/runs/repository.ts';
@@ -45,7 +46,7 @@ test('disk migration leaves legacy contexts absent and retains a new immutable s
   db=openProductDatabase(path);const conversations=new ConversationRepository(db),runs=new RunRepository(db,new EventStore(db));
   const legacy=conversations.create('migration-owner',{workspace_id:'ws',model:{provider:'fixture',model:'work'}}),old=runs.enqueue(legacy.conversation_id,'migration-owner',{client_message_id:'old',content:[{type:'text',text:'Original legacy question.'}]});
   const original=db.prepare('SELECT execution_policy_json,native_session_ref,input_message_id FROM ga_runs WHERE id=?').get(old.run_id);
-  db.exec('DROP TRIGGER ga_chat_context_immutable; ALTER TABLE ga_runs DROP COLUMN chat_context_json; ALTER TABLE ga_runs DROP COLUMN chat_context_sha256;');db.close();db=openProductDatabase(path);
+  stripNewMemberFencesForLegacyFixture(db);db.exec('DROP TRIGGER ga_chat_context_immutable; ALTER TABLE ga_runs DROP COLUMN chat_context_json; ALTER TABLE ga_runs DROP COLUMN chat_context_sha256;');db.close();db=openProductDatabase(path);
   assert.equal(db.prepare('SELECT chat_context_json FROM ga_runs WHERE id=?').get(old.run_id).chat_context_json,null);
   assert.deepEqual(db.prepare('SELECT execution_policy_json,native_session_ref,input_message_id FROM ga_runs WHERE id=?').get(old.run_id),original);
   assert.throws(()=>db.prepare("UPDATE ga_runs SET chat_context_json='{}' WHERE id=?").run(old.run_id),/chat_context_immutable/);
@@ -54,5 +55,6 @@ test('disk migration leaves legacy contexts absent and retains a new immutable s
   const frozen=db.prepare('SELECT chat_context_json,chat_context_sha256 FROM ga_runs WHERE id=?').get(accepted.run_id);db.close();db=openProductDatabase(path);
   assert.deepEqual(db.prepare('SELECT chat_context_json,chat_context_sha256 FROM ga_runs WHERE id=?').get(accepted.run_id),frozen);
   assert.throws(()=>db.prepare("UPDATE ga_runs SET chat_context_sha256=? WHERE id=?").run('0'.repeat(64),accepted.run_id),/chat_context_immutable/);
+  assertReopenedMemberFences(db);
  }finally{db?.close();const child=relative(base,root);assert.ok(child&&!isAbsolute(child)&&!child.startsWith('..'));rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:20});}
 });

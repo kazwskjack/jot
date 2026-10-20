@@ -4,7 +4,7 @@ title: Git views use owned read-only repository snapshots
 category: decision
 status: active
 created: "2026-10-19T17:04:32"
-updated: "2026-10-20T09:59:39"
+updated: "2026-10-20T12:07:21"
 ---
 
 <!-- compiled_truth -->
@@ -62,4 +62,22 @@ Git 执行的配置占用范围与程序／stat 见证分离：原始记录固�
   kind: decision
   summary: "Original project reservations fence the existing Worker claim and shared-file CAS transactions; active or unbound legacy producers and expired leases cannot prove a workspace free. A reservation grants no Git/native execution, never expires automatically, and only an original admitted execution with no producer/effect facts may use pre-dispatch release. Complete native membership, original publication/root validation and checkpoint restore remain prerequisites for write activation."
   source: docs/implementation/2026-10-20-project-workspace-reservations.md
+  affects: [git-inspection-boundary]
+
+- time: 2026-10-20T11:19:40
+  kind: decision
+  summary: "Original reserved workspace membership includes historical Work/Chat/child references. Cold Sessions require original persistence write ownership; absent logs require the reviewed optional Jot protocol-2 factory fence and typed absence, never fake empty logs. Host-local factory custody does not prove cross-host exclusion, root/publication association or original producer drain, so Git write activation remains unavailable."
+  source: docs/implementation/2026-10-20-workspace-family-cold-storage.md
+  affects: [git-inspection-boundary]
+
+- time: 2026-10-20T11:30:44
+  kind: decision
+  summary: "Original Git workspace family crosses the existing authenticated loopback bridge only as verified no-store inventory. Browser identity and supplied member/root lists cannot authorize it; original admission, current approval and ownership remain required. Inventory success does not create a namespace hold, dispatch grant or substitute asynchronous cached authority for the original synchronous execution guard."
+  source: docs/implementation/2026-10-20-workspace-family-cold-storage.md
+  affects: [git-inspection-boundary]
+
+- time: 2026-10-20T12:07:21
+  kind: decision
+  summary: "Unsettled workspace custody follows the original project resource across ownership transfer; revocation never releases a producer or grants a new owner its execution. Unbound legacy scopes retain original-owner protection. Module-owned fence SQL upgrades atomically, failed installation rolls back, and unchanged definitions must not churn schema revisions used by immutable source witnesses."
+  source: docs/implementation/2026-10-20-workspace-family-cold-storage.md
   affects: [git-inspection-boundary]

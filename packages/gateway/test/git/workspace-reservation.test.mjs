@@ -6,6 +6,15 @@ import {ProjectRepository} from '../../src/projects/repository.ts';import {GitWo
 import {GitMutationIntents} from '../../src/git/intents.ts';import {GitIndexExecutions} from '../../src/git/index-executions.ts';
 import {WorkbenchService} from '../../src/workbench/service.ts';import {EventStore} from '../../src/events/event-store.ts';
 import {RunRepository} from '../../src/runs/repository.ts';import {HarnessCoordinator} from '../../src/harness/coordinator.ts';
+import {installWorkspaceCoordination,installWorkspaceMemberFences} from '../../src/workbench/workspace-coordination.ts';
+
+const currentMatch='WHERE (wr.project_id=c.project_id OR(c.project_id IS NULL AND wr.owner_id=c.owner_id)) AND wx.reservation_id IS NULL';
+const priorMatch='WHERE wr.owner_id=c.owner_id AND (wr.project_id=c.project_id OR c.project_id IS NULL) AND wx.reservation_id IS NULL';
+function priorRunTriggerFixture(db){
+ const rows=db.prepare("SELECT name,sql FROM sqlite_schema WHERE name IN('wb_workspace_run_insert','wb_workspace_run_update') ORDER BY name").all();assert.equal(rows.length,2);
+ withImmediateTransaction(db,()=>{for(const row of rows){const prior=row.sql.replace(currentMatch,priorMatch);assert.notEqual(prior,row.sql);db.exec('DROP TRIGGER "'+row.name+'"');db.exec(prior);}});
+ return db.prepare("SELECT name,sql FROM sqlite_schema WHERE name IN('wb_workspace_run_insert','wb_workspace_run_update') ORDER BY name").all();
+}
 
 async function fixture(t){
  const root=await mkdtemp(join(tmpdir(),'jot-project-reservation-')),repo=join(root,'repo'),database=join(root,'state.sqlite');await mkdir(repo);
@@ -29,6 +38,13 @@ test('original admission can reserve project coordination but never grants physi
  await assert.rejects(f.executions.perform('owner',f.project,f.accepted.execution_id),/workspace_coordination_required/);
  assert.equal(f.executions.producer('owner',f.project,f.accepted.execution_id).state,'not_started');assert.deepEqual(await readFile(join(f.repo,'.git/index')),before);
  assert.equal(f.db.prepare('SELECT count(*) n FROM ga_worker_leases').get().n,0);
+});
+
+test('the original Git owning service derives family scope without caller-supplied Sessions',async t=>{
+ const f=await fixture(t);f.reserve();const family=f.executions.workspaceFamily('owner',f.project,f.accepted.execution_id);
+ assert.equal(family.execution_id,f.accepted.execution_id);assert.equal(family.project_id,f.project);assert.equal(family.execution_authorized,false);assert.deepEqual(family.members,[]);
+ assert.throws(()=>f.executions.workspaceFamily('foreign',f.project,f.accepted.execution_id),/project_not_found/);
+ f.release();assert.throws(()=>f.executions.workspaceFamily('owner',f.project,f.accepted.execution_id),/workspace_reservation_closed/);
 });
 
 test('original Worker skips a reserved project and can still claim another project',async t=>{
@@ -95,6 +111,46 @@ test('owner changes cannot borrow or release an original workspace reservation',
  const f=await fixture(t);assert.throws(()=>f.executions.reserveWorkspace('foreign',f.project,f.accepted.execution_id),/project_not_found/);
  f.reserve();f.db.prepare('UPDATE ga_projects SET owner_id=? WHERE id=?').run('replacement',f.project);
  assert.throws(f.release,/project_not_found/);assert.equal(f.db.prepare('SELECT count(*) n FROM wb_workspace_reservation_releases').get().n,0);
+});
+
+test('project ownership transfer cannot release the original resource fence for its new owner',async t=>{
+ const f=await fixture(t);f.reserve();f.db.prepare('UPDATE ga_projects SET owner_id=? WHERE id=?').run('replacement',f.project);
+ assert.throws(()=>f.workbench.writeFile('replacement','ws',{project_id:f.project,path:'new-owner.txt',content:'must wait for the original producer',expected_version:0}),/workspace_coordination_required/);
+ assert.throws(()=>f.enqueue('new-owner-conversation','replacement',f.project),/workspace_coordination_required/);
+ assert.equal(f.db.prepare('SELECT count(*) n FROM wb_workspace_reservation_releases').get().n,0);
+});
+
+test('an unresolved legacy conversation cannot move its owner out of a held family',async t=>{
+ const f=await fixture(t);f.enqueue('legacy-owner-scope','owner',null);f.reserve();
+ assert.throws(()=>f.db.prepare('UPDATE ga_conversations SET owner_id=? WHERE id=?').run('replacement','legacy-owner-scope'),/workspace_coordination_required/);
+ assert.equal(f.db.prepare('SELECT owner_id FROM ga_conversations WHERE id=?').get('legacy-owner-scope').owner_id,'owner');
+});
+
+test('reopening a previously installed owner-only fence upgrades its SQL while preserving the original hold',async t=>{
+ const f=await fixture(t);
+ f.db.prepare('INSERT INTO ga_conversations(id,owner_id,workspace_id,title,model,version,created_at,updated_at,project_id) VALUES(?,?,?,?,?,?,?,?,?)').run('transferred-conversation','replacement','ws','Synthetic','{}',1,'now','now',f.project);
+ f.db.prepare("INSERT INTO ga_runs(id,conversation_id,status,version,created_at,updated_at) VALUES('transferred-run','transferred-conversation','queued',1,'now','now')").run();
+ f.reserve();const saved=f.db.prepare('SELECT * FROM wb_workspace_reservations').get();priorRunTriggerFixture(f.db);f.db.prepare('UPDATE ga_projects SET owner_id=? WHERE id=?').run('replacement',f.project);
+ const second=openProductDatabase(f.database);try{
+  assert.throws(()=>second.prepare("UPDATE ga_runs SET status='starting' WHERE id='transferred-run'").run(),/workspace_coordination_required/);
+  assert.equal(second.prepare("SELECT status FROM ga_runs WHERE id='transferred-run'").get().status,'queued');assert.deepEqual(second.prepare('SELECT * FROM wb_workspace_reservations').get(),saved);
+ }finally{second.close();}
+});
+
+test('unchanged workspace installers do not churn the original schema revision',async t=>{
+ const f=await fixture(t),before=f.db.prepare('PRAGMA schema_version').get().schema_version;
+ installWorkspaceCoordination(f.db);installWorkspaceMemberFences(f.db);
+ assert.equal(f.db.prepare('PRAGMA schema_version').get().schema_version,before);
+});
+
+test('failed fence upgrade rolls back every changed trigger before a corrected retry',async t=>{
+ const f=await fixture(t),prior=priorRunTriggerFixture(f.db);f.db.exec('CREATE UNIQUE INDEX fixture_expression_identity ON ga_runs(lower(id))');
+ const before=f.db.prepare('PRAGMA schema_version').get().schema_version;
+ assert.throws(()=>installWorkspaceCoordination(f.db),/workspace_member_schema_unavailable/);
+ assert.deepEqual(f.db.prepare("SELECT name,sql FROM sqlite_schema WHERE name IN('wb_workspace_run_insert','wb_workspace_run_update') ORDER BY name").all(),prior);
+ assert.equal(f.db.prepare('PRAGMA schema_version').get().schema_version,before);
+ f.db.exec('DROP INDEX fixture_expression_identity');installWorkspaceCoordination(f.db);
+ assert.ok(f.db.prepare("SELECT sql FROM sqlite_schema WHERE name IN('wb_workspace_run_insert','wb_workspace_run_update')").all().every(row=>row.sql.includes(currentMatch)));
 });
 
 test('reservation and release journals cannot be updated, deleted or replaced',async t=>{

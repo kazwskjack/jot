@@ -1,4 +1,5 @@
 import type {DatabaseSync} from 'node:sqlite';
+import {installWorkspaceMemberFences} from './workspace-coordination.ts';
 import {assertExecutionLease,type ExecutionLease} from './execution-lease.ts';
 import {assertNativeTaskAssignment,type NativeTaskAssignment} from './native-task-intents.ts';
 import {assertNativeCollaborationPolicy} from './task-collaboration.ts';
@@ -47,7 +48,8 @@ export function installNativeChildRuns(db:DatabaseSync){
    UNION ALL SELECT run_id,reservation_id,activation_id,previous_run_id,owner_id,root_run_id,task_id,occurrence_id,role_id,child_session_ref,snapshot_json,created_at FROM wb_native_child_activations;
   CREATE VIEW IF NOT EXISTS wb_native_execution_closures AS
    SELECT run_id,receipt_sha256,receipt_json,created_at FROM wb_native_child_closures
-   UNION ALL SELECT run_id,receipt_sha256,receipt_json,created_at FROM wb_native_activation_closures;`);
+    UNION ALL SELECT run_id,receipt_sha256,receipt_json,created_at FROM wb_native_activation_closures;`);
+ installWorkspaceMemberFences(db);
 }
 /** Revalidate persisted identity before native preparation, model or tools.
  * Accounting closure must not call this: dispatched spend survives revocation.

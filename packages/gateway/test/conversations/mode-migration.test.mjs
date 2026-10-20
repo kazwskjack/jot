@@ -4,11 +4,12 @@ import {mkdirSync,mkdtempSync,rmSync} from 'node:fs';
 import {resolve,join,relative,isAbsolute} from 'node:path';
 import {openProductDatabase} from '../../src/db/database.ts';
 import {SessionBindingRepository} from '../../src/harness/session-bindings.ts';
+import {stripNewMemberFencesForLegacyFixture,assertReopenedMemberFences} from '../support/workspace-legacy-fixture.mjs';
 
 test('legacy conversations become Work without replacing their saved native Session or Goal control',()=>{
  const base=resolve('.test-tmp/mode-migration');mkdirSync(base,{recursive:true});const root=mkdtempSync(join(base,'case-')),path=join(root,'product.db');let db;
  try{
-  db=openProductDatabase(path);db.exec('DROP TABLE ga_conversation_mode_sessions; DROP TRIGGER ga_execution_policy_immutable; ALTER TABLE ga_runs DROP COLUMN execution_policy_json; ALTER TABLE ga_conversations DROP COLUMN mode;');
+  db=openProductDatabase(path);stripNewMemberFencesForLegacyFixture(db);db.exec('DROP TABLE ga_conversation_mode_sessions; DROP TRIGGER ga_execution_policy_immutable; ALTER TABLE ga_runs DROP COLUMN execution_policy_json; ALTER TABLE ga_conversations DROP COLUMN mode;');
   db.prepare('INSERT INTO ga_conversations(id,owner_id,workspace_id,title,model,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run('legacy-conversation','legacy-owner','ws','Synthetic','{}','now','now');
   db.prepare('INSERT INTO ga_harness_session_bindings VALUES(?,?,?,?,?)').run('legacy-conversation','legacy-owner','original-native','now','now');
   db.prepare('INSERT INTO ga_runs(id,conversation_id,status,created_at,updated_at) VALUES(?,?,?,?,?)').run('legacy-source','legacy-conversation','succeeded','now','now');
@@ -22,5 +23,6 @@ test('legacy conversations become Work without replacing their saved native Sess
   assert.equal(new SessionBindingRepository(db,'different-prefix').getOrCreate('legacy-owner','legacy-conversation').session_id,'original-native');
   assert.throws(()=>db.prepare("UPDATE ga_conversation_mode_sessions SET session_id='replacement'").run(),/mode_session_immutable/);
   db.close();db=openProductDatabase(path);assert.equal(db.prepare('SELECT count(*) n FROM ga_conversation_mode_sessions').get().n,1);assert.deepEqual(db.prepare('SELECT * FROM ga_conversation_goal_controls').get(),goal);
+  assertReopenedMemberFences(db);
  }finally{db?.close();const child=relative(base,root);assert.ok(child&&!isAbsolute(child)&&!child.startsWith('..'));rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:20});}
 });

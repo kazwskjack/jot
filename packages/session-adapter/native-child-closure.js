@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import {assertNativeWorkspaceFactoryHold} from './native-workspace-factory.js';
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 const json=value=>JSON.stringify(value,(_key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item);
 const headerJson=header=>json({...header,delegationDepth:header?.delegationDepth??0});
@@ -192,4 +193,98 @@ async function captureNativeQuiescence({agent,parentSessionRef,registry,persiste
  const fresh=projections.stateOf(session,'inbox');if(fresh?.['next-turn']?.length!==0||fresh?.['next-step']?.length!==0)throw new Error('native_child_pending_inbox');
  const facts={protocol:1,session_ref:agent.id,seq_exclusive:count,turn_end_seq:lastEnd,log_sha256:hash.digest('hex'),inbox_pending:0,...(remoteOperations.length?{remote_operations:remoteOperations}:{})};
  return resident?{...facts,driver_idle:true}:{...facts,parent_session_ref:parentSessionRef,driver_nonresident:true};
+}
+
+/** Own an existing cold Session's original storage writer while inspecting it.
+ * No Agent is loaded, no message/Goal is changed and no event is appended.
+ * Missing or historical-format storage is unsupported, never invented as empty.
+ * This is a host primitive: the caller still owes original run/tool drain,
+ * namespace admission fencing, root association and effect-journal custody.
+ */
+export async function withColdWorkspaceSession(input,operation){
+ const {sessionRef:id,registry,sessions,persistence,currentPersistence,backendClass,assertReservation,allowedPresets,validateLog,projections,signal,reconcileOperations,factoryHold}=input??{};
+ if(typeof id!=='string'||!ID.test(id)||typeof operation!=='function'||typeof assertReservation!=='function'
+  ||typeof registry?.get!=='function'||typeof sessions?.get!=='function'||typeof persistence?.open!=='function'||typeof persistence?.stat!=='function'
+  ||typeof currentPersistence!=='function'||typeof backendClass!=='function'||!(persistence instanceof backendClass)||typeof persistence.identity!=='symbol'
+  ||!(allowedPresets instanceof Set)||!allowedPresets.size||typeof validateLog!=='function'||typeof projections?.snapshot!=='function')throw Error('native_workspace_cold_unavailable');
+ const identity=persistence.identity;
+ const check=()=>{
+  signal?.throwIfAborted();
+  const result=assertReservation();if(result!==undefined){if(result&&typeof result.then==='function')Promise.resolve(result).catch(()=>{});throw Error('native_workspace_reservation_invalid');}
+  const current=currentPersistence();if(!(current instanceof backendClass)||current.identity!==identity||registry.get(id)!==undefined||sessions.get(id)!==undefined)throw Error('native_workspace_cold_changed');
+  if(factoryHold!==undefined)assertNativeWorkspaceFactoryHold(factoryHold,{sessionRef:id,registry,sessions,persistence});
+ };
+ const stamp=value=>{
+  if(!value||value.header?.id!==id||value.formatStatus!=='current'||typeof value.revision!=='string'||!value.revision
+   ||!allowedPresets.has(value.header.agentPreset))throw Error('native_workspace_cold_unavailable');
+  return JSON.stringify([value.revision,headerJson(value.header)]);
+ };
+ check();const before=await persistence.stat(id,{signal});check();
+ if(before===undefined){
+  if(factoryHold===undefined)throw Error('native_workspace_cold_unavailable');
+  const {notFoundError}=assertNativeWorkspaceFactoryHold(factoryHold,{sessionRef:id,registry,sessions,persistence});
+  const recheck=async()=>{
+   check();if(await persistence.stat(id,{signal})!==undefined)throw Error('native_workspace_cold_changed');check();
+   let unexpected;
+   try{unexpected=await persistence.open(id,'write',{signal});}
+   catch(error){if(!(error instanceof notFoundError)||error.sessionId!==id)throw error;}
+   if(unexpected){await unexpected.close();throw Error('native_workspace_cold_changed');}
+   check();if(await persistence.stat(id,{signal})!==undefined)throw Error('native_workspace_cold_changed');check();
+  };
+  await recheck();const proof=Object.freeze({protocol:1,session_ref:id,driver_nonresident:true,storage_absent:true,factory_fenced:true,storage_owned:false,
+   seq_exclusive:null,turn_end_seq:null,log_sha256:null,execution_authorized:false});
+  const result=await operation({proof,header:null,check,recheck,signal});await recheck();return result;
+ }
+ const baseline=stamp(before);let handle,failure;
+ try{
+  handle=await persistence.open(id,'write',{signal});check();
+  if(handle?.id!==id||handle.access!=='write'||headerJson(handle.header)!==headerJson(before.header)||!Number.isSafeInteger(handle.inheritedEventCount)||handle.inheritedEventCount<0)throw Error('native_workspace_cold_unavailable');
+  const recheck=async()=>{check();const current=await persistence.stat(id,{signal});check();if(stamp(current)!==baseline)throw Error('native_workspace_cold_changed');};
+  await recheck();const events=[],tools=new Set(),remoteCalls=new Map(),inbox={'next-turn':[],'next-step':[]};let openTurn=false,lastEnd=-1,executionSeen=false;
+  const hash=createHash('sha256').update(headerJson(handle.header)+'\n');
+  for(;;){
+   check();const result=await handle.read(events.length,256,{signal});check();if(!Array.isArray(result?.events)||result.events.length>256)throw Error('native_workspace_log_unconfirmed');
+   if(!result.events.length)break;
+   for(const event of result.events){
+    if(event?.seq!==events.length||typeof event.type!=='string')throw Error('native_workspace_log_unconfirmed');events.push(event);hash.update(json(event)+'\n');
+    if(event.type.startsWith('turn/')||event.type.startsWith('step/')||event.type.startsWith('llm/')||event.type.startsWith('tool/'))executionSeen=true;
+    if(event.type==='turn/start'){if(openTurn)throw Error('native_workspace_log_unconfirmed');openTurn=true;}
+    if(event.type==='turn/end'){if(!openTurn)throw Error('native_workspace_log_unconfirmed');openTurn=false;lastEnd=event.seq;}
+    if(event.type==='agent/inbox/spliced'){
+     const d=event.data,items=inbox[d?.target],removed=d?.removedCount??0;
+     if(!Array.isArray(items)||!Number.isSafeInteger(d.start)||d.start<0||d.start>items.length||!Number.isSafeInteger(removed)||removed<0||d.start+removed>items.length||!Array.isArray(d.inserted))throw Error('native_workspace_log_unconfirmed');
+     items.splice(d.start,removed,...d.inserted);
+    }
+    if(event.type==='tool/call'){
+     const call=event.data?.callId;if(!openTurn||typeof call!=='string'||!ID.test(call)||tools.has(call))throw Error('native_workspace_log_unconfirmed');tools.add(call);
+     const batch=batchWebCall(event.data);if(batch){if(remoteCalls.has(call))throw Error('native_workspace_remote_unresolved');remoteCalls.set(call,batch.name);}
+    }
+    if(event.type==='tool/result'){
+     if(event.data?.error?.code==='TOOL_OUTCOME_UNKNOWN')throw Error('native_workspace_tool_unknown');
+     if(!openTurn)throw Error('native_workspace_log_unconfirmed');if(event.surfaceOp!==undefined&&event.surfaceOp!=='append')continue;
+     const call=event.data?.message?.source?.callId??event.data?.message?.toolCallId??event.data?.callId;
+     if(!tools.delete(call)&&!(event.data?.message?.isError===true&&event.data?.error?.code==='TOOL_NOT_STARTED'))throw Error('native_workspace_log_unconfirmed');
+    }
+   }
+  }
+  if(openTurn||tools.size||inbox['next-turn'].length||inbox['next-step'].length||executionSeen&&lastEnd<0)throw Error('native_workspace_log_unconfirmed');
+  const count=events.length,view=Object.freeze({id,header:handle.header,inheritedEventCount:handle.inheritedEventCount,seq:count,eventAt:index=>events[index],snapshotEvents:(start=0,end=count)=>events.slice(start,end)});
+  const validated=await validateLog(view,{signal});check();if(validated?.validated!==true)throw Error('native_workspace_log_unconfirmed');
+  const projected=projections.snapshot(view,['inbox','goal']),values=projected?.values,queue=values?.inbox,goal=values?.goal;
+  if(projected?.asOfSeq!==count-1||!Array.isArray(queue?.['next-turn'])||!Array.isArray(queue?.['next-step'])||queue['next-turn'].length||queue['next-step'].length
+   ||!values||!Object.hasOwn(values,'goal')||goal!==null&&(!goal||typeof goal.goal?.id!=='string'||!ID.test(goal.goal.id)||!Number.isSafeInteger(goal.goal.revision)||goal.goal.revision<1
+    ||!['paused','blocked','complete'].includes(goal.goal.phase)||goal.goal.activation==='armed'))throw Error('native_workspace_projection_unconfirmed');
+  const remote=[];
+  for(const [callId,toolName]of remoteCalls){
+   if(typeof reconcileOperations!=='function')throw Error('native_workspace_remote_unresolved');check();
+   const proof=await reconcileOperations(Object.freeze({sessionRef:id,callId,toolName,signal}));check();
+   if(!settledWebOperation(proof,id,callId))throw Error('native_workspace_remote_unresolved');
+   remote.push({session_ref:id,request_id:callId,tool_name:toolName,operation_id:proof.operation_id,revision:proof.revision,status:proof.status,accepted_count:proof.accepted_count,
+    items:proof.items.map(item=>({item_id:item.item_id,position:item.position,status:item.status}))});
+  }
+  const proof=Object.freeze({protocol:1,session_ref:id,driver_nonresident:true,storage_owned:true,seq_exclusive:count,turn_end_seq:lastEnd,log_sha256:hash.digest('hex'),inbox_pending:0,
+   ...(remote.length?{remote_operations:remote}:{}),execution_authorized:false});
+  await recheck();const result=await operation({proof,header:structuredClone(handle.header),check,recheck,signal});await recheck();return result;
+ }catch(error){failure=error;throw error;}
+ finally{if(handle)try{await handle.close();}catch(error){if(failure)throw new AggregateError([failure,error],'native_workspace_storage_release_failed');throw error;}}
 }

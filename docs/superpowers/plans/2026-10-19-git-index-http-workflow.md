@@ -61,6 +61,23 @@ in their product-database boundary. It verifies original Git admission and only
 supports unstarted release; joining complete native membership, physical root
 publication, settled producer drain and checkpoint restore remains required.
 
+The [member and cold-storage integration increment](../../implementation/2026-10-20-workspace-family-cold-storage.md)
+now derives original historical Work/Chat/child membership, fences identity
+changes and retains cold storage ownership alongside resident maintenance.
+Absent IDs require the existing reviewed Jot protocol-2 factory hooks and an
+authentic private hold; they are not reported as owned empty logs. Actual SDK
+tests cover original create/resume exclusion and a pending factory writer.
+This does not complete the original authenticated host bridge, root/publication
+association, producer drain or mobile mutation workflow; keep the checks below open.
+
+The original adapter can now read the reserved family through the existing
+authenticated loopback service channel. Gateway rechecks original admission,
+approval, ownership and binding; the adapter verifies and freezes the response
+without admitting a new member or caching prior authority. Real HTTP and restart
+checks preserve the original index and producer state. This read channel does
+not itself establish held native custody, original physical dispatch or an
+asynchronous replacement for the original dispatch guard.
+
 - [ ] Follow the reference Gateway/checkpoint coordination: Git mutation cannot
   race an Agent turn, shared-workspace writer or checkpoint restore. Reuse the
   owning workspace coordinator, not a second planner or a Git-only busy flag.
