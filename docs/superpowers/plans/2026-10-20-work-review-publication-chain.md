@@ -1,5 +1,57 @@
 # Original work review and publication chain
 
+The owner preparation/current-review/approval/cancellation HTTP boundary is now
+implemented with safe projections and original atomic receipts; see
+[owner review API](../../implementation/2026-10-20-publication-owner-review-api.md).
+This closes only the review API portion of the product-entry requirement.
+Execution admission, dispatch/status/settlement and mobile controls remain open;
+do not mark the complete publication or full26 item done from this increment.
+
+### Next owner entry sequence, traced to original service methods
+
+1. Expose an owned read of the completed source through the existing
+   `FinalizedWorkSources.summary(owner, runId)`. Assert the route project matches
+   the summary project; project/run names from a browser do not select roots.
+   Return the same safe source projection and exact `source_sha256` used by
+   publication preparation. A pending review's work-inspection source digest is
+   not interchangeable with this finalized-source digest. Refuse missing or
+   unfinalized proofs and preserve original immutable file-version provenance.
+2. Wire the already implemented owner preparation and review read from that
+   source. Render the complete inventories, actual target before/after changes
+   and chosen paths. Keep the original review version/digest through explicit
+   approval and cancellation; task delivery or acceptance is not this approval.
+3. Add original execution admission using `WorkPublicationExecutions.admit`
+   inside the existing synchronous `atomicCommand` boundary. Reuse its immutable
+   `getAdmission` receipt for lost acceptance responses. The acceptance includes
+   original review/source/target digests and must not be displayed as applied.
+4. Add current read through `publicationStatus`. Retain `pending`, `unknown`,
+   applied-but-not-settled and abandon-but-not-settled distinctions exactly as
+   produced by the journal and original workspace reservation. A read must not
+   acquire native custody, call the transport, clear a lease or replay a write.
+5. Dispatch only an explicitly accepted original execution through the existing
+   authenticated `callNativeGitTransport`, typed as `work_publication`. Retain
+   the same database, configured repository and full workspace family. Gateway
+   transport configuration must be operator supplied and work in source and
+   compiled layouts. Neither request bodies nor browser capabilities can carry
+   module paths, socket credentials, arbitrary roots or execution authority.
+   Never hold an SQL transaction across the awaited transport operation.
+6. Keep dispatch separate from acceptance. When the response is lost or the BFF
+   times out, read immutable acceptance and current original journal state;
+   do not automatically repeat the transport request. A normal completed HTTP
+   response is not proof of file effects: display only original verified status.
+   A changed target/revoked review must still refuse at the producer boundary.
+7. Send explicit `confirm_recorded` or `abandon_unknown` settlement only through
+   the same original Host, binding `request_id`, `expected_journal_sha256` and
+   `acknowledge_unknown: true`. Read-only status cannot substitute for settlement.
+   Preserve the original native custody and expired Worker fencing checks. Do
+   not infer rollback, delete files or adopt coincidentally matching bytes.
+8. Prove actual browser/BFF behavior for mobile and ordinary desktop: escaped
+   content, stale request cancellation, exact-key lost-response retry, current
+   state refresh, revoked ownership, user cancellation and unknown outcomes.
+   Include original immutable source bytes and target file/index verification.
+   Run relevant focused tests before the final changed-tree regression/build
+   and public source/staged/history review, then verify the exact remote commit.
+
 **Goal:** Complete the existing isolated-result review, explicit publication and
 Git/checkpoint coordination without replacing DSH or its original authority.
 

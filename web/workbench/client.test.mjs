@@ -7,6 +7,13 @@ await mkdir(output,{recursive:true});
 await build({entryPoints:[new URL('./client.ts',import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')],bundle:true,platform:'node',format:'esm',outfile:new URL('client.mjs',output).pathname.replace(/^\/([A-Z]:)/,'$1')});
 const {workbenchApi}=await import(new URL('client.mjs',output));
 
+test('publication review uses the encoded owner BFF read without sending approval or file authority',async t=>{
+ const original=globalThis.fetch,calls=[];t.after(()=>{globalThis.fetch=original});globalThis.fetch=async(url,init)=>{calls.push({url,init});return new Response('{"execution_authorized":false}')};
+ const abort=new AbortController();await workbenchApi.publicationReview('project /1','review:original',abort.signal);
+ assert.equal(calls[0].url,'/workbench-api/v1/projects/project%20%2F1/work-publications/review%3Aoriginal');assert.equal(calls[0].init.method,'GET');assert.equal(calls[0].init.body,undefined);assert.equal(calls[0].init.cache,'no-store');
+ globalThis.fetch=async(_url,init)=>new Promise((_resolve,reject)=>init.signal.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true}));const pending=workbenchApi.publicationReview('project','review',abort.signal);abort.abort();await assert.rejects(pending,{name:'AbortError'});
+});
+
 test('Git accepted receipt and current outcome use distinct read-only no-store requests with original IDs',async t=>{
  const original=globalThis.fetch,calls=[];t.after(()=>{globalThis.fetch=original});globalThis.fetch=async(url,init)=>{calls.push({url,init});return new Response('{"execution_authorized":false}')};const abort=new AbortController();
  await workbenchApi.gitAcceptance('project /1','original:request',abort.signal);await workbenchApi.gitExecution('project /1','original:execution',abort.signal);

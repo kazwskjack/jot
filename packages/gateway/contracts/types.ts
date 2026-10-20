@@ -312,3 +312,12 @@ export type GitReviewIntent = {intent_id:string;project_id:string;action:GitRevi
 
 export type GitIndexAcceptance = {execution_id:string;project_id:string;intent_id:string;request_id:string;action:"stage"|"unstage";accepted:true;execution_authorized:false};
 export type GitIndexExecutionResult = Omit<GitIndexAcceptance,"accepted"> & {paths:string[]} & ({state:"pending"|"unknown"}|{state:"applied";before_index_sha256:string|null;index_sha256:string}|{state:"not_dispatched"|"abandoned_unknown";disposition_id:string});
+
+export type WorkPublicationPrepare = {request_id:string;source_run_id:string;source_sha256:string;paths:string[]};
+export type WorkPublicationControl = GitReviewControl;
+export type WorkPublicationSource = {source:'isolated';workspace_id:string;project_id:string;agent_id:string;task_id:string;occurrence_id:string;run_id:string;
+ final_message_id:string;candidate_id:string;certificate_id:string;completion_intent_id:string;snapshot_sha256:string;candidate_sha256:string;native_proof_sha256:string;source_sha256:string;files:Array<{path:string;version:number;sha256:string;size_bytes:number;receipt_id:string;producing_run_id:string}>;work_review:TaskWorkReview};
+export type WorkPublicationTarget = {snapshot_id:string;repository_sha256:string;head:GitSnapshot['head'];index_sha256:string|null;target_sha256:string};
+export type WorkPublicationChange = {path:string;kind:'add'|'modify';before:WorkReviewEntry|null;after:WorkReviewEntry;before_text:string|null;after_text:string};
+export type WorkPublicationReview = {intent_id:string;project_id:string;source:WorkPublicationSource;target:WorkPublicationTarget;changes:WorkPublicationChange[];paths:string[];
+ review_sha256:string;version:number;state:'prepared'|'approved'|'cancelled';created_at:string;updated_at:string;execution_authorized:false};

@@ -1096,5 +1096,32 @@
     "GitIndexExecutionResult",
     "200",
     "Read current result of an originally admitted Git execution; current ownership is required and historical acceptance grants no execution authority."
+  ],
+  [
+    "POST",
+    "/v1/projects/{projectId}/work-publications",
+    "Review original completed work against the configured target",
+    "WorkPublicationPrepare",
+    "WorkPublicationReview",
+    "201",
+    "Owner review only; approval does not admit or dispatch file effects. Replays return the original receipt; GET returns current review state."
+  ],
+  [
+    "GET",
+    "/v1/projects/{projectId}/work-publications/{intentId}",
+    "Review original completed work against the configured target",
+    null,
+    "WorkPublicationReview",
+    "200",
+    "Owner review only; approval does not admit or dispatch file effects. Replays return the original receipt; GET returns current review state."
+  ],
+  [
+    "POST",
+    "/v1/projects/{projectId}/work-publications/{intentId}/control",
+    "Review original completed work against the configured target",
+    "WorkPublicationControl",
+    "WorkPublicationReview",
+    "200",
+    "Owner review only; approval does not admit or dispatch file effects. Replays return the original receipt; GET returns current review state."
   ]
 ]

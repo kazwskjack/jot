@@ -1,5 +1,10 @@
 # PilotDeck capability and implementation reference
 
+The original owner publication review now has a public Gateway preparation,
+current-state and approval/cancellation boundary with atomic original receipts;
+see [implementation and acceptance](implementation/2026-10-20-publication-owner-review-api.md).
+Apply admission, native dispatch/status/recovery and mobile controls remain open.
+
 Jot's reference scope covers all PilotDeck functions and implementation mechanisms, not only its interface or headline features. This checklist is not a claim of complete parity.
 
 For the current remaining work, dependencies and parallel implementation
