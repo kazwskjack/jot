@@ -14,7 +14,7 @@ const relativePath=(v:unknown)=>typeof v==='string'&&v.length>0&&v.length<=4096&
 const sha=(v:unknown)=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v);
 const entry=(v:WorkReviewEntry)=>v&&relativePath(v.path)&&(v.kind==='directory'||v.kind==='file'&&sha(v.sha256)&&Number.isSafeInteger(v.bytes)&&v.bytes>=0&&typeof v.executable==='boolean');
 const manifest=(v:WorkReviewManifest)=>v&&v.protocol===1&&v.provider==='snapshot-copy'&&Array.isArray(v.paths)&&v.paths.length>0&&v.paths.length<=50000&&v.paths.every(relativePath)&&Array.isArray(v.entries)&&v.entries.length<=100000&&v.entries.every(entry);
-function validateWorkReview(v:TaskWorkReview){
+export function validateWorkReview(v:TaskWorkReview){
  if(!v||v.protocol!==1||v.source!=='isolated'||v.execution_authorized!==false
   ||!['grant_id','work_occurrence_id','cycle_id','snapshot_id'].every(k=>typeof v[k as keyof TaskWorkReview]==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(v[k as keyof TaskWorkReview] as string))
   ||!['source_sha256','source_record_sha256','plans_sha256','paths_sha256','call_set_sha256','inspection_sha256'].every(k=>sha(v[k as keyof TaskWorkReview]))

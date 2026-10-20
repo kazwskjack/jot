@@ -643,3 +643,17 @@ or explicitly disposed outcomes. Real process-loss tests cover admission on both
 sides of commit. This closes neither write activation nor capability 15:
 original workspace coordination, producer lifecycle, mutation UI, commit,
 destructive/revert and remote operations remain in the full workflow plan.
+
+### 2026-10-21 original finalized-work Apply entry
+
+The [mobile publication increment](../../implementation/2026-10-21-publication-mobile-apply.md)
+connects the completed task occurrence to original source/review history,
+explicit approval/admission, authenticated native dispatch and acknowledged
+recovery. Real mobile BFF/Gateway tests include a separate original SDK Host,
+process exit after physical file effect, reload and settlement without rewriting.
+Root67/UI267, local builds/typecheck and transport9 pass. The current frozen whole
+Gateway gate passed 2224 of 2231 tests, with seven conditional
+skips, zero failures/cancellations and SDK enabled. Packaged maintenance, deployed pool quiescence,
+commit/destructive/revert, authorized remote operations and the full portable
+Chat/Work/product acceptance retain their own requirements. This does not close
+capability15 or the all26 ledger, and no production write switch was enabled.

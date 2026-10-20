@@ -1123,5 +1123,86 @@
     "WorkPublicationReview",
     "200",
     "Owner review only; approval does not admit or dispatch file effects. Replays return the original receipt; GET returns current review state."
+  ],
+  [
+    "GET",
+    "/v1/projects/{projectId}/work-publication-sources/{runId}",
+    "Read original finalized work source for owner publication review",
+    null,
+    "WorkPublicationSource",
+    "200",
+    "Read-only original immutable completed-work proof and file versions. No root lookup, approval, execution admission or dispatch."
+  ],
+  [
+    "POST",
+    "/v1/projects/{projectId}/work-publications/{intentId}/admissions",
+    "admitWorkPublication",
+    "WorkPublicationAdmission",
+    "WorkPublicationAcceptance",
+    "202",
+    "Original immutable publication acceptance or current journal; never dispatches native effects."
+  ],
+  [
+    "GET",
+    "/v1/projects/{projectId}/work-publication-admissions/{requestId}",
+    "getWorkPublicationAcceptance",
+    null,
+    "WorkPublicationAcceptance",
+    "200",
+    "Original immutable publication acceptance or current journal; never dispatches native effects."
+  ],
+  [
+    "GET",
+    "/v1/projects/{projectId}/work-publication-executions/{executionId}",
+    "getWorkPublicationStatus",
+    null,
+    "WorkPublicationStatus",
+    "200",
+    "Original immutable publication acceptance or current journal; never dispatches native effects."
+  ],
+  [
+    "POST",
+    "/v1/projects/{projectId}/work-publication-executions/{executionId}/dispatch",
+    "dispatchWorkPublication",
+    "WorkPublicationDispatch",
+    "WorkPublicationStatus",
+    "200",
+    "Original explicit owner native command or immutable command receipt; never automatically replay an unknown effect."
+  ],
+  [
+    "POST",
+    "/v1/projects/{projectId}/work-publication-executions/{executionId}/settle",
+    "settleWorkPublication",
+    "WorkPublicationSettlementCommand",
+    "WorkPublicationSettlementResult",
+    "200",
+    "Original explicit owner native command or immutable command receipt; never automatically replay an unknown effect."
+  ],
+  [
+    "GET",
+    "/v1/projects/{projectId}/work-publication-executions/{executionId}/settlements/{requestId}",
+    "getWorkPublicationSettlementReceipt",
+    null,
+    "WorkPublicationSettlementReceipt",
+    "200",
+    "Original explicit owner native command or immutable command receipt; never automatically replay an unknown effect."
+  ],
+  [
+    "GET",
+    "/v1/projects/{projectId}/work-publication-executions/{executionId}/settlement",
+    "Read the original latest owner command receipt",
+    null,
+    "WorkPublicationSettlementReceipt",
+    "200",
+    "Read only the original recorded command; neither guesses a request ID nor completes pending settlement."
+  ],
+  [
+    "GET",
+    "/v1/projects/{projectId}/work-publication-sources/{runId}/history",
+    "Read original owned publication history for a completed source",
+    null,
+    "WorkPublicationHistory",
+    "200",
+    "Validated original review, immutable acceptance and current journal metadata; no new registry or execution."
   ]
 ]

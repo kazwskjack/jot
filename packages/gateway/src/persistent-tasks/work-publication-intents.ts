@@ -73,6 +73,19 @@ export class WorkPublicationIntents{
  private view(row:Row,event:Row){return freezeWorkAdmission({intent_id:row.intent_id,project_id:row.project_id,source:json(row.source_json),target:json(row.target_json),changes:json(row.changes_json),paths:json(row.selection_json).paths,
   review_sha256:row.review_sha256,version:Number(event.version),state:event.state,created_at:row.created_at,updated_at:event.created_at,execution_authorized:false as const});}
  get(owner:string,project:string,id:string){return this.read(()=>{const row=this.row(owner,project,id);return this.view(row,this.latest(id));});}
+ /** Original owned history only; a cursor selects an original row in this same
+  * source, never another scope or a mutable filesystem location. */
+ history(owner:string,project:string,runId:string,before?:string){return this.read(()=>{
+  this.projects.assertOwned(project,owner);if(typeof runId!=='string'||!ID.test(runId)||before!==undefined&&(typeof before!=='string'||!ID.test(before)))fail('invalid');
+  const cursor=before?this.row(owner,project,before):undefined;if(cursor&&cursor.source_run_id!==runId)fail('not_found');
+  const rows=this.db.prepare(`SELECT intent_id FROM wb_work_publication_intents WHERE owner_id=? AND project_id=? AND source_run_id=?
+   AND (? IS NULL OR created_at<? OR created_at=? AND intent_id<?) ORDER BY created_at DESC,intent_id DESC LIMIT 26`)
+   .all(owner,project,runId,cursor?.created_at??null,cursor?.created_at??null,cursor?.created_at??null,before??null) as Row[];
+  const items=rows.slice(0,25).map(item=>{const row=this.row(owner,project,item.intent_id),event=this.latest(row.intent_id),source=json(row.source_json);
+   return{intent_id:row.intent_id,project_id:project,source_run_id:runId,source_sha256:source.source_sha256,paths:json(row.selection_json).paths,
+    review_sha256:row.review_sha256,version:Number(event.version),state:event.state,created_at:row.created_at,updated_at:event.created_at,execution_authorized:false as const};});
+  return freezeWorkAdmission({project_id:project,source_run_id:runId,items,next_cursor:rows.length>25?items.at(-1)!.intent_id as string:null});
+ });}
  /** Original service-only prerequisite, not a serializable execution grant. */
  executionSource(owner:string,project:string,id:string,version:number,reviewSha256:string){
   return this.read(()=>{

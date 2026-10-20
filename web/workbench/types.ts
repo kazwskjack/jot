@@ -1,7 +1,10 @@
 import type {Capabilities} from '../jot/types';
 export type {ProjectPage,GitSnapshot,GitDiff,GitEntry} from '../../packages/gateway/contracts/types';
 export type {GitReviewPrepare,GitReviewControl,GitReviewIntent} from '../../packages/gateway/contracts/types';
-export type {WorkPublicationPrepare,WorkPublicationControl,WorkPublicationReview} from '../../packages/gateway/contracts/types';
+export type {WorkPublicationPrepare,WorkPublicationControl,WorkPublicationReview,WorkPublicationSource} from '../../packages/gateway/contracts/types';
+export type {WorkPublicationAdmission,WorkPublicationAcceptance,WorkPublicationStatus} from '../../packages/gateway/contracts/types';
+export type {WorkPublicationHistory,WorkPublicationHistoryItem} from '../../packages/gateway/contracts/types';
+export type {WorkPublicationSettlementCommand,WorkPublicationSettlementReceipt,WorkPublicationSettlementResult} from '../../packages/gateway/contracts/types';
 export type {GitIndexAcceptance,GitIndexExecutionResult} from '../../packages/gateway/contracts/types';
 export type {CreateTaskDelegation,TaskDelegationReceipt} from '../../packages/gateway/contracts/types';
 export type {SaveTaskCollaboration,TaskCollaboration} from '../../packages/gateway/contracts/types';

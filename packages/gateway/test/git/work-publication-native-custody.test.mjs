@@ -108,6 +108,12 @@ test('the owner can explicitly abandon an unknown original effect after review r
   await assert.rejects(f.executions.settlePublication('owner',f.scope.project_id,f.accepted.execution_id,{...command,expected_journal_sha256:'0'.repeat(64)}),/conflict/);
   const result=await f.executions.settlePublication('owner',f.scope.project_id,f.accepted.execution_id,command);assert.equal(result.state,'abandoned_unknown');
   assert.deepEqual(await f.executions.settlePublication('owner',f.scope.project_id,f.accepted.execution_id,command),result);
+  const changes=f.db.prepare('SELECT total_changes() n').get().n,receipt=f.plain.publicationSettlementReceipt('owner',f.scope.project_id,f.accepted.execution_id,command.request_id);
+  assert.equal(receipt.request_id,command.request_id);assert.equal(receipt.action,'abandon_unknown');assert.equal(receipt.expected_journal_sha256,command.expected_journal_sha256);assert.equal(receipt.acknowledge_unknown,true);assert.equal(receipt.execution_authorized,false);
+  assert.equal(receipt.disposition_sha256,f.db.prepare("SELECT record_sha256 FROM wb_work_publication_journal WHERE execution_id=? AND kind='disposition'").get(f.accepted.execution_id).record_sha256);assert.ok(Number.isFinite(Date.parse(receipt.recorded_at)));
+  assert.equal(JSON.stringify(receipt).includes(f.root),false);assert.equal(f.db.prepare('SELECT total_changes() n').get().n,changes);
+  assert.throws(()=>f.plain.publicationSettlementReceipt('foreign',f.scope.project_id,f.accepted.execution_id,command.request_id),/project_not_found/);
+  assert.throws(()=>f.plain.publicationSettlementReceipt('owner',f.scope.project_id,f.accepted.execution_id,'different-request'),/settlement_not_found/);
   assert.equal(await readFile(join(f.rootTarget,'source.md'),'utf8'),'Exact reviewed work content');assert.equal(f.db.prepare('SELECT count(*) n FROM wb_workspace_reservation_settlements').get().n,1);assert.equal(f.calls,0);
   await assert.rejects(f.executions.executePublication('owner',f.scope.project_id,f.accepted.execution_id),/producer_closed/);
  }finally{await f.close()}

@@ -9,6 +9,7 @@ import {publicationNativeHostFixture} from '../support/publication-native-host-f
 import {buildServer} from '../../src/server.ts';
 import {withImmediateTransaction} from '../../src/db/database.ts';
 import {callNativeGitTransport} from '../../../session-adapter/native-git-transport.js';
+import {createNativeGitClient} from '../../src/git/native-transport-client.ts';
 
 function peer(){
  const child=fork(fileURLToPath(new URL('./fixtures/native-publication-peer.mjs',import.meta.url)),[],{windowsHide:true,stdio:['ignore','ignore','pipe','ipc']}),messages=[],waiters=[];let failure,diagnostic='';
@@ -28,16 +29,23 @@ test('separate original native Host publishes original completed source, observe
  const peers=[];let app,gateway;try{
   const f=await publicationNativeHostFixture(t);await f.close();assert.equal(f.calls,0);
   const token='test-original-publication-source-token',transportToken='test-original-publication-wire-token-0001';
-  gateway=await buildServer({databasePath:join(f.root,'db.sqlite'),templateRoot:fileURLToPath(new URL('../../file-engine/templates/',import.meta.url)),workspaces:['ws'],internalChannelToken:token,gitRepositories:[{owner_id:'owner',project_id:f.scope.project_id,root:f.rootTarget}]});app=gateway.app;
-  const origin=await app.listen({host:'127.0.0.1',port:0}),database=join(f.root,'db.sqlite'),bs=String.fromCharCode(92),socket=process.platform==='win32'?[bs,bs,'.',bs,'pipe',bs,'jot-git-publication-',randomUUID()].join(''):join(f.root,'publication.sock');
+  const bs=String.fromCharCode(92),socket=process.platform==='win32'?[bs,bs,'.',bs,'pipe',bs,'jot-git-publication-',randomUUID()].join(''):join(f.root,'publication.sock'),nativeGitClient=await createNativeGitClient({socket,token:transportToken}),csrf='test-publication-route-csrf-token',uiOrigin='http://127.0.0.1:3030';
+  gateway=await buildServer({databasePath:join(f.root,'db.sqlite'),templateRoot:fileURLToPath(new URL('../../file-engine/templates/',import.meta.url)),workspaces:['ws'],internalChannelToken:token,csrfToken:csrf,allowedOrigins:[uiOrigin],nativeGitClient,gitRepositories:[{owner_id:'owner',project_id:f.scope.project_id,root:f.rootTarget}]});app=gateway.app;
+  const origin=await app.listen({host:'127.0.0.1',port:0}),database=join(f.root,'db.sqlite');
   const config={privateRoot:f.root,persistenceRoot:join(f.root,'original-native-host','sessions'),runtime:resolve(process.env.JOT_DSH_RUNTIME_MODULES),origin,channelToken:token,transportToken,database,project:f.scope.project_id,root:f.rootTarget,socket};
   const open=async()=>{const p=peer();peers.push(p);p.send('initialize',{config});assert.equal((await p.take('initialized')).modelCalls,0);p.send('mount',{config});assert.equal((await p.take('mounted')).modelCalls,0);return p};
   const schema=f.db.prepare('PRAGMA schema_version').get().schema_version;let p=await open();assert.equal(f.db.prepare('PRAGMA schema_version').get().schema_version,schema);
   const request={owner_id:'owner',project_id:f.scope.project_id,execution_id:f.accepted.execution_id,operation_kind:'work_publication'},wire={socket,token:transportToken};
+  const post=(id,action,payload,key)=>app.inject({method:'POST',url:'/v1/projects/'+f.scope.project_id+'/work-publication-executions/'+id+'/'+action,headers:{'x-user-id':'owner','x-csrf-token':csrf,origin:uiOrigin,'idempotency-key':key},payload});
   await assert.rejects(callNativeGitTransport(wire,{owner_id:'owner',project_id:f.scope.project_id,execution_id:f.accepted.execution_id}),/native_git_transport_rejected/);
   await assert.rejects(callNativeGitTransport(wire,{...request,owner_id:'foreign'}),/native_git_transport_rejected/);
   assert.equal(await readFile(join(f.rootTarget,'source.md'),'utf8'),f.base);assert.equal(f.db.prepare('SELECT count(*) n FROM wb_work_publication_journal').get().n,0);
-  assert.equal((await callNativeGitTransport(wire,request)).state,'applied');assert.equal(await readFile(join(f.rootTarget,'source.md'),'utf8'),'Exact reviewed work content');
+  const dispatched=await post(request.execution_id,'dispatch',{},'test-first-dispatch');assert.equal(dispatched.statusCode,200,dispatched.body);assert.equal(dispatched.json().state,'applied');assert.equal(await readFile(join(f.rootTarget,'source.md'),'utf8'),'Exact reviewed work content');
+  assert.deepEqual((await post(request.execution_id,'dispatch',{},'test-first-dispatch')).json(),dispatched.json());
+  const currentUrl=id=>'/v1/projects/'+f.scope.project_id+'/work-publication-executions/'+id;
+  const readCurrent=async id=>{const response=await app.inject({method:'GET',url:currentUrl(id),headers:{'x-user-id':'owner'}});assert.equal(response.statusCode,200,response.body);assert.equal(response.body.includes(f.root),false);return response.json()};
+  const history=await app.inject({method:'GET',url:'/v1/projects/'+f.scope.project_id+'/work-publication-admissions/'+f.accepted.request_id,headers:{'x-user-id':'owner'}});assert.equal(history.statusCode,200,history.body);assert.deepEqual(history.json(),f.accepted);
+  assert.equal((await readCurrent(request.execution_id)).state,'applied');
   const prepare=async id=>{const review=await f.service.prepare('owner',f.scope.project_id,{...f.input,request_id:id+'-review'}),approved=await f.service.control('owner',f.scope.project_id,review.intent_id,{request_id:id+'-approve',action:'approve',expected_version:1,review_sha256:review.review_sha256});
    const accepted=withImmediateTransaction(f.db,()=>f.plain.admit('owner',f.scope.project_id,review.intent_id,{request_id:id+'-execute',expected_version:approved.version,review_sha256:approved.review_sha256}));return{review,approved,request:{...request,execution_id:accepted.execution_id}}};
   // A deliberate synthetic local edit creates another explicit target review;
@@ -46,16 +54,21 @@ test('separate original native Host publishes original completed source, observe
   const pending=callNativeGitTransport(wire,second.request);pending.catch(()=>{});await p.take('prepared');
   await f.service.control('owner',f.scope.project_id,second.approved.intent_id,{request_id:'revoke-second',action:'cancel',expected_version:second.approved.version,review_sha256:second.approved.review_sha256});p.send('continue');await assert.rejects(pending,/native_git_transport_rejected/);
   assert.equal(await readFile(join(f.rootTarget,'source.md'),'utf8'),f.base);const stopped=f.plain.publicationStatus('owner',f.scope.project_id,second.request.execution_id);
-  assert.equal((await callNativeGitTransport(wire,{...second.request,command:{request_id:'ack-second',action:'abandon_unknown',expected_journal_sha256:stopped.journal_sha256,acknowledge_unknown:true}})).state,'abandoned_unknown');
-  const third=await prepare('third');p.send('exit-after-apply');await p.take('exit-armed');const lost=callNativeGitTransport(wire,third.request);lost.catch(()=>{});assert.equal(await p.exited,73);await assert.rejects(lost,/native_git_transport_rejected/);
+  const abandoned=await post(second.request.execution_id,'settle',{request_id:'ack-second',action:'abandon_unknown',expected_journal_sha256:stopped.journal_sha256,acknowledge_unknown:true},'test-abandon-second');assert.equal(abandoned.statusCode,200,abandoned.body);assert.equal(abandoned.json().status.state,'abandoned_unknown');assert.equal(abandoned.json().receipt.request_id,'ack-second');
+  const third=await prepare('third');p.send('exit-after-apply');await p.take('exit-armed');const lost=post(third.request.execution_id,'dispatch',{},'test-third-dispatch');assert.equal(await p.exited,73);assert.equal((await lost).statusCode,503);
   const before=await lstat(join(f.rootTarget,'source.md'),{bigint:true}),recorded=f.plain.publicationStatus('owner',f.scope.project_id,third.request.execution_id);assert.equal(recorded.state,'applied_pending_settlement');
+  const beforeRead=f.db.prepare('SELECT count(*) n FROM wb_work_publication_journal').get().n;assert.deepEqual(await readCurrent(third.request.execution_id),recorded);assert.equal(f.db.prepare('SELECT count(*) n FROM wb_work_publication_journal').get().n,beforeRead);
+  assert.equal((await post(third.request.execution_id,'dispatch',{},'test-refuse-third-replay')).statusCode,409);assert.equal(f.db.prepare('SELECT count(*) n FROM wb_work_publication_journal').get().n,beforeRead);
   // The dead synthetic process is confirmed above. Simulate expiry of only its
   // exact original lease; the shipped owner command still performs the fence.
   const resource='git-index-binding:'+f.workbench.executionBinding('owner',f.scope.project_id),lease=f.db.prepare('SELECT owner,generation FROM ga_worker_leases WHERE resource_id=?').get(resource);assert.ok(lease);
   assert.equal(f.db.prepare('UPDATE ga_worker_leases SET expires_at=? WHERE resource_id=? AND owner=? AND generation=?').run(String(Date.now()-1),resource,lease.owner,lease.generation).changes,1);
   p=await open();const command={request_id:'confirm-third',action:'confirm_recorded',expected_journal_sha256:recorded.journal_sha256,acknowledge_unknown:true};
-  const settled=await callNativeGitTransport(wire,{...third.request,command});assert.equal(settled.state,'applied');const count=f.db.prepare('SELECT count(*) n FROM wb_work_publication_journal').get().n;
-  assert.deepEqual(await callNativeGitTransport(wire,{...third.request,command}),settled);assert.equal(f.db.prepare('SELECT count(*) n FROM wb_work_publication_journal').get().n,count);
+  const resolved=await post(third.request.execution_id,'settle',command,'test-confirm-third');assert.equal(resolved.statusCode,200,resolved.body);const {status:settled,receipt}=resolved.json();assert.equal(settled.state,'applied');assert.equal(receipt.action,'confirm_recorded');const count=f.db.prepare('SELECT count(*) n FROM wb_work_publication_journal').get().n;
+  assert.deepEqual((await post(third.request.execution_id,'settle',command,'test-confirm-third')).json(),resolved.json());assert.equal(f.db.prepare('SELECT count(*) n FROM wb_work_publication_journal').get().n,count);
+  const recovery=await app.inject({method:'GET',url:currentUrl(third.request.execution_id)+'/settlements/'+command.request_id,headers:{'x-user-id':'owner'}});assert.equal(recovery.statusCode,200,recovery.body);assert.deepEqual(recovery.json(),receipt);
+  const latest=await app.inject({method:'GET',url:currentUrl(third.request.execution_id)+'/settlement',headers:{'x-user-id':'owner'}});assert.equal(latest.statusCode,200,latest.body);assert.deepEqual(latest.json(),receipt);
+  assert.deepEqual(await readCurrent(third.request.execution_id),settled);
   const after=await lstat(join(f.rootTarget,'source.md'),{bigint:true});assert.equal(after.ino,before.ino);assert.equal(after.dev,before.dev);assert.equal(await readFile(join(f.rootTarget,'source.md'),'utf8'),'Exact reviewed work content');
   assert.equal(f.db.prepare('SELECT count(*) n FROM ga_worker_leases').get().n,0);p.send('status');assert.equal((await p.take('status')).modelCalls,0);
  }finally{for(const p of peers.reverse())await p.close();await app?.close();gateway?.db.close()}

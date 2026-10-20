@@ -30,6 +30,12 @@ function configuration(options){
  return{socket:options.socket,token:options.token};
 }
 const digest=value=>createHash('sha256').update(value).digest();
+/** Operator client settings only. Reuse the exact original endpoint/token
+ * rules without accepting Host callbacks or caller-selected module paths. */
+export function normalizeNativeGitTransportConfiguration(options){
+ if(!options||typeof options!=='object'||Array.isArray(options)||Object.keys(options).sort().join(',')!=='socket,token')throw Error('native_git_transport_config_invalid');
+ return Object.freeze(configuration(options));
+}
 const publicCodes=new Set(['git_execution_revoked','git_execution_not_found','git_native_workspace_host_unavailable','native_git_database_changed','native_git_transport_busy']);
 
 /** Local transport only. The original perform function retains all authority.

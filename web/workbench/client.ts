@@ -1,7 +1,7 @@
 import type {MemoryRetrieval,MemoryRetrievalPage} from './types';
 import type {ProjectPage,GitSnapshot,GitDiff} from './types';
 import type {GitReviewIntent} from './types';
-import type {WorkPublicationReview} from './types';
+import type {WorkPublicationReview,WorkPublicationSource,WorkPublicationAcceptance,WorkPublicationStatus,WorkPublicationSettlementReceipt,WorkPublicationHistory} from './types';
 import type {GitIndexAcceptance,GitIndexExecutionResult} from './types';
 import type {DiscoveryPolicyView} from './types';
 import type {DiscoveryHistoryPage,DiscoveryHistoryDetail} from './types';
@@ -24,6 +24,12 @@ export const workbenchApi={
  gitDiff:(project:string,snapshot:string,file:string,stage:'working'|'staged',signal?:AbortSignal)=>request<GitDiff>(`/projects/${pathId(project)}/git/diff?snapshot_id=${pathId(snapshot)}&path=${pathId(file)}&stage=${stage}`,'GET',undefined,undefined,signal),
  gitReview:(project:string,intent:string,signal?:AbortSignal)=>request<GitReviewIntent>(`/projects/${pathId(project)}/git/intents/${pathId(intent)}`,'GET',undefined,undefined,signal),
  publicationReview:(project:string,intent:string,signal?:AbortSignal)=>request<WorkPublicationReview>(`/projects/${pathId(project)}/work-publications/${pathId(intent)}`,'GET',undefined,undefined,signal),
+ publicationSource:(project:string,run:string,signal?:AbortSignal)=>request<WorkPublicationSource>(`/projects/${pathId(project)}/work-publication-sources/${pathId(run)}`,'GET',undefined,undefined,signal),
+ publicationHistory:(project:string,run:string,before?:string,signal?:AbortSignal)=>request<WorkPublicationHistory>(`/projects/${pathId(project)}/work-publication-sources/${pathId(run)}/history${before?'?before='+pathId(before):''}`,'GET',undefined,undefined,signal),
+ publicationAcceptance:(project:string,requestId:string,signal?:AbortSignal)=>request<WorkPublicationAcceptance>(`/projects/${pathId(project)}/work-publication-admissions/${pathId(requestId)}`,'GET',undefined,undefined,signal),
+ publicationStatus:(project:string,executionId:string,signal?:AbortSignal)=>request<WorkPublicationStatus>(`/projects/${pathId(project)}/work-publication-executions/${pathId(executionId)}`,'GET',undefined,undefined,signal),
+ publicationSettlementReceipt:(project:string,executionId:string,requestId:string,signal?:AbortSignal)=>request<WorkPublicationSettlementReceipt>(`/projects/${pathId(project)}/work-publication-executions/${pathId(executionId)}/settlements/${pathId(requestId)}`,'GET',undefined,undefined,signal),
+ publicationLatestSettlement:(project:string,executionId:string,signal?:AbortSignal)=>request<WorkPublicationSettlementReceipt>(`/projects/${pathId(project)}/work-publication-executions/${pathId(executionId)}/settlement`,'GET',undefined,undefined,signal),
  gitAcceptance:(project:string,requestId:string,signal?:AbortSignal)=>request<GitIndexAcceptance>(`/projects/${pathId(project)}/git/admissions/${pathId(requestId)}`,'GET',undefined,undefined,signal),
  gitExecution:(project:string,executionId:string,signal?:AbortSignal)=>request<GitIndexExecutionResult>(`/projects/${pathId(project)}/git/executions/${pathId(executionId)}`,'GET',undefined,undefined,signal),
  files:(workspace:string,project:string,options:WorkspaceFileListOptions={},signal?:AbortSignal)=>request<WorkspaceFilePage>(`/workspaces/${pathId(workspace)}/files?project_id=${pathId(project)}${options.limit===undefined?'':`&limit=${options.limit}`}${options.cursor===undefined?'':`&cursor=${pathId(options.cursor)}`}`,'GET',undefined,undefined,signal),

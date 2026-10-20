@@ -3,9 +3,24 @@
 The owner preparation/current-review/approval/cancellation HTTP boundary is now
 implemented with safe projections and original atomic receipts; see
 [owner review API](../../implementation/2026-10-20-publication-owner-review-api.md).
-This closes only the review API portion of the product-entry requirement.
-Execution admission, dispatch/status/settlement and mobile controls remain open;
-do not mark the complete publication or full26 item done from this increment.
+Original source/admission/status/history, authenticated native dispatch and
+explicit settlement now also have HTTP/contracts and mobile task-entry wiring.
+See [mobile Apply evidence](../../implementation/2026-10-21-publication-mobile-apply.md).
+The actual mobile BFF/Gateway and separate compiled Host passed synthetic
+response-loss and explicit recovery tests with zero model calls. Complete
+changed-tree regression, packaged maintenance and deployment acceptance remain
+separate; do not mark the complete publication or full26 item done from this.
+
+- [x] Original owned finalized-source read and exact-digest preparation; immutable
+  file versions and inspected inventories share the same safe source projection.
+- [x] Separate original execution admission/acceptance/current-status APIs, with
+  atomic admission acknowledgements and no read/admission-side native dispatch.
+  See [source and execution API evidence](../../implementation/2026-10-20-publication-source-and-execution-api.md).
+- [x] Explicit original native Host dispatch/settlement HTTP boundary and original
+  immutable command receipt reads, including known-ID and latest owner reads.
+  See [native IO implementation and local evidence](../../implementation/2026-10-20-publication-native-dispatch-api.md).
+- [ ] Owner BFF/mobile review/Apply/recovery controls and full changed-tree/
+  real-provider acceptance remain required before complete Apply.
 
 ### Next owner entry sequence, traced to original service methods
 
@@ -51,6 +66,31 @@ do not mark the complete publication or full26 item done from this increment.
    Include original immutable source bytes and target file/index verification.
    Run relevant focused tests before the final changed-tree regression/build
    and public source/staged/history review, then verify the exact remote commit.
+
+### Owner UI recovery requirements
+
+- Resolve the project from the original owned conversation/run, rather than
+  depending on a role that may have been removed since completion. Bind source
+  project/run/task, original file proofs, review version/digest, acceptance and
+  current status before showing each action.
+- Use the complete original inventory/diff and actual selected target changes;
+  render content as escaped text and page long lists. Unsupported change kinds
+  remain visible limitations, not silent full-tree completion claims.
+- Ordinary prepare/approve/cancel/admit can retry their exact original atomic
+  request. Dispatch/settlement loss requires original receipt/current reads;
+  do not route an unknown IO retry through the ordinary mutation helper.
+- For a pending recorded owner command, obtain its immutable receipt and reuse
+  its original request ID, action and expected journal digest. Do not substitute
+  the newer journal tail. Require explicit acknowledgement and a new deliberate
+  user action before continuing native settlement.
+- Retain only owner-scoped client command metadata, never source contents,
+  physical roots or transport credentials. No network write occurs just from
+  hydrating client state. An owned original-store history read is also needed
+  to find prior reviews/executions after reload or on another device; derive it
+  from original rows and receipts, not a new publication registry or guessed ID.
+- The local UI candidate already has six passing proposal/presentation tests.
+  They are prerequisites only; the actual component, task-history entry, BFF/
+  Playwright loss/reload/revocation/escaping tests and integration remain open.
 
 **Goal:** Complete the existing isolated-result review, explicit publication and
 Git/checkpoint coordination without replacing DSH or its original authority.

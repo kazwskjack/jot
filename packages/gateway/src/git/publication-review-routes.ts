@@ -1,16 +1,22 @@
 import type {FastifyInstance,FastifyRequest,FastifyReply} from 'fastify';
 import type {WorkPublicationIntents,WorkPublicationPrepare,WorkPublicationControl} from '../persistent-tasks/work-publication-intents.ts';
-import {publicationReviewView} from '../persistent-tasks/publication-review-view.ts';
+import {publicationReviewView,publicationSourceView} from '../persistent-tasks/publication-review-view.ts';
+import type {FinalizedWorkSources} from '../persistent-tasks/finalized-work-sources.ts';
 
-type Options={intents:WorkPublicationIntents|undefined;actor:(request:any)=>string;atomic:<T>(request:any,status:number,operation:()=>T)=>T};
+type Options={intents:WorkPublicationIntents|undefined;sources:FinalizedWorkSources;actor:(request:any)=>string;atomic:<T>(request:any,status:number,operation:()=>T)=>T};
 /** Original owner review only. Approval does not admit or dispatch publication. */
 export function registerPublicationReviewRoutes(app:FastifyInstance,options:Options){
- const route=async(request:FastifyRequest,reply:FastifyReply,kind:'get'|'prepare'|'control')=>{
+ const route=async(request:FastifyRequest,reply:FastifyReply,kind:'get'|'prepare'|'control'|'source')=>{
   const abort=new AbortController(),cancel=()=>{if(!reply.raw.writableEnded)abort.abort()};request.raw.once('aborted',cancel);reply.raw.once('close',cancel);
   reply.header('cache-control','private, no-store');
   try{
-   const params=request.params as {projectId:string;intentId?:string},owner=options.actor(request);
+   const params=request.params as {projectId:string;intentId?:string;runId?:string},owner=options.actor(request);
    if(Object.keys(request.query as object).length)throw Error('work_publication_invalid');
+   if(kind==='source'){
+    const source=options.sources.summary(owner,params.runId!);
+    if(source.project_id!==params.projectId)throw Error('completed_work_source_not_found');
+    return publicationSourceView(source);
+   }
    if(!options.intents)throw Error('git_repository_unconfigured');
    if(kind==='get')return publicationReviewView(options.intents.get(owner,params.projectId,params.intentId!));
    const commit=kind==='prepare'?await options.intents.prepareChange(owner,params.projectId,request.body as WorkPublicationPrepare,abort.signal)
@@ -26,6 +32,7 @@ export function registerPublicationReviewRoutes(app:FastifyInstance,options:Opti
   }finally{request.raw.removeListener('aborted',cancel);reply.raw.removeListener('close',cancel)}
  };
  app.post('/v1/projects/:projectId/work-publications',(request,reply)=>route(request,reply,'prepare'));
+ app.get('/v1/projects/:projectId/work-publication-sources/:runId',(request,reply)=>route(request,reply,'source'));
  app.get('/v1/projects/:projectId/work-publications/:intentId',(request,reply)=>route(request,reply,'get'));
  app.post('/v1/projects/:projectId/work-publications/:intentId/control',(request,reply)=>route(request,reply,'control'));
 }

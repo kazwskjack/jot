@@ -91,6 +91,17 @@ export class WorkPublicationExecutions{
   const record={protocol:1,execution:row,acceptance:this.acceptance(row)};this.db.prepare('INSERT INTO wb_work_publication_admissions VALUES(?,?,?)').run(row.execution_id,canonicalJson(record),hash(record));return this.receipt(this.row(owner,project,row.execution_id));
  }
  getAdmission(owner:string,project:string,requestId:string){return this.read(()=>{if(typeof requestId!=='string'||!ID.test(requestId))fail('execution_invalid');this.projects.assertOwned(project,owner);const row=this.db.prepare('SELECT execution_id FROM wb_work_publication_executions WHERE owner_id=? AND project_id=? AND request_id=?').get(owner,project,requestId) as Row|undefined;if(!row)fail('execution_not_found');return this.receipt(this.row(owner,project,row.execution_id));});}
+ publicationHistory(owner:string,project:string,runId:string,before?:string){return this.read(()=>{
+  const page=this.intents.history(owner,project,runId,before);
+  const items=page.items.map(item=>{
+   const record=this.db.prepare('SELECT execution_id FROM wb_work_publication_executions WHERE owner_id=? AND project_id=? AND intent_id=?').get(owner,project,item.intent_id) as Row|undefined;
+   if(!record)return{...item,acceptance:null,status:null};
+   const acceptance=this.receipt(this.row(owner,project,record.execution_id));
+   if(acceptance.intent_id!==item.intent_id||acceptance.review_sha256!==item.review_sha256||acceptance.source_sha256!==item.source_sha256)fail('admission_corrupt');
+   return{...item,acceptance,status:this.publicationStatus(owner,project,record.execution_id)};
+  });
+  return freezeWorkAdmission({...page,items});
+ });}
  reserveWorkspace(owner:string,project:string,id:string){return withImmediateTransaction(this.db,()=>{const row=this.row(owner,project,id);this.current(row);const scope=this.scope(row),result=reserveWorkspaceOperation(this.db,scope);sealWorkspaceFamily(this.db,scope);return result;});}
  workspaceFamily(owner:string,project:string,id:string){return withImmediateTransaction(this.db,()=>{
   const row=this.row(owner,project,id);this.receipt(row);
@@ -157,6 +168,16 @@ export class WorkPublicationExecutions{
   return freezeWorkAdmission({execution_id:id,project_id:project,intent_id:row.intent_id,request_id:row.request_id,state,
    files:journal.effects.filter(effect=>effect.phase==='publish').map(effect=>({path:effect.path,sha256:effect.sha256,size:effect.size})),
    pending_path:journal.pending?.path??null,journal_sha256:journal.tail_sha256,execution_authorized:false as const});
+ });}
+ /** Original immutable owner-command acknowledgement, independently of
+  * current reservation settlement. Reading it never invokes the native Host. */
+ publicationSettlementReceipt(owner:string,project:string,id:string,requestId?:string){return this.read(()=>{
+  if(requestId!==undefined&&(typeof requestId!=='string'||!ID.test(requestId)))fail('execution_invalid');
+  const row=this.row(owner,project,id);this.receipt(row);const record=readWorkPublicationJournal(this.db,row).disposition;
+  if(!record||requestId!==undefined&&record.payload.request_id!==requestId)fail('settlement_not_found');
+  const command=record.payload;
+  return freezeWorkAdmission({execution_id:id,project_id:project,request_id:command.request_id,action:command.action,expected_journal_sha256:command.expected_journal_sha256,
+   acknowledge_unknown:true as const,disposition_sha256:record.sha256,recorded_at:command.settled_at,execution_authorized:false as const});
  });}
  async executePublication(owner:string,project:string,id:string,signal?:AbortSignal){
   if(this.db.isTransaction)fail('async_transaction');signal?.throwIfAborted();const row=this.row(owner,project,id),before=this.publicationStatus(owner,project,id);

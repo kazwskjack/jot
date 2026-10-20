@@ -6,8 +6,10 @@ import {createEmailProvider} from './channels/email-provider.ts';
 import {emailConfiguration} from './channels/provider-config.ts';
 import {loadReplyJudgeClient} from './persistent-tasks/reply-judge-client.ts';
 import {SessionControllerClient} from './harness/session-controller-client.ts';
+import {loadNativeGitClient} from './git/native-transport-client.ts';
 
 const config = loadBffConfig();
+const nativeGitClient=await loadNativeGitClient(process.env);
 const sessionAdapterTokenFile=process.env.GENERAL_AGENT_SESSION_ADAPTER_TOKEN_FILE?.trim();
 const conversationGoalClient=sessionAdapterTokenFile?new SessionControllerClient(
   process.env.GENERAL_AGENT_SESSION_ADAPTER_URL?.trim()||'http://127.0.0.1:18841',readFileSync(sessionAdapterTokenFile,'utf8').trim()):undefined;
@@ -19,7 +21,7 @@ if (config.voiceEnabled) {
 }
 const emailProvider=process.env.GENERAL_AGENT_EMAIL_BINDINGS_ENABLED==='true'?await createEmailProvider(emailConfiguration(process.env)):undefined;
 const replyJudge=loadReplyJudgeClient(process.env,config.modelBudgetPolicy?.routes??[]);
-const service = await buildServer({ ...config,chatModeEnabled:process.env.GENERAL_AGENT_CHAT_ENABLED==='true',ordinarySteeringEnabled:process.env.GENERAL_AGENT_ORDINARY_STEERING_ENABLED==='true',ordinaryAttachmentSteeringEnabled:process.env.GENERAL_AGENT_ORDINARY_STEERING_ATTACHMENTS_ENABLED==='true',ordinaryInputRecoveryEnabled:process.env.GENERAL_AGENT_ORDINARY_INPUT_RECOVERY_ENABLED==='true',workAgentPreset:process.env.GENERAL_AGENT_DSH_AGENT_PRESET?.trim()||'jot-general', ...(conversationGoalClient?{conversationGoalClient,modelCatalogClient:conversationGoalClient,conversationModeClient:conversationGoalClient,ordinaryAttachmentSteeringClient:conversationGoalClient}:{}),...(voiceAdapter ? { voiceAdapter } : {}),...(emailProvider?{emailBindingSend:emailProvider.send.bind(emailProvider)}:{}),...(replyJudge?{replyJudge}:{}) });
+const service = await buildServer({ ...config,...(nativeGitClient?{nativeGitClient}:{}),chatModeEnabled:process.env.GENERAL_AGENT_CHAT_ENABLED==='true',ordinarySteeringEnabled:process.env.GENERAL_AGENT_ORDINARY_STEERING_ENABLED==='true',ordinaryAttachmentSteeringEnabled:process.env.GENERAL_AGENT_ORDINARY_STEERING_ATTACHMENTS_ENABLED==='true',ordinaryInputRecoveryEnabled:process.env.GENERAL_AGENT_ORDINARY_INPUT_RECOVERY_ENABLED==='true',workAgentPreset:process.env.GENERAL_AGENT_DSH_AGENT_PRESET?.trim()||'jot-general', ...(conversationGoalClient?{conversationGoalClient,modelCatalogClient:conversationGoalClient,conversationModeClient:conversationGoalClient,ordinaryAttachmentSteeringClient:conversationGoalClient}:{}),...(voiceAdapter ? { voiceAdapter } : {}),...(emailProvider?{emailBindingSend:emailProvider.send.bind(emailProvider)}:{}),...(replyJudge?{replyJudge}:{}) });
 await service.app.listen({ host: config.host, port: config.port });
 
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, async () => {

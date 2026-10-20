@@ -8,9 +8,9 @@ function Inventory({label,items}:{label:string;items:WorkReviewEntry[]}){
  {items.length>50&&<nav aria-label={label+'分页'}><button type="button" disabled={offset===0} onClick={()=>setOffset(n=>Math.max(0,n-50))}>上一页</button><span>{offset+1}–{Math.min(offset+50,items.length)} / {items.length}</span><button type="button" disabled={offset+50>=items.length} onClick={()=>setOffset(n=>n+50)}>下一页</button></nav>}</details>;
 }
 /** Original frozen review only; no apply, Git or checkpoint action is granted. */
-export default function TaskWorkReviewView({value}:{value:TaskWorkReview}){
+export default function TaskWorkReviewView({value,publication=false}:{value:TaskWorkReview;publication?:boolean}){
  const [offset,setOffset]=useState(0),changes=value.diff.changes;
- return <section aria-label="完整任务改动" style={{overflowWrap:'anywhere',minWidth:0}}><h4>完整任务改动</h4><p>共 {changes.length} 项改动 · 隔离工作区结果，尚未发布到项目</p>
+ return <section aria-label="完整任务改动" style={{overflowWrap:'anywhere',minWidth:0}}><h4>完整任务改动</h4><p>共 {changes.length} 项改动 · {publication?'原始隔离工作区改动清单':'隔离工作区结果，尚未发布到项目'}</p>
  <ul>{changes.slice(offset,offset+50).map((change,i)=><li key={offset+i}>{names[change.kind]} · <code>{change.from?`${change.from} → `:''}{change.path}</code></li>)}</ul>
  {changes.length>50&&<nav aria-label="改动分页"><button type="button" disabled={offset===0} onClick={()=>setOffset(n=>Math.max(0,n-50))}>上一页</button><span>{offset+1}–{Math.min(offset+50,changes.length)} / {changes.length}</span><button type="button" disabled={offset+50>=changes.length} onClick={()=>setOffset(n=>n+50)}>下一页</button></nav>}
  <Inventory label="原始版本完整清单" items={value.base_manifest.entries}/><Inventory label="结果版本完整清单" items={value.result_manifest.entries}/>

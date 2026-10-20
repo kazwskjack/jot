@@ -85,10 +85,10 @@ Local loopback tests require the authorized Windows user context when the
 restricted shell denies `127.0.0.1`; the original restricted-shell failures are
 retained separately rather than reported as passing tests.
 
-Still required in this same publication plan: original immutable acceptance and
-current status APIs; explicit dispatch and unknown-outcome settlement using the
-existing authenticated native Host transport; BFF/mobile review and Apply/
-recovery controls; real browser lost-response/current-state acceptance. Approval
+Subsequent increments implement the [original source/acceptance/current reads](2026-10-20-publication-source-and-execution-api.md)
+and [explicit original native IO and recovery receipts](2026-10-20-publication-native-dispatch-api.md).
+Still required in the same plan: BFF/mobile review and Apply/recovery controls,
+real browser lost-response/current-state acceptance and final changed-tree gates. Approval
 must not be silently dispatched by a GET, task delivery or response replay.
 Binary/delete/rename/mode producers, full PilotDeck capability parity, portable
 Chat/Work and provider/platform/deployment acceptance remain open.

@@ -6,8 +6,16 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {request} from 'node:http';
 import {createNativeGitTransport,callNativeGitTransport} from '../native-git-transport.js';
+import * as transport from '../native-git-transport.js';
 const token='test-local-git-transport-token-00000001';
 const scope={owner_id:'owner',project_id:'project',execution_id:'execution'};
+test('Gateway configuration reuses the original transport validator without accepting host callbacks',()=>{
+ assert.equal(typeof transport.normalizeNativeGitTransportConfiguration,'function');
+ const bs=String.fromCharCode(92),socket=process.platform==='win32'?[bs,bs,'.',bs,'pipe',bs,'jot-git-config-test'].join(''):'/tmp/jot-git-config.sock';
+ const input={socket,token},settings=transport.normalizeNativeGitTransportConfiguration(input);
+ assert.deepEqual(settings,input);assert.ok(Object.isFrozen(settings));input.token='changed';assert.equal(settings.token,token);
+ for(const bad of [{socket,token:'short'},{socket:'http://untrusted.invalid',token},{socket,token,perform:()=>{}},{socket,token,module:'caller'}])assert.throws(()=>transport.normalizeNativeGitTransportConfiguration(bad),/native_git_transport_config_invalid/);
+});
 async function fixture(perform){
  const root=await mkdtemp(join(tmpdir(),'jot-git-transport-'));await chmod(root,0o700);
  const bs=String.fromCharCode(92),socket=process.platform==='win32'?[bs,bs,'.',bs,'pipe',bs,'jot-git-test-',randomUUID()].join(''):join(root,'native.sock');

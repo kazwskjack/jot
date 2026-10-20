@@ -18,10 +18,8 @@ Jot puts a small interface around useful Agent work: ask a question, follow the 
 - A demo mode with clearly labelled synthetic responses.
 - An extended TypeScript gateway and Session adapter for projects, ownership, batch progress, document jobs, event recovery and optional voice services.
 - An optional workbench for Agent roles, scheduled and event-triggered tasks, task-specific teams, shared workspace files and memory proposals. It uses the extended gateway and a configured execution host.
-- An extended read-only Git workbench for configured owned projects: branch/status and snapshot-bound staged/working diffs. [Setup and current scope](docs/implementation/2026-10-19-git-workbench.md).
-  Original accepted requests and current execution outcomes also have separate
-  [history APIs](docs/implementation/2026-10-19-git-original-admission-history.md).
-  UI write activation still requires workspace coordination and producer wiring.
+- An extended Git workbench for configured owned projects: branch/status and snapshot-bound staged/working diffs. Completed task text-file changes also have explicit target review, approval, local Apply, history and mobile recovery through the original native host. [Setup and current scope](docs/implementation/2026-10-21-publication-mobile-apply.md).
+  Operator-bound repositories, authenticated native IPC and offline schema maintenance are required. Commit, destructive/revert and remote-operation workflows remain separate work.
 
 The local runtime runs without the extended services. Extended integrations require their own configured runtime, models and tool endpoints. Bundled interfaces do not imply that external services are installed.
 

@@ -321,3 +321,16 @@ export type WorkPublicationTarget = {snapshot_id:string;repository_sha256:string
 export type WorkPublicationChange = {path:string;kind:'add'|'modify';before:WorkReviewEntry|null;after:WorkReviewEntry;before_text:string|null;after_text:string};
 export type WorkPublicationReview = {intent_id:string;project_id:string;source:WorkPublicationSource;target:WorkPublicationTarget;changes:WorkPublicationChange[];paths:string[];
  review_sha256:string;version:number;state:'prepared'|'approved'|'cancelled';created_at:string;updated_at:string;execution_authorized:false};
+
+export type WorkPublicationAdmission = {request_id:string;expected_version:number;review_sha256:string};
+export type WorkPublicationAcceptance = {protocol:1;execution_id:string;operation_kind:'work_publication';project_id:string;intent_id:string;request_id:string;
+ review_version:number;review_sha256:string;source_sha256:string;target_sha256:string;state:'accepted';accepted_at:string;execution_authorized:false};
+export type WorkPublicationStatus = {execution_id:string;project_id:string;intent_id:string;request_id:string;state:'not_started'|'running'|'interrupted'|'unknown'|'prepared'|'cancelled_before_preparation'|'failed_before_preparation'|'applied'|'abandoned_unknown'|'applied_pending_settlement'|'abandon_pending_settlement';
+ files:Array<{path:string;sha256:string;size:number}>;pending_path:string|null;journal_sha256:string|null;execution_authorized:false};
+
+export type WorkPublicationDispatch = Record<string,never>;
+export type WorkPublicationSettlementCommand = {request_id:string;action:'confirm_recorded'|'abandon_unknown';expected_journal_sha256:string;acknowledge_unknown:true};
+export type WorkPublicationSettlementReceipt = WorkPublicationSettlementCommand & {execution_id:string;project_id:string;disposition_sha256:string;recorded_at:string;execution_authorized:false};
+export type WorkPublicationSettlementResult = {receipt:WorkPublicationSettlementReceipt;status:WorkPublicationStatus};
+export type WorkPublicationHistoryItem = Pick<WorkPublicationReview,'intent_id'|'project_id'|'paths'|'review_sha256'|'version'|'state'|'created_at'|'updated_at'|'execution_authorized'> & {source_run_id:string;source_sha256:string;acceptance:WorkPublicationAcceptance|null;status:WorkPublicationStatus|null};
+export type WorkPublicationHistory = {project_id:string;source_run_id:string;items:WorkPublicationHistoryItem[];next_cursor:string|null};

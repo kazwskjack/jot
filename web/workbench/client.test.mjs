@@ -7,6 +7,28 @@ await mkdir(output,{recursive:true});
 await build({entryPoints:[new URL('./client.ts',import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')],bundle:true,platform:'node',format:'esm',outfile:new URL('client.mjs',output).pathname.replace(/^\/([A-Z]:)/,'$1')});
 const {workbenchApi}=await import(new URL('client.mjs',output));
 
+test('publication recovery receipts have explicit latest and original-command read paths without native dispatch',async t=>{
+ const original=globalThis.fetch,calls=[];t.after(()=>{globalThis.fetch=original});globalThis.fetch=async(url,init)=>{calls.push({url,init});return new Response('{"execution_authorized":false}')};
+ const signal=new AbortController().signal;
+ await workbenchApi.publicationLatestSettlement('project /1','execution:original',signal);await workbenchApi.publicationSettlementReceipt('project /1','execution:original','request:original',signal);
+ assert.equal(calls[0].url,'/workbench-api/v1/projects/project%20%2F1/work-publication-executions/execution%3Aoriginal/settlement');
+ assert.equal(calls[1].url,'/workbench-api/v1/projects/project%20%2F1/work-publication-executions/execution%3Aoriginal/settlements/request%3Aoriginal');
+ for(const {init} of calls){assert.equal(init.method,'GET');assert.equal(init.body,undefined);assert.equal(init.cache,'no-store');assert.equal(init.credentials,'same-origin');assert.ok(init.signal instanceof AbortSignal)}
+});
+
+test('publication acceptance and current outcome remain separate abortable BFF reads',async t=>{
+ const original=globalThis.fetch,calls=[];t.after(()=>{globalThis.fetch=original});globalThis.fetch=async(url,init)=>{calls.push({url,init});return new Response('{"execution_authorized":false}')};
+ const signal=new AbortController().signal;await workbenchApi.publicationAcceptance('project /1','original:request',signal);await workbenchApi.publicationStatus('project /1','original:execution',signal);
+ assert.equal(calls[0].url,'/workbench-api/v1/projects/project%20%2F1/work-publication-admissions/original%3Arequest');assert.equal(calls[1].url,'/workbench-api/v1/projects/project%20%2F1/work-publication-executions/original%3Aexecution');
+ for(const {init} of calls){assert.equal(init.method,'GET');assert.equal(init.body,undefined);assert.equal(init.cache,'no-store');assert.equal(init.credentials,'same-origin');assert.ok(init.signal instanceof AbortSignal)}
+});
+
+test('completed publication source read encodes the original project and run without mutation',async t=>{
+ const original=globalThis.fetch,calls=[];t.after(()=>{globalThis.fetch=original});globalThis.fetch=async(url,init)=>{calls.push({url,init});return new Response('{"source":"isolated"}')};
+ await workbenchApi.publicationSource('project /1','run:original',new AbortController().signal);
+ assert.equal(calls[0].url,'/workbench-api/v1/projects/project%20%2F1/work-publication-sources/run%3Aoriginal');assert.equal(calls[0].init.method,'GET');assert.equal(calls[0].init.body,undefined);assert.equal(calls[0].init.cache,'no-store');assert.equal(calls[0].init.credentials,'same-origin');
+});
+
 test('publication review uses the encoded owner BFF read without sending approval or file authority',async t=>{
  const original=globalThis.fetch,calls=[];t.after(()=>{globalThis.fetch=original});globalThis.fetch=async(url,init)=>{calls.push({url,init});return new Response('{"execution_authorized":false}')};
  const abort=new AbortController();await workbenchApi.publicationReview('project /1','review:original',abort.signal);
