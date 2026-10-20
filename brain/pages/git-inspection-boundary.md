@@ -4,7 +4,7 @@ title: Git views use owned read-only repository snapshots
 category: decision
 status: active
 created: "2026-10-19T17:04:32"
-updated: "2026-10-19T22:01:51"
+updated: "2026-10-20T07:53:02"
 ---
 
 <!-- compiled_truth -->
@@ -44,4 +44,10 @@ Git 执行的配置占用范围与程序／stat 见证分离：原始记录固�
   kind: decision
   summary: Separate original Git admission and historical reads from physical dispatch and workspace coordination
   source: docs/implementation/2026-10-19-git-original-admission-history.md
+  affects: [git-inspection-boundary]
+
+- time: 2026-10-20T07:53:02
+  kind: decision
+  summary: "Original Git producer custody commits with its exact Worker lease before effects; known preparation failure and interrupted starts never grant an automatic retry, while existing accepted history and explicit disposition remain separate."
+  source: docs/implementation/2026-10-20-git-producer-lifecycle.md
   affects: [git-inspection-boundary]

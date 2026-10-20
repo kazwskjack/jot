@@ -42,6 +42,13 @@ planner or adopt unrelated internal/native requests as UI work.
 
 ## 3. Original workspace coordination before write activation
 
+The [original producer lifecycle increment](../../implementation/2026-10-20-git-producer-lifecycle.md)
+now journals original executor start/finish facts and prevents automatic retries
+of an interrupted or known failed pending preparation. This is a prerequisite
+within section 2, not completion of its HTTP/Worker lifecycle or any coordination
+checkbox below. Original admission, effect and producer observations remain
+separate; existing pre-upgrade pending producers require explicit reconciliation.
+
 - [ ] Follow the reference Gateway/checkpoint coordination: Git mutation cannot
   race an Agent turn, shared-workspace writer or checkpoint restore. Reuse the
   owning workspace coordinator, not a second planner or a Git-only busy flag.

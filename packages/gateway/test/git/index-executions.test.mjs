@@ -16,7 +16,7 @@ for(const phase of ['before-record','before-link-1',...Array.from({length:4},(_,
  const child=spawnSync(process.execPath,[fileURLToPath(new URL('./fixtures/lock-acquisition-crash-worker.mjs',import.meta.url)),f.root,f.database,approved.intent_id,input.request_id,phase],{encoding:'utf8',env:{...process.env,TEMP:f.childTemp,TMP:f.childTemp},timeout:30000,windowsHide:true});
  assert.equal(child.error,undefined);assert.equal(child.status,73,child.stderr);
  f.db.exec('DROP TRIGGER IF EXISTS crash_before_preparation');
- const row=f.db.prepare('SELECT * FROM wb_git_index_executions').get();assert.equal(row.protocol,3);
+ const row=f.db.prepare('SELECT * FROM wb_git_index_executions').get();assert.equal(row.protocol,4);
  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM wb_git_index_dispatches').get().n,0);
  assert.deepEqual(await readFile(join(f.root,'.git/index')),before);
  const names=await readdir(join(f.root,'.git')),pending=names.filter(name=>/^jot-index-lock-/.test(name));
