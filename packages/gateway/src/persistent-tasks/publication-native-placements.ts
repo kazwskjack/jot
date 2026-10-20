@@ -20,9 +20,15 @@ const exists=(db:DatabaseSync,name:string)=>!!db.prepare("SELECT 1 FROM sqlite_s
  * Closed/failed records remain historical; live guards and physical/native
  * custody are checked separately by the original foreground coordinator. */
 export function readReservedPublicationPlacements(db:DatabaseSync,scope:WorkspaceOperationSource){
+ valid(scope.operation_kind==='work_publication');return readReservedNativePlacements(db,scope);
+}
+
+/** The same original sealed family history for index operations. Neither read
+ * authorizes source publication, source copying or execution. */
+export function readReservedNativePlacements(db:DatabaseSync,scope:WorkspaceOperationSource){
  const outer=db.isTransaction;if(!outer)db.exec('BEGIN DEFERRED');
  try{
-  valid(scope.operation_kind==='work_publication');const family=readReservedWorkspaceFamily(db,scope),cache=new Map<string,History|null>();
+  valid(scope.operation_kind==='work_publication'||scope.operation_kind==='git_index');const family=readReservedWorkspaceFamily(db,scope),cache=new Map<string,History|null>();
   const history=(runId:string):History|null=>{
    if(cache.has(runId))return cache.get(runId)!;valid(cache.size<10000);
    let value:History|null;try{value=readHistoricalWorkSnapshot(db,scope.owner_id,runId)}catch(error){

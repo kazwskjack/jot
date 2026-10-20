@@ -54,35 +54,47 @@ export class GitIndexEffects extends GitRepositoryInspection{
   let target:()=>void;
   if(rawFamily===undefined){try{target=this.retainNativeWorkspaceRoots(observations.filter(member=>member.session_ref!==placement.session_ref));}catch{invalid();}}
   else{
-   const family=structuredClone(rawFamily),{placements_sha256,...familyFacts}=family;
-   if(Object.keys(family).sort().join(',')!=='binding_sha256,execution_authorized,family_sha256,members,owner_id,placements_sha256,project_id,protocol'
-    ||family.protocol!==1||family.execution_authorized!==false||family.owner_id!==placement.owner_id||family.project_id!==placement.project_id
-    ||!['binding_sha256','family_sha256','placements_sha256'].every(key=>typeof family[key as keyof typeof family]==='string'&&/^[a-f0-9]{64}$/.test(family[key as keyof typeof family] as string))
-    ||hash(canonicalJson(familyFacts))!==placements_sha256||!Array.isArray(family.members)||family.members.length!==observations.length)invalid();
-   const seen=new Set<string>(),ordinary:GitNativeWorkspaceObservation[]=[];
-   for(const [index,member] of observations.entries()){
-    const expected=family.members[index]!;
-    if(!member||Object.keys(member).sort().join(',')!=='custody,cwd,header_sha256,session_ref'||typeof member.session_ref!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(member.session_ref)||seen.has(member.session_ref)
-     ||!expected||Object.keys(expected).sort().join(',')!=='evidence_sha256,placement,session_ref'||expected.session_ref!==member.session_ref||typeof expected.evidence_sha256!=='string'||!/^[a-f0-9]{64}$/.test(expected.evidence_sha256))invalid();seen.add(member.session_ref);
-    if(member.custody==='absent'){if(member.cwd!==null||member.header_sha256!==null)invalid();}
-    else if(!['resident','cold'].includes(member.custody)||typeof member.cwd!=='string'||member.cwd!==resolve(member.cwd)||typeof member.header_sha256!=='string'||!/^[a-f0-9]{64}$/.test(member.header_sha256))invalid();
-    if(expected.placement===null){if(member.session_ref===placement.session_ref)invalid();ordinary.push(member);continue;}
-    const historical=expected.placement;
-    if(!historical||Object.keys(historical).sort().join(',')!=='isolated_root,record_sha256,snapshot_id,storage_root'||typeof historical.snapshot_id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(historical.snapshot_id)||typeof historical.record_sha256!=='string'||!/^[a-f0-9]{64}$/.test(historical.record_sha256))invalid();
-    for(const root of [historical.storage_root,historical.isolated_root])if(!root||Object.keys(root).sort().join(',')!=='canonical,dev,ino,path'||typeof root.path!=='string'||typeof root.canonical!=='string'
-     ||resolve(root.path)!==root.path||resolve(root.canonical)!==root.canonical||![root.dev,root.ino].every(value=>typeof value==='string'&&/^(0|[1-9][0-9]{0,127})$/.test(value)))invalid();
-    if(!equalPath(join(historical.storage_root.path,historical.snapshot_id),historical.isolated_root.path))invalid();
-    if(member.session_ref===placement.session_ref&&canonicalJson(historical)!==canonicalJson({snapshot_id:placement.snapshot_id,storage_root:placement.storage_root,isolated_root:placement.isolated_root,record_sha256:placement.record_sha256}))invalid();
-    // An absent member is fenced by the original native persistence/factory
-    // barrier, not a reason to recreate a removed historical snapshot. A live
-    // or cold member must retain its exact original physical root identities.
-    if(member.custody!=='absent'){if(!equalPath(member.cwd!,historical.isolated_root.path))invalid();roots.push(historical.storage_root,historical.isolated_root);}
-   }
-   try{target=this.retainNativeWorkspaceRoots(ordinary);}catch{invalid();}
+   if(!rawFamily||typeof rawFamily!=='object'||rawFamily.owner_id!==placement.owner_id||rawFamily.project_id!==placement.project_id||!Array.isArray(rawFamily.members))invalid();
+   const producer=rawFamily.members.find(member=>member.session_ref===placement.session_ref);
+   if(!producer||canonicalJson(producer.placement)!==canonicalJson({snapshot_id:placement.snapshot_id,storage_root:placement.storage_root,isolated_root:placement.isolated_root,record_sha256:placement.record_sha256}))invalid();
+   try{target=this.retainReservedNativeWorkspaceRoots(observations,rawFamily);}catch{invalid();}
   }
   const check=()=>{try{
    target!();for(const root of roots)if(this.directorySync(root.path)!==root.dev+':'+root.ino||!equalPath(realpathSync(root.path),root.canonical))throw Error();
   }catch{throw Error('git_publication_native_workspace_changed');}};
+  check();return check;
+ }
+ /** Original sealed family roots, including historical isolated work. No
+  * finalized source or permission is inferred from association with an index. */
+ retainReservedNativeWorkspaceRoots(input:readonly GitNativeWorkspaceObservation[],rawFamily:PublicationNativePlacements){
+  const invalid=()=>{throw Error('git_native_workspace_association_required');};
+  if(!rawFamily||typeof rawFamily!=='object'||!Array.isArray(input)||input.length>256)invalid();
+  const observations=structuredClone(input),roots:Array<FinalizedWorkNativePlacement['storage_root']>=[];let target:()=>void;
+  const family=structuredClone(rawFamily),{placements_sha256,...familyFacts}=family;
+  if(Object.keys(family).sort().join(',')!=='binding_sha256,execution_authorized,family_sha256,members,owner_id,placements_sha256,project_id,protocol'
+   ||family.protocol!==1||family.execution_authorized!==false||!['owner_id','project_id'].every(key=>typeof family[key as keyof typeof family]==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(family[key as keyof typeof family] as string))
+   ||!['binding_sha256','family_sha256','placements_sha256'].every(key=>typeof family[key as keyof typeof family]==='string'&&/^[a-f0-9]{64}$/.test(family[key as keyof typeof family] as string))
+   ||hash(canonicalJson(familyFacts))!==placements_sha256||!Array.isArray(family.members)||family.members.length!==observations.length)invalid();
+  const seen=new Set<string>(),ordinary:GitNativeWorkspaceObservation[]=[];
+  for(const [index,member] of observations.entries()){
+   const expected=family.members[index]!;
+   if(!member||Object.keys(member).sort().join(',')!=='custody,cwd,header_sha256,session_ref'||typeof member.session_ref!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(member.session_ref)||seen.has(member.session_ref)
+    ||!expected||Object.keys(expected).sort().join(',')!=='evidence_sha256,placement,session_ref'||expected.session_ref!==member.session_ref||typeof expected.evidence_sha256!=='string'||!/^[a-f0-9]{64}$/.test(expected.evidence_sha256))invalid();seen.add(member.session_ref);
+   if(member.custody==='absent'){if(member.cwd!==null||member.header_sha256!==null)invalid();}
+   else if(!['resident','cold'].includes(member.custody)||typeof member.cwd!=='string'||member.cwd!==resolve(member.cwd)||typeof member.header_sha256!=='string'||!/^[a-f0-9]{64}$/.test(member.header_sha256))invalid();
+   if(expected.placement===null){ordinary.push(member);continue;}
+   const historical=expected.placement;
+   if(!historical||Object.keys(historical).sort().join(',')!=='isolated_root,record_sha256,snapshot_id,storage_root'||typeof historical.snapshot_id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(historical.snapshot_id)||typeof historical.record_sha256!=='string'||!/^[a-f0-9]{64}$/.test(historical.record_sha256))invalid();
+   for(const root of [historical.storage_root,historical.isolated_root])if(!root||Object.keys(root).sort().join(',')!=='canonical,dev,ino,path'||typeof root.path!=='string'||typeof root.canonical!=='string'
+    ||resolve(root.path)!==root.path||resolve(root.canonical)!==root.canonical||![root.dev,root.ino].every(value=>typeof value==='string'&&/^(0|[1-9][0-9]{0,127})$/.test(value)))invalid();
+   if(!equalPath(join(historical.storage_root.path,historical.snapshot_id),historical.isolated_root.path))invalid();
+   // An absent member is fenced by the original native persistence/factory
+   // barrier, not a reason to recreate a removed historical snapshot. A live
+   // or cold member must retain its exact original physical root identities.
+   if(member.custody!=='absent'){if(!equalPath(member.cwd!,historical.isolated_root.path))invalid();roots.push(historical.storage_root,historical.isolated_root);}
+  }
+  try{target=this.retainNativeWorkspaceRoots(ordinary);}catch{invalid();}
+  const check=()=>{try{target!();for(const root of roots)if(this.directorySync(root.path)!==root.dev+':'+root.ino||!equalPath(realpathSync(root.path),root.canonical))throw Error();}catch{throw Error('git_native_workspace_changed');}};
   check();return check;
  }
  /** Host-only root association, not execution authority. The original caller

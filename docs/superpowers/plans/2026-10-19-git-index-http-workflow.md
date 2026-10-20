@@ -158,6 +158,14 @@ remaining original paths are joined and accepted.
 
 ## 4. Actual mobile workbench and release
 
+The [historical native association increment](../../implementation/2026-10-21-index-historical-native-association.md)
+now reuses the same original family history and retained physical-root proof for
+index effects and publication, with actual resident/cold stage/unstage and
+root-replacement evidence. Its [Apply/recovery continuation](2026-10-21-index-native-apply-and-recovery.md)
+retains explicit original control admission, fresh native drain and settlement,
+HTTP/BFF/mobile activation and full changed-tree release as separate requirements.
+This association fix does not activate index writes in the workbench.
+
 ### Cross-process restart admission continuation
 
 See the [original restart admission implementation](../../implementation/2026-10-20-native-workspace-restart-admission.md)

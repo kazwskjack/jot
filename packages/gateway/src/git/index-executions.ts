@@ -9,6 +9,7 @@ import type {GitIndexReceipt,GitNativeWorkspaceObservation} from './index-effect
 import type {GitIndexAcceptance,GitIndexExecutionResult} from '../../contracts/types.ts';
 import {indexEvidence,indexPreparation,type GitIndexEvidence,type GitIndexPreparation} from './index-evidence.ts';
 import {GitIndexProducers} from './index-producers.ts';
+import {readReservedNativePlacements} from '../persistent-tasks/publication-native-placements.ts';
 import {assertWorkspaceWritable,reserveWorkspaceOperation,releaseUnstartedWorkspaceOperation,settleWorkspaceOperation,readReservedWorkspaceFamily,sealWorkspaceFamily,assertNativeWorkspaceAdmission} from '../workbench/workspace-coordination.ts';
 
 type Input={request_id:string;expected_version:number;review_sha256:string};
@@ -199,7 +200,8 @@ export class GitIndexExecutions{
   const prior=this.get(owner,project,id);if(prior.state!=='pending')return prior;
   const host=this.nativeWorkspaceHost;if(!host)throw Error('git_native_workspace_host_unavailable');
   this.reserveWorkspace(owner,project,id);const family=this.workspaceFamily(owner,project,id);
-  const checkReservation=()=>{signal?.throwIfAborted();const current=this.workspaceFamily(owner,project,id);if(current.reservation_id!==family.reservation_id||current.family_sha256!==family.family_sha256)throw Error('git_native_workspace_source_changed');};
+  const placementScope={owner_id:owner,project_id:project,operation_kind:'git_index' as const,operation_id:id,binding_sha256:family.binding_sha256},placements=readReservedNativePlacements(this.db,placementScope);
+  const checkReservation=()=>{signal?.throwIfAborted();const current=this.workspaceFamily(owner,project,id);if(current.reservation_id!==family.reservation_id||current.family_sha256!==family.family_sha256||readReservedNativePlacements(this.db,placementScope).placements_sha256!==placements.placements_sha256)throw Error('git_native_workspace_source_changed');};
   const result=await host.withReservedFamily({owner_id:owner,project_id:project,execution_id:id},{assertReservation:checkReservation,...(signal?{signal}:{})},async context=>{
    const requireAdmission=()=>{const checked=host.assertAdmission(context) as unknown;if(checked!==undefined){if(checked&&typeof(checked as {then?:unknown}).then==='function')Promise.resolve(checked).catch(()=>{});throw Error('git_native_workspace_host_unavailable');}};
    checkReservation();requireAdmission();const view=host.inspect(context),source=view?.source;
@@ -207,7 +209,7 @@ export class GitIndexExecutions{
     ||source.reservation_id!==family.reservation_id||source.family_sha256!==family.family_sha256||source.binding_sha256!==family.binding_sha256
     ||source.execution_id!==id||source.owner_id!==owner||source.project_id!==project||!(view.signal instanceof AbortSignal)||!Array.isArray(view.workspaces)
     ||JSON.stringify(view.workspaces.map(member=>member.session_ref))!==JSON.stringify(family.members.map(member=>member.session_ref)))throw Error('git_native_workspace_source_changed');
-   const roots=this.git.indexEffects(owner,project).retainNativeWorkspaceRoots(view.workspaces),custody=Object.freeze({});
+   const roots=this.git.indexEffects(owner,project).retainReservedNativeWorkspaceRoots(view.workspaces,placements),custody=Object.freeze({});
    const assertCurrent=()=>{checkReservation();requireAdmission();if(host.inspect(context)!==view)throw Error('git_native_workspace_custody_invalid');roots();};
    assertCurrent();this.nativeCustodies.set(custody,{execution_id:id,assertCurrent});
    const ownedSignal=AbortSignal.any([view.signal,...(signal?[signal]:[])]);
