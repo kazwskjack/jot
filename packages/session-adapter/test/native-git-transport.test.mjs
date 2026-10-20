@@ -39,6 +39,16 @@ test('the same authenticated transport preserves a distinct publication kind and
  }finally{await f.close()}
 });
 
+test('index recovery carries only its exact admitted original control and cannot borrow a publication command',async()=>{
+ const index={...scope,operation_kind:'git_index'},command={request_id:'original-index-confirmation',expected_state_sha256:'b'.repeat(64),acknowledge_unknown:true},seen=[];
+ const f=await fixture(async input=>{seen.push(input);assert.ok(Object.isFrozen(input));assert.ok(Object.isFrozen(input.command));return{state:'completed',execution_id:input.execution_id,request_id:input.command.request_id}});
+ try{
+  const pending=callNativeGitTransport({socket:f.socket,token},{...index,command});command.expected_state_sha256='c'.repeat(64);const receipt=await pending;assert.equal(receipt.request_id,'original-index-confirmation');assert.equal(seen[0].command.expected_state_sha256,'b'.repeat(64));
+  for(const bad of [{...index,command:{...command,root:'untrusted'}},{...index,command:{...command,acknowledge_unknown:false}},{...index,command:{...command,expected_state_sha256:'bad'}},{...scope,command},{...scope,operation_kind:'work_publication',command}])await assert.rejects(callNativeGitTransport({socket:f.socket,token},bad),/native_git_transport_input_invalid/);
+  assert.equal(seen.length,1);
+ }finally{await f.close()}
+});
+
 test('publication transport refuses unknown kinds, injected roots and ambiguous recovery commands before original dispatch',async()=>{
  let calls=0;const f=await fixture(async()=>{calls++;return{};});
  const command={request_id:'owner-command',action:'confirm_recorded',expected_journal_sha256:'a'.repeat(64),acknowledge_unknown:true};

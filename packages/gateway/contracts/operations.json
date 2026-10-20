@@ -1204,5 +1204,50 @@
     "WorkPublicationHistory",
     "200",
     "Validated original review, immutable acceptance and current journal metadata; no new registry or execution."
+  ],
+  [
+    "POST",
+    "/v1/projects/{projectId}/git/intents/{intentId}/admissions",
+    "Original owned Git index admission or evidence; no native dispatch",
+    "GitIndexAdmissionInput",
+    "GitIndexAcceptance",
+    "202",
+    "Original owner, CSRF and atomic receipt boundaries; no effect dispatch."
+  ],
+  [
+    "POST",
+    "/v1/projects/{projectId}/git/executions/{executionId}/controls",
+    "Original owned Git index admission or evidence; no native dispatch",
+    "GitIndexControlInput",
+    "GitIndexControlAcceptance",
+    "202",
+    "Original owner, CSRF and atomic receipt boundaries; no effect dispatch."
+  ],
+  [
+    "GET",
+    "/v1/projects/{projectId}/git/executions/{executionId}/inspection",
+    "Original owned Git index admission or evidence; no native dispatch",
+    null,
+    "GitIndexInspection",
+    "200",
+    "Original owner, CSRF and atomic receipt boundaries; no effect dispatch."
+  ],
+  [
+    "GET",
+    "/v1/projects/{projectId}/git/executions/{executionId}/control-admissions/{requestId}",
+    "Original owned Git index admission or evidence; no native dispatch",
+    null,
+    "GitIndexControlAcceptance",
+    "200",
+    "Original owner, CSRF and atomic receipt boundaries; no effect dispatch."
+  ],
+  [
+    "GET",
+    "/v1/projects/{projectId}/git/executions/{executionId}/controls/{requestId}",
+    "Original owned Git index admission or evidence; no native dispatch",
+    null,
+    "GitIndexControlReceipt",
+    "200",
+    "Original owner, CSRF and atomic receipt boundaries; no effect dispatch."
   ]
 ]

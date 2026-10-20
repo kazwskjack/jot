@@ -16,21 +16,8 @@ export class GitIndexProducers{
    CREATE TABLE IF NOT EXISTS wb_git_index_producer_finishes(execution_id TEXT PRIMARY KEY REFERENCES wb_git_index_producers(execution_id),record_json TEXT NOT NULL,record_sha256 TEXT NOT NULL);`);
   for(const table of ['wb_git_index_producers','wb_git_index_producer_finishes'])for(const kind of ['UPDATE','DELETE'])db.exec(`CREATE TRIGGER IF NOT EXISTS ${table}_no_${kind.toLowerCase()} BEFORE ${kind} ON ${table} BEGIN SELECT RAISE(ABORT,'git_execution_immutable'); END;`);
  }
- record(row:Execution){
-  const record=this.db.prepare('SELECT * FROM wb_git_index_producers WHERE execution_id=?').get(row.execution_id) as {record_json:string;record_sha256:string}|undefined;
-  if(!record){if(this.db.prepare('SELECT 1 FROM wb_git_index_producer_finishes WHERE execution_id=?').get(row.execution_id))throw Error('git_execution_producer_corrupt');return;}
-  try{
-   const start=JSON.parse(record.record_json) as Start;
-   if(row.protocol!==4||digest(start)!==record.record_sha256||!start.lease||typeof start.lease.owner!=='string'||!/^git-executor-[a-f0-9-]{36}$/.test(start.lease.owner)||!Number.isSafeInteger(start.lease.generation)||start.lease.generation<1||typeof start.started_at!=='string'||!Number.isFinite(Date.parse(start.started_at))||JSON.stringify(start)!==JSON.stringify({protocol:1,execution_id:row.execution_id,request_sha256:row.request_sha256,binding_sha256:row.binding_sha256,lease:{owner:start.lease.owner,generation:start.lease.generation},started_at:start.started_at}))throw Error();
-   const saved=this.db.prepare('SELECT * FROM wb_git_index_producer_finishes WHERE execution_id=?').get(row.execution_id) as {record_json:string;record_sha256:string}|undefined;
-   if(!saved)return{start,sha256:record.record_sha256};
-   const finish=JSON.parse(saved.record_json) as Finish;
-   if(digest(finish)!==saved.record_sha256||!['failed_before_preparation','cancelled_before_preparation','prepared','unknown','applied'].includes(finish.state)||typeof finish.finished_at!=='string'||!Number.isFinite(Date.parse(finish.finished_at))||JSON.stringify(finish)!==JSON.stringify({protocol:1,execution_id:row.execution_id,producer_sha256:record.record_sha256,state:finish.state,finished_at:finish.finished_at}))throw Error();
-   const has=(table:string)=>!!this.db.prepare('SELECT 1 FROM '+table+' WHERE execution_id=?').get(row.execution_id),prepared=has('wb_git_index_preparations'),dispatched=has('wb_git_index_dispatches');
-   if((finish.state==='failed_before_preparation'||finish.state==='cancelled_before_preparation')&&(prepared||dispatched)||finish.state==='prepared'&&(!prepared||dispatched)||finish.state==='unknown'&&!dispatched||finish.state==='applied'&&!has('wb_git_index_outcomes'))throw Error();
-   return{start,sha256:record.record_sha256,finish};
-  }catch{throw Error('git_execution_producer_corrupt');}
- }
+ record(row:Execution){return readIndexProducerRecord(this.db,row);}
+
  view(row:Execution,resource:string){
   const record=this.record(row),base={execution_id:row.execution_id,execution_authorized:false as const};
   if(!record)return{...base,state:row.protocol<4?'legacy_untracked' as const:'not_started' as const};
@@ -50,3 +37,20 @@ export class GitIndexProducers{
   this.db.prepare('INSERT INTO wb_git_index_producer_finishes VALUES(?,?,?)').run(row.execution_id,JSON.stringify(finish),digest(finish));this.record(row);
  }
 }
+
+/** Exact original producer facts; never install tables or manufacture a finish while reading. */
+export function readIndexProducerRecord(db:DatabaseSync,row:Execution){
+  const record=db.prepare('SELECT * FROM wb_git_index_producers WHERE execution_id=?').get(row.execution_id) as {record_json:string;record_sha256:string}|undefined;
+  if(!record){if(db.prepare('SELECT 1 FROM wb_git_index_producer_finishes WHERE execution_id=?').get(row.execution_id))throw Error('git_execution_producer_corrupt');return;}
+  try{
+   const start=JSON.parse(record.record_json) as Start;
+   if(row.protocol!==4||digest(start)!==record.record_sha256||!start.lease||typeof start.lease.owner!=='string'||!/^git-executor-[a-f0-9-]{36}$/.test(start.lease.owner)||!Number.isSafeInteger(start.lease.generation)||start.lease.generation<1||typeof start.started_at!=='string'||!Number.isFinite(Date.parse(start.started_at))||JSON.stringify(start)!==JSON.stringify({protocol:1,execution_id:row.execution_id,request_sha256:row.request_sha256,binding_sha256:row.binding_sha256,lease:{owner:start.lease.owner,generation:start.lease.generation},started_at:start.started_at}))throw Error();
+   const saved=db.prepare('SELECT * FROM wb_git_index_producer_finishes WHERE execution_id=?').get(row.execution_id) as {record_json:string;record_sha256:string}|undefined;
+   if(!saved)return{start,sha256:record.record_sha256};
+   const finish=JSON.parse(saved.record_json) as Finish;
+   if(digest(finish)!==saved.record_sha256||!['failed_before_preparation','cancelled_before_preparation','prepared','unknown','applied'].includes(finish.state)||typeof finish.finished_at!=='string'||!Number.isFinite(Date.parse(finish.finished_at))||JSON.stringify(finish)!==JSON.stringify({protocol:1,execution_id:row.execution_id,producer_sha256:record.record_sha256,state:finish.state,finished_at:finish.finished_at}))throw Error();
+   const has=(table:string)=>!!db.prepare('SELECT 1 FROM '+table+' WHERE execution_id=?').get(row.execution_id),prepared=has('wb_git_index_preparations'),dispatched=has('wb_git_index_dispatches');
+   if((finish.state==='failed_before_preparation'||finish.state==='cancelled_before_preparation')&&(prepared||dispatched)||finish.state==='prepared'&&(!prepared||dispatched)||finish.state==='unknown'&&!dispatched||finish.state==='applied'&&!has('wb_git_index_outcomes'))throw Error();
+   return{start,sha256:record.record_sha256,finish};
+  }catch{throw Error('git_execution_producer_corrupt');}
+ }

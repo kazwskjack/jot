@@ -2,6 +2,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
 import {workspacePublicationSchema} from './workspace-coordination-upgrade.ts';
 import {publicationSettlementEvidence} from '../persistent-tasks/work-publication-journal.ts';
+import {indexAppliedSettlementEvidence,indexResolutionSettlementEvidence,recordedIndexResolutionSettlementEvidence} from '../git/index-settlement.ts';
 
 export type WorkspaceOperationSource={owner_id:string;project_id:string;operation_kind:'git_index'|'work_publication';operation_id:string;binding_sha256:string};
 type Source=WorkspaceOperationSource;
@@ -151,13 +152,23 @@ function record(db:DatabaseSync,source:Source):Reservation|undefined{
 function view(db:DatabaseSync,value:Reservation){
  const released=!!db.prepare('SELECT 1 FROM wb_workspace_reservation_releases WHERE reservation_id=?').get(value.reservation_id),settled=db.prepare('SELECT * FROM wb_workspace_reservation_settlements WHERE reservation_id=?').get(value.reservation_id);
  if(settled){let proof;try{proof=JSON.parse(String(settled.record_json));}catch{throw Error('workspace_settlement_corrupt');}
-  if(!released||digest(proof)!==settled.record_sha256||Object.keys(proof).sort().join(',')!=='execution_id,finish_sha256,outcome_sha256,producer_sha256,reservation_id,settled_at'
-   ||proof.reservation_id!==value.reservation_id||proof.execution_id!==value.operation_id||!['outcome_sha256','producer_sha256','finish_sha256'].every(key=>typeof proof[key]==='string'&&/^[a-f0-9]{64}$/.test(proof[key]))||!Number.isFinite(Date.parse(proof.settled_at)))throw Error('workspace_settlement_corrupt');
+  if(!released||digest(proof)!==settled.record_sha256||proof.reservation_id!==value.reservation_id||proof.execution_id!==value.operation_id||!Number.isFinite(Date.parse(proof.settled_at)))throw Error('workspace_settlement_corrupt');
+  if(proof.protocol===2){
+   try{if(value.operation_kind!=='git_index'||proof.kind!=='git_index_control')throw Error();const expected={protocol:2,kind:'git_index_control',reservation_id:value.reservation_id,execution_id:value.operation_id,...recordedIndexResolutionSettlementEvidence(db,value,proof.control_request_id),settled_at:proof.settled_at};if(JSON.stringify(proof)!==JSON.stringify(expected))throw Error();}catch{throw Error('workspace_settlement_corrupt')}
+  }else if(Object.keys(proof).sort().join(',')!=='execution_id,finish_sha256,outcome_sha256,producer_sha256,reservation_id,settled_at'
+   ||!['outcome_sha256','producer_sha256','finish_sha256'].every(key=>typeof proof[key]==='string'&&/^[a-f0-9]{64}$/.test(proof[key])))throw Error('workspace_settlement_corrupt');
  }
  return{reservation_id:value.reservation_id,project_id:value.project_id,state:released?(settled?'released_settled' as const:'released_unstarted' as const):'reserved' as const,execution_authorized:false as const};
 }
 /** Historical owning-service projection; no reservation or release is minted. */
 export function readWorkspaceOperation(db:DatabaseSync,source:Source){const value=record(db,source);return value?view(db,value):undefined;}
+/** Read a proven original control settlement only. No hold, lease or release is
+ * created when an acknowledgement was lost after its final transaction. */
+export function readWorkspaceIndexResolution(db:DatabaseSync,source:Source,request:string){
+ const value=record(db,source);if(!value)throw Error('workspace_reservation_not_found');const current=view(db,value);if(source.operation_kind!=='git_index'||current.state!=='released_settled')throw Error('workspace_reservation_closed');
+ const saved=db.prepare('SELECT record_json FROM wb_workspace_reservation_settlements WHERE reservation_id=?').get(value.reservation_id),proof=JSON.parse(String(saved?.record_json));
+ if(proof.protocol!==2||proof.kind!=='git_index_control'||proof.control_request_id!==request)throw Error('workspace_reservation_source_changed');return current;
+}
 /** Trusted owning-service call, inside its original admission transaction. The
  * caller must verify its immutable original operation; this is not a wire API. */
 export function reserveWorkspaceOperation(db:DatabaseSync,source:Source){
@@ -191,16 +202,23 @@ export function settleWorkspaceOperation(db:DatabaseSync,source:Source){
   db.prepare('INSERT INTO wb_workspace_reservation_settlements VALUES(?,?,?)').run(value.reservation_id,JSON.stringify(proof),digest(proof));
   db.prepare('INSERT INTO wb_workspace_reservation_releases VALUES(?,?)').run(value.reservation_id,proof.settled_at);return view(db,value);
  }
- const execution=db.prepare('SELECT * FROM wb_git_index_executions WHERE execution_id=? AND owner_id=? AND project_id=? AND binding_sha256=? AND protocol=4').get(source.operation_id,source.owner_id,source.project_id,source.binding_sha256);
- const outcome=db.prepare('SELECT * FROM wb_git_index_outcomes WHERE execution_id=?').get(source.operation_id),producer=db.prepare('SELECT * FROM wb_git_index_producers WHERE execution_id=?').get(source.operation_id),finish=db.prepare('SELECT * FROM wb_git_index_producer_finishes WHERE execution_id=?').get(source.operation_id);
- let result,start,end;try{result=JSON.parse(String(outcome?.receipt_json));start=JSON.parse(String(producer?.record_json));end=JSON.parse(String(finish?.record_json));}catch{throw Error('workspace_reservation_producer_unsettled');}
- if(!execution||digest(result)!==outcome?.receipt_sha256||result.execution_id!==source.operation_id||result.state!=='applied'||result.execution_authorized!==false
-  ||digest(start)!==producer?.record_sha256||start.execution_id!==source.operation_id||start.request_sha256!==execution.request_sha256||start.binding_sha256!==source.binding_sha256
-  ||digest(end)!==finish?.record_sha256||end.execution_id!==source.operation_id||end.producer_sha256!==producer?.record_sha256||end.state!=='applied'
-  ||db.prepare('SELECT 1 FROM ga_worker_leases WHERE resource_id=?').get('git-index-binding:'+source.binding_sha256))throw Error('workspace_reservation_producer_unsettled');
- const proof={reservation_id:value.reservation_id,execution_id:source.operation_id,outcome_sha256:String(outcome!.receipt_sha256),producer_sha256:String(producer!.record_sha256),finish_sha256:String(finish!.record_sha256),settled_at:new Date().toISOString()};
+ const evidence=indexAppliedSettlementEvidence(db,source);
+ if(db.prepare('SELECT 1 FROM ga_worker_leases WHERE resource_id=?').get('git-index-binding:'+source.binding_sha256))throw Error('workspace_reservation_producer_unsettled');
+ const proof={reservation_id:value.reservation_id,execution_id:source.operation_id,...evidence,settled_at:new Date().toISOString()};
  db.prepare('INSERT INTO wb_workspace_reservation_settlements VALUES(?,?,?)').run(value.reservation_id,JSON.stringify(proof),digest(proof));
  db.prepare('INSERT INTO wb_workspace_reservation_releases VALUES(?,?)').run(value.reservation_id,proof.settled_at);return view(db,value);
+}
+
+/** Owning service only after actual native drain, in the same transaction that
+ * releases its exact recovery Worker. Expired or foreign leases never qualify. */
+export function settleWorkspaceIndexResolution(db:DatabaseSync,source:Source,request:string){
+ if(!db.isTransaction||!available(db))throw Error('workspace_coordination_unavailable');
+ if(source.operation_kind!=='git_index')throw Error('workspace_reservation_source_invalid');const value=record(db,source);if(!value)throw Error('workspace_reservation_not_found');
+ const current=view(db,value);if(current.state==='released_settled')return readWorkspaceIndexResolution(db,source,request);if(current.state!=='reserved')throw Error('workspace_reservation_closed');
+ const evidence=indexResolutionSettlementEvidence(db,source,request);
+ if(db.prepare('SELECT 1 FROM ga_worker_leases WHERE resource_id=?').get('git-index-binding:'+source.binding_sha256))throw Error('workspace_reservation_producer_unsettled');
+ const proof={protocol:2,kind:'git_index_control',reservation_id:value.reservation_id,execution_id:source.operation_id,...evidence,settled_at:new Date().toISOString()};
+ db.prepare('INSERT INTO wb_workspace_reservation_settlements VALUES(?,?,?)').run(value.reservation_id,JSON.stringify(proof),digest(proof));db.prepare('INSERT INTO wb_workspace_reservation_releases VALUES(?,?)').run(value.reservation_id,proof.settled_at);return view(db,value);
 }
 
 type FamilyMember={session_ref:string;scopes:Array<{conversation_id:string;workspace_id:string}>;source_kinds:string[]};

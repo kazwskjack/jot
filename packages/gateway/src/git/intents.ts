@@ -5,6 +5,7 @@ import type {ProjectRepository} from '../projects/repository.ts';
 import type {GitWorkbench} from './service.ts';
 import {workspaceRelativePath} from '../always-on/workspace-provider.ts';
 import type {GitReviewWitness} from './inspection.ts';
+import {gitMutationIntentView,readGitMutationIntent} from './intent-reads.ts';
 
 type Operation='stage'|'unstage'|'commit'|'discard'|'delete-untracked';
 export type GitReviewPrepare={request_id:string;action:Operation;paths:string[];snapshot_id:string;message?:string};
@@ -44,8 +45,8 @@ export class GitMutationIntents{
  }
  private row(owner:string,project:string,id:string){this.projects.assertOwned(project,owner);const row=this.db.prepare('SELECT * FROM wb_git_mutation_intents WHERE intent_id=? AND owner_id=? AND project_id=?').get(id,owner,project) as Row|undefined;if(!row)throw Error('git_intent_not_found');return row;}
  private latest(id:string){const event=this.db.prepare('SELECT * FROM wb_git_mutation_events WHERE intent_id=? ORDER BY version DESC LIMIT 1').get(id) as Event|undefined;if(!event)throw Error('git_intent_unavailable');return event;}
- private view(row:Row,event:Event){const selection=JSON.parse(row.selection_json) as Prepare;return{intent_id:row.intent_id,project_id:row.project_id,action:row.action,paths:selection.paths,...(selection.message===undefined?{}:{message:selection.message}),snapshot_id:selection.snapshot_id,review_sha256:row.review_sha256,version:event.version,state:event.state,created_at:row.created_at,updated_at:event.created_at,execution_authorized:false as const};}
- get(owner:string,project:string,id:string){const row=this.row(owner,project,id);return this.view(row,this.latest(id));}
+ private view(row:Row,event:Event){return gitMutationIntentView(row,event);}
+ get(owner:string,project:string,id:string){return readGitMutationIntent(this.db,owner,project,id);}
  /** Internal original approval fence, not a browser-supplied execution source. */
  executionSource(owner:string,project:string,id:string,version:number,review:string){
   const row=this.row(owner,project,id),event=this.latest(id);

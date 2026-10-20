@@ -54,6 +54,20 @@ test('file list pages encode scope and cursor and use authenticated read-only BF
  assert.equal(calls[0].init.method,'GET');assert.equal(calls[0].init.credentials,'same-origin');assert.equal(calls[0].init.cache,'no-store');assert.equal(calls[0].init.body,undefined);
 });
 
+test('original Git index admissions preserve exact command bodies and keys while evidence reads remain no-store and cancellable',async t=>{
+ const original=globalThis.fetch,calls=[];t.after(()=>{globalThis.fetch=original});globalThis.fetch=async(url,init)=>{calls.push({url,init});return new Response('{"execution_authorized":false}')};
+ const command={request_id:'original',expected_version:2,review_sha256:'a'.repeat(64)},control={request_id:'original-control',expected_state_sha256:'b'.repeat(64),acknowledge_unknown:true},abort=new AbortController();
+ await workbenchApi.gitAdmit('project','intent',command,'unchanged-admission-key',abort.signal);await workbenchApi.gitAdmit('project','intent',command,'unchanged-admission-key',abort.signal);
+ await workbenchApi.gitAdmitControl('project','execution',control,'unchanged-control-key',abort.signal);
+ assert.equal(calls[0].url,'/workbench-api/v1/projects/project/git/intents/intent/admissions');assert.equal(calls[0].init.body,JSON.stringify(command));assert.equal(calls[0].init.headers['Idempotency-Key'],'unchanged-admission-key');assert.equal(calls[1].init.body,calls[0].init.body);assert.equal(calls[1].init.headers['Idempotency-Key'],calls[0].init.headers['Idempotency-Key']);
+ assert.equal(calls[2].url,'/workbench-api/v1/projects/project/git/executions/execution/controls');assert.equal(calls[2].init.body,JSON.stringify(control));assert.equal(calls[2].init.headers['Idempotency-Key'],'unchanged-control-key');
+ await workbenchApi.gitInspection('project','execution',abort.signal);await workbenchApi.gitControlAcceptance('project','execution','original-control',abort.signal);await workbenchApi.gitControlReceipt('project','execution','original-control',abort.signal);
+ assert.deepEqual(calls.slice(3).map(c=>c.url),['inspection','control-admissions/original-control','controls/original-control'].map(path=>'/workbench-api/v1/projects/project/git/executions/execution/'+path));
+ for(const {init}of calls){assert.equal(init.cache,'no-store');assert.equal(init.credentials,'same-origin');assert.ok(init.signal instanceof AbortSignal)}
+ for(const {init}of calls.slice(3)){assert.equal(init.method,'GET');assert.equal(init.body,undefined)}
+ globalThis.fetch=async(_url,init)=>new Promise((_resolve,reject)=>init.signal.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true}));const pending=workbenchApi.gitInspection('project','execution',abort.signal);abort.abort();await assert.rejects(pending,{name:'AbortError'});
+});
+
 test('discovery policy read uses the encoded owned role route and never sends an enable command',async t=>{
  const original=globalThis.fetch;t.after(()=>{globalThis.fetch=original;});let call;
  globalThis.fetch=async(url,init)=>{call={url,init};return new Response('{"policy":null,"execution_authorized":false}');};

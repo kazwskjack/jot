@@ -334,3 +334,9 @@ export type WorkPublicationSettlementReceipt = WorkPublicationSettlementCommand 
 export type WorkPublicationSettlementResult = {receipt:WorkPublicationSettlementReceipt;status:WorkPublicationStatus};
 export type WorkPublicationHistoryItem = Pick<WorkPublicationReview,'intent_id'|'project_id'|'paths'|'review_sha256'|'version'|'state'|'created_at'|'updated_at'|'execution_authorized'> & {source_run_id:string;source_sha256:string;acceptance:WorkPublicationAcceptance|null;status:WorkPublicationStatus|null};
 export type WorkPublicationHistory = {project_id:string;source_run_id:string;items:WorkPublicationHistoryItem[];next_cursor:string|null};
+
+export type GitIndexAdmissionInput = {request_id:string;expected_version:number;review_sha256:string};
+export type GitIndexControlInput = {request_id:string;expected_state_sha256:string;acknowledge_unknown:true};
+export type GitIndexControlAcceptance = {control_id:string;execution_id:string;project_id:string;request_id:string;expected_state_sha256:string;accepted:true;execution_authorized:false};
+export type GitIndexInspection = {execution:GitIndexExecutionResult;state_sha256:string;requires_unknown_acknowledgement:boolean;execution_authorized:false};
+export type GitIndexControlReceipt = {control_id:string;execution_id:string;request_id:string;execution_authorized:false} & ({state:"pending"}|{state:"completed";result:Exclude<GitIndexExecutionResult,{state:"pending"|"unknown"}>;cleanup:"verified"|"unverified"|"not_recorded"|"not_attempted"});

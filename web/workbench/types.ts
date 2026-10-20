@@ -6,6 +6,7 @@ export type {WorkPublicationAdmission,WorkPublicationAcceptance,WorkPublicationS
 export type {WorkPublicationHistory,WorkPublicationHistoryItem} from '../../packages/gateway/contracts/types';
 export type {WorkPublicationSettlementCommand,WorkPublicationSettlementReceipt,WorkPublicationSettlementResult} from '../../packages/gateway/contracts/types';
 export type {GitIndexAcceptance,GitIndexExecutionResult} from '../../packages/gateway/contracts/types';
+export type {GitIndexAdmissionInput,GitIndexControlInput,GitIndexControlAcceptance,GitIndexInspection,GitIndexControlReceipt} from '../../packages/gateway/contracts/types';
 export type {CreateTaskDelegation,TaskDelegationReceipt} from '../../packages/gateway/contracts/types';
 export type {SaveTaskCollaboration,TaskCollaboration} from '../../packages/gateway/contracts/types';
 export type {ChannelBinding,ChannelBindingChallenge,TaskNotificationSettings,UpdateTaskNotifications,TaskNotificationDelivery,TaskNotificationHistoryPage} from '../../packages/gateway/contracts/types';

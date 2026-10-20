@@ -3,6 +3,7 @@ import type {ProjectPage,GitSnapshot,GitDiff} from './types';
 import type {GitReviewIntent} from './types';
 import type {WorkPublicationReview,WorkPublicationSource,WorkPublicationAcceptance,WorkPublicationStatus,WorkPublicationSettlementReceipt,WorkPublicationHistory} from './types';
 import type {GitIndexAcceptance,GitIndexExecutionResult} from './types';
+import type {GitIndexAdmissionInput,GitIndexControlInput,GitIndexControlAcceptance,GitIndexInspection,GitIndexControlReceipt} from './types';
 import type {DiscoveryPolicyView} from './types';
 import type {DiscoveryHistoryPage,DiscoveryHistoryDetail} from './types';
 import type {MemoryCapturePolicy,MemoryCapture,MemoryCapturePage} from './types';
@@ -19,6 +20,11 @@ import type {Run,ResumeReceipt} from '../jot/types';
 import type {ChannelBinding,ChannelBindingChallenge,TaskNotificationSettings,UpdateTaskNotifications,TaskNotificationDelivery,TaskNotificationHistoryPage} from './types';
 export const pathId=(value:string)=>encodeURIComponent(value);
 export const workbenchApi={
+ gitAdmit:(project:string,intent:string,input:GitIndexAdmissionInput,key:string,signal?:AbortSignal)=>request<GitIndexAcceptance>(`/projects/${pathId(project)}/git/intents/${pathId(intent)}/admissions`,'POST',input,key,signal),
+ gitAdmitControl:(project:string,execution:string,input:GitIndexControlInput,key:string,signal?:AbortSignal)=>request<GitIndexControlAcceptance>(`/projects/${pathId(project)}/git/executions/${pathId(execution)}/controls`,'POST',input,key,signal),
+ gitInspection:(project:string,execution:string,signal?:AbortSignal)=>request<GitIndexInspection>(`/projects/${pathId(project)}/git/executions/${pathId(execution)}/inspection`,'GET',undefined,undefined,signal),
+ gitControlAcceptance:(project:string,execution:string,requestId:string,signal?:AbortSignal)=>request<GitIndexControlAcceptance>(`/projects/${pathId(project)}/git/executions/${pathId(execution)}/control-admissions/${pathId(requestId)}`,'GET',undefined,undefined,signal),
+ gitControlReceipt:(project:string,execution:string,requestId:string,signal?:AbortSignal)=>request<GitIndexControlReceipt>(`/projects/${pathId(project)}/git/executions/${pathId(execution)}/controls/${pathId(requestId)}`,'GET',undefined,undefined,signal),
  projects:(signal?:AbortSignal)=>request<ProjectPage>('/projects','GET',undefined,undefined,signal),
  git:(project:string,signal?:AbortSignal)=>request<GitSnapshot>(`/projects/${pathId(project)}/git`,'GET',undefined,undefined,signal),
  gitDiff:(project:string,snapshot:string,file:string,stage:'working'|'staged',signal?:AbortSignal)=>request<GitDiff>(`/projects/${pathId(project)}/git/diff?snapshot_id=${pathId(snapshot)}&path=${pathId(file)}&stage=${stage}`,'GET',undefined,undefined,signal),

@@ -3,7 +3,7 @@ import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';import {tmp
 import {buildServer} from '../../src/server.ts';import {GitWorkbench} from '../../src/git/service.ts';import {GitMutationIntents} from '../../src/git/intents.ts';import {GitIndexExecutions} from '../../src/git/index-executions.ts';import {withImmediateTransaction} from '../../src/db/database.ts';
 import {callNativeGitTransport} from '../../../session-adapter/native-git-transport.js';
 
-test('separate original native Host executes reviewed Git and sees parent revocation in the same physical DB',
+test('separate original native Host executes reviewed Git, sees revocation and settles the exact admitted original recovery control',
  {skip:!process.env.JOT_DSH_RUNTIME_MODULES,timeout:60000},async()=>{
  const privateRoot=await mkdtemp(join(tmpdir(),'jot-native-git-')),root=join(privateRoot,'repo'),database=join(privateRoot,'product.sqlite');
  const bs=String.fromCharCode(92),socket=process.platform==='win32'?[bs,bs,'.',bs,'pipe',bs,'jot-git-test-',randomUUID()].join(''):join(privateRoot,'native.sock');
@@ -34,6 +34,10 @@ test('separate original native Host executes reviewed Git and sees parent revoca
   const second=await prepare('unstage','second'),index=await readFile(join(root,'.git/index'));peer.send({type:'pause-next'});await take('pause-armed');const operation=callNativeGitTransport({socket,token:transportToken},second.scope);operation.catch(()=>{});await take('prepared');
   await intents.control('owner','project',second.approved.intent_id,{request_id:'cancel-second',action:'cancel',expected_version:second.approved.version,review_sha256:second.approved.review_sha256});peer.send({type:'continue'});
   await assert.rejects(operation,/native_git_transport_rejected/);assert.deepEqual(await readFile(join(root,'.git/index')),index);assert.equal(service.db.prepare('SELECT count(*) n FROM wb_workspace_reservation_releases').get().n,1);assert.equal(service.db.prepare('SELECT count(*) n FROM ga_worker_leases').get().n,0);
+  const command={request_id:'recover-second',expected_state_sha256:executions.inspect('owner','project',second.scope.execution_id).state_sha256,acknowledge_unknown:true};withImmediateTransaction(service.db,()=>executions.admitResolution('owner','project',second.scope.execution_id,command));
+  const recovery={...second.scope,operation_kind:'git_index',command},receipt=await callNativeGitTransport({socket,token:transportToken},recovery);assert.equal(receipt.state,'completed');assert.equal(receipt.result.state,'not_dispatched');assert.deepEqual(receipt,executions.getControl('owner','project',second.scope.execution_id,command.request_id));assert.deepEqual(await readFile(join(root,'.git/index')),index);assert.equal(service.db.prepare('SELECT count(*) n FROM wb_workspace_reservation_settlements').get().n,2);assert.equal(service.db.prepare('SELECT count(*) n FROM wb_workspace_reservation_releases').get().n,2);assert.equal(service.db.prepare('SELECT count(*) n FROM ga_worker_leases').get().n,0);
+  const changes=service.db.prepare('SELECT total_changes() n FROM ga_projects').get().n;assert.deepEqual(await callNativeGitTransport({socket,token:transportToken},recovery),receipt);assert.equal(service.db.prepare('SELECT total_changes() n FROM ga_projects').get().n,changes);assert.equal(service.db.prepare('PRAGMA schema_version').get().schema_version,schemaBefore);
+  await assert.rejects(callNativeGitTransport({socket,token:transportToken},{...recovery,command:{...command,expected_state_sha256:'0'.repeat(64)}}),/native_git_transport_rejected/);assert.deepEqual(await readFile(join(root,'.git/index')),index);
  }finally{
   for(const item of pending.splice(0))item.reject(Error('fixture_closed'));
   if(peer&&peer.exitCode===null){peer.send({type:'stop'});await Promise.race([new Promise(r=>peer.once('exit',r)),new Promise(r=>setTimeout(r,5000))]);if(peer.exitCode===null){peer.kill();await new Promise(r=>peer.once('exit',r));}}

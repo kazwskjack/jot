@@ -191,10 +191,12 @@ export async function buildServer(config: {
   const isModeMutationRoute=(request:any)=>request.method==='POST'&&['/v1/conversations','/v1/conversations/:conversationId/messages'].includes(request.routeOptions.url)||request.method==='PATCH'&&request.routeOptions.url==='/v1/conversations/:conversationId'&&request.body?.mode!==undefined;
   const isRunCommandRoute=(request:any)=>request.method==='POST'&&['/v1/runs/:runId/steer','/v1/runs/:runId/cancel'].includes(request.routeOptions.url);
   const isGitReviewRoute=(request:any)=>request.method==='POST'&&['/v1/projects/:projectId/git/intents','/v1/projects/:projectId/git/intents/:intentId/control'].includes(request.routeOptions.url);
+  const isIndexAdmissionRoute=(request:any)=>request.method==='POST'&&request.routeOptions.url==='/v1/projects/:projectId/git/intents/:intentId/admissions';
+  const isIndexControlAdmissionRoute=(request:any)=>request.method==='POST'&&request.routeOptions.url==='/v1/projects/:projectId/git/executions/:executionId/controls';
   const isPublicationReviewRoute=(request:any)=>request.method==='POST'&&['/v1/projects/:projectId/work-publications','/v1/projects/:projectId/work-publications/:intentId/control'].includes(request.routeOptions.url);
   const isPublicationAdmissionRoute=(request:any)=>request.method==='POST'&&request.routeOptions.url==='/v1/projects/:projectId/work-publications/:intentId/admissions';
   const isPublicationTransportRoute=(request:any)=>request.method==='POST'&&['/v1/projects/:projectId/work-publication-executions/:executionId/dispatch','/v1/projects/:projectId/work-publication-executions/:executionId/settle'].includes(request.routeOptions.url);
-  const atomicProtocol=(request:any)=>isPublicationAdmissionRoute(request)?'work-publication-admission-atomic-v1':isPublicationReviewRoute(request)?'work-publication-review-atomic-v1':isGitReviewRoute(request)?'git-review-atomic-v1':isRunCommandRoute(request)?'run-command-atomic-v1':isModeMutationRoute(request)?'conversation-mode-atomic-v1':isDiscoveryPolicyRoute(request)?'discovery-policy-atomic-v1':isGoalResumeRoute(request)?'conversation-goal-resume-atomic-v1':isUploadRoute(request)?'upload-atomic-v1':isMemoryRestoreRoute(request)?'memory-restore-atomic-v1':isMemoryConsolidationRoute(request)?'memory-consolidation-atomic-v1':isMemoryCaptureRoute(request)?'memory-capture-atomic-v1':null;
+  const atomicProtocol=(request:any)=>isIndexAdmissionRoute(request)?'git-index-admission-atomic-v1':isIndexControlAdmissionRoute(request)?'git-index-control-admission-atomic-v1':isPublicationAdmissionRoute(request)?'work-publication-admission-atomic-v1':isPublicationReviewRoute(request)?'work-publication-review-atomic-v1':isGitReviewRoute(request)?'git-review-atomic-v1':isRunCommandRoute(request)?'run-command-atomic-v1':isModeMutationRoute(request)?'conversation-mode-atomic-v1':isDiscoveryPolicyRoute(request)?'discovery-policy-atomic-v1':isGoalResumeRoute(request)?'conversation-goal-resume-atomic-v1':isUploadRoute(request)?'upload-atomic-v1':isMemoryRestoreRoute(request)?'memory-restore-atomic-v1':isMemoryConsolidationRoute(request)?'memory-consolidation-atomic-v1':isMemoryCaptureRoute(request)?'memory-capture-atomic-v1':null;
   // Receipt protocol is reserved with the original request. Legacy pending rows
   // have no proof of an atomic business boundary and must not be re-executed.
   const atomicCommand=<T>(request:any,status:number,operation:()=>T):T=>{
@@ -241,8 +243,9 @@ export async function buildServer(config: {
     // Preview only computes a schedule; retain authentication and CSRF without persisting requests.
     if (request.method === 'POST' && request.url.split('?')[0] === '/v1/persistent-tasks/preview') return;
     if ((request.routeOptions.url ?? request.url).includes('/voice/transcriptions')) return;
-    if(isGitReviewRoute(request)||isPublicationReviewRoute(request)||isPublicationAdmissionRoute(request)||isPublicationTransportRoute(request)){
+    if(isGitReviewRoute(request)||isIndexAdmissionRoute(request)||isIndexControlAdmissionRoute(request)||isPublicationReviewRoute(request)||isPublicationAdmissionRoute(request)||isPublicationTransportRoute(request)){
       projects.assertOwned(String((request.params as {projectId:string}).projectId),actor(request as any));
+      if(isIndexAdmissionRoute(request)||isIndexControlAdmissionRoute(request))gitWorkbench.executionBinding(actor(request as any),String((request.params as {projectId:string}).projectId));
       reply.header('cache-control','private, no-store');
     }
     const idempotencyKey = String(request.headers['idempotency-key'] ?? '');
@@ -268,7 +271,7 @@ export async function buildServer(config: {
     if (existing) {
       if (existing.request_sha256 !== requestHash) throw new Error('idempotency_conflict');
       if (existing.response_status === null) {
-        if((isGitReviewRoute(request)||isPublicationReviewRoute(request)||isPublicationAdmissionRoute(request)||isRunCommandRoute(request)||isModeMutationRoute(request)||isDiscoveryPolicyRoute(request)||isGoalResumeRoute(request)||isMemoryRestoreRoute(request)||isMemoryConsolidationRoute(request)||isMemoryCaptureRoute(request))&&existing.receipt_protocol===atomicProtocol(request)){idempotencyRequests.set(request,{owner,operation,key:idempotencyKey});return;}
+        if((isGitReviewRoute(request)||isIndexAdmissionRoute(request)||isIndexControlAdmissionRoute(request)||isPublicationReviewRoute(request)||isPublicationAdmissionRoute(request)||isRunCommandRoute(request)||isModeMutationRoute(request)||isDiscoveryPolicyRoute(request)||isGoalResumeRoute(request)||isMemoryRestoreRoute(request)||isMemoryConsolidationRoute(request)||isMemoryCaptureRoute(request))&&existing.receipt_protocol===atomicProtocol(request)){idempotencyRequests.set(request,{owner,operation,key:idempotencyKey});return;}
         if(isUploadRoute(request)&&existing.receipt_protocol==='upload-atomic-v1'){
           if(request.method==='PUT'){
             const upload=db.prepare('SELECT status,declared_size,received_size,declared_sha256,actual_sha256,writer_token,writer_lease_until FROM ga_uploads WHERE id=? AND owner_id=?').get(String((request.params as Record<string,unknown>).uploadId),owner) as Record<string,unknown>|undefined;
@@ -334,6 +337,7 @@ export async function buildServer(config: {
   app.setErrorHandler((error, _request, reply) => {
     const code = error instanceof Error ? error.message : 'internal_error';
     if(code==='contract_response_invalid')return reply.code(500).send({error:{code:'CONTRACT_RESPONSE_INVALID'}});
+    if(code==='git_repository_unconfigured')return reply.code(503).send({error:{code:'GIT_REPOSITORY_UNCONFIGURED'}});
     if(code==='chat_mode_unavailable')return reply.code(503).send({error:{code:'CHAT_MODE_UNAVAILABLE'}});
     if(code==='conversation_mode_invalid')return reply.code(400).send({error:{code:'CONVERSATION_MODE_INVALID'}});
     if(['active_run_mode_change','chat_model_fixed','conversation_mode_conflict','conversation_mode_scope_invalid','conversation_mode_goal_active','conversation_mode_goal_unconfirmed','conversation_mode_legacy_unconfirmed','conversation_mode_session_missing','conversation_mode_admission_required'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
@@ -592,7 +596,7 @@ export async function buildServer(config: {
   registerGitRoutes(app,gitWorkbench,actor);
   registerGitReviewRoutes(app,{intents:gitReviewIntents,actor,atomic:atomicCommand});
   const gitIndexExecutions=new GitIndexExecutions(db,projects,gitWorkbench,gitReviewIntents);
-  registerGitExecutionHistoryRoutes(app,gitIndexExecutions,actor);
+  registerGitExecutionHistoryRoutes(app,gitIndexExecutions,actor,atomicCommand);
   // These constructors observe the original database only. Publication schema
   // readiness still requires the explicit maintenance upgrade, never a request.
   const workPublicationIntents=config.gitRepositories?.length?new WorkPublicationIntents(db,gitWorkbench):undefined;

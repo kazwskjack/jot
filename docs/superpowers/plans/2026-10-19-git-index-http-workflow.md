@@ -202,3 +202,14 @@ handles, root/source association and journal remain required at physical effects
   privacy review, exact scoped commit and remote identity verification. Production
   site stays unchanged. Commit/destructive/revert/remote operations and the full
   26-capability plus portable Chat/Work ledger remain separate open requirements.
+
+## Native index recovery continuation
+
+Original control admission/cleanup/settlement and authenticated index-control IPC
+now have private local implementation and installed-SDK evidence. Historical drain
+facts remain valid after ownership transfer while current-owner API/effect checks
+remain mandatory. No public selected-index mutation route is activated yet.
+Follow [the native Apply/recovery plan](2026-10-21-index-native-apply-and-recovery.md)
+for full evidence, release gates and the still-required atomic HTTP, BFF and mobile
+recovery/settlement flow. Preserve the original physical DB, source/target, native
+family, Worker, review and command identities throughout those remaining steps.

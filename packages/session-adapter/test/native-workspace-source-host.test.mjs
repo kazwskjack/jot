@@ -10,7 +10,7 @@ function inventory(ids=['native']){
  const base={reservation_id:'reservation',owner_id:'owner',project_id:'project',binding_sha256:'b'.repeat(64),members:members.map(({session_ref,scopes})=>({session_ref,scopes}))};
  return{protocol:1,...base,execution_id:'execution',members,family_sha256:createHash('sha256').update(JSON.stringify(base)).digest('hex'),execution_authorized:false};
 }
-function fixture(){
+function fixture(requestScope=scope){
  assert.equal(typeof sourceModule.createNativeWorkspaceSourceHost,'function');
  const held=new Set(),registry=new Map(),sessions=new Map(),header={id:'native',agentPreset:'jot-general',delegationDepth:0},events=[];
  const session={id:'native',header,seq:0,eventAt:i=>events[i]};
@@ -22,7 +22,7 @@ function fixture(){
  const persistence=new Backend(),hooks=new Map(),ctx={get:()=>({jotPreSetupHookProtocol:2}),on:(event,fn)=>{hooks.set(event,fn);return()=>hooks.delete(event);}};
  const gate=createNativeWorkspaceFactoryGate({ctx,registry,sessions,persistence,currentPersistence:()=>persistence,notFoundError:Missing});
  let valid=true,calls=0,reply=()=>inventory(),onRead=()=>{};
- const options={bridge:{origin:'http://127.0.0.1:7654',token:'test-source-token',fetch:async(_url,init)=>{calls++;assert.deepEqual(JSON.parse(init.body),scope);await onRead(calls);return Response.json({source:reply(calls)});}},
+ const options={bridge:{origin:'http://127.0.0.1:7654',token:'test-source-token',fetch:async(_url,init)=>{calls++;assert.deepEqual(JSON.parse(init.body),requestScope);await onRead(calls);return Response.json({source:reply(calls)});}},
   registry,sessions,persistence,currentPersistence:()=>persistence,backendClass:Backend,allowedPresets:new Set(['jot-general']),validateLog:async()=>({validated:true}),
   projections:{stateOf:()=>({'next-turn':[],'next-step':[]})},factoryGate:gate};
  const host=sourceModule.createNativeWorkspaceSourceHost(options);
@@ -50,6 +50,16 @@ test('fresh source disagreement unwinds native custody before callback',async t=
  const f=fixture();t.after(()=>f.gate.dispose());f.reply(n=>n===1?inventory():inventory(['other']));
  await assert.rejects(f.host.withReservedFamily(scope,f.controls,()=>assert.fail('no callback')),/native_workspace_source_changed/);
  assert.equal(f.held.size,0);
+});
+
+test('another valid original-control ID cannot replace held recovery custody before or after its callback',async t=>{
+ const recovery={...scope,operation_kind:'git_index',control_request_id:'original-confirmation'};
+ for(const changedAt of [2,3]){
+  const f=fixture(recovery);t.after(()=>f.gate.dispose());let callbacks=0;
+  f.reply(n=>({...inventory(),operation_kind:'git_index',control_request_id:recovery.control_request_id,control_id:n===changedAt?'replacement-control':'original-control'}));
+  await assert.rejects(f.host.withReservedFamily(recovery,f.controls,async()=>{callbacks++}),/native_workspace_source_changed/);
+  assert.equal(callbacks,changedAt===2?0:1);assert.equal(f.held.size,0);
+ }
 });
 
 test('post-callback source revocation is not retried or reported as no effect',async t=>{

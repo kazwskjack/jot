@@ -33,6 +33,20 @@ test('Git execution history contracts distinguish original acceptance, pending, 
  for(const name of ['GitIndexAcceptance','GitIndexExecutionResult']){assert.deepEqual(event.$defs[name],spec.components.schemas[name]);const line=yaml.split('\n').find(value=>value.startsWith('    '+name+': '));assert.ok(line);assert.deepEqual(JSON.parse(line.slice(line.indexOf(':')+1)),spec.components.schemas[name]);}
 });
 
+test('index admission and control schemas keep original confirmations strict across JSON, YAML and event definitions',async()=>{
+ const spec=await json('openapi.json'),event=await json('agent-event.schema.json'),yaml=await readFile(new URL('openapi.yaml',contracts),'utf8'),{ContractValidator}=await import('../../src/contracts/validator.ts'),v=new ContractValidator();
+ const admission=v.operationFor('POST','/v1/projects/{projectId}/git/intents/{intentId}/admissions'),control=v.operationFor('POST','/v1/projects/{projectId}/git/executions/{executionId}/controls'),input={request_id:'original',expected_version:2,review_sha256:'a'.repeat(64)},command={request_id:'control',expected_state_sha256:'b'.repeat(64),acknowledge_unknown:true};
+ assert.equal(v.validateRequest(admission,input).valid,true);assert.equal(v.validateRequest(control,command).valid,true);
+ for(const patch of [{root:'caller'},{owner_id:'other'},{action:'push'},{expected_version:0},{review_sha256:'unknown'},{request_id:'../other'}])assert.equal(v.validateRequest(admission,{...input,...patch}).valid,false);
+ for(const patch of [{acknowledge_unknown:false},{expected_state_sha256:'unknown'},{root:'caller'},{expected_journal_sha256:'c'.repeat(64)}])assert.equal(v.validateRequest(control,{...command,...patch}).valid,false);
+ const receipt={control_id:'control',execution_id:'execution',project_id:'project',request_id:'control',expected_state_sha256:command.expected_state_sha256,accepted:true,execution_authorized:false};assert.equal(v.validateResponse(control,202,receipt).valid,true);
+ for(const patch of [{execution_authorized:true},{root:'caller'},{accepted:false},{expected_state_sha256:undefined}])assert.equal(v.validateResponse(control,202,{...receipt,...patch}).valid,false);
+ const read=v.operationFor('GET','/v1/projects/{projectId}/git/executions/{executionId}/controls/{requestId}'),pending={control_id:'control',execution_id:'execution',request_id:'control',state:'pending',execution_authorized:false};assert.equal(v.validateResponse(read,200,pending).valid,true);
+ const result={execution_id:'execution',project_id:'project',intent_id:'intent',request_id:'original',action:'stage',paths:['note.txt'],state:'not_dispatched',disposition_id:'control',execution_authorized:false},completed={...pending,state:'completed',result,cleanup:'not_attempted'};assert.equal(v.validateResponse(read,200,completed).valid,true);
+ assert.equal(v.validateResponse(read,200,{...completed,result:{...result,state:'pending',disposition_id:undefined}}).valid,false);assert.equal(v.validateResponse(read,200,{...pending,result}).valid,false);
+ for(const name of ['GitIndexAdmissionInput','GitIndexControlInput','GitIndexControlAcceptance','GitIndexInspection','GitIndexControlReceipt']){assert.deepEqual(event.$defs[name],spec.components.schemas[name]);const line=yaml.split('\n').find(s=>s.startsWith('    '+name+': '));assert.ok(line);assert.deepEqual(JSON.parse(line.slice(line.indexOf(':')+1)),spec.components.schemas[name]);}
+});
+
 test('pinned message references are bounded public metadata in REST, SSE and YAML',async()=>{
  const spec=await json('openapi.json'),event=await json('agent-event.schema.json'),ref=spec.components.schemas.MessageAttachmentRef;
  assert.ok(ref);const {default:Ajv}=await import('ajv/dist/2020.js'),validate=new Ajv({strict:false}).compile(ref);

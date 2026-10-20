@@ -1,8 +1,10 @@
 import {readFile} from 'node:fs/promises';
 import {isAbsolute} from 'node:path';
 import type {WorkPublicationExecutions} from '../persistent-tasks/work-publication-executions.ts';
+import type {GitIndexExecutions} from './index-executions.ts';
 
-export type NativeGitRequest=Readonly<{owner_id:string;project_id:string;execution_id:string;operation_kind:'work_publication';command?:Parameters<WorkPublicationExecutions['settlePublication']>[3]}>;
+type OriginalIds=Readonly<{owner_id:string;project_id:string;execution_id:string}>;
+export type NativeGitRequest=OriginalIds&(Readonly<{operation_kind:'work_publication';command?:Parameters<WorkPublicationExecutions['settlePublication']>[3]}>|Readonly<{operation_kind:'git_index';command?:Parameters<GitIndexExecutions['resolveReserved']>[3]}>|Readonly<{operation_kind?:undefined;command?:never}>);
 export type NativeGitClient=Readonly<{execute:(input:NativeGitRequest,signal?:AbortSignal)=>Promise<unknown>}>;
 
 /** Fixed sibling package, for source and compiled Gateway layouts. No module

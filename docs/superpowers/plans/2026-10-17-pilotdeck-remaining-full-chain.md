@@ -657,3 +657,18 @@ skips, zero failures/cancellations and SDK enabled. Packaged maintenance, deploy
 commit/destructive/revert, authorized remote operations and the full portable
 Chat/Work/product acceptance retain their own requirements. This does not close
 capability15 or the all26 ledger, and no production write switch was enabled.
+
+## Original index native recovery candidate
+
+The [native index continuation](2026-10-21-index-native-apply-and-recovery.md) now
+implements the original explicit control and original reservation settlement in
+a private candidate. Its same authenticated Host supports index recovery and
+has real process-exit/cold-persistence evidence. Current ownership remains the
+API/effect boundary; recorded native drain is separately checked as historical
+evidence. No producer finish is fabricated to satisfy maintenance readiness.
+
+Full frozen Gateway and release review are in progress. Original index HTTP/BFF,
+mobile selected Apply/recovery, the remaining process-effect matrix, broader
+producers and separately authorized Git workflows remain in the ledger. All26
+capabilities and portable Chat/Work/provider/deployment acceptance stay in scope;
+this increment does not substitute native transport for complete product behavior.

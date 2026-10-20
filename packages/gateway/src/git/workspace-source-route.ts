@@ -35,13 +35,15 @@ export function registerGitWorkspaceSource(app:FastifyInstance,executions:GitInd
   if(!token||token.length<16||actual.length!==expected.length||!timingSafeEqual(actual,expected))return reply.code(401).send({error:{code:'UNAUTHORIZED'}});
   const input=request.body as Record<string,unknown>;
   const typed=!!input&&Object.hasOwn(input,'operation_kind');
-  if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).sort().join(',')!==(typed?'execution_id,operation_kind,owner_id,project_id':'execution_id,owner_id,project_id')
+  const recovery=!!input&&Object.hasOwn(input,'control_request_id');
+  if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).sort().join(',')!==(recovery?'control_request_id,execution_id,operation_kind,owner_id,project_id':typed?'execution_id,operation_kind,owner_id,project_id':'execution_id,owner_id,project_id')
    ||typed&&!['git_index','work_publication'].includes(input.operation_kind as string)
+   ||recovery&&(input.operation_kind!=='git_index'||typeof input.control_request_id!=='string'||!ID.test(input.control_request_id))
    ||!['owner_id','project_id','execution_id'].every(key=>typeof input[key]==='string'&&ID.test(input[key] as string))
    ||Object.keys(request.query as object).length)return reply.code(422).send({error:{code:'GIT_WORKSPACE_SOURCE_INVALID'}});
   try{
    const service=input.operation_kind==='work_publication'?publication:executions;if(!service)throw Error();
-   const source=service.workspaceFamily(input.owner_id as string,input.project_id as string,input.execution_id as string);
+   const source=recovery?executions.resolutionFamily(input.owner_id as string,input.project_id as string,input.execution_id as string,input.control_request_id as string):service.workspaceFamily(input.owner_id as string,input.project_id as string,input.execution_id as string);
    return{source:{...source,...(typed?{operation_kind:input.operation_kind}:{})}};
   }
   catch{return reply.code(409).send({error:{code:'GIT_WORKSPACE_SOURCE_UNCONFIRMED'}});}

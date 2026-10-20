@@ -12,11 +12,12 @@ function scopeOf(input){
  const value={...input},typed=Object.hasOwn(value,'operation_kind'),recovery=Object.hasOwn(value,'command');
  const expected=typed?(recovery?'command,execution_id,operation_kind,owner_id,project_id':'execution_id,operation_kind,owner_id,project_id'):keys;
  if(Object.keys(value).sort().join(',')!==expected||!['owner_id','project_id','execution_id'].every(key=>typeof value[key]==='string'&&ID.test(value[key]))
-  ||typed&&!['git_index','work_publication'].includes(value.operation_kind)||recovery&&value.operation_kind!=='work_publication')invalid();
+  ||typed&&!['git_index','work_publication'].includes(value.operation_kind))invalid();
  if(recovery){
   if(!value.command||typeof value.command!=='object'||Array.isArray(value.command))invalid();const command={...value.command};
-  if(Object.keys(command).sort().join(',')!=='acknowledge_unknown,action,expected_journal_sha256,request_id'||typeof command.request_id!=='string'||!ID.test(command.request_id)
-   ||!['confirm_recorded','abandon_unknown'].includes(command.action)||command.acknowledge_unknown!==true||typeof command.expected_journal_sha256!=='string'||!/^[a-f0-9]{64}$/.test(command.expected_journal_sha256))invalid();
+  const index=value.operation_kind==='git_index',sha=index?'expected_state_sha256':'expected_journal_sha256';
+  if(Object.keys(command).sort().join(',')!==(index?'acknowledge_unknown,expected_state_sha256,request_id':'acknowledge_unknown,action,expected_journal_sha256,request_id')||typeof command.request_id!=='string'||!ID.test(command.request_id)
+   ||!index&&!['confirm_recorded','abandon_unknown'].includes(command.action)||command.acknowledge_unknown!==true||typeof command[sha]!=='string'||!/^[a-f0-9]{64}$/.test(command[sha]))invalid();
   value.command=Object.freeze(command);
  }
  return Object.freeze(value);
@@ -39,7 +40,7 @@ export function normalizeNativeGitTransportConfiguration(options){
 const publicCodes=new Set(['git_execution_revoked','git_execution_not_found','git_native_workspace_host_unavailable','native_git_database_changed','native_git_transport_busy']);
 
 /** Local transport only. The original perform function retains all authority.
- * Preserve legacy three-ID index requests; typed publication requests carry
+ * Preserve legacy three-ID index requests; typed index/publication requests carry
  * only original IDs and, for recovery, an exact original-owner command. No
  * root, source bytes, planner or approval can be supplied through this layer.
  * Requests are never automatically retried, replayed or treated as approvals. */

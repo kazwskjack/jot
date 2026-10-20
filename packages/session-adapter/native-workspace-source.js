@@ -9,7 +9,9 @@ const id=value=>typeof value==='string'&&ID.test(value);
 const contexts=new WeakMap();
 function operationScope(input){
  const modern=fields(input,['owner_id','project_id','execution_id','operation_kind']);
- if(!modern&&!fields(input,['owner_id','project_id','execution_id'])||!['owner_id','project_id','execution_id'].every(key=>id(input?.[key]))
+ const recovery=fields(input,['owner_id','project_id','execution_id','operation_kind','control_request_id']);
+ if(!modern&&!recovery&&!fields(input,['owner_id','project_id','execution_id'])||!['owner_id','project_id','execution_id'].every(key=>id(input?.[key]))
+  ||recovery&&(input.operation_kind!=='git_index'||!id(input.control_request_id))
   ||modern&&!['git_index','work_publication'].includes(input.operation_kind))throw Error('native_workspace_source_invalid');
  return Object.freeze({...input});
 }
@@ -32,8 +34,10 @@ function freeze(value){if(value&&typeof value==='object'){for(const child of Obj
 function verified(value,scope){
  const fail=()=>{throw Error('native_workspace_source_unconfirmed');};
  const typed=Object.hasOwn(scope,'operation_kind');
- if(!fields(value,['protocol','reservation_id','execution_id','owner_id','project_id','binding_sha256','family_sha256','members','execution_authorized',...(typed?['operation_kind']:[])])
+ const recovery=Object.hasOwn(scope,'control_request_id');
+ if(!fields(value,['protocol','reservation_id','execution_id','owner_id','project_id','binding_sha256','family_sha256','members','execution_authorized',...(typed?['operation_kind']:[]),...(recovery?['control_request_id','control_id']:[])])
   ||value.protocol!==1||value.execution_authorized!==false||!id(value.reservation_id)||!SHA.test(value.binding_sha256)||!SHA.test(value.family_sha256)
+  ||recovery&&!id(value.control_id)
   ||Object.keys(scope).some(key=>value[key]!==scope[key])||!Array.isArray(value.members)||value.members.length>256)fail();
  const ids=new Set();let count=0,previous;
  const members=value.members.map(member=>{
@@ -52,7 +56,7 @@ function verified(value,scope){
  const base={reservation_id:value.reservation_id,owner_id:scope.owner_id,project_id:scope.project_id,binding_sha256:value.binding_sha256,
   members:members.map(({session_ref,scopes})=>({session_ref,scopes}))};
  if(createHash('sha256').update(JSON.stringify(base)).digest('hex')!==value.family_sha256)fail();
- return freeze({protocol:1,...base,execution_id:scope.execution_id,...(typed?{operation_kind:scope.operation_kind}:{}),family_sha256:value.family_sha256,members,execution_authorized:false});
+ return freeze({protocol:1,...base,execution_id:scope.execution_id,...(typed?{operation_kind:scope.operation_kind}:{}),...(recovery?{control_request_id:scope.control_request_id,control_id:value.control_id}:{}),family_sha256:value.family_sha256,members,execution_authorized:false});
 }
 
 /** Original authenticated inventory only. No cache, Agent resolution, namespace
@@ -116,7 +120,7 @@ export function createNativeWorkspaceSourceHost(options={}){
   return withNativeWorkspaceBarrier({members,assertReservation:check,signal,factoryGate},async(proofs,nativeCheck,nativeSignal,nativeRecheck,workspaces,headers)=>{
    const observe=async()=>{
     await nativeRecheck();check();const current=await read(nativeCheck,nativeSignal);
-    if(current.reservation_id!==source.reservation_id||current.binding_sha256!==source.binding_sha256||current.family_sha256!==source.family_sha256)throw Error('native_workspace_source_changed');
+    if(current.reservation_id!==source.reservation_id||current.binding_sha256!==source.binding_sha256||current.family_sha256!==source.family_sha256||current.control_id!==source.control_id||current.control_request_id!==source.control_request_id)throw Error('native_workspace_source_changed');
     await nativeRecheck();check();
    };
    await observe();let context;

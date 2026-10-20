@@ -78,7 +78,7 @@ export async function createNativeGitHost({ctx,bridge,admissionGate,allowedPrese
     if(workspacePublicationSchema(db)!=='publication')throw Error('native_work_publication_unavailable');
     return scope.command?publication.settlePublication(scope.owner_id,scope.project_id,scope.execution_id,scope.command,signal):publication.executePublication(scope.owner_id,scope.project_id,scope.execution_id,signal);
    }
-   return executions.performReserved(scope.owner_id,scope.project_id,scope.execution_id,signal);
+   return scope.command?executions.resolveReserved(scope.owner_id,scope.project_id,scope.execution_id,scope.command,signal):executions.performReserved(scope.owner_id,scope.project_id,scope.execution_id,signal);
   }});
   return Object.freeze({dispose});
  }catch{await dispose();throw Error('native_git_host_unavailable');}

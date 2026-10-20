@@ -2,6 +2,7 @@ import {createHash} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {retainOriginalGitDatabase} from '../git/database-identity.ts';
+import {readWorkspaceIndexResolution} from './workspace-coordination.ts';
 
 type Row=Record<string,any>;
 const original='wb_workspace_reservations',replacement='wb_workspace_reservations_publication_upgrade';
@@ -38,8 +39,16 @@ function quiescent(db:DatabaseSync){
  if(exists(db,'wb_agent_messages')&&any("SELECT 1 FROM wb_agent_messages WHERE status IN('processing','outcome_unknown') LIMIT 1"))fail('busy');
  if(exists(db,'wb_git_index_executions')){
   for(const name of ['wb_git_index_outcomes','wb_git_index_dispositions','wb_git_index_producers','wb_git_index_producer_finishes'])if(!exists(db,name))fail('storage_unconfirmed');
-  if(any('SELECT 1 FROM wb_git_index_executions e WHERE NOT EXISTS(SELECT 1 FROM wb_git_index_outcomes o WHERE o.execution_id=e.execution_id) AND NOT EXISTS(SELECT 1 FROM wb_git_index_dispositions d WHERE d.execution_id=e.execution_id) LIMIT 1')
-   ||any('SELECT 1 FROM wb_git_index_producers p WHERE NOT EXISTS(SELECT 1 FROM wb_git_index_producer_finishes f WHERE f.execution_id=p.execution_id) LIMIT 1'))fail('busy');
+  if(any('SELECT 1 FROM wb_git_index_executions e WHERE NOT EXISTS(SELECT 1 FROM wb_git_index_outcomes o WHERE o.execution_id=e.execution_id) AND NOT EXISTS(SELECT 1 FROM wb_git_index_dispositions d WHERE d.execution_id=e.execution_id) LIMIT 1'))fail('busy');
+  // A verified original explicit-control settlement records native drain even
+  // when the original producer could not persist its finish. Never invent one.
+  for(const row of db.prepare('SELECT e.execution_id,e.owner_id,e.project_id,e.binding_sha256 FROM wb_git_index_producers p JOIN wb_git_index_executions e ON e.execution_id=p.execution_id WHERE NOT EXISTS(SELECT 1 FROM wb_git_index_producer_finishes f WHERE f.execution_id=p.execution_id)').iterate()){
+   try{
+    if(typeof row.binding_sha256!=='string')throw Error();
+    const saved=db.prepare("SELECT s.record_json FROM wb_workspace_reservation_settlements s JOIN wb_workspace_reservations r ON r.reservation_id=s.reservation_id WHERE r.operation_kind='git_index' AND r.operation_id=?").get(String(row.execution_id)),proof=JSON.parse(String(saved?.record_json));
+    readWorkspaceIndexResolution(db,{owner_id:String(row.owner_id),project_id:String(row.project_id),operation_kind:'git_index',operation_id:String(row.execution_id),binding_sha256:row.binding_sha256},proof.control_request_id);
+   }catch{fail('busy')}
+  }
  }
  if(exists(db,'wb_native_child_reservations')){
   for(const name of ['wb_native_child_closures','wb_native_creation_aborts'])if(!exists(db,name))fail('storage_unconfirmed');
