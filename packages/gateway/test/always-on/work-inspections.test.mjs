@@ -109,10 +109,15 @@ import {readIsolatedTaskFileVersion} from '../../src/persistent-tasks/isolated-o
 import {createNativeWorkRuntime} from '../../src/always-on/native-work-runtime.ts';
 import {PersistentTaskService} from '../../src/persistent-tasks/service.ts';
 import {registerWorkbenchExecution} from '../../src/workbench/execution.ts';
+import {TaskReviewOutputs} from '../../src/persistent-tasks/review-outputs.ts';
+import {configureTaskOutputDelivery} from '../../src/persistent-tasks/output-delivery.ts';
+import {ArtifactService} from '../../src/artifacts/service.ts';
+import {ContractValidator} from '../../src/contracts/validator.ts';
 
 test('an original complete proposal cannot silently bind a later successful inspection of the same pinned write',async t=>{
  const f=await fixture(t),runtime=createNativeWorkRuntime({db:f.db,workbench:f.workbench,root:join(f.root,'grant-snapshots'),executionReady:true,budgetPolicy:f.budget});
  configureTaskOutputReader(f.db,input=>readIsolatedTaskFileVersion(f.db,input.source));
+ configureTaskOutputDelivery(f.db,new ArtifactService(f.db,join(f.root,'review-artifacts')),f.events);
  const app=Fastify();t.after(()=>app.close());app.setErrorHandler((error,request,reply)=>reply.status(400).send({error:error.message}));
  const tasks=new PersistentTaskService(f.db,f.workbench,{modelBudgetPolicy:f.budget,discoveryWorkOperations:runtime});
  registerWorkbenchExecution(app,f.db,f.workbench,tasks,'test-inspect-11df6d',f.budget.ledger,undefined,undefined,runtime);
@@ -136,6 +141,19 @@ test('an original complete proposal cannot silently bind a later successful insp
  f.coordinator.recordCheckpoint(f.claimed,'work-test-session',{session_ref:'work-test-session',seq_exclusive:7,turn_end_seq:6,goal_id:'inspection-drift-goal',goal_revision:3,log_sha256:'b'.repeat(64)});
  f.coordinator.waitForTask(f.claimed,{goal_id:'inspection-drift-goal',goal_revision:3,phase:'paused',turn_end_seq:6},'SESSION_GOAL_WAITING_APPROVAL',{text:'The exact new inspection is ready'});
  const frozen=currentTaskCompletionCandidate(f.db,'owner',f.admission.run_id);assert.equal(frozen.snapshot.objective,f.resolver.context(f.admission.run_id).objective);assert.equal(frozen.snapshot.isolated_work_evidence.inspection_sha256,recollected.inspection_sha256);
+ const interaction=f.db.prepare("SELECT w.interaction_id FROM wb_task_wait_interactions w WHERE w.run_id=? AND w.purpose='task_acceptance_review'").get(f.admission.run_id);
+ assert.ok(interaction,'original waiting-approval transition must create its original review interaction');
+ const review=new TaskReviewOutputs(f.db),eventsBefore=f.db.prepare('SELECT count(*) n FROM ga_events').get().n;
+ const page=review.list('owner',interaction.interaction_id);
+ const contract=new ContractValidator();assert.equal(contract.validateResponse(contract.operationFor('GET','/v1/interactions/{interaction_id}/outputs'),200,page).valid,true);
+ assert.deepEqual(page.work_review.base_manifest,recollected.base_manifest);
+ assert.deepEqual(page.work_review.result_manifest,recollected.result_manifest);
+ assert.deepEqual(page.work_review.diff,recollected.diff);
+ assert.equal(page.work_review.selected_objective,recollected.selected_objective);
+ assert.equal(page.work_review.execution_authorized,false);
+ assert.equal(JSON.stringify(page).includes(f.prepared.snapshot.isolated_root),false,'private host root must not enter the API projection');
+ assert.throws(()=>review.list('foreign',interaction.interaction_id),/task_review_output_not_found/);
+ assert.equal(f.db.prepare('SELECT count(*) n FROM ga_events').get().n,eventsBefore);
  const realCurrent=runtime.inspections.current.bind(runtime.inspections);let invoked=0;
  const rejected=Promise.reject(Error('fixture_completion_hook_rejection'));rejected.then=()=>{invoked++;throw Error('overridden_then_must_not_run');};
  runtime.inspections.current=()=>rejected;

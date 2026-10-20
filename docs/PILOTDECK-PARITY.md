@@ -57,6 +57,12 @@ The reference core/UI have been built in an isolated Windows environment, and it
 
 ## Current native Git hosting milestone
 
+The original pending work review now displays complete frozen base/result
+inventories, selected objective and recomputed diff through the existing owned
+read. See [review evidence and remaining publication](implementation/2026-10-20-complete-work-review.md).
+Task acceptance and artifact delivery remain distinct from applying results to
+the configured checkout; Git/checkpoint activation still depends on that chain.
+
 Optional original native hosting uses an authenticated local pipe/socket.
 Separate-process installed-SDK tests stage reviewed bytes and observe parent
 approval revocation in the same physical database. This is internal hosting,

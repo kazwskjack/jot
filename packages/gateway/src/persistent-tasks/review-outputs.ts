@@ -4,6 +4,7 @@ import {taskOutputsDeliverable} from './output-delivery.ts';
 import {taskFileSource} from './task-file-source.ts';
 import {verifyTaskOutputContent} from './output-content.ts';
 import {readFrozenGeneratedPart,withGeneratedOutputReadScope} from './generated-output-content.ts';
+import {projectWorkReviewEvidence} from './review-work-evidence.ts';
 
 type Frozen=ReturnType<typeof currentTaskCompletionCandidate>;
 type Output={source:'workspace'|'native'|'generated';file_name:string;version:number;size_bytes:number;sha256:string;mime_type:string;read:()=>Buffer};
@@ -42,16 +43,19 @@ export class TaskReviewOutputs{
   }
   return outputs;
  }
- private read<T>(owner:string,id:string,operation:(outputs:Output[])=>T):T{
+ private read<T>(owner:string,id:string,operation:(outputs:Output[],frozen:Frozen)=>T):T{
   // WAL deferred snapshot: authorize and read one consistent version without
   // reserving the writer lock used by the separate task Worker.
   if(this.db.isTransaction)throw new Error('task_review_output_unavailable');
   this.db.exec('BEGIN');
-  try{const value=withGeneratedOutputReadScope(this.db,()=>{const {frozen,runId}=this.frozen(owner,id);return operation(this.outputs(frozen,runId));});this.db.exec('COMMIT');return value;}
+  try{const value=withGeneratedOutputReadScope(this.db,()=>{const {frozen,runId}=this.frozen(owner,id);return operation(this.outputs(frozen,runId),frozen);});this.db.exec('COMMIT');return value;}
   catch(error){if(error instanceof Error&&unavailable.has(error.message))throw new Error('task_review_output_unavailable');throw error;}
   finally{if(this.db.isTransaction)this.db.exec('ROLLBACK');}
  }
- list(owner:string,id:string){return this.read(owner,id,outputs=>({items:outputs.map(({read,...value},output_index)=>({...value,output_index,download_url:`/v1/interactions/${encodeURIComponent(id)}/outputs/${output_index}`}))}));}
+ list(owner:string,id:string){return this.read(owner,id,(outputs,frozen)=>{
+  const work=projectWorkReviewEvidence(frozen.snapshot.isolated_work_evidence);
+  return {items:outputs.map(({read,...value},output_index)=>({...value,output_index,download_url:`/v1/interactions/${encodeURIComponent(id)}/outputs/${output_index}`})),...(work?{work_review:work}:{})};
+ });}
  content(owner:string,id:string,index:string){
   if(!/^(0|[1-9][0-9]{0,3})$/.test(index))throw new Error('invalid_task_review_output_index');
   return this.read(owner,id,outputs=>{const value=outputs[Number(index)];if(!value)throw new Error('task_review_output_not_found');return {file_name:value.file_name,content:value.read()};});

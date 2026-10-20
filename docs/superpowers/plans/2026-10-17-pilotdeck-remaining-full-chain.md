@@ -80,6 +80,16 @@ mutation controls or reduce the complete 26-capability/portable Chat/Work scope.
 
 ## Current parallel assignments
 
+### Original isolated review continuation
+
+The [full-evidence review increment](../../implementation/2026-10-20-complete-work-review.md)
+joins the existing frozen candidate to the owner review card: complete original
+and result manifests, selected objective and recomputed diff, not only selected
+downloads. The [publication continuation](2026-10-20-work-review-publication-chain.md)
+keeps explicit target review, original source/version custody, interrupted
+publication, checkpoint and Git activation open. This moves rows08/14/15/21
+forward without claiming those whole rows or the 26-capability scope complete.
+
 The coordinator integrates interfaces and runs final shared regression/builds.
 Independent workers own separate files; they do not commit, push, deploy or run
 template generation concurrently with Gateway fixtures. New independent work is

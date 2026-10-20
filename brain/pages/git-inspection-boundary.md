@@ -4,7 +4,7 @@ title: Git views use owned read-only repository snapshots
 category: decision
 status: active
 created: "2026-10-19T17:04:32"
-updated: "2026-10-20T15:06:41"
+updated: "2026-10-20T15:37:39"
 ---
 
 <!-- compiled_truth -->
@@ -101,4 +101,10 @@ Git 执行的配置占用范围与程序／stat 见证分离：原始记录固�
   kind: evidence
   summary: "Original native Git hosting now uses authenticated local pipe/socket transport beside the existing Host, with ID-only requests and no second runtime. Fresh Gateway physical-database observation matches the native process and synchronous guards retain original DB/root/native custody. Actual installed-SDK separate-process staging and parent approval revocation pass; constructor startup cannot migrate schema/data. Transport availability is not public write activation; shared/isolated publication, profile deployment and HTTP/UI closure remain open."
   source: docs/implementation/2026-10-20-native-git-local-transport.md
+  affects: [git-inspection-boundary]
+
+- time: 2026-10-20T15:37:39
+  kind: evidence
+  summary: "Task acceptance and artifact delivery do not establish publication into a configured Git checkout. The existing owned pending-review response now projects the original frozen isolated base/result manifests, selected objective and recomputed diff, retaining candidate/proof/current-state validation and exposing no host roots. Explicit publication needs its own target review, original source/version custody and interrupted-outcome reconciliation before Git write UI activation."
+  source: docs/superpowers/plans/2026-10-20-work-review-publication-chain.md
   affects: [git-inspection-boundary]

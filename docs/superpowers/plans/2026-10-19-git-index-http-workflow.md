@@ -127,6 +127,11 @@ different native and Git directories. This does not close root association.
 
 Continue the original integration in this order:
 
+The [work review/publication continuation](2026-10-20-work-review-publication-chain.md)
+tracks the existing frozen inspection through full owner review, a distinct
+explicit publication intent and original Git/checkpoint custody. Its read-only
+review increment does not authorize copying an isolated tree into a checkout.
+
 1. Resolve each maintained native directory through its original Work binding,
    source journal and operator-configured Git project. Validate physical roots,
    not just path strings, project membership or matching bytes.

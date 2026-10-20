@@ -245,7 +245,15 @@ export type TaskReplyHistoryItem = {draft_id:string;run_id:string;conversation_i
 export type TaskReplyHistoryPage = {items:TaskReplyHistoryItem[];has_more:boolean;next_cursor:string|null};
 
 export type TaskReviewOutput = {output_index:number;source:"workspace"|"native"|"generated";file_name:string;version:number;size_bytes:number;sha256:string;mime_type:string;download_url:string};
-export type TaskReviewOutputPage = {items:TaskReviewOutput[]};
+export type WorkReviewEntry = {path:string;kind:'directory'}|{path:string;kind:'file';sha256:string;bytes:number;executable:boolean};
+export type WorkReviewManifest = {protocol:1;provider:'snapshot-copy';paths:string[];entries:WorkReviewEntry[]};
+export type WorkReviewChange = {kind:'add'|'delete'|'replace'|'modify'|'rename';path:string;from?:string;before?:WorkReviewEntry;after?:WorkReviewEntry;content_changed?:boolean;mode_changed?:boolean;case_only?:boolean};
+export type WorkReviewDiff = {protocol:1;base_sha256:string;result_sha256:string;diff_sha256:string;execution_authorized:false;changes:WorkReviewChange[]};
+export type TaskWorkReview = {protocol:1;source:'isolated';grant_id:string;work_occurrence_id:string;cycle_id:string;snapshot_id:string;
+ selected_objective:string;source_sha256:string;source_record_sha256:string;plans_sha256:string;paths_sha256:string;call_set_sha256:string;inspection_sha256:string;
+ base_manifest:WorkReviewManifest;result_manifest:WorkReviewManifest;
+ diff:WorkReviewDiff;execution_authorized:false};
+export type TaskReviewOutputPage = {items:TaskReviewOutput[];work_review?:TaskWorkReview};
 
 export type RestoreWorkbenchMemory = { expected_version: number; source_version: number };
 export type WorkbenchMemoryHistory = { memory_id: string; current_version: number; next_before_version: number | null; items: Array<WorkbenchMemoryVersion> };

@@ -21530,6 +21530,9 @@
             "items": {
               "$ref": "#/components/schemas/TaskReviewOutput"
             }
+          },
+          "work_review": {
+            "$ref": "#/components/schemas/TaskWorkReview"
           }
         }
       },
@@ -24772,6 +24775,380 @@
             ]
           }
         ]
+      },
+      "WorkReviewEntry": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "kind"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096,
+                "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*/$)[^\\\\:\\x00-\\x1f\\x7f]+$"
+              },
+              "kind": {
+                "const": "directory"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "kind",
+              "sha256",
+              "bytes",
+              "executable"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096,
+                "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*/$)[^\\\\:\\x00-\\x1f\\x7f]+$"
+              },
+              "kind": {
+                "const": "file"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "executable": {
+                "type": "boolean"
+              }
+            }
+          }
+        ]
+      },
+      "WorkReviewManifest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "protocol",
+          "provider",
+          "paths",
+          "entries"
+        ],
+        "properties": {
+          "protocol": {
+            "const": 1
+          },
+          "provider": {
+            "const": "snapshot-copy"
+          },
+          "paths": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50000,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*/$)[^\\\\:\\x00-\\x1f\\x7f]+$"
+            }
+          },
+          "entries": {
+            "type": "array",
+            "maxItems": 100000,
+            "items": {
+              "$ref": "#/components/schemas/WorkReviewEntry"
+            }
+          }
+        }
+      },
+      "WorkReviewChange": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "path",
+              "after"
+            ],
+            "properties": {
+              "kind": {
+                "const": "add"
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096,
+                "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*/$)[^\\\\:\\x00-\\x1f\\x7f]+$"
+              },
+              "after": {
+                "$ref": "#/components/schemas/WorkReviewEntry"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "path",
+              "before"
+            ],
+            "properties": {
+              "kind": {
+                "const": "delete"
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096,
+                "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*/$)[^\\\\:\\x00-\\x1f\\x7f]+$"
+              },
+              "before": {
+                "$ref": "#/components/schemas/WorkReviewEntry"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "path",
+              "before",
+              "after"
+            ],
+            "properties": {
+              "kind": {
+                "const": "replace"
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096,
+                "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*/$)[^\\\\:\\x00-\\x1f\\x7f]+$"
+              },
+              "before": {
+                "$ref": "#/components/schemas/WorkReviewEntry"
+              },
+              "after": {
+                "$ref": "#/components/schemas/WorkReviewEntry"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "path",
+              "before",
+              "after",
+              "content_changed",
+              "mode_changed"
+            ],
+            "properties": {
+              "kind": {
+                "const": "modify"
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096,
+                "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*/$)[^\\\\:\\x00-\\x1f\\x7f]+$"
+              },
+              "before": {
+                "$ref": "#/components/schemas/WorkReviewEntry"
+              },
+              "after": {
+                "$ref": "#/components/schemas/WorkReviewEntry"
+              },
+              "content_changed": {
+                "type": "boolean"
+              },
+              "mode_changed": {
+                "type": "boolean"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "path",
+              "before",
+              "after",
+              "from",
+              "mode_changed",
+              "case_only"
+            ],
+            "properties": {
+              "kind": {
+                "const": "rename"
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096,
+                "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*/$)[^\\\\:\\x00-\\x1f\\x7f]+$"
+              },
+              "before": {
+                "$ref": "#/components/schemas/WorkReviewEntry"
+              },
+              "after": {
+                "$ref": "#/components/schemas/WorkReviewEntry"
+              },
+              "from": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096,
+                "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*/$)[^\\\\:\\x00-\\x1f\\x7f]+$"
+              },
+              "mode_changed": {
+                "type": "boolean"
+              },
+              "case_only": {
+                "type": "boolean"
+              }
+            }
+          }
+        ]
+      },
+      "WorkReviewDiff": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "protocol",
+          "base_sha256",
+          "result_sha256",
+          "diff_sha256",
+          "changes",
+          "execution_authorized"
+        ],
+        "properties": {
+          "protocol": {
+            "const": 1
+          },
+          "base_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "result_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "diff_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "changes": {
+            "type": "array",
+            "maxItems": 200000,
+            "items": {
+              "$ref": "#/components/schemas/WorkReviewChange"
+            }
+          },
+          "execution_authorized": {
+            "const": false
+          }
+        }
+      },
+      "TaskWorkReview": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "protocol",
+          "source",
+          "grant_id",
+          "work_occurrence_id",
+          "cycle_id",
+          "snapshot_id",
+          "selected_objective",
+          "source_sha256",
+          "source_record_sha256",
+          "plans_sha256",
+          "paths_sha256",
+          "call_set_sha256",
+          "inspection_sha256",
+          "base_manifest",
+          "result_manifest",
+          "diff",
+          "execution_authorized"
+        ],
+        "properties": {
+          "protocol": {
+            "const": 1
+          },
+          "source": {
+            "const": "isolated"
+          },
+          "grant_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+          },
+          "work_occurrence_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+          },
+          "cycle_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+          },
+          "snapshot_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+          },
+          "selected_objective": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 65536
+          },
+          "source_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "source_record_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "plans_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "paths_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "call_set_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "inspection_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "base_manifest": {
+            "$ref": "#/components/schemas/WorkReviewManifest"
+          },
+          "result_manifest": {
+            "$ref": "#/components/schemas/WorkReviewManifest"
+          },
+          "diff": {
+            "$ref": "#/components/schemas/WorkReviewDiff"
+          },
+          "execution_authorized": {
+            "const": false
+          }
+        }
       }
     },
     "parameters": {

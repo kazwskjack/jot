@@ -22,7 +22,7 @@ const counts=f=>Object.fromEntries(['ga_events','ga_artifacts','ga_artifact_leas
 test('an owned pending review lists and downloads its exact frozen workspace version without publication or lease renewal',async t=>{
  const f=await files(t),card=(await f.list())[0],base=`/v1/interactions/${card.interaction_id}/outputs`,before=counts(f);
  f.workbench.writeFile('alice','ws',{project_id:f.workbench.contextForRun(f.runId).project_id,path:'report.md',content:'Later replacement',expected_version:1});
- const list=await read(f,base);assert.equal(list.statusCode,200,list.body);const page=list.json();assert.equal(page.items.length,1);assert.equal(page.items[0].source,'workspace');assert.equal(page.items[0].version,1);assert.equal(page.items[0].file_name,'report.md');assert.equal(page.items[0].output_index,0);
+ const list=await read(f,base);assert.equal(list.statusCode,200,list.body);const page=list.json();assert.equal(page.work_review,undefined);assert.equal(page.items.length,1);assert.equal(page.items[0].source,'workspace');assert.equal(page.items[0].version,1);assert.equal(page.items[0].file_name,'report.md');assert.equal(page.items[0].output_index,0);
  const content=await read(f,base+'/0');assert.equal(content.statusCode,200,content.body);assert.equal(content.body,'Original reviewed report');assert.equal(content.headers['x-content-type-options'],'nosniff');assert.match(content.headers['content-disposition'],/^attachment;/);assert.match(content.headers['cache-control'],/no-store/);
  assert.deepEqual(counts(f),before);assert.equal(f.runs.get(f.runId,'alice').status,'waiting_approval');assert.equal((await f.list())[0].status,'pending');
 });
