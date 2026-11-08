@@ -285,7 +285,20 @@ export async function buildServer(config: {
   const isPublicationTransportRoute=(request:any)=>request.method==='POST'&&['/v1/projects/:projectId/work-publication-executions/:executionId/dispatch','/v1/projects/:projectId/work-publication-executions/:executionId/settle'].includes(request.routeOptions.url);
   const isConversationForkRoute=(request:any)=>request.method==='POST'&&request.routeOptions.url==='/v1/conversations/:conversationId/fork';
   const isMcpMutationRoute=(request:any)=>['POST /v1/agents/:agentId/mcp/connections','PATCH /v1/agents/:agentId/mcp/connections/:connectionId/config','PATCH /v1/agents/:agentId/mcp/connections/:connectionId/enabled','PUT /v1/agents/:agentId/mcp/connections/:connectionId/tools','POST /v1/agents/:agentId/mcp/connections/:connectionId/reload','DELETE /v1/agents/:agentId/mcp/connections/:connectionId'].includes(`${request.method} ${request.routeOptions.url}`);
-  const atomicProtocol=(request:any)=>isWorkspaceSelectionRoute(request)?'workspace-selection-atomic-v1':isProjectMutationRoute(request)?'project-metadata-atomic-v1':isConversationForkRoute(request)?'conversation-fork-atomic-v1':isFileLifecycleRoute(request)?'file-lifecycle-atomic-v1':isIndexAdmissionRoute(request)?'git-index-admission-atomic-v1':isIndexControlAdmissionRoute(request)?'git-index-control-admission-atomic-v1':isPublicationAdmissionRoute(request)?'work-publication-admission-atomic-v1':isPublicationReviewRoute(request)?'work-publication-review-atomic-v1':isGitReviewRoute(request)?'git-review-atomic-v1':isRunCommandRoute(request)?'run-command-atomic-v1':isModeMutationRoute(request)?'conversation-mode-atomic-v1':isDiscoveryPolicyRoute(request)?'discovery-policy-atomic-v1':isGoalResumeRoute(request)?'conversation-goal-resume-atomic-v1':isMcpMutationRoute(request)?'workbench-mcp-atomic-v1':isUploadRoute(request)?'upload-atomic-v1':isMemoryRestoreRoute(request)?'memory-restore-atomic-v1':isMemoryConsolidationRoute(request)?'memory-consolidation-atomic-v1':isMemoryCaptureRoute(request)?'memory-capture-atomic-v1':isMemoryDreamPolicyRoute(request)?'memory-dream-policy-atomic-v1':null;
+  const persistentTaskMutationRoutes = new Set([
+    'POST /v1/persistent-tasks',
+    'PATCH /v1/persistent-tasks/:taskId',
+    'POST /v1/persistent-tasks/:taskId/pause',
+    'POST /v1/persistent-tasks/:taskId/resume',
+    'POST /v1/persistent-tasks/:taskId/archive',
+    'POST /v1/persistent-tasks/:taskId/run-now',
+    'POST /v1/persistent-tasks/:taskId/occurrences/:occurrenceId/cancel',
+    'POST /v1/persistent-tasks/:taskId/subtasks',
+    'PATCH /v1/persistent-tasks/:taskId/collaboration',
+    'POST /v1/persistent-tasks/:taskId/delegations',
+  ]);
+  const isPersistentTaskMutationRoute=(request:any)=>persistentTaskMutationRoutes.has(`${request.method} ${request.routeOptions.url}`);
+  const atomicProtocol=(request:any)=>isPersistentTaskMutationRoute(request)?'persistent-task-atomic-v1':isWorkspaceSelectionRoute(request)?'workspace-selection-atomic-v1':isProjectMutationRoute(request)?'project-metadata-atomic-v1':isConversationForkRoute(request)?'conversation-fork-atomic-v1':isFileLifecycleRoute(request)?'file-lifecycle-atomic-v1':isIndexAdmissionRoute(request)?'git-index-admission-atomic-v1':isIndexControlAdmissionRoute(request)?'git-index-control-admission-atomic-v1':isPublicationAdmissionRoute(request)?'work-publication-admission-atomic-v1':isPublicationReviewRoute(request)?'work-publication-review-atomic-v1':isGitReviewRoute(request)?'git-review-atomic-v1':isRunCommandRoute(request)?'run-command-atomic-v1':isModeMutationRoute(request)?'conversation-mode-atomic-v1':isDiscoveryPolicyRoute(request)?'discovery-policy-atomic-v1':isGoalResumeRoute(request)?'conversation-goal-resume-atomic-v1':isMcpMutationRoute(request)?'workbench-mcp-atomic-v1':isUploadRoute(request)?'upload-atomic-v1':isMemoryRestoreRoute(request)?'memory-restore-atomic-v1':isMemoryConsolidationRoute(request)?'memory-consolidation-atomic-v1':isMemoryCaptureRoute(request)?'memory-capture-atomic-v1':isMemoryDreamPolicyRoute(request)?'memory-dream-policy-atomic-v1':null;
   // Receipt protocol is reserved with the original request. Legacy pending rows
   // have no proof of an atomic business boundary and must not be re-executed.
   const atomicCommand=<T>(request:any,status:number,operation:()=>T):T=>{
@@ -413,7 +426,7 @@ export async function buildServer(config: {
           });
           if(recovered)return reply.code(recovered.status).send(recovered.body);
         }
-        if((isWorkspaceSelectionRoute(request)||isProjectMutationRoute(request)||isConversationForkRoute(request)||isFileLifecycleRoute(request)||isGitReviewRoute(request)||isIndexAdmissionRoute(request)||isIndexControlAdmissionRoute(request)||isPublicationReviewRoute(request)||isPublicationAdmissionRoute(request)||isRunCommandRoute(request)||isModeMutationRoute(request)||isDiscoveryPolicyRoute(request)||isGoalResumeRoute(request)||isMcpMutationRoute(request)||isMemoryRestoreRoute(request)||isMemoryConsolidationRoute(request)||isMemoryCaptureRoute(request)||isMemoryDreamPolicyRoute(request))&&existing.receipt_protocol===atomicProtocol(request)){idempotencyRequests.set(request,{owner,operation,key:idempotencyKey});return;}
+        if((isPersistentTaskMutationRoute(request)||isWorkspaceSelectionRoute(request)||isProjectMutationRoute(request)||isConversationForkRoute(request)||isFileLifecycleRoute(request)||isGitReviewRoute(request)||isIndexAdmissionRoute(request)||isIndexControlAdmissionRoute(request)||isPublicationReviewRoute(request)||isPublicationAdmissionRoute(request)||isRunCommandRoute(request)||isModeMutationRoute(request)||isDiscoveryPolicyRoute(request)||isGoalResumeRoute(request)||isMcpMutationRoute(request)||isMemoryRestoreRoute(request)||isMemoryConsolidationRoute(request)||isMemoryCaptureRoute(request)||isMemoryDreamPolicyRoute(request))&&existing.receipt_protocol===atomicProtocol(request)){idempotencyRequests.set(request,{owner,operation,key:idempotencyKey});return;}
         if(isUploadRoute(request)&&existing.receipt_protocol==='upload-atomic-v1'){
           if(request.method==='PUT'){
             const uploadId=String((request.params as Record<string,unknown>).uploadId),upload=db.prepare('SELECT status,declared_size,received_size,declared_sha256,actual_sha256,writer_token,writer_lease_until FROM ga_uploads WHERE id=? AND owner_id=?').get(uploadId,owner) as Record<string,unknown>|undefined;
@@ -660,7 +673,7 @@ export async function buildServer(config: {
     (ownerId, agentId) => listUnknownMcpOperations(db, ownerId, agentId));
   const taskDelegations=new TaskDelegationService(db,workbench,persistentTasks);
   const taskCollaboration=new TaskCollaborationService(db,workbench,persistentTasks,taskDelegations);
-  registerPersistentTaskRoutes(app, persistentTasks, actor,taskDelegations,taskCollaboration);
+  registerPersistentTaskRoutes(app, persistentTasks, actor,taskDelegations,taskCollaboration,atomicCommand);
   registerTaskPrdRoutes(app,taskPrd,actor);
   registerTaskBudgetRoutes(app,new TaskBudgetService(db,budgetPolicy),actor);
   registerWorkbenchExecution(app, db, workbench, persistentTasks, config.internalChannelToken, modelBudgets,taskCollaboration,config.replyJudge,nativeWork,
