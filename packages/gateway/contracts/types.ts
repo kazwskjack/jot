@@ -613,3 +613,9 @@ export type TaskPrdWorkAdmissionRequest={plan_id:string;cycle_id:string;grant_id
 export type TaskPrdWorkAdmissionReceipt={protocol:1;task_id:string;plan_id:string;cycle_id:string;grant_id:string;grant_sha256:string;created_at:string;accepted:true;execution_authorized:false};
 export type TaskPrdWorkAdmissionState={task_id:string;plan_id:string;available:boolean;request:TaskPrdWorkAdmissionReceipt|null;
  admission:{grant_id:string;occurrence_id:string;run_id:string;conversation_id:string;created_at:string}|null;reason:string|null;execution_authorized:false};
+
+export type TaskmasterRuntimeVersionRequest={profile_id:string;manifest_sha256:string;cli_entry_sha256:string};
+export type TaskmasterRuntimeVersion={protocol:1;owner_id:string;profile_id:string;manifest_sha256:string;cli_entry_sha256:string;declared_version:string;
+ status:"observed"|"failed";runtime_version:string|null;stdout_sha256:string;exit_code:number|null;
+ reason_code:"cli_failed"|"version_output_unconfirmed"|"cancelled"|"timeout"|"output_limit"|"spawn_failed"|"cleanup_unconfirmed"|null;observed_at:string;execution_authorized:false};
+export type TaskPrdRuntimeVersion={task_id:string;task_version:number;runtime:TaskmasterRuntimeVersion};

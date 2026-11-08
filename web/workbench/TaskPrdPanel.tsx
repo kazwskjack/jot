@@ -1,3 +1,4 @@
+import TaskmasterRuntimeVersion from './TaskmasterRuntimeVersion';
 import React,{useEffect,useMemo,useRef,useState} from 'react';
 import type {Task} from './types';
 import {request,taskDraftScope} from '../jot/client';
@@ -42,8 +43,9 @@ export default function TaskPrdPanel({task,executionReady,onBound}:{task:Task;ex
  const [prepareSave]=useState(()=>new TaskSaveReceipt(undefined,recovery.prepareStore));
  const [grantSave]=useState(()=>new TaskSaveReceipt(undefined,recovery.grantStore));
  const [admitSave]=useState(()=>new TaskSaveReceipt(undefined,recovery.admitStore));
+ const [runtimeBusy,setRuntimeBusy]=useState(false);
  const saves=[importSave,templateSave,documentSave,workPlanSave,cycleSave,handoffSave,prepareSave,grantSave,admitSave];
- const savesBlocked=(current?:TaskSaveReceipt)=>saves.some(save=>save!==current&&(save.busy||save.pending));
+ const savesBlocked=(current?:TaskSaveReceipt)=>runtimeBusy||saves.some(save=>save!==current&&(save.busy||save.pending));
  const [importConfirmed,setImportConfirmed]=useState(false),[importReceipt,setImportReceipt]=useState<PrdImport|null>(null);
  const [savedSource,setSavedSource]=useState<{task_version:number;source:Extract<TaskPrdSource,{kind:'logical_file'}>}|null>(null);
  if(!flowRef.current)flowRef.current=new PrdFlow(task,executionReady,undefined,recovery.store);
@@ -113,6 +115,7 @@ export default function TaskPrdPanel({task,executionReady,onBound}:{task:Task;ex
     {installation.status==='available'&&<dl><dt>包声明版本</dt><dd>{installation.version}</dd><dt>许可证声明</dt><dd>{installation.license??'未提供'}</dd><dt>包清单 SHA-256</dt><dd>{installation.manifest_sha256}</dd><dt>CLI 入口 SHA-256</dt><dd>{installation.cli_entry_sha256}</dd></dl>}
     <p className="wb-hint">安装观察读取原用户 profile 或其运行环境 PATH 指向的包清单与 CLI 入口，版本取自包声明。许可证声明保留给原安装审核流程。</p>
    </div>}
+   <TaskmasterRuntimeVersion taskId={task.task_id} taskVersion={task.version} installation={installation??null} locked={locked||!!recovery.error} onBusyChange={setRuntimeBusy}/>
    <p className="wb-hint">显示原角色 MCP 注册表中按名称、命令或包参数匹配的连接及已发现目录状态。可在此角色的 MCP 连接面板配置、重载及审核工具。PRD 文件绑定继续检查原任务准备度。</p>
    {resource.data&&!taskmaster?.registry_available&&<p className="wb-status">MCP 注册表状态尚不可读取。</p>}
    {taskmaster?.registry_available&&taskmaster.connections.length===0&&<p className="wb-status">此角色尚未配置匹配的 Taskmaster MCP 连接。</p>}
@@ -139,7 +142,7 @@ export default function TaskPrdPanel({task,executionReady,onBound}:{task:Task;ex
    <button type="button" disabled={flow.busy||flow.pending||importSave.busy||savesBlocked(importSave)||!!recovery.error||(!importSave.pending&&(!importReady||!importConfirmed))} onClick={()=>void importProject()}>{importSave.busy?'正在保存文件…':importSave.pending?'重试原导入回执':'保存项目任务文件'}</button>
    {importSave.pending&&<p className="wb-status" role="status">导入结果待确认，已保留原请求及 key。请重试读取原回执。</p>}
    {importReceipt&&<p className="wb-status" role="status" style={textStyle}>已保存 {importReceipt.file.path} · v{importReceipt.file.version} · SHA-256 {importReceipt.file.sha256}。可从下方来源选择继续预览和绑定。</p>}
-   <p className="wb-hint">CLI 安装、运行版本检查及其余任务操作继续补齐。连接状态沿用原注册表的发现结果，执行时沿用原角色权限、运行身份和预算校验。</p>
+   <p className="wb-hint">CLI 初始化、提示词生成和 PRD 拆解选项继续补齐。连接状态沿用原注册表的发现结果，执行时沿用原角色权限、运行身份和预算校验。</p>
   </details>
   {!executionReady&&<p className="wb-status" role="status">执行宿主尚未就绪；来源可查看，就绪后再预览绑定。</p>}
   {task.status!=='paused'&&<p className="wb-status" role="status">绑定 PRD 前请先暂停原任务，并等待所有执行及未知结果核对完成。</p>}

@@ -53,7 +53,7 @@ import {createAgentHooksBridge} from './hooks-agent-bridge.js'
 import {createHookCallbackAuthority} from './hooks-callback-authority.js'
 import {readHookStopPayload} from './hooks-stop-source.js'
 import {resolveOwnerBoundDshProfileContext} from './dsh-profile-binding.js'
-import {readTaskmasterInstallation} from './taskmaster-installation.js'
+import {readTaskmasterInstallation,createTaskmasterRuntimeVersionReader} from './taskmaster-installation.js'
 
 import {normalizeLeaseTakeoverRequest,settleLeaseTakeover} from './lease-takeover.js'
 import {browserToolsConfigFromEnvironment,createBrowserToolsPlugin} from '../dsh-host/browser-tools.mjs'
@@ -274,7 +274,7 @@ async function createOrResumeSession({controller,request,agents,sessions,session
   return value
 }
 
-export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,skillContentCommand,skillCatalogCommand,skillResourceCommand,nativeCommandQueryHost,nativePlanModeHost,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation=false,sessionNotFoundError,modelCatalogReader,trustedModelMetadataReader,trustedModelMetadataEnabled=false,requireOrdinaryModelPolicy=false,chatExecutionPolicy,chatModeReadiness,mcpControlRoute,pluginProfileControl,hostPolicyBootstrap,hostSettingsProductHandler,hostAdmissionGuard,taskmasterInstallationReader }) {
+export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,skillContentCommand,skillCatalogCommand,skillResourceCommand,nativeCommandQueryHost,nativePlanModeHost,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation=false,sessionNotFoundError,modelCatalogReader,trustedModelMetadataReader,trustedModelMetadataEnabled=false,requireOrdinaryModelPolicy=false,chatExecutionPolicy,chatModeReadiness,mcpControlRoute,pluginProfileControl,hostPolicyBootstrap,hostSettingsProductHandler,hostAdmissionGuard,taskmasterInstallationReader,taskmasterRuntimeVersionReader }) {
   const allowedPresets=new Set(ALLOWED_AGENT_PRESETS)
   if(chatExecutionPolicy!==undefined){normalizeChatExecutionPolicy(chatExecutionPolicy);if(!requireOrdinaryModelPolicy||!ordinaryInputAdmissionHost)throw Error('ordinary_execution_policy_config_invalid');allowedPresets.add('jot-chat')}
   const voiceHandler = voiceEnabled ? createVoiceAdapterHandler({ speechController, token }) : null
@@ -312,6 +312,15 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       if(typeof taskmasterInstallationReader !== 'function') return json(503, {error: 'taskmaster_installation_unavailable'})
       try { return json(200, await taskmasterInstallationReader(body.owner_id, signal)) }
       catch(error) { return json(error.message === 'taskmaster_profile_forbidden' ? 404 : 503, {error: 'taskmaster_installation_unavailable'}) }
+    }
+    if(url.pathname === '/v1/taskmaster/runtime-version') {
+      if(method !== 'POST') return json(405, {error: 'method_not_allowed'})
+      if(!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).sort().join(',') !== 'cli_entry_sha256,manifest_sha256,owner_id,profile_id'
+        || typeof body.owner_id !== 'string' || !ID.test(body.owner_id) || typeof body.profile_id !== 'string' || !/^dsh-profile-[a-f0-9]{48}$/.test(body.profile_id)
+        || ![body.manifest_sha256,body.cli_entry_sha256].every(value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value)) || url.search) return json(422, {error: 'taskmaster_runtime_invalid'})
+      if(typeof taskmasterRuntimeVersionReader !== 'function') return json(503, {error: 'taskmaster_runtime_unavailable'})
+      try {return json(200, await taskmasterRuntimeVersionReader(body.owner_id, body, signal))}
+      catch(error) {return json(error.message === 'taskmaster_runtime_busy' ? 409 : 503, {error: error.message === 'taskmaster_runtime_busy' ? 'taskmaster_runtime_busy' : 'taskmaster_runtime_unavailable'})}
     }
     if(url.pathname.startsWith('/v1/plugin-profile/')){
       if(method!=='POST')return json(405,{error:'method_not_allowed'});
@@ -1249,9 +1258,12 @@ export function apply(ctx, config = {}) {
       const dispose=connection.fetch.register(ownerRoute);
       ctx.effect(()=>()=>dispose());
     }
+    const taskmasterRuntime=createTaskmasterRuntimeVersionReader({readIdentity:()=>resolveOwnerBoundDshProfileContext(ctx.get('profileContext'))});
+    ctx.effect(()=>()=>taskmasterRuntime.close());
     const handler = createAdapterHandler({ controller: ctx.sessionController, fileUploads: ctx.fileUploads, agents: ctx.agents,
       sessions:ctx.sessions,persistence:ctx.sessionPersistence,sessionNotFoundError:ApiSessionNotFound,
       speechController, voiceEnabled, token, workbenchBridge, skillContentCommand, skillCatalogCommand, skillResourceCommand, nativeCommandQueryHost, nativePlanModeHost,
+      taskmasterRuntimeVersionReader:(ownerId,expected,signal)=>taskmasterRuntime.read(ownerId,expected,signal),
       taskmasterInstallationReader:(ownerId,signal)=>readTaskmasterInstallation({ownerId,signal,readIdentity:()=>resolveOwnerBoundDshProfileContext(ctx.get('profileContext'))}),
       budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation:config.nativeIdleObservation===true,
       chatModeReadiness,modelCatalogReader:createModelCatalogReader({llm:ctx.llm,enabled:config.ordinaryModelSelection===true,routeHealth:modelRouteHealth}),trustedModelMetadataReader,trustedModelMetadataEnabled:config.ordinaryModelSelection===true,requireOrdinaryModelPolicy:config.ordinaryModelSelection===true,...(chatExecutionPolicy?{chatExecutionPolicy}:{}),mcpControlRoute,pluginProfileControl,...(hostPolicyBootstrapRuntime?.bootstrap?{hostPolicyBootstrap:hostPolicyBootstrapRuntime.bootstrap}:{}),...(hostPolicyBootstrapRuntime?.productHandler?{hostSettingsProductHandler:hostPolicyBootstrapRuntime.productHandler}:{}),...(hostAdmissionGuard?{hostAdmissionGuard}:{}) })

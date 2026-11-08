@@ -6,7 +6,8 @@ import {normalizeOrdinaryHistoryScope,validateOrdinarySteeringObservation,valida
 import { createReadStream } from 'node:fs'
 import { Readable } from 'node:stream'
 import {nativeIdleSessionId,validateNativeIdleObservation} from './native-idle-observation.ts'
-import {validateTaskmasterInstallation} from '../persistent-tasks/taskmaster-installation.ts'
+import type {TaskmasterRuntimeVersionRequest} from '../../contracts/types.ts'
+import {validateTaskmasterInstallation,validateTaskmasterRuntimeVersion} from '../persistent-tasks/taskmaster-installation.ts'
 
 export type AdapterFetch = (input: string | URL, init?: RequestInit) => Promise<Response>
 
@@ -229,6 +230,13 @@ export class SessionControllerClient {
     return this.post('/v1/plugin-profile/bundles/remove', {
       owner_id: input.ownerId, operation_id: input.operationId, name: input.name,
     }, signal)
+  }
+
+  async observeTaskmasterRuntimeVersion(ownerId:string,expected:TaskmasterRuntimeVersionRequest,signal?:AbortSignal){
+    if(typeof ownerId!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(ownerId))throw Error('taskmaster_runtime_invalid')
+    const deadline=AbortSignal.timeout(25000)
+    const value=await this.post('/v1/taskmaster/runtime-version',{owner_id:ownerId,...expected},signal?AbortSignal.any([signal,deadline]):deadline)
+    return validateTaskmasterRuntimeVersion(value,ownerId,expected)
   }
 
   async observeTaskmasterInstallation(ownerId: string, signal?: AbortSignal) {

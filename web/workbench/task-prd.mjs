@@ -1,5 +1,6 @@
 import {TaskSaveReceipt} from './task-save.mjs';
 const messages={
+ PRD_TASKMASTER_RUNTIME_UNAVAILABLE:'Taskmaster 实际运行版本尚待确认，请重读安装资料后再观察。',
  INVALID_PRD_WORK_ADMISSION:'准入请求无效，请重新核对原 grant。',
  PRD_WORK_ADMISSION_UNAVAILABLE:'原 Worker 工作配置尚未就绪，请保留原请求。',
  PRD_WORK_ADMISSION_SCOPE_CHANGED:'原计划、grant 或工作循环已变化，请重新核对。',

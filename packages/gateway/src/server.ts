@@ -431,9 +431,9 @@ export async function buildServer(config: {
     if(request.method==='PATCH'&&hostReceipt==='host-settings-original-attempt-v1')return;
     if(request.method==='POST'&&['/v1/host/bootstrap/redeem','/v1/host/settings/approval-requests'].includes(request.routeOptions.url??''))return;
     // Only these server-registered route markers use the PRD service's own
-    // immutable transaction/receipt; never persist read-only preview requests.
+    // immutable transaction/receipt; previews and bounded observations stay transient.
     const prdCommand=(request.routeOptions.config as {taskPrdCommand?:string}).taskPrdCommand;
-    if(request.method==='POST'&&['preview','bind','template-preview','project-prd-preview'].includes(prdCommand??''))return;
+    if(request.method==='POST'&&['preview','bind','template-preview','project-prd-preview','runtime-version'].includes(prdCommand??''))return;
     // Preview only computes a schedule; retain authentication and CSRF without persisting requests.
     if (request.method === 'POST' && request.url.split('?')[0] === '/v1/persistent-tasks/preview') return;
     if ((request.routeOptions.url ?? request.url).includes('/voice/transcriptions')) return;

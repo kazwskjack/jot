@@ -1960,5 +1960,14 @@
     "TaskPrdWorkAdmissionState",
     "200",
     "Read the durable owner admission request, bounded original admission lineage and latest deferred gate reason. Historical admission does not prove native execution or completion."
+  ],
+  [
+    "POST",
+    "/v1/persistent-tasks/{task_id}/prd/taskmaster-runtime-version",
+    "Observe installed Taskmaster CLI runtime version",
+    "TaskmasterRuntimeVersionRequest",
+    "TaskPrdRuntimeVersion",
+    "200",
+    "Explicitly run the already installed owner-selected Node CLI entry with fixed --version arguments. Match profile, manifest and CLI hashes before and after probing. Bound execution to 15 seconds and combined output to 64 KiB. Propagate cancellation, await process close and retain one in-flight probe per adapter. Return the parsed runtime version separately from the manifest declaration. Raw output and physical paths remain private. This transient observation grants no task execution authority."
   ]
 ]

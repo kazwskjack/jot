@@ -24731,6 +24731,133 @@
           }
         }
       }
+    },
+    "/v1/persistent-tasks/{task_id}/prd/taskmaster-runtime-version": {
+      "post": {
+        "operationId": "observeTaskPrdTaskmasterRuntimeVersion",
+        "summary": "Observe installed Taskmaster CLI runtime version",
+        "description": "Explicitly run the already installed owner-selected Node CLI entry with fixed --version arguments. Match profile, manifest and CLI hashes before and after probing. Bound execution to 15 seconds and combined output to 64 KiB. Propagate cancellation, await process close and retain one in-flight probe per adapter. Return the parsed runtime version separately from the manifest declaration. Raw output and physical paths remain private. This transient observation grants no task execution authority.",
+        "tags": [
+          "persistent-tasks"
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskPrdRuntimeVersion"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Rejected; no execution grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Rejected; no execution grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Rejected; no execution grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Rejected; no execution grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Rejected; no execution grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Rejected; no execution grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Rejected; no execution grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Original scope or PRD operation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskmasterRuntimeVersionRequest"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -48687,6 +48814,206 @@
           "execution_authorized": {
             "type": "boolean",
             "const": false
+          }
+        }
+      },
+      "TaskmasterRuntimeVersionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "profile_id",
+          "manifest_sha256",
+          "cli_entry_sha256"
+        ],
+        "properties": {
+          "profile_id": {
+            "type": "string",
+            "pattern": "^dsh-profile-[a-f0-9]{48}$"
+          },
+          "manifest_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "cli_entry_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        }
+      },
+      "TaskmasterRuntimeVersion": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "protocol",
+          "owner_id",
+          "profile_id",
+          "manifest_sha256",
+          "cli_entry_sha256",
+          "declared_version",
+          "status",
+          "runtime_version",
+          "stdout_sha256",
+          "exit_code",
+          "reason_code",
+          "observed_at",
+          "execution_authorized"
+        ],
+        "properties": {
+          "protocol": {
+            "type": "integer",
+            "const": 1
+          },
+          "owner_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "profile_id": {
+            "type": "string",
+            "pattern": "^dsh-profile-[a-f0-9]{48}$"
+          },
+          "manifest_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "cli_entry_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "declared_version": {
+            "type": "string",
+            "pattern": "^[0-9][A-Za-z0-9.+-]{0,127}$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "observed",
+              "failed"
+            ]
+          },
+          "runtime_version": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stdout_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "cli_failed",
+                  "version_output_unconfirmed",
+                  "cancelled",
+                  "timeout",
+                  "output_limit",
+                  "spawn_failed",
+                  "cleanup_unconfirmed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "execution_authorized": {
+            "type": "boolean",
+            "const": false
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "observed"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "runtime_version": {
+                  "type": "string",
+                  "maxLength": 128,
+                  "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+                },
+                "exit_code": {
+                  "const": 0
+                },
+                "reason_code": {
+                  "type": "null"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "runtime_version": {
+                  "type": "null"
+                },
+                "reason_code": {
+                  "type": "string",
+                  "enum": [
+                    "cli_failed",
+                    "version_output_unconfirmed",
+                    "cancelled",
+                    "timeout",
+                    "output_limit",
+                    "spawn_failed",
+                    "cleanup_unconfirmed"
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "TaskPrdRuntimeVersion": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "task_id",
+          "task_version",
+          "runtime"
+        ],
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "task_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "runtime": {
+            "$ref": "#/components/schemas/TaskmasterRuntimeVersion"
           }
         }
       }

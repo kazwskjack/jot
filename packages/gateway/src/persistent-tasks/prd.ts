@@ -11,7 +11,7 @@ import {withImmediateTransaction,withReadTransaction} from '../db/database.ts';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {taskmasterSourceSummary} from './taskmaster-source.ts';
 import type {McpRegistryService} from '../workbench/mcp-registry.ts';
-import {validateTaskmasterInstallation,type TaskmasterInstallation,type TaskmasterInstallationClient} from './taskmaster-installation.ts';
+import {validateTaskmasterInstallation,validateTaskmasterRuntimeVersion,type TaskmasterInstallation,type TaskmasterInstallationClient} from './taskmaster-installation.ts';
 import type {GitWorkbench} from '../git/service.ts';
 import {installPrdRunSources,prdReferenceInstructions,prdRunSourceContext,type PrdBindingSource} from './prd-run-source.ts';
 import {readUtf8Range,validateFileRange} from '../workbench/utf8-range.ts';
@@ -150,6 +150,19 @@ export class TaskPrdService {
    });
    return {task_id:taskId,task_version:view.task_version,preview_sha256:previewHash,file,execution_authorized:false as const};
   });
+ }
+ async taskmasterRuntimeVersion(owner:string,taskId:string,input:unknown,signal:AbortSignal){
+  const request=object(input,['profile_id','manifest_sha256','cli_entry_sha256']);
+  if(Object.keys(request).length!==3||typeof request.profile_id!=='string'||!/^dsh-profile-[a-f0-9]{48}$/.test(request.profile_id)
+   ||![request.manifest_sha256,request.cli_entry_sha256].every(value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value)))throw Error('invalid_prd_request');
+  const expected={profile_id:request.profile_id as string,manifest_sha256:request.manifest_sha256 as string,cli_entry_sha256:request.cli_entry_sha256 as string};
+  const {task,role}=this.scope(owner,taskId),client=this.options.installationClient;
+  if(!client?.observeTaskmasterRuntimeVersion)throw Error('prd_taskmaster_runtime_unavailable');
+  let runtime;
+  try{runtime=validateTaskmasterRuntimeVersion(await client.observeTaskmasterRuntimeVersion(owner,expected,signal),owner,expected);}
+  catch{throw Error('prd_taskmaster_runtime_unavailable');}
+  this.assertProjectContext(owner,taskId,task,role);
+  return {task_id:taskId,task_version:task.version,runtime};
  }
  async taskmasterInstallation(owner:string,taskId:string){
   const {task,role}=this.scope(owner,taskId);
