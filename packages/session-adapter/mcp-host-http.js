@@ -1,10 +1,11 @@
 import https from 'node:https';
+import http from 'node:http';
 import {awaitWithSignal} from './mcp-agent-provider.js';
 import {lookup} from 'node:dns/promises';
 import {Readable} from 'node:stream';
 import {pipeline} from 'node:stream/promises';
 import {isDeepStrictEqual} from 'node:util';
-import {isPublicNetworkAddress} from '../gateway/src/network/public-address.js';
+import {isPublicNetworkAddress,isLoopbackNetworkAddress} from '../gateway/src/network/public-address.js';
 
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 const REF=/^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
@@ -19,10 +20,14 @@ export function normalizeMcpHttpPolicy(value){
   ||!Array.isArray(value.connections)||value.connections.length>64)fail();
  const keys=new Set();
  const connections=value.connections.map(row=>{
-  if(!exact(row,['agent_id','connection_id','url','headers'])||![row.agent_id,row.connection_id].every(id=>typeof id==='string'&&ID.test(id))
+  if(!(exact(row,['agent_id','connection_id','url','headers'])||exact(row,['agent_id','connection_id','url','headers','network']))||![row.agent_id,row.connection_id].every(id=>typeof id==='string'&&ID.test(id))
    ||typeof row.url!=='string'||row.url.length>2048||!object(row.headers)||Object.keys(row.headers).length>64)fail();
   let url;try{url=new URL(row.url);}catch{fail();}
-  if(url.protocol!=='https:'||url.username||url.password||url.hash||url.href!==row.url)fail();
+  const network=row.network??'public';
+  if(!['public','loopback'].includes(network)||url.username||url.password||url.hash||url.href!==row.url
+   ||network==='public'&&url.protocol!=='https:'
+   ||network==='loopback'&&(!['http:','https:'].includes(url.protocol)||!['localhost','127.0.0.1','[::1]'].includes(url.hostname))
+   ||[...url.searchParams.keys()].some(key=>/token|secret|password|api[_-]?key/i.test(key)))fail();
   const key=JSON.stringify([row.agent_id,row.connection_id]);if(keys.has(key))fail();keys.add(key);
   const headers=Object.create(null);
   for(const [name,mapping] of Object.entries(row.headers)){
@@ -33,7 +38,7 @@ export function normalizeMcpHttpPolicy(value){
     ||typeof mapping.native_ref!=='string'||!REF.test(mapping.native_ref)||!['','Bearer '].includes(mapping.prefix))fail();
    headers[lower]=Object.freeze({...mapping});
   }
-  return Object.freeze({...row,headers:Object.freeze(headers)});
+  return Object.freeze({...row,network,headers:Object.freeze(headers)});
  });
  return Object.freeze({owner_id:value.owner_id,connections:Object.freeze(connections)});
 }
@@ -41,7 +46,8 @@ export function normalizeMcpHttpPolicy(value){
 function pinnedRequest(url,init,addresses,signal){
  return new Promise((resolve,reject)=>{
   let incoming;
-  const request=https.request(url,{method:init.method,headers:Object.fromEntries(init.headers),signal,agent:false,
+  const send=url.protocol==='https:'?https.request:http.request;
+  const request=send(url,{method:init.method,headers:Object.fromEntries(init.headers),signal,agent:false,
    lookup:(_host,options,callback)=>{
     if(options?.all)callback(null,addresses);else callback(null,addresses[0].address,addresses[0].family);
    }},response=>{
@@ -108,7 +114,7 @@ export function createMcpHostHttpFetch({policy,readIdentity,readCredentials}={})
     }
     const url=new URL(target),hostname=url.hostname.replace(/^\[|\]$/g,'');
     const addresses=await awaitWithSignal(lookup(hostname,{all:true,verbatim:true}),current);
-    if(!addresses.length||addresses.length>64||addresses.some(row=>!isPublicNetworkAddress(row.address)))fail();
+    if(!addresses.length||addresses.length>64||addresses.some(row=>!(approved.network==='loopback'?isLoopbackNetworkAddress(row.address):isPublicNetworkAddress(row.address))))fail();
     await check();
     const response=await pinnedRequest(url,{...init,headers},addresses,current);
     try{await check();}catch{await response.body?.cancel();fail();}

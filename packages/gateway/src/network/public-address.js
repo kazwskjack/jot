@@ -28,3 +28,13 @@ export function isPublicNetworkAddress(address){
  const first=words[0],second=words[1];
  return first>=0x2000&&first<=0x3fff&&!(first===0x2001&&(second<0x0200||second===0x0db8))&&first!==0x2002;
 }
+
+export function isLoopbackNetworkAddress(address){
+ const family=isIP(address);
+ if(family===4)return Number(address.split('.')[0])===127;
+ if(family!==6)return false;
+ const words=ipv6Words(address);
+ if(!words)return false;
+ return words.slice(0,7).every(word=>word===0)&&words[7]===1
+  ||words.slice(0,5).every(word=>word===0)&&words[5]===0xffff&&(words[6]>>>8)===127;
+}

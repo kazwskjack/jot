@@ -79,7 +79,7 @@ API key or authorization grant uses that provider's own administration surface.
 `createHostProfile` also accepts `mcpHttpPolicy`. Its private JSON file is the
 fifth CLI argument. Earlier optional JSON files may contain `null` to omit that
 configuration. The policy supplies `owner_id` and a `connections` array. Each
-connection supplies the exact `agent_id`, `connection_id`, HTTPS `url` and
+connection supplies the exact `agent_id`, `connection_id`, `url` and
 `headers` mapping. For example, one connection may contain the following mapping.
 
 ```json
@@ -94,10 +94,34 @@ of the Gateway connection config and DSH MCP plugin config.
 
 The Host compares owner, Agent, connection, complete URL and every header
 reference against that private policy and the original current connection
-binding. HTTPS requests resolve public addresses and pin the connection to
-those results. Redirects are refused. Request cancellation, provider changes,
+binding. The default `network: "public"` policy uses HTTPS and pins the
+connection to checked public addresses. Explicit `network: "loopback"` allows
+HTTP or HTTPS for `localhost`, `127.0.0.1` and `[::1]`, with all resolved
+addresses verified as loopback and pinned before the connection. Redirects are refused. Request cancellation, provider changes,
 credential changes and stale bindings stop the scoped transport. HTTP requests
 have a 60-second bound. Stdio launch authorization retains its existing policy.
+
+### Approved MCP stdio startup
+
+`createHostProfile` accepts `mcpStdioPolicy`; the sixth CLI argument names its
+private JSON file. Its shape is `owner_id` and `connections`. Each connection
+supplies `agent_id`, `connection_id`, `server_name`, absolute `command`,
+`command_sha256`, exact `args`, absolute `cwd` and a `files` map of absolute
+entry-file paths to lowercase SHA-256 digests. Matching policies use the same
+owner as the selected native profile and any other configured MCP policy.
+
+The Host checks the owner/Agent/connection binding, command, parameters and
+working directory before the original DSH stdio startup or reload. It reads
+executable and pinned entry files through stable file handles, verifies their
+fingerprints and rejects leaf symlinks. A cancelled or timed-out authorization
+stops startup. Keep executables, entry files and dependencies in operator-owned
+installation directories. Full installation integrity and dependency lifecycle
+remain part of the MCP installation work.
+
+This startup policy currently requires the Workbench connection's `env_refs`
+to be empty. Native DSH owns the existing subprocess environment scrubbing and
+process lifecycle. Stdio credential-reference resolution still needs a native
+transport seam that keeps values out of plugin configuration.
 
 ## Windows startup
 

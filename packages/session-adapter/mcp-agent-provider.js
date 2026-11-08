@@ -107,8 +107,7 @@ function reloadServerName(identity, source, existingNames) {
  * port such as `translateCredentialRef(secretRef, { agent, connectionId })`,
  * plus a separately approved DSH credential resolver. This candidate has no
  * mapping config, invokes no translator, and never reads secret values.
- * Streamable HTTP remains unavailable without a target egress policy injection
- * point.
+ * Streamable HTTP uses the separately scoped Host fetch policy.
  */
 export function toDshMcpStdioConfig(connection) {
   if (!isObject(connection) || connection.transport !== 'stdio' || !isObject(connection.config)
@@ -258,7 +257,7 @@ export function createMcpAgentRuntimeProvider({ mcpPlugin, authorizeStdio, httpF
         if (config.transport !== 'stdio' || source.server_name !== config.server_name) fail('mcp_reload_transport_unavailable');
         const staged = { ...source, version: identity.config_version, generation: identity.generation, config };
         const dshConfig = toDshMcpStdioConfig(staged);
-        if (!authorizeStdio || await authorizeStdio(Object.freeze({ agent, connectionId: source.connection_id,
+        if (!authorizeStdio || await authorizeStdio(Object.freeze({ agent, ownerId, agentId, signal:linked.signal, connectionId: source.connection_id,
           serverName: config.server_name, command: dshConfig.command, args: dshConfig.args, cwd: dshConfig.cwd })) !== true) fail('mcp_agent_stdio_forbidden');
         await check();
         const before = scope.tools.schemas(agent);
@@ -483,7 +482,7 @@ export function createMcpAgentRuntimeProvider({ mcpPlugin, authorizeStdio, httpF
       });
       for (const { connection, dshConfig } of prepared.filter(row => row.connection.transport === 'stdio')) {
         const request = Object.freeze({
-          agent,
+          agent, ownerId, agentId, signal,
           connectionId: connection.connection_id,
           serverName: connection.server_name,
           command: dshConfig.command,

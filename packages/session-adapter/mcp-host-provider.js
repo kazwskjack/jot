@@ -1,3 +1,4 @@
+import {createMcpHostStdioAuthorization,normalizeMcpStdioPolicy} from './mcp-host-stdio.js';
 import {createMcpHostHttpFetch,normalizeMcpHttpPolicy} from './mcp-host-http.js';
 import {resolveOwnerBoundDshProfileContext} from './dsh-profile-binding.js';
 import { createRequire } from 'node:module';
@@ -10,7 +11,8 @@ export const name = 'jot-mcp-host-provider';
 export const inject = ['profileContext', 'agents'];
 
 export async function apply(ctx,config={}) {
-  if(!config||typeof config!=='object'||Array.isArray(config)||Object.keys(config).some(key=>key!=='httpPolicy'))throw Error('jot_mcp_host_config_invalid');
+  if(!config||typeof config!=='object'||Array.isArray(config)||Object.keys(config).some(key=>!['httpPolicy','stdioPolicy'].includes(key)))throw Error('jot_mcp_host_config_invalid');
+  const stdioPolicy=config.stdioPolicy===undefined?undefined:normalizeMcpStdioPolicy(config.stdioPolicy);
   const httpPolicy=config.httpPolicy===undefined?undefined:normalizeMcpHttpPolicy(config.httpPolicy);
   const anchor = ctx.get('profileContext')?.installAnchor;
   if (typeof anchor !== 'string' || !isAbsolute(anchor)) throw Error('jot_mcp_host_installation_missing');
@@ -38,10 +40,11 @@ export async function apply(ctx,config={}) {
   }
 
   const readIdentity=()=>resolveOwnerBoundDshProfileContext(ctx.get('profileContext'));
-  if(httpPolicy&&readIdentity().ownerId!==httpPolicy.owner_id)throw Error('jot_mcp_host_owner_invalid');
+  if([httpPolicy,stdioPolicy].some(policy=>policy&&readIdentity().ownerId!==policy.owner_id))throw Error('jot_mcp_host_owner_invalid');
+  const authorizeStdio=stdioPolicy?createMcpHostStdioAuthorization({policy:stdioPolicy,readIdentity}):undefined;
   const httpFetchForConnection=httpPolicy?createMcpHostHttpFetch({policy:httpPolicy,readIdentity,
     readCredentials:()=>ctx.get('credentials')}):undefined;
-  const provider = createMcpAgentRuntimeProvider({mcpPlugin,...(httpFetchForConnection?{httpFetchForConnection}:{})});
+  const provider = createMcpAgentRuntimeProvider({mcpPlugin,...(httpFetchForConnection?{httpFetchForConnection}:{}),...(authorizeStdio?{authorizeStdio}:{})});
   ctx.on('credentials/reference-updated', () => provider.invalidateCredentials());
   ctx.on('agent/created', ({agent}) => provider.setup(agent.ctx, agent));
   for (const agent of ctx.agents.list()) provider.setup(agent.ctx, agent);

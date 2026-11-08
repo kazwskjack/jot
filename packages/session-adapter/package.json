@@ -29,6 +29,7 @@
     "mcp-control-host.js",
     "mcp-host-provider.js",
     "mcp-host-http.js",
+    "mcp-host-stdio.js",
     "mcp-runtime.js",
     "voice.js",
     "skill-content-reader.js",
