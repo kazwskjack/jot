@@ -69,11 +69,14 @@ export default function SkillCatalogPanel({runId,ownerScope,onUseSkill}:{runId:s
   },error=>{if(!abort.signal.aborted&&pending.current.get(name)===abort)setResources(old=>({...old,[name]:{error:skillResourceErrorMessage(error)}}));});
  };
  const readDefinition=(name:string)=>{
-  const key='definition/'+name;pending.current.get(key)?.abort();
-  const abort=new AbortController();pending.current.set(key,abort);setDefinitions(old=>({...old,[name]:{loading:true}}));
+  for(const [key,request] of pending.current){
+   if(key.startsWith('definition/')){request.abort();pending.current.delete(key);}
+  }
+  const key='definition/'+name,abort=new AbortController();
+  pending.current.set(key,abort);setDefinitions({[name]:{loading:true}});
   void readSelectedSkillDefinition(runId,ownerScope,name,abort.signal).then(value=>{
-   if(!abort.signal.aborted&&pending.current.get(key)===abort)setDefinitions(old=>({...old,[name]:{value}}));
-  },error=>{if(!abort.signal.aborted&&pending.current.get(key)===abort)setDefinitions(old=>({...old,[name]:{error:skillResourceErrorMessage(error)}}));});
+   if(!abort.signal.aborted&&pending.current.get(key)===abort)setDefinitions({[name]:{value}});
+  },error=>{if(!abort.signal.aborted&&pending.current.get(key)===abort)setDefinitions({[name]:{error:skillResourceErrorMessage(error)}});});
  };
  const changePath=(name:string,path:string)=>{pending.current.get(name)?.abort();pending.current.delete(name);setPaths(old=>({...old,[name]:path}));
   setResources(old=>{const next={...old};delete next[name];return next;});};
