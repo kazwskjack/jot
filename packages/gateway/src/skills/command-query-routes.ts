@@ -29,7 +29,11 @@ export function registerNativeCommandQueryRoutes(app:FastifyInstance,{db,catalog
    if(!client.executeCommandQuery)return reply.code(503).send({error:{code:'NATIVE_COMMAND_QUERY_UNAVAILABLE'}});
    const prepared=journal.prepare(owner,runId,input,()=>catalog.originalScope(owner,runId));
    if(prepared.packet){
-    try{await client.executeCommandQuery(prepared.packet);}
+    try{
+     await client.executeCommandQuery(prepared.packet);
+     const settled=journal.read(owner,runId,prepared.receipt.request_id);
+     if(['prepared','dispatched'].includes(settled.state))journal.finish(prepared.packet,'unknown');
+    }
     catch{try{journal.finish(prepared.packet,'unknown');}catch{}}
    }
    return reply.code(202).send({accepted:true,request_id:prepared.receipt.request_id,run_id:runId});
