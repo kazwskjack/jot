@@ -501,7 +501,7 @@ export class PersistentTaskService {
       const now=this.now(); const runId=String(receipt.run_id);
       beforeOccurrence?.(occurrenceId,runId,conversation.conversation_id);
       this.db.prepare(`INSERT INTO wb_task_occurrences VALUES(?,?,?,?,?,?,?,'queued','queued',?,?,?)`).run(occurrenceId,id,key,scheduled,row.generation,conversation.conversation_id,runId,JSON.stringify(sourceEvidence),now,now);
-      if(prdSource)capturePrdRunSource(this.db,owner,id,occurrenceId,runId,prdSource.binding_id,now);
+      if(prdSource)capturePrdRunSource(this.db,owner,id,occurrenceId,runId,prdSource.binding_id,now,prdSource.context);
       this.replyPolicies.capture(owner,id,occurrenceId,runId);
       beginSubtaskOccurrence(this.db,id,occurrenceId,now);
       this.workbench.bindRun(owner,agent.agent_id,runId,'task');

@@ -22,7 +22,7 @@ export type PrdPreview={task_id:string;task_version:number;role:{agent_id:string
 const sha=(value:string|Buffer)=>createHash('sha256').update(value).digest('hex');
 const supported=(name:string)=>/\.(md|markdown|txt|json)$/i.test(name);
 const supportedMedia=(name:string,mediaType:string)=>mediaType.startsWith('text/')||/\.json$/i.test(name)&&mediaType.split(';',1)[0]!.trim().toLowerCase()==='application/json';
-const MAX_BYTES=65536,MAX_OBJECTIVE=12000;
+const MAX_BYTES=1048576,MAX_OBJECTIVE=12000;
 const terminal=['succeeded','partial','failed','cancelled','interrupted'];
 type PrdOptions={uploadRoot:string;mcpRegistry?:Pick<McpRegistryService,'taskmasterConnections'>;installationClient?:TaskmasterInstallationClient;projectSource?:Pick<GitWorkbench,'taskmasterFiles'>};
 function object(value:unknown,keys:string[]):Row{
@@ -236,12 +236,13 @@ export class TaskPrdService {
   const preview={task_id:taskId,task_version:task.version,role:{agent_id:role.agent_id,version:role.version,capability_epoch:role.capability_epoch},...material,objective,...delivery,execution_authorized:false as const};
   return {...preview,preview_sha256:sha(canonicalJson(preview))};
  }
- private runSource(owner:string,runId:string){
-  return this.db.prepare(`SELECT p.* FROM wb_task_run_occurrences o
+ private runSource(owner:string,runId:string,includeContent=false){
+  return this.db.prepare(`SELECT p.binding_id,p.objective,p.base_objective,p.source_json,p.content_sha256,s.source_context,
+   CASE WHEN ?=1 OR s.source_context='' THEN p.content ELSE '' END AS content FROM wb_task_run_occurrences o
    JOIN wb_task_prd_occurrence_sources s ON s.occurrence_id=o.occurrence_id AND s.root_run_id=o.root_run_id AND s.task_id=o.task_id
    JOIN wb_task_prd_bindings p ON p.binding_id=s.binding_id AND p.owner_id=s.owner_id AND p.task_id=s.task_id
    JOIN wb_persistent_tasks t ON t.task_id=s.task_id AND t.owner_id=s.owner_id
-   WHERE o.run_id=? AND s.owner_id=?`).get(runId,owner) as PrdBindingSource|undefined;
+   WHERE o.run_id=? AND s.owner_id=?`).get(includeContent?1:0,runId,owner) as PrdBindingSource|undefined;
  }
  runSourceContext(owner:string,runId:string):string|undefined {
   const row=this.runSource(owner,runId);return row?prdRunSourceContext(row):undefined;
@@ -254,7 +255,7 @@ export class TaskPrdService {
   }
   const offset=args.offset_bytes??0,limit=args.limit_bytes??8192;
   validateFileRange(offset,limit);
-  const row=this.runSource(owner,runId);
+  const row=this.runSource(owner,runId,true);
   if(!row||row.binding_id!==args.binding_id)throw Error('prd_source_unavailable');
   const bytes=Buffer.from(row.content,'utf8'),source=JSON.parse(row.source_json) as PrdSource;
   if(sha(bytes)!==row.content_sha256||source.sha256!==row.content_sha256||source.size!==bytes.length)throw Error('prd_source_integrity_failed');

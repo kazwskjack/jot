@@ -22602,7 +22602,7 @@
         "tags": [
           "persistent-tasks"
         ],
-        "description": "Read fixed .taskmaster project config/tasks files from the existing operator-bound owner/project Git repository. Reuse original repository/path and stable-byte witnesses. Read at most 65536 content bytes per file. Config content is withheld. Task JSON is source material only. No installation, file import, task mutation or execution authorization.",
+        "description": "Read fixed .taskmaster project config/tasks files from the existing operator-bound owner/project Git repository. Reuse original repository/path and stable-byte witnesses. Read at most 1048576 task-file bytes and 65536 config-file bytes. Config content is withheld. Task JSON is source material only. No installation, file import, task mutation or execution authorization.",
         "parameters": [
           {
             "name": "task_id",
@@ -34871,7 +34871,7 @@
               "size": {
                 "type": "integer",
                 "minimum": 0,
-                "maximum": 65536
+                "maximum": 1048576
               }
             }
           },
@@ -34912,7 +34912,7 @@
               "size": {
                 "type": "integer",
                 "minimum": 0,
-                "maximum": 65536
+                "maximum": 1048576
               }
             }
           }
@@ -35057,7 +35057,7 @@
           },
           "content": {
             "type": "string",
-            "maxLength": 65536
+            "maxLength": 1048576
           },
           "objective": {
             "type": "string",
@@ -43954,7 +43954,7 @@
                   "anyOf": [
                     {
                       "type": "string",
-                      "maxLength": 65536
+                      "maxLength": 1048576
                     },
                     {
                       "type": "null"
@@ -44150,7 +44150,7 @@
               "size": {
                 "type": "integer",
                 "minimum": 0,
-                "maximum": 65536
+                "maximum": 1048576
               },
               "source": {
                 "type": "object",

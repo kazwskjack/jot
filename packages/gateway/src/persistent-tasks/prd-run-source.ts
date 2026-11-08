@@ -2,14 +2,14 @@ import {createHash} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
 import {taskmasterSourceSummary} from './taskmaster-source.ts';
 import {canonicalJson} from '../db/canonical-json.ts';
-export type PrdBindingSource={binding_id:string;objective:string;base_objective:string;source_json:string;content_sha256:string;content:string};
+export type PrdBindingSource={binding_id:string;objective:string;base_objective:string;source_json:string;content_sha256:string;content:string;source_context?:string};
 
 export function installPrdRunSources(db:DatabaseSync):void {
   db.exec(`CREATE TABLE IF NOT EXISTS wb_task_prd_occurrence_sources (
     occurrence_id TEXT PRIMARY KEY REFERENCES wb_task_occurrences(occurrence_id),
     binding_id TEXT NOT NULL REFERENCES wb_task_prd_bindings(binding_id),
     owner_id TEXT NOT NULL,task_id TEXT NOT NULL REFERENCES wb_persistent_tasks(task_id),
-    root_run_id TEXT NOT NULL REFERENCES ga_runs(id),created_at TEXT NOT NULL);
+    root_run_id TEXT NOT NULL REFERENCES ga_runs(id),created_at TEXT NOT NULL,source_context TEXT NOT NULL DEFAULT '');
     CREATE TRIGGER IF NOT EXISTS wb_task_prd_source_no_update BEFORE UPDATE ON wb_task_prd_occurrence_sources
       BEGIN SELECT RAISE(ABORT,'task_prd_source_immutable'); END;
     CREATE TRIGGER IF NOT EXISTS wb_task_prd_source_no_delete BEFORE DELETE ON wb_task_prd_occurrence_sources
@@ -17,6 +17,9 @@ export function installPrdRunSources(db:DatabaseSync):void {
     CREATE TRIGGER IF NOT EXISTS wb_task_prd_source_no_replace BEFORE INSERT ON wb_task_prd_occurrence_sources
       WHEN EXISTS(SELECT 1 FROM wb_task_prd_occurrence_sources WHERE occurrence_id=NEW.occurrence_id)
       BEGIN SELECT RAISE(ABORT,'task_prd_source_immutable'); END;`);
+  if(!db.prepare("SELECT 1 FROM pragma_table_info('wb_task_prd_occurrence_sources') WHERE name='source_context'").get()){
+    db.exec("ALTER TABLE wb_task_prd_occurrence_sources ADD COLUMN source_context TEXT NOT NULL DEFAULT ''");
+  }
 }
 
 export function prdReferenceInstructions(sourceJson:string,contentHash:string,content:string):string {
@@ -29,6 +32,7 @@ export function prdReferenceInstructions(sourceJson:string,contentHash:string,co
 }
 
 export function prdRunSourceContext(source:PrdBindingSource):string {
+  if(source.source_context)return source.source_context;
   if(createHash('sha256').update(source.content,'utf8').digest('hex')!==source.content_sha256)throw Error('prd_source_integrity_failed');
   return prdReferenceInstructions(source.source_json,source.content_sha256,source.content)
     +`\n本次固定读取参数 ${JSON.stringify({binding_id:source.binding_id,offset_bytes:0,limit_bytes:8192})}`;
@@ -43,12 +47,14 @@ export function readPrdRunSource(db:DatabaseSync,owner:string,taskId:string,obje
   return {binding_id:row.binding_id,context:prdRunSourceContext(row)};
 }
 
-export function capturePrdRunSource(db:DatabaseSync,owner:string,taskId:string,occurrenceId:string,runId:string,bindingId:string,now:string):void {
+export function capturePrdRunSource(db:DatabaseSync,owner:string,taskId:string,occurrenceId:string,runId:string,bindingId:string,now:string,sourceContext=''):void {
+  const hasContext=!!db.prepare("SELECT 1 FROM pragma_table_info('wb_task_prd_occurrence_sources') WHERE name='source_context'").get();
   const result=db.prepare(`INSERT INTO wb_task_prd_occurrence_sources
-    SELECT o.occurrence_id,p.binding_id,p.owner_id,p.task_id,o.run_id,?
+    (occurrence_id,binding_id,owner_id,task_id,root_run_id,created_at${hasContext?',source_context':''})
+    SELECT o.occurrence_id,p.binding_id,p.owner_id,p.task_id,o.run_id,?${hasContext?',?':''}
     FROM wb_task_occurrences o JOIN wb_task_prd_bindings p ON p.task_id=o.task_id
     JOIN wb_persistent_tasks t ON t.task_id=o.task_id AND t.owner_id=p.owner_id AND t.objective=p.objective
     WHERE o.occurrence_id=? AND o.run_id=? AND p.owner_id=? AND p.task_id=? AND p.binding_id=?`)
-    .run(now,occurrenceId,runId,owner,taskId,bindingId);
+    .run(now,...(hasContext?[sourceContext]:[]),occurrenceId,runId,owner,taskId,bindingId);
   if(result.changes!==1)throw Error('prd_source_pin_conflict');
 }

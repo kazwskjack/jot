@@ -156,10 +156,11 @@ export class GitRepositoryInspection{
    signal?.throwIfAborted();
    const fact=await this.publicationPath(path,signal);
    let content:Buffer|null=null;
-   if(fact.kind==='file'&&fact.size<=65536){
+   const maxBytes=path==='.taskmaster/config.json'?65536:1048576;
+   if(fact.kind==='file'&&fact.size<=maxBytes){
     const stat=await lstat(join(this.root,path));
     if(hash(witness(stat))!==fact.stat_sha256)throw Error('git_snapshot_changed');
-    content=await this.bytes(join(this.root,path),65536,witness(stat));
+    content=await this.bytes(join(this.root,path),maxBytes,witness(stat));
    }
    if(canonicalJson(await this.publicationPath(path,signal))!==canonicalJson(fact))throw Error('git_snapshot_changed');
    const sha256=content===null?null:hash(content);

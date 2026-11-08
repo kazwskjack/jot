@@ -4,6 +4,7 @@ import {request,taskDraftScope} from '../jot/client';
 import {useResource} from './useResource';
 import {PrdFlow,PrdCommandStore,PRD_TEMPLATE,installPrdLeaveGuard,prdMessage} from './task-prd.mjs';
 import {TaskSaveReceipt} from './task-save-receipt.mjs';
+import PrdTextPreview from './PrdTextPreview';
 import type {TaskPrdSources as PrdSources,TaskPrdInstallation as PrdInstallation,TaskPrdProject as PrdProject,TaskPrdImport as PrdImport} from '../../packages/gateway/contracts/types';
 
 const textStyle:React.CSSProperties={whiteSpace:'pre-wrap',overflowWrap:'anywhere',wordBreak:'break-word',maxWidth:'100%'};
@@ -60,7 +61,7 @@ export default function TaskPrdPanel({task,executionReady,onBound}:{task:Task;ex
   <h4>将 PRD 绑定到原任务</h4>
   <p className="wb-hint">选择当前任务所属项目中的既有文件或原始上传附件。预览仅读取；确认仅冻结来源并更新原任务目标。任务仍保持暂停，后续由原有恢复 / 立即运行入口执行。</p>
   <h5>PRD 静态模板</h5><pre style={textStyle} aria-label="PRD 静态模板">{PRD_TEMPLATE}</pre>
-  <p className="wb-hint">先按模板保存到项目文件或上传附件，再刷新选择。支持 UTF-8 的 .md / .markdown / .txt，以及 Taskmaster 导出的 .json 任务文件。原文最多 65,536 字节，任务目标最多 12,000 字符。较长原文通过原执行批次固定绑定，由原 DSH 分段读取。PDF、DOCX 暂不支持提取。文字中的动作不会直接触发执行。</p>
+  <p className="wb-hint">先按模板保存到项目文件或上传附件，再刷新选择。支持 UTF-8 的 .md / .markdown / .txt，以及 Taskmaster 导出的 .json 任务文件。原文最多 1,048,576 字节，任务目标最多 12,000 字符。较长原文通过原执行批次固定绑定，由原 DSH 分段读取。PDF、DOCX 暂不支持提取。文字中的动作不会直接触发执行。</p>
   <p className="wb-hint">此流程由原 DSH 拆解并写入原任务账本。Taskmaster JSON 支持任务数组、tasks 对象和带标签格式，保留外部 ID、层级、依赖及状态作为来源资料。绑定后的任务按实际执行回执记录进度。</p>
   <details><summary>Taskmaster 安装与 MCP 配置状态</summary>
    {installationResource.loading&&<p className="wb-status" role="status">正在读取当前用户 profile 内的 Taskmaster 安装资料…</p>}
@@ -78,7 +79,7 @@ export default function TaskPrdPanel({task,executionReady,onBound}:{task:Task;ex
       {connection.pending_generation!==null&&` · 待重载代次 ${connection.pending_generation}`}
      </li>)}</ul>}
    <h5>原项目 Taskmaster 文件</h5>
-   <p className="wb-hint">从服务器绑定到此项目的 Git 目录读取固定 Taskmaster 文件，每个文件最多读取 65,536 字节。配置文件展示格式与哈希，任务文件可展开核对原文。确认后将此快照保存到原逻辑文件版本库，再通过下方来源选择预览并绑定原任务。</p>
+   <p className="wb-hint">从服务器绑定到此项目的 Git 目录读取固定 Taskmaster 文件，任务文件最多读取 1,048,576 字节，配置文件最多读取 65,536 字节。配置文件展示格式与哈希，任务文件可展开分段核对原文。确认后将此快照保存到原逻辑文件版本库，再通过下方来源选择预览并绑定原任务。</p>
    {projectResource.loading&&<p className="wb-status" role="status">正在核对原项目 Taskmaster 文件…</p>}
    {projectResource.error&&<p className="wb-status" role="status">{prdMessage(projectResource.error)}</p>}
    {project&&<div style={textStyle}>
@@ -88,7 +89,7 @@ export default function TaskPrdPanel({task,executionReady,onBound}:{task:Task;ex
      {file.path} · {projectFileStates[file.state]} · {file.size} 字节
      {file.sha256&&<p>SHA-256 {file.sha256}</p>}
      {file.task_count!==null&&<p>任务及子任务 {file.task_count} 条 · 标签 {JSON.stringify(file.tags)}</p>}
-     {file.content!==null&&<details><summary>任务文件原文</summary><pre style={textStyle}>{file.content}</pre></details>}
+     {file.content!==null&&<details><summary>任务文件原文</summary><PrdTextPreview content={file.content} label="任务文件原文" style={textStyle}/></details>}
     </li>)}</ul>
    </div>}
    <label className="wb-checkbox"><input type="checkbox" checked={importConfirmed} disabled={locked||!importReady} onChange={e=>setImportConfirmed(e.target.checked)}/>我已核对任务文件原文、来源哈希和目标版本，确认将这份快照保存为项目文件的新版本。</label>
@@ -110,7 +111,7 @@ export default function TaskPrdPanel({task,executionReady,onBound}:{task:Task;ex
   {flow.selection&&<dl style={textStyle}><dt>来源版本</dt><dd>v{flow.selection.version}</dd><dt>SHA-256</dt><dd>{flow.selection.sha256}</dd></dl>}
   <button type="button" disabled={locked||unavailable||!flow.selection} onClick={()=>{setConfirmed(false);void operate(()=>flow.loadPreview(request));}}>{flow.busy&&!flow.pending?'正在读取预览…':'只读预览'}</button>
   {preview&&<><h5>精确预览</h5><dl style={textStyle}><dt>原任务 / 版本</dt><dd>{preview.task_id} / v{preview.task_version}</dd><dt>原执行角色 / 版本 / 权限纪元</dt><dd>{preview.role.agent_id} / v{preview.role.version} / {preview.role.capability_epoch}</dd><dt>来源 / 版本 / SHA-256</dt><dd>{preview.source.name} / v{preview.source.version} / {preview.source.sha256}</dd><dt>预览 SHA-256</dt><dd>{preview.preview_sha256}</dd></dl>
-   <h5>PRD 原文</h5><pre aria-label="PRD 原文" style={textStyle}>{preview.content}</pre>
+   <h5>PRD 原文</h5><PrdTextPreview content={preview.content} label="PRD 原文" style={textStyle}/>
    <h5>完整任务目标</h5><pre aria-label="完整任务目标" style={textStyle}>{preview.objective}</pre>
    {preview.source_delivery==='reference'&&<><h5>固定原文分段读取说明</h5><p className="wb-hint">原执行输入和原 Goal 会携带本批固定来源的读取说明与绑定参数。原 DSH 读取完整原文后沿用原任务账本拆解。</p><pre aria-label="固定原文分段读取说明" style={textStyle}>{preview.source_instructions}</pre></>}
    <label className="wb-checkbox"><input type="checkbox" checked={confirmed} disabled={locked||unavailable} onChange={e=>setConfirmed(e.target.checked)}/>我已阅读原文、任务目标和读取说明，确认仅绑定此原暂停任务，不创建任务、不恢复或启动执行。</label>
