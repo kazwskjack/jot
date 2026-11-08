@@ -4,7 +4,7 @@ import PrdTextPreview from './PrdTextPreview';
 
 const pageSize=50;
 const textStyle:React.CSSProperties={whiteSpace:'pre-wrap',overflowWrap:'anywhere'};
-export default function TaskmasterSourceTasks({content}:{content:string}){
+export default function TaskmasterSourceTasks({content,onEdit,disabled=false}:{content:string;onEdit?:(index:number)=>void;disabled?:boolean}){
  const [open,setOpen]=useState(false),[tag,setTag]=useState<string|null>(null),[page,setPage]=useState(0);
  const source=useMemo(()=>{
   if(!open)return null;
@@ -27,6 +27,7 @@ export default function TaskmasterSourceTasks({content}:{content:string}){
    <p>下一项 {next?`${next.item.tag||'未分组'} · ${String(next.item.task.id)} · ${String(next.item.task.title)}`:'当前选择中没有 pending 或 in-progress 的顶层任务'}</p>
    <ol start={current*pageSize+1}>{selected.slice(current*pageSize,(current+1)*pageSize).map(({item,index})=><li key={index} style={textStyle}>
     <strong>{String(item.task.id)} · {String(item.task.title)}</strong>
+    {onEdit&&<button type="button" disabled={disabled} onClick={()=>onEdit(index)}>编辑任务字段</button>}
     <p>标签 {item.tag||'未分组'} · 层级 {item.depth} · 原状态 {String(item.task.status??'未提供')} · 原优先级 {String(item.task.priority??'未提供')}</p>
     {item.parent_index!==null&&<p>所在父任务 {String(items[item.parent_index]!.task.id)}</p>}
     {item.task.parentId!==undefined&&<p>原声明父 ID {String(item.task.parentId)}</p>}
