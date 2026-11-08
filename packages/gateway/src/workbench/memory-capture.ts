@@ -21,6 +21,11 @@ export function captureFinalizedTaskReportForDatabase(db:DatabaseSync,owner:stri
 function exact(input:Input,allowed:string[]){if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(key=>!allowed.includes(key)))throw new Error('invalid_memory_capture');}
 function text(value:unknown,max:number):string{if(typeof value!=='string'||!value.trim()||value.length>max)throw new Error('invalid_memory_capture');return (value as string).trim();}
 function expected(value:unknown,version:number){if(!Number.isSafeInteger(value)||Number(value)<0)throw new Error('invalid_memory_capture');if(value!==version)throw new Error('version_conflict');}
+function captureText(value:string,maxCharacters:number){
+ let end=Math.min(value.length,maxCharacters);
+ if(end<value.length&&(value.codePointAt(end-1)??0)>0xffff)end--;
+ return value.slice(0,end);
+}
 /** Capturing a completed public message is separate from planning, extraction and approval. */
 export class MemoryCaptureService{
  private readonly db:DatabaseSync;private readonly ports:Ports;
@@ -99,24 +104,26 @@ export class MemoryCaptureService{
   const blocks=decodeStoredContent(String(message.content_json)).blocks;
   if(blocks.length!==1||blocks[0]?.kind!=='text'||typeof blocks[0].text!=='string'||!blocks[0].text.trim()
    ||(blocks[0].exposure!==undefined&&blocks[0].exposure!=='public'))throw Error('completed_work_source_unavailable');
-  const reportText=blocks[0].text,source:Source={kind:'task_report',source_id:'source-'+digest(JSON.stringify(['task_report',runId,summary.certificate_id,summary.source_sha256])).slice(0,32),
+  const reportText=blocks[0].text,capturedText=captureText(reportText,20000),usable=!!capturedText.trim(),status=usable?'ready':'no_source';
+  const source:Source={kind:'task_report',source_id:'source-'+digest(JSON.stringify(['task_report',runId,summary.certificate_id,summary.source_sha256])).slice(0,32),
    message_id:String(message.id),block_id:'task-report:'+summary.certificate_id,block_index:0,role:'assistant',origin:'agent',content_sha256:digest(String(message.content_json)),
-   text:reportText.slice(0,20000),truncated:reportText.length>20000,task_run_id:runId,certificate_id:summary.certificate_id,source_sha256:summary.source_sha256};
-  const sourceJson=JSON.stringify([source]),infoJson=JSON.stringify({source_kind:'task_report',source_sha256:summary.source_sha256,certificate_id:summary.certificate_id,captured_chars:source.text.length,truncated_blocks:Number(source.truncated),omitted_blocks:0,excluded_blocks:0,source_status:'succeeded'});
+   text:capturedText,truncated:capturedText.length<reportText.length,task_run_id:runId,certificate_id:summary.certificate_id,source_sha256:summary.source_sha256};
+  const sourceJson=JSON.stringify(usable?[source]:[]),infoJson=JSON.stringify({source_kind:'task_report',source_sha256:summary.source_sha256,certificate_id:summary.certificate_id,captured_chars:usable?source.text.length:0,truncated_blocks:usable?Number(source.truncated):0,omitted_blocks:usable?0:1,excluded_blocks:0,source_status:'succeeded'});
   const existing=this.db.prepare('SELECT * FROM wb_memory_captures WHERE owner_id=? AND agent_id=? AND source_run_id=?').get(owner,agentId,runId) as Row|undefined;
   if(existing){
    if(existing.workspace_id!==actor.workspace_id||existing.project_id!==actor.project_id||existing.source_conversation_id!==message.conversation_id||existing.run_kind!=='task'
     ||existing.policy_version!==policy.version||existing.epoch!==actor.capability_epoch)throw Error('memory_capture_source_conflict');
+   if(existing.status==='no_source'&&existing.source_json===sourceJson&&existing.info_json===infoJson)return this.get(owner,agentId,String(existing.capture_id));
    const prior=this.sources(existing);
    if(prior.length===1&&prior[0]?.kind==='task_report'&&prior[0].source_sha256===summary.source_sha256&&prior[0].certificate_id===summary.certificate_id){this.requireSources(existing);return this.get(owner,agentId,String(existing.capture_id));}
    if(existing.status!=='watching'||existing.source_json!==null||existing.info_json!==null)throw Error('memory_capture_source_conflict');
-   this.db.prepare("UPDATE wb_memory_captures SET source_json=?,info_json=?,status='ready',version=version+1,updated_at=? WHERE capture_id=? AND version=?")
-    .run(sourceJson,infoJson,now(),String(existing.capture_id),Number(existing.version));
+   this.db.prepare("UPDATE wb_memory_captures SET source_json=?,info_json=?,status=?,version=version+1,updated_at=? WHERE capture_id=? AND version=?")
+    .run(sourceJson,infoJson,status,now(),String(existing.capture_id),Number(existing.version));
    return this.get(owner,agentId,String(existing.capture_id));
   }
   const at=now(),captureId='capture-'+randomUUID();
   this.db.prepare(`INSERT INTO wb_memory_captures(capture_id,owner_id,workspace_id,project_id,agent_id,source_run_id,source_conversation_id,run_kind,policy_version,epoch,status,version,source_json,info_json,created_at,updated_at)
-   VALUES(?,?,?,?,?,?,?,?,?,?,'ready',1,?,?,?,?)`).run(captureId,owner,actor.workspace_id,actor.project_id,agentId,runId,String(message.conversation_id),'task',Number(policy.version),actor.capability_epoch,sourceJson,infoJson,at,at);
+   VALUES(?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?)`).run(captureId,owner,actor.workspace_id,actor.project_id,agentId,runId,String(message.conversation_id),'task',Number(policy.version),actor.capability_epoch,status,sourceJson,infoJson,at,at);
   return this.get(owner,agentId,captureId);
  });}
  register(owner:string,agentId:string,runId:string){
@@ -288,7 +295,7 @@ export class MemoryCaptureService{
      for(const message of messages){for(const [index,block] of decodeStoredContent(String(message.content_json)).blocks.entries()){
       const role=String(message.role),allowed=message.status==='complete'&&(role==='user'?(row.run_kind==='chat'||!!row.include_automation):role==='assistant'&&!!row.include_assistant);
       if(!allowed||block.kind!=='text'||(block.exposure!==undefined&&block.exposure!=='public')||typeof block.text!=='string'||!block.text.trim()){excluded++;continue;}
-      if(sources.length>=20||captured>=20000){omitted++;continue;}const value=block.text.slice(0,20000-captured),short=value.length<block.text.length,hash=digest(String(message.content_json));if(short)truncated++;
+      if(sources.length>=20||captured>=20000){omitted++;continue;}const value=captureText(block.text,20000-captured);if(!value.trim()){omitted++;continue;}const short=value.length<block.text.length,hash=digest(String(message.content_json));if(short)truncated++;
       sources.push({source_id:'source-'+digest(JSON.stringify([message.id,index,hash])).slice(0,32),message_id:String(message.id),block_id:typeof block.block_id==='string'?block.block_id.slice(0,256):String(message.id)+':'+index,block_index:index,role,origin:role==='assistant'?'agent':row.run_kind==='chat'?'human':'automation',content_sha256:hash,text:value,truncated:short});captured+=value.length;
      }}if(!sources.length)status='no_source';
     }
