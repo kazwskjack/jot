@@ -71,8 +71,9 @@ export default function TaskPrdPanel({task,executionReady,onBound}:{task:Task;ex
   finally{draw();}
  }
  function refresh(){if(locked)return;flow.invalidate();setIndex('');setConfirmed(false);setError('');resource.reload();installationResource.reload();projectResource.reload();draw();}
- function fileSaved(receipt:{task_version:number;file:{path:string;version:number;sha256:string;size:number}}){
+ function fileSaved(receipt:{task_version:number;file:{path:string;version:number;sha256:string;size:number;source?:{kind:string;template_id?:string}}}){
   const file=receipt.file;
+  if(file.source?.kind==='prd_template'&&file.source.template_id==='task-request'){flow.setTaskCount('1');flow.setAppend(true);flow.setResearch(true);}
   setSavedSource({task_version:receipt.task_version,source:{kind:'logical_file',path:file.path,name:file.path,version:file.version,sha256:file.sha256,size:file.size}});
   flow.invalidate();setIndex('');setConfirmed(false);resource.reload();projectResource.reload();draw();
  }

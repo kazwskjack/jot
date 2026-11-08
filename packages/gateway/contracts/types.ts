@@ -521,7 +521,7 @@ export type TaskPrdImport = {
   file:{protocol:1;workspace_id:string;project_id:string;path:".taskmaster/tasks/tasks.json";version:number;sha256:string;size:number;source:TaskPrdImportSource;updated_at:string};
 };
 
-export type TaskPrdTemplateId = "web-app"|"api"|"mobile-app"|"data-analysis";
+export type TaskPrdTemplateId = "task-request"|"web-app"|"api"|"mobile-app"|"data-analysis";
 export type TaskPrdTemplate = {id:TaskPrdTemplateId;name:string;category:string;description:string;content:string;placeholders:string[]};
 export type TaskPrdTemplates = {task_id:string;task_version:number;templates:TaskPrdTemplate[]};
 export type TaskPrdTemplateRequest = {template_id:TaskPrdTemplateId;file_name:string;values?:Record<string,string>};

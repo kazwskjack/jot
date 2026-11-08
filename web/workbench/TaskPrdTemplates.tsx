@@ -13,6 +13,7 @@ export default function TaskPrdTemplates({task,locked,ready,save,onStateChange,o
  const identity=`${task.task_id}:${task.version}:${task.status}`;
  const catalog=useResource(signal=>request<Templates>(`/persistent-tasks/${encodeURIComponent(task.task_id)}/prd/templates`,'GET',undefined,undefined,signal),identity);
  const [selected,setSelected]=useState(''),[fileName,setFileName]=useState('prd.md'),[values,setValues]=useState('{}');
+ const [prompt,setPrompt]=useState(''),[priority,setPriority]=useState('medium'),[dependencies,setDependencies]=useState('[]');
  const [preview,setPreview]=useState<TaskPrdTemplatePreview|null>(null),[receipt,setReceipt]=useState<TaskPrdTemplateApply|null>(null);
  const [confirmed,setConfirmed]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState('');
  const epoch=useRef(0),currentIdentity=useRef(identity);currentIdentity.current=identity;
@@ -25,7 +26,7 @@ export default function TaskPrdTemplates({task,locked,ready,save,onStateChange,o
   if(locked||busy||!template)return;
   invalidate();const generation=epoch.current,context=identity;setBusy(true);
   try{
-   const body={template_id:template.id,file_name:fileName,values:JSON.parse(values)};
+   const body={template_id:template.id,file_name:fileName,values:template.id==='task-request'?{'任务提示词':prompt,'优先级':priority,'依赖原生ID':dependencies}:JSON.parse(values)};
    const value=await request<TaskPrdTemplatePreview>(`/persistent-tasks/${encodeURIComponent(task.task_id)}/prd/template-preview`,'POST',body);
    if(generation!==epoch.current||context!==currentIdentity.current)return;
    if(value.task_id!==task.task_id||value.task_version!==task.version||value.template?.id!==template.id||value.target?.path!==`.taskmaster/docs/${fileName}`
@@ -52,18 +53,24 @@ export default function TaskPrdTemplates({task,locked,ready,save,onStateChange,o
  }
  const disabled=locked||busy;
  const textStyle:React.CSSProperties={whiteSpace:'pre-wrap',overflowWrap:'anywhere',wordBreak:'break-word',maxWidth:'100%'};
- return <details><summary>PRD 模板</summary>
-  <label>模板类别<select value={selected} disabled={disabled} onChange={e=>{invalidate();setSelected(e.target.value);}}>
+ return <details><summary>PRD 模板与提示词任务</summary>
+  <label>模板类别<select value={selected} disabled={disabled} onChange={e=>{invalidate();setSelected(e.target.value);if(e.target.value==='task-request')setFileName('task-request.md');}}>
    <option value="">通用需求模板</option>{catalog.data?.templates.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}
   </select></label>
   {catalog.loading&&<p role="status">正在读取模板目录…</p>}
   {catalog.error&&<p className="wb-error" role="alert">{prdMessage(catalog.error)}</p>}
   <PrdTextPreview content={template?.content??PRD_TEMPLATE} label="PRD 模板原文" style={textStyle}/>
   {template&&<>
-   <p className="wb-hint">{template.description}。可替换字段为 {template.placeholders.join('、')}。字段值填写为 JSON 字符串对象，未填写的字段保留占位符。</p>
+   <p className="wb-hint">{template.description}。{template.id==='task-request'?'填写下方提示词、优先级和原生依赖后预览。':<>可替换字段为 {template.placeholders.join('、')}。字段值填写为 JSON 字符串对象，未填写的字段保留占位符。</>}</p>
    <label>文件名<input value={fileName} maxLength={200} disabled={disabled} onChange={e=>{invalidate();setFileName(e.target.value);}}/></label>
-   <label>模板字段<textarea value={values} maxLength={524288} disabled={disabled} rows={6} spellCheck={false} onChange={e=>{invalidate();setValues(e.target.value);}}/></label>
-   <button type="button" disabled={disabled} onClick={()=>void loadPreview()}>{busy?'正在生成预览…':'只读模板预览'}</button>
+   {template.id==='task-request'?<>
+    <p className="wb-hint">保存请求来源后，可在来源列表选择此精确版本，预览并绑定原暂停任务。绑定选项会预设为追加一项并启用研究，可在确认前调整。由原任务的恢复入口交给原 DSH 生成原生子任务。</p>
+    <label>任务提示词<textarea value={prompt} maxLength={1048576} disabled={disabled} rows={6} onChange={event=>{invalidate();setPrompt(event.target.value);}}/></label>
+    <label>优先级<select value={priority} disabled={disabled} onChange={event=>{invalidate();setPriority(event.target.value);}}><option value="high">high / 90</option><option value="medium">medium / 50</option><option value="low">low / 10</option></select></label>
+    <label>依赖原生 ID JSON 数组<textarea value={dependencies} maxLength={10240} disabled={disabled} rows={2} onChange={event=>{invalidate();setDependencies(event.target.value);}}/></label>
+   </>:<><label>模板字段<textarea value={values} maxLength={524288} disabled={disabled} rows={6} spellCheck={false} onChange={e=>{invalidate();setValues(e.target.value);}}/></label></>}
+
+   <button type="button" disabled={disabled||template.id==='task-request'&&!prompt.trim()} onClick={()=>void loadPreview()}>{busy?'正在生成预览…':'只读模板预览'}</button>
   </>}
   {preview&&<>
    <PrdTextPreview content={preview.content} label="模板填充预览" style={textStyle}/>

@@ -46511,6 +46511,7 @@
           "id": {
             "type": "string",
             "enum": [
+              "task-request",
               "web-app",
               "api",
               "mobile-app",
@@ -46581,6 +46582,7 @@
           "template_id": {
             "type": "string",
             "enum": [
+              "task-request",
               "web-app",
               "api",
               "mobile-app",
@@ -46601,7 +46603,56 @@
             },
             "additionalProperties": {
               "type": "string",
-              "maxLength": 2000
+              "maxLength": 1048576
+            }
+          }
+        },
+        "if": {
+          "properties": {
+            "template_id": {
+              "const": "task-request"
+            }
+          }
+        },
+        "then": {
+          "required": [
+            "values"
+          ],
+          "properties": {
+            "values": {
+              "additionalProperties": false,
+              "required": [
+                "任务提示词"
+              ],
+              "properties": {
+                "任务提示词": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1048576
+                },
+                "优先级": {
+                  "type": "string",
+                  "enum": [
+                    "high",
+                    "medium",
+                    "low"
+                  ]
+                },
+                "依赖原生ID": {
+                  "type": "string",
+                  "maxLength": 10240
+                }
+              }
+            }
+          }
+        },
+        "else": {
+          "properties": {
+            "values": {
+              "additionalProperties": {
+                "type": "string",
+                "maxLength": 2000
+              }
             }
           }
         }
@@ -46670,6 +46721,7 @@
               "id": {
                 "type": "string",
                 "enum": [
+                  "task-request",
                   "web-app",
                   "api",
                   "mobile-app",
@@ -46753,6 +46805,7 @@
           "template_id": {
             "type": "string",
             "enum": [
+              "task-request",
               "web-app",
               "api",
               "mobile-app",
@@ -46773,12 +46826,61 @@
             },
             "additionalProperties": {
               "type": "string",
-              "maxLength": 2000
+              "maxLength": 1048576
             }
           },
           "preview_sha256": {
             "type": "string",
             "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "if": {
+          "properties": {
+            "template_id": {
+              "const": "task-request"
+            }
+          }
+        },
+        "then": {
+          "required": [
+            "values"
+          ],
+          "properties": {
+            "values": {
+              "additionalProperties": false,
+              "required": [
+                "任务提示词"
+              ],
+              "properties": {
+                "任务提示词": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1048576
+                },
+                "优先级": {
+                  "type": "string",
+                  "enum": [
+                    "high",
+                    "medium",
+                    "low"
+                  ]
+                },
+                "依赖原生ID": {
+                  "type": "string",
+                  "maxLength": 10240
+                }
+              }
+            }
+          }
+        },
+        "else": {
+          "properties": {
+            "values": {
+              "additionalProperties": {
+                "type": "string",
+                "maxLength": 2000
+              }
+            }
           }
         }
       },
@@ -46824,6 +46926,7 @@
           "template_id": {
             "type": "string",
             "enum": [
+              "task-request",
               "web-app",
               "api",
               "mobile-app",

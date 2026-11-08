@@ -14,9 +14,11 @@ export const prdSelectionSchema={oneOf:[
 export const prdPreviewRequestSchema={type:'object',additionalProperties:false,required:['source'],properties:{source:prdSelectionSchema,research:{type:'boolean'},append:{type:'boolean'},num_tasks:{type:'integer',minimum:1,maximum:Number.MAX_SAFE_INTEGER}}};
 export const prdBindRequestSchema={type:'object',additionalProperties:false,required:['source','preview_sha256'],properties:{source:prdSelectionSchema,research:{type:'boolean'},append:{type:'boolean'},num_tasks:{type:'integer',minimum:1,maximum:Number.MAX_SAFE_INTEGER},preview_sha256:{type:'string',pattern:'^[a-f0-9]{64}$'}}};
 export const prdTemplateRequestSchema={type:'object',additionalProperties:false,required:['template_id','file_name'],properties:{
- template_id:{type:'string',enum:['web-app','api','mobile-app','data-analysis']},file_name:{type:'string',minLength:1,maxLength:200},
- values:{type:'object',maxProperties:32,propertyNames:{minLength:1,maxLength:100},additionalProperties:{type:'string',maxLength:2000}},
-}};
+ template_id:{type:'string',enum:['task-request','web-app','api','mobile-app','data-analysis']},file_name:{type:'string',minLength:1,maxLength:200},
+ values:{type:'object',maxProperties:32,propertyNames:{minLength:1,maxLength:100},additionalProperties:{type:'string',maxLength:1048576}},
+},if:{properties:{template_id:{const:'task-request'}}},then:{required:['values'],properties:{values:{additionalProperties:false,required:['任务提示词'],properties:{
+ '任务提示词':{type:'string',minLength:1,maxLength:1048576},'优先级':{type:'string',enum:['high','medium','low']},'依赖原生ID':{type:'string',maxLength:10240},
+}}}},else:{properties:{values:{additionalProperties:{type:'string',maxLength:2000}}}}};
 export const prdTemplateApplySchema={...prdTemplateRequestSchema,required:['template_id','file_name','preview_sha256'],properties:{
  ...prdTemplateRequestSchema.properties,preview_sha256:{type:'string',pattern:'^[a-f0-9]{64}$'},
 }};

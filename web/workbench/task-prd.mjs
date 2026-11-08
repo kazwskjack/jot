@@ -1,5 +1,6 @@
 import {TaskSaveReceipt} from './task-save.mjs';
 const messages={
+ INVALID_PRD_TEMPLATE_DEPENDENCIES:'依赖 ID 须来自此原任务的子任务账本，请核对后重新预览。',
  PRD_WORK_PLAN_RESEARCH_REQUIRED:'研究模式需要本批真实 web.read 或 files.read 资料回执，请将回执引用加入计划 evidence。',
  PRD_WORK_PLAN_RESEARCH_UNVERIFIED:'研究资料回执与原读取结果未完成核对。',
  PRD_WORK_PLAN_APPEND_CHANGED:'追加基线中的原生子任务定义或依赖已变化，请保留基线后重新提交计划。',
@@ -130,14 +131,16 @@ export class PrdCommandStore {
   this.storage=storage;this.operation=operation;this.path=`/persistent-tasks/${encodeURIComponent(taskId)}/prd/${operation}`;
   this.key=`jot-task-prd/v1/${scope}/${encodeURIComponent(taskId)}`+(operation==='bind'?'':`/${operation}`);
  }
- read(){const raw=this.storage.getItem(this.key);if(!raw)return null;if(raw.length>(this.operation==='template-apply'?524288:16000))throw Error('PRD 回执过大');const value=JSON.parse(raw),command=value?.command;
+ read(){const raw=this.storage.getItem(this.key);if(!raw)return null;if(raw.length>(this.operation==='template-apply'?3145728:16000))throw Error('PRD 回执过大');const value=JSON.parse(raw),command=value?.command;
   if(!command||command.path!==this.path||command.method!=='POST'||typeof command.key!=='string'||!command.key||command.key.length>200||!/^[a-f0-9]{64}$/.test(command.body?.preview_sha256))throw Error('PRD 原请求回执无效，请保留本站存储以便核对');
   if(this.operation==='template-apply'){
    const body=command.body,values=body.values;
+   const fieldLimits=new Map(body.template_id==='task-request'?[['任务提示词',1048576],['依赖原生ID',10240]]:[]);
+   if(body.template_id!=='task-request'&&raw.length>524288)throw Error('PRD 回执过大');
    if(Object.keys(body).some(key=>!['template_id','file_name','values','preview_sha256'].includes(key))
-    ||!['web-app','api','mobile-app','data-analysis'].includes(body.template_id)||typeof body.file_name!=='string'||!body.file_name||body.file_name.length>200
+    ||!['task-request','web-app','api','mobile-app','data-analysis'].includes(body.template_id)||typeof body.file_name!=='string'||!body.file_name||body.file_name.length>200
     ||(values!==undefined&&(!values||typeof values!=='object'||Array.isArray(values)||Object.keys(values).length>32
-     ||Object.entries(values).some(([key,value])=>!key||key.length>100||typeof value!=='string'||value.length>2000))))throw Error('PRD 原请求回执无效，请保留本站存储以便核对');
+     ||Object.entries(values).some(([key,value])=>!key||key.length>100||typeof value!=='string'||value.length>(fieldLimits.get(key)??2000)))))throw Error('PRD 原请求回执无效，请保留本站存储以便核对');
   }else if(this.operation==='work-plan-accept'){
    const body=command.body;
    if(Object.keys(body).sort().join(',')!=='expected_role_epoch,expected_role_version,expected_task_version,plan_id,preview_sha256'

@@ -126,8 +126,12 @@ export class TaskPrdService {
   if(typeof request.file_name!=='string'||request.file_name.length>200)throw Error('invalid_prd_template_file');
   let fileName:string;try{fileName=workspaceRelativePath(request.file_name);}catch{throw Error('invalid_prd_template_file');}
   if(fileName.includes('/')||fileName.startsWith('.')||!supported(fileName)||/\.json$/i.test(fileName))throw Error('invalid_prd_template_file');
-  const {template,content}=renderPrdTemplate(request.template_id,request.values===undefined?{}:request.values);
+  const {template,content,task_dependencies}=renderPrdTemplate(request.template_id,request.values===undefined?{}:request.values);
   const {task,role}=this.scope(owner,taskId),path='.taskmaster/docs/'+fileName;
+  if(task_dependencies){
+   const ids=new Set(this.tasks.subtasks(owner,taskId).items.map(task=>task.subtask_id));
+   if(task_dependencies.some(id=>!ids.has(id)))throw Error('invalid_prd_template_dependencies');
+  }
   const target=this.db.prepare('SELECT version,sha256,size FROM wb_files WHERE owner_id=? AND workspace_id=? AND project_id=? AND path=?')
    .get(owner,role.workspace_id,role.project_id,path) as Row|undefined;
   const preview={task_id:taskId,task_version:task.version,role:{agent_id:role.agent_id,version:role.version,capability_epoch:role.capability_epoch},

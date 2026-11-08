@@ -1794,7 +1794,7 @@ export class WorkbenchService {
       const template=provenance.kind==='prd_template',projectPrd=provenance.kind==='taskmaster_prd_import',keys=Object.keys(provenance).sort().join(',');
       const validKind=template
         ?keys==='kind,preview_sha256,relative_path,request_sha256,task_id,task_version,template_id,template_sha256'
-          &&/^\.taskmaster\/docs\/[^/]+\.(md|markdown|txt)$/i.test(path)&&['web-app','api','mobile-app','data-analysis'].includes(provenance.template_id)
+          &&/^\.taskmaster\/docs\/[^/]+\.(md|markdown|txt)$/i.test(path)&&['task-request','web-app','api','mobile-app','data-analysis'].includes(provenance.template_id)
         :projectPrd?keys==='kind,preview_sha256,relative_path,repository_sha256,request_sha256,source_sha256,task_id,task_version'
           &&/^\.taskmaster\/docs\/[^/]+\.(md|markdown|txt)$/i.test(path)
         :provenance.kind==='taskmaster_project_import'&&keys==='kind,preview_sha256,relative_path,repository_sha256,source_sha256,task_id,task_version'

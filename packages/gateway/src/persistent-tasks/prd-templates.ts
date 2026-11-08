@@ -1,6 +1,8 @@
 import type {TaskPrdTemplate as Template} from '../../contracts/types.ts';
 const base='# [项目名称]\n\n## 目标\n[目标]\n\n## 用户与范围\n[用户与范围]\n\n## 验收标准\n[验收标准]\n\n## 依赖与边界\n[依赖与边界]';
+const taskRequest='# 原 DSH 任务生成请求\n\n## 提示词\n[任务提示词]\n\n## 优先级\n[优先级]\n原生优先级对应 high=90、medium=50、low=10。\n\n## 已有依赖原生 ID\n[依赖原生ID]\n\n## 原任务生成流程\n完整读取本请求后，在原任务账本追加一项原生子任务。由原 DSH 根据提示词生成标题和可核验的验收条件，沿原 tasks.upsert 设置对应优先级及上述依赖，保留返回的真实原生子任务 ID。生成的步骤继续通过原 tasks.next 与文件计划审阅。沿用原 owner、角色、Goal、工具权限和累计预算。资料不足时说明阻塞并请求补充。';
 const definitions:(Omit<Template,'content'|'placeholders'>&{sections:string[]})[]=[
+ {id:'task-request',name:'提示词生成原生任务',category:'task',description:'提示词、优先级和已有依赖交给原 DSH，经原账本与计划回执生成任务',sections:[]},
  {id:'web-app',name:'Web 应用',category:'web',description:'页面、服务与数据协作的应用需求',sections:[
   '## 页面与交互\n列出页面、角色入口、主要操作、空状态、错误状态和无障碍要求。\n[页面与交互]',
   '## 服务与数据\n说明服务接口、数据模型、状态变化、权限校验和现有调用方兼容要求。\n[服务与数据]',
@@ -27,7 +29,7 @@ const placeholder=/\[([^\]\r\n]{1,100})\]/g;
 /** Native templates retain the existing goal/scope/acceptance/dependency format. */
 export function prdTemplates():Template[]{
  return definitions.map(({sections,...template})=>{
-  const content=[base,...sections].join('\n\n');
+  const content=[template.id==='task-request'?taskRequest:base,...sections].join('\n\n');
   return {...template,content,placeholders:[...new Set([...content.matchAll(placeholder)].map(match=>match[1]!))]};
  });
 }
@@ -38,11 +40,22 @@ export function renderPrdTemplate(id:unknown,input:unknown){
  if(!template)throw Error('prd_template_not_found');
  if(!input||typeof input!=='object'||Array.isArray(input))throw Error('invalid_prd_template_values');
  const values=input as Record<string,unknown>,entries=Object.entries(values);
+ const fieldLimits=new Map<string,number>(id==='task-request'?[['任务提示词',1048576],['依赖原生ID',10240]]:[]);
  if(entries.length>32||entries.some(([key,value])=>!key||key.length>100||/[\u0000-\u001f\u007f]/.test(key)
-  ||typeof value!=='string'||value.length>2000))throw Error('invalid_prd_template_values');
- const content=template.content.replace(placeholder,(literal:string,key:string)=>Object.hasOwn(values,key)?values[key] as string:literal);
+  ||typeof value!=='string'||value.length>(fieldLimits.get(key)??2000)))throw Error('invalid_prd_template_values');
+ let resolved=values,dependencies:string[]|undefined;
+ if(id==='task-request'){
+  if(entries.some(([key])=>!['任务提示词','优先级','依赖原生ID'].includes(key))||typeof values['任务提示词']!=='string'||!values['任务提示词'].trim())throw Error('invalid_prd_template_values');
+  const priority=values['优先级']??'medium';
+  if(!['high','medium','low'].includes(String(priority)))throw Error('invalid_prd_template_values');
+  let parsed:unknown;try{parsed=JSON.parse(String(values['依赖原生ID']??'[]'));}catch{throw Error('invalid_prd_template_values');}
+  if(!Array.isArray(parsed)||parsed.length>50||parsed.some(id=>typeof id!=='string'||!id||id.length>200)||new Set(parsed).size!==parsed.length)throw Error('invalid_prd_template_values');
+  dependencies=parsed as string[];
+  resolved={...values,'优先级':priority,'依赖原生ID':JSON.stringify(dependencies)};
+ }
+ const content=template.content.replace(placeholder,(literal:string,key:string)=>Object.hasOwn(resolved,key)?resolved[key] as string:literal);
  const bytes=Buffer.from(content,'utf8');
  if(bytes.length>1048576||/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(content)
   ||new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(bytes)!==content)throw Error('invalid_prd_template_values');
- return {template,content};
+ return {template,content,...(dependencies===undefined?{}:{task_dependencies:dependencies})};
 }
