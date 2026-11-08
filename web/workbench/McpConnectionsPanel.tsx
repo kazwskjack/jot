@@ -8,6 +8,7 @@ import { McpPanelContext, createMcpConnectionsClient, projectMcpConnectionState 
 import type {McpTool,McpConnection,McpConnectionPage as McpList} from '../../packages/gateway/contracts/types';
 import './workbench.css';
 import './McpConnectionsPanel.css';
+import McpOperationStatusPanel from './McpOperationStatusPanel';
 
 
 type Draft = { server_name: string; transport: string; command: string; args_json: string; cwd: string; env_refs_json: string; url: string; header_refs_json: string };
@@ -189,6 +190,7 @@ export function McpConnectionsPanel({ agentId, agentName, capabilityEpoch, expec
     {resource.loading && <p className="wb-status" role="status">正在读取 MCP 连接…</p>}
     {resource.error && <div className="wb-error" role="alert"><span>{resource.error}</span><button type="button" onClick={resource.reload}>重新读取连接</button></div>}
     {currentFeedback && <p className="wb-error" role="alert">{currentFeedback}</p>}
+    {context.active&&capabilities.data&&<McpOperationStatusPanel client={client} identity={identity}/>}
     {ready && items.length === 0 && <p className="wb-empty">尚未配置 MCP 连接。</p>}
     {ready && <div className="wb-mcp-list">{items.map(connection => {
       const state = projectMcpConnectionState(connection);

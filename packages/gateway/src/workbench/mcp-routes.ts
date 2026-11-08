@@ -40,7 +40,8 @@ export function registerWorkbenchMcpRoutes(app: FastifyInstance, registry: McpRe
     const { agentId } = params(request, ['agentId']);
     return registry.list(actor(request), agentId);
   });
-  if (readUnknownOperations) app.get('/v1/agents/:agentId/mcp/operations', async request => {
+  if (readUnknownOperations) app.get('/v1/agents/:agentId/mcp/operations', async (request, reply) => {
+    reply.header('cache-control','private, no-store');
     noQuery(request);
     const { agentId } = params(request, ['agentId']);
     const ownerId = actor(request);

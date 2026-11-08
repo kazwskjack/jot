@@ -59,6 +59,21 @@ export function createMcpConnectionsClient({request,receipt,context,isCurrent}){
    const ids=new Set();for(const row of page.items){validateConnection(row);if(ids.has(row.connection_id))fail('MCP_RESPONSE_UNKNOWN');ids.add(row.connection_id);}
    return structuredClone(page);
   },
+  async readUnknownOperations(signal){
+   current(signal);
+   const page=await request(`/agents/${encodeURIComponent(context.agent_id)}/mcp/operations`,'GET',undefined,undefined,signal);
+   current(signal);exact(page,['items']);
+   if(!Array.isArray(page.items)||page.items.length>50)fail('MCP_RESPONSE_UNKNOWN');
+   const ids=new Set();
+   for(const row of page.items){
+    exact(row,['operation_id','state','updated_at']);
+    if(typeof row.operation_id!=='string'||!/^mcp-op-[a-f0-9-]{36}$/.test(row.operation_id)||ids.has(row.operation_id)
+     ||row.state!=='unknown'||typeof row.updated_at!=='string'||row.updated_at.length>64
+     ||!Number.isFinite(Date.parse(row.updated_at)))fail('MCP_RESPONSE_UNKNOWN');
+    ids.add(row.operation_id);
+   }
+   return structuredClone(page);
+  },
   async submit(path,method,body){
    current();if(!receipt||typeof receipt.submit!=='function')fail('MCP_RECEIPT_UNAVAILABLE');
    return receipt.submit(async(originalPath,originalMethod,originalBody,originalKey)=>{

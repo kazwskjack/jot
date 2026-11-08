@@ -148,6 +148,7 @@ export function toDshMcpHttpConfig(connection) {
     url: connection.config.url,
     // Secret refs are resolved inside hostFetch for each request and never enter DSH config.
     headers: Object.freeze({}),
+    reconnect: Object.freeze({enabled:false}),
     failOnStartupError: true,
     toolCallTimeoutMs: 60000,
   });

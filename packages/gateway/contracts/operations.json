@@ -1654,5 +1654,14 @@
     "PluginProfileOperation",
     "200",
     "Host owner-profile scope. Original persistent receipts fence dispatch and preserve unknown outcomes."
+  ],
+  [
+    "GET",
+    "/v1/agents/{agent_id}/mcp/operations",
+    "读取原角色的未知工具操作",
+    null,
+    "McpUnknownOperationPage",
+    "200",
+    "Owner-and-agent scoped read-only projection of up to 50 unknown original operations. Original calls are never redispatched by this endpoint."
   ]
 ]

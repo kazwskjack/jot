@@ -184,6 +184,8 @@ export type McpConnection = {
   active_generation: number; pending_generation: number | null; credentials_configured: boolean; last_error_code: string | null; tools: McpTool[];
 };
 export type McpConnectionPage = { items: McpConnection[] };
+export type McpUnknownOperation = {operation_id:string;state:'unknown';updated_at:string};
+export type McpUnknownOperationPage = {items:McpUnknownOperation[]};
 export type McpConfigStage = { expected_version: number; config: McpConnectionConfig };
 export type McpEnabledUpdate = { expected_version: number; enabled: boolean };
 export type McpToolGrant = { expected_version: number; tool_ids: string[] };
