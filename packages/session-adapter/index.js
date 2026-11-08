@@ -1163,7 +1163,7 @@ export function apply(ctx, config = {}) {
     const modelRouteHealth=config.ordinaryModelSelection===true?createModelRouteHealth({ctx}):undefined
     const trustedModelMetadataReader=createTrustedModelMetadataProducer({llm:ctx.llm,enabled:config.ordinaryModelSelection===true})
     if(modelRouteHealth)ctx.effect(()=>()=>modelRouteHealth.dispose())
-    const budgetModelSelector=createBudgetModelSelector({route:config.workbenchModel,llm:ctx.llm,agents:ctx.sessionController.agents,bridge:workbenchBridge})
+    const budgetModelSelector=createBudgetModelSelector({route:config.workbenchModel,llm:ctx.llm,agents:ctx.sessionController.agents,bridge:workbenchBridge,registry:ctx.agents,tokenMeter:config.workbenchModel===undefined?undefined:ctx.get('tokenMeter')})
     const nativeClaimedComposer=config.nativeClaimedInputRecovery===undefined?undefined:createNativeClaimedSessionComposer({
       ctx,bridge:workbenchBridge,agents:ctx.agents,sessions:ctx.sessions,
       query:typeof ctx.get==='function'?ctx.get('sessionQuery'):ctx.sessionQuery,projections:ctx.sessionProjections,
@@ -1192,8 +1192,9 @@ export function apply(ctx, config = {}) {
     if(conversationGoalRunHost)ctx.effect(()=>()=>conversationGoalRunHost.dispose())
     const executionPolicyReader=chatExecutionPolicy?createOrdinaryExecutionPolicyReader({bridge:workbenchBridge,chatPolicy:chatExecutionPolicy}):undefined
     const ordinaryModelSelector=config.ordinaryModelSelection===true?createOrdinaryModelSelector({bridge:workbenchBridge,llm:ctx.llm,agents:ctx.sessionController.agents,registry:ctx.agents,routeHealth:modelRouteHealth,readTrustedModelMetadata:trustedModelMetadataReader,ordinaryPresets,...(executionPolicyReader?{executionPolicyReader}:{})}):undefined
-    if(ordinaryModelSelector){
-      const dispatchGuard=installNativeModelDispatchGuard({llm:ctx.llm,installAnchor:ctx.get('profileContext').installAnchor,prepareDispatch:ordinaryModelSelector.prepareDispatch})
+    if(ordinaryModelSelector||budgetModelSelector){
+      const dispatchGuard=installNativeModelDispatchGuard({llm:ctx.llm,installAnchor:ctx.get('profileContext').installAnchor,
+        prepareDispatch:options=>budgetModelSelector?.prepareDispatch(options)??ordinaryModelSelector?.prepareDispatch(options)})
       ctx.effect(()=>()=>dispatchGuard.dispose())
     }
     const contextOptions=config.ordinaryInputAdmission?{bridge:workbenchBridge,sessions:ctx.sessions,createUserMessage:createRequire(ctx.get('profileContext').installAnchor)('@deepseek-ai/dsh-llm').createUserMessage}:undefined

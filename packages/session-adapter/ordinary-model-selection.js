@@ -2,7 +2,8 @@ import {createHash} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
 import {readOrdinaryInputAuthority} from './ordinary-input-resume.js';
 import {normalizeHostExecutionLease} from './workbench.js';
-import {createTrustedModelMetadataConsumer,createTrustedModelMetadataProducer,observePreparedModelMetadata} from './trusted-model-metadata.js';
+import {createTrustedModelMetadataConsumer,createTrustedModelMetadataProducer} from './trusted-model-metadata.js';
+import {assertPreparedModelCompatibility} from './model-compatibility.js';
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 const plain=value=>!!value&&typeof value==='object'&&!Array.isArray(value);
 const canonical=value=>JSON.stringify(value,(_key,item)=>plain(item)?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item);
@@ -160,20 +161,9 @@ export function createOrdinaryModelSelector({bridge,llm,agents,registry,executio
   return ({options,modelInfo,stopped})=>{
    originalOptions.signal?.throwIfAborted();policy?.signal?.throwIfAborted();
    if(stopped||!policy||dispatchPolicies.get(session)!==policy||registry.get(agent.id)!==agent||agent.session!==session
-    ||policy.agent!==agent||agent.id!==session.id||options.sessionId!==session.id
-    ||options.provider!==policy.route.provider||options.model!==policy.route.model
-    ||options.reasoningEffort!==policy.route.reasoning_effort)fail();
-   const observed=observePreparedModelMetadata(modelInfo,{provider:options.provider,model:options.model});
-   if(observed.state!=='ready'||observed.metadata_digest!==policy.metadata?.metadata_digest
-    ||observed.digest_revision!==policy.metadata?.digest_revision)fail();
-   if(!Array.isArray(originalOptions.messages))fail();
-   const has=type=>originalOptions.messages.some(message=>Array.isArray(message?.content)&&message.content.some(block=>block?.type===type));
-   if(has('image')&&!observed.metadata.inputModalities?.includes('image')
-    ||has('text')&&observed.metadata.inputModalities&&!observed.metadata.inputModalities.includes('text'))fail();
-   const measured=policy.tokenMeter.measure(session),limit=observed.metadata.context?.contextWindow;
-   const output=options.maxTokens??observed.metadata.defaultMaxTokens;
-   if(!integer(measured?.totalTokens)||!integer(limit)||limit===0||!integer(output)||output===0
-    ||!Number.isSafeInteger(measured.totalTokens+output)||measured.totalTokens+output>limit)fail();
+    ||policy.agent!==agent||agent.id!==session.id)fail();
+   assertPreparedModelCompatibility({route:policy.route,metadata:policy.metadata,session,tokenMeter:policy.tokenMeter,
+    options,originalOptions,modelInfo});
   };
  };
  return Object.assign(select,{prepareDispatch,prepareAgent(agent){if(registry.get(agent?.id)!==agent)fail();agents.selectionFor(agent);}});

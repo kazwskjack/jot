@@ -67,6 +67,7 @@
     "web-budget-tool.js",
     "image-output.js",
     "budget-model-selection.js",
+    "model-compatibility.js",
     "ordinary-model-selection.js",
     "native-model-dispatch-guard.js",
     "runtime-patches/dsh-llm-0.2.1-rc.2-dispatch-sha256.json",
