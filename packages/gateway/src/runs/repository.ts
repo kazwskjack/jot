@@ -5,13 +5,14 @@ import { withImmediateTransaction } from '../db/database.ts';
 import { EventStore } from '../events/event-store.ts';
 import { decodeStoredContent, encodeInputContent } from '../messages/content.ts';
 import {messageAttachmentProjection,pinnedAttachmentRefs} from '../messages/pinned-attachments.ts';
+import type {TrustedModelMetadataBinding} from '../harness/model-metadata.ts';
 import {snapshotAcceptedModelPolicy} from '../conversations/model-policy.ts';
 import {acceptedExecutionPolicy,conversationMode,chatModePolicy,type ChatModePolicy} from '../conversations/mode-policy.ts';
 import {ensureModeSession} from '../conversations/mode-sessions.ts';
 import {snapshotChatContext,chatContextHash} from '../conversations/chat-context.ts';
 import {normalizeChannelAttachmentManifestV2,encodeChannelAttachmentInputV2,channelAttachmentManifestDigestV2} from '../channels/attachment-manifest-v2.ts';
 
-type EnqueueOptions={executionMode?:'native';modePolicy?:ChatModePolicy;expectedConversationVersion?:number};
+type EnqueueOptions={executionMode?:'native';modePolicy?:ChatModePolicy;expectedConversationVersion?:number;modelMetadataBindings?:TrustedModelMetadataBinding[]};
 
 const AUTOMATIC_TITLES = new Set(['New conversation', '新对话']);
 
@@ -75,7 +76,7 @@ export class RunRepository {
       const mode=conversationMode(current.mode),chat=mode==='chat'?chatModePolicy(options.modePolicy):undefined;
       if(options.executionMode==='native'&&mode!=='work')throw Error('conversation_mode_scope_invalid');
       if(mode==='work'&&options.modePolicy!==undefined)throw Error('conversation_mode_policy_invalid');
-      const modelPolicy=snapshotAcceptedModelPolicy(this.db,conversationId,ownerId,chat?.model);
+      const modelPolicy=snapshotAcceptedModelPolicy(this.db,conversationId,ownerId,chat?.model,options.modelMetadataBindings);
       // Native child preparation retains its original reservation/role/archived
       // conversation contract; it is not ordinary Chat/Work input admission.
       const executionPolicy=options.executionMode==='native'?null:acceptedExecutionPolicy(mode,Number(current.version),modelPolicy,this.options.workAgentPreset??'jot-general',chat);

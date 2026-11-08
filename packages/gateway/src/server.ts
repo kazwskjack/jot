@@ -266,7 +266,7 @@ export async function buildServer(config: {
     });
   }
   const runs = new RunRepository(db, events,{workAgentPreset:config.workAgentPreset??'jot-general'});
-  const conversationModes=new ConversationModes(db,conversations,runs,config.conversationModeClient,config.chatModeEnabled===true);
+  const conversationModes=new ConversationModes(db,conversations,runs,config.conversationModeClient,config.chatModeEnabled===true,config.modelCatalogClient);
   const commands = new RunCommandService(db, events);
   const artifacts = new ArtifactService(db, config.uploadRoot ?? join(dirname(config.databasePath), 'general-agent-uploads'));
   try{artifacts.cleanupExpiredUploads();}catch(error){app.log.error(error);}
@@ -581,6 +581,8 @@ export async function buildServer(config: {
     if(code==='host_settings_admission_fenced')return reply.code(503).send({error:{code:'HOST_SETTINGS_ADMISSION_FENCED'}});
     if(code==='contract_response_invalid')return reply.code(500).send({error:{code:'CONTRACT_RESPONSE_INVALID'}});
     if(code==='git_repository_unconfigured')return reply.code(503).send({error:{code:'GIT_REPOSITORY_UNCONFIGURED'}});
+    if(code==='model_metadata_changed')return reply.code(409).send({error:{code:'MODEL_METADATA_CHANGED'}});
+    if(['model_metadata_invalid','model_metadata_unavailable'].includes(code))return reply.code(503).send({error:{code:'MODEL_METADATA_UNAVAILABLE'}});
     if(code==='chat_mode_unavailable')return reply.code(503).send({error:{code:'CHAT_MODE_UNAVAILABLE'}});
     if(code==='conversation_mode_invalid')return reply.code(400).send({error:{code:'CONVERSATION_MODE_INVALID'}});
     if(['invalid_file_range','invalid_file_history_query','invalid_file_history_cursor'].includes(code))return reply.code(400).send({error:{code:code.toUpperCase()}});

@@ -1,5 +1,6 @@
+import type {TrustedModelMetadataClient} from './model-metadata.ts';
 import type {Capabilities} from '../../contracts/types.ts';
-export interface ModelCatalogClient{modelCatalog(signal:AbortSignal):Promise<unknown>}
+export interface ModelCatalogClient extends TrustedModelMetadataClient{modelCatalog(signal:AbortSignal):Promise<unknown>}
 const plain=(value:unknown):value is Record<string,unknown>=>!!value&&typeof value==='object'&&!Array.isArray(value);
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 function health(value:unknown):NonNullable<Capabilities['models'][number]['health']>|undefined{

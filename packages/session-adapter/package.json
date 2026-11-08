@@ -82,6 +82,7 @@
     "chat-mode-readiness.js",
     "chat-web.js",
     "model-catalog.js",
+    "trusted-model-metadata.js",
     "model-route-health.js",
     "conversation-goal.js",
     "conversation-goal-run-host.js",

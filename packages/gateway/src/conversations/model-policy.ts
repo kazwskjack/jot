@@ -4,6 +4,7 @@ import type {FastifyInstance} from 'fastify';
 import {withImmediateTransaction} from '../db/database.ts';
 import {inspectOrdinaryInputBinding} from './ordinary-input-binding.ts';
 import {normalizeExecutionLease} from '../workbench/execution-lease.ts';
+import {acceptedModelMetadataBindings,type TrustedModelMetadataBinding} from '../harness/model-metadata.ts';
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 const plain=(value:unknown):value is Record<string,unknown>=>!!value&&typeof value==='object'&&!Array.isArray(value);
 export const canonicalModelJson=(value:unknown)=>JSON.stringify(value,(_key,item)=>plain(item)?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item);
@@ -26,36 +27,41 @@ function selection(value:unknown):Selection{
  }
  return primary;
 }
+export function modelMetadataRoutes(value:unknown){const selected=selection(value);return[{provider:selected.provider,model:selected.model},...(selected.fallbacks??[])];}
 export function acceptedModelPolicyCandidates(serialized:unknown){
  if(typeof serialized!=='string')throw Error('model_policy_invalid');
  const original=JSON.parse(serialized) as unknown;
- if(!plain(original)||Object.keys(original).sort().join(',')!=='conversation_version,model,protocol'||original.protocol!==1
+ if(!plain(original)||!['conversation_version,metadata_bindings,model,protocol','conversation_version,model,protocol'].includes(Object.keys(original).sort().join(','))||original.protocol!==1
   ||!Number.isSafeInteger(original.conversation_version)||Number(original.conversation_version)<1)throw Error('model_policy_invalid');
- const model=selection(original.model);
+ const model=selection(original.model);if(original.metadata_bindings!==undefined)acceptedModelMetadataBindings(original.metadata_bindings,[{provider:model.provider,model:model.model},...(model.fallbacks??[])]);
  if(canonicalModelJson(original)!==serialized)throw Error('model_policy_invalid');
  return [{provider:model.provider,model:model.model},...(model.fallbacks??[])];
 }
 /** Called inside acceptance's existing transaction, never from mutable metadata at dispatch. */
-export function snapshotAcceptedModelPolicy(db:DatabaseSync,conversationId:string,ownerId:string,modelOverride?:Selection){
+export function snapshotAcceptedModelPolicy(db:DatabaseSync,conversationId:string,ownerId:string,modelOverride?:Selection,metadataBindings?:TrustedModelMetadataBinding[]){
  if(!db.isTransaction)throw Error('model_policy_acceptance_transaction_required');
  const row=db.prepare('SELECT model,version FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId);
  if(!row||typeof row.model!=='string'||!Number.isSafeInteger(row.version)||Number(row.version)<1)throw Error('model_policy_invalid');
- return canonicalModelJson({protocol:1,conversation_version:row.version,model:selection(modelOverride===undefined?JSON.parse(row.model):modelOverride)});
+ const model=selection(modelOverride===undefined?JSON.parse(row.model):modelOverride),base={protocol:1,conversation_version:row.version,model};
+ if(metadataBindings===undefined)return canonicalModelJson(base);
+ const metadata_bindings=acceptedModelMetadataBindings(metadataBindings,[{provider:model.provider,model:model.model},...(model.fallbacks??[])]);
+ return canonicalModelJson({...base,metadata_bindings});
 }
 function readPolicyInside(db:DatabaseSync,runId:string,sessionId:string,lease:unknown){
  const authority=inspectOrdinaryInputBinding(db,runId,sessionId,lease);
  const row=db.prepare('SELECT model_policy_json,model_resolution_json FROM ga_runs WHERE id=?').get(runId);
  if(typeof row?.model_policy_json!=='string')throw Error('model_policy_missing');
  const original=JSON.parse(row.model_policy_json) as unknown;
- if(!plain(original)||Object.keys(original).sort().join(',')!=='conversation_version,model,protocol'||original.protocol!==1
+ if(!plain(original)||!['conversation_version,metadata_bindings,model,protocol','conversation_version,model,protocol'].includes(Object.keys(original).sort().join(','))||original.protocol!==1
   ||!Number.isSafeInteger(original.conversation_version)||Number(original.conversation_version)<1)throw Error('model_policy_invalid');
  const model=selection(original.model);
+ const metadata_bindings=original.metadata_bindings===undefined?undefined:acceptedModelMetadataBindings(original.metadata_bindings,[{provider:model.provider,model:model.model},...(model.fallbacks??[])]);
  if(canonicalModelJson(original)!==row.model_policy_json)throw Error('model_policy_invalid');
  const resolved=row.model_resolution_json===null?null:routeSelection(JSON.parse(String(row.model_resolution_json)));
  if(resolved&&((resolved.provider!==model.provider||resolved.model!==model.model)
   &&!(model.fallbacks??[]).some(route=>route.provider===resolved.provider&&route.model===resolved.model)
   ||model.reasoning_effort!==undefined&&resolved.reasoning_effort!==model.reasoning_effort))throw Error('model_resolution_invalid');
- return{...authority,model,conversation_version:Number(original.conversation_version),policy_sha256:createHash('sha256').update(row.model_policy_json).digest('hex'),resolved_model:resolved};
+ return{...authority,model,...(metadata_bindings===undefined?{}:{metadata_bindings}),conversation_version:Number(original.conversation_version),policy_sha256:createHash('sha256').update(row.model_policy_json).digest('hex'),resolved_model:resolved};
 }
 export function inspectOrdinaryModelPolicy(db:DatabaseSync,runId:string,sessionId:string,lease:unknown){
  return withImmediateTransaction(db,()=>readPolicyInside(db,runId,sessionId,lease));

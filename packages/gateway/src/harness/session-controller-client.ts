@@ -238,6 +238,8 @@ export class SessionControllerClient {
   }
 
   async modelCatalog(signal:AbortSignal){return this.post('/v1/models',{},signal);}
+  async trustedModelMetadata(route:{provider:string;model:string},signal:AbortSignal){return this.post('/v1/models/metadata',route,signal);}
+  async trustedModelMetadataReadiness(signal:AbortSignal){return this.post('/v1/models/metadata/readiness',{},signal);}
   async inspectConversationForkSource(sessionId:string,signal?:AbortSignal):Promise<unknown>{
     try{nativeIdleSessionId(sessionId);}catch{throw Error('fork_native_source_invalid');}
     const value=await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/fork-source`,{},signal);

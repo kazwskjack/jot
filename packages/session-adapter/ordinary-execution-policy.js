@@ -24,10 +24,10 @@ export function createOrdinaryExecutionPolicyReader({bridge,chatPolicy}){
   await fence();const result=await bridge.request('ordinary-execution-policy',binding,{},signal);await fence();
   if(!plain(result)||Object.keys(result).join(',')!=='execution'||!plain(result.execution))fail();
   const {policy,policy_sha256,...authority}=result.execution;
-  const {model,conversation_version,policy_sha256:modelHash,resolved_model,...original}=modelPolicy;
+  const {model,metadata_bindings,conversation_version,policy_sha256:modelHash,resolved_model,...original}=modelPolicy;
   if(!isDeepStrictEqual(authority,original)||!plain(policy)||policy.protocol!==1||policy.conversation_version!==conversation_version
    ||!Number.isSafeInteger(conversation_version)||conversation_version<1||policy.model_policy_sha256!==modelHash
-   ||modelHash!==hash({protocol:1,conversation_version,model})||policy_sha256!==hash(policy)
+   ||modelHash!==hash({protocol:1,conversation_version,model,...(metadata_bindings===undefined?{}:{metadata_bindings})})||policy_sha256!==hash(policy)
    ||agent.session.header?.agentPreset!==policy.preset_id)fail();
   const {conversation_version:_version,model_policy_sha256:_modelHash,...base}=policy;
   if(policy.mode==='chat'){

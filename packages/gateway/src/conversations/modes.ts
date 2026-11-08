@@ -9,7 +9,8 @@ import {validateNativeIdleObservation} from '../harness/native-idle-observation.
 import {ChatCompactionAttempts} from './chat-compaction-attempts.ts';
 import {CHAT_CHECKPOINT_REVISION,latestChatCheckpoint} from './chat-checkpoint-store.ts';
 import {validateChatContext} from './chat-context.ts';
-import {canonicalModelJson} from './model-policy.ts';
+import {canonicalModelJson,modelMetadataRoutes} from './model-policy.ts';
+import {readHostTrustedModelMetadata,readHostTrustedModelMetadataEnabled,type TrustedModelMetadataBinding,type TrustedModelMetadataClient} from '../harness/model-metadata.ts';
 
 type RecoveryCandidate={scope:{owner_id:string;conversation_id:string;run_id:string;session_ref:string;expected_run_version:number};intentId:string;sourceSha:string;parentId:string|null};
 const CHAT_RECOVERY_MS=1000;
@@ -63,8 +64,8 @@ function boundedRead<T>(operation:()=>Promise<T>,signal:AbortSignal):Promise<T>{
 /** The async native observation stays outside SQL. The original snapshot is
  * rechecked inside the owned CAS transaction before any mode mapping is made. */
 export class ConversationModes{
- private db:DatabaseSync;private conversations:ConversationRepository;private runs:RunRepository;private client:ConversationModeClient|undefined;private chatEnabled:boolean;
- constructor(db:DatabaseSync,conversations:ConversationRepository,runs:RunRepository,client?:ConversationModeClient,chatEnabled=true){this.db=db;this.conversations=conversations;this.runs=runs;this.client=client;this.chatEnabled=chatEnabled;}
+ private db:DatabaseSync;private conversations:ConversationRepository;private runs:RunRepository;private client:ConversationModeClient|undefined;private chatEnabled:boolean;private modelMetadataClient:TrustedModelMetadataClient|undefined;
+ constructor(db:DatabaseSync,conversations:ConversationRepository,runs:RunRepository,client?:ConversationModeClient,chatEnabled=true,modelMetadataClient?:TrustedModelMetadataClient){this.modelMetadataClient=modelMetadataClient;this.db=db;this.conversations=conversations;this.runs=runs;this.client=client;this.chatEnabled=chatEnabled;}
  private chatPolicy(signal?:AbortSignal){return readChatModePolicy(this.chatEnabled?this.client:undefined,signal);}
  async capability(signal?:AbortSignal){const chat=!!await this.chatPolicy(signal);return{default:chat?'chat':'work',work:{supported:true},chat:{ready:chat}};}
  async prepareCreate(owner:string,input:Record<string,unknown>){
@@ -108,10 +109,27 @@ export class ConversationModes{
  }
  async prepareEnqueue(id:string,owner:string,input:Record<string,unknown>,signal?:AbortSignal){
   const current=this.conversations.get(id,owner);
-  if(this.db.prepare('SELECT 1 FROM ga_messages WHERE conversation_id=? AND client_message_id=?').get(id,String(input.client_message_id)))return()=>this.runs.enqueue(id,owner,input);
+  const duplicate=this.db.prepare('SELECT id,run_id FROM ga_messages WHERE conversation_id=? AND client_message_id=?').get(id,String(input.client_message_id));
+  if(duplicate)return()=>{
+   const original=this.db.prepare('SELECT id,run_id FROM ga_messages WHERE conversation_id=? AND client_message_id=?').get(id,String(input.client_message_id));
+   if(!original||original.id!==duplicate.id||original.run_id!==duplicate.run_id)throw Error('version_conflict');
+   return this.runs.enqueue(id,owner,input);
+  };
   if(current.archived)throw Error('conversation_mode_conflict');
   const policy=current.mode==='chat'?await this.chatPolicy():undefined;
   if(current.mode==='chat'&&!policy)throw Error('chat_mode_unavailable');
+  let modelMetadataBindings:TrustedModelMetadataBinding[]|undefined;
+  const metadataEnabled=await readHostTrustedModelMetadataEnabled(this.modelMetadataClient,signal);
+  if(metadataEnabled===true&&typeof this.modelMetadataClient?.trustedModelMetadata!=='function')throw Error('model_metadata_unavailable');
+  if(typeof this.modelMetadataClient?.trustedModelMetadata==='function'&&metadataEnabled!==false){
+   const routes=modelMetadataRoutes(policy?.model??current.model),signalBound=signal?AbortSignal.any([signal,AbortSignal.timeout(4500)]):AbortSignal.timeout(4500);
+   const read=()=>Promise.all(routes.map(route=>readHostTrustedModelMetadata(this.modelMetadataClient,route,signalBound)));
+   const first=await read(),second=await read();signalBound.throwIfAborted();
+   if(canonicalModelJson(first)!==canonicalModelJson(second))throw Error('model_metadata_changed');
+   if(metadataEnabled===true&&first.some(binding=>binding===undefined))throw Error('model_metadata_changed');
+   if(first.some(binding=>binding===undefined)&&first.some(binding=>binding!==undefined))throw Error('model_metadata_unavailable');
+   if(first.every((binding):binding is TrustedModelMetadataBinding=>binding!==undefined))modelMetadataBindings=first;
+  }
   const candidate=current.mode==='chat'?recoveryCandidate(this.db,owner,id,policy):undefined;
   if(candidate&&typeof this.client?.recoverChatCheckpoint==='function'&&!signal?.aborted){
    const deadline=AbortSignal.timeout(CHAT_RECOVERY_MS),bounded=signal?AbortSignal.any([signal,deadline]):deadline;
@@ -121,6 +139,6 @@ export class ConversationModes{
     if(validRecoveryReceipt(value,candidate)===undefined)throw Error('chat_checkpoint_recovery_receipt_invalid');
    }catch{/* Recovery is optional; normal Chat retains the original bounded snapshot fallback. */}
   }
-  return()=>this.runs.enqueue(id,owner,input,{...(policy?{modePolicy:policy}:{}),expectedConversationVersion:current.version});
+  return()=>this.runs.enqueue(id,owner,input,{...(policy?{modePolicy:policy}:{}),expectedConversationVersion:current.version,...(modelMetadataBindings?{modelMetadataBindings}:{})});
  }
 }

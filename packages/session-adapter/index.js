@@ -23,6 +23,7 @@ import {createOrdinaryExecutionPolicyReader,normalizeChatExecutionPolicy} from '
 import {createOrdinaryContextSelector} from './chat-context.js'
 import {createChatWebSelector} from './chat-web.js'
 import {createModelCatalogReader} from './model-catalog.js'
+import {createTrustedModelMetadataProducer} from './trusted-model-metadata.js'
 import {createModelRouteHealth} from './model-route-health.js'
 import {createNativeTaskDispatcher} from './native-task-dispatch.js'
 import {createNativeTaskScheduler} from './native-task-scheduler.js'
@@ -271,7 +272,7 @@ async function createOrResumeSession({controller,request,agents,sessions,session
   return value
 }
 
-export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,skillContentCommand,skillCatalogCommand,skillResourceCommand,nativeCommandQueryHost,nativePlanModeHost,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation=false,sessionNotFoundError,modelCatalogReader,requireOrdinaryModelPolicy=false,chatExecutionPolicy,chatModeReadiness,mcpControlRoute,pluginProfileControl,hostPolicyBootstrap,hostSettingsProductHandler,hostAdmissionGuard }) {
+export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,skillContentCommand,skillCatalogCommand,skillResourceCommand,nativeCommandQueryHost,nativePlanModeHost,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation=false,sessionNotFoundError,modelCatalogReader,trustedModelMetadataReader,trustedModelMetadataEnabled=false,requireOrdinaryModelPolicy=false,chatExecutionPolicy,chatModeReadiness,mcpControlRoute,pluginProfileControl,hostPolicyBootstrap,hostSettingsProductHandler,hostAdmissionGuard }) {
   const allowedPresets=new Set(ALLOWED_AGENT_PRESETS)
   if(chatExecutionPolicy!==undefined){normalizeChatExecutionPolicy(chatExecutionPolicy);if(!requireOrdinaryModelPolicy||!ordinaryInputAdmissionHost)throw Error('ordinary_execution_policy_config_invalid');allowedPresets.add('jot-chat')}
   const voiceHandler = voiceEnabled ? createVoiceAdapterHandler({ speechController, token }) : null
@@ -425,6 +426,19 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       if(method!=='POST')return json(405,{error:'method_not_allowed'});
       if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).length)return json(422,{error:'chat_mode_readiness_input_invalid'});
       return json(200,typeof chatModeReadiness==='function'?chatModeReadiness():{protocol:1,ready:false,policy:null});
+    }
+    if(url.pathname==='/v1/models/metadata'){
+      if(method!=='POST')return json(405,{error:'method_not_allowed'});
+      if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).sort().join(',')!=='model,provider'
+        ||typeof body.provider!=='string'||typeof body.model!=='string')return json(422,{error:'model_metadata_input_invalid'});
+      return json(200,typeof trustedModelMetadataReader==='function'
+        ?await trustedModelMetadataReader({provider:body.provider,model:body.model},signal)
+        :{protocol:1,state:'unavailable',reason:'PRODUCER_UNAVAILABLE',execution_authorized:false});
+    }
+    if(url.pathname==='/v1/models/metadata/readiness'){
+      if(method!=='POST')return json(405,{error:'method_not_allowed'});
+      if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).length)return json(422,{error:'model_metadata_readiness_input_invalid'});
+      return json(200,{protocol:1,enabled:trustedModelMetadataEnabled===true,execution_authorized:false});
     }
     if(url.pathname==='/v1/models'){
       if(method!=='POST')return json(405,{error:'method_not_allowed'});
@@ -915,7 +929,7 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
     }
     return json(404, { error: 'not_found' })
   };
-  const quietPost=(request)=>request?.method==='POST'&&(['/v1/host-admin/bootstrap/redeem','/v1/host-admin/settings/read','/v1/host-admin/settings/editor/read','/v1/host-admin/settings/attempt/read','/v1/host-admin/settings/readiness','/v1/models','/v1/conversation-modes/readiness'].includes(request?.url?.pathname));
+  const quietPost=(request)=>request?.method==='POST'&&(['/v1/host-admin/bootstrap/redeem','/v1/host-admin/settings/read','/v1/host-admin/settings/editor/read','/v1/host-admin/settings/attempt/read','/v1/host-admin/settings/readiness','/v1/models','/v1/models/metadata','/v1/models/metadata/readiness','/v1/conversation-modes/readiness'].includes(request?.url?.pathname));
   return async request=>{
     if(!hostAdmissionGuard||quietPost(request)||!authorized(request?.headers?.authorization,token))return dispatch(request);
     let admission;
@@ -1146,6 +1160,7 @@ export function apply(ctx, config = {}) {
       ctx.effect(()=>async()=>{stopped=true;ready=false;await prepared;await nativeGitHost?.dispose()})
     }
     const modelRouteHealth=config.ordinaryModelSelection===true?createModelRouteHealth({ctx}):undefined
+    const trustedModelMetadataReader=createTrustedModelMetadataProducer({llm:ctx.llm,enabled:config.ordinaryModelSelection===true})
     if(modelRouteHealth)ctx.effect(()=>()=>modelRouteHealth.dispose())
     const budgetModelSelector=createBudgetModelSelector({route:config.workbenchModel,llm:ctx.llm,agents:ctx.sessionController.agents,bridge:workbenchBridge})
     const nativeClaimedComposer=config.nativeClaimedInputRecovery===undefined?undefined:createNativeClaimedSessionComposer({
@@ -1175,7 +1190,7 @@ export function apply(ctx, config = {}) {
     const conversationGoalRunHost=config.conversationGoalResume===true?createConversationGoalRunHost({controller:ctx.sessionController,agents:ctx.agents,persistence:ctx.sessionPersistence,bridge:workbenchBridge,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted'))}):undefined
     if(conversationGoalRunHost)ctx.effect(()=>()=>conversationGoalRunHost.dispose())
     const executionPolicyReader=chatExecutionPolicy?createOrdinaryExecutionPolicyReader({bridge:workbenchBridge,chatPolicy:chatExecutionPolicy}):undefined
-    const ordinaryModelSelector=config.ordinaryModelSelection===true?createOrdinaryModelSelector({bridge:workbenchBridge,llm:ctx.llm,agents:ctx.sessionController.agents,registry:ctx.agents,routeHealth:modelRouteHealth,...(executionPolicyReader?{executionPolicyReader}:{})}):undefined
+    const ordinaryModelSelector=config.ordinaryModelSelection===true?createOrdinaryModelSelector({bridge:workbenchBridge,llm:ctx.llm,agents:ctx.sessionController.agents,registry:ctx.agents,routeHealth:modelRouteHealth,readTrustedModelMetadata:trustedModelMetadataReader,...(executionPolicyReader?{executionPolicyReader}:{})}):undefined
     const contextOptions=config.ordinaryInputAdmission?{bridge:workbenchBridge,sessions:ctx.sessions,createUserMessage:createRequire(ctx.get('profileContext').installAnchor)('@deepseek-ai/dsh-llm').createUserMessage}:undefined
     const contextSelector=contextOptions?createOrdinaryContextSelector({...contextOptions,...(config.ordinaryChatContext===true?{chatPolicy:chatExecutionPolicy}:{})}):undefined
     const webSelector=config.ordinaryChatWeb===true?createChatWebSelector({bridge:workbenchBridge,sessions:ctx.sessions,chatPolicy:chatExecutionPolicy}):undefined
@@ -1222,7 +1237,7 @@ export function apply(ctx, config = {}) {
       sessions:ctx.sessions,persistence:ctx.sessionPersistence,sessionNotFoundError:ApiSessionNotFound,
       speechController, voiceEnabled, token, workbenchBridge, skillContentCommand, skillCatalogCommand, skillResourceCommand, nativeCommandQueryHost, nativePlanModeHost,
       budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation:config.nativeIdleObservation===true,
-      chatModeReadiness,modelCatalogReader:createModelCatalogReader({llm:ctx.llm,enabled:config.ordinaryModelSelection===true,routeHealth:modelRouteHealth}),requireOrdinaryModelPolicy:config.ordinaryModelSelection===true,...(chatExecutionPolicy?{chatExecutionPolicy}:{}),mcpControlRoute,pluginProfileControl,...(hostPolicyBootstrapRuntime?.bootstrap?{hostPolicyBootstrap:hostPolicyBootstrapRuntime.bootstrap}:{}),...(hostPolicyBootstrapRuntime?.productHandler?{hostSettingsProductHandler:hostPolicyBootstrapRuntime.productHandler}:{}),...(hostAdmissionGuard?{hostAdmissionGuard}:{}) })
+      chatModeReadiness,modelCatalogReader:createModelCatalogReader({llm:ctx.llm,enabled:config.ordinaryModelSelection===true,routeHealth:modelRouteHealth}),trustedModelMetadataReader,trustedModelMetadataEnabled:config.ordinaryModelSelection===true,requireOrdinaryModelPolicy:config.ordinaryModelSelection===true,...(chatExecutionPolicy?{chatExecutionPolicy}:{}),mcpControlRoute,pluginProfileControl,...(hostPolicyBootstrapRuntime?.bootstrap?{hostPolicyBootstrap:hostPolicyBootstrapRuntime.bootstrap}:{}),...(hostPolicyBootstrapRuntime?.productHandler?{hostSettingsProductHandler:hostPolicyBootstrapRuntime.productHandler}:{}),...(hostAdmissionGuard?{hostAdmissionGuard}:{}) })
     const server = createServer(async (req, res) => {
       const abort = new AbortController()
       req.once('aborted', () => abort.abort())
