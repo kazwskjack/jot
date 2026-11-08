@@ -33,7 +33,7 @@ export function workspaceCheckpointCoordinationSchema(db:DatabaseSync):'legacy'|
  if(!row)return 'unsupported';for(const [kind,enabled,checkpoint] of [['legacy',false,false],['publication',true,false],['checkpoint',true,true]] as const)if(normalized(row.sql)===normalized(definition(original,enabled,checkpoint)))return kind;return 'unsupported';
 }
 function fail(code:string):never{throw Error('workspace_publication_upgrade_'+code);}
-function quiescent(db:DatabaseSync){
+export function assertOriginalWorkspaceQuiescence(db:DatabaseSync){
  const any=(sql:string)=>!!db.prepare(sql).get();
  if(any('SELECT 1 FROM ga_worker_leases LIMIT 1')||any("SELECT 1 FROM ga_runs WHERE status IN('queued','starting','running','waiting_user','waiting_approval','cancelling') LIMIT 1")
   ||any('SELECT 1 FROM wb_workspace_reservations r LEFT JOIN wb_workspace_reservation_releases x ON x.reservation_id=r.reservation_id WHERE x.reservation_id IS NULL LIMIT 1'))fail('busy');
@@ -72,6 +72,11 @@ function inventory(db:DatabaseSync,tables:readonly string[]){return tables.map(t
  const hash=createHash('sha256');let count=0;for(const row of db.prepare('SELECT * FROM '+quote(table)+' ORDER BY '+order).iterate()){hash.update(canonicalJson(row)+'\0');count++;}
  return{table,rows:count,sha256:hash.digest('hex')};
 });}
+/** Read-only original-store preservation evidence for offline schema maintenance. */
+export function originalWorkspaceMaintenanceSnapshot(db:DatabaseSync){
+ const schema=objects(db),tables=schema.filter(object=>object.type==='table').map(object=>String(object.name));
+ return {schema,rows:inventory(db,tables)};
+}
 export type WorkspaceUpgradePhase='captured'|'copied'|'recreated'|'verified';
 
 /** Explicit maintenance preflight, including an already-upgraded coordinator.
@@ -82,7 +87,7 @@ export function assertWorkspacePublicationMaintenance(db:DatabaseSync){
  if(Number((db.prepare('PRAGMA foreign_keys').get() as Row).foreign_keys)!==1
   ||Number((db.prepare('PRAGMA writable_schema').get() as Row).writable_schema)!==0
   ||db.prepare("SELECT 1 FROM sqlite_temp_schema WHERE name NOT LIKE 'sqlite_%' LIMIT 1").get())fail('connection_unconfirmed');
- quiescent(db);if(db.prepare('PRAGMA foreign_key_check').all().length)fail('integrity');
+ assertOriginalWorkspaceQuiescence(db);if(db.prepare('PRAGMA foreign_key_check').all().length)fail('integrity');
 }
 /** Trusted OFFLINE maintenance only. Durable DB checks do not prove that idle
  * native processes or external pools stopped. No automatic bootstrap, live
@@ -94,13 +99,13 @@ export function upgradeWorkspacePublicationCoordination(db:DatabaseSync,options:
  const foreignKeys=Number((db.prepare('PRAGMA foreign_keys').get() as Row).foreign_keys),legacy=Number((db.prepare('PRAGMA legacy_alter_table').get() as Row).legacy_alter_table);
  if(foreignKeys!==1||Number((db.prepare('PRAGMA writable_schema').get() as Row).writable_schema)!==0||db.prepare("SELECT 1 FROM sqlite_temp_schema WHERE name NOT LIKE 'sqlite_%' LIMIT 1").get())fail('connection_unconfirmed');
  if(db.prepare('SELECT 1 FROM sqlite_schema WHERE name=?').get(replacement))fail('replacement_exists');
- quiescent(db);if(db.prepare('PRAGMA foreign_key_check').all().length)fail('integrity');
+ assertOriginalWorkspaceQuiescence(db);if(db.prepare('PRAGMA foreign_key_check').all().length)fail('integrity');
  const phase=(name:WorkspaceUpgradePhase)=>{const result=options.onPhase?.(name) as unknown;if(result!==undefined){if(result&&typeof(result as {then?:unknown}).then==='function')Promise.resolve(result).catch(()=>{});fail('async_callback');}};
  // SQLite's documented generalized table-change sequence. Only this isolated
  // maintenance connection changes FK policy; all flags are restored on failure.
  db.exec('PRAGMA foreign_keys=OFF');
  try{
-  db.exec('BEGIN IMMEDIATE');identity.assertCurrent();if(workspacePublicationSchema(db)!=='legacy')fail('schema_changed');quiescent(db);
+  db.exec('BEGIN IMMEDIATE');identity.assertCurrent();if(workspacePublicationSchema(db)!=='legacy')fail('schema_changed');assertOriginalWorkspaceQuiescence(db);
   const beforeObjects=objects(db),tables=dependencies(db),before=inventory(db,tables),beforeChanges=Number((db.prepare('SELECT total_changes() n').get() as Row).n);
   phase('captured');
   // Keep original definitions, including triggers attached to OTHER tables and
@@ -138,11 +143,11 @@ export function upgradeWorkspaceCheckpointCoordination(db:DatabaseSync,options:{
  const foreignKeys=Number((db.prepare('PRAGMA foreign_keys').get() as Row).foreign_keys),legacy=Number((db.prepare('PRAGMA legacy_alter_table').get() as Row).legacy_alter_table);
  if(foreignKeys!==1||Number((db.prepare('PRAGMA writable_schema').get() as Row).writable_schema)!==0||db.prepare("SELECT 1 FROM sqlite_temp_schema WHERE name NOT LIKE 'sqlite_%' LIMIT 1").get())failCheckpoint('connection_unconfirmed');
  if(db.prepare('SELECT 1 FROM sqlite_schema WHERE name=?').get(replacement))failCheckpoint('replacement_exists');
- quiescent(db);if(db.prepare('PRAGMA foreign_key_check').all().length)failCheckpoint('integrity');
+ assertOriginalWorkspaceQuiescence(db);if(db.prepare('PRAGMA foreign_key_check').all().length)failCheckpoint('integrity');
  const phase=(name:WorkspaceUpgradePhase)=>{const result=options.onPhase?.(name) as unknown;if(result!==undefined){if(result&&typeof(result as {then?:unknown}).then==='function')Promise.resolve(result).catch(()=>{});failCheckpoint('async_callback');}};
  db.exec('PRAGMA foreign_keys=OFF');
  try{
-  db.exec('BEGIN IMMEDIATE');identity.assertCurrent();if(workspaceCheckpointCoordinationSchema(db)!=='publication')failCheckpoint('schema_changed');quiescent(db);
+  db.exec('BEGIN IMMEDIATE');identity.assertCurrent();if(workspaceCheckpointCoordinationSchema(db)!=='publication')failCheckpoint('schema_changed');assertOriginalWorkspaceQuiescence(db);
   const beforeObjects=objects(db),tables=dependencies(db),before=inventory(db,tables),beforeChanges=Number((db.prepare('SELECT total_changes() n').get() as Row).n);phase('captured');
   for(const object of beforeObjects.filter(row=>row.type==='trigger'))db.exec('DROP TRIGGER '+quote(object.name));
   for(const object of beforeObjects.filter(row=>row.type==='view'))db.exec('DROP VIEW '+quote(object.name));

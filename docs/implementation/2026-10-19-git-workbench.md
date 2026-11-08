@@ -98,3 +98,34 @@ readable and cancellable, and require a fresh metadata-bound review for approval
 The physical repository exclusion namespace continues to derive from the original
 common Git directory. The owner review and its version are the fixed source for the subsequent
 original commit admission and effect work.
+
+
+## Offline commit execution schema maintenance
+
+The original index execution table can hold typed commit rows under protocol 5.
+New stores create that schema. Existing canonical index stores retain their current
+schema until explicit offline maintenance. Inspection reports `commit_execution_schema`.
+The original project/family reservation and common-directory Worker namespace own
+subsequent commit admission. Index consumers continue to handle protocols 1–4.
+
+Stop Gateway, Worker and native pools before applying this table change. The
+maintenance command checks the original physical WAL database, foreign keys,
+quiescent original leases/runs/reservations/budgets/producers and native closures.
+It preserves original execution rowids while copying rows transactionally, restores original views/triggers and
+indexes, and compares all application-table row inventories and non-target schema objects.
+Its result includes `offline_pool_drain_observed:false` because database evidence
+cannot observe stopped idle native pools.
+
+The existing maintenance entry supports these operator commands after compilation.
+
+```text
+publication-maintenance-main inspect ABSOLUTE_DATABASE
+publication-maintenance-main apply-commit ABSOLUTE_DATABASE EXPECTED_DATABASE_SHA --confirm-offline
+publication-maintenance-main rollback-commit ABSOLUTE_DATABASE EXPECTED_DATABASE_SHA --confirm-offline
+```
+
+The expected database digest comes from inspection. Rollback requires no commit
+rows and no protocol-5-or-newer rows, including completed history. Original receipts
+and rows are retained. The source implementation currently provides storage and
+maintenance groundwork. Typed admission, native commit effects and settlement
+remain the following P08 integration work.

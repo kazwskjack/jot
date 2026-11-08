@@ -1,3 +1,4 @@
+import {gitCommitExecutionSchema,upgradeGitCommitExecutionSchema,rollbackGitCommitExecutionSchema} from '../git/commit-execution-upgrade.ts';
 import {DatabaseSync} from 'node:sqlite';
 import {lstatSync,realpathSync} from 'node:fs';import {isAbsolute,resolve} from 'node:path';
 import {retainOriginalGitDatabase} from '../git/database-identity.ts';
@@ -30,16 +31,21 @@ function openExisting<T>(path:string,writable:boolean,operation:(db:DatabaseSync
  const db=new DatabaseSync(path,{readOnly:!writable});
  try{db.exec('PRAGMA foreign_keys=ON; PRAGMA busy_timeout=0;');return operation(db)}finally{db.close()}
 }
-function view(db:DatabaseSync){const identity=retainOriginalGitDatabase(db);return{protocol:1 as const,database_sha256:identity.sha256,coordination:workspacePublicationSchema(db),publication_schema:publicationSchema(db),execution_authorized:false as const,offline_pool_drain_observed:false as const}}
+function view(db:DatabaseSync){const identity=retainOriginalGitDatabase(db);return{protocol:1 as const,database_sha256:identity.sha256,coordination:workspacePublicationSchema(db),commit_execution_schema:gitCommitExecutionSchema(db),publication_schema:publicationSchema(db),execution_authorized:false as const,offline_pool_drain_observed:false as const}}
 
 /** Offline inspection only. Does not bootstrap a missing DB, upgrade a live
  * server or expose host paths, data, credentials or user approval authority. */
 export function inspectPublicationMaintenance(path:string){return openExisting(path,false,db=>{db.exec('BEGIN DEFERRED');try{return view(db)}finally{db.exec('ROLLBACK')}})}
 
-export function applyPublicationMaintenance(path:string,command:unknown){
+function maintenanceInput(command:unknown){
  if(!command||typeof command!=='object'||Array.isArray(command)||Object.keys(command).sort().join(',')!=='expected_database_sha256,offline')fail('command_invalid');
  const input=command as {expected_database_sha256:unknown;offline:unknown};
  if(input.offline!==true||typeof input.expected_database_sha256!=='string'||!/^[a-f0-9]{64}$/.test(input.expected_database_sha256))fail('command_invalid');
+ return {expected_database_sha256:input.expected_database_sha256,offline:true as const};
+}
+
+export function applyPublicationMaintenance(path:string,command:unknown){
+ const input=maintenanceInput(command);
  return openExisting(path,true,db=>{
   const identity=retainOriginalGitDatabase(db),before=view(db);if(identity.sha256!==input.expected_database_sha256)fail('database_changed');
   if(before.publication_schema==='unsupported')fail('schema_unsupported');
@@ -55,5 +61,20 @@ export function applyPublicationMaintenance(path:string,command:unknown){
    if(publicationSchema(db)!=='current'||db.prepare('PRAGMA foreign_key_check').all().length)fail('integrity');identity.assertCurrent();
   });
   return{...view(db),state:coordination.state==='upgraded'?'upgraded' as const:before.publication_schema==='current'?'already_current' as const:'storage_installed' as const};
+ });
+}
+
+
+/** Commit schema changes use the original maintenance connection and require
+ * the same explicit offline confirmation and physical database identity. */
+export function applyGitCommitMaintenance(path:string,command:unknown,rollback=false){
+ const input=maintenanceInput(command);
+ if(typeof rollback!=='boolean')fail('command_invalid');
+ return openExisting(path,true,db=>{
+  const identity=retainOriginalGitDatabase(db),before=view(db);
+  if(identity.sha256!==input.expected_database_sha256)fail('database_changed');
+  const change=rollback?rollbackGitCommitExecutionSchema(db):upgradeGitCommitExecutionSchema(db);
+  identity.assertCurrent();
+  return {before,commit_schema_change:change,after:view(db),execution_authorized:false as const,offline_pool_drain_observed:false as const};
  });
 }
