@@ -3,6 +3,7 @@ import type {WorkbenchMemoryImportBundle,WorkbenchMemoryImportBundleSource} from
 import {taskDraftScope} from '../jot/client';
 import {workbenchApi} from './client';
 import PrdTextPreview from './PrdTextPreview';
+import MemoryImportHistory from './MemoryImportHistory';
 
 export default function MemoryImportBundle({workspace,importId,inputHash,bundle}:{workspace:string;importId:string;inputHash:string;bundle:WorkbenchMemoryImportBundle}){
  const owner=taskDraftScope(),alive=useRef(true);
@@ -42,6 +43,7 @@ export default function MemoryImportBundle({workspace,importId,inputHash,bundle}
   <dl><dt>包导出时间</dt><dd>{metadata.exported_at??'原始值见源包'}</dd><dt>原索引时间</dt><dd>{metadata.last_indexed_at??'未提供'}</dd><dt>原 Dream 时间与状态</dt><dd>{metadata.last_dream_at??'未提供'} · {metadata.last_dream_status??'未提供'}</dd></dl>
   <p>Case 记录 {metadata.case_trace_count} 条 · 索引记录 {metadata.index_trace_count} 条 · Dream 记录 {metadata.dream_trace_count} 条 · Dream 摘要 {metadata.last_dream_summary_chars} 字符</p>
   <p style={{overflowWrap:'anywhere'}}>源包 SHA-256 {bundle.sha256}</p>
+  <MemoryImportHistory key={`${workspace}:${importId}:${inputHash}`} workspace={workspace} importId={importId} inputHash={inputHash} bundleHash={bundle.sha256}/>
   {error&&<p role="alert" className="wb-error">{error}</p>}
   <button type="button" disabled={busy} onClick={()=>void read()}>{busy?'正在读取并核对源包…':'读取完整源包'}</button>
   {source?.source_file&&<p role="status">已核对原项目文件 {source.source_file.path} 的 v{source.source_file.version}。可通过上方原始源文件入口下载完整字节。</p>}

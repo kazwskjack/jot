@@ -668,3 +668,9 @@ export type WorkbenchMemoryImportPage = {offset:number;limit:number;total:number
 
 export type WorkbenchMemoryImportFileSelection = {kind:"workspace_file";path:string;version:number;sha256:string;size:number};
 export type WorkbenchMemoryImportFileSource = WorkbenchMemoryImportFileSelection&{workspace_id:string;project_id:string};
+
+export type WorkbenchMemoryImportHistorySection = "metadata"|"case"|"index"|"dream";
+export type WorkbenchMemoryImportSourceHistory = {
+ import_id:string;input_sha256:string;sha256:string;execution_authorized:false;
+ section:WorkbenchMemoryImportHistorySection;content_sha256:string;text:string;page:WorkbenchMemoryImportPage;
+};

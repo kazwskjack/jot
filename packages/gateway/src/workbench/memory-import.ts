@@ -1,6 +1,6 @@
-import {pilotdeckMemoryImport,type PilotdeckMemoryImportSource} from './pilotdeck-memory-import.ts';
+import {pilotdeckMemoryImport,pilotdeckMemoryImportHistory,type PilotdeckMemoryImportSource} from './pilotdeck-memory-import.ts';
 import {createHash} from 'node:crypto';
-import type {WorkbenchMemoryImportFileSelection,WorkbenchMemoryImportFileSource} from '../../contracts/types.ts';
+import type {WorkbenchMemoryImportFileSelection,WorkbenchMemoryImportFileSource,WorkbenchMemoryImportHistorySection} from '../../contracts/types.ts';
 import type {DatabaseSync} from 'node:sqlite';
 import {withImmediateTransaction} from '../db/database.ts';
 import {memoryExpired,type MemoryRow,type MemoryValue} from './memory-lifecycle.ts';
@@ -235,18 +235,26 @@ export class MemoryImportService{
    ||createHash('sha256').update(content,'utf8').digest('hex')!==item.content_sha256)throw Error('memory_import_digest_conflict');
   return {import_id:importId,preview_version:expectedVersion,memory_id:memoryId,version:item.version,sha256:item.content_sha256,memory,execution_authorized:false as const};
  }
- source(owner:string,workspace:string,importId:string){
+ source(owner:string,workspace:string,importId:string,history?:{section:WorkbenchMemoryImportHistorySection;offset:number;limit:number}){
   this.get(owner,workspace,importId);
   const row=this.db.prepare('SELECT * FROM wb_memory_import_batches WHERE owner_id=? AND workspace_id=? AND import_id=?').get(owner,workspace,importId) as Batch;
   const snapshot=JSON.parse(String(row.input_json)) as Snapshot;
   if(digest(snapshot)!==row.input_sha256)throw Error('memory_import_digest_conflict');
   const source=snapshot.source_bundle;
   if(snapshot.source_file){
-   this.readFileSource(owner,workspace,snapshot.target,snapshot.source_file);
+   const bytes=this.readFileSource(owner,workspace,snapshot.target,snapshot.source_file);
+   if(history){
+    if(!source)throw Error('memory_import_bundle_not_found');
+    let bundle:unknown;try{bundle=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));}catch{throw Error('invalid_memory_import_file_source');}
+    return {import_id:importId,input_sha256:String(row.input_sha256),sha256:source.summary.sha256,
+     ...pilotdeckMemoryImportHistory(bundle,history.section,history.offset,history.limit),execution_authorized:false as const};
+   }
    return {import_id:importId,input_sha256:String(row.input_sha256),sha256:source?.summary.sha256??snapshot.source_file.sha256,source_file:snapshot.source_file,execution_authorized:false as const};
   }
   if(!source||!('bundle' in source))throw Error('memory_import_bundle_not_found');
   if(digest(source.bundle)!==source.summary.sha256)throw Error('memory_import_digest_conflict');
+  if(history)return {import_id:importId,input_sha256:String(row.input_sha256),sha256:source.summary.sha256,
+   ...pilotdeckMemoryImportHistory(source.bundle,history.section,history.offset,history.limit),execution_authorized:false as const};
   return {import_id:importId,input_sha256:String(row.input_sha256),sha256:source.summary.sha256,bundle:source.bundle,execution_authorized:false as const};
  }
  apply(owner:string,workspace:string,input:Input,page?:ImportPage){return withImmediateTransaction(this.db,()=>{

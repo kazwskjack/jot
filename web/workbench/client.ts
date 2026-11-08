@@ -1,4 +1,4 @@
-import type {WorkbenchMemoryImportTarget,WorkbenchMemoryImportPreview,WorkbenchMemoryImportBundleSource,WorkbenchMemoryImportReplacementSource} from '../../packages/gateway/contracts/types';
+import type {WorkbenchMemoryImportTarget,WorkbenchMemoryImportPreview,WorkbenchMemoryImportBundleSource,WorkbenchMemoryImportHistorySection,WorkbenchMemoryImportSourceHistory,WorkbenchMemoryImportReplacementSource} from '../../packages/gateway/contracts/types';
 import {createHostAdminClient} from './host-admin-client.mjs';
 import type {MemoryRetrieval,MemoryRetrievalPage} from './types';
 import type {ProjectPage,GitSnapshot,GitDiff} from './types';
@@ -127,6 +127,7 @@ export const workbenchApi={
  memoryConsolidations:(workspace:string,query:string,signal?:AbortSignal)=>request<MemoryConsolidationPage>(`/workspaces/${pathId(workspace)}/memory-consolidations${query}`,'GET',undefined,undefined,signal),
  memoryConsolidation:(workspace:string,id:string,signal?:AbortSignal)=>request<MemoryConsolidation>(`/workspaces/${pathId(workspace)}/memory-consolidations/${pathId(id)}`,'GET',undefined,undefined,signal),
  memoryImportReplacementSource:(workspace:string,id:string,memoryId:string,version:number,signal?:AbortSignal)=>request<WorkbenchMemoryImportReplacementSource>(`/workspaces/${pathId(workspace)}/memory/import/${pathId(id)}/replacement/${pathId(memoryId)}?preview_version=${version}`,'GET',undefined,undefined,signal),
+ memoryImportSourceHistory:(workspace:string,id:string,section:WorkbenchMemoryImportHistorySection,offset:number,signal?:AbortSignal)=>request<WorkbenchMemoryImportSourceHistory>(`/workspaces/${pathId(workspace)}/memory/import/${pathId(id)}/source/history?section=${section}&offset=${offset}&limit=4096`,'GET',undefined,undefined,signal),
  memoryImportSource:(workspace:string,id:string,signal?:AbortSignal)=>request<WorkbenchMemoryImportBundleSource>(`/workspaces/${pathId(workspace)}/memory/import/${pathId(id)}/source`,'GET',undefined,undefined,signal),
  memoryImport:(workspace:string,id:string,signal?:AbortSignal,offset?:number)=>request<WorkbenchMemoryImportPreview>(`/workspaces/${pathId(workspace)}/memory/import/${pathId(id)}${offset===undefined?'':`?offset=${offset}&limit=25`}`,'GET',undefined,undefined,signal),
  previewMemoryImport:(workspace:string,input:{import_id:string;document:unknown;target:WorkbenchMemoryImportTarget;mode?:'replace_scope'},key:string,signal?:AbortSignal,offset?:number)=>request<WorkbenchMemoryImportPreview>(`/workspaces/${pathId(workspace)}/memory/import/preview${offset===undefined?'':`?offset=${offset}&limit=25`}`,'POST',input,key,signal),

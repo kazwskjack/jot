@@ -126,6 +126,15 @@ export function registerWorkbenchRoutes(app: FastifyInstance, service: Workbench
     if(Object.keys(input).join(',')!=='preview_version'||typeof input.preview_version!=='string'||!/^[1-9][0-9]{0,15}$/.test(input.preview_version))throw Error('invalid_memory_import');
     return service.memoryImports.replacementSource(actor(request),param(request,'workspaceId'),param(request,'importId'),param(request,'memoryId'),Number(input.preview_version));
   });
+  app.get('/v1/workspaces/:workspaceId/memory/import/:importId/source/history',async(request,reply)=>{
+    privateReply(reply);const input=query(request);
+    if(Object.keys(input).some(key=>!['section','offset','limit'].includes(key))
+      ||!['metadata','case','index','dream'].includes(String(input.section))||typeof input.section!=='string'
+      ||input.offset!==undefined&&(typeof input.offset!=='string'||!/^(0|[1-9][0-9]{0,15})$/.test(input.offset))
+      ||input.limit!==undefined&&(typeof input.limit!=='string'||!/^[1-9][0-9]{0,4}$/.test(input.limit)))throw Error('invalid_memory_import');
+    return service.memoryImports.source(actor(request),param(request,'workspaceId'),param(request,'importId'),{
+      section:input.section as 'metadata'|'case'|'index'|'dream',offset:Number(input.offset??0),limit:Number(input.limit??4096)});
+  });
   app.get('/v1/workspaces/:workspaceId/memory/import/:importId/source',async(request,reply)=>{
     privateReply(reply);if(Object.keys(query(request)).length)throw Error('invalid_memory_import');
     return service.memoryImports.source(actor(request),param(request,'workspaceId'),param(request,'importId'));

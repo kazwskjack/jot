@@ -2014,5 +2014,14 @@
     "WorkbenchMemoryImportReplacementSource",
     "200",
     "Read one original immutable memory revision from the exact owner-scoped replacement preview version, including after retirement. Reauthorize target scope, match the original full replacement inventory, verify original revision scope, status, metadata and content SHA-256. Returns source data with no execution authority."
+  ],
+  [
+    "GET",
+    "/v1/workspaces/{workspace_id}/memory/import/{import_id}/source/history",
+    "getWorkbenchMemoryImportSourceHistory",
+    null,
+    "WorkbenchMemoryImportSourceHistory",
+    "200",
+    "Read immutable imported source history through the original owner/workspace/target authorization and captured input digest. Revalidate complete source bytes or inline bundle digest before projecting metadata, Case, index or Dream JSON. Preserve all captured fields and ordering. Offset/limit address UTF-16 units of the complete compact JSON section. Pages preserve Unicode scalars and a one-unit limit may return two units to advance. content_sha256 binds the entire UTF-8 encoded JSON section. Absent original values return JSON null. Native index jobs and execution history continue under their original authorities. Responses are private and no-store."
   ]
 ]

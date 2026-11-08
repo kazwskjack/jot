@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 import {posix,win32} from 'node:path';
-import type {WorkbenchMemoryImportBundle,WorkbenchMemoryImportFileSource} from '../../contracts/types.ts';
+import type {WorkbenchMemoryImportBundle,WorkbenchMemoryImportFileSource,WorkbenchMemoryImportHistorySection} from '../../contracts/types.ts';
 
 const formatVersion='clawxmemory-memory-snapshot.v4';
 const hash=(value:string)=>createHash('sha256').update(value,'utf8').digest('hex');
@@ -87,4 +87,25 @@ export function pilotdeckMemoryImport(value:unknown,namespace:string,maxCharacte
    dream_trace_count:Array.isArray(bundle.recentDreamTraces)?bundle.recentDreamTraces.length:0},execution_authorized:false};
  return {document:{schema_version:1,workspace_id:workspaceId,exported_at:Number.isFinite(exported)?new Date(exported).toISOString():'1970-01-01T00:00:00.000Z',items},
   source:{bundle,summary} satisfies PilotdeckMemoryImportSource};
+}
+
+/** Project original captured history without changing native execution or index state. */
+export function pilotdeckMemoryImportHistory(value:unknown,section:WorkbenchMemoryImportHistorySection,offset:number,limit:number){
+ if(!record(value)||value.formatVersion!==formatVersion)invalid();
+ if(!['metadata','case','index','dream'].includes(section)||!Number.isSafeInteger(offset)||offset<0
+  ||!Number.isSafeInteger(limit)||limit<1||limit>16_384)throw Error('invalid_memory_import');
+ const keys={case:'recentCaseTraces',index:'recentIndexTraces',dream:'recentDreamTraces'};
+ const material=section==='metadata'?{
+  exportedAt:value.exportedAt??null,lastIndexedAt:value.lastIndexedAt??null,lastDreamAt:value.lastDreamAt??null,
+  lastDreamStatus:value.lastDreamStatus??null,lastDreamSummary:value.lastDreamSummary??null,
+ }:value[keys[section]]??null;
+ // shortcut: each page reads and hashes its complete captured section, bounded by the original source-file policy.
+ const text=JSON.stringify(material);if(typeof text!=='string')invalid();
+ if(offset>text.length||offset>0&&(text.codePointAt(offset-1)??0)>0xffff)throw Error('invalid_memory_import');
+ let end=Math.min(text.length,offset+limit);
+ if(end<text.length&&(text.codePointAt(end-1)??0)>0xffff)end--;
+ // A one-unit request must still advance across a complete Unicode scalar.
+ if(end===offset&&end<text.length)end=Math.min(text.length,offset+2);
+ return {section,content_sha256:hash(text),text:text.slice(offset,end),
+  page:{offset,limit,total:text.length,next_offset:end<text.length?end:null}};
 }
