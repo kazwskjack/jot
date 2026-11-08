@@ -44,16 +44,18 @@ export class MemoryImportItems{
   }
  });}
 
- write(batch:ImportItemsBatch,phase:Phase,items:Item[],manifest:ImportItemsManifest,replacement=false){
+ write(batch:ImportItemsBatch,phase:Phase,items:Iterable<Item>,manifest?:ImportItemsManifest,replacement=false){
   if(!this.db.isTransaction)throw Error('memory_import_item_transaction_required');
   const table=replacement?'wb_memory_import_replacement_items':'wb_memory_import_items';
   const insert=this.db.prepare(`INSERT INTO ${table}(owner_id,workspace_id,import_id,preview_version,phase,position,item_json) VALUES(?,?,?,?,?,?,?)`);
-  const hash=createHash('sha256').update('[');
-  for(let index=0;index<items.length;index++){
-   const encoded=JSON.stringify(items[index]);hash.update((index?',':'')+encoded,'utf8');
-   insert.run(batch.owner,batch.workspace,batch.importId,batch.version,phase,index,encoded);
+  const hash=createHash('sha256').update('[');let count=0;
+  for(const item of items){
+   const encoded=JSON.stringify(item);hash.update((count?',':'')+encoded,'utf8');
+   insert.run(batch.owner,batch.workspace,batch.importId,batch.version,phase,count,encoded);count++;
   }
-  if(manifest.count!==items.length||hash.update(']').digest('hex')!==manifest.sha256)conflict();
+  const result:ImportItemsManifest={kind:'original-memory-import-items-v1',count,sha256:hash.update(']').digest('hex')};
+  if(manifest&&(manifest.count!==count||manifest.sha256!==result.sha256))conflict();
+  return result;
  }
 
  read(batch:ImportItemsBatch,phase:Phase,manifest:ImportItemsManifest,range?:Range,replacement=false,scope?:{target:unknown;sha256:string}){
