@@ -9,6 +9,7 @@ import {withImmediateTransaction} from '../db/database.ts';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {taskmasterSourceSummary} from './taskmaster-source.ts';
 import type {McpRegistryService} from '../workbench/mcp-registry.ts';
+import {validateTaskmasterInstallation,type TaskmasterInstallation,type TaskmasterInstallationClient} from './taskmaster-installation.ts';
 
 type Row=Record<string,any>;
 export type PrdSelection={kind:'logical_file';path:string;version:number;sha256:string}|{kind:'upload';artifact_id:string;version:number;sha256:string};
@@ -20,7 +21,7 @@ const supported=(name:string)=>/\.(md|markdown|txt|json)$/i.test(name);
 const supportedMedia=(name:string,mediaType:string)=>mediaType.startsWith('text/')||/\.json$/i.test(name)&&mediaType.split(';',1)[0]!.trim().toLowerCase()==='application/json';
 const MAX_BYTES=65536,MAX_OBJECTIVE=12000;
 const terminal=['succeeded','partial','failed','cancelled','interrupted'];
-type PrdOptions={uploadRoot:string;mcpRegistry?:Pick<McpRegistryService,'taskmasterConnections'>};
+type PrdOptions={uploadRoot:string;mcpRegistry?:Pick<McpRegistryService,'taskmasterConnections'>;installationClient?:TaskmasterInstallationClient};
 function object(value:unknown,keys:string[]):Row{
  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!keys.includes(key)))throw Error('invalid_prd_request');return value as Row;
 }
@@ -85,6 +86,17 @@ export class TaskPrdService {
    AND (c.last_status IS NULL OR c.last_status NOT IN ('succeeded','partial','failed','cancelled') OR c.items_settled<>1) LIMIT 1`).get(task.task_id))reasons.push('PRD_EXECUTION_UNRESOLVED');
   const prior=this.latest(owner,task.task_id);
   if(prior&&task.objective!==prior.objective)reasons.push('PRD_OBJECTIVE_CHANGED');return [...new Set(reasons)];
+ }
+ async taskmasterInstallation(owner:string,taskId:string){
+  const {task,role}=this.scope(owner,taskId);
+  if(!this.options.installationClient)throw Error('prd_taskmaster_unavailable');
+  let installation:TaskmasterInstallation;
+  try{installation=validateTaskmasterInstallation(await this.options.installationClient.observeTaskmasterInstallation(owner),owner);}
+  catch{throw Error('prd_taskmaster_unavailable');}
+  const current=this.scope(owner,taskId);
+  if(current.task.version!==task.version||current.role.agent_id!==role.agent_id||current.role.version!==role.version
+   ||current.role.capability_epoch!==role.capability_epoch)throw Error('prd_taskmaster_context_changed');
+  return {task_id:taskId,task_version:task.version,installation};
  }
  sources(owner:string,taskId:string){
   const {task,role}=this.scope(owner,taskId),reasons=this.reasons(owner,task,role);

@@ -22502,6 +22502,99 @@
           }
         }
       }
+    },
+    "/v1/persistent-tasks/{task_id}/prd/taskmaster-installation": {
+      "get": {
+        "operationId": "readTaskPrdTaskmasterInstallation",
+        "tags": [
+          "persistent-tasks"
+        ],
+        "description": "Observe only the current owner-bound DSH profile Taskmaster package manifest and CLI entry file. Package version and license are declarations, with hashes and no execution authorization. Original task ownership and task/role versions are rechecked. No package installation or CLI execution occurs.",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owner profile package observation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskPrdInstallation"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Original task or installation observation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Original task or installation observation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Original task or installation observation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Original task or installation observation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Original task or installation observation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Original task or installation observation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -43388,6 +43481,172 @@
         "type": "object",
         "properties": {},
         "additionalProperties": false
+      },
+      "TaskmasterInstallation": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "protocol",
+          "owner_id",
+          "profile_id",
+          "scope",
+          "status",
+          "version",
+          "license",
+          "manifest_sha256",
+          "cli_entry_sha256",
+          "reason_code",
+          "observed_at",
+          "execution_authorized"
+        ],
+        "properties": {
+          "protocol": {
+            "const": 1
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "profile_id": {
+            "type": "string",
+            "pattern": "^dsh-profile-[a-f0-9]{48}$"
+          },
+          "scope": {
+            "const": "owner_profile"
+          },
+          "status": {
+            "enum": [
+              "available",
+              "missing"
+            ]
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9][A-Za-z0-9.+-]{0,127}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "license": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "manifest_sha256": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cli_entry_sha256": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason_code": {
+            "enum": [
+              "package_not_installed",
+              null
+            ]
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "execution_authorized": {
+            "const": false
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "available"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "version": {
+                  "type": "string",
+                  "pattern": "^[0-9][A-Za-z0-9.+-]{0,127}$"
+                },
+                "manifest_sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "cli_entry_sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "reason_code": {
+                  "type": "null"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "version": {
+                  "type": "null"
+                },
+                "license": {
+                  "type": "null"
+                },
+                "manifest_sha256": {
+                  "type": "null"
+                },
+                "cli_entry_sha256": {
+                  "type": "null"
+                },
+                "reason_code": {
+                  "const": "package_not_installed"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "TaskPrdInstallation": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "task_id",
+          "task_version",
+          "installation"
+        ],
+        "properties": {
+          "task_id": {
+            "type": "string"
+          },
+          "task_version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "installation": {
+            "$ref": "#/components/schemas/TaskmasterInstallation"
+          }
+        }
       }
     },
     "parameters": {

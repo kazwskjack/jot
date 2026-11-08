@@ -100,6 +100,7 @@ import {TaskReplyPolicies} from './persistent-tasks/reply-policy.ts';
 import {TaskReplyHistory} from './persistent-tasks/reply-history.ts';
 import { registerPersistentTaskRoutes } from './persistent-tasks/routes.ts';
 import {TaskPrdService} from './persistent-tasks/prd.ts';
+import type {TaskmasterInstallationClient} from './persistent-tasks/taskmaster-installation.ts';
 import {registerTaskPrdRoutes} from './persistent-tasks/prd-routes.ts';
 import {TaskDelegationService} from './workbench/task-delegation.ts';
 import {TaskCollaborationService} from './workbench/task-collaboration.ts';
@@ -198,6 +199,7 @@ export async function buildServer(config: {
   memoryReasoningClient?:MemoryReasoningClient;
   conversationGoalClient?: ConversationGoalClient;
   nativeMemberClient?:NativeMemberControlClient;
+  taskmasterInstallationClient?:TaskmasterInstallationClient;
   skillCatalogClient?: SkillCatalogHost;
   conversationForkSourceClient?:{inspectConversationForkSource(sessionId:string,signal?:AbortSignal):Promise<unknown>};
   conversationGoalResumeEnabled?:boolean;
@@ -307,7 +309,7 @@ export async function buildServer(config: {
     ...(nativeWork?{discoveryWorkOperations:nativeWork}:{}),
   });
   const taskNotifications=new TaskNotifications(db);
-  const taskPrd=new TaskPrdService(db,workbench,persistentTasks,artifacts,{uploadRoot:config.uploadRoot??join(dirname(config.databasePath),'general-agent-uploads'),mcpRegistry});
+  const taskPrd=new TaskPrdService(db,workbench,persistentTasks,artifacts,{uploadRoot:config.uploadRoot??join(dirname(config.databasePath),'general-agent-uploads'),mcpRegistry,...(config.taskmasterInstallationClient?{installationClient:config.taskmasterInstallationClient}:{})});
   const taskReplyPolicies=new TaskReplyPolicies(db);
   const replyDrafts=new TaskReplyDrafts(db,events);
   const replyHistory=new TaskReplyHistory(db);

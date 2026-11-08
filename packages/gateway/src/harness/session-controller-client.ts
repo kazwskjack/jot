@@ -6,6 +6,7 @@ import {normalizeOrdinaryHistoryScope,validateOrdinarySteeringObservation,valida
 import { createReadStream } from 'node:fs'
 import { Readable } from 'node:stream'
 import {nativeIdleSessionId,validateNativeIdleObservation} from './native-idle-observation.ts'
+import {validateTaskmasterInstallation} from '../persistent-tasks/taskmaster-installation.ts'
 
 export type AdapterFetch = (input: string | URL, init?: RequestInit) => Promise<Response>
 
@@ -228,6 +229,13 @@ export class SessionControllerClient {
     return this.post('/v1/plugin-profile/bundles/remove', {
       owner_id: input.ownerId, operation_id: input.operationId, name: input.name,
     }, signal)
+  }
+
+  async observeTaskmasterInstallation(ownerId: string, signal?: AbortSignal) {
+    if (typeof ownerId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(ownerId)) throw Error('taskmaster_installation_invalid')
+    const deadline = AbortSignal.timeout(5000)
+    const value = await this.post('/v1/taskmaster/installation', {owner_id: ownerId}, signal ? AbortSignal.any([signal, deadline]) : deadline)
+    return validateTaskmasterInstallation(value, ownerId)
   }
 
   async create(sessionId: string, cwd: string, agentPreset: string, signal?: AbortSignal, workbenchRunId?: string, workbenchExecutionLease?: ExecutionLease,workWorkspace?:Readonly<{protocol:1}>) {

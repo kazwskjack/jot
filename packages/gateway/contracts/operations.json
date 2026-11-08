@@ -1762,5 +1762,14 @@
     "NativePlanModeOperation",
     "200",
     "Reconcile the original plan-mode request against its durably paired native command/run and command/done log, including exact original mode input, Session incarnation and event hashes. This read settles the original result from retained evidence."
+  ],
+  [
+    "GET",
+    "/v1/persistent-tasks/{task_id}/prd/taskmaster-installation",
+    "Observe owner-profile Taskmaster installation",
+    null,
+    "TaskPrdInstallation",
+    "200",
+    "Read only the original owner-bound profile package metadata and CLI entry, with native file hashes. No installation or execution authorization."
   ]
 ]

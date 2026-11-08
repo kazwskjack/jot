@@ -17,7 +17,7 @@ async function privateDirectory(path) {
 }
 
 /** Read one bounded, stable regular file under its already resolved directory. */
-async function readSource(root, name, limit = MAX_FILE_BYTES) {
+export async function readSource(root, name, limit = MAX_FILE_BYTES) {
   const path = resolve(root, name);
   if (!inside(root, path)) fail();
   let info;
