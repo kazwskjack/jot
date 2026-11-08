@@ -21702,9 +21702,31 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "history",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            },
+            "description": "Browse original operation history in immutable creation order."
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Original request ID from the last item of the previous history page. Requires history=1 and an existing original owner/run record."
           }
         ],
-        "description": "Read the most recent 50 original owner/run query operation summaries.",
+        "description": "Read the most recent 50 original owner/run query summaries by update time by default. Opt into history=1 for stable creation-time and request-ID descending order. In history mode, before selects records older than that original request within the same owner/run. Status changes retain the original creation boundary. Response shape remains unchanged.",
         "responses": {
           "200": {
             "description": "Original command query operation",

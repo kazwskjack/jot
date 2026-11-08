@@ -1689,7 +1689,7 @@
     null,
     "NativeCommandQueryPage",
     "200",
-    "Read the most recent 50 original owner/run query operation summaries."
+    "Read the most recent 50 original owner/run query summaries by update time by default. Opt into history=1 for stable creation-time and request-ID descending order. In history mode, before selects records older than that original request within the same owner/run. Status changes retain the original creation boundary. Response shape remains unchanged."
   ],
   [
     "GET",

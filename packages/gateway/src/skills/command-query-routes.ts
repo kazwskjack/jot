@@ -44,7 +44,15 @@ export function registerNativeCommandQueryRoutes(app:FastifyInstance,{db,catalog
  });
  app.get('/v1/runs/:runId/native-command-queries',async(request,reply)=>{
   reply.header('cache-control','private, no-store');
-  try{if(Object.keys(request.query as object).length)throw Error('native_command_query_invalid');const {owner,runId}=owned(request);return journal.list(owner,runId);}
+  try{
+   const query=request.query as Record<string,unknown>;
+   if(Object.keys(query).some(key=>!['history','before'].includes(key))
+    ||query.history!==undefined&&query.history!=='1'
+    ||query.before!==undefined&&(query.history!=='1'||typeof query.before!=='string'
+     ||!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(query.before)))throw Error('native_command_query_invalid');
+   const {owner,runId}=owned(request);
+   return journal.list(owner,runId,{...(query.history==='1'?{history:true as const}:{}),...(typeof query.before==='string'?{before:query.before}:{})});
+  }
   catch(cause){return error(reply,cause);}
  });
  app.get('/v1/runs/:runId/native-command-queries/:requestId',async(request,reply)=>{

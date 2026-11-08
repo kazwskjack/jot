@@ -134,6 +134,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  const [models,setModels]=useState<Capabilities['models']>([]),[conversation,setConversation]=useState<Conversation>(),fileInput=useRef<HTMLInputElement>(null),folderInput=useRef<HTMLInputElement>(null);
  const controller=useMemo(()=>new RoleChatController(id,{request,follow,snapshot:async(conversationId:string,signal?:AbortSignal)=>{const value=await snapshot(conversationId,signal);if(!signal?.aborted)rememberConversation(value.conversation);return value;}},()=>render(n=>n+1)),[id,rememberConversation]);
  const [goalMode,setGoalMode]=useState(false),[goalPending,setGoalPending]=useState(false);
+ const [recoveryRunId,setRecoveryRunId]=useState('');
  useEffect(()=>{setGoalMode(false);},[id,ordinary]);
  const uploads=useMemo(()=>new UploadController(id,{request},()=>render(n=>n+1)),[id]);
  useEffect(()=>{let mounted=true;controller.onChange=()=>{if(mounted)render(n=>n+1);};void controller.start();return()=>{mounted=false;controller.stop();};},[controller]);
@@ -143,9 +144,13 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  useEffect(()=>()=>previewRequest.current?.abort(),[]);
  useEffect(()=>{const warn=(event:BeforeUnloadEvent)=>{if(uploads.entries.length||controller.pendingMessage||goalPending||voiceBusy||modeWriter.pending||cancelWriter.pending){event.preventDefault();event.returnValue='';}};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);},[uploads,controller,goalPending,voiceBusy,modeWriter.pending,cancelWriter.pending]);
  const state=controller.state,run=state?(Object.values(state.runs) as Run[]).find(active):undefined;
- const diagnosticRun=state?(Object.values(state.runs) as Run[]).filter(value=>value.conversation_id===id).sort((a,b)=>b.created_at.localeCompare(a.created_at)||b.run_id.localeCompare(a.run_id))[0]:undefined;
+ const conversationRuns=state?(Object.values(state.runs) as Run[]).filter(value=>value.conversation_id===id)
+  .sort((a,b)=>b.created_at.localeCompare(a.created_at)||b.run_id.localeCompare(a.run_id)):[];
+ const diagnosticRun=conversationRuns[0];
   const catalogMount=catalogMountForRun(run?.run_id,taskDraftScope(),ordinary);
-  const queryRecoveryMount=catalogMount?null:catalogMountForRun(diagnosticRun?.run_id,taskDraftScope(),ordinary);
+  const recoveryRuns=conversationRuns.filter(value=>value.run_id!==catalogMount?.runId);
+  const recoveryRun=recoveryRuns.find(value=>value.run_id===recoveryRunId)??recoveryRuns[0];
+  const queryRecoveryMount=catalogMountForRun(recoveryRun?.run_id,taskDraftScope(),ordinary);
  const chatMode=ordinary&&conversation?.mode==='chat';
  const routingStatus=modelRoutingStatus(conversation?.model,models);
  let modes={aware:false,default:'work',chatReady:false},modeCapabilityError='';
@@ -213,8 +218,13 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  {!ordinary&&run&&['starting','running'].includes(run.status)&&<NativeMemberControls key={`native-member-controls:${run.run_id}`} run={run}/>}
  {ordinary&&conversation&&!chatMode&&<div inert={cancelWriter.pending||controller.pendingMessage}><ConversationGoal key={id} id={id} running={run?.status==='running'} runStatus={run?.status} controlRun={state?latestGoalRun(Object.values(state.runs),id):undefined} onResumeAccepted={()=>{void controller.refresh().catch(()=>{});}} onStopCompleted={focusConversationAfterStop} onPendingChange={setGoalPending}/></div>}
   {catalogMount&&<SkillCatalogPanel runId={catalogMount.runId} ownerScope={catalogMount.ownerScope} onUseSkill={name=>editDraft(skillGestureDraft(draftRef.current,name))}/>}
-  {queryRecoveryMount&&<NativeCommandQueries key={queryRecoveryMount.ownerScope+':'+queryRecoveryMount.runId}
-   runId={queryRecoveryMount.runId} ownerScope={queryRecoveryMount.ownerScope} commands={[]} catalogSha256=""/>}
+  {queryRecoveryMount&&<details><summary>历史运行的命令与恢复记录</summary>
+   <label>选择原运行 <select value={queryRecoveryMount.runId} onChange={event=>setRecoveryRunId(event.currentTarget.value)}>
+    {recoveryRuns.map(value=><option key={value.run_id} value={value.run_id}>{value.created_at} · {value.status} · {value.run_id}</option>)}
+   </select></label>
+   <NativeCommandQueries key={queryRecoveryMount.ownerScope+':'+queryRecoveryMount.runId}
+    runId={queryRecoveryMount.runId} ownerScope={queryRecoveryMount.ownerScope} commands={[]} catalogSha256=""/>
+  </details>}
   {diagnosticRun&&<RunDiagnostics key={diagnosticRun.run_id} run={diagnosticRun}/>}
  {state&&<CompactionActivities activities={Object.values(state.activities)} runs={state.runs}/>}
   {state&&Object.values(state.messages).map((message:any)=>{

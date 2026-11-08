@@ -17,9 +17,11 @@ function summary(value:unknown,runId:string):NativeCommandQuerySummary{
   ||typeof value.updated_at!=='string'||!Number.isFinite(Date.parse(value.updated_at)))throw Error('NATIVE_QUERY_RESPONSE_UNKNOWN');
  return value as unknown as NativeCommandQuerySummary;
 }
-export async function listNativeCommandQueries(runId:string,ownerScope:string,signal:AbortSignal){
+export async function listNativeCommandQueries(runId:string,ownerScope:string,signal:AbortSignal,history?:{before?:string}){
  current(ownerScope,runId,signal);
- const value=await request<unknown>(`/runs/${encodeURIComponent(runId)}/native-command-queries`,'GET',undefined,undefined,signal);
+ if(history?.before!==undefined&&!UUID.test(history.before))throw Error('NATIVE_QUERY_REQUEST_INVALID');
+ const query=history?'?history=1'+(history.before?'&before='+encodeURIComponent(history.before):''):'';
+ const value=await request<unknown>(`/runs/${encodeURIComponent(runId)}/native-command-queries${query}`,'GET',undefined,undefined,signal);
  current(ownerScope,runId,signal);
  if(!object(value)||Object.keys(value).join(',')!=='items'||!Array.isArray(value.items)||value.items.length>50)throw Error('NATIVE_QUERY_RESPONSE_UNKNOWN');
  const seen=new Set<string>();

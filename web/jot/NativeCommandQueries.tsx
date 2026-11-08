@@ -22,11 +22,17 @@ export default function NativeCommandQueries({runId,ownerScope,commands,catalogS
  const store=useMemo(()=>new NativeCommandQueryStore(ownerScope,runId),[ownerScope,runId]);
  const [pending,setPending]=useState<PendingNativeQuery|null>(null),[ready,setReady]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState('');
  const [selected,setSelected]=useState<NativeCommandQueryOperation|null>(null),active=useRef<AbortController|null>(null);
+ const [history,setHistory]=useState(false),[pageStarts,setPageStarts]=useState<Array<string|undefined>>([undefined]);
+ const before=pageStarts.at(-1);
  const resource=useResource(signal=>listNativeCommandQueries(runId,ownerScope,signal),ownerScope+':'+runId);
+ const historical=useResource(async signal=>({before,items:await listNativeCommandQueries(runId,ownerScope,signal,{before})}),ownerScope+':'+runId+':history:'+(before??''),history);
+ const historyItems=historical.data?.before===before?historical.data?.items:null;
+ const displayed=history?{...historical,data:historyItems}:resource;
  const reload=()=>{
   setError('');
   try{setPending(store.read());setReady(true);}catch(cause){setReady(false);setError(message(cause));}
   resource.reload();
+  historical.reload();
  };
  useEffect(()=>{
   try{setPending(store.read());setReady(true);}catch(cause){setError(message(cause));setReady(false);}
@@ -44,7 +50,7 @@ export default function NativeCommandQueries({runId,ownerScope,commands,catalogS
    else if(!store.read())store.save({request_id:operation.request_id,name:operation.name});
    setPending(store.read());
   }catch(cause){if(!controller.signal.aborted)setError(message(cause));}
-  finally{if(active.current===controller){active.current=null;if(!controller.signal.aborted){setBusy(false);resource.reload();}}}
+  finally{if(active.current===controller){active.current=null;if(!controller.signal.aborted){setBusy(false);resource.reload();historical.reload();}}}
  };
  const submit=(command:CommandManifest)=>void run(async signal=>{
   const query=validateNativeCommandQuery({request_id:crypto.randomUUID(),name:command.name,definition_id:command.definitionId,expected_catalog_sha256:catalogSha256});
@@ -67,17 +73,25 @@ export default function NativeCommandQueries({runId,ownerScope,commands,catalogS
   </div>}
   {busy&&<p role="status">正在处理原请求…</p>}
   {error&&<p role="alert">{error}</p>}
-  {resource.loading&&<p role="status">正在读取最近操作…</p>}
-  {resource.error&&<p role="alert">最近操作暂不可用，请重新读取恢复记录。</p>}
+  <button type="button" disabled={busy} onClick={()=>{setHistory(value=>!value);setPageStarts([undefined]);}}>{history?'返回最近操作':'按创建顺序浏览全部记录'}</button>
+  {displayed.loading&&<p role="status">正在读取命令记录…</p>}
+  {displayed.error&&<p role="alert">命令记录暂不可用，请重新读取恢复记录。</p>}
   {selected&&<div aria-label="原命令查询结果"><p><code>{selected.request_id}</code> · {labels[selected.state]}</p>
    {selected.result&&<><p>原生命令 ID <code>{selected.result.commandId}</code> · {selected.result.result.kind==='success'?'查询成功':'原生命令返回错误'}</p>
     {selected.result.result.text!==undefined&&<pre>{selected.result.result.text}</pre>}</>}
    {selected.state==='dispatched'||selected.state==='unknown'?<p>请求已进入派发记录，继续读取原状态等待结果核对。</p>:null}
   </div>}
-  {!!resource.data?.length&&<ul aria-label="最近命令查询">{resource.data.map(operation=><li key={operation.request_id}>
+  {!!displayed.data?.length&&<ul aria-label={history?'历史命令查询':'最近命令查询'}>{displayed.data.map(operation=><li key={operation.request_id}>
    <code>{operation.request_id}</code> · /{operation.name} · {labels[operation.state]} · <time dateTime={operation.updated_at}>{operation.updated_at}</time>
    <button type="button" disabled={busy} onClick={()=>recover(operation.request_id)}>读取此原操作</button>
    {['dispatched','unknown'].includes(operation.state)&&<button type="button" disabled={busy} onClick={()=>void run(signal=>reconcileNativeCommandQuery(runId,ownerScope,operation.request_id,signal))}>核对此原生结果</button>}
   </li>)}</ul>}
+  {history&&<nav aria-label="命令记录分页">
+   <button type="button" disabled={busy||historical.loading||pageStarts.length===1} onClick={()=>setPageStarts(value=>value.slice(0,-1))}>上一页</button>
+   <span>第 {pageStarts.length} 页</span>
+   <button type="button" disabled={busy||historical.loading||!!historical.error||historyItems?.length!==50}
+    onClick={()=>{const last=historyItems?.at(-1);if(last)setPageStarts(value=>[...value,last.request_id]);}}>下一页</button>
+   {!historical.loading&&!historical.error&&historyItems?.length===0&&<p role="status">此页没有更早的记录。</p>}
+  </nav>}
  </section>;
 }

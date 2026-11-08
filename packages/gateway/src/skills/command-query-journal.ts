@@ -35,11 +35,26 @@ export class NativeCommandQueryJournal{
   const fenced=this.fence(owner,runId,id);if(fenced)return project(fenced);
   throw Error('native_command_query_not_found');
  }
- list(owner:string,runId:string){
-  return {items:(this.db.prepare(`SELECT request_id,run_id,name,state,updated_at FROM ga_native_command_queries WHERE owner_id=? AND run_id=?
-   UNION ALL SELECT f.request_id,f.run_id,f.name,'rejected' AS state,f.updated_at FROM ga_native_command_query_fences f
+ list(owner:string,runId:string,options:{history?:true;before?:string}={}){
+  // History cursors retain their position when the original operation settles.
+  let boundary:Row|undefined;
+  if(options.before){
+   boundary=this.db.prepare('SELECT created_at,request_id FROM ga_native_command_queries WHERE owner_id=? AND run_id=? AND request_id=?').get(owner,runId,options.before) as Row|undefined;
+   if(!boundary){
+    const fenced=this.fence(owner,runId,options.before);
+    if(!fenced)throw Error('native_command_query_not_found');
+    boundary={created_at:fenced.updated_at,request_id:fenced.request_id};
+   }
+  }
+  const order=options.history?'created_at':'updated_at';
+  const predicate=boundary?'WHERE created_at<? OR (created_at=? AND request_id<?)':'';
+  const parameters=boundary?[boundary.created_at,boundary.created_at,boundary.request_id]:[];
+  return {items:(this.db.prepare(`WITH operations AS (
+   SELECT request_id,run_id,name,state,updated_at,created_at FROM ga_native_command_queries WHERE owner_id=? AND run_id=?
+   UNION ALL SELECT f.request_id,f.run_id,f.name,'rejected' AS state,f.updated_at,f.updated_at AS created_at FROM ga_native_command_query_fences f
    WHERE f.owner_id=? AND f.run_id=? AND NOT EXISTS(SELECT 1 FROM ga_native_command_queries q WHERE q.owner_id=f.owner_id AND q.run_id=f.run_id AND q.request_id=f.request_id)
-   ORDER BY updated_at DESC,request_id DESC LIMIT 50`).all(owner,runId,owner,runId) as Row[])
+   ) SELECT request_id,run_id,name,state,updated_at FROM operations ${predicate}
+   ORDER BY ${order} DESC,request_id DESC LIMIT 50`).all(owner,runId,owner,runId,...parameters) as Row[])
    .map(row=>({request_id:row.request_id,run_id:row.run_id,name:row.name,state:row.state,updated_at:row.updated_at}))};
  }
  prepare(owner:string,runId:string,input:unknown,scope:()=>SkillCatalogScope){
