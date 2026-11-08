@@ -41,7 +41,7 @@ export default function MemoryImportReplacement({workspace,importId,previewVersi
  if(!current())return null;
  return <section aria-label="替换受影响记忆" className="wb-form">
   <h4>当前范围内将退役 {replacement.count} 条记忆</h4>
-  <p>清单包含当前范围中的已核实和已过期记忆。确认后，旧记录进入原有版本历史，所选源包中的有效项目记忆生成待核实记录。</p>
+  <p>清单包含当前范围中的已核实和已过期记忆。确认后，旧记录进入原有版本历史，所选源包中的有效记忆生成待核实记录。</p>
   <p style={{overflowWrap:'anywhere'}}>范围快照 SHA-256 {replacement.scope_sha256}</p>
   {error&&<p role="alert" className="wb-error">{error}</p>}
   <div className="wb-message-list">{(inventory.page?inventory.items:inventory.items.slice(page*pageSize,(page+1)*pageSize)).map(item=><article key={item.memory_id}>

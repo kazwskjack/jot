@@ -38,8 +38,8 @@ export default function MemoryImportBundle({workspace,importId,inputHash,bundle}
  return <section aria-label="上游记忆源包" className="wb-form">
   <h4>上游当前项目记忆快照</h4>
   <p>{bundle.format_version} · {bundle.file_count} 个文件 · 原文件 UTF-8 共 {bundle.total_utf8_bytes} 字节</p>
-  <p>项目记忆文件 {bundle.memory_file_count} 个，其中已废弃 {bundle.deprecated_file_count} 个。全局用户文件 {bundle.global_file_count} 个，其他源资料文件 {bundle.source_only_file_count} 个，完整原文随源包保留。</p>
-  <p>索引与 Dream 状态作为导入来源记录，正式记忆沿原有索引任务更新。上游文件以完整 SHA-256 区分版本，转换条目的 v1 表示导入适配版本。</p>
+  <p>可识别记忆文件 {bundle.memory_file_count} 个，其中已废弃 {bundle.deprecated_file_count} 个。global/ 来源文件 {bundle.global_file_count} 个，其他源资料文件 {bundle.source_only_file_count} 个，完整原文随源包保留。</p>
+  <p>索引与 Dream 状态作为导入来源记录，正式记忆沿原有索引任务更新。上游文件以完整 SHA-256 区分版本，转换条目版本表示导入适配版本，原批次继续使用捕获时的适配规则。</p>
   <dl><dt>包导出时间</dt><dd>{metadata.exported_at??'原始值见源包'}</dd><dt>原索引时间</dt><dd>{metadata.last_indexed_at??'未提供'}</dd><dt>原 Dream 时间与状态</dt><dd>{metadata.last_dream_at??'未提供'} · {metadata.last_dream_status??'未提供'}</dd></dl>
   <p>Case 记录 {metadata.case_trace_count} 条 · 索引记录 {metadata.index_trace_count} 条 · Dream 记录 {metadata.dream_trace_count} 条 · Dream 摘要 {metadata.last_dream_summary_chars} 字符</p>
   <p style={{overflowWrap:'anywhere'}}>源包 SHA-256 {bundle.sha256}</p>

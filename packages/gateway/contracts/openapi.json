@@ -50671,7 +50671,18 @@
             "const": "clawxmemory-memory-snapshot.v4"
           },
           "scope": {
-            "const": "current_project"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^\\s*(?:current_project)?\\s*$"
+              },
+              {
+                "not": {
+                  "type": "string"
+                }
+              }
+            ],
+            "description": "Pinned current-project import trims string scope and treats blank or non-string scope metadata as unspecified. Other nonempty string scopes are rejected."
           },
           "files": {
             "type": "array",

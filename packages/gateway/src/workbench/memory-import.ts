@@ -17,7 +17,7 @@ type PreviewItem={source_memory_id:string;source_version:number;source_history_v
 type Ports={authorizeTarget(owner:string,workspace:string,target:Target):Target;save(owner:string,workspace:string,input:Input):MemoryValue;remove?(owner:string,workspace:string,memoryId:string,version:number):{memory_id:string;status:string};readFile?(owner:string,workspace:string,project:string,path:string,version:number,sha256:string):{path:string;version:number;sha256:string;size:number;content:Buffer}};
 type Batch=Record<string,string|number|null>;
 type Snapshot={target:Target;source_bundle?:PilotdeckMemoryImportSource;mode?:'replace_scope';source_file?:WorkbenchMemoryImportFileSource}
- &({document:ReturnType<typeof normalizeDocument>;document_source?:never}|{document?:never;document_source:'pilotdeck-v4-notes-v1'});
+ &({document:ReturnType<typeof normalizeDocument>;document_source?:never}|{document?:never;document_source:'pilotdeck-v4-notes-v1'|'pilotdeck-v4-notes-v2'});
 
 const digest=(value:unknown)=>{const encoded=JSON.stringify(value);if(typeof encoded!=='string')invalid();return createHash('sha256').update(encoded).digest('hex');};
 function invalid():never{throw new Error('invalid_memory_import');}
@@ -179,7 +179,7 @@ export class MemoryImportService{
  private readDocument(owner:string,workspace:string,snapshot:Snapshot){
   const bytes=snapshot.source_file?this.readFileSource(owner,workspace,snapshot.target,snapshot.source_file):undefined;
   if(snapshot.document_source===undefined){if(!snapshot.document)throw Error('memory_import_digest_conflict');return snapshot.document;}
-  if(snapshot.document_source!=='pilotdeck-v4-notes-v1'||snapshot.document||!snapshot.source_bundle)throw Error('memory_import_digest_conflict');
+  if(!['pilotdeck-v4-notes-v1','pilotdeck-v4-notes-v2'].includes(snapshot.document_source)||snapshot.document||!snapshot.source_bundle)throw Error('memory_import_digest_conflict');
   let material:unknown;
   if(bytes){
    try{material=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));}catch{throw Error('invalid_memory_import_file_source');}
@@ -188,7 +188,7 @@ export class MemoryImportService{
    if(!('bundle' in source)||digest(source.bundle)!==source.summary.sha256)throw Error('memory_import_digest_conflict');
    material=source.bundle;
   }
-  const imported=pilotdeckMemoryImport(material,JSON.stringify([workspace,snapshot.target.project_id]),snapshot.source_file?104_857_600:5_000_000,snapshot.source_file?.sha256);
+  const imported=pilotdeckMemoryImport(material,JSON.stringify([workspace,snapshot.target.project_id]),snapshot.source_file?104_857_600:5_000_000,snapshot.source_file?.sha256,snapshot.document_source==='pilotdeck-v4-notes-v1'?1:2);
   if(!imported||JSON.stringify(imported.source.summary)!==JSON.stringify(snapshot.source_bundle.summary))throw Error('memory_import_digest_conflict');
   return normalizeDocument(imported.document,Number.MAX_SAFE_INTEGER,Number.MAX_SAFE_INTEGER);
  }
@@ -284,14 +284,15 @@ export class MemoryImportService{
    const bytes=this.readFileSource(owner,workspace,target,sourceFile);
    try{material=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));}catch{throw Error('invalid_memory_import_file_source');}
   }
-  const imported=pilotdeckMemoryImport(material,JSON.stringify([workspace,target.project_id]),sourceFile?104_857_600:5_000_000,sourceFile?.sha256);
+  const projectionVersion=old&&old.document_source!=='pilotdeck-v4-notes-v2'?1:2;
+  const imported=pilotdeckMemoryImport(material,JSON.stringify([workspace,target.project_id]),sourceFile?104_857_600:5_000_000,sourceFile?.sha256,projectionVersion);
   if(mode&&!imported)invalid();
   if(mode&&!this.ports.remove)throw Error('memory_import_replace_unavailable');
   // Preserve old immutable document captures and their original hashes on refresh/retry.
-  const compact=!!imported&&(!old||old.document_source==='pilotdeck-v4-notes-v1');
+  const compact=!!imported&&(!old||old.document_source==='pilotdeck-v4-notes-v1'||old.document_source==='pilotdeck-v4-notes-v2');
   const document=normalizeDocument(imported?.document??material,imported?(compact?Number.MAX_SAFE_INTEGER:sourceFile?400_000_000:160_000_000):5_000_000,imported?Number.MAX_SAFE_INTEGER:200);
   const sourceBundle:PilotdeckMemoryImportSource|undefined=imported?(sourceFile?{source_file:sourceFile,summary:imported.source.summary}:imported.source):undefined;
-  const inputValue:Snapshot={...(compact?{document_source:'pilotdeck-v4-notes-v1' as const}:{document}),target,...(sourceBundle?{source_bundle:sourceBundle}:{}),...(mode?{mode}:{}),...(sourceFile?{source_file:sourceFile}:{})};
+  const inputValue:Snapshot={...(compact?{document_source:projectionVersion===1?'pilotdeck-v4-notes-v1' as const:'pilotdeck-v4-notes-v2' as const}:{document}),target,...(sourceBundle?{source_bundle:sourceBundle}:{}),...(mode?{mode}:{}),...(sourceFile?{source_file:sourceFile}:{})};
   const inputJson=JSON.stringify(inputValue),inputHash=createHash('sha256').update(inputJson,'utf8').digest('hex'),now=new Date().toISOString();
   if(old){
    if(old.input_sha256!==inputHash||old.input_json!==inputJson)throw new Error('memory_import_id_conflict');

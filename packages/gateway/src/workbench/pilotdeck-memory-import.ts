@@ -32,14 +32,17 @@ function frontmatter(content:string){
 function metadataText(bundle:Bundle,key:string){const value=bundle[key];return typeof value==='string'&&value.length<=128?value:null;}
 
 /** Convert the pinned current-project snapshot into original unverified note inputs, retaining its complete source. */
-export function pilotdeckMemoryImport(value:unknown,namespace:string,maxCharacters=5_000_000,sourceSha256?:string){
+export function pilotdeckMemoryImport(value:unknown,namespace:string,maxCharacters=5_000_000,sourceSha256?:string,projectionVersion:1|2=2){
  if(!record(value)||value.formatVersion===undefined)return null;
  let sourceHash=sourceSha256;
  if(sourceHash===undefined){
   let encoded:string|undefined;try{encoded=JSON.stringify(value);}catch{invalid();}
   if(typeof encoded!=='string'||encoded.length>maxCharacters)invalid();sourceHash=hash(encoded);
  }
- if(!/^[a-f0-9]{64}$/.test(sourceHash)||value.formatVersion!==formatVersion||value.scope!==undefined&&value.scope!=='current_project'||!Array.isArray(value.files))invalid();
+ if(projectionVersion!==1&&projectionVersion!==2)invalid();
+ let scope=value.scope;
+ if(projectionVersion===2)scope=typeof scope==='string'?scope.trim()||undefined:undefined;
+ if(!/^[a-f0-9]{64}$/.test(sourceHash)||value.formatVersion!==formatVersion||scope!==undefined&&scope!=='current_project'||!Array.isArray(value.files))invalid();
  const bundle=value as Bundle,files:Array<{path:string;content:string}>=[],paths=new Set<string>();
  for(const input of bundle.files){
   if(!record(input)||typeof input.content!=='string')invalid();
@@ -50,6 +53,8 @@ export function pilotdeckMemoryImport(value:unknown,namespace:string,maxCharacte
  for(let index=1;index<ordered.length;index++)if(ordered[index]!.startsWith(ordered[index-1]!))invalid();
  const workspaceId='pilotdeck-'+hash(namespace);
  const items:Array<Record<string,unknown>>=[];
+ const noteTypes=projectionVersion===1?['project','feedback','general_project_meta']:['user','project','feedback','general_project_meta'];
+ const noteScopes=projectionVersion===1?['project']:['project','global'];
  let globalFiles=0,memoryFiles=0,sourceOnlyFiles=0,totalBytes=0,deprecatedFiles=0;
  for(const file of files){
   totalBytes+=Buffer.byteLength(file.content,'utf8');
@@ -57,12 +62,12 @@ export function pilotdeckMemoryImport(value:unknown,namespace:string,maxCharacte
   const header=frontmatter(file.content),type=header.get('type'),scope=header.get('scope');
   const note=/^(Project|Feedback|GeneralProjects)\/[^/]+\.md$/.test(file.path)
    &&!['MEMORY.md','project.meta.md'].includes(file.path.split('/').at(-1)!)
-   &&['project','feedback','general_project_meta'].includes(type??'')&&scope==='project';
+   &&noteTypes.includes(type??'')&&noteScopes.includes(scope??'');
   const projectMeta=file.path==='project.meta.md'&&!!header.get('project_name')?.trim();
   if((!note&&!projectMeta)||!file.content.trim()){sourceOnlyFiles++;continue;}
   memoryFiles++;
   const deprecated=header.get('deprecated')==='true';if(deprecated)deprecatedFiles++;
-  const fileHash=hash(file.content),pathHash=hash(file.path),version=1;
+  const fileHash=hash(file.content),pathHash=hash(file.path),version=projectionVersion;
   let offset=0,part=0;
   while(offset<file.content.length){
    let end=Math.min(file.content.length,offset+20_000);
