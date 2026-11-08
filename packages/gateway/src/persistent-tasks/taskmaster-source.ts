@@ -16,7 +16,7 @@ function unsupported(): never {
 }
 
 // Preserve the original JSON in the versioned binding, including external statuses.
-export function taskmasterSourceSummary(content: string): {tags: string[]; task_count: number} {
+function taskmasterSource(content: string) {
   let value: unknown;
   try {
     value = JSON.parse(content.charCodeAt(0) === 0xfeff ? content.slice(1) : content);
@@ -61,5 +61,32 @@ export function taskmasterSourceSummary(content: string): {tags: string[]; task_
       }
     }
   }
-  return {tags: groups.map(group => group.tag), task_count: taskCount};
+  return {groups, tags: groups.map(group => group.tag), task_count: taskCount};
+}
+
+export function taskmasterSourceSummary(content: string): {tags: string[]; task_count: number} {
+  const {tags, task_count} = taskmasterSource(content);
+  return {tags, task_count};
+}
+
+export type TaskmasterSourceTask = {tag: string; depth: number; parent_index: number | null; task: RecordValue};
+
+/** Ordered source projection. External statuses remain source data. */
+export function taskmasterSourceTasks(content: string): {tags: string[]; items: TaskmasterSourceTask[]} {
+  const {groups, tags} = taskmasterSource(content);
+  const items: TaskmasterSourceTask[] = [];
+  for (const group of groups) {
+    const stack = [{tasks: group.tasks, index: 0, depth: 0, parent_index: null as number | null}];
+    while (stack.length) {
+      const frame = stack[stack.length - 1]!;
+      if (frame.index === frame.tasks.length) {stack.pop(); continue;}
+      const task = frame.tasks[frame.index++] as RecordValue;
+      const parent = items.length;
+      items.push({tag: group.tag, depth: frame.depth, parent_index: frame.parent_index, task});
+      if (Array.isArray(task.subtasks) && task.subtasks.length) {
+        stack.push({tasks: task.subtasks, index: 0, depth: frame.depth + 1, parent_index: parent});
+      }
+    }
+  }
+  return {tags, items};
 }

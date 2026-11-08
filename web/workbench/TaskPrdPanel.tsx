@@ -8,6 +8,7 @@ import PrdTextPreview from './PrdTextPreview';
 import TaskPrdTemplates from './TaskPrdTemplates';
 import TaskPrdProjectFiles from './TaskPrdProjectFiles';
 import TaskPrdWorkPlans from './TaskPrdWorkPlans';
+import TaskmasterSourceTasks from './TaskmasterSourceTasks';
 import type {TaskPrdSources as PrdSources,TaskPrdSource,TaskPrdInstallation as PrdInstallation,TaskPrdProject as PrdProject,TaskPrdImport as PrdImport} from '../../packages/gateway/contracts/types';
 
 const textStyle:React.CSSProperties={whiteSpace:'pre-wrap',overflowWrap:'anywhere',wordBreak:'break-word',maxWidth:'100%'};
@@ -131,6 +132,7 @@ export default function TaskPrdPanel({task,executionReady,onBound}:{task:Task;ex
      {file.sha256&&<p>SHA-256 {file.sha256}</p>}
      {file.task_count!==null&&<p>任务及子任务 {file.task_count} 条 · 标签 {JSON.stringify(file.tags)}</p>}
      {file.content!==null&&<details><summary>任务文件原文</summary><PrdTextPreview content={file.content} label="任务文件原文" style={textStyle}/></details>}
+     {file.path==='.taskmaster/tasks/tasks.json'&&file.state==='ready'&&file.content!==null&&<TaskmasterSourceTasks key={file.sha256} content={file.content}/>}
     </li>)}</ul>
    </div>}
    <label className="wb-checkbox"><input type="checkbox" checked={importConfirmed} disabled={locked||!importReady} onChange={e=>setImportConfirmed(e.target.checked)}/>我已核对任务文件原文、来源哈希和目标版本，确认将这份快照保存为项目文件的新版本。</label>
