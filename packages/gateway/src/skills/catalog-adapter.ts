@@ -25,6 +25,23 @@ export class SkillCatalogAdapterClient implements SkillCatalogHost{
   finally{if(!done)await reader.cancel().catch(()=>{});reader.releaseLock();}
   try{return JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw Error('skill_catalog_adapter_invalid');}
  }
+ async readDefinition({scope,name,signal}:{scope:SkillCatalogScope;name:string;signal?:AbortSignal}):Promise<unknown>{
+  const combined=AbortSignal.any([AbortSignal.timeout(5000),...(signal?[signal]:[])]);combined.throwIfAborted();
+  const response=await this.#fetch(this.#origin+'/v1/skills/read',{method:'POST',redirect:'error',cache:'no-store',
+   headers:{authorization:`Bearer ${this.#token}`,'content-type':'application/json'},
+   body:JSON.stringify({protocol:1,scope,name,include_manifest:true}),signal:combined});
+  combined.throwIfAborted();
+  if(response.status===404)throw Error('skill_not_found');
+  if(response.status===409)throw Error('skill_catalog_scope_changed');
+  if(response.status===413)throw Error('skill_resource_too_large');
+  if(!response.ok)throw Error('skill_catalog_adapter_unavailable');
+  const reader=response.body?.getReader();if(!reader)throw Error('skill_catalog_adapter_invalid');
+  const chunks:Uint8Array[]=[];let length=0,done=false;
+  try{for(;;){const next=await reader.read();combined.throwIfAborted();if(next.done){done=true;break;}
+    length+=next.value.byteLength;if(length>8*1024*1024)throw Error('skill_catalog_adapter_invalid');chunks.push(next.value);}}
+  finally{if(!done)await reader.cancel().catch(()=>{});reader.releaseLock();}
+  try{return JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw Error('skill_catalog_adapter_invalid');}
+ }
  async readResource({scope,skill_name,relative_path,signal}:{scope:SkillCatalogScope;skill_name:string;relative_path:string;signal?:AbortSignal}):Promise<unknown>{
   const combined=AbortSignal.any([AbortSignal.timeout(5000),...(signal?[signal]:[])]);combined.throwIfAborted();
   const response=await this.#fetch(this.#origin+'/v1/skills/resource',{method:'POST',redirect:'error',cache:'no-store',

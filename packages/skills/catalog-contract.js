@@ -35,6 +35,26 @@ function commandCatalog(value){
 }
 export function catalogDigestInput(value){return JSON.stringify({protocol:1,complete:value.complete,items:value.items,
  ...(value.commands===undefined?{}:{commands:value.commands})});}
+export function skillDefinitionDigestInput(value){
+ return JSON.stringify({protocol:1,...skillManifest(value),content:value.content,bodySha256:value.bodySha256,
+  manifest:{version:value.manifest.version,license:value.manifest.license,source:value.manifest.source},execution_authorized:false});
+}
+/** Explicitly selected native definition with allowlisted provider metadata. */
+export async function validateSkillDefinitionView(value){
+ const manifest=skillManifest(value);
+ if(!exact(value,[...Object.keys(manifest),'protocol','content','bodySha256','manifest','definitionSha256','execution_authorized'])
+  ||!exact(value.invocation,['modelInvocable','userInvocable'])||value.protocol!==1||value.execution_authorized!==false
+  ||!manifest.invocation.userInvocable||typeof value.content!=='string'||new TextEncoder().encode(value.content).byteLength>1024*1024
+  ||!sha(value.bodySha256)||!sha(value.definitionSha256)||!exact(value.manifest,['version','license','source'])
+  ||value.manifest.source!=='native-provider-metadata'
+  ||['version','license'].some(key=>value.manifest[key]!==null&&(typeof value.manifest[key]!=='string'
+   ||value.manifest[key].length<1||value.manifest[key].length>512||/[\u0000-\u001f\u007f]/u.test(value.manifest[key]))))invalid();
+ const digest=async text=>[...new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256',new TextEncoder().encode(text)))].map(byte=>byte.toString(16).padStart(2,'0')).join('');
+ if(await digest(value.content)!==value.bodySha256||await digest(skillDefinitionDigestInput(value))!==value.definitionSha256)invalid();
+ return {protocol:1,...manifest,content:value.content,bodySha256:value.bodySha256,
+  manifest:{version:value.manifest.version,license:value.manifest.license,source:value.manifest.source},
+  definitionSha256:value.definitionSha256,execution_authorized:false};
+}
 /** Allowlist the observation. Provider paths, opaque locators and arbitrary metadata never cross this boundary. */
 export function validateSkillCatalogView(value){
  if(!exact(value,['protocol','complete','items','catalogSha256','execution_authorized',...(object(value)&&Object.hasOwn(value,'commands')?['commands']:[])])||value.protocol!==1||value.execution_authorized!==false

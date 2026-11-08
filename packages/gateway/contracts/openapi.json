@@ -21490,7 +21490,7 @@
         "tags": [
           "skills"
         ],
-        "description": "Read the resident native SkillRegistry for the original owner/run/Session scope. commands=1 opts into descriptors from commands.list(originalAgent), including effective scoped shadowing. The default view contains skill metadata. Select exactly name and path together for one inert relative resource. Query forms are exclusive. The response carries execution_authorized=false and retains the original run permissions. SkillDefinition version metadata requires a separate selected-definition read.",
+        "description": "Read original-scope native skills and optional command descriptors. The default view contains skill metadata, while commands=1 includes effective commands.list(originalAgent) descriptors. Select name alone for one native SkillDefinition, its body hash and definition hash, plus allowlisted version/license values from native provider metadata. Null means the provider metadata supplies no usable value. Select name and path together for one inert relative resource. Query forms are exclusive. The response carries execution_authorized=false under the original run permissions.",
         "parameters": [
           {
             "name": "run_id",
@@ -21515,7 +21515,8 @@
             "in": "query",
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "Name alone selects a native definition; name together with path selects one relative resource."
           },
           {
             "name": "path",
@@ -41525,8 +41526,116 @@
           },
           {
             "$ref": "#/components/schemas/RunSkillResourceObservation"
+          },
+          {
+            "$ref": "#/components/schemas/RunSkillDefinitionObservation"
           }
         ]
+      },
+      "RunSkillDefinitionObservation": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 16384
+          },
+          "whenToUse": {
+            "type": "string",
+            "maxLength": 16384
+          },
+          "invocation": {
+            "type": "object",
+            "properties": {
+              "modelInvocable": {
+                "type": "boolean"
+              },
+              "userInvocable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "modelInvocable",
+              "userInvocable"
+            ],
+            "additionalProperties": false
+          },
+          "source": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "protocol": {
+            "const": 1
+          },
+          "content": {
+            "type": "string",
+            "description": "Original selected native skill body, limited to 1 MiB in UTF-8."
+          },
+          "bodySha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "manifest": {
+            "type": "object",
+            "properties": {
+              "version": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "license": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "source": {
+                "const": "native-provider-metadata"
+              }
+            },
+            "required": [
+              "version",
+              "license",
+              "source"
+            ],
+            "additionalProperties": false
+          },
+          "definitionSha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "execution_authorized": {
+            "const": false
+          },
+          "viewScope": {
+            "$ref": "#/components/schemas/RunSkillCatalogScope"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "invocation",
+          "source",
+          "provider",
+          "protocol",
+          "content",
+          "bodySha256",
+          "manifest",
+          "definitionSha256",
+          "execution_authorized",
+          "viewScope"
+        ],
+        "additionalProperties": false
       }
     },
     "parameters": {

@@ -1671,6 +1671,6 @@
     null,
     "RunSkillReadResponse",
     "200",
-    "Read the resident native SkillRegistry for the original owner/run/Session scope. commands=1 opts into descriptors from commands.list(originalAgent), including effective scoped shadowing. The default view contains skill metadata. Select exactly name and path together for one inert relative resource. Query forms are exclusive. The response carries execution_authorized=false and retains the original run permissions. SkillDefinition version metadata requires a separate selected-definition read."
+    "Read original-scope native skills and optional command descriptors. The default view contains skill metadata, while commands=1 includes effective commands.list(originalAgent) descriptors. Select name alone for one native SkillDefinition, its body hash and definition hash, plus allowlisted version/license values from native provider metadata. Null means the provider metadata supplies no usable value. Select name and path together for one inert relative resource. Query forms are exclusive. The response carries execution_authorized=false under the original run permissions."
   ]
 ]

@@ -19,7 +19,7 @@ export function createSkillContentReader({ agents, sessions, bridge } = {}) {
     || typeof bridge?.guard !== 'function' || typeof bridge?.bindingFor !== 'function' || typeof bridge?.request !== 'function') {
     throw Error('skill_content_host_unavailable')
   }
-  const read = async ({ scope: input, name, signal } = {}) => {
+  const read = async ({ scope: input, name, signal, include_manifest = false } = {}) => {
     const scope = scopeOf(input)
     if (typeof name !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) throw Error('skill_name_invalid')
     const bounded = AbortSignal.any([AbortSignal.timeout(5000), ...(signal ? [signal] : [])])
@@ -50,7 +50,7 @@ export function createSkillContentReader({ agents, sessions, bridge } = {}) {
 
     await authorize()
     const skills = agent.ctx?.get('skills')
-    const skill = await loadUserSkill({ skills, name, cwd, scope: agent, signal: bounded })
+    const skill = await loadUserSkill({ skills, name, cwd, scope: agent, signal: bounded, includeManifest:include_manifest })
     await authorize()
     return { scope: { ...scope }, skill, execution_authorized: false }
   }
@@ -62,10 +62,13 @@ export function createSkillContentReader({ agents, sessions, bridge } = {}) {
 export function createSkillContentCommand(readContent) {
   if (typeof readContent !== 'function' || !readers.has(readContent)) throw Error('skill_content_host_unavailable')
   return async (request, { signal } = {}) => {
-    if (!exact(request, ['protocol', 'scope', 'name']) || request.protocol !== 1) throw Error('skill_content_command_invalid')
+    if (!(exact(request, ['protocol', 'scope', 'name'])
+      || exact(request, ['protocol', 'scope', 'name', 'include_manifest']) && request.include_manifest === true)
+      || request.protocol !== 1) throw Error('skill_content_command_invalid')
     const scope = scopeOf(request.scope)
     signal?.throwIfAborted()
-    const result = await readContent({ scope, name: request.name, ...(signal ? { signal } : {}) })
+    const result = await readContent({ scope, name: request.name, ...(signal ? { signal } : {}),
+      ...(request.include_manifest ? {include_manifest:true} : {}) })
     signal?.throwIfAborted()
     if (!exact(result, ['scope', 'skill', 'execution_authorized']) || result.execution_authorized !== false) throw Error('skill_content_scope_changed')
     const observed = scopeOf(result.scope)

@@ -1,10 +1,11 @@
 import {request,taskDraftScope} from './client';
-import {validateSkillCatalogView,validateSkillResourceView,catalogDigestInput} from '../../packages/skills/catalog-contract.js';
+import {validateSkillCatalogView,validateSkillResourceView,validateSkillDefinitionView,catalogDigestInput} from '../../packages/skills/catalog-contract.js';
 type SkillCatalogObservation=Omit<ReturnType<typeof validateSkillCatalogView>,'items'>&{items:Array<ReturnType<typeof import('../../packages/skills/catalog-contract.js').skillManifest>>};
 type SkillResourceView=Awaited<ReturnType<typeof validateSkillResourceView>>;
 export interface SkillCatalogViewScope{conversation_id:string;workspace_id:string;project_id:string;agent_id:string;run_id:string;capability_epoch:number}
 export interface SkillCatalogResponse extends SkillCatalogObservation{viewScope:SkillCatalogViewScope}
 export interface SkillResourceResponse extends SkillResourceView{viewScope:SkillCatalogViewScope}
+export type SkillDefinitionResponse=Awaited<ReturnType<typeof validateSkillDefinitionView>>&{viewScope:SkillCatalogViewScope};
 export interface SkillCatalogState{runId:string;ownerScope:string;value?:SkillCatalogResponse;error?:boolean}
 export function catalogForScope(state:SkillCatalogState|null,runId:string,ownerScope:string){return state?.runId===runId&&state.ownerScope===ownerScope?state:null;}
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
@@ -26,6 +27,16 @@ export async function readSkillCatalog(runId:string,ownerScope:string,signal:Abo
  const {viewScope:rawScope,...candidate}=raw,catalog=validateSkillCatalogView(candidate),scope=viewScope(rawScope,runId);
  const hash=[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(catalogDigestInput(catalog))))].map(v=>v.toString(16).padStart(2,'0')).join('');current();
  if(hash!==catalog.catalogSha256)throw Error('skill_catalog_invalid');return {...catalog,viewScope:scope};
+}
+export async function readSelectedSkillDefinition(runId:string,ownerScope:string,name:string,signal:AbortSignal):Promise<SkillDefinitionResponse>{
+ if(!ID.test(runId)||!SKILL.test(name)||name.length>128)throw Error('skill_catalog_invalid');
+ const current=()=>{signal.throwIfAborted();if(!/^[a-f0-9]{64}$/.test(ownerScope)||taskDraftScope()!==ownerScope)throw Error('SKILL_CATALOG_SCOPE_CHANGED');};
+ current();const query=new URLSearchParams({name});
+ const raw=await request<SkillDefinitionResponse>(`/runs/${encodeURIComponent(runId)}/skills?${query}`,'GET',undefined,undefined,signal);current();
+ if(!raw||typeof raw!=='object'||Array.isArray(raw))throw Error('skill_catalog_invalid');
+ const {viewScope:rawScope,...candidate}=raw,definition=await validateSkillDefinitionView(candidate),scope=viewScope(rawScope,runId);current();
+ if(definition.name!==name)throw Error('skill_catalog_invalid');
+ return {...definition,viewScope:scope};
 }
 export async function readSelectedSkillResource(runId:string,ownerScope:string,skillName:string,relativePath:string,signal:AbortSignal):Promise<SkillResourceResponse>{
  if(!ID.test(runId)||!SKILL.test(skillName)||typeof relativePath!=='string'||relativePath.length<1||relativePath.length>512)throw Error('skill_catalog_invalid');

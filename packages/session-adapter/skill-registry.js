@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
+import {skillManifest,skillDefinitionDigestInput} from '../skills/catalog-contract.js'
 
 const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const LABEL = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/
@@ -27,7 +28,7 @@ function summary(skill) {
 }
 
 /** Read the selected user skill through the resident DSH SkillRegistry API. */
-export async function loadUserSkill({ skills, name, cwd, scope, signal } = {}) {
+export async function loadUserSkill({ skills, name, cwd, scope, signal, includeManifest = false } = {}) {
   if (!skills || typeof skills.snapshot !== 'function' || typeof skills.get !== 'function') throw fail('skills_service_unavailable')
   if (typeof name !== 'string' || !SKILL_NAME.test(name)) throw fail('skill_name_invalid')
   signal?.throwIfAborted()
@@ -53,9 +54,18 @@ export async function loadUserSkill({ skills, name, cwd, scope, signal } = {}) {
   if (typeof definition.content !== 'string') throw fail('skill_content_invalid')
   if (Buffer.byteLength(definition.content, 'utf8') > MAX_BODY_BYTES) throw fail('skill_content_too_large')
 
-  return {
+  const skill = {
     ...before,
     content: definition.content,
     bodySha256: createHash('sha256').update(definition.content, 'utf8').digest('hex'),
   }
+  if (!includeManifest) return skill
+  const metadataText = value => {
+    if (typeof value === 'number' && Number.isFinite(value)) value = String(value)
+    return typeof value === 'string' && value.length>0 && value.length<=512 && !/[\u0000-\u001f\u007f]/u.test(value) ? value : null
+  }
+  const view = {protocol:1,...skillManifest(definition),content:skill.content,bodySha256:skill.bodySha256,
+    manifest:{version:metadataText(definition.metadata?.version),license:metadataText(definition.metadata?.license),source:'native-provider-metadata'},
+    execution_authorized:false}
+  return {...view,definitionSha256:createHash('sha256').update(skillDefinitionDigestInput(view),'utf8').digest('hex')}
 }

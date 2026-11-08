@@ -368,7 +368,7 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
     if (url.pathname === '/v1/skills/read') {
       if (method !== 'POST') return json(405, { error: 'method_not_allowed' })
       if (!body || typeof body !== 'object' || Array.isArray(body)
-        || Object.keys(body).sort().join(',') !== 'name,protocol,scope' || body.protocol !== 1
+        || Object.keys(body).sort().join(',') !== (body.include_manifest===true?'include_manifest,name,protocol,scope':'name,protocol,scope') || body.protocol !== 1
         || typeof body.name !== 'string' || !body.scope || typeof body.scope !== 'object' || Array.isArray(body.scope)) {
         return json(422, { error: 'skill_content_input_invalid' })
       }
