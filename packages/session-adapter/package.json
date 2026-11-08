@@ -53,6 +53,8 @@
     "skill-source-manifest.js",
     "skill-read-scope.js",
     "native-command-query.js",
+    "native-command-audit.js",
+    "native-command-audit-reader.js",
     "workbench.js",
     "workbench-goal.js",
     "host-execution-lease.js",

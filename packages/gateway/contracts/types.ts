@@ -488,3 +488,5 @@ export type NativeCommandQueryOperation = NativeCommandQuerySummary & {result?:N
 export type NativeCommandQueryPage = {items:NativeCommandQuerySummary[]};
 
 export type NativeCommandQueryClose = {name:'permission'|'goal'};
+
+export type NativeCommandQueryReconcile = Record<string,never>;

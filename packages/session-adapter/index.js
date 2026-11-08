@@ -366,12 +366,13 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       if (typeof mcpControlRoute !== 'function') return json(503, { error: 'mcp_control_unavailable' })
       return mcpControlRoute({ method, url: url.pathname, body, signal })
     }
-    if(url.pathname==='/v1/commands/query'){
+    if(url.pathname==='/v1/commands/query'||url.pathname==='/v1/commands/query/reconcile'){
+      const reconcile=url.pathname.endsWith('/reconcile');
       if(method!=='POST')return json(405,{error:'method_not_allowed'});
-      if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).sort().join(',')!=='grant_token,request,scope')return json(422,{error:'native_command_query_invalid'});
+      if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).sort().join(',')!==(reconcile?'audit,request,scope':'grant_token,request,scope'))return json(422,{error:'native_command_query_invalid'});
       if(!nativeCommandQueryHost)return json(503,{error:'native_command_query_unavailable'});
-      try{return json(200,await nativeCommandQueryHost.execute(body,signal));}
-      catch{return json(422,{error:'native_command_query_invalid'});}
+      try{return json(200,await (reconcile?nativeCommandQueryHost.reconcile(body,signal):nativeCommandQueryHost.execute(body,signal)));}
+      catch{return json(reconcile?503:422,{error:reconcile?'native_command_query_audit_unavailable':'native_command_query_invalid'});}
     }
     if (url.pathname === '/v1/skills/read') {
       if (method !== 'POST') return json(405, { error: 'method_not_allowed' })
@@ -1123,7 +1124,7 @@ export function apply(ctx, config = {}) {
     const skillResourceCommand = workbenchBridge && typeof ctx.agents?.get === 'function' && typeof ctx.sessions?.get === 'function'
       ? createSkillResourceCommand(createSkillResourceReader({ agents: ctx.agents, sessions: ctx.sessions, bridge: workbenchBridge,ordinaryPresets }))
       : undefined
-    const nativeCommandQueryHost=workbenchBridge?createNativeCommandQueryHost({agents:ctx.agents,sessions:ctx.sessions,bridge:workbenchBridge,ordinaryPresets}):undefined
+    const nativeCommandQueryHost=workbenchBridge?createNativeCommandQueryHost({agents:ctx.agents,sessions:ctx.sessions,persistence:ctx.sessionPersistence,bridge:workbenchBridge,ordinaryPresets}):undefined
     if(nativeCommandQueryHost)ctx.effect(()=>()=>nativeCommandQueryHost.close())
     let nativeWorkspaceAdmissionGate
     if(config.nativeWorkspaceAdmission===true){

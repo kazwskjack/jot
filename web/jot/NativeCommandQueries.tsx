@@ -3,7 +3,7 @@ import {useResource} from '../workbench/useResource';
 import {isNativeCommandQuery,validateNativeCommandQuery} from '../../packages/skills/command-query.js';
 import type {CommandManifest} from '../../packages/skills/catalog-contract.js';
 import type {NativeCommandQueryOperation} from '../../packages/gateway/contracts/types';
-import {NativeCommandQueryStore,listNativeCommandQueries,readNativeCommandQuery,submitNativeCommandQuery,closeNativeCommandQuery,type PendingNativeQuery} from './native-command-query-client';
+import {NativeCommandQueryStore,listNativeCommandQueries,readNativeCommandQuery,submitNativeCommandQuery,closeNativeCommandQuery,reconcileNativeCommandQuery,type PendingNativeQuery} from './native-command-query-client';
 
 const labels={prepared:'待派发',dispatched:'已派发，等待结果',settled:'结果已保存',rejected:'未派发，已结束',unknown:'结果待核对'};
 function message(error:unknown){
@@ -13,6 +13,9 @@ function message(error:unknown){
  if(code==='NATIVE_QUERY_RECOVERY_UNAVAILABLE'||code==='NATIVE_QUERY_RECOVERY_INVALID')return '浏览器恢复记录暂不可用。可从最近操作读取原状态。';
  if(code==='NATIVE_COMMAND_QUERY_NOT_FOUND')return '暂未找到原操作。可核对并结束尚未派发的原请求。';
  if(code==='NATIVE_COMMAND_QUERY_CONFLICT')return '原请求内容或权限范围已变化，请读取原操作状态。';
+ if(code==='NATIVE_COMMAND_QUERY_AUDIT_UNPAIRED')return '尚未保存可核对的原生审计配对，原请求继续保留。';
+ if(code==='NATIVE_COMMAND_QUERY_AUDIT_CONFLICT')return '原生审计与原请求的已存证据冲突，原状态继续保留。';
+ if(code==='NATIVE_COMMAND_QUERY_AUDIT_UNAVAILABLE')return '原生日志暂不可读取，稍后可按原请求继续核对。';
  return '原操作暂未确认，请保留请求 ID 并重新读取状态。';
 }
 export default function NativeCommandQueries({runId,ownerScope,commands,catalogSha256}:{runId:string;ownerScope:string;commands:CommandManifest[];catalogSha256:string}){
@@ -59,6 +62,7 @@ export default function NativeCommandQueries({runId,ownerScope,commands,catalogS
   <button type="button" disabled={busy} onClick={reload}>读取恢复记录</button>
   {pending&&<div role="status"><p>保留的原请求 <code>{pending.request_id}</code></p>
    <button type="button" disabled={busy} onClick={()=>recover(pending.request_id)}>读取原请求状态</button>
+   <button type="button" disabled={busy} onClick={()=>void run(signal=>reconcileNativeCommandQuery(runId,ownerScope,pending.request_id,signal))}>核对原生日志</button>
    <button type="button" disabled={busy} onClick={()=>void run(signal=>closeNativeCommandQuery(runId,ownerScope,pending,signal))}>核对并结束未派发请求</button>
   </div>}
   {busy&&<p role="status">正在处理原请求…</p>}
@@ -73,6 +77,7 @@ export default function NativeCommandQueries({runId,ownerScope,commands,catalogS
   {!!resource.data?.length&&<ul aria-label="最近命令查询">{resource.data.map(operation=><li key={operation.request_id}>
    <code>{operation.request_id}</code> · /{operation.name} · {labels[operation.state]} · <time dateTime={operation.updated_at}>{operation.updated_at}</time>
    <button type="button" disabled={busy} onClick={()=>recover(operation.request_id)}>读取此原操作</button>
+   {['dispatched','unknown'].includes(operation.state)&&<button type="button" disabled={busy} onClick={()=>void run(signal=>reconcileNativeCommandQuery(runId,ownerScope,operation.request_id,signal))}>核对此原生结果</button>}
   </li>)}</ul>}
  </section>;
 }

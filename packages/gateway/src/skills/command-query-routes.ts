@@ -17,6 +17,9 @@ export function registerNativeCommandQueryRoutes(app:FastifyInstance,{db,catalog
   const code=cause instanceof Error?cause.message:'';
   if(code==='native_command_query_invalid')return reply.code(422).send({error:{code:'NATIVE_COMMAND_QUERY_INVALID'}});
   if(['native_command_query_conflict','skill_catalog_scope_changed'].includes(code))return reply.code(409).send({error:{code:'NATIVE_COMMAND_QUERY_CONFLICT'}});
+  if(code==='native_command_query_audit_unpaired')return reply.code(409).send({error:{code:'NATIVE_COMMAND_QUERY_AUDIT_UNPAIRED'}});
+  if(['native_command_query_audit_conflict','native_command_query_result_conflict'].includes(code))return reply.code(409).send({error:{code:'NATIVE_COMMAND_QUERY_AUDIT_CONFLICT'}});
+  if(['native_command_query_audit_unavailable','native_command_query_audit_invalid','native_command_query_result_invalid'].includes(code))return reply.code(503).send({error:{code:'NATIVE_COMMAND_QUERY_AUDIT_UNAVAILABLE'}});
   if(['native_command_query_not_found','skill_catalog_scope_forbidden'].includes(code))return reply.code(404).send({error:{code:'NATIVE_COMMAND_QUERY_NOT_FOUND'}});
   throw cause;
  };
@@ -58,14 +61,34 @@ export function registerNativeCommandQueryRoutes(app:FastifyInstance,{db,catalog
    return journal.close(owner,runId,requestId!,input.name);
   }catch(cause){return error(reply,cause);}
  });
- for(const action of ['claim','settle'] as const)app.post(`/internal/v1/workbench/native-command-query-${action}`,
+ app.post('/v1/runs/:runId/native-command-queries/:requestId/reconcile',{config:{nativeCommandQueryMutation:true}},async(request,reply)=>{
+  reply.header('cache-control','private, no-store');
+  try{
+   const {owner,runId,requestId}=owned(request),body=request.body;
+   if(Object.keys(request.query as object).length||!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).length
+    ||requestId!==request.headers['idempotency-key'])throw Error('native_command_query_invalid');
+   const original=journal.read(owner,runId,requestId!);
+   if(!['dispatched','unknown'].includes(original.state))return original;
+   const packet=journal.recoveryPacket(owner,runId,requestId!);
+   if(!client.reconcileCommandQuery)throw Error('native_command_query_audit_unavailable');
+   const response=await client.reconcileCommandQuery(packet) as Record<string,unknown>;
+   if(!response||Object.keys(response).sort().join(',')!=='execution_authorized,recovery,request_id'
+    ||response.execution_authorized!==false||response.request_id!==requestId)throw Error('native_command_query_audit_unavailable');
+   return response.recovery===null?journal.read(owner,runId,requestId!):journal.recover(owner,runId,requestId!,response.recovery);
+  }catch(cause){return error(reply,cause);}
+ });
+ for(const action of ['claim','settle','bind','audit'] as const)app.post(`/internal/v1/workbench/native-command-query-${action}`,
   {config:{skillReadInternal:true},bodyLimit:8*1024*1024},async(request,reply)=>{
    const actual=String(request.headers.authorization??''),expected=`Bearer ${token??''}`;
    if(!token||token.length<16||Buffer.byteLength(actual)!==Buffer.byteLength(expected)||!timingSafeEqual(Buffer.from(actual),Buffer.from(expected)))return reply.code(401).send({error:{code:'UNAUTHORIZED'}});
-   const input=request.body as Record<string,any>,allowed=['scope','request','grant_token','run_id','session_ref',...(action==='settle'?['state','result']:[])];
+   const input=request.body as Record<string,any>,allowed=['scope','request','grant_token','run_id','session_ref',
+    ...(action==='settle'?['state','result']:[]),...(['bind','audit'].includes(action)?['audit']:[])];
    if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(key=>!allowed.includes(key))
     ||!input.scope||input.run_id!==input.scope.run_id||input.session_ref!==input.scope.session_ref
     ||action==='settle'&&!['settled','unknown','rejected'].includes(input.state))return reply.code(422).send({error:{code:'NATIVE_COMMAND_QUERY_INVALID'}});
-   return action==='claim'?journal.claim(input,scope=>catalog.assertScopeCurrent(scope)):journal.finish(input,input.state,input.result);
+   if(action==='claim')return journal.claim(input,scope=>catalog.assertScopeCurrent(scope));
+   if(action==='bind')return journal.bindAudit(input);
+   if(action==='audit')return journal.authorizeAudit(input);
+   return journal.finish(input,input.state,input.result);
   });
 }

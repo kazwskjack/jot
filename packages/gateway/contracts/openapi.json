@@ -21924,6 +21924,102 @@
           }
         }
       }
+    },
+    "/v1/runs/{run_id}/native-command-queries/{request_id}/reconcile": {
+      "post": {
+        "operationId": "reconcileNativeCommandQuery",
+        "tags": [
+          "skills"
+        ],
+        "description": "Read the original paired native audit through the configured Host persistence read handle. Check Session incarnation, original command/run sequence and hash, matching command/done identity and immutable end receipt before settling the original operation. Dispatch remains owned by the original first claim. Unpaired, absent, changed or incomplete audit evidence preserves unresolved state.",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativeCommandQueryReconcile"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Original operation after evidence reconciliation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeCommandQueryOperation"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Owned original operation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Original audit unpaired or evidence conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid original request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Native audit provider unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -42335,6 +42431,11 @@
         "required": [
           "name"
         ],
+        "additionalProperties": false
+      },
+      "NativeCommandQueryReconcile": {
+        "type": "object",
+        "properties": {},
         "additionalProperties": false
       }
     },

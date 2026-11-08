@@ -51,6 +51,15 @@ export async function closeNativeCommandQuery(runId:string,ownerScope:string,ori
  catch{current(ownerScope,runId,signal);}
  return readNativeCommandQuery(runId,ownerScope,original.request_id,signal);
 }
+export async function reconcileNativeCommandQuery(runId:string,ownerScope:string,requestId:string,signal:AbortSignal){
+ current(ownerScope,runId,signal);if(!UUID.test(requestId))throw Error('NATIVE_QUERY_REQUEST_INVALID');
+ let failure:unknown;
+ try{await request(`/runs/${encodeURIComponent(runId)}/native-command-queries/${encodeURIComponent(requestId)}/reconcile`,'POST',{},requestId,signal);}
+ catch(cause){current(ownerScope,runId,signal);failure=cause;}
+ const original=await readNativeCommandQuery(runId,ownerScope,requestId,signal);
+ if(failure&&!['settled','rejected'].includes(original.state))throw failure;
+ return original;
+}
 function pending(value:unknown):PendingNativeQuery{
  try{return validateNativeCommandQueryIdentity(value);}catch{throw Error('NATIVE_QUERY_RECOVERY_INVALID');}
 }

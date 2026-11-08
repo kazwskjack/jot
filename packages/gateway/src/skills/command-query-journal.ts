@@ -5,6 +5,7 @@ import {withImmediateTransaction} from '../db/database.ts';
 import type {SkillCatalogScope} from './catalog.ts';
 const policyPath=import.meta.url.endsWith('/dist/src/skills/command-query-journal.js')?'../../../../skills/command-query.js':'../../../skills/command-query.js';
 const {validateNativeCommandQuery,validateNativeCommandQueryIdentity,validateNativeCommandQueryResult}=await import(new URL(policyPath,import.meta.url).href) as typeof import('../../../skills/command-query.js');
+const {validateNativeCommandAudit,validateNativeCommandRecovery}=await import(new URL('command-query-audit.js',new URL(policyPath,import.meta.url)).href) as typeof import('../../../skills/command-query-audit.js');
 
 type Row=Record<string,any>;
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
@@ -19,7 +20,10 @@ export class NativeCommandQueryJournal{
  result_json TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(owner_id,run_id,request_id));
  CREATE TABLE IF NOT EXISTS ga_native_command_query_fences(owner_id TEXT NOT NULL,
  run_id TEXT NOT NULL REFERENCES ga_runs(id) ON DELETE CASCADE,request_id TEXT NOT NULL,name TEXT NOT NULL,updated_at TEXT NOT NULL,
- PRIMARY KEY(owner_id,run_id,request_id));`);}
+ PRIMARY KEY(owner_id,run_id,request_id));
+ CREATE TABLE IF NOT EXISTS ga_native_command_query_audits(owner_id TEXT NOT NULL,run_id TEXT NOT NULL,request_id TEXT NOT NULL,
+ proof_json TEXT NOT NULL,recovery_json TEXT,updated_at TEXT NOT NULL,PRIMARY KEY(owner_id,run_id,request_id),
+ FOREIGN KEY(owner_id,run_id,request_id) REFERENCES ga_native_command_queries(owner_id,run_id,request_id) ON DELETE CASCADE);`);}
  private fence(owner:string,runId:string,id:string){return this.db.prepare("SELECT request_id,run_id,name,'rejected' AS state,updated_at FROM ga_native_command_query_fences WHERE owner_id=? AND run_id=? AND request_id=?").get(owner,runId,id) as Row|undefined;}
  private row(owner:string,runId:string,id:string){
   const row=this.db.prepare('SELECT * FROM ga_native_command_queries WHERE owner_id=? AND run_id=? AND request_id=?').get(owner,runId,id) as Row|undefined;
@@ -79,10 +83,54 @@ export class NativeCommandQueryJournal{
    return {dispatch:changed===1};
   });
  }
+ private audit(owner:string,runId:string,id:string){return this.db.prepare('SELECT * FROM ga_native_command_query_audits WHERE owner_id=? AND run_id=? AND request_id=?').get(owner,runId,id) as Row|undefined;}
+ bindAudit(packet:Row){
+  const proof=canonicalJson(validateNativeCommandAudit(packet.audit));
+  return withImmediateTransaction(this.db,()=>{
+   const row=this.authorized(packet);
+   if(!['dispatched','unknown','settled'].includes(row.state))throw Error('native_command_query_state_conflict');
+   const audit=this.audit(row.owner_id,row.run_id,row.request_id);
+   if(audit&&audit.proof_json!==proof)throw Error('native_command_query_audit_conflict');
+   if(row.state==='settled'&&JSON.parse(row.result_json).commandId!==packet.audit.command_id)throw Error('native_command_query_audit_conflict');
+   this.db.prepare('INSERT OR IGNORE INTO ga_native_command_query_audits VALUES(?,?,?,?,NULL,?)').run(row.owner_id,row.run_id,row.request_id,proof,now());
+   return {audit:JSON.parse(proof),execution_authorized:false};
+  });
+ }
+ recoveryPacket(owner:string,runId:string,id:string){
+  const row=this.row(owner,runId,id),audit=this.audit(owner,runId,id);
+  if(!audit)throw Error('native_command_query_audit_unpaired');
+  return {scope:JSON.parse(row.scope_json),request:validateNativeCommandQuery(JSON.parse(row.request_json)),audit:validateNativeCommandAudit(JSON.parse(audit.proof_json))};
+ }
+ authorizeAudit(packet:Row){
+  const request=validateNativeCommandQuery(packet.request),scope=packet.scope;
+  if(!scope||typeof scope.owner_id!=='string'||typeof scope.run_id!=='string')throw Error('native_command_query_forbidden');
+  const row=this.row(scope.owner_id,scope.run_id,request.request_id),audit=this.audit(scope.owner_id,scope.run_id,request.request_id);
+  if(row.scope_json!==canonicalJson(scope)||row.request_sha256!==hash(canonicalJson(request))||!audit
+   ||audit.proof_json!==canonicalJson(validateNativeCommandAudit(packet.audit)))throw Error('native_command_query_audit_conflict');
+  return {audit:JSON.parse(audit.proof_json),execution_authorized:false};
+ }
+ recover(owner:string,runId:string,id:string,value:unknown){
+  const proof=validateNativeCommandRecovery(value),serialized=canonicalJson(proof.result);
+  return withImmediateTransaction(this.db,()=>{
+   const packet=this.recoveryPacket(owner,runId,id),row=this.row(owner,runId,id);
+   if(canonicalJson(packet.audit)!==canonicalJson(proof.audit))throw Error('native_command_query_audit_conflict');
+   const audit=this.audit(owner,runId,id)!,receipt=canonicalJson({end_event_seq:proof.end_event_seq,end_event_sha256:proof.end_event_sha256,result_sha256:hash(serialized)});
+   if(audit.recovery_json!==null&&audit.recovery_json!==receipt)throw Error('native_command_query_audit_conflict');
+   if(row.state==='settled'&&row.result_json!==serialized)throw Error('native_command_query_result_conflict');
+   if(!['dispatched','unknown','settled'].includes(row.state))throw Error('native_command_query_state_conflict');
+   this.db.prepare('UPDATE ga_native_command_query_audits SET recovery_json=?,updated_at=? WHERE owner_id=? AND run_id=? AND request_id=?').run(receipt,now(),owner,runId,id);
+   if(row.state!=='settled')this.db.prepare("UPDATE ga_native_command_queries SET state='settled',result_json=?,updated_at=? WHERE owner_id=? AND run_id=? AND request_id=?").run(serialized,now(),owner,runId,id);
+   return this.read(owner,runId,id);
+  });
+ }
  finish(packet:Row,state:'settled'|'rejected'|'unknown',result?:unknown){
   const serialized=state==='settled'?canonicalJson(validateNativeCommandQueryResult(result)):null;
   return withImmediateTransaction(this.db,()=>{
    const row=this.authorized(packet);
+   if(state==='settled'){
+    const audit=this.audit(row.owner_id,row.run_id,row.request_id);
+    if(audit&&JSON.parse(audit.proof_json).command_id!==JSON.parse(serialized!).commandId)throw Error('native_command_query_audit_conflict');
+   }
    if(row.state==='settled'){
     if(state==='settled'&&serialized!==row.result_json)throw Error('native_command_query_result_conflict');return project(row);
    }

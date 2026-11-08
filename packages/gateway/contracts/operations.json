@@ -1708,5 +1708,14 @@
     "NativeCommandQueryOperation",
     "200",
     "Persist an owner/run/request dispatch fence and end any unclaimed original query. An absent original request receives a durable fenced rejection. Original native settlement owns outcomes after dispatch. The original request ID must equal Idempotency-Key."
+  ],
+  [
+    "POST",
+    "/v1/runs/{run_id}/native-command-queries/{request_id}/reconcile",
+    "Reconcile original paired native command audit",
+    "NativeCommandQueryReconcile",
+    "NativeCommandQueryOperation",
+    "200",
+    "Read the original paired native audit through the configured Host persistence read handle. Check Session incarnation, original command/run sequence and hash, matching command/done identity and immutable end receipt before settling the original operation. Dispatch remains owned by the original first claim. Unpaired, absent, changed or incomplete audit evidence preserves unresolved state."
   ]
 ]
