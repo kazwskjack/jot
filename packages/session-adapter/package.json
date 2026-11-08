@@ -28,6 +28,7 @@
     "mcp-agent-scope.js",
     "mcp-control-host.js",
     "mcp-host-provider.js",
+    "mcp-host-http.js",
     "mcp-runtime.js",
     "voice.js",
     "skill-content-reader.js",

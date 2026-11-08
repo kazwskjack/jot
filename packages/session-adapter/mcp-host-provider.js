@@ -1,3 +1,5 @@
+import {createMcpHostHttpFetch,normalizeMcpHttpPolicy} from './mcp-host-http.js';
+import {resolveOwnerBoundDshProfileContext} from './dsh-profile-binding.js';
 import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
@@ -7,7 +9,9 @@ import { createMcpAgentRuntimeProvider } from './mcp-agent-provider.js';
 export const name = 'jot-mcp-host-provider';
 export const inject = ['profileContext', 'agents'];
 
-export async function apply(ctx) {
+export async function apply(ctx,config={}) {
+  if(!config||typeof config!=='object'||Array.isArray(config)||Object.keys(config).some(key=>key!=='httpPolicy'))throw Error('jot_mcp_host_config_invalid');
+  const httpPolicy=config.httpPolicy===undefined?undefined:normalizeMcpHttpPolicy(config.httpPolicy);
   const anchor = ctx.get('profileContext')?.installAnchor;
   if (typeof anchor !== 'string' || !isAbsolute(anchor)) throw Error('jot_mcp_host_installation_missing');
   const require = createRequire(anchor);
@@ -33,10 +37,11 @@ export async function apply(ctx) {
     throw Error('jot_mcp_host_client_invalid');
   }
 
-  // This Host has no trusted stdio allowlist, scoped HTTP fetcher, or secret-ref
-  // resolver. The provider therefore keeps both transports fail-closed. Never
-  // derive command, network, credential, or owner authorization from model input.
-  const provider = createMcpAgentRuntimeProvider({ mcpPlugin });
+  const readIdentity=()=>resolveOwnerBoundDshProfileContext(ctx.get('profileContext'));
+  if(httpPolicy&&readIdentity().ownerId!==httpPolicy.owner_id)throw Error('jot_mcp_host_owner_invalid');
+  const httpFetchForConnection=httpPolicy?createMcpHostHttpFetch({policy:httpPolicy,readIdentity,
+    readCredentials:()=>ctx.get('credentials')}):undefined;
+  const provider = createMcpAgentRuntimeProvider({mcpPlugin,...(httpFetchForConnection?{httpFetchForConnection}:{})});
   ctx.on('credentials/reference-updated', () => provider.invalidateCredentials());
   ctx.on('agent/created', ({agent}) => provider.setup(agent.ctx, agent));
   for (const agent of ctx.agents.list()) provider.setup(agent.ctx, agent);

@@ -4,6 +4,7 @@ import {fileURLToPath,pathToFileURL} from 'node:url';
 import {createBudgetModelSelector} from '../session-adapter/budget-model-selection.js';
 
 import {validateHostPolicyBootstrapRuntimeConfig} from '../session-adapter/host-policy-bootstrap-runtime.js';
+import {normalizeMcpHttpPolicy} from '../session-adapter/mcp-host-http.js';
 import {validateHostCredentialRefs} from '../session-adapter/host-credentials-owner-route.js';
 import {writeOwnerBoundDshProfile} from '../session-adapter/dsh-profile-binding.js';
 
@@ -25,7 +26,7 @@ function profileHostSettings(value,gatewayOrigin){
 }
 
 /** Prepare an unused official DSH profile. No install, launch, credential read or SDK patch. */
-export async function createHostProfile({home,name='jot',adapter=fileURLToPath(new URL('../session-adapter/index.js',import.meta.url)),workbench,hostSettings}){
+export async function createHostProfile({home,name='jot',adapter=fileURLToPath(new URL('../session-adapter/index.js',import.meta.url)),workbench,hostSettings,mcpHttpPolicy}){
  if(typeof home!=='string'||!isAbsolute(home)||typeof name!=='string'||!/^[a-z][a-z0-9-]{0,47}$/.test(name)||name==='desktop'||typeof adapter!=='string'||!isAbsolute(adapter))throw Error('host_profile_config_invalid');
  if(!(await stat(adapter)).isFile())throw Error('host_profile_adapter_invalid');
  let route,origin='http://127.0.0.1:18831';
@@ -35,6 +36,9 @@ export async function createHostProfile({home,name='jot',adapter=fileURLToPath(n
   if(workbench.origin!==undefined){const url=new URL(workbench.origin);if(url.protocol!=='http:'||!['127.0.0.1','localhost','[::1]'].includes(url.hostname)||url.username||url.password||url.search||url.hash||url.pathname!=='/')throw Error();origin=url.origin;}
  }catch{throw Error('host_profile_workbench_invalid');}}
  const configuredHostSettings=profileHostSettings(hostSettings,origin);
+ const configuredMcpHttpPolicy=mcpHttpPolicy===undefined?undefined:normalizeMcpHttpPolicy(mcpHttpPolicy);
+ if(configuredHostSettings&&configuredMcpHttpPolicy&&configuredHostSettings.ownerId!==configuredMcpHttpPolicy.owner_id)throw Error('host_profile_owner_conflict');
+ const ownerId=configuredHostSettings?.ownerId??configuredMcpHttpPolicy?.owner_id;
  const preset=fileURLToPath(new URL('./standard-preset.mjs',import.meta.url));
  const mcpProvider=fileURLToPath(new URL('../session-adapter/mcp-host-provider.js',import.meta.url));
  if(!(await stat(mcpProvider)).isFile())throw Error('host_profile_mcp_provider_invalid');
@@ -54,7 +58,7 @@ export async function createHostProfile({home,name='jot',adapter=fileURLToPath(n
   {insert:[
    {id:'preset-jot-general',name:pathToFileURL(preset).href,...(route?{config:{budgeted:true}}:{})},
    ...(configuredHostSettings?[{id:'jot-host-policy',name:pathToFileURL(policyEntry).href,config:{}}]:[]),
-   {id:'jot-mcp-runtime-provider',name:pathToFileURL(mcpProvider).href},
+   {id:'jot-mcp-runtime-provider',name:pathToFileURL(mcpProvider).href,...(configuredMcpHttpPolicy?{config:{httpPolicy:configuredMcpHttpPolicy}}:{})},
    {id:'jot-session-adapter',name:pathToFileURL(adapter).href,inject:['jotHostReady'],config:{host:'127.0.0.1',port:18841,tokenEnv:'JOT_SESSION_ADAPTER_TOKEN',workbenchTokenEnv:'GENERAL_AGENT_INTERNAL_CHANNEL_TOKEN',workbenchOrigin:origin,nativeContinuation:!!route,nativeRoles:false,webBudgetEnabled:false,voiceEnabled:false,...(route?{workbenchModel:route}:{}),
     ...(configuredHostSettings?{hostSettingsBootstrap:configuredHostSettings.bootstrap,hostSettingsOwnerRoutesEnabled:true,hostSettingsWriteEnabled:true,hostSettingsWriteNamespace:configuredHostSettings.writeNamespace,hostSettingsProductSchema:configuredHostSettings.productSchema,hostCredentialRefs:configuredHostSettings.credentialRefs}:{})}},
   ]},
@@ -71,13 +75,21 @@ export async function createHostProfile({home,name='jot',adapter=fileURLToPath(n
  await writeFile(join(directory,'cordis.patch.yml'),yaml,{flag:'wx'});
  if(configuredHostSettings){
   await writeFile(join(directory,'jot-host-policy-config-entry.mjs'),policySource,{flag:'wx'});
-  writeOwnerBoundDshProfile(directory,configuredHostSettings.ownerId);
  }
+ if(ownerId)writeOwnerBoundDshProfile(directory,ownerId);
  await writeFile(join(directory,'.gitignore'),'.env\nnode_modules/\n',{flag:'wx'});
  return Object.freeze({directory,profile:name,runtimeVersion:'0.2.1-rc.2'});
 }
 
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
- try{const args=process.argv.slice(2);if(args.length<1||args.length>4)throw Error('usage');const workbench=args[2]===undefined?undefined:JSON.parse(await readFile(args[2],'utf8'));const hostSettings=args[3]===undefined?undefined:JSON.parse(await readFile(args[3],'utf8'));const result=await createHostProfile({home:args[0],name:args[1]??'jot',workbench,hostSettings});console.log(JSON.stringify(result));}
- catch{console.error('Jot host preparation failed. Use: node create-profile.mjs <absolute-private-home> [profile-name] [private-workbench-route.json] [private-host-settings-config.json]. The profile must not already exist.');process.exitCode=1;}
+ try{
+  const args=process.argv.slice(2);
+  if(args.length<1||args.length>5)throw Error('usage');
+  const workbench=args[2]===undefined?undefined:JSON.parse(await readFile(args[2],'utf8'))??undefined;
+  const hostSettings=args[3]===undefined?undefined:JSON.parse(await readFile(args[3],'utf8'))??undefined;
+  const mcpHttpPolicy=args[4]===undefined?undefined:JSON.parse(await readFile(args[4],'utf8'));
+  const result=await createHostProfile({home:args[0],name:args[1]??'jot',workbench,hostSettings,mcpHttpPolicy});
+  console.log(JSON.stringify(result));
+ }
+ catch{console.error('Jot host preparation failed. Use: node create-profile.mjs <absolute-private-home> [profile-name] [private-workbench-route.json] [private-host-settings-config.json] [private-mcp-http-policy.json]. The profile must not already exist.');process.exitCode=1;}
 }

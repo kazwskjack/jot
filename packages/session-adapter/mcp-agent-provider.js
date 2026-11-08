@@ -32,7 +32,7 @@ function combineSignals(parent, ...lifetimes) {
   };
 }
 
-function awaitWithSignal(value, signal) {
+export function awaitWithSignal(value, signal) {
   signal.throwIfAborted();
   return new Promise((resolve, reject) => {
     let settled = false;

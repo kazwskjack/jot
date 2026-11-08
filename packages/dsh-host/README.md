@@ -74,6 +74,31 @@ and requires removal of that native source before revocation can be confirmed.
 Rotation changes future reference resolution. Revoking the provider's external
 API key or authorization grant uses that provider's own administration surface.
 
+### Scoped MCP HTTP policy
+
+`createHostProfile` also accepts `mcpHttpPolicy`. Its private JSON file is the
+fifth CLI argument. Earlier optional JSON files may contain `null` to omit that
+configuration. The policy supplies `owner_id` and a `connections` array. Each
+connection supplies the exact `agent_id`, `connection_id`, HTTPS `url` and
+`headers` mapping. For example, one connection may contain the following mapping.
+
+```json
+{"authorization":{"reference":"secret://owner-1/mcp-api","native_ref":"MCP_API_KEY","prefix":"Bearer "}}
+```
+
+The corresponding Workbench connection uses
+`header_refs.authorization = "secret://owner-1/mcp-api"`. Header names are
+matched case-insensitively. Supported prefixes are the empty string and
+`Bearer `. The native reference value is resolved for each request and kept out
+of the Gateway connection config and DSH MCP plugin config.
+
+The Host compares owner, Agent, connection, complete URL and every header
+reference against that private policy and the original current connection
+binding. HTTPS requests resolve public addresses and pin the connection to
+those results. Redirects are refused. Request cancellation, provider changes,
+credential changes and stale bindings stop the scoped transport. HTTP requests
+have a 60-second bound. Stdio launch authorization retains its existing policy.
+
 ## Windows startup
 
 Use a private installation directory outside the Agent workspace and Git checkout.
