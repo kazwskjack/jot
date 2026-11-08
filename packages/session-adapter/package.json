@@ -20,6 +20,7 @@
     "host-policy-constants.js",
     "host-policy.js",
     "host-readiness.js",
+    "hooks-config.js",
     "host-settings-migration-proof.js",
     "host-settings-owner-approval-route.js",
     "host-settings-product-service.js",

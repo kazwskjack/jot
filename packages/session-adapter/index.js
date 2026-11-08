@@ -43,6 +43,7 @@ import {createMcpControlHost,createMcpControlRouteHandler} from './mcp-control-h
 import {createMcpDiscoveryScopeResolver} from './mcp-discovery-control.js'
 import {createGatewayPluginProfileReceiptClient,createDshProfilePluginControl} from './dsh-profile-plugin-control.js'
 import {createPluginProfileEvidence} from './plugin-profile-evidence.js'
+import {createHooksConfiguration} from './hooks-config.js'
 import {resolveOwnerBoundDshProfileContext} from './dsh-profile-binding.js'
 
 import {normalizeLeaseTakeoverRequest,settleLeaseTakeover} from './lease-takeover.js'
@@ -918,6 +919,10 @@ async function readJson(req, limit = 1024 * 1024) {
 }
 
 export function apply(ctx, config = {}) {
+  if(config.hooks!==undefined){
+    const hooksConfiguration=createHooksConfiguration(config.hooks);
+    ctx.provide('jotHooksConfiguration',hooksConfiguration);
+  }
   if(config.pluginProfileEnabled!==undefined&&typeof config.pluginProfileEnabled!=='boolean')throw Error('plugin_profile_config_invalid');
   if(config.pluginProfileEnabled===true&&config.hostSettingsBootstrap===undefined)throw Error('plugin_profile_bootstrap_required');
   if(config.hostCredentialRefs!==undefined&&validateHostCredentialRefs(config.hostCredentialRefs).length&&(!config.hostSettingsBootstrap||config.hostSettingsOwnerRoutesEnabled!==true))throw Error('host_credentials_route_invalid')
