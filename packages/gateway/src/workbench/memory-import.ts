@@ -1,4 +1,4 @@
-import {MemoryImportItems,importItemsManifest,importReplacementDigest,type ImportItemsBatch} from './memory-import-items.ts';
+import {MemoryImportItems,importItemsManifest,importReplacementDigest,type ImportItemsBatch,type ImportItemsManifest} from './memory-import-items.ts';
 import {pilotdeckMemoryImport,pilotdeckMemoryImportHistory,type PilotdeckMemoryImportSource} from './pilotdeck-memory-import.ts';
 import {createHash} from 'node:crypto';
 import type {WorkbenchMemoryImportFileSelection,WorkbenchMemoryImportFileSource,WorkbenchMemoryImportHistorySection} from '../../contracts/types.ts';
@@ -14,6 +14,7 @@ type Source=MemoryValue & {
  expires_at:string|null;supersedes:string|null;history:Array<Record<string,unknown>>;
 };
 type PreviewItem={source_memory_id:string;source_version:number;source_history_versions:number[];source_content:string;source_provenance:Array<{kind:string;reference:string}>;source_revision:string|null;source_expires_at:string|null;target_key:string;target_expected_version:number;status:'ready'|'skipped'|'conflict';reason:string|null;source_local:boolean};
+type ReplacementItem={memory_id:string;version:number;content_sha256:string;content_chars:number;verified:boolean;expires_at:string|null};
 type Ports={authorizeTarget(owner:string,workspace:string,target:Target):Target;save(owner:string,workspace:string,input:Input):MemoryValue;remove?(owner:string,workspace:string,memoryId:string,version:number):{memory_id:string;status:string};readFile?(owner:string,workspace:string,project:string,path:string,version:number,sha256:string):{path:string;version:number;sha256:string;size:number;content:Buffer}};
 type Batch=Record<string,string|number|null>;
 type Snapshot={target:Target;source_bundle?:PilotdeckMemoryImportSource;mode?:'replace_scope';source_file?:WorkbenchMemoryImportFileSource}
@@ -123,8 +124,8 @@ export class MemoryImportService{
  }
  private batch(owner:string,workspace:string,row:Batch):ImportItemsBatch{return {owner,workspace,importId:String(row.import_id),version:Number(row.version)};}
  private packPreview(value:any,splitReplacement=true){
-  return {...value,items:[],items_storage:importItemsManifest(value.items),
-   ...(splitReplacement&&value.replacement?{replacement:{...value.replacement,items:[],items_storage:importItemsManifest(value.replacement.items)}}:{})};
+  return {...value,items:[],items_storage:value.items_storage??importItemsManifest(value.items),
+   ...(splitReplacement&&value.replacement?{replacement:{...value.replacement,items:[],items_storage:value.replacement.items_storage??importItemsManifest(value.replacement.items)}}:{})};
  }
  private writePreview(batch:ImportItemsBatch,value:any,stored:any){
   this.storedItems.write(batch,'preview',value.items,stored.items_storage);
@@ -160,15 +161,20 @@ export class MemoryImportService{
    status:String(row.status),created_at:String(row.created_at),updated_at:String(row.updated_at),
    ...(row.receipt_json===null?{}:{receipt:this.payload(owner,workspace,row,true,page)})};
  }
- private matchesPreview(owner:string,workspace:string,row:Batch,fresh:any){
+ private previewProof(owner:string,workspace:string,row:Batch,fresh:any):{items?:ImportItemsManifest;replacement?:ImportItemsManifest}|null{
   const projected=this.db.prepare("SELECT json_extract(preview_json,'$.items_storage') AS storage,json_extract(preview_json,'$.replacement.items_storage') AS replacement_storage FROM wb_memory_import_batches WHERE owner_id=? AND workspace_id=? AND import_id=? AND version=?")
    .get(owner,workspace,String(row.import_id),Number(row.version)) as {storage:string|null;replacement_storage:string|null}|undefined;
   if(!projected)throw Error('memory_import_conflict');
-  if(projected.storage===null)return samePreview(fresh,String(row.preview_json));
-  if(JSON.stringify(this.packPreview(fresh,projected.replacement_storage!==null))!==row.preview_json)return false;
-  this.storedItems.read(this.batch(owner,workspace,row),'preview',JSON.parse(projected.storage));
-  if(projected.replacement_storage!==null)this.storedItems.read(this.batch(owner,workspace,row),'preview',JSON.parse(projected.replacement_storage),undefined,true);
-  return true;
+  if(projected.storage===null)return samePreview(fresh,String(row.preview_json))?{}:null;
+  if(JSON.stringify(this.packPreview(fresh,projected.replacement_storage!==null))!==row.preview_json)return null;
+  const items=JSON.parse(projected.storage) as ImportItemsManifest;
+  this.storedItems.read(this.batch(owner,workspace,row),'preview',items);
+  if(projected.replacement_storage!==null){
+   const replacement=JSON.parse(projected.replacement_storage) as ImportItemsManifest;
+   this.storedItems.read(this.batch(owner,workspace,row),'preview',replacement,undefined,true);
+   return {items,replacement};
+  }
+  return {items};
  }
  private readFileSource(owner:string,workspace:string,target:Target,source:WorkbenchMemoryImportFileSource){
   if(source.workspace_id!==workspace||source.project_id!==target.project_id)throw Error('memory_scope_forbidden');
@@ -213,15 +219,19 @@ export class MemoryImportService{
   if(memoryExpired(row))return {local:true,reason:'source_expired'};
   return {local:true,reason:null};
  }
- private replacement(owner:string,workspace:string,target:Target){
-  const rows=this.db.prepare(`SELECT memory_id,version,content,verified,expires_at FROM wb_memories
-   WHERE owner_id=? AND workspace_id=? AND project_id=? AND scope=? AND agent_id IS ? AND status='active' ORDER BY memory_id`)
-   .iterate(owner,workspace,target.project_id,target.scope,target.agent_id) as Iterable<MemoryRow>;
-  const items:Array<{memory_id:string;version:number;content_sha256:string;content_chars:number;verified:boolean;expires_at:string|null}>=[];
-  for(const row of rows)items.push({memory_id:String(row.memory_id),version:Number(row.version),
-   content_sha256:createHash('sha256').update(String(row.content),'utf8').digest('hex'),content_chars:String(row.content).length,
-   verified:Boolean(row.verified),expires_at:row.expires_at===null?null:String(row.expires_at)});
-  return {scope_sha256:importReplacementDigest(target,items),count:items.length,items};
+ private replacement(owner:string,workspace:string,target:Target,deferred=false){
+  const db=this.db;
+  function* inventoryItems():Generator<ReplacementItem>{
+   const rows=db.prepare(`SELECT memory_id,version,content,verified,expires_at FROM wb_memories
+    WHERE owner_id=? AND workspace_id=? AND project_id=? AND scope=? AND agent_id IS ? AND status='active' ORDER BY memory_id`)
+    .iterate(owner,workspace,target.project_id,target.scope,target.agent_id) as Iterable<MemoryRow>;
+   for(const row of rows)yield {memory_id:String(row.memory_id),version:Number(row.version),
+    content_sha256:createHash('sha256').update(String(row.content),'utf8').digest('hex'),content_chars:String(row.content).length,
+    verified:Boolean(row.verified),expires_at:row.expires_at===null?null:String(row.expires_at)};
+  }
+  const items=deferred?{[Symbol.iterator]:inventoryItems}:Array.from(inventoryItems());
+  const manifest=importItemsManifest(items);
+  return {scope_sha256:importReplacementDigest(target,items),count:manifest.count,items,...(deferred?{items_storage:manifest}:{})};
  }
  private targetStates(owner:string,workspace:string,target:Target){
   const scope=[owner,workspace,target.project_id,target.scope,target.agent_id];
@@ -263,20 +273,23 @@ export class MemoryImportService{
   }
   return states;
  }
- private inspect(owner:string,workspace:string,target:Target,document:ReturnType<typeof normalizeDocument>,sourceBundle?:PilotdeckMemoryImportSource,mode?:'replace_scope',sourceFile?:WorkbenchMemoryImportFileSource){
-  const targets=this.targetStates(owner,workspace,target);
-  const items:PreviewItem[]=[];let ready=0,skipped=0,conflict=0;
-  for(const source of document.items){
-   const targetKey=`${sourceBundle?'jot-import-v2':'jot-import-v1'}:${digest([target.scope,target.project_id,target.agent_id]).slice(0,16)}:${source.workspace_id}/${source.memory_id}@${sourceBundle?source.source_revision:source.version}`;
-   const local=this.sourceState(owner,source),targetState=targets.get(targetKey.slice(0,targetKey.lastIndexOf('@')+1))??targets.get(targetKey)??{expected:0,reason:null};
-   let reason=local.reason??(mode==='replace_scope'&&targetState.reason==='target_exists'?null:targetState.reason),status:PreviewItem['status']=reason?(reason==='source_expired'||reason==='source_superseded'?'skipped':'conflict'):'ready';
-   if(source.provenance.length>=20&&status==='ready'){reason='provenance_limit';status='conflict';}
-   if(status==='ready')ready++;if(status==='skipped')skipped++;if(status==='conflict')conflict++;
-   items.push({source_memory_id:source.memory_id,source_version:source.version,source_history_versions:source.history.map(row=>Number(row.version)),source_content:source.content,
-    source_provenance:source.provenance,source_revision:source.source_revision,source_expires_at:source.expires_at,target_key:targetKey,target_expected_version:targetState.expected,status,reason,source_local:local.local});
+ private inspect(owner:string,workspace:string,target:Target,document:ReturnType<typeof normalizeDocument>,sourceBundle?:PilotdeckMemoryImportSource,mode?:'replace_scope',sourceFile?:WorkbenchMemoryImportFileSource,deferred=false,deferredReplacement=false){
+  const targets=this.targetStates(owner,workspace,target),service=this;
+  function* inspectItems():Generator<PreviewItem>{
+   for(const source of document.items){
+    const targetKey=`${sourceBundle?'jot-import-v2':'jot-import-v1'}:${digest([target.scope,target.project_id,target.agent_id]).slice(0,16)}:${source.workspace_id}/${source.memory_id}@${sourceBundle?source.source_revision:source.version}`;
+    const local=service.sourceState(owner,source),targetState=targets.get(targetKey.slice(0,targetKey.lastIndexOf('@')+1))??targets.get(targetKey)??{expected:0,reason:null};
+    let reason=local.reason??(mode==='replace_scope'&&targetState.reason==='target_exists'?null:targetState.reason),status:PreviewItem['status']=reason?(reason==='source_expired'||reason==='source_superseded'?'skipped':'conflict'):'ready';
+    if(source.provenance.length>=20&&status==='ready'){reason='provenance_limit';status='conflict';}
+    yield {source_memory_id:source.memory_id,source_version:source.version,source_history_versions:source.history.map(row=>Number(row.version)),source_content:source.content,
+     source_provenance:source.provenance,source_revision:source.source_revision,source_expires_at:source.expires_at,target_key:targetKey,target_expected_version:targetState.expected,status,reason,source_local:local.local};
+   }
   }
+  const items=deferred?{[Symbol.iterator]:inspectItems}:Array.from(inspectItems()),counts={total:0,ready:0,skipped:0,conflict:0};
+  function* countedItems(){for(const item of items){counts.total++;counts[item.status]++;yield item;}}
+  const manifest=importItemsManifest(countedItems());
   return {schema_version:1,document_workspace_id:document.workspace_id,target,...(sourceBundle?{source_bundle:sourceBundle.summary}:{}),...(sourceFile?{source_file:sourceFile}:{}),
-   ...(mode==='replace_scope'?{mode,replacement:this.replacement(owner,workspace,target)}:{}),counts:{total:items.length,ready,skipped,conflict},items};
+   ...(mode==='replace_scope'?{mode,replacement:this.replacement(owner,workspace,target,deferredReplacement)}:{}),counts,items,...(deferred?{items_storage:manifest}:{})};
  }
  preview(owner:string,workspace:string,input:Input,page?:ImportPage){return withImmediateTransaction(this.db,()=>{
   exact(input,['import_id','document','target','mode']);const importId=label(input.import_id,128);
@@ -284,7 +297,7 @@ export class MemoryImportService{
   if(JSON.stringify(target)!==JSON.stringify(requestedTarget))throw new Error('memory_scope_forbidden');
   if(input.mode!==undefined&&input.mode!=='append'&&input.mode!=='replace_scope')invalid();
   const mode=input.mode==='replace_scope'?'replace_scope' as const:undefined;
-  const old=this.db.prepare("SELECT *,json_extract(input_json,'$.document_source') AS document_source FROM wb_memory_import_batches WHERE owner_id=? AND workspace_id=? AND import_id=?").get(owner,workspace,importId) as Batch|undefined;
+  const old=this.db.prepare("SELECT *,json_extract(input_json,'$.document_source') AS document_source,json_type(preview_json,'$.items_storage') IS NOT NULL AS preview_items_stored,json_type(preview_json,'$.replacement.items_storage') IS NOT NULL AS replacement_items_stored FROM wb_memory_import_batches WHERE owner_id=? AND workspace_id=? AND import_id=?").get(owner,workspace,importId) as Batch|undefined;
   const selected=fileSelection(input.document),sourceFile=selected?{...selected,workspace_id:workspace,project_id:target.project_id}:undefined;
   let material=input.document;
   if(sourceFile){
@@ -304,8 +317,8 @@ export class MemoryImportService{
   if(old){
    if(old.input_sha256!==inputHash||old.input_json!==inputJson)throw new Error('memory_import_id_conflict');
    if(old.status==='applied')return this.view(owner,workspace,old,page);
-   const fresh=this.inspect(owner,workspace,target,document,inputValue.source_bundle,mode,sourceFile);
-   if(!this.matchesPreview(owner,workspace,old,fresh)){
+   const fresh=this.inspect(owner,workspace,target,document,inputValue.source_bundle,mode,sourceFile,compact&&!!old.preview_items_stored,compact&&!!old.replacement_items_stored);
+   if(!this.previewProof(owner,workspace,old,fresh)){
     const stored=compact?this.packPreview(fresh):fresh;
     const changed=this.db.prepare("UPDATE wb_memory_import_batches SET preview_json=?,version=version+1,updated_at=? WHERE owner_id=? AND workspace_id=? AND import_id=? AND status='previewed' AND version=?")
      .run(JSON.stringify(stored),now,owner,workspace,importId,Number(old.version));
@@ -314,7 +327,7 @@ export class MemoryImportService{
    }
    return this.view(owner,workspace,this.db.prepare('SELECT * FROM wb_memory_import_batches WHERE owner_id=? AND workspace_id=? AND import_id=?').get(owner,workspace,importId) as Batch,page);
   }
-  const preview=this.inspect(owner,workspace,target,document,inputValue.source_bundle,mode,sourceFile),stored=compact?this.packPreview(preview):preview;
+  const preview=this.inspect(owner,workspace,target,document,inputValue.source_bundle,mode,sourceFile,compact,compact),stored=compact?this.packPreview(preview):preview;
   this.db.prepare(`INSERT INTO wb_memory_import_batches(owner_id,workspace_id,import_id,input_sha256,input_json,preview_json,version,status,receipt_json,created_at,updated_at)
    VALUES(?,?,?,?,?,?,1,'previewed',NULL,?,?)`).run(owner,workspace,importId,inputHash,inputJson,JSON.stringify(stored),now,now);
   if(compact)this.writePreview({owner,workspace,importId,version:1},preview,stored);
@@ -380,34 +393,42 @@ export class MemoryImportService{
  apply(owner:string,workspace:string,input:Input,page?:ImportPage){return withImmediateTransaction(this.db,()=>{
   exact(input,['import_id','expected_version']);const importId=label(input.import_id,128);
   if(!Number.isSafeInteger(input.expected_version)||Number(input.expected_version)<1)invalid();
-  const row=this.db.prepare('SELECT * FROM wb_memory_import_batches WHERE owner_id=? AND workspace_id=? AND import_id=?').get(owner,workspace,importId) as Batch|undefined;
+  const row=this.db.prepare("SELECT *,json_type(preview_json,'$.items_storage') IS NOT NULL AS preview_items_stored,json_type(preview_json,'$.replacement.items_storage') IS NOT NULL AS replacement_items_stored FROM wb_memory_import_batches WHERE owner_id=? AND workspace_id=? AND import_id=?").get(owner,workspace,importId) as Batch|undefined;
   if(!row)throw new Error('memory_import_not_found');if(row.status==='applied')return this.payload(owner,workspace,row,true,page);
   if(Number(input.expected_version)!==Number(row.version))throw new Error('version_conflict');
   const snapshot=JSON.parse(String(row.input_json)) as Snapshot;
   if(digest(snapshot)!==row.input_sha256)throw new Error('memory_import_digest_conflict');
   const target=this.ports.authorizeTarget(owner,workspace,snapshot.target);if(JSON.stringify(target)!==JSON.stringify(snapshot.target))throw new Error('memory_scope_forbidden');
   const document=this.readDocument(owner,workspace,snapshot);
-  const fresh=this.inspect(owner,workspace,target,document,snapshot.source_bundle,snapshot.mode,snapshot.source_file);
-  if(fresh.counts.conflict||!this.matchesPreview(owner,workspace,row,fresh))throw new Error('memory_import_conflict');
+  const fresh=this.inspect(owner,workspace,target,document,snapshot.source_bundle,snapshot.mode,snapshot.source_file,
+   !!snapshot.document_source&&!!row.preview_items_stored,!!snapshot.document_source&&!!row.replacement_items_stored);
+  if(fresh.counts.conflict)throw Error('memory_import_conflict');
+  const proof=this.previewProof(owner,workspace,row,fresh);if(!proof)throw Error('memory_import_conflict');
+  const batch=this.batch(owner,workspace,row),streamed=!!snapshot.document_source;
+  const inspectedItems=proof.items?this.storedItems.iterate<PreviewItem>(batch,'preview',proof.items):fresh.items;
+  const replacementItems=proof.replacement?this.storedItems.iterate<ReplacementItem>(batch,'preview',proof.replacement,true):fresh.replacement?.items;
   const ports=this.ports,db=this.db;let created=0,skipped=0;
   function* applyItems():Generator<Input>{
-   let index=0;
-   for(const source of document.items){
-    const item=fresh.items[index++];
-    if(!item||source.memory_id!==item.source_memory_id)throw Error('memory_import_digest_conflict');
-    if(item.status==='skipped'){skipped++;yield {...item};continue;}
-    const provenance=[...source.provenance,{kind:'import',reference:item.target_key}];
-    const saved=ports.save(owner,workspace,{scope:target.scope,project_id:target.project_id,agent_id:target.agent_id,
-     content:source.content,verified:false,provenance,source_revision:source.source_revision,expires_at:source.expires_at,supersedes:null});
-    if(typeof saved.memory_id!=='string'||saved.version!==1||saved.verified!==false||saved.status!=='active')throw Error('memory_import_write_conflict');
-    created++;yield {source_memory_id:item.source_memory_id,source_version:item.source_version,memory_id:String(saved.memory_id),version:Number(saved.version),status:'created'};
-   }
-   if(index!==fresh.items.length)throw Error('memory_import_digest_conflict');
+   const sources=document.items[Symbol.iterator]();let count=0;
+   try{
+    for(const item of inspectedItems){
+     const next=sources.next();if(next.done||next.value.memory_id!==item.source_memory_id)throw Error('memory_import_digest_conflict');
+     const source=next.value;count++;
+     if(item.status==='skipped'){skipped++;yield {...item};continue;}
+     const provenance=[...source.provenance,{kind:'import',reference:item.target_key}];
+     const saved=ports.save(owner,workspace,{scope:target.scope,project_id:target.project_id,agent_id:target.agent_id,
+      content:source.content,verified:false,provenance,source_revision:source.source_revision,expires_at:source.expires_at,supersedes:null});
+     if(typeof saved.memory_id!=='string'||saved.version!==1||saved.verified!==false||saved.status!=='active')throw Error('memory_import_write_conflict');
+     created++;yield {source_memory_id:item.source_memory_id,source_version:item.source_version,memory_id:String(saved.memory_id),version:Number(saved.version),status:'created'};
+    }
+    if(!sources.next().done||count!==fresh.counts.total)throw Error('memory_import_digest_conflict');
+   }finally{sources.return?.();}
   }
   function* retireItems():Generator<Input>{
    if(!fresh.replacement)return;
    if(!ports.remove)throw Error('memory_import_replace_unavailable');
-   for(const item of fresh.replacement.items){
+   if(!replacementItems)throw Error('memory_import_digest_conflict');
+   for(const item of replacementItems){
     const removed=ports.remove(owner,workspace,item.memory_id,item.version);
     if(removed.memory_id!==item.memory_id||removed.status!=='deleted')throw Error('memory_import_write_conflict');
     const current=db.prepare(`SELECT m.version,m.status FROM wb_memories m JOIN wb_memory_revisions r ON r.memory_id=m.memory_id AND r.owner_id=m.owner_id AND r.version=m.version
@@ -417,7 +438,6 @@ export class MemoryImportService{
     yield {memory_id:item.memory_id,from_version:item.version,result_version:Number(current.version),status:'deleted'};
    }
   }
-  const batch=this.batch(owner,workspace,row),streamed=!!snapshot.document_source;
   const resultStorage=streamed?this.storedItems.write(batch,'receipt',applyItems()):undefined;
   const results=streamed?[]:Array.from(applyItems());
   const retirementStorage=streamed&&fresh.replacement?this.storedItems.write(batch,'receipt',retireItems(),undefined,true):undefined;

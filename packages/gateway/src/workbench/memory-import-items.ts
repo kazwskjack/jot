@@ -9,15 +9,20 @@ type Phase='preview'|'receipt';
 type Range={offset:number;limit:number};
 const conflict=():never=>{throw Error('memory_import_digest_conflict');};
 
-export function importItemsManifest(items:Item[]):ImportItemsManifest{
- const hash=createHash('sha256').update('[');
- for(let index=0;index<items.length;index++)hash.update((index?',':'')+JSON.stringify(items[index]),'utf8');
- return {kind:'original-memory-import-items-v1',count:items.length,sha256:hash.update(']').digest('hex')};
+function validateManifest(manifest:ImportItemsManifest){
+ if(!manifest||manifest.kind!=='original-memory-import-items-v1'||!Number.isSafeInteger(manifest.count)||manifest.count<0
+  ||typeof manifest.sha256!=='string'||!/^[a-f0-9]{64}$/.test(manifest.sha256))conflict();
 }
 
-export function importReplacementDigest(target:unknown,items:Item[]){
- const hash=createHash('sha256').update('{"target":'+JSON.stringify(target)+',"items":[');
- for(let index=0;index<items.length;index++)hash.update((index?',':'')+JSON.stringify(items[index]),'utf8');
+export function importItemsManifest(items:Iterable<Item>):ImportItemsManifest{
+ const hash=createHash('sha256').update('[');let count=0;
+ for(const item of items){hash.update((count?',':'')+JSON.stringify(item),'utf8');count++;}
+ return {kind:'original-memory-import-items-v1',count,sha256:hash.update(']').digest('hex')};
+}
+
+export function importReplacementDigest(target:unknown,items:Iterable<Item>){
+ const hash=createHash('sha256').update('{"target":'+JSON.stringify(target)+',"items":[');let count=0;
+ for(const item of items){hash.update((count?',':'')+JSON.stringify(item),'utf8');count++;}
  return hash.update(']}').digest('hex');
 }
 
@@ -58,17 +63,30 @@ export class MemoryImportItems{
   return result;
  }
 
- read(batch:ImportItemsBatch,phase:Phase,manifest:ImportItemsManifest,range?:Range,replacement=false,scope?:{target:unknown;sha256:string}){
-  if(!manifest||manifest.kind!=='original-memory-import-items-v1'||!Number.isSafeInteger(manifest.count)||manifest.count<0
-   ||typeof manifest.sha256!=='string'||!/^[a-f0-9]{64}$/.test(manifest.sha256))conflict();
-  if(range&&(!Number.isSafeInteger(range.offset)||range.offset<0||!Number.isSafeInteger(range.limit)||range.limit<0))conflict();
+ private rows(batch:ImportItemsBatch,phase:Phase,replacement:boolean){
   const table=replacement?'wb_memory_import_replacement_items':'wb_memory_import_items';
-  const rows=this.db.prepare(`SELECT position,item_json FROM ${table}
+  return this.db.prepare(`SELECT position,item_json FROM ${table}
    WHERE owner_id=? AND workspace_id=? AND import_id=? AND preview_version=? AND phase=? ORDER BY position`)
    .iterate(batch.owner,batch.workspace,batch.importId,batch.version,phase) as Iterable<{position:number;item_json:string}>;
+ }
+
+ *iterate<T extends Item=Item>(batch:ImportItemsBatch,phase:Phase,manifest:ImportItemsManifest,replacement=false):Generator<T>{
+  validateManifest(manifest);
+  const hash=createHash('sha256').update('[');let count=0;
+  for(const row of this.rows(batch,phase,replacement)){
+   if(row.position!==count)conflict();hash.update((count?',':'')+row.item_json,'utf8');count++;
+   const item=JSON.parse(row.item_json) as unknown;
+   if(!item||typeof item!=='object'||Array.isArray(item))conflict();yield item as T;
+  }
+  if(count!==manifest.count||hash.update(']').digest('hex')!==manifest.sha256)conflict();
+ }
+
+ read(batch:ImportItemsBatch,phase:Phase,manifest:ImportItemsManifest,range?:Range,replacement=false,scope?:{target:unknown;sha256:string}){
+  validateManifest(manifest);
+  if(range&&(!Number.isSafeInteger(range.offset)||range.offset<0||!Number.isSafeInteger(range.limit)||range.limit<0))conflict();
   const hash=createHash('sha256').update('['),scopeHash=scope?createHash('sha256').update('{"target":'+JSON.stringify(scope.target)+',"items":['):undefined;
   const items:Item[]=[];let count=0;
-  for(const row of rows){
+  for(const row of this.rows(batch,phase,replacement)){
    if(row.position!==count)conflict();const part=(count?',':'')+row.item_json;hash.update(part,'utf8');scopeHash?.update(part,'utf8');
    if(range&&count>=range.offset&&count-range.offset<range.limit){
     const item=JSON.parse(row.item_json) as unknown;
