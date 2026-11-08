@@ -255,6 +255,8 @@ export class WorkbenchBridge {
       let code;
       try { code = (await response.json())?.error?.code; } catch {}
       if(response.status===503&&code==='DATABASE_BUSY')throw new Error('workbench_database_busy');
+      if(response.status===409&&code==='NATIVE_FILE_ASSIGNMENT_CONFLICT'
+        &&['guard','native-task-intent','native-child-reservation','native-child-source','native-child-activate'].includes(path))throw new Error('native_file_assignment_conflict');
       if(path==='ordinary-chat-web'&&response.status===409){
         if(code==='CHAT_WEB_ALLOWANCE_CONSUMED')throw Error('CHAT_WEB_ALLOWANCE_CONSUMED');
       }

@@ -4,6 +4,7 @@ import {workspaceRelativePath} from '../always-on/workspace-provider.ts';
 import {createHash} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
 import {withImmediateTransaction} from '../db/database.ts';
+import {canonicalJson} from '../db/canonical-json.ts';
 import {TaskExecutionEvidence} from '../persistent-tasks/execution-evidence.ts';
 import {taskDependencyReasons,assertDependencyReasons} from '../persistent-tasks/execution-eligibility.ts';
 import type {WorkbenchService} from './service.ts';
@@ -12,11 +13,45 @@ import type {TaskCollaborationService} from './task-collaboration.ts';
 type Input={request_id:string;subtask_id:string;expected_subtask_version:number;recipient_agent_id:string;file_paths?:string[]};
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 export type NativeTaskAssignment={task_id:string;occurrence_id:string;subtask_id:string;subtask_version:number;title:string;acceptance:string;dependencies:string[];file_paths?:string[]};
-export function assertNativeTaskAssignment(db:DatabaseSync,owner:string,assignment:NativeTaskAssignment){
+type FileAssignmentClaim={task_id:string;occurrence_id:string;file_paths:readonly string[];root_run_id:string;request_id:string;reservation_id?:string};
+function assertNativeFileAvailability(db:DatabaseSync,owner:string,claim:FileAssignmentClaim){
+ const paths=JSON.stringify(claim.file_paths);
+ const hasNative=!!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_native_child_reservations'").get();
+ if(hasNative&&db.prepare(`SELECT 1 FROM wb_native_child_reservations q
+  WHERE q.owner_id=? AND q.task_id=? AND q.occurrence_id=? AND q.reservation_id<>?
+   AND NOT EXISTS(SELECT 1 FROM wb_native_creation_aborts x WHERE x.reservation_id=q.reservation_id)
+   AND(NOT EXISTS(SELECT 1 FROM wb_native_child_closures c WHERE c.reservation_id=q.reservation_id)
+    OR EXISTS(SELECT 1 FROM wb_native_child_activations a WHERE a.reservation_id=q.reservation_id
+     AND NOT EXISTS(SELECT 1 FROM wb_native_activation_closures c WHERE c.run_id=a.run_id)))
+   AND(json_type(q.snapshot_json,'$.task_assignment.file_paths') IS NOT 'array'
+    OR EXISTS(SELECT 1 FROM json_each(q.snapshot_json,'$.task_assignment.file_paths') p
+     JOIN json_each(?) wanted ON wanted.value=p.value)) LIMIT 1`)
+  .get(owner,claim.task_id,claim.occurrence_id,claim.reservation_id??'',paths))throw new Error('native_file_assignment_conflict');
+ // Only still-current, unreserved intents can become new file owners. Closed
+ // reservations remain immutable history and are rechecked on cold activation.
+ if(db.prepare(`SELECT 1 FROM wb_native_task_intents i
+  JOIN wb_task_current_occurrences o ON o.run_id=i.root_run_id AND o.task_id=? AND o.occurrence_id=?
+  JOIN wb_task_subtasks s ON s.task_id=o.task_id AND s.subtask_id=json_extract(i.plan_json,'$.subtask_id')
+  WHERE i.owner_id=? AND json_extract(i.plan_json,'$.task_id')=o.task_id AND json_extract(i.plan_json,'$.occurrence_id')=o.occurrence_id
+   AND s.version=json_extract(i.plan_json,'$.expected_subtask_version') AND s.status IN('pending','blocked')
+   AND NOT(i.root_run_id=? AND i.request_id=?)
+   ${hasNative?`AND NOT EXISTS(SELECT 1 FROM wb_native_child_reservations q WHERE q.owner_id=i.owner_id AND q.root_run_id=i.root_run_id AND q.request_id=i.request_id)`:''}
+   AND EXISTS(SELECT 1 FROM json_each(i.plan_json,'$.file_paths') p JOIN json_each(?) wanted ON wanted.value=p.value) LIMIT 1`)
+  .get(claim.task_id,claim.occurrence_id,owner,claim.root_run_id,claim.request_id,paths))throw new Error('native_file_assignment_conflict');
+}
+export function assertNativeTaskAssignment(db:DatabaseSync,owner:string,assignment:NativeTaskAssignment,reservationId?:string){
  const step=db.prepare(`SELECT s.version,s.status,s.dependencies_json FROM wb_task_subtasks s JOIN wb_persistent_tasks t ON t.task_id=s.task_id
    WHERE t.owner_id=? AND s.task_id=? AND s.subtask_id=?`).get(owner,assignment.task_id,assignment.subtask_id) as {version:number;status:string;dependencies_json:string}|undefined;
  if(!step||step.version!==assignment.subtask_version||step.status!=='running')throw new Error('task_assignment_revoked');
  assertDependencyReasons(taskDependencyReasons(db,new TaskExecutionEvidence(db),owner,assignment.task_id,JSON.parse(step.dependencies_json),assignment.occurrence_id));
+ if(assignment.file_paths!==undefined){
+  const paths=assignment.file_paths;
+  if(!Array.isArray(paths)||!paths.length||paths.length>32||paths.some(path=>typeof path!=='string')||new Set(paths).size!==paths.length)throw new Error('task_assignment_revoked');
+  const reservation=typeof reservationId==='string'?db.prepare('SELECT root_run_id,request_id,snapshot_json FROM wb_native_child_reservations WHERE owner_id=? AND reservation_id=?').get(owner,reservationId) as {root_run_id:string;request_id:string;snapshot_json:string}|undefined:undefined;
+  if(!reservation||canonicalJson(JSON.parse(reservation.snapshot_json).task_assignment)!==canonicalJson(assignment))throw new Error('task_assignment_revoked');
+  assertNativeFileAvailability(db,owner,{task_id:assignment.task_id,occurrence_id:assignment.occurrence_id,file_paths:paths,
+   root_run_id:reservation.root_run_id,request_id:reservation.request_id,reservation_id:reservationId});
+ }
  return assignment;
 }
 /** Planning journal only. No child admission, mailbox dispatch or completion. */
@@ -60,8 +95,9 @@ export class NativeTaskIntents {
    const bound=prior&&this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_native_child_reservations'").get()&&this.db.prepare('SELECT snapshot_json FROM wb_native_child_reservations WHERE owner_id=? AND root_run_id=? AND request_id=?').get(owner,runId,input.request_id) as {snapshot_json:string}|undefined;
    if(bound){const reservation=JSON.parse(bound.snapshot_json);
      if(reservation.role_id!==input.recipient_agent_id||reservation.task_assignment?.subtask_id!==input.subtask_id)throw new Error('task_assignment_revoked');
-     assertNativeTaskAssignment(this.db,owner,reservation.task_assignment);return saved;}
+     assertNativeTaskAssignment(this.db,owner,reservation.task_assignment,reservation.reservation_id);return saved;}
    if(!step||step.version!==input.expected_subtask_version||!['pending','blocked'].includes(step.status))throw new Error('task_assignment_revoked');
+   if(filePaths)assertNativeFileAvailability(this.db,owner,{task_id:current.task_id,occurrence_id:current.occurrence_id,file_paths:filePaths,root_run_id:runId,request_id:input.request_id});
    if(saved)return saved;
    const role=this.workbench.getAgent(owner,input.recipient_agent_id);
    const plan={protocol:1,request_id:input.request_id,role_ref:role.agent_id,expected_policy_version:policy.version,

@@ -89,6 +89,6 @@ export function assertNativeSnapshot(db:DatabaseSync,owner:string,saved:NativeRe
     UNION ALL SELECT run_id,occurrence_id FROM wb_task_auxiliary_runs) o ON o.run_id=a.run_id
   WHERE o.occurrence_id=? AND (a.state='unknown' OR a.bound_exceeded=1) LIMIT 1`).get(saved.occurrence_id);
  if(unresolved)throw new Error(unresolved.state==='unknown'?'budget_usage_unknown':'model_budget_exhausted');
- if(saved.task_assignment)assertNativeTaskAssignment(db,owner,saved.task_assignment);
+ if(saved.task_assignment)assertNativeTaskAssignment(db,owner,saved.task_assignment,saved.reservation_id);
  return saved;
 }

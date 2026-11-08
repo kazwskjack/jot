@@ -620,7 +620,7 @@ export async function buildServer(config: {
     if(code==='task_completion_handshake_conflict')return reply.code(409).send({error:{code:code.toUpperCase()}});
     if(code==='task_mailbox_binding_invalid')return reply.code(422).send({error:{code:code.toUpperCase()}});
     if(code==='task_auxiliary_pending')return reply.code(409).send({error:{code:code.toUpperCase()}});
-    if(code==='task_assignment_revoked')return reply.code(409).send({error:{code:code.toUpperCase()}});
+    if(['task_assignment_revoked','native_file_assignment_conflict'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
     if(code==='task_collaboration_exhausted')return reply.code(429).send({error:{code:code.toUpperCase()}});
     if(code==='task_reply_target_invalid')return reply.code(422).send({error:{code:code.toUpperCase()}});
     if(code==='task_reply_run_active')return reply.code(409).send({error:{code:code.toUpperCase()}});
