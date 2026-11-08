@@ -32,7 +32,7 @@ import {installNativeChildRuns,assertNativeReservation,assertNativeRun,assertNat
 import {assertExecutionLease} from './execution-lease.ts';
 
 type Input = Record<string, unknown>;
-import type {TaskPrdImportSource} from '../../contracts/types.ts';
+import type {TaskPrdImportSource,TaskPrdTemplateSource} from '../../contracts/types.ts';
 type PreparedModelAcceptance={source:ReturnType<WorkbenchService['modelAcceptanceSource']>;bindings:TrustedModelMetadataBinding[]};
 type Row = Record<string, string | number | null>;
 type FileLifecycleAction = 'rename' | 'delete';
@@ -1379,7 +1379,8 @@ export class WorkbenchService {
   private filePath(value: unknown): string {
     if (typeof value !== 'string' || !value || value.length > 400 || isAbsolute(value) || /[\\:\x00-\x1f]/.test(value)) throw new Error('invalid_file_path');
     const parts = value.split('/');
-    if (parts.some(part => !part || part === '.' || part === '..' || part.startsWith('.') || /[. ]$/.test(part) || /[<>"|?*]/.test(part)
+    const taskmaster=value==='.taskmaster/tasks/tasks.json'||parts.length===3&&parts[0]==='.taskmaster'&&parts[1]==='docs'&&/\.(md|markdown|txt)$/i.test(parts[2]!);
+    if (parts.some((part,index) => !part || part === '.' || part === '..' || part.startsWith('.')&&!(taskmaster&&index===0) || /[. ]$/.test(part) || /[<>"|?*]/.test(part)
       || /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(part))) throw new Error('invalid_file_path');
     return parts.join('/');
   }
@@ -1772,15 +1773,24 @@ export class WorkbenchService {
       WHERE owner_id=? AND workspace_id=? AND project_id=? AND command_key=?`).get(owner,workspace,projectId,this.fileLifecycleRequestKey(key)) as {receipt_json:string;receipt_sha256:string}|undefined;
     return row?this.fileLifecycleReceipt(row):undefined;
   }
-  writeBinaryFile(owner: string, workspaceId: string, input: Input, content: Buffer, provenance?:TaskPrdImportSource) {
+  writeBinaryFile(owner: string, workspaceId: string, input: Input, content: Buffer, provenance?:TaskPrdImportSource|TaskPrdTemplateSource) {
     const workspace=this.workspace(workspaceId),project=text(input.project_id,'invalid_project_id',128),path=this.filePath(input.path),
       expected=integer(input.expected_version),key=this.fileLifecycleRequestKey(input.command_key);
     if(!Buffer.isBuffer(content)||content.byteLength>104_857_600)throw new Error('invalid_binary_file_content');
     this.projects.assertOwned(project,owner);
-    if(provenance&&(Object.keys(provenance).sort().join(',')!=='kind,preview_sha256,relative_path,repository_sha256,source_sha256,task_id,task_version'
-      ||provenance.kind!=='taskmaster_project_import'||provenance.relative_path!==path||path!=='.taskmaster/tasks/tasks.json'
-      ||typeof provenance.task_id!=='string'||!provenance.task_id||!Number.isSafeInteger(provenance.task_version)||provenance.task_version<1
-      ||[provenance.preview_sha256,provenance.source_sha256,provenance.repository_sha256].some(value=>typeof value!=='string'||!/^[a-f0-9]{64}$/.test(value))))throw Error('invalid_binary_file_source');
+    if(provenance){
+      const template=provenance.kind==='prd_template',keys=Object.keys(provenance).sort().join(',');
+      const validKind=template
+        ?keys==='kind,preview_sha256,relative_path,request_sha256,task_id,task_version,template_id,template_sha256'
+          &&/^\.taskmaster\/docs\/[^/]+\.(md|markdown|txt)$/i.test(path)&&['web-app','api','mobile-app','data-analysis'].includes(provenance.template_id)
+        :provenance.kind==='taskmaster_project_import'&&keys==='kind,preview_sha256,relative_path,repository_sha256,source_sha256,task_id,task_version'
+          &&path==='.taskmaster/tasks/tasks.json';
+      const hashes=template?[provenance.preview_sha256,provenance.request_sha256,provenance.template_sha256]
+        :[provenance.preview_sha256,provenance.source_sha256,provenance.repository_sha256];
+      if(!validKind||provenance.relative_path!==path||typeof provenance.task_id!=='string'||!provenance.task_id
+        ||!Number.isSafeInteger(provenance.task_version)||provenance.task_version<1
+        ||hashes.some(value=>typeof value!=='string'||!/^[a-f0-9]{64}$/.test(value)))throw Error('invalid_binary_file_source');
+    }
     const digest=createHash('sha256').update(content).digest('hex'),source=provenance?{...provenance}:{kind:'directory_import',relative_path:path},
       requestSha=hash(canonicalJson({workspace_id:workspace,project_id:project,path,expected_version:expected,sha256:digest,size:content.byteLength,source}));
     return this.transaction(()=>{

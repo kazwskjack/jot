@@ -1789,5 +1789,32 @@
     "TaskPrdImport",
     "200",
     "Original immutable file version/import receipt and atomic command only. Exact snapshot confirmation, target CAS and paused/no-unresolved task/role/workspace guards. No task execution or budget mutation."
+  ],
+  [
+    "GET",
+    "/v1/persistent-tasks/{task_id}/prd/templates",
+    "List native PRD templates",
+    null,
+    "TaskPrdTemplates",
+    "200",
+    "Read the owner-scoped four-category native template catalog through the original task. Templates use original goal, scope, acceptance and dependency sections."
+  ],
+  [
+    "POST",
+    "/v1/persistent-tasks/{task_id}/prd/template-preview",
+    "Preview customized native PRD template",
+    "TaskPrdTemplateRequest",
+    "TaskPrdTemplatePreview",
+    "200",
+    "Read-only literal placeholder substitution with bounded values. Capture original task, role, template digest, target version and exact rendered content digest. Original authentication, Origin and CSRF apply."
+  ],
+  [
+    "POST",
+    "/v1/persistent-tasks/{task_id}/prd/template-apply",
+    "Save confirmed native PRD template",
+    "TaskPrdTemplateApplyRequest",
+    "TaskPrdTemplateApply",
+    "200",
+    "Confirm the exact template preview under the original paused task, role, unresolved-execution and workspace write guards. Reuse original atomic command, file versions, target CAS and durable binary import receipts. Replays retain original body and key. File remains source material for the original PRD bind flow."
   ]
 ]

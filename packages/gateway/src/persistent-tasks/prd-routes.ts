@@ -6,26 +6,43 @@ import type {ValidateFunction} from 'ajv';
 const Ajv=(AjvModule as unknown as {default:new(options:Record<string,unknown>)=>{compile(schema:unknown):ValidateFunction}}).default;
 const ajv=new Ajv({strict:false,coerceTypes:false,removeAdditional:false});
 const validatorCompiler=({schema}:{schema:unknown})=>ajv.compile(schema);
-declare module 'fastify' {interface FastifyContextConfig {taskPrdCommand?:'preview'|'bind'}}
+declare module 'fastify' {interface FastifyContextConfig {taskPrdCommand?:'preview'|'bind'|'template-preview'}}
 export const prdSelectionSchema={oneOf:[
  {type:'object',additionalProperties:false,required:['kind','path','version','sha256'],properties:{kind:{const:'logical_file'},path:{type:'string',minLength:1,maxLength:1024},version:{type:'integer',minimum:1,maximum:Number.MAX_SAFE_INTEGER},sha256:{type:'string',pattern:'^[a-f0-9]{64}$'}}},
  {type:'object',additionalProperties:false,required:['kind','artifact_id','version','sha256'],properties:{kind:{const:'upload'},artifact_id:{type:'string',minLength:1,maxLength:200},version:{type:'integer',minimum:1,maximum:Number.MAX_SAFE_INTEGER},sha256:{type:'string',pattern:'^[a-f0-9]{64}$'}}},
 ]};
 export const prdPreviewRequestSchema={type:'object',additionalProperties:false,required:['source'],properties:{source:prdSelectionSchema}};
 export const prdBindRequestSchema={type:'object',additionalProperties:false,required:['source','preview_sha256'],properties:{source:prdSelectionSchema,preview_sha256:{type:'string',pattern:'^[a-f0-9]{64}$'}}};
+export const prdTemplateRequestSchema={type:'object',additionalProperties:false,required:['template_id','file_name'],properties:{
+ template_id:{type:'string',enum:['web-app','api','mobile-app','data-analysis']},file_name:{type:'string',minLength:1,maxLength:200},
+ values:{type:'object',maxProperties:32,propertyNames:{minLength:1,maxLength:100},additionalProperties:{type:'string',maxLength:2000}},
+}};
+export const prdTemplateApplySchema={...prdTemplateRequestSchema,required:['template_id','file_name','preview_sha256'],properties:{
+ ...prdTemplateRequestSchema.properties,preview_sha256:{type:'string',pattern:'^[a-f0-9]{64}$'},
+}};
 /** Outer server retains actor/origin/CSRF validation. taskPrdCommand routes must
  * bypass its generic ledger: preview is read-only; bind has an atomic receipt. */
 export function registerTaskPrdRoutes(app:FastifyInstance,service:TaskPrdService,actor:(r:FastifyRequest)=>string,atomicCommand?:<T>(request:FastifyRequest,status:number,operation:()=>T)=>T){
  const task=(r:FastifyRequest)=>(r.params as {taskId:string}).taskId;
  const errorHandler=(error:FastifyError,r:FastifyRequest,reply:FastifyReply)=>{
   const code=error.validation?'invalid_workbench_request':error.message;
-  const status=['prd_taskmaster_unavailable','prd_taskmaster_project_unavailable','prd_taskmaster_import_unavailable','prd_taskmaster_import_unconfirmed'].includes(code)?503:code==='unauthorized'?401:['origin_forbidden','csrf_invalid'].includes(code)?403:['task_not_found','agent_not_found'].includes(code)?404:
+  const status=['prd_taskmaster_unavailable','prd_taskmaster_project_unavailable','prd_taskmaster_import_unavailable','prd_taskmaster_import_unconfirmed'].includes(code)?503:code==='unauthorized'?401:['origin_forbidden','csrf_invalid'].includes(code)?403:['task_not_found','agent_not_found','prd_template_not_found'].includes(code)?404:
    code.startsWith('invalid_')||code==='contract_request_invalid'||code==='idempotency_key_required'||code==='prd_source_unsupported'?422:
    code.startsWith('prd_')||['version_conflict','idempotency_conflict','workspace_coordination_required'].includes(code)?409:500;
   const publicCode=status===500?'INTERNAL_ERROR':code.toUpperCase(),requestId=/^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$/.test(r.id)?r.id:randomUUID();
   return reply.code(status).send({error:{code:publicCode,message:publicCode,retryable:status>=500},request_id:requestId});
  };
  const params={type:'object',additionalProperties:false,required:['taskId'],properties:{taskId:{type:'string',minLength:1,maxLength:200}}};
+ app.get('/v1/persistent-tasks/:taskId/prd/templates',{validatorCompiler,errorHandler,schema:{params}},async(r,reply)=>{
+  reply.header('cache-control','private, no-store');return service.templates(actor(r),task(r));
+ });
+ app.post('/v1/persistent-tasks/:taskId/prd/template-preview',{validatorCompiler,errorHandler,config:{taskPrdCommand:'template-preview'},schema:{params,body:prdTemplateRequestSchema}},async(r,reply)=>{
+  reply.header('cache-control','private, no-store');return service.templatePreview(actor(r),task(r),r.body);
+ });
+ app.post('/v1/persistent-tasks/:taskId/prd/template-apply',{validatorCompiler,errorHandler,schema:{params,body:prdTemplateApplySchema}},async(r,reply)=>{
+  reply.header('cache-control','private, no-store');if(!atomicCommand)throw Error('prd_taskmaster_import_unavailable');
+  return atomicCommand(r,200,()=>service.applyTemplate(actor(r),task(r),r.body,r.headers['idempotency-key']));
+ });
  app.get('/v1/persistent-tasks/:taskId/prd/sources',{validatorCompiler,errorHandler,schema:{params}},async r=>service.sources(actor(r),task(r)));
  app.get('/v1/persistent-tasks/:taskId/prd/taskmaster-installation',{validatorCompiler,errorHandler,schema:{params}},async(r,reply)=>{
   reply.header('cache-control','private, no-store');return service.taskmasterInstallation(actor(r),task(r));

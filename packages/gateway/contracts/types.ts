@@ -518,3 +518,23 @@ export type TaskPrdImport = {
   task_id:string;task_version:number;preview_sha256:string;execution_authorized:false;
   file:{protocol:1;workspace_id:string;project_id:string;path:".taskmaster/tasks/tasks.json";version:number;sha256:string;size:number;source:TaskPrdImportSource;updated_at:string};
 };
+
+export type TaskPrdTemplateId = "web-app"|"api"|"mobile-app"|"data-analysis";
+export type TaskPrdTemplate = {id:TaskPrdTemplateId;name:string;category:string;description:string;content:string;placeholders:string[]};
+export type TaskPrdTemplates = {task_id:string;task_version:number;templates:TaskPrdTemplate[]};
+export type TaskPrdTemplateRequest = {template_id:TaskPrdTemplateId;file_name:string;values?:Record<string,string>};
+export type TaskPrdTemplatePreview = {
+ task_id:string;task_version:number;role:TaskPrdPreview["role"];
+ template:{id:TaskPrdTemplateId;name:string;category:string;sha256:string};
+ target:{path:string;version:number;sha256:string|null;size:number};
+ content:string;content_sha256:string;preview_sha256:string;execution_authorized:false;
+};
+export type TaskPrdTemplateApplyRequest = TaskPrdTemplateRequest&{preview_sha256:string};
+export type TaskPrdTemplateSource = {
+ kind:"prd_template";relative_path:string;task_id:string;task_version:number;preview_sha256:string;
+ request_sha256:string;template_id:TaskPrdTemplateId;template_sha256:string;
+};
+export type TaskPrdTemplateApply = {
+ task_id:string;task_version:number;preview_sha256:string;execution_authorized:false;
+ file:{protocol:1;workspace_id:string;project_id:string;path:string;version:number;sha256:string;size:number;source:TaskPrdTemplateSource;updated_at:string};
+};
