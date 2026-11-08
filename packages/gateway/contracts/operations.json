@@ -1699,5 +1699,14 @@
     "NativeCommandQueryOperation",
     "200",
     "Recover the persisted original operation and any known native command result after cancellation, response loss or run completion."
+  ],
+  [
+    "POST",
+    "/v1/runs/{run_id}/native-command-queries/{request_id}/close",
+    "Fence and end an unclaimed original command query",
+    "NativeCommandQueryClose",
+    "NativeCommandQueryOperation",
+    "200",
+    "Persist an owner/run/request dispatch fence and end any unclaimed original query. An absent original request receives a durable fenced rejection. Original native settlement owns outcomes after dispatch. The original request ID must equal Idempotency-Key."
   ]
 ]

@@ -1,4 +1,5 @@
 import React,{useEffect,useRef,useState} from 'react';
+import NativeCommandQueries from './NativeCommandQueries';
 import {readSkillCatalog,readSelectedSkillResource,readSelectedSkillDefinition,catalogForScope,type SkillCatalogResponse,type SkillCatalogState,type SkillResourceResponse,type SkillDefinitionResponse} from './skill-catalog-client';
 type ResourceState={loading?:boolean;value?:SkillResourceResponse;error?:string};
 type DefinitionState={loading?:boolean;value?:SkillDefinitionResponse;error?:string};
@@ -88,7 +89,11 @@ export default function SkillCatalogPanel({runId,ownerScope,onUseSkill}:{runId:s
  };
  const changePath=(name:string,path:string)=>{pending.current.get(name)?.abort();pending.current.delete(name);setPaths(old=>({...old,[name]:path}));
   setResources(old=>{const next={...old};delete next[name];return next;});};
- return <div>{current?.error?<p role="alert">技能目录暂时不可用，请重试。</p>:current?.value?<SkillCatalogView value={current.value} paths={paths} resources={resources} definitions={definitions}
-  onPathChange={changePath} onReadResource={readResource} onReadDefinition={readDefinition} onUseSkill={onUseSkill}/>:<p role="status">正在读取技能目录…</p>}
+ return <div>{current?.error?<p role="alert">技能目录暂时不可用，请重试。</p>:current?.value?
+  <SkillCatalogView value={current.value} paths={paths} resources={resources} definitions={definitions}
+   onPathChange={changePath} onReadResource={readResource} onReadDefinition={readDefinition} onUseSkill={onUseSkill}/>
+ :<p role="status">正在读取技能目录…</p>}
+  <NativeCommandQueries key={ownerScope+':'+runId} runId={runId} ownerScope={ownerScope}
+   commands={current?.value?.commands?.items??[]} catalogSha256={current?.value?.catalogSha256??''}/>
   <button type="button" onClick={()=>setAttempt(n=>n+1)}>刷新技能目录</button></div>;
 }

@@ -21838,6 +21838,92 @@
           }
         }
       }
+    },
+    "/v1/runs/{run_id}/native-command-queries/{request_id}/close": {
+      "post": {
+        "operationId": "closeNativeCommandQuery",
+        "tags": [
+          "skills"
+        ],
+        "description": "Persist an owner/run/request dispatch fence and end any unclaimed original query. An absent original request receives a durable fenced rejection. Original native settlement owns outcomes after dispatch. The original request ID must equal Idempotency-Key.",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativeCommandQueryClose"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Original operation state after the dispatch fence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeCommandQueryOperation"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Owned run unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Original command identity conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid original request identity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -42232,6 +42318,22 @@
         },
         "required": [
           "items"
+        ],
+        "additionalProperties": false
+      },
+      "NativeCommandQueryClose": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": [
+              "permission",
+              "goal"
+            ]
+          }
+        },
+        "required": [
+          "name"
         ],
         "additionalProperties": false
       }

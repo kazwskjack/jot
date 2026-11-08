@@ -49,6 +49,15 @@ export function registerNativeCommandQueryRoutes(app:FastifyInstance,{db,catalog
   try{if(Object.keys(request.query as object).length)throw Error('native_command_query_invalid');const {owner,runId,requestId}=owned(request);return journal.read(owner,runId,requestId!);}
   catch(cause){return error(reply,cause);}
  });
+ app.post('/v1/runs/:runId/native-command-queries/:requestId/close',{config:{nativeCommandQueryMutation:true}},async(request,reply)=>{
+  reply.header('cache-control','private, no-store');
+  try{
+   const {owner,runId,requestId}=owned(request),input=request.body as Record<string,unknown>;
+   if(Object.keys(request.query as object).length||!input||typeof input!=='object'||Array.isArray(input)
+    ||Object.keys(input).join(',')!=='name'||requestId!==request.headers['idempotency-key'])throw Error('native_command_query_invalid');
+   return journal.close(owner,runId,requestId!,input.name);
+  }catch(cause){return error(reply,cause);}
+ });
  for(const action of ['claim','settle'] as const)app.post(`/internal/v1/workbench/native-command-query-${action}`,
   {config:{skillReadInternal:true},bodyLimit:8*1024*1024},async(request,reply)=>{
    const actual=String(request.headers.authorization??''),expected=`Bearer ${token??''}`;

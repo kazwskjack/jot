@@ -4,7 +4,7 @@ import {canonicalJson} from '../db/canonical-json.ts';
 import {withImmediateTransaction} from '../db/database.ts';
 import type {SkillCatalogScope} from './catalog.ts';
 const policyPath=import.meta.url.endsWith('/dist/src/skills/command-query-journal.js')?'../../../../skills/command-query.js':'../../../skills/command-query.js';
-const {validateNativeCommandQuery,validateNativeCommandQueryResult}=await import(new URL(policyPath,import.meta.url).href) as typeof import('../../../skills/command-query.js');
+const {validateNativeCommandQuery,validateNativeCommandQueryIdentity,validateNativeCommandQueryResult}=await import(new URL(policyPath,import.meta.url).href) as typeof import('../../../skills/command-query.js');
 
 type Row=Record<string,any>;
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
@@ -16,14 +16,26 @@ export class NativeCommandQueryJournal{
  owner_id TEXT NOT NULL,run_id TEXT NOT NULL REFERENCES ga_runs(id) ON DELETE CASCADE,request_id TEXT NOT NULL,session_ref TEXT NOT NULL,name TEXT NOT NULL,
  scope_json TEXT NOT NULL,request_json TEXT NOT NULL,request_sha256 TEXT NOT NULL,grant_sha256 TEXT NOT NULL,
  state TEXT NOT NULL CHECK(state IN ('prepared','dispatched','settled','rejected','unknown')),
- result_json TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(owner_id,run_id,request_id));`);}
+ result_json TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(owner_id,run_id,request_id));
+ CREATE TABLE IF NOT EXISTS ga_native_command_query_fences(owner_id TEXT NOT NULL,
+ run_id TEXT NOT NULL REFERENCES ga_runs(id) ON DELETE CASCADE,request_id TEXT NOT NULL,name TEXT NOT NULL,updated_at TEXT NOT NULL,
+ PRIMARY KEY(owner_id,run_id,request_id));`);}
+ private fence(owner:string,runId:string,id:string){return this.db.prepare("SELECT request_id,run_id,name,'rejected' AS state,updated_at FROM ga_native_command_query_fences WHERE owner_id=? AND run_id=? AND request_id=?").get(owner,runId,id) as Row|undefined;}
  private row(owner:string,runId:string,id:string){
   const row=this.db.prepare('SELECT * FROM ga_native_command_queries WHERE owner_id=? AND run_id=? AND request_id=?').get(owner,runId,id) as Row|undefined;
   if(!row)throw Error('native_command_query_not_found');return row;
  }
- read(owner:string,runId:string,id:string){return project(this.row(owner,runId,id));}
+ read(owner:string,runId:string,id:string){
+  const row=this.db.prepare('SELECT * FROM ga_native_command_queries WHERE owner_id=? AND run_id=? AND request_id=?').get(owner,runId,id) as Row|undefined;
+  if(row)return project(row);
+  const fenced=this.fence(owner,runId,id);if(fenced)return project(fenced);
+  throw Error('native_command_query_not_found');
+ }
  list(owner:string,runId:string){
-  return {items:(this.db.prepare('SELECT request_id,run_id,name,state,updated_at FROM ga_native_command_queries WHERE owner_id=? AND run_id=? ORDER BY updated_at DESC,request_id DESC LIMIT 50').all(owner,runId) as Row[])
+  return {items:(this.db.prepare(`SELECT request_id,run_id,name,state,updated_at FROM ga_native_command_queries WHERE owner_id=? AND run_id=?
+   UNION ALL SELECT f.request_id,f.run_id,f.name,'rejected' AS state,f.updated_at FROM ga_native_command_query_fences f
+   WHERE f.owner_id=? AND f.run_id=? AND NOT EXISTS(SELECT 1 FROM ga_native_command_queries q WHERE q.owner_id=f.owner_id AND q.run_id=f.run_id AND q.request_id=f.request_id)
+   ORDER BY updated_at DESC,request_id DESC LIMIT 50`).all(owner,runId,owner,runId) as Row[])
    .map(row=>({request_id:row.request_id,run_id:row.run_id,name:row.name,state:row.state,updated_at:row.updated_at}))};
  }
  prepare(owner:string,runId:string,input:unknown,scope:()=>SkillCatalogScope){
@@ -31,10 +43,23 @@ export class NativeCommandQueryJournal{
   return withImmediateTransaction(this.db,()=>{
    const old=this.db.prepare('SELECT * FROM ga_native_command_queries WHERE owner_id=? AND run_id=? AND request_id=?').get(owner,runId,request.request_id) as Row|undefined;
    if(old){if(old.request_sha256!==requestHash)throw Error('native_command_query_conflict');return {receipt:project(old)};}
+   const fenced=this.fence(owner,runId,request.request_id);
+   if(fenced){if(fenced.name!==request.name)throw Error('native_command_query_conflict');return {receipt:project(fenced)};}
    const original=scope(),token=randomBytes(32).toString('base64url'),time=now();
    this.db.prepare("INSERT INTO ga_native_command_queries VALUES(?,?,?,?,?,?,?,?,?,'prepared',NULL,?,?)")
     .run(owner,runId,request.request_id,original.session_ref,request.name,canonicalJson(original),canonicalJson(request),requestHash,hash(token),time,time);
    return {receipt:{request_id:request.request_id,run_id:runId,name:request.name,state:'prepared',updated_at:time},packet:{scope:original,request,grant_token:token}};
+  });
+ }
+ close(owner:string,runId:string,id:string,name:unknown){
+  const identity=validateNativeCommandQueryIdentity({request_id:id,name});
+  return withImmediateTransaction(this.db,()=>{
+   const old=this.db.prepare('SELECT name FROM ga_native_command_queries WHERE owner_id=? AND run_id=? AND request_id=?').get(owner,runId,id) as Row|undefined;
+   const fenced=this.fence(owner,runId,id);
+   if(old&&old.name!==name||fenced&&fenced.name!==name)throw Error('native_command_query_conflict');
+   this.db.prepare('INSERT OR IGNORE INTO ga_native_command_query_fences VALUES(?,?,?,?,?)').run(owner,runId,id,identity.name,now());
+   this.db.prepare("UPDATE ga_native_command_queries SET state='rejected',updated_at=? WHERE owner_id=? AND run_id=? AND request_id=? AND state='prepared'").run(now(),owner,runId,id);
+   return this.read(owner,runId,id);
   });
  }
  private authorized(value:Row){

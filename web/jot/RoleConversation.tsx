@@ -13,6 +13,7 @@ import InteractionCard from './InteractionCard';
 import ConversationGoal from './ConversationGoal';
 import VoiceInput from './VoiceInput';
 import SkillCatalogPanel from './SkillCatalogPanel';
+import NativeCommandQueries from './NativeCommandQueries';
 import {catalogMountForRun,skillGestureDraft} from './skill-catalog-mount.js';
 import CompactionActivities from './CompactionActivities';
 import RunDiagnostics from './RunDiagnostics';
@@ -144,6 +145,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  const state=controller.state,run=state?(Object.values(state.runs) as Run[]).find(active):undefined;
  const diagnosticRun=state?(Object.values(state.runs) as Run[]).filter(value=>value.conversation_id===id).sort((a,b)=>b.created_at.localeCompare(a.created_at)||b.run_id.localeCompare(a.run_id))[0]:undefined;
   const catalogMount=catalogMountForRun(run?.run_id,taskDraftScope(),ordinary);
+  const queryRecoveryMount=catalogMount?null:catalogMountForRun(diagnosticRun?.run_id,taskDraftScope(),ordinary);
  const chatMode=ordinary&&conversation?.mode==='chat';
  const routingStatus=modelRoutingStatus(conversation?.model,models);
  let modes={aware:false,default:'work',chatReady:false},modeCapabilityError='';
@@ -211,6 +213,8 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  {!ordinary&&run&&['starting','running'].includes(run.status)&&<NativeMemberControls key={`native-member-controls:${run.run_id}`} run={run}/>}
  {ordinary&&conversation&&!chatMode&&<div inert={cancelWriter.pending||controller.pendingMessage}><ConversationGoal key={id} id={id} running={run?.status==='running'} runStatus={run?.status} controlRun={state?latestGoalRun(Object.values(state.runs),id):undefined} onResumeAccepted={()=>{void controller.refresh().catch(()=>{});}} onStopCompleted={focusConversationAfterStop} onPendingChange={setGoalPending}/></div>}
   {catalogMount&&<SkillCatalogPanel runId={catalogMount.runId} ownerScope={catalogMount.ownerScope} onUseSkill={name=>editDraft(skillGestureDraft(draftRef.current,name))}/>}
+  {queryRecoveryMount&&<NativeCommandQueries key={queryRecoveryMount.ownerScope+':'+queryRecoveryMount.runId}
+   runId={queryRecoveryMount.runId} ownerScope={queryRecoveryMount.ownerScope} commands={[]} catalogSha256=""/>}
   {diagnosticRun&&<RunDiagnostics key={diagnosticRun.run_id} run={diagnosticRun}/>}
  {state&&<CompactionActivities activities={Object.values(state.activities)} runs={state.runs}/>}
   {state&&Object.values(state.messages).map((message:any)=>{

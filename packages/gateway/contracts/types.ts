@@ -486,3 +486,5 @@ export type NativeCommandQueryAccepted = {accepted:true;request_id:string;run_id
 export type NativeCommandQuerySummary = {request_id:string;run_id:string;name:'permission'|'goal';state:'prepared'|'dispatched'|'settled'|'rejected'|'unknown';updated_at:string};
 export type NativeCommandQueryOperation = NativeCommandQuerySummary & {result?:NativeCommandQueryResult};
 export type NativeCommandQueryPage = {items:NativeCommandQuerySummary[]};
+
+export type NativeCommandQueryClose = {name:'permission'|'goal'};
