@@ -16,7 +16,7 @@ function scopeOf(value){
 export function createSkillCatalogReader({agents,sessions,bridge}={}){
  if(typeof agents?.get!=='function'||typeof sessions?.get!=='function'||typeof bridge?.guard!=='function'
   ||typeof bridge?.bindingFor!=='function'||typeof bridge?.request!=='function')throw Error('skill_catalog_host_unavailable');
- const reader=async({scope:input,signal}={})=>{
+ const reader=async({scope:input,signal,include_commands=false}={})=>{
   const scope=scopeOf(input),bounded=AbortSignal.any([AbortSignal.timeout(5000),...(signal?[signal]:[])]);
   const agent=agents.get(scope.session_ref),session=sessions.get(scope.session_ref),binding=agent&&bridge.bindingFor(agent),cwd=session?.header?.cwd;
   const check=()=>{
@@ -31,7 +31,8 @@ export function createSkillCatalogReader({agents,sessions,bridge}={}){
    if(!context||KEYS.filter(k=>k!=='session_ref').some(k=>context[k]!==scope[k]))throw Error('skill_catalog_scope_forbidden');
   };
   await authorize();const skills=agent.ctx?.get('skills');
-  const catalog=await readSkillCatalogView({skills,cwd,scope:agent,signal:bounded});
+  const commands=include_commands?agent.ctx?.get('commands',false):undefined;
+  const catalog=await readSkillCatalogView({skills,cwd,scope:agent,signal:bounded,includeCommands:include_commands,commands});
   await authorize();return {scope:{...scope},catalog};
  };
  originalReaders.add(reader);
@@ -44,9 +45,10 @@ export function createSkillCatalogReader({agents,sessions,bridge}={}){
 export function createSkillCatalogCommand(readCatalog){
  if(typeof readCatalog!=='function'||!originalReaders.has(readCatalog))throw Error('skill_catalog_host_unavailable');
  return async(request,{signal}={})=>{
-  if(!exact(request,['protocol','scope'])||request.protocol!==1)throw Error('skill_catalog_command_invalid');
+  if(!(exact(request,['protocol','scope'])||exact(request,['protocol','scope','include_commands'])&&request.include_commands===true)
+   ||request.protocol!==1)throw Error('skill_catalog_command_invalid');
   const scope=scopeOf(request.scope);signal?.throwIfAborted();
-  const result=await readCatalog({scope,...(signal?{signal}:{})});signal?.throwIfAborted();
+  const result=await readCatalog({scope,...(signal?{signal}:{}),...(request.include_commands?{include_commands:true}:{})});signal?.throwIfAborted();
   if(!exact(result,['catalog','scope']))throw Error('skill_catalog_scope_changed');
   const observed=scopeOf(result.scope);
   if(KEYS.some(key=>observed[key]!==scope[key]))throw Error('skill_catalog_scope_changed');

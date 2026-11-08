@@ -467,3 +467,10 @@ export type PluginProfileOperation = {
   operation_id:string; operation:'plugin.bundle.install'|'plugin.bundle.enable'|'plugin.bundle.remove';
 } & ({state:'settled';response:PluginProfileResult;response_status:200}
   | {state:'reserved'|'dispatched'|'unknown';response?:never;response_status?:never});
+
+export type RunSkillCatalogScope = {conversation_id:string;workspace_id:string;project_id:string;agent_id:string;run_id:string;capability_epoch:number};
+export type NativeCommandDescriptor = import('../../skills/catalog-contract.js').CommandManifest;
+export type NativeCommandCatalog = import('../../skills/catalog-contract.js').SkillCommandCatalog;
+export type RunSkillCatalogObservation = import('../../skills/catalog-contract.js').SkillCatalogObservation & {viewScope:RunSkillCatalogScope};
+export type RunSkillResourceObservation = import('../../skills/catalog-contract.js').SkillResourceView & {viewScope:RunSkillCatalogScope};
+export type RunSkillReadResponse = RunSkillCatalogObservation | RunSkillResourceObservation;

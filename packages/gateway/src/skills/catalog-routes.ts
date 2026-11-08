@@ -5,14 +5,16 @@ export function registerSkillCatalogRoutes(app:FastifyInstance,service:SkillCata
  app.get('/v1/runs/:runId/skills',async(request,reply)=>{
   reply.header('cache-control','private, no-store').header('x-content-type-options','nosniff');
   const query=request.query as Record<string,unknown>,keys=Object.keys(query);
-  const selected=keys.length===0?undefined:keys.length===2&&keys.includes('name')&&keys.includes('path')
+  const includeCommands=keys.length===1&&query.commands==='1';
+  const selected=keys.length===0||includeCommands?undefined:keys.length===2&&keys.includes('name')&&keys.includes('path')
    &&typeof query.name==='string'&&typeof query.path==='string'?{name:query.name,path:query.path}:null;
   if(selected===null)return reply.code(422).send({error:{code:'SKILL_CATALOG_INPUT_INVALID'}});
   const cancel=new AbortController(),abort=()=>cancel.abort(),close=()=>{if(!reply.raw.writableEnded)abort();};
   request.raw.once('aborted',abort);reply.raw.once('close',close);
   try{
    const runId=(request.params as {runId:string}).runId;
-   return selected?await service.readResource(actor(request),runId,selected.name,selected.path,cancel.signal):await service.read(actor(request),runId,cancel.signal);
+   return selected?await service.readResource(actor(request),runId,selected.name,selected.path,cancel.signal)
+    :await service.read(actor(request),runId,cancel.signal,includeCommands);
   }
   catch(error){
    if(cancel.signal.aborted)throw error;

@@ -29,6 +29,15 @@ export function SkillCatalogView({value,paths,resources,onPathChange,onReadResou
     {selected?.error&&<p role="alert">{selected.error}</p>}
     {selected?.value&&<section aria-label={`${item.name} 资源内容`}><p>只读文本 · SHA-256 <code>{selected.value.textSha256}</code></p><pre>{selected.value.text}</pre></section>}
    </li>})}</ul>}
+  <section aria-label="当前会话原生命令"><h4>原生命令</h4>
+   {!value.commands?.available?<p role="status">当前会话的原生命令目录暂不可用。</p>
+    :value.commands.items.length===0?<p>当前会话没有注册命令。</p>
+    :<ul>{value.commands.items.map(command=><li key={command.name}>
+     <strong>/{command.name}</strong><p>{command.description}</p>
+     {command.definitionId&&<p>定义 ID <code>{command.definitionId}</code></p>}
+     {command.input&&<p>参数提示 {command.input.hint} · 附件{command.input.attachments?'可提交':'不可提交'}</p>}
+    </li>)}</ul>}
+  </section>
  </section>;
 }
 /** Root-owned RoleConversation mounting remains an explicit integration step. */

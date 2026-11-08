@@ -1663,5 +1663,14 @@
     "McpUnknownOperationPage",
     "200",
     "Owner-and-agent scoped read-only projection of up to 50 unknown original operations. Original calls are never redispatched by this endpoint."
+  ],
+  [
+    "GET",
+    "/v1/runs/{run_id}/skills",
+    "Read original-scope native skills and optional commands",
+    null,
+    "RunSkillReadResponse",
+    "200",
+    "Read the resident native SkillRegistry for the original owner/run/Session scope. commands=1 opts into descriptors from commands.list(originalAgent), including effective scoped shadowing. The default view contains skill metadata. Select exactly name and path together for one inert relative resource. Query forms are exclusive. The response carries execution_authorized=false and retains the original run permissions. SkillDefinition version metadata requires a separate selected-definition read."
   ]
 ]

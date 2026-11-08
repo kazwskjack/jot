@@ -21,7 +21,7 @@ function viewScope(value:unknown,runId:string):SkillCatalogViewScope{
 export async function readSkillCatalog(runId:string,ownerScope:string,signal:AbortSignal):Promise<SkillCatalogResponse>{
  if(!ID.test(runId))throw Error('skill_catalog_invalid');
  const current=()=>{signal.throwIfAborted();if(!/^[a-f0-9]{64}$/.test(ownerScope)||taskDraftScope()!==ownerScope)throw Error('SKILL_CATALOG_SCOPE_CHANGED');};
- current();const raw=await request<SkillCatalogResponse>(`/runs/${encodeURIComponent(runId)}/skills`,'GET',undefined,undefined,signal);current();
+ current();const raw=await request<SkillCatalogResponse>(`/runs/${encodeURIComponent(runId)}/skills?commands=1`,'GET',undefined,undefined,signal);current();
  if(!raw||typeof raw!=='object'||Array.isArray(raw))throw Error('skill_catalog_invalid');
  const {viewScope:rawScope,...candidate}=raw,catalog=validateSkillCatalogView(candidate),scope=viewScope(rawScope,runId);
  const hash=[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(catalogDigestInput(catalog))))].map(v=>v.toString(16).padStart(2,'0')).join('');current();

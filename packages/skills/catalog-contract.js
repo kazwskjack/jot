@@ -13,10 +13,31 @@ export function skillManifest(value){
  return {name:value.name,description:value.description,...(value.whenToUse===undefined?{}:{whenToUse:value.whenToUse}),
   invocation:{modelInvocable:value.invocation.modelInvocable,userInvocable:value.invocation.userInvocable},source:value.source,provider:value.provider};
 }
-export function catalogDigestInput(value){return JSON.stringify({protocol:1,complete:value.complete,items:value.items});}
+export function commandManifest(value){
+ if(!object(value)||typeof value.name!=='string'||value.name.length>128||!/^[a-z][a-z0-9_-]*$/u.test(value.name)
+  ||typeof value.description!=='string'||value.description.length>16384
+  ||value.definitionId!==undefined&&(typeof value.definitionId!=='string'||value.definitionId.length<1||value.definitionId.length>512||/[\u0000-\u001f\u007f]/u.test(value.definitionId))
+  ||value.input!==undefined&&(!object(value.input)||typeof value.input.hint!=='string'||value.input.hint.length>16384
+   ||value.input.attachments!==undefined&&typeof value.input.attachments!=='boolean'))invalid();
+ return {name:value.name,description:value.description,...(value.definitionId===undefined?{}:{definitionId:value.definitionId}),
+  ...(value.input===undefined?{}:{input:{hint:value.input.hint,...(value.input.attachments===undefined?{}:{attachments:value.input.attachments})}})};
+}
+function commandCatalog(value){
+ if(!exact(value,['available','items'])||typeof value.available!=='boolean'||!Array.isArray(value.items)
+  ||value.items.length>256||!value.available&&value.items.length)invalid();
+ let previous='';
+ const items=value.items.map(raw=>{
+  const item=commandManifest(raw);
+  if(!exact(raw,Object.keys(item))||item.input&&!exact(raw.input,Object.keys(item.input))||item.name<=previous)invalid();
+  previous=item.name;return item;
+ });
+ return {available:value.available,items};
+}
+export function catalogDigestInput(value){return JSON.stringify({protocol:1,complete:value.complete,items:value.items,
+ ...(value.commands===undefined?{}:{commands:value.commands})});}
 /** Allowlist the observation. Provider paths, opaque locators and arbitrary metadata never cross this boundary. */
 export function validateSkillCatalogView(value){
- if(!exact(value,['protocol','complete','items','catalogSha256','execution_authorized'])||value.protocol!==1||value.execution_authorized!==false
+ if(!exact(value,['protocol','complete','items','catalogSha256','execution_authorized',...(object(value)&&Object.hasOwn(value,'commands')?['commands']:[])])||value.protocol!==1||value.execution_authorized!==false
   ||typeof value.complete!=='boolean'||!Array.isArray(value.items)||value.items.length>256||!sha(value.catalogSha256)||!value.complete&&value.items.length)invalid();
  let previous='';
  const items=value.items.map(raw=>{
@@ -24,7 +45,8 @@ export function validateSkillCatalogView(value){
   if(!exact(raw,keys)||!exact(raw.invocation,['modelInvocable','userInvocable'])||manifest.name<=previous)invalid();
   previous=manifest.name;return manifest;
  });
- return {protocol:1,complete:value.complete,items,catalogSha256:value.catalogSha256,execution_authorized:false};
+ return {protocol:1,complete:value.complete,items,catalogSha256:value.catalogSha256,execution_authorized:false,
+  ...(Object.hasOwn(value,'commands')?{commands:commandCatalog(value.commands)}:{})};
 }
 /** Validate inert text returned for one explicitly selected DSH resource. */
 export async function validateSkillResourceView(value){

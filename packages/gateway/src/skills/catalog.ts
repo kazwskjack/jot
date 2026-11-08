@@ -3,7 +3,7 @@ import type {DatabaseSync} from 'node:sqlite';
 import type {WorkbenchService} from '../workbench/service.ts';
 export type SkillCatalogScope=Readonly<{owner_id:string;project_id:string;workspace_id:string;agent_id:string;run_id:string;session_ref:string;capability_epoch:number}>;
 export type SkillCatalogHost=Readonly<{
- read:(input:{scope:SkillCatalogScope;signal?:AbortSignal})=>Promise<unknown>;
+ read:(input:{scope:SkillCatalogScope;signal?:AbortSignal;include_commands?:true})=>Promise<unknown>;
  readResource?:(input:{scope:SkillCatalogScope;skill_name:string;relative_path:string;signal?:AbortSignal})=>Promise<unknown>;
 }>;
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
@@ -42,9 +42,9 @@ export class SkillCatalogService{
    run_id:runId,session_ref:session,capability_epoch:context.capability_epoch};
   return {scope,conversation_id:String(row.conversation_id)};
  }
- async read(owner:string,runId:string,signal?:AbortSignal){
+ async read(owner:string,runId:string,signal?:AbortSignal,includeCommands=false){
   signal?.throwIfAborted();const before=this.bound(owner,runId);
-  const response=await this.host.read({scope:before.scope,...(signal?{signal}:{})}) as Row;
+  const response=await this.host.read({scope:before.scope,...(signal?{signal}:{}),...(includeCommands?{include_commands:true as const}:{})}) as Row;
   signal?.throwIfAborted();const after=this.bound(owner,runId);
   if(JSON.stringify(before)!==JSON.stringify(after))throw Error('skill_catalog_scope_changed');
   if(!response||Object.keys(response).sort().join(',')!=='catalog,scope'||!response.scope||typeof response.scope!=='object'||Array.isArray(response.scope)

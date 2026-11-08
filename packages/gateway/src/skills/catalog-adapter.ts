@@ -9,10 +9,11 @@ export class SkillCatalogAdapterClient implements SkillCatalogHost{
    ||typeof token!=='string'||token.length<32||token.length>512||/[\r\n]/.test(token)||typeof fetchImpl!=='function')throw Error('skill_catalog_adapter_configuration_invalid');
   this.#origin=url.origin;this.#token=token;this.#fetch=fetchImpl;
  }
- async read({scope,signal}:{scope:SkillCatalogScope;signal?:AbortSignal}):Promise<unknown>{
+ async read({scope,signal,include_commands}:{scope:SkillCatalogScope;signal?:AbortSignal;include_commands?:true}):Promise<unknown>{
   const combined=AbortSignal.any([AbortSignal.timeout(5000),...(signal?[signal]:[])]);combined.throwIfAborted();
   const response=await this.#fetch(this.#origin+'/v1/skills/catalog',{method:'POST',redirect:'error',cache:'no-store',
-   headers:{authorization:`Bearer ${this.#token}`,'content-type':'application/json'},body:JSON.stringify({protocol:1,scope}),signal:combined});
+   headers:{authorization:`Bearer ${this.#token}`,'content-type':'application/json'},
+   body:JSON.stringify({protocol:1,scope,...(include_commands?{include_commands:true}:{})}),signal:combined});
   combined.throwIfAborted();
   if(response.status===404)throw Error('skill_catalog_scope_forbidden');
   if(response.status===409)throw Error('skill_catalog_scope_changed');

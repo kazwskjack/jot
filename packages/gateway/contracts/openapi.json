@@ -21483,6 +21483,113 @@
           }
         }
       }
+    },
+    "/v1/runs/{run_id}/skills": {
+      "get": {
+        "operationId": "readRunSkillCatalog",
+        "tags": [
+          "skills"
+        ],
+        "description": "Read the resident native SkillRegistry for the original owner/run/Session scope. commands=1 opts into descriptors from commands.list(originalAgent), including effective scoped shadowing. The default view contains skill metadata. Select exactly name and path together for one inert relative resource. Query forms are exclusive. The response carries execution_authorized=false and retains the original run permissions. SkillDefinition version metadata requires a separate selected-definition read.",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "commands",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Original-scope read-only observation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunSkillReadResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Scope or selected resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Original scope or selected catalog changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Selected resource exceeds the byte limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid query or resource path",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Native catalog or resource provider unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -41190,6 +41297,236 @@
           "items"
         ],
         "additionalProperties": false
+      },
+      "RunSkillCatalogScope": {
+        "type": "object",
+        "properties": {
+          "conversation_id": {
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "agent_id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "capability_epoch": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "conversation_id",
+          "workspace_id",
+          "project_id",
+          "agent_id",
+          "run_id",
+          "capability_epoch"
+        ],
+        "additionalProperties": false
+      },
+      "SkillCatalogManifest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 16384
+          },
+          "whenToUse": {
+            "type": "string",
+            "maxLength": 16384
+          },
+          "invocation": {
+            "type": "object",
+            "properties": {
+              "modelInvocable": {
+                "type": "boolean"
+              },
+              "userInvocable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "modelInvocable",
+              "userInvocable"
+            ],
+            "additionalProperties": false
+          },
+          "source": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "invocation",
+          "source",
+          "provider"
+        ],
+        "additionalProperties": false
+      },
+      "NativeCommandDescriptor": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "maxLength": 128
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 16384
+          },
+          "definitionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "input": {
+            "type": "object",
+            "properties": {
+              "hint": {
+                "type": "string",
+                "maxLength": 16384
+              },
+              "attachments": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "hint"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "name",
+          "description"
+        ],
+        "additionalProperties": false
+      },
+      "NativeCommandCatalog": {
+        "type": "object",
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 256,
+            "items": {
+              "$ref": "#/components/schemas/NativeCommandDescriptor"
+            }
+          }
+        },
+        "required": [
+          "available",
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "RunSkillCatalogObservation": {
+        "type": "object",
+        "properties": {
+          "protocol": {
+            "const": 1
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 256,
+            "items": {
+              "$ref": "#/components/schemas/SkillCatalogManifest"
+            }
+          },
+          "catalogSha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "execution_authorized": {
+            "const": false
+          },
+          "commands": {
+            "$ref": "#/components/schemas/NativeCommandCatalog"
+          },
+          "viewScope": {
+            "$ref": "#/components/schemas/RunSkillCatalogScope"
+          }
+        },
+        "required": [
+          "protocol",
+          "complete",
+          "items",
+          "catalogSha256",
+          "execution_authorized",
+          "viewScope"
+        ],
+        "additionalProperties": false
+      },
+      "RunSkillResourceObservation": {
+        "type": "object",
+        "properties": {
+          "protocol": {
+            "const": 1
+          },
+          "name": {
+            "type": "string"
+          },
+          "relativePath": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "text": {
+            "type": "string",
+            "description": "UTF-8 text limited to 64 KiB."
+          },
+          "textSha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "execution_authorized": {
+            "const": false
+          },
+          "viewScope": {
+            "$ref": "#/components/schemas/RunSkillCatalogScope"
+          }
+        },
+        "required": [
+          "protocol",
+          "name",
+          "relativePath",
+          "text",
+          "textSha256",
+          "execution_authorized",
+          "viewScope"
+        ],
+        "additionalProperties": false
+      },
+      "RunSkillReadResponse": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/RunSkillCatalogObservation"
+          },
+          {
+            "$ref": "#/components/schemas/RunSkillResourceObservation"
+          }
+        ]
       }
     },
     "parameters": {
