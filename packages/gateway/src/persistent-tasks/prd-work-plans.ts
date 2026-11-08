@@ -1,3 +1,4 @@
+import {readPrdResearch,isPrdResearchEvidence} from './prd-research.ts';
 import {readPrdAppendSource,assertPrdAppendLedger,type PrdAppendSource} from './prd-append-source.ts';
 import {readPrdTaskCount} from './prd-task-count.ts';
 import {createHash} from 'node:crypto';
@@ -58,6 +59,8 @@ export function proposePrdWorkPlan(db:DatabaseSync,owner:string,runId:string,cal
   if(prior.request_sha256!==requestHash)throw Error('idempotency_conflict');
   return view(prior);
  }
+ const research=readPrdResearch(db,source.binding_id);
+ const researchEvidence:Array<{kind:'tool_receipt';reference:string;hash:string}>=[];
  const numTasks=readPrdTaskCount(db,source.binding_id),appendSource=readPrdAppendSource(db,source.binding_id);
  assertPrdAppendLedger(appendSource,subtasks);
  if(numTasks!==undefined&&subtasks.length-(appendSource?.task_count??0)!==numTasks)throw Error('prd_work_plan_task_count_mismatch');
@@ -77,6 +80,10 @@ export function proposePrdWorkPlan(db:DatabaseSync,owner:string,runId:string,cal
   const ref=object(item,['kind','reference','hash']);
   if(ref.kind!=='tool_receipt'||typeof ref.reference!=='string'||!ref.reference||ref.reference.length>200||typeof ref.hash!=='string'||!/^[a-f0-9]{64}$/.test(ref.hash)||seen.has(ref.reference))throw invalid();
   seen.add(ref.reference);
+  const verified={kind:'tool_receipt' as const,reference:ref.reference as string,hash:ref.hash as string};
+  if(research&&isPrdResearchEvidence(db,owner,task.task_id,source.occurrence_id,descriptor,verified)){
+   researchEvidence.push(verified);return verified;
+  }
   const read=db.prepare(`SELECT e.*,w.response_json FROM wb_task_execution_receipts e JOIN wb_tool_receipts w ON w.run_id=e.run_id AND w.call_id=e.call_id
    JOIN wb_task_run_occurrences o ON o.run_id=e.run_id JOIN wb_persistent_tasks t ON t.task_id=o.task_id
    WHERE e.receipt_id=? AND e.operation='tasks.prd.read' AND t.owner_id=? AND o.task_id=? AND o.occurrence_id=?`)
@@ -88,7 +95,7 @@ export function proposePrdWorkPlan(db:DatabaseSync,owner:string,runId:string,cal
    ||result.source_untrusted!==true||result.execution_authorized!==false||!Number.isSafeInteger(start)||start<0||!Number.isSafeInteger(length)||length<0||length>65536
    ||start+length>bytes.length||typeof result.content!=='string'||!Buffer.from(result.content,'utf8').equals(bytes.subarray(start,start+length))||result.eof!==(start+length===bytes.length))throw Error('prd_work_plan_read_unverified');
   ranges.push({start,end:start+length});
-  return {kind:'tool_receipt' as const,reference:ref.reference as string,hash:ref.hash as string};
+  return verified;
  });
  let end=0;
  for(const range of ranges.sort((a,b)=>a.start-b.start)){
@@ -96,13 +103,14 @@ export function proposePrdWorkPlan(db:DatabaseSync,owner:string,runId:string,cal
   end=Math.max(end,range.end);
  }
  if(end!==bytes.length)throw Error('prd_work_plan_full_read_required');
+ if(research&&!researchEvidence.length)throw Error('prd_work_plan_research_required');
  let ledgerBytes=0;
  for(const subtask of subtasks){
   ledgerBytes+=Buffer.byteLength(canonicalJson(subtask),'utf8');
   if(ledgerBytes>4194304)throw Error('invalid_prd_work_plan_ledger_too_large');
  }
  const at=new Date().toISOString(),planId='prd-plan-'+digest({owner,run_id:runId,call_id:callId});
- const snapshot={protocol:1,plan_id:planId,task_id:task.task_id,task_version:task.version,objective_sha256:hash(task.objective),
+ const snapshot={...(research?{research_evidence:researchEvidence}:{}),protocol:1,plan_id:planId,task_id:task.task_id,task_version:task.version,objective_sha256:hash(task.objective),
   role:{agent_id:role.agent_id,version:role.version,capability_epoch:role.capability_epoch,workspace_id:role.workspace_id,project_id:role.project_id},
   source:{binding_id:source.binding_id,content_sha256:source.content_sha256,size:bytes.length},occurrence_id:source.occurrence_id,root_run_id:source.root_run_id,run_id:runId,call_id:callId,
   summary,rationale,changes,evidence,subtasks,ledger_sha256:digest(subtasks),created_at:at,accepted:false,execution_authorized:false};

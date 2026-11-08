@@ -36991,6 +36991,10 @@
           "append": {
             "type": "boolean",
             "description": "Explicitly retain original native subtask definitions and dependencies as an immutable binding baseline. num_tasks then counts newly added subtasks."
+          },
+          "research": {
+            "type": "boolean",
+            "description": "Explicitly require original same-occurrence attested source reads in addition to contiguous full PRD reads when proposing work. Existing tool permissions and cumulative budgets apply."
           }
         }
       },
@@ -37018,6 +37022,10 @@
           "append": {
             "type": "boolean",
             "description": "Explicitly retain original native subtask definitions and dependencies as an immutable binding baseline. num_tasks then counts newly added subtasks."
+          },
+          "research": {
+            "type": "boolean",
+            "description": "Explicitly require original same-occurrence attested source reads in addition to contiguous full PRD reads when proposing work. Existing tool permissions and cumulative budgets apply."
           }
         }
       },
@@ -37102,6 +37110,10 @@
                 "pattern": "^[a-f0-9]{64}$"
               }
             }
+          },
+          "research": {
+            "type": "boolean",
+            "const": true
           }
         },
         "dependentRequired": {
@@ -37202,6 +37214,10 @@
           },
           "append_source": {
             "$ref": "#/components/schemas/TaskPrdAppendSource"
+          },
+          "research": {
+            "type": "boolean",
+            "const": true
           }
         },
         "dependentRequired": {
@@ -47610,6 +47626,35 @@
           },
           "execution_authorized": {
             "const": false
+          },
+          "research_evidence": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 256,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "reference",
+                "hash"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "tool_receipt"
+                },
+                "reference": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "hash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "description": "Server-verified original same-occurrence web.read/files.read research receipt references. Reading is attested. Owner review evaluates the findings."
           }
         }
       },

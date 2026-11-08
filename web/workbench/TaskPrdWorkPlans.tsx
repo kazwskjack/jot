@@ -90,6 +90,7 @@ export default function TaskPrdWorkPlans({task,locked,ready,save,cycleSave,hando
   {detail&&<div style={textStyle}>
    <h5>{detail.summary}</h5><p>{detail.rationale}</p>
    <dl><dt>原任务 / 角色版本</dt><dd>v{detail.task_version} / v{detail.role.version} · 权限修订 {detail.role.capability_epoch}</dd><dt>原执行批次 / 运行</dt><dd>{detail.occurrence_id} / {detail.run_id}</dd><dt>PRD 绑定 / 原文 SHA-256</dt><dd>{detail.source.binding_id} / {detail.source.content_sha256}</dd><dt>提案 SHA-256</dt><dd>{detail.sha256}</dd><dt>原账本 SHA-256</dt><dd>{detail.ledger_sha256}</dd></dl>
+   {detail.research_evidence&&<details><summary>本批研究资料读取回执 {detail.research_evidence.length} 项</summary><p>回执指向原执行记录，研究结论沿原计划审阅。</p><PrdTextPreview content={JSON.stringify(detail.research_evidence,null,2)} label="研究资料回执" style={textStyle}/></details>}
    <PrdTextPreview content={changes} label="文件计划提案步骤" style={textStyle}/>
    <details open={ledgerOpen} onToggle={event=>setLedgerOpen(event.currentTarget.open)}><summary>本次冻结的子任务账本</summary>{ledgerOpen&&<PrdTextPreview content={ledger} label="文件计划原账本" style={textStyle}/>}</details>
    {!accepted&&(task.version!==detail.task_version||!['active','budget_exhausted'].includes(task.status))&&<p role="status">当前任务状态或版本与提案不匹配，请由原任务在有效执行批次重新提交计划。</p>}

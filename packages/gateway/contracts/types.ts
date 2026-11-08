@@ -394,10 +394,10 @@ export type ProjectDiscoveryTaskTrigger = {kind:"project_discovery";policy_id:st
 
 export type TaskPrdSelection = {kind:"logical_file";path:string;version:number;sha256:string}|{kind:"upload";artifact_id:string;version:number;sha256:string};
 export type TaskPrdSource = TaskPrdSelection & {name:string;size:number};
-export type TaskPrdPreviewRequest = {append?:boolean;num_tasks?:number;source:TaskPrdSelection};
-export type TaskPrdBindRequest = {append?:boolean;num_tasks?:number;source:TaskPrdSelection;preview_sha256:string};
-export type TaskPrdReceipt = {append?:true;append_source?:Pick<TaskPrdAppendSource,"task_count"|"sha256">;num_tasks?:number;binding_id:string;task_id:string;task_version:number;revision:number;source:TaskPrdSource;content_sha256:string;objective_sha256:string;created_at:string;execution_authorized:false};
-export type TaskPrdPreview = {append?:true;append_source?:TaskPrdAppendSource;num_tasks?:number;task_id:string;task_version:number;role:{agent_id:string;version:number;capability_epoch:number};source:TaskPrdSource;content:string;objective:string;source_delivery?:"reference";source_instructions?:string;preview_sha256:string;execution_authorized:false};
+export type TaskPrdPreviewRequest = {research?:boolean;append?:boolean;num_tasks?:number;source:TaskPrdSelection};
+export type TaskPrdBindRequest = {research?:boolean;append?:boolean;num_tasks?:number;source:TaskPrdSelection;preview_sha256:string};
+export type TaskPrdReceipt = {research?:true;append?:true;append_source?:Pick<TaskPrdAppendSource,"task_count"|"sha256">;num_tasks?:number;binding_id:string;task_id:string;task_version:number;revision:number;source:TaskPrdSource;content_sha256:string;objective_sha256:string;created_at:string;execution_authorized:false};
+export type TaskPrdPreview = {research?:true;append?:true;append_source?:TaskPrdAppendSource;num_tasks?:number;task_id:string;task_version:number;role:{agent_id:string;version:number;capability_epoch:number};source:TaskPrdSource;content:string;objective:string;source_delivery?:"reference";source_instructions?:string;preview_sha256:string;execution_authorized:false};
 export type TaskmasterMcpStatus = {connection_id:string;server_name:string;version:number;enabled:boolean;state:string;active_generation:number;pending_generation:number|null;approved_tool_count:number};
 export type TaskPrdTaskmasterStatus = {registry_available:boolean;connections:TaskmasterMcpStatus[]};
 export type TaskPrdSources = {task_id:string;task_version:number;readiness:{ready:boolean;reasons:string[]};sources:TaskPrdSource[];truncated:boolean;binding:TaskPrdReceipt|null;taskmaster?:TaskPrdTaskmasterStatus};
@@ -562,6 +562,7 @@ export type TaskPrdProjectDocumentImport = Omit<TaskPrdTemplateApply,"file">&{
 };
 
 export type TaskPrdWorkPlan = {
+ research_evidence?:Array<{kind:"tool_receipt";reference:string;hash:string}>;
  protocol:1;plan_id:string;task_id:string;task_version:number;objective_sha256:string;
  role:TaskPrdPreview["role"]&{workspace_id:string;project_id:string};source:{binding_id:string;content_sha256:string;size:number};
  occurrence_id:string;root_run_id:string;run_id:string;call_id:string;summary:string;rationale:string;
