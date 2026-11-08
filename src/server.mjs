@@ -21,7 +21,18 @@ export async function buildServer(options={}){
   const flag=value=>{if(value===undefined||value==='false')return false;if(value==='true')return true;throw Error('invalid_chat_configuration');};
   const chat=demo?undefined:chatRoute(options.chat??{enabled:flag(process.env.JOT_CHAT_ENABLED),baseUrl:process.env.JOT_CHAT_MODEL_URL,model:process.env.JOT_CHAT_MODEL,key:process.env.JOT_CHAT_MODEL_KEY,thinkingDisabledSupported:flag(process.env.JOT_CHAT_THINKING_DISABLED_SUPPORTED)});
   const staticRoot=resolve(options.publicRoot??publicRoot);
-  const workbench=workbenchConfig(options.workbench??{url:process.env.JOT_WORKBENCH_URL,owner:process.env.JOT_WORKBENCH_OWNER,csrf:process.env.JOT_WORKBENCH_CSRF_TOKEN});
+  const hostSettingsFlag=process.env.JOT_HOST_SETTINGS_ENABLED;
+  if(hostSettingsFlag!==undefined&&hostSettingsFlag!=='true'&&hostSettingsFlag!=='false')throw Error('invalid_host_settings_configuration');
+  const hostSettingsWriteFlag=process.env.JOT_HOST_SETTINGS_WRITE_ENABLED;
+  if(hostSettingsWriteFlag!==undefined&&hostSettingsWriteFlag!=='true'&&hostSettingsWriteFlag!=='false')throw Error('invalid_host_settings_write_configuration');
+  const hostSettingsWriteEnabled=hostSettingsWriteFlag==='true',hostSettingsWriteNamespace=process.env.JOT_HOST_SETTINGS_WRITE_NAMESPACE?.trim()||'';
+  if(hostSettingsWriteEnabled&&(hostSettingsFlag!=='true'||!hostSettingsWriteNamespace)||!hostSettingsWriteEnabled&&hostSettingsWriteNamespace)
+    throw Error('invalid_host_settings_write_configuration');
+  const defaultWorkbench={url:process.env.JOT_WORKBENCH_URL,owner:process.env.JOT_WORKBENCH_OWNER,csrf:process.env.JOT_WORKBENCH_CSRF_TOKEN,
+    ...(hostSettingsFlag==='true'?{hostBootstrap:{enabled:true,dshOrigin:process.env.JOT_DSH_ORIGIN,jotOrigin:process.env.JOT_PUBLIC_ORIGIN,
+      namespaces:(process.env.JOT_HOST_SETTINGS_NAMESPACES??'').split(',').map(value=>value.trim()).filter(Boolean),
+      ...(hostSettingsWriteEnabled?{writeEnabled:true,writeNamespace:hostSettingsWriteNamespace}:{})}}:{})};
+  const workbench=workbenchConfig(options.workbench??defaultWorkbench);
   const root=resolve(options.root??'.data/files'),store=new Store(options.database??'.data/jot.db');store.recover();
   const origins=new Set((process.env.JOT_WEB_ORIGINS??'').split(',').map(x=>x.trim()).filter(Boolean));
   const tools=createTools({store,root,origins,searchUrl:process.env.JOT_SEARCH_URL??'',browserEnabled:process.env.JOT_BROWSER==='true'&&!demo,...(options.browserFactory?{browserFactory:options.browserFactory}:{})});

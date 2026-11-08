@@ -1,6 +1,6 @@
 import type {Snapshot,AgentEvent} from './types';
 export const base='/workbench-api';
-export class ApiError extends Error{constructor(public status:number,message:string){super(message)}}
+export class ApiError extends Error{constructor(public status:number,message:string,public data?:unknown){super(message)}}
 let csrfToken='',draftScope='';
 export const taskDraftScope=()=>draftScope;
 function deadline(parent:AbortSignal|undefined,ms:number){
@@ -16,7 +16,7 @@ export async function request<T>(path:string,method='GET',body?:unknown,key?:str
  try{
  const r=await fetch(base+'/v1'+path,{method,headers,credentials:'same-origin',cache:'no-store',signal:timed.signal,body:body===undefined?undefined:body instanceof File?body:JSON.stringify(body)});
  if(path==='/capabilities'){const scope=r.headers.get('x-workbench-draft-scope')??'';draftScope=r.ok&&/^[a-f0-9]{64}$/.test(scope)?scope:'';if(r.ok)csrfToken=r.headers.get('x-csrf-token')??'';}
- if(!r.ok){const data=await r.json().catch(()=>({}));throw new ApiError(r.status,data.error?.message??data.error?.code??`连接失败 (${r.status})`)}
+ if(!r.ok){const data=await r.json().catch(()=>({}));throw new ApiError(r.status,data.error?.message??data.error?.code??`连接失败 (${r.status})`,data)}
  if(r.status===204)return undefined as T;
  const text=await r.text();return text?JSON.parse(text):undefined as T;
  }finally{timed.dispose()}
@@ -28,6 +28,15 @@ export async function requestBytes(path:string,signal?:AbortSignal):Promise<Uint
   if(!r.ok){const data=await r.json().catch(()=>({}));throw new ApiError(r.status,data.error?.message??data.error?.code??`连接失败 (${r.status})`)}
   return new Uint8Array(await r.arrayBuffer());
  }finally{timed.dispose()}
+}
+
+export async function hostBootstrapRequest(action:'challenge'|'redeem',body:Record<string,string>|undefined,signal?:AbortSignal):Promise<unknown>{
+ const timed=deadline(signal,30000);
+ try{
+  const response=await fetch(`/api/host/bootstrap/${action}`,{method:'POST',headers:{'Content-Type':'application/json','X-jot-token':csrfToken},credentials:'same-origin',cache:'no-store',redirect:'error',signal:timed.signal,body:JSON.stringify(body??{})});
+  if(!response.ok){const data=await response.json().catch(()=>({}));throw new ApiError(response.status,data.error?.code??`Host 授权失败 (${response.status})`);}
+  return await response.json();
+ }finally{timed.dispose();}
 }
 
 function abortableDelay(ms:number,signal:AbortSignal){return new Promise<void>((resolve,reject)=>{if(signal.aborted){reject(new DOMException('Aborted','AbortError'));return;}const timer=setTimeout(done,ms);function done(){signal.removeEventListener('abort',aborted);resolve()}function aborted(){clearTimeout(timer);signal.removeEventListener('abort',aborted);reject(new DOMException('Aborted','AbortError'))}signal.addEventListener('abort',aborted,{once:true})})}

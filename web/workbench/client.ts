@@ -1,3 +1,4 @@
+import {createHostAdminClient} from './host-admin-client.mjs';
 import type {MemoryRetrieval,MemoryRetrievalPage} from './types';
 import type {ProjectPage,GitSnapshot,GitDiff} from './types';
 import type {GitReviewIntent} from './types';
@@ -10,7 +11,7 @@ import type {DiscoveryPolicyView} from './types';
 import type {DiscoveryHistoryPage,DiscoveryHistoryDetail,CreateDiscoveryWorkCycle,DiscoveryWorkCycle} from './types';
 import type {MemoryCapturePolicy,MemoryCapture,MemoryCapturePage,MemoryCaptureRecovery,MemoryCaptureReconcileInput,MemoryCaptureReconciliation} from './types';
 import type {MemoryConsolidation,MemoryConsolidationPage} from './types';
-import {request,requestBytes} from '../jot/client';
+import {request,requestBytes,hostBootstrapRequest} from '../jot/client';
 import type {WorkspaceFilePage,WorkspaceFileListOptions} from './types';
 import type {WorkbenchFileLifecycleHistoryPage,WorkbenchFileLifecycleHistoryQuery,WorkbenchFileLifecyclePreview,WorkbenchFileLifecycleReceipt,WorkbenchFileLifecycleStatus,PreviewWorkbenchFileRename,PreviewWorkbenchFileDelete,ApplyWorkbenchFileRename,ApplyWorkbenchFileDelete} from './types';
 import type {MemoryHistoryPage} from './types';
@@ -30,6 +31,7 @@ export const taskActionCommand=(task:Task,action:string,key?:string)=>({
  path:'/persistent-tasks/'+pathId(task.task_id)+'/'+action,method:'POST',
  body:action==='run-now'?{client_message_id:key??crypto.randomUUID()}:{expected_version:task.version}
 });
+export const hostAdminClient=createHostAdminClient(request,hostBootstrapRequest);
 export const workbenchApi={
  workspaceSelection:(signal?:AbortSignal)=>request<WorkspaceSelection>('/workspaces/selection','GET',undefined,undefined,signal),
  selectWorkspace:(input:SelectWorkspace,key:string)=>request<WorkspaceSelection>('/workspaces/selection','POST',input,key),

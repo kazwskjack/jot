@@ -51,6 +51,42 @@ function approveSettingsRead(bootstrapRequest,{signal,timeoutMs=120000}={}){
  });
 }
 
+function approveSettingsWrite(request,namespace,command,key,{signal,timeoutMs=120000}={}){
+ const failure=()=>Object.assign(new Error('host_settings_owner_approval_invalid'),{status:422,code:'host_settings_owner_approval_invalid'});
+ if(typeof window==='undefined'||typeof window.open!=='function')return Promise.reject(failure());
+ const popup=window.open('about:blank','_blank','popup,width=760,height=800');
+ if(!popup)return Promise.reject(failure());
+ return new Promise((resolve,reject)=>{
+  let challenge,done=false,timeout,poll;
+  const cleanup=()=>{clearTimeout(timeout);clearInterval(poll);window.removeEventListener('message',onMessage);signal?.removeEventListener('abort',onAbort);try{if(!popup.closed)popup.close();}catch{}};
+  const finish=(error)=>{if(done)return;done=true;cleanup();if(error)reject(error);else resolve();};
+  const onAbort=()=>finish(failure());
+  const onMessage=event=>{
+   if(done||!challenge||event.source!==popup||event.origin!==challenge.owner_origin||!record(event.data)
+    ||!exactKeys(event.data,['type','challenge_id','review_sha256'])||event.data.type!=='jot-host-settings-write-approved'
+    ||event.data.challenge_id!==challenge.challenge_id||event.data.review_sha256!==challenge.review_sha256)return;
+   finish();
+  };
+  signal?.addEventListener('abort',onAbort,{once:true});
+  if(signal?.aborted){onAbort();return;}
+  window.addEventListener('message',onMessage);
+  timeout=setTimeout(()=>finish(failure()),timeoutMs);
+  poll=setInterval(()=>{try{if(popup.closed)finish(failure());}catch{finish(failure());}},500);
+  Promise.resolve().then(()=>request(`/host/settings/approval-requests?namespace=${encodeURIComponent(namespace)}`,'POST',{purpose:'settings.update',command:{idempotency_key:key,...command}},undefined,signal)).then(value=>{
+   const raw=value?.approval;
+   if(!exactKeys(value,['approval'])||!exactKeys(raw,['challenge_id','expires_at','owner_approval_url','purpose','review_sha256'])
+    ||raw.purpose!=='settings.update'||!token(raw.challenge_id)||typeof raw.review_sha256!=='string'||!/^[a-f0-9]{64}$/.test(raw.review_sha256)
+    ||!Number.isSafeInteger(raw.expires_at)||raw.expires_at<=Date.now()||typeof raw.owner_approval_url!=='string')throw new Error('HOST_SETTINGS_APPROVAL_INVALID');
+   let url;try{url=new URL(raw.owner_approval_url);}catch{throw new Error('HOST_SETTINGS_APPROVAL_INVALID');}
+   if(!['http:','https:'].includes(url.protocol)||!['127.0.0.1','localhost','[::1]'].includes(url.hostname)||url.username||url.password||url.hash
+    ||url.pathname!=='/api/jot-host-settings/approval'||url.searchParams.size!==1||url.searchParams.get('challenge_id')!==raw.challenge_id)
+    throw new Error('HOST_SETTINGS_APPROVAL_INVALID');
+   challenge={challenge_id:raw.challenge_id,review_sha256:raw.review_sha256,owner_origin:url.origin};
+   popup.location.href=url.origin+url.pathname+url.search;
+  }).catch(()=>finish(failure()));
+ });
+}
+
 /** Build the UI-owned client for Host read-only routes. */
 export function createHostAdminClient(request,bootstrapRequest=async()=>{throw new Error('HOST_BOOTSTRAP_UNAVAILABLE');}){
  const editorPath=namespace=>{if(typeof namespace!=='string'||!/^[a-z][a-z0-9._-]{0,127}$/.test(namespace)||namespace==='jot-host-policy')throw Error('HOST_SETTINGS_NAMESPACE_INVALID');return`?namespace=${encodeURIComponent(namespace)}`;};
@@ -65,7 +101,11 @@ export function createHostAdminClient(request,bootstrapRequest=async()=>{throw n
    return request(`/host/readiness?namespace=${encodeURIComponent(namespace)}`,'GET',undefined,undefined,signal);
   },
   settings:(namespace,signal)=>request('/host/settings/editor'+editorPath(namespace),'GET',undefined,undefined,signal),
-  saveSettings:(namespace,input,key)=>request('/host/settings'+editorPath(namespace),'PATCH',input,key),
+  saveSettings:(namespace,input,key,signal)=>{
+   if(typeof key!=='string'||!/^[A-Za-z0-9_-]{8,128}$/.test(key))return Promise.reject(new Error('HOST_SETTINGS_ATTEMPT_INVALID'));
+   editorPath(namespace);
+   return approveSettingsWrite(request,namespace,input,key,{signal}).then(()=>request('/host/settings'+editorPath(namespace),'PATCH',input,key,signal));
+  },
   settingsAttempt:(namespace,key,signal)=>{if(typeof key!=='string'||!/^[A-Za-z0-9_-]{8,128}$/.test(key))throw Error('HOST_SETTINGS_ATTEMPT_INVALID');return request(`/host/settings/attempts/${encodeURIComponent(key)}`+editorPath(namespace),'GET',undefined,undefined,signal);},
   onboarding:signal=>request('/host/onboarding','GET',undefined,undefined,signal),
   saveOnboarding:(input,key)=>request('/host/onboarding','PATCH',input,key),
