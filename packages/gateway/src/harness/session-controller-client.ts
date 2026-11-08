@@ -8,6 +8,42 @@ import {nativeIdleSessionId,validateNativeIdleObservation} from './native-idle-o
 
 export type AdapterFetch = (input: string | URL, init?: RequestInit) => Promise<Response>
 
+export type BrowserDriverScope=Readonly<{
+  run_id:string;owner_id:string;workspace_id:string;session_id:string;lease_owner:string;lease_generation:number;
+}>;
+export type BrowserDriverObservation=Readonly<{
+  protocol:1;scope:BrowserDriverScope;status:'ready'|'unknown'|'failed';required:true;observed_at:string;
+  reason?:string;execution_authorized:false;
+}>;
+const DRIVER_SCOPE_KEYS='lease_generation,lease_owner,owner_id,run_id,session_id,workspace_id';
+const DRIVER_ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
+const DRIVER_SAFE_REASON=/^[a-z][a-z0-9_]{0,63}$/;
+export function normalizeBrowserDriverScope(value:unknown):BrowserDriverScope{
+  if(!value||typeof value!=='object'||Array.isArray(value))throw Error('driver_scope_invalid');
+  const row=value as Record<string,unknown>;
+  if(Object.keys(row).sort().join(',')!==DRIVER_SCOPE_KEYS
+    ||!['run_id','owner_id','workspace_id','session_id','lease_owner'].every(key=>typeof row[key]==='string'&&DRIVER_ID.test(row[key] as string))
+    ||!Number.isSafeInteger(row.lease_generation)||Number(row.lease_generation)<1)throw Error('driver_scope_invalid');
+  return Object.freeze({run_id:row.run_id as string,owner_id:row.owner_id as string,workspace_id:row.workspace_id as string,
+    session_id:row.session_id as string,lease_owner:row.lease_owner as string,lease_generation:Number(row.lease_generation)});
+}
+
+export function validateBrowserDriverObservation(value:unknown,expected:BrowserDriverScope,now=Date.now()):BrowserDriverObservation{
+  if(!value||typeof value!=='object'||Array.isArray(value))throw Error('driver_observation_invalid');
+  const row=value as Record<string,unknown>,keys=Object.keys(row).sort().join(',');
+  if((keys!=='execution_authorized,observed_at,protocol,required,scope,status'
+      &&keys!=='execution_authorized,observed_at,protocol,reason,required,scope,status')
+    ||row.protocol!==1||row.execution_authorized!==false||row.required!==true
+    ||!['ready','unknown','failed'].includes(String(row.status))||typeof row.observed_at!=='string'||row.observed_at.length>64
+    ||row.reason!==undefined&&(typeof row.reason!=='string'||!DRIVER_SAFE_REASON.test(row.reason)))throw Error('driver_observation_invalid');
+  const scope=normalizeBrowserDriverScope(row.scope);
+  if(Object.keys(scope).some(key=>scope[key as keyof BrowserDriverScope]!==expected[key as keyof BrowserDriverScope]))
+    throw Error('driver_scope_changed');
+  const observedAt=/^\d{4}-\d\d-\d\dT.*(?:Z|[+-]\d\d:\d\d)$/.test(row.observed_at)?Date.parse(row.observed_at):NaN;
+  if(!Number.isFinite(observedAt)||observedAt>now+5000||now-observedAt>60_000)throw Error('driver_observation_stale');
+  return Object.freeze({...row,scope}) as BrowserDriverObservation;
+}
+
 export type OriginalInputExecution=Readonly<{run_id:string;execution_lease:ExecutionLease}>;
 export function normalizeOriginalInputExecution(value:unknown):OriginalInputExecution{
  if(!value||typeof value!=='object'||Array.isArray(value))throw Error('ordinary_input_binding_invalid');const row=value as Record<string,unknown>;
@@ -28,10 +64,49 @@ export function normalizeGoalExecution(value:unknown):ConversationGoalExecution{
   if(Object.keys(row).sort().join(',')!=='control_id,execution_lease,run_id'||!['control_id','run_id'].every(key=>typeof row[key]==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(row[key] as string)))throw Error('goal_control_input_invalid');
   return Object.freeze({control_id:row.control_id as string,run_id:row.run_id as string,execution_lease:normalizeExecutionLease(row.execution_lease)});
 }
+export type NativeMemberWakeReceipt=Readonly<{request_id:string;status:'accepted'|'unknown';execution_authorized:false}>;
+export type NativeMemberView=Readonly<{id:string;name:string;role:'teammate';status:string}>;
+export type NativeMemberRoster=Readonly<{members:readonly NativeMemberView[];execution_authorized:false}>;
+export type NativeMemberInterruptReceipt=Readonly<{request_id:string;status:'accepted';quiescent:false;execution_authorized:false}>;
 
 export type SessionPromptPart = { type: 'text'; text: string }
   | { type: 'image'; media_type: string; data: string; name?: string }
   | { type: 'file'; receipt_id: string }
+
+export type ChatCheckpointRecoveryReceipt=Readonly<{
+ protocol:1;status:'recovered'|'already_published';checkpoint:Readonly<{
+  protocol:1;kind:'chat_compaction_checkpoint';checkpoint_id:string;checkpoint_sha256:string;run_id:string;session_id:string;
+  source_sha256:string;summary_text_sha256:string;native_summary_sha256:string;parent_checkpoint_id:string|null;execution_authorized:false;
+ }>;execution_authorized:false
+}|{protocol:1;status:'unavailable';reason:'NO_ATTEMPT'|'NO_DISPATCHED_ATTEMPT'|'UNSUPPORTED_CONTEXT';checkpoint:null;execution_authorized:false}>;
+const CHAT_RECOVERY_TIMEOUT_MS=1000;
+function validateChatCheckpointRecovery(value:unknown,sessionId:string,scope:OrdinaryRunHistoryScope):ChatCheckpointRecoveryReceipt{
+ const fail=():never=>{throw Error('chat_checkpoint_recovery_receipt_invalid');},row=value as Record<string,unknown>;
+ if(!row||typeof row!=='object'||Array.isArray(row)||row.protocol!==1||row.execution_authorized!==false)return fail();
+ if(row.status==='unavailable'){
+  if(Object.keys(row).sort().join(',')!=='checkpoint,execution_authorized,protocol,reason,status'||row.checkpoint!==null||!['NO_ATTEMPT','NO_DISPATCHED_ATTEMPT','UNSUPPORTED_CONTEXT'].includes(String(row.reason)))return fail();
+  return structuredClone(row) as ChatCheckpointRecoveryReceipt;
+ }
+ if(!['recovered','already_published'].includes(String(row.status))||Object.keys(row).sort().join(',')!=='checkpoint,execution_authorized,protocol,status')return fail();
+ const cp=row.checkpoint as Record<string,unknown>;
+ if(!cp||typeof cp!=='object'||Array.isArray(cp)||Object.keys(cp).sort().join(',')!=='checkpoint_id,checkpoint_sha256,execution_authorized,kind,native_summary_sha256,parent_checkpoint_id,protocol,run_id,session_id,source_sha256,summary_text_sha256'
+  ||cp.protocol!==1||cp.kind!=='chat_compaction_checkpoint'||cp.execution_authorized!==false||cp.run_id!==scope.run_id||cp.session_id!==sessionId
+  ||typeof cp.checkpoint_id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(cp.checkpoint_id)
+  ||cp.parent_checkpoint_id!==null&&(typeof cp.parent_checkpoint_id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(cp.parent_checkpoint_id))
+  ||!['checkpoint_sha256','source_sha256','summary_text_sha256','native_summary_sha256'].every(k=>typeof cp[k]==='string'&&/^[a-f0-9]{64}$/.test(cp[k] as string)))return fail();
+ return structuredClone(row) as ChatCheckpointRecoveryReceipt;
+}
+
+export type LeaseTakeoverScope=Readonly<{protocol:1;kind:'lease_takeover';run_id:string;owner_id:string;workspace_id:string;session_id:string;lease_owner:string;lease_generation:number}>;
+export type LeaseTakeoverObservation=Readonly<{protocol:1;kind:'lease_takeover';scope:LeaseTakeoverScope;status:'quiescent'|'outcome_unknown'|'unknown';settled:boolean;execution_authorized:false}>;
+const LEASE_TAKEOVER_ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
+export function normalizeLeaseTakeoverScope(value:unknown,sessionId?:string):LeaseTakeoverScope{
+ if(!value||typeof value!=='object'||Array.isArray(value))throw Error('lease_takeover_scope_invalid');const row=value as Record<string,unknown>;
+ if(Object.keys(row).sort().join(',')!=='kind,lease_generation,lease_owner,owner_id,protocol,run_id,session_id,workspace_id'||row.protocol!==1||row.kind!=='lease_takeover'
+  ||['run_id','owner_id','workspace_id','session_id','lease_owner'].some(key=>typeof row[key]!=='string'||!LEASE_TAKEOVER_ID.test(row[key] as string))
+  ||!Number.isSafeInteger(row.lease_generation)||Number(row.lease_generation)<1||sessionId!==undefined&&row.session_id!==sessionId)throw Error('lease_takeover_scope_invalid');
+ return Object.freeze({...row}) as LeaseTakeoverScope;
+}
 
 const SAFE_ADAPTER_REASON_CODES = new Set([
   'DSH_IMAGE_MODEL_UNSUPPORTED', 'DSH_IMAGE_INVALID', 'DSH_IMAGE_TOO_MANY_PIXELS',
@@ -112,7 +187,20 @@ export class SessionControllerClient {
   }
 
   async modelCatalog(signal:AbortSignal){return this.post('/v1/models',{},signal);}
+  async inspectConversationForkSource(sessionId:string,signal?:AbortSignal):Promise<unknown>{
+    try{nativeIdleSessionId(sessionId);}catch{throw Error('fork_native_source_invalid');}
+    const value=await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/fork-source`,{},signal);
+    if(Object.keys(value).sort().join(',')!=='execution_authorized,inspection'||value.execution_authorized!==false||!value.inspection||typeof value.inspection!=='object')throw Error('fork_native_source_invalid');
+    return value.inspection;
+  }
   async conversationModeReadiness(signal:AbortSignal){return this.post('/v1/conversation-modes/readiness',{},signal);}
+  async recoverChatCheckpoint(sessionId:string,input:OrdinaryRunHistoryScope,intentId:string,signal?:AbortSignal):Promise<ChatCheckpointRecoveryReceipt>{
+    let scope:OrdinaryRunHistoryScope;try{scope=normalizeOrdinaryRunHistoryScope(sessionId,input);}catch{throw Error('chat_checkpoint_recovery_scope_invalid');}
+    if(typeof intentId!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(intentId))throw Error('chat_checkpoint_recovery_scope_invalid');
+    signal?.throwIfAborted();const deadline=AbortSignal.timeout(CHAT_RECOVERY_TIMEOUT_MS),active=signal?AbortSignal.any([signal,deadline]):deadline;
+    const value=await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/chat-checkpoint-recovery`,{history:scope,intent_id:intentId},active);
+    return validateChatCheckpointRecovery(value,sessionId,scope);
+  }
 
   async prompt(sessionId: string, requestId: string, content: string | SessionPromptPart[],
     mode: 'queue' | 'steer' = 'queue', signal?: AbortSignal, original?:OriginalInputExecution) {
@@ -162,6 +250,40 @@ export class SessionControllerClient {
   async steerOriginalContent(sessionId:string,requestId:string,content:SessionPromptPart[],execution:OrdinarySteeringExecution,signal?:AbortSignal){
     const proof=normalizeOrdinarySteeringExecution(execution);if(proof.command_id!==requestId)throw Error('ordinary_steering_binding_invalid');
     return this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/prompts`,{request_id:requestId,content,mode:'steer',ordinary_steer:proof},signal);
+  }
+
+  async wakeNativeMember(sessionId:string,childSessionId:string,requestId:string,text:string,signal?:AbortSignal):Promise<NativeMemberWakeReceipt>{
+    const id=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
+    if(![sessionId,childSessionId,requestId].every(value=>typeof value==='string'&&id.test(value))||sessionId===childSessionId
+      ||typeof text!=='string'||!text.trim()||Buffer.byteLength(text,'utf8')>32768)throw Error('native_member_wake_invalid');
+    const value=await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/native-members/${encodeURIComponent(childSessionId)}/messages`,{request_id:requestId,text},signal);
+    if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!=='execution_authorized,request_id,status'
+      ||value.execution_authorized!==false||value.request_id!==requestId||!['accepted','unknown'].includes(String(value.status)))throw Error('native_member_wake_receipt_invalid');
+    return Object.freeze(value as NativeMemberWakeReceipt);
+  }
+
+  async listNativeMembers(sessionId:string,signal?:AbortSignal):Promise<NativeMemberRoster>{
+    const id=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
+    if(typeof sessionId!=='string'||!id.test(sessionId))throw Error('native_member_roster_input_invalid');
+    const value=await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/native-members/list`,{},signal);
+    if(!value||Object.keys(value).sort().join(',')!=='execution_authorized,members'||value.execution_authorized!==false||!Array.isArray(value.members))throw Error('native_member_roster_invalid');
+    const seen=new Set<string>(),members=value.members.map((item:unknown)=>{
+      const row=item as Record<string,unknown>;
+      if(!row||typeof row!=='object'||Array.isArray(row)||Object.keys(row).sort().join(',')!=='id,name,role,status'
+        ||typeof row.id!=='string'||!id.test(row.id)||typeof row.name!=='string'||!row.name.trim()||row.name.length>80||row.role!=='teammate'
+        ||typeof row.status!=='string'||!row.status||row.status.length>64||seen.has(row.id))throw Error('native_member_roster_invalid');
+      seen.add(row.id);return Object.freeze({id:row.id,name:row.name,role:'teammate' as const,status:row.status});
+    });
+    return Object.freeze({members:Object.freeze(members),execution_authorized:false});
+  }
+
+  async interruptNativeMember(sessionId:string,childSessionId:string,requestId:string,signal?:AbortSignal):Promise<NativeMemberInterruptReceipt>{
+    const id=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
+    if(![sessionId,childSessionId,requestId].every(value=>typeof value==='string'&&id.test(value))||sessionId===childSessionId)throw Error('native_member_interrupt_input_invalid');
+    const value=await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/native-members/${encodeURIComponent(childSessionId)}/interrupt`,{request_id:requestId},signal);
+    if(!value||Object.keys(value).sort().join(',')!=='execution_authorized,quiescent,request_id,status'||value.execution_authorized!==false
+      ||value.request_id!==requestId||value.status!=='accepted'||value.quiescent!==false)throw Error('native_member_interrupt_receipt_invalid');
+    return Object.freeze(value as NativeMemberInterruptReceipt);
   }
 
   async observeOriginalSteeringAdmission(sessionId:string,execution:OrdinarySteeringExecution,sourceHash:string,signal?:AbortSignal):Promise<OrdinarySteeringAdmission>{
@@ -235,6 +357,15 @@ export class SessionControllerClient {
     nativeIdleSessionId(sessionId);const deadline=AbortSignal.timeout(20_000);
     return validateNativeIdleObservation(await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/idle-observation`,{protocol:1},signal?AbortSignal.any([signal,deadline]):deadline),sessionId);
   }
+  async observeBrowserDriver(sessionId:string,scope:BrowserDriverScope,signal:AbortSignal){
+    const bound=normalizeBrowserDriverScope(scope);
+    if(sessionId!==bound.session_id)throw Error('driver_scope_invalid');
+    signal.throwIfAborted();
+    const value=await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/browser-driver-observation`,
+      {protocol:1,scope:bound},AbortSignal.any([signal,AbortSignal.timeout(5000)]));
+    signal.throwIfAborted();
+    return validateBrowserDriverObservation(value,bound);
+  }
   async conversationGoal(sessionId:string,body:Record<string,unknown>={},signal?:AbortSignal){
     const deadline=AbortSignal.timeout(20_000);
     return this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/conversation-goal`,body,signal?AbortSignal.any([signal,deadline]):deadline);
@@ -258,6 +389,18 @@ export class SessionControllerClient {
 
   async cancel(sessionId: string) {
     return await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/cancel`, {}, AbortSignal.timeout(20_000))
+  }
+
+  async leaseTakeover(sessionId:string,value:LeaseTakeoverScope):Promise<LeaseTakeoverObservation>{
+    const scope=normalizeLeaseTakeoverScope(value,sessionId),deadline=AbortSignal.timeout(30_000);
+    const result=await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/cancel`,{purpose:'lease_takeover',...scope},deadline);
+    if(!result||typeof result!=='object'||Array.isArray(result)||Object.keys(result).sort().join(',')!=='execution_authorized,kind,protocol,scope,settled,status'
+      ||result.protocol!==1||result.kind!=='lease_takeover'||result.execution_authorized!==false||typeof result.settled!=='boolean'
+      ||!['quiescent','outcome_unknown','unknown'].includes(String(result.status)))throw Error('lease_takeover_observation_invalid');
+    const observed=normalizeLeaseTakeoverScope(result.scope,sessionId);
+    if(Object.keys(scope).some(key=>observed[key as keyof LeaseTakeoverScope]!==scope[key as keyof LeaseTakeoverScope]))throw Error('lease_takeover_scope_changed');
+    if(result.status==='quiescent'&&result.settled!==true||result.status==='outcome_unknown'&&result.settled!==true||result.status==='unknown'&&result.settled!==false)throw Error('lease_takeover_observation_invalid');
+    return Object.freeze({...result,scope:observed}) as LeaseTakeoverObservation;
   }
 
   async checkpoint(sessionId:string,afterSeq:number,signal?:AbortSignal){

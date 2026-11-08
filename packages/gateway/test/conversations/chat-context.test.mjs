@@ -7,6 +7,7 @@ import {RunRepository} from '../../src/runs/repository.ts';
 import {EventStore} from '../../src/events/event-store.ts';
 import {mkdirSync,mkdtempSync,rmSync} from 'node:fs';
 import {resolve,join,relative,isAbsolute} from 'node:path';
+import {createHash} from 'node:crypto';
 const policy={protocol:1,mode:'chat',model:{provider:'fixture',model:'fast'},thinking:'disabled',preset_id:'jot-chat',preset_revision:'chat-native-v1',context_revision:'bounded-text-v1'};
 function fixture(t){const db=openProductDatabase(':memory:');t.after(()=>db.close());const conversations=new ConversationRepository(db),runs=new RunRepository(db,new EventStore(db));const c=conversations.create('context-owner',{workspace_id:'ws',model:{provider:'fixture',model:'work'},mode:'chat'},{chatPolicy:policy});
  const history=(id,role,text,extra={})=>db.prepare('INSERT INTO ga_messages(id,conversation_id,run_id,role,status,content_json,created_at,updated_at) VALUES(?,?,NULL,?,?,?,?,?)').run(id,c.conversation_id,role,extra.status??'complete',JSON.stringify({blocks:[{kind:'reasoning',text:'PRIVATE-REASONING-NEVER-SEED'},{kind:'text',text},...(extra.blocks??[])],attachments:extra.attachments??[]}),id,id);
@@ -15,7 +16,7 @@ test('Chat acceptance freezes the newest twelve prior complete text messages wit
  const f=fixture(t);for(let i=0;i<16;i++)f.history('history-'+String(i).padStart(2,'0'),i%2?'assistant':'user','Synthetic prior '+i);
  f.history('history-17','assistant','INCOMPLETE-NEVER-SEED',{status:'streaming'});
  const accepted=f.send(),row=f.db.prepare('SELECT * FROM ga_runs WHERE id=?').get(accepted.run_id);assert.equal(typeof row.chat_context_json,'string');const snapshot=JSON.parse(row.chat_context_json);
- assert.equal(snapshot.algorithm,'recent-text-v1');assert.equal(snapshot.context_revision,policy.context_revision);assert.equal(snapshot.conversation_id,f.c.conversation_id);assert.equal(snapshot.messages.length,12);
+ assert.equal(snapshot.protocol,1);assert.equal(snapshot.algorithm,'recent-text-v1');assert.equal(snapshot.context_revision,policy.context_revision);assert.equal(snapshot.conversation_id,f.c.conversation_id);assert.equal(snapshot.messages.length,12);
  assert.deepEqual(snapshot.messages.map(item=>item.message_id),Array.from({length:12},(_,i)=>'history-'+String(i+4).padStart(2,'0')));
  for(const item of snapshot.messages){assert.equal(item.updated_at,item.message_id);assert.match(item.source_content_sha256,/^[a-f0-9]{64}$/);}
  assert.ok(!snapshot.model_text.includes('PRIVATE-REASONING'));assert.ok(!snapshot.model_text.includes('INCOMPLETE'));assert.ok(!snapshot.model_text.includes('Current original'));
@@ -26,10 +27,22 @@ test('the complete model-facing context is bounded and never splits a surrogate 
  const f=fixture(t);for(let i=0;i<12;i++)f.history('history-'+String(i).padStart(2,'0'),i%2?'assistant':'user','🙂'.repeat(5000));
  f.history('history-13','user','A prior image ![source](data:image/png;base64,QUJDREVGRw==) and useful text.',{blocks:[{kind:'image',data:'IMAGE-BYTES-NEVER-SEED'}],attachments:['image-artifact']});
  const snapshot=JSON.parse(f.db.prepare('SELECT chat_context_json FROM ga_runs WHERE id=?').get(f.send().run_id).chat_context_json);
+ assert.equal(snapshot.protocol,2);assert.equal(snapshot.algorithm,'recent-source-v2');
  assert.ok(snapshot.model_text.length<=14000);assert.ok(snapshot.messages.length<=12);assert.ok(snapshot.messages.some(item=>item.truncated));
  assert.ok(!snapshot.model_text.includes('QUJDREVGRw=='));assert.ok(!snapshot.model_text.includes('IMAGE-BYTES'));
- assert.equal(snapshot.messages.at(-1).omitted_images,1);assert.ok(snapshot.model_text.includes('useful text'));
+ assert.equal(snapshot.messages.at(-1).omitted_images,2);assert.ok(snapshot.model_text.includes('useful text'));
+ const raw=f.db.prepare('SELECT content_json FROM ga_messages WHERE id=?').get('history-13').content_json;
+ assert.deepEqual(snapshot.messages.at(-1).image_source,{kind:'stored_content_images',message_id:'history-13',source_content_sha256:createHash('sha256').update(raw).digest('hex'),image_count:2,recognition_text_state:'unknown'});
+ assert.ok(snapshot.model_text.includes('stored_content_images'));
  for(const item of snapshot.messages){assert.ok(item.text.length<=(item.role==='user'?4000:2400));assert.ok(!/[\uD800-\uDBFF]$/.test(item.text));}
+});
+test('completed image-only turns survive as bounded typed references with recognition explicitly unknown',t=>{
+ const f=fixture(t);f.history('image-only-01','user','',{blocks:[{kind:'image',data:'IMAGE-BYTES-NEVER-SEED'}],attachments:['stored-image-artifact']});
+ const run=f.send(),raw=f.db.prepare('SELECT content_json FROM ga_messages WHERE id=?').get('image-only-01').content_json;
+ const snapshot=JSON.parse(f.db.prepare('SELECT chat_context_json FROM ga_runs WHERE id=?').get(run.run_id).chat_context_json),item=snapshot.messages.find(message=>message.message_id==='image-only-01');
+ assert.ok(item);assert.equal(item.text,'');assert.equal(item.omitted_images,1);
+ assert.deepEqual(item.image_source,{kind:'stored_content_images',message_id:'image-only-01',source_content_sha256:createHash('sha256').update(raw).digest('hex'),image_count:1,recognition_text_state:'unknown'});
+ assert.ok(snapshot.model_text.includes('recognition_text_state'));assert.ok(!snapshot.model_text.includes('IMAGE-BYTES'));assert.ok(!snapshot.model_text.includes('stored-image-artifact'));
 });
 test('Work acceptance does not create Chat context or change the stored transcript',t=>{
  const db=openProductDatabase(':memory:');t.after(()=>db.close());const conversations=new ConversationRepository(db),runs=new RunRepository(db,new EventStore(db)),c=conversations.create('work-owner',{workspace_id:'ws',model:{provider:'fixture',model:'work'}});

@@ -54,6 +54,15 @@
     "as_of_seq 与投影来自同一一致性水位。包含活动运行、全部待办和所返回尾部消息的关联对象。首次最多尾部200条；history_complete=false 时用 next_history_cursor 取更早消息。stream_cursors 用于恢复增量索引。不得把快照替换成新任务。"
   ],
   [
+    "POST",
+    "/v1/conversations/{conversation_id}/fork",
+    "Fork a conversation from a verified transcript boundary",
+    "ForkConversationInput",
+    "ConversationForkReceipt",
+    "201",
+    "Creates one owned fork and a durable idempotency receipt from the exact verified history boundary; no model run starts."
+  ],
+  [
     "GET",
     "/v1/conversations/{conversation_id}/messages",
     "分页读取更早消息",
@@ -115,6 +124,15 @@
     "Run",
     "200",
     ""
+  ],
+  [
+    "GET",
+    "/v1/runs/{run_id}/diagnostics",
+    "读取运行诊断",
+    null,
+    "RunRuntimeDiagnostics",
+    "200",
+    "先核验运行所有者；仅返回脱敏运行诊断，不修改运行状态。"
   ],
   [
     "GET",
@@ -361,6 +379,69 @@
   ],
   [
     "GET",
+    "/v1/agents/{agent_id}/mcp",
+    "列出角色的 MCP 连接与已批准工具",
+    null,
+    "McpConnectionPage",
+    "200",
+    "Owner-scoped metadata only. Transport configuration and credential references are never returned."
+  ],
+  [
+    "POST",
+    "/v1/agents/{agent_id}/mcp/connections",
+    "创建默认关闭的 MCP 连接",
+    "McpConnectionConfig",
+    "McpConnection",
+    "201",
+    "Owner-only MCP setup. New connections start disabled. Only secret:// references are accepted for credentials; plaintext secrets are never returned."
+  ],
+  [
+    "PATCH",
+    "/v1/agents/{agent_id}/mcp/connections/{connection_id}/config",
+    "暂存 MCP 连接配置变更",
+    "McpConfigStage",
+    "McpConnection",
+    "200",
+    "Owner-only MCP setup. New connections start disabled. Only secret:// references are accepted for credentials; plaintext secrets are never returned."
+  ],
+  [
+    "PATCH",
+    "/v1/agents/{agent_id}/mcp/connections/{connection_id}/enabled",
+    "启用或停用 MCP 连接",
+    "McpEnabledUpdate",
+    "McpConnection",
+    "200",
+    "Owner-only. Enabling does not grant tools; each discovered tool still requires an explicit tool grant."
+  ],
+  [
+    "PUT",
+    "/v1/agents/{agent_id}/mcp/connections/{connection_id}/tools",
+    "批准该连接的精确工具集合",
+    "McpToolGrant",
+    "McpConnection",
+    "200",
+    "Owner-only approval of exact tool IDs from the active discovery generation."
+  ],
+  [
+    "POST",
+    "/v1/agents/{agent_id}/mcp/connections/{connection_id}/reload",
+    "请求重新发现 MCP 工具",
+    "McpExpectedVersion",
+    "McpConnection",
+    "202",
+    "Owner-only. Discovery runs through the trusted DSH host bridge; newly discovered tools remain unapproved."
+  ],
+  [
+    "DELETE",
+    "/v1/agents/{agent_id}/mcp/connections/{connection_id}",
+    "撤销并移除 MCP 连接",
+    "McpExpectedVersion",
+    "McpConnection",
+    "202",
+    "Owner-only revocation. The runtime is stopped and private configuration is erased after in-flight calls are fenced."
+  ],
+  [
+    "GET",
     "/v1/teams",
     "列出独立角色团队",
     null,
@@ -501,7 +582,7 @@
     "CreatePersistentTask",
     "PersistentTask",
     "201",
-    "服务器根据认证身份校验owner；跨角色和项目范围由服务端核验。修改使用版本和既有同源CSRF/幂等边界。"
+    "服务器根据认证身份校验owner；跨角色和项目范围由服务端核验。修改使用版本和既有同源CSRF/幂等边界。 可选notification_settings只引用已验证binding；可选文件交付需逐个授权已选择的微信企业绑定，并启用任务完成事件，默认关闭；与任务在同一事务保存，绑定无效或策略写入失败整笔回滚；重复请求不重新授权。"
   ],
   [
     "GET",
@@ -640,6 +721,15 @@
   ],
   [
     "GET",
+    "/v1/persistent-tasks/{task_id}/model-budget/attempts",
+    "List task model budget attempts",
+    null,
+    "TaskModelBudgetAttempts",
+    "200",
+    "Read-only, owner-scoped history for one persistent task. Unconfirmed usage remains null; provider/model routes, run identifiers and session identifiers are never exposed."
+  ],
+  [
+    "GET",
     "/v1/channel-bindings",
     "列出自己的通知渠道",
     null,
@@ -681,7 +771,7 @@
     "UpdateTaskNotifications",
     "TaskNotificationSettings",
     "200",
-    "版本校验；运行中不得更改，最多五个已验证owner渠道。空列表关闭外部完成通知；不接收recipient。"
+    "版本校验；运行中不得更改，最多五个已验证owner渠道。空列表关闭外部完成通知；不接收recipient。 可设置同owner/渠道/收件人的发送间隔、滚动24小时上限与IANA时区安静时段；延后发送不重新执行任务。省略delivery_policy保留当前策略。 events可选择变化、完成、失败、需确认，空数组关闭事件提醒；省略保留当前选择。非完成事件只来自服务端来源账本，对新派发的任务执行生效，不回放旧执行。文件交付仅允许已选择的微信企业绑定，并需启用completed；默认关闭。省略时只保留相同绑定ID和版本上的现有授权，新增或重绑不继承。邮箱、Web Push和个人微信不支持文件交付。"
   ],
   [
     "GET",
@@ -934,6 +1024,24 @@
     "MemoryCapture",
     "200",
     "Owner-scoped automatic public-message capture and reviewed candidate application. No model call in these endpoints; GET never captures sources."
+  ],
+  [
+    "GET",
+    "/v1/agents/{agent_id}/memory-captures/{capture_id}/recovery",
+    "getMemoryCaptureRecovery",
+    null,
+    "MemoryCaptureRecovery",
+    "200",
+    "Owner-scoped read-only recovery projection. No model calls, retries, usage release, proposal apply, storage mutation, or emitted events."
+  ],
+  [
+    "POST",
+    "/v1/agents/{agent_id}/memory-captures/{capture_id}/reconcile",
+    "reconcileMemoryCapture",
+    "MemoryCaptureReconcileInput",
+    "MemoryCaptureReconciliation",
+    "200",
+    "Owner-scoped reconciliation of a verified original provider usage receipt. Settles the exact unknown attempt and never retries model extraction or applies the proposal."
   ],
   [
     "POST",
@@ -1285,5 +1393,221 @@
     "GitIndexHistory",
     "200",
     "Original owned UI journal and bounded cursor reads; no effect dispatch."
+  ],
+  [
+    "GET",
+    "/v1/push/vapid-public-key",
+    "读取浏览器推送公钥",
+    null,
+    "PushVapidPublicKey",
+    "200",
+    "返回客户端订阅所需的VAPID公钥及其generation，不返回私钥。"
+  ],
+  [
+    "POST",
+    "/v1/push/subscriptions",
+    "注册当前owner的浏览器推送订阅",
+    "CreatePushSubscription",
+    "ChannelBinding",
+    "201",
+    "浏览器已取得通知许可后提交订阅；endpoint和加密密钥仅保存在服务端，不作为用户身份。owner由认证会话确定。"
+  ],
+  [
+    "POST",
+    "/v1/push/subscriptions/{bindingId}/revoke",
+    "撤销当前owner的浏览器推送订阅",
+    "RevokeChannelBinding",
+    "ChannelBinding",
+    "200",
+    "通过owner与expected_version撤销订阅并删除服务端推送密钥。"
+  ],
+  [
+    "GET",
+    "/v1/workspaces/{workspace_id}/files/versions",
+    "读取不可变文件版本历史",
+    null,
+    "WorkbenchFileVersionPage",
+    "200",
+    "只读列出当前所有者、工作区、项目和相对路径下的不可变文件版本元数据。before_version是排他的稳定版本游标，新写入不会进入后续旧版本页；limit默认50，最大100。内容继续通过files/content固定版本读取。"
+  ],
+  [
+    "GET",
+    "/v1/workspaces/{workspace_id}/files/rename-preview",
+    "预览共同文件重命名影响",
+    null,
+    "WorkbenchFileLifecyclePreview",
+    "200",
+    "只读预览；校验源版本及引用，不持久化请求。"
+  ],
+  [
+    "GET",
+    "/v1/workspaces/{workspace_id}/files/delete-preview",
+    "预览共同文件删除影响",
+    null,
+    "WorkbenchFileLifecyclePreview",
+    "200",
+    "只读预览；校验源版本及引用，不持久化请求。"
+  ],
+  [
+    "POST",
+    "/v1/workspaces/{workspace_id}/files/rename",
+    "提交共同文件重命名",
+    "ApplyWorkbenchFileRename",
+    "WorkbenchFileLifecycleReceipt",
+    "200",
+    "复核原预览与 expected-version CAS，Idempotency-Key 固定原命令。"
+  ],
+  [
+    "POST",
+    "/v1/workspaces/{workspace_id}/files/delete",
+    "提交共同文件删除",
+    "ApplyWorkbenchFileDelete",
+    "WorkbenchFileLifecycleReceipt",
+    "200",
+    "复核原预览与 expected-version CAS，Idempotency-Key 固定原命令。"
+  ],
+  [
+    "GET",
+    "/v1/workspaces/{workspace_id}/files/lifecycle-commands/{command_key}",
+    "读取共同文件操作结果",
+    null,
+    "WorkbenchFileLifecycleStatus",
+    "200",
+    "只读、owner/project scoped 查询；不重放文件变更。"
+  ],
+  [
+    "GET",
+    "/v1/workspaces/{workspace_id}/files/lifecycle-history",
+    "读取共同文件生命周期历史",
+    null,
+    "WorkbenchFileLifecycleHistoryPage",
+    "200",
+    "只读列出当前认证所有者、工作区和项目已提交的不可变生命周期回执。仅接受 project_id、limit、cursor；limit 默认50、最大100。按 created_at DESC、command_key DESC 稳定 keyset 分页，游标绑定原认证范围、排序协议与首屏同一只读快照的追加水位，排除之后提交及回填的命令。游标不作为授权依据。所有取出的回执（含多取一行）均须通过原 canonical/hash 和行身份校验；不可用或损坏时返回503 FILE_LIFECYCLE_RECEIPT_UNAVAILABLE，不跳过坏行。响应仅含原始回执 items 与不透明 next_cursor，不公开内部存储字段。"
+  ],
+  [
+    "GET",
+    "/v1/workspaces/{workspace_id}/checkpoints",
+    "List owned workspace checkpoints",
+    null,
+    "WorkspaceCheckpointPage",
+    "200",
+    "Owner and project scoped bounded history; no host paths or blob names."
+  ],
+  [
+    "POST",
+    "/v1/workspaces/{workspace_id}/checkpoints",
+    "Capture selected project paths",
+    "CreateWorkspaceCheckpoint",
+    "WorkspaceCheckpoint",
+    "201",
+    "Bounded snapshot with explicit absent paths; execution and restore remain unauthorized."
+  ],
+  [
+    "GET",
+    "/v1/workspaces/{workspace_id}/checkpoints/{checkpoint_id}",
+    "Read an owned workspace checkpoint",
+    null,
+    "WorkspaceCheckpoint",
+    "200",
+    "Owner and project scoped checkpoint."
+  ],
+  [
+    "POST",
+    "/v1/workspaces/{workspace_id}/checkpoints/{checkpoint_id}/restore-review",
+    "Review one exact path restore",
+    "CreateWorkspaceCheckpointRestoreReview",
+    "WorkspaceCheckpointRestoreReview",
+    "201",
+    "Review receipt only; no bytes are restored."
+  ],
+  [
+    "POST",
+    "/v1/workspaces/{workspace_id}/checkpoints/{checkpoint_id}/restore",
+    "Restore one reviewed project path",
+    "RestoreWorkspaceCheckpoint",
+    "WorkspaceCheckpointRestoreReceipt",
+    "200",
+    "Exact reviewed path restore; no task, Goal, budget, permission, or external effects are replayed."
+  ],
+  [
+    "GET",
+    "/v1/workspaces/{workspace_id}/checkpoint-restores/{operation_id}",
+    "Read an owned path restore result",
+    null,
+    "WorkspaceCheckpointRestoreStatus",
+    "200",
+    "Owner and project scoped outcome or unresolved status."
+  ],
+  [
+    "POST",
+    "/v1/workspaces/{workspace_id}/checkpoint-restores/{operation_id}/reconcile",
+    "Reconcile an interrupted exact path restore",
+    "ReconcileWorkspaceCheckpointRestore",
+    "WorkspaceCheckpointRestoreReceipt",
+    "200",
+    "Fenced restart reconciliation from the immutable per-path journal."
+  ],
+  [
+    "GET",
+    "/v1/workspaces/{workspace_id}/checkpoints/{checkpoint_id}/restore-requests/{command_key}",
+    "Read original checkpoint restore command disposition",
+    null,
+    "WorkspaceCheckpointRestoreRequestStatus",
+    "200",
+    "Read-only original owner/workspace/project/checkpoint/key/request identity. Unobserved never authorizes clearing or replay. Terminal no-effect disposition serializes with journal creation. Existing journal outcomes are read without dispatching recovery."
+  ],
+  [
+    "GET",
+    "/v1/agents/{agent_id}/memory-dream-policy",
+    "getMemoryDreamPolicy",
+    null,
+    "MemoryDreamPolicy",
+    "200",
+    "Owner-scoped scheduled Dream consolidation. Defaults off; enabled runs use the existing DSH worker, permissions and model budget, and can only prepare project-scoped proposals for owner review."
+  ],
+  [
+    "PATCH",
+    "/v1/agents/{agent_id}/memory-dream-policy",
+    "updateMemoryDreamPolicy",
+    "UpdateMemoryDreamPolicy",
+    "MemoryDreamPolicy",
+    "200",
+    "Owner-scoped scheduled Dream consolidation. Defaults off; enabled runs use the existing DSH worker, permissions and model budget, and can only prepare project-scoped proposals for owner review."
+  ],
+  [
+    "POST",
+    "/v1/agents/{agentId}/discovery-history/{admissionId}/work-cycles",
+    "Create a work cycle from an accepted discovery proposal",
+    "CreateDiscoveryWorkCycle",
+    "DiscoveryWorkCycle",
+    "200",
+    "Owner-scoped and idempotent; requires current active policy and role versions. Creates no execution authority or task run."
+  ],
+  [
+    "DELETE",
+    "/v1/uploads/{upload_id}",
+    "取消未完成的上传",
+    null,
+    null,
+    "204",
+    "仅上传所有者可取消未封存的上传。重复请求幂等；活动 writer 会被 fencing，未完成字节会清理。已完成 artifact 不可取消。"
+  ],
+  [
+    "POST",
+    "/v1/conversations/{conversation_id}/upload-batches",
+    "申请多文件上传批次",
+    "UploadBatchInit",
+    "UploadBatchReceipt",
+    "201",
+    "以不可变manifest原子预留一组文件槽位；relative_path只作为展示元数据。每批最多500个文件、合计2 GiB，同一会话最多3个活动批次，24小时过期。"
+  ],
+  [
+    "DELETE",
+    "/v1/upload-batches/{batch_id}",
+    "取消未完成上传批次",
+    null,
+    null,
+    "204",
+    "仅所有者可取消批次中尚未封存的文件；重复请求幂等，活动writer会被fencing并清理。已完成artifact保留。"
   ]
 ]

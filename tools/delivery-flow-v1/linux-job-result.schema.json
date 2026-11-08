@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.invalid/jot/linux-job-result.schema.json",
+  "title": "Linux layered test job result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "job_id", "repo", "layer", "scope", "status",
+    "failure_classification", "source", "environment", "event_context",
+    "tests", "tests_sha256", "command", "started_at_utc", "finished_at_utc", "exit_code", "counts",
+    "artifacts", "preflight", "cleanup", "windows_status", "formal_acceptance_credit"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "job_id": { "type": "string", "minLength": 1 },
+    "repo": { "type": "string", "minLength": 1 },
+    "layer": { "enum": [1, 2, 3] },
+    "scope": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["PASS", "FAIL", "BLOCKED", "NOT_RUN", "CANCELLED", "SUPERSEDED_UNRUN"] },
+    "failure_classification": { "enum": ["NONE", "SOFTWARE_DEVELOPMENT_INCOMPLETE", "INFRA_BLOCKED", "NOT_APPLICABLE"] },
+    "source": {
+      "type": "object", "additionalProperties": false,
+      "required": ["commit", "tree", "package_sha256", "lock_sha256"],
+      "properties": {
+        "commit": { "type": ["string", "null"], "pattern": "^([0-9a-f]{40})?$" },
+        "tree": { "type": ["string", "null"], "pattern": "^([0-9a-f]{40})?$" },
+        "package_sha256": { "type": ["string", "null"], "pattern": "^([0-9a-f]{64})?$", "description": "Source archive SHA-256; owner packet manifest SHA-256 is in event_context." },
+        "lock_sha256": { "type": "object", "propertyNames": { "type": "string" }, "additionalProperties": { "type": "string", "pattern": "^[0-9a-f]{64}$" } }
+      }
+    },
+    "environment": {
+      "type": "object", "additionalProperties": false,
+      "required": ["os", "distro", "kernel", "arch", "node", "node_executable", "node_sha256", "npm", "python", "git", "execution_root", "execution_root_kind"],
+      "properties": {
+        "os": { "const": "linux" },
+        "distro": { "type": "string" },
+        "kernel": { "type": "string" },
+        "arch": { "enum": ["x64", "arm64", "other"] },
+        "node": { "type": "string" },
+        "node_executable": { "type": ["string", "null"] },
+        "node_sha256": { "type": ["string", "null"], "pattern": "^([0-9a-f]{64})?$" },
+        "npm": { "type": "string" },
+        "python": { "type": ["string", "null"] },
+        "git": { "type": "string" },
+        "execution_root": { "type": "string", "minLength": 1 },
+        "execution_root_kind": { "enum": ["local", "remote"] },
+        "browser": {
+          "type": ["object", "null"], "additionalProperties": false,
+          "required": ["name", "version", "revision", "executable", "sha256"],
+          "properties": {
+            "name": { "type": "string" }, "version": { "type": "string" },
+            "revision": { "type": "string" }, "executable": { "type": "string" },
+            "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          }
+        }
+      }
+    },
+    "event_context": {
+      "type": "object", "additionalProperties": false,
+      "required": ["owner", "packet_id", "source_class", "candidate_commit", "candidate_tree", "manifest_path", "manifest_sha256", "dependencies", "ac_ids", "next_owner", "ready_at"],
+      "properties": {
+        "owner": { "type": "string", "minLength": 1 },
+        "packet_id": { "type": "string", "minLength": 1 },
+        "source_class": { "enum": ["inherited_wip", "new_development"] },
+        "candidate_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "candidate_tree": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "manifest_path": { "type": "string", "minLength": 1, "description": "Original manifest_path value from the owner packet." },
+        "manifest_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "SHA-256 of the owner packet manifest, distinct from artifacts.source_manifest_sha256." },
+        "dependencies": { "type": "array", "items": { "type": "string" } },
+        "ac_ids": { "type": "array", "items": { "type": "string" } },
+        "next_owner": { "type": ["string", "null"] },
+        "ready_at": { "type": ["string", "null"], "format": "date-time" }
+      }
+    },
+    "tests": {
+      "type": "object", "minProperties": 1,
+      "propertyNames": { "type": "string", "minLength": 1 },
+      "additionalProperties": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+    },
+    "tests_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "command": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+    "started_at_utc": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "finished_at_utc": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "exit_code": { "type": ["integer", "null"] },
+    "counts": {
+      "type": "object", "additionalProperties": false,
+      "required": ["tests", "passed", "failed", "skipped", "cancelled", "unparsed"],
+      "properties": {
+        "tests": { "type": ["integer", "null"], "minimum": 0 },
+        "passed": { "type": ["integer", "null"], "minimum": 0 },
+        "failed": { "type": ["integer", "null"], "minimum": 0 },
+        "skipped": { "type": ["integer", "null"], "minimum": 0 },
+        "cancelled": { "type": ["integer", "null"], "minimum": 0 },
+        "unparsed": { "type": "boolean" }
+      }
+    },
+    "artifacts": {
+      "type": "object", "additionalProperties": false,
+      "required": ["run_root", "source_archive", "source_manifest", "source_manifest_sha256", "execution_descriptor", "execution_descriptor_sha256", "raw_log", "raw_log_sha256", "result_manifest", "event_draft"],
+      "properties": {
+        "run_root": { "type": "string", "minLength": 1 },
+        "source_archive": { "type": "string", "minLength": 1 },
+        "source_manifest": { "type": "string", "minLength": 1, "description": "Retained full-source-archive manifest, separate from the owner packet manifest." },
+        "source_manifest_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "SHA-256 of the retained full-source-archive manifest." },
+        "execution_descriptor": { "type": "string", "minLength": 1, "description": "Retained operator-supplied execution descriptor; not a sandbox proof." },
+        "execution_descriptor_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "SHA-256 independently pinned by the reviewed invocation." },
+        "raw_log": { "type": "string", "minLength": 1 },
+        "raw_log_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "result_manifest": { "type": "string", "minLength": 1 },
+        "event_draft": { "type": ["string", "null"], "minLength": 1 },
+        "screenshots": { "type": "array", "items": { "type": "string" } },
+        "extra_logs": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "preflight": {
+      "type": "object", "additionalProperties": false,
+      "required": ["authorized_output_root_confirmed", "source_pins_verified", "lock_hashes_verified", "worktree_clean_before", "worktree_clean_after"],
+      "properties": {
+        "authorized_output_root_confirmed": { "type": "boolean" },
+        "source_pins_verified": { "type": "boolean" },
+        "lock_hashes_verified": { "type": "boolean" },
+        "worktree_clean_before": { "type": ["boolean", "null"] },
+        "worktree_clean_after": { "type": ["boolean", "null"] },
+        "runtime_integrity_verified": { "type": ["boolean", "null"] }
+      }
+    },
+    "cleanup": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "runner_temp_removed", "process_group_cleaned", "retained_paths", "errors"],
+      "properties": {
+        "status": { "enum": ["COMPLETE", "FAILED", "PRESERVED_FOR_DIAGNOSTICS", "NOT_REQUIRED"] },
+        "runner_temp_removed": { "type": "boolean" },
+        "process_group_cleaned": { "type": ["boolean", "null"], "description": "True only when the child process group was observed empty; null when no child process group was started; false means cleanup is unconfirmed and cannot be accepted as a final receipt." },
+        "retained_paths": { "type": "array", "items": { "type": "string" } },
+        "errors": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "process_evidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["browser_pid", "termination_signal", "browser_exit_code", "cdp_disconnected", "cleanup_completed"],
+      "properties": {
+        "browser_pid": { "type": ["integer", "null"], "minimum": 1 },
+        "termination_signal": { "type": ["string", "null"] },
+        "browser_exit_code": { "type": ["integer", "null"] },
+        "cdp_disconnected": { "type": "boolean" },
+        "cleanup_completed": { "type": "boolean" }
+      }
+    },
+    "windows_status": { "const": "DEFERRED_USER" },
+    "formal_acceptance_credit": { "const": "NONE" },
+    "notes": { "type": "array", "items": { "type": "string" } }
+  },
+  "$comment": "PASS is job-scoped and requires a parsed nonempty test summary with zero failures, skips and cancellations, a hash-pinned execution descriptor, and a confirmed-empty child process group. The descriptor is not an OS sandbox or proof that the caller-approved environment has no credentials. Windows is DEFERRED_USER. CANCELLED and SUPERSEDED_UNRUN receive no pass credit. Linux tests never grant formal D/E or accepted status."
+}

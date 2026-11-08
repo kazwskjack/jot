@@ -42,3 +42,9 @@ Direct installed package manifests report:
 The lockfiles identify transitive dependencies. Their package distributions contain their respective license files; retain those notices when redistributing dependencies. Optional DSH/Cordis, speech, office, model and decision services are installed separately and remain subject to their own terms. Browser binaries, Python and LibreOffice also have separate distribution licenses.
 
 Original explanations of a technology choice do not claim authorship of that technology. A named adapter is not a bundled model or an endorsement by its upstream maintainer.
+
+## Twemoji v17.0.3 and parser
+
+Jot bundles the unmodified Twemoji v17.0.3 SVG artwork from `web/public/twemoji/svg/` (4,009 files), from the official [v17.0.3 release](https://github.com/jdecked/twemoji/releases/tag/v17.0.3). The graphics are licensed under CC BY 4.0; the complete license and attribution are in `web/public/twemoji/LICENSE-GRAPHICS` and `web/public/twemoji/NOTICE.md`. The repository MIT notice is retained at `web/public/twemoji/LICENSE`.
+
+The Unicode matcher is adapted from the official `@twemoji/parser` 17.0.2 package, pinned by Twemoji API 17.0.3. The CommonJS parser was converted to ESM and its asset URL defaults to local SVG files; no npm dependency or runtime CDN access was added. The complete MIT license is at `web/jot/vendor/LICENSE.twemoji-parser.md`.

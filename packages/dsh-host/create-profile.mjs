@@ -14,6 +14,8 @@ export async function createHostProfile({home,name='jot',adapter=fileURLToPath(n
   if(workbench.origin!==undefined){const url=new URL(workbench.origin);if(url.protocol!=='http:'||!['127.0.0.1','localhost','[::1]'].includes(url.hostname)||url.username||url.password||url.search||url.hash||url.pathname!=='/')throw Error();origin=url.origin;}
  }catch{throw Error('host_profile_workbench_invalid');}}
  const preset=fileURLToPath(new URL('./standard-preset.mjs',import.meta.url));
+ const mcpProvider=fileURLToPath(new URL('../session-adapter/mcp-host-provider.js',import.meta.url));
+ if(!(await stat(mcpProvider)).isFile())throw Error('host_profile_mcp_provider_invalid');
  const patch=[
   {id:'session-log-deepseek',disabled:true},
   {id:'session-telemetry-otel',disabled:true},
@@ -25,6 +27,7 @@ export async function createHostProfile({home,name='jot',adapter=fileURLToPath(n
   {id:'agent-preset-registry',config:{default:'jot-general'}},
   {insert:[
    {id:'preset-jot-general',name:pathToFileURL(preset).href,...(route?{config:{budgeted:true}}:{})},
+   {id:'jot-mcp-runtime-provider',name:pathToFileURL(mcpProvider).href},
    {id:'jot-session-adapter',name:pathToFileURL(adapter).href,inject:['jotHostReady'],config:{host:'127.0.0.1',port:18841,tokenEnv:'JOT_SESSION_ADAPTER_TOKEN',workbenchTokenEnv:'GENERAL_AGENT_INTERNAL_CHANNEL_TOKEN',workbenchOrigin:origin,nativeContinuation:!!route,nativeRoles:false,webBudgetEnabled:false,voiceEnabled:false,...(route?{workbenchModel:route}:{})}},
   ]},
  ];

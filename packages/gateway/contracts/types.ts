@@ -4,19 +4,25 @@
  */
 export type Error = { error: { code: string; message: string; retryable: boolean; details?: Record<string, unknown> }; request_id: string };
 
-export type ModelSelection = { provider: string; model: string; reasoning_effort?: string };
+export type ModelRouteHealth={status:'healthy'|'unhealthy'|'stale'|'unknown';observed_at:number|null;expires_at:number|null};
+export type ModelSelection = { provider: string; model: string; reasoning_effort?: string; fallbacks?:Array<{provider:string;model:string}> };
 
 export type CapabilitySet = { search: boolean; fetch: boolean; browser_interaction: boolean; file_read: boolean; file_edit: boolean; command_execution: boolean; questions: boolean; approvals: boolean; artifact_download: boolean; resume_checkpoint: boolean };
 
 export type GitWorkbenchCapability = {configured_projects:string[]} & ({read_only:true}|{read_only:false;index_actions:['stage','unstage']});
 
-export type Capabilities = { git_workbench?:GitWorkbenchCapability; conversation_commands?:{protocol:1;ordinary_steer:{configured:boolean;delivery:"original";attachments:boolean}}; conversation_modes?:{default:'chat'|'work';work:{supported:true};chat:{ready:boolean}};api_version: string; event_schema_version: string; adapter_version: string; capabilities: CapabilitySet; models: Array<{ provider: string; model: string; reasoning_output: "provider" | "summary" | "none"; supported_reasoning_efforts: Array<string> }>; limits: { max_upload_bytes: number; max_active_runs_per_conversation: 1; max_concurrent_sessions: 5; replay_retention_hours: number; idempotency_retention_hours: number }; voice?: { enabled: boolean; status: "disabled" | "unavailable" | "preparing" | "ready"; max_duration_ms: number; max_bytes: number; accepted_mime_types: string[]; languages: string[] }; workbench?: WorkbenchCapabilities; workspaces: Array<{ workspace_id: string; title: string; can_read: boolean; can_write: boolean }> };
+export type WorkspaceSelection = {workspace_id:string;version:number;configured:boolean};
+export type SelectWorkspace = {workspace_id:string;expected_version:number};
+export type Capabilities = { workspace_selection?:WorkspaceSelection; git_workbench?:GitWorkbenchCapability; conversation_commands?:{protocol:1;ordinary_steer:{configured:boolean;delivery:"original";attachments:boolean}}; conversation_modes?:{default:'chat'|'work';work:{supported:true};chat:{ready:boolean}};api_version: string; event_schema_version: string; adapter_version: string; capabilities: CapabilitySet; models: Array<{ provider: string; model: string; reasoning_output: "provider" | "summary" | "none"; supported_reasoning_efforts: Array<string>; health?:ModelRouteHealth }>; limits: { max_upload_bytes: number; max_active_runs_per_conversation: 1; max_concurrent_sessions: 5; replay_retention_hours: number; idempotency_retention_hours: number }; voice?: { enabled: boolean; status: "disabled" | "unavailable" | "preparing" | "ready"; max_duration_ms: number; max_bytes: number; accepted_mime_types: string[]; languages: string[] }; workbench?: WorkbenchCapabilities; workspaces: Array<{ workspace_id: string; title: string; can_read: boolean; can_write: boolean }> };
 
 export type VoiceTranscriptionRequest = { client_request_id: string; language?: string; audio: Blob };
 export type VoiceTranscription = { transcription_id: string; status: "queued" | "transcribing" | "succeeded" | "failed" | "cancelled"; text?: string; language?: string; error_code?: "transcription_failed" | "result_expired" | "worker_restarted"; created_at: string; updated_at?: string };
 
 export type Project = { project_id: string; title: string; is_default: boolean; version: number; created_at: string; updated_at: string; active_conversation_count?: number; archived_conversation_count?: number };
 export type ProjectPage = { items: Project[] };
+export type ProjectLifecycle = Project & {archived_at:string|null;deleted_at:string|null};
+export type ProjectLifecyclePage = {items:ProjectLifecycle[]};
+export type UpdateProjectLifecycle = {action:'archive'|'restore'|'delete';expected_version:number};
 
 export type GitHead = {oid:string|null;branch:string|null;detached:boolean};
 export type GitEntry = {path:string;original_path?:string;index_status:string;worktree_status:string;conflicted:boolean;kind:'file'|'directory'|'symlink'|'missing'|'other'};
@@ -36,6 +42,11 @@ export type UpdateConversation = { mode?:ConversationMode;expected_version: numb
 export type ConversationPage = { items: Array<Conversation>; next_cursor?: string };
 
 export type Run = { run_id: string; conversation_id: string; input_message_id: string | null; goal_control_id?:string; status: "queued" | "starting" | "partial" | "running" | "waiting_user" | "waiting_approval" | "cancelling" | "succeeded" | "failed" | "cancelled" | "interrupted"; version: number; created_at: string; updated_at: string; continuation_of?: string; checkpoint_id?: string; error_code?: string };
+
+export type RuntimePreparationPhase = { phase: string; duration_ms: number; outcome: "succeeded" | "failed" | "cancelled"; offset_ms: number | null };
+export type RuntimeUsage = Partial<Record<"input_tokens" | "output_tokens" | "cache_read_tokens" | "cache_write_tokens" | "total_tokens" | "reasoning_tokens", string>>;
+export type RuntimeAttemptDiagnostics = { attempt_id: string; state: string; provider: string | null; model: string | null; retry_index: number | null; ttft_ms: number | null; generation_ms: number | null; usage: RuntimeUsage | null; usage_status: "available" | "partial" | "not_metered" | "unknown"; cost: { nano_usd: string; basis: "configured_rates" } | null; unknown: boolean; unknown_reason: string | null; manual_intervention_required: boolean; missing: Array<string> };
+export type RunRuntimeDiagnostics = { schema_version: 1; run_id: string; status: string; queue_ms: number | null; preparation: { phases: Array<RuntimePreparationPhase>; total_ms: number | null; outcome: string | null }; attempts: Array<RuntimeAttemptDiagnostics>; retry_count: number; manual_intervention_required: boolean; partial: boolean; missing: Array<string> };
 
 export type InputBlock = ({ type: "text"; text: string }) | ({ type: "file"; artifact_id: string });
 
@@ -61,7 +72,7 @@ export type Message = { message_id: string; run_id: string | null; role: "user" 
 
 export type Source = { source_id: string; activity_id: string; url: string; title: string; host: string; access: "discovered" | "snippet" | "fetched" | "read" | "failed"; retrieved_at: string; excerpt?: string; error_code?: string };
 
-export type Activity_search = { activity_id: string; run_id: string; tool_call_id: string; attempt_id?: string; parent_activity_id?: string; status: "pending" | "running" | "waiting" | "succeeded" | "failed" | "cancelled" | "unknown"; title: string; started_at: string; ended_at?: string; error_code?: string; kind: "search"; detail: { tool_name?: string; action?: string; urls?: string[]; url?: string; queries: Array<string>; provider?: string; source_ids: Array<string> } };
+export type Activity_search = { activity_id: string; run_id: string; tool_call_id: string; attempt_id?: string; parent_activity_id?: string; status: "pending" | "running" | "waiting" | "succeeded" | "failed" | "cancelled" | "unknown"; title: string; started_at: string; ended_at?: string; error_code?: string; kind: "search"; detail: { tool_name?: string; action?: string; urls?: string[]; url?: string; queries?: Array<string>; query_count?: number; provider?: string; source_ids: Array<string> } };
 
 export type Activity_browse = { activity_id: string; run_id: string; tool_call_id: string; attempt_id?: string; parent_activity_id?: string; status: "pending" | "running" | "waiting" | "succeeded" | "partial" | "failed" | "cancelled" | "unknown"; title: string; started_at: string; ended_at?: string; error_code?: string; kind: "browse"; detail: { tool_name?: string; action?: string; urls?: string[]; operation: "open" | "fetch" | "click" | "type" | "scroll" | "capture" | "navigate" | "interact" | "execute" | "web_operation"; url?: string; source_ids: Array<string>; screenshot_artifact_id?: string; operation_kind?: "read_page" | "browse" | "execute" | "unknown"; request_id?: string; generation?: number; operation_id?: string; operation_status?: string; revision?: number; event_cursor?: number; accepted_count?: number; counts?: Record<string, number>; requested_action_types?: Array<"click" | "expand" | "next_page" | "scroll" | "wait" | "fill">; browse_outcome?: "success" | "pause" | "failure" | "unknown"; action_trace_count?: number; traced_action_types?: Array<"click" | "expand" | "next_page" | "scroll" | "wait" | "fill">; verification_statuses?: string[]; verified_action_types?: Array<"click" | "expand" | "next_page" | "scroll" | "wait" | "fill">; items?: Array<{ item_id: string; position: number; url?: string; status: string; attempt?: number; reason_code?: string; result_ref?: string; action_label?: string }> } };
 
@@ -84,7 +95,7 @@ export type QuestionAnswer = { question_id: string; selected_option_ids: Array<s
 
 export type QuestionInteraction = { interaction_id: string; run_id: string; tool_call_id: string; version: number; status: "pending" | "answered" | "denied" | "cancelled" | "expired"; created_at: string; expires_at: string; kind: "question"; purpose?: "task_input" | "task_acceptance_review"; questions: Array<Question>; answers?: Array<QuestionAnswer> };
 
-export type ApprovalInteraction = { interaction_id: string; run_id: string; tool_call_id: string; version: number; status: "pending" | "answered" | "denied" | "cancelled" | "expired"; created_at: string; expires_at: string; kind: "approval"; purpose?: "task_review" | "task_completion_review" | "task_reply_review"; action_digest: string; action_summary: string; risk: "low" | "medium" | "high"; decision?: "approve" | "deny" };
+export type ApprovalInteraction = { interaction_id: string; run_id: string; tool_call_id: string; version: number; status: "pending" | "answered" | "denied" | "cancelled" | "expired"; created_at: string; expires_at: string; kind: "approval"; purpose?: "task_review" | "task_completion_review" | "task_reply_review" | "browser_action"; action_digest: string; action_summary: string; risk: "low" | "medium" | "high"; decision?: "approve" | "deny" };
 
 export type Interaction = (QuestionInteraction) | (ApprovalInteraction);
 
@@ -96,7 +107,7 @@ export type InteractionReceipt = { accepted: true; interaction_id: string; run_i
 
 export type ArtifactBackupStatus = "pending" | "retry" | "verified" | "failed";
 
-export type Artifact = { artifact_id: string; conversation_id: string; run_id?: string; file_name: string; media_type: string; size_bytes: number; sha256: string; version: number; status: "quarantined" | "ready" | "rejected" | "deleted"; created_at: string; preview_kind: "text" | "image" | "unsupported"; origin: "upload" | "generated" | "edited"; local_state?: "present" | "deleted" | "restoring"; backup_status?: ArtifactBackupStatus; remote_path?: string; restorable?: boolean };
+export type Artifact = { artifact_id: string; conversation_id: string; run_id?: string; file_name: string; relative_path?: string; media_type: string; size_bytes: number; sha256: string; version: number; status: "quarantined" | "ready" | "rejected" | "deleted"; created_at: string; preview_kind: "text" | "image" | "unsupported"; origin: "upload" | "generated" | "edited"; local_state?: "present" | "deleted" | "restoring"; backup_status?: ArtifactBackupStatus; remote_path?: string; restorable?: boolean };
 
 export type RunArtifact = { run_id: string; conversation_id: string; artifact_id: string; version: number; file_name: string; media_type: string; size_bytes: number; sha256: string; status: string; local_state?: "present" | "deleted" | "restoring"; backup_status?: ArtifactBackupStatus; created_at: string; download_url: string };
 
@@ -107,6 +118,12 @@ export type ArtifactBackup = { artifact_id: string; backup_status: ArtifactBacku
 export type ArtifactRestoreReceipt = { accepted: true; artifact_id: string; status: "ready" | "restoring" };
 
 export type UploadInit = { file_name: string; media_type: string; size_bytes: number; sha256: string };
+
+export type UploadBatchFile = { client_file_id: string; file_name: string; relative_path: string; media_type: string; size_bytes: number; sha256: string };
+
+export type UploadBatchInit = { files: UploadBatchFile[] };
+
+export type UploadBatchReceipt = { batch_id: string; expires_at: string; files: Array<{ client_file_id: string; upload_id: string; max_bytes: number }> };
 
 export type UploadReceipt = { upload_id: string; expires_at: string; max_bytes: number };
 
@@ -140,15 +157,31 @@ export type MessagePage = { items: Array<Message>; next_cursor?: string };
 export type InteractionPage = { items: Array<Interaction> };
 
 /** Workbench and persistent task DTOs mirror registered owner-scoped routes. */
+export type BrowserActionReadinessItem = { protocol: 1; run_id: string; workspace_id: string; status: "ready" | "unknown" | "failed"; required: true; observed_at: string; reason?: string; execution_authorized: false };
 export type WorkbenchCollaborationMode = ({ id: "single"; enabled: true }) | ({ id: "independent_team"; enabled: true }) | ({ id: "subagents"; enabled: false; reason: "HOST_ADAPTER_NOT_READY" }) | ({ id: "team"; enabled: false; reason: "DSH_EXPERIMENTAL_TEAM_NOT_READY" }) | ({ id: "handoff"; enabled: false; reason: "HOST_ADAPTER_NOT_READY" });
-export type WorkbenchCapabilities = { enabled: boolean; agent_roles: boolean; independent_teams: boolean; agent_messages: boolean; shared_workspace: boolean; memory_scopes: Array<"project" | "private">; collaboration_modes: Array<WorkbenchCollaborationMode>; task_triggers: Array<"once" | "interval" | "page_change" | "daily" | "weekly" | "conversation_message" | "conversation_result">; task_schedule_limits?: WorkbenchTaskScheduleLimits; notification_channels: Array<"in_app">; allowed_tools: Array<"universe_capabilities" | "universe_search">; execution_ready: boolean; memory_lifecycle?: boolean; memory_restore?: boolean; memory_consolidation?: boolean; memory_retrieval_traces?: boolean; memory_capture?: boolean; memory_retrieval?: "local_keyword"; task_readiness?:boolean;task_prd?:boolean; task_unlimited_runs?: boolean; task_run_limit_protocol?: 1; model_budget?: boolean; task_model_budget_limits?: ModelBudgetLimits; task_reply_policy?: boolean; task_reply_execution?: false; task_create_delivery?: boolean; task_notifications?: boolean; channel_bindings?: boolean; email_bindings?: boolean; wecom_bindings?: boolean;task_notification_events?:TaskNotificationEventKind[] };
-export type AgentRole = { agent_id: string; name: string; instructions: string; workspace_id: string; project_id: string; conversation_id: string; status: "active" | "disabled" | "deleting" | "deleted"; version: number; capability_epoch: number; allowed_tools: Array<"universe_capabilities" | "universe_search">; created_at: string; updated_at: string };
+export type WorkbenchCapabilities = { enabled: boolean; agent_roles: boolean; independent_teams: boolean; agent_messages: boolean; shared_workspace: boolean; workspace_file_history?: boolean; workspace_file_range?: boolean; memory_scopes: Array<"project" | "private">; collaboration_modes: Array<WorkbenchCollaborationMode>; task_triggers: Array<"once" | "interval" | "page_change" | "daily" | "weekly" | "cron" | "delay" | "conversation_message" | "conversation_result">; task_schedule_limits?: WorkbenchTaskScheduleLimits; notification_channels: Array<"in_app">; allowed_tools: Array<"universe_capabilities" | "universe_search" | "browser_action">; execution_ready: boolean; browser_action_readiness?: BrowserActionReadinessItem[]; memory_lifecycle?: boolean; memory_restore?: boolean; memory_consolidation?: boolean; memory_retrieval_traces?: boolean; memory_capture?: boolean; memory_retrieval?: "local_keyword"; task_readiness?:boolean;task_prd?:boolean; task_unlimited_runs?: boolean; task_run_limit_protocol?: 1; model_budget?: boolean; task_model_budget_limits?: ModelBudgetLimits; task_reply_policy?: boolean; task_reply_execution?: false; task_create_delivery?: boolean; task_notifications?: boolean; channel_bindings?: boolean; email_bindings?: boolean; wecom_bindings?: boolean; matrix_bindings?: boolean; webpush_bindings?: boolean; sms_bindings?: boolean;task_notification_events?:TaskNotificationEventKind[]; mcp_servers?: boolean; host_readiness?:boolean; host_readiness_namespaces?:string[] };
+export type AgentRole = { agent_id: string; name: string; instructions: string; workspace_id: string; project_id: string; conversation_id: string; status: "active" | "disabled" | "deleting" | "deleted"; version: number; capability_epoch: number; allowed_tools: Array<"universe_capabilities" | "universe_search" | "browser_action">; created_at: string; updated_at: string };
 export type AgentRolePage = { items: Array<AgentRole> };
-export type CreateAgentRole = { name: string; instructions?: string; workspace_id?: string; project_id?: string; allowed_tools?: Array<"universe_capabilities" | "universe_search"> };
-export type UpdateAgentRole = { name?: string; instructions?: string; workspace_id?: string; project_id?: string; allowed_tools?: Array<"universe_capabilities" | "universe_search">; expected_version: number; status?: "active" | "disabled" };
+export type CreateAgentRole = { name: string; instructions?: string; workspace_id?: string; project_id?: string; allowed_tools?: Array<"universe_capabilities" | "universe_search" | "browser_action"> };
+export type UpdateAgentRole = { name?: string; instructions?: string; workspace_id?: string; project_id?: string; allowed_tools?: Array<"universe_capabilities" | "universe_search" | "browser_action">; expected_version: number; status?: "active" | "disabled" };
 export type AgentDeletionPreview = { agent_id: string; version: number; active_runs: Array<{ run_id: string; status: "queued" | "starting" | "running" | "waiting_user" | "waiting_approval" | "cancelling" }>; persistent_tasks: Array<{ task_id: string; status: "active" | "paused" | "budget_exhausted" }>; private_memory_count: number; pending_message_count: number };
 export type AgentDeletionReceipt = { agent_id: string; status: "deleting" | "deleted" };
 export type ExpectedVersion = { expected_version: number };
+
+export type McpConnectionConfig =
+  | { server_name: string; transport: 'stdio'; command: string; args?: string[]; cwd?: string; env_refs?: Record<string, string>; url?: never; header_refs?: never }
+  | { server_name: string; transport: 'streamable-http'; url: string; header_refs?: Record<string, string>; command?: never; args?: never; cwd?: never; env_refs?: never };
+export type McpTool = { tool_id: string; public_name: string; raw_name: string; description: string; source: 'mcp_server'; source_untrusted: true; input_schema: Record<string, unknown>; approved: boolean };
+export type McpConnection = {
+  connection_id: string; server_name: string; transport: 'stdio' | 'streamable-http'; version: number; enabled: boolean;
+  state: 'configured' | 'disconnected' | 'connecting' | 'reloading' | 'ready' | 'error' | 'removing' | 'removed';
+  active_generation: number; pending_generation: number | null; credentials_configured: boolean; last_error_code: string | null; tools: McpTool[];
+};
+export type McpConnectionPage = { items: McpConnection[] };
+export type McpConfigStage = { expected_version: number; config: McpConnectionConfig };
+export type McpEnabledUpdate = { expected_version: number; enabled: boolean };
+export type McpToolGrant = { expected_version: number; tool_ids: string[] };
+export type McpExpectedVersion = { expected_version: number };
 export type SendAgentRoleMessage = { text: string; client_message_id: string };
 export type IndependentTeam = { team_id: string; name: string; workspace_id: string; project_id: string; status: "active" | "deleted"; version: number; created_at: string; updated_at: string; member_ids: Array<string> };
 export type IndependentTeamPage = { items: Array<IndependentTeam> };
@@ -158,15 +191,19 @@ export type IndependentTeamDeletion = { team_id: string; status: "deleted" };
 export type WorkbenchWorkspace = { workspace_id: string; agents: Array<AgentRole>; teams: Array<IndependentTeam> };
 export type AgentMailboxMessage = { message_id: string; workspace_id: string; project_id: string; sender_agent_id: string; recipient_agent_id: string; thread_id: string; root_causation_id: string; reply_to: string | null; text: string; initiator: "user" | "agent"; status: "pending" | "processing" | "completed" | "failed" | "outcome_unknown" | "recipient_deleted" | "sender_deleted" | "budget_exhausted" | "delivered" | "task_revoked"; auto_reply: boolean; run_id: string | null; created_at: string; updated_at: string };
 export type AgentMailboxMessagePage = { items: Array<AgentMailboxMessage> };
-export type CreateChannelBinding = {channel:'wecom'};
+export type CreateChannelBinding = {channel:'wecom'|'matrix'|'mattermost'|'sms'};
 export type RevokeChannelBinding = {expected_version:number};
-export type ChannelBinding = {channel_binding_id:string;channel:'wecom'|'email';status:'pending'|'verified'|'revoked'|'expired';version:number;created_at:string;verified_at:string|null;revoked_at:string|null;expires_at?:string};
+export type RevokePushSubscription = {expected_version:number;local_endpoint?:string};
+export type ChannelBinding = {channel_binding_id:string;channel:'wecom'|'matrix'|'mattermost'|'email'|'webpush'|'sms';status:'pending'|'verified'|'revoked'|'expired';version:number;created_at:string;verified_at:string|null;revoked_at:string|null;expires_at?:string};
+export type PushSubscriptionRevocation = {binding:ChannelBinding;local_subscription_matches:boolean};
 export type ChannelBindingPage = {items:ChannelBinding[]};
-export type ChannelBindingChallenge = {channel_binding_id:string;channel:'wecom';status:'pending';version:number;expires_at:string;requires_new_code:boolean;code?:string};
+export type PushVapidPublicKey = {public_key:string;generation:string};
+export type CreatePushSubscription = {endpoint:string;keys:{p256dh:string;auth:string}};
+export type ChannelBindingChallenge = {channel_binding_id:string;channel:'wecom'|'matrix'|'mattermost'|'sms';status:'pending';version:number;expires_at:string;requires_new_code:boolean;code?:string};
 export type NotificationDeliveryPolicy = {min_interval_seconds:number;max_per_24_hours:number;quiet_hours:null|{start:string;end:string;timezone:string}};
 export type TaskNotificationEventKind = 'changed'|'completed'|'failed'|'needs_confirmation';
-export type TaskNotificationSettings = {task_id:string;version:number;channel_binding_ids:string[];events:TaskNotificationEventKind[];delivery_policy:NotificationDeliveryPolicy};
-export type UpdateTaskNotifications = {expected_version:number;channel_binding_ids:string[];delivery_policy?:NotificationDeliveryPolicy;events?:TaskNotificationEventKind[]};
+export type TaskNotificationSettings = {task_id:string;version:number;channel_binding_ids:string[];artifact_delivery_binding_ids:string[];events:TaskNotificationEventKind[];delivery_policy:NotificationDeliveryPolicy};
+export type UpdateTaskNotifications = {expected_version:number;channel_binding_ids:string[];artifact_delivery_binding_ids?:string[];delivery_policy?:NotificationDeliveryPolicy;events?:TaskNotificationEventKind[]};
 export type TaskNotificationDelivery = {delivery_id:string;channel:'wecom';status:'pending'|'sending'|'receipt_pending'|'delivered'|'outcome_unknown'|'cancelled'|'failed';reason:string|null;digest_size?:number;created_at:string;updated_at:string};
 export type TaskNotificationDeliveryPage = {items:TaskNotificationDelivery[]};
 export type TaskNotificationHistoryItem = TaskNotificationDelivery & {source:'execution'|'monitor';occurrence_id:string|null};
@@ -180,8 +217,27 @@ export type WorkbenchFile = { path: string; version: number; sha256: string; siz
 export type WorkbenchFilePage = { items: Array<WorkbenchFile>; next_cursor: string|null };
 export type WorkbenchFileListQuery = { project_id: string; limit?: number; cursor?: string };
 export type WorkbenchFileContent = { path: string; version: number; sha256: string; size: number; updated_at: string; content: string };
+export type WorkbenchFileVersion = { workspace_id: string; project_id: string; path: string; version: number; sha256: string; size: number; created_at: string };
+export type WorkbenchFileVersionPage = { workspace_id: string; project_id: string; path: string; items: Array<WorkbenchFileVersion>; next_before_version: number|null };
+export type WorkbenchFileRange = { workspace_id: string; project_id: string; path: string; version: number; sha256: string; size: number; offset_bytes: number; returned_bytes: number; eof: boolean; content: string };
 export type WriteWorkbenchFile = { project_id: string; path: string; content: string; expected_version: number };
-export type PersistentTaskTrigger = ({ kind: "once"; run_at?: string }) | ({ kind: "interval"; interval_seconds?: number }) | ({ kind: "page_change"; interval_seconds?: number; url: string }) | ({ kind: "daily"; time: string; timezone: string }) | ({ kind: "weekly"; time: string; timezone: string; weekdays: Array<number> }) | ({ kind: "conversation_message" | "conversation_result"; conversation_id: string });
+export type WorkbenchFileLifecycleReference = Record<string,string|number|null>;
+export type WorkbenchFileLifecycleSource = {path:string;version:number;sha256:string;size:number;updated_at:string};
+export type WorkbenchFileLifecyclePreview =
+ | {action:"rename";source:WorkbenchFileLifecycleSource;source_refs:Array<WorkbenchFileLifecycleReference>;target:{path:string;version:number};target_refs:Array<WorkbenchFileLifecycleReference>;preview_sha256:string}
+ | {action:"delete";source:WorkbenchFileLifecycleSource;source_refs:Array<WorkbenchFileLifecycleReference>;preview_sha256:string};
+export type WorkbenchFileLifecycleReceipt =
+ | {protocol:1;action:"rename";command_key:string;project_id:string;workspace_id:string;source:WorkbenchFileLifecycleSource;source_refs:Array<WorkbenchFileLifecycleReference>;target:{path:string;version:number;sha256:string;size:number};target_refs:Array<WorkbenchFileLifecycleReference>;preview_sha256:string;applied_at:string}
+ | {protocol:1;action:"delete";command_key:string;project_id:string;workspace_id:string;source:WorkbenchFileLifecycleSource;source_refs:Array<WorkbenchFileLifecycleReference>;preview_sha256:string;applied_at:string};
+export type WorkbenchFileLifecycleStatus = {state:"not_applied"}|{state:"applied";receipt:WorkbenchFileLifecycleReceipt};
+export type WorkbenchFileLifecycleHistoryPage = {items:Array<WorkbenchFileLifecycleReceipt>;next_cursor:string|null};
+export type WorkbenchFileLifecycleHistoryQuery = {project_id:string;limit?:number;cursor?:string};
+export type PreviewWorkbenchFileRename = {project_id:string;path:string;target_path:string;expected_version:number};
+export type PreviewWorkbenchFileDelete = {project_id:string;path:string;expected_version:number};
+export type ApplyWorkbenchFileRename = PreviewWorkbenchFileRename&{preview_sha256:string};
+export type ApplyWorkbenchFileDelete = PreviewWorkbenchFileDelete&{preview_sha256:string};
+export type PersistentTaskMisfirePolicy = "coalesce" | "skip" | "catch_up";
+export type PersistentTaskTrigger = ({ kind: "once"; run_at?: string }) | ({ kind: "interval"; interval_seconds?: number }) | ({ kind: "page_change"; interval_seconds?: number; url: string }) | ({ kind: "daily"; time: string; timezone: string; missed_triggers?: PersistentTaskMisfirePolicy }) | ({ kind: "weekly"; time: string; timezone: string; weekdays: Array<number>; missed_triggers?: PersistentTaskMisfirePolicy }) | ({ kind: "cron"; expression: string; timezone: string; missed_triggers?: PersistentTaskMisfirePolicy }) | ({ kind: "delay"; delay_seconds: number }) | ({ kind: "conversation_message" | "conversation_result"; conversation_id: string });
 export type PersistentTaskBudget = { max_runs: number | null };
 export type CreatePersistentTask = { reply_policy?: TaskReplyPolicy; notification_settings?: CreateTaskNotificationSettings; source?: { conversation_id: string; message_id: string }; title: string; agent_id: string; objective: string; trigger: PersistentTaskTrigger; priority?: number; budget?: PersistentTaskBudget; model_budget?: ModelBudgetLimits };
 export type UpdatePersistentTask = { title?: string; agent_id?: string; objective?: string; trigger?: PersistentTaskTrigger; priority?: number; budget?: PersistentTaskBudget; expected_version: number };
@@ -195,7 +251,7 @@ export type CancelTaskOccurrence = { expected_run_version: number; client_messag
 export type TaskSubtask = { subtask_id: string; task_id: string; title: string; acceptance: string; status: "pending" | "running" | "blocked" | "completed" | "failed" | "cancelled"; priority: number; dependencies: Array<string>; evidence: Array<TaskEvidence>; version: number; created_at: string; updated_at: string };
 export type TaskSubtaskPage = { items: Array<TaskSubtask> };
 export type UpsertTaskSubtask = { subtask_id?: string; expected_version?: number; title?: string; acceptance?: string; status?: "pending" | "running" | "blocked" | "completed" | "failed" | "cancelled"; priority?: number; dependencies?: Array<string>; evidence?: Array<TaskEvidence> };
-export type WorkbenchTaskScheduleLimits = { default_interval_seconds: 300; min_interval_seconds: 60; max_interval_seconds: 31536000; dst_gap: "next_valid_time"; dst_fold: "first_only"; missed_triggers: "coalesce" };
+export type WorkbenchTaskScheduleLimits = { default_interval_seconds: 300; min_interval_seconds: 60; max_interval_seconds: 31536000; dst_gap: "next_valid_time"; dst_fold: "first_only"; missed_triggers: "coalesce"; misfire_policies: PersistentTaskMisfirePolicy[] };
 export type PreviewPersistentTask = { trigger: PersistentTaskTrigger };
 export type PersistentTaskPreview = { next_due_at: string | null; timezone: string | null };
 export type WorkbenchMemoryProvenance = { kind: string; reference: string };
@@ -214,6 +270,11 @@ export type ModelBudgetSummary = { kind: "task_total" | "owner_daily" | "project
 export type TaskModelBudgetUnavailable = { configured: false; task_id: string; reason: "BUDGET_POLICY_NOT_CONFIGURED" };
 export type TaskModelBudgetView = { configured: true; task_id: string; version: number; root: ModelBudgetSummary; ceiling: ModelBudgetAmountLimits; shared: Array<ModelBudgetSummary>; can_start_next_call: boolean; blocking_reasons: Array<string>; pending_unknown: number; token_accounting: "metered_routes_only"; unmetered_token_calls: number; cost_basis: "configured_rates"; currency: "USD"; as_of: string };
 export type TaskModelBudget = TaskModelBudgetUnavailable | TaskModelBudgetView;
+export type TaskModelBudgetAttemptUsage = { status: 'settled' | 'unknown' | 'unavailable' | 'not_metered'; input_tokens: string | null; output_tokens: string | null; cache_read_tokens: string | null; cache_write_tokens: string | null; reasoning_tokens: string | null; total_tokens: string | null };
+export type TaskModelBudgetAttempt = { attempt_ref: string; purpose: 'compaction' | 'session-title' | 'emotion' | 'web-decision' | 'reply-verification' | null; state: 'reserved' | 'in_flight' | 'unknown' | 'settled' | 'released'; created_at: string; updated_at: string; reserved: { tokens: string; nano_usd: string; model_calls: '1' }; settled: { tokens: string | null; nano_usd: string | null; model_calls: '1' | null }; cost_basis: 'configured_rates'; usage: TaskModelBudgetAttemptUsage };
+export type TaskModelBudgetAttemptsView = { configured: true; task_id: string; items: Array<TaskModelBudgetAttempt>; next_cursor: string | null; truncated: boolean; cost_basis: 'configured_rates'; currency: 'USD' };
+export type TaskModelBudgetAttemptsUnavailable = { configured: false; task_id: string; reason: 'BUDGET_POLICY_NOT_CONFIGURED'; items: Array<TaskModelBudgetAttempt>; next_cursor: null };
+export type TaskModelBudgetAttempts = TaskModelBudgetAttemptsView | TaskModelBudgetAttemptsUnavailable;
 export type UpdateTaskModelBudget = { expected_version: number; limits: ModelBudgetLimits };
 export type TaskSubtaskQuery = { occurrence_id?: string };
 
@@ -222,6 +283,21 @@ export type FileOperationRequest = { conversation_id: string; operation: "docume
 export type FileJob = { job_id: string; artifact_ref: string; operation: string; status: "queued" | "running" | "completed" | "failed"; base_version: number; output_version: number | null; result: Record<string, unknown> | null; error_code: string | null; created_at: string; updated_at: string };
 
 export type WorkbenchFileReadQuery = { project_id: string; path: string; version?: number };
+
+export type WorkspaceCheckpointManifestEntry = {path:string;kind:'file';sha256:string;bytes:number;executable:boolean}|{path:string;kind:'directory'}|{path:string;kind:'absent'};
+export type WorkspaceCheckpointManifest = {protocol:2;provider:'snapshot-copy';paths:string[];entries:WorkspaceCheckpointManifestEntry[]};
+export type WorkspaceCheckpointReceipt = {protocol:1;checkpoint_id:string;project_id:string;workspace_id:string;source_revision:number;snapshot_id:string;manifest_sha256:string;created_at:string;status:'ready';execution_authorized:false;restore_authorized:false};
+export type WorkspaceCheckpoint = {checkpoint_id:string;project_id:string;workspace_id:string;source_revision:number;paths:string[];manifest:WorkspaceCheckpointManifest;manifest_sha256:string;receipt:WorkspaceCheckpointReceipt;state:'ready'|'pruned';created_at:string;execution_authorized:false;restore_authorized:false};
+export type WorkspaceCheckpointPage = {items:WorkspaceCheckpoint[];next_before_checkpoint_id:string|null;execution_authorized:false;restore_authorized:false};
+export type CreateWorkspaceCheckpoint = {project_id:string;paths:string[]};
+export type WorkspaceCheckpointPathState = {path:string;kind:'file';version:number;sha256:string;size:number;executable:false}|{path:string;kind:'absent'};
+export type CreateWorkspaceCheckpointRestoreReview = {project_id:string;path:string};
+export type WorkspaceCheckpointRestoreReview = {review_id:string;checkpoint_id:string;project_id:string;workspace_id:string;path:string;expected_revision:number;before:WorkspaceCheckpointPathState;target:WorkspaceCheckpointPathState;review_sha256:string;created_at:string;execution_authorized:false;restore_authorized:false};
+export type RestoreWorkspaceCheckpoint = {project_id:string;path:string;review_id:string;review_sha256:string};
+export type WorkspaceCheckpointRestoreReceipt = {protocol:1;operation_id:string;checkpoint_id:string;path:string;outcome:'applied'|'not_applied';target_state_sha256:string;result_version:number|null;source_revision:number;execution_authorized:false;restore_authorized:false};
+export type WorkspaceCheckpointRestoreUnresolved = {operation_id:string;checkpoint_id:string;path:string;state:'unresolved';execution_authorized:false;restore_authorized:false};
+export type WorkspaceCheckpointRestoreStatus = WorkspaceCheckpointRestoreReceipt|WorkspaceCheckpointRestoreUnresolved;
+export type ReconcileWorkspaceCheckpointRestore = {project_id:string};
 
 
 export type CreateTaskDelegation = { occurrence_id: string; subtask_id: string; expected_subtask_version: number; recipient_agent_id: string; client_message_id: string };
@@ -235,7 +311,7 @@ export type ConfirmEmailBinding = {code:string};
 export type EmailBindingChallenge = {channel_binding_id:string;channel:'email';status:'pending'|'consumed'|'verified'|'replaced';delivery_status:'sending'|'accepted'|'outcome_unknown';expires_at:string};
 export type EmailBindingVerified = {channel_binding_id:string;channel:'email';status:'verified';version:number};
 
-export type CreateTaskNotificationSettings = {channel_binding_ids:string[];delivery_policy?:NotificationDeliveryPolicy;events?:TaskNotificationEventKind[]};
+export type CreateTaskNotificationSettings = {channel_binding_ids:string[];artifact_delivery_binding_ids?:string[];delivery_policy?:NotificationDeliveryPolicy;events?:TaskNotificationEventKind[]};
 
 export type TaskReplyPolicy = {mode:"report"}|{mode:"draft"|"review"|"bounded_auto_reply";target:{kind:"conversation";conversation_id:string}|{kind:"channel";channel_binding_id:string};direction:{topic:string;tone:string;evidence_required:true;forbidden:string[]};limits:{max_per_24_hours:number;min_interval_seconds:number;expires_at:string};quiet_hours:NotificationDeliveryPolicy["quiet_hours"]};
 export type TaskReplyPolicySettings = {task_id:string;version:number;policy:TaskReplyPolicy};
@@ -269,18 +345,24 @@ export type MemoryConsolidationCommand = {expected_version:number};
 export type MemoryConsolidationResult = {memory_id:string;version:number;status:'active'|'superseded'};
 export type MemoryConsolidationSummary = Omit<MemoryConsolidation,'sources'|'proposal'|'results'|'rollback_results'>&{source_count:number;summary:string|null;change_count:number};
 
-export type MemoryRetrievalSummary = {retrieval_id:string;workspace_id:string;agent_id:string;project_id:string;run_id:string;source_run_id:string|null;kind:'context_snapshot'|'continuation_snapshot'|'tool_query';query:string;method:'scope_order'|'keyword'|'adapter'|'inherited';fallback_reason:'adapter_failed'|'invalid_adapter_result'|null;candidate_count:number;context_chars:number|null;excluded:{query_miss:number;result_limit:number;context_limit:number;duplicate:number;context_budget:number};result_count:number;created_at:string};
-export type MemoryRetrievalReference = {scope:'project'|'private';memory_id:string;version:number;rank:number;reason:'scope_order'|'keyword_match'|'adapter_rank'|'adapter_tail'|'inherited';keyword_score:number|null;matched_terms:string[];content_chars:number;truncated:boolean;provenance_truncated:boolean;available:boolean;content_preview?:string;provenance?:WorkbenchMemoryProvenance[]};
+export type MemoryContextDelivery = {status:'delivered_to_session';source_retrieval_id:string;context_hash:string};
+export type MemoryRetrievalSummary = {retrieval_id:string;workspace_id:string;agent_id:string;project_id:string;run_id:string;source_run_id:string|null;kind:'context_snapshot'|'continuation_snapshot'|'tool_query';query:string;method:'scope_order'|'keyword'|'adapter'|'reasoning_provider'|'inherited';fallback_reason:'adapter_failed'|'invalid_adapter_result'|'reasoning_provider_failed'|'invalid_reasoning_provider_result'|null;candidate_count:number;candidate_pool_truncated?:boolean;context_chars:number|null;excluded:{query_miss:number;result_limit:number;context_limit:number;duplicate:number;context_budget:number;provider_unselected?:number;selected_source_stale?:number};result_count:number;created_at:string;context_delivery?:MemoryContextDelivery};
+export type MemoryRetrievalReference = {scope:'project'|'private';memory_id:string;version:number;rank:number;reason:'scope_order'|'keyword_match'|'adapter_rank'|'adapter_tail'|'reasoning_provider'|'inherited';keyword_score:number|null;matched_terms:string[];content_chars:number;truncated:boolean;provenance_truncated:boolean;available:boolean;content_preview?:string;provenance?:WorkbenchMemoryProvenance[]};
 export type MemoryRetrieval = MemoryRetrievalSummary&{references:MemoryRetrievalReference[]};
 export type MemoryRetrievalPage = {items:MemoryRetrievalSummary[];next_before_id:string|null};
 
 export type MemoryCapturePolicy ={agent_id:string;mode:'off'|'suggest';include_assistant:boolean;include_automation:boolean;version:number;current:boolean;updated_at:string|null};
+export type MemoryDreamPolicy ={owner_id:string;workspace_id:string;project_id:string;agent_id:string;enabled:boolean;interval_seconds:number;next_due_at:string|null;policy_version:number;epoch:number;updated_at:string};
 export type MemoryCaptureSummary ={processing?:{status:string;reason_code:string|null}|null;capture_id:string;agent_id:string;workspace_id:string;project_id:string;source_run_id:string;source_conversation_id:string;run_kind:'chat'|'task'|'native_team'|'internal_mailbox';policy_version:number;policy_current:boolean;status:'watching'|'ready'|'proposed'|'applied'|'rejected'|'no_notes'|'no_source'|'source_failed'|'stale';version:number;source_count:number;notes_count:number;created_at:string;updated_at:string};
 export type MemoryCaptureSource ={source_id:string;message_id:string;block_id:string;block_index:number;role:'user'|'assistant';origin:'human'|'agent'|'automation';content_sha256:string;truncated:boolean;available:boolean;text?:string};
 export type MemoryCapture =MemoryCaptureSummary&{info:{captured_chars:number;truncated_blocks:number;omitted_blocks:number;excluded_blocks:number;source_status:string|null}|null;sources:MemoryCaptureSource[];proposal:{summary:string;notes:{content:string;source_ids:string[]}[]}|null;proposal_unavailable:boolean;results:{memory_id:string;version:number;reused:boolean}[]|null};
 export type MemoryCapturePage ={items:MemoryCaptureSummary[];next_before_id:string|null};
+export type MemoryCaptureRecovery = {capture_status:MemoryCaptureSummary['status'];processor_run_status:'queued'|'starting'|'running'|'waiting_user'|'waiting_approval'|'succeeded'|'partial'|'failed'|'interrupted'|'cancelling'|'not_started'|'unavailable'|'unknown';proposal_available:boolean;usage_state:'no_attempt'|'settled'|'released'|'held_unknown'|'held_in_flight'|'held_mixed'|'unresolved'|'unavailable';recovery_state:'committed_proposal_settled'|'unresolved_usage_held'|'source_or_policy_stale'|'budget_bound_exceeded'|'no_recovery_needed';reconciliation_evidence:{attempt_id:string;evidence_ref:string;policy_version:number;epoch:number}[]};
+export type MemoryCaptureReconcileInput = {expected_capture_version:number;expected_policy_version:number;expected_epoch:number;attempt_id:string;evidence_ref:string};
+export type MemoryCaptureReconciliation = {state:'committed_proposal_settled'|'budget_bound_exceeded'|'usage_reconciled_held';run_id:string;reconciled_attempt_id:string;evidence_sha256:string};
 
 export type UpdateMemoryCapturePolicy = {expected_version:number;mode:"off"|"suggest";include_assistant?:boolean;include_automation?:boolean};
+export type UpdateMemoryDreamPolicy = {expected_version:number;enabled?:boolean;interval_seconds?:number};
 export type MemoryCaptureCollection = {ready:number;skipped:number};
 export type MemoryCaptureCommand = {expected_version:number};
 export type EmptyObject = Record<string,never>;
@@ -295,6 +377,9 @@ export type DiscoveryPolicySave = {expected_version:number;expected_role_version
 export type DiscoveryPolicyControl = {action:'enable';expected_version:number;expected_role_version:number;expected_role_epoch:number}|{action:'pause'|'stop';expected_version:number};
 export type DiscoveryPolicyReceipt = {policy_id:string;scope:{project_id:string;workspace_id:string;agent_id:string};version:number;role_version:number;role_epoch:number;state:'off'|'active'|'paused'|'stopped';mode:'discover_only'|'discover_and_work';cooldown_ms:number;recent_input_ms:number;max_cycles:number|null;execution_authorized:false};
 export type DiscoveryPolicyStatus = {policy:(DiscoveryPolicyReceipt&{effective_state:DiscoveryPolicyReceipt['state']|'revoked'})|null;execution_authorized:false};
+export type CreateDiscoveryWorkCycle = {report_sha256:string;plan_ids:string[];expected_policy_version:number;expected_role_version:number;expected_role_epoch:number};
+export type DiscoveryWorkCyclePlan = {plan_id:string;sha256:string;paths:string[]};
+export type DiscoveryWorkCycle = {cycle_id:string;version:number;state:'open'|'closed';admission_id:string;occurrence_id:string;task_id:string;root_run_id:string;report_sha256:string;policy_version:number;role_version:number;role_epoch:number;plans:DiscoveryWorkCyclePlan[];created_at:string;closed_at:string|null;execution_authorized:false};
 
 export type ProjectDiscoveryTaskTrigger = {kind:"project_discovery";policy_id:string};
 
@@ -348,3 +433,9 @@ export type GitIndexResolutionResult = {receipt:Extract<GitIndexControlReceipt,{
 
 export type GitIndexHistoryItem = {created_at:string;acceptance:GitIndexAcceptance;status:GitIndexStatus};
 export type GitIndexHistory = {project_id:string;items:GitIndexHistoryItem[];next_cursor:string|null;execution_authorized:false};
+
+export type ChannelId = 'api-server'|'bluebubbles'|'cli'|'dingtalk'|'discord'|'email'|'feishu'|'homeassistant'|'matrix'|'mattermost'|'qq'|'signal'|'slack'|'sms'|'telegram'|'tui'|'webhook'|'wecom'|'wecom-callback'|'weixin'|'whatsapp';
+
+export type WorkspaceCheckpointRestoreRequestStatus = {command_key:string;request_sha256:string;command_sha256:string;execution_authorized:false;restore_authorized:false}&({state:'unobserved'}|{state:'recorded_pending';operation_id:string}|{state:'settled';operation_id:string;receipt:WorkspaceCheckpointRestoreReceipt}|{state:'terminal_rejected';no_effect:true;reason:'workspace_checkpoint_review_changed'});
+export type ForkConversationInput = { expected_version: number; through_message_id: string };
+export type ConversationForkReceipt = { conversation_id: string; fork_id: string; source: { conversation_id: string; through_message_id: string; head_sha256: string }; state: "ready" };

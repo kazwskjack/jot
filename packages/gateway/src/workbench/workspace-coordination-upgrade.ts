@@ -20,14 +20,17 @@ function normalized(sql:string){
  }
  return output.replace(/;$/,'');
 }
-function definition(name:string,publication:boolean){return `CREATE TABLE ${quote(name)}(
+function definition(name:string,publication:boolean,checkpoint=false){return `CREATE TABLE ${quote(name)}(
  reservation_id TEXT PRIMARY KEY,owner_id TEXT NOT NULL,project_id TEXT NOT NULL,
- operation_kind TEXT NOT NULL CHECK(operation_kind IN(${publication?"'git_index','work_publication'":"'git_index'"})),operation_id TEXT NOT NULL,
+ operation_kind TEXT NOT NULL CHECK(operation_kind IN(${checkpoint?"'git_index','work_publication','workspace_checkpoint_restore'":publication?"'git_index','work_publication'":"'git_index'"})),operation_id TEXT NOT NULL,
  binding_sha256 TEXT NOT NULL,created_at TEXT NOT NULL,record_sha256 TEXT NOT NULL,UNIQUE(operation_kind,operation_id))`;}
 function exists(db:DatabaseSync,name:string){return !!db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?").get(name);}
 export function workspacePublicationSchema(db:DatabaseSync):'legacy'|'publication'|'unsupported'{
+ const kind=workspaceCheckpointCoordinationSchema(db);return kind==='checkpoint'?'publication':kind==='legacy'||kind==='publication'?kind:'unsupported';
+}
+export function workspaceCheckpointCoordinationSchema(db:DatabaseSync):'legacy'|'publication'|'checkpoint'|'unsupported'{
  const row=db.prepare("SELECT sql FROM sqlite_schema WHERE type='table' AND name=?").get(original) as {sql:string}|undefined;
- if(!row)return 'unsupported';for(const [kind,enabled] of [['legacy',false],['publication',true]] as const)if(normalized(row.sql)===normalized(definition(original,enabled)))return kind;return 'unsupported';
+ if(!row)return 'unsupported';for(const [kind,enabled,checkpoint] of [['legacy',false,false],['publication',true,false],['checkpoint',true,true]] as const)if(normalized(row.sql)===normalized(definition(original,enabled,checkpoint)))return kind;return 'unsupported';
 }
 function fail(code:string):never{throw Error('workspace_publication_upgrade_'+code);}
 function quiescent(db:DatabaseSync){
@@ -121,6 +124,39 @@ export function upgradeWorkspacePublicationCoordination(db:DatabaseSync,options:
   if(canonicalJson(objects(db))!==canonicalJson(afterObjects)||db.prepare('PRAGMA foreign_key_check').all().length||canonicalJson(inventory(db,tables))!==canonicalJson(before)||Number((db.prepare('SELECT total_changes() n').get() as Row).n)!==beforeChanges+parentRows)fail('integrity');
   db.exec('COMMIT');
   return{protocol:1 as const,state:'upgraded' as const,database_sha256:identity.sha256,retained:before,execution_authorized:false as const,offline_pool_drain_observed:false as const};
+ }catch(error){if(db.isTransaction)db.exec('ROLLBACK');throw error;}
+ finally{db.exec('PRAGMA legacy_alter_table='+legacy);db.exec('PRAGMA foreign_keys='+foreignKeys);}
+}
+
+/** Offline, quiescent second schema migration for the owner-scoped restore
+ * reservation. It preserves every existing object, row, FK and source record. */
+export function upgradeWorkspaceCheckpointCoordination(db:DatabaseSync,options:{onPhase?:(phase:WorkspaceUpgradePhase)=>void}={}){
+ const failCheckpoint=(code:string):never=>{throw Error('workspace_checkpoint_upgrade_'+code);};
+ if(db.isTransaction)failCheckpoint('transaction');if(Object.keys(options).some(key=>key!=='onPhase')||options.onPhase!==undefined&&(typeof options.onPhase!=='function'||options.onPhase.constructor.name==='AsyncFunction'))failCheckpoint('invalid');
+ const identity=retainOriginalGitDatabase(db),kind=workspaceCheckpointCoordinationSchema(db);if(kind==='unsupported'||kind==='legacy')failCheckpoint('schema_unsupported');
+ if(kind==='checkpoint')return{protocol:1 as const,state:'already_current' as const,database_sha256:identity.sha256,execution_authorized:false as const,offline_pool_drain_observed:false as const};
+ const foreignKeys=Number((db.prepare('PRAGMA foreign_keys').get() as Row).foreign_keys),legacy=Number((db.prepare('PRAGMA legacy_alter_table').get() as Row).legacy_alter_table);
+ if(foreignKeys!==1||Number((db.prepare('PRAGMA writable_schema').get() as Row).writable_schema)!==0||db.prepare("SELECT 1 FROM sqlite_temp_schema WHERE name NOT LIKE 'sqlite_%' LIMIT 1").get())failCheckpoint('connection_unconfirmed');
+ if(db.prepare('SELECT 1 FROM sqlite_schema WHERE name=?').get(replacement))failCheckpoint('replacement_exists');
+ quiescent(db);if(db.prepare('PRAGMA foreign_key_check').all().length)failCheckpoint('integrity');
+ const phase=(name:WorkspaceUpgradePhase)=>{const result=options.onPhase?.(name) as unknown;if(result!==undefined){if(result&&typeof(result as {then?:unknown}).then==='function')Promise.resolve(result).catch(()=>{});failCheckpoint('async_callback');}};
+ db.exec('PRAGMA foreign_keys=OFF');
+ try{
+  db.exec('BEGIN IMMEDIATE');identity.assertCurrent();if(workspaceCheckpointCoordinationSchema(db)!=='publication')failCheckpoint('schema_changed');quiescent(db);
+  const beforeObjects=objects(db),tables=dependencies(db),before=inventory(db,tables),beforeChanges=Number((db.prepare('SELECT total_changes() n').get() as Row).n);phase('captured');
+  for(const object of beforeObjects.filter(row=>row.type==='trigger'))db.exec('DROP TRIGGER '+quote(object.name));
+  for(const object of beforeObjects.filter(row=>row.type==='view'))db.exec('DROP VIEW '+quote(object.name));
+  db.exec(definition(replacement,true,true));db.exec('INSERT INTO '+quote(replacement)+' SELECT * FROM '+quote(original));phase('copied');
+  db.exec('DROP TABLE '+quote(original));db.exec('ALTER TABLE '+quote(replacement)+' RENAME TO '+quote(original));
+  for(const object of beforeObjects.filter(row=>row.type==='index'&&row.tbl_name===original))db.exec(object.sql);
+  for(const type of ['view','trigger'])for(const object of beforeObjects.filter(row=>row.type===type))db.exec(object.sql);
+  phase('recreated');identity.assertCurrent();
+  if(workspaceCheckpointCoordinationSchema(db)!=='checkpoint'||db.prepare('PRAGMA foreign_key_check').all().length||canonicalJson(inventory(db,tables))!==canonicalJson(before))failCheckpoint('integrity');
+  const afterObjects=objects(db);if(afterObjects.length!==beforeObjects.length)failCheckpoint('schema_changed');
+  for(let index=0;index<beforeObjects.length;index++){const a=beforeObjects[index]!,b=afterObjects[index]!;if(a.name!==b.name||a.type!==b.type||a.tbl_name!==b.tbl_name||a.name!==original&&a.sql!==b.sql)failCheckpoint('schema_changed');}
+  const parentRows=before.find(row=>row.table===original)!.rows;if(Number((db.prepare('SELECT total_changes() n').get() as Row).n)!==beforeChanges+parentRows)failCheckpoint('unexpected_write');
+  phase('verified');identity.assertCurrent();if(canonicalJson(objects(db))!==canonicalJson(afterObjects)||db.prepare('PRAGMA foreign_key_check').all().length||canonicalJson(inventory(db,tables))!==canonicalJson(before)||Number((db.prepare('SELECT total_changes() n').get() as Row).n)!==beforeChanges+parentRows)failCheckpoint('integrity');
+  db.exec('COMMIT');return{protocol:1 as const,state:'upgraded' as const,database_sha256:identity.sha256,retained:before,execution_authorized:false as const,offline_pool_drain_observed:false as const};
  }catch(error){if(db.isTransaction)db.exec('ROLLBACK');throw error;}
  finally{db.exec('PRAGMA legacy_alter_table='+legacy);db.exec('PRAGMA foreign_keys='+foreignKeys);}
 }

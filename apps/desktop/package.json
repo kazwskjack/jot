@@ -1,0 +1,17 @@
+{
+  "name": "jot-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "main-entry.mjs",
+  "scripts": {
+    "start": "electron .",
+    "package:portable": "node scripts/package-portable.mjs"
+  },
+  "dependencies": {
+    "fastify": "5.12.5"
+  },
+  "devDependencies": {
+    "electron": "45.0.0"
+  }
+}

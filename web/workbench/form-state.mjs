@@ -1,6 +1,7 @@
 import {replyPolicyInput} from './reply-policy-ui.mjs';
 const required=(value,label)=>{const text=String(value??'').trim();if(!text)throw new Error(`请填写${label}`);return text;};
 const integer=(value,label,min,max)=>{const number=Number(value);if(!Number.isSafeInteger(number)||number<min||number>max)throw new Error(`${label}必须为 ${min}–${max} 的整数`);return number;};
+/** @returns {import('../../packages/gateway/contracts/types').CreatePersistentTask} */
 export function taskInput(form,limits,modelBudgetEnabled=false,unlimitedRunsEnabled=false) {
  const input={title:required(form.title,'任务名称'),agent_id:required(form.agent_id,'执行角色'),objective:required(form.objective,'任务目标'),trigger:taskTriggerInput(form,limits)};
  if(form.max_runs==='unlimited'){
@@ -30,9 +31,15 @@ export function validateTaskWizardStep(form,step,limits,modelBudgetEnabled=false
 }
 export function taskTriggerInput(form,limits) {
  const trigger={kind:form.kind};
- if(!['once','interval','page_change','daily','weekly','conversation_message','conversation_result'].includes(form.kind))throw new Error('当前不支持这个触发方式');
+ if(!['once','interval','page_change','daily','weekly','cron','delay','conversation_message','conversation_result'].includes(form.kind))throw new Error('当前不支持这个触发方式');
  if(['conversation_message','conversation_result'].includes(form.kind)){trigger.conversation_id=required(form.conversation_id,'来源对话');if(trigger.conversation_id.length>200)throw new Error('对话标识过长');}
  if(['interval','page_change'].includes(form.kind))trigger.interval_seconds=integer(form.interval_seconds,'检查间隔（秒）',limits?.min_interval_seconds??60,limits?.max_interval_seconds??31536000);
+ if(form.kind==='delay')trigger.delay_seconds=integer(form.delay_seconds,'延迟时间（秒）',1,31536000);
+ if(form.kind==='cron'){
+  trigger.expression=required(form.expression,'Cron 表达式');if(trigger.expression.length>120)throw new Error('Cron 表达式不能超过 120 个字符');
+  trigger.timezone=required(form.timezone,'IANA 时区');if(trigger.timezone.length>100)throw new Error('IANA 时区不能超过 100 个字符');
+  if(form.missed_triggers!==undefined){if(!['coalesce','skip','catch_up'].includes(form.missed_triggers))throw new Error('漏触发策略无效');trigger.missed_triggers=form.missed_triggers;}
+ }
  if(form.kind==='once'&&form.run_at){const date=new Date(form.run_at);if(!/(Z|[+-]\d\d:\d\d)$/.test(form.run_at)||!Number.isFinite(date.valueOf()))throw new Error('执行时间需包含时区，例如 +08:00');trigger.run_at=date.toISOString();}
  if(form.kind==='page_change'){let url;try{url=new URL(required(form.url,'网页地址'));}catch{throw new Error('请填写完整的网页地址');}if(!['http:','https:'].includes(url.protocol)||url.username||url.password||(url.port&&!['80','443'].includes(url.port)))throw new Error('网页地址仅支持不含凭据的 HTTP / HTTPS 标准端口');trigger.url=url.href;}
  if(['daily','weekly'].includes(form.kind)){
@@ -48,11 +55,23 @@ export function taskTriggerInput(form,limits) {
  return trigger;
 }
 export function blankTaskForm(agentId,limits,modelLimits) {
- return {title:'',agent_id:agentId,objective:'',kind:'once',conversation_id:'',interval_seconds:String(limits?.default_interval_seconds??300),url:'',max_runs:'100',run_at:'',time:'09:00',timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC',weekdays:[new Date().getDay()],model_budget_enabled:false,model_tokens:String(modelLimits?.tokens??0),model_dollars:modelLimits?nanoToDollars(modelLimits.nano_usd):'0',model_calls:String(modelLimits?.model_calls??0),notification_settings:{channel_binding_ids:[],events:['completed']}};
+ return {title:'',agent_id:agentId,objective:'',kind:'once',conversation_id:'',interval_seconds:String(limits?.default_interval_seconds??300),url:'',expression:'',delay_seconds:'',max_runs:'100',run_at:'',time:'09:00',timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC',weekdays:[new Date().getDay()],model_budget_enabled:false,model_tokens:String(modelLimits?.tokens??0),model_dollars:modelLimits?nanoToDollars(modelLimits.nano_usd):'0',model_calls:String(modelLimits?.model_calls??0),notification_settings:{channel_binding_ids:[],artifact_delivery_binding_ids:[],artifact_delivery_binding_versions:{},events:['completed']}};
 }
 export function taskCreationNotificationInput(value){
- if(!value||typeof value!=='object'||Object.keys(value).some(key=>!['channel_binding_ids','events'].includes(key))||!Array.isArray(value.channel_binding_ids)||value.channel_binding_ids.length>5||new Set(value.channel_binding_ids).size!==value.channel_binding_ids.length||value.channel_binding_ids.some(id=>typeof id!=='string'||!id||id.length>128)||!Array.isArray(value.events)||value.events.length>4||new Set(value.events).size!==value.events.length||value.events.some(event=>!['changed','completed','failed','needs_confirmation'].includes(event)))throw new Error('请选择有效的通知渠道和条件');
- return {channel_binding_ids:[...value.channel_binding_ids],events:[...value.events]};
+ if(!value||typeof value!=='object'||Object.keys(value).some(key=>!['channel_binding_ids','artifact_delivery_binding_ids','artifact_delivery_binding_versions','events'].includes(key))||!Array.isArray(value.channel_binding_ids)||value.channel_binding_ids.length>5||new Set(value.channel_binding_ids).size!==value.channel_binding_ids.length||value.channel_binding_ids.some(id=>typeof id!=='string'||!id||id.length>128)||!Array.isArray(value.events)||value.events.length>4||new Set(value.events).size!==value.events.length||value.events.some(event=>!['changed','completed','failed','needs_confirmation'].includes(event)))throw new Error('请选择有效的通知渠道和条件');
+ const artifacts=value.artifact_delivery_binding_ids??[];
+ if(!Array.isArray(artifacts)||artifacts.length>5||new Set(artifacts).size!==artifacts.length||artifacts.some(id=>typeof id!=='string'||!value.channel_binding_ids.includes(id))||artifacts.length&&!value.events.includes('completed'))throw new Error('文件交付需选择通知渠道并启用任务完成通知');
+ return {channel_binding_ids:[...value.channel_binding_ids],artifact_delivery_binding_ids:[...artifacts],events:[...value.events]};
+}
+/** @returns {{channel_binding_ids:string[],artifact_delivery_binding_ids:string[],artifact_delivery_binding_versions:Partial<Record<string,number>>,events:import('./types').TaskNotificationSettings['events']}} */
+export function taskCreationNotificationDefaults(value){
+ return {channel_binding_ids:value?.channel_binding_ids??[],artifact_delivery_binding_ids:value?.artifact_delivery_binding_ids??[],artifact_delivery_binding_versions:value?.artifact_delivery_binding_versions??{},events:value?.events??['completed']};
+}
+export function taskCreationNotificationDraft(value){
+ const input=taskCreationNotificationInput(value);
+ const artifacts=value.artifact_delivery_binding_ids??[],versions=value.artifact_delivery_binding_versions??{};
+ if(!versions||typeof versions!=='object'||Array.isArray(versions)||Object.keys(versions).some(id=>!artifacts.includes(id)||!Number.isSafeInteger(versions[id])||versions[id]<1)||artifacts.some(id=>!Number.isSafeInteger(versions[id])||versions[id]<1))throw new Error('文件交付需保留 binding 版本以便恢复草稿');
+ return {...input,artifact_delivery_binding_versions:{...versions}};
 }
 export function taskFormFromMessage(selection,agents,limits,modelLimits){
  const message=selection?.message;
@@ -61,8 +80,9 @@ export function taskFormFromMessage(selection,agents,limits,modelLimits){
  const objective=(message.blocks??[]).filter(block=>block.kind==='text').map(block=>block.text??'').join('\n').slice(0,12000);
  return {...blankTaskForm(agent?.agent_id??'',limits,modelLimits),objective,source:{conversation_id:selection.conversation_id,message_id:message.message_id}};
 }
+/** @returns {Omit<ReturnType<typeof blankTaskForm>,'notification_settings'>&{missed_triggers?:string}} */
 export function taskFormFromTask(task,limits) {
- return {...Object.fromEntries(Object.entries(blankTaskForm(task.agent_id,limits)).filter(([key])=>key!=='notification_settings')),title:task.title,objective:task.objective,kind:task.trigger.kind,conversation_id:task.trigger.conversation_id??'',interval_seconds:String(task.trigger.interval_seconds??limits?.default_interval_seconds??300),url:task.trigger.url??'',max_runs:task.budget.max_runs===null?'unlimited':String(task.budget.max_runs),run_at:task.trigger.run_at??'',time:task.trigger.time??'09:00',timezone:task.trigger.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone??'UTC',weekdays:[...(task.trigger.weekdays??[new Date().getDay()])]};
+ return {...Object.fromEntries(Object.entries(blankTaskForm(task.agent_id,limits)).filter(([key])=>key!=='notification_settings')),title:task.title,objective:task.objective,kind:task.trigger.kind,conversation_id:task.trigger.conversation_id??'',interval_seconds:String(task.trigger.interval_seconds??limits?.default_interval_seconds??300),url:task.trigger.url??'',expression:task.trigger.expression??'',delay_seconds:task.trigger.delay_seconds===undefined?'':String(task.trigger.delay_seconds),missed_triggers:task.trigger.kind==='cron'?task.trigger.missed_triggers:undefined,max_runs:task.budget.max_runs===null?'unlimited':String(task.budget.max_runs),run_at:task.trigger.run_at??'',time:task.trigger.time??'09:00',timezone:task.trigger.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone??'UTC',weekdays:[...(task.trigger.weekdays??[new Date().getDay()])]};
 }
 export function taskTriggerSummary(trigger) {
  if(trigger.kind==='project_discovery')return '项目发现策略';
@@ -70,6 +90,8 @@ export function taskTriggerSummary(trigger) {
  if(trigger.kind==='conversation_result')return '对话完成新结果';
  if(trigger.kind==='once')return '单次';
  if(trigger.kind==='page_change')return '网页变化';
+ if(trigger.kind==='cron')return `Cron ${trigger.expression} · ${trigger.timezone}`;
+ if(trigger.kind==='delay')return `延迟 ${trigger.delay_seconds} 秒`;
  if(trigger.kind==='daily')return `每日 ${trigger.time} · ${trigger.timezone}`;
  if(trigger.kind==='weekly')return `每周 ${(trigger.weekdays??[]).map(day=>['周日','周一','周二','周三','周四','周五','周六'][day]).join('、')} ${trigger.time} · ${trigger.timezone}`;
  return `每 ${trigger.interval_seconds} 秒`;

@@ -18,14 +18,34 @@ test('projects contract-shaped assistant text and safe tool status', () => {
     data: { callId: 'c1', name: 'universe_search', arguments: { query: '亦庄天气' } } } }, context),
   { type: 'activity.upsert', payload: { activity_id: 'c1', run_id: 'run-1', tool_call_id: 'c1',
     attempt_id: 'attempt-run-1', status: 'running', title: '正在搜索资料', started_at: context.at,
-    kind: 'search', detail: { queries: ['亦庄天气'], source_ids: [], tool_name: 'universe_search' } } })
+    kind: 'search', detail: { query_count: 1, source_ids: [], tool_name: 'universe_search' } } })
 })
 
-test('retains real tool, action, full URLs and start time through result',()=>{
+test('ordinary native web/search activity omits endpoint paths and raw query text', () => {
+ const ctx={...context,knownTools:new Map()}
+ const browser=projectSessionFrame({type:'event',event:{type:'tool/call',data:{
+  callId:'private-web-call',name:'mcp__browser__navigate',arguments:{
+   url:'https://private.example.test/private/profile?token=private-url-marker#private-fragment',action:'navigate',
+  },
+ }}},ctx)
+ const search=projectSessionFrame({type:'event',event:{type:'tool/call',data:{
+  callId:'private-search-call',name:'mcp__search__query',arguments:{query:'private-search-query-marker'},
+ }}},{...context,knownTools:new Map()})
+ const serialized=JSON.stringify([browser,search])
+ assert.doesNotMatch(serialized,/private\.example\.test|private\/profile|private-url-marker|private-fragment|private-search-query-marker/)
+ assert.equal(browser.payload.detail.url,undefined)
+ assert.equal(browser.payload.detail.urls,undefined)
+ assert.equal(browser.payload.detail.action,'navigate')
+ assert.equal(search.payload.detail.queries,undefined)
+ assert.equal(search.payload.detail.query_count,1)
+})
+
+test('retains real tool, action, safe URL origins and start time through result',()=>{
  const ctx={...context,knownTools:new Map()};
  const urls=Array.from({length:7},(_,i)=>`https://example.com/${i}?q=one#section`);
  const call=projectSessionFrame({type:'event',event:{type:'tool/call',data:{callId:'url-call',name:'mcp__browser__navigate',arguments:JSON.stringify({urls,action:'navigate',password:'not-public'})}}},ctx);
- assert.deepEqual(call.payload.detail.urls,urls);
+ assert.deepEqual(call.payload.detail.urls,['https://example.com']);
+ assert.equal(JSON.stringify(call).includes('/0?q=one'),false);
  assert.equal(call.payload.detail.tool_name,'mcp__browser__navigate');
  assert.equal(call.payload.detail.action,'navigate');
  assert.equal(JSON.stringify(call).includes('not-public'),false);
@@ -33,9 +53,9 @@ test('retains real tool, action, full URLs and start time through result',()=>{
  assert.deepEqual(result.payload.detail,call.payload.detail);
  assert.equal(result.payload.started_at,context.at);
 });
-test('generic tool activity preserves complete bounded URLs and rejects credential-bearing or over-limit URLs', () => {
+test('generic tool activity projects bounded public origins and rejects credentials or over-limit URLs', () => {
  const ctx={...context,knownTools:new Map()};
- const prefix='https://example.test/';
+ const prefix='https://example.com/';
  const atLength=length=>prefix+'a'.repeat(length-prefix.length);
  const atCodePointLength=length=>prefix+'😀'.repeat(length-[...prefix].length);
  const urls=[atLength(2001),atLength(8192),atLength(8193),atLength(20000),
@@ -45,7 +65,20 @@ test('generic tool activity preserves complete bounded URLs and rejects credenti
   callId:'bounded-url-call',name:'mcp__browser__navigate',arguments:{urls},
  }}},ctx);
  assert.ok(projected);
- assert.deepEqual(projected.payload.detail.urls,[urls[0],urls[1],urls[7]]);
+ assert.deepEqual(projected.payload.detail.urls,['https://example.com']);
+});
+test('generic tool activity omits IP literal URLs and non-default ports', () => {
+ const urls=[
+  'https://127.0.0.1/private/ipv4?token=ipv4-marker',
+  'https://[::1]/private/ipv6?token=ipv6-marker',
+  'https://example.com:8443/private/port?token=port-marker',
+  'https://example.com:443/private/default-port?token=default-port-marker',
+ ];
+ const projected=projectSessionFrame({type:'event',event:{type:'tool/call',data:{
+  callId:'literal-or-port-url-call',name:'mcp__browser__navigate',arguments:{urls},
+ }}},{...context,knownTools:new Map()});
+ assert.deepEqual(projected.payload.detail.urls,['https://example.com']);
+ assert.doesNotMatch(JSON.stringify(projected),/127\.0\.0\.1|\[::1\]|:8443|ipv4-marker|ipv6-marker|port-marker|default-port-marker/);
 });
 test('invalid argument JSON and unsafe URL protocols do not escape into public details',()=>{
  for(const args of ['invalid',{url:'javascript:alert(1)'},{url:'data:text/html,test'}]){
@@ -84,7 +117,7 @@ test('projects nested Universe browse inputs as requested actions without implyi
     },
   } } }, { ...context, knownTools: new Map() });
 
-  assert.deepEqual(projected.payload.detail.urls, ['https://www.w3.org/']);
+  assert.deepEqual(projected.payload.detail.urls, ['https://www.w3.org']);
   assert.deepEqual(projected.payload.detail.requested_action_types, ['click']);
   assert.equal(projected.payload.detail.click_receipt, undefined);
   assert.doesNotMatch(JSON.stringify(projected), /standards and guidelines|click a visible link/);
@@ -326,7 +359,7 @@ test('execute snapshots never persist target URLs or form inputs in the Jot acti
   assert.doesNotMatch(JSON.stringify(projected), /example\.test|private form value|token=secret/)
 })
 
-test('web-operation snapshots allowlist status identifiers and references while preserving the complete accepted URL', () => {
+test('web-operation snapshots allowlist status identifiers and references while reducing URLs to origins', () => {
   const projected = projectWebOperationSnapshot('safe-call', 'universe_read_page', {
     operation_id: `web-${'a'.repeat(32)}`, kind: 'read_page', status: 'private operation status',
     revision: 1, event_cursor: 1, accepted_count: 2,
@@ -344,11 +377,9 @@ test('web-operation snapshots allowlist status identifiers and references while 
   assert.equal(projected.payload.detail.operation_kind, 'read_page')
   assert.equal(projected.payload.detail.operation_status, 'unknown')
   assert.deepEqual(projected.payload.detail.counts, { succeeded: 1 })
-  assert.deepEqual(projected.payload.detail.urls, [
-    'https://example.test/article?q=gold#results', 'https://example.test/next',
-  ])
+  assert.deepEqual(projected.payload.detail.urls, [])
   assert.deepEqual(projected.payload.detail.items[0], {
-    item_id: 'item-0', position: 0, url: 'https://example.test/article?q=gold#results', status: 'unknown',
+    item_id: 'item-0', position: 0, status: 'unknown',
     action_label: '读取页面',
   })
   assert.equal(projected.payload.detail.items[1].reason_code, 'PAGE_TIMEOUT')
@@ -356,8 +387,8 @@ test('web-operation snapshots allowlist status identifiers and references while 
   assert.doesNotMatch(JSON.stringify(projected), /private user input|PRIVATE USER TOKEN|private result token|private_count_token/)
 })
 
-test('web-operation snapshot URLs follow C 8192-character limit without truncating query or fragment', () => {
-  const prefix = 'https://example.test/'
+test('web-operation snapshot URLs apply the input bound and expose only public origins', () => {
+  const prefix = 'https://example.com/'
   const suffix = '?q=full#fragment'
   const atLength = length => prefix + 'a'.repeat(length - prefix.length - suffix.length) + suffix
   const atCodePointLength = length => prefix + '😀'.repeat(length - [...prefix].length - [...suffix].length) + suffix
@@ -370,15 +401,14 @@ test('web-operation snapshot URLs follow C 8192-character limit without truncati
       inputs: { url }, status: 'succeeded' })),
   }, context)
   assert.ok(projected)
-  assert.deepEqual(projected.payload.detail.urls, [
-    urls[0], urls[1], urls[3],
-  ])
-  assert.equal(projected.payload.detail.items[0].url, urls[0])
-  assert.equal(projected.payload.detail.items[1].url, urls[1])
+  assert.deepEqual(projected.payload.detail.urls, ['https://example.com'])
+  assert.equal(projected.payload.detail.items[0].url, 'https://example.com')
+  assert.equal(projected.payload.detail.items[1].url, 'https://example.com')
   assert.equal(projected.payload.detail.items[2].url, undefined)
-  assert.equal(projected.payload.detail.items[3].url, urls[3])
+  assert.equal(projected.payload.detail.items[3].url, 'https://example.com')
   assert.equal(projected.payload.detail.items[4].url, undefined)
   assert.equal(projected.payload.detail.items[5].url, undefined)
+  assert.doesNotMatch(JSON.stringify(projected), /q=full|fragment/)
 })
 
 test('official DSH result message correlates with the call and preserves webpage details',()=>{

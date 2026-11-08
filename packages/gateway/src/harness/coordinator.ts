@@ -6,6 +6,7 @@ import type { EventStore } from '../events/event-store.ts';
 import type { RunRepository } from '../runs/repository.ts';
 import type { JotProjection } from './session-event-projector.ts';
 import type { ResolvedAttachment } from '../artifacts/resolver.ts';
+import {CHANNEL_VERSIONED_INPUT_SQL} from '../channels/attachment-protocol-migration-v2.ts';
 import {recordSessionCheckpoint} from './session-checkpoints.ts';
 import {requestTaskWaitInteraction} from '../persistent-tasks/task-wait.ts';
 import {freezeTaskCompletionCandidate,type TaskCompletionCandidate} from '../persistent-tasks/completion-candidates.ts';
@@ -32,10 +33,23 @@ export interface BackgroundRunOptions {
   maxBackgroundRuns: number;
   allowBackgroundRuns: boolean;
 }
+const TAKEOVER_ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
+const TAKEOVER_TOOLS=new Set(['universe_capabilities','universe_search','browser_action']);
+function browserBindingRisk(value:unknown,runId:string,rowOwner:string):{context?:Record<string,unknown>;risk:boolean}{
+  try{
+    const context=typeof value==='string'?JSON.parse(value):undefined;
+    if(!context||typeof context!=='object'||Array.isArray(context)||context.run_id!==runId
+      ||typeof context.owner_id!=='string'||!TAKEOVER_ID.test(context.owner_id)||context.owner_id!==rowOwner
+      ||typeof context.workspace_id!=='string'||!TAKEOVER_ID.test(context.workspace_id)
+      ||!Array.isArray(context.allowed_tools)||context.allowed_tools.some((name:unknown)=>typeof name!=='string'||!TAKEOVER_TOOLS.has(name))
+      ||new Set(context.allowed_tools).size!==context.allowed_tools.length)return{risk:true};
+    return{context,risk:context.allowed_tools.includes('browser_action')};
+  }catch{return{risk:true};}
+}
 // Shared by claim admission and its read-only projection; no second scheduler.
 const ACTIVE_BACKGROUND_SQL=`SELECT count(*) FROM ga_runs ar JOIN ga_worker_leases al ON al.resource_id=ar.id
   JOIN wb_run_bindings ab ON ab.run_id=ar.id JOIN ga_conversations ac ON ac.id=ar.conversation_id
-  WHERE ab.kind IN ('task','internal_mailbox','memory_capture') AND ar.status IN ('starting','running','waiting_user','waiting_approval','cancelling') AND CAST(al.expires_at AS INTEGER)>?`;
+  WHERE ab.kind IN ('task','internal_mailbox','memory_capture','memory_consolidation') AND ar.status IN ('starting','running','waiting_user','waiting_approval','cancelling') AND CAST(al.expires_at AS INTEGER)>?`;
 
 export class HarnessCoordinator {
   private readonly db: DatabaseSync;
@@ -51,8 +65,9 @@ export class HarnessCoordinator {
     this.backgroundOptions = options;
   }
 
-  claimNext(workerId: string, leaseMs: number): RunLease | null {
-    return this.claim(workerId,leaseMs);
+  claimNext(workerId: string, leaseMs: number,inputProtocol:1|2=1): RunLease | null {
+    if(inputProtocol!==1&&inputProtocol!==2)throw Error('channel_attachment_reader_protocol_invalid');
+    return this.claim(workerId,leaseMs,undefined,inputProtocol);
   }
   /** Existing logical background slots only; not Host idle or an execution lease. */
   observeBackgroundCapacity(owner:string){
@@ -69,63 +84,134 @@ export class HarnessCoordinator {
   }
   /** Only an explicitly ready extraction dispatcher may use this admission. */
   claimMemoryExtraction(workerId:string,leaseMs:number,runId:string):RunLease|null{
-    return this.claim(workerId,leaseMs,runId);
+    return this.claim(workerId,leaseMs,runId,1,'memory_capture');
   }
-  private claim(workerId:string,leaseMs:number,memoryRunId?:string):RunLease|null{
+  claimMemoryConsolidation(workerId:string,leaseMs:number,runId:string,recoverInterrupted=false):RunLease|null{
+    return this.claim(workerId,leaseMs,runId,1,'memory_consolidation',recoverInterrupted);
+  }
+  private claim(workerId:string,leaseMs:number,memoryRunId?:string,inputProtocol:1|2=1,memoryKind?:'memory_capture'|'memory_consolidation',recoverInterrupted=false):RunLease|null{
     const now = this.now();
     return withImmediateTransaction(this.db, () => {
       const hasBindings=Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_run_bindings'").get());
+      if(memoryRunId===undefined&&hasBindings)this.queueStaleBrowserTakeovers(now);
+      const versionedInput=this.db.prepare('PRAGMA table_info(ga_channel_message_events)').all().some(column=>column.name==='content_protocol');
+      const inputAdmission=versionedInput&&inputProtocol!==2?`AND NOT EXISTS(SELECT 1 FROM ga_channel_message_events input_event WHERE input_event.run_id=r.id AND input_event.content_protocol=2) AND NOT(${CHANNEL_VERSIONED_INPUT_SQL})`:'';
       const workspaceAdmission=this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_workspace_reservations'").get()
         ? `AND NOT EXISTS(SELECT 1 FROM ga_conversations c WHERE c.id=r.conversation_id AND EXISTS(${WORKSPACE_RESERVATION_MATCH}))` : '';
       if(memoryRunId!==undefined){
-        if(!hasBindings||!this.backgroundOptions.allowBackgroundRuns||this.backgroundOptions.maxBackgroundRuns<1||!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_memory_processing_runs'").get())return null;
-        const job=this.db.prepare('SELECT owner_id FROM wb_memory_processing_runs WHERE processor_run_id=?').get(memoryRunId) as {owner_id:string}|undefined;if(!job)return null;
-        try{assertMemoryProcessingIdentity(this.db,job.owner_id,memoryRunId);}catch(error){if(error instanceof Error&&error.message==='memory_processing_source_unavailable')return null;throw error;}
+        if(!memoryKind||!hasBindings||!this.backgroundOptions.allowBackgroundRuns||this.backgroundOptions.maxBackgroundRuns<1)return null;
+        if(memoryKind==='memory_capture'){
+          if(!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_memory_processing_runs'").get())return null;
+          const job=this.db.prepare('SELECT owner_id FROM wb_memory_processing_runs WHERE processor_run_id=?').get(memoryRunId) as {owner_id:string}|undefined;if(!job)return null;
+          try{assertMemoryProcessingIdentity(this.db,job.owner_id,memoryRunId);}catch(error){if(error instanceof Error&&error.message==='memory_processing_source_unavailable')return null;throw error;}
+        }else{
+          const binding=this.db.prepare(`SELECT b.owner_id,b.agent_id,b.epoch,b.context_json,a.status,a.capability_epoch,a.workspace_id,a.project_id
+            FROM wb_run_bindings b JOIN wb_agents a ON a.agent_id=b.agent_id AND a.owner_id=b.owner_id
+            WHERE b.run_id=? AND b.kind='memory_consolidation'`).get(memoryRunId) as Record<string,unknown>|undefined;
+          if(!binding||binding.status!=='active'||binding.epoch!==binding.capability_epoch)return null;
+          let context:Record<string,unknown>;try{context=JSON.parse(String(binding.context_json));}catch{return null;}
+          const dream=context.memory_dream as Record<string,unknown>|undefined,policy=dream&&this.db.prepare(`SELECT enabled,policy_version,epoch,project_id,interval_seconds,next_due_at
+            FROM wb_memory_dream_policies WHERE owner_id=? AND workspace_id=? AND project_id=? AND agent_id=?`).get(String(binding.owner_id),String(binding.workspace_id),String(binding.project_id),String(binding.agent_id)) as Record<string,unknown>|undefined;
+          if(!dream||!policy||Number(policy.enabled)!==1||Number(policy.policy_version)!==dream.policy_version||Number(policy.epoch)!==dream.epoch
+            ||Number(policy.epoch)!==Number(binding.epoch)||policy.project_id!==dream.project_id||policy.next_due_at!==dream.cadence_slot
+            ||Number(policy.interval_seconds)!==dream.interval_seconds||binding.project_id!==dream.project_id)return null;
+          if(this.db.prepare(`SELECT 1 FROM ga_runs active JOIN wb_run_bindings b ON b.run_id=active.id
+            WHERE b.owner_id=? AND b.agent_id=? AND active.id<>? AND active.status IN ('starting','running','waiting_user','waiting_approval','cancelling') LIMIT 1`)
+            .get(String(binding.owner_id),String(binding.agent_id),memoryRunId))return null;
+        }
       }
       const hasTaskPriority=hasBindings && Number((this.db.prepare("SELECT count(*) n FROM sqlite_master WHERE type='table' AND name IN ('wb_task_occurrences','wb_persistent_tasks')").get() as {n:number}).n)===2;
       const joins=hasBindings ? `JOIN ga_conversations c ON c.id=r.conversation_id LEFT JOIN wb_run_bindings b ON b.run_id=r.id
         ${hasTaskPriority ? 'LEFT JOIN wb_task_run_occurrences o ON o.run_id=r.id LEFT JOIN wb_persistent_tasks t ON t.task_id=o.task_id' : ''}` : '';
       const activeBackground=ACTIVE_BACKGROUND_SQL;
-      const admission=memoryRunId!==undefined?`AND b.kind='memory_capture' AND r.id=? AND ((${activeBackground})<? AND (${activeBackground} AND ac.owner_id=c.owner_id)<?)`:!hasBindings ? '' : !this.backgroundOptions.allowBackgroundRuns ? 'AND b.run_id IS NULL' :
-        `AND (b.kind IS NULL OR b.kind NOT IN ('native_team','memory_capture')) AND (b.kind IS NULL OR b.kind NOT IN ('task','internal_mailbox') OR
+      const admission=memoryRunId!==undefined?`AND b.kind=? AND r.id=? AND ((${activeBackground})<? AND (${activeBackground} AND ac.owner_id=c.owner_id)<?)`:!hasBindings ? '' : !this.backgroundOptions.allowBackgroundRuns ? 'AND b.run_id IS NULL' :
+        `AND (b.kind IS NULL OR b.kind NOT IN ('native_team','memory_capture','memory_consolidation')) AND (b.kind IS NULL OR b.kind NOT IN ('task','internal_mailbox') OR
           ((${activeBackground})<? AND (${activeBackground} AND ac.owner_id=c.owner_id)<?))`;
       const order=hasBindings ? `CASE WHEN b.kind IN ('task','internal_mailbox') THEN 1 ELSE 0 END,
         ${hasTaskPriority ? 'COALESCE(t.priority,50)' : 'CAST(50 AS INTEGER)'} DESC,` : '';
       const parameters:Array<number>=[now];
       const queryParameters:Array<number|string>=parameters;
-      if(memoryRunId!==undefined)queryParameters.push(memoryRunId);
+      if(recoverInterrupted&&memoryRunId!==undefined)queryParameters.push(memoryRunId);
+      if(memoryRunId!==undefined)queryParameters.push(memoryKind!,memoryRunId);
       if(hasBindings && this.backgroundOptions.allowBackgroundRuns)queryParameters.push(now,this.backgroundOptions.maxBackgroundRuns,now,this.backgroundOptions.maxBackgroundRuns);
       const row = this.db.prepare(
-        `SELECT r.id,r.conversation_id,r.input_message_id,r.status,l.generation
+        `SELECT r.id,r.conversation_id,r.input_message_id,r.status,r.version,l.generation
          FROM ga_runs r LEFT JOIN ga_worker_leases l ON l.resource_id=r.id
          ${joins}
          WHERE ((r.status='queued' AND NOT EXISTS (
            SELECT 1 FROM ga_runs active WHERE active.conversation_id=r.conversation_id
            AND active.id<>r.id AND active.status IN ('starting','running','waiting_user','waiting_approval','cancelling')
-         )) OR (r.status IN ('starting','running') AND (l.resource_id IS NULL OR CAST(l.expires_at AS INTEGER)<=?)))
-         ${admission} ${workspaceAdmission}
+         )) OR (r.status IN ('starting','running') AND (l.resource_id IS NULL OR CAST(l.expires_at AS INTEGER)<=?))${recoverInterrupted?` OR (r.status='interrupted' AND r.id=?)`:''})
+         AND NOT EXISTS(SELECT 1 FROM ga_run_commands takeover WHERE takeover.run_id=r.id AND takeover.kind='lease_takeover' AND takeover.status='pending')
+         ${admission} ${workspaceAdmission} ${inputAdmission}
          ORDER BY ${order} CASE r.status WHEN 'queued' THEN 0 ELSE 1 END,r.created_at,r.id LIMIT 1`,
       ).get(...queryParameters) as Record<string, unknown> | undefined;
       if (!row) return null;
       const runId = String(row.id);
       const conversationId = String(row.conversation_id);
       const inputMessageId = row.input_message_id===null?null:String(row.input_message_id);
-      const generation = Number(row.generation || 0) + 1;
+      const dreamClaim=memoryKind==='memory_consolidation';
+      const generation=dreamClaim?row.generation!==null&&row.generation!==undefined?Math.max(Number(row.generation)+1,Number(row.version)+1):Number(row.version)+1:Number(row.generation||0)+1;
       const expiresAt = now + Math.max(100, leaseMs);
-      this.db.prepare(
+      if(versionedInput&&inputProtocol===2)this.db.prepare(`INSERT INTO ga_worker_leases(resource_id,owner,generation,expires_at,updated_at,channel_protocol_generation) VALUES(?,?,?,?,?,?)
+        ON CONFLICT(resource_id) DO UPDATE SET owner=excluded.owner,generation=excluded.generation,expires_at=excluded.expires_at,updated_at=excluded.updated_at,channel_protocol_generation=excluded.channel_protocol_generation`)
+        .run(runId,workerId,generation,String(expiresAt),new Date(now).toISOString(),generation);
+      else this.db.prepare(
         `INSERT INTO ga_worker_leases(resource_id,owner,generation,expires_at,updated_at) VALUES(?,?,?,?,?)
          ON CONFLICT(resource_id) DO UPDATE SET owner=excluded.owner,generation=excluded.generation,
          expires_at=excluded.expires_at,updated_at=excluded.updated_at`,
       ).run(runId, workerId, generation, String(expiresAt), new Date(now).toISOString());
       if (row.status === 'queued') {
-        this.db.prepare("UPDATE ga_runs SET status='starting',version=version+1,updated_at=? WHERE id=?")
-          .run(new Date(now).toISOString(), runId);
+        const version=dreamClaim?Math.max(Number(row.version)+1,generation):Number(row.version)+1;
+        this.db.prepare("UPDATE ga_runs SET status='starting',version=?,updated_at=? WHERE id=?")
+          .run(version,new Date(now).toISOString(), runId);
         const run = this.db.prepare('SELECT * FROM ga_runs WHERE id=?').get(runId) as Record<string, unknown>;
         this.events.append(conversationId, runId, 'run.state', this.runValue(run));
+      } else if(dreamClaim){
+        const version=Math.max(Number(row.version)+1,generation);
+        this.db.prepare('UPDATE ga_runs SET version=?,updated_at=? WHERE id=?').run(version,new Date(now).toISOString(),runId);
+        const run=this.db.prepare('SELECT * FROM ga_runs WHERE id=?').get(runId) as Record<string,unknown>;
+        this.events.append(conversationId,runId,'run.state',this.runValue(run));
       }
       return { run_id: runId, conversation_id: conversationId, input_message_id: inputMessageId,
         owner: workerId, generation, expires_at: expiresAt };
     });
+  }
+
+  private queueStaleBrowserTakeovers(now:number):void{
+    const rows=this.db.prepare(`SELECT r.id,r.conversation_id,b.run_id binding_run_id,b.owner_id binding_owner,b.context_json,l.resource_id,
+      l.owner lease_owner,l.generation lease_generation,l.expires_at,
+      n.session_id,runtime.harness_session_ref,runtime.runtime_owner,CAST(runtime.fence_epoch AS TEXT) fence_epoch
+      FROM ga_runs r LEFT JOIN ga_worker_leases l ON l.resource_id=r.id
+      LEFT JOIN wb_run_bindings b ON b.run_id=r.id
+      LEFT JOIN ga_run_native_sessions n ON n.run_id=r.id AND n.conversation_id=r.conversation_id
+      LEFT JOIN ga_runtime_bindings runtime ON runtime.run_id=r.id
+      WHERE r.status IN ('starting','running') AND (l.resource_id IS NULL OR CAST(l.expires_at AS INTEGER)<=?)`).all(now) as Array<Record<string,unknown>>;
+    for(const row of rows){
+      if(typeof row.binding_run_id!=='string')continue;
+      const runId=String(row.id),binding=browserBindingRisk(row.context_json,runId,typeof row.binding_owner==='string'?row.binding_owner:'');
+      if(!binding.risk)continue;
+      let leaseOwner=row.lease_owner,leaseGeneration=row.lease_generation;
+      const sessionId=typeof row.session_id==='string'?row.session_id:undefined;
+      const restoredOwner=row.runtime_owner,restoredFence=row.fence_epoch;
+      const restoredGeneration=typeof restoredFence==='string'?Number(restoredFence):Number.NaN;
+      const restoredGenerationValid=typeof restoredFence==='string'&&/^[1-9]\d*$/.test(restoredFence)
+        &&Number.isSafeInteger(restoredGeneration)&&String(restoredGeneration)===restoredFence;
+      if(row.resource_id===null&&sessionId&&row.harness_session_ref===sessionId&&typeof restoredOwner==='string'
+        &&TAKEOVER_ID.test(restoredOwner)&&restoredGenerationValid){
+        leaseOwner=restoredOwner;leaseGeneration=restoredGeneration;
+        this.db.prepare(`INSERT OR IGNORE INTO ga_worker_leases(resource_id,owner,generation,expires_at,updated_at)
+          VALUES(?,?,?,?,?)`).run(runId,restoredOwner,restoredGeneration,String(now-1),new Date(now).toISOString());
+      }
+      const leaseValid=typeof leaseOwner==='string'&&TAKEOVER_ID.test(leaseOwner)&&Number.isSafeInteger(leaseGeneration)&&Number(leaseGeneration)>0;
+      const context=binding.context,identityValid=!!context&&typeof context.owner_id==='string'&&typeof context.workspace_id==='string'
+        &&!!sessionId&&row.harness_session_ref===sessionId&&leaseValid&&row.runtime_owner===leaseOwner&&Number(row.fence_epoch)===Number(leaseGeneration);
+      const payload=identityValid?{protocol:1,kind:'lease_takeover',run_id:runId,owner_id:context!.owner_id,workspace_id:context!.workspace_id,
+        session_id:sessionId,lease_owner:leaseOwner,lease_generation:Number(leaseGeneration)}:{protocol:1,kind:'lease_takeover',run_id:runId};
+      const generation=leaseValid?String(leaseGeneration):'unknown',key=`lease-takeover:${runId}:${generation}`;
+      this.db.prepare(`INSERT OR IGNORE INTO ga_run_commands(id,run_id,kind,payload_json,status,idempotency_key,created_at)
+        VALUES(?,?, 'lease_takeover',?,'pending',?,?)`).run(key,runId,JSON.stringify(payload),key,new Date(now).toISOString());
+    }
   }
 
   start(lease: RunLease): void {
@@ -377,6 +463,13 @@ export class HarnessCoordinator {
     if (!/^[A-Z][A-Z0-9_]{0,63}$/.test(reasonCode)) reasonCode = 'SESSION_INTERRUPTED';
     withImmediateTransaction(this.db, () => {
       this.assertLease(lease);
+      // A lost observer cannot classify a dispatched, unsettled model call as
+      // a failure before execution. Preserve its holds and accounting evidence.
+      if (reasonCode === 'DSH_NO_RUNTIME_OUTCOME'
+        && this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_model_budget_attempts'").get()
+        && this.db.prepare("SELECT 1 FROM wb_model_budget_attempts WHERE run_id=? AND state IN ('in_flight','unknown') LIMIT 1").get(lease.run_id)) {
+        reasonCode = 'OUTCOME_UNKNOWN';
+      }
       const now = new Date(this.now()).toISOString();
       const row = this.db.prepare('SELECT * FROM ga_runs WHERE id=?').get(lease.run_id) as Record<string, unknown>;
       this.db.prepare("UPDATE ga_runs SET status='interrupted',reason_code=?,version=version+1,updated_at=? WHERE id=?")

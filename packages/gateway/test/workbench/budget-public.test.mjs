@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {mkdirSync,mkdtempSync,rmSync,writeFileSync} from 'node:fs';
+import {mkdirSync,mkdtempSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
 import {resolve,join,relative,isAbsolute} from 'node:path';
 import {buildServer} from '../../src/server.ts';
 import {openProductDatabase} from '../../src/db/database.ts';
@@ -188,4 +188,54 @@ test('unlimited monetary ceilings are null in public contract while usage stays 
  const v=new ContractValidator();assert.equal(v.validateResponse(v.operationFor('GET','/v1/persistent-tasks/{task_id}/model-budget'),200,view).valid,true);
  const changed=await f.update({tokens:5000,nano_usd:null,model_calls:50});assert.equal(changed.statusCode,200,changed.body);
  assert.equal(v.validateResponse(v.operationFor('GET','/v1/persistent-tasks/{task_id}/model-budget'),200,{...view,root:{...view.root,used:{...view.root.used,nano_usd:null}}}).valid,false);
+});
+
+const attemptsGet=(f,query={},owner='alice')=>{
+ const params=new URLSearchParams();for(const [key,value] of Object.entries(query))if(value!==undefined)params.set(key,String(value));
+ return f.app.inject({method:'GET',url:`${f.path}/attempts${params.size?'?'+params.toString():''}`,headers:{'x-user-id':owner,origin:'https://fixture.invalid','x-csrf-token':'test-dcbf055943f33d8a'}});
+};
+test('per-attempt history pages only the authenticated task lineage and keeps unknown usage null',async t=>{
+ const memberUsage={inputTokens:20,outputTokens:5,cacheReadTokens:10,cacheWriteTokens:5,totalTokens:40,reasoningTokens:2};
+ const f=await fixture(t),root=f.run('attempt-history-root');f.db.prepare("UPDATE ga_runs SET status='running' WHERE id=?").run(root.run_id);
+ const attemptRoute={attempt_id:'public-root-attempt',provider:route.provider,model:route.model,purpose:'compaction'};
+ f.modelBudgets.reserve('alice',root.run_id,attemptRoute);f.modelBudgets.dispatch('alice',root.run_id,attemptRoute.attempt_id);f.modelBudgets.settle('alice',root.run_id,attemptRoute.attempt_id,{inputTokens:20,outputTokens:5,cacheReadTokens:10,cacheWriteTokens:5,totalTokens:40,reasoningTokens:2});
+ const reviewer=f.workbench.createAgent('alice',{name:'Reviewer',workspace_id:'ws',project_id:f.a.project_id});
+ const message=f.workbench.sendMessage('alice','ws',{sender_agent_id:f.a.agent_id,recipient_agent_id:reviewer.agent_id,text:'Review this task',client_message_id:'attempt-history-member',auto_reply:true,max_replies:1,task_run_id:root.run_id});
+ f.workbench.processMailbox();const memberRun=f.db.prepare('SELECT run_id FROM wb_agent_messages WHERE message_id=?').get(message.message_id).run_id;
+ assert.ok(memberRun);f.db.prepare("UPDATE ga_runs SET status='running' WHERE id=?").run(memberRun);
+ const unknown={attempt_id:'public-member-unknown',provider:route.provider,model:route.model,purpose:'web-decision'};
+ f.modelBudgets.reserve('alice',memberRun,unknown);f.modelBudgets.dispatch('alice',memberRun,unknown.attempt_id);f.modelBudgets.settle('alice',memberRun,unknown.attempt_id,{inputTokens:4,outputTokens:2});
+ const otherTask=f.persistentTasks.create('alice',newTask(f),'attempt-history-other-task'),other=f.persistentTasks.runNow('alice',otherTask.task_id,'attempt-history-other-run');
+ f.db.prepare("UPDATE ga_runs SET status='running' WHERE id=?").run(other.run_id);
+ f.modelBudgets.reserve('alice',other.run_id,{attempt_id:'other-task-private',provider:route.provider,model:route.model});f.modelBudgets.dispatch('alice',other.run_id,'other-task-private');f.modelBudgets.settle('alice',other.run_id,'other-task-private',memberUsage);
+ const before={attempts:f.db.prepare('SELECT count(*) n FROM wb_model_budget_attempts').get().n,events:f.db.prepare('SELECT count(*) n FROM wb_model_budget_events').get().n,scopes:f.db.prepare('SELECT count(*) n FROM wb_model_budget_scopes').get().n};
+ const first=await attemptsGet(f,{limit:1});assert.equal(first.statusCode,200,first.body);const page1=first.json();
+ assert.equal(page1.configured,true);assert.equal(page1.task_id,f.task.task_id);assert.equal(page1.cost_basis,'configured_rates');assert.ok(page1.next_cursor);
+ const second=await attemptsGet(f,{limit:1,cursor:page1.next_cursor});assert.equal(second.statusCode,200,second.body);const page2=second.json();assert.equal(page2.next_cursor,null);
+ const rows=[...page1.items,...page2.items];assert.equal(rows.length,2);assert.deepEqual(new Set(rows.map(row=>row.purpose)),new Set(['compaction','web-decision']));
+ const settled=rows.find(row=>row.purpose==='compaction');assert.equal(settled.state,'settled');assert.deepEqual(settled.settled,{tokens:'40',nano_usd:'115',model_calls:'1'});
+ assert.deepEqual(settled.usage,{status:'settled',input_tokens:'20',output_tokens:'5',cache_read_tokens:'10',cache_write_tokens:'5',reasoning_tokens:'2',total_tokens:'40'});
+ const unresolved=rows.find(row=>row.purpose==='web-decision');assert.equal(unresolved.state,'unknown');assert.deepEqual(unresolved.settled,{tokens:null,nano_usd:null,model_calls:null});
+ assert.deepEqual(unresolved.usage,{status:'unknown',input_tokens:null,output_tokens:null,cache_read_tokens:null,cache_write_tokens:null,reasoning_tokens:null,total_tokens:null});
+ const encoded=JSON.stringify(rows);for(const forbidden of [root.run_id,memberRun,'public-root-attempt','public-member-unknown','other-task-private','fixture','bounded','route_json','request_json','provider','run_id','session_id','owner_id','scope_id'])assert.equal(encoded.includes(forbidden),false,forbidden);
+ assert.equal(new Set(rows.map(row=>row.attempt_ref)).size,2);for(const row of rows){assert.equal(row.cost_basis,'configured_rates');assert.ok(row.created_at);assert.ok(row.updated_at);}
+ assert.deepEqual({attempts:f.db.prepare('SELECT count(*) n FROM wb_model_budget_attempts').get().n,events:f.db.prepare('SELECT count(*) n FROM wb_model_budget_events').get().n,scopes:f.db.prepare('SELECT count(*) n FROM wb_model_budget_scopes').get().n},before,'reading attempt pages must not change accounting');
+ assert.equal((await attemptsGet(f,{limit:1,cursor:page1.next_cursor},'bob')).statusCode,404);
+ assert.equal((await attemptsGet(f,{cursor:'not-a-cursor'})).statusCode,422);
+ assert.equal((await attemptsGet(f,{limit:51})).statusCode,422);
+ assert.equal((await attemptsGet(f,{limit:1,owner:'bob'})).statusCode,422);
+ const spec=JSON.parse(readFileSync(new URL('../../contracts/openapi.json',import.meta.url),'utf8'));
+ const limitSchema=spec.paths['/v1/persistent-tasks/{task_id}/model-budget/attempts'].get.parameters.find(parameter=>parameter.in==='query'&&parameter.name==='limit').schema;
+ const {default:Ajv}=await import('ajv/dist/2020.js'),validateLimit=new Ajv({strict:false}).compile(limitSchema);
+ for(const value of ['1','20','50'])assert.equal(validateLimit(value),true,`published limit ${value} must be accepted`);
+ for(const value of ['0','51','99','100'])assert.equal(validateLimit(value),false,`published limit ${value} must be rejected`);
+ const validator=new ContractValidator(),operation=validator.operationFor('GET','/v1/persistent-tasks/{task_id}/model-budget/attempts');
+ assert.ok(operation);assert.equal(validator.validateResponse(operation,200,page1).valid,true);
+ assert.equal(validator.validateResponse(operation,200,{...page1,items:[{...page1.items[0],run_id:root.run_id}]}).valid,false);
+});
+
+test('unconfigured attempt history is empty and does not fabricate zero usage',async t=>{
+ const f=await fixture(t,false),response=await attemptsGet(f);assert.equal(response.statusCode,200,response.body);
+ assert.deepEqual(response.json(),{configured:false,task_id:f.task.task_id,reason:'BUDGET_POLICY_NOT_CONFIGURED',items:[],next_cursor:null});
+ assert.equal((await attemptsGet(f,{},'bob')).statusCode,404);
 });

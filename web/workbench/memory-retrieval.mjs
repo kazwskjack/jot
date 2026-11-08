@@ -1,3 +1,5 @@
 export function retrievalMatches(trace,selection){return !!trace&&trace.agent_id===selection.agent_id&&trace.project_id===selection.project_id;}
-export function retrievalMethodLabel(method){return {scope_order:'范围顺序',keyword:'关键词匹配',adapter:'适配器排序',inherited:'继承会话快照'}[method]??'未知排序方式';}
+export function retrievalMethodLabel(method){return {scope_order:'范围顺序',keyword:'关键词匹配',adapter:'适配器排序',reasoning_provider:'推理排序',inherited:'继承会话快照'}[method]??'未知排序方式';}
+export function retrievalReasonLabel(reason){return {scope_order:'按授权范围顺序选入',keyword_match:'匹配查询词项',adapter_rank:'适配器提供的顺序',adapter_tail:'未进入适配器排序的范围尾项',reasoning_provider:'推理模型从授权候选中选入',inherited:'保留上一轮仍有效的快照'}[reason]??'未知选择依据';}
+export function retrievalOmissionLabel(reason){return {query_miss:'未命中查询',result_limit:'结果数量限制',context_limit:'快照条数限制',duplicate:'重复内容',context_budget:'快照长度限制',provider_unselected:'推理模型未选择',selected_source_stale:'推理期间来源变更或失效'}[reason]??'其他排除项';}
 export function retrievalSourceView(reference,method){return {available:reference.available===true,preview:reference.available===true?reference.content_preview??'':'',provenance:reference.available===true?reference.provenance??[]:[],keyword_count:method==='keyword'&&Number.isSafeInteger(reference.keyword_score)&&reference.keyword_score>=0?reference.keyword_score:null};}

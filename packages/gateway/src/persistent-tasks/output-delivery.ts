@@ -34,13 +34,17 @@ export function taskOutputsDeliverable(db:DatabaseSync,frozen:Frozen):boolean {
  }
  return true;
 }
-export function publishTaskOutputs(db:DatabaseSync,frozen:Frozen,runId:string,conversationId:string):string[]{
+export type PublishedTaskOutputs={attachment_ids:string[];pins:Array<{artifact_id:string;version:number}>};
+export function taskOutputArtifactService(db:DatabaseSync):ArtifactService{
+ const publisher=publishers.get(db);if(!publisher)throw new Error('task_output_delivery_unavailable');return publisher.artifacts;
+}
+export function publishTaskOutputs(db:DatabaseSync,frozen:Frozen,runId:string,conversationId:string):PublishedTaskOutputs{
  if(!db.isTransaction)throw new Error('task_output_transaction_required');
  if(!taskOutputsDeliverable(db,frozen))throw new Error('task_acceptance_outputs_unverified');
- const outputs=[...(frozen.snapshot.file_outputs??[]),...(frozen.snapshot.workspace_file_outputs??[])],groups=frozen.snapshot.artifact_outputs??[];if(!outputs.length&&!groups.length)return [];
+ const outputs=[...(frozen.snapshot.file_outputs??[]),...(frozen.snapshot.workspace_file_outputs??[])],groups=frozen.snapshot.artifact_outputs??[];if(!outputs.length&&!groups.length)return {attachment_ids:[],pins:[]};
  const publisher=publishers.get(db)!;
  const context=JSON.parse(frozen.snapshot.frozen_context) as {workspace_id:string;project_id:string};
- const ids:string[]=[];
+ const ids:string[]=[],pins:Array<{artifact_id:string;version:number}>=[];
  const link=(artifact:ReturnType<ArtifactService['get']>)=>{
   const id=String(artifact.artifact_id),version=Number(artifact.version);
   if(!db.prepare(`SELECT 1 FROM ga_artifacts a JOIN ga_artifact_versions v ON v.artifact_id=a.id AND v.version=?
@@ -51,6 +55,7 @@ export function publishTaskOutputs(db:DatabaseSync,frozen:Frozen,runId:string,co
    .run(runId,id,version,new Date().toISOString()).changes;
   if(changed)publisher.events.append(conversationId,runId,'artifact.upsert',{...artifact,run_id:runId});
   if(!ids.includes(id))ids.push(id);
+  if(!pins.some(pin=>pin.artifact_id===id&&pin.version===version))pins.push({artifact_id:id,version});
  };
  for(const output of outputs){
   if(!output.verified)throw new Error('task_output_source_unverified');
@@ -71,5 +76,5 @@ export function publishTaskOutputs(db:DatabaseSync,frozen:Frozen,runId:string,co
    runId:group.run_id!,artifactId:group.artifact_id!,version:group.version!,partIndex:part.part_index}));
   db.prepare('DELETE FROM ga_artifact_leases WHERE artifact_id=? AND lease_id=?').run(group.artifact_id!,`task-review:${runId}`);
  }
- return ids;
+ return {attachment_ids:ids,pins};
 }

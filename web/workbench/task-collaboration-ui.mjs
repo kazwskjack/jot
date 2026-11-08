@@ -1,3 +1,4 @@
+/** @param {import('./types').Agent|undefined} lead @param {import('./types').Team[]} teams */
 export function eligibleCollaborationTeams(lead,teams){
  return lead?.status==='active'?teams.filter(t=>t.status==='active'&&t.workspace_id===lead.workspace_id&&t.project_id===lead.project_id&&t.member_ids?.includes(lead.agent_id)):[];
 }

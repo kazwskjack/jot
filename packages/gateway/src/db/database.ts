@@ -12,6 +12,7 @@ import {installHistoricalDispatchProtocol} from '../channels/historical-final-qu
 import {installOrdinarySteeringCustody} from '../harness/ordinary-steering-custody.ts';
 import {installChatCompactionAttempts} from '../conversations/chat-compaction-attempt-schema.ts';
 import {installWorkspaceCoordination} from '../workbench/workspace-coordination.ts';
+import {installChannelUploadStages} from '../artifacts/channel-upload-schema.ts';
 
 const schemaUrl = new URL('./schema.sql', import.meta.url);
 let savepointSequence = 0;
@@ -34,6 +35,22 @@ export function openProductDatabase(path: string): DatabaseSync {
   ensureColumn(db, 'ga_conversations', 'project_id', 'TEXT');
   ensureColumn(db, 'ga_conversations', 'pinned_at', 'TEXT');
   ensureColumn(db, 'ga_conversations', 'archived_at', 'TEXT');
+  ensureColumn(db, 'ga_projects', 'archived_at', 'TEXT');
+  ensureColumn(db, 'ga_projects', 'deleted_at', 'TEXT');
+  db.exec(`CREATE TRIGGER IF NOT EXISTS ga_project_run_insert BEFORE INSERT ON ga_runs
+    WHEN NEW.status NOT IN ('succeeded','failed','cancelled','interrupted','partial')
+      AND EXISTS(SELECT 1 FROM ga_conversations c JOIN ga_projects p ON p.id=c.project_id WHERE c.id=NEW.conversation_id AND p.deleted_at IS NOT NULL)
+    BEGIN SELECT RAISE(ABORT,'project_deleted'); END;
+    CREATE TRIGGER IF NOT EXISTS ga_project_run_update BEFORE UPDATE OF status,conversation_id ON ga_runs
+    WHEN NEW.status NOT IN ('succeeded','failed','cancelled','interrupted','partial')
+      AND EXISTS(SELECT 1 FROM ga_conversations c JOIN ga_projects p ON p.id=c.project_id WHERE c.id=NEW.conversation_id AND p.deleted_at IS NOT NULL)
+    BEGIN SELECT RAISE(ABORT,'project_deleted'); END;
+    CREATE TRIGGER IF NOT EXISTS ga_project_conversation_insert BEFORE INSERT ON ga_conversations
+    WHEN EXISTS(SELECT 1 FROM ga_projects p WHERE p.id=NEW.project_id AND p.deleted_at IS NOT NULL)
+    BEGIN SELECT RAISE(ABORT,'project_deleted'); END;
+    CREATE TRIGGER IF NOT EXISTS ga_project_conversation_update BEFORE UPDATE OF project_id,owner_id ON ga_conversations
+    WHEN EXISTS(SELECT 1 FROM ga_projects p WHERE p.id=NEW.project_id AND p.deleted_at IS NOT NULL)
+    BEGIN SELECT RAISE(ABORT,'project_deleted'); END;`);
   ensureColumn(db,'ga_conversations','mode',"TEXT NOT NULL DEFAULT 'work'");
   ensureColumn(db,'ga_runs','execution_policy_json','TEXT');
   ensureColumn(db,'ga_runs','chat_context_json','TEXT');
@@ -105,6 +122,8 @@ export function openProductDatabase(path: string): DatabaseSync {
   ensureColumn(db, 'ga_idempotency', 'receipt_protocol', 'TEXT');
   ensureColumn(db, 'ga_uploads', 'writer_token', 'TEXT');
   ensureColumn(db, 'ga_uploads', 'writer_lease_until', 'TEXT');
+  installChannelUploadStages(db);
+  installUploadBatchStorage(db);
   migrateHostDeliveries(db);
   withImmediateTransaction(db,()=>installHistoricalDispatchProtocol(db));
   ensureColumn(db, 'ga_crawl_batches', 'summary_delivery_effect_id', 'TEXT');
@@ -121,6 +140,37 @@ export function openProductDatabase(path: string): DatabaseSync {
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string): void {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
   if (!columns.some(value => value.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+
+function installUploadBatchStorage(db:DatabaseSync):void {
+  ensureColumn(db,'ga_uploads','batch_id','TEXT');
+  ensureColumn(db,'ga_uploads','client_file_id','TEXT');
+  ensureColumn(db,'ga_uploads','relative_path','TEXT');
+  ensureColumn(db,'ga_uploads','expires_at','TEXT');
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_ga_uploads_batch_client_file ON ga_uploads(batch_id,client_file_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_ga_uploads_batch_relative_path ON ga_uploads(batch_id,relative_path);`);
+  const legacy=db.prepare(`SELECT id,conversation_id,owner_id,status,filename,declared_size,declared_sha256,mime_type,created_at,completed_at
+    FROM ga_uploads WHERE batch_id IS NULL AND channel_stage_key IS NULL`).all() as Array<Record<string,unknown>>;
+  if(legacy.length)withImmediateTransaction(db,()=>{
+    const insert=db.prepare(`INSERT OR IGNORE INTO ga_upload_batches(id,conversation_id,owner_id,status,manifest_json,total_size,created_at,expires_at,closed_at)
+      VALUES(?,?,?,?,?,?,?,?,?)`);
+    const update=db.prepare('UPDATE ga_uploads SET batch_id=?,client_file_id=?,relative_path=?,expires_at=? WHERE id=? AND batch_id IS NULL');
+    for(const row of legacy){
+      const id=String(row.id),filename=String(row.filename),created=String(row.created_at),clientFileId='legacy-file';
+      const expires=new Date(Date.parse(created)+86_400_000).toISOString();
+      const status=row.status==='completed'?'settled':row.status==='cancelled'?'cancelled':row.status==='expired'?'expired':'active';
+      const manifest=JSON.stringify([{client_file_id:clientFileId,file_name:filename,relative_path:filename,
+        media_type:String(row.mime_type??'application/octet-stream'),size_bytes:Number(row.declared_size),sha256:String(row.declared_sha256??'')}]);
+      const batchId=`upload-batch-legacy-${id}`;
+      insert.run(batchId,String(row.conversation_id),String(row.owner_id),status,manifest,Number(row.declared_size),created,expires,
+        status==='active'?null:String(row.completed_at??created));
+      update.run(batchId,clientFileId,filename,expires,id);
+    }
+  });
+  db.exec(`CREATE TRIGGER IF NOT EXISTS ga_upload_manifest_immutable BEFORE UPDATE ON ga_uploads
+    WHEN NEW.batch_id IS NOT OLD.batch_id OR NEW.client_file_id IS NOT OLD.client_file_id
+      OR NEW.relative_path IS NOT OLD.relative_path OR NEW.expires_at IS NOT OLD.expires_at
+    BEGIN SELECT RAISE(ABORT,'upload_manifest_immutable'); END;`);
 }
 
 export function withImmediateTransaction<T>(db: DatabaseSync, operation: () => T): T {

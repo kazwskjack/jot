@@ -3,9 +3,11 @@ import type {DatabaseSync} from 'node:sqlite';
 import type {ConversationRepository} from './repository.ts';
 import {validateConversationGoalView} from '../harness/conversation-goal-view.ts';
 import type {ConversationGoalControls} from './goal-controls.ts';
+import type {BrowserDriverObservation,BrowserDriverScope} from '../events/browser-driver-readiness.ts';
 export interface ConversationGoalClient {
   conversationGoal(sessionId:string,body?:Record<string,unknown>,signal?:AbortSignal):Promise<Record<string,unknown>>;
   conversationGoalResumeReadiness?(signal?:AbortSignal):Promise<Record<string,unknown>>;
+  observeBrowserDriver?(sessionId:string,scope:BrowserDriverScope,signal:AbortSignal):Promise<BrowserDriverObservation>;
 }
 type Admission={enabled:boolean;controls:ConversationGoalControls;atomic:<T>(request:FastifyRequest,status:number,operation:()=>T)=>T};
 export function registerConversationGoalRoutes(app:FastifyInstance,{db,conversations,actor,client,resumeAdmission}:{db:DatabaseSync;conversations:ConversationRepository;actor:(request:FastifyRequest)=>string;client?:ConversationGoalClient|undefined;resumeAdmission?:Admission}){

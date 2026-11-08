@@ -15,7 +15,7 @@ async function fixture(database=':memory:'){
  assert.equal(typeof mod.runBudgetedAuxiliaryCall,'function');
  const db=openProductDatabase(database);const conversations=new ConversationRepository(db);
  const runs=new RunRepository(db,new EventStore(db));
- const c=conversations.create('alice',{workspace_id:'main',model:{provider:'fixture',id:'aux-model'}});
+ const c=conversations.create('alice',{workspace_id:'main',model:{provider:'fixture',model:'aux-model'}});
  const run=runs.enqueue(c.conversation_id,'alice',{client_message_id:crypto.randomUUID(),content:[{type:'text',text:'fixture'}]});
  db.prepare("UPDATE ga_runs SET status='running' WHERE id=?").run(run.run_id);
  const ledger=new ModelBudgetLedger(db,{routes:[route]});const scope=ledger.createScope('alice','task',{tokens:300,nano_usd:3000,model_calls:3});

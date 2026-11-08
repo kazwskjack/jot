@@ -12,7 +12,7 @@ const chunks=[{type:'text-delta',index:0,text:'Controlled response'},{type:'usag
 async function fixture(limits={tokens:1000,nano_usd:10000,model_calls:10}){
  const mod=await import(moduleUrl.href).catch(()=>({}));assert.equal(typeof mod.budgetedModelStream,'function','host stream budget interceptor must exist');
  const db=openProductDatabase(':memory:');const ledger=new ModelBudgetLedger(db,{routes:[{provider:'fixture',model:'bounded',revision:'fixture-v1',context_window:100,max_output_tokens:20,rates:{input:2,output:10,cache_read:1,cache_write:3}}]});
- const conversation=new ConversationRepository(db).create('alice',{workspace_id:'main',model:{provider:'fixture',id:'bounded'}});
+ const conversation=new ConversationRepository(db).create('alice',{workspace_id:'main',model:{provider:'fixture',model:'bounded'}});
  const run=new RunRepository(db,new EventStore(db)).enqueue(conversation.conversation_id,'alice',{client_message_id:'controlled-task',content:[{type:'text',text:'Controlled source'}]});
  db.prepare("UPDATE ga_runs SET status='running' WHERE id=?").run(run.run_id);
  const scope=ledger.createScope('alice','controlled-root',limits);ledger.bindRun('alice',run.run_id,[scope.scope_id]);
@@ -26,17 +26,18 @@ async function fixture(limits={tokens:1000,nano_usd:10000,model_calls:10}){
   if(payload.action==='reserve')receipt=ledger.reserve('alice',run.run_id,payload.request);
   else if(payload.action==='dispatch')receipt=ledger.dispatch('alice',run.run_id,payload.attempt_id);
   else if(payload.action==='settle')receipt=ledger.settle('alice',run.run_id,payload.attempt_id,payload.usage);
+  else if(payload.action==='provider_receipt')receipt={attempt_id:payload.attempt_id,state:'provider_receipt_recorded'};
   else if(payload.action==='unknown')receipt=ledger.markUnknown('alice',run.run_id,payload.attempt_id,payload.reason);
   else if(payload.action==='release')receipt=ledger.releaseUndispatched('alice',run.run_id,payload.attempt_id);
   else throw new Error('unknown action');
   if(failAction===payload.action&&failAfterCommit)throw new Error('controlled lost response');
-  return {receipt};
+  return payload.action==='provider_receipt'?{receipt,evidence_ref:'musage-0123456789abcdef'}:{receipt};
  };
  const controller=new AbortController();
  const options=Object.freeze({provider:'fixture',model:'bounded',sessionId:binding.sessionRef,maxTokens:20,messages:Object.freeze([]),signal:controller.signal});
- const stream=(values=chunks,overrides={})=>mod.budgetedModelStream({binding,options:Object.freeze({...options,...overrides}),request,
+ const stream=(values=chunks,overrides={})=>{const{memoryCapture=false,...optionOverrides}=overrides;assert.equal(memoryCapture,overrides.memoryCapture??false);return mod.budgetedModelStream({binding,options:Object.freeze({...options,...optionOverrides}),request,memoryCapture,
   check:async()=>{guardCalls++;if(guardCalls===guardFailureAt)throw new Error('controlled binding revoked');},
-  next:()=>{providerCalls++;if(abortAtProvider)controller.abort();return (async function*(){for(const chunk of values){if(chunk instanceof Error)throw chunk;yield chunk;}})();}});
+  next:()=>{providerCalls++;if(abortAtProvider)controller.abort();return (async function*(){for(const chunk of values){if(chunk instanceof Error)throw chunk;yield chunk;}})();}});};
  return {db,ledger,scope,binding,requests,options,stream,controller,balance:()=>ledger.balance('alice',scope.scope_id),providerCalls:()=>providerCalls,
   fail(action,afterCommit=false){failAction=action;failAfterCommit=afterCommit;},guardFailAt(n){guardFailureAt=n;},abortAtProvider(){abortAtProvider=true;},close(){db.close();}};
 }
@@ -48,6 +49,27 @@ test('native chunks stay intact and terminal finish cannot precede durable exact
   assert.deepEqual(out,chunks);assert.equal(f.providerCalls(),1);assert.equal(f.balance().used.nano_usd,'115');
   assert.deepEqual(f.requests.map(x=>x.action),['reserve','dispatch','settle']);
   assert.equal(f.options.maxTokens,20);assert.ok(Object.isFrozen(f.options));assert.equal(f.balance().held.tokens,'0');
+ }finally{f.close();}
+});
+
+test('memory capture records provider usage evidence before settling the original attempt',async()=>{
+ const f=await fixture();try{
+  const out=await collect(f.stream(chunks,{memoryCapture:true}));
+  assert.deepEqual(out,chunks);assert.equal(f.providerCalls(),1);
+  assert.deepEqual(f.requests.map(x=>x.action),['reserve','dispatch','provider_receipt','settle']);
+  assert.equal(f.requests[2].attempt_id,f.requests[3].attempt_id);
+  assert.equal(f.requests[2].stable_request_id,f.requests[3].attempt_id);
+  assert.deepEqual(f.requests[2].usage,usage);
+ }finally{f.close();}
+});
+
+test('a lost provider evidence acknowledgement withholds finish and keeps the original spend unknown',async()=>{
+ const f=await fixture();try{
+  f.fail('provider_receipt',true);const output=[];
+  await assert.rejects((async()=>{for await(const chunk of f.stream(chunks,{memoryCapture:true}))output.push(chunk);})(),/controlled lost response/);
+  assert.equal(f.providerCalls(),1);assert.equal(output.some(chunk=>chunk.type==='finish'),false);
+  assert.deepEqual(f.requests.map(x=>x.action),['reserve','dispatch','provider_receipt','unknown']);
+  assert.equal(f.db.prepare('SELECT state FROM wb_model_budget_attempts').get().state,'unknown');assert.equal(f.balance().held.tokens,'100');
  }finally{f.close();}
 });
 

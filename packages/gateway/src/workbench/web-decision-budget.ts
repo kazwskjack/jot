@@ -3,6 +3,7 @@ import type {DatabaseSync} from 'node:sqlite';
 import {withImmediateTransaction} from '../db/database.ts';
 import type {ModelBudgetLedger} from './model-budget.ts';
 type Row=Record<string,string>;type Input=Record<string,unknown>;
+const BUDGETED_TOOL_IDS=new Set(['universe_capabilities','universe_search']);
 const digest=(value:string)=>createHash('sha256').update(value).digest('hex');
 const id=(value:unknown)=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(value);
 const hash=(value:unknown)=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
@@ -73,7 +74,7 @@ export class WebDecisionBudgetService {
  private token(row:Row){return createHmac('sha256',this.options.secret).update(JSON.stringify([row.owner_id,row.run_id,row.call_id,row.tool_name,row.request_hash,row.session_hash,row.lease_scope,row.expires_at])).digest('hex');}
  private live(row:Row){const guard=this.options.guard(row.owner_id!,row.run_id!);guard.guard();if(guard.scopeKey!==row.lease_scope)throw new Error('web_budget_grant_revoked');const binding=this.db.prepare('SELECT b.session_id FROM ga_harness_session_bindings b JOIN ga_runs r ON r.conversation_id=b.conversation_id WHERE r.id=? AND b.owner_id=?').get(row.run_id!,row.owner_id!);if(!binding||digest(String(binding.session_id))!==row.session_hash)throw new Error('web_budget_grant_revoked');if(row.state!=='active'||Number(row.expires_at)<=this.now())throw new Error('web_budget_grant_revoked');}
  mint(owner:string,run:string,session:string,call:string,tool:string,requestHash:string){
-  if(!id(call)||!id(tool)||!hash(requestHash))throw new Error('invalid_web_budget_request');
+  if(!id(call)||!BUDGETED_TOOL_IDS.has(tool)||!hash(requestHash))throw new Error('invalid_web_budget_request');
   return withImmediateTransaction(this.db,()=>{const current=this.options.guard(owner,run);current.guard();const old=this.db.prepare('SELECT * FROM wb_web_model_grants WHERE run_id=? AND call_id=?').get(run,call) as Row|undefined;
    const row:Row=old??{owner_id:owner,run_id:run,call_id:call,tool_name:tool,request_hash:requestHash,session_hash:digest(session),lease_scope:current.scopeKey,expires_at:String(this.now()+300000),state:'active'};
    if(row.owner_id!==owner||row.tool_name!==tool||row.request_hash!==requestHash||row.session_hash!==digest(session))throw new Error('web_budget_grant_state_conflict');this.live(row);const token=this.token(row),grantId=digest(token);if(!old)this.db.prepare('INSERT INTO wb_web_model_grants(grant_id,run_id,owner_id,call_id,tool_name,request_hash,session_hash,lease_scope,expires_at,state) VALUES(?,?,?,?,?,?,?,?,?,?)').run(grantId,run,owner,call,tool,requestHash,row.session_hash!,row.lease_scope!,row.expires_at!,'active');return {protocol:1,grant:token,expires_at:new Date(Number(row.expires_at)).toISOString()};

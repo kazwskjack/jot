@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as pressure from '../chat-compaction-pressure.js';
 function fixture(){
  const header={config:{provider:'fixture',model:'fast',maxTokens:2000}},session={id:'s',seq:20,requestHeader:()=>structuredClone(header)};
- const f={header,session,reads:0,measurements:0,tokens:1000,info:{context:{contextWindow:10000},defaultMaxTokens:1000}};
+ const f={header,session,reads:0,measurements:0,tokens:1000,info:{provider:'fixture',id:'fast',name:'Fixture fast',context:{contextWindow:10000},defaultMaxTokens:1000}};
  f.args={session,expectedModel:{provider:'fixture',model:'fast'},policy:{thresholdRatio:.8,headroomTokens:1000},signal:new AbortController().signal,
   tokenMeter:{measure:()=>{f.measurements++;return{logRevision:session.seq,totalTokens:f.tokens};}},llm:{resolveModelInfo:async()=>{f.reads++;return f.info;}}};return f;
 }
@@ -25,8 +25,15 @@ for(const mutate of [f=>f.info={},f=>f.info.context.contextWindow=0,f=>f.header.
 test('exact routed model identity is required before metadata lookup',async()=>{
  const f=fixture();f.header.config.model='other';assert.equal((await inspect(f)).reason,'ROUTE_UNCONFIRMED');assert.equal(f.reads,0);
 });
+test('returned catalog identity must match the accepted route before capacity is consumed',async()=>{
+ for(const identity of [{provider:'other',id:'fast'},{provider:'fixture',id:'other'},{provider:undefined,id:'fast'},{provider:'fixture',id:undefined}]){
+  const f=fixture();f.tokens=9000;Object.assign(f.info,identity);
+  const result=await inspect(f);assert.equal(result.decision,'skip');assert.equal(result.reason,'ROUTE_UNCONFIRMED');
+  assert.equal(result.context_window,undefined);assert.equal(result.threshold_tokens,undefined);assert.equal(result.execution_authorized,false);
+ }
+});
 test('changes across asynchronous resolution revoke the observation',async()=>{
- for(const change of [f=>f.session.seq++,f=>f.header.config.maxTokens++,f=>f.tokens++]){const f=fixture();f.args.llm.resolveModelInfo=async()=>{change(f);return f.info;};assert.equal((await inspect(f)).reason,'STATE_CHANGED');}
+ for(const change of [f=>f.session.seq++,f=>f.header.config.maxTokens++,f=>f.tokens++,f=>f.args.expectedModel.model='changed']){const f=fixture();f.args.llm.resolveModelInfo=async()=>{change(f);return f.info;};assert.equal((await inspect(f)).reason,'STATE_CHANGED');}
 });
 test('cancellation propagates, provider errors remain private quiet skips',async()=>{
  const f=fixture();f.args.llm.resolveModelInfo=async()=>{throw Error('private endpoint');};const r=await inspect(f);assert.equal(r.reason,'METADATA_UNAVAILABLE');assert.ok(!JSON.stringify(r).includes('private'));

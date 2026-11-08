@@ -22,6 +22,17 @@ test('only trusted proof consumes a short-lived code, without storing its plaint
  assert.throws(()=>f.bindings.acceptProof('wecom','principal-a',challenge.code),/channel_binding_proof_invalid/);
 });
 
+test('trusted proof accepts a bounded composite provider principal and rejects malformed principal spellings',async t=>{
+ const f=await setup(t),challenge=f.bindings.create('alice','wecom'),principal=JSON.stringify(['bot-a','user-a']);
+ for(const invalid of [' provider','provider ','provider\u0001user','x'.repeat(513)])
+  assert.throws(()=>f.bindings.acceptProof('wecom',invalid,challenge.code),/channel_binding_proof_invalid/);
+ assert.throws(()=>f.bindings.acceptProof('weixin',principal,challenge.code),/channel_binding_proof_invalid/);
+ assert.equal(f.bindings.list('alice').items[0].status,'pending');
+ assert.deepEqual(f.bindings.acceptProof('wecom',principal,challenge.code),
+  {accepted:true,kind:'channel_binding',status:'verified'});
+ assert.equal(f.bindings.resolve('alice',challenge.channel_binding_id).principal,principal);
+});
+
 test('expired, replaced, rate-limited and conflicting proofs cannot create new destinations',async t=>{
  const f=await setup(t),expired=f.bindings.create('alice','wecom');f.advance(601);
  assert.throws(()=>f.bindings.acceptProof('wecom','a',expired.code),/channel_binding_proof_invalid/);

@@ -2,12 +2,20 @@ import type {DatabaseSync} from 'node:sqlite';
 import type {FastifyInstance,FastifyRequest} from 'fastify';
 import {withImmediateTransaction} from '../db/database.ts';
 import {dailyBudgetDefinitions,taskBudgetKey,type WorkbenchBudgetPolicy} from './model-budget-policy.ts';
-import type {ModelBudgetLimits} from './model-budget.ts';
+import type {ModelBudgetLimits,TaskBudgetAttemptProjection} from './model-budget.ts';
 
 const fields=['tokens','nano_usd','model_calls'] as const;
 const strings=(value:ModelBudgetLimits)=>Object.fromEntries(fields.map(key=>[key,value[key]===null?null:String(value[key])]));
 const zero=()=>({tokens:'0',nano_usd:'0',model_calls:'0'});
 type TaskRow={task_id:string;agent_id:string;workspace_id:string;project_id:string;version:number;generation:number};
+function attemptPageQuery(input:unknown){
+  if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(key=>!['cursor','limit'].includes(key)))throw new Error('budget_attempt_query_invalid');
+  const value=input as {cursor?:unknown;limit?:unknown};
+  if(value.cursor!==undefined&&(typeof value.cursor!=='string'||!/^(0|[1-9]\d{0,5})$/.test(value.cursor)))throw new Error('budget_attempt_query_invalid');
+  const limit=value.limit===undefined?20:typeof value.limit==='string'&&/^[1-9]\d?$/.test(value.limit)?Number(value.limit):NaN;
+  if(!Number.isSafeInteger(limit)||limit<1||limit>50)throw new Error('budget_attempt_query_invalid');
+  return {cursor:value.cursor as string|undefined,limit};
+}
 /** User projection has no model routes, native sessions, scope identities or machine paths. */
 export class TaskBudgetService {
   private readonly db:DatabaseSync;
@@ -20,6 +28,14 @@ export class TaskBudgetService {
   }
   get(owner:string,id:string) {
     return this.read(()=>this.view(owner,this.task(owner,id)));
+  }
+  attempts(owner:string,id:string,query:unknown={}) {
+    return this.read(()=>{
+      const task=this.task(owner,id),page=attemptPageQuery(query);
+      if(!this.policy)return {configured:false as const,task_id:task.task_id,reason:'BUDGET_POLICY_NOT_CONFIGURED' as const,items:[] as TaskBudgetAttemptProjection[],next_cursor:null};
+      const projection=this.policy.ledger.listTaskAttempts(owner,taskBudgetKey(task.task_id),page.cursor,page.limit);
+      return {configured:true as const,task_id:task.task_id,...projection,cost_basis:'configured_rates' as const,currency:'USD' as const};
+    });
   }
   private read<T>(operation:()=>T):T{
     if(this.db.isTransaction)return operation();
@@ -76,5 +92,6 @@ export class TaskBudgetService {
 export function registerTaskBudgetRoutes(app:FastifyInstance,service:TaskBudgetService,actor:(request:FastifyRequest)=>string){
   const id=(request:FastifyRequest)=>(request.params as {taskId:string}).taskId;
   app.get('/v1/persistent-tasks/:taskId/model-budget',async request=>service.get(actor(request),id(request)));
+  app.get('/v1/persistent-tasks/:taskId/model-budget/attempts',async request=>service.attempts(actor(request),id(request),request.query));
   app.patch('/v1/persistent-tasks/:taskId/model-budget',async request=>service.update(actor(request),id(request),request.body));
 }

@@ -11,7 +11,7 @@ export async function fixture(t,intent='wait_user',options={}){
  const fixtureConfig={databasePath:join(root,'db.sqlite'),workspaces:['ws'],workbenchRoot:join(root,'files'),uploadRoot:join(root,'uploads'),templateRoot:resolve('file-engine/templates'),internalChannelToken:'test-b99992d64419ae59',modelBudgetPolicy:policy,csrfToken:'test-dcbf055943f33d8a',allowedOrigins:['https://fixture.invalid']};
  const f=await buildServer(fixtureConfig);
  if(options.configureApp)options.configureApp(f);
- t.after(async()=>{await f.app.close();f.db.close();const child=relative(base,root);assert.ok(child&&!child.startsWith('..')&&!isAbsolute(child));rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:20});});
+ t.after(async()=>{await f.app.close();if(f.db.isOpen)f.db.close();const child=relative(base,root);assert.ok(child&&!child.startsWith('..')&&!isAbsolute(child));rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:20});});
  const a=f.workbench.createAgent('alice',{name:'Reader',instructions:'Frozen role permissions'});
  const task=f.persistentTasks.create('alice',{title:'Task needing input',agent_id:a.agent_id,objective:'Produce the authorized report',trigger:{kind:'once',run_at:'2099-01-01T00:00:00Z'}});
  if(options.beforeRun)await options.beforeRun({...f,task,a});
@@ -32,5 +32,5 @@ export async function fixture(t,intent='wait_user',options={}){
  const headers={'x-user-id':'alice',origin:'https://fixture.invalid','x-csrf-token':'test-dcbf055943f33d8a','idempotency-key':'wait-response-key'};
  const send=(url,payload,extra={})=>f.app.inject({method:'POST',url,headers:{...headers,...extra},payload});
  const list=async()=>{const response=await f.app.inject({url:`/v1/conversations/${occurrence.conversation_id}/interactions`,headers:{'x-user-id':'alice'}});assert.equal(response.statusCode,200,response.body);return response.json().items;};
- return {...f,fixtureConfig,task,a,runId,occurrence,coordinator,lease,checkpointId,headers,send,list};
+ return Object.assign(f,{fixtureConfig,task,a,runId,occurrence,coordinator,lease,checkpointId,headers,send,list});
 }

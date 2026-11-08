@@ -66,6 +66,38 @@ test('active and missing runs and runtime bindings are reported as protection re
   } finally { db.close(); }
 });
 
+test('secret payload scanning iterates and stops at the first match', () => {
+  const { db, store } = setup();
+  try {
+    withImmediateTransaction(db, () => store.append('c','r','activity.upsert',{ safe: 'later event' }));
+    let materialized = 0;
+    let iterated = 0;
+    const trackedDb = new Proxy(db, {
+      get(target, property) {
+        if (property === 'prepare') return sql => {
+          const statement = target.prepare(sql);
+          if (!sql.includes('FROM ga_events e') || !sql.includes('e.type,e.payload_json')) return statement;
+          return {
+            all(...parameters) { materialized += 1; return statement.all(...parameters); },
+            *iterate(...parameters) {
+              for (const event of statement.iterate(...parameters)) {
+                iterated += 1;
+                yield event;
+              }
+            },
+          };
+        };
+        const value = Reflect.get(target, property, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const report = buildEventRetentionPlan(trackedDb, { now });
+    assert.ok(report.candidates[0].reasons.includes('secret_log_present'));
+    assert.equal(materialized, 0);
+    assert.equal(iterated, 1);
+  } finally { db.close(); }
+});
+
 test('pagination is bounded by conversations and rejects invalid scan parameters', () => {
   const { db } = setup();
   try {
@@ -78,6 +110,7 @@ test('pagination is bounded by conversations and rejects invalid scan parameters
     assert.equal(second.next_after_conversation_id, null);
     for (const limit of [0, 1001, 1.5]) assert.throws(() => buildEventRetentionPlan(db, { now, limit }));
     assert.throws(() => buildEventRetentionPlan(db, { now: 'bad' }));
+    assert.throws(() => buildEventRetentionPlan(db, { now, restoreProofs: [{}] }), /retention_restore_proofs_unsupported/);
   } finally { db.close(); }
 });
 

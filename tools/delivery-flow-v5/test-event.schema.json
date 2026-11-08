@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.invalid/jot/test-event.schema.json",
+  "title": "Owner test lifecycle event draft",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "event_id", "event_type", "occurred_at", "owner", "packet_id",
+    "source_class", "candidate_commit", "candidate_tree", "manifest_path", "manifest_sha256",
+    "repo", "tests_sha256", "dependencies", "ac_ids", "evidence"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "event_id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "event_type": { "const": "test" },
+    "occurred_at": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "owner": { "type": "string", "minLength": 1 },
+    "packet_id": { "type": "string", "minLength": 1 },
+    "source_class": { "enum": ["inherited_wip", "new_development"] },
+    "candidate_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "candidate_tree": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "manifest_path": { "type": "string", "minLength": 1, "description": "Original manifest_path value from the owner packet." },
+    "manifest_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "SHA-256 of the owner packet manifest; distinct from the archive manifest SHA." },
+    "repo": { "type": "string", "minLength": 1 },
+    "tests_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "dependencies": { "type": "array", "items": { "type": "string" } },
+    "ac_ids": { "type": "array", "items": { "type": "string" } },
+    "next_owner": { "type": ["string", "null"] },
+    "ready_at": { "type": ["string", "null"], "format": "date-time" },
+    "evidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "path", "sha256", "job_id", "exit_code", "result"],
+      "properties": {
+        "kind": { "const": "test_result" },
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "job_id": { "type": "string", "minLength": 1 },
+        "exit_code": { "type": "integer" },
+        "result": { "enum": ["passed", "failed"] }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "evidence": { "properties": { "result": { "const": "passed" } }, "required": ["result"] } }, "required": ["evidence"] },
+      "then": { "properties": { "evidence": { "properties": { "exit_code": { "const": 0 } } } } }
+    },
+    {
+      "if": { "properties": { "evidence": { "properties": { "result": { "const": "failed" } }, "required": ["result"] } }, "required": ["evidence"] },
+      "then": { "properties": { "evidence": { "properties": { "exit_code": { "not": { "const": 0 } } } } } }
+    }
+  ],
+  "$comment": "This is a single test event draft. The tool never appends the shared owner JSONL and cannot emit accepted events. Consumers enforce immutable source_class per packet and event-id deduplication/conflict handling."
+}

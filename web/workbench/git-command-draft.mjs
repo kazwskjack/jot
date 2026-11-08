@@ -7,6 +7,8 @@ const storageValue=value=>typeof value==='function'?value():value;
 const prefix=(scope,project)=>{if(typeof scope!=='string'||!SHA.test(scope))invalid();id(project);return 'jot-git-request:v1:'+scope+':'+encodeURIComponent(project)+':'};
 const changed=()=>{if(globalThis.window?.dispatchEvent)window.dispatchEvent(new window.Event(EVENT))};
 export const gitCommandDraftEvent=EVENT;
+/** @typedef {{kind:'review-prepare'}|{kind:'admit',intent_id:string}|{kind:'review-control',intent_id:string}|{kind:'control',execution_id:string}} CommandHint */
+/** @returns {CommandHint} */
 function command(value,project){
  object(value,['path','method','body','key']);if(value.method!=='POST'||typeof value.path!=='string'||value.path.length>4096)invalid();id(value.key);
  const parts=/^\/projects\/([^/]+)\/git\/(intents|executions)(?:\/([^/]+)\/(admissions|control|controls))?$/.exec(value.path);if(!parts||encoded(parts[1])!==project)invalid();

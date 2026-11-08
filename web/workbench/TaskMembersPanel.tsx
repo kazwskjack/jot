@@ -4,7 +4,7 @@ import {ApiError} from '../jot/client';
 import type {Run} from '../jot/types';
 import {workbenchApi} from './client';
 import {useResource} from './useResource';
-import {ResourceStatus,Empty} from './AgentsPanel';
+import {ResourceStatus,Empty} from './PanelStatus';
 import {taskMemberCanSend,taskMemberRequest,taskDelegationRequest} from './task-member-ui.mjs';
 const labels:Record<string,string>={pending:'等待执行',processing:'正在协作',completed:'回复已完成',delivered:'已送达',failed:'执行失败',outcome_unknown:'结果待核对',task_revoked:'任务已暂停或结束',budget_exhausted:'额度不足',recipient_deleted:'接收角色已删除',sender_deleted:'发起角色已删除'};
 export default function TaskMembersPanel({task,occurrence,run,agents,enabled}:{task:Task;occurrence:Occurrence;run:Run|null;agents:Agent[];enabled:boolean}){

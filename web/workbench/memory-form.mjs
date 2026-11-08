@@ -1,8 +1,10 @@
+/** @returns {{content:string,verified:boolean,provenance:import('./types').MemoryProvenance[],source_revision:string,expires_at:string,supersedes:string}} */
 export function blankMemoryForm(){return {content:'',verified:false,provenance:[],source_revision:'',expires_at:'',supersedes:''};}
 export function memoryMatchesSelection(memory,selection){
  return memory.scope===selection.scope&&(selection.scope!=='private'||memory.agent_id===selection.agent_id)
   &&(!selection.lifecycle||memory.project_id===selection.project_id);
 }
+/** @param {import('./types').Memory} memory */
 export function memoryFormFromMemory(memory){
  return {...blankMemoryForm(),content:memory.content,verified:!!memory.verified,provenance:(memory.provenance??[]).map(item=>({...item})),source_revision:memory.source_revision??'',expires_at:memory.expires_at??'',supersedes:memory.supersedes??''};
 }
@@ -17,7 +19,7 @@ export function normalizeMemoryExpiry(input){
  const milliseconds=Date.parse(value);if(!Number.isFinite(milliseconds))return invalid();
  return new Date(milliseconds).toISOString();
 }
-export function memoryInput(form,{scope,agent_id,project_id,lifecycle=false,editing=null}){
+export function memoryInput(form,{scope,agent_id,project_id,lifecycle=false,editing=/** @type {import('./types').Memory|null} */(null)}){
  const content=form.content.trim();if(!content||content.length>20000)throw new Error('请填写记忆内容（最多 20000 字）');
  const input={scope,...(scope==='private'?{agent_id}:{project_id}),content,verified:!!form.verified,...(editing?{expected_version:editing.version}:{})};
  if(!lifecycle)return input;

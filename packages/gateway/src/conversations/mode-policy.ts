@@ -6,6 +6,7 @@ export interface ConversationModeClient{
  conversationModeReadiness(signal:AbortSignal):Promise<unknown>;
  conversationGoal?(sessionId:string,body?:Record<string,unknown>,signal?:AbortSignal):Promise<Record<string,unknown>>;
  observeNativeIdle?(sessionId:string,signal?:AbortSignal):Promise<unknown>;
+ recoverChatCheckpoint?(sessionId:string,history:{owner_id:string;conversation_id:string;run_id:string;expected_run_version:number},intentId:string,signal?:AbortSignal):Promise<unknown>;
 }
 const plain=(value:unknown):value is Record<string,unknown>=>!!value&&typeof value==='object'&&!Array.isArray(value);
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;

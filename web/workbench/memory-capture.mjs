@@ -7,3 +7,10 @@ export function captureAction(value,action){
  return {expected_version:value.version};
 }
 export function capturePolicyInput(policy,enabled,assistant,automation){if(!Number.isSafeInteger(policy?.version)||policy.version<0||[enabled,assistant,automation].some(value=>typeof value!=='boolean'))throw Error('capture_unavailable');return {expected_version:policy.version,mode:enabled?'suggest':'off',include_assistant:assistant,include_automation:automation};}
+export function captureReconcileInput(capture,recovery,epoch,evidence){
+ if(!capture||capture.status!=='proposed'||!Number.isSafeInteger(capture.version)||capture.version<1||!Number.isSafeInteger(capture.policy_version)||capture.policy_version<0||
+  !recovery||recovery.capture_status!==capture.status||recovery.processor_run_status!=='interrupted'||recovery.proposal_available!==false||recovery.usage_state!=='held_unknown'||recovery.recovery_state!=='unresolved_usage_held'||
+  !Number.isSafeInteger(epoch)||epoch<0||typeof evidence?.attempt_id!=='string'||!evidence.attempt_id||typeof evidence.evidence_ref!=='string'||!evidence.evidence_ref||
+  !Array.isArray(recovery.reconciliation_evidence)||!recovery.reconciliation_evidence.some(item=>item?.attempt_id===evidence.attempt_id&&item?.evidence_ref===evidence.evidence_ref))throw Error('capture_unavailable');
+ return {expected_capture_version:capture.version,expected_policy_version:capture.policy_version,expected_epoch:epoch,attempt_id:evidence.attempt_id,evidence_ref:evidence.evidence_ref};
+}

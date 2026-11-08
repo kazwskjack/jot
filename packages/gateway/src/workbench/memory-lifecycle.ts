@@ -50,7 +50,7 @@ export function serializeMemory(row: MemoryRow): MemoryValue {
 }
 
 export interface MemoryRankReference {
-  memory_id:string;version:number;rank:number;reason:'scope_order'|'keyword_match'|'adapter_rank'|'adapter_tail'|'inherited';
+  memory_id:string;version:number;rank:number;reason:'scope_order'|'keyword_match'|'adapter_rank'|'adapter_tail'|'reasoning_provider'|'inherited';
   keyword_score:number|null;matched_terms:string[];
 }
 export interface MemoryRankResult {

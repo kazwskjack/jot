@@ -4,13 +4,16 @@
  */
 export type Error = { error: { code: string; message: string; retryable: boolean; details?: Record<string, unknown> }; request_id: string };
 
-export type ModelSelection = { provider: string; model: string; reasoning_effort?: string };
+export type ModelSelection = { provider: string; model: string; reasoning_effort?: string; fallbacks?: Array<{provider:string;model:string}> };
 
 export type CapabilitySet = { search: boolean; fetch: boolean; browser_interaction: boolean; file_read: boolean; file_edit: boolean; command_execution: boolean; questions: boolean; approvals: boolean; artifact_download: boolean; resume_checkpoint: boolean };
 
-export type GitWorkbenchCapability = {configured_projects:string[];read_only:true};
+export type GitWorkbenchCapability = import('../../packages/gateway/contracts/types').GitWorkbenchCapability;
 
-export type Capabilities = { git_workbench?:GitWorkbenchCapability; conversation_commands?:{protocol:1;ordinary_steer:{configured:boolean;delivery:"original";attachments:boolean}}; conversation_modes?:{default:'chat'|'work';work:{supported:true};chat:{ready:boolean}};api_version: string; event_schema_version: string; adapter_version: string; capabilities: CapabilitySet; models: Array<{ provider: string; model: string; reasoning_output: "provider" | "summary" | "none"; supported_reasoning_efforts: Array<string> }>; limits: { max_upload_bytes: number; max_active_runs_per_conversation: 1; replay_retention_hours: number; idempotency_retention_hours: number }; voice?: { enabled: boolean; status: "disabled" | "unavailable" | "preparing" | "ready"; max_duration_ms: number; max_bytes: number; accepted_mime_types: string[]; languages: string[] }; workspaces: Array<{ workspace_id: string; title: string; can_read: boolean; can_write: boolean }> };
+export type ModelRouteHealth = {status:'healthy'|'unhealthy'|'stale'|'unknown';observed_at:number|null;expires_at:number|null};
+export type WorkspaceSelection = {workspace_id:string;version:number;configured:boolean};
+export type SelectWorkspace = {workspace_id:string;expected_version:number};
+export type Capabilities = { workspace_selection?:WorkspaceSelection; conversation_forks?:{protocol:1;available:boolean}; git_workbench?:GitWorkbenchCapability; conversation_commands?:{protocol:1;ordinary_steer:{configured:boolean;delivery:"original";attachments:boolean}}; conversation_modes?:{default:'chat'|'work';work:{supported:true};chat:{ready:boolean}};api_version: string; event_schema_version: string; adapter_version: string; capabilities: CapabilitySet; models: Array<{ provider: string; model: string; reasoning_output: "provider" | "summary" | "none"; supported_reasoning_efforts: Array<string>; health?:ModelRouteHealth }>; limits: { max_upload_bytes: number; max_active_runs_per_conversation: 1; replay_retention_hours: number; idempotency_retention_hours: number }; voice?: { enabled: boolean; status: "disabled" | "unavailable" | "preparing" | "ready"; max_duration_ms: number; max_bytes: number; accepted_mime_types: string[]; languages: string[] }; workspaces: Array<{ workspace_id: string; title: string; can_read: boolean; can_write: boolean }> };
 
 export type Project = {project_id:string;title:string;is_default:boolean;version:number;created_at:string;updated_at:string;active_conversation_count?:number;archived_conversation_count?:number};
 export type Conversation = { mode?:'chat'|'work';project_id?:string;pinned_at?:string|null;archived_at?:string|null; conversation_id: string; title: string; workspace_id: string; model: ModelSelection; created_at: string; updated_at: string; version: number };
@@ -47,7 +50,7 @@ export type Message = { message_id: string; run_id: string | null; role: "user" 
 
 export type Source = { source_id: string; activity_id: string; url: string; title: string; host: string; access: "discovered" | "snippet" | "fetched" | "read" | "failed"; retrieved_at: string; excerpt?: string; error_code?: string };
 
-export type Activity_search = { activity_id: string; run_id: string; tool_call_id: string; attempt_id?: string; parent_activity_id?: string; status: "pending" | "running" | "waiting" | "succeeded" | "failed" | "cancelled" | "unknown"; title: string; started_at: string; ended_at?: string; error_code?: string; kind: "search"; detail: { tool_name?: string; action?: string; urls?: string[]; url?: string; queries: Array<string>; provider?: string; source_ids: Array<string> } };
+export type Activity_search = { activity_id: string; run_id: string; tool_call_id: string; attempt_id?: string; parent_activity_id?: string; status: "pending" | "running" | "waiting" | "succeeded" | "failed" | "cancelled" | "unknown"; title: string; started_at: string; ended_at?: string; error_code?: string; kind: "search"; detail: { tool_name?: string; action?: string; urls?: string[]; url?: string; queries?: Array<string>; query_count?: number; provider?: string; source_ids: Array<string> } };
 
 export type WebOperationItem = { item_id: string; position: number; url?: string; status: string; attempt?: number; reason_code?: string; result_ref?: string; action_label?: string };
 export type Activity_browse = { activity_id: string; run_id: string; tool_call_id: string; attempt_id?: string; parent_activity_id?: string; status: "pending" | "running" | "waiting" | "succeeded" | "partial" | "failed" | "cancelled" | "unknown"; title: string; started_at: string; ended_at?: string; error_code?: string; kind: "browse"; detail: { tool_name?: string; action?: string; urls?: string[]; operation: "open" | "fetch" | "click" | "type" | "scroll" | "capture" | "navigate" | "interact" | "execute" | "web_operation"; url?: string; source_ids: Array<string>; screenshot_artifact_id?: string; operation_kind?: "read_page" | "browse" | "execute" | "unknown"; request_id?: string; generation?: number; operation_id?: string; operation_status?: string; revision?: number; event_cursor?: number; accepted_count?: number; counts?: Record<string,number>; requested_action_types?: Array<"click" | "expand" | "next_page" | "scroll" | "wait" | "fill">; browse_outcome?: "success" | "pause" | "failure" | "unknown"; action_trace_count?: number; traced_action_types?: Array<"click" | "expand" | "next_page" | "scroll" | "wait" | "fill">; verification_statuses?: string[]; verified_action_types?: Array<"click" | "expand" | "next_page" | "scroll" | "wait" | "fill">; items?: Array<WebOperationItem> } };
@@ -71,7 +74,7 @@ export type QuestionAnswer = { question_id: string; selected_option_ids: Array<s
 
 export type QuestionInteraction = { interaction_id: string; run_id: string; tool_call_id: string; version: number; status: "pending" | "answered" | "denied" | "cancelled" | "expired"; created_at: string; expires_at: string; kind: "question"; purpose?: "task_input" | "task_acceptance_review"; questions: Array<Question>; answers?: Array<QuestionAnswer> };
 
-export type ApprovalInteraction = { interaction_id: string; run_id: string; tool_call_id: string; version: number; status: "pending" | "answered" | "denied" | "cancelled" | "expired"; created_at: string; expires_at: string; kind: "approval"; purpose?: "task_review" | "task_completion_review" | "task_reply_review"; action_digest: string; action_summary: string; risk: "low" | "medium" | "high"; decision?: "approve" | "deny" };
+export type ApprovalInteraction = import('../../packages/gateway/contracts/types').ApprovalInteraction;
 
 export type Interaction = (QuestionInteraction) | (ApprovalInteraction);
 
@@ -81,7 +84,7 @@ export type ApprovalDecision = { expected_version: number; action_digest: string
 
 export type InteractionReceipt = { accepted: true; interaction_id: string; run_id: string; status: "answered" | "denied"; version: number };
 
-export type Artifact = { artifact_id: string; conversation_id: string; run_id?: string; file_name: string; media_type: string; size_bytes: number; sha256: string; version: number; status: "quarantined" | "ready" | "rejected" | "deleted"; created_at: string; preview_kind: "text" | "image" | "unsupported"; origin: "upload" | "generated" | "edited"; local_state?: "present" | "deleted" | "restoring"; backup_status?: "pending" | "retry" | "verified" | "failed"; remote_path?: string; restorable?: boolean };
+export type Artifact = { artifact_id: string; conversation_id: string; run_id?: string; file_name: string; relative_path?: string; media_type: string; size_bytes: number; sha256: string; version: number; status: "quarantined" | "ready" | "rejected" | "deleted"; created_at: string; preview_kind: "text" | "image" | "unsupported"; origin: "upload" | "generated" | "edited"; local_state?: "present" | "deleted" | "restoring"; backup_status?: "pending" | "retry" | "verified" | "failed"; remote_path?: string; restorable?: boolean };
 
 export type UploadInit = { file_name: string; media_type: string; size_bytes: number; sha256: string };
 export type RunArtifact = {run_id:string;conversation_id:string;artifact_id:string;version:number;file_name:string;media_type:string;size_bytes:number;sha256:string;status:string;created_at:string;download_url:string;local_state?:Artifact['local_state'];backup_status?:Artifact['backup_status']};

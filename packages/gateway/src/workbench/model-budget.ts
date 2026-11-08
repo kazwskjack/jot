@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { withImmediateTransaction } from '../db/database.ts';
 import {HostResourceObservations} from './host-resource-observations.ts';
@@ -11,8 +11,13 @@ export interface ModelBudgetRoute {
   billing?: {unit:'dispatched_call';nano_usd:number};
 }
 export interface ModelBudgetLimits { tokens: number; nano_usd: number | null; model_calls: number }
-export interface ModelBudgetRequest { attempt_id: string; provider: string; model: string; max_tokens?: number; purpose?: 'compaction' | 'session-title' | 'emotion' | 'web-decision' | 'reply-verification' }
-type ObjectValue = Record<string, unknown>;
+export interface ModelBudgetRequest { attempt_id: string; provider: string; model: string; max_tokens?: number; purpose?: 'compaction' | 'session-title' | 'emotion' | 'web-decision' | 'reply-verification' | 'memory-reasoning' }
+export type ModelBudgetUsageEvidence={protocol:1;source:'reply-judge-client';cacheWrite:'reported'|'folded-unreported'};export type TaskBudgetAttemptState = 'reserved'|'in_flight'|'unknown'|'settled'|'released';
+export type TaskBudgetAttemptUsage = {status:'settled'|'unknown'|'unavailable'|'not_metered';input_tokens:string|null;output_tokens:string|null;cache_read_tokens:string|null;cache_write_tokens:string|null;reasoning_tokens:string|null;total_tokens:string|null};
+export type TaskBudgetAttemptProjection = {attempt_ref:string;purpose:ModelBudgetRequest['purpose']|null;state:TaskBudgetAttemptState;created_at:string;updated_at:string;
+  reserved:{tokens:string;nano_usd:string;model_calls:'1'};settled:{tokens:string|null;nano_usd:string|null;model_calls:'1'|null};cost_basis:'configured_rates';usage:TaskBudgetAttemptUsage};
+export type TaskBudgetAttemptPage = {items:TaskBudgetAttemptProjection[];next_cursor:string|null;truncated:boolean};
+const maxTaskAttemptOffset=999_999;type ObjectValue = Record<string, unknown>;
 type Row = Record<string, string>;
 type Amounts = { tokens: bigint; nano_usd: bigint; model_calls: bigint };
 const zero = (): Amounts => ({ tokens: 0n, nano_usd: 0n, model_calls: 0n });
@@ -30,6 +35,12 @@ function lesserMoney(a:number|null,b:number|null):number|null { return a===null?
 function record(value: unknown, keys: string[], code: string): ObjectValue {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !keys.includes(key))) throw new Error(code);
   return value as ObjectValue;
+}
+function isCacheWriteEvidence(value:unknown):value is ModelBudgetUsageEvidence {
+  if(!value||typeof value!=='object'||Array.isArray(value))return false;
+  const row=value as Record<string,unknown>,keys=Object.keys(row);
+  return keys.length===3&&keys.every(key=>['protocol','source','cacheWrite'].includes(key))
+    &&row.protocol===1&&row.source==='reply-judge-client'&&['reported','folded-unreported'].includes(String(row.cacheWrite));
 }
 function amounts(value: Amounts) { return { tokens: String(value.tokens), nano_usd: String(value.nano_usd), model_calls: String(value.model_calls) }; }
 function routeKey(provider: string, model: string) { return JSON.stringify([provider, model]); }
@@ -86,6 +97,17 @@ export class ModelBudgetLedger {
         PRIMARY KEY(run_id,attempt_id));
       CREATE TABLE IF NOT EXISTS wb_model_budget_events (
         event_id INTEGER PRIMARY KEY,run_id TEXT NOT NULL,attempt_id TEXT NOT NULL,state TEXT NOT NULL,detail_json TEXT NOT NULL,created_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS wb_model_budget_provider_receipts (
+        run_id TEXT NOT NULL,attempt_id TEXT NOT NULL,owner_id TEXT NOT NULL,evidence_ref TEXT NOT NULL UNIQUE,
+        stable_request_id TEXT NOT NULL,request_sha256 TEXT NOT NULL,route_sha256 TEXT NOT NULL,
+        capture_id TEXT NOT NULL,source_run_id TEXT NOT NULL,source_conversation_id TEXT NOT NULL,
+        source_version INTEGER NOT NULL,source_sha256 TEXT NOT NULL,policy_version INTEGER NOT NULL,epoch INTEGER NOT NULL,
+        receipt_json TEXT NOT NULL,receipt_sha256 TEXT NOT NULL,created_at TEXT NOT NULL,
+        PRIMARY KEY(run_id,attempt_id),FOREIGN KEY(run_id,attempt_id) REFERENCES wb_model_budget_attempts(run_id,attempt_id));
+      CREATE TRIGGER IF NOT EXISTS wb_model_budget_provider_receipt_no_update BEFORE UPDATE ON wb_model_budget_provider_receipts
+        BEGIN SELECT RAISE(ABORT,'budget_provider_receipt_immutable'); END;
+      CREATE TRIGGER IF NOT EXISTS wb_model_budget_provider_receipt_no_delete BEFORE DELETE ON wb_model_budget_provider_receipts
+        BEGIN SELECT RAISE(ABORT,'budget_provider_receipt_immutable'); END;
       CREATE TABLE IF NOT EXISTS wb_model_budget_admissions (
         run_id TEXT PRIMARY KEY REFERENCES ga_runs(id),attempt_id TEXT NOT NULL,created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS wb_model_budget_limit_revisions (
@@ -312,6 +334,65 @@ export class ModelBudgetLedger {
     return this.hostResources.observe(owner,runId,attemptId,invoke);
   }
   resourceReport(owner:string,runId:string){this.binding(owner,runId);return this.hostResources.report(owner,runId);}
+  /** Read-only public projection inputs: only runs bound to this exact owner/task-total scope qualify. */
+  listTaskAttempts(owner:string,taskScopeKey:string,cursor?:string,limit=20):TaskBudgetAttemptPage {
+    if(!identifier(owner)||!identifier(taskScopeKey)||!taskScopeKey.startsWith('task-total:')
+      ||!Number.isSafeInteger(limit)||limit<1||limit>50)throw new Error('budget_attempt_query_invalid');
+    let offset=0;
+    if(cursor!==undefined){
+      if(typeof cursor!=='string'||!/^(0|[1-9]\d{0,5})$/.test(cursor))throw new Error('budget_attempt_query_invalid');
+      offset=Number(cursor);if(!Number.isSafeInteger(offset)||offset>maxTaskAttemptOffset)throw new Error('budget_attempt_query_invalid');
+    }
+    const rows=this.db.prepare(`SELECT a.run_id,a.attempt_id,a.request_json,a.route_json,a.state,a.held_tokens,a.held_nano_usd,a.usage_json,
+      a.actual_tokens,a.actual_nano_usd,a.created_at,a.updated_at
+      FROM wb_model_budget_attempts a JOIN wb_model_budget_bindings b ON b.run_id=a.run_id
+      WHERE b.owner_id=? AND a.attempt_id<>'queue-admission' AND EXISTS(
+        SELECT 1 FROM json_each(b.scopes_json) bound_scope JOIN wb_model_budget_scopes s ON s.scope_id=bound_scope.value
+        WHERE s.owner_id=b.owner_id AND s.scope_key=?)
+      ORDER BY a.created_at,a.run_id,a.attempt_id LIMIT ? OFFSET ?`).all(owner,taskScopeKey,limit+1,offset) as Row[];
+    const hasMore=rows.length>limit;
+    const items=rows.slice(0,limit).map(row=>{
+      const state=row.state as TaskBudgetAttemptState;
+      let purpose:TaskBudgetAttemptProjection['purpose']=null;
+      try{
+        const request=JSON.parse(row.request_json!) as {purpose?:unknown};
+        if(['compaction','session-title','emotion','web-decision','reply-verification'].includes(String(request.purpose)))purpose=request.purpose as TaskBudgetAttemptProjection['purpose'];
+      }catch{/* A malformed private request never escapes the projection. */}
+      const emptyUsage=(status:TaskBudgetAttemptUsage['status']):TaskBudgetAttemptUsage=>({status,input_tokens:null,output_tokens:null,cache_read_tokens:null,cache_write_tokens:null,reasoning_tokens:null,total_tokens:null});
+      let usage=emptyUsage(state==='unknown'?'unknown':'unavailable');
+      if(state==='settled'&&row.usage_json){
+        try{
+          const saved=JSON.parse(row.usage_json) as Record<string,unknown>;
+          if(saved.unit==='dispatched_call'&&saved.token_usage==='not_metered')usage=emptyUsage('not_metered');
+          else{
+            const hasEvidence=Object.hasOwn(saved,'usageEvidence');
+            const evidence=isCacheWriteEvidence(saved.usageEvidence)?saved.usageEvidence:null;
+            const evidenceValid=evidence!==null&&purpose==='reply-verification'
+              &&(evidence.cacheWrite!=='folded-unreported'||saved.cacheWriteTokens==='0');
+            const foldedCacheWrite=evidence!==null&&purpose==='reply-verification'&&evidence.cacheWrite==='folded-unreported'&&saved.cacheWriteTokens==='0';
+            const number=(value:unknown)=>typeof value==='string'&&/^\d+$/.test(value)?value:null;
+            const input=number(saved.inputTokens),output=number(saved.outputTokens),read=number(saved.cacheReadTokens),write=number(saved.cacheWriteTokens),total=number(saved.totalTokens);
+            const reasoning=saved.reasoningTokens===null?null:number(saved.reasoningTokens);
+            const route=JSON.parse(row.route_json!) as ModelBudgetRoute;
+            const ambiguousLegacyWrite=!hasEvidence&&purpose==='reply-verification'&&saved.cacheWriteTokens==='0'
+              &&route.rates.input===route.rates.cache_write;
+            const unknownWrite=foldedCacheWrite||ambiguousLegacyWrite;
+            if(hasEvidence&&!evidenceValid)usage=emptyUsage('unknown');
+            else if((input!==null||unknownWrite)&&output!==null&&read!==null&&(write!==null||unknownWrite)&&total!==null&&(saved.reasoningTokens===null||reasoning!==null))
+              usage={status:'settled',input_tokens:unknownWrite?null:input,output_tokens:output,cache_read_tokens:read,cache_write_tokens:unknownWrite?null:write,reasoning_tokens:reasoning,total_tokens:total};
+            else usage=emptyUsage('unknown');
+          }
+        }catch{usage=emptyUsage('unknown');}
+      }else if(state==='settled')usage=emptyUsage('unknown');
+      const attemptRef=createHash('sha256').update('jot-task-budget-attempt\0').update(JSON.stringify([owner,taskScopeKey,row.run_id,row.attempt_id])).digest('base64url');
+      return {attempt_ref:attemptRef,purpose,state,created_at:row.created_at!,updated_at:row.updated_at!,
+        reserved:{tokens:row.held_tokens!,nano_usd:row.held_nano_usd!,model_calls:'1' as const},
+        settled:state==='settled'?{tokens:row.actual_tokens??null,nano_usd:row.actual_nano_usd??null,model_calls:'1' as const}:{tokens:null,nano_usd:null,model_calls:null},
+        cost_basis:'configured_rates' as const,usage};
+    });
+    const nextOffset=offset+limit;
+    return {items,next_cursor:hasMore&&nextOffset<=maxTaskAttemptOffset?String(nextOffset):null,truncated:hasMore&&nextOffset>maxTaskAttemptOffset};
+  }
   private receipt(row: Row) {
     const route: ModelBudgetRoute = JSON.parse(row.route_json!);
     return {attempt_id: row.attempt_id!,state: row.state!,provider: route.provider,model: route.model,pricing_revision: route.revision,
@@ -337,7 +418,7 @@ export class ModelBudgetLedger {
   private reserveAttempt(owner: string, runId: string, input: ModelBudgetRequest, allowQueued: boolean) {
     const value = record(input,['attempt_id','provider','model','max_tokens','purpose'],'budget_request_invalid');
     if (!identifier(value.attempt_id) || !routeName(value.provider) || !routeName(value.model)
-      || (value.purpose !== undefined && !['compaction','session-title','emotion','web-decision','reply-verification'].includes(String(value.purpose)))) throw new Error('budget_request_invalid');
+      || (value.purpose !== undefined && !['compaction','session-title','emotion','web-decision','reply-verification','memory-reasoning'].includes(String(value.purpose)))) throw new Error('budget_request_invalid');
     if (value.max_tokens !== undefined) count(value.max_tokens,'budget_request_invalid',1);
     const request = JSON.stringify({attempt_id: value.attempt_id,provider: value.provider,model: value.model,
       ...(value.max_tokens === undefined ? {} : {max_tokens: value.max_tokens}),...(value.purpose === undefined ? {} : {purpose: value.purpose})});
@@ -351,7 +432,7 @@ export class ModelBudgetLedger {
       if (this.db.prepare('SELECT 1 FROM wb_model_budget_attempts WHERE run_id=? AND bound_exceeded=1 LIMIT 1').get(runId)) throw new Error('model_budget_exhausted');
       const route = this.routes.get(routeKey(String(value.provider),String(value.model)));
       if (!route) throw new Error('budget_route_unavailable');
-      if(route.billing&&!['emotion','web-decision'].includes(String(value.purpose)))throw new Error('budget_request_invalid');
+      if(route.billing&&!['emotion','web-decision','memory-reasoning'].includes(String(value.purpose)))throw new Error('budget_request_invalid');
       if (value.max_tokens !== undefined && Number(value.max_tokens) > route.max_output_tokens) throw new Error('budget_request_invalid');
       if(!allowQueued){
         const admission=this.db.prepare(`SELECT a.* FROM wb_model_budget_attempts a JOIN wb_model_budget_admissions q
@@ -438,12 +519,18 @@ export class ModelBudgetLedger {
       this.event(runId,attemptId,'unknown',{reason});return this.receipt(this.attempt(owner,runId,attemptId));
     });
   }
-  settle(owner: string, runId: string, attemptId: string, input: unknown) {
+  settle(owner: string, runId: string, attemptId: string, input: unknown, usageEvidence?:unknown) {
     return withImmediateTransaction(this.db,() => {
       const row = this.attempt(owner,runId,attemptId);
       if((JSON.parse(row.route_json!) as ModelBudgetRoute).billing)throw new Error('budget_usage_invalid');
       if (!['in_flight','unknown','settled'].includes(row.state!)) throw new Error('budget_dispatch_conflict');
       const value = record(input,['inputTokens','outputTokens','totalTokens','cacheReadTokens','cacheWriteTokens','reasoningTokens'],'budget_usage_invalid');
+      if(usageEvidence!==undefined){
+        const request=JSON.parse(row.request_json!) as ModelBudgetRequest;
+        if(!isCacheWriteEvidence(usageEvidence)||request.purpose!=='reply-verification'
+          ||(usageEvidence.cacheWrite==='folded-unreported'&&value.cacheWriteTokens!==0)
+          ||(usageEvidence.cacheWrite==='reported'&&!Number.isSafeInteger(value.cacheWriteTokens)))throw new Error('budget_usage_invalid');
+      }
       const uncached = BigInt(count(value.inputTokens,'budget_usage_invalid')), output = BigInt(count(value.outputTokens,'budget_usage_invalid'));
       let read = value.cacheReadTokens === undefined ? undefined : BigInt(count(value.cacheReadTokens,'budget_usage_invalid'));
       let write = value.cacheWriteTokens === undefined ? undefined : BigInt(count(value.cacheWriteTokens,'budget_usage_invalid'));
@@ -461,7 +548,7 @@ export class ModelBudgetLedger {
       }
       const tokens = uncached + output + read + write, route: ModelBudgetRoute = JSON.parse(row.route_json!);
       const cost = uncached * BigInt(route.rates.input) + output * BigInt(route.rates.output) + read * BigInt(route.rates.cache_read) + write * BigInt(route.rates.cache_write);
-      const normalized = JSON.stringify({inputTokens: String(uncached),outputTokens: String(output),cacheReadTokens: String(read),cacheWriteTokens: String(write),totalTokens: String(tokens),reasoningTokens: reasoning === undefined ? null : String(reasoning)});
+      const normalized = JSON.stringify({inputTokens: String(uncached),outputTokens: String(output),cacheReadTokens: String(read),cacheWriteTokens: String(write),totalTokens: String(tokens),reasoningTokens: reasoning === undefined ? null : String(reasoning),...(usageEvidence===undefined?{}:{usageEvidence:{protocol:1,source:'reply-judge-client',cacheWrite:usageEvidence.cacheWrite}})});
       if (row.state === 'settled') { if (row.usage_json !== normalized) throw new Error('budget_settlement_conflict'); return this.receipt(row); }
       const request: ModelBudgetRequest = JSON.parse(row.request_json!);
       const exceeded = tokens > BigInt(row.held_tokens!) || cost > BigInt(row.held_nano_usd!) || output > BigInt(request.max_tokens ?? route.max_output_tokens);
@@ -470,6 +557,47 @@ export class ModelBudgetLedger {
         .run(normalized,String(tokens),String(cost),exceeded ? 1 : 0,this.now().toISOString(),runId,attemptId);
       this.event(runId,attemptId,'settled',{usage: JSON.parse(normalized),nano_usd: String(cost),bound_exceeded: exceeded,pricing_revision: route.revision});
       return this.receipt(this.attempt(owner,runId,attemptId));
+    });
+  }
+  /** Persist usage observed on the original memory extraction stream before
+   * attempting settlement. The attempt ID is the stable request identity.
+   */
+  recordMemoryProviderReceipt(owner:string,runId:string,attemptId:string,stableRequestId:string,input:unknown){
+    return withImmediateTransaction(this.db,()=>{
+      const row=this.attempt(owner,runId,attemptId),route:ModelBudgetRoute=JSON.parse(row.route_json!);
+      if(stableRequestId!==attemptId||route.billing||!['in_flight','unknown'].includes(row.state!))throw new Error('budget_provider_receipt_invalid');
+      const usage=record(input,['inputTokens','outputTokens','totalTokens','cacheReadTokens','cacheWriteTokens','reasoningTokens'],'budget_usage_invalid');
+      const inputTokens=BigInt(count(usage.inputTokens,'budget_usage_invalid')),outputTokens=BigInt(count(usage.outputTokens,'budget_usage_invalid'));
+      const read=usage.cacheReadTokens===undefined?undefined:BigInt(count(usage.cacheReadTokens,'budget_usage_invalid'));
+      const write=usage.cacheWriteTokens===undefined?undefined:BigInt(count(usage.cacheWriteTokens,'budget_usage_invalid'));
+      const total=usage.totalTokens===undefined?undefined:BigInt(count(usage.totalTokens,'budget_usage_invalid'));
+      const reasoning=usage.reasoningTokens===undefined?undefined:BigInt(count(usage.reasoningTokens,'budget_usage_invalid'));
+      const known=inputTokens+outputTokens+(read??0n)+(write??0n);
+      if((reasoning!==undefined&&reasoning>outputTokens)||(total!==undefined&&(total<known||(read!==undefined&&write!==undefined&&total!==known)))
+        ||((read===undefined||write===undefined)&&!(total!==undefined&&total===known)))throw new Error('budget_usage_invalid');
+      const identity=this.db.prepare(`SELECT p.capture_id,p.source_run_id,p.source_conversation_id,p.source_version,p.policy_version,p.epoch,
+        c.source_json,c.owner_id,c.agent_id,c.workspace_id,c.project_id,r.status,b.kind,b.owner_id AS binding_owner,b.agent_id AS binding_agent,b.epoch AS binding_epoch
+        FROM wb_memory_processing_runs p JOIN wb_memory_captures c ON c.capture_id=p.capture_id
+        JOIN ga_runs r ON r.id=p.processor_run_id JOIN wb_run_bindings b ON b.run_id=p.processor_run_id
+        WHERE p.processor_run_id=? AND p.owner_id=? AND p.agent_id=c.agent_id AND p.workspace_id=c.workspace_id AND p.project_id=c.project_id
+          AND p.capture_id=c.capture_id AND p.source_run_id=c.source_run_id AND p.source_conversation_id=c.source_conversation_id
+          AND p.policy_version=c.policy_version AND p.epoch=c.epoch AND b.owner_id=p.owner_id AND b.agent_id=p.agent_id AND b.epoch=p.epoch AND b.kind='memory_capture'
+          AND r.status IN ('starting','running')`).get(runId,owner) as Record<string,unknown>|undefined;
+      if(!identity||identity.owner_id!==owner||identity.binding_owner!==owner||identity.binding_agent!==identity.agent_id||identity.binding_epoch!==identity.epoch)throw new Error('budget_provider_receipt_invalid');
+      const requestSha=createHash('sha256').update(row.request_json!).digest('hex'),routeSha=createHash('sha256').update(row.route_json!).digest('hex'),sourceSha=createHash('sha256').update(String(identity.source_json??'')).digest('hex');
+      const payload={protocol:1,kind:'memory_provider_usage_v1',owner_id:owner,workspace_id:identity.workspace_id,project_id:identity.project_id,
+        agent_id:identity.agent_id,capture_id:identity.capture_id,source_run_id:identity.source_run_id,source_conversation_id:identity.source_conversation_id,
+        source_version:Number(identity.source_version),source_sha256:sourceSha,policy_version:Number(identity.policy_version),epoch:Number(identity.epoch),
+        run_id:runId,attempt_id:attemptId,stable_request_id:stableRequestId,request_sha256:requestSha,route_sha256:routeSha,usage};
+      const receiptJson=JSON.stringify(payload),receiptSha=createHash('sha256').update(receiptJson,'utf8').digest('hex');
+      const prior=this.db.prepare('SELECT * FROM wb_model_budget_provider_receipts WHERE run_id=? AND attempt_id=?').get(runId,attemptId) as Record<string,unknown>|undefined;
+      if(prior){if(prior.receipt_sha256!==receiptSha||prior.receipt_json!==receiptJson)throw new Error('budget_provider_receipt_conflict');return {receipt:{attempt_id:attemptId,state:'provider_receipt_recorded'},evidence_ref:String(prior.evidence_ref)};}
+      const evidenceRef=`musage-${randomUUID()}`;
+      this.db.prepare(`INSERT INTO wb_model_budget_provider_receipts(run_id,attempt_id,owner_id,evidence_ref,stable_request_id,request_sha256,route_sha256,
+        capture_id,source_run_id,source_conversation_id,source_version,source_sha256,policy_version,epoch,receipt_json,receipt_sha256,created_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(runId,attemptId,owner,evidenceRef,stableRequestId,requestSha,routeSha,String(identity.capture_id),String(identity.source_run_id),String(identity.source_conversation_id),Number(identity.source_version),sourceSha,Number(identity.policy_version),Number(identity.epoch),receiptJson,receiptSha,this.now().toISOString());
+      this.event(runId,attemptId,'provider_receipt',{evidence_ref:evidenceRef,receipt_sha256:receiptSha,request_sha256:requestSha,route_sha256:routeSha});
+      return {receipt:{attempt_id:attemptId,state:'provider_receipt_recorded'},evidence_ref:evidenceRef};
     });
   }
   /** Durable dispatch is the measured unit; tokens remain unmeasured. */

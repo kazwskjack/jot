@@ -18,9 +18,10 @@ import { createVoiceAdapterHandler } from './voice.js'
 import {createBudgetModelSelector} from './budget-model-selection.js'
 import {createOrdinaryModelSelector} from './ordinary-model-selection.js'
 import {createOrdinaryExecutionPolicyReader,normalizeChatExecutionPolicy} from './ordinary-execution-policy.js'
-import {createChatContextSelector} from './chat-context.js'
+import {createOrdinaryContextSelector} from './chat-context.js'
 import {createChatWebSelector} from './chat-web.js'
 import {createModelCatalogReader} from './model-catalog.js'
+import {createModelRouteHealth} from './model-route-health.js'
 import {createNativeTaskDispatcher} from './native-task-dispatch.js'
 import {createNativeTaskScheduler} from './native-task-scheduler.js'
 import {createNativeRoleHost} from './native-role-host.js'
@@ -32,11 +33,17 @@ import {createConversationGoalRunHost} from './conversation-goal-run-host.js'
 import {createOrdinaryInputRunHost,normalizeOrdinaryInputExecution} from './ordinary-input-run-host.js'
 import {createOptionalMemoryExtractionHost} from './optional-memory-extraction.js'
 import { WorkbenchBridge,normalizeHostExecutionLease } from './workbench.js'
+import { createSkillContentCommand, createSkillContentReader } from './skill-content-reader.js'
+import { createSkillCatalogCommand, createSkillCatalogReader, createSkillResourceCommand, createSkillResourceReader } from './skill-catalog-reader.js'
 import {createNativeWorkspaceAdmissionGate} from './native-workspace-factory.js'
 import {createNativeGitHost,normalizeNativeGitHostConfig} from './native-git-host.js'
+import {createMcpControlHost,createMcpControlRouteHandler} from './mcp-control-host.js'
+
+import {normalizeLeaseTakeoverRequest,settleLeaseTakeover} from './lease-takeover.js'
+import {browserToolsConfigFromEnvironment,createBrowserToolsPlugin} from '../dsh-host/browser-tools.mjs'
 
 export const name = 'jot-jot-session-adapter'
-export const inject = ['sessionController', 'fileUploads', 'agents','sessions','sessionPersistence','sessionProjections','llm']
+export const inject = ['sessionController', 'fileUploads', 'agents','sessions','sessionPersistence','sessionProjections','llm','agentPresets','jotMcpRuntimeProvider','profileContext','approval']
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/
 const ALLOWED_AGENT_PRESETS = new Set([
@@ -112,6 +119,30 @@ function authorized(actual, expected) {
 }
 
 function json(status, value) { return { status, value } }
+
+const DRIVER_SCOPE_KEYS='lease_generation,lease_owner,owner_id,run_id,session_id,workspace_id';
+const DRIVER_SAFE_REASON=/^[a-z][a-z0-9_]{0,63}$/;
+function normalizeBrowserDriverScope(value,sessionId){
+  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!==DRIVER_SCOPE_KEYS
+    ||!['run_id','owner_id','workspace_id','session_id','lease_owner'].every(key=>typeof value[key]==='string'&&ID.test(value[key]))
+    ||!Number.isSafeInteger(value.lease_generation)||value.lease_generation<1||value.session_id!==sessionId)throw Error('browser_driver_observation_invalid');
+  return Object.freeze({run_id:value.run_id,owner_id:value.owner_id,workspace_id:value.workspace_id,session_id:value.session_id,
+    lease_owner:value.lease_owner,lease_generation:value.lease_generation});
+}
+function validateBrowserDriverObservation(value,expected,now=Date.now()){
+  if(!value||typeof value!=='object'||Array.isArray(value))throw Error('browser_driver_observation_invalid');
+  const keys=Object.keys(value).sort().join(',');
+  if((keys!=='execution_authorized,observed_at,protocol,required,scope,status'
+      &&keys!=='execution_authorized,observed_at,protocol,reason,required,scope,status')
+    ||value.protocol!==1||value.execution_authorized!==false||value.required!==true
+    ||!['ready','unknown','failed'].includes(value.status)||typeof value.observed_at!=='string'||value.observed_at.length>64
+    ||value.reason!==undefined&&(typeof value.reason!=='string'||!DRIVER_SAFE_REASON.test(value.reason)))throw Error('browser_driver_observation_invalid');
+  const scope=normalizeBrowserDriverScope(value.scope,expected.session_id);
+  if(Object.keys(scope).some(key=>scope[key]!==expected[key]))throw Error('browser_driver_observation_invalid');
+  const observedAt=/^\d{4}-\d\d-\d\dT.*(?:Z|[+-]\d\d:\d\d)$/.test(value.observed_at)?Date.parse(value.observed_at):NaN;
+  if(!Number.isFinite(observedAt)||observedAt>now+5000||now-observedAt>60_000)throw Error('browser_driver_observation_invalid');
+  return Object.freeze({...value,scope});
+}
 
 const BINDING_FAILURE_CODES=new Set(['workbench_run_forbidden','workbench_goal_binding_changed','workbench_host_incompatible','workbench_goal_unavailable','workbench_goal_context_invalid','workbench_goal_identity_conflict','workbench_goal_stopped','workbench_context_invalid','workbench_binding_lease_required','workbench_model_host_incompatible','workbench_model_route_changed','workbench_budget_binding_required','workbench_binding_missing','workbench_binding_changed','workbench_goal_native_driver_unavailable','workbench_task_state_invalid','workbench_goal_host_state_invalid','workbench_goal_binding_missing','workbench_goal_revoked']);
 export function bindingFailureSummary(stage,error){
@@ -227,7 +258,7 @@ async function createOrResumeSession({controller,request,agents,sessions,session
   return value
 }
 
-export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation=false,sessionNotFoundError,modelCatalogReader,requireOrdinaryModelPolicy=false,chatExecutionPolicy,chatModeReadiness }) {
+export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,skillContentCommand,skillCatalogCommand,skillResourceCommand,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation=false,sessionNotFoundError,modelCatalogReader,requireOrdinaryModelPolicy=false,chatExecutionPolicy,chatModeReadiness,mcpControlRoute }) {
   const allowedPresets=new Set(ALLOWED_AGENT_PRESETS)
   if(chatExecutionPolicy!==undefined){normalizeChatExecutionPolicy(chatExecutionPolicy);if(!requireOrdinaryModelPolicy||!ordinaryInputAdmissionHost)throw Error('ordinary_execution_policy_config_invalid');allowedPresets.add('jot-chat')}
   const voiceHandler = voiceEnabled ? createVoiceAdapterHandler({ speechController, token }) : null
@@ -258,6 +289,53 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
 
   return async ({ method, url, headers, body, signal = new AbortController().signal }) => {
     if (!authorized(headers.authorization, token)) return json(401, { error: 'unauthorized' })
+    if (url.pathname === '/internal/v1/mcp/reload' || url.pathname === '/internal/v1/mcp/cancel'
+      || url.pathname === '/internal/v1/mcp/remove') {
+      if (typeof mcpControlRoute !== 'function') return json(503, { error: 'mcp_control_unavailable' })
+      return mcpControlRoute({ method, url: url.pathname, body, signal })
+    }
+    if (url.pathname === '/v1/skills/read') {
+      if (method !== 'POST') return json(405, { error: 'method_not_allowed' })
+      if (!body || typeof body !== 'object' || Array.isArray(body)
+        || Object.keys(body).sort().join(',') !== 'name,protocol,scope' || body.protocol !== 1
+        || typeof body.name !== 'string' || !body.scope || typeof body.scope !== 'object' || Array.isArray(body.scope)) {
+        return json(422, { error: 'skill_content_input_invalid' })
+      }
+      if (typeof skillContentCommand !== 'function') return json(503, { error: 'skill_content_unavailable' })
+      try { return json(200, await skillContentCommand(body, { signal })) }
+      catch (error) {
+        const code = error instanceof Error ? error.message : ''
+        if (code === 'skill_content_scope_forbidden') return json(404, { error: 'skill_content_not_found' })
+        if (['skill_content_command_invalid', 'skill_name_invalid'].includes(code)) return json(422, { error: 'skill_content_input_invalid' })
+        if (['skill_not_found', 'skill_not_user_invocable'].includes(code)) return json(404, { error: 'skill_content_not_found' })
+        if (code === 'skill_content_too_large') return json(413, { error: 'skill_content_too_large' })
+        if (['skill_catalog_incomplete', 'skill_definition_changed', 'skill_content_scope_changed'].includes(code)) return json(409, { error: 'skill_content_changed' })
+        return json(503, { error: 'skill_content_unavailable' })
+      }
+    }
+    if (url.pathname === '/v1/skills/catalog' || url.pathname === '/v1/skills/resource') {
+      const resource = url.pathname.endsWith('/resource')
+      const expected = resource ? ['protocol','relative_path','scope','skill_name'] : ['protocol','scope']
+      if (method !== 'POST') return json(405, { error: 'method_not_allowed' })
+      if (!body || typeof body !== 'object' || Array.isArray(body)
+        || Object.keys(body).sort().join(',') !== expected.sort().join(',') || body.protocol !== 1
+        || !body.scope || typeof body.scope !== 'object' || Array.isArray(body.scope)
+        || resource && (typeof body.skill_name !== 'string' || typeof body.relative_path !== 'string')) {
+        return json(422, { error: 'skill_catalog_input_invalid' })
+      }
+      const command = resource ? skillResourceCommand : skillCatalogCommand
+      if (typeof command !== 'function') return json(503, { error: 'skill_catalog_unavailable' })
+      try { return json(200, await command(body, { signal })) }
+      catch (error) {
+        const code = error instanceof Error ? error.message : ''
+        if (code === 'skill_catalog_scope_forbidden' || ['skill_not_found','skill_not_user_invocable'].includes(code)) return json(404, { error: 'skill_catalog_not_found' })
+        if (['skill_catalog_command_invalid','skill_catalog_input_invalid','skill_name_invalid','skill_resource_path_invalid','skill_resource_provider_unsupported'].includes(code)) return json(422, { error: 'skill_catalog_input_invalid' })
+        if (['skill_catalog_scope_changed','skill_catalog_changed','skill_resource_changed','skill_catalog_incomplete'].includes(code)) return json(409, { error: 'skill_catalog_changed' })
+        if (code === 'skill_resource_too_large') return json(413, { error: 'skill_resource_too_large' })
+        if (code === 'skill_resource_path_unsafe') return json(404, { error: 'skill_catalog_not_found' })
+        return json(503, { error: 'skill_catalog_unavailable' })
+      }
+    }
     if(url.pathname==='/v1/conversation-modes/readiness'){
       if(method!=='POST')return json(405,{error:'method_not_allowed'});
       if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).length)return json(422,{error:'chat_mode_readiness_input_invalid'});
@@ -272,6 +350,22 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
     if (url.pathname.startsWith('/v1/voice/')) {
       if (!voiceHandler) return json(404, { error: 'not_found' })
       return voiceHandler({ method, url, headers, body, signal })
+    }
+    const forkSource=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/fork-source$/)
+    if(forkSource){
+      let sessionId;try{sessionId=decodeURIComponent(forkSource[1])}catch{return json(422,{error:'fork_source_input_invalid'})}
+      if(!ID.test(sessionId)||!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).length)return json(422,{error:'fork_source_input_invalid'})
+      if(typeof persistence?.open!=='function')return json(503,{error:'fork_source_unavailable'})
+      let handle,inspection,failed=false
+      try{
+        signal.throwIfAborted();handle=await persistence.open(sessionId,'read',{signal});
+        const snapshot=await handle.read(0,undefined,{signal});signal.throwIfAborted()
+        if(!handle.header||handle.header.id!==sessionId||!Number.isSafeInteger(handle.inheritedEventCount)||handle.inheritedEventCount<0||!Array.isArray(snapshot?.events))throw Error('fork_source_unconfirmed')
+        inspection={meta:structuredClone(handle.header),inheritedEventCount:handle.inheritedEventCount,events:structuredClone(snapshot.events)}
+      }catch{failed=true}
+      try{await handle?.close()}catch{failed=true}
+      if(failed)return json(409,{error:'fork_source_unconfirmed'})
+      return json(200,{execution_authorized:false,inspection})
     }
     if (url.pathname === '/v1/sessions') {
       const sessionId = String(body?.session_id ?? '')
@@ -426,6 +520,52 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       try{return json(200,await memoryExtractionHost.run(agent,{signal}));}
       catch{return json(409,{error:'memory_extraction_not_completed'});}
     }
+    const nativeMemberList=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/native-members\/list$/)
+    if(nativeMemberList){
+      const sessionId=decodeURIComponent(nativeMemberList[1]);
+      if(!ID.test(sessionId)||!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).length)return json(422,{error:'native_member_roster_input_invalid'});
+      if(typeof nativeRoleHost?.listMembers!=='function')return json(503,{error:'native_member_roster_unavailable'});
+      const parent=agents?.get?.(sessionId),binding=parent&&workbenchBridge?.bindingFor?.(parent);
+      if(parent?.id!==sessionId||blockedWorkbenchSessions.has(sessionId)||binding?.sessionRef!==sessionId)return json(409,{error:'native_member_parent_unavailable'});
+      try{
+        const members=await nativeRoleHost.listMembers(parent,{signal});
+        if(!Array.isArray(members)||members.some(member=>!member||Object.keys(member).sort().join(',')!=='id,name,role,status'
+          ||typeof member.id!=='string'||!ID.test(member.id)||typeof member.name!=='string'||!member.name.trim()||member.name.length>80
+          ||member.role!=='teammate'||typeof member.status!=='string'||!member.status||member.status.length>64))return json(409,{error:'native_member_roster_invalid'});
+        return json(200,{members,execution_authorized:false});
+      }catch{return json(409,{error:'native_member_roster_unavailable'});}
+    }
+    const nativeMemberInterrupt=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/native-members\/([^/]+)\/interrupt$/)
+    if(nativeMemberInterrupt){
+      const sessionId=decodeURIComponent(nativeMemberInterrupt[1]),childSessionId=decodeURIComponent(nativeMemberInterrupt[2]);
+      if(!ID.test(sessionId)||!ID.test(childSessionId)||!body||typeof body!=='object'||Array.isArray(body)
+        ||Object.keys(body).join(',')!=='request_id'||typeof body.request_id!=='string'||!ID.test(body.request_id))return json(422,{error:'native_member_interrupt_input_invalid'});
+      if(typeof nativeRoleHost?.interruptMember!=='function')return json(503,{error:'native_member_interrupt_unavailable'});
+      const parent=agents?.get?.(sessionId),binding=parent&&workbenchBridge?.bindingFor?.(parent);
+      if(parent?.id!==sessionId||blockedWorkbenchSessions.has(sessionId)||binding?.sessionRef!==sessionId)return json(409,{error:'native_member_parent_unavailable'});
+      try{
+        const receipt=await nativeRoleHost.interruptMember(parent,childSessionId,{requestId:body.request_id,signal});
+        if(!receipt||Object.keys(receipt).sort().join(',')!=='execution_authorized,quiescent,request_id,status'||receipt.request_id!==body.request_id
+          ||receipt.execution_authorized!==false||receipt.status!=='accepted'||receipt.quiescent!==false)return json(409,{error:'native_member_interrupt_receipt_invalid'});
+        return json(200,receipt);
+      }catch{return json(409,{error:'native_member_interrupt_unavailable'});}
+    }
+    const nativeMemberMessage=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/native-members\/([^/]+)\/messages$/)
+    if(nativeMemberMessage){
+      const sessionId=decodeURIComponent(nativeMemberMessage[1]),childSessionId=decodeURIComponent(nativeMemberMessage[2]);
+      if(!ID.test(sessionId)||!ID.test(childSessionId)||!body||typeof body!=='object'||Array.isArray(body)
+        ||Object.keys(body).sort().join(',')!=='request_id,text'||typeof body.request_id!=='string'||!ID.test(body.request_id)
+        ||typeof body.text!=='string'||!body.text.trim()||Buffer.byteLength(body.text,'utf8')>32768)return json(422,{error:'native_member_wake_input_invalid'});
+      if(typeof nativeRoleHost?.wakeMember!=='function')return json(503,{error:'native_member_wake_unavailable'});
+      const parent=agents?.get?.(sessionId),binding=parent&&workbenchBridge?.bindingFor?.(parent);
+      if(parent?.id!==sessionId||blockedWorkbenchSessions.has(sessionId)||binding?.sessionRef!==sessionId)return json(409,{error:'native_member_parent_unavailable'});
+      try{
+        const receipt=await nativeRoleHost.wakeMember(parent,childSessionId,{requestId:body.request_id,text:body.text,signal});
+        if(!receipt||Object.keys(receipt).sort().join(',')!=='execution_authorized,request_id,status'||receipt.request_id!==body.request_id
+          ||receipt.execution_authorized!==false||!['accepted','unknown'].includes(receipt.status))return json(409,{error:'native_member_wake_receipt_invalid'});
+        return json(200,receipt);
+      }catch{return json(409,{error:'native_member_wake_unavailable'});}
+    }
     const nativeMembers=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/native-members$/)
     if(nativeMembers){
       const sessionId=decodeURIComponent(nativeMembers[1]),keys=['role_ref','expected_policy_version','request_id','name','description','text'];
@@ -538,6 +678,18 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       if(nativeIdleObservation!==true||typeof agents?.get!=='function'||typeof controller?.projections!=='function')return json(503,{error:'native_idle_observation_unavailable'});
       try{return json(200,await readNativeIdleObservation({agents,controller,sessionId,signal,allowedPresets}));}catch{return json(409,{error:'native_idle_observation_unconfirmed'});}
     }
+    const browserDriverObservation=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/browser-driver-observation$/)
+    if(browserDriverObservation){
+      let sessionId,scope;
+      try{sessionId=decodeURIComponent(browserDriverObservation[1]);scope=normalizeBrowserDriverScope(body?.scope,sessionId);}
+      catch{return json(422,{error:'browser_driver_observation_invalid'});}
+      if(method!=='POST'||!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).sort().join(',')!=='protocol,scope'||body.protocol!==1)
+        return json(422,{error:'browser_driver_observation_invalid'});
+      const agent=agents?.get?.(sessionId);
+      if(!agent||agent.id!==sessionId||typeof workbenchBridge?.observeBrowserDriver!=='function')return json(503,{error:'browser_driver_observation_unavailable'});
+      try{return json(200,validateBrowserDriverObservation(await workbenchBridge.observeBrowserDriver(agent,scope,signal),scope));}
+      catch{return json(409,{error:'browser_driver_observation_unconfirmed'});}
+    }
     const chatGoal=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/conversation-goal$/)
     if(chatGoal){
       const sessionId=decodeURIComponent(chatGoal[1]);
@@ -600,6 +752,12 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       const sessionId = decodeURIComponent(cancel[1])
       if (!ID.test(sessionId)) return json(422, { error: 'session_id_invalid' })
       if (!agents?.get) return json(503, { error: 'agent_registry_unavailable' })
+      if(body?.purpose==='lease_takeover'){
+        let scope;try{scope=normalizeLeaseTakeoverRequest(body,sessionId)}catch{return json(422,{error:'lease_takeover_input_invalid'})}
+        const agent=agents.get(sessionId),value=await settleLeaseTakeover({agent,agents,controller,bridge:workbenchBridge,scope,signal})
+        return json(200,value)
+      }
+      if(body?.purpose!==undefined)return json(422,{error:'cancel_purpose_invalid'})
       const agent = agents.get(sessionId)
       // No attached driver exists after a Host restart; there is no live turn to stop.
       if (!agent) return json(202, { accepted: true, settled: true, attached: false })
@@ -685,6 +843,8 @@ async function readJson(req, limit = 1024 * 1024) {
 }
 
 export function apply(ctx, config = {}) {
+  const mcpRuntimeProvider=config.mcpRuntimeProvider??ctx.get?.('jotMcpRuntimeProvider')
+  if(mcpRuntimeProvider!==undefined&&(!mcpRuntimeProvider||typeof mcpRuntimeProvider.setup!=='function'||typeof mcpRuntimeProvider.attach!=='function'))throw Error('jot_session_adapter_config_invalid')
   const nativeGitConfig=config.nativeGit===undefined?undefined:normalizeNativeGitHostConfig(config.nativeGit)
   if(nativeGitConfig&&config.nativeWorkspaceAdmission!==true)throw Error('native_git_host_config_invalid')
   if(config.ordinaryModelSelection!==undefined&&typeof config.ordinaryModelSelection!=='boolean'||config.ordinaryModelSelection===true&&config.ordinaryInputAdmission===undefined)throw Error('ordinary_model_policy_config_invalid')
@@ -738,125 +898,165 @@ export function apply(ctx, config = {}) {
   const speechController = voiceEnabled ? ctx.speechController : undefined
   if (voiceEnabled && !speechController) throw new Error('jot_voice_speech_service_unavailable')
   let nativeTaskDispatcher
-  const workbenchBridge = workbenchToken.length >= 16 ? new WorkbenchBridge({
-    origin: config.workbenchOrigin || 'http://127.0.0.1:18831', token: workbenchToken,
-    nativeDelegate:config.nativeRoles===true?(...args)=>{if(!nativeTaskDispatcher)throw new Error('native_task_dispatch_unavailable');return nativeTaskDispatcher(...args)}:undefined,
-    webBudgetEnabled:config.webBudgetEnabled===true,
-    nativeContinuation: config.nativeContinuation ?? false,
-    modelRouteFor:config.workbenchModel?agent=>ctx.sessionController.agents.selectionFor(agent).current:undefined,
-  }) : undefined
-  let nativeWorkspaceAdmissionGate
-  if(config.nativeWorkspaceAdmission===true){
-    nativeWorkspaceAdmissionGate=createNativeWorkspaceAdmissionGate({ctx,bridge:workbenchBridge})
-    ctx.effect(()=>()=>nativeWorkspaceAdmissionGate.dispose())
+  let scopeOf
+  let browserConfig
+  if(workbenchToken.length>=16){
+    try { browserConfig=browserToolsConfigFromEnvironment() } catch {}
   }
-  if(nativeGitConfig){
-    let stopped=false,nativeGitHost,ready=false
-    const prepared=createNativeGitHost({ctx,bridge:workbenchBridge,admissionGate:nativeWorkspaceAdmissionGate,allowedPresets:new Set(ALLOWED_AGENT_PRESETS),config:nativeGitConfig}).then(async host=>{
-      nativeGitHost=host
-      if(stopped){await host.dispose();return}
-      ready=true;ctx.emit('jot/native-git-readiness',{ready:true})
-    }).catch(()=>{if(!stopped)ctx.emit('jot/native-git-readiness',{ready:false,reason:'native_git_host_unavailable'})})
-    ctx.provide('jotNativeGitHost',Object.freeze({async readiness(){await prepared;return{ready:ready&&!stopped}}}))
-    ctx.effect(()=>async()=>{stopped=true;ready=false;await prepared;await nativeGitHost?.dispose()})
-  }
-  const budgetModelSelector=createBudgetModelSelector({route:config.workbenchModel,llm:ctx.llm,agents:ctx.sessionController.agents})
-  const nativeClaimedComposer=config.nativeClaimedInputRecovery===undefined?undefined:createNativeClaimedSessionComposer({
-    ctx,bridge:workbenchBridge,agents:ctx.agents,sessions:ctx.sessions,
-    query:typeof ctx.get==='function'?ctx.get('sessionQuery'):ctx.sessionQuery,projections:ctx.sessionProjections,
-    ...config.nativeClaimedInputRecovery,
-  })
-  const nativeHandoffLifecycle=config.nativeHandoff===undefined?undefined:createNativeHandoffLifecycle({
-    ctx,bridge:workbenchBridge,registry:ctx.agents,sessions:ctx.sessions,
-    persistence:ctx.sessionPersistence,projections:ctx.sessionProjections,
-    route:config.workbenchModel,reconcileOperations:config.reconcileOperations,
-    policyVersion:config.nativeHandoff.policyVersion,
-    maxHops:config.nativeHandoff.maxHops,
-    validateLog:config.nativeHandoff.validateLog,
-  })
-  const handoffAdmission=nativeHandoffLifecycle?.handoffAdmission??config.handoffAdmission
-  const handoffReturn=nativeHandoffLifecycle?.handoffReturn??config.handoffReturn
-  const handoffRecovery=nativeHandoffLifecycle?.handoffRecovery??config.handoffRecovery
-  const nativeRoleHost=config.nativeRoles===true?createNativeRoleHost({ctx,bridge:workbenchBridge,selectModel:budgetModelSelector,
-    sessions:ctx.sessions,persistence:ctx.sessionPersistence,automaticClosures:true,durableSpawns:true,nativeRecovery:config.nativeRoleRecovery===true,reconcileOperations:config.reconcileOperations,nativeOperationOrigin:config.nativeOperationOrigin,handoffAdmission,onMemberClosed:handoffReturn}):undefined
-  let nativeTaskScheduler
-  if(nativeRoleHost){
-    nativeTaskScheduler=config.nativeDeferredHandoff===true?createNativeTaskScheduler({ctx,bridge:workbenchBridge,host:nativeRoleHost}):undefined
-    nativeTaskDispatcher=createNativeTaskDispatcher({bridge:workbenchBridge,host:nativeRoleHost,scheduler:nativeTaskScheduler})
-    ctx.effect(()=>async()=>{await nativeTaskScheduler?.dispose();await nativeRoleHost.dispose()})
-  }
-  const conversationGoalRunHost=config.conversationGoalResume===true?createConversationGoalRunHost({controller:ctx.sessionController,agents:ctx.agents,persistence:ctx.sessionPersistence,bridge:workbenchBridge,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted'))}):undefined
-  if(conversationGoalRunHost)ctx.effect(()=>()=>conversationGoalRunHost.dispose())
-  const executionPolicyReader=chatExecutionPolicy?createOrdinaryExecutionPolicyReader({bridge:workbenchBridge,chatPolicy:chatExecutionPolicy}):undefined
-  const ordinaryModelSelector=config.ordinaryModelSelection===true?createOrdinaryModelSelector({bridge:workbenchBridge,llm:ctx.llm,agents:ctx.sessionController.agents,registry:ctx.agents,...(executionPolicyReader?{executionPolicyReader}:{})}):undefined
-  const contextSelector=config.ordinaryChatContext===true?createChatContextSelector({bridge:workbenchBridge,sessions:ctx.sessions,chatPolicy:chatExecutionPolicy,createUserMessage:createRequire(ctx.get('profileContext').installAnchor)('@deepseek-ai/dsh-llm').createUserMessage}):undefined
-  const webSelector=config.ordinaryChatWeb===true?createChatWebSelector({bridge:workbenchBridge,sessions:ctx.sessions,chatPolicy:chatExecutionPolicy}):undefined
-  if(webSelector){
-    if(typeof ctx.agents.list!=='function')throw Error('chat_web_host_incompatible')
-    ctx.on('agent/created',({agent})=>webSelector.prepareAgent(agent))
-    for(const agent of ctx.agents.list())webSelector.prepareAgent(agent)
-    ctx.effect(()=>()=>webSelector.dispose())
-  }
-  let chatCompactionManager
-  const ordinaryInputAdmissionHost=config.ordinaryInputAdmission===undefined?undefined:createOrdinaryInputAdmissionHost({ctx,agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets,...config.ordinaryInputAdmission,...(ordinaryModelSelector?{modelSelector:ordinaryModelSelector}:{}),...(contextSelector?{contextSelector}:{}),...(webSelector?{webSelector}:{}),...(config.ordinaryChatCompaction===true?{beforeInput:request=>{if(!chatCompactionManager)throw Error('chat_compaction_manager_unavailable');return chatCompactionManager.beforeInput(request)}}:{})})
-  if(ordinaryInputAdmissionHost)ctx.effect(()=>()=>ordinaryInputAdmissionHost.dispose())
-  const ordinaryCompletionReader=config.ordinaryInputAdmission===undefined?undefined:createOrdinaryCompletionReader({agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets,readGoal:agent=>nativeGoalsFor(agent)?.get(agent),...config.ordinaryInputAdmission})
-  const attachmentHistoryOptions=config.ordinaryInputAdmission?.attachmentSteeringProtocol===1?{attachmentSteeringProtocol:1}:{};
-  const ordinarySteeringObservationReader=config.ordinaryInputHistory===undefined?undefined:createOrdinarySteeringObservationReader({agents:ctx.agents,sessions:ctx.sessions,persistence:ctx.sessionPersistence,bridge:workbenchBridge,admissions:config.ordinaryInputAdmission.admissions,ordinaryPresets,...attachmentHistoryOptions,...config.ordinaryInputHistory})
-  const ordinaryRunCompletionReader=config.ordinaryRunHistory===undefined?undefined:createOrdinaryRunCompletionReader({agents:ctx.agents,sessions:ctx.sessions,persistence:ctx.sessionPersistence,bridge:workbenchBridge,admissions:config.ordinaryInputAdmission.admissions,projections:ctx.sessionProjections,ordinaryPresets,...attachmentHistoryOptions,...config.ordinaryRunHistory})
-  const chatCheckpointRecovery=config.ordinaryChatCompactionRecovery===true?createChatCheckpointRecovery({agents:ctx.agents,sessions:ctx.sessions,persistence:ctx.sessionPersistence,bridge:workbenchBridge,admissions:config.ordinaryInputAdmission.admissions,projections:ctx.sessionProjections,ordinaryPresets,...attachmentHistoryOptions,...config.ordinaryRunHistory}):undefined
-  const chatMaintenanceObserver=config.ordinaryChatMaintenanceObservation===undefined?undefined:createChatMaintenanceObserver({bridge:workbenchBridge,agents:ctx.agents,tokenMeter:ctx.get('tokenMeter'),llm:ctx.llm,pressurePolicy:config.ordinaryChatMaintenanceObservation,completionReader:createLiveChatRunCompletionReader({agents:ctx.agents,sessions:ctx.sessions,persistence:ctx.sessionPersistence,bridge:workbenchBridge,admissions:config.ordinaryInputAdmission.admissions,projections:ctx.sessionProjections,ordinaryPresets,...attachmentHistoryOptions,...config.ordinaryRunHistory})})
-  if(config.ordinaryChatCompaction===true){
-    chatCompactionManager=createChatCompactionManager({ctx,bridge:workbenchBridge,agents:ctx.agents,presets:ctx.get('agentPresets'),runtime:ctx.get('jotChatCompactionRuntime'),observe:chatMaintenanceObserver,tokenMeter:ctx.get('tokenMeter'),llm:ctx.llm,completionReader:createLiveChatRunCompletionReader({agents:ctx.agents,sessions:ctx.sessions,persistence:ctx.sessionPersistence,bridge:workbenchBridge,admissions:config.ordinaryInputAdmission.admissions,projections:ctx.sessionProjections,ordinaryPresets,...attachmentHistoryOptions,...config.ordinaryRunHistory})})
-    ctx.provide('jotChatCompactionManager',chatCompactionManager)
-    ctx.effect(()=>()=>chatCompactionManager.dispose())
-  }
-  const chatPostAnswer=config.ordinaryChatCompactionAuto===true?createChatPostAnswer({bridge:workbenchBridge,agents:ctx.agents,manager:chatCompactionManager,recover:chatCheckpointRecovery,...(typeof ctx.emit==='function'?{onSettled:value=>ctx.emit('jot/chat-post-answer-settled',value)}:{})}):undefined
-  if(chatPostAnswer){ctx.provide('jotChatPostAnswer',chatPostAnswer);ctx.effect(()=>()=>chatPostAnswer.dispose())}
-  const ordinaryClaimedComposer=config.ordinaryInputRecovery?.claimedInput===undefined?undefined:createOrdinaryClaimedSessionComposer({ctx,bridge:workbenchBridge,agents:ctx.agents,sessions:ctx.sessions,query:typeof ctx.get==='function'?ctx.get('sessionQuery'):ctx.sessionQuery,projections:ctx.sessionProjections,ordinaryPresets,...config.ordinaryInputAdmission,...config.ordinaryInputRecovery.claimedInput})
-  if(ordinaryClaimedComposer)ctx.effect(()=>()=>ordinaryClaimedComposer.dispose())
-  const ordinaryInputRunHost=config.ordinaryInputRecovery===undefined?undefined:createOrdinaryInputRunHost({controller:ctx.sessionController,agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets,verifyComposition:config.ordinaryInputRecovery.verifyComposition,inputAdmissionHost:ordinaryInputAdmissionHost,claimedComposer:ordinaryClaimedComposer,...attachmentHistoryOptions})
-  if(ordinaryInputRunHost)ctx.effect(()=>()=>ordinaryInputRunHost.dispose())
-  const memoryExtractionHost=createOptionalMemoryExtractionHost({config:config.memoryExtraction,bridge:workbenchBridge,llm:ctx.llm,route:config.workbenchModel})
-  if(memoryExtractionHost)ctx.effect(()=>()=>memoryExtractionHost.dispose())
-  let ApiSessionNotFound
-  if(workbenchBridge||typeof ctx.sessionController.inspect==='function'&&typeof ctx.sessionController.resolveAgent==='function'){
-    ({ApiSessionNotFound}=createRequire(ctx.get('profileContext').installAnchor)('@deepseek-ai/dsh-api-session-controller'))
-    if(typeof ApiSessionNotFound!=='function'||!(ApiSessionNotFound.prototype instanceof Error))throw Error('jot_session_controller_incompatible')
-  }
-  const chatModeReadiness=createChatModeReadiness({enabled:config.ordinaryChatModeReadiness,policy:chatExecutionPolicy,mounted:ctx.get?.('jotChatPresetReady'),context:config.ordinaryChatContext,web:config.ordinaryChatWeb,modelSelection:config.ordinaryModelSelection,admission:!!ordinaryInputAdmissionHost});
-  const handler = createAdapterHandler({ controller: ctx.sessionController, fileUploads: ctx.fileUploads, agents: ctx.agents,
-    sessions:ctx.sessions,persistence:ctx.sessionPersistence,sessionNotFoundError:ApiSessionNotFound,
-    speechController, voiceEnabled, token, workbenchBridge,
-    budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation:config.nativeIdleObservation===true,
-    chatModeReadiness,modelCatalogReader:createModelCatalogReader({llm:ctx.llm,enabled:config.ordinaryModelSelection===true}),requireOrdinaryModelPolicy:config.ordinaryModelSelection===true,...(chatExecutionPolicy?{chatExecutionPolicy}:{}) })
-  const server = createServer(async (req, res) => {
-    const abort = new AbortController()
-    req.once('aborted', () => abort.abort())
-    res.once('close', () => { if (!res.writableEnded) abort.abort() })
-    try {
-      const url = new URL(req.url, `http://${host}:${port}`)
-      const isFileUpload = /^\/v1\/sessions\/[^/]+\/files$/.test(url.pathname)
-      const bodyLimit = url.pathname.startsWith('/v1/voice/') ? 4 * 1024 * 1024 : 32 * 1024 * 1024
-      const result = await handler({ method: req.method, url, headers: req.headers,
-        body: isFileUpload ? req : await readJson(req, bodyLimit), signal: abort.signal })
-      if (result.stream) {
-        res.writeHead(result.status, { 'content-type': 'application/x-ndjson; charset=utf-8', 'cache-control': 'no-store' })
-        for await (const frame of result.stream) res.write(`${JSON.stringify(frame)}\n`)
-        return res.end()
-      }
-      res.writeHead(result.status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-      res.end(JSON.stringify(result.value))
-    } catch (error) {
-      console.error('[jot-jot-session-adapter] request failed', JSON.stringify(adapterErrorSummary(error)))
-      if (res.headersSent) return res.destroy()
-      res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
-      res.end(JSON.stringify({ error: 'adapter_internal_error' }))
+  // Preserve synchronous setup and validation when no browser driver is configured.
+  if(browserConfig)return createBrowserToolsPlugin({
+    approvalForAgent:agent=>ctx.agentPresets?.serviceFor?.(agent,'approval'),
+  }).apply(ctx,browserConfig).then(install,()=>install())
+  return install()
+
+  function install(browserRegistrar) {
+    const scopeKeyForAgent=agent=>{
+      scopeOf??=createRequire(ctx.get('profileContext').installAnchor)('@deepseek-ai/dsh-scope').scopeOf
+      return scopeOf(agent.ctx)
     }
-  })
-  server.once('listening',()=>ctx.emit('jot-session-adapter/ready',{host,port}))
-  server.listen(port, host)
-  ctx.effect(() => () => server.close())
+    const workbenchBridge = workbenchToken.length >= 16 ? new WorkbenchBridge({
+      origin: config.workbenchOrigin || 'http://127.0.0.1:18831', token: workbenchToken,
+      nativeDelegate:config.nativeRoles===true?(...args)=>{if(!nativeTaskDispatcher)throw new Error('native_task_dispatch_unavailable');return nativeTaskDispatcher(...args)}:undefined,
+      webBudgetEnabled:config.webBudgetEnabled===true,
+      nativeContinuation: config.nativeContinuation ?? false,
+      browserRegistrarForAgent:agent=>ctx.agentPresets?.serviceFor?.(agent,'jotBrowserToolRegistrar'),
+      browserRegistrar,
+      scopeKeyForAgent,
+      modelRouteFor:config.workbenchModel?agent=>ctx.sessionController.agents.selectionFor(agent).current:undefined,
+      browserDriverObserverForAgent:agent=>ctx.agentPresets?.serviceFor?.(agent,'jotBrowserToolRegistrar'),
+      mcpRuntimeProvider,
+    }) : undefined
+    const mcpControlHost=workbenchBridge&&typeof mcpRuntimeProvider?.resolveReloadScopes==='function'
+      ?createMcpControlHost({resolveScopes:(ownerId,agentId,signal)=>mcpRuntimeProvider.resolveReloadScopes(ownerId,agentId,signal),
+        assertCurrent:async(identity,_phase,signal,controlConfig)=>(await workbenchBridge.mcpControlState(identity,signal,controlConfig)).state})
+      :undefined
+    const mcpControlRoute=mcpControlHost?createMcpControlRouteHandler(mcpControlHost):undefined
+    if(mcpControlHost)ctx.effect(()=>()=>mcpControlHost.dispose())
+    const skillContentCommand = workbenchBridge && typeof ctx.agents?.get === 'function' && typeof ctx.sessions?.get === 'function'
+      ? createSkillContentCommand(createSkillContentReader({ agents: ctx.agents, sessions: ctx.sessions, bridge: workbenchBridge }))
+      : undefined
+    const skillCatalogCommand = workbenchBridge && typeof ctx.agents?.get === 'function' && typeof ctx.sessions?.get === 'function'
+      ? createSkillCatalogCommand(createSkillCatalogReader({ agents: ctx.agents, sessions: ctx.sessions, bridge: workbenchBridge }))
+      : undefined
+    const skillResourceCommand = workbenchBridge && typeof ctx.agents?.get === 'function' && typeof ctx.sessions?.get === 'function'
+      ? createSkillResourceCommand(createSkillResourceReader({ agents: ctx.agents, sessions: ctx.sessions, bridge: workbenchBridge }))
+      : undefined
+    let nativeWorkspaceAdmissionGate
+    if(config.nativeWorkspaceAdmission===true){
+      nativeWorkspaceAdmissionGate=createNativeWorkspaceAdmissionGate({ctx,bridge:workbenchBridge})
+      ctx.effect(()=>()=>nativeWorkspaceAdmissionGate.dispose())
+    }
+    if(nativeGitConfig){
+      let stopped=false,nativeGitHost,ready=false
+      const prepared=createNativeGitHost({ctx,bridge:workbenchBridge,admissionGate:nativeWorkspaceAdmissionGate,allowedPresets:new Set(ALLOWED_AGENT_PRESETS),config:nativeGitConfig}).then(async host=>{
+        nativeGitHost=host
+        if(stopped){await host.dispose();return}
+        ready=true;ctx.emit('jot/native-git-readiness',{ready:true})
+      }).catch(()=>{if(!stopped)ctx.emit('jot/native-git-readiness',{ready:false,reason:'native_git_host_unavailable'})})
+      ctx.provide('jotNativeGitHost',Object.freeze({async readiness(){await prepared;return{ready:ready&&!stopped}}}))
+      ctx.effect(()=>async()=>{stopped=true;ready=false;await prepared;await nativeGitHost?.dispose()})
+    }
+    const modelRouteHealth=config.ordinaryModelSelection===true?createModelRouteHealth({ctx}):undefined
+    if(modelRouteHealth)ctx.effect(()=>()=>modelRouteHealth.dispose())
+    const budgetModelSelector=createBudgetModelSelector({route:config.workbenchModel,llm:ctx.llm,agents:ctx.sessionController.agents,bridge:workbenchBridge})
+    const nativeClaimedComposer=config.nativeClaimedInputRecovery===undefined?undefined:createNativeClaimedSessionComposer({
+      ctx,bridge:workbenchBridge,agents:ctx.agents,sessions:ctx.sessions,
+      query:typeof ctx.get==='function'?ctx.get('sessionQuery'):ctx.sessionQuery,projections:ctx.sessionProjections,
+      ...config.nativeClaimedInputRecovery,
+    })
+    const nativeHandoffLifecycle=config.nativeHandoff===undefined?undefined:createNativeHandoffLifecycle({
+      ctx,bridge:workbenchBridge,registry:ctx.agents,sessions:ctx.sessions,
+      persistence:ctx.sessionPersistence,projections:ctx.sessionProjections,
+      route:config.workbenchModel,reconcileOperations:config.reconcileOperations,
+      policyVersion:config.nativeHandoff.policyVersion,
+      maxHops:config.nativeHandoff.maxHops,
+      validateLog:config.nativeHandoff.validateLog,
+    })
+    const handoffAdmission=nativeHandoffLifecycle?.handoffAdmission??config.handoffAdmission
+    const handoffReturn=nativeHandoffLifecycle?.handoffReturn??config.handoffReturn
+    const handoffRecovery=nativeHandoffLifecycle?.handoffRecovery??config.handoffRecovery
+    const nativeRoleHost=config.nativeRoles===true?createNativeRoleHost({ctx,bridge:workbenchBridge,selectModel:budgetModelSelector,
+      sessions:ctx.sessions,persistence:ctx.sessionPersistence,automaticClosures:true,durableSpawns:true,nativeRecovery:config.nativeRoleRecovery===true,reconcileOperations:config.reconcileOperations,nativeOperationOrigin:config.nativeOperationOrigin,handoffAdmission,onMemberClosed:handoffReturn}):undefined
+    let nativeTaskScheduler
+    if(nativeRoleHost){
+      nativeTaskScheduler=config.nativeDeferredHandoff===true?createNativeTaskScheduler({ctx,bridge:workbenchBridge,host:nativeRoleHost}):undefined
+      nativeTaskDispatcher=createNativeTaskDispatcher({bridge:workbenchBridge,host:nativeRoleHost,scheduler:nativeTaskScheduler})
+      ctx.effect(()=>async()=>{await nativeTaskScheduler?.dispose();await nativeRoleHost.dispose()})
+    }
+    const conversationGoalRunHost=config.conversationGoalResume===true?createConversationGoalRunHost({controller:ctx.sessionController,agents:ctx.agents,persistence:ctx.sessionPersistence,bridge:workbenchBridge,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted'))}):undefined
+    if(conversationGoalRunHost)ctx.effect(()=>()=>conversationGoalRunHost.dispose())
+    const executionPolicyReader=chatExecutionPolicy?createOrdinaryExecutionPolicyReader({bridge:workbenchBridge,chatPolicy:chatExecutionPolicy}):undefined
+    const ordinaryModelSelector=config.ordinaryModelSelection===true?createOrdinaryModelSelector({bridge:workbenchBridge,llm:ctx.llm,agents:ctx.sessionController.agents,registry:ctx.agents,routeHealth:modelRouteHealth,...(executionPolicyReader?{executionPolicyReader}:{})}):undefined
+    const contextOptions=config.ordinaryInputAdmission?{bridge:workbenchBridge,sessions:ctx.sessions,createUserMessage:createRequire(ctx.get('profileContext').installAnchor)('@deepseek-ai/dsh-llm').createUserMessage}:undefined
+    const contextSelector=contextOptions?createOrdinaryContextSelector({...contextOptions,...(config.ordinaryChatContext===true?{chatPolicy:chatExecutionPolicy}:{})}):undefined
+    const webSelector=config.ordinaryChatWeb===true?createChatWebSelector({bridge:workbenchBridge,sessions:ctx.sessions,chatPolicy:chatExecutionPolicy}):undefined
+    if(webSelector){
+      if(typeof ctx.agents.list!=='function')throw Error('chat_web_host_incompatible')
+      ctx.on('agent/created',({agent})=>webSelector.prepareAgent(agent))
+      for(const agent of ctx.agents.list())webSelector.prepareAgent(agent)
+      ctx.effect(()=>()=>webSelector.dispose())
+    }
+    let chatCompactionManager
+    const ordinaryInputAdmissionHost=config.ordinaryInputAdmission===undefined?undefined:createOrdinaryInputAdmissionHost({ctx,agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets,...config.ordinaryInputAdmission,...(ordinaryModelSelector?{modelSelector:ordinaryModelSelector}:{}),...(contextSelector?{contextSelector}:{}),...(webSelector?{webSelector}:{}),...(config.ordinaryChatCompaction===true?{beforeInput:request=>{if(!chatCompactionManager)throw Error('chat_compaction_manager_unavailable');return chatCompactionManager.beforeInput(request)}}:{})})
+    if(ordinaryInputAdmissionHost)ctx.effect(()=>()=>ordinaryInputAdmissionHost.dispose())
+    const ordinaryCompletionReader=config.ordinaryInputAdmission===undefined?undefined:createOrdinaryCompletionReader({agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets,readGoal:agent=>nativeGoalsFor(agent)?.get(agent),...config.ordinaryInputAdmission})
+    const attachmentHistoryOptions=config.ordinaryInputAdmission?.attachmentSteeringProtocol===1?{attachmentSteeringProtocol:1}:{};
+    const ordinarySteeringObservationReader=config.ordinaryInputHistory===undefined?undefined:createOrdinarySteeringObservationReader({agents:ctx.agents,sessions:ctx.sessions,persistence:ctx.sessionPersistence,bridge:workbenchBridge,admissions:config.ordinaryInputAdmission.admissions,ordinaryPresets,...attachmentHistoryOptions,...config.ordinaryInputHistory})
+    const ordinaryRunCompletionReader=config.ordinaryRunHistory===undefined?undefined:createOrdinaryRunCompletionReader({agents:ctx.agents,sessions:ctx.sessions,persistence:ctx.sessionPersistence,bridge:workbenchBridge,admissions:config.ordinaryInputAdmission.admissions,projections:ctx.sessionProjections,ordinaryPresets,...attachmentHistoryOptions,...config.ordinaryRunHistory})
+    const chatCheckpointRecovery=config.ordinaryChatCompactionRecovery===true?createChatCheckpointRecovery({agents:ctx.agents,sessions:ctx.sessions,persistence:ctx.sessionPersistence,bridge:workbenchBridge,admissions:config.ordinaryInputAdmission.admissions,projections:ctx.sessionProjections,ordinaryPresets,...attachmentHistoryOptions,...config.ordinaryRunHistory}):undefined
+    const chatMaintenanceObserver=config.ordinaryChatMaintenanceObservation===undefined?undefined:createChatMaintenanceObserver({bridge:workbenchBridge,agents:ctx.agents,tokenMeter:ctx.get('tokenMeter'),llm:ctx.llm,pressurePolicy:config.ordinaryChatMaintenanceObservation,completionReader:createLiveChatRunCompletionReader({agents:ctx.agents,sessions:ctx.sessions,persistence:ctx.sessionPersistence,bridge:workbenchBridge,admissions:config.ordinaryInputAdmission.admissions,projections:ctx.sessionProjections,ordinaryPresets,...attachmentHistoryOptions,...config.ordinaryRunHistory})})
+    if(config.ordinaryChatCompaction===true){
+      chatCompactionManager=createChatCompactionManager({ctx,bridge:workbenchBridge,agents:ctx.agents,presets:ctx.get('agentPresets'),runtime:ctx.get('jotChatCompactionRuntime'),observe:chatMaintenanceObserver,tokenMeter:ctx.get('tokenMeter'),llm:ctx.llm,completionReader:createLiveChatRunCompletionReader({agents:ctx.agents,sessions:ctx.sessions,persistence:ctx.sessionPersistence,bridge:workbenchBridge,admissions:config.ordinaryInputAdmission.admissions,projections:ctx.sessionProjections,ordinaryPresets,...attachmentHistoryOptions,...config.ordinaryRunHistory})})
+      ctx.provide('jotChatCompactionManager',chatCompactionManager)
+      ctx.effect(()=>()=>chatCompactionManager.dispose())
+    }
+    const chatPostAnswer=config.ordinaryChatCompactionAuto===true?createChatPostAnswer({bridge:workbenchBridge,agents:ctx.agents,manager:chatCompactionManager,recover:chatCheckpointRecovery,...(typeof ctx.emit==='function'?{onSettled:value=>ctx.emit('jot/chat-post-answer-settled',value)}:{})}):undefined
+    if(chatPostAnswer){ctx.provide('jotChatPostAnswer',chatPostAnswer);ctx.effect(()=>()=>chatPostAnswer.dispose())}
+    const ordinaryClaimedComposer=config.ordinaryInputRecovery?.claimedInput===undefined?undefined:createOrdinaryClaimedSessionComposer({ctx,bridge:workbenchBridge,agents:ctx.agents,sessions:ctx.sessions,query:typeof ctx.get==='function'?ctx.get('sessionQuery'):ctx.sessionQuery,projections:ctx.sessionProjections,ordinaryPresets,...config.ordinaryInputAdmission,...config.ordinaryInputRecovery.claimedInput})
+    if(ordinaryClaimedComposer)ctx.effect(()=>()=>ordinaryClaimedComposer.dispose())
+    const ordinaryInputRunHost=config.ordinaryInputRecovery===undefined?undefined:createOrdinaryInputRunHost({controller:ctx.sessionController,agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets,verifyComposition:config.ordinaryInputRecovery.verifyComposition,inputAdmissionHost:ordinaryInputAdmissionHost,claimedComposer:ordinaryClaimedComposer,...attachmentHistoryOptions})
+    if(ordinaryInputRunHost)ctx.effect(()=>()=>ordinaryInputRunHost.dispose())
+    const memoryExtractionHost=createOptionalMemoryExtractionHost({config:config.memoryExtraction,bridge:workbenchBridge,llm:ctx.llm,route:config.workbenchModel})
+    if(memoryExtractionHost)ctx.effect(()=>()=>memoryExtractionHost.dispose())
+    let ApiSessionNotFound
+    if(workbenchBridge||typeof ctx.sessionController.inspect==='function'&&typeof ctx.sessionController.resolveAgent==='function'){
+      ({ApiSessionNotFound}=createRequire(ctx.get('profileContext').installAnchor)('@deepseek-ai/dsh-api-session-controller'))
+      if(typeof ApiSessionNotFound!=='function'||!(ApiSessionNotFound.prototype instanceof Error))throw Error('jot_session_controller_incompatible')
+    }
+    const chatModeReadiness=createChatModeReadiness({enabled:config.ordinaryChatModeReadiness,policy:chatExecutionPolicy,mounted:ctx.get?.('jotChatPresetReady'),context:config.ordinaryChatContext,web:config.ordinaryChatWeb,modelSelection:config.ordinaryModelSelection,admission:!!ordinaryInputAdmissionHost});
+    const handler = createAdapterHandler({ controller: ctx.sessionController, fileUploads: ctx.fileUploads, agents: ctx.agents,
+      sessions:ctx.sessions,persistence:ctx.sessionPersistence,sessionNotFoundError:ApiSessionNotFound,
+      speechController, voiceEnabled, token, workbenchBridge, skillContentCommand, skillCatalogCommand, skillResourceCommand,
+      budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation:config.nativeIdleObservation===true,
+      chatModeReadiness,modelCatalogReader:createModelCatalogReader({llm:ctx.llm,enabled:config.ordinaryModelSelection===true,routeHealth:modelRouteHealth}),requireOrdinaryModelPolicy:config.ordinaryModelSelection===true,...(chatExecutionPolicy?{chatExecutionPolicy}:{}),mcpControlRoute })
+    const server = createServer(async (req, res) => {
+      const abort = new AbortController()
+      req.once('aborted', () => abort.abort())
+      res.once('close', () => { if (!res.writableEnded) abort.abort() })
+      try {
+        const url = new URL(req.url, `http://${host}:${port}`)
+        const isFileUpload = /^\/v1\/sessions\/[^/]+\/files$/.test(url.pathname)
+        const bodyLimit = url.pathname.startsWith('/v1/voice/') ? 4 * 1024 * 1024 : 32 * 1024 * 1024
+        const result = await handler({ method: req.method, url, headers: req.headers,
+          body: isFileUpload ? req : await readJson(req, bodyLimit), signal: abort.signal })
+        if (result.stream) {
+          res.writeHead(result.status, { 'content-type': 'application/x-ndjson; charset=utf-8', 'cache-control': 'no-store' })
+          for await (const frame of result.stream) res.write(`${JSON.stringify(frame)}\n`)
+          return res.end()
+        }
+        res.writeHead(result.status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        res.end(JSON.stringify(result.value))
+      } catch (error) {
+        console.error('[jot-jot-session-adapter] request failed', JSON.stringify(adapterErrorSummary(error)))
+        if (res.headersSent) return res.destroy()
+        res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
+        res.end(JSON.stringify({ error: 'adapter_internal_error' }))
+      }
+    })
+    server.once('listening',()=>ctx.emit('jot-session-adapter/ready',{host,port}))
+    server.listen(port, host)
+    ctx.effect(() => () => server.close())
+  }
 }
 
 export { createNativeHandoffLifecycle }

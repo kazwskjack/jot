@@ -1,46 +1,77 @@
-import React,{useEffect,useRef,useState} from 'react';
-import type {ChannelBinding,ChannelBindingChallenge,UpdateTaskNotifications} from './types';
-import {workbenchApi} from './client';import {useResource} from './useResource';import {ApiError} from '../jot/client';
-import {ResourceStatus,Empty} from './AgentsPanel';import {notificationRequest,deliveryLabel} from './notification-ui.mjs';
+import React,{useEffect,useLayoutEffect,useRef,useState} from 'react';
+import type {ChannelBinding,ChannelBindingChallenge,TaskNotificationSettings,UpdateTaskNotifications} from './types';
+import type {TaskArtifactDeliverySelection} from './TaskArtifactDeliveryOptions';
+import TaskArtifactDeliveryOptions from './TaskArtifactDeliveryOptions';
+import {workbenchApi,type ReadonlyNotificationInput} from './client';import {useResource} from './useResource';import {ApiError,taskDraftScope} from '../jot/client';
+import {ResourceStatus,Empty} from './PanelStatus';import {notificationRequest,deliveryLabel,channelBindingLabel} from './notification-ui.mjs';
+import {canOfferBrowserPushEnrollment,enableBrowserPush,revokeBrowserPush} from './push-notifications.mjs';
 import EmailBindingPanel from './EmailBindingPanel';
-export default function TaskNotificationsPanel({taskId,occurrenceId,bindingsEnabled,emailBindingsEnabled=false,wecomBindingsEnabled=bindingsEnabled,canEdit,onSaved}:{taskId:string;occurrenceId?:string;bindingsEnabled:boolean;emailBindingsEnabled?:boolean;wecomBindingsEnabled?:boolean;canEdit:boolean;onSaved:()=>void}){
- const settings=useResource(signal=>workbenchApi.taskNotifications(taskId,signal),taskId),bindings=useResource(signal=>workbenchApi.channelBindings(signal),'channel-bindings',bindingsEnabled);
+import {reconcileTaskArtifactDeliverySelection} from './task-artifact-delivery-options.mjs';
+export default function TaskNotificationsPanel({taskId,occurrenceId,bindingsEnabled,emailBindingsEnabled=false,wecomBindingsEnabled=bindingsEnabled,webPushBindingsEnabled=false,canEdit,onSaved}:{taskId:string;occurrenceId?:string;bindingsEnabled:boolean;emailBindingsEnabled?:boolean;wecomBindingsEnabled?:boolean;webPushBindingsEnabled?:boolean;canEdit:boolean;onSaved:(restoreFocus:()=>void)=>void}){
+ const ownerScope=taskDraftScope(),identityScope=`${ownerScope}:${taskId}`;
+ const canOfferPush=typeof window!=='undefined'&&canOfferBrowserPushEnrollment({webPushBindingsEnabled,secureContext:window.isSecureContext,notification:window.Notification,pushManager:window.PushManager,serviceWorker:typeof navigator!=='undefined'?navigator.serviceWorker:undefined});
+ const settings=useResource(signal=>workbenchApi.taskNotifications(taskId,signal),identityScope),bindings=useResource(signal=>workbenchApi.channelBindings(signal),`channel-bindings:${ownerScope}`,bindingsEnabled);
  const [historyCursor,setHistoryCursor]=useState<string|undefined>(undefined);
- const deliveries=useResource(signal=>workbenchApi.taskNotificationHistory(taskId,historyCursor,signal),taskId+':'+(historyCursor??''));
- useEffect(()=>{setHistoryCursor(undefined);},[taskId]);
- const [editing,setEditing]=useState(false),[selected,setSelected]=useState<string[]>([]),[busy,setBusy]=useState(false),[uncertain,setUncertain]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[challenge,setChallenge]=useState<ChannelBindingChallenge|null>(null),[revoking,setRevoking]=useState<ChannelBinding|null>(null);
+ const deliveries=useResource(signal=>workbenchApi.taskNotificationHistory(taskId,historyCursor,signal),identityScope+':'+(historyCursor??''));
+ useEffect(()=>{setHistoryCursor(undefined);},[identityScope]);
+ const [editing,setEditing]=useState(false),[selected,setSelected]=useState<string[]>([]),[artifactSelection,setArtifactSelection]=useState<TaskArtifactDeliverySelection[]>([]),[busy,setBusy]=useState(false),[uncertain,setUncertain]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[challenge,setChallenge]=useState<ChannelBindingChallenge|null>(null),[revoking,setRevoking]=useState<ChannelBinding|null>(null);
  const [interval,setIntervalSeconds]=useState(60),[limit,setLimit]=useState(20),[quiet,setQuiet]=useState(false),[quietStart,setQuietStart]=useState('22:00'),[quietEnd,setQuietEnd]=useState('08:00'),[timezone,setTimezone]=useState('Asia/Hong_Kong');
  const [events,setEvents]=useState<NonNullable<UpdateTaskNotifications['events']>>(['completed']);
  const eventOptions=[['changed','页面有变化'],['completed','任务完成'],['failed','执行失败'],['needs_confirmation','需要你确认']] as const;
- const saveKey=useRef(''),codeKey=useRef(crypto.randomUUID()),revokeKey=useRef(''),pending=useRef<UpdateTaskNotifications|null>(null);
+ const saveKey=useRef(''),codeKey=useRef(crypto.randomUUID()),pushKey=useRef(crypto.randomUUID()),revokeKey=useRef(''),pending=useRef<ReadonlyNotificationInput|null>(null),pendingScope=useRef(''),identityRef=useRef(identityScope);
+ const pendingScopeMismatch=!!pending.current&&pendingScope.current!==identityScope;
+ const settingsOpener=useRef<HTMLButtonElement>(null),settingsEditor=useRef<HTMLFormElement>(null),settingsStatus=useRef<HTMLDivElement>(null),editorWasOpen=useRef(false),editorScope=useRef('');
+ const returnFocus=useRef<{scope:string;previous:TaskNotificationSettings|null;recoveryFocused?:boolean}|null>(null);
+ useLayoutEffect(()=>{
+  if(editing&&!editorWasOpen.current){editorScope.current=identityScope;returnFocus.current=null;settingsEditor.current?.querySelector<HTMLInputElement>('input:not(:disabled)')?.focus();}
+  if(!editing&&editorWasOpen.current)returnFocus.current=editorScope.current===identityScope?{scope:identityScope,previous:settings.data}:null;
+  editorWasOpen.current=editing;
+  const pending=returnFocus.current;
+  if(pending&&pending.scope!==identityScope){returnFocus.current=null;return;}
+  if(pending&&settings.loading)pending.recoveryFocused=false;
+  if(pending&&!editing&&!settings.loading&&settings.error&&!pending.recoveryFocused){const retry=settingsStatus.current?.querySelector<HTMLButtonElement>('button:not(:disabled)');if(retry){retry.focus();pending.recoveryFocused=true;}}
+  if(pending&&!editing&&settings.data!==pending.previous&&!settings.loading&&settingsOpener.current&&!settingsOpener.current.disabled){settingsOpener.current.focus();returnFocus.current=null;}
+ },[editing,identityScope,settings.data,settings.loading,settings.error,bindings.loading,busy,canEdit,uncertain]);
+ useEffect(()=>{if(identityRef.current!==identityScope){identityRef.current=identityScope;setSelected([]);setArtifactSelection([]);setChallenge(null);setRevoking(null);setNotice('');setError('');codeKey.current=crypto.randomUUID();if(!uncertain)setEditing(false);}},[identityScope,uncertain]);
  useEffect(()=>{if(challenge&&bindings.data?.items.some(binding=>binding.channel_binding_id===challenge.channel_binding_id&&binding.status==='verified'))setChallenge(null);},[challenge,bindings.data]);
  useEffect(()=>{const timer=setInterval(()=>{if(!document.hidden&&!busy){if(challenge)bindings.reload();if(!historyCursor)deliveries.reload();}},5000);return()=>clearInterval(timer);},[challenge,historyCursor,busy]);
  const run=async(action:()=>Promise<void>)=>{if(busy)return;setBusy(true);setError('');try{await action();}catch(e){setError(e instanceof Error?e.message:'请求未完成');}finally{setBusy(false);}};
- const create=()=>void run(async()=>{const result=await workbenchApi.createChannelBinding(codeKey.current);setChallenge(result);codeKey.current=crypto.randomUUID();bindings.reload();});
- const revoke=()=>void run(async()=>{await workbenchApi.revokeChannelBinding(revoking!,revokeKey.current);setRevoking(null);bindings.reload();deliveries.reload();setNotice('渠道已撤销，尚未发送的通知会在发送前复核时停止。');});
+ const create=()=>void run(async()=>{const scope=identityRef.current,result=await workbenchApi.createChannelBinding(codeKey.current);if(identityRef.current!==scope)return;setChallenge(result);codeKey.current=crypto.randomUUID();bindings.reload();});
+ const enablePush=()=>void run(async()=>{const scope=identityRef.current;await enableBrowserPush({api:workbenchApi,notification:window.Notification,serviceWorker:navigator.serviceWorker,idempotencyKey:pushKey.current,isCurrent:()=>identityRef.current===scope});if(identityRef.current!==scope)return;pushKey.current=crypto.randomUUID();bindings.reload();setNotice('本浏览器通知已绑定；可在下方撤销该渠道。');});
+ const revoke=()=>void run(async()=>{let localUnknown=false,localUnsubscribeFailed=false;if(revoking!.channel==='webpush'){const result=await revokeBrowserPush({api:workbenchApi,serviceWorker:typeof navigator!=='undefined'?navigator.serviceWorker:undefined,binding:revoking!,idempotencyKey:revokeKey.current});localUnknown=!result.localSubscriptionMatches;localUnsubscribeFailed=result.localUnsubscribeFailed;}else await workbenchApi.revokeChannelBinding(revoking!,revokeKey.current);setRevoking(null);bindings.reload();deliveries.reload();setNotice(localUnsubscribeFailed?'服务器订阅已撤销，但浏览器本地取消未确认。':localUnknown?'服务器渠道已撤销；本机订阅未匹配或状态未知，因此未取消本机订阅。':'渠道及匹配的本机浏览器订阅已撤销，尚未发送的通知会在发送前复核时停止。');});
  const save=(e:React.FormEvent)=>{e.preventDefault();void run(async()=>{try{
-  pending.current??=notificationRequest(settings.data!.version,selected,bindings.data?.items??[],{min_interval_seconds:interval,max_per_24_hours:limit,quiet_hours:quiet?{start:quietStart,end:quietEnd,timezone}:null},events);
-  await workbenchApi.saveTaskNotifications(taskId,pending.current!,saveKey.current);pending.current=null;setUncertain(false);setEditing(false);settings.reload();onSaved();setNotice('任务通知设置已保存，原有结果和消耗保持不变。');
- }catch(e){if(e instanceof ApiError&&e.status<500){pending.current=null;saveKey.current=crypto.randomUUID();setUncertain(false);}else setUncertain(!!pending.current);throw e;}});};
- return <section aria-label="任务通知与交付"><h4>通知与交付</h4><p className="wb-hint">任务结果先保存在应用内。可选择已验证的微信或邮箱渠道，按变化、完成、失败或待确认状态接收提醒；渠道接收与用户阅读分别判断。</p>
- <ResourceStatus {...settings} onRetry={settings.reload}/><ResourceStatus {...bindings} onRetry={bindings.reload}/>{error&&<p className="wb-error" role="alert">{error}</p>}{notice&&<p className="wb-status" role="status">{notice}</p>}
- {bindingsEnabled?<>{wecomBindingsEnabled&&<button disabled={busy} onClick={create}>{challenge?'重新生成绑定码':'生成微信绑定码'}</button>}{challenge&&<div className="wb-form" aria-label="微信绑定验证">{challenge.code?<><p>请从自己的微信发送以下完整消息：</p><code style={{overflowWrap:'anywhere'}}>/jot-bind {challenge.code}</code><small>有效期至 {new Date(challenge.expires_at).toLocaleString()}，只在本页面显示，不保存到浏览器。</small></>:<p>明文绑定码只显示一次。若初次响应丢失，请重新生成。</p>}<button disabled={busy} onClick={bindings.reload}>刷新验证状态</button></div>}
+  if(pendingScopeMismatch)throw new Error('账户或任务范围已变化；请切回原范围核对待确认请求。');
+  if(!pending.current){
+   const draft={expected_version:settings.data!.version,channel_binding_ids:selected,events};
+   const currentArtifacts=reconcileTaskArtifactDeliverySelection(artifactSelection,bindings.data?.items??[],draft);
+   if(currentArtifacts.length!==artifactSelection.length){setArtifactSelection(currentArtifacts);throw new Error('通知渠道版本已变化，请重新确认文件输出目标。');}
+   pending.current=notificationRequest(settings.data!.version,selected,bindings.data?.items??[],{min_interval_seconds:interval,max_per_24_hours:limit,quiet_hours:quiet?{start:quietStart,end:quietEnd,timezone}:null},events,currentArtifacts.map(choice=>choice.channel_binding_id));
+   pendingScope.current=identityScope;
+  }
+  await workbenchApi.saveTaskNotifications(taskId,pending.current!,saveKey.current);pending.current=null;pendingScope.current='';setUncertain(false);setEditing(false);settings.reload();onSaved(()=>settingsOpener.current?.focus());setNotice('任务通知设置已保存，原有结果和消耗保持不变。');
+ }catch(e){if(e instanceof ApiError&&e.status<500){pending.current=null;pendingScope.current='';saveKey.current=crypto.randomUUID();setUncertain(false);}else setUncertain(!!pending.current);throw e;}});};
+ return <section aria-label="任务通知与交付"><h4>通知与交付</h4><p className="wb-hint">任务结果先保存在应用内。可选择已验证的微信企业、邮箱或浏览器通知渠道，按变化、完成、失败或待确认状态接收提醒；渠道接收与用户阅读分别判断。</p>
+ <div ref={settingsStatus}><ResourceStatus {...settings} onRetry={settings.reload}/></div><ResourceStatus {...bindings} onRetry={bindings.reload}/>{error&&<p className="wb-error" role="alert">{error}</p>}{notice&&<p className="wb-status" role="status">{notice}</p>}
+ {bindingsEnabled?<>{wecomBindingsEnabled&&<button disabled={busy} onClick={create}>{challenge?'重新生成绑定码':'生成微信绑定码'}</button>}{canOfferPush?<button disabled={busy} onClick={enablePush}>启用此浏览器通知</button>:webPushBindingsEnabled&&<p className="wb-hint">当前浏览器或连接不支持安全的浏览器通知。</p>}{challenge&&<div className="wb-form" aria-label="微信绑定验证">{challenge.code?<><p>请从自己的微信发送以下完整消息：</p><code style={{overflowWrap:'anywhere'}}>/jot-bind {challenge.code}</code><small>有效期至 {new Date(challenge.expires_at).toLocaleString()}，只在本页面显示，不保存到浏览器。</small></>:<p>明文绑定码只显示一次。若初次响应丢失，请重新生成。</p>}<button disabled={busy} onClick={bindings.reload}>刷新验证状态</button></div>}
  {emailBindingsEnabled&&<EmailBindingPanel bindings={bindings.data?.items??[]} onUpdated={bindings.reload}/>}
- <div className="wb-message-list">{bindings.data?.items.map(binding=><article key={binding.channel_binding_id}><p>{binding.channel==='email'?'邮箱':'微信'}渠道 · {binding.channel_binding_id.slice(-6)} · {{verified:'已验证',pending:'等待验证',expired:'绑定码已过期',revoked:'已撤销'}[binding.status]}</p>{binding.status==='verified'&&<button className="wb-danger" disabled={busy} onClick={()=>{setRevoking(binding);revokeKey.current=crypto.randomUUID();}}>撤销渠道</button>}</article>)}</div></>:<Empty>服务端尚未配置通知渠道绑定入口。</Empty>}
+ <div className="wb-message-list">{bindings.data?.items.map(binding=><article key={binding.channel_binding_id}><p>{channelBindingLabel(binding.channel)}渠道 · {binding.channel_binding_id.slice(-6)} · {{verified:'已验证',pending:'等待验证',expired:'绑定码已过期',revoked:'已撤销'}[binding.status]}</p>{binding.status==='verified'&&<button className="wb-danger" disabled={busy} onClick={()=>{setRevoking(binding);revokeKey.current=crypto.randomUUID();}}>撤销渠道</button>}</article>)}</div></>:<Empty>服务端尚未配置通知渠道绑定入口。</Empty>}
  {revoking&&<div className="wb-form" role="group" aria-label="确认撤销通知渠道"><p>撤销此渠道后，尚未发送的任务通知将停止。已经提交的消息无法撤回。</p><div className="wb-actions"><button className="wb-danger" disabled={busy} onClick={revoke}>确认撤销</button><button disabled={busy} onClick={()=>setRevoking(null)}>取消</button></div></div>}
  {!editing?<><p className="wb-status">{settings.data?.channel_binding_ids.length?`已选择 ${settings.data.channel_binding_ids.length} 个通知渠道`:'未配置外部通知'}</p>
  {settings.data&&<p className="wb-hint">通知条件：{eventOptions.filter(([kind])=>settings.data!.events.includes(kind)).map(([,label])=>label).join('、')||'不发送事件提醒'}。</p>}
  {settings.data&&<p className="wb-hint">发送间隔至少 {settings.data.delivery_policy.min_interval_seconds} 秒，同一渠道收件人24小时最多 {settings.data.delivery_policy.max_per_24_hours} 次。{settings.data.delivery_policy.quiet_hours&&`安静时段 ${settings.data.delivery_policy.quiet_hours.start}–${settings.data.delivery_policy.quiet_hours.end}（${settings.data.delivery_policy.quiet_hours.timezone}）。`}</p>}
- <button disabled={!canEdit||busy||!settings.data||!!settings.error} onClick={()=>{
-  setEditing(true);setSelected(settings.data!.channel_binding_ids);setEvents(settings.data!.events);const policy=settings.data!.delivery_policy;
+  <button ref={settingsOpener} disabled={!canEdit||busy||uncertain||pendingScopeMismatch||!settings.data||!!settings.error||bindingsEnabled&&(!bindings.data||bindings.loading||!!bindings.error)} onClick={()=>{
+   setEditing(true);setSelected(settings.data!.channel_binding_ids);setEvents(settings.data!.events);const policy=settings.data!.delivery_policy;
+   const artifactIds=(settings.data as TaskNotificationSettings&{artifact_delivery_binding_ids?:string[]}).artifact_delivery_binding_ids??[];
+   setArtifactSelection(artifactIds.flatMap(id=>{const binding=bindings.data?.items.find(item=>item.channel_binding_id===id&&item.status==='verified'&&item.channel==='wecom');return binding?[{channel_binding_id:id,binding_version:binding.version}]:[];}));
   setIntervalSeconds(policy.min_interval_seconds);setLimit(policy.max_per_24_hours);setQuiet(!!policy.quiet_hours);
   setQuietStart(policy.quiet_hours?.start??'22:00');setQuietEnd(policy.quiet_hours?.end??'08:00');setTimezone(policy.quiet_hours?.timezone??'Asia/Hong_Kong');
-  saveKey.current=crypto.randomUUID();pending.current=null;setUncertain(false);
- }}>设置任务通知</button></>:<form className="wb-form" aria-label="设置任务通知" onSubmit={save}>
+   saveKey.current=crypto.randomUUID();pending.current=null;pendingScope.current='';setUncertain(false);
+ }}>设置任务通知</button></>:<form ref={settingsEditor} className="wb-form" aria-label="设置任务通知" onSubmit={save}>
  <fieldset disabled={busy||uncertain||!canEdit}><legend>通知条件与渠道</legend>
- {eventOptions.map(([kind,label])=><label className="wb-checkbox" key={kind}><input type="checkbox" checked={events.includes(kind)} onChange={e=>setEvents(values=>e.target.checked?[...values,kind]:values.filter(value=>value!==kind))}/>{label}</label>)}
- {bindings.data?.items.filter(binding=>binding.status==='verified').map(binding=><label className="wb-checkbox" key={binding.channel_binding_id}><input type="checkbox" checked={selected.includes(binding.channel_binding_id)} onChange={e=>setSelected(ids=>e.target.checked?[...ids,binding.channel_binding_id]:ids.filter(id=>id!==binding.channel_binding_id))}/>{binding.channel==='email'?'邮箱':'微信'}渠道 {binding.channel_binding_id.slice(-6)}</label>)}
- <button type="button" onClick={()=>setSelected([])}>仅保留应用内结果</button>
+  {eventOptions.map(([kind,label])=><label className="wb-checkbox" key={kind}><input type="checkbox" checked={events.includes(kind)} onChange={e=>{setEvents(values=>e.target.checked?[...values,kind]:values.filter(value=>value!==kind));if(kind==='completed'&&!e.target.checked)setArtifactSelection([]);}}/>{label}</label>)}
+  {bindings.data?.items.filter(binding=>binding.status==='verified').map(binding=><label className="wb-checkbox" key={binding.channel_binding_id}><input type="checkbox" checked={selected.includes(binding.channel_binding_id)} onChange={e=>{setSelected(ids=>e.target.checked?[...ids,binding.channel_binding_id]:ids.filter(id=>id!==binding.channel_binding_id));if(!e.target.checked)setArtifactSelection(choices=>choices.filter(choice=>choice.channel_binding_id!==binding.channel_binding_id));}}/>{channelBindingLabel(binding.channel)}渠道 {binding.channel_binding_id.slice(-6)}</label>)}
+  <TaskArtifactDeliveryOptions targets={bindings.data?.items??[]} notificationDraft={{expected_version:settings.data?.version,channel_binding_ids:selected,events}} selected={artifactSelection} scopeEpoch={identityScope} disabled={busy||!canEdit||pendingScopeMismatch} selectionFrozen={uncertain} onChange={setArtifactSelection}/>
+  <button type="button" onClick={()=>{setSelected([]);setArtifactSelection([]);}}>仅保留应用内结果</button>
  <label>最短发送间隔（秒）<input type="number" min="1" max="86400" required value={interval} onChange={e=>setIntervalSeconds(Number(e.target.value))}/></label>
  <label>滚动24小时通知上限<input type="number" min="1" max="100" required value={limit} onChange={e=>setLimit(Number(e.target.value))}/></label>
  <label className="wb-checkbox"><input type="checkbox" checked={quiet} onChange={e=>setQuiet(e.target.checked)}/>启用安静时段</label>

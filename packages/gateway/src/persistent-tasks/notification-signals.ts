@@ -111,10 +111,10 @@ export class TaskNotificationSignals {
    const conversation=this.db.prepare('SELECT conversation_id FROM ga_runs WHERE id=?').get(event.run_id) as {conversation_id:string};let emitted=0;
    for(const saved of JSON.parse(scope.bindings_json) as Array<{channel_binding_id:string;version:number}>){
     const binding=this.db.prepare("SELECT * FROM ga_owner_channel_bindings WHERE channel_binding_id=? AND owner_id=? AND status='verified' AND version=?").get(saved.channel_binding_id,scope.owner_id,saved.version) as Row|undefined;
-    if(!binding||!['wecom','email'].includes(String(binding.channel)))continue;
-    const delivery=store.enqueueText({runId:event.run_id,messageId:eventId,destination:binding.channel as 'wecom'|'email',recipient:binding.principal,text:body})!;
+    if(!binding||!['wecom','email','webpush'].includes(String(binding.channel)))continue;
+    const delivery=store.enqueueText({runId:event.run_id,messageId:eventId,destination:binding.channel as 'wecom'|'email'|'webpush',recipient:binding.principal,text:body})!;
     store.bindTaskAuthorization(String(delivery.effect_id),scope as any,conversation.conversation_id,binding.principal);
-    notifications.grant(String(delivery.effect_id),scope.owner_id,scope.task_id,{channel_binding_id:saved.channel_binding_id,version:saved.version,settings_version:scope.settings_version,channel:binding.channel,principal:binding.principal});
+    notifications.grant(String(delivery.effect_id),scope.owner_id,scope.task_id,{channel_binding_id:saved.channel_binding_id,version:saved.version,settings_version:scope.settings_version,channel:binding.channel,principal:binding.principal,artifact_delivery:false});
     this.db.prepare('INSERT INTO wb_task_notification_event_links VALUES(?,?)').run(String(delivery.effect_id),eventId);emitted++;
    }
    return emitted;

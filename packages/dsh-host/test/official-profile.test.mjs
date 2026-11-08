@@ -4,7 +4,6 @@ import {spawn} from 'node:child_process';
 import {createServer} from 'node:net';
 import {randomBytes,createHash} from 'node:crypto';
 import {mkdtemp,readFile,writeFile,rm,mkdir} from 'node:fs/promises';
-import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {createHostProfile} from '../create-profile.mjs';
@@ -12,14 +11,36 @@ const runtime=process.env.JOT_DSH_RUNTIME_MODULES;
 test('official launcher mounts real host services and reads effective preset policy without inference',{skip:!runtime,timeout:45000},async t=>{
  const measured=[];for(const name of ['dsh','dsh-base','dsh-web-app']){const bytes=await readFile(join(runtime,name,'package.json')),manifest=JSON.parse(bytes);assert.equal(manifest.version,'0.2.1-rc.2');measured.push({name,version:manifest.version,manifest_sha256:createHash('sha256').update(bytes).digest('hex')});}
  t.diagnostic(JSON.stringify({kind:'measured-test-installation-not-release-approval',packages:measured}));
- const root=await mkdtemp(join(tmpdir(),'jot-official-host-')),home=join(root,'home'),workspace=join(root,'workspace');await mkdir(workspace);
+ const scratch=resolve('../../../.test-tmp');await mkdir(scratch,{recursive:true});const root=await mkdtemp(join(scratch,'jot-official-host-')),home=join(root,'home'),workspace=join(root,'workspace');await mkdir(workspace);
  const prepared=await createHostProfile({home,name:'jot',adapter:resolve('../session-adapter/index.js')});
  const probe=createServer();await new Promise(done=>probe.listen(0,'127.0.0.1',done));const port=probe.address().port;await new Promise(done=>probe.close(done));
  const receipt=join(root,'composition.json'),patchPath=join(prepared.directory,'cordis.patch.yml'),source=await readFile(patchPath,'utf8');
  const inspection={id:'jot-host-inspection',name:pathToFileURL(fileURLToPath(new URL('./inspect-host-plugin.mjs',import.meta.url))).href,config:{receipt}};
- await writeFile(patchPath,source.replace('"port": 18841','"port": '+port).replace('"jotHostReady"','"jotHostReady", "jotHostInspectionReady"').trim().replace(/\]$/,', '+JSON.stringify({insert:[inspection]})+']'));
+ const mcpReceipt=join(root,'mcp-provider-composition.json'),mcpInspectionPath=join(root,'inspect-mcp-provider.mjs');
+ const mcpInspectionSource=[
+  "import {writeFile} from 'node:fs/promises';",
+  "export const name='jot-mcp-host-provider-inspection';",
+  "export const inject=['jotMcpRuntimeProvider'];",
+  "export async function apply(ctx,{receipt}){",
+  " const provider=ctx.get('jotMcpRuntimeProvider');",
+  " const required=['setup','attach','bindReloadScope','resolveReloadScopes','close'];",
+  " if(required.some(key=>typeof provider?.[key]!=='function'))throw Error('jot_mcp_host_provider_incomplete');",
+  " const tools={get(){return undefined;},register(){return()=>{};},guard(){return()=>{};}};",
+  " let cleanup;const agent={},agentCtx={tools,plugin(){},effect(register){cleanup=register();return()=>{};}};",
+  " try{",
+  "  provider.setup(agentCtx,agent);",
+  "  const connection={connection_id:'fixture-connection',server_name:'repo',transport:'stdio',version:1,generation:1,config:{server_name:'repo',transport:'stdio',command:'synthetic-mcp-plugin',args:[],env_refs:{}},tools:[{tool_id:'mcp_'+'a'.repeat(32),public_name:'jot_mcp_repo_search',raw_name:'search',description:'Synthetic tool',input_schema:{type:'object'},approved:true}]};",
+  "  let denial;try{await provider.attach({agent,connections:[connection],signal:new AbortController().signal,ownerId:'fixture-owner',agentId:'fixture-agent'});}catch(error){denial=error.message;}",
+  "  if(denial!=='mcp_agent_stdio_forbidden')throw Error('jot_mcp_stdio_policy_not_fail_closed');",
+  "  await writeFile(receipt,JSON.stringify({provided:true,methods:required,stdio_denial:denial,connection_started:false}));",
+  " }finally{if(typeof cleanup==='function')await cleanup();}",
+  "}",
+ ].join('\n')+'\n';
+ await writeFile(mcpInspectionPath,mcpInspectionSource,'utf8');
+ const mcpInspection={id:'jot-mcp-host-provider-inspection',name:pathToFileURL(mcpInspectionPath).href,config:{receipt:mcpReceipt}};
+ await writeFile(patchPath,source.replace('"port": 18841','"port": '+port).replace('"jotHostReady"','"jotHostReady", "jotHostInspectionReady"').trim().replace(/\]$/,', '+JSON.stringify({insert:[inspection,mcpInspection]})+']'));
  const env={};for(const key of ['PATH','SystemRoot','WINDIR','COMSPEC','TEMP','TMP','PATHEXT'])if(process.env[key])env[key]=process.env[key];
- Object.assign(env,{DSH_HOME:home,DSH_TELEMETRY_DISABLED:'1',JOT_SESSION_ADAPTER_TOKEN:randomBytes(32).toString('hex')});
+ Object.assign(env,{DSH_HOME:home,DSH_TELEMETRY_DISABLED:'1',JOT_SESSION_ADAPTER_TOKEN:randomBytes(32).toString('hex'),TEMP:scratch,TMP:scratch});
  const child=spawn(process.execPath,[join(runtime,'dsh/lib/bin.js'),'--profile','jot','--host','127.0.0.1','--port','0','--no-open'],{cwd:workspace,env,stdio:['ignore','pipe','pipe'],windowsHide:true});
  let output='',exit,succeeded=false;const done=new Promise(resolve=>child.once('exit',(code,signal)=>{exit={code,signal};resolve();}));for(const stream of [child.stdout,child.stderr])stream.on('data',data=>{output+=data.toString();});
  try{
@@ -31,6 +52,9 @@ test('official launcher mounts real host services and reads effective preset pol
   if(!ready){await writeFile(join(root,'startup-private.log'),output);throw Error('official_host_not_ready; isolated diagnostics retained in '+root);}
   const response=await fetch(url+'/v1/sessions',{method:'POST',headers:{authorization:'Bearer '+env.JOT_SESSION_ADAPTER_TOKEN,'content-type':'application/json'},body:JSON.stringify({session_id:'host-canary',cwd:workspace,agent_preset:'jot-general'})});
   const body=await response.json();assert.equal(response.status,201,JSON.stringify(body));assert.equal(body.sessionId,'host-canary');assert.equal(body.agentPreset,'jot-general');
+  const mcpComposition=JSON.parse(await readFile(mcpReceipt,'utf8'));
+  assert.equal(mcpComposition.provided,true);assert.deepEqual(mcpComposition.methods,['setup','attach','bindReloadScope','resolveReloadScopes','close']);
+  assert.equal(mcpComposition.stdio_denial,'mcp_agent_stdio_forbidden');assert.equal(mcpComposition.connection_started,false);
   const composition=JSON.parse(await readFile(receipt,'utf8'));
   assert.equal(composition.preset,'jot-general');assert.equal(composition.mounted,true);
   assert.equal(composition.permission,'workspace-write');assert.equal(composition.sandbox.mode,'workspace-write');assert.equal(composition.approval,'ask');

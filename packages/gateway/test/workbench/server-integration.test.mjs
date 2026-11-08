@@ -456,6 +456,8 @@ test('calendar preview is authenticated, matches created task and leaves no task
  const caps=await f.json('GET','/v1/capabilities');
  assert.ok(caps.workbench.task_triggers.includes('daily'));
  assert.ok(caps.workbench.task_triggers.includes('weekly'));
+ assert.ok(caps.workbench.task_triggers.includes('cron'));
+ assert.ok(caps.workbench.task_triggers.includes('delay'));
  const trigger={kind:'daily',time:'09:30',timezone:'Asia/Hong_Kong'};
  const beforeTasks=f.db.prepare('SELECT count(*) n FROM wb_persistent_tasks').get().n;
  const beforeRequests=f.db.prepare('SELECT count(*) n FROM ga_idempotency').get().n;
@@ -790,6 +792,25 @@ test('native memory query traces expose actual ranking through owner-only read r
  assert.equal((await f.http('POST',base,{owner_id:'alice'})).statusCode,404);
 });
 
+test('session context-delivery is bearer-authorized and its receipt GET/list responses satisfy the published contract',async t=>{
+ const f=await fixture(t),agent=await f.agent('Context receipt viewer');
+ await f.json('POST','/v1/workspaces/main/memory',{scope:'private',agent_id:agent.agent_id,content:'Context receipt contract fixture'},201);
+ const run=await f.chat(agent),context=f.workbench.contextForRun(run.run_id),identity={run_id:run.run_id,session_ref:f.bind('alice',agent.conversation_id)};
+ const deliveryPayload={...identity,memory_retrieval_id:context.memory_retrieval_id,
+  context_hash:createHash('sha256').update(JSON.stringify(context.memories)).digest('hex'),
+  references:context.memories.map(({memory_id,version})=>({memory_id,version}))};
+ assert.equal((await f.internal('context-delivery',deliveryPayload,'Bearer incorrect')).statusCode,401);
+ const delivery=await f.internal('context-delivery',deliveryPayload);
+ assert.equal(delivery.statusCode,200,delivery.body);assert.equal(delivery.json().receipt.status,'delivered_to_session');
+ const retrievalId=delivery.json().receipt.retrieval_id;
+ const detail=await f.http('GET',`/v1/workspaces/main/memory-retrievals/${retrievalId}`);assert.equal(detail.statusCode,200,detail.body);
+ const page=await f.http('GET',`/v1/workspaces/main/memory-retrievals?agent_id=${agent.agent_id}`);assert.equal(page.statusCode,200,page.body);
+ const validator=new ContractValidator();
+ for(const [method,path,value] of [['GET','/v1/workspaces/{workspace_id}/memory-retrievals/{retrieval_id}',detail.json()],['GET','/v1/workspaces/{workspace_id}/memory-retrievals',page.json()]]){
+  const operation=validator.operationFor(method,path);assert.ok(operation);assert.equal(validator.validateResponse(operation,200,value).valid,true,JSON.stringify(validator.validateResponse(operation,200,value).errors));
+ }
+});
+
 test('resumed context traces identify their original run and retain only still-valid frozen versions',async t=>{
  const f=await fixture(t),a=await f.agent('Continuing reader');
  const first=f.workbench.saveMemory('alice','main',{scope:'private',agent_id:a.agent_id,content:'Original source'}),second=f.workbench.saveMemory('alice','main',{scope:'private',agent_id:a.agent_id,content:'Retained source'}),run=await f.chat(a);
@@ -808,4 +829,29 @@ test('a cached task memory read cannot replay deleted text or its stale executio
  f.workbench.deleteMemory('alice','main',note.memory_id,1);
  const stale=await f.internal('tool',input);assert.equal(stale.statusCode,200,stale.body);assert.deepEqual(stale.json().items,[]);assert.equal(stale.json().invalidated_result,true);assert.equal(stale.json().execution_receipt,undefined);assert.equal(stale.json().retrieval_id,first.json().retrieval_id);assert.doesNotMatch(stale.body,/Park cached source/);
  assert.equal(f.workbench.memoryRetrievals.list('alice','main',a.agent_id).items.length,2);
+});
+
+test('integrated file lifecycle routes preview, apply and reconcile logical rename under owner and idempotency scope',async t=>{
+ const f=await fixture(t),a=await f.agent('Lifecycle route owner');
+ await f.json('PUT','/v1/workspaces/main/files',{project_id:a.project_id,path:'notes/source.md',content:'Source version',expected_version:0});
+ const previewUrl=`/v1/workspaces/main/files/rename-preview?project_id=${encodeURIComponent(a.project_id)}&path=notes%2Fsource.md&target_path=notes%2Fpublished.md&expected_version=1`;
+ const previewResponse=await f.http('GET',previewUrl);assert.equal(previewResponse.statusCode,200,previewResponse.body);assert.match(previewResponse.headers['cache-control']??'',/no-store/);
+ const preview=previewResponse.json();assert.equal(preview.action,'rename');assert.equal(preview.source.path,'notes/source.md');assert.equal(preview.source.version,1);
+ assert.equal(preview.target.path,'notes/published.md');assert.equal(preview.target.version,1);assert.match(preview.preview_sha256,/^[a-f0-9]{64}$/);
+ assert.equal(Object.hasOwn(preview.source,'blob_name'),false);assert.doesNotMatch(previewResponse.body,/server_path|E:\\|E:\//);
+ assert.equal((await f.http('GET',previewUrl,undefined,'bob')).statusCode,404);
+ assert.notEqual((await f.http('GET',previewUrl+'&owner_id=alice')).statusCode,200);
+ const body={project_id:a.project_id,path:'notes/source.md',target_path:'notes/published.md',expected_version:1,preview_sha256:preview.preview_sha256};
+ const applyUrl='/v1/workspaces/main/files/rename',key='file-rename-route-001';
+ const applied=await f.json('POST',applyUrl,body,200,'alice',key);assert.equal(applied.action,'rename');assert.equal(applied.source.path,'notes/source.md');assert.equal(applied.target.path,'notes/published.md');
+ assert.deepEqual(await f.json('POST',applyUrl,body,200,'alice',key),applied,'the same idempotency key returns the original receipt');
+ assert.equal((await f.http('POST',applyUrl,{...body,target_path:'notes/other.md'},'alice',key)).statusCode,409);
+ const stateUrl=`/v1/workspaces/main/files/lifecycle-commands/${key}?project_id=${encodeURIComponent(a.project_id)}`;
+ assert.deepEqual(await f.json('GET',stateUrl),{state:'applied',receipt:applied});assert.equal((await f.http('GET',stateUrl,undefined,'bob')).statusCode,404);
+ const current=await f.json('GET',`/v1/workspaces/main/files?project_id=${encodeURIComponent(a.project_id)}`);assert.deepEqual(current.items.map(item=>item.path),['notes/published.md']);
+ const historical=await f.json('GET',`/v1/workspaces/main/files/content?project_id=${encodeURIComponent(a.project_id)}&path=notes%2Fsource.md&version=1`);assert.equal(historical.content,'Source version');
+ const deletePreview=await f.json('GET',`/v1/workspaces/main/files/delete-preview?project_id=${encodeURIComponent(a.project_id)}&path=notes%2Fpublished.md&expected_version=1`);
+ const deleteBody={project_id:a.project_id,path:'notes/published.md',expected_version:1,preview_sha256:deletePreview.preview_sha256};
+ const deleted=await f.json('POST','/v1/workspaces/main/files/delete',deleteBody,200,'alice','file-delete-route-001');assert.equal(deleted.action,'delete');assert.equal(deleted.source.path,'notes/published.md');
+ assert.deepEqual(await f.json('GET',`/v1/workspaces/main/files/lifecycle-commands/file-delete-route-001?project_id=${encodeURIComponent(a.project_id)}`),{state:'applied',receipt:deleted});
 });

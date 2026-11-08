@@ -30,6 +30,27 @@ test('lightweight engine reads DOCX paragraphs without starting LibreOffice', { 
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
+test('document.inspect extracts bounded PDF and Office content without executing document markup', { skip: !python }, async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ga-engine-document-preview-'));
+  try {
+    const code = `import sys,zipfile\nfrom pathlib import Path\nfrom reportlab.pdfgen import canvas\nroot=Path(sys.argv[1])\n\nwith zipfile.ZipFile(root/'sample.docx','w') as z:\n z.writestr('word/document.xml','''<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>DOCX preview</w:t></w:r></w:p><w:tbl><w:tr><w:tc><w:p><w:r><w:t>Table value</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body></w:document>''')\nwith zipfile.ZipFile(root/'sample.xlsx','w') as z:\n z.writestr('xl/workbook.xml','''<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Summary" sheetId="1" r:id="rId1"/></sheets></workbook>''')\n z.writestr('xl/_rels/workbook.xml.rels','''<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Target="worksheets/sheet1.xml" Type="worksheet"/></Relationships>''')\n z.writestr('xl/sharedStrings.xml','''<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>XLSX preview</t></si></sst>''')\n z.writestr('xl/worksheets/sheet1.xml','''<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1"><f>1+1</f><v>2</v></c></row></sheetData></worksheet>''')\nwith zipfile.ZipFile(root/'sample.pptx','w') as z:\n z.writestr('ppt/presentation.xml','''<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>''')\n z.writestr('ppt/slides/slide1.xml','''<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:t>PPTX preview</a:t></p:sld>''')\npdf=canvas.Canvas(str(root/'sample.pdf'));pdf.drawString(72,720,'PDF preview');pdf.save()\n`;
+    assert.equal(spawnSync(python, ['-c', code, directory], { encoding: 'utf8' }).status, 0);
+    const adapter = new FileEngineAdapter({ python, workerPath: worker, timeoutMs: 15_000 });
+    const inspect = (name, mediaType) => adapter.run({ operation: 'document.inspect', input_path: join(directory, name),
+      media_type: mediaType, job_dir: directory, request: {} });
+    const pdf = await inspect('sample.pdf', 'application/pdf');
+    const docx = await inspect('sample.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    const xlsx = await inspect('sample.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    const pptx = await inspect('sample.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
+    assert.match(pdf.content.pages[0].text, /PDF preview/);
+    assert.equal(docx.content.paragraphs[0], 'DOCX preview');
+    assert.equal(docx.content.tables[0][0][0], 'Table value');
+    assert.equal(xlsx.content.sheets[0].cells.A1.value, 'XLSX preview');
+    assert.equal(xlsx.content.sheets[0].cells.B1.formula, '1+1');
+    assert.equal(pptx.content.slides[0].text, 'PPTX preview');
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
 test('engine rejects unknown operations with a fixed reason code', { skip: !python }, async () => {
   const directory = mkdtempSync(join(tmpdir(), 'ga-engine-invalid-'));
   try {

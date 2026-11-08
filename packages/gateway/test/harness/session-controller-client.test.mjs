@@ -251,3 +251,58 @@ test('observed resume transport carries only the original control and lease on f
  assert.deepEqual(requests[0].body,{max_messages:100,assistant_stream:true,goal_control:control});assert.deepEqual(requests[1].body,{goal_control:control});assert.ok(requests[1].url.endsWith('/session-a/goal-resume'));
  await assert.rejects(()=>client.resumeGoal('session-a',{...control,owner_id:'untrusted'}),/goal_control_input_invalid/);assert.equal(requests.length,2);
 });
+
+test('fork-source inspection calls the authenticated read endpoint for a valid native Session',async()=>{
+ const calls=[],inspection={meta:{id:'jot-source',version:4,createdAt:1234},inheritedEventCount:0,events:[{seq:0,type:'turn/start',data:{turn:1}}]};
+ const client=new SessionControllerClient('http://127.0.0.1:18841','a'.repeat(32),async(url,init)=>{calls.push({url:String(url),init});return Response.json({execution_authorized:false,inspection});});
+ assert.deepEqual(await client.inspectConversationForkSource('jot-source'),inspection);
+ assert.equal(calls.length,1);assert.equal(calls[0].url,'http://127.0.0.1:18841/v1/sessions/jot-source/fork-source');
+ assert.equal(calls[0].init.headers.authorization,`Bearer ${'a'.repeat(32)}`);assert.deepEqual(JSON.parse(calls[0].init.body),{});
+});
+
+test('fork-source inspection rejects illegal Session ids and responses that claim execution authority',async()=>{
+ const client=new SessionControllerClient('http://127.0.0.1:18841','a'.repeat(32),async()=>Response.json({execution_authorized:true,inspection:{}}));
+ for(const sessionId of ['', 'foreign/session', ' leading-space'])await assert.rejects(client.inspectConversationForkSource(sessionId),/fork_native_source_invalid/);
+ await assert.rejects(client.inspectConversationForkSource('jot-source'),/fork_native_source_invalid/);
+});
+
+test('browser driver observation uses the authenticated exact session endpoint and rejects scope drift',async()=>{
+ const scope={run_id:'run-a',owner_id:'owner-a',workspace_id:'workspace-a',session_id:'session-a',lease_owner:'worker-a',lease_generation:2};
+ const calls=[],client=new SessionControllerClient('http://127.0.0.1:18841','a'.repeat(32),async(url,init)=>{
+  calls.push({url:String(url),init,body:JSON.parse(init.body)});
+  return Response.json({protocol:1,scope,status:'unknown',required:true,observed_at:new Date().toISOString(),execution_authorized:false});
+ });
+ const controller=new AbortController(),value=await client.observeBrowserDriver('session-a',scope,controller.signal);
+ assert.equal(calls.length,1);assert.equal(calls[0].url,'http://127.0.0.1:18841/v1/sessions/session-a/browser-driver-observation');
+ assert.equal(calls[0].init.headers.authorization,`Bearer ${'a'.repeat(32)}`);
+ assert.deepEqual(calls[0].body,{protocol:1,scope});assert.equal(value.status,'unknown');
+ await assert.rejects(()=>client.observeBrowserDriver('session-b',scope,controller.signal),/driver_scope_invalid/);
+});
+
+test('browser driver observation rejects malformed, stale and differently scoped Host responses',async()=>{
+ const scope={run_id:'run-a',owner_id:'owner-a',workspace_id:'workspace-a',session_id:'session-a',lease_owner:'worker-a',lease_generation:2};
+ for(const response of [
+  {protocol:1,scope,status:'ready',required:true,observed_at:new Date().toISOString(),execution_authorized:true},
+  {protocol:1,scope:{...scope,lease_generation:3},status:'ready',required:true,observed_at:new Date().toISOString(),execution_authorized:false},
+  {protocol:1,scope,status:'ready',required:true,observed_at:'2020-01-01T00:00:00.000Z',execution_authorized:false},
+ ]){
+  const client=new SessionControllerClient('http://127.0.0.1:18841','a'.repeat(32),async()=>Response.json(response));
+  await assert.rejects(client.observeBrowserDriver('session-a',scope,new AbortController().signal),/driver_observation|driver_scope|driver_observation_stale/);
+ }
+});
+
+test('native member controls use the authenticated adapter path and require non-authorizing receipts',async()=>{
+ const calls=[],client=new SessionControllerClient('http://127.0.0.1:18841','a'.repeat(32),async(url,init)=>{
+  calls.push({url:String(url),init});return String(url).endsWith('/list')
+   ?Response.json({members:[{id:'child-1',name:'Reviewer',role:'teammate',status:'running'}],execution_authorized:false})
+  :Response.json({request_id:'stop-1',status:'accepted',quiescent:false,execution_authorized:false});
+ });
+ assert.deepEqual(await client.listNativeMembers('parent-1'),{members:[{id:'child-1',name:'Reviewer',role:'teammate',status:'running'}],execution_authorized:false});
+ assert.deepEqual(await client.interruptNativeMember('parent-1','child-1','stop-1'),{request_id:'stop-1',status:'accepted',quiescent:false,execution_authorized:false});
+ assert.equal(calls[0].url,'http://127.0.0.1:18841/v1/sessions/parent-1/native-members/list');
+ assert.equal(calls[1].url,'http://127.0.0.1:18841/v1/sessions/parent-1/native-members/child-1/interrupt');
+ for(const call of calls){assert.equal(call.init.headers.authorization,`Bearer ${'a'.repeat(32)}`);}
+ assert.deepEqual(JSON.parse(calls[0].init.body),{});assert.deepEqual(JSON.parse(calls[1].init.body),{request_id:'stop-1'});
+ const unsafe=new SessionControllerClient('http://127.0.0.1:18841','a'.repeat(32),async()=>Response.json({request_id:'stop-1',status:'accepted',quiescent:false,execution_authorized:true}));
+ await assert.rejects(unsafe.interruptNativeMember('parent-1','child-1','stop-1'),/native_member_interrupt_receipt_invalid/);
+});

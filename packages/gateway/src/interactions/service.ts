@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { withImmediateTransaction } from '../db/database.ts';
 import type { EventStore } from '../events/event-store.ts';
+import {createBrowserActionInteraction,readBrowserActionInteraction,type BrowserActionObservation,type BrowserActionRequest} from './browser-action-approval.ts';
 
 type TaskResponder={resolve(row:Record<string,unknown>,owner:string,status:string,input:Record<string,unknown>,key:string):boolean;
   recordReceipt(row:Record<string,unknown>,input:unknown,key:string,operation:string,receipt:Record<string,unknown>):void};
@@ -26,6 +27,15 @@ export class InteractionService {
     const rows = this.db.prepare('SELECT * FROM ga_interactions WHERE conversation_id=? AND (?=\'all\' OR status=?) ORDER BY created_at,id')
       .all(conversationId, status, status) as Array<Record<string, unknown>>;
     return { items: rows.map(row => this.value(row)) };
+  }
+
+  requestBrowserAction(input:BrowserActionRequest){
+    return withImmediateTransaction(this.db,()=>this.value(createBrowserActionInteraction(this.db,this.events,input)));
+  }
+
+  observeBrowserAction(input:BrowserActionObservation){
+    const observed=readBrowserActionInteraction(this.db,input);
+    return{state:observed.state,interaction:this.value(observed.row)};
   }
 
   respond(id: string, ownerId: string, input: Record<string, unknown>, key: string) {

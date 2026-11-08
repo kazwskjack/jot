@@ -1,10 +1,10 @@
 import {createHash,randomUUID} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
-import {workspacePublicationSchema} from './workspace-coordination-upgrade.ts';
+import {workspaceCheckpointCoordinationSchema,workspacePublicationSchema} from './workspace-coordination-upgrade.ts';
 import {publicationSettlementEvidence} from '../persistent-tasks/work-publication-journal.ts';
 import {indexAppliedSettlementEvidence,indexResolutionSettlementEvidence,recordedIndexResolutionSettlementEvidence} from '../git/index-settlement.ts';
 
-export type WorkspaceOperationSource={owner_id:string;project_id:string;operation_kind:'git_index'|'work_publication';operation_id:string;binding_sha256:string};
+export type WorkspaceOperationSource={owner_id:string;project_id:string;operation_kind:'git_index'|'work_publication'|'workspace_checkpoint_restore';operation_id:string;binding_sha256:string};
 type Source=WorkspaceOperationSource;
 type Reservation=Source&{reservation_id:string;created_at:string};
 const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -155,6 +155,8 @@ function view(db:DatabaseSync,value:Reservation){
   if(!released||digest(proof)!==settled.record_sha256||proof.reservation_id!==value.reservation_id||proof.execution_id!==value.operation_id||!Number.isFinite(Date.parse(proof.settled_at)))throw Error('workspace_settlement_corrupt');
   if(proof.protocol===2){
    try{if(value.operation_kind!=='git_index'||proof.kind!=='git_index_control')throw Error();const expected={protocol:2,kind:'git_index_control',reservation_id:value.reservation_id,execution_id:value.operation_id,...recordedIndexResolutionSettlementEvidence(db,value,proof.control_request_id),settled_at:proof.settled_at};if(JSON.stringify(proof)!==JSON.stringify(expected))throw Error();}catch{throw Error('workspace_settlement_corrupt')}
+  }else if(proof.protocol===3){
+   try{if(value.operation_kind!=='workspace_checkpoint_restore'||proof.kind!=='workspace_checkpoint_restore')throw Error();const evidence=checkpointRestoreSettlementEvidence(db,value);const expected={protocol:3,kind:'workspace_checkpoint_restore',reservation_id:value.reservation_id,execution_id:value.operation_id,...evidence,settled_at:proof.settled_at};if(JSON.stringify(proof)!==JSON.stringify(expected))throw Error();}catch{throw Error('workspace_settlement_corrupt')}
   }else if(Object.keys(proof).sort().join(',')!=='execution_id,finish_sha256,outcome_sha256,producer_sha256,reservation_id,settled_at'
    ||!['outcome_sha256','producer_sha256','finish_sha256'].every(key=>typeof proof[key]==='string'&&/^[a-f0-9]{64}$/.test(proof[key])))throw Error('workspace_settlement_corrupt');
  }
@@ -173,8 +175,9 @@ export function readWorkspaceIndexResolution(db:DatabaseSync,source:Source,reque
  * caller must verify its immutable original operation; this is not a wire API. */
 export function reserveWorkspaceOperation(db:DatabaseSync,source:Source){
  if(!db.isTransaction||!available(db))throw Error('workspace_coordination_unavailable');
- if(![source.owner_id,source.project_id,source.operation_id].every(value=>typeof value==='string'&&ID.test(value))||!['git_index','work_publication'].includes(source.operation_kind)||!/^[a-f0-9]{64}$/.test(source.binding_sha256))throw Error('workspace_reservation_source_invalid');
+ if(![source.owner_id,source.project_id,source.operation_id].every(value=>typeof value==='string'&&ID.test(value))||!['git_index','work_publication','workspace_checkpoint_restore'].includes(source.operation_kind)||!/^[a-f0-9]{64}$/.test(source.binding_sha256))throw Error('workspace_reservation_source_invalid');
  if(source.operation_kind==='work_publication'&&workspacePublicationSchema(db)!=='publication')throw Error('workspace_publication_upgrade_required');
+ if(source.operation_kind==='workspace_checkpoint_restore'&&workspaceCheckpointCoordinationSchema(db)!=='checkpoint')throw Error('workspace_checkpoint_upgrade_required');
  const prior=record(db,source);if(prior){const current=view(db,prior);if(current.state!=='reserved')throw Error('workspace_reservation_closed');return current;}
  assertWorkspaceWritable(db,source.owner_id,source.project_id);
  if(db.prepare(`SELECT 1 FROM ga_runs r JOIN ga_conversations c ON c.id=r.conversation_id
@@ -197,6 +200,12 @@ export function releaseUnstartedWorkspaceOperation(db:DatabaseSync,source:Source
 export function settleWorkspaceOperation(db:DatabaseSync,source:Source){
  if(!db.isTransaction||!available(db))throw Error('workspace_coordination_unavailable');
  const value=record(db,source);if(!value||view(db,value).state!=='reserved')throw Error('workspace_reservation_closed');
+ if(source.operation_kind==='workspace_checkpoint_restore'){
+  if(workspaceCheckpointCoordinationSchema(db)!=='checkpoint')throw Error('workspace_checkpoint_upgrade_required');
+  const evidence=checkpointRestoreSettlementEvidence(db,value),proof={protocol:3,kind:'workspace_checkpoint_restore',reservation_id:value.reservation_id,execution_id:source.operation_id,...evidence,settled_at:new Date().toISOString()};
+  db.prepare('INSERT INTO wb_workspace_reservation_settlements VALUES(?,?,?)').run(value.reservation_id,JSON.stringify(proof),digest(proof));
+  db.prepare('INSERT INTO wb_workspace_reservation_releases VALUES(?,?)').run(value.reservation_id,proof.settled_at);return view(db,value);
+ }
  if(source.operation_kind==='work_publication'){
   const evidence=publicationSettlementEvidence(db,source),proof={reservation_id:value.reservation_id,execution_id:source.operation_id,...evidence,settled_at:new Date().toISOString()};
   db.prepare('INSERT INTO wb_workspace_reservation_settlements VALUES(?,?,?)').run(value.reservation_id,JSON.stringify(proof),digest(proof));
@@ -207,6 +216,19 @@ export function settleWorkspaceOperation(db:DatabaseSync,source:Source){
  const proof={reservation_id:value.reservation_id,execution_id:source.operation_id,...evidence,settled_at:new Date().toISOString()};
  db.prepare('INSERT INTO wb_workspace_reservation_settlements VALUES(?,?,?)').run(value.reservation_id,JSON.stringify(proof),digest(proof));
  db.prepare('INSERT INTO wb_workspace_reservation_releases VALUES(?,?)').run(value.reservation_id,proof.settled_at);return view(db,value);
+}
+
+function checkpointRestoreSettlementEvidence(db:DatabaseSync,value:Reservation){
+ if(!available(db)||!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_workspace_checkpoint_path_journal'").get()
+  ||!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_workspace_checkpoint_restore_outcomes'").get())throw Error('workspace_settlement_corrupt');
+ const journal=db.prepare('SELECT reservation_id,journal_sha256 FROM wb_workspace_checkpoint_path_journal WHERE operation_id=?').get(value.operation_id) as Record<string,unknown>|undefined;
+ const lease=db.prepare('SELECT lease_owner,generation FROM wb_workspace_checkpoint_restore_lease_generations WHERE operation_id=? ORDER BY generation DESC LIMIT 1').get(value.operation_id) as Record<string,unknown>|undefined;
+ const outcome=db.prepare('SELECT outcome_json,outcome_sha256 FROM wb_workspace_checkpoint_restore_outcomes WHERE operation_id=?').get(value.operation_id) as Record<string,unknown>|undefined;
+ if(!journal||!outcome||journal.reservation_id!==value.reservation_id||typeof journal.journal_sha256!=='string'||!/^[a-f0-9]{64}$/.test(journal.journal_sha256)
+  ||!lease||typeof lease.lease_owner!=='string'||!Number.isSafeInteger(lease.generation)||Number(lease.generation)<1
+  ||typeof outcome.outcome_json!=='string'||typeof outcome.outcome_sha256!=='string'||digest(JSON.parse(String(outcome.outcome_json)))!==outcome.outcome_sha256)throw Error('workspace_settlement_corrupt');
+ if(db.prepare('SELECT 1 FROM ga_worker_leases WHERE resource_id=?').get('workspace-checkpoint-restore:'+value.operation_id))throw Error('workspace_reservation_producer_unsettled');
+ return{outcome_sha256:String(outcome.outcome_sha256),journal_sha256:String(journal.journal_sha256),lease_owner:String(lease.lease_owner),lease_generation:Number(lease.generation)};
 }
 
 /** Owning service only after actual native drain, in the same transaction that

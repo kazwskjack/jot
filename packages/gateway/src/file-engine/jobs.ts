@@ -3,6 +3,8 @@ import type { DatabaseSync } from 'node:sqlite';
 import { withImmediateTransaction } from '../db/database.ts';
 import { validateFileOperationRequest, type FileOperationRequest } from './contracts.ts';
 
+const DOCUMENT_PREVIEW_MAX_BYTES = 20 * 1024 * 1024;
+
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
   if (value && typeof value === 'object') {
@@ -21,7 +23,7 @@ export class FileJobService {
     input: Record<string, unknown>, idempotencyKey: string): Record<string, unknown> {
     if (!/^[\x21-\x7E]{8,128}$/.test(idempotencyKey)) throw new Error('FILE_REQUEST_INVALID');
     const request = validateFileOperationRequest(input);
-    const version = this.db.prepare(`SELECT a.current_version,v.sha256,v.server_path,v.mime_type,v.metadata_json
+    const version = this.db.prepare(`SELECT a.current_version,v.sha256,v.size_bytes,v.server_path,v.mime_type,v.metadata_json
       FROM ga_artifacts a JOIN ga_artifact_versions v ON v.artifact_id=a.id AND v.version=?
       WHERE a.id=? AND a.owner_id=? AND a.conversation_id=?`).get(
         request.base_version, artifactId, ownerId, conversationId) as Record<string, unknown> | undefined;
@@ -31,7 +33,12 @@ export class FileJobService {
       if (!owned) throw new Error('UNAUTHORIZED_FILE');
       throw new Error('STALE_FILE_VERSION');
     }
-    if (Number(version.current_version) !== request.base_version || String(version.sha256) !== request.base_sha256) {
+    const documentInspection = request.operation === 'document.inspect';
+    if (documentInspection && Number(version.size_bytes) > DOCUMENT_PREVIEW_MAX_BYTES) {
+      throw new Error('DOCUMENT_PREVIEW_TOO_LARGE');
+    }
+    if ((!documentInspection && Number(version.current_version) !== request.base_version)
+      || String(version.sha256) !== request.base_sha256) {
       throw new Error('STALE_FILE_VERSION');
     }
     const requestJson = canonical(request);

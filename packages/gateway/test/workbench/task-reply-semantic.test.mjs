@@ -24,7 +24,7 @@ async function fixture(t,result={text:'Release available.'},kind='conversation',
  const occurrence=f.persistentTasks.runNow('alice',task.task_id,'test-semantic-run');f.db.prepare("UPDATE ga_runs SET status='running' WHERE id=?").run(occurrence.run_id);
  const ref=new TaskExecutionEvidence(f.db).record(occurrence.run_id,'test-source','web.read',result);
  const draft=new TaskReplyDrafts(f.db).propose('alice',occurrence.run_id,'test-draft',{text:'Release available.',evidence:[ref]});
- const ledger=new ModelBudgetLedger(f.db,{routes:[route]}),budget=ledger.createScope('alice','test-semantic',{tokens:8000,nano_usd:16000,model_calls:4});ledger.bindRun('alice',occurrence.run_id,[budget.scope_id]);
+ const ledger=new ModelBudgetLedger(f.db,{routes:[route]}),budget=ledger.createScope('alice',`task-total:${task.task_id}`,{tokens:8000,nano_usd:16000,model_calls:4});ledger.bindRun('alice',occurrence.run_id,[budget.scope_id]);
  const {TaskReplySemanticChecks}=await import('../../src/persistent-tasks/reply-semantic.ts');
  const checks=new TaskReplySemanticChecks(f.db),assessment={topic_matches:true,tone_matches:true,evidence_supported:true,forbidden_clear:true,risk:'low',requires_user_confirmation:false,claims:[{reply_start:0,reply_end:draft.text.length,reference:ref.reference,quote:'Release available.'}]};
  const verify=invoke=>checks.verify('alice',draft.draft_id,{ledger,route:{provider:route.provider,model:route.model},guard:()=>{},invoke});
@@ -40,6 +40,18 @@ test('host semantic call uses exact owned sources, settled root accounting and i
  assert.equal(new TaskReplySendGate(f.db).check('alice',f.draft.draft_id).allowed,true);
  assert.throws(()=>f.db.prepare("UPDATE wb_task_reply_semantic_checks SET verdict='blocked'").run(),/immutable/);
  await assert.rejects(f.checks.verify('bob',f.draft.draft_id,{}),/reply_draft_not_found/);
+});
+test('reply-judge folded-cache evidence is persisted privately and public task history keeps both derived buckets unknown',async t=>{
+ const f=await fixture(t),usageEvidence={protocol:1,source:'reply-judge-client',cacheWrite:'folded-unreported'};
+ const receipt=await f.verify(async()=>({value:f.assessment,usage:{inputTokens:80,outputTokens:20,totalTokens:100,cacheReadTokens:0,cacheWriteTokens:0},usageEvidence}));
+ assert.equal(receipt.verdict,'eligible');
+ const response=JSON.parse(f.db.prepare('SELECT response_json FROM wb_task_reply_semantic_responses').get().response_json);
+ assert.deepEqual(response.usage_evidence,usageEvidence);
+ const attempt=JSON.parse(f.db.prepare('SELECT usage_json FROM wb_model_budget_attempts').get().usage_json);
+ assert.deepEqual(attempt.usageEvidence,usageEvidence);
+ const page=f.ledger.listTaskAttempts('alice',`task-total:${f.task.task_id}`);
+ assert.deepEqual(page.items[0].usage,{status:'settled',input_tokens:null,output_tokens:'20',cache_read_tokens:'0',cache_write_tokens:null,reasoning_tokens:null,total_tokens:'100'});
+ assert.equal(page.items[0].settled.tokens,'100');
 });
 test('uncertain scope, forbidden content, risk, unsupported quotes and uncovered reply text cannot become eligible',async t=>{
  for(const alter of [v=>({...v,risk:'medium'}),v=>({...v,topic_matches:false}),v=>({...v,forbidden_clear:false}),v=>({...v,requires_user_confirmation:true}),v=>({...v,extra:'send'}),v=>({...v,claims:[{...v.claims[0],quote:'Invented'}]}),v=>({...v,claims:[{...v.claims[0],reply_end:5}]})]){
@@ -183,17 +195,20 @@ test('an assessed candidate whose target changed is cancelled without projecting
  assert.equal(f.db.prepare('SELECT count(*) n FROM wb_task_reply_send_reservations').get().n,0);
 });
 
-test('a persisted provider response repairs a post-settlement check-write failure without another call',async t=>{
- const f=await fixture(t);let calls=0;
+test('a persisted folded-cache provider response recovers with its private evidence without another call',async t=>{
+ const f=await fixture(t);let calls=0;const usageEvidence={protocol:1,source:'reply-judge-client',cacheWrite:'folded-unreported'},foldedUsage={inputTokens:80,outputTokens:20,totalTokens:100,cacheReadTokens:0,cacheWriteTokens:0};
  f.db.exec("CREATE TRIGGER test_check_write_failure BEFORE INSERT ON wb_task_reply_semantic_checks BEGIN SELECT RAISE(ABORT,'test_check_write_failure'); END;");
- await assert.rejects(f.verify(async()=>{calls++;return {value:f.assessment,usage};}),/test_check_write_failure/);
+ await assert.rejects(f.verify(async()=>{calls++;return {value:f.assessment,usage:foldedUsage,usageEvidence};}),/test_check_write_failure/);
  assert.equal(f.db.prepare('SELECT state FROM wb_model_budget_attempts').get().state,'settled');
  assert.equal(f.db.prepare('SELECT count(*) n FROM wb_task_reply_semantic_responses').get().n,1);
+ assert.deepEqual(JSON.parse(f.db.prepare('SELECT response_json FROM wb_task_reply_semantic_responses').get().response_json).usage_evidence,usageEvidence);
  f.db.exec('DROP TRIGGER test_check_write_failure');
  const {TaskReplySemanticChecks}=await import('../../src/persistent-tasks/reply-semantic.ts'),next=new TaskReplySemanticChecks(f.db);
  const receipt=next.recover('alice',f.draft.draft_id,{ledger:f.ledger,guard:()=>{}});assert.equal(receipt.verdict,'eligible');
  assert.deepEqual(next.recover('alice',f.draft.draft_id,{ledger:f.ledger,guard:()=>{}}),receipt);
  assert.equal(calls,1);assert.equal(f.ledger.balance('alice',f.budget.scope_id).used.model_calls,'1');
+ assert.deepEqual(JSON.parse(f.db.prepare('SELECT usage_json FROM wb_model_budget_attempts').get().usage_json).usageEvidence,usageEvidence);
+ assert.deepEqual(f.ledger.listTaskAttempts('alice',`task-total:${f.task.task_id}`).items[0].usage,{status:'settled',input_tokens:null,output_tokens:'20',cache_read_tokens:'0',cache_write_tokens:null,reasoning_tokens:null,total_tokens:'100'});
  assert.equal(f.db.prepare('SELECT count(*) n FROM wb_model_budget_attempts').get().n,1);
  assert.equal(f.db.prepare('SELECT count(*) n FROM wb_task_reply_projection_receipts').get().n,0);
 });

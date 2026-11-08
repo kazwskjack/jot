@@ -8,8 +8,8 @@ function fixture(model={provider:'fixture',model:'chosen',reasoning_effort:'high
  const binding={runId:'run-a',sessionRef:'session-a',executionLease:{owner:'worker-a',generation:1}};
  const authority={protocol:1,run_id:'run-a',request_id:'run-a',input_message_id:'input-a',conversation_id:'conversation-a',owner_id:'owner-a',session_id:'session-a',execution_lease:binding.executionLease,input_sha256:'a'.repeat(64),execution_authorized:false};
  const policy={...authority,conversation_version:3,model,policy_sha256:createHash('sha256').update(canonical({protocol:1,conversation_version:3,model})).digest('hex'),resolved_model:null};
- const agent={id:'session-a',session:{id:'session-a'}},state={current:undefined},installed=[],calls=[];
- const f={agent,binding,policy,installed,calls,defaultEffort:'low',binds:0,checks:0,registered:agent};
+ const agent={id:'session-a',session:{id:'session-a',seq:1}},state={current:undefined},installed=[],calls=[],modelInfoCalls=[];
+ const f={agent,binding,policy,installed,calls,modelInfoCalls,defaultEffort:'low',binds:0,checks:0,registered:agent,totalTokens:100,outputBudget:256,contextWindow:4096};
  const bridge={request:async(path,scope,payload)=>{
   assert.equal(scope.runId,binding.runId);assert.deepEqual(scope.executionLease,binding.executionLease);
   if(path==='ordinary-input-binding')return{binding:structuredClone(authority)};
@@ -17,10 +17,11 @@ function fixture(model={provider:'fixture',model:'chosen',reasoning_effort:'high
   if(payload.action==='bind'){f.binds++;policy.resolved_model=structuredClone(payload.model);if(f.loseBindReceipt){f.loseBindReceipt=false;throw Error('fixture_response_lost');}}
   return{policy:structuredClone(policy)};
  }};
- const llm={resolveCallConfig:async(config,signal)=>{calls.push({config,signal});return{...config,reasoningEffort:config.reasoningEffort??f.defaultEffort};}};
+ const llm={resolveCallConfig:async(config,signal)=>{calls.push({config,signal});return{...config,reasoningEffort:config.reasoningEffort??f.defaultEffort,maxTokens:f.outputBudget};},resolveModelInfo:async(provider,model,signal)=>{modelInfoCalls.push({provider,model,signal});return{provider,id:model,context:{contextWindow:f.contextWindow},defaultMaxTokens:1024};}};
+ f.tokenMeter={measure:session=>{assert.equal(session,agent.session);return{totalTokens:f.totalTokens,logRevision:session.seq};}};
  const agents={selectionFor:()=>state,selectForNextRequest:(_agent,value)=>{installed.push(value);state.current=value;}};
  f.options={bridge,llm,agents,registry:{get:()=>f.registered}};
- f.invoke=async(signal=new AbortController().signal)=>{const select=createOrdinaryModelSelector(f.options);select.prepareAgent(agent);return select({agent,binding,signal,check:async()=>{f.checks++;}});};
+ f.invoke=async(signal=new AbortController().signal)=>{const select=createOrdinaryModelSelector(f.options);select.prepareAgent(agent);return select({agent,binding,signal,tokenMeter:f.tokenMeter,check:async()=>{f.checks++;}});};
  return f;
 }
 test('exact owned route and effort are resolved, frozen and selected without changing a global default',async()=>{
@@ -32,6 +33,48 @@ test('exact owned route and effort are resolved, frozen and selected without cha
 test('provider default is pinned once and a fresh selector reuses it after defaults change',async()=>{
  const f=fixture({provider:'fixture',model:'chosen'});await f.invoke();assert.equal(f.policy.resolved_model.reasoning_effort,'low');
  f.defaultEffort='high';await f.invoke();assert.equal(f.calls.at(-1).config.reasoningEffort,'low');assert.equal(f.binds,1);
+});
+test('fresh unhealthy primary selects only a saved fallback and keeps the accepted effort',async()=>{
+ const fallback={provider:'backup',model:'approved'};
+ const f=fixture({provider:'fixture',model:'chosen',reasoning_effort:'high',fallbacks:[fallback]});
+ f.options.routeHealth={select:(primary,candidates)=>{assert.deepEqual(primary,{provider:'fixture',model:'chosen'});assert.deepEqual(candidates,[fallback]);return fallback;}};
+ await f.invoke();
+ assert.deepEqual(f.calls[0].config,{provider:'fixture',model:'chosen',reasoningEffort:'high'});
+ assert.deepEqual(f.calls[1].config,{provider:'backup',model:'approved',reasoningEffort:'high'});
+ assert.deepEqual(f.policy.resolved_model,{provider:'backup',model:'approved',reasoning_effort:'high'});
+ assert.deepEqual(f.installed,[{provider:'backup',model:'approved',reasoningEffort:'high'}]);
+});
+test('native admission measures the actual Session and budgets the selected fallback route',async()=>{
+ const fallback={provider:'backup',model:'approved'};
+ const f=fixture({provider:'fixture',model:'chosen',reasoning_effort:'high',fallbacks:[fallback]});
+ f.options.routeHealth={select:()=>fallback};f.totalTokens=900;f.outputBudget=300;f.contextWindow=1200;
+ await f.invoke();
+ assert.deepEqual(f.modelInfoCalls.map(({provider,model})=>({provider,model})),[{provider:'backup',model:'approved'}]);
+ assert.deepEqual(f.installed,[{provider:'backup',model:'approved',reasoningEffort:'high'}]);
+});
+test('native admission rejects one token over the selected route budget before installation',async()=>{
+ const fallback={provider:'backup',model:'approved'};
+ const f=fixture({provider:'fixture',model:'chosen',reasoning_effort:'high',fallbacks:[fallback]});
+ f.options.routeHealth={select:()=>fallback};f.totalTokens=901;f.outputBudget=300;f.contextWindow=1200;
+ await assert.rejects(()=>f.invoke(),/ordinary_model_policy_unconfirmed/);assert.equal(f.installed.length,0);
+});
+test('primary route rejects when its resolved output budget exceeds the context window',async()=>{
+ const f=fixture();f.totalTokens=100;f.outputBudget=2000;f.contextWindow=1500;
+ await assert.rejects(()=>f.invoke(),/ordinary_model_policy_unconfirmed/);assert.equal(f.installed.length,0);
+});
+test('primary route uses its resolved output budget when the model default is larger',async()=>{
+ const f=fixture();f.totalTokens=100;f.outputBudget=200;f.contextWindow=500;
+ await f.invoke();assert.deepEqual(f.modelInfoCalls.map(({provider,model})=>({provider,model})),[{provider:'fixture',model:'chosen'}]);
+ assert.deepEqual(f.installed,[{provider:'fixture',model:'chosen',reasoningEffort:'high'}]);
+});
+test('native admission fails closed when the DSH token meter is unavailable',async()=>{
+ const f=fixture();f.tokenMeter=undefined;
+ await assert.rejects(()=>f.invoke(),/ordinary_model_policy_unconfirmed/);assert.equal(f.installed.length,0);
+});
+test('a route-health source cannot select outside the original fallback policy',async()=>{
+ const f=fixture({provider:'fixture',model:'chosen',reasoning_effort:'high',fallbacks:[{provider:'backup',model:'approved'}]});
+ f.options.routeHealth={select:()=>({provider:'unapproved',model:'route'})};
+ await assert.rejects(()=>f.invoke(),/ordinary_model_policy_unconfirmed/);assert.equal(f.calls.length,1);assert.equal(f.binds,0);
 });
 for(const scenario of ['owner','hash','extra','route','effort'])test('model selection rejects changed '+scenario+' before installation',async()=>{
  const f=fixture();

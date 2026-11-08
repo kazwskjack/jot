@@ -35,6 +35,7 @@ export function pinnedLookup(address: Address): LookupFunction {
 }
 export type PageResponse = { status: number; location?: string; contentType?: string; text: string };
 export type PageReaderOptions = {
+  allowedOrigins?: ReadonlySet<string>;
   resolve?: (hostname: string) => Promise<Address[]>;
   request?: (url: URL, address: Address) => Promise<PageResponse>;
 };
@@ -65,16 +66,21 @@ async function pinnedRequest(url: URL, address: Address): Promise<PageResponse> 
 
 export async function readPublicPage(value: string, options: PageReaderOptions = {}): Promise<{ text: string; url: string }> {
   let url = validatePageUrl(value);
+  const assertAllowedOrigin=(candidate:URL)=>{
+    if(options.allowedOrigins&&!options.allowedOrigins.has(candidate.origin))throw new Error('unsafe_page_url');
+  };
+  assertAllowedOrigin(url);
   const resolve = options.resolve ?? (hostname => lookup(hostname, { all: true, verbatim: true }));
   const request = options.request ?? pinnedRequest;
   for (let hop = 0; hop <= 5; hop++) {
+    assertAllowedOrigin(url);
     const host = url.hostname.replace(/^\[|\]$/g, '');
     const addresses = isIP(host) ? [{ address: host, family: isIP(host) }] : await resolve(host);
     if (!addresses.length || addresses.some(item => !publicAddress(item.address))) throw new Error('unsafe_page_url');
     const response = await request(url, addresses[0]!);
     if ([301,302,303,307,308].includes(response.status)) {
       if (!response.location || hop === 5) throw new Error('page_redirect_limit');
-      url = validatePageUrl(new URL(response.location, url).href); continue;
+      url = validatePageUrl(new URL(response.location, url).href);assertAllowedOrigin(url);continue;
     }
     if (response.status < 200 || response.status >= 300) throw new Error('page_http_error');
     if (!/^text\/(html|plain)|^application\/(json|xhtml\+xml)/i.test(response.contentType ?? '')) throw new Error('page_content_type');

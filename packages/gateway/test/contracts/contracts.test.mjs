@@ -3,6 +3,20 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const contracts = new URL('../../contracts/', import.meta.url);
+test('model-route fallback and health metadata stay optional, bounded, and synchronized across contracts',async()=>{
+ const spec=await json('openapi.json'),event=await json('agent-event.schema.json'),yaml=await readFile(new URL('openapi.yaml',contracts),'utf8'),selection=spec.components.schemas.ModelSelection,capabilities=spec.components.schemas.Capabilities;
+ assert.deepEqual(event.$defs.ModelSelection,selection);assert.deepEqual(event.$defs.Capabilities.properties.models,capabilities.properties.models);
+ for(const name of ['ModelSelection','Capabilities']){const line=yaml.split('\n').find(value=>value.startsWith('    '+name+': '));assert.ok(line);assert.deepEqual(JSON.parse(line.slice(line.indexOf(':')+1)),spec.components.schemas[name]);}
+ const {default:Ajv}=await import('ajv/dist/2020.js'),validateSelection=new Ajv({strict:false}).compile(selection),validateHealth=new Ajv({strict:false}).compile(capabilities.properties.models.items);
+ assert.equal(validateSelection({provider:'provider-a',model:'model-a'}),true);
+ assert.equal(validateSelection({provider:'provider-a',model:'model-a',fallbacks:[{provider:'provider-b',model:'model-b'}]}),true);
+ assert.equal(validateSelection({provider:'provider-a',model:'model-a',fallbacks:Array.from({length:4},(_,i)=>({provider:'provider-'+i,model:'model-'+i}))}),false);
+ const model={provider:'provider-a',model:'model-a',reasoning_output:'none',supported_reasoning_efforts:[]};
+ assert.equal(validateHealth(model),true,'older catalogs without health remain valid');
+ assert.equal(validateHealth({...model,health:{status:'unknown',observed_at:null,expires_at:null}}),true);
+ assert.equal(validateHealth({...model,health:{status:'fresh',observed_at:1,expires_at:2}}),false);
+ assert.equal(validateHealth({...model,health:{status:'healthy',observed_at:1,expires_at:2,credential:'private'}}),false);
+});
 test('Git workbench schemas expose bounded read-only state and no host paths, commands or credentials',async()=>{
  const spec=await json('openapi.json'),event=await json('agent-event.schema.json'),schemas=spec.components.schemas;
  assert.ok(schemas.GitSnapshot);assert.equal(schemas.GitSnapshot.properties.read_only.const,true);assert.equal(schemas.GitSnapshot.properties.execution_authorized.const,false);
@@ -10,6 +24,14 @@ test('Git workbench schemas expose bounded read-only state and no host paths, co
  assert.deepEqual(schemas.GitWorkbenchCapability,event.$defs.GitWorkbenchCapability);
  for(const name of ['GitSnapshot','GitDiff','GitEntry','GitRemote'])for(const forbidden of ['root','git_directory','executable','command','url','credentials'])assert.equal(forbidden in schemas[name].properties,false);
  const yaml=await readFile(new URL('openapi.yaml',contracts),'utf8');for(const name of ['Capabilities','GitSnapshot','GitDiff','GitEntry','GitRemote','GitWorkbenchCapability']){const line=yaml.split('\n').find(s=>s.startsWith('    '+name+': '));assert.ok(line);assert.deepEqual(JSON.parse(line.slice(line.indexOf(':')+1)),schemas[name]);}
+});
+test('Memory Dream policy contract stays aligned across OpenAPI, YAML, operations and TypeScript',async()=>{
+ const spec=await json('openapi.json'),operations=await json('operations.json'),yaml=await readFile(new URL('openapi.yaml',contracts),'utf8'),types=await readFile(new URL('types.ts',contracts),'utf8');
+ const path='/v1/agents/{agent_id}/memory-dream-policy',entry=spec.paths[path];assert.ok(entry?.get&&entry?.patch);
+ const pathLine=yaml.split('\n').find(line=>line.startsWith(`  ${path}: `));assert.ok(pathLine);assert.deepEqual(JSON.parse(pathLine.slice(pathLine.indexOf(':')+1)),entry);
+ for(const name of ['MemoryDreamPolicy','UpdateMemoryDreamPolicy']){const line=yaml.split('\n').find(value=>value.startsWith(`    ${name}: `));assert.ok(line);assert.deepEqual(JSON.parse(line.slice(line.indexOf(':')+1)),spec.components.schemas[name]);assert.match(types,new RegExp(`export type ${name} =`));}
+ assert.ok(operations.some(item=>item[0]==='GET'&&item[1]===path&&item[2]==='getMemoryDreamPolicy'));
+ assert.ok(operations.some(item=>item[0]==='PATCH'&&item[1]===path&&item[2]==='updateMemoryDreamPolicy'));
 });
 test('Git capability keeps default reads separate from explicitly configured reviewed index actions',async()=>{
  const spec=await json('openapi.json'),event=await json('agent-event.schema.json'),yaml=await readFile(new URL('openapi.yaml',contracts),'utf8'),{default:Ajv}=await import('ajv/dist/2020.js'),schema=spec.components.schemas.GitWorkbenchCapability,validate=new Ajv({strict:false}).compile(schema);
@@ -148,4 +170,58 @@ test('Run contract allows a message-free Goal control only with explicit control
  const run={run_id:'run-a',conversation_id:'conv-a',input_message_id:null,goal_control_id:'goal-control-fixture',continuation_of:'run-source',status:'queued',version:1,created_at:'2026-10-16T00:00:00Z',updated_at:'2026-10-16T00:00:00Z'};
  assert.equal(validator.validateResponse(operation,200,run).valid,true);
  for(const patch of [{goal_control_id:undefined},{continuation_of:undefined},{input_message_id:'old-prompt'}]){const value={...run,...patch};for(const key of Object.keys(value))if(value[key]===undefined)delete value[key];assert.equal(validator.validateResponse(operation,200,value).valid,false);}
+});
+
+test('memory capture recovery is a public bounded owner-scoped contract', async () => {
+  const spec = await json('openapi.json');
+  const operations = await json('operations.json');
+  const event = await json('agent-event.schema.json');
+  const yaml = await readFile(new URL('openapi.yaml', contracts), 'utf8');
+  const types = await readFile(new URL('types.ts', contracts), 'utf8');
+  const path = '/v1/agents/{agent_id}/memory-captures/{capture_id}/recovery';
+  assert.ok(spec.components.schemas.MemoryCaptureRecovery.properties.recovery_state.enum.includes('budget_bound_exceeded'));
+  const operation = spec.paths[path]?.get;
+  assert.equal(operation?.operationId, 'getMemoryCaptureRecovery');
+  assert.deepEqual(operation.parameters.map(({name, in: location, required}) => [name, location, required]), [
+    ['agent_id', 'path', true], ['capture_id', 'path', true],
+  ]);
+  assert.equal(Object.hasOwn(operation, 'requestBody'), false);
+  assert.deepEqual(Object.keys(operation.responses).sort(), ['200', '401', '403', '404', '422']);
+  assert.equal(operation.responses['404'].description, "Capture is missing or not visible in the owner's agent scope.");
+  assert.ok(operations.some(entry => entry[0] === 'GET' && entry[1] === path && entry[2] === operation.operationId && entry[3] === null && entry[4] === 'MemoryCaptureRecovery' && entry[5] === '200'));
+
+  const response = {
+    capture_status: 'proposed',
+    processor_run_status: 'succeeded',
+    proposal_available: true,
+    usage_state: 'settled',
+    recovery_state: 'committed_proposal_settled',
+    reconciliation_evidence: [],
+  };
+  const {ContractValidator} = await import('../../src/contracts/validator.ts');
+  const validator = new ContractValidator();
+  assert.equal(validator.operationFor('GET', path), 'getMemoryCaptureRecovery');
+  assert.equal(validator.validateResponse('getMemoryCaptureRecovery', 200, response).valid, true);
+  for (const patch of [
+    {processor_run_status: 'private raw failure detail'},
+    {usage_state: 'released_and_replayed'},
+    {recovery_state: 'automatic_apply'},
+    {capture_id: 'internal-id'},
+  ]) assert.equal(validator.validateResponse('getMemoryCaptureRecovery', 200, {...response, ...patch}).valid, false);
+
+  const pathLine = yaml.split('\n').find(line => line.startsWith(`  ${path}: `));
+  assert.ok(pathLine);
+  assert.deepEqual(JSON.parse(pathLine.slice(pathLine.indexOf(':') + 1)), {get: operation});
+  const schemaLine = yaml.split('\n').find(line => line.startsWith('    MemoryCaptureRecovery: '));
+  assert.ok(schemaLine);
+  assert.deepEqual(JSON.parse(schemaLine.slice(schemaLine.indexOf(':') + 1)), spec.components.schemas.MemoryCaptureRecovery);
+  assert.match(types, /export type MemoryCaptureRecovery =/);
+  assert.equal(Object.hasOwn(event.$defs, 'MemoryCaptureRecovery'), false);
+  const reconcilePath='/v1/agents/{agent_id}/memory-captures/{capture_id}/reconcile',reconcile=spec.paths[reconcilePath]?.post;
+  assert.equal(reconcile?.operationId,'reconcileMemoryCapture');assert.ok(operations.some(entry=>entry[0]==='POST'&&entry[1]===reconcilePath&&entry[2]===reconcile.operationId&&entry[3]==='MemoryCaptureReconcileInput'&&entry[4]==='MemoryCaptureReconciliation'));
+  const input={expected_capture_version:4,expected_policy_version:2,expected_epoch:3,attempt_id:'model-original',evidence_ref:'musage-0123456789abcdef'};
+  assert.equal(validator.operationFor('POST',reconcilePath),'reconcileMemoryCapture');assert.equal(validator.validateRequest('reconcileMemoryCapture',input).valid,true);
+  assert.equal(validator.validateRequest('reconcileMemoryCapture',{...input,owner_id:'other'}).valid,false);
+  const pathLine2=yaml.split('\n').find(line=>line.startsWith(`  ${reconcilePath}: `));assert.ok(pathLine2);assert.deepEqual(JSON.parse(pathLine2.slice(pathLine2.indexOf(':')+1)),{post:reconcile});
+  for(const name of ['MemoryCaptureReconcileInput','MemoryCaptureReconciliation']){const schemaLine=yaml.split('\n').find(line=>line.startsWith(`    ${name}: `));assert.ok(schemaLine);assert.deepEqual(JSON.parse(schemaLine.slice(schemaLine.indexOf(':')+1)),spec.components.schemas[name]);assert.match(types,new RegExp(`export type ${name} =`));}
 });

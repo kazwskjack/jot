@@ -1,23 +1,40 @@
 import {createHash} from 'node:crypto';
 import {performance} from 'node:perf_hooks';
+import type {DatabaseSync} from 'node:sqlite';
+import {withImmediateTransaction} from '../db/database.ts';
+import type {EventStore} from '../events/event-store.ts';
 
 type Phase='session_confirm'|'opening_snapshot'|'attachments'|'prompt_submit'|'input_recovery'|'goal_resume'|'preparation_total';
 type Outcome='succeeded'|'failed'|'cancelled';
 type Metadata={snapshot_records?:number;snapshot_has_more?:boolean;attachment_count?:number};
 export type PreparationTimingRecord={event:'jot_preparation_timing';run_hash:string;mode:'chat'|'work'|'unknown';phase:Phase;started_at:string;offset_ms:number;duration_ms:number;outcome:Outcome}&Metadata;
-export type PreparationTimingReporter=(record:PreparationTimingRecord)=>void;
+export type PreparationTimingReporter=(record:PreparationTimingRecord,context:{runId:string})=>void;
 const round=(value:number)=>Math.round(Math.max(0,value)*1000)/1000;
+
+/** Persist redacted preparation facts as events attached to their original run. */
+export function createRunPreparationTimingReporter(db:DatabaseSync,events:EventStore):PreparationTimingReporter{
+ return (record,{runId})=>{
+  try{
+   const run=db.prepare('SELECT conversation_id FROM ga_runs WHERE id=?').get(runId) as {conversation_id:string}|undefined;
+   if(!run)return;
+   withImmediateTransaction(db,()=>events.append(run.conversation_id,runId,'runtime.preparation_timing',record as unknown as Record<string,unknown>));
+  }catch{
+   // Diagnostics are best effort and must never change preparation outcomes.
+  }
+ };
+}
 
 /** Diagnostic metadata only. Neither input contents nor dependency errors enter logs. */
 export class PreparationTiming{
  private readonly started=performance.now();
  private readonly wall=Date.now();
+ private readonly runId:string;
  private readonly hash:string;
  private readonly mode:'chat'|'work'|undefined;
  private readonly signal:AbortSignal;
  private readonly report:PreparationTimingReporter;
  private completed=false;
- constructor(runId:string,mode:'chat'|'work'|undefined,signal:AbortSignal,report:PreparationTimingReporter=record=>{process.stderr.write(JSON.stringify(record)+'\n');}){this.hash=createHash('sha256').update(runId).digest('hex');this.mode=mode;this.signal=signal;this.report=report;}
+ constructor(runId:string,mode:'chat'|'work'|undefined,signal:AbortSignal,report:PreparationTimingReporter=record=>{process.stderr.write(JSON.stringify(record)+'\n');}){this.runId=runId;this.hash=createHash('sha256').update(runId).digest('hex');this.mode=mode;this.signal=signal;this.report=report;}
  private emit(phase:Phase,start:number,outcome:Outcome,metadata:Metadata={}){
   const safe:Metadata={};
   for(const key of ['snapshot_records','attachment_count'] as const){const value=metadata[key];if(typeof value==='number'&&Number.isSafeInteger(value)&&value>=0&&value<=100000)safe[key]=value;}
@@ -25,7 +42,7 @@ export class PreparationTiming{
   const offset=round(start-this.started);
   const record:PreparationTimingRecord={event:'jot_preparation_timing',run_hash:this.hash,mode:this.mode==='chat'?'chat':this.mode==='work'?'work':'unknown',phase,started_at:new Date(this.wall+offset).toISOString(),offset_ms:offset,duration_ms:round(performance.now()-start),outcome,...safe};
   // Observability must not alter task acceptance, execution or cancellation.
-  try{this.report(record);}catch{}
+  try{this.report(record,{runId:this.runId});}catch{}
  }
  async measure<T>(phase:Exclude<Phase,'preparation_total'>,operation:()=>Promise<T>,metadata?:(value:T)=>Metadata):Promise<T>{
   const start=performance.now();

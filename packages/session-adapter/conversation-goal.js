@@ -66,7 +66,7 @@ export function conversationGoal(agent,body){
  if(!goal||goal.id!==body.id||goal.revision!==body.revision)throw new Error('goal_revision_changed');
  const ref={id:goal.id,revision:goal.revision};
  if(body.action==='stop'){
-   service.clear(agent,ref);return {goal:null};
+   service.clear(agent,ref);if(service.get(agent))throw Error('goal_stop_unconfirmed');return {goal:null};
  }
  return {goal:service[body.action](agent,ref)};
 }

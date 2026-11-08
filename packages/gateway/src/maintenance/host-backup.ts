@@ -1,14 +1,60 @@
 import {DatabaseSync,backup} from 'node:sqlite';
 import {createHash} from 'node:crypto';
-import {existsSync,lstatSync,mkdirSync,readdirSync,openSync,readSync,closeSync,fstatSync,copyFileSync,readFileSync,writeFileSync,chmodSync,chownSync} from 'node:fs';
+import {existsSync,lstatSync,realpathSync,mkdirSync,readdirSync,openSync,readSync,closeSync,fstatSync,copyFileSync,readFileSync,writeFileSync,chmodSync,chownSync} from 'node:fs';
 import {resolve,dirname,relative,sep,parse} from 'node:path';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {notificationArchiveFiles} from '../channels/notification-archive.ts';
+import {validateWorkspaceRecoveryRecord} from '../always-on/snapshot-provider.ts';
+import {workspaceManifestHash, type WorkspaceManifestEntry} from '../always-on/workspace-provider.ts';
 const kinds=['database','workspaces','artifacts','sessions','host-config','notification-archives'] as const;
 type Kind=typeof kinds[number];type Root={kind:Kind;path:string;entries?:string[]};type Fingerprint={sha256:string;bytes:number};
 type Posix={uid:number;gid:number;mode:number};
 type File=Fingerprint&{kind:Kind;path:string;executable:boolean;posix?:Posix};
 type Manifest={schema_version:1|2|3;scope:'offline-local-host';roots:Root[];database:{kind:'database';path:string};directories:Array<{kind:Kind;path:string;posix?:Posix}>;files:File[]};
+export interface HostRestoreVerificationReceipt {
+ schema_version:1;
+ backup_id:string;
+ restored:true;
+ database_integrity_verified:true;
+ reference_paths_verified:true;
+ file_contents_verified:true;
+}
+type RestoreVerificationBinding={backupId:string;database:string;databaseFingerprint:Fingerprint;walFingerprint:Fingerprint|null;eventSnapshot:string|null;roots:Root[];inventoryFingerprint:string;sourceRoots?:Root[];verificationRoot?:string};
+const issuedRestoreVerifications=new WeakMap<object,RestoreVerificationBinding>();
+function eventSnapshot(db:DatabaseSync){
+ if(!table(db,'ga_events'))return null;
+ const primaryKey=db.prepare('PRAGMA table_info(ga_events)').all()
+  .filter(column=>Number(column.pk)>0).sort((a,b)=>Number(a.pk)-Number(b.pk));
+ if(!primaryKey.length)return null;
+ const order=primaryKey.map(column=>'"'+String(column.name).replaceAll('"','""')+'"').join(',');
+ const digest=createHash('sha256');let count=0;
+ for(const row of db.prepare(`SELECT * FROM ga_events ORDER BY ${order}`).iterate()){digest.update(canonicalJson(row));digest.update('\n');count++;}
+ return `${count}:${digest.digest('hex')}`;
+}
+function optionalFingerprint(path:string):Fingerprint|null{return existsSync(path)?fingerprint(path):null;}
+function normalizedPath(path:string){const absolute=resolve(path);return process.platform==='win32'?absolute.toLowerCase():absolute;}
+/** Only an unchanged database and restored file inventory covered by this in-process receipt qualifies. */
+export function isHostRestoreVerificationReceipt(value:unknown,db:DatabaseSync):value is HostRestoreVerificationReceipt{
+ if(!value||typeof value!=='object')return false;
+ const receipt=value as Partial<HostRestoreVerificationReceipt>;
+ const binding=issuedRestoreVerifications.get(value);
+ if(!binding||receipt.schema_version!==1||typeof receipt.backup_id!=='string'||!/^[a-f0-9]{64}$/.test(receipt.backup_id)
+  ||receipt.restored!==true||receipt.database_integrity_verified!==true
+  ||receipt.reference_paths_verified!==true||receipt.file_contents_verified!==true||binding.eventSnapshot===null)return false;
+ try{
+  if(binding.verificationRoot&&fingerprint(resolve(binding.verificationRoot,'manifest.json')).sha256!==binding.backupId)return false;
+  const main=db.prepare('PRAGMA database_list').all().find(row=>row.name==='main');
+  if(typeof main?.file!=='string'||!main.file||normalizedPath(main.file)!==normalizedPath(binding.database))return false;
+  const database=resolve(main.file);
+  if(existsSync(database+'-journal'))return false;
+  if(canonicalJson(fingerprint(database))!==canonicalJson(binding.databaseFingerprint))return false;
+  const wal=optionalFingerprint(database+'-wal'),expectedWal=binding.walFingerprint;
+  if((wal?.bytes??0)!==(expectedWal?.bytes??0)||((wal?.bytes??0)>0&&canonicalJson(wal)!==canonicalJson(expectedWal)))return false;
+  if(eventSnapshot(db)!==binding.eventSnapshot)return false;
+  if(hash(canonicalJson(inventory(binding.roots,database)))!==binding.inventoryFingerprint)return false;
+  return receipt.backup_id===binding.backupId;
+ }catch{return false;}
+}
 const maximumFiles=100000,maximumManifest=16*1024*1024;
 const fail=(code='host_backup_invalid'):never=>{throw new Error(code);};
 const hash=(bytes:string)=>createHash('sha256').update(bytes).digest('hex');
@@ -55,6 +101,7 @@ function contentIntegrity(db:DatabaseSync,resolveFile:(path:string)=>string){
  * Original locations are preserved: no rewriting immutable artifact paths. */
 function references(db:DatabaseSync,roots:Root[]){for(const [name,column] of [['ga_uploads','server_path'],['ga_artifact_versions','server_path'],['ga_artifact_parts','server_path'],['wb_task_notification_archives','root'],['wb_task_notification_digest_archives','root']]){if(!table(db,name!))continue;const columns=db.prepare(`PRAGMA table_info(${name})`).all();if(!columns.some(row=>row.name===column))continue;for(const row of db.prepare(`SELECT ${column} AS path FROM ${name}`).all()){if(typeof row.path!=='string'||!row.path||!roots.some(root=>selected(root,resolve(String(row.path)))))fail('host_backup_reference_outside_roots');}}}
 function inventory(roots:Root[],database:string){
+ const databaseFiles=new Set([database,database+'-wal',database+'-shm'].filter(path=>existsSync(path)).map(path=>realpathSync.native(path)));
  const files:File[]=[],directories:Manifest['directories']=[],seen=new Set<string>();
  for(const root of roots){
   if(!lstatSync(safe(root.path)).isDirectory())fail();
@@ -65,7 +112,7 @@ function inventory(roots:Root[],database:string){
   const visit=(file:string,depth:number)=>{
    if(depth>100||files.length+directories.length>maximumFiles)fail('host_backup_limit');
    safe(file);if(roots.some(other=>other.kind!==root.kind&&other.path===file))return;
-   if([database,database+'-wal',database+'-shm'].includes(file))return;
+   if(databaseFiles.has(realpathSync.native(file)))return;
    const stat=lstatSync(file);
    if(stat.isDirectory()){addDirectory(file);for(const entry of readdirSync(file).sort())visit(child(file,entry),depth+1);}
    else if(stat.isFile()){if(/-(wal|shm|journal)$/.test(file))fail('host_backup_runtime_checkpoint_required');files.push({kind:root.kind,path:relative(root.path,file).split(sep).join('/'),executable:!!(stat.mode&0o100),...permissions(file),...fingerprint(file)});}
@@ -96,4 +143,154 @@ function manifestOf(bundle:string,expected:string):Manifest{if(!/^[a-f0-9]{64}$/
 export function verifyHostBackup(bundle:string,expected:string){try{const manifest=manifestOf(bundle,expected),db=new DatabaseSync(child(resolve(bundle,'trees','database'),manifest.database.path),{readOnly:true});try{integrity(db);references(db,manifest.roots);contentIntegrity(db,path=>copiedPath(manifest.roots,bundle,path));}finally{db.close();}return {backup_id:expected,file_count:manifest.files.length,root_count:manifest.roots.length,verified:true};}catch{fail();}}
 /** Caller must stop every writer. Restore full roots only when absent, or explicit entries only when absent;
  * never mutate immutable paths, overwrite live data or start workers. */
-export function restoreHostBackup(bundle:string,expected:string,input:{roots:Root[];offline:boolean}){const roots=rootsOf(input.roots,input.offline),receipt=verifyHostBackup(bundle,expected),manifest=manifestOf(bundle,expected);if(manifest.schema_version===3){if(process.platform==='win32')fail('host_backup_posix_restore_required');const uid=process.getuid!(),groups=process.getgroups!();if(uid!==0&&[...manifest.files,...manifest.directories].some(entry=>entry.posix!.uid!==uid||!groups.includes(entry.posix!.gid)))fail('host_backup_ownership_privilege_required');}const existingDirectories=new Set(manifest.directories.map(entry=>child(roots.find(root=>root.kind===entry.kind)!.path,entry.path,true)).filter(path=>existsSync(path)));if(canonicalJson(roots)!==canonicalJson(manifest.roots))fail('host_backup_restore_roots_mismatch');for(const root of roots){safe(root.path);if(root.entries){if(existsSync(root.path)&&!lstatSync(root.path).isDirectory())fail();for(const entry of root.entries)if(existsSync(child(root.path,entry)))fail('host_backup_target_exists');}else if(existsSync(root.path))fail('host_backup_target_exists');}const database=child(roots.find(root=>root.kind==='database')!.path,manifest.database.path);for(const path of [database,database+'-wal',database+'-shm',database+'-journal'])if(existsSync(safe(path)))fail('host_backup_target_exists');for(const root of roots)mkdirSync(root.path,{recursive:true,mode:0o700});for(const directory of manifest.directories)mkdirSync(child(roots.find(root=>root.kind===directory.kind)!.path,directory.path,true),{recursive:true,mode:0o700});for(const file of manifest.files){const destination=child(roots.find(root=>root.kind===file.kind)!.path,file.path);mkdirSync(dirname(destination),{recursive:true,mode:0o700});copyFileSync(child(resolve(bundle,'trees',file.kind),file.path),destination);if(file.posix)restorePermissions(destination,file.posix);else chmodSync(destination,file.executable?0o700:0o600);if(canonicalJson(fingerprint(destination))!==canonicalJson({sha256:file.sha256,bytes:file.bytes}))fail();}const db=new DatabaseSync(child(roots.find(root=>root.kind==='database')!.path,manifest.database.path),{readOnly:true});try{integrity(db);references(db,roots);}finally{db.close();}for(const directory of [...manifest.directories].sort((a,b)=>b.path.length-a.path.length)){const path=child(roots.find(root=>root.kind===directory.kind)!.path,directory.path,true);if(directory.posix&&!existingDirectories.has(path))restorePermissions(path,directory.posix);}return {...receipt,restored:true};}
+export function restoreHostBackup(bundle:string,expected:string,input:{roots:Root[];offline:boolean}){const roots=rootsOf(input.roots,input.offline),receipt=verifyHostBackup(bundle,expected),manifest=manifestOf(bundle,expected);if(manifest.schema_version===3){if(process.platform==='win32')fail('host_backup_posix_restore_required');const uid=process.getuid!(),groups=process.getgroups!();if(uid!==0&&[...manifest.files,...manifest.directories].some(entry=>entry.posix!.uid!==uid||!groups.includes(entry.posix!.gid)))fail('host_backup_ownership_privilege_required');}const existingDirectories=new Set(manifest.directories.map(entry=>child(roots.find(root=>root.kind===entry.kind)!.path,entry.path,true)).filter(path=>existsSync(path)));if(canonicalJson(roots)!==canonicalJson(manifest.roots))fail('host_backup_restore_roots_mismatch');for(const root of roots){safe(root.path);if(root.entries){if(existsSync(root.path)&&!lstatSync(root.path).isDirectory())fail();for(const entry of root.entries)if(existsSync(child(root.path,entry)))fail('host_backup_target_exists');}else if(existsSync(root.path))fail('host_backup_target_exists');}const database=child(roots.find(root=>root.kind==='database')!.path,manifest.database.path);for(const path of [database,database+'-wal',database+'-shm',database+'-journal'])if(existsSync(safe(path)))fail('host_backup_target_exists');for(const root of roots)mkdirSync(root.path,{recursive:true,mode:0o700});for(const directory of manifest.directories)mkdirSync(child(roots.find(root=>root.kind===directory.kind)!.path,directory.path,true),{recursive:true,mode:0o700});for(const file of manifest.files){const destination=child(roots.find(root=>root.kind===file.kind)!.path,file.path);mkdirSync(dirname(destination),{recursive:true,mode:0o700});copyFileSync(child(resolve(bundle,'trees',file.kind),file.path),destination);if(file.posix)restorePermissions(destination,file.posix);else chmodSync(destination,file.executable?0o700:0o600);if(canonicalJson(fingerprint(destination))!==canonicalJson({sha256:file.sha256,bytes:file.bytes}))fail();}let restoredEventSnapshot:string|null=null;const db=new DatabaseSync(database,{readOnly:true});try{integrity(db);references(db,roots);restoredEventSnapshot=eventSnapshot(db);}finally{db.close();}for(const directory of [...manifest.directories].sort((a,b)=>b.path.length-a.path.length)){const path=child(roots.find(root=>root.kind===directory.kind)!.path,directory.path,true);if(directory.posix&&!existingDirectories.has(path))restorePermissions(path,directory.posix);}const restoreVerification=Object.freeze({schema_version:1 as const,backup_id:expected,restored:true as const,database_integrity_verified:true as const,reference_paths_verified:true as const,file_contents_verified:true as const});issuedRestoreVerifications.set(restoreVerification,{backupId:expected,database,databaseFingerprint:fingerprint(database),walFingerprint:optionalFingerprint(database+'-wal'),eventSnapshot:restoredEventSnapshot,roots,inventoryFingerprint:hash(canonicalJson(inventory(roots,database)))});return {...receipt,restored:true,restore_verification:restoreVerification};}
+
+
+/** Restore an independent verification copy. Absolute references remain in the
+ * database and are checked against their corresponding restored private tree. */
+export function restoreHostBackupForVerification(bundle: string, expected: string, target: string) {
+ const receipt = verifyHostBackup(bundle, expected);
+ const manifest = manifestOf(bundle, expected);
+ const destination = isolatedTarget(target, manifest.roots);
+ const bundleRoot = safe(bundle);
+ if (inside(destination, bundleRoot) || inside(bundleRoot, destination)) fail('host_backup_overlapping_roots');
+ if (manifest.schema_version === 3) {
+  if (process.platform === 'win32') fail('host_backup_posix_restore_required');
+  const uid = process.getuid!();
+  const groups = process.getgroups!();
+  if (uid !== 0 && [...manifest.files, ...manifest.directories].some(entry =>
+   entry.posix!.uid !== uid || !groups.includes(entry.posix!.gid),
+  )) fail('host_backup_ownership_privilege_required');
+ }
+ const roots = manifest.roots.map(root => ({
+  ...root,
+  path: resolve(destination, 'trees', root.kind),
+  ...(root.entries ? {entries: [...root.entries]} : {}),
+ }));
+ mkdirSync(destination, {mode: 0o700});
+ for (const root of roots) mkdirSync(root.path, {recursive: true, mode: 0o700});
+ for (const directory of manifest.directories) {
+  const root = roots.find(root => root.kind === directory.kind)!;
+  mkdirSync(child(root.path, directory.path, true), {recursive: true, mode: 0o700});
+ }
+ for (const file of manifest.files) {
+  const root = roots.find(root => root.kind === file.kind)!;
+  const restored = child(root.path, file.path);
+  mkdirSync(dirname(restored), {recursive: true, mode: 0o700});
+  copyFileSync(child(resolve(bundleRoot, 'trees', file.kind), file.path), restored);
+  if (file.posix) restorePermissions(restored, file.posix);
+  else chmodSync(restored, file.executable ? 0o700 : 0o600);
+  if (canonicalJson(fingerprint(restored)) !== canonicalJson({sha256: file.sha256, bytes: file.bytes})) fail();
+ }
+ writeFileSync(resolve(destination, 'manifest.json'), encode(manifest), {flag: 'wx', mode: 0o600});
+ verifyHostBackup(destination, expected);
+ for (const directory of [...manifest.directories].sort((left, right) => right.path.length - left.path.length)) {
+  if (directory.posix) {
+   const root = roots.find(root => root.kind === directory.kind)!;
+   restorePermissions(child(root.path, directory.path, true), directory.posix);
+  }
+ }
+ const database = child(roots.find(root => root.kind === 'database')!.path, manifest.database.path);
+ const db = new DatabaseSync(database, {readOnly: true});
+ let restoredEventSnapshot: string | null;
+ try {
+  integrity(db);
+  references(db, manifest.roots);
+  contentIntegrity(db, original => copiedPath(manifest.roots, destination, original));
+  restoredEventSnapshot = eventSnapshot(db);
+ } finally { db.close(); }
+ const restoreVerification: HostRestoreVerificationReceipt = Object.freeze({
+  schema_version: 1,
+  backup_id: expected,
+  restored: true,
+  database_integrity_verified: true,
+  reference_paths_verified: true,
+  file_contents_verified: true,
+ });
+ issuedRestoreVerifications.set(restoreVerification, {
+  backupId: expected,
+  database,
+  databaseFingerprint: fingerprint(database),
+  walFingerprint: optionalFingerprint(database + '-wal'),
+  eventSnapshot: restoredEventSnapshot,
+  roots,
+  inventoryFingerprint: hash(canonicalJson(inventory(roots, database))),
+  sourceRoots: structuredClone(manifest.roots),
+  verificationRoot: destination,
+ });
+ return {
+  ...receipt,
+  scope: 'isolated-restore-verification' as const,
+  restored: true,
+  database,
+  roots: structuredClone(roots),
+  restore_verification: restoreVerification,
+ };
+}
+
+
+/** A serialized proof has authority only when rechecked with the live, private
+ * restore capability and the exact original checkpoint identity. */
+export function createWorkspaceCheckpointBackupProof(
+ restoreVerification: unknown,
+ scope: {owner_id: string; workspace_id: string; project_id: string; checkpoint_id: string},
+) {
+ if (!scope || Object.keys(scope).sort().join(',') !== 'checkpoint_id,owner_id,project_id,workspace_id'
+  || Object.values(scope).some(value => typeof value !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(value))) {
+  fail('host_backup_checkpoint_scope_invalid');
+ }
+ const binding = restoreVerification && typeof restoreVerification === 'object'
+  ? issuedRestoreVerifications.get(restoreVerification) : undefined;
+ if (!binding?.sourceRoots || !binding.verificationRoot) return fail('host_backup_checkpoint_verification_required');
+ let db: DatabaseSync | undefined;
+ try {
+  db = new DatabaseSync(binding.database, {readOnly: true});
+  if (!isHostRestoreVerificationReceipt(restoreVerification, db)) fail('host_backup_checkpoint_verification_invalid');
+  const checkpoint = db.prepare(`SELECT i.manifest_json,i.manifest_sha256,r.snapshot_id,r.receipt_json,r.receipt_sha256,
+   a.record_json,a.record_sha256 FROM wb_workspace_checkpoint_intents i
+   JOIN wb_workspace_checkpoint_ready r ON r.checkpoint_id=i.checkpoint_id
+   JOIN wb_workspace_checkpoint_artifacts a ON a.checkpoint_id=i.checkpoint_id AND a.snapshot_id=r.snapshot_id
+   WHERE i.checkpoint_id=? AND i.owner_id=? AND i.workspace_id=? AND i.project_id=?`)
+   .get(scope.checkpoint_id, scope.owner_id, scope.workspace_id, scope.project_id);
+  if (!checkpoint || typeof checkpoint.record_json !== 'string' || typeof checkpoint.snapshot_id !== 'string'
+   || hash(checkpoint.record_json) !== checkpoint.record_sha256) return fail('host_backup_checkpoint_invalid');
+  const record = validateWorkspaceRecoveryRecord(JSON.parse(checkpoint.record_json), checkpoint.snapshot_id);
+  if (workspaceManifestHash(record.manifest) !== checkpoint.manifest_sha256
+   || canonicalJson(record.manifest) !== checkpoint.manifest_json
+   || typeof checkpoint.receipt_json !== 'string' || hash(checkpoint.receipt_json) !== checkpoint.receipt_sha256) {
+   return fail('host_backup_checkpoint_invalid');
+  }
+  const receipt = JSON.parse(checkpoint.receipt_json);
+  if (receipt.protocol !== 1 || receipt.checkpoint_id !== scope.checkpoint_id || receipt.project_id !== scope.project_id
+   || receipt.workspace_id !== scope.workspace_id || receipt.snapshot_id !== checkpoint.snapshot_id
+   || receipt.manifest_sha256 !== checkpoint.manifest_sha256 || receipt.status !== 'ready'
+   || receipt.execution_authorized !== false || receipt.restore_authorized !== false) fail('host_backup_checkpoint_invalid');
+  const restoredRoot = copiedPath(binding.sourceRoots, binding.verificationRoot, record.isolated_root.path);
+  const actual = inventory([{kind: 'workspaces', path: restoredRoot}], binding.database);
+  const entries: WorkspaceManifestEntry[] = actual.files.map(file => ({
+   path: file.path, kind: 'file', sha256: file.sha256, bytes: file.bytes, executable: file.executable,
+  }));
+  for (const directory of actual.directories) {
+   if (directory.path) entries.push({path: directory.path, kind: 'directory'});
+  }
+  for (const entry of record.manifest.entries) {
+   if (entry.kind === 'absent') {
+    if (existsSync(child(restoredRoot, entry.path))) fail('host_backup_checkpoint_manifest_changed');
+    entries.push(entry);
+   }
+  }
+  if (workspaceManifestHash({...record.manifest, entries}) !== checkpoint.manifest_sha256
+   || !isHostRestoreVerificationReceipt(restoreVerification, db)) fail('host_backup_checkpoint_manifest_changed');
+  return Object.freeze({
+   protocol: 1,
+   backup_id: binding.backupId,
+   ...scope,
+   snapshot_id: checkpoint.snapshot_id,
+   manifest_sha256: String(checkpoint.manifest_sha256),
+   execution_authorized: false,
+   restore_authorized: false,
+  });
+ } catch {
+  return fail('host_backup_checkpoint_verification_failed');
+ } finally { db?.close(); }
+}

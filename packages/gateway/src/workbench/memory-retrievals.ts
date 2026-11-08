@@ -4,8 +4,9 @@ import {memoryExpired,type MemoryRow,type MemoryRankReference} from './memory-li
 export type RetrievalKind='context_snapshot'|'continuation_snapshot'|'tool_query';
 export interface RetrievalReference extends MemoryRankReference {scope:'project'|'private';content_chars:number;truncated:boolean;provenance_truncated:boolean}
 export interface RetrievalData {
- method:'scope_order'|'keyword'|'adapter'|'inherited';fallback_reason:'adapter_failed'|'invalid_adapter_result'|null;
- candidate_count:number;context_chars:number|null;excluded:{query_miss:number;result_limit:number;context_limit:number;duplicate:number;context_budget:number};references:RetrievalReference[];
+ method:'scope_order'|'keyword'|'adapter'|'reasoning_provider'|'inherited';fallback_reason:'adapter_failed'|'invalid_adapter_result'|'reasoning_provider_failed'|'invalid_reasoning_provider_result'|null;
+ candidate_count:number;candidate_pool_truncated?:boolean;context_chars:number|null;excluded:{query_miss:number;result_limit:number;context_limit:number;duplicate:number;context_budget:number;provider_unselected?:number;selected_source_stale?:number};references:RetrievalReference[];
+ context_delivery?:{status:'delivered_to_session';source_retrieval_id:string;context_hash:string};
 }
 type Row=Record<string,string|number|null>;
 type Authorize=(owner:string,workspace:string,agentId:string)=>{project_id:string};
@@ -35,6 +36,21 @@ export class MemoryRetrievalLog {
   if(prior){if(prior.workspace_id!==workspace||prior.agent_id!==agentId||prior.project_id!==scope.project_id||prior.kind!==kind||prior.query!==query||prior.data_json!==json||prior.source_run_id!==sourceRunId)throw new Error('memory_retrieval_conflict');return String(prior.retrieval_id);}
   const id='retrieval-'+randomUUID();this.db.prepare(`INSERT INTO wb_memory_retrievals(retrieval_id,owner_id,workspace_id,agent_id,project_id,run_id,source_run_id,kind,query,observation_key,data_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
    .run(id,owner,workspace,agentId,scope.project_id,runId,sourceRunId,kind,query,observation,json,new Date().toISOString());return id;
+ }
+ recordContextDelivery(owner:string,workspace:string,agentId:string,runId:string,sourceRetrievalId:string,contextHash:string,references:{memory_id:string;version:number}[],contextChars:number){
+  if(!this.db.isTransaction)throw new Error('memory_retrieval_transaction_required');
+  const scope=this.authorize(owner,workspace,agentId),source=this.db.prepare(`SELECT * FROM wb_memory_retrievals WHERE owner_id=? AND workspace_id=? AND agent_id=? AND project_id=? AND run_id=? AND retrieval_id=?`)
+   .get(owner,workspace,agentId,scope.project_id,runId,sourceRetrievalId) as Row|undefined;
+  if(!source||!['context_snapshot','continuation_snapshot'].includes(String(source.kind)))throw new Error('memory_context_delivery_trace_invalid');
+  const original=JSON.parse(String(source.data_json)) as RetrievalData;let offset=0;
+  const delivered=references.map(reference=>{
+   while(offset<original.references.length&&(original.references[offset]!.memory_id!==reference.memory_id||original.references[offset]!.version!==reference.version))offset++;
+   const match=original.references[offset++];if(!match)throw new Error('memory_context_delivery_trace_invalid');return match;
+  });
+  const data:RetrievalData={method:original.method,fallback_reason:original.fallback_reason,candidate_count:original.candidate_count,context_chars:contextChars,
+   excluded:original.excluded,references:delivered,context_delivery:{status:'delivered_to_session',source_retrieval_id:sourceRetrievalId,context_hash:contextHash}};
+  const retrievalId=this.record(owner,workspace,agentId,runId,String(source.kind) as RetrievalKind,String(source.query),`context_delivery:${sourceRetrievalId}:${contextHash}`,data,source.source_run_id===null?null:String(source.source_run_id));
+  return{retrieval_id:retrievalId,status:'delivered_to_session' as const,source_retrieval_id:sourceRetrievalId,context_hash:contextHash,reference_count:delivered.length};
  }
  private header(row:Row){const {references,...data}=JSON.parse(String(row.data_json)) as RetrievalData;return {retrieval_id:String(row.retrieval_id),workspace_id:String(row.workspace_id),agent_id:String(row.agent_id),project_id:String(row.project_id),run_id:String(row.run_id),source_run_id:row.source_run_id===null?null:String(row.source_run_id),kind:row.kind,query:String(row.query),...data,result_count:references.length,created_at:String(row.created_at)};}
  list(owner:string,workspace:string,agentId:string,beforeId?:string){

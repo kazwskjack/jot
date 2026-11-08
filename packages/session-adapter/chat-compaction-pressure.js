@@ -20,16 +20,18 @@ export async function inspectChatCompactionPressure({session,expectedModel,polic
  const result=(reason,extra={})=>Object.freeze({protocol:1,decision:'skip',reason,...extra,execution_authorized:false});
  try{
   if(!route(expectedModel)||typeof session?.requestHeader!=='function')return result('ROUTE_UNCONFIRMED');
-  const header=structuredClone(session.requestHeader()),config=header?.config,seq=session.seq;
-  if(!route(config)||config.provider!==expectedModel.provider||config.model!==expectedModel.model)return result('ROUTE_UNCONFIRMED');
+  const selectedModel=structuredClone(expectedModel),header=structuredClone(session.requestHeader()),config=header?.config,seq=session.seq;
+  if(!route(config)||config.provider!==selectedModel.provider||config.model!==selectedModel.model)return result('ROUTE_UNCONFIRMED');
   // Require explicit resolved host policy; never guess defaults or capacity.
   if(!integer(seq)||!policy||!Number.isFinite(policy.thresholdRatio)||policy.thresholdRatio<=0||policy.thresholdRatio>1||!integer(policy.headroomTokens)
    ||typeof tokenMeter?.measure!=='function'||typeof llm?.resolveModelInfo!=='function')return result('METADATA_UNAVAILABLE');
   const resolvedPolicy=structuredClone(policy),first=structuredClone(tokenMeter.measure(session));
   if(!integer(first.totalTokens)||!integer(first.logRevision))return result('METADATA_UNAVAILABLE');
-  const info=await cancellable(llm.resolveModelInfo(config.provider,config.model,signal),signal);signal.throwIfAborted();
+  const info=structuredClone(await cancellable(llm.resolveModelInfo(config.provider,config.model,signal),signal));signal.throwIfAborted();
   const second=tokenMeter.measure(session);
-  if(session.seq!==seq||!isDeepStrictEqual(session.requestHeader(),header)||!isDeepStrictEqual(policy,resolvedPolicy)||!isDeepStrictEqual(first,second))return result('STATE_CHANGED');
+  if(session.seq!==seq||!isDeepStrictEqual(session.requestHeader(),header)||!isDeepStrictEqual(expectedModel,selectedModel)||!isDeepStrictEqual(policy,resolvedPolicy)||!isDeepStrictEqual(first,second))return result('STATE_CHANGED');
+  // Pinned SDK LlmResolvedModelInfo uses provider + id for exact-route identity.
+  if(info?.provider!==selectedModel.provider||info.id!==selectedModel.model)return result('ROUTE_UNCONFIRMED');
   const window=info?.context?.contextWindow,declaredDefault=info?.defaultMaxTokens;
   if(!integer(window)||window===0||declaredDefault!==undefined&&!integer(declaredDefault)||config.maxTokens!==undefined&&!integer(config.maxTokens))return result('METADATA_UNAVAILABLE');
   const reserved=config.maxTokens??declaredDefault??0;

@@ -1,8 +1,8 @@
-import React,{useState,useContext} from 'react';
+import React,{useLayoutEffect,useRef,useState,useContext} from 'react';
 import type {Caps,GitEntry} from './types';
 import {workbenchApi} from './client';
 import {useResource} from './useResource';
-import {ResourceStatus} from './AgentsPanel';
+import {ResourceStatus} from './PanelStatus';
 import GitReview,{type GitReviewDraft} from './GitReview';
 import GitHistory from './GitHistory';
 import GitPendingRequests from './GitPendingRequests';
@@ -18,6 +18,9 @@ export default function GitPanel({caps}:{caps:Caps}){
  const configured=caps.git_workbench?.configured_projects??[],projects=useResource(workbenchApi.projects,'git-projects',configured.length>0);
  const [selected,setSelected]=useState(''),[selection,setSelection]=useState<{project:string;snapshot:string;path:string;stage:'working'|'staged'}>();
  const [draft,setDraft]=useState<GitReviewDraft|null>(null),[reviewBusy,setReviewBusy]=useState(false),[recoveryPending,setRecoveryPending]=useState(false),pending=useContext(MutationPendingState),locked=pending||reviewBusy||recoveryPending;
+ const reviewPanel=useRef<HTMLElement|null>(null),reviewOpener=useRef<'change'|'commit'|null>(null),[restoreReviewFocus,setRestoreReviewFocus]=useState(false);
+ useLayoutEffect(()=>{if(!draft&&restoreReviewFocus){reviewPanel.current?.querySelector<HTMLButtonElement>(`[data-review-opener="${reviewOpener.current}"]`)?.focus();setRestoreReviewFocus(false);}},[draft,restoreReviewFocus]);
+ const closeReview=()=>{setRestoreReviewFocus(true);setDraft(null);};
  const available=projects.data?.items.filter(project=>configured.includes(project.project_id))??[],project=available.some(value=>value.project_id===selected)?selected:available[0]?.project_id??'';
  const snapshot=useResource(signal=>workbenchApi.git(project,signal),'git-snapshot:'+project,Boolean(project)),state=!snapshot.error&&!snapshot.loading&&snapshot.data?.project_id===project?snapshot.data:null;
  const active=selection?.project===project&&state?.snapshot_id===selection.snapshot?selection:undefined;
@@ -26,7 +29,7 @@ export default function GitPanel({caps}:{caps:Caps}){
  const refresh=()=>{setDraft(null);setSelection(undefined);snapshot.reload();};
  const rows=(stage:'working'|'staged')=>(state?.entries??[]).filter(entry=>stage==='staged'?entry.index_status!==' '&&entry.index_status!=='?':entry.worktree_status!==' ');
  const row=(entry:GitEntry,stage:'working'|'staged')=><li key={entry.path}><button type="button" disabled={locked||!['file','missing'].includes(entry.kind)} aria-label={`查看${stage==='staged'?'暂存区':'工作区'}差异：${entry.path}`} aria-pressed={active?.path===entry.path&&active.stage===stage} onClick={()=>{setDraft(null);setSelection({project,snapshot:state!.snapshot_id,path:entry.path,stage});}}><code>{entry.original_path?entry.original_path+' → ':''}{entry.path}</code><span className="wb-badge">{entry.conflicted?'冲突':label(stage==='staged'?entry.index_status:entry.worktree_status)}</span></button></li>;
- return <section className="wb-git" aria-label="Git 工作台">
+ return <section ref={reviewPanel} className="wb-git" aria-label="Git 工作台">
   <h2>Git 工作台</h2><p className="wb-page-intro">查看项目的分支与文件变化。<span className="wb-badge">{caps.git_workbench?.read_only===false?'可审核暂存':'只读'}</span></p>
   {!configured.length?<p role="status">尚未绑定项目仓库，请先完成服务端配置。</p>:<>
    <ResourceStatus {...projects} onRetry={projects.reload}/><div className="wb-toolbar"><label>项目仓库<select aria-label="项目仓库" disabled={locked} value={project} onChange={event=>{setDraft(null);setSelection(undefined);setSelected(event.target.value);}}>{available.map(value=><option key={value.project_id} value={value.project_id}>{value.title}</option>)}</select></label><button type="button" disabled={locked||!project||snapshot.loading} onClick={refresh}>刷新仓库</button></div>
@@ -40,9 +43,9 @@ export default function GitPanel({caps}:{caps:Caps}){
     <div className="wb-git-files"><div><h3>暂存区</h3>{rows('staged').length?<ul>{rows('staged').map(entry=>row(entry,'staged'))}</ul>:<p className="wb-hint">没有暂存变更。</p>}</div><div><h3>工作区</h3>{rows('working').length?<ul>{rows('working').map(entry=>row(entry,'working'))}</ul>:<p className="wb-hint">没有未暂存变更。</p>}</div></div>
     {diff.loading&&<p role="status">正在读取差异…</p>}{active&&diff.error&&<p role="alert" className="wb-error">{message(diff.error)}</p>}
     {patch&&(patch.kind==='binary'?<p role="status">二进制文件，暂无文本差异。</p>:patch.patch?<pre aria-label="Git 差异">{patch.patch}</pre>:<p role="status">这部分没有内容变化。</p>)}
-    {patch&&active&&!draft&&!state.entries.find(entry=>entry.path===active.path)?.conflicted&&<button type="button" disabled={locked} onClick={()=>{const entry=state.entries.find(value=>value.path===active.path)!;const actions:GitReviewDraft['actions']=active.stage==='staged'?['unstage']:entry.index_status==='?'?['stage','delete-untracked']:['stage','discard'];setDraft({project,snapshot:state.snapshot_id,paths:[active.path],action:actions[0]!,actions});}}>审核此变更</button>}
-    {!draft&&rows('staged').length>0&&<button type="button" disabled={locked||state.omitted_count>0||rows('staged').some(entry=>entry.conflicted)} onClick={()=>setDraft({project,snapshot:state.snapshot_id,paths:rows('staged').map(entry=>entry.path),action:'commit',actions:['commit']})}>审核提交</button>}
-    {draft&&draft.project===project&&draft.snapshot===state.snapshot_id&&<GitReview key={JSON.stringify(draft)} draft={draft} onClose={()=>setDraft(null)} onBusy={setReviewBusy} allowIndexExecution={caps.git_workbench?.read_only===false&&caps.git_workbench.index_actions.includes(draft.action as 'stage'|'unstage')}/>}
+    {patch&&active&&!draft&&!state.entries.find(entry=>entry.path===active.path)?.conflicted&&<button data-review-opener="change" type="button" disabled={locked} onClick={()=>{reviewOpener.current='change';const entry=state.entries.find(value=>value.path===active.path)!;const actions:GitReviewDraft['actions']=active.stage==='staged'?['unstage']:entry.index_status==='?'?['stage','delete-untracked']:['stage','discard'];setDraft({project,snapshot:state.snapshot_id,paths:[active.path],action:actions[0]!,actions});}}>审核此变更</button>}
+    {!draft&&rows('staged').length>0&&<button data-review-opener="commit" type="button" disabled={locked||state.omitted_count>0||rows('staged').some(entry=>entry.conflicted)} onClick={()=>{reviewOpener.current='commit';setDraft({project,snapshot:state.snapshot_id,paths:rows('staged').map(entry=>entry.path),action:'commit',actions:['commit']});}}>审核提交</button>}
+    {draft&&draft.project===project&&draft.snapshot===state.snapshot_id&&<GitReview key={JSON.stringify(draft)} draft={draft} onClose={closeReview} onBusy={setReviewBusy} allowIndexExecution={caps.git_workbench?.read_only===false&&caps.git_workbench.index_actions.includes(draft.action as 'stage'|'unstage')}/>}
    </>}
   </>}
  </section>;

@@ -15,7 +15,7 @@ const keys='artifact_id,file_name,kind,media_type,sha256,size_bytes,version';
 function fail():never{throw Error('attachment_manifest_invalid');}
 const equalPath=(a:string,b:string)=>process.platform==='win32'?a.toLowerCase()===b.toLowerCase():a===b;
 const inside=(root:string,path:string)=>!equalPath(root,path)&&(process.platform==='win32'?path.toLowerCase().startsWith((root+sep).toLowerCase()):path.startsWith(root+sep));
-const kind=(mime:string):ResolvedAttachment['kind']=>mime.startsWith('image/')&&mime!=='image/svg+xml'?'image':mime.startsWith('text/')||['application/json','application/xml'].includes(mime)?'text':mime==='application/pdf'||/officedocument|msword|excel|powerpoint/.test(mime)?'document':'file';
+export const attachmentKindForMime=(mime:string):ResolvedAttachment['kind']=>mime.startsWith('image/')&&mime!=='image/svg+xml'?'image':mime.startsWith('text/')||['application/json','application/xml'].includes(mime)?'text':mime==='application/pdf'||/officedocument|msword|excel|powerpoint/.test(mime)?'document':'file';
 
 /** Serializable source identity only. No paths, file receipts or native admission. */
 export function validateAttachmentManifest(input:unknown,limits:Pick<Limits,'maxCount'|'maxAggregateBytes'>):AttachmentManifest{
@@ -26,7 +26,7 @@ export function validateAttachmentManifest(input:unknown,limits:Pick<Limits,'max
  for(const raw of value.attachments){
   if(!raw||typeof raw!=='object'||Array.isArray(raw)||Object.keys(raw).sort().join(',')!==keys)fail();
   const row=raw as Record<string,unknown>;
-  if(typeof row.artifact_id!=='string'||!id.test(row.artifact_id)||seen.has(row.artifact_id)||!Number.isSafeInteger(row.version)||Number(row.version)<1||typeof row.sha256!=='string'||!/^[a-f0-9]{64}$/.test(row.sha256)||!Number.isSafeInteger(row.size_bytes)||Number(row.size_bytes)<0||typeof row.media_type!=='string'||!row.media_type||row.media_type.length>200||typeof row.file_name!=='string'||!row.file_name||row.file_name.length>255||row.kind!==kind(row.media_type))fail();
+  if(typeof row.artifact_id!=='string'||!id.test(row.artifact_id)||seen.has(row.artifact_id)||!Number.isSafeInteger(row.version)||Number(row.version)<1||typeof row.sha256!=='string'||!/^[a-f0-9]{64}$/.test(row.sha256)||!Number.isSafeInteger(row.size_bytes)||Number(row.size_bytes)<0||typeof row.media_type!=='string'||!row.media_type||row.media_type.length>200||typeof row.file_name!=='string'||!row.file_name||row.file_name.length>255||row.kind!==attachmentKindForMime(row.media_type))fail();
   total+=Number(row.size_bytes);if(!Number.isSafeInteger(total)||total>limits.maxAggregateBytes)throw Error('attachment_aggregate_size_invalid');seen.add(row.artifact_id);
   entries.push(Object.freeze({artifact_id:row.artifact_id,version:Number(row.version),sha256:row.sha256,size_bytes:Number(row.size_bytes),media_type:row.media_type,file_name:row.file_name,kind:row.kind as ResolvedAttachment['kind']}));
  }

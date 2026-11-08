@@ -1,5 +1,34 @@
 # Jot DSH Session adapter
 
+### Build an installable adapter package
+
+From the project checkout with build dependencies installed, build the Gateway and choose a new absolute staging directory. The staging command retains the original module layout, adapter entry paths, runtime patches and notices, and records source-file hashes in `runtime-source-manifest.json`.
+
+```powershell
+npm --prefix packages/gateway run build
+node packages/session-adapter/scripts/stage-package.mjs E:/codex/jot-adapter-stage
+npm pack E:/codex/jot-adapter-stage --ignore-scripts --pack-destination E:/codex
+```
+
+The generated package declares the optional Playwright dependency used by the browser driver. DSH services continue to resolve through the configured Host installation.
+
+### Optional browser driver
+
+The Session Adapter loads the browser registrar only when the DSH process has
+`JOT_BROWSER_PRIVATE_ROOT` (an absolute private directory) and
+`JOT_BROWSER_ORIGINS` (a JSON array of exact HTTPS origins). The directory must
+be private to the DSH host account: POSIX directories must be owned by the
+process user with no group/other permissions; Windows allows only the process
+user, SYSTEM, Administrators and CREATOR OWNER. Existing broad ACLs and symlinked
+directory paths are rejected without changing them. `JOT_BROWSER_EXECUTABLE_PATH`
+may select an installed browser executable; no browser runtime is downloaded or installed.
+Without the required settings, `browser_action` is not mounted and readiness
+stays unknown. A mounted action is registered on the exact Agent only while its
+current Gateway run and execution lease allow it. Page changes use the existing
+owner approval interaction. `action: "profile_revoke"` uses that same approval
+path, closes the active context, invalidates the owner profile generation and
+retains local profile files. Import, export and clear are unsupported.
+
 `chat-compaction-pressure.js` provides a read-only effective-request pressure
 inspection prerequisite for Chat maintenance. It uses the host's official token
 meter, exact routed model metadata and explicitly resolved host policy. Low
@@ -153,6 +182,18 @@ node --test voice.test.mjs
 ```
 
 Mocked protocol tests do not establish that a real model, speech provider or browser action works in your host. Validate the complete chain after installing your providers.
+
+## Original DSH skill content read
+
+The bearer-authenticated `POST /v1/skills/read` endpoint accepts exactly
+`{protocol:1, scope, name}`. It reads one user-invocable skill from the resident
+Agent's original DSH `skills.snapshot()` / `skills.get()` service after the
+existing Workbench guard confirms the owner, project, workspace, role, run,
+session and capability epoch. The catalog must be complete; missing, changed,
+non-user-invocable or oversized content fails closed. The response includes the
+selected definition's source/provider labels, UTF-8 body, SHA-256 digest and
+`execution_authorized:false`. The endpoint does not execute, install, remove or
+download skills and never returns provider locators or resource paths.
 
 ## Runtime compatibility
 
@@ -331,7 +372,13 @@ conversation metadata. Generated profiles keep the option off.
 The same opt-in enables the detached bearer-authenticated `POST /v1/models`
 catalog (`{}` only). Metadata is advisory and never grants execution; missing
 readiness or failed resolution is not a reason to fall back silently to a
-different model. See [activation, evidence and limitations](../../docs/implementation/2026-10-18-native-model-policy.md).
+different model. A conversation may save up to three explicit fallback routes;
+only a fresh unhealthy observation from a completed native stream permits the
+first configured fallback that is not freshly unhealthy. Unknown or stale
+health stays on the accepted primary route. Health is process-local, expires
+after 60 seconds, and does not add probes, credentials, URLs, attempts, or
+accounting entries. Every chosen route remains bound to the original accepted
+run policy and reasoning effort. See [activation, evidence and limitations](../../docs/implementation/2026-10-18-native-model-policy.md).
 
 An optional `ordinaryExecutionPolicy` trusted Chat declaration additionally
 checks the original execution-policy bridge, native preset and policy digests.

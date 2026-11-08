@@ -23,13 +23,17 @@ test('standalone inventory opens existing database read-only even while a writer
     assert.equal(result.status, 0, result.stderr);
     const report = JSON.parse(result.stdout);
     assert.equal(report.candidates[0].protected, true);
+    assert.equal(report.candidates[0].backup_verified, false);
+    assert.equal(report.candidates[0].deletable, false);
     assert.equal(report.candidates[0].event_count, 1);
+    assert.ok(report.candidates[0].reasons.includes('complete_checkpoint_and_restore_verification_missing'));
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM ga_events').get().n, 1);
     db.exec('ROLLBACK');
     const missing = join(directory, 'missing.sqlite');
     assert.notEqual(spawnSync(process.execPath, [cli,missing], { encoding: 'utf8' }).status, 0);
     assert.equal(existsSync(missing), false);
     assert.notEqual(spawnSync(process.execPath, [cli,path,'2026-09-20T00:00:00Z','','1','--execute'], { encoding: 'utf8' }).status, 0);
+    assert.notEqual(spawnSync(process.execPath, [cli,path,'2026-09-20T00:00:00Z','--restore-verification','serialized'], { encoding: 'utf8' }).status, 0);
   } finally {
     if (db.isTransaction) db.exec('ROLLBACK');
     db.close(); rmSync(directory, { recursive: true, force: true });

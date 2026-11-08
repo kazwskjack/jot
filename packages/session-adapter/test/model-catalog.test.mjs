@@ -15,8 +15,13 @@ test('model catalog transport is internally authenticated and accepts no page-su
 function catalog(){return{listProviders:()=>[{id:'fixture',privateConfig:'fixture-private'}],listModels:async()=>[{id:'chosen',name:'Private label',credential:'fixture-private'}],resolveModelInfo:async(provider,id)=>({provider,id,reasoning:{efforts:[{id:'low'},{id:'high'}]},privateConfig:'fixture-private'})};}
 test('only detached model identities and supported effort IDs leave the native catalog',async()=>{
  const read=createModelCatalogReader({llm:catalog(),enabled:true}),value=await read();
- assert.deepEqual(value,{protocol:1,ready:true,models:[{provider:'fixture',model:'chosen',reasoning_output:'none',supported_reasoning_efforts:['low','high']}]});
+ assert.deepEqual(value,{protocol:1,ready:true,models:[{provider:'fixture',model:'chosen',reasoning_output:'none',supported_reasoning_efforts:['low','high'],health:{status:'unknown',observed_at:null,expires_at:null}}]});
  assert.ok(!JSON.stringify(value).includes('fixture-private'));
+});
+test('catalog exposes only bounded observed route health and its freshness fence',async()=>{
+ const read=createModelCatalogReader({llm:catalog(),enabled:true,routeHealth:{read:(provider,model)=>{assert.equal(provider,'fixture');assert.equal(model,'chosen');return{status:'stale',observed_at:1000,expires_at:2000,private:'fixture-secret'};}}});
+ const value=await read();assert.deepEqual(value.models[0].health,{status:'stale',observed_at:1000,expires_at:2000});
+ assert.ok(!JSON.stringify(value).includes('fixture-secret'));
 });
 test('disabled metadata makes no provider calls and provider errors expose no exception body',async()=>{
  const llm=catalog();let calls=0;llm.listModels=async()=>{calls++;throw Error('fixture-private');};

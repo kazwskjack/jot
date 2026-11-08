@@ -17,34 +17,64 @@ test('task mailbox history declares its optional owned occurrence filter',()=>{
 });
 test('workbench and persistent route families expose request and response schemas',()=>{
   const v=new ContractValidator();
-  for(const [method,path] of [['POST','/v1/agents'],['DELETE','/v1/agents/{agent_id}'],['GET','/v1/teams'],['GET','/v1/workspaces/{workspace_id}/files/content'],['POST','/v1/persistent-tasks'],['POST','/v1/persistent-tasks/{task_id}/occurrences/{occurrence_id}/cancel'],['POST','/v1/persistent-tasks/{task_id}/subtasks'],['GET','/v1/persistent-tasks/{task_id}/readiness']])assert.ok(v.operationFor(method,path),`${method} ${path}`);
+  for(const [method,path] of [['POST','/v1/agents'],['DELETE','/v1/agents/{agent_id}'],['GET','/v1/teams'],['GET','/v1/workspaces/{workspace_id}/files/content'],['GET','/v1/workspaces/{workspace_id}/files/versions'],['POST','/v1/persistent-tasks'],['POST','/v1/persistent-tasks/{task_id}/occurrences/{occurrence_id}/cancel'],['POST','/v1/persistent-tasks/{task_id}/subtasks'],['GET','/v1/persistent-tasks/{task_id}/readiness']])assert.ok(v.operationFor(method,path),`${method} ${path}`);
 });
-test('public workbench capabilities expose only two reviewed tool IDs',()=>{
+test('memory retrieval contract marks context delivery without claiming provider usage',()=>{
+ const json=spec(),summary=json.components.schemas.MemoryRetrievalSummary,retrieval=json.components.schemas.MemoryRetrieval,delivery=json.components.schemas.MemoryContextDelivery;
+ assert.deepEqual(summary.properties.context_delivery,{$ref:'#/components/schemas/MemoryContextDelivery'});
+ assert.deepEqual(retrieval.properties.context_delivery,{$ref:'#/components/schemas/MemoryContextDelivery'});
+ assert.deepEqual(delivery.required,['status','source_retrieval_id','context_hash']);
+ assert.equal(delivery.properties.status.const,'delivered_to_session');
+ assert.match(json.paths['/v1/workspaces/{workspace_id}/memory-retrievals'].get.description,/does not prove Provider use/i);
+ assert.match(readFileSync(new URL('../../contracts/types.ts',import.meta.url),'utf8'),/context_delivery\?:MemoryContextDelivery/);
+});
+test('memory reasoning retrieval contract records provider selection and bounded candidate omissions',()=>{
+ const schemas=spec().components.schemas;
+ assert.ok(schemas.MemoryRetrievalSummary.properties.method.enum.includes('reasoning_provider'));
+ assert.ok(schemas.MemoryRetrievalReference.properties.reason.enum.includes('reasoning_provider'));
+ assert.equal(schemas.MemoryRetrievalSummary.properties.excluded.properties.provider_unselected.minimum,0);
+ assert.equal(schemas.MemoryRetrievalSummary.properties.excluded.properties.selected_source_stale.minimum,0);
+ assert.equal(schemas.MemoryRetrievalSummary.properties.candidate_pool_truncated.type,'boolean');
+});
+test('public workbench capabilities expose only the reviewed tool IDs',()=>{
   const schemas=spec().components.schemas;assert.ok(schemas.WorkbenchCapabilities);
   const w=schemas.WorkbenchCapabilities.properties;
-  assert.deepEqual(w.task_triggers.items.enum,['once','interval','page_change','daily','weekly','conversation_message','conversation_result']);
+  assert.deepEqual(w.task_triggers.items.enum,['once','interval','page_change','daily','weekly','cron','delay','conversation_message','conversation_result']);
   assert.deepEqual(w.notification_channels.items.enum,['in_app']);
-  assert.deepEqual(w.allowed_tools.items.enum,['universe_capabilities','universe_search']);
+  assert.deepEqual(w.allowed_tools.items.enum,['universe_capabilities','universe_search','browser_action']);
   assert.equal(w.execution_ready.type,'boolean');
 });
 test('new JSON-flow YAML path and schema blocks match JSON and have TypeScript declarations',()=>{
   const json=spec();const yaml=readFileSync(new URL('../../contracts/openapi.yaml',import.meta.url),'utf8');const types=readFileSync(new URL('../../contracts/types.ts',import.meta.url),'utf8');
   const seenSchemas=new Set();
   for(const line of yaml.split(/\r?\n/)){
-    const path=line.match(/^  (\/v1\/(?:agents|teams|workspaces|persistent-tasks)[^:]*): (\{.*\})$/);
+    const path=line.match(/^  (\/v1\/(?:agents|teams|workspaces|persistent-tasks|push)[^:]*): (\{.*\})$/);
     if(path)assert.deepEqual(JSON.parse(path[2]),json.paths[path[1]],path[1]);
     const schema=line.match(/^    ([A-Za-z][A-Za-z0-9_]*): (\{.*\})$/);
     if(schema&&Object.hasOwn(json.components.schemas,schema[1])){assert.equal(seenSchemas.has(schema[1]),false,`duplicate schema: ${schema[1]}`);seenSchemas.add(schema[1]);assert.deepEqual(JSON.parse(schema[2]),json.components.schemas[schema[1]],schema[1]);assert.match(types,new RegExp(`export type ${schema[1]} =`));}
   }
   assert.match(yaml,/  \/v1\/persistent-tasks: \{/);assert.match(types,/workbench\?: WorkbenchCapabilities/);
 });
+test('push revoke accepts only an optional local endpoint and never returns endpoint or keys',()=>{
+ const v=new ContractValidator(),operation=v.operationFor('POST','/v1/push/subscriptions/{bindingId}/revoke');
+ assert.ok(operation);
+ assert.equal(v.validateRequest(operation,{expected_version:2}).valid,true);
+ assert.equal(v.validateRequest(operation,{expected_version:2,local_endpoint:'https://push.example.test/private'}).valid,true);
+ assert.equal(v.validateRequest(operation,{expected_version:2,local_endpoint:'http://push.example.test/private'}).valid,false);
+ assert.equal(v.validateRequest(operation,{expected_version:2,local_endpoint:'https://push.example.test/private',keys:{auth:'secret'}}).valid,false);
+ const response={binding:{channel_binding_id:'push-binding',channel:'webpush',status:'revoked',version:3,created_at:'2026-01-01T00:00:00Z',verified_at:'2026-01-01T00:00:00Z',revoked_at:'2026-01-01T00:00:01Z'},local_subscription_matches:true};
+ assert.equal(v.validateResponse(operation,200,response).valid,true);
+ assert.equal(v.validateResponse(operation,200,{...response,endpoint:'https://push.example.test/private'}).valid,false);
+});
 test('live capabilities response validates safe tool IDs, readiness and disabled collaboration modes',async()=>{
   const base='.test-tmp';mkdirSync(base,{recursive:true});const directory=mkdtempSync(join(base,'contract-capability-'));
   const service=await buildServer({databasePath:join(directory,'fixture.sqlite'),workspaces:['ws'],workbenchRoot:join(directory,'workspace')});
   try{
     const response=await service.app.inject({method:'GET',url:'/v1/capabilities',headers:{'x-user-id':'alice'}});assert.equal(response.statusCode,200);
-    const value=response.json();assert.equal(value.workbench.execution_ready,false);assert.equal(value.workbench.allowed_tools.length,2);
+    const value=response.json();assert.equal(value.workbench.execution_ready,false);assert.equal(value.workbench.allowed_tools.length,3);
+    assert.equal(value.capabilities.browser_interaction,false);
     assert.equal(value.workbench.task_readiness,true);
+    assert.equal(value.workbench.workspace_file_history,true);assert.equal(value.workbench.workspace_file_range,true);
     const v=new ContractValidator();const op=v.operationFor('GET','/v1/capabilities');assert.equal(v.validateResponse(op,200,value).valid,true);
     const forged=structuredClone(value);forged.workbench.collaboration_modes.find(mode=>mode.id==='team').enabled=true;assert.equal(v.validateResponse(op,200,forged).valid,false);
     const unsafe=structuredClone(value);unsafe.workbench.allowed_tools.push('arbitrary_shell');assert.equal(v.validateResponse(op,200,unsafe).valid,false);
@@ -62,6 +92,8 @@ test('real workbench and task DTOs satisfy success schemas and reject owner spoo
     const memory=workbench.saveMemory('alice','ws',{scope:'private',agent_id:a.agent_id,content:'Note'});check('POST','/v1/workspaces/{workspace_id}/memory',201,memory);
     const b=workbench.createAgent('alice',{name:'Writer'});const message=workbench.sendMessage('alice','ws',{sender_agent_id:a.agent_id,recipient_agent_id:b.agent_id,text:'Read this source',client_message_id:'message-1'});check('POST','/v1/workspaces/{workspace_id}/agent-messages',201,message);check('GET','/v1/workspaces/{workspace_id}/agent-messages',200,workbench.listMessages('alice','ws'));
     const file=workbench.writeFile('alice','ws',{project_id:a.project_id,path:'notes/read.txt',content:'Notes',expected_version:0});check('PUT','/v1/workspaces/{workspace_id}/files',200,file);check('GET','/v1/workspaces/{workspace_id}/files/content',200,workbench.readFile('alice','ws',a.project_id,'notes/read.txt'));
+    check('GET','/v1/workspaces/{workspace_id}/files/content',200,{workspace_id:'ws',project_id:a.project_id,...workbench.readFileVersionRange('alice','ws',a.project_id,'notes/read.txt',1,file.sha256,0,65_536)});
+    check('GET','/v1/workspaces/{workspace_id}/files/versions',200,workbench.listFileVersions('alice','ws',a.project_id,'notes/read.txt',undefined,50));
     const t=tasks.create('alice',{title:'Check',agent_id:a.agent_id,objective:'Check the source',trigger:{kind:'once'}});check('POST','/v1/persistent-tasks',201,t);
     const o=tasks.runNow('alice',t.task_id,'manual');check('POST','/v1/persistent-tasks/{task_id}/run-now',202,o);check('GET','/v1/persistent-tasks/{task_id}/occurrences',200,tasks.occurrences('alice',t.task_id));
     const sub=tasks.upsertSubtask('alice',t.task_id,{title:'Read'});check('POST','/v1/persistent-tasks/{task_id}/subtasks',200,sub);
@@ -70,6 +102,7 @@ test('real workbench and task DTOs satisfy success schemas and reject owner spoo
     const create=v.operationFor('POST','/v1/persistent-tasks');assert.equal(v.validateRequest(create,{title:'T',agent_id:a.agent_id,objective:'O',trigger:{kind:'daily'}}).valid,false);
     const role=v.operationFor('POST','/v1/agents');assert.equal(v.validateRequest(role,{name:'Reader',owner_id:'bob'}).valid,false);
     assert.equal(v.validateRequest(role,{name:'Reader',allowed_tools:['arbitrary_shell']}).valid,false);
+    assert.equal(v.validateRequest(role,{name:'Browser reader',allowed_tools:['browser_action']}).valid,true);
     for(const tool of ['universe_metric_query','universe_get_state','universe_cancel','universe_read_page','universe_research'])assert.equal(v.validateRequest(role,{name:'Reader',allowed_tools:[tool]}).valid,false,tool);
   }finally{db.close();rmSync(dir,{recursive:true,force:true,maxRetries:5,retryDelay:20});}
 });

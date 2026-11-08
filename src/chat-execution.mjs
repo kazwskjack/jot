@@ -1,5 +1,6 @@
 import {chatPrompt,digest,toolContext} from './chat-policy.mjs';
 import {boundedResult} from './chat-store.mjs';
+import {toolActivitySummary} from './activity-summary.mjs';
 export async function performChat({store,run,route,tools,signal,maxSteps,publicError}){
  const execution=store.chatExecution(run.id);
  if(!route||!execution||JSON.stringify(execution.policy)!==JSON.stringify(route.policy))throw Error('model_chat_unavailable');
@@ -25,7 +26,7 @@ export async function performChat({store,run,route,tools,signal,maxSteps,publicE
    if(!['search','read_page','file_read'].includes(name)||!definitions.some(d=>d.function.name===name))return{error:'tool_not_available'};
    const signature=digest(call.function),prior=fileResults.get(call.id);if(name==='file_read'&&prior)return prior.signature===signature?prior.result:{error:'invalid_tool_call_reused'};
    if(signal.aborted)throw Error('cancelled');let result;
-   try{store.event(run.conversation_id,'activity',{run_id:run.id,phase:name,label:name,args});result=boundedResult(await tools.execute(name,args,{run,signal,approve:async()=>{throw Error('tool_not_available');}}));}
+   try{store.event(run.conversation_id,'activity',toolActivitySummary({run_id:run.id,phase:name,label:name,args}));result=boundedResult(await tools.execute(name,args,{run,signal,approve:async()=>{throw Error('tool_not_available');}}));}
    catch(error){if(signal.aborted)throw error;result={error:publicError(error)};}
    if(name==='file_read')fileResults.set(call.id,{signature,result});else store.settleChatTool(run.id,call,result);return result;
   }));

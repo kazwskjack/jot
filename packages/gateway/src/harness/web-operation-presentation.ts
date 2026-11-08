@@ -1,3 +1,5 @@
+import { isIP } from 'node:net'
+
 type OperationKind = 'read_page' | 'browse' | 'execute'
 
 const operationKinds = new Set<OperationKind>(['read_page', 'browse', 'execute'])
@@ -13,6 +15,7 @@ const itemIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
 const operationIdPattern = /^web-[0-9a-f]{32}$/
 const reasonCodePattern = /^[A-Z][A-Z0-9_]{1,63}$/
 const resultRefPattern = /^(?:[0-9a-f]{32}|(?:browse|execute)-child-[0-9a-f]{40})$/
+const nonPublicHostSuffixes = new Set(['arpa', 'corp', 'example', 'home', 'internal', 'invalid', 'lan', 'local', 'localhost', 'onion', 'test'])
 
 type WebOperationPresentation = {
   action: string
@@ -70,7 +73,13 @@ export function safeWebOperationUrl(value: unknown): string | null {
     const authority = value.match(/^https?:\/\/([^/?#]*)/i)?.[1]
     if (!['http:', 'https:'].includes(parsed.protocol) || !parsed.hostname || !authority || authority.includes('@')
       || parsed.username !== '' || parsed.password !== '') return null
-    return value
+    const hostname = parsed.hostname.toLowerCase().replace(/\.$/, '')
+    const labels = hostname.split('.')
+    const suffix = labels.at(-1) ?? ''
+    const ipHost = hostname.startsWith('[') ? hostname.slice(1, -1) : hostname
+    if (isIP(ipHost) !== 0 || parsed.port !== '' || labels.length < 2 || nonPublicHostSuffixes.has(suffix)
+      || !labels.every(label => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))) return null
+    return parsed.origin
   } catch {
     return null
   }

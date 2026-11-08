@@ -1,13 +1,35 @@
 import test from 'node:test';import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import {createNativeRoleHost} from '../native-role-host.js';
-function fixture(options={}){const entries=new Map(),owners=new Map(),bindings=new WeakMap(),events=[],hooks=new Map();let provider,counter=0;
+import {createAdapterHandler} from '../index.js';
+const token='t'.repeat(32);const invoke=(handler,path,body={},authorized=true)=>handler({method:'POST',url:new URL('http://127.0.0.1'+path),headers:authorized?{authorization:`Bearer ${token}`}:{},body,signal:new AbortController().signal});
+const canonical=value=>JSON.stringify(value,(_key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item);
+function fixture(options={}){const {drainApi='legacy',onDrain,...hostOptions}=options;const entries=new Map(),owners=new Map(),bindings=new WeakMap(),events=[],hooks=new Map();let provider,counter=0;
  const make=(id,parent)=>{const barriers=new Map(),agent={id,session:{id,header:parent?{parentSession:parent.id}:{}},ctx:{tools:{guard:fn=>{barriers.set('tool',fn);return()=>barriers.delete('tool');}},on:(name,fn)=>{barriers.set(name,fn);return()=>barriers.delete(name);}},barriers};entries.set(id,agent);if(parent)owners.set(id,parent);return agent;};
  const root=make('root');bindings.set(root,Object.freeze({runId:'root-run',sessionRef:'root',executionLease:{owner:'worker',generation:1}}));
  const bridge={bindingFor:a=>bindings.get(a),guardBudget:async a=>{assert.ok(bindings.get(a));},attach:async(a,b)=>{events.push('attach');bindings.set(a,Object.freeze({...b}));},request:async(path,b,p)=>{assert.equal(b.sessionRef,'root');events.push(path);if(path==='native-child-reservation')return {reservation:{reservation_id:'reservation-'+p.child_session_ref,child_session_ref:p.child_session_ref,role_id:p.role_ref}};return {binding:{runId:'run-'+p.reservation_id,sessionRef:p.reservation_id.replace('reservation-',''),executionLease:{owner:'worker',generation:1}}};}};
- const ctx={agents:{get:id=>entries.get(id),list:()=>[...entries.values()],isOwnedBy:(id,p)=>owners.get(id)===p},on:(name,fn)=>{hooks.set(name,fn);return()=>hooks.delete(name);},subagents:{drainContinuableChildren:async()=>{},registerProvider:p=>{provider=p;return()=>{provider=undefined;};}},agentTeams:{spawnTeammate:async(parent,request)=>{assert.equal(request.provider,'jot-native-role');const id='child-'+(++counter);await provider.prepareContinuable({parent,sessionId:id,signal:request.signal});const child=make(id,parent);await hooks.get('agent/created')({agent:child,signal:request.signal});events.push('published');return {member:{id}};}}};
+ const subagents={registerProvider:p=>{provider=p;return()=>{provider=undefined;};}};let drain=onDrain??(async()=>{});
+ const exposeDrain=name=>Object.defineProperty(subagents,name,{configurable:true,get(){return function(...args){return drain.apply(this,args);};},set(next){drain=next;}});
+ if(drainApi==='legacy')exposeDrain('drainContinuableChildren');
+ if(drainApi==='modern')exposeDrain('drainChildren');
+ const ctx={agents:{get:id=>entries.get(id),list:()=>[...entries.values()],isOwnedBy:(id,p)=>owners.get(id)===p},on:(name,fn)=>{hooks.set(name,fn);return()=>hooks.delete(name);},subagents,agentTeams:{spawnTeammate:async(parent,request)=>{assert.equal(request.provider,'jot-native-role');const id='child-'+(++counter);await provider.prepareContinuable({parent,sessionId:id,signal:request.signal});const child=make(id,parent);await hooks.get('agent/created')({agent:child,signal:request.signal});events.push('published');return {member:{id}};}}};
  const selectModel=async(child,check)=>{assert.equal(child.barriers.get('tool')(),'NATIVE_CHILD_NOT_ADMITTED');await check();events.push('select');};
- const host=createNativeRoleHost({ctx,bridge,selectModel,...options});const request={name:'Saved role',description:'Review',prompt:[{type:'text',text:'Review evidence'}],context:'fresh',signal:new AbortController().signal};
+ const host=createNativeRoleHost({ctx,bridge,selectModel,...hostOptions});const request={name:'Saved role',description:'Review',prompt:[{type:'text',text:'Review evidence'}],context:'fresh',signal:new AbortController().signal};
  return {host,ctx,root,bridge,events,bindings,entries,request,hooks,make};}
+for(const drainApi of ['modern','legacy'])test(`${drainApi} child drain API preserves its receiver during close and disposal`,async()=>{
+ const calls=[],events=[{seq:0,type:'turn/start',data:{}},{seq:1,type:'turn/end',data:{}}];let child;
+ const f=fixture({drainApi,onDrain(parent,ids){assert.equal(this,f.ctx.subagents);calls.push([parent,ids]);for(const id of ids)f.entries.delete(id);},persistence:{flush:async()=>{},open:async()=>({id:child.id,access:'read',header:child.session.header,read:async(offset,count)=>({events:events.slice(offset,offset+count)}),close:async()=>{}})}});
+ f.ctx.sessionProjections={stateOf:()=>({'next-turn':[],'next-step':[]})};
+ const result=await f.host.spawn(f.root,{roleRef:'role',policyVersion:1,requestId:'request'},f.request);
+ child=f.entries.get(result.member.id);child.status='idle';child.whenIdle=async()=>{};Object.assign(child.session,{seq:2,eventAt:i=>events[i]});
+ const request=f.bridge.request;f.bridge.request=async(path,b,payload)=>path==='native-child-close'?{closed:true,run_id:b.runId}:request(path,b,payload);
+ await f.host.closeMember(f.root,child.id);
+ await f.host.dispose();
+ assert.deepEqual(calls,[[f.root,[result.member.id]],[f.root,[result.member.id]]]);
+});
+test('host fails closed when neither supported child drain API exists',()=>{
+ assert.throws(()=>fixture({drainApi:'neither'}),/native_role_host_incompatible/);
+});
 test('named provider prepares backend identity, attaches a cloned binding and selects model before native publication',async()=>{const f=fixture();const result=await f.host.spawn(f.root,{roleRef:'role',policyVersion:1,requestId:'request'},f.request);assert.equal(result.member.id,'child-1');assert.deepEqual(f.events,['native-child-reservation','native-child-bind','attach','select','published']);assert.equal(f.entries.get('child-1').barriers.size,0);await f.host.dispose();});
 
 test('provider prepare failure reports its original identity before native creation even after user cancellation',async()=>{
@@ -173,4 +195,174 @@ test('host reads original batch through the real loopback bridge and guards the 
  const host=createNativeRoleHost({ctx:f.ctx,bridge:f.bridge,selectModel:async()=>{},persistence,nativeOperationOrigin:'http://127.0.0.1:'+server.address().port});
  try{const result=await host.spawn(f.root,{roleRef:'role',policyVersion:1,requestId:'request'},f.request);child=f.entries.get(result.member.id);child.status='idle';child.whenIdle=async()=>{};Object.assign(child.session,{seq:4,eventAt:i=>events[i]});f.ctx.subagents.drainContinuableChildren=async()=>{f.entries.delete(child.id);};assert.equal((await host.closeMember(f.root,child.id)).closed,true);assert.equal(closed,1);}
  finally{await host.dispose();server.closeAllConnections();await new Promise(done=>server.close(done));}
+});
+
+test('native member roster and interrupt resolve only the originally admitted child by its exact Team name',async()=>{
+ const f=fixture(),rows=[],interrupts=[];
+ f.ctx.agentTeams.listMembers=parent=>{assert.equal(parent,f.root);return rows;};
+ f.ctx.agentTeams.interrupt=(parent,targetName)=>{assert.equal(parent,f.root);interrupts.push(targetName);};
+ const created=await f.host.spawn(f.root,{roleRef:'role',policyVersion:1,requestId:'member-control'},f.request),child=f.entries.get(created.member.id);
+ child.name='Saved role';rows.push({id:child.id,name:'Saved role',role:'teammate',status:'running'},{id:'unrelated',name:'Other member',role:'teammate',status:'running'});
+ assert.deepEqual(await f.host.listMembers(f.root),[{id:child.id,name:'Saved role',role:'teammate',status:'running'}]);
+ const receipt=await f.host.interruptMember(f.root,child.id,{requestId:'stop-1',signal:new AbortController().signal});
+ assert.deepEqual(receipt,{request_id:'stop-1',status:'accepted',quiescent:false,execution_authorized:false});assert.deepEqual(interrupts,['Saved role']);
+ await assert.rejects(f.host.interruptMember(f.root,'unrelated',{requestId:'stop-2'}),/native_role_interrupt_member_invalid/);
+ assert.deepEqual(interrupts,['Saved role']);await f.host.dispose();
+});
+
+test('native member wake requires the exact bound parent and preserves an unknown receipt',async()=>{
+ const parent={id:'parent'},calls=[],body={request_id:'wake-1',text:'Continue the assigned task.'};
+ const handler=createAdapterHandler({token,agents:{get:id=>id==='parent'?parent:null},workbenchBridge:{bindingFor:agent=>agent===parent?{sessionRef:'parent',runId:'parent-run'}:undefined},
+  nativeRoleHost:{wakeMember:async(agent,child,request)=>{assert.equal(agent,parent);assert.equal(child,'child');assert.deepEqual(request,{requestId:'wake-1',text:body.text,signal:request.signal});calls.push(child);return {request_id:'wake-1',status:'unknown',execution_authorized:false};}}});
+ assert.equal((await invoke(handler,'/v1/sessions/parent/native-members/child/messages',body,false)).status,401);
+ assert.equal((await invoke(handler,'/v1/sessions/foreign/native-members/child/messages',body)).status,409);
+ assert.equal((await invoke(handler,'/v1/sessions/parent/native-members/child/messages',{...body,run_id:'forged'})).status,422);
+ const reply=await invoke(handler,'/v1/sessions/parent/native-members/child/messages',body);
+ assert.equal(reply.status,200);assert.deepEqual(reply.value,{request_id:'wake-1',status:'unknown',execution_authorized:false});assert.deepEqual(calls,['child']);
+});
+test('native member roster and interrupt require the authenticated bound parent and exact child identity',async()=>{
+ const parent={id:'parent'},calls=[],members=[{id:'child',name:'Reviewer',role:'teammate',status:'running'}];
+ const handler=createAdapterHandler({token,agents:{get:id=>id==='parent'?parent:null},workbenchBridge:{bindingFor:agent=>agent===parent?{sessionRef:'parent',runId:'parent-run'}:undefined},
+  nativeRoleHost:{listMembers:async agent=>{assert.equal(agent,parent);calls.push('list');return members;},
+   interruptMember:async(agent,child,request)=>{assert.equal(agent,parent);assert.equal(child,'child');assert.deepEqual(request,{requestId:'stop-1',signal:request.signal});calls.push(child);return {request_id:'stop-1',status:'accepted',quiescent:false,execution_authorized:false};}}});
+ assert.equal((await invoke(handler,'/v1/sessions/parent/native-members/list',{},false)).status,401);
+ assert.equal((await invoke(handler,'/v1/sessions/foreign/native-members/list')).status,409);
+ assert.equal((await invoke(handler,'/v1/sessions/parent/native-members/list',{extra:true})).status,422);
+ assert.deepEqual(calls,[]);
+ const roster=await invoke(handler,'/v1/sessions/parent/native-members/list');
+ assert.equal(roster.status,200);assert.deepEqual(roster.value,{members,execution_authorized:false});
+ assert.equal((await invoke(handler,'/v1/sessions/parent/native-members/foreign/interrupt',{request_id:'stop-1'})).status,409);
+ assert.equal((await invoke(handler,'/v1/sessions/parent/native-members/child/interrupt',{request_id:'stop-1',child_session_ref:'forged'})).status,422);
+ const stopped=await invoke(handler,'/v1/sessions/parent/native-members/child/interrupt',{request_id:'stop-1'});
+ assert.equal(stopped.status,200);assert.deepEqual(stopped.value,{request_id:'stop-1',status:'accepted',quiescent:false,execution_authorized:false});
+ assert.deepEqual(calls,['list','child']);
+});
+test('authenticated adapter controls the exact bound native child and leaves parent state intact',async()=>{
+ const parent={id:'parent',session:{id:'parent',header:{}}},parentBinding={sessionRef:'parent',runId:'parent-run'},agents=new Map([['parent',parent]]),providers=new Map(),roster=[],interrupts=[];
+ let onCreated,child,childBinding;
+ const ctx={agents:{get:id=>agents.get(id),list:()=>[...agents.values()],isOwnedBy:(id,owner)=>agents.get(id)?.session?.header?.parentSession===owner.id},
+  subagents:{registerProvider:provider=>(providers.set(provider.name,provider),()=>providers.delete(provider.name)),drainChildren:async()=>{}},
+  agentTeams:{spawnTeammate:async(owner,options)=>{const provider=providers.get(options.provider);await provider.prepareContinuable({parent:owner,sessionId:'child',signal:options.signal});
+   child={id:'child',name:'Reviewer',session:{id:'child',header:{parentSession:'parent'}},ctx:{tools:{guard:()=>()=>{}},on:()=>()=>{}}};agents.set('child',child);await onCreated({agent:child,signal:options.signal});
+   roster.push({id:'child',name:'Reviewer',role:'teammate',status:'running'});return {member:{id:'child'}};},
+   listMembers:owner=>{assert.equal(owner,parent);return roster;},interrupt:async(owner,targetName)=>{assert.equal(owner,parent);interrupts.push(targetName);}},
+  on:(name,listener)=>{if(name==='agent/created')onCreated=listener;return()=>{};}};
+ const bridge={bindingFor:agent=>agent===parent?parentBinding:agent===child?childBinding:undefined,guardBudget:async()=>{},attach:async(_child,binding)=>{childBinding=binding;},
+  request:async(path,_binding,payload)=>{
+   if(path==='native-child-reservation')return {reservation:{child_session_ref:'child',role_id:payload.role_ref,reservation_id:'reserve-1'}};
+   if(path==='native-child-bind')return {binding:{sessionRef:'child',runId:'child-run'}};
+   if(path==='native-child-abort')return {aborted:true,child_session_ref:'child'};
+   return {};
+  }};
+ const host=createNativeRoleHost({ctx,bridge,selectModel:async()=>{}}),handler=createAdapterHandler({token,agents,workbenchBridge:{bindingFor:agent=>bridge.bindingFor(agent)},nativeRoleHost:host});
+ const before=structuredClone({goal:{id:'goal',revision:7},budget:{remaining:41},parentId:parent.id});
+ await host.spawn(parent,{roleRef:'saved-role',policyVersion:1,requestId:'spawn-1'},{name:'Reviewer',description:'Review',context:'fresh',prompt:[{type:'text',text:'Start'}],signal:new AbortController().signal});
+ const listed=await invoke(handler,'/v1/sessions/parent/native-members/list');assert.equal(listed.status,200);assert.deepEqual(listed.value,{members:[{id:'child',name:'Reviewer',role:'teammate',status:'running'}],execution_authorized:false});
+ const denied=await invoke(handler,'/v1/sessions/parent/native-members/child/interrupt',{request_id:'stop-1'},false);assert.equal(denied.status,401);
+ const interrupted=await invoke(handler,'/v1/sessions/parent/native-members/child/interrupt',{request_id:'stop-1'});assert.equal(interrupted.status,200);
+ assert.deepEqual(interrupted.value,{request_id:'stop-1',status:'accepted',quiescent:false,execution_authorized:false});assert.deepEqual(interrupts,['Reviewer']);
+ assert.deepEqual({goal:{id:'goal',revision:7},budget:{remaining:41},parentId:parent.id},before);
+ await host.dispose();
+});
+test('native role host does not resend a wake after an uncertain Team message',async()=>{
+ const parent={id:'parent',session:{id:'parent',header:{}}},parentBinding={sessionRef:'parent',runId:'parent-run'},agents=new Map([['parent',parent]]),providers=new Map(),roster=[],sends=[],receipts=[];
+ let onCreated,childBinding,receiptState='none';
+ const ctx={agents:{get:id=>agents.get(id),list:()=>[...agents.values()],isOwnedBy:(id,owner)=>agents.get(id)?.session?.header?.parentSession===owner.id},
+  subagents:{registerProvider:provider=>(providers.set(provider.name,provider),()=>providers.delete(provider.name)),drainContinuableChildren:async()=>{}},
+  agentTeams:{listMembers:()=>roster,spawnTeammate:async(owner,options)=>{
+   const provider=providers.get(options.provider);await provider.prepareContinuable({parent:owner,sessionId:'child',signal:options.signal});
+   const child={id:'child',name:'Reviewer',session:{id:'child',header:{parentSession:'parent'}},ctx:{tools:{guard:()=>()=>{}},on:()=>()=>{}}};agents.set('child',child);
+   await onCreated({agent:child,signal:options.signal});roster.push({id:'child',name:'Reviewer',role:'teammate',status:'inactive'});
+   return {member:{id:'child',name:'Reviewer',role:'teammate',status:'inactive',diagnostics:[]}};
+  },sendMessage:async(owner,message)=>{sends.push(message);throw Error('lost acknowledgement');}},
+  on:(name,listener)=>{if(name==='agent/created')onCreated=listener;return ()=>{};}};
+ const bridge={bindingFor:agent=>agent===parent?parentBinding:agent?.id==='child'?childBinding:undefined,guardBudget:async()=>{},
+  attach:async(child,binding)=>{childBinding=binding;},request:async(path,binding,payload)=>{
+   if(path==='native-child-reservation')return {reservation:{child_session_ref:'child',role_id:'role',reservation_id:'reserve-1'}};
+   if(path==='native-child-bind')return {binding:{sessionRef:'child',runId:'child-run'}};
+   if(path==='native-child-source'&&payload.action==='member-message'){
+    receipts.push(payload.receipt_action);
+    if(payload.receipt_action==='complete'){receiptState=payload.result;return {state:receiptState};}
+    if(receiptState==='unknown')return {decision:'unknown'};
+    if(receiptState==='accepted')return {decision:'accepted'};
+    receiptState='dispatching';return {decision:'dispatch'};
+   }
+   throw Error('unexpected native host request');
+  }};
+ const host=createNativeRoleHost({ctx,bridge,selectModel:async()=>{}});
+ await host.spawn(parent,{roleRef:'role',policyVersion:1,requestId:'spawn-1'},{name:'Reviewer',description:'Review',context:'fresh',prompt:[{type:'text',text:'Start'}],signal:new AbortController().signal});
+ const request={requestId:'wake-1',text:'Continue the assigned task.',signal:new AbortController().signal};
+ assert.deepEqual(await host.wakeMember(parent,'child',request),{request_id:'wake-1',status:'unknown',execution_authorized:false});
+ assert.deepEqual(await host.wakeMember(parent,'child',request),{request_id:'wake-1',status:'unknown',execution_authorized:false});
+ assert.equal(sends.length,1);assert.deepEqual(receipts,['begin','complete','begin']);assert.equal(sends[0].target,'Reviewer');
+ assert.deepEqual(sends[0].content,[{type:'text',text:request.text}]);assert.equal(sends[0].signal.aborted,false);
+ roster.push({id:'other',name:'Reviewer',role:'teammate',status:'inactive'});
+ await assert.rejects(host.wakeMember(parent,'child',{...request,requestId:'wake-2'}),/native_role_wake_member_invalid/);
+ assert.equal(sends.length,1);assert.deepEqual(receipts,['begin','complete','begin']);
+ await host.dispose();
+});
+test('explicit owner wake cold-recovers the same native child Session through its closed prefix',async()=>{
+ const f=fixture(),parent=f.root,parentBinding=f.bridge.bindingFor(parent),events=[{seq:0,type:'turn/start',data:{}},{seq:1,type:'turn/end',data:{}}],header={parentSession:parent.id};
+ const digest=createHash('sha256').update(canonical({...header,delegationDepth:0})+'\n'+events.map(event=>canonical(event)+'\n').join('')).digest('hex');
+ const proof={protocol:1,session_ref:'child',parent_session_ref:parent.id,seq_exclusive:events.length,turn_end_seq:1,log_sha256:digest,driver_nonresident:true,inbox_pending:0};
+ const persistence={flush:async()=>{},open:async id=>({id,access:'read',header,read:async(offset,count)=>({events:events.slice(offset,offset+count)}),close:async()=>{}})};
+ f.ctx.sessionProjections={stateOf:()=>({'next-turn':[],'next-step':[]})};
+ let onCreated,receiptState='none',newChildBinding,sends=0;const calls=[];
+ f.ctx.agentTeams.listMembers=()=>[{id:'child',name:'Reviewer',role:'teammate',status:'inactive'}];
+ f.ctx.agentTeams.sendMessage=async(owner,message)=>{
+  assert.equal(owner,parent);assert.deepEqual(message.content,[{type:'text',text:'Continue the same assigned task.'}]);sends++;
+  const child=f.make('child',parent);child.name='Reviewer';child.status='idle';child.whenIdle=async()=>{};Object.assign(child.session,{seq:events.length,eventAt:index=>events[index]});
+  await onCreated({agent:child,signal:message.signal});return {status:'accepted'};
+ };
+ f.ctx.subagents.drainContinuableChildren=async(_owner,ids)=>{for(const id of ids)f.entries.delete(id);};
+ f.ctx.on=(name,listener)=>{if(name==='agent/created')onCreated=listener;return()=>{};};
+ f.bridge.attach=async(child,binding)=>{assert.equal(child.id,'child');newChildBinding=binding;f.bindings.set(child,Object.freeze({...binding}));};
+ f.bridge.request=async(path,binding,payload)=>{
+  if(path==='native-child-close')assert.equal(binding.runId,'child-run-new');else assert.equal(binding,parentBinding);calls.push([path,payload]);
+  if(path==='native-child-source'&&payload.action==='member-message'){
+   if(payload.receipt_action==='complete'){receiptState=payload.result;return {state:receiptState};}
+   if(receiptState==='accepted')return {decision:'accepted'};
+   if(receiptState==='unknown')return {decision:'unknown'};
+   receiptState='dispatching';return {decision:'dispatch'};
+  }
+  if(path==='native-child-source')return {source:{previous_run_id:'child-run-old',role_ref:'saved-role',proof}};
+  if(path==='native-child-activate')return {binding:{runId:'child-run-new',sessionRef:'child',executionLease:{owner:'worker',generation:2}}};
+  if(path==='native-child-close')return {closed:true,run_id:binding.runId};
+  throw Error('unexpected native host request');
+ };
+ const host=createNativeRoleHost({ctx:f.ctx,bridge:f.bridge,selectModel:async(child,guard)=>{assert.equal(child.id,'child');await guard();},persistence,automaticClosures:true,nativeRecovery:true});
+ const input={requestId:'cold-wake-1',text:'Continue the same assigned task.',signal:new AbortController().signal};
+ assert.deepEqual(await host.listMembers(parent),[{id:'child',name:'Reviewer',role:'teammate',status:'inactive'}]);
+ assert.deepEqual(await host.wakeMember(parent,'child',input),{request_id:input.requestId,status:'accepted',execution_authorized:false});
+ assert.equal(sends,1);assert.equal(parent.id,'root');assert.equal(f.bridge.bindingFor(parent),parentBinding);
+ assert.equal(newChildBinding.sessionRef,'child');assert.equal(newChildBinding.runId,'child-run-new');assert.notEqual(newChildBinding.runId,'child-run-old');
+ assert.deepEqual(calls.filter(([path])=>path==='native-child-activate').map(([,payload])=>payload),[{child_session_ref:'child',previous_run_id:'child-run-old',previous_log_sha256:digest,previous_seq_exclusive:2}]);
+ assert.deepEqual(calls.filter(([path,payload])=>path==='native-child-source'&&payload.action==='member-message').map(([,payload])=>payload.receipt_action),['begin','complete']);
+ assert.deepEqual(await host.wakeMember(parent,'child',input),{request_id:input.requestId,status:'accepted',execution_authorized:false});assert.equal(sends,1);
+ await host.dispose();
+});
+test('native role host keeps spawn-only Team services compatible and refuses unsupported wake before dispatch',async()=>{
+ const parent={id:'parent',session:{id:'parent',header:{}}},parentBinding={sessionRef:'parent',runId:'parent-run'},agents=new Map([['parent',parent]]),providers=new Map();
+ let onCreated,childBinding,sourceCalls=0;
+ const ctx={agents:{get:id=>agents.get(id),list:()=>[...agents.values()],isOwnedBy:(id,owner)=>agents.get(id)?.session?.header?.parentSession===owner.id},
+  subagents:{registerProvider:provider=>(providers.set(provider.name,provider),()=>providers.delete(provider.name)),drainContinuableChildren:async()=>{}},
+  agentTeams:{spawnTeammate:async(owner,options)=>{
+   const provider=providers.get(options.provider);await provider.prepareContinuable({parent:owner,sessionId:'child',signal:options.signal});
+   const child={id:'child',name:'Reviewer',session:{id:'child',header:{parentSession:'parent'}},ctx:{tools:{guard:()=>()=>{}},on:()=>()=>{}}};agents.set('child',child);
+   await onCreated({agent:child,signal:options.signal});return {member:{id:'child'}};
+  }},on:(name,listener)=>{if(name==='agent/created')onCreated=listener;return()=>{};}};
+ const bridge={bindingFor:agent=>agent===parent?parentBinding:agent?.id==='child'?childBinding:undefined,guardBudget:async()=>{},
+  attach:async(_child,binding)=>{childBinding=binding;},request:async(path,_binding,payload)=>{
+   if(path==='native-child-reservation')return {reservation:{child_session_ref:'child',role_id:'role',reservation_id:'reserve-1'}};
+   if(path==='native-child-bind')return {binding:{sessionRef:'child',runId:'child-run'}};
+   if(path==='native-child-source'){sourceCalls++;return {decision:'dispatch'};}
+   throw Error('unexpected native host request');
+  }};
+ const host=createNativeRoleHost({ctx,bridge,selectModel:async()=>{}});
+ const spawned=await host.spawn(parent,{roleRef:'role',policyVersion:1,requestId:'spawn-only'},
+  {name:'Reviewer',description:'Review',context:'fresh',prompt:[{type:'text',text:'Start'}],signal:new AbortController().signal});
+ assert.equal(spawned.member.id,'child');
+ await assert.rejects(host.wakeMember(parent,'child',{requestId:'wake-1',text:'Continue'}),/native_role_wake_unavailable/);
+ assert.equal(sourceCalls,0);
+ await host.dispose();
 });

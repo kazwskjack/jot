@@ -1,0 +1,37 @@
+test_linux_run (unittest.loader._FailedTest.test_linux_run) ... ERROR
+test_result_validate (unittest.loader._FailedTest.test_result_validate) ... ERROR
+
+======================================================================
+ERROR: test_linux_run (unittest.loader._FailedTest.test_linux_run)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_linux_run
+Traceback (most recent call last):
+  File "C:\Users\kazws\AppData\Local\Programs\Python\Python311\Lib\unittest\loader.py", line 407, in _find_test_path
+    module = self._get_module_from_name(name)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\kazws\AppData\Local\Programs\Python\Python311\Lib\unittest\loader.py", line 350, in _get_module_from_name
+    __import__(name)
+  File "E:\codex\yunticket\tools\delivery-flow-v1\tests\test_linux_run.py", line 3, in <module>
+    from linux_run import classify_result, parse_node_test_summary
+ModuleNotFoundError: No module named 'linux_run'
+
+
+======================================================================
+ERROR: test_result_validate (unittest.loader._FailedTest.test_result_validate)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_result_validate
+Traceback (most recent call last):
+  File "C:\Users\kazws\AppData\Local\Programs\Python\Python311\Lib\unittest\loader.py", line 407, in _find_test_path
+    module = self._get_module_from_name(name)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\kazws\AppData\Local\Programs\Python\Python311\Lib\unittest\loader.py", line 350, in _get_module_from_name
+    __import__(name)
+  File "E:\codex\yunticket\tools\delivery-flow-v1\tests\test_result_validate.py", line 7, in <module>
+    from result_validate import load_schema, validate_job_result, validate_test_event
+ModuleNotFoundError: No module named 'result_validate'
+
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.000s
+
+FAILED (errors=2)

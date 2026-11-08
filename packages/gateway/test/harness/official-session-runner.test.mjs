@@ -132,6 +132,19 @@ test('runner has no whole-task deadline when timeout is omitted', async () => {
   assert.equal(result.final_text, '完成')
 })
 
+test('caller cancellation aborts the native DSH follow and settles the original runner',async()=>{
+ const caller=new AbortController();let observedSignal,beginFollow;
+ const following=new Promise(resolve=>beginFollow=resolve);
+ const client={create:async()=>({}),prompt:async()=>({accepted:true}),async *follow(_sessionId,signal){
+  observedSignal=signal;yield {type:'snapshot',cursor:0,records:[]};beginFollow();
+  await new Promise((resolve,reject)=>signal.addEventListener('abort',()=>reject(signal.reason??Error('aborted')),{once:true}));
+ }};
+ const pending=new OfficialSessionRunner(client,{cwd:'/fixture',agentPreset:'jot-general'})
+  .run({enabled:true,taskRequestId:'dream-cancel-run',message:'Review project memory',sessionRef:'dream-cancel-session',deferCompletionProbe:true,signal:caller.signal});
+ await following;caller.abort(Error('dream_shutdown'));
+ await assert.rejects(pending,/dream_shutdown/);assert.equal(observedSignal.aborted,true);
+});
+
 test('a background interrupted turn captures a host-verified checkpoint before returning its outcome',async()=>{
  const proof={session_ref:'session-fixture',seq_exclusive:4,turn_end_seq:3,goal_id:'goal-fixture',goal_revision:3,log_sha256:'a'.repeat(64)};
  const calls=[];let saved;

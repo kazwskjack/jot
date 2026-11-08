@@ -106,3 +106,68 @@ test('worker stages an extensionless uploaded DOCX with a MIME-derived input suf
     assert.deepEqual(readFileSync(input), original);
   } finally { db.close(); rmSync(directory, { recursive: true, force: true }); }
 });
+
+test('worker previews a pinned historical artifact only after verifying and staging its exact bytes', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ga-file-document-preview-'));
+  const db = openProductDatabase(join(directory, 'db.sqlite')); const root = join(directory, 'files');
+  const input = join(directory, 'old.pdf'), current = join(directory, 'current.pdf');
+  const original = Buffer.from('%PDF-1.7\nold pinned bytes'), newer = Buffer.from('%PDF-1.7\nnew current bytes');
+  writeFileSync(input, original); writeFileSync(current, newer);
+  const sha = createHash('sha256').update(original).digest('hex');
+  db.prepare("INSERT INTO ga_conversations(id,owner_id,workspace_id,title,model,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
+    .run('conv', 'owner', 'ws', 't', '{}', 'now', 'now');
+  db.prepare("INSERT INTO ga_artifacts(id,conversation_id,owner_id,kind,current_version,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
+    .run('artifact-1', 'conv', 'owner', 'upload', 2, 'now', 'now');
+  const insert = db.prepare("INSERT INTO ga_artifact_versions(artifact_id,version,server_path,sha256,size_bytes,mime_type,metadata_json,created_at) VALUES(?,?,?,?,?,?,?,?)");
+  insert.run('artifact-1', 1, input, sha, original.length, 'application/pdf', JSON.stringify({ file_name: 'old.pdf', status: 'ready' }), 'now');
+  insert.run('artifact-1', 2, current, createHash('sha256').update(newer).digest('hex'), newer.length,
+    'application/pdf', JSON.stringify({ file_name: 'current.pdf', status: 'ready' }), 'later');
+  db.prepare("INSERT INTO ga_artifact_archives(artifact_id,backup_status,local_state,last_used_at,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+    .run('artifact-1', 'pending', 'present', 'now', 'now', 'now');
+  try {
+    const jobs = new FileJobService(db), queued = jobs.enqueue('owner', 'conv', 'artifact-1', {
+      operation: 'document.inspect', base_version: 1, base_sha256: sha,
+    }, 'idem-document-preview-1');
+    let receivedInput = '';
+    const worker = new FileEngineWorker(jobs, new ArtifactService(db, root), {
+      run: async value => { receivedInput = String(value.input_path); assert.deepEqual(readFileSync(receivedInput), original);
+        return { ok: true, engine: { name: 'test', version: '1' }, content: { page_count: 1,
+          pages: [{ number: 1, text: 'original PDF page' }], truncated: false }, warnings: [] }; },
+    }, { workerId: 'worker', workRoot: join(root, 'sessions', 'file-engine') });
+    assert.equal(await worker.processNext(), true);
+    assert.notEqual(receivedInput, input); assert.match(receivedInput, /input\.pdf$/);
+    const done = jobs.get('owner', queued.job_id);
+    assert.equal(done.status, 'completed'); assert.equal(done.base_version, 1);
+    assert.deepEqual(done.result.source, { artifact_id: 'artifact-1', version: 1, sha256: sha });
+    assert.equal(done.result.content.pages[0].text, 'original PDF page');
+    assert.equal(db.prepare('SELECT current_version FROM ga_artifacts WHERE id=?').get('artifact-1').current_version, 2);
+    assert.deepEqual(readFileSync(input), original);
+  } finally { db.close(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('worker refuses a document preview if the pinned source bytes changed after enqueue', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ga-file-document-integrity-'));
+  const db = openProductDatabase(join(directory, 'db.sqlite')); const root = join(directory, 'files');
+  const input = join(directory, 'source.docx'), original = Buffer.from('pinned source'); writeFileSync(input, original);
+  const sha = createHash('sha256').update(original).digest('hex');
+  db.prepare("INSERT INTO ga_conversations(id,owner_id,workspace_id,title,model,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
+    .run('conv', 'owner', 'ws', 't', '{}', 'now', 'now');
+  db.prepare("INSERT INTO ga_artifacts(id,conversation_id,owner_id,kind,current_version,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
+    .run('artifact-1', 'conv', 'owner', 'upload', 1, 'now', 'now');
+  db.prepare("INSERT INTO ga_artifact_versions(artifact_id,version,server_path,sha256,size_bytes,mime_type,metadata_json,created_at) VALUES(?,?,?,?,?,?,?,?)")
+    .run('artifact-1', 1, input, sha, original.length,
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document', JSON.stringify({ file_name: 'source.docx', status: 'ready' }), 'now');
+  try {
+    const jobs = new FileJobService(db), queued = jobs.enqueue('owner', 'conv', 'artifact-1', {
+      operation: 'document.inspect', base_version: 1, base_sha256: sha,
+    }, 'idem-document-preview-tamper');
+    writeFileSync(input, 'changed after enqueue');
+    let called = false;
+    const worker = new FileEngineWorker(jobs, new ArtifactService(db, root), {
+      run: async () => { called = true; return { ok: true, engine: { name: 'test', version: '1' } }; },
+    }, { workerId: 'worker', workRoot: join(root, 'sessions', 'file-engine') });
+    assert.equal(await worker.processNext(), true);
+    assert.equal(called, false);
+    assert.equal(jobs.get('owner', queued.job_id).error_code, 'FILE_SOURCE_INTEGRITY_FAILED');
+  } finally { db.close(); rmSync(directory, { recursive: true, force: true }); }
+});

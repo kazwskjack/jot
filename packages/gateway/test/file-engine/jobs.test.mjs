@@ -46,6 +46,41 @@ test('rejects foreign artifacts and stale versions before enqueue', () => {
   } finally { f.close(); }
 });
 
+test('allows a read-only inspection of an exact historical owner version', () => {
+  const f = fixture();
+  try {
+    const path = join(f.directory, 'current.docx'); writeFileSync(path, 'current');
+    f.db.prepare('INSERT INTO ga_artifact_versions(artifact_id,version,server_path,sha256,size_bytes,mime_type,metadata_json,created_at) VALUES(?,?,?,?,?,?,?,?)')
+      .run('artifact-1', 2, path, 'b'.repeat(64), 7,
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        JSON.stringify({ file_name: 'current.docx', status: 'ready' }), 'later');
+    f.db.prepare('UPDATE ga_artifacts SET current_version=2 WHERE id=?').run('artifact-1');
+    const jobs = new FileJobService(f.db);
+    const preview = jobs.enqueue('owner', 'conv', 'artifact-1', {
+      operation: 'document.inspect', base_version: 1, base_sha256: 'a'.repeat(64),
+    }, 'idem-file-historic-preview');
+    assert.equal(preview.status, 'queued');
+    assert.equal(preview.base_version, 1);
+    assert.equal(preview.artifact_ref, 'artifact-1');
+    assert.throws(() => jobs.enqueue('other', 'conv', 'artifact-1', {
+      operation: 'document.inspect', base_version: 1, base_sha256: 'a'.repeat(64),
+    }, 'idem-file-foreign-preview'), /UNAUTHORIZED_FILE/);
+  } finally { f.close(); }
+});
+
+test('bounds document inspection before queuing the file worker', () => {
+  const f = fixture();
+  try {
+    f.db.prepare('UPDATE ga_artifact_versions SET size_bytes=? WHERE artifact_id=? AND version=1')
+      .run(20 * 1024 * 1024 + 1, 'artifact-1');
+    const jobs = new FileJobService(f.db);
+    assert.throws(() => jobs.enqueue('owner', 'conv', 'artifact-1', {
+      operation: 'document.inspect', base_version: 1, base_sha256: 'a'.repeat(64),
+    }, 'idem-file-too-large-preview'), /DOCUMENT_PREVIEW_TOO_LARGE/);
+    assert.equal(f.db.prepare('SELECT COUNT(*) count FROM ga_file_jobs').get().count, 0);
+  } finally { f.close(); }
+});
+
 test('claims a queued job once and exposes only owned status', () => {
   const f = fixture();
   try {

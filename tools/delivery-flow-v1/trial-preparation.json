@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "trial_id": "delivery-flow-v1-120m",
+  "state": "prepared_not_started",
+  "prepared_at": "2026-10-24T09:09:39Z",
+  "duration_seconds": 7200,
+  "historical_baseline": {
+    "cycle_time_hours": 3.951902,
+    "integrated_batches": 8,
+    "source": {
+      "path": "E:/codex/yunticket/docs/superpowers/plans/2026-10-24-delivery-flow-v1-and-two-hour-trial.md",
+      "sha256": "5b62240f74e18bb5b4ab24e0964672728440a7d2d6f3d7f7513cd8786f918f4b"
+    },
+    "source_class_scope": "inherited_wip_included_unseparated"
+  },
+  "optimization_baseline": null,
+  "started_at": null,
+  "ended_at": null,
+  "start_snapshot": null,
+  "end_snapshot": null
+}

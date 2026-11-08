@@ -1,0 +1,146 @@
+[
+  {
+    "owner": "15",
+    "source": "E:\\codex\\yunticket\\tools\\delivery-flow-v1\\README.md",
+    "path": "linux-README.md",
+    "sha256": "8322ad4955a66d8614fad4c831065f14caf7a16c3560a99839a4c13741ff31e4"
+  },
+  {
+    "owner": "15",
+    "source": "E:\\codex\\yunticket\\tools\\delivery-flow-v1\\linux_run.py",
+    "path": "linux_run.py",
+    "sha256": "39862d8aec970c1e94c0011c9dc079404dd86e7a3b3a7e0b7420d0f512af99d6"
+  },
+  {
+    "owner": "15",
+    "source": "E:\\codex\\yunticket\\tools\\delivery-flow-v1\\result_validate.py",
+    "path": "result_validate.py",
+    "sha256": "7e9fdbb63498750f8e15136ca002d478fb3ffab46613542fb89f1be70380deaf"
+  },
+  {
+    "owner": "15",
+    "source": "E:\\codex\\yunticket\\tools\\delivery-flow-v1\\linux-job-result.schema.json",
+    "path": "linux-job-result.schema.json",
+    "sha256": "e1f6f4d7171582af74772a98e09c1ea99ea3a980599769cdd515a3f7a84db4cd"
+  },
+  {
+    "owner": "15",
+    "source": "E:\\codex\\yunticket\\tools\\delivery-flow-v1\\test-event.schema.json",
+    "path": "test-event.schema.json",
+    "sha256": "dfca4c2090a6cb7fb740c2ebd28f03dbda6f91b814c2464e1420eab404644251"
+  },
+  {
+    "owner": "15",
+    "source": "E:\\codex\\yunticket\\tools\\delivery-flow-v1\\tests\\test_linux_run.py",
+    "path": "tests/test_linux_run.py",
+    "sha256": "99b0ac7a51298e49aba2ac27696ae96c0cc5fa5b8b56e6f352048982a84fb6de"
+  },
+  {
+    "owner": "15",
+    "source": "E:\\codex\\yunticket\\tools\\delivery-flow-v1\\tests\\test_result_validate.py",
+    "path": "tests/test_result_validate.py",
+    "sha256": "bfabd3296eaee29ef834c5bb23c94656bc020fa96fcca4867d832245f493ac8f"
+  },
+  {
+    "owner": "15",
+    "source": "E:\\codex\\yunticket\\tools\\delivery-flow-v1\\fixtures\\m14-18b\\source-manifest.json",
+    "path": "fixtures/m14-18b/source-manifest.json",
+    "sha256": "08499edbe7ac50cf3b5d9599974126c1d1018834bccfae39656dec1810937545"
+  },
+  {
+    "owner": "15",
+    "source": "E:\\codex\\yunticket\\tools\\delivery-flow-v1\\fixtures\\m14-18b\\tracked-source-18b.zip",
+    "path": "fixtures/m14-18b/tracked-source-18b.zip",
+    "sha256": "ef5846f3ce619d179918935db1012f6eaee6fb19d774b148d6eda088b6d3202f"
+  },
+  {
+    "owner": "15",
+    "source": "E:\\codex\\yunticket\\tools\\delivery-flow-v1\\fixtures\\synthetic-node-d060882ad1eb\\packet.json",
+    "path": "fixtures/synthetic-node-d060882ad1eb/packet.json",
+    "sha256": "7beed2437093a4e801919cd2999cf1cf7115016948c45a6e86c580cb846385af"
+  },
+  {
+    "owner": "15",
+    "source": "E:\\codex\\yunticket\\tools\\delivery-flow-v1\\fixtures\\synthetic-node-d060882ad1eb\\source-manifest.json",
+    "path": "fixtures/synthetic-node-d060882ad1eb/source-manifest.json",
+    "sha256": "79c37f1e1f1327367825eb8f877943591fdfe5718273ff59c1aee38a1c4a1b1d"
+  },
+  {
+    "owner": "15",
+    "source": "E:\\codex\\yunticket\\tools\\delivery-flow-v1\\fixtures\\synthetic-node-d060882ad1eb\\source.zip",
+    "path": "fixtures/synthetic-node-d060882ad1eb/source.zip",
+    "sha256": "b789e3e95566b2715e438cf81ef8000b4e01ec5548c8fe94823c051310c17560"
+  },
+  {
+    "owner": "15",
+    "source": "E:\\codex\\yunticket\\tools\\delivery-flow-v1\\fixtures\\synthetic-node-d060882ad1eb\\bundle\\manifest.json",
+    "path": "fixtures/synthetic-node-d060882ad1eb/bundle/manifest.json",
+    "sha256": "bfe83fb00c23998bd0d08f8add76e0c3e4a3fd3189eb01581e9c999a417a6661"
+  },
+  {
+    "owner": "15",
+    "source": "E:\\codex\\yunticket\\tools\\delivery-flow-v1\\tdd-red-authoring-host.log",
+    "path": "tdd-red-authoring-host.log",
+    "sha256": "fb0b91668158171c63d0737500d08f8f532388d07330173045b75cce88dfeec2"
+  },
+  {
+    "owner": "20",
+    "source": "E:\\codex\\yunticket\\.test-tmp\\jot-permissive-20261021\\worker-20\\tools\\delivery-flow-v1\\README.md",
+    "path": "metrics-README.md",
+    "sha256": "30b3b96123f10ad127a84b4da2891fcad97aa6427e9ad9ae21179219ac47432e"
+  },
+  {
+    "owner": "20",
+    "source": "E:\\codex\\yunticket\\.test-tmp\\jot-permissive-20261021\\worker-20\\tools\\delivery-flow-v1\\event.schema.json",
+    "path": "event.schema.json",
+    "sha256": "02045a1bf6c86fa053d49c1ff7f61957e8e11816447a9d693dbaae2a64983c0a"
+  },
+  {
+    "owner": "20",
+    "source": "E:\\codex\\yunticket\\.test-tmp\\jot-permissive-20261021\\worker-20\\tools\\delivery-flow-v1\\metrics.py",
+    "path": "metrics.py",
+    "sha256": "df7d4c9b6b9661331554a17b8ea0afb3181a920936450c224f92e374aa9af442"
+  },
+  {
+    "owner": "20",
+    "source": "E:\\codex\\yunticket\\.test-tmp\\jot-permissive-20261021\\worker-20\\tools\\delivery-flow-v1\\trial-preparation.json",
+    "path": "trial-preparation.json",
+    "sha256": "c103b7d8282008f101c387cbaae784f2faf19782f42c74d26eba6a89cf99224a"
+  },
+  {
+    "owner": "20",
+    "source": "E:\\codex\\yunticket\\.test-tmp\\jot-permissive-20261021\\worker-20\\tools\\delivery-flow-v1\\trial.schema.json",
+    "path": "trial.schema.json",
+    "sha256": "dab662ac431ab00ea7c20d43f77de462167a99b2d1e392532cb8a8bda89a35fd"
+  },
+  {
+    "owner": "20",
+    "source": "E:\\codex\\yunticket\\.test-tmp\\jot-permissive-20261021\\worker-20\\tools\\delivery-flow-v1\\tests\\test_metrics.py",
+    "path": "tests/test_metrics.py",
+    "sha256": "215ce1752471a17d63fbde7aea23fbca6b13476c8a37c9101ee8aaf1005096e0"
+  },
+  {
+    "owner": "20",
+    "source": "E:\\codex\\yunticket\\.test-tmp\\jot-permissive-20261021\\worker-20\\tools\\delivery-flow-v1\\test-results\\unittest-20261024-r3.log",
+    "path": "test-results/unittest-20261024-r3.log",
+    "sha256": "06483ae5dafbc33004b559e67784436034efb19697a5373ecbb9a52763b407bc"
+  },
+  {
+    "owner": "20",
+    "source": "E:\\codex\\yunticket\\.test-tmp\\jot-permissive-20261021\\worker-20\\tools\\delivery-flow-v1\\test-results\\schema-ajv6-draft07-20261024-r3.log",
+    "path": "test-results/schema-ajv6-draft07-20261024-r3.log",
+    "sha256": "f48663208b5b0cf9041aecfebd2aac421d7c247bc9dde237d8b41673ef859c66"
+  },
+  {
+    "owner": "17",
+    "source": "E:\\codex\\yunticket\\.test-tmp\\jot-permissive-20261021\\worker-17-b\\tools\\delivery-flow-v1\\coverage.py",
+    "path": "coverage.py",
+    "sha256": "cbca0ac55bfd1fcd569e4dfba17001d7c544535fa18b6f8d9ce2ef62d5bee30e"
+  },
+  {
+    "owner": "17",
+    "source": "E:\\codex\\yunticket\\.test-tmp\\jot-permissive-20261021\\worker-17-b\\tools\\delivery-flow-v1\\tests\\test_coverage.py",
+    "path": "tests/test_coverage.py",
+    "sha256": "9113fdb7c5c48a6e33c7aa4967989451c056220e2a8c7fdd931cddf23b03a507"
+  }
+]

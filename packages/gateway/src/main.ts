@@ -1,17 +1,23 @@
+import {mattermostOwnerBindingConfiguration} from './channels/mattermost-owner-proof.ts';
 import { buildServer } from './server.ts';
 import { loadBffConfig } from './config.ts';
 import { readFileSync } from 'node:fs';
 import { VoiceAdapterClient } from './voice/adapter-client.ts';
 import {createEmailProvider} from './channels/email-provider.ts';
 import {emailConfiguration} from './channels/provider-config.ts';
+import {loadWebPushVapidConfiguration} from './channels/web-push-provider.ts';
 import {loadReplyJudgeClient} from './persistent-tasks/reply-judge-client.ts';
+import {loadMemoryReasoningClient} from './workbench/memory-reasoning-client.ts';
 import {SessionControllerClient} from './harness/session-controller-client.ts';
+import {SkillCatalogAdapterClient} from './skills/catalog-adapter.ts';
 import {loadNativeGitClient} from './git/native-transport-client.ts';
 
 const config = loadBffConfig();
 const nativeGitClient=await loadNativeGitClient(process.env);
 const sessionAdapterTokenFile=process.env.GENERAL_AGENT_SESSION_ADAPTER_TOKEN_FILE?.trim();
 const conversationGoalClient=sessionAdapterTokenFile?new SessionControllerClient(
+  process.env.GENERAL_AGENT_SESSION_ADAPTER_URL?.trim()||'http://127.0.0.1:18841',readFileSync(sessionAdapterTokenFile,'utf8').trim()):undefined;
+const skillCatalogClient=sessionAdapterTokenFile?new SkillCatalogAdapterClient(
   process.env.GENERAL_AGENT_SESSION_ADAPTER_URL?.trim()||'http://127.0.0.1:18841',readFileSync(sessionAdapterTokenFile,'utf8').trim()):undefined;
 let voiceAdapter: VoiceAdapterClient | undefined;
 if (config.voiceEnabled) {
@@ -20,8 +26,10 @@ if (config.voiceEnabled) {
     readFileSync(config.voiceAdapterTokenFile, 'utf8').trim());
 }
 const emailProvider=process.env.GENERAL_AGENT_EMAIL_BINDINGS_ENABLED==='true'?await createEmailProvider(emailConfiguration(process.env)):undefined;
+const webPushVapid=loadWebPushVapidConfiguration(process.env);
 const replyJudge=loadReplyJudgeClient(process.env,config.modelBudgetPolicy?.routes??[]);
-const service = await buildServer({ ...config,...(nativeGitClient?{nativeGitClient}:{}),chatModeEnabled:process.env.GENERAL_AGENT_CHAT_ENABLED==='true',ordinarySteeringEnabled:process.env.GENERAL_AGENT_ORDINARY_STEERING_ENABLED==='true',ordinaryAttachmentSteeringEnabled:process.env.GENERAL_AGENT_ORDINARY_STEERING_ATTACHMENTS_ENABLED==='true',ordinaryInputRecoveryEnabled:process.env.GENERAL_AGENT_ORDINARY_INPUT_RECOVERY_ENABLED==='true',workAgentPreset:process.env.GENERAL_AGENT_DSH_AGENT_PRESET?.trim()||'jot-general', ...(conversationGoalClient?{conversationGoalClient,modelCatalogClient:conversationGoalClient,conversationModeClient:conversationGoalClient,ordinaryAttachmentSteeringClient:conversationGoalClient}:{}),...(voiceAdapter ? { voiceAdapter } : {}),...(emailProvider?{emailBindingSend:emailProvider.send.bind(emailProvider)}:{}),...(replyJudge?{replyJudge}:{}) });
+const memoryReasoningClient=loadMemoryReasoningClient(process.env,config.modelBudgetPolicy?.routes??[]);
+const service = await buildServer({ ...config,...mattermostOwnerBindingConfiguration(process.env),...(nativeGitClient?{nativeGitClient}:{}),chatModeEnabled:process.env.GENERAL_AGENT_CHAT_ENABLED==='true',ordinarySteeringEnabled:process.env.GENERAL_AGENT_ORDINARY_STEERING_ENABLED==='true',ordinaryAttachmentSteeringEnabled:process.env.GENERAL_AGENT_ORDINARY_STEERING_ATTACHMENTS_ENABLED==='true',ordinaryInputRecoveryEnabled:process.env.GENERAL_AGENT_ORDINARY_INPUT_RECOVERY_ENABLED==='true',matrixOwnerBindingEnabled:Boolean(process.env.GENERAL_AGENT_MATRIX_BASE_URL?.trim()&&process.env.GENERAL_AGENT_MATRIX_ACCESS_TOKEN?.trim()),workAgentPreset:process.env.GENERAL_AGENT_DSH_AGENT_PRESET?.trim()||'jot-general', ...(conversationGoalClient?{conversationGoalClient,nativeMemberClient:conversationGoalClient,conversationForkSourceClient:conversationGoalClient,modelCatalogClient:conversationGoalClient,conversationModeClient:conversationGoalClient,ordinaryAttachmentSteeringClient:conversationGoalClient}:{}),...(skillCatalogClient?{skillCatalogClient}:{}),...(voiceAdapter ? { voiceAdapter } : {}),...(emailProvider?{emailBindingSend:emailProvider.send.bind(emailProvider)}:{}),...(webPushVapid?{webPushVapid:{publicKey:webPushVapid.publicKey,generation:webPushVapid.generation}}:{}),...(replyJudge?{replyJudge}:{}),...(memoryReasoningClient?{memoryReasoningClient}:{}) });
 await service.app.listen({ host: config.host, port: config.port });
 
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, async () => {

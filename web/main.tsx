@@ -1,7 +1,6 @@
 import React,{useEffect,useMemo,useRef,useState} from 'react';
 import {createRoot} from 'react-dom/client';
-import Markdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import TwemojiMarkdown from './jot/TwemojiMarkdown';
 import './style.css';
 import {StandaloneCommand,standaloneCreation,standaloneModes,mergeStandaloneSnapshot} from './standalone-mode.mjs';
 type Message={id:string;role:string;content:string;run_id?:string};
@@ -92,8 +91,8 @@ function App(){
     {caps?.mode==='agent'&&!caps.model_configured&&<div className="notice">Configure a model in .env to start real Agent tasks.</div>}
     {unavailable&&<div className="notice">Chat is unavailable. Switch to Work or configure the Chat route.</div>}{command.pending&&<div className="notice" role="status">Conversation setting is unconfirmed. Keep this page open.<button disabled={commandBusy} onClick={()=>void setting()}>Retry original setting</button></div>}
     <section className="timeline" aria-label="Chat messages">{!snapshot.messages.length&&<div className="welcome"><div className="orb"/><h1>Small bot.<br/>Useful work.</h1><p>Ask a question, bring a file,<br/>or let Jot take the next step.</p><div className="examples">{['Help me organize a short plan','Create a Markdown task checklist','Summarize an uploaded text file'].map(x=><button key={x} onClick={()=>changeDraft(x)}>{x} ↗</button>)}</div>{caps?.mode==='demo'&&<SampleSurface/>}</div>}
-      {snapshot.messages.map(m=><article key={m.id} className={m.role}><small>{m.role==='user'?'YOU':'JOT'}</small><Markdown remarkPlugins={[remarkGfm]} skipHtml>{m.content}</Markdown>{m.role==='assistant'&&snapshot.artifacts.filter(a=>a.run_id&&snapshot.runs.find(r=>r.id===a.run_id)?.status==='succeeded').filter(a=>a.run_id===m.run_id).map(a=><button key={a.id} className="file" onClick={()=>void download(a)}>↧ {a.name}<span>{Math.ceil(a.size/1024)} KB</span></button>)}</article>)}
-      {stream&&<article className="assistant draft-response"><small>JOT · DRAFT IN PROGRESS</small><Markdown remarkPlugins={[remarkGfm]} skipHtml>{stream}</Markdown></article>}
+      {snapshot.messages.map(m=><article key={m.id} className={m.role}><small>{m.role==='user'?'YOU':'JOT'}</small><TwemojiMarkdown>{m.content}</TwemojiMarkdown>{m.role==='assistant'&&snapshot.artifacts.filter(a=>a.run_id&&snapshot.runs.find(r=>r.id===a.run_id)?.status==='succeeded').filter(a=>a.run_id===m.run_id).map(a=><button key={a.id} className="file" onClick={()=>void download(a)}>↧ {a.name}<span>{Math.ceil(a.size/1024)} KB</span></button>)}</article>)}
+      {stream&&<article className="assistant draft-response"><small>JOT · DRAFT IN PROGRESS</small><TwemojiMarkdown>{stream}</TwemojiMarkdown></article>}
       {approval&&<div className="approval"><strong>Review this action</strong><p>{approval.description}</p>{approval.operation!==undefined&&<pre>{JSON.stringify(approval.operation,null,2)}</pre>}<button disabled={deciding||cancelling} onClick={()=>void decide(true)}>Approve</button><button disabled={deciding||cancelling} onClick={()=>void decide(false)}>Decline</button></div>}
       {details.length>0&&<details className="trace"><summary>Task details · {details.length} steps</summary>{details.map((x,i)=><p key={i}>{readable(x.phase||x.label)}<code>{JSON.stringify(x.args??{})}</code></p>)}</details>}
       {snapshot.runs.at(-1)?.status==='failed'&&<p className="error" role="alert">Task failed: {snapshot.runs.at(-1)?.error||'Please try again.'}</p>}

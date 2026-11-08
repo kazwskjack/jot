@@ -3,7 +3,7 @@ import type {Memory,MemoryVersion} from './types';
 import {pathId,workbenchApi} from './client';
 import {useResource} from './useResource';
 import {useMutationReceipt} from './useMutationReceipt';
-import {ResourceStatus} from './AgentsPanel';
+import {ResourceStatus} from './PanelStatus';
 import {memoryRestoreReason,memoryRestoreInput} from './memory-history.mjs';
 
 export default function MemoryHistory({workspace,memory,onClose,onRestored}:{workspace:string;memory:Memory;onClose:()=>void;onRestored:()=>void}){

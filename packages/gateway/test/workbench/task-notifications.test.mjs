@@ -182,12 +182,39 @@ test('task notification settings refuse active execution, stale versions, foreig
  assert.throws(()=>f.settings.update('alice',independent.task_id,{expected_version:0,channel_binding_ids:[]}),/version_conflict/);
 });
 
+test('artifact delivery opt-in is explicit, binding-scoped, and preserved only for unchanged selected bindings',async t=>{
+ const f=await setup(t),task=f.persistentTasks.create('alice',{title:'Future output task',agent_id:f.a.agent_id,objective:'Future',trigger:{kind:'once',run_at:'2099-01-01T00:00:00Z'}}),initial=f.settings.get('alice',task.task_id);
+ assert.deepEqual(initial.artifact_delivery_binding_ids,[]);
+ const opted=f.settings.update('alice',task.task_id,{expected_version:initial.version,channel_binding_ids:[f.binding.channel_binding_id],artifact_delivery_binding_ids:[f.binding.channel_binding_id]});
+ assert.deepEqual(opted.artifact_delivery_binding_ids,[f.binding.channel_binding_id]);
+ const target=f.settings.targets('alice',task.task_id,'completed')[0];assert.equal(target.artifact_delivery,true);
+ const preserved=f.settings.update('alice',task.task_id,{expected_version:opted.version,channel_binding_ids:[f.binding.channel_binding_id]});
+ assert.deepEqual(preserved.artifact_delivery_binding_ids,[f.binding.channel_binding_id]);
+ const secondChallenge=new OwnerChannelBindings(f.db,{enabled:['wecom']}).create('alice','wecom');
+ new OwnerChannelBindings(f.db).acceptProof('wecom','second-task-recipient',secondChallenge.code);
+ const second=new OwnerChannelBindings(f.db).list('alice').items.find(item=>item.channel==='wecom'&&item.channel_binding_id!==f.binding.channel_binding_id);
+ const added=f.settings.update('alice',task.task_id,{expected_version:preserved.version,channel_binding_ids:[f.binding.channel_binding_id,second.channel_binding_id]});
+ assert.deepEqual(added.artifact_delivery_binding_ids,[f.binding.channel_binding_id]);
+ assert.equal(f.settings.targets('alice',task.task_id,'completed').find(item=>item.channel_binding_id===second.channel_binding_id).artifact_delivery,false);
+});
+
+test('artifact delivery opt-in requires a selected verified binding and completed notifications',async t=>{
+ const f=await setup(t),task=f.persistentTasks.create('alice',{title:'Future output task',agent_id:f.a.agent_id,objective:'Future',trigger:{kind:'once',run_at:'2099-01-01T00:00:00Z'}}),version=f.settings.get('alice',task.task_id).version;
+ assert.throws(()=>f.settings.update('alice',task.task_id,{expected_version:version,channel_binding_ids:[f.binding.channel_binding_id],artifact_delivery_binding_ids:['other-binding']}),/invalid_task_notification_settings/);
+ assert.throws(()=>f.settings.update('alice',task.task_id,{expected_version:version,channel_binding_ids:[f.binding.channel_binding_id],events:['failed'],artifact_delivery_binding_ids:[f.binding.channel_binding_id]}),/invalid_task_notification_settings/);
+});
+
 test('public task settings and delivery status validate the owner and reject unverified notification destinations',async t=>{
  const f=await setup(t),id=f.task.task_id;
  const own=await f.app.inject({url:`/v1/persistent-tasks/${id}/notifications`,headers:{'x-user-id':'alice'}});assert.equal(own.statusCode,200,own.body);assert.equal(own.json().version,1);
  const foreign=await f.app.inject({url:`/v1/persistent-tasks/${id}/notifications`,headers:{'x-user-id':'bob'}});assert.equal(foreign.statusCode,404);
  const future=f.persistentTasks.create('alice',{title:'Future notification',agent_id:f.a.agent_id,objective:'Future',trigger:{kind:'once',run_at:'2099-01-01T00:00:00Z'}});
- const update=await f.app.inject({method:'PATCH',url:`/v1/persistent-tasks/${future.task_id}/notifications`,headers:f.headers,payload:{expected_version:0,channel_binding_ids:[f.binding.channel_binding_id]}});assert.equal(update.statusCode,200,update.body);
+ const channels=new OwnerChannelBindings(f.db,{enabled:['wecom']}),challenge=channels.create('alice','wecom');channels.acceptProof('wecom','route-file-recipient',challenge.code);
+ const binding=channels.list('alice').items.find(item=>item.channel==='wecom'&&item.status==='verified');
+ const update=await f.app.inject({method:'PATCH',url:`/v1/persistent-tasks/${future.task_id}/notifications`,headers:f.headers,payload:{expected_version:0,channel_binding_ids:[binding.channel_binding_id],artifact_delivery_binding_ids:[binding.channel_binding_id]}});assert.equal(update.statusCode,200,update.body);
+ assert.deepEqual(update.json().artifact_delivery_binding_ids,[binding.channel_binding_id]);
+ const stored=JSON.parse(f.db.prepare('SELECT bindings_json FROM wb_task_notification_settings WHERE task_id=?').get(future.task_id).bindings_json);
+ assert.deepEqual(stored,[{channel_binding_id:binding.channel_binding_id,version:binding.version,artifact_delivery:true}]);
  const invalid=await f.app.inject({method:'PATCH',url:`/v1/persistent-tasks/${future.task_id}/notifications`,headers:{...f.headers,'idempotency-key':'forged-notification'},payload:{expected_version:1,channel_binding_ids:[],recipient:'victim'}});assert.equal(invalid.statusCode,422,invalid.body);
  const empty=await f.app.inject({url:`/v1/persistent-tasks/${id}/occurrences/${f.occurrence.occurrence_id}/deliveries`,headers:{'x-user-id':'alice'}});assert.equal(empty.statusCode,200,empty.body);assert.deepEqual(empty.json().items,[]);
 });

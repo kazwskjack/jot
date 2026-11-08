@@ -19,6 +19,15 @@ test('ready maintenance ingests discovery sources on the original lifecycle only
  const result=await maintainWorkbench(workbench,tasks,true);assert.deepEqual(calls,['sources','mailbox','tick']);assert.deepEqual(result.discovery_sources,{policies:1,recorded:2});
 });
 
+test('the existing maintenance tick forwards only its optional internal admission hook',async()=>{
+ const {maintainWorkbench}=await import(moduleUrl),calls=[],scope={project_id:'p',workspace_id:'w',agent_id:'a'};
+ const workbench={resumeDeletions:()=>[],processMailbox:()=>calls.push('mailbox')};
+ const hook=async(owner,value)=>{calls.push(['admit',owner,value]);return{admitted:false,execution_authorized:false};};
+ const tasks={collectDiscoverySources:()=>({policies:1,recorded:0}),async tick(callback){calls.push('tick');assert.equal(callback,hook);await callback('owner',scope);return{};}};
+ await maintainWorkbench(workbench,tasks,true,hook);
+ assert.deepEqual(calls,['mailbox','tick',['admit','owner',scope]]);
+});
+
 test('completed memory sources are collected while model execution is unavailable',async()=>{
  const {maintainWorkbench}=await import(moduleUrl);const calls=[];
  const workbench={resumeDeletions(){calls.push('cleanup');return [];},reconcileBudgets(){calls.push('budgets');},collectMemoryCaptures(){calls.push('capture');return {ready:1,skipped:0};},processMailbox(){throw new Error('must not execute');}};

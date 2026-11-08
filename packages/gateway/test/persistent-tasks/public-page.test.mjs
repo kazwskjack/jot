@@ -25,6 +25,16 @@ test('each redirect resolves again and transport receives pinned public address'
   const result=await readPublicPage('https://example.com/',{resolve:async host=>{hosts.push(host);return[{address:'8.8.4.4',family:4}];},request:async(url,address)=>{addresses.push(address.address);return url.hostname==='example.com' ? {status:302,location:'https://other.example.org/new',text:''}:{status:200,contentType:'text/html',text:'  changed\r\npage  '};}});
   assert.deepEqual(hosts,['example.com','other.example.org']);assert.deepEqual(addresses,['8.8.4.4','8.8.4.4']);assert.equal(result.text,'changed\npage');
 });
+test('reader without a Workbench origin policy preserves public-page caller behavior',async()=>{
+  let requests=0;
+  const page=await readPublicPage('https://example.com/',{resolve:async()=>[{address:'8.8.8.8',family:4}],request:async()=>{requests++;return{status:200,contentType:'text/plain',text:'public fixture'};}});
+  assert.equal(requests,1);assert.deepEqual(page,{text:'public fixture',url:'https://example.com/'});
+});
+test('an explicitly empty Workbench origin policy blocks before DNS',async()=>{
+  let resolves=0,requests=0;
+  await assert.rejects(()=>readPublicPage('https://example.com/',{allowedOrigins:new Set(),resolve:async()=>{resolves++;return[{address:'8.8.8.8',family:4}];},request:async()=>{requests++;return{status:200,contentType:'text/html',text:'must not request'};}}),/unsafe_page_url/);
+  assert.equal(resolves,0);assert.equal(requests,0);
+});
 test('reader caps body size and redirect chains and rejects binary content',async()=>{
   const resolve=async()=>[{address:'8.8.8.8',family:4}];
   await assert.rejects(()=>readPublicPage('https://example.com/',{resolve,request:async()=>({status:200,contentType:'text/html',text:'x'.repeat(262145)})}),/page_too_large/);

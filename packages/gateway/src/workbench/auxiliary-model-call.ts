@@ -1,13 +1,12 @@
 import {randomUUID} from 'node:crypto';
-import type {ModelBudgetLedger} from './model-budget.ts';
+import type {ModelBudgetLedger,ModelBudgetUsageEvidence} from './model-budget.ts';
 
 /** Trusted adapters supply bounded server routes and normalized provider usage.
  * Never pass browser/model supplied accounting claims to this entry point. */
 export async function runBudgetedAuxiliaryCall<T>(options:{
   ledger:ModelBudgetLedger;owner:string;runId:string;
-  route:{provider:string;model:string};purpose:'emotion'|'web-decision'|'reply-verification';attemptId?:string;
-  guard:()=>void;invoke:()=>Promise<{value:T;usage:unknown}>;
-}) {
+  route:{provider:string;model:string};purpose:'emotion'|'web-decision'|'reply-verification'|'memory-reasoning';attemptId?:string;
+  guard:()=>void;invoke:()=>Promise<{value:T;usage:unknown;usageEvidence?:ModelBudgetUsageEvidence}>;}) {
   const {ledger,owner,runId}=options;
   const attemptId=options.attemptId??randomUUID();
   options.guard();
@@ -18,9 +17,9 @@ export async function runBudgetedAuxiliaryCall<T>(options:{
     ledger.dispatch(owner,runId,attemptId,options.guard);dispatched=true;
     let receipt=perCall?ledger.settleDispatchedCall(owner,runId,attemptId):undefined;
     settled=receipt?.state==='settled';
-    let result:{value:T;usage:unknown};
+    let result:{value:T;usage:unknown;usageEvidence?:ModelBudgetUsageEvidence};
     try{result=await ledger.observeAuxiliaryCall(owner,runId,attemptId,options.invoke);}catch{throw new Error(perCall?'auxiliary_provider_failed':'auxiliary_usage_unknown');}
-    if(!receipt)try{receipt=ledger.settle(owner,runId,attemptId,result.usage);}catch{throw new Error('auxiliary_usage_unknown');}
+    if(!receipt)try{receipt=ledger.settle(owner,runId,attemptId,result.usage,result.usageEvidence);}catch{throw new Error('auxiliary_usage_unknown');}
     settled=receipt.state==='settled';
     if(!settled)throw new Error('auxiliary_usage_unknown');
     if(receipt.bound_exceeded)throw new Error('model_budget_exhausted');

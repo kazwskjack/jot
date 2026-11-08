@@ -16,7 +16,7 @@ async function fixture(path=':memory:',routes=[route]) {
   const db=openProductDatabase(path),conversations=new ConversationRepository(db),runs=new RunRepository(db,new EventStore(db));
   let now=new Date('2026-10-02T00:00:00Z');
   const ledger=new mod.ModelBudgetLedger(db,{routes,now:()=>now});
-  const run=(owner='alice')=>{const c=conversations.create(owner,{workspace_id:'main',model:{provider:'fixture',id:'bounded-model'}});
+  const run=(owner='alice')=>{const c=conversations.create(owner,{workspace_id:'main',model:{provider:'fixture',model:'bounded-model'}});
     const r=runs.enqueue(c.conversation_id,owner,{client_message_id:crypto.randomUUID(),content:[{type:'text',text:'Controlled task'}]});
     db.prepare("UPDATE ga_runs SET status='running' WHERE id=?").run(r.run_id);return r.run_id;};
   const scope=(key='root',tokens=500,nano_usd=5000,model_calls=5)=>ledger.createScope('alice',key,{tokens,nano_usd,model_calls});
@@ -24,6 +24,17 @@ async function fixture(path=':memory:',routes=[route]) {
   return {db,ledger,run,scope,request,now:value=>{now=new Date(value);},close:()=>db.close()};
 }
 const usage={inputTokens:20,outputTokens:5,cacheReadTokens:10,cacheWriteTokens:5,totalTokens:40,reasoningTokens:2};
+
+test('the ledger accepts budgeted memory reasoning while rejecting unregistered purposes',async()=>{
+ const billed={...route,rates:{input:0,output:0,cache_read:0,cache_write:0},billing:{unit:'dispatched_call',nano_usd:25}};
+ const f=await fixture(':memory:',[billed]);try{
+  const scope=f.scope('memory-reasoning',500,5000,5),run=f.run();f.ledger.bindRun('alice',run,[scope.scope_id]);
+  const reservation=f.ledger.reserve('alice',run,{...f.request('memory-reasoning'),purpose:'memory-reasoning'});
+  assert.equal(reservation.metering,'dispatched_call');
+  assert.throws(()=>f.ledger.reserve('alice',run,{...f.request('invalid-purpose'),purpose:'invalid-purpose'}),/budget_request_invalid/);
+  assert.equal(f.db.prepare('SELECT count(*) n FROM wb_model_budget_attempts').get().n,1);
+ }finally{f.close();}
+});
 
 test('step preview credits only the matching queued admission without releasing it or charging a call',async()=>{
  const f=await fixture(':memory:',[route,{...route,model:'other-model'}]);try{
@@ -159,6 +170,56 @@ test('zero cache can be proven by authoritative total; nonzero unknown caches ca
     assert.equal(f.ledger.settle('alice',r,'attempt-1',{inputTokens:20,outputTokens:5,totalTokens:25}).state,'settled');
     assert.equal(f.ledger.balance('alice',s.scope_id).used.nano_usd,'90');
   }finally{f.close();}
+});
+
+test('folded unreported cache writes preserve settlement cost but stay unknown in public token buckets',async()=>{
+  const equalRateRoute={...route,rates:{...route.rates,cache_write:route.rates.input}},f=await fixture(':memory:',[equalRateRoute]);try{
+    const taskKey='task-total:folded-cache-write',s=f.scope(taskKey,1000,5000,2),r=f.run();f.ledger.bindRun('alice',r,[s.scope_id]);
+    const evidence={protocol:1,source:'reply-judge-client',cacheWrite:'folded-unreported'};
+    f.ledger.reserve('alice',r,{...f.request('folded-write'),purpose:'reply-verification'});f.ledger.dispatch('alice',r,'folded-write');
+    const receipt=f.ledger.settle('alice',r,'folded-write',{inputTokens:80,outputTokens:20,totalTokens:120,cacheReadTokens:20,cacheWriteTokens:0,reasoningTokens:5},evidence);
+    assert.equal(receipt.state,'settled');assert.equal(f.ledger.balance('alice',s.scope_id).used.tokens,'120');assert.equal(f.ledger.balance('alice',s.scope_id).used.nano_usd,'380');
+    assert.deepEqual(JSON.parse(f.db.prepare('SELECT usage_json FROM wb_model_budget_attempts WHERE attempt_id=?').get('folded-write').usage_json),{
+      inputTokens:'80',outputTokens:'20',cacheReadTokens:'20',cacheWriteTokens:'0',totalTokens:'120',reasoningTokens:'5',
+      usageEvidence:{protocol:1,source:'reply-judge-client',cacheWrite:'folded-unreported'}
+    });
+    const page=f.ledger.listTaskAttempts('alice',taskKey);assert.equal(page.items[0].state,'settled');
+    assert.deepEqual(page.items[0].settled,{tokens:'120',nano_usd:'380',model_calls:'1'});
+    assert.deepEqual(page.items[0].usage,{status:'settled',input_tokens:null,output_tokens:'20',cache_read_tokens:'20',cache_write_tokens:null,reasoning_tokens:'5',total_tokens:'120'});
+    assert.deepEqual(f.ledger.settle('alice',r,'folded-write',{inputTokens:80,outputTokens:20,totalTokens:120,cacheReadTokens:20,cacheWriteTokens:0,reasoningTokens:5},evidence),receipt);
+  }finally{f.close();}
+});
+
+test('reported zero cache writes remain zero while ambiguous legacy same-rate folds are not rewritten',async()=>{
+  const equalRateRoute={...route,rates:{...route.rates,cache_write:route.rates.input}},f=await fixture(':memory:',[equalRateRoute]);try{
+    const taskKey='task-total:cache-zero',s=f.scope(taskKey,1000,5000,3),reportedRun=f.run(),legacyRun=f.run();
+    f.ledger.bindRun('alice',reportedRun,[s.scope_id]);f.ledger.bindRun('alice',legacyRun,[s.scope_id]);
+    const actual={inputTokens:80,outputTokens:20,totalTokens:120,cacheReadTokens:20,cacheWriteTokens:0};
+    f.ledger.reserve('alice',reportedRun,{...f.request('reported-zero'),purpose:'reply-verification'});f.ledger.dispatch('alice',reportedRun,'reported-zero');
+    f.ledger.settle('alice',reportedRun,'reported-zero',actual,{protocol:1,source:'reply-judge-client',cacheWrite:'reported'});
+    f.ledger.reserve('alice',legacyRun,{...f.request('legacy-fold'),purpose:'reply-verification'});f.ledger.dispatch('alice',legacyRun,'legacy-fold');
+    f.ledger.settle('alice',legacyRun,'legacy-fold',actual);
+    const usages=f.ledger.listTaskAttempts('alice',taskKey).items.map(row=>row.usage);
+    assert.deepEqual(usages.find(value=>value.cache_write_tokens==='0'),{status:'settled',input_tokens:'80',output_tokens:'20',cache_read_tokens:'20',cache_write_tokens:'0',reasoning_tokens:null,total_tokens:'120'});
+    assert.deepEqual(usages.find(value=>value.cache_write_tokens===null),{status:'settled',input_tokens:null,output_tokens:'20',cache_read_tokens:'20',cache_write_tokens:null,reasoning_tokens:null,total_tokens:'120'});
+    assert.equal(f.db.prepare("SELECT usage_json FROM wb_model_budget_attempts WHERE attempt_id='legacy-fold'").get().usage_json.includes('usageEvidence'),false,'legacy journal bytes stay unchanged');
+    assert.equal(f.ledger.balance('alice',s.scope_id).used.nano_usd,'760');
+  }finally{f.close();}
+});
+
+test('folded cache-write evidence is accepted only from reply-judge settlement and only in its exact form',async()=>{
+  for(const [purpose,evidence] of [
+    ['emotion',{protocol:1,source:'reply-judge-client',cacheWrite:'folded-unreported'}],
+    ['reply-verification',{protocol:1,source:'provider',cacheWrite:'folded-unreported'}],
+    ['reply-verification',{protocol:1,source:'reply-judge-client',cacheWrite:'reported-zero'}],
+    ['reply-verification',{protocol:1,source:'reply-judge-client',cacheWrite:'folded-unreported',extra:true}]
+  ]){
+    const f=await fixture();try{
+      const s=f.scope(),r=f.run();f.ledger.bindRun('alice',r,[s.scope_id]);f.ledger.reserve('alice',r,{...f.request('invalid-evidence'),purpose});f.ledger.dispatch('alice',r,'invalid-evidence');
+      assert.throws(()=>f.ledger.settle('alice',r,'invalid-evidence',{inputTokens:20,outputTokens:5,totalTokens:25,cacheReadTokens:0,cacheWriteTokens:0},evidence),/budget_usage_invalid/);
+      assert.equal(f.db.prepare('SELECT state FROM wb_model_budget_attempts WHERE attempt_id=?').get('invalid-evidence').state,'in_flight');
+    }finally{f.close();}
+  }
 });
 
 test('routes, request limits, identities and binding boundaries cannot come from model-controlled fields',async()=>{
@@ -301,5 +362,57 @@ test('unlimited owner adjustment requires an unlimited host ceiling and retains 
   assert.equal(f.ledger.setLimits('alice','adjust-unlimited',1,ceiling,ceiling).limits.nano_usd,null);
   assert.equal(f.ledger.balance('alice',root.scope_id).held.nano_usd,'1000');
   assert.throws(()=>f.ledger.setLimits('alice','adjust-unlimited',2,ceiling,{...ceiling,nano_usd:2000}),/budget_ceiling_exceeded/);
+ }finally{f.close();}
+});
+
+test('task attempt pages expose normalized usage only for the exact owner scope without internal routes or run IDs',async()=>{
+ const f=await fixture();try{
+  const taskKey='task-total:task-one',taskScope=f.scope(taskKey),otherScope=f.scope('task-total:task-two');
+  const ownerRun=f.run(),otherTaskRun=f.run(),foreignRun=f.run('bob');
+  const foreignScope=f.ledger.createScope('bob',taskKey,{tokens:500,nano_usd:5000,model_calls:5});
+  f.ledger.bindRun('alice',ownerRun,[taskScope.scope_id]);
+  f.ledger.bindRun('alice',otherTaskRun,[otherScope.scope_id]);
+  f.ledger.bindRun('bob',foreignRun,[foreignScope.scope_id]);
+  const addSettled=(runId,attemptId,purpose)=>{
+   f.ledger.reserve('alice',runId,{...f.request(attemptId),purpose});f.ledger.dispatch('alice',runId,attemptId);
+   f.ledger.settle('alice',runId,attemptId,usage);
+  };
+  addSettled(ownerRun,'alpha','compaction');addSettled(ownerRun,'beta','compaction');
+  f.ledger.reserve('alice',ownerRun,{...f.request('unknown-missing-cache'),purpose:'session-title'});
+  f.ledger.dispatch('alice',ownerRun,'unknown-missing-cache');
+  f.ledger.settle('alice',ownerRun,'unknown-missing-cache',{inputTokens:4,outputTokens:2});
+  f.ledger.reserve('alice',otherTaskRun,f.request('other-task-attempt'));f.ledger.dispatch('alice',otherTaskRun,'other-task-attempt');f.ledger.settle('alice',otherTaskRun,'other-task-attempt',usage);
+  f.ledger.reserve('bob',foreignRun,f.request('other-owner-attempt'));f.ledger.dispatch('bob',foreignRun,'other-owner-attempt');f.ledger.settle('bob',foreignRun,'other-owner-attempt',usage);
+
+  const first=f.ledger.listTaskAttempts('alice',taskKey,undefined,2);
+  assert.equal(first.items.length,2);assert.equal(first.next_cursor,'2');
+  assert.deepEqual(first.items.map(item=>item.purpose),['compaction','compaction']);
+  assert.deepEqual(first.items[0].reserved,{tokens:'100',nano_usd:'1000',model_calls:'1'});
+  assert.deepEqual(first.items[0].settled,{tokens:'40',nano_usd:'115',model_calls:'1'});
+  assert.deepEqual(first.items[0].usage,{status:'settled',input_tokens:'20',output_tokens:'5',cache_read_tokens:'10',cache_write_tokens:'5',reasoning_tokens:'2',total_tokens:'40'});
+  assert.equal(first.items[0].cost_basis,'configured_rates');
+  const second=f.ledger.listTaskAttempts('alice',taskKey,first.next_cursor,2);
+  assert.equal(second.next_cursor,null);assert.equal(second.items.length,1);
+  assert.equal(second.items[0].state,'unknown');
+  assert.deepEqual(second.items[0].settled,{tokens:null,nano_usd:null,model_calls:null});
+  assert.deepEqual(second.items[0].usage,{status:'unknown',input_tokens:null,output_tokens:null,cache_read_tokens:null,cache_write_tokens:null,reasoning_tokens:null,total_tokens:null});
+  const encoded=JSON.stringify([...first.items,...second.items]);
+  for(const forbidden of [ownerRun,'alpha','beta','unknown-missing-cache','fixture','bounded-model','route_json','request_json','owner_id','run_id','session_id'])assert.equal(encoded.includes(forbidden),false,forbidden);
+  assert.equal(new Set([...first.items,...second.items].map(item=>item.attempt_ref)).size,3);
+  assert.equal(first.items[0].attempt_ref, f.ledger.listTaskAttempts('alice',taskKey,undefined,2).items[0].attempt_ref);
+  assert.throws(()=>f.ledger.listTaskAttempts('alice',taskKey,'not-a-cursor',2),/budget_attempt_query_invalid/);
+  assert.throws(()=>f.ledger.listTaskAttempts('alice',taskKey,undefined,51),/budget_attempt_query_invalid/);
+ }finally{f.close();}
+});
+test('task attempt pages report truncation at the six-digit cursor boundary',async()=>{
+ const f=await fixture();try{
+  const taskKey='task-total:cursor-boundary',scope=f.scope(taskKey),run=f.run();
+  f.ledger.bindRun('alice',run,[scope.scope_id]);
+  f.ledger.reserve('alice',run,{...f.request('boundary-attempt'),purpose:'compaction'});
+  const prepare=f.db.prepare.bind(f.db);
+  const row=prepare('SELECT run_id,attempt_id,request_json,route_json,state,held_tokens,held_nano_usd,usage_json,actual_tokens,actual_nano_usd,created_at,updated_at FROM wb_model_budget_attempts WHERE run_id=? AND attempt_id=?').get(run,'boundary-attempt');
+  f.db.prepare=sql=>sql.includes('FROM wb_model_budget_attempts a JOIN wb_model_budget_bindings b')?{all:()=>[row,row]}:prepare(sql);
+  const page=f.ledger.listTaskAttempts('alice',taskKey,'999999',1);
+  assert.equal(page.items.length,1);assert.equal(page.next_cursor,null);assert.equal(page.truncated,true);
  }finally{f.close();}
 });

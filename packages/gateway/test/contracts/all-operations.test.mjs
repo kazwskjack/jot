@@ -8,7 +8,7 @@ import { buildServer } from '../../src/server.ts';
 test('every OpenAPI operation is registered by the backend router', async () => {
   const spec = JSON.parse(readFileSync(new URL('../../contracts/openapi.json', import.meta.url), 'utf8'));
   const base='.test-tmp';mkdirSync(base,{recursive:true});const directory = mkdtempSync(join(base, 'ga-routes-'));
-  const service = await buildServer({ databasePath: join(directory, 'db.sqlite'), workspaces: ['ws'],workbenchRoot:join(directory,'workbench') });
+  const service = await buildServer({ databasePath: join(directory, 'db.sqlite'), workspaces: ['ws'],workbenchRoot:join(directory,'workbench'),conversationForkSourceClient:{inspectConversationForkSource:async()=>{throw new Error('not used by route inventory');}} });
   try {
     const missing = [];
     let operations = 0;

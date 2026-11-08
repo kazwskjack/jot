@@ -1,25 +1,84 @@
+import WorkspaceCheckpointPanel from './WorkspaceCheckpointPanel';
 import MemoryCapture from './MemoryCapture';
 import MemoryRetrievals from './MemoryRetrievals';
 import MemoryConsolidations from './MemoryConsolidations';
 import React,{useRef,useState,useContext,useMemo,useEffect,useSyncExternalStore} from 'react';
 import {createFilePager} from './file-pages.mjs';
-import type {WorkspaceFilePage,WorkspaceFile} from './types';
+import {buildFileTree} from './file-tree.mjs';
+import {createFileEditorState,editFileDraft,fileApplyPayload,markFileConflict,rebaseFileDraft,reloadLatestFile,restoreFileDraft,readSessionDraft,readStoredSessionDrafts,writeSessionDraft,moveSessionDraft,removeSessionDraft,removeStoredSessionDraft,fileEditorMatchesScope,workspaceFilePreview,requestFileApply,confirmFileApply,editorViewAvailable,unrestoredSessionDraftForEditor} from './file-editor-state.mjs';
+import {readWorkspaceFile} from './file-content-client.mjs';
+import {normalizeWorkspaceFileReadError,readWorkspaceFileRange,readWorkspaceFileVersions,verifyWorkspaceFileRangeContent} from './file-history-client.mjs';
+import {WorkspaceFileEditor} from './FileEditorPanel';
+import {WorkspaceFileLifecycleHistoryListing,WorkspaceFileLifecycleReview} from './WorkspaceFileLifecycleReview';
+import type {FileLifecycleCommand} from './WorkspaceFileLifecycleReview';
+import {readPendingFileLifecycleDialog} from './file-lifecycle-flow.mjs';
+import type {WorkspaceFilePage,WorkspaceFile,WorkspaceFileVersion,WorkspaceFileVersionPage,WorkbenchFileLifecycleHistoryItem,WorkbenchFileLifecycleHistoryPage} from './types';
 import {useMutationReceipt,MutationPendingState} from './useMutationReceipt';
 import type {Agent,AgentMessage,Caps,Memory} from './types';
 import {pathId,workbenchApi} from './client';
-import {request} from '../jot/client';
+import {request,taskDraftScope} from '../jot/client';
+import {downloadWorkspaceFile,exportWorkspaceDirectory,importWorkspaceDirectory,workspaceRelativePath} from './workspace-directory-flow.mjs';
+import {WorkspaceSelectionStore} from './task-save-receipt.mjs';
 import {useResource} from './useResource';
-import {ResourceStatus,Empty} from './AgentsPanel';
+import {ResourceStatus,Empty} from './PanelStatus';
 import {featureReason,executionReason} from './form-state.mjs';
 import MemoryHistory from './MemoryHistory';
 import {blankMemoryForm,memoryFormFromMemory,memoryInput,memoryQuery,memoryExpired,downloadMemoryExport,memoryMatchesSelection} from './memory-form.mjs';
+export {submitFileLifecycleCommand} from './file-lifecycle-flow.mjs';
+export {downloadWorkspaceFile,exportWorkspaceDirectory,importWorkspaceDirectory} from './workspace-directory-flow.mjs';
+export {WorkspaceFileLifecycleHistoryListing,WorkspaceFileLifecycleReview} from './WorkspaceFileLifecycleReview';
 type FileInfo=WorkspaceFile;
-export default function SharedWorkspace({caps,agents}:{caps:Caps;agents:Agent[]}){
+type FileHistoryView=WorkspaceFileVersionPage&{owner_scope:string};
+type FileLifecycleHistoryView=WorkbenchFileLifecycleHistoryPage&{owner_scope:string;workspace_id:string;project_id:string};
+type FileRangeView={owner_scope:string;source:WorkspaceFileVersion;content:string;offset_bytes:number;eof:boolean;verified:boolean};
+function fileReadMessage(error:unknown){
+ const normalized=normalizeWorkspaceFileReadError(error),code=(normalized as any)?.code??(normalized instanceof Error?normalized.message:'');
+ if(code==='FILE_IS_BINARY'||code==='file_is_binary')return '这是二进制文件；请使用“下载原始文件”获取并校验原始字节。';
+ if(code==='workspace_file_stale')return '文件版本信息已过期或校验失败。已保留当前内容；刷新版本历史后可重试。';
+ if(code==='workspace_file_unavailable')return '所选版本无法读取；它可能已不存在，或当前账号无权访问。刷新版本历史后可重试。';
+ if(code==='workspace_file_history_unavailable')return '服务端尚未声明版本历史能力。';
+ if(code==='workspace_file_range_unavailable')return '服务端尚未声明范围读取能力。';
+ if(code==='workspace_file_history_invalid')return '服务端返回的版本目录格式无效，请刷新后重试。';
+ if(code==='workspace_file_range_invalid')return '服务端返回的文本范围无效，请重试或刷新版本历史。';
+ if(code==='workspace_file_source_mismatch')return '文件路径、版本或 SHA-256 与请求不一致，请刷新文件列表后重试。';
+ return normalized instanceof Error?normalized.message:'文件读取失败';
+}
+function workspaceDirectoryMessage(error:unknown){
+ const code=error instanceof Error?error.message:'';
+ if(code==='workspace_directory_path_invalid'||code==='workspace_directory_path_duplicate')return '目录包含无效或重复的相对路径，未继续导入或导出。';
+  if(code==='workspace_directory_path_conflict')return '项目中存在文件与目录路径冲突，未继续导入或导出。';
+  if(code==='workspace_coordination_required'||code==='WORKSPACE_COORDINATION_REQUIRED')return '项目当前有需要协调的工作，暂不能导入目录。';
+ if(code==='workspace_directory_file_too_large')return '单个文件超过 100 MiB，未导入。';
+ if(code==='workspace_directory_import_receipt_mismatch')return '服务端回执与所选文件的路径、来源、大小或 SHA-256 不一致；请刷新文件列表核对后再操作。';
+ if(code==='workspace_binary_download_mismatch')return '下载字节与所选版本的 SHA-256 或大小不一致，未写入目标目录。';
+ if(code==='workspace_directory_file_list_invalid')return '项目文件清单无效或分页游标重复，已停止操作。';
+ return error instanceof Error?error.message:'目录文件操作未完成';
+}
+export default function SharedWorkspace({caps,agents,onWorkspaceSelected}:{caps:Caps;agents:Agent[];onWorkspaceSelected?:()=>void}){
  const pending=useContext(MutationPendingState);
- const [workspace,setWorkspace]=useState(caps.workspaces[0]?.workspace_id??''),[tab,setTab]=useState('messages');
+ const [workspace,setWorkspace]=useState(caps.workspace_selection?.configured?caps.workspace_selection.workspace_id:caps.workspaces[0]?.workspace_id??''),[tab,setTab]=useState('messages');
  const members=agents.filter(agent=>agent.workspace_id===workspace),reason=featureReason(caps.workbench,'shared_workspace');
- return <div><div className="wb-toolbar"><div><h2>共享工作区</h2><p>成员交流、项目资料与记忆集中在一处。</p></div><label className="wb-inline-label">工作区<select disabled={pending} value={workspace} onChange={e=>setWorkspace(e.target.value)}>{caps.workspaces.map(item=><option key={item.workspace_id} value={item.workspace_id}>{item.title}</option>)}</select></label></div>{reason?<Empty>{reason}</Empty>:!workspace?<Empty>尚无授权工作区。</Empty>:<><nav className="wb-subnav" aria-label="工作区内容">{[['messages','成员消息'],['memory','共享与私有记忆'],['files','共同文件']].map(([value,label])=><button key={value} disabled={pending} aria-current={tab===value?'page':undefined} onClick={()=>setTab(value)}>{label}</button>)}</nav><div key={workspace}>{tab==='messages'?<Messages workspace={workspace} agents={members} caps={caps}/>:tab==='memory'?<Memories workspace={workspace} agents={members} caps={caps}/>:<Files workspace={workspace} agents={members} caps={caps}/>}</div></>}
+ return <div><div className="wb-toolbar"><div><h2>共享工作区</h2><p>成员交流、项目资料与记忆集中在一处。</p></div><label className="wb-inline-label">工作区<select aria-label="工作区" disabled={pending} value={workspace} onChange={e=>setWorkspace(e.target.value)}>{caps.workspaces.map(item=><option key={item.workspace_id} value={item.workspace_id}>{item.title}</option>)}</select></label></div>{caps.workspace_selection&&<WorkspaceSelectionSettings caps={caps} workspace={workspace} onSelected={onWorkspaceSelected}/>} {reason?<Empty>{reason}</Empty>:!workspace?<Empty>尚无授权工作区。</Empty>:<><nav className="wb-subnav" aria-label="工作区内容">{[['messages','成员消息'],['memory','共享与私有记忆'],['files','共同文件']].map(([value,label])=><button key={value} disabled={pending} aria-current={tab===value?'page':undefined} onClick={()=>setTab(value)}>{label}</button>)}</nav><div key={workspace}>{tab==='messages'?<Messages workspace={workspace} agents={members} caps={caps}/>:tab==='memory'?<Memories workspace={workspace} agents={members} caps={caps}/>:<Files workspace={workspace} agents={members} caps={caps}/>}</div></>}
  </div>;
+}
+function WorkspaceSelectionSettings({caps,workspace,onSelected}:{caps:Caps;workspace:string;onSelected?:()=>void}){
+ const scope=taskDraftScope(),selection=caps.workspace_selection!;
+ const recovery=useMemo(()=>{
+  try{const store=new WorkspaceSelectionStore(sessionStorage,scope);return {store,command:store.read()?.command??null,error:''};}
+  catch{return {store:null,command:null,error:'工作区选择回执无法读取，请核对服务端当前选择。'};}
+ },[scope]);
+ const mutation=useMutationReceipt(recovery.store),[error,setError]=useState(''),[notice,setNotice]=useState('');
+ const [retry,setRetry]=useState<Record<string,unknown>|null>(recovery.command?.body??null);
+ const save=async(body:Record<string,unknown>)=>{
+  if(!recovery.store)return;setError('');setNotice('');setRetry(body);
+  try{await mutation.submit('/workspaces/selection','POST',body);setRetry(null);setNotice('默认工作区已确认。');onSelected?.();}
+  catch(cause){setError(cause instanceof Error?cause.message:'工作区选择失败');onSelected?.();}
+ };
+ return <section aria-label="工作区设置"><p>可用工作区由服务端配置，目录由主机管理。默认选择用于新建对话和角色，已有任务保留原工作区。活动运行或未释放的工作区占用会阻止切换。</p>
+  <p>当前默认工作区 {selection.workspace_id}{!selection.configured&&'（配置已移除，请重新选择）'}</p>
+  {(error||recovery.error)&&<p className="wb-error" role="alert">{error||recovery.error}</p>}{notice&&<p role="status">{notice}</p>}
+  {mutation.pending&&retry?<button autoFocus type="button" onClick={()=>void save(retry)}>重试原工作区选择</button>:<button type="button" disabled={!recovery.store||!workspace||workspace===selection.workspace_id} onClick={()=>void save({workspace_id:workspace,expected_version:selection.version})}>设为默认工作区</button>}
+ </section>;
 }
 function Messages({workspace,agents,caps}:{workspace:string;agents:Agent[];caps:Caps}){
  const mutation=useMutationReceipt();
@@ -71,17 +130,187 @@ function Memories({workspace,agents,caps}:{workspace:string;agents:Agent[];caps:
 }
 function Files({workspace,agents,caps}:{workspace:string;agents:Agent[];caps:Caps}){
  const mutation=useMutationReceipt();
- const projects=[...new Set(agents.map(agent=>agent.project_id).filter(Boolean))], [project,setProject]=useState(projects[0]??''),[file,setFile]=useState<FileInfo|null>(null),[path,setPath]=useState(''),[content,setContent]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[editing,setEditing]=useState(false);
+ const ownerScope=taskDraftScope(),projects=[...new Set(agents.map(agent=>agent.project_id).filter(Boolean))], [project,setProject]=useState(projects[0]??''),[file,setFile]=useState<any>(null),[editor,setEditor]=useState<any>(null),[preview,setPreview]=useState<any>(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[historical,setHistorical]=useState(false),[historyVersion,setHistoryVersion]=useState(''),[storedDrafts,setStoredDrafts]=useState<any[]>([]),[draftError,setDraftError]=useState(''),[pathCollision,setPathCollision]=useState<any>(null),[draftRetry,setDraftRetry]=useState(0);
+  const [directoryAction,setDirectoryAction]=useState<'import'|'export'|'download'|null>(null),[directoryStatus,setDirectoryStatus]=useState('');
+ const [lifecycleDialog,setLifecycleDialog]=useState<{action:'rename'|'delete';file:Pick<WorkspaceFile,'path'|'version'|'sha256'>;resumeCommand?:FileLifecycleCommand}|null>(null),[lifecycleHistoryPage,setLifecycleHistoryPage]=useState<FileLifecycleHistoryView|null>(null),[lifecycleHistoryLoading,setLifecycleHistoryLoading]=useState(false),[lifecycleHistoryError,setLifecycleHistoryError]=useState('');
+ const workspaceReadable=caps.workspaces.find(item=>item.workspace_id===workspace)?.can_read===true;
+ const historyEnabled=workspaceReadable&&caps.workbench?.workspace_file_history===true,rangeEnabled=workspaceReadable&&caps.workbench?.workspace_file_range===true;
+ const [historyPage,setHistoryPage]=useState<FileHistoryView|null>(null),[historyLoading,setHistoryLoading]=useState(false),[historyError,setHistoryError]=useState(''),[selectedHistoryVersion,setSelectedHistoryVersion]=useState<number|null>(null);
+ const [rangeRead,setRangeRead]=useState<FileRangeView|null>(null),[rangeLoading,setRangeLoading]=useState(false),[rangeError,setRangeError]=useState('');
  const prefix=`/workspaces/${pathId(workspace)}/files`;
+   const contentRequest=useRef<AbortController|null>(null),historyRequest=useRef<AbortController|null>(null),lifecycleHistoryRequest=useRef<AbortController|null>(null),directoryRequest=useRef<AbortController|null>(null),persistedDraftRef=useRef<any>(null),renderedScope=useRef({owner_scope:ownerScope,workspace_id:workspace,project_id:project});
+  renderedScope.current={owner_scope:ownerScope,workspace_id:workspace,project_id:project};
+  const matchesRenderedScope=(target:{owner_scope:string;workspace_id:string;project_id:string})=>{const current=renderedScope.current;return current.owner_scope===target.owner_scope&&current.workspace_id===target.workspace_id&&current.project_id===target.project_id;};
+ const storage=()=>{try{return globalThis.sessionStorage??null;}catch{return null;}};
+ const scope={owner_scope:ownerScope,workspace_id:workspace,project_id:project},currentEditor=fileEditorMatchesScope(editor,scope)?editor:null,ownerDrafts=storedDrafts.filter(draft=>draft.owner_scope===ownerScope),currentScopeDrafts=ownerDrafts.filter(draft=>draft.workspace_id===workspace&&draft.project_id===project),foreignDrafts=ownerDrafts.filter(draft=>draft.workspace_id!==workspace||draft.project_id!==project),currentRestoreCandidates=currentScopeDrafts.map(draft=>({...draft,active:!!currentEditor?.draft_storage_path&&currentEditor.path===draft.path&&currentEditor.draft_storage_path===draft.path,collision_target:pathCollision?.target?.owner_scope===draft.owner_scope&&pathCollision.target.workspace_id===draft.workspace_id&&pathCollision.target.project_id===draft.project_id&&pathCollision.target.path===draft.path})),activeRestoreCandidate=unrestoredSessionDraftForEditor(currentEditor,currentScopeDrafts,pathCollision);
  const pager=useMemo(()=>createFilePager((cursor:string|undefined,signal:AbortSignal)=>workbenchApi.files(workspace,project,{cursor},signal)),[workspace,project]);
  const listing=useSyncExternalStore(pager.subscribe,pager.getSnapshot,pager.getSnapshot) as WorkspaceFilePage&{error:string;loading:boolean};
  useEffect(()=>{if(project)void pager.refresh();return()=>pager.dispose();},[pager,project]);
- const resource={data:listing,error:listing.error,loading:listing.loading,reload:()=>void pager.refresh()};
- const canWrite=caps.workspaces.find(item=>item.workspace_id===workspace)?.can_write===true;
- const open=async(item:FileInfo)=>{if(busy)return;setBusy(true);setError('');try{const data=await request<{content:string;version:number}>(`${prefix}/content?project_id=${pathId(project)}&path=${pathId(item.path)}`);setFile({...item,version:data.version});setPath(item.path);setContent(data.content);setEditing(true);}catch(e){setError(e instanceof Error?e.message:'文件读取失败');}finally{setBusy(false);}};
- const save=async(e:React.FormEvent)=>{e.preventDefault();if(busy)return;setBusy(true);setError('');try{if(!path.trim())throw new Error('请填写相对路径');await mutation.submit(prefix,'PUT',{project_id:project,path:path.trim(),content,expected_version:file?.version??0});setEditing(false);resource.reload();}catch(e){setError(e instanceof Error?e.message:'文件未保存');}finally{setBusy(false);}};
- return <div><div className="wb-toolbar"><label className="wb-inline-label">项目<select disabled={busy||mutation.pending} value={project} onChange={e=>{setProject(e.target.value);setEditing(false);}}>{projects.map(id=><option value={id} key={id}>{id}</option>)}</select></label><button className="wb-primary" disabled={!canWrite||!project||busy||mutation.pending} title={!canWrite?'此工作区没有写入权限':''} onClick={()=>{setFile(null);setPath('');setContent('');setEditing(true);}}>新建共同文件</button></div>{!project&&<Empty>先创建绑定项目的角色，即可查看项目共同文件。</Empty>}<ResourceStatus {...resource} onRetry={resource.reload}/>{error&&<p className="wb-error" role="alert">{error}</p>}{editing&&<form className="wb-form" onSubmit={save} aria-label="编辑共同文件"><fieldset className="wb-input-fields" disabled={busy||mutation.pending}><label>项目内相对路径<input autoFocus required disabled={!!file||!canWrite||busy} value={path} onChange={e=>setPath(e.target.value)} placeholder="notes/research.md"/></label><label>文本内容<textarea rows={12} className="wb-file-editor" readOnly={!canWrite} disabled={busy||mutation.pending} value={content} onChange={e=>setContent(e.target.value)}/></label><p className="wb-hint">保存时检查文件版本，其他成员更新后需重新读取再提交。</p></fieldset><div className="wb-actions"><button className="wb-primary" disabled={!canWrite||busy}>{busy?'正在保存…':mutation.pending?'重试原保存':'保存共同文件'}</button><button type="button" disabled={busy||mutation.pending} onClick={()=>setEditing(false)}>关闭</button></div></form>}<WorkspaceFileListing page={listing} disabled={!project||busy||mutation.pending} onOpen={item=>void open(item)} onMore={()=>void pager.more()} onRefresh={resource.reload}/>{project&&!resource.loading&&!resource.error&&!resource.data?.items.length&&<Empty>项目暂无共同文件。</Empty>}</div>;
+  useEffect(()=>{contentRequest.current?.abort();contentRequest.current=null;historyRequest.current?.abort();historyRequest.current=null;lifecycleHistoryRequest.current?.abort();lifecycleHistoryRequest.current=null;directoryRequest.current?.abort();directoryRequest.current=null;persistedDraftRef.current=null;setFile(null);setEditor(null);setPreview(null);setHistorical(false);setHistoryVersion('');setHistoryPage(null);setHistoryLoading(false);setHistoryError('');setLifecycleDialog(readPendingFileLifecycleDialog(storage(),{owner_scope:ownerScope,workspace_id:workspace,project_id:project}));setLifecycleHistoryPage(null);setLifecycleHistoryLoading(false);setLifecycleHistoryError('');setSelectedHistoryVersion(null);setRangeRead(null);setRangeLoading(false);setRangeError('');setBusy(false);setDirectoryAction(null);setDirectoryStatus('');setError('');setDraftError('');setPathCollision(null);setStoredDrafts(readStoredSessionDrafts(storage(),ownerScope));return()=>{contentRequest.current?.abort();historyRequest.current?.abort();lifecycleHistoryRequest.current?.abort();directoryRequest.current?.abort();};},[workspace,project,ownerScope]);
+ useEffect(()=>{
+  if(!fileEditorMatchesScope(editor,scope)||!project||!editor.path)return;
+  if(editor.base_version>0&&editor.draft_content===editor.base_content&&!editor.draft_restored)return;
+  if(editor.base_version===0&&editor.path==='untitled.txt'&&!editor.draft_content)return;
+  if(editor.draft_storage_path===editor.path&&editor.draft_storage_content===editor.draft_content){setDraftError('');return;}
+  try{const target={owner_scope:ownerScope,workspace_id:workspace,project_id:project,path:editor.path,base_version:editor.base_version,base_sha256:editor.base_sha256,base_content:editor.base_content,content:editor.draft_content},persisted=persistedDraftRef.current,persistedScopeMatches=persisted?.owner_scope===ownerScope&&persisted.workspace_id===workspace&&persisted.project_id===project,sourcePath=editor.draft_storage_path??(persistedScopeMatches&&(persisted.path===editor.path||persisted.path===editor.base_path)?persisted.path:null),previousDraft=sourcePath&&sourcePath!==editor.path?readSessionDraft(storage(),{...scope,path:sourcePath}):null,allowReplace=editor.draft_storage_path===editor.path||persistedScopeMatches&&persisted.path===editor.path;if(previousDraft)moveSessionDraft(storage(),previousDraft,target);else writeSessionDraft(storage(),target,{allowReplaceExisting:allowReplace});persistedDraftRef.current=target;setDraftError('');setPathCollision(null);setStoredDrafts(readStoredSessionDrafts(storage(),ownerScope));if(editor.draft_storage_path!==editor.path||editor.draft_storage_content!==editor.draft_content)setEditor((current:typeof editor)=>fileEditorMatchesScope(current,scope)?{...current,draft_storage_path:editor.path,draft_storage_content:editor.draft_content}:current);}
+  catch(error){if((error as any)?.message==='workspace_file_draft_path_collision'&&(error as any).candidate){const target=(error as any).candidate;setPathCollision({source_path:editor.draft_storage_path??null,target});setDraftError(`目标路径 ${target.path} 已有另一份会话草稿；当前草稿仍保留。请恢复目标、改用其他路径，或明确丢弃目标草稿后继续改名。`);}else setDraftError('浏览器无法保存会话草稿；当前页面中的编辑内容仍保留。');}
+ },[editor,workspace,project,ownerScope,draftRetry]);
+  const currentFile=file?.owner_scope===ownerScope&&file.workspace_id===workspace&&file.project_id===project?file:null,visiblePreview=currentEditor||currentFile?preview:null,currentEditorDirty=!!currentEditor&&(currentEditor.draft_content!==currentEditor.base_content||currentEditor.path!==currentEditor.base_path),editorDraftPersisted=!!currentEditor&&ownerDrafts.some(draft=>draft.owner_scope===ownerScope&&draft.workspace_id===workspace&&draft.project_id===project&&draft.path===currentEditor.path&&draft.base_version===currentEditor.base_version&&draft.base_sha256===currentEditor.base_sha256&&draft.base_content===currentEditor.base_content&&draft.content===currentEditor.draft_content),draftNeedsPersistence=currentEditorDirty&&!editorDraftPersisted,resource={data:listing,error:listing.error,loading:listing.loading,reload:()=>void pager.refresh()};
+ const visibleHistoryPage=historyPage&&historyPage.owner_scope===ownerScope&&historyPage.workspace_id===workspace&&historyPage.project_id===project&&historyPage.path===currentFile?.path?historyPage:null;
+ const visibleLifecycleHistory=lifecycleHistoryPage&&lifecycleHistoryPage.owner_scope===ownerScope&&lifecycleHistoryPage.workspace_id===workspace&&lifecycleHistoryPage.project_id===project?lifecycleHistoryPage:null;
+ const visibleRangeRead=rangeRead&&rangeRead.owner_scope===ownerScope&&rangeRead.source.workspace_id===workspace&&rangeRead.source.project_id===project&&rangeRead.source.path===currentFile?.path?rangeRead:null;
+ const [checkpointPending,setCheckpointPending]=useState(false);
+  const permission=caps.workspaces.find(item=>item.workspace_id===workspace)?.can_write===true,canWrite=permission&&!activeRestoreCandidate&&!checkpointPending;
+  const readAllWorkspaceFiles=async(signal:AbortSignal)=>{
+   const items:WorkspaceFile[]=[],paths=new Set<string>(),cursors=new Set<string>();let cursor:string|undefined;
+   while(true){
+    const page=await workbenchApi.files(workspace,project,{limit:200,...(cursor?{cursor}:{})},signal);
+    if(!Array.isArray(page.items)||!(page.next_cursor===null||typeof page.next_cursor==='string'))throw new Error('workspace_file_list_invalid');
+    for(const item of page.items){
+     if(!item.path||!Number.isSafeInteger(item.version)||item.version<1||!Number.isSafeInteger(item.size)||item.size<0||!/^[a-f0-9]{64}$/.test(item.sha256)||paths.has(item.path))throw new Error('workspace_file_list_invalid');
+     paths.add(item.path);items.push(item);
+    }
+    if(page.next_cursor===null)break;
+    if(!page.next_cursor||cursors.has(page.next_cursor))throw new Error('workspace_file_list_invalid');
+    cursors.add(page.next_cursor);cursor=page.next_cursor;
+   }
+   return items;
+  };
+  const importDirectory=async(event:React.ChangeEvent<HTMLInputElement>)=>{
+   const files=Array.from(event.currentTarget.files??[]);event.currentTarget.value='';
+   if(!files.length||busy||!canWrite||!ownerScope||!project)return;
+   const targetScope={owner_scope:ownerScope,workspace_id:workspace,project_id:project},controller=new AbortController();
+   directoryRequest.current?.abort();directoryRequest.current=controller;setBusy(true);setDirectoryAction('import');setDirectoryStatus('正在读取项目文件清单…');setError('');let changed=false;
+   try{
+    const existing=await readAllWorkspaceFiles(controller.signal);
+    if(controller.signal.aborted||!matchesRenderedScope(targetScope))return;
+    const existingPaths=new Set(existing.map(item=>item.path)),overwrites=new Set(files.map(item=>workspaceRelativePath(item.webkitRelativePath)).filter(path=>existingPaths.has(path))).size;
+    if(overwrites&&typeof window!=='undefined'&&!window.confirm(`目录中有 ${overwrites} 个现有路径；确认后将按当前版本号替换，内容相同的文件会跳过。继续？`)){setDirectoryStatus('已取消目录导入。');return;}
+    const result=await importWorkspaceDirectory(files,{
+     workspace,project,existingFiles:existing,api:workbenchApi,makeKey:()=>crypto.randomUUID(),signal:controller.signal,
+     onProgress:item=>{if(item.status==='imported'||item.status==='uploading')changed=true;setDirectoryStatus(`${item.status==='imported'?'已导入并核验':'内容未变，已跳过'}：${item.path}`);},
+    });
+    if(controller.signal.aborted||!matchesRenderedScope(targetScope))return;
+    setDirectoryStatus(`目录导入完成：${result.receipts.length} 个文件写入并核验，${result.unchanged.length} 个未变文件已跳过。`);
+   }catch(cause){if(!controller.signal.aborted&&matchesRenderedScope(targetScope))setError(workspaceDirectoryMessage(cause));}
+   finally{if(changed&&matchesRenderedScope(targetScope))resource.reload();if(directoryRequest.current===controller){directoryRequest.current=null;setDirectoryAction(null);setBusy(false);}}
+  };
+  const exportDirectory=async()=>{
+   if(busy||!workspaceReadable||!ownerScope||!project)return;
+   const picker=typeof window==='undefined'?undefined:(window as any).showDirectoryPicker;
+   if(typeof picker!=='function'){setError('此浏览器不支持目录写入；可逐个使用“下载原始文件”。');return;}
+   let directoryPromise:Promise<any>;try{directoryPromise=picker({mode:'readwrite'});}catch(cause){setError(workspaceDirectoryMessage(cause));return;}
+   const targetScope={owner_scope:ownerScope,workspace_id:workspace,project_id:project},controller=new AbortController();
+   directoryRequest.current?.abort();directoryRequest.current=controller;setBusy(true);setDirectoryAction('export');setDirectoryStatus('等待选择导出目录…');setError('');
+   try{
+    const directory=await directoryPromise;
+    if(controller.signal.aborted||!matchesRenderedScope(targetScope))return;
+    const items=await readAllWorkspaceFiles(controller.signal);
+    if(!items.length){setDirectoryStatus('项目没有可导出的文件。');return;}
+    const paths=await exportWorkspaceDirectory(items,{workspace,project,api:workbenchApi,directory,signal:controller.signal,
+     onProgress:item=>setDirectoryStatus(`已校验并导出：${item.path}`)});
+    if(!controller.signal.aborted&&matchesRenderedScope(targetScope))setDirectoryStatus(`目录导出完成：${paths.length} 个文件已按相对路径写入并通过 SHA-256 校验。`);
+   }catch(cause){if(controller.signal.aborted||!matchesRenderedScope(targetScope))return;if((cause as any)?.name==='AbortError'){setDirectoryStatus('已取消目录导出。');return;}setError(workspaceDirectoryMessage(cause));}
+   finally{if(directoryRequest.current===controller){directoryRequest.current=null;setDirectoryAction(null);setBusy(false);}}
+  };
+  const downloadFile=async(item:WorkspaceFile)=>{
+   if(busy||!workspaceReadable||!ownerScope||!project)return;
+   const targetScope={owner_scope:ownerScope,workspace_id:workspace,project_id:project},controller=new AbortController();
+   directoryRequest.current?.abort();directoryRequest.current=controller;setBusy(true);setDirectoryAction('download');setDirectoryStatus('正在下载并校验文件…');setError('');
+   try{
+    const bytes=await downloadWorkspaceFile(item,{workspace,project,api:workbenchApi,signal:controller.signal});
+    if(controller.signal.aborted||!matchesRenderedScope(targetScope))return;
+    const url=URL.createObjectURL(new Blob([bytes],{type:'application/octet-stream'})),link=document.createElement('a');
+    link.href=url;link.download=item.path.split('/').at(-1)||'workspace-file';document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    setDirectoryStatus(`已校验并下载 ${item.path}（SHA-256 ${item.sha256}）。`);
+   }catch(cause){if(!controller.signal.aborted&&matchesRenderedScope(targetScope))setError(workspaceDirectoryMessage(cause));}
+   finally{if(directoryRequest.current===controller){directoryRequest.current=null;setDirectoryAction(null);setBusy(false);}}
+  };
+ const clearHistory=()=>{historyRequest.current?.abort();historyRequest.current=null;setHistoryPage(null);setHistoryError('');setHistoryLoading(false);};
+ const clearRange=()=>{contentRequest.current?.abort();contentRequest.current=null;setRangeRead(null);setRangeError('');setRangeLoading(false);};
+ const showFile=async(item:FileInfo|WorkspaceFileVersion,version?:number,fromHistory=false,preserveHistory=false,skipDigestCheck=false)=>{if(!project||busy){return;}if(currentEditor&&(draftError||draftNeedsPersistence)){setError(draftError?'本地草稿尚未成功保存；请先复制编辑内容或重试，暂不能切换文件。':'会话草稿正在保存，请稍后再切换文件。');return;}if(!preserveHistory){clearHistory();setSelectedHistoryVersion(null);}clearRange();setBusy(true);setError('');const controller=new AbortController();contentRequest.current=controller;
+  try{const targetVersion=version??item.version,data=await readWorkspaceFile({request,workspace_id:workspace,project_id:project,path:item.path,version:targetVersion,sha256:skipDigestCheck?undefined:item.sha256},controller.signal);if(controller.signal.aborted)return;setFile({...data,owner_scope:ownerScope});setPreview(workspaceFilePreview(data.path,data.content));setHistorical(fromHistory);setSelectedHistoryVersion(fromHistory?targetVersion:null);setEditor(fromHistory?null:createFileEditorState({...data,owner_scope:ownerScope}));setStoredDrafts(readStoredSessionDrafts(storage(),ownerScope));}
+  catch(error){if(!controller.signal.aborted){const normalized=normalizeWorkspaceFileReadError(error);setError(fileReadMessage(normalized));resource.reload();}}
+  finally{if(contentRequest.current===controller){contentRequest.current=null;setBusy(false);}}};
+ const open=async(item:FileInfo)=>{if(currentEditor&&(draftError||draftNeedsPersistence)){setError(draftError?'本地草稿尚未成功保存；请先复制编辑内容或重试，暂不能切换文件。':'会话草稿正在保存，请稍后再切换文件。');return;}if(currentEditor&&currentEditor.path!==item.path&&currentEditorDirty&&typeof window!=='undefined'&&!window.confirm('当前草稿已保存到此标签页的会话存储。切换文件后可从草稿恢复，继续吗？'))return;await showFile(item);};
+ const readKnownVersion=()=>{const target=currentFile,version=Number(historyVersion);if(!target||target.owner_scope!==ownerScope||!historyVersion||!Number.isSafeInteger(version)||version<1||version>=target.version){setError('已知版本号超出范围');return;}void showFile(target,version,true,true,true);};
+ const loadHistory=async(before_version?:number)=>{const target=currentFile;if(!historyEnabled||!target||target.owner_scope!==ownerScope||!ownerScope||busy)return;historyRequest.current?.abort();const controller=new AbortController();historyRequest.current=controller;setHistoryLoading(true);setHistoryError('');
+  try{const latest=listing.items.find(item=>item.path===target.path),current=latest?{workspace_id:workspace,project_id:project,...latest}:undefined,page=await readWorkspaceFileVersions({request,enabled:historyEnabled,workspace_id:workspace,project_id:project,path:target.path,before_version,limit:50,current:before_version===undefined?current:undefined},controller.signal);if(controller.signal.aborted)return;const previous=before_version===undefined?null:historyPage;if(previous&&(previous.owner_scope!==ownerScope||previous.workspace_id!==workspace||previous.project_id!==project||previous.path!==target.path))throw new Error('workspace_file_history_stale_cursor');if(previous&&page.items.some((item:WorkspaceFileVersion)=>previous.items.some(existing=>existing.version===item.version)))throw new Error('workspace_file_history_invalid');setHistoryPage({...page,items:previous?[...previous.items,...page.items]:page.items,owner_scope:ownerScope});}
+  catch(error){if(!controller.signal.aborted)setHistoryError(fileReadMessage(error));}
+  finally{if(historyRequest.current===controller){historyRequest.current=null;setHistoryLoading(false);}}};
+ const loadMoreHistory=()=>{const before=visibleHistoryPage?.next_before_version;if(before!==null&&before!==undefined)void loadHistory(before);};
+ const readVersion=(version:number)=>{const item=visibleHistoryPage?.items.find(entry=>entry.version===version);if(!item||!historyEnabled)return;void showFile(item,version,true,true);};
+ const loadLifecycleHistory=async(cursor?:string)=>{
+  if(!workspaceReadable||!project||!ownerScope)return;
+  const previous=cursor?lifecycleHistoryPage:null;
+  if(cursor&&(!previous||previous.owner_scope!==ownerScope||previous.workspace_id!==workspace||previous.project_id!==project)){setLifecycleHistoryError('操作历史游标与当前项目不匹配，请刷新。');return;}
+  lifecycleHistoryRequest.current?.abort();const controller=new AbortController();lifecycleHistoryRequest.current=controller;setLifecycleHistoryLoading(true);if(cursor===undefined)setLifecycleHistoryError('');
+  try{
+   const page=await workbenchApi.fileLifecycleHistory(workspace,project,{limit:50,...(cursor?{cursor}:{})},controller.signal);
+   if(controller.signal.aborted)return;
+   if(!Array.isArray(page.items)||!(page.next_cursor===null||typeof page.next_cursor==='string')||page.items.some(item=>item.project_id!==project||item.workspace_id!==workspace||!item.command_key||!item.source?.path||!Number.isSafeInteger(item.source?.version)||!/^[a-f0-9]{64}$/.test(item.source?.sha256??'')))throw new Error('workspace_file_lifecycle_history_scope_mismatch');
+   if(previous&&page.items.some(item=>previous.items.some(existing=>existing.command_key===item.command_key)))throw new Error('workspace_file_lifecycle_history_duplicate');
+   setLifecycleHistoryPage({...page,items:previous?[...previous.items,...page.items]:page.items,owner_scope:ownerScope,workspace_id:workspace,project_id:project});
+  }catch(cause){if(!controller.signal.aborted)setLifecycleHistoryError(cause instanceof Error?cause.message:'读取文件操作历史失败');}
+  finally{if(lifecycleHistoryRequest.current===controller){lifecycleHistoryRequest.current=null;setLifecycleHistoryLoading(false);}}
+ };
+ const loadMoreLifecycleHistory=()=>{const cursor=visibleLifecycleHistory?.next_cursor;if(cursor)void loadLifecycleHistory(cursor);};
+ useEffect(()=>{if(workspaceReadable&&project)void loadLifecycleHistory();return()=>lifecycleHistoryRequest.current?.abort();},[workspace,project,ownerScope,workspaceReadable]);
+ const lifecycleHistoryPanelPage={...(visibleLifecycleHistory??{items:[],next_cursor:null}),loading:lifecycleHistoryLoading,error:lifecycleHistoryError};
+ const previewLifecycleSource=async(item:WorkbenchFileLifecycleHistoryItem)=>{
+  const source=item.source;
+  if(item.project_id!==project||item.workspace_id!==workspace||!item.command_key||!source.path||!Number.isSafeInteger(source.version)||!/^[a-f0-9]{64}$/.test(source.sha256)){
+   setError('历史回执与文件路径或摘要不匹配，未读取内容。');return;
+  }
+  if(currentEditor&&(draftError||draftNeedsPersistence)){setError(draftError?'本地草稿尚未成功保存；请先复制编辑内容或重试，暂不能切换文件。':'会话草稿正在保存，请稍后再切换文件。');return;}
+  if(currentEditor&&currentEditorDirty&&typeof window!=='undefined'&&!window.confirm('当前草稿已保存在此标签页。打开历史版本后仍可从草稿恢复，继续吗？'))return;
+  await showFile({workspace_id:workspace,project_id:project,...source},source.version,true);
+ };
+ const readRangePage=async(source:WorkspaceFileVersion,owner: string,offset:number,previous:string)=>{if(!rangeEnabled||!owner||busy)return;setBusy(true);setRangeLoading(true);setRangeError('');contentRequest.current?.abort();const controller=new AbortController();contentRequest.current=controller;
+  try{const page=await readWorkspaceFileRange({request,enabled:rangeEnabled,source,offset_bytes:offset},controller.signal);if(controller.signal.aborted||contentRequest.current!==controller||taskDraftScope()!==owner)return;const content=previous+page.content,nextOffset=offset+page.returned_bytes;if(page.eof)await verifyWorkspaceFileRangeContent(source,content);if(controller.signal.aborted||contentRequest.current!==controller||taskDraftScope()!==owner)return;const next={owner_scope:owner,source,content,offset_bytes:nextOffset,eof:page.eof,verified:page.eof};setRangeRead(next);setFile({...source,owner_scope:owner,content});const nextPreview=workspaceFilePreview(source.path,content,{maxBytes:source.size});setPreview(nextPreview.kind==='text'&&!page.eof?{...nextPreview,truncated:true}:nextPreview);setHistorical(true);setSelectedHistoryVersion(source.version);setError('');}
+  catch(error){if(!controller.signal.aborted)setRangeError(fileReadMessage(error));}
+  finally{if(contentRequest.current===controller){contentRequest.current=null;setBusy(false);setRangeLoading(false);}}};
+ const readVersionByRange=(version:number)=>{const source=visibleHistoryPage?.items.find(entry=>entry.version===version);if(!source||!rangeEnabled||!historyEnabled||busy)return;clearRange();setHistoryError('');setError('');setHistorical(true);setSelectedHistoryVersion(version);setEditor(null);setFile({...source,owner_scope:ownerScope,content:''});setPreview(workspaceFilePreview(source.path,''));const initial:FileRangeView={owner_scope:ownerScope,source,content:'',offset_bytes:0,eof:false,verified:false};setRangeRead(initial);void readRangePage(source,ownerScope,0,'');};
+ const loadNextRange=()=>{const current=visibleRangeRead;if(!current||current.eof||!rangeEnabled||busy)return;void readRangePage(current.source,current.owner_scope,current.offset_bytes,current.content);};
+ const create=()=>{if(!ownerScope||!project||currentEditor&&(draftError||draftNeedsPersistence))return;clearHistory();clearRange();setFile(null);setPreview(null);setHistorical(false);setSelectedHistoryVersion(null);setError('');setEditor(createFileEditorState({owner_scope:ownerScope,workspace_id:workspace,project_id:project,path:'untitled.txt',version:0,sha256:null,content:''}));};
+ const refreshDrafts=()=>setStoredDrafts(readStoredSessionDrafts(storage(),ownerScope));
+ const restore=async(candidate:any)=>{if(!candidate||candidate.owner_scope!==ownerScope||candidate.workspace_id!==workspace||candidate.project_id!==project||busy)return;setBusy(true);setError('');const controller=new AbortController();contentRequest.current?.abort();contentRequest.current=controller;
+  try{const latest=candidate.base_version===0?null:await readWorkspaceFile({request,workspace_id:workspace,project_id:project,path:candidate.path},controller.signal);const next=restoreFileDraft(candidate,latest);setFile(latest?{...latest,owner_scope:ownerScope}:null);setPreview(workspaceFilePreview(candidate.path,latest?.content??''));setEditor({...next,draft_restored:true,draft_storage_path:candidate.path,draft_storage_content:candidate.content});setHistorical(false);setPathCollision(null);setDraftError('');}
+  catch(error){if(!controller.signal.aborted)setError(`草稿恢复失败：${fileReadMessage(error)}`);}
+  finally{if(contentRequest.current===controller){contentRequest.current=null;setBusy(false);}}};
+ const discardDraft=(candidate:any)=>{if(candidate?.owner_scope!==ownerScope)return;const collisionTarget=pathCollision?.target;if(collisionTarget&&candidate.workspace_id===collisionTarget.workspace_id&&candidate.project_id===collisionTarget.project_id&&candidate.path===collisionTarget.path){setError('请在路径冲突提示中明确选择恢复目标或丢弃目标并继续改名。');return;}const sameCurrent=!!currentEditor&&currentEditor.workspace_id===candidate.workspace_id&&currentEditor.project_id===candidate.project_id&&currentEditor.path===candidate.path;if(removeStoredSessionDraft(storage(),candidate)){if(sameCurrent&&currentEditor?.draft_restored){setEditor(null);setFile(null);setPreview(null);setDraftError('');}refreshDrafts();}};
+ const discardCollisionTarget=()=>{const target=pathCollision?.target;if(!target)return;if(!removeStoredSessionDraft(storage(),target)){setError('目标草稿未能丢弃；两份草稿均已保留。');refreshDrafts();return;}setError('');setPathCollision(null);setDraftError('');setStoredDrafts(readStoredSessionDrafts(storage(),ownerScope));setDraftRetry(value=>value+1);};
+ const discardForeignDraft=(candidate:any)=>discardDraft(candidate);
+ const draft=(field:'path'|'content',value:string)=>{if(!currentEditor||pathCollision&&field==='content')return;setError('');if(field==='path'){if(pathCollision&&value!==pathCollision.target.path){setPathCollision(null);setDraftError('');}setEditor({...currentEditor,path:value,reviewing:false,apply_confirmed:false});return;}try{setEditor(editFileDraft(currentEditor,value));}catch(error){setError(error instanceof Error?'文件草稿超过 1 MiB 上限':'文件草稿无效');}};
+  const save=async(event:React.FormEvent)=>{event.preventDefault();if(busy||!currentEditor||pathCollision)return;const saveScope={owner_scope:ownerScope,workspace_id:workspace,project_id:project},submitted=currentEditor;setBusy(true);setError('');try{const payload=fileApplyPayload(submitted);await mutation.submit(prefix,'PUT',payload);if(!matchesRenderedScope(saveScope))return;removeSessionDraft(storage(),{...saveScope,path:submitted.path});if(submitted.draft_storage_path&&submitted.draft_storage_path!==submitted.path)removeSessionDraft(storage(),{...saveScope,path:submitted.draft_storage_path});clearHistory();clearRange();setEditor(null);setFile(null);setPreview(null);setHistorical(false);setSelectedHistoryVersion(null);refreshDrafts();resource.reload();}
+   catch(error){if(!matchesRenderedScope(saveScope))return;const conflict=error instanceof Error&&(error.message==='version_conflict'||(error as any).status===409);if(conflict){clearHistory();try{const latest=await readWorkspaceFile({request,workspace_id:saveScope.workspace_id,project_id:saveScope.project_id,path:submitted.path});if(!matchesRenderedScope(saveScope))return;setFile({...latest,owner_scope:saveScope.owner_scope});setPreview(workspaceFilePreview(latest.path,latest.content));setEditor(markFileConflict(submitted,latest));setError('版本冲突：本地草稿已保留，请比较服务端最新版本。');resource.reload();}catch(refreshError){if(matchesRenderedScope(saveScope))setError(`版本冲突，草稿已保留；读取最新版本失败：${fileReadMessage(refreshError)}`);}}
+    else setError(error instanceof Error?error.message:'文件未保存');}
+   finally{setBusy(false);}};
+ const requestApply=()=>{if(!currentEditor||pathCollision)return;try{setEditor(requestFileApply(currentEditor));setError('');}catch{setError('没有可保存的修改');}};
+ const confirmApply=()=>{if(!currentEditor)return;try{setEditor(confirmFileApply(currentEditor));setError('');}catch{setError('请先查看修改摘要');}};
+ const close=()=>{if(currentEditor&&(draftError||draftNeedsPersistence)){setError(draftError?'本地草稿尚未成功保存；请先复制编辑内容或重试，暂不能关闭。':'会话草稿正在保存，请稍后再关闭。');return;}clearHistory();clearRange();setFile(null);setPreview(null);setEditor(null);setHistorical(false);setSelectedHistoryVersion(null);setError('');};
+ return <div><div className="wb-toolbar"><label className="wb-inline-label">项目<select disabled={busy||checkpointPending||mutation.pending||!!lifecycleDialog||!!(currentEditor&&(draftError||draftNeedsPersistence))} value={project} onChange={event=>setProject(event.target.value)}>{projects.map(id=><option value={id} key={id}>{id}</option>)}</select></label><button className="wb-primary" disabled={!permission||!ownerScope||!project||busy||checkpointPending||mutation.pending||!!lifecycleDialog||!!(currentEditor&&(draftError||draftNeedsPersistence))} title={!permission?'此工作区没有写入权限':currentEditor&&(draftError||draftNeedsPersistence)?'会话草稿尚未成功保存':''} onClick={create}>新建共同文件</button></div>{foreignDrafts.length>0&&<div className="wb-file-recovery" role="status"><p>此标签页还保存着其他工作区 / 项目的草稿：</p><ul aria-label="其他项目的文件草稿">{foreignDrafts.map(candidate=><li key={`${candidate.workspace_id}:${candidate.project_id}:${candidate.path}`}><span>{candidate.workspace_id} / {candidate.project_id} / {candidate.path}</span><div className="wb-actions">{candidate.workspace_id===workspace&&projects.includes(candidate.project_id)&&<button type="button" onClick={()=>setProject(candidate.project_id)}>切回草稿项目</button>}<button type="button" onClick={()=>discardForeignDraft(candidate)}>放弃草稿</button></div></li>)}</ul></div>}{!project&&<Empty>先创建绑定项目的角色，即可查看项目共同文件。</Empty>}<ResourceStatus {...resource} onRetry={resource.reload}/>{error&&<p className="wb-error" role="alert">{error}</p>}{draftError&&<p className="wb-error" role="alert">{draftError}</p>}{currentEditor?.draft_content===currentEditor?.base_content&&currentEditor?.base_version>0&&<span className="wb-status">当前草稿没有未保存修改。</span>}{currentEditorDirty&&editorDraftPersisted&&!draftError&&<span className="wb-status" role="status">未保存草稿已保存在此标签页会话中。</span>}{currentEditorDirty&&!editorDraftPersisted&&!draftError&&<span className="wb-status" role="status">正在保存会话草稿…</span>}
+  <WorkspaceCheckpointPanel key={`${ownerScope}:${workspace}:${project}`} workspace={workspace} project={project} canWrite={permission&&!!ownerScope&&!busy&&!mutation.pending&&!lifecycleDialog&&!currentEditor} onPending={setCheckpointPending} onChanged={resource.reload}/>
+  {(editorViewAvailable(currentEditor,currentRestoreCandidates)||currentFile)&&<WorkspaceFileEditor file={currentFile} state={currentEditor} preview={visiblePreview} canWrite={!!canWrite&&!!ownerScope} busy={busy} mutationPending={mutation.pending} historical={historical} historyVersion={historyVersion} restoreCandidates={currentRestoreCandidates} pathCollision={pathCollision} historyEnabled={historyEnabled&&!!ownerScope} rangeEnabled={rangeEnabled&&!!ownerScope} historyItems={visibleHistoryPage?.items??[]} historyNextBeforeVersion={visibleHistoryPage?.next_before_version??null} historyLoading={historyLoading} historyError={historyError} rangeLoading={rangeLoading} rangeError={rangeError} rangeRead={visibleRangeRead?{loaded_bytes:visibleRangeRead.offset_bytes,total_bytes:visibleRangeRead.source.size,complete:visibleRangeRead.eof,verified:visibleRangeRead.verified}:null} selectedHistoryVersion={selectedHistoryVersion} onDraft={draft} onRequestApply={requestApply} onConfirmApply={confirmApply} onSave={save} onClose={close} onHistoryVersion={setHistoryVersion} onReadKnownVersion={readKnownVersion} onLoadHistory={()=>void loadHistory()} onLoadMoreHistory={loadMoreHistory} onRetryHistory={()=>void loadHistory()} onReadVersion={readVersion} onReadVersionByRange={readVersionByRange} onLoadNextRange={loadNextRange} onLoadLatest={()=>{if(!currentEditor)return;try{setEditor(reloadLatestFile(currentEditor));const latest=currentEditor.conflict?.latest;if(latest){setFile({...latest,owner_scope:ownerScope});setPreview(workspaceFilePreview(latest.path,latest.content));}setError('');}catch{setError('未能载入最新版本');}}} onRebase={()=>{if(!currentEditor)return;try{setEditor(rebaseFileDraft(currentEditor));setError('');}catch{setError('未能保留本地草稿');}}} onRestoreDraft={candidate=>void restore(candidate)} onDiscardDraft={discardDraft} onRestoreCollisionTarget={()=>void restore(pathCollision?.target)} onDiscardCollisionTarget={discardCollisionTarget}/>}
+  <WorkspaceDirectoryControls importDisabled={!project||!ownerScope||!canWrite||busy||checkpointPending||mutation.pending||!!lifecycleDialog||!!currentEditor} exportDisabled={!project||!workspaceReadable||busy||checkpointPending||mutation.pending||!!lifecycleDialog||!!currentEditor} importing={directoryAction==='import'} exporting={directoryAction==='export'} importSupported={typeof HTMLInputElement!=='undefined'&&'webkitdirectory' in HTMLInputElement.prototype} exportSupported={typeof window!=='undefined'&&typeof (window as any).showDirectoryPicker==='function'} onImport={event=>void importDirectory(event)} onExport={()=>void exportDirectory()}/>
+  {directoryStatus&&<p className="wb-status" role="status">{directoryStatus}</p>}
+  <WorkspaceFileListing page={listing} disabled={!project||busy||checkpointPending||mutation.pending||!!lifecycleDialog||!!(currentEditor&&(draftError||draftNeedsPersistence))} actionsDisabled={!canWrite} onOpen={item=>void open(item)} onRename={item=>setLifecycleDialog({action:'rename',file:item})} onDelete={item=>setLifecycleDialog({action:'delete',file:item})} onDownload={workspaceReadable?item=>void downloadFile(item):undefined} onMore={()=>void pager.more()} onRefresh={resource.reload}/>{project&&!resource.loading&&!resource.error&&!resource.data?.items.length&&<Empty>项目暂无共同文件。</Empty>}
+  {!!project&&<WorkspaceFileLifecycleHistoryListing page={lifecycleHistoryPanelPage} onMore={loadMoreLifecycleHistory} onRefresh={()=>void loadLifecycleHistory()} onPreviewSource={item=>void previewLifecycleSource(item)}/>}
+  {lifecycleDialog&&<WorkspaceFileLifecycleReview key={`${ownerScope}:${workspace}:${project}:${lifecycleDialog.action}:${lifecycleDialog.file.path}:${lifecycleDialog.resumeCommand?.command_key??'new'}`} workspace={workspace} project={project} file={lifecycleDialog.file} action={lifecycleDialog.action} canWrite={!!canWrite} ownerScope={ownerScope} lifecycleStorage={storage()} resumeCommand={lifecycleDialog.resumeCommand} onClose={()=>setLifecycleDialog(null)} onApplied={()=>{clearHistory();clearRange();setEditor(null);setFile(null);setPreview(null);setHistorical(false);setSelectedHistoryVersion(null);resource.reload();void loadLifecycleHistory();}}/>}
+  </div>;
+ }
+export function WorkspaceDirectoryControls({importDisabled,exportDisabled,importing,exporting,importSupported,exportSupported,onImport,onExport}:{importDisabled:boolean;exportDisabled:boolean;importing:boolean;exporting:boolean;importSupported:boolean;exportSupported:boolean;onImport:(event:React.ChangeEvent<HTMLInputElement>)=>void;onExport:()=>void}){
+ return <><div className="wb-actions" aria-busy={importing||exporting}><label className="wb-inline-label">导入目录<input type="file" multiple aria-label="选择要导入的目录" disabled={importDisabled||!importSupported||importing} {...({webkitdirectory:''} as any)} onChange={onImport}/></label><button type="button" disabled={exportDisabled||!exportSupported||exporting} title={!exportSupported?'此浏览器不支持目录写入；可逐个下载原始文件。':''} onClick={onExport}>{exporting?'正在导出…':'导出项目目录'}</button></div><p className="wb-hint">导入按目录内相对路径保存，保留文件字节；空目录不存储。已有路径按版本号更新，未变化的文件会跳过。</p></>;
 }
-export function WorkspaceFileListing({page,disabled,onOpen,onMore,onRefresh}:{page:WorkspaceFilePage&{loading:boolean;error:string};disabled:boolean;onOpen:(item:WorkspaceFile)=>void;onMore:()=>void;onRefresh:()=>void}){
- return <><div className="wb-actions"><button disabled={disabled||page.loading} onClick={onRefresh}>刷新文件列表</button>{page.next_cursor&&<button disabled={disabled||page.loading} onClick={onMore}>{page.loading?'正在加载…':page.error?'重试加载更多文件':'加载更多文件'}</button>}</div><p className="wb-hint">已加载 {page.items.length} 个文件。翻页期间列表变化时需刷新；文件内容按当前版本读取。</p><div className="wb-file-list">{page.items.map(item=><button key={item.path} disabled={disabled} onClick={()=>onOpen(item)}><span>{item.path}</span><small>v{item.version} · {item.size} B</small></button>)}</div></>;
+export function WorkspaceFileListing({page,disabled,actionsDisabled=false,onOpen,onRename,onDelete,onDownload,onMore,onRefresh}:{page:WorkspaceFilePage&{loading:boolean;error:string};disabled:boolean;actionsDisabled?:boolean;onOpen:(item:WorkspaceFile)=>void;onRename?:(item:WorkspaceFile)=>void;onDelete?:(item:WorkspaceFile)=>void;onDownload?:(item:WorkspaceFile)=>void;onMore:()=>void;onRefresh:()=>void}){
+ const [collapsed,setCollapsed]=useState<Set<string>>(()=>new Set());
+ const tree=useMemo(()=>buildFileTree(page.items),[page.items]);
+ const onTreeKeyDown=(event:React.KeyboardEvent<HTMLUListElement>)=>{const button=(event.target as HTMLElement).closest<HTMLButtonElement>('button[data-tree-path]');if(!button)return;const items=[...event.currentTarget.querySelectorAll<HTMLButtonElement>('button[data-tree-path]')],index=items.indexOf(button);let next:HTMLButtonElement|undefined;
+  if(event.key==='ArrowDown')next=items[index+1];else if(event.key==='ArrowUp')next=items[index-1];else if(event.key==='Home')next=items[0];else if(event.key==='End')next=items.at(-1);
+  else if(event.key==='ArrowRight'&&button.dataset.treeKind==='directory'){if(button.getAttribute('aria-expanded')==='false')button.click();else next=items.find(item=>item.dataset.treeParent===button.dataset.treePath);}
+  else if(event.key==='ArrowLeft'){if(button.dataset.treeKind==='directory'&&button.getAttribute('aria-expanded')==='true')button.click();else if(button.dataset.treeParent)next=items.find(item=>item.dataset.treePath===button.dataset.treeParent);}
+  if(next){event.preventDefault();next.focus();}
+ };
+ const renderNodes=(nodes:any[],level:number,parent=''):React.ReactNode=><ul role={level===1?'tree':'group'} onKeyDown={level===1?onTreeKeyDown:undefined}>{nodes.map(node=>{const isDirectory=node.kind==='directory',closed=collapsed.has(node.path);return <li key={node.path} role="treeitem" aria-level={level} {...(isDirectory?{'aria-expanded':!closed}:{})}>{isDirectory?<><button type="button" data-tree-path={node.path} data-tree-parent={parent} data-tree-kind="directory" aria-expanded={!closed} disabled={disabled} onClick={()=>setCollapsed(current=>{const next=new Set(current);if(next.has(node.path))next.delete(node.path);else next.add(node.path);return next;})}>{closed?'▸':'▾'} {node.name}</button>{!closed&&<div role="group">{renderNodes(node.children,level+1,node.path)}</div>}</>:<div className="wb-file-tree-row"><button type="button" data-tree-path={node.path} data-tree-parent={parent} data-tree-kind="file" disabled={disabled} onClick={()=>onOpen(node.file)}><span>{node.path}</span><small>v{node.file.version} · {node.file.size} B</small></button>{(onRename||onDelete||onDownload)&&<div className="wb-file-tree-actions">{onRename&&<button type="button" disabled={disabled||actionsDisabled} onClick={()=>onRename(node.file)}>重命名</button>}{onDelete&&<button type="button" disabled={disabled||actionsDisabled} onClick={()=>onDelete(node.file)}>删除</button>}{onDownload&&<button type="button" disabled={disabled} onClick={()=>onDownload(node.file)}>下载原始文件</button>}</div>}</div>}</li>;})}</ul>;
+ return <><div className="wb-actions"><button disabled={disabled||page.loading} onClick={onRefresh}>刷新文件列表</button>{page.next_cursor&&<button disabled={disabled||page.loading} onClick={onMore}>{page.loading?'正在加载…':page.error?'重试加载更多文件':'加载更多文件'}</button>}</div><p className="wb-hint">已加载 {page.items.length} 个文件。目录按项目内相对路径展开；翻页期间列表变化时需刷新。</p><div className="wb-file-list">{renderNodes(tree,1)}</div></>;
 }

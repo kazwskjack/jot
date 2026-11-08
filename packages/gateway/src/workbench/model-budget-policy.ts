@@ -7,6 +7,7 @@ import { ModelBudgetLedger, normalizeModelBudgetRoutes, type ModelBudgetLimits, 
 import {installTaskMailbox,currentTaskMailbox} from './task-mailbox.ts';
 import {assertNativeRun} from './native-child-identity.ts';
 import {assertMemoryProcessingIdentity} from './memory-processing.ts';
+import {acceptedModelPolicyCandidates} from '../conversations/model-policy.ts';
 
 const categories = ['owner_daily','project_daily','agent_daily','task_total','occurrence','chat_root','mailbox_thread'] as const;
 type Category = typeof categories[number];
@@ -218,6 +219,15 @@ export class WorkbenchBudgetPolicy {
         const categoryByPrefix:Record<string,Category>={'task-total':'task_total',occurrence:'occurrence','chat-root':'chat_root','mailbox-thread':'mailbox_thread'};
         for(const scope of cumulative){const category=categoryByPrefix[scope.key.split(':')[0]!];if(!category)throw new Error('budget_binding_invalid');definitions.push({key:scope.key,category});}
         if(this.db.prepare(`SELECT 1 FROM wb_model_budget_attempts attempts JOIN wb_model_budget_bindings bindings ON bindings.run_id=attempts.run_id WHERE bindings.owner_id=? AND EXISTS (SELECT 1 FROM json_each(bindings.scopes_json) scope WHERE scope.value IN (${cumulative.map(()=>'?').join(',')})) AND attempts.state IN ('unknown','in_flight') LIMIT 1`).get(owner,...cumulative.map(scope=>scope.scope_id)))throw new Error('budget_usage_unknown');
+      } else if(binding.kind==='memory_consolidation'){
+        let context:Record<string,unknown>;try{context=JSON.parse(String(binding.context_json));}catch{throw new Error('budget_binding_invalid');}
+        const dream=context.memory_dream as Record<string,unknown>|undefined,policy=dream&&this.db.prepare(`SELECT enabled,policy_version,epoch,project_id,interval_seconds,next_due_at
+          FROM wb_memory_dream_policies WHERE owner_id=? AND workspace_id=? AND project_id=? AND agent_id=?`).get(owner,String(binding.workspace_id),String(binding.project_id),String(binding.agent_id)) as Row|undefined;
+        if(!dream||!policy||Number(policy.enabled)!==1||Number(policy.policy_version)!==dream.policy_version||Number(policy.epoch)!==dream.epoch
+          ||Number(policy.epoch)!==Number(binding.epoch)||policy.project_id!==dream.project_id||policy.next_due_at!==dream.cadence_slot
+          ||Number(policy.interval_seconds)!==dream.interval_seconds||!Number.isSafeInteger(dream.policy_version)||!Number.isSafeInteger(dream.epoch)
+          ||dream.project_id!==binding.project_id||typeof dream.cadence_slot!=='string'||!/^[0-9]+$/.test(dream.cadence_slot)
+          ||!Number.isSafeInteger(dream.interval_seconds)||Number(dream.interval_seconds)<1)throw new Error('budget_binding_invalid');
       } else if (binding.kind === 'chat') {
         let root = run, seen = new Set<string>();
         for (;;) {
@@ -236,7 +246,14 @@ export class WorkbenchBudgetPolicy {
       const scopes = definitions.map(definition => ({key:definition.key,...this.ledger.createScope(owner,definition.key,
         this.config.limits[definition.category],definition.daily ? window : {})}));
       this.ledger.bindRun(owner,runId,scopes.map(scope => scope.scope_id));
-      this.ledger.admitRun(owner,runId,this.config.admission_route);
+      const candidates=acceptedModelPolicyCandidates(run.model_policy_json),configured=this.config.admission_route;
+      const admissionRoutes=candidates[0]!.provider===configured.provider&&candidates[0]!.model===configured.model?candidates:[configured];
+      let admissionFailure:Error|undefined;
+      for(const route of admissionRoutes){
+        try{this.ledger.admitRun(owner,runId,route);admissionFailure=undefined;break;}
+        catch(error){if(error instanceof Error&&['model_budget_exhausted','budget_route_unavailable'].includes(error.message))admissionFailure??=error;else throw error;}
+      }
+      if(admissionFailure)throw admissionFailure;
       const allocation = {run_id:runId,scopes};
       this.db.prepare('INSERT INTO wb_budget_allocations VALUES(?,?,?,?)').run(runId,owner,JSON.stringify(allocation),instant.toISOString());
       return allocation;

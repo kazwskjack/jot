@@ -6,10 +6,11 @@ import {TaskReplyDrafts} from './reply-drafts.ts';
 import {TaskReplyPolicies} from './reply-policy.ts';
 import {TaskExecutionEvidence} from './execution-evidence.ts';
 import {runBudgetedAuxiliaryCall} from '../workbench/auxiliary-model-call.ts';
-import type {ModelBudgetLedger} from '../workbench/model-budget.ts';
+import type {ModelBudgetLedger,ModelBudgetUsageEvidence} from '../workbench/model-budget.ts';
 type Row=Record<string,any>;
 const hash=(value:unknown)=>createHash('sha256').update(canonicalJson(value)).digest('hex');
 const exact=(value:unknown,keys:string[]):value is Row=>!!value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).length===keys.length&&Object.keys(value).every(key=>keys.includes(key));
+function validUsageEvidence(value:unknown):value is ModelBudgetUsageEvidence{return exact(value,['protocol','source','cacheWrite'])&&(value as Row).protocol===1&&(value as Row).source==='reply-judge-client'&&['reported','folded-unreported'].includes(String((value as Row).cacheWrite));}
 function sourceStrings(value:unknown):string[]{
  if(typeof value==='string')return [value];
  if(typeof value==='number'||typeof value==='boolean')return [String(value)];
@@ -98,7 +99,7 @@ export class TaskReplySemanticChecks{
   const result=await runBudgetedAuxiliaryCall({ledger:options.ledger,owner,runId:draft.run_id,route:options.route,purpose:'reply-verification',attemptId,guard,invoke:async()=>{
    const response=await options.invoke(structuredClone(request));
    const captured=this.capture(owner,draft,inputHash,attemptId,response);
-   return {value:captured.assessment,usage:captured.usage};
+   return {value:captured.assessment,usage:captured.usage,...(captured.usageEvidence?{usageEvidence:captured.usageEvidence}:{})};
   }});
   return this.finish(owner,draft,request,inputHash,attemptId,result.value,result.receipt,guard);
  }
@@ -106,14 +107,18 @@ export class TaskReplySemanticChecks{
   try{const serialized=JSON.stringify(value);if(serialized&&Buffer.byteLength(serialized,'utf8')<=65536)return JSON.parse(serialized);}catch{/* Invalid values are blocked, never stored as raw provider text. */}
   return null;
  }
- private capture(owner:string,draft:Row,inputHash:string,attemptId:string,result:{value:unknown;usage:unknown}){
+ private capture(owner:string,draft:Row,inputHash:string,attemptId:string,result:{value:unknown;usage:unknown;usageEvidence?:unknown}){
   const assessment=this.safeAssessment(result.value),keys=['inputTokens','outputTokens','totalTokens','cacheReadTokens','cacheWriteTokens','reasoningTokens'];
+  if(result.usageEvidence!==undefined&&(!validUsageEvidence(result.usageEvidence)||!result.usage||typeof result.usage!=='object'||Array.isArray(result.usage)
+    ||(result.usageEvidence.cacheWrite==='folded-unreported'&&(result.usage as Row).cacheWriteTokens!==0)
+    ||(result.usageEvidence.cacheWrite==='reported'&&(!Number.isSafeInteger((result.usage as Row).cacheWriteTokens)||Number((result.usage as Row).cacheWriteTokens)<0))))throw new Error('reply_semantic_usage_evidence_invalid');
+  const usageEvidence=result.usageEvidence as ModelBudgetUsageEvidence|undefined;
   let usage:unknown=null;
   if(result.usage&&typeof result.usage==='object'&&!Array.isArray(result.usage)){
    const values=result.usage as Row;
    if(Object.keys(values).every(k=>keys.includes(k)&&Number.isSafeInteger(values[k])&&values[k]>=0))usage=structuredClone(values);
   }
-  const response={assessment,usage},encoded=canonicalJson(response);
+  const response={assessment,usage,...(usageEvidence?{usage_evidence:usageEvidence}:{})},encoded=canonicalJson(response);
   withImmediateTransaction(this.db,()=>{
    const attempt=this.db.prepare('SELECT * FROM wb_task_reply_semantic_attempts WHERE draft_id=? AND owner_id=?').get(draft.draft_id,owner) as Row|undefined;
    if(!attempt||attempt.attempt_id!==attemptId||attempt.input_sha256!==inputHash||attempt.payload_sha256!==draft.payload_sha256)throw new Error('reply_semantic_corrupt');
@@ -121,7 +126,7 @@ export class TaskReplySemanticChecks{
    if(prior){if(prior.response_sha256!==hash(response))throw new Error('reply_semantic_corrupt');return;}
    this.db.prepare('INSERT INTO wb_task_reply_semantic_responses VALUES(?,?,?,?,?,?,?,?)').run(draft.draft_id,owner,draft.payload_sha256,inputHash,attemptId,hash(response),encoded,new Date().toISOString());
   });
-  return response;
+  return {assessment,usage,...(usageEvidence?{usageEvidence}:{})};
  }
  private finish(owner:string,draft:Row,request:ReplyCheckRequest,inputHash:string,attemptId:string,value:unknown,accounting:unknown,guard:()=>void){
   return withImmediateTransaction(this.db,()=>{
@@ -146,15 +151,20 @@ export class TaskReplySemanticChecks{
    const captured=this.db.prepare('SELECT * FROM wb_task_reply_semantic_responses WHERE draft_id=? AND owner_id=?').get(id,owner) as Row|undefined;
    if(!attempt||!captured)return null;
    let response:Row;try{response=JSON.parse(captured.response_json);}catch{throw new Error('reply_semantic_corrupt');}
-   if(!exact(response,['assessment','usage'])||captured.response_sha256!==hash(response)||attempt.payload_sha256!==draft.payload_sha256||captured.payload_sha256!==draft.payload_sha256||attempt.input_sha256!==captured.input_sha256||attempt.attempt_id!==captured.attempt_id)throw new Error('reply_semantic_corrupt');
+   const hasEvidence=Object.hasOwn(response,'usage_evidence'),evidence=hasEvidence?response.usage_evidence:undefined;
+   if((!exact(response,['assessment','usage'])&&!(hasEvidence&&exact(response,['assessment','usage','usage_evidence'])))
+      ||(hasEvidence&&(!validUsageEvidence(evidence)||!response.usage||typeof response.usage!=='object'||Array.isArray(response.usage)
+        ||(evidence.cacheWrite==='folded-unreported'&&(response.usage as Row).cacheWriteTokens!==0)
+        ||(evidence.cacheWrite==='reported'&&(!Number.isSafeInteger((response.usage as Row).cacheWriteTokens)||Number((response.usage as Row).cacheWriteTokens)<0))))
+      ||captured.response_sha256!==hash(response)||attempt.payload_sha256!==draft.payload_sha256||captured.payload_sha256!==draft.payload_sha256||attempt.input_sha256!==captured.input_sha256||attempt.attempt_id!==captured.attempt_id)throw new Error('reply_semantic_corrupt');
    const billing=this.db.prepare('SELECT a.request_json,a.route_json FROM wb_model_budget_attempts a JOIN wb_model_budget_bindings b ON b.run_id=a.run_id WHERE a.run_id=? AND a.attempt_id=? AND b.owner_id=?').get(draft.run_id,attempt.attempt_id,owner) as Row|undefined;
    if(!billing||JSON.parse(billing.request_json).purpose!=='reply-verification'||JSON.parse(billing.route_json).billing)throw new Error('reply_semantic_corrupt');
-   return {attempt,response};
+   return {attempt,response,evidence};
   });
   if(!capturedState)return unavailable('REPLY_RESPONSE_UNAVAILABLE');
-  const {attempt,response}=capturedState;
+  const {attempt,response,evidence}=capturedState;
    let accounting;
-   try{accounting=options.ledger.settle(owner,draft.run_id,attempt.attempt_id,response.usage);}catch(error){if(error instanceof Error&&error.message==='budget_usage_invalid')throw new Error('auxiliary_usage_unknown');throw error;}
+   try{accounting=options.ledger.settle(owner,draft.run_id,attempt.attempt_id,response.usage,evidence);}catch(error){if(error instanceof Error&&error.message==='budget_usage_invalid')throw new Error('auxiliary_usage_unknown');throw error;}
    if(accounting.state!=='settled')throw new Error('auxiliary_usage_unknown');
    if(accounting.bound_exceeded)return unavailable('REPLY_ACCOUNTING_EXCEEDED');
    // Incurred costs are reconciled even if permissions have since changed.

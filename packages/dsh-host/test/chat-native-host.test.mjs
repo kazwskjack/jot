@@ -33,7 +33,7 @@ async function chatCase(t,{bounded=false,web=false,maintenance=false,accounting=
   assert.equal(req.headers['x-api-key'],modelKey);assert.match(req.url,/\/messages$/);assert.equal(input.thinking.type,'disabled');assert.equal(input.output_config,undefined);
   const compactionRequest=JSON.stringify(input.messages).includes('JOT-CHAT-COMPACTION-CHECKPOINT');
   const accountingRequest=JSON.stringify(input.messages).includes('SYNTHETIC-COMPACTION-ACCOUNTING-PROBE');
-  if(accountingRequest){assert.equal(accounting,true);assert.equal((input.tools??[]).length,0);}else{assert.deepEqual(input.tools.map(tool=>tool.name).sort(),['web_fetch','web_search']);assert.match(input.system,/useful solutions/);}requests.push(input);
+  if(accountingRequest){assert.equal(accounting,true);assert.equal((input.tools??[]).length,0);}else{assert.deepEqual(input.tools.map(tool=>tool.name).sort(),['web_fetch','web_search']);assert.match(input.system,/useful solutions/);assert.match(input.system,/J is Dad and X is Mom/);}requests.push(input);
   if(web&&requests.length===2)await supplementGate;
   if(bounded&&!accountingRequest&&!compactionRequest){const text=input.messages.flatMap(message=>typeof message.content==='string'?[message.content]:(message.content??[]).filter(block=>block.type==='text').map(block=>block.text)).join('\n');assert.ok(text.includes(expectedContext.model_text));assert.ok(text.includes(expectedQuestion));assert.ok(!text.includes('RAW-REASONING-NEVER-SEND'));assert.ok(!text.includes('data:image/png;base64,'));assert.ok(!text.includes('HISTORY-00'));assert.ok(expectedContext.model_text.length<=14000);}
   const planned=web?[

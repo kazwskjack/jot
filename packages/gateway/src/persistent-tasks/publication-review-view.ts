@@ -4,7 +4,7 @@ import type {WorkPublicationIntents} from './work-publication-intents.ts';
 import type {WorkPublicationSource} from '../../contracts/types.ts';
 import type {FinalizedWorkSources} from './finalized-work-sources.ts';
 
-const entry=(e:WorkspaceManifestEntry)=>e.kind==='directory'?{path:e.path,kind:e.kind}:{path:e.path,kind:e.kind,sha256:e.sha256,bytes:e.bytes,executable:e.executable};
+const entry=(e:WorkspaceManifestEntry)=>e.kind==='file'?{path:e.path,kind:e.kind,sha256:e.sha256,bytes:e.bytes,executable:e.executable}:{path:e.path,kind:e.kind};
 
 /** Project only a verified original service read. The private target witness
  * stays in the original database and the original review digest is unchanged.

@@ -19,6 +19,7 @@
 .jot-prompt-composer button{font:inherit;color:inherit;cursor:pointer}
 .jot-prompt-composer .jot-prompt-setting,.jot-prompt-composer .jot-prompt-plus,.jot-prompt-composer .jot-prompt-primary{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:32px;margin:0;padding:5px 6px;border:0;background:transparent;border-radius:9px;font-size:12px;line-height:20px}
 .jot-prompt-setting{max-width:100%}
+.jot-prompt-fallback{flex-shrink:0;white-space:nowrap}
 .jot-prompt-setting span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .jot-prompt-effort{max-width:40%;flex-shrink:0}
 .jot-prompt-composer svg{width:16px;height:16px;flex-shrink:0}
@@ -31,6 +32,7 @@
 .jot-prompt-composer .jot-prompt-menu button{display:flex;align-items:center;gap:8px;width:100%;min-height:36px;margin:0;padding:8px;border:0;border-radius:8px;background:transparent;text-align:left;font-size:13px;line-height:20px}
 .jot-prompt-menu button span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .jot-prompt-menu small{margin-left:auto;opacity:.6;font-size:10px;overflow-wrap:anywhere}
+.jot-prompt-menu-note{margin:4px 8px;padding:6px 0;opacity:.72;font-size:11px;line-height:16px}
 .jot-prompt-menu button:not(:disabled):hover,.jot-prompt-menu button[aria-checked="true"]{background:var(--composer-hover,rgba(127,127,127,.12))}
 .jot-prompt-more-menu{left:auto;right:0}
 .jot-prompt-attachments{display:flex;flex-wrap:wrap;gap:8px;min-width:0;max-height:180px;overflow:auto;overflow-wrap:anywhere}
@@ -50,3 +52,9 @@
 @keyframes jot-prompt-menu-in{from{opacity:0;transform:translateY(6px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
 @media(max-width:540px){.jot-prompt-composer,.jot-prompt-composer[data-expanded="true"]{max-width:100%}.jot-prompt-composer[data-expanded="true"]{padding-left:12px;padding-right:8px}.jot-prompt-settings,.jot-prompt-actions{gap:2px}.jot-prompt-model-anchor{max-width:60%}.jot-prompt-setting span{max-width:120px}.jot-prompt-menu{max-width:calc(100vw - 40px)}}
 @media(prefers-reduced-motion:reduce){.jot-prompt-composer{transition:none}.jot-prompt-menu{animation:none}}
+
+.jot-goal-stop-dialog{box-sizing:border-box;width:min(28rem,calc(100vw - 32px));max-width:calc(100vw - 32px);padding:18px;border:1px solid var(--line,#8885);border-radius:16px;background:var(--panel,#fff);color:var(--ink,#202020);box-shadow:0 16px 48px #0003}
+.jot-goal-stop-dialog::backdrop{background:#0006;backdrop-filter:blur(2px)}
+.jot-goal-stop-dialog>button{min-height:40px;margin:8px 8px 0 0;padding:7px 12px;border:1px solid var(--line,#8885);border-radius:9px;background:var(--panel,#fff);color:inherit}
+.jot-goal-stop-dialog>button:last-child{margin-right:0}
+.jot-goal-stop-focus-target:focus{outline:2px solid var(--accent);outline-offset:4px}

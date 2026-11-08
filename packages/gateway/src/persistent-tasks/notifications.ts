@@ -3,7 +3,7 @@ import {withImmediateTransaction} from '../db/database.ts';
 import {OwnerChannelBindings} from '../channels/owner-bindings.ts';
 import {defaultNotificationPolicy,normalizeNotificationPolicy} from './notification-policy.ts';
 type Row=Record<string,any>;
-type Target={channel_binding_id:string;channel:string;principal:string;version:number;settings_version:number};
+type Target={channel_binding_id:string;channel:string;principal:string;version:number;settings_version:number;artifact_delivery:boolean};
 export const taskNotificationEvents=['changed','completed','failed','needs_confirmation'] as const;
 export function normalizeNotificationEvents(value:unknown):string[]{
  if(!Array.isArray(value)||value.length>4||new Set(value).size!==value.length||value.some(item=>!taskNotificationEvents.includes(item as typeof taskNotificationEvents[number])))throw new Error('invalid_task_notification_settings');
@@ -24,17 +24,27 @@ export class TaskNotifications{
  }
  private task(owner:string,id:string){const task=this.db.prepare('SELECT * FROM wb_persistent_tasks WHERE owner_id=? AND task_id=?').get(owner,id) as Row|undefined;if(!task)throw new Error('task_not_found');return task;}
  get(owner:string,id:string){this.task(owner,id);const row=this.db.prepare('SELECT * FROM wb_task_notification_settings WHERE owner_id=? AND task_id=?').get(owner,id) as Row|undefined;
-  return {task_id:id,version:row?Number(row.version):0,channel_binding_ids:row?(JSON.parse(String(row.bindings_json)) as Target[]).map(binding=>binding.channel_binding_id):[],events:row?normalizeNotificationEvents(JSON.parse(String(row.events_json))):['completed'],delivery_policy:row?normalizeNotificationPolicy(JSON.parse(String(row.delivery_policy_json))):{...defaultNotificationPolicy}};}
+  const saved=row?(JSON.parse(String(row.bindings_json)) as Array<{channel_binding_id:string;artifact_delivery?:unknown}>):[];
+  return {task_id:id,version:row?Number(row.version):0,channel_binding_ids:saved.map(binding=>binding.channel_binding_id),artifact_delivery_binding_ids:saved.filter(binding=>binding.artifact_delivery===true).map(binding=>binding.channel_binding_id),events:row?normalizeNotificationEvents(JSON.parse(String(row.events_json))):['completed'],delivery_policy:row?normalizeNotificationPolicy(JSON.parse(String(row.delivery_policy_json))):{...defaultNotificationPolicy}};}
  update(owner:string,id:string,input:Row){return withImmediateTransaction(this.db,()=>{
   const task=this.task(owner,id);
-  if(Object.keys(input).some(key=>!['expected_version','channel_binding_ids','delivery_policy','events'].includes(key))||!Number.isSafeInteger(input.expected_version)||input.expected_version<0||!Array.isArray(input.channel_binding_ids)||input.channel_binding_ids.length>5||new Set(input.channel_binding_ids).size!==input.channel_binding_ids.length||input.channel_binding_ids.some((id:unknown)=>typeof id!=='string'||!id||id.length>128))throw new Error('invalid_task_notification_settings');
+  if(Object.keys(input).some(key=>!['expected_version','channel_binding_ids','artifact_delivery_binding_ids','delivery_policy','events'].includes(key))||!Number.isSafeInteger(input.expected_version)||input.expected_version<0||!Array.isArray(input.channel_binding_ids)||input.channel_binding_ids.length>5||new Set(input.channel_binding_ids).size!==input.channel_binding_ids.length||input.channel_binding_ids.some((id:unknown)=>typeof id!=='string'||!id||id.length>128))throw new Error('invalid_task_notification_settings');
   const policy=input.delivery_policy===undefined?this.get(owner,id).delivery_policy:normalizeNotificationPolicy(input.delivery_policy);
   const events=input.events===undefined?this.get(owner,id).events:normalizeNotificationEvents(input.events);
   if(task.status==='archived')throw new Error('task_state_conflict');
   if(this.db.prepare(`SELECT 1 FROM wb_task_current_occurrences o JOIN ga_runs r ON r.id=o.run_id WHERE o.task_id=? AND (r.reason_code='OUTCOME_UNKNOWN' OR r.status NOT IN ('succeeded','partial','failed','cancelled','interrupted'))`).get(id))throw new Error('task_notification_run_active');
   const current=this.get(owner,id);if(current.version!==input.expected_version)throw new Error('version_conflict');
   const bindings=new OwnerChannelBindings(this.db),targets=input.channel_binding_ids.map((id:string)=>bindings.resolve(owner,id)),now=new Date().toISOString();
-  this.db.prepare(`INSERT INTO wb_task_notification_settings(task_id,owner_id,version,bindings_json,created_at,updated_at,delivery_policy_json,events_json) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(task_id) DO UPDATE SET version=excluded.version,bindings_json=excluded.bindings_json,updated_at=excluded.updated_at,delivery_policy_json=excluded.delivery_policy_json,events_json=excluded.events_json`).run(id,owner,current.version+1,JSON.stringify(targets.map(({channel_binding_id,version})=>({channel_binding_id,version}))),now,now,JSON.stringify(policy),JSON.stringify(events));
+  const prior=this.db.prepare('SELECT bindings_json FROM wb_task_notification_settings WHERE task_id=? AND owner_id=?').get(id,owner) as {bindings_json:string}|undefined;
+  const previous=prior?JSON.parse(prior.bindings_json) as Array<{channel_binding_id:string;version:number;artifact_delivery?:unknown}>:[];
+  const requested=input.artifact_delivery_binding_ids;
+  if(requested!==undefined&&(!Array.isArray(requested)||requested.length>5||new Set(requested).size!==requested.length||requested.some((bindingId:unknown)=>typeof bindingId!=='string'||!bindingId||bindingId.length>128||!input.channel_binding_ids.includes(bindingId))||requested.length>0&&!events.includes('completed')))
+   throw new Error('invalid_task_notification_settings');
+  if(requested!==undefined&&requested.some((bindingId:string)=>!['wecom','mattermost'].includes(String(targets.find(target=>target.channel_binding_id===bindingId)?.channel))))throw new Error('task_artifact_channel_unsupported');
+  const artifactIds=requested===undefined
+   ?targets.filter(target=>['wecom','mattermost'].includes(target.channel)&&events.includes('completed')&&previous.some(saved=>saved.channel_binding_id===target.channel_binding_id&&saved.version===target.version&&saved.artifact_delivery===true)).map(target=>target.channel_binding_id)
+   :requested as string[];
+  this.db.prepare(`INSERT INTO wb_task_notification_settings(task_id,owner_id,version,bindings_json,created_at,updated_at,delivery_policy_json,events_json) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(task_id) DO UPDATE SET version=excluded.version,bindings_json=excluded.bindings_json,updated_at=excluded.updated_at,delivery_policy_json=excluded.delivery_policy_json,events_json=excluded.events_json`).run(id,owner,current.version+1,JSON.stringify(targets.map(({channel_binding_id,version})=>({channel_binding_id,version,...(artifactIds.includes(channel_binding_id)?{artifact_delivery:true}:{})}))),now,now,JSON.stringify(policy),JSON.stringify(events));
   // Permission changes invalidate queued delivery grants without resetting the
   // task's schedule, Goal, progress, generation or consumed model allowance.
   this.db.prepare('UPDATE wb_persistent_tasks SET version=version+1,projection_pending=1,updated_at=? WHERE task_id=? AND owner_id=?').run(now,id,owner);
@@ -44,10 +54,10 @@ export class TaskNotifications{
   this.task(owner,id);const settings=this.db.prepare('SELECT * FROM wb_task_notification_settings WHERE task_id=? AND owner_id=?').get(id,owner) as Row|undefined;
   if(!settings)return;
   if(!normalizeNotificationEvents(JSON.parse(settings.events_json)).includes(event))return [];
-  return (JSON.parse(String(settings.bindings_json)) as Array<{channel_binding_id:string;version:number}>).map(saved=>{
+  return (JSON.parse(String(settings.bindings_json)) as Array<{channel_binding_id:string;version:number;artifact_delivery?:unknown}>).map(saved=>{
    const row=this.db.prepare('SELECT * FROM ga_owner_channel_bindings WHERE channel_binding_id=? AND owner_id=?').get(saved.channel_binding_id,owner) as Row|undefined;
    if(!row)throw new Error('channel_binding_not_found');
-   return {channel_binding_id:saved.channel_binding_id,version:saved.version,channel:String(row.channel),principal:String(row.principal),settings_version:Number(settings.version)};
+   return {channel_binding_id:saved.channel_binding_id,version:saved.version,channel:String(row.channel),principal:String(row.principal),settings_version:Number(settings.version),artifact_delivery:saved.artifact_delivery===true&&['wecom','mattermost'].includes(String(row.channel))&&Number(row.version)===Number(saved.version)&&row.status==='verified'};
   });
  }
  grant(effectId:string,owner:string,taskId:string,target:Target){if(!this.db.isTransaction)throw new Error('task_notification_transaction_required');

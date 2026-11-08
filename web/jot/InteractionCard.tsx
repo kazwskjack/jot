@@ -25,14 +25,15 @@ export default function InteractionCard({value,disabled,submit,onRefresh}:{value
   }finally{if(!controller.signal.aborted){locked.current=false;setBusy(false);}}
  };
  const blocked=disabled||busy||accepted;
- const review=value.kind==='approval'&&!!value.purpose;
+ const browserAction=value.kind==='approval'&&value.purpose==='browser_action';
+ const review=value.kind==='approval'&&!!value.purpose&&!browserAction;
  const replyReview=value.kind==='approval'&&value.purpose==='task_reply_review';
  const acceptance=value.kind==='question'&&value.purpose==='task_acceptance_review';
- return <section className="jot-interaction"><h3>{replyReview?'确认这份回复':acceptance?'逐项验收结果':review?'确认继续核验':value.kind==='approval'?'需要你的确认':'补充一下信息'}</h3>
+ return <section className="jot-interaction"><h3>{browserAction?'确认浏览器操作':replyReview?'确认这份回复':acceptance?'逐项验收结果':review?'确认继续核验':value.kind==='approval'?'需要你的确认':'补充一下信息'}</h3>
  {acceptance&&<TaskReviewFiles id={value.interaction_id} version={value.version} disabled={blocked} onRefresh={onRefresh}/>}
  {value.kind==='approval'?<><p style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{value.action_summary}</p>{!review&&<small>风险：{value.risk}</small>}
- <button disabled={blocked} onClick={()=>void send({expected_version:value.version,action_digest:value.action_digest,decision:'approve'})}>{replyReview?'确认这份回复':review?'确认并继续核验':'批准本次操作'}</button>
- <button disabled={blocked} onClick={()=>void send({expected_version:value.version,action_digest:value.action_digest,decision:'deny'})}>{replyReview?'拒绝这份回复':review?'暂不继续':'拒绝'}</button></>:<>
+ <button disabled={blocked} onClick={()=>void send({expected_version:value.version,action_digest:value.action_digest,decision:'approve'})}>{browserAction?'批准此浏览器操作':replyReview?'确认这份回复':review?'确认并继续核验':'批准本次操作'}</button>
+ <button disabled={blocked} onClick={()=>void send({expected_version:value.version,action_digest:value.action_digest,decision:'deny'})}>{browserAction?'拒绝此浏览器操作':replyReview?'拒绝这份回复':review?'暂不继续':'拒绝'}</button></>:<>
  {value.questions.map(q=><fieldset key={q.question_id} disabled={blocked}><legend>{q.prompt}</legend>{q.description&&<>{acceptance&&<small>待验收的结果</small>}<p style={{whiteSpace:'pre-wrap'}}>{q.description}</p></>}{q.options.map(o=><label key={o.option_id}><input type={q.multiple?'checkbox':'radio'} name={`${value.interaction_id}-${q.question_id}`} checked={answers[q.question_id]?.selected_option_ids.includes(o.option_id)??false} onChange={e=>setAnswers(v=>({...v,[q.question_id]:{custom_text:v[q.question_id]?.custom_text??'',selected_option_ids:q.multiple?(e.target.checked?[...(v[q.question_id]?.selected_option_ids??[]),o.option_id]:(v[q.question_id]?.selected_option_ids??[]).filter(x=>x!==o.option_id)):[o.option_id]}}))}/>{o.label}</label>)}
  {q.allow_custom&&<input aria-label={q.prompt} placeholder={acceptance?'补充说明（可选）':undefined} maxLength={value.purpose==='task_input'||acceptance?10000:undefined} value={answers[q.question_id]?.custom_text??''} onChange={e=>setAnswers(v=>({...v,[q.question_id]:{selected_option_ids:v[q.question_id]?.selected_option_ids??[],custom_text:e.target.value}}))}/>}</fieldset>)}
  <button disabled={blocked||(value.purpose==='task_input'&&!value.questions.every(q=>answers[q.question_id]?.custom_text.trim()))||(acceptance&&!value.questions.every(q=>answers[q.question_id]?.selected_option_ids.length===1))} onClick={()=>void send({expected_version:value.version,answers:value.questions.map(q=>({question_id:q.question_id,...(answers[q.question_id]??{selected_option_ids:[],custom_text:''})}))})}>{acceptance?'提交验收':value.purpose==='task_input'?'提交信息并继续':'提交回答'}</button>

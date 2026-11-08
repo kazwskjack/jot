@@ -29,6 +29,8 @@ export class EventStore {
     this.db = db;
   }
 
+  usesDatabase(db: DatabaseSync): boolean { return this.db === db; }
+
   append(
     conversationId: string,
     runId: string | null,

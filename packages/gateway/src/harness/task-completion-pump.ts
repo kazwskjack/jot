@@ -7,6 +7,7 @@ import {installTaskCompletionHandshake,prepareTaskCompletion,preparedTaskComplet
 import {installTaskFinalizations} from '../persistent-tasks/finalization.ts';
 import {savedSessionCheckpoint} from './session-checkpoints.ts';
 import type {HarnessCoordinator} from './coordinator.ts';
+import {captureFinalizedTaskReportForDatabase} from '../workbench/memory-capture.ts';
 
 interface CompletionClient {
  goalStatus(session:string):Promise<unknown>;
@@ -14,6 +15,7 @@ interface CompletionClient {
  goalRestore?(session:string,run:string,intent?:string):Promise<unknown>;
 }
 type Claim={owner_id:string;run_id:string;token:string};
+type TaskCompletionPumpOptions={workerId:string;now?:()=>number;leaseMs?:number};
 /** The existing Worker consumes business certificates, never native phase or
  * model text alone. A durable fenced claim grants no execution/model budget. */
 export class TaskCompletionPump {
@@ -22,9 +24,9 @@ export class TaskCompletionPump {
  private db:DatabaseSync;
  private coordinator:HarnessCoordinator;
  private client:CompletionClient;
- private options:{workerId:string;now?:()=>number;leaseMs?:number};
+ private options:TaskCompletionPumpOptions;
  constructor(db:DatabaseSync,coordinator:HarnessCoordinator,client:CompletionClient,
-  options:{workerId:string;now?:()=>number;leaseMs?:number}){
+  options:TaskCompletionPumpOptions){
   this.db=db;this.coordinator=coordinator;this.client=client;this.options=options;
   this.now=options.now??Date.now;this.leaseMs=options.leaseMs??60_000;
   if(!options.workerId||!Number.isSafeInteger(this.leaseMs)||this.leaseMs<30_000)throw new Error('completion_pump_config_invalid');
@@ -96,6 +98,7 @@ export class TaskCompletionPump {
     // The finalizer requires the authenticated persisted proof; a response
     // shaped like success is never a substitute for its durable journal.
     this.coordinator.finalizeReviewedTask(claim.owner_id,claim.run_id,intent.intent_id);
+    captureFinalizedTaskReportForDatabase(this.db,claim.owner_id,claim.run_id);
     this.db.prepare('DELETE FROM wb_task_completion_claims WHERE run_id=? AND token=?').run(claim.run_id,claim.token);
    });
    return {run_id:claim.run_id,status:'succeeded'};

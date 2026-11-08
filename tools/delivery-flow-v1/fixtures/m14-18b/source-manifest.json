@@ -1,0 +1,72 @@
+{
+  "schema": "jot.m14.portable-source-slice.v2",
+  "commit": "18b20e4ae18b5580ad0f3089683522f1a7400ad7",
+  "tree": "f3f4728cb614fcd8a3644eefac04228e31ec068a",
+  "archive_sha256": "ef5846f3ce619d179918935db1012f6eaee6fb19d774b148d6eda088b6d3202f",
+  "scope": "tracked dependency closure only, not full repository tree",
+  "node": ">=24",
+  "external_packages_required": false,
+  "test_entry": "packages/gateway/test/always-on/snapshot-provider.test.mjs",
+  "files": [
+    {
+      "path": "LICENSE",
+      "sha256": "1eb85fc97224598dad1852b5d6483bbcf0aa8608790dcc657a5a2a761ae9c8c6",
+      "git_blob": "261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64"
+    },
+    {
+      "path": "package-lock.json",
+      "sha256": "cf6cb969b9ef603b459c730a389bdc0754a881ffbfac137657893bd9dc685251",
+      "git_blob": "998c63a331793153bb31a76fcc05edf718d8c7ec"
+    },
+    {
+      "path": "package.json",
+      "sha256": "7182a0db1c309a2a7982ba04a919a1775d458b621bbb9a4d465b11f072a0be2b",
+      "git_blob": "eead4e0b2c42362b7007351e8f2e87728068d0a1"
+    },
+    {
+      "path": "packages/dsh-host/runtime-package-lock.json",
+      "sha256": "123d6db9faabec92c006f53f5a808acb2477d000621e8ac421d1f05167c8efef",
+      "git_blob": "d7b091a8641bbd9cc21603ffcf4a9389787b7b06"
+    },
+    {
+      "path": "packages/gateway/package-lock.json",
+      "sha256": "b578dde01ba9df51bfce027b9f8c4b4168ba155fb160b648344d492e8ef7c283",
+      "git_blob": "82073b2d01e2e42999ac2315ca76a7bba5969946"
+    },
+    {
+      "path": "packages/gateway/package.json",
+      "sha256": "1a80b20a33703cdafc5e968949bfecff0ac44ed38d5cc26495a78e52a0f848c2",
+      "git_blob": "a323eb685f530d59fc6644add0de19561f8845bc"
+    },
+    {
+      "path": "packages/gateway/src/always-on/snapshot-provider.ts",
+      "sha256": "92c6a495caa8b34b842b3b34e272b4649c2544d49233037c573f57f3ae0ba704",
+      "git_blob": "dffb35a6049cfd881dd36a87518bcaacec592a37"
+    },
+    {
+      "path": "packages/gateway/src/always-on/workspace-provider.ts",
+      "sha256": "2be24a444628b925bf3b25fa6de7375e5ca9e8100d0f55ec70ddb86998bf2ac0",
+      "git_blob": "9c0ac3ea079d6fe03465f54f9556636d4c8271d6"
+    },
+    {
+      "path": "packages/gateway/src/db/canonical-json.ts",
+      "sha256": "7035a5069d66d0f45f52070f11f3424b53f7ce31b42df7e61aec630451f81bbc",
+      "git_blob": "48d222636b950607ed7b52deb726dcb80cc9eeec"
+    },
+    {
+      "path": "packages/gateway/test/always-on/snapshot-provider.test.mjs",
+      "sha256": "5ddd40e52d01e59b55f5b85b4dc7eb21485bdd4fffd5b31fab9e4d5c5798441d",
+      "git_blob": "6582b20361e8d8f61aaf26e18c7bc056e3feacbf"
+    }
+  ],
+  "blocked_cases": [
+    "M14.04",
+    "M14.05",
+    "M17",
+    "M21.05",
+    "R02",
+    "R04"
+  ],
+  "formal_E": 0,
+  "product_execution_in_assembly": false
+}

@@ -8,8 +8,8 @@ test('native Cordis context uses active-service lookup instead of optional proxy
  assert.equal(conversationGoal({ctx:scope},{}).goal,goal);
 });
 test('goal controls require exact CAS and cannot create or report completion',()=>{
- const agent={id:'s',status:'idle'},goal={id:'g',revision:2,objective:'collect',phase:'active',activation:'armed'};
- let calls=[];agent.ctx={goals:{get:()=>goal,pause:(a,ref)=>{calls.push(['pause',a,ref]);return {...goal,phase:'paused'}},clear:(a,ref)=>calls.push(['clear',a,ref])}};
+ const agent={id:'s',status:'idle'};let goal={id:'g',revision:2,objective:'collect',phase:'active',activation:'armed'},calls=[];
+ agent.ctx={goals:{get:()=>goal,pause:(a,ref)=>{calls.push(['pause',a,ref]);return {...goal,phase:'paused'}},clear:(a,ref)=>{calls.push(['clear',a,ref]);goal=undefined;}}};
  assert.equal(conversationGoal(agent,{}).goal.id,'g');
  assert.throws(()=>conversationGoal(agent,{action:'pause',id:'g',revision:1}),/goal_revision_changed/);
  assert.throws(()=>conversationGoal(agent,{action:'complete',id:'g',revision:2}),/goal_action_invalid/);
@@ -65,9 +65,10 @@ test('cold controls require a durable flush and reject malformed controls before
  const f=coldFixture();delete f.context.persistence.flush;await assert.rejects(()=>readConversationGoal({...f.context,body:{action:'pause',id:'g',revision:3}}));assert.deepEqual(f.calls,[]);
  for(const body of [{action:['pause'],id:'g',revision:3},{action:'stop',id:'g',revision:3,extra:true},{action:'resume',id:'g',revision:3}]){const f=coldFixture();await assert.rejects(()=>readConversationGoal({...f.context,body}));assert.deepEqual(f.calls,[]);}
 });
-test('stop records one native clear rather than a pause followed by a second mutation',()=>{
- const calls=[],agent={ctx:{goals:{get:()=>({id:'g',revision:3,phase:'active'}),pause:()=>{calls.push('pause');return{id:'g',revision:4}},clear:(_agent,ref)=>{calls.push(['clear',ref]);}}}};
- assert.deepEqual(conversationGoal(agent,{action:'stop',id:'g',revision:3}),{goal:null});assert.deepEqual(calls,[['clear',{id:'g',revision:3}]]);
+test('stop does not confirm a native clear while the original Goal remains visible',()=>{
+ const goal={id:'g',revision:3,phase:'active'},calls=[],agent={ctx:{goals:{get:()=>goal,pause:()=>{calls.push('pause');return{id:'g',revision:4}},clear:(_agent,ref)=>{calls.push(['clear',ref]);}}}};
+ assert.throws(()=>conversationGoal(agent,{action:'stop',id:'g',revision:3}),/goal_stop_unconfirmed/);
+ assert.deepEqual(conversationGoal(agent,{}),{goal});assert.deepEqual(calls,[['clear',{id:'g',revision:3}]]);
 });
 test('a parked-input refusal has a fixed recoverable protocol code and performs no activation',async()=>{
  const {createAdapterHandler}=await import('../index.js'),f=coldFixture();f.projection.values.inbox['next-turn']=[{id:'pending'}];

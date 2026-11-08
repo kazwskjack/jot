@@ -3,7 +3,7 @@ import type {MemoryConsolidation} from './types';
 import {workbenchApi,pathId} from './client';
 import {useResource} from './useResource';
 import {useMutationReceipt} from './useMutationReceipt';
-import {ResourceStatus,Empty} from './AgentsPanel';
+import {ResourceStatus,Empty} from './PanelStatus';
 import {consolidationCommand,consolidationMatches,consolidationPreview} from './memory-consolidation.mjs';
 
 type Selection={project_id:string;scope:'project'|'private';agent_id:string};

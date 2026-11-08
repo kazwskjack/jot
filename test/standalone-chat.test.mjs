@@ -6,7 +6,7 @@ import {tmpdir} from 'node:os';
 import {join,resolve,sep} from 'node:path';
 import {Store} from '../src/store.mjs';
 import {Agent} from '../src/agent.mjs';
-import {buildServer} from '../src/server.mjs';
+import {buildServer,encodeSseEvent} from '../src/server.mjs';
 const impl=await import('../src/chat-policy.mjs').catch(e=>{if(e.code==='ERR_MODULE_NOT_FOUND')return{};throw e;});
 const tool=(id,name,args)=>({id,type:'function',function:{name,arguments:JSON.stringify(args)}});
 
@@ -55,11 +55,29 @@ test('reserved Web group survives disk reopen and cannot dispatch an unknown eff
 });
 
 test('Chat bounds model-visible tool bodies while retaining complete stored tool receipts',async()=>{
- assert.equal(typeof impl.chatRoute,'function');const store=new Store(':memory:');let step=0,lastHistory;
+ assert.equal(typeof impl.chatRoute,'function');const store=new Store(':memory:');let step=0,lastHistory;const marker='M22-04-CHAT-RECEIPT-SECRET-2f71';
  const base=impl.chatRoute({enabled:true,baseUrl:'https://model.example/v1',model:'fast',thinkingDisabledSupported:true}),route={policy:base.policy,provider:async history=>{lastHistory=structuredClone(history);return ++step===1?{role:'assistant',content:null,tool_calls:Array.from({length:8},(_,i)=>tool('s'+i,'search',{query:'q'+i}))}:{role:'assistant',content:'summary'};}};
- const agent=new Agent(store,{chatRoute:route,tools:{definitions:[{type:'function',function:{name:'search'}}],execute:async()=>({text:'evidence '.repeat(5000),untrusted:true})}});
- try{const {run}=store.accept(store.createConversation('test','chat').id,'search','one',{chatReady:true,chatPolicy:route.policy});await agent.execute(run);assert.equal(store.run(run.id).status,'succeeded');const visible=lastHistory.filter(m=>m.role==='tool');assert.ok(visible.reduce((n,m)=>n+m.content.length,0)<=24000);assert.ok(visible.some(m=>m.content.includes('truncated')));assert.ok(store.db.prepare('SELECT result FROM chat_web_calls WHERE run_id=? LIMIT 1').get(run.id).result.length>30000);}
+ const agent=new Agent(store,{chatRoute:route,tools:{definitions:[{type:'function',function:{name:'search'}}],execute:async()=>({text:marker+' evidence '.repeat(5000),untrusted:true})}});
+ try{const {run}=store.accept(store.createConversation('test','chat').id,'search','one',{chatReady:true,chatPolicy:route.policy});await agent.execute(run);assert.equal(store.run(run.id).status,'succeeded');const visible=lastHistory.filter(m=>m.role==='tool');assert.ok(visible.reduce((n,m)=>n+m.content.length,0)<=24000);assert.ok(visible.some(m=>m.content.includes('truncated')));assert.ok(visible.some(m=>m.content.includes(marker)));const stored=store.db.prepare('SELECT result FROM chat_web_calls WHERE run_id=? LIMIT 1').get(run.id).result;assert.ok(stored.length>30000);assert.ok(stored.includes(marker));const eventRows=store.db.prepare("SELECT data FROM events WHERE conversation_id=? AND type='tool.result'").all(run.conversation_id).map(row=>row.data).join('\n');assert.equal(eventRows.includes(marker),false);assert.equal(JSON.stringify(store.events(run.conversation_id,0)).includes(marker),false);}
  finally{await agent.close();store.close();}
+});
+
+test('Chat activity stores only an argument summary while the executor receives the original values',async()=>{
+ assert.equal(typeof impl.chatRoute,'function');const store=new Store(':memory:');let step=0,executed;
+ const marker='M22-04-CHAT-SECRET-8f31',original={url:'https://private.example.invalid/profile?token='+marker,query:marker};
+ const base=impl.chatRoute({enabled:true,baseUrl:'https://model.example/v1',model:'fast',thinkingDisabledSupported:true}),route={policy:base.policy,provider:async()=>++step===1?{role:'assistant',content:null,tool_calls:[tool('private-read','read_page',original)]}:{role:'assistant',content:'The read was handled.'}};
+ const agent=new Agent(store,{chatRoute:route,tools:{definitions:[{type:'function',function:{name:'read_page'}}],execute:async(name,args)=>{executed={name,args};return{ok:true};}}});
+ try{
+  const conversation=store.createConversation('test','chat'),{run}=store.accept(conversation.id,'read private page','private-read-1',{chatReady:true,chatPolicy:route.policy});
+  await agent.execute(run);
+  assert.deepEqual(executed,{name:'read_page',args:original});
+  const activity=store.events(conversation.id,0).find(event=>event.type==='activity'&&event.data.phase==='read_page');
+  assert.ok(activity);assert.equal(activity.data.label,'read_page');assert.deepEqual(activity.data.args,{kind:'object',field_count:2});
+  const persisted=store.db.prepare("SELECT data FROM events WHERE conversation_id=? AND type='activity'").all(conversation.id).map(row=>row.data).join('\n');
+  assert.equal(persisted.includes(marker),false);assert.equal(persisted.includes(original.url),false);
+  const replay=store.events(conversation.id,0).map(encodeSseEvent).join('');
+  assert.equal(replay.includes(marker),false);assert.equal(replay.includes(original.url),false);
+ }finally{await agent.close();store.close();}
 });
 
 test('Chat cancellation records an unsettled model outcome without an answer or Work fallback',async()=>{

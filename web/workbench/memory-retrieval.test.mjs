@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {retrievalMatches,retrievalSourceView,retrievalMethodLabel} from './memory-retrieval.mjs';
+import {retrievalMatches,retrievalSourceView,retrievalMethodLabel,retrievalReasonLabel,retrievalOmissionLabel} from './memory-retrieval.mjs';
 test('a stale role or project trace is not displayed under a new selection',()=>{
  const trace={agent_id:'a',project_id:'p'};assert.equal(retrievalMatches(trace,{agent_id:'a',project_id:'p'}),true);assert.equal(retrievalMatches(trace,{agent_id:'b',project_id:'p'}),false);assert.equal(retrievalMatches(trace,{agent_id:'a',project_id:'other'}),false);
 });
@@ -9,4 +9,12 @@ test('invalidated references suppress any previously cached preview and provenan
 });
 test('keyword counts are never presented as adapter confidence',()=>{
  const reference={available:true,content_preview:'Current source',provenance:[],keyword_score:2};assert.equal(retrievalSourceView(reference,'keyword').keyword_count,2);assert.equal(retrievalSourceView(reference,'adapter').keyword_count,null);assert.equal(retrievalSourceView(reference,'scope_order').keyword_count,null);assert.equal(retrievalMethodLabel('keyword'),'关键词匹配');assert.equal(retrievalMethodLabel('scope_order'),'范围顺序');
+});
+test('reasoning retrieval traces identify provider selection without showing keyword scores',()=>{
+ const reference={available:true,content_preview:'Selected source',provenance:[],keyword_score:null};
+ assert.equal(retrievalMethodLabel('reasoning_provider'),'推理排序');
+ assert.equal(retrievalReasonLabel('reasoning_provider'),'推理模型从授权候选中选入');
+ assert.equal(retrievalOmissionLabel('provider_unselected'),'推理模型未选择');
+ assert.equal(retrievalOmissionLabel('selected_source_stale'),'推理期间来源变更或失效');
+ assert.equal(retrievalSourceView(reference,'reasoning_provider').keyword_count,null);
 });

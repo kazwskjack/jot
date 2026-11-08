@@ -1,5 +1,5 @@
 import {openSync,closeSync,fstatSync,readSync} from 'node:fs';
-import type {ModelBudgetRoute} from '../workbench/model-budget.ts';
+import type {ModelBudgetRoute,ModelBudgetUsageEvidence} from '../workbench/model-budget.ts';
 import type {ReplyCheckRequest} from './reply-semantic.ts';
 type Row=Record<string,any>;
 type Fetch=(url:string,init:RequestInit)=>Promise<Response>;
@@ -14,13 +14,16 @@ function normalizedUsage(value:any,foldUnreportedWrites=false){
  if(!value||!count(value.prompt_tokens)||!count(value.completion_tokens)||!count(value.total_tokens)||value.total_tokens!==value.prompt_tokens+value.completion_tokens)return undefined;
  const read=value.prompt_tokens_details?.cached_tokens,reasoning=value.completion_tokens_details?.reasoning_tokens;
  let write=value.prompt_tokens_details?.cache_write_tokens;
+ const reportedWrite=write!==undefined;
+ const foldedUnreportedWrite=write===undefined&&foldUnreportedWrites;
  // This is an accounting bucket, not a claim of zero provider cache writes.
  // Unreported writes remain in input only under explicit equal-rate policy.
- if(write===undefined&&foldUnreportedWrites)write=0;
+ if(foldedUnreportedWrite)write=0;
  if(!count(read)||!count(write)||read+write>value.prompt_tokens||(reasoning!==undefined&&(!count(reasoning)||reasoning>value.completion_tokens)))return undefined;
- return {inputTokens:value.prompt_tokens-read-write,outputTokens:value.completion_tokens,totalTokens:value.total_tokens,cacheReadTokens:read,cacheWriteTokens:write,...(reasoning===undefined?{}:{reasoningTokens:reasoning})};
+ return {usage:{inputTokens:value.prompt_tokens-read-write,outputTokens:value.completion_tokens,totalTokens:value.total_tokens,cacheReadTokens:read,cacheWriteTokens:write,...(reasoning===undefined?{}:{reasoningTokens:reasoning})},
+  ...(reportedWrite||foldedUnreportedWrite?{usageEvidence:{protocol:1,source:'reply-judge-client',cacheWrite:reportedWrite?'reported':'folded-unreported'} satisfies ModelBudgetUsageEvidence}:{})};
 }
-export type ReplyJudgeClient={route:{provider:string;model:string};preflight:(request:ReplyCheckRequest)=>void;invoke:(request:ReplyCheckRequest)=>Promise<{value:unknown;usage:unknown}>};
+export type ReplyJudgeClient={route:{provider:string;model:string};preflight:(request:ReplyCheckRequest)=>void;invoke:(request:ReplyCheckRequest)=>Promise<{value:unknown;usage:unknown;usageEvidence?:ModelBudgetUsageEvidence}>};
 /** Server-owned optional compatible endpoint. This is an assessor, without
  * tools/session history/recipients; DSH remains the sole task planner. */
 export function createReplyJudgeClient(input:unknown,routes:ModelBudgetRoute[],options:{readSecret?:(path:string)=>string;fetch?:Fetch}={}):ReplyJudgeClient{
@@ -49,10 +52,10 @@ export function createReplyJudgeClient(input:unknown,routes:ModelBudgetRoute[],o
   const reader=response.body?.getReader();if(!reader)throw new Error('reply_judge_response_missing');const decoder=new TextDecoder('utf8',{fatal:true});let encoded='',bytes=0;
   try{while(true){const chunk=await reader.read();if(chunk.done)break;bytes+=chunk.value.byteLength;if(bytes>262144)throw new Error('reply_judge_response_too_large');encoded+=decoder.decode(chunk.value,{stream:true});}encoded+=decoder.decode();}finally{await reader.cancel();}
   let data:Row;try{data=JSON.parse(encoded);}catch{throw new Error('reply_judge_response_invalid');}
-  const usage=normalizedUsage(data.usage,config.cache_write_policy==='input-rate-equivalent');let value:unknown=null;
+  const normalized=normalizedUsage(data.usage,config.cache_write_policy==='input-rate-equivalent');let value:unknown=null;
   const choice=Array.isArray(data.choices)&&data.choices.length===1?data.choices[0]:undefined,message=choice?.message;
   if(config.response_model_ids.includes(data.model)&&choice?.finish_reason==='stop'&&message?.role==='assistant'&&!message.refusal&&!message.tool_calls&&!message.function_call&&typeof message.content==='string'&&Buffer.byteLength(message.content,'utf8')<=65536){try{value=JSON.parse(message.content);}catch{/* A billed malformed answer is still not eligible. */}}
-  return {value,usage};
+  return {value,usage:normalized?.usage,...(normalized?.usageEvidence?{usageEvidence:normalized.usageEvidence}:{})};
  }};
 }
 export function loadReplyJudgeClient(env:Record<string,string|undefined>,routes:ModelBudgetRoute[],options:{readConfig?:(path:string)=>string;readSecret?:(path:string)=>string;fetch?:Fetch}={}):ReplyJudgeClient|undefined{

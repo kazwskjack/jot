@@ -5,7 +5,7 @@ import {canonicalJson} from '../db/canonical-json.ts';
 import {ChannelDeliveryService} from '../channels/delivery.ts';
 import {currentTaskBusinessCertificate} from './business-review.ts';
 import {preparedTaskCompletion,confirmTaskCompletion} from './completion-handshake.ts';
-import {publishTaskOutputs} from './output-delivery.ts';
+import {publishTaskOutputs,taskOutputArtifactService} from './output-delivery.ts';
 import {TaskNotifications} from './notifications.ts';
 
 export function installTaskFinalizations(db:DatabaseSync){
@@ -62,17 +62,32 @@ export function finalizeReviewedTask(db:DatabaseSync,runs:RunRepository,owner:st
   .run(canonicalJson([frozen.certificate_id,intentId]),now,String(answer.id));
  // Only the text shown in the owner review card is published. Provider
  // reasoning/unreviewed alternative blocks do not become a final answer.
- const attachmentIds=publishTaskOutputs(db,frozen,runId,String(run.conversation_id));
- const message=runs.appendAssistant(runId,frozen.candidate.text,undefined,attachmentIds);
- if(canonicalJson(message.attachments??[])!==canonicalJson(attachmentIds))throw new Error('task_output_attachment_conflict');
+ const published=publishTaskOutputs(db,frozen,runId,String(run.conversation_id));
+ const message=runs.appendAssistant(runId,frozen.candidate.text,undefined,published.attachment_ids);
+ if(canonicalJson(message.attachments??[])!==canonicalJson(published.attachment_ids))throw new Error('task_output_attachment_conflict');
  runs.finalizePublication(runId,'succeeded',null);
  const delivery_effect_ids:string[]=[];
  for(const channel of channels){
-  if(channel.channel!=='wecom'&&channel.channel!=='email')throw new Error('task_delivery_channel_invalid');
+  if(channel.channel!=='wecom'&&channel.channel!=='email'&&channel.channel!=='webpush'&&channel.channel!=='mattermost')throw new Error('task_delivery_channel_invalid');
   const store=new ChannelDeliveryService(db),delivery=store.enqueueText({runId,messageId:String(message.message_id),destination:channel.channel,recipient:channel.principal,text:frozen.candidate.text});
   if(!delivery)throw new Error('task_delivery_enqueue_failed');delivery_effect_ids.push(String(delivery.effect_id));
   store.bindTaskAuthorization(String(delivery.effect_id),scope,String(run.conversation_id),channel.principal);
   if(configuredTargets)notifications.grant(String(delivery.effect_id),owner,scope.task_id,channel as typeof configuredTargets[number]);
+ }
+ if(configuredTargets&&published.pins.length){
+  const artifacts=taskOutputArtifactService(db),store=new ChannelDeliveryService(db);
+  for(const target of configuredTargets){
+   if(!target.artifact_delivery)continue;
+   if(target.channel!=='wecom'&&target.channel!=='mattermost')throw new Error('task_artifact_channel_unsupported');
+   for(const pin of published.pins){
+    const delivery=store.enqueuePinnedArtifact({runId,messageId:String(message.message_id),ownerId:owner,
+     artifactId:pin.artifact_id,version:pin.version,destination:target.channel,recipient:target.principal},artifacts);
+    if(!delivery||delivery.status!=='pending')throw new Error('task_artifact_delivery_enqueue_failed');
+    delivery_effect_ids.push(String(delivery.effect_id));
+    store.bindTaskAuthorization(String(delivery.effect_id),scope,String(run.conversation_id),target.principal);
+    notifications.grant(String(delivery.effect_id),owner,scope.task_id,target);
+   }
+  }
  }
  const evidence=JSON.parse(String((db.prepare('SELECT evidence_json FROM wb_task_occurrences WHERE occurrence_id=?').get(scope.occurrence_id) as {evidence_json:string}).evidence_json));
  evidence.push({kind:'business_certificate',reference:frozen.certificate_id},{kind:'native_completion',reference:intentId},{kind:'final_message',reference:String(message.message_id)});

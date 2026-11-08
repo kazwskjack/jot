@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
+import Fastify from 'fastify';
+import {WorkbenchBridge} from '../../../session-adapter/workbench.js';
 import {rankMemory,rankMemoryDetailed} from '../../src/workbench/memory-lifecycle.ts';
 const values=[{memory_id:'a',version:1,content:'Park lake',verified:false},{memory_id:'b',version:2,content:'Park',verified:true},{memory_id:'c',version:1,content:'Museum',verified:false}];
 test('retrieval explanations preserve existing stable substring ranking without claiming model confidence',()=>{
@@ -16,8 +19,10 @@ test('adapter order and appended scope tail are distinguished and invalid adapte
 });
 import {mkdirSync,mkdtempSync,rmSync} from 'node:fs';
 import {join,resolve} from 'node:path';
-import {openProductDatabase} from '../../src/db/database.ts';
+import {openProductDatabase,withImmediateTransaction} from '../../src/db/database.ts';
 import {WorkbenchService} from '../../src/workbench/service.ts';
+import {registerWorkbenchExecution} from '../../src/workbench/execution.ts';
+import {SessionBindingRepository} from '../../src/harness/session-bindings.ts';
 function fixture(t){
  const base=resolve('.test-tmp/memory-retrievals');mkdirSync(base,{recursive:true});const root=mkdtempSync(join(base,'case-')),db=openProductDatabase(join(root,'db.sqlite')),options={workspaceIds:['ws','other'],root:join(root,'files')},service=new WorkbenchService(db,options),agent=service.createAgent('alice',{name:'Reader'});
  t.after(()=>{db.close();rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:20});});
@@ -64,6 +69,44 @@ test('retrieval references survive SQLite reopening without restoring an old sou
  t.after(()=>{db.close();rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:20});});let service=new WorkbenchService(db,options);const agent=service.createAgent('alice',{name:'Persistent reader'}),note=service.saveMemory('alice','ws',{scope:'private',agent_id:agent.agent_id,content:'Park before restart'}),run=service.enqueueAgentMessage('alice',agent.agent_id,{text:'Find park',client_message_id:'restart'}),id=service.retrieveMemory('alice','ws',{q:'park'},run.run_id,'query').retrieval_id;
  db.close();db=openProductDatabase(path);service=new WorkbenchService(db,options);assert.equal(service.memoryRetrievals.get('alice','ws',id).references[0].content_preview,'Park before restart');
  service.deleteMemory('alice','ws',note.memory_id,1);db.close();db=openProductDatabase(path);service=new WorkbenchService(db,options);const trace=service.memoryRetrievals.get('alice','ws',id);assert.equal(trace.references[0].available,false);assert.equal(Object.hasOwn(trace.references[0],'content_preview'),false);assert.equal(service.memoryRetrievals.list('alice','ws',agent.agent_id).items.length,2);
+});
+
+test('context delivery persists an immutable receipt bound to the exact selected retrieval trace',t=>{
+ const f=fixture(t),note=f.save({content:'Context receipt secret'}),run=f.run(),context=f.service.contextForRun(run.run_id);
+ const trace=f.service.memoryRetrievals.list('alice','ws',f.agent.agent_id).items.find(item=>item.run_id===run.run_id&&item.kind==='context_snapshot');
+ assert.equal(context.memory_retrieval_id,trace.retrieval_id);
+ const references=context.memories.map(({memory_id,version})=>({memory_id,version})),contextHash=createHash('sha256').update(JSON.stringify(context.memories)).digest('hex');
+ const receipt=withImmediateTransaction(f.db,()=>f.service.recordContextDelivery('alice','ws',run.run_id,trace.retrieval_id,contextHash,references));
+ assert.equal(receipt.status,'delivered_to_session');assert.equal(receipt.source_retrieval_id,trace.retrieval_id);assert.equal(receipt.context_hash,contextHash);assert.equal(receipt.reference_count,1);
+ const log=f.service.memoryRetrievals,detail=log.get('alice','ws',receipt.retrieval_id);
+ assert.equal(detail.context_delivery.status,'delivered_to_session');assert.equal(detail.context_delivery.source_retrieval_id,trace.retrieval_id);assert.equal(detail.references[0].memory_id,note.memory_id);assert.equal(detail.references[0].version,1);
+ assert.equal(withImmediateTransaction(f.db,()=>f.service.recordContextDelivery('alice','ws',run.run_id,trace.retrieval_id,contextHash,references)).retrieval_id,receipt.retrieval_id);
+ const stored=f.db.prepare('SELECT data_json FROM wb_memory_retrievals WHERE retrieval_id=?').get(receipt.retrieval_id);assert.doesNotMatch(JSON.stringify(stored),/Context receipt secret|session_ref/);
+ assert.throws(()=>withImmediateTransaction(f.db,()=>f.service.recordContextDelivery('alice','ws',run.run_id,trace.retrieval_id,'0'.repeat(64),references)),/memory_context_delivery_mismatch/);
+ assert.throws(()=>withImmediateTransaction(f.db,()=>f.service.recordContextDelivery('alice','ws',run.run_id,trace.retrieval_id,contextHash,[])),/memory_context_delivery_mismatch/);
+ f.save({memory_id:note.memory_id,expected_version:1,content:'Corrected source'});
+ const invalidated=log.get('alice','ws',receipt.retrieval_id);assert.equal(invalidated.references[0].available,false);assert.equal(Object.hasOwn(invalidated.references[0],'content_preview'),false);
+});
+
+test('the registered context-delivery route accepts the real Bridge payload and rejects identity/hash/reference mismatches',async t=>{
+ const f=fixture(t),note=f.save({content:'Context receipt secret'}),run=f.run(),context=f.service.contextForRun(run.run_id),sessionRef=new SessionBindingRepository(f.db).getOrCreate('alice',run.conversation_id).session_id;
+ const app=Fastify(),token='context-delivery-route-token';t.after(()=>app.close());
+ registerWorkbenchExecution(app,f.db,f.service,{assertRunActive(){}},token);
+ const requests=[];
+ const fetchImpl=async(url,init)=>{const path=new URL(url).pathname,body=JSON.parse(init.body);requests.push({path,body});const response=await app.inject({method:init.method,url:path,headers:init.headers,payload:init.body});return new Response(response.body,{status:response.statusCode,headers:{'content-type':'application/json'}});};
+ const bridge=new WorkbenchBridge({origin:'http://127.0.0.1',token,fetchImpl}),binding={runId:run.run_id,sessionRef},references=context.memories.map(({memory_id,version})=>({memory_id,version}));
+ const payload={memory_retrieval_id:context.memory_retrieval_id,context_hash:createHash('sha256').update(JSON.stringify(context.memories)).digest('hex'),references};
+ const delivered=await bridge.request('context-delivery',binding,payload);
+ assert.equal(delivered.receipt.status,'delivered_to_session');assert.equal(delivered.receipt.source_retrieval_id,context.memory_retrieval_id);assert.equal(delivered.receipt.reference_count,1);
+ const request=requests.find(value=>value.path==='/internal/v1/workbench/context-delivery');
+ assert.deepEqual(request.body,{...payload,run_id:binding.runId,session_ref:binding.sessionRef});
+ assert.equal((await bridge.request('context-delivery',binding,payload)).receipt.retrieval_id,delivered.receipt.retrieval_id);
+ const wire={...request.body};
+ for(const invalid of [{...wire,run_id:'wrong-run'},{...wire,session_ref:'wrong-session'},{...wire,context_hash:'0'.repeat(64)},{...wire,references:[]}]){
+  const response=await app.inject({method:'POST',url:'/internal/v1/workbench/context-delivery',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},payload:invalid});assert.notEqual(response.statusCode,200,response.body);
+ }
+ const stored=f.db.prepare('SELECT data_json FROM wb_memory_retrievals WHERE retrieval_id=?').get(delivered.receipt.retrieval_id);
+ assert.equal(JSON.parse(stored.data_json).references[0].memory_id,note.memory_id);assert.doesNotMatch(stored.data_json,/Context receipt secret|session_ref/);
 });
 
 test('a replacement continuation appends its own trace without overwriting an earlier binding observation',t=>{

@@ -101,8 +101,12 @@ test('entry, total byte and depth bounds plus pre-cancel refuse before allocatio
 test('private root and substituted root are refused; source mutations during target verification remain detected',async t=>{
  const f=fixture(t);mkdirSync(join(f.sourceRoot,'.ssh'));writeFileSync(join(f.sourceRoot,'.ssh/config'),'private');await assert.rejects(()=>new SnapshotCopyWorkspaceProvider().create(input(f,{sourceRoot:join(f.sourceRoot,'.ssh'),paths:['config']})),/workspace_private_path/);
  mkdirSync(join(f.sourceRoot,'src'));writeFileSync(join(f.sourceRoot,'src/a'),'first');let published=false,changed=false;
- await assert.rejects(()=>new SnapshotCopyWorkspaceProvider().create(input(f,{guard:context=>{if(context.phase==='publish')published=true;if(published&&!changed&&context.phase==='verify'&&context.relative_path==='src/a'){changed=true;writeFileSync(join(f.sourceRoot,'src/a'),'later');}}})),/workspace_source_changed/);
- assert.equal(changed,true);
+ const store=recoveryStore();
+ let createError;
+ try{await new SnapshotCopyWorkspaceProvider({recoveryStore:store}).create(input(f,{guard:context=>{if(context.phase==='publish')published=true;if(published&&!changed&&context.phase==='verify'&&context.relative_path==='src/a'){changed=true;writeFileSync(join(f.sourceRoot,'src/a'),'later');}}}));}catch(error){createError=error;}
+ assert.equal(changed,true,'publish-to-target verification hook must change the source');
+ assert.match(String(createError?.message??''),/workspace_source_changed/,`expected source-change rejection after target verify; changed=${changed}; recovery_commits=${store.commits}; error=${createError?.message??'resolved'}`);
+ assert.equal(store.commits,0);assert.equal(store.records.size,0);
 });
 
 test('inspection catches directory-root replacement, cancellation and source changes during observed hashing',async t=>{
@@ -138,10 +142,20 @@ test('a new provider recovers a committed snapshot and inspects legitimate edits
 });
 
 test('lost recovery-store commit response cannot return ready but committed identity can be recovered once without recopy',async t=>{
- const f=fixture(t);mkdirSync(join(f.sourceRoot,'src'));writeFileSync(join(f.sourceRoot,'src/a'),'ready bytes');const store=recoveryStore(),commit=store.commit;store.commit=async record=>{await commit(record);throw Error('synthetic lost response');};
+ const f=fixture(t);mkdirSync(join(f.sourceRoot,'src'));writeFileSync(join(f.sourceRoot,'src/a'),'ready bytes');const store=recoveryStore(),commit=store.commit;let sourceChanged=false;store.commit=async record=>{await commit(record);writeFileSync(join(f.sourceRoot,'src/a'),'changed after commit');sourceChanged=true;throw Error('synthetic lost response');};
  let snapshotId;await assert.rejects(()=>new SnapshotCopyWorkspaceProvider({recoveryStore:store}).create(input(f,{guard:context=>{snapshotId??=context.snapshot_id;}})),/workspace_recovery_commit_unknown/);
+ assert.equal(sourceChanged,true);assert.equal(readFileSync(join(f.sourceRoot,'src/a'),'utf8'),'changed after commit');
  assert.equal(store.records.size,1);assert.equal(readdirSync(f.storageRoot).length,1);const provider=new SnapshotCopyWorkspaceProvider({recoveryStore:store}),recovered=await provider.recover({snapshot_id:snapshotId,storageRoot:f.storageRoot,guard:()=>{},signal:new AbortController().signal});
- assert.equal(recovered.receipt.status,'ready');assert.equal(store.commits,1);assert.equal(readdirSync(f.storageRoot).length,1);
+ assert.equal(recovered.receipt.status,'ready');assert.equal(readFileSync(join(recovered.isolated_root,'src/a'),'utf8'),'ready bytes');assert.equal(store.commits,1);assert.equal(readdirSync(f.storageRoot).length,1);
+});
+
+test('a source change after recovery-store commit remains outside the published immutable snapshot',async t=>{
+ const f=fixture(t);mkdirSync(join(f.sourceRoot,'src'));writeFileSync(join(f.sourceRoot,'src/a'),'captured source');const store=recoveryStore();let changed=false;
+ const snapshot=await new SnapshotCopyWorkspaceProvider({recoveryStore:store}).create(input(f,{guard:context=>{if(store.commits===1&&!changed&&context.phase==='publish'){changed=true;writeFileSync(join(f.sourceRoot,'src/a'),'source changed after commit');}}}));
+ assert.equal(changed,true);assert.equal(snapshot.receipt.status,'ready');assert.equal(snapshot.manifest.entries.find(entry=>entry.path==='src/a').sha256,sha('captured source'));
+ assert.equal(readFileSync(join(f.sourceRoot,'src/a'),'utf8'),'source changed after commit');assert.equal(readFileSync(join(snapshot.isolated_root,'src/a'),'utf8'),'captured source');
+ const recovered=await new SnapshotCopyWorkspaceProvider({recoveryStore:store}).recover({snapshot_id:snapshot.receipt.snapshot_id,storageRoot:f.storageRoot,guard:()=>{},signal:new AbortController().signal});
+ assert.equal(readFileSync(join(recovered.isolated_root,'src/a'),'utf8'),'captured source');assert.equal(store.commits,1);assert.equal(readdirSync(f.storageRoot).length,1);
 });
 
 test('recovery refuses unrecorded leftovers, wrong storage, forged metadata, root replacement, revoked guard and cancellation',async t=>{

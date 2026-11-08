@@ -37,7 +37,7 @@ export class BudgetedModelStreamQueue {
 }
 
 /** Scoped llm/stream middleware. GenerateOptions remain the SDK's frozen request. */
-export async function* budgetedModelStream({ binding, options, next, request, check }) {
+export async function* budgetedModelStream({ binding, options, next, request, check, memoryCapture=false }) {
   if (!binding || options?.sessionId !== binding.sessionRef) throw new Error('workbench_budget_session_mismatch');
   options.signal?.throwIfAborted();
   await check(options.signal);
@@ -75,6 +75,11 @@ export async function* budgetedModelStream({ binding, options, next, request, ch
     if (!finish) throw new Error('workbench_budget_stream_incomplete');
     if (usage === undefined) throw new Error('workbench_budget_usage_unknown');
     reason = 'settlement_unavailable';
+    if(memoryCapture){
+      const observed=await request('model-budget',binding,{action:'provider_receipt',attempt_id:attemptId,stable_request_id:attemptId,usage});
+      if(!observed?.receipt||observed.receipt.attempt_id!==attemptId||observed.receipt.state!=='provider_receipt_recorded'
+        ||typeof observed.evidence_ref!=='string'||!/^musage-[A-Za-z0-9-]{16,64}$/.test(observed.evidence_ref))throw new Error('workbench_budget_provider_receipt_invalid');
+    }
     const receipt = await call('settle', { attempt_id: attemptId, usage });
     if (receipt.state !== 'settled') {
       reason = 'usage_incomplete';

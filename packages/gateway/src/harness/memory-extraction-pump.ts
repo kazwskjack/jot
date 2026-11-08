@@ -63,7 +63,6 @@ export class MemoryExtractionPump{
     return {run_id:runId,runtime_status:'memory_proposed'};
    }catch{
     try{
-     combined.throwIfAborted();
      withImmediateTransaction(this.db,()=>{this.workbench.assertRunActive(runId);if(!this.completed(runId,candidate.capture_id))throw Error('memory_extraction_receipt_missing');this.coordinator.finalizePublication(lease,'succeeded',null);});
      return {run_id:runId,runtime_status:'memory_proposed'};
     }catch{/* Only committed, still-authorized facts can recover a lost reply. */}

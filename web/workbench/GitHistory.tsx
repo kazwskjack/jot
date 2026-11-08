@@ -1,6 +1,6 @@
 import React,{useState} from 'react';
 import type {GitIndexHistory,GitIndexStatus,GitIndexAcceptance} from './types';
-import {workbenchApi} from './client';import {useResource} from './useResource';import {ResourceStatus} from './AgentsPanel';
+import {workbenchApi} from './client';import {useResource} from './useResource';import {ResourceStatus} from './PanelStatus';
 import GitIndexOperation from './GitIndexOperation';
 
 const outcome=(state:string)=>({pending:'等待执行',unknown:'结果待确认',applied:'已应用',not_dispatched:'未执行',abandoned_unknown:'已结束，效果未确认'} as Record<string,string>)[state]??'状态待核对';

@@ -1,9 +1,10 @@
-import test from 'node:test';import assert from 'node:assert/strict';
+import test from 'node:test';import assert from 'node:assert/strict';import {rmSync} from 'node:fs';
 import {fixture} from './discovery-fixture.mjs';
 import {join} from 'node:path';import {buildServer} from '../../src/server.ts';import {withImmediateTransaction} from '../../src/db/database.ts';
 import {prepareTaskCompletion,confirmTaskCompletion} from '../../src/persistent-tasks/completion-handshake.ts';
 import {canonicalJson} from '../../src/db/canonical-json.ts';import {createHash} from 'node:crypto';
 import {DiscoveryPlanning} from '../../src/always-on/planning.ts';import {TaskExecutionEvidence} from '../../src/persistent-tasks/execution-evidence.ts';
+import {acceptedWorkCycleFixture} from './work-cycle-fixture.mjs';
 const History=(await import('../../src/always-on/discovery-history.ts')).DiscoveryHistory;
 const digest=value=>createHash('sha256').update(canonicalJson(value)).digest('hex');
 function insertMetadataCycle(f,index){
@@ -124,4 +125,62 @@ test('queued admissions are visible without being accepted and foreign cursors c
  assert.throws(()=>history.list('owner',f.scope,'foreign-id'),/invalid_discovery_history_cursor/);
  assert.throws(()=>history.detail('foreign',f.scope,page.items[0].admission_id),/discovery_history_not_found/);
  assert.equal(f.db.prepare('SELECT total_changes() n').get().n,before);
+});
+test('owner explicitly creates one accepted proposal work cycle with current CAS and no execution authority',async t=>{
+ const f=await acceptedWorkCycleFixture(t,{count:2}),detail=f.history.detail('owner',f.scope,f.admission.admission_id),policy=f.policies.get('owner',f.scope).policy;
+ const input={report_sha256:detail.report.sha256,plan_ids:[detail.plans[0].plan_id],expected_policy_version:policy.version,expected_role_version:policy.role_version,expected_role_epoch:policy.role_epoch};
+ const request={method:'POST',url:`/v1/agents/${f.agent.agent_id}/discovery-history/${f.admission.admission_id}/work-cycles`,headers:{'x-user-id':'owner','x-csrf-token':'test-history-dcbf0559',origin:'https://fixture.invalid','idempotency-key':'history-cycle-create'},payload:input};
+ const counts=()=>['ga_runs','wb_task_occurrences','wb_model_budget_attempts','wb_budget_allocations'].map(table=>f.db.prepare(`SELECT count(*) n FROM ${table}`).get().n),before=counts();
+ const invalid=await f.server.app.inject({...request,payload:{...input,unexpected:true}});assert.equal(invalid.statusCode,400,invalid.body);
+ const withoutKey={...request.headers};delete withoutKey['idempotency-key'];const missingKey=await f.server.app.inject({...request,headers:withoutKey});assert.equal(missingKey.statusCode,400,missingKey.body);
+ const csrf=await f.server.app.inject({...request,headers:{...request.headers,'x-csrf-token':'invalid'}});assert.equal(csrf.statusCode,403,csrf.body);
+ const foreign=await f.server.app.inject({...request,headers:{...request.headers,'x-user-id':'foreign'}});assert.equal(foreign.statusCode,404,foreign.body);
+ const stale=await f.server.app.inject({...request,headers:{...request.headers,'idempotency-key':'history-cycle-stale'},payload:{...input,expected_policy_version:input.expected_policy_version+1}});assert.equal(stale.statusCode,409,stale.body);assert.equal(stale.json().error.code,'WORK_CYCLE_VERSION_CONFLICT');
+ assert.deepEqual(counts(),before);assert.equal(f.db.prepare('SELECT count(*) n FROM wb_discovery_work_cycles').get().n,0);
+ const created=await f.server.app.inject(request);assert.equal(created.statusCode,200,created.body);const cycle=created.json();
+ assert.equal(cycle.admission_id,f.admission.admission_id);assert.equal(cycle.report_sha256,detail.report.sha256);assert.deepEqual(cycle.plans.map(plan=>plan.plan_id),input.plan_ids);
+ assert.equal(cycle.execution_authorized,false);assert.deepEqual(counts(),before);
+ assert.equal(f.db.prepare('SELECT count(*) n FROM wb_discovery_work_cycles').get().n,1);
+ const replay=await f.server.app.inject(request);assert.equal(replay.statusCode,200,replay.body);assert.deepEqual(replay.json(),cycle);assert.deepEqual(counts(),before);
+ const conflict=await f.server.app.inject({...request,payload:{...input,plan_ids:[detail.plans[1].plan_id]}});assert.equal(conflict.statusCode,409,conflict.body);assert.equal(conflict.json().error.code,'IDEMPOTENCY_CONFLICT');assert.deepEqual(counts(),before);assert.equal(f.db.prepare('SELECT count(*) n FROM wb_discovery_work_cycles').get().n,1);
+ f.db.exec('DROP TRIGGER wb_work_cycle_command_no_update');f.db.prepare("UPDATE wb_discovery_work_cycle_commands SET receipt_json='{' WHERE owner_id=? AND command_key=?").run('owner','history-cycle-create');
+ f.db.prepare('DELETE FROM ga_idempotency WHERE owner_id=? AND idempotency_key=?').run('owner','history-cycle-create');
+ const corruptReplay=await f.server.app.inject(request);assert.equal(corruptReplay.statusCode,409,corruptReplay.body);assert.equal(corruptReplay.json().error.code,'WORK_CYCLE_CORRUPT');assert.equal(f.db.prepare('SELECT count(*) n FROM wb_discovery_work_cycles').get().n,1);
+});
+test('concurrent same-key work-cycle requests choose one body and cold reopen replays its receipt',async t=>{
+ let f,reopened;t.after(async()=>{
+  if(reopened){await reopened.app.close();if(reopened.db.isOpen)reopened.db.close();}
+  if(f?.server?.db.isOpen){await f.server.app.close();if(f.server.db.isOpen)f.server.db.close();}
+  if(f?.db.isOpen)f.db.close();if(f?.root)rmSync(f.root,{recursive:true,force:true});
+ });
+ f=await acceptedWorkCycleFixture({after(){}},{count:2});
+ const detail=f.history.detail('owner',f.scope,f.admission.admission_id),policy=f.policies.get('owner',f.scope).policy;
+ const input={report_sha256:detail.report.sha256,expected_policy_version:policy.version,expected_role_version:policy.role_version,expected_role_epoch:policy.role_epoch};
+ const bodies=detail.plans.map(plan=>({...input,plan_ids:[plan.plan_id]})),request={method:'POST',url:`/v1/agents/${f.agent.agent_id}/discovery-history/${f.admission.admission_id}/work-cycles`,headers:{'x-user-id':'owner','x-csrf-token':'test-history-dcbf0559',origin:'https://fixture.invalid','idempotency-key':'history-cycle-concurrent'},payload:null};
+ const resources=db=>['ga_runs','wb_task_occurrences','wb_model_budget_attempts','wb_budget_allocations'].map(table=>db.prepare(`SELECT count(*) n FROM ${table}`).get().n),before=resources(f.db);
+ const responses=await Promise.all(bodies.map(payload=>f.server.app.inject({...request,payload}))),successIndex=responses.findIndex(response=>response.statusCode===200),conflicts=responses.filter(response=>response.statusCode===409);
+ assert.notEqual(successIndex,-1);assert.equal(conflicts.length,1);assert.equal(conflicts[0].json().error.code,'IDEMPOTENCY_CONFLICT');
+ const receipt=responses[successIndex].json(),replayRequest={...request,payload:bodies[successIndex]};
+ assert.equal(receipt.execution_authorized,false);assert.deepEqual(resources(f.db),before);
+ assert.equal(f.db.prepare('SELECT count(*) n FROM wb_discovery_work_cycles').get().n,1);assert.equal(f.db.prepare('SELECT count(*) n FROM wb_discovery_work_cycle_commands').get().n,1);
+ const config=JSON.parse(f.db.prepare('SELECT policy_json FROM wb_model_budget_policy_history ORDER BY revision DESC LIMIT 1').get().policy_json),serverOptions={databasePath:join(f.root,'db.sqlite'),workspaces:['ws'],workbenchRoot:join(f.root,'workspace'),uploadRoot:join(f.root,'uploads'),templateRoot:new URL('../../file-engine/templates/',import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1'),internalChannelToken:'test-history-11df6da2',modelBudgetPolicy:config,csrfToken:'test-history-dcbf0559',allowedOrigins:['https://fixture.invalid']};
+ await f.server.app.close();if(f.server.db.isOpen)f.server.db.close();if(f.db.isOpen)f.db.close();
+ assert.equal(f.server.db.isOpen,false);assert.equal(f.db.isOpen,false,'all original SQLite connections are closed before reopen');
+ reopened=await buildServer(serverOptions);
+ const replay=await reopened.app.inject(replayRequest);assert.equal(replay.statusCode,200,replay.body);assert.deepEqual(replay.json(),receipt);
+ assert.equal(reopened.db.prepare('SELECT count(*) n FROM wb_discovery_work_cycles').get().n,1);assert.equal(reopened.db.prepare('SELECT count(*) n FROM wb_discovery_work_cycle_commands').get().n,1);
+ assert.deepEqual(resources(reopened.db),before);
+ const stored=reopened.db.prepare('SELECT * FROM wb_discovery_work_cycle_commands WHERE owner_id=? AND command_key=?').get('owner','history-cycle-concurrent');
+ assert.equal(stored.cycle_id,receipt.cycle_id);assert.deepEqual(JSON.parse(stored.receipt_json),receipt);
+});
+test('HTTP work-cycle creation rejects a stale accepted source revision without creating resources',async t=>{
+ const f=await acceptedWorkCycleFixture(t,{count:1}),detail=f.history.detail('owner',f.scope,f.admission.admission_id),policy=f.policies.get('owner',f.scope).policy;
+ const input={report_sha256:detail.report.sha256,plan_ids:[detail.plans[0].plan_id],expected_policy_version:policy.version,expected_role_version:policy.role_version,expected_role_epoch:policy.role_epoch};
+ const request={method:'POST',url:`/v1/agents/${f.agent.agent_id}/discovery-history/${f.admission.admission_id}/work-cycles`,headers:{'x-user-id':'owner','x-csrf-token':'test-history-dcbf0559',origin:'https://fixture.invalid','idempotency-key':'history-stale-source'},payload:input};
+ const counts=()=>['wb_discovery_work_cycles','ga_runs','wb_task_occurrences','wb_model_budget_attempts','wb_budget_allocations'].map(table=>f.db.prepare(`SELECT count(*) n FROM ${table}`).get().n),before=counts();
+ const revision=f.policies.recordSignal('owner',f.scope,{kind:'external_update',source_id:'source-revision-after-report',source_version:2,source_sha256:'c'.repeat(64),origin:'external'});
+ assert.ok(revision.signal_revision>f.admission.signal_revision);
+ const response=await f.server.app.inject(request);
+ assert.equal(response.statusCode,409,response.body);assert.equal(response.json().error.code,'WORK_CYCLE_AUTHORITY_REVOKED');
+ assert.deepEqual(counts(),before,'a stale source proposal creates no cycle, run, occurrence or budget resource');
 });

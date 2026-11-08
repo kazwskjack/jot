@@ -1,0 +1,514 @@
+{
+  "schema": "jot.flow-v1-phase.v1",
+  "phase": "real_product_trial_running",
+  "updated_at": "2026-10-24T12:40:38.7498126Z",
+  "plan": "E:/codex/yunticket/docs/superpowers/plans/2026-10-24-delivery-flow-v1-and-two-hour-trial.md",
+  "launch": "E:/codex/yunticket/docs/diagnostics/delivery-flow-v1-20261024/launch.json",
+  "dispatch_receipts": "E:/codex/yunticket/docs/diagnostics/delivery-flow-v1-20261024/dispatch-receipts.json",
+  "optimization_workers": [
+    13,
+    14,
+    15,
+    16,
+    17,
+    20
+  ],
+  "remote_ci_authorization": "human_explicitly_approved_one_upload_and_one_linux_test",
+  "remote_ci_rejection_preserved": true,
+  "trial": {
+    "duration_minutes": 120,
+    "started_at": "2026-10-24T12:40:08Z",
+    "ends_at": "2026-10-24T14:40:08Z",
+    "forecast": {
+      "new_formal_D_plus_E_range": [
+        0,
+        2
+      ],
+      "integratable_candidate_packets_range": [
+        2,
+        4
+      ],
+      "confidence": "low_to_medium",
+      "basis": "12 existing readiness reports plus independently hashed worker2 and7 addenda;fallback policy and cron/MCP chains closest;cross-base migration and runtime restart semantics remain uncertain",
+      "old_WIP": "Inherited implementation and window new changes must be separately attributed;packets/tests/commits are not originalAC completion"
+    },
+    "scope": "original26modules_204AC_no_reduced_scope",
+    "start_gate": "Source-reviewed frozen tools,necessary fast local checks,exact development baseline and forecast/start-record prepared.Independent Linux long tests run async and do not gate development per latest human instruction.",
+    "human_clarification": "After all optimizations and verification, execute two hours of real Jot product development, not optimization tools, environment preparation, or synthetic benchmarks.",
+    "countable_work": "Actual remaining original Jot/PilotDeck functionality implementation and fixes, necessary product verification and integration; inherited WIP credit separate",
+    "excluded_work": [
+      "optimization_tools",
+      "CI_environment_preparation",
+      "synthetic_fixture_validation",
+      "readiness_inventory"
+    ],
+    "per_worker_deadline_policy": "Same absolute trial_end in every dispatch. At deadline no new item/major step; save safe checkpoint. Do not kill in-flight effects. Completion outside window separately reported.",
+    "trial_id": "JOT-REAL-120M-20261024T124008",
+    "start_snapshot_path": "E:/codex/yunticket/docs/diagnostics/delivery-flow-v1-20261024/trial-start-snapshot.json"
+  },
+  "old_automations": {
+    "jot": "PAUSED",
+    "dot": "PAUSED",
+    "jot-r": "PAUSED"
+  },
+  "product_development_dispatches": [],
+  "canonical_integration": "E:/codex/yunticket/.test-tmp/jot-permissive-20261021/integration",
+  "permissions": {
+    "project_handoffs": "human_allowed_original1to20",
+    "no_credentials": true,
+    "no_production_deployment": true,
+    "no_new_threads": true,
+    "no_new_subagents": true
+  },
+  "next_action": "Real product seven-squad dispatch active;13 continuous exact integration,14 formal review,15 custody,20 truthful stats;Dot asyncLinux independent;no waiting on long tests.",
+  "monitor_automation": "jot-2",
+  "optimization_workers_confirmed_active": [
+    13,
+    14,
+    15,
+    16,
+    17,
+    20
+  ],
+  "pretrial_observation": "E:/codex/yunticket/docs/diagnostics/delivery-flow-v1-20261024/pretrial-baseline-observation.json",
+  "known_blockers": [
+    "15 fixes SIGTERM cleanup and consumer CANCELLED unconfirmed cleanup acceptance;14 exact delta review pending",
+    "Same-candidate current-runner Linux not performed;16 local-only finite seed preparing,second remote run not authorized",
+    "Pretrial immutable start snapshot/pin and real forecast/baseline not set;not a completed-trial prerequisite"
+  ],
+  "shared_product_tree_unchanged_observed": "b4c47c91a2c254e283f33439293bfe67bce50c9b",
+  "run_id": "FLOW-V1-20261024",
+  "current_work_orders": "E:/codex/yunticket/docs/diagnostics/delivery-flow-v1-20261024/current-work-orders.json",
+  "readiness_dispatches": "E:/codex/yunticket/docs/diagnostics/delivery-flow-v1-20261024/readiness-dispatch-receipts.json",
+  "decisions": "E:/codex/yunticket/docs/diagnostics/delivery-flow-v1-20261024/decisions.json",
+  "optimization_observations": {
+    "13": "Exact9e8c combination author runner22+consumer11+interop3PASS;identified cleanup-entry SIGTERM race not covered by wait-mock tests;no shared writes",
+    "15": "Race2path delta delivered,R hashesverified;author23runnerPASS;no source changes beyondrunner/test;14/13 working",
+    "16": "Active local v2/d060 seed draft awaiting14/13 frozen source;R06 portable-manifest technical callback kept separate,not CI schema or new remote authority;single primary reaffirmed",
+    "17": "Final ad27... index+13 v2 config commit independently checked;23 file roots ready19 valid reads,1 excluded",
+    "20": "Final metrics delta patch c70a9443dcbb4a334fd1dde335018529dd8e57dea801ebf1ac4888b38f500d44;14 SOURCE_ACCEPT;13 temp-index compatibility checked;frozen start snapshot missing/pinNone intentionally rejects actual trial.20 assigned existing readiness facts preparation only.",
+    "14": "Final artifact SOURCE_ACCEPT race2path;final70bd13path composition exact2 source changes/11 unchanged proven;artifact independently read/hashverified despite native turn interrupted"
+  },
+  "excluded_runtime_workers": [
+    1
+  ],
+  "remote_ci_review_packet": {
+    "manifest_path": "E:/codex/yunticket/.test-tmp/jot-permissive-20261021/worker-16/tools/delivery-flow-v1/seed-manifest.json",
+    "manifest_sha256": "fb7cd73f915ab243b9e62af4a2a10ab11e7102d03dd12ccdf0969f25642ababd",
+    "payload_bytes": 246884,
+    "listed_files": 15,
+    "repository": "kazwskjack/jot-test-private",
+    "branch": "main",
+    "requested_remote_runs": 1,
+    "timeout_minutes": 20,
+    "activation": "workflow_dispatch via authenticated GitHub Actions UI; no gh CLI installed",
+    "root_hash_verification": "passed; no remote action taken"
+  },
+  "real_product_trial_started": true,
+  "ponytail_coverage_receipt": {
+    "path": "E:\\codex\\yunticket\\.test-tmp\\jot-permissive-20261021\\worker-17-b\\tools\\delivery-flow-v1\\evidence\\ponytail-coverage-acceptance-index-20261024.json",
+    "sha256": "ad27ca2511bc824a4622564c6ee82686825014e0d3b06a38b7ff85d13becd091",
+    "file_level_roots_ready": 23,
+    "planned_workers": 20,
+    "additional_private_roots": 3,
+    "file_level_blocked": 0,
+    "valid_read_acknowledgements": 19,
+    "runtime_ack_missing_workers": [
+      1
+    ],
+    "activation_confirmed": 0,
+    "source": "17 original index,20 statistical receipt;not formal product acceptance",
+    "formal_optimizer_gate": "14 source-level ACCEPT for local rules;no product AC credit"
+  },
+  "remote_ci_human_authorization": {
+    "source": "direct human reply in R thread",
+    "question_item_id": "[\"request_user_input_async\",\"call_2ddeb3528dc0410ebfb27843876eb4dd\",0]",
+    "answer": "允许上述上传和一次 Linux 测试",
+    "repository": "kazwskjack/jot-test-private",
+    "branch": "main",
+    "scope": "minimal reviewed15-file+manifest tools/M14 source slice,activate this workflow,one GitHub-hosted Ubuntu test <=20min,download results E:/codex",
+    "permissions": [
+      "contents:read",
+      "artifact-metadata:write"
+    ],
+    "forbidden": [
+      "production config",
+      "credentials",
+      "user data",
+      "public publication",
+      "second run without further authorization"
+    ],
+    "recorded_at_utc": "2026-10-24T18:09:18.628343+08:00"
+  },
+  "remote_ci_attempts_started": 1,
+  "configuration_preparation_commit": {
+    "commit": "153af9a2a80da1305930b93a6b7dde9b060405eb",
+    "tree": "6ba08233bd48e25a546cc712e2f86ae9befc5aa4",
+    "clean": true,
+    "path_count": 13,
+    "product_trial_credit": false,
+    "writer_receipt": "E:/codex/yunticket/docs/superpowers/plans/pilotdeck-ledger-v2-20261021/parallel-permissive-20/thread-13/ponytail-config13-preparation-v2-writer-receipt-20261024.json"
+  },
+  "monitor_authorization": {
+    "automation_id": "jot-2",
+    "status": "ACTIVE",
+    "reason": "Direct human answer allows only this finite monitor;every2minutes;delete after final comparison;old tasks remain paused",
+    "needs_explicit_human_scope": "Only this bounded optimization/two-hour-comparison monitor;old dot/jot/jot-r remain paused",
+    "active_implementation_and_CI_authorization_unchanged": true,
+    "human_question_item_id": "[\"request_user_input_async\",\"call_eebe76a7584d432ea6da72687ba629cb\",0]",
+    "human_answer": "允许仅本次有限跟进",
+    "on_final_report": "delete jot-2"
+  },
+  "remote_ci_source_review": {
+    "reviewer": 14,
+    "status": "SOURCE_LEVEL_ACCEPT",
+    "seed_manifest_sha256": "fb7cd73f915ab243b9e62af4a2a10ab11e7102d03dd12ccdf0969f25642ababd",
+    "evidence": "native14 latest completed turn;exact run block/allowlist/38 local checks;not Linux execution"
+  },
+  "remote_ci_upload": {
+    "status": "uploaded_author_report_remote_workflow_read_confirmed",
+    "repository": "kazwskjack/jot-test-private",
+    "branch": "main",
+    "commit": "bb303859f4149e9176a9497b15f271b6f58ceef5",
+    "seed_manifest_sha256": "24c9873f5d43dd9b10a3b43167fa9f9e0cd8b58f2c221eeefdb74d7cbe4c65f2",
+    "remote_files": 17,
+    "workflow_path": ".github/workflows/delivery-flow-v1-review.yml",
+    "runtime_source": "fixed M14 slice only;no new Node demo upload"
+  },
+  "remote_ci_observation": {
+    "total_runs": 1,
+    "actual_GET_endpoint": "https://api.github.com/repos/kazwskjack/jot-test-private/actions/runs?per_page=5",
+    "browser_control": "native URL capture refused;official browser provider bootstrap failed os error3;no UI input or trigger",
+    "proposed_safe_alternative": "16/14 review one temporary branch+exact-workflow-path-filtered push trigger using approved GitHub connector;restore manual-only after real run id;run budget stays1",
+    "run_id": 40087049467,
+    "event": "push",
+    "head_sha": "8af567a676373834f4568eca0b4dc25ba834d466",
+    "run_attempt": 1,
+    "status": "completed_success",
+    "observed_at_utc": "2026-10-24T18:44:28.264611+08:00",
+    "restored_main_head": "375d55b3adbef3c64064002c7350a1ed787e8d0f",
+    "restored_workflow_blob": "e6626b89e88dae7f7daa57d238b3b6781015c050",
+    "conclusion": "success",
+    "R_receipt": "E:/codex/yunticket/docs/diagnostics/delivery-flow-v1-20261024/ci-run-40087049467-R-observation.json",
+    "workflow_restored_manual_only": true,
+    "artifact_downloaded": true,
+    "artifact_id": 12558045382
+  },
+  "local_tools_frozen_packet": {
+    "manifest": "E:/codex/yunticket/docs/superpowers/plans/pilotdeck-ledger-v2-20261021/parallel-permissive-20/thread-13/delivery-tools-review-v1-20261024/manifest.json",
+    "sha256": "015312366508accb2c3a63acd189c867f610e785f7b387b0c8df0175879b0e1a",
+    "paths": 31,
+    "base_commit": "153af9a2a80da1305930b93a6b7dde9b060405eb",
+    "candidate_commit": "5bb965dc883e2dbb824c764fb92cacb35b6c149d",
+    "tree": "ad40efdd37723ce9a57773f85dd19218cbe2371f",
+    "status": "SOURCE_REJECT_two_concrete_defects_routed_to15_20_13;no_shared_merge"
+  },
+  "remote_ci_trigger_policy": {
+    "executor": 16,
+    "source_review": 14,
+    "normal_service": "existing authenticated GitHub connector",
+    "UI_input_allowed_now": false,
+    "temporary_trigger": "only main + exact active workflow path;one CAS;run/permissions/timeout/artifact body unchanged",
+    "pre_mutation_run_count_must_be": 0,
+    "if_run_already_exists": "identify existing authorized run;do not trigger another",
+    "after_run_id": "restore exact manual-only on block and verify;keep observing same run",
+    "automatic_retry": false,
+    "permitted_source_case": "approved fixed M14 only;not new d060 demo",
+    "concrete_review_manifest": "E:/codex/yunticket/docs/diagnostics/delivery-flow-v1-20261024/ci-trigger-review/review-manifest.json",
+    "R_operational_grade": "ACCEPT only4-line event-block change;runtime source/permissions/timeout/artifacts byte-identical;14 formalAC unchanged",
+    "trigger_patch_sha256": "95156dbffb4542964e43c33240c5a9752003fee226a0f5b4410ec763a9b2fc20",
+    "remote_base_tree": "ae76cf734dfb7658e0ec101ef4d7777658b86190",
+    "restore_on_unknown_or_failure": true
+  },
+  "remote_ci_operation_review": {
+    "R_operation_level": "ACCEPT",
+    "reviewer_14": "light review complete; no concrete counterexample reported",
+    "manifest_sha256": "24c9873f5d43dd9b10a3b43167fa9f9e0cd8b58f2c221eeefdb74d7cbe4c65f2",
+    "trigger_patch_sha256": "95156dbffb4542964e43c33240c5a9752003fee226a0f5b4410ec763a9b2fc20",
+    "formal_seed_acceptance": "existing phase-state remote_ci_source_review remains at its original manifest SHA; not overwritten"
+  },
+  "remote_ci_execution": {
+    "status": "completed_success_artifact_verified",
+    "repository": "kazwskjack/jot-test-private",
+    "branch": "main",
+    "run_id": 40087049467,
+    "run_attempt": 1,
+    "run_count": 1,
+    "trigger_commit": "8af567a676373834f4568eca0b4dc25ba834d466",
+    "restore_commit": "375d55b3adbef3c64064002c7350a1ed787e8d0f",
+    "restore_commit_message": "Restore manual-only workflow [skip ci]",
+    "main_head_after_restore": "375d55b3adbef3c64064002c7350a1ed787e8d0f",
+    "main_tree_after_restore": "ae76cf734dfb7658e0ec101ef4d7777658b86190",
+    "workflow_blob_after_restore": "e6626b89e88dae7f7daa57d238b3b6781015c050",
+    "trigger_patch_sha256": "95156dbffb4542964e43c33240c5a9752003fee226a0f5b4410ec763a9b2fc20",
+    "workflow_candidate_sha256": "9436c5203ae404a8802f99a17d9f18a4b8f59f292649b86271bef68b4236f3b0",
+    "seed_manifest_sha256": "24c9873f5d43dd9b10a3b43167fa9f9e0cd8b58f2c221eeefdb74d7cbe4c65f2",
+    "artifact_download": "verified",
+    "completed_at_utc": "2026-10-24T18:46:47.233058+08:00",
+    "run_status": "completed",
+    "run_conclusion": "success",
+    "job_id": 120852015823,
+    "artifact_id": 12558045382,
+    "artifact_name": "delivery-flow-v1-40087049467-1",
+    "artifact_sha256": "7235dcac00347ca8202d01b5cef7baced1caf0efe309644d30a67be5093394d1",
+    "artifact_size_bytes": 131029,
+    "artifact_path": "E:/codex/yunticket/docs/diagnostics/delivery-flow-v1-20261024/delivery-flow-v1-40087049467-1.zip",
+    "extraction_directory": "E:/codex/yunticket/docs/diagnostics/delivery-flow-v1-20261024/run-40087049467",
+    "result_json_sha256": "86c55ad6d8d7a0a30c9fb8bf28a7c6ac94d6297abeaf97844aba4228eabd8f2a",
+    "run_log_sha256": "20f0c414f3107746c15663fff7bcf4c4f6e1b55b25c641750d5a70d9813d0031",
+    "source_archive_sha256": "ef5846f3ce619d179918935db1012f6eaee6fb19d774b148d6eda088b6d3202f",
+    "source_manifest_sha256": "08499edbe7ac50cf3b5d9599974126c1d1018834bccfae39656dec1810937545",
+    "tests": 24,
+    "passed": 24,
+    "failed": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "linux_result": "PASS",
+    "formal_acceptance_credit": "NONE",
+    "windows_status": "DEFERRED_USER"
+  },
+  "trial_queue_input": {
+    "path": "E:/codex/yunticket/docs/superpowers/plans/pilotdeck-ledger-v2-20261021/parallel-permissive-20/thread-20/trial-ready-queue-input-v1-20261024.json",
+    "sha256": "787fc53c5cea583053cd5556d095b609a3f9698e18a192b032c1564ca07616bd",
+    "source_reports": 12,
+    "formal_completion_forecast": "not established;M07.04 closest conditional candidate",
+    "targeted_readonly_preparation": [
+      "2:M07.04 exact Gateway seam;8 backup",
+      "7:M17.04 restart seam;9 backup"
+    ],
+    "trial_start_authorization": false,
+    "verified_addenda": [
+      {
+        "worker": 2,
+        "sha256": "840053ffb6af92ccf89e2e7ac942abdfa904d5d1a62793b2d255d55c84c35f17",
+        "finding": "No newGateway route needed;policy fallback+health projection/contracts migration to153af unknown;45to75min excludes migration"
+      },
+      {
+        "worker": 7,
+        "sha256": "7cbe84ab19418b944958430ca558a45995de2e189b092052e5997d0094ec82c1",
+        "finding": "Existing journal same-call recovery reusable;actual cross-process fixture/identity restart absent,not fullAC verified;R independently read authorized local evidence despite worker outbound rejection"
+      }
+    ]
+  },
+  "runner_fix_review_packet": {
+    "root": "E:/codex/yunticket/docs/superpowers/plans/pilotdeck-ledger-v2-20261021/parallel-permissive-20/thread-15/delivery-tools-review-v1-20261024-custody/private-fix",
+    "manifest_sha256": "a7d5754e1998d53d3b4db6b032645e25c2b43531ee705b01e80f34a88b061160",
+    "patch_sha256": "71606a03ca913bb4a54c5871dc6afc30cfbb9391144d1c65332c3abb700e96e7",
+    "zip_sha256": "4e40a944bdc6c5367d068c0e97ff7c8e87b51d56d7b610dc00c55d39c9b9bcee",
+    "changed_files": 11,
+    "status": "14incremental_review_and13compatibility_dispatched",
+    "shared_merge": false
+  },
+  "fix_combination_preflight": {
+    "report": "E:/codex/yunticket/docs/superpowers/plans/pilotdeck-ledger-v2-20261021/parallel-permissive-20/thread-13/runner-metrics-fix11-tempcheck-20261024/report.json",
+    "sha256": "3850b70be535db0f9fce5f5867d2b80b347b0e65eeed9194b88ae90c3939ac7e",
+    "fix11_tree": "14109ac5bf63d8aa9b317f76ab247c210b35e2c7",
+    "combined_tree": "a6f6ab144f8111ae7bf58a3cb99053dbecfd8309",
+    "paths": 13,
+    "source_review": "SOURCE_REJECT_SIGTERM_and_CANCELLED_cleanup_false;queue small changes accepted",
+    "shared_written": false
+  },
+  "sigterm_delta_review_packet": {
+    "root": "E:/codex/yunticket/docs/superpowers/plans/pilotdeck-ledger-v2-20261021/parallel-permissive-20/thread-15/delivery-tools-review-v1-20261024-custody/sigterm-delta",
+    "manifest_sha256": "9aadfd3a31077286cf90cd13b058f3a3f58cb1ab7420adde85cd30ec539b9569",
+    "patch_sha256": "b6c6d076df768285c27d3b8c829788b09eb08e53bb14e9e9146dad083376a04a",
+    "zip_sha256": "a242295b51c64feb794e310496c5249eb9a4cfe7c4424bcdc1520d22e9261b54",
+    "changed_paths": 7,
+    "status": "14incremental_review_and13composition_dispatched",
+    "remote_run": false
+  },
+  "sigterm_combination_preflight": {
+    "report": "E:/codex/yunticket/docs/superpowers/plans/pilotdeck-ledger-v2-20261021/parallel-permissive-20/thread-13/sigterm-delta-tempcheck-20261024/report.json",
+    "sha256": "64a114e58112ad5cc20e0fe457ff0a11a10be31740b187696a7b9deaf8d35501",
+    "delta7_tree": "c85faa8ca7e8d770b5791fc675360fbc0468bd84",
+    "final_combined_tree": "9e8c8d3d90fd796cc9f23945972319f58548c7c6",
+    "paths": 13,
+    "source_review": "NOT_ACCEPTED_cleanup_entry_SIGTERM_race_identified;14 previous turn interrupted,concrete continuation dispatched",
+    "shared_written": false
+  },
+  "sigterm_race_delta_review_packet": {
+    "root": "E:/codex/yunticket/docs/superpowers/plans/pilotdeck-ledger-v2-20261021/parallel-permissive-20/thread-15/delivery-tools-review-v1-20261024-custody/sigterm-race-delta",
+    "manifest_sha256": "89cf8505413ff0070db327a9a3f0784e87e5ac6cc9df51eba66f54420c482f2d",
+    "patch_sha256": "240eab5e076572ce39ab68bd92b696415ae22a37a60a7fb2030d5c8007431676",
+    "zip_sha256": "4e84771812557e11243e810f3709b7ddf9c5d20fb8d06cf6de002d576981bdc1",
+    "changed_paths": 2,
+    "status": "14 incremental review and13 exact composition dispatched"
+  },
+  "race_combination_preflight": {
+    "report": "E:/codex/yunticket/docs/superpowers/plans/pilotdeck-ledger-v2-20261021/parallel-permissive-20/thread-13/sigterm-race-tempcheck-20261024/report.json",
+    "sha256": "77a2e7d76cdb3615b7d4d8d398d959dda4154cb6d648c0d0c4c7a9e30f4dec7e",
+    "base_tree": "9e8c8d3d90fd796cc9f23945972319f58548c7c6",
+    "combined_tree": "70bd77050ba8d39e7622ac7d0d5755c099a21eed",
+    "changed_paths": 2,
+    "unchanged_reviewed_paths": true,
+    "source_review": "SOURCE_ACCEPT exact2path+final13path unchanged-source identity confirmed by14",
+    "shared_written": false,
+    "review_receipt": "E:/codex/yunticket/docs/superpowers/plans/pilotdeck-ledger-v2-20261021/parallel-permissive-20/thread-15/delivery-tools-review-v1-20261024-custody/sigterm-race-delta/REVIEW-14-SIGTERM-RACE-20261024.md",
+    "review_sha256": "59f7016d6b365eeeac11c452b28f9b36a62f8def3623ca1cbf84f3a4f52e6011"
+  },
+  "local_tools_v2_frozen": {
+    "root": "E:/codex/yunticket/docs/superpowers/plans/pilotdeck-ledger-v2-20261021/parallel-permissive-20/thread-13/delivery-tools-review-v2-20261024",
+    "manifest_sha256": "1fa7d9742370507058042268e8feea97f9acb9c772d2f86f9cc87489a1425b68",
+    "zip_sha256": "a5846e6d694f073a64e604414763fbbbe796548915c4334b8c38207877d5034e",
+    "commit": "00bc6cb3750488bc8388d3bc0f84d970cc1c74ff",
+    "parent": "153af9a2a80da1305930b93a6b7dde9b060405eb",
+    "tree": "70bd77050ba8d39e7622ac7d0d5755c099a21eed",
+    "files": 31,
+    "shared_merged": false,
+    "current_linux_run": false,
+    "product_ac_credit": "NONE"
+  },
+  "d060_v2_remote_review_packet": {
+    "zip": "E:/codex/yunticket/docs/diagnostics/delivery-flow-v1-20261024/d060-v2-review-seed.zip",
+    "sha256": "a27597f9865d82ca43779853451c258576b2b51cf12b3572d6bdfa8cc0f30be0",
+    "bytes": 35434,
+    "files": 16,
+    "descriptor_sha256": "c295f1d1f2703ac352440749bfb6b4e5ff3645fc5562adb7b0a1715b5749a588",
+    "repository": "kazwskjack/jot-test-private",
+    "branch": "main",
+    "run_budget_requested": 1,
+    "timeout_minutes": 20,
+    "source_case": "synthetic-node-d060882ad1eb",
+    "status": "Invocation identity passed14;only artifact-metadata write scope unnecessary;16 reducing permissions and freezing new zip",
+    "human_new_remote_authorized": false,
+    "revision2": {
+      "zip": "E:/codex/yunticket/docs/diagnostics/delivery-flow-v1-20261024/d060-v2-review-seed-r2.zip",
+      "sha256": "b5e83f16a665f048fdc15242d5607b878060a835e4feee9458569ac520258346",
+      "bytes": 35795,
+      "files": 16,
+      "permissions": "contents:read only",
+      "R_zip_diff_verified": true,
+      "status": "14 SOURCE_ACCEPT;R independently verifiedZIPdiff;pending direct human new one-run approval",
+      "remote_authorized": true,
+      "review_path": "E:/codex/yunticket/docs/diagnostics/delivery-flow-v1-20261024/d060-v2-seed-review-14-r2.md",
+      "review_sha256": "c8e4351fbd452d9521ad93e584150169d997213c43b43c3d9ce8f7fc98ce5a9c",
+      "human_question_status": "Resolved by direct human standing test authorization;no repeat confirmation within scope"
+    }
+  },
+  "standing_test_authorization": {
+    "source": "Direct human messages in R current conversation 2026-10-24",
+    "human_text": [
+      "始终允许。但测试不要影响开发",
+      "另外Linux测试不是可以交给dot么，它会自己下载"
+    ],
+    "scope": "Reviewed project test packages;existing private kazwskjack/jot-test-private and existing scoped J HTTPS transfer;Dot own Linux preferred,GitHub Ubuntu fallback;results retained E",
+    "per_run_limit_minutes": 20,
+    "no_repeated_approval_same_scope": true,
+    "tests_async_no_development_gate": true,
+    "forbidden": [
+      "credentials/user data/production configurations transfer",
+      "production deployment or system-security change",
+      "new paid accounts or runners",
+      "unbounded retries"
+    ],
+    "old_automations_remain_paused": true
+  },
+  "dot_async_lane": {
+    "thread_id": "01a1624c-d08c-75b3-9b2a-5633840ea0e2",
+    "host_id": "durable",
+    "title": "查找 Respond to greeting 对话",
+    "native_dispatch": "failed before delivery",
+    "error": "invalid turn/start params: AbsolutePathBuf deserialized without a base path",
+    "authorization": "Direct human Linux tests to Dot,self-download",
+    "development_waits_for_dot": false,
+    "next": "16 publish exact reviewed package through existing scoped J transfer;private human-forwardable handoff;no repeated failed native sends"
+  },
+  "optimization_baseline": {
+    "commit": "00bc6cb3750488bc8388d3bc0f84d970cc1c74ff",
+    "tree": "70bd77050ba8d39e7622ac7d0d5755c099a21eed",
+    "tool_manifest_sha256": "1fa7d9742370507058042268e8feea97f9acb9c772d2f86f9cc87489a1425b68",
+    "writer_receipt_sha256": "6a61a6d91cae87052b7773e80c7bf2705d30e0e82f65b2e7b684d9d4ac9c9ed6",
+    "formal_D": 38,
+    "formal_E": 0,
+    "denominator": 204,
+    "ledger_sha256": "81885ba4b09fd308bfc69d3007d36f9786fd1889c7ffc902044167ed379de441",
+    "shared_clean_confirmed": true
+  },
+  "formal_start_D_ids": [
+    "M01.02",
+    "M02.01",
+    "M02.02",
+    "M02.03",
+    "M02.07",
+    "M02.09",
+    "M05.01",
+    "M05.02",
+    "M05.S",
+    "M06.01",
+    "M06.02",
+    "M06.03",
+    "M07.01",
+    "M07.02",
+    "M08.02",
+    "M08.04",
+    "M08.05",
+    "M09.03",
+    "M10.02",
+    "M11.04",
+    "M12.01",
+    "M12.06",
+    "M14.01",
+    "M14.S",
+    "M15.01",
+    "M15.02",
+    "M15.03",
+    "M15.04",
+    "M18.01",
+    "M20.S",
+    "M21.01",
+    "M21.03",
+    "M21.04",
+    "M21.06",
+    "M23.S",
+    "M25.01",
+    "M25.02",
+    "M26.01"
+  ],
+  "formal_start_E_ids": [],
+  "trial_activation_metadata": {
+    "trial_id": "JOT-REAL-120M-20261024T124008",
+    "started_at": "2026-10-24T12:40:08Z",
+    "ends_at": "2026-10-24T14:40:08Z",
+    "duration_seconds": 7200,
+    "forecast": {
+      "new_formal_D_plus_E_range": [
+        0,
+        2
+      ],
+      "integratable_candidate_packets_range": [
+        2,
+        4
+      ],
+      "confidence": "low_to_medium",
+      "basis": "12 existing readiness reports plus independently hashed worker2 and7 addenda;fallback policy and cron/MCP chains closest;cross-base migration and runtime restart semantics remain uncertain",
+      "old_WIP": "Inherited implementation and window new changes must be separately attributed;packets/tests/commits are not originalAC completion"
+    },
+    "baseline": {
+      "commit": "00bc6cb3750488bc8388d3bc0f84d970cc1c74ff",
+      "tree": "70bd77050ba8d39e7622ac7d0d5755c099a21eed",
+      "tool_manifest_sha256": "1fa7d9742370507058042268e8feea97f9acb9c772d2f86f9cc87489a1425b68",
+      "writer_receipt_sha256": "6a61a6d91cae87052b7773e80c7bf2705d30e0e82f65b2e7b684d9d4ac9c9ed6",
+      "formal_D": 38,
+      "formal_E": 0,
+      "denominator": 204,
+      "ledger_sha256": "81885ba4b09fd308bfc69d3007d36f9786fd1889c7ffc902044167ed379de441",
+      "shared_clean_confirmed": true
+    },
+    "latest_human_override": "Tests always permitted within reviewed project/private scope;Linux and Dot testing async and must not hold development",
+    "linux_async": {
+      "new_d060": "pending publication/test,not passed",
+      "old_M14_github": "40087049467 PASS24/24 historical",
+      "dot_old_M14": "independent compatibility report received,remote evidence not yet E verified",
+      "windows": "formal testing deferred"
+    },
+    "rules": {
+      "primary_and_named_backup": true,
+      "original_full_AC_scope_preserved": true,
+      "no_production_or_publication": true,
+      "stop_new_trial_work_at_deadline": true,
+      "do_not_kill_inflight": true,
+      "only14_formal_judgment": true,
+      "no_new_threads_or_subagents": true
+    }
+  }
+}

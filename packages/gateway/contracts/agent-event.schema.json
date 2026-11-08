@@ -720,6 +720,19 @@
         },
         "reasoning_effort": {
           "type": "string"
+        },
+        "fallbacks": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "properties": {
+              "provider": { "type": "string" },
+              "model": { "type": "string" }
+            },
+            "required": ["provider", "model"],
+            "additionalProperties": false
+          }
         }
       },
       "required": [
@@ -815,6 +828,16 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "health": {
+                "type": "object",
+                "properties": {
+                  "status": { "type": "string", "enum": ["healthy", "unhealthy", "stale", "unknown"] },
+                  "observed_at": { "type": ["integer", "null"], "minimum": 0 },
+                  "expires_at": { "type": ["integer", "null"], "minimum": 0 }
+                },
+                "required": ["status", "observed_at", "expires_at"],
+                "additionalProperties": false
               }
             },
             "required": [
@@ -2725,6 +2748,15 @@
           "enum": [
             "approve",
             "deny"
+          ]
+        },
+        "purpose": {
+          "type": "string",
+          "enum": [
+            "task_review",
+            "task_completion_review",
+            "task_reply_review",
+            "browser_action"
           ]
         }
       },

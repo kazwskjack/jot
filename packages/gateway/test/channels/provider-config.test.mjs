@@ -7,7 +7,32 @@ test('delivery channel selection is explicit and rejects unsupported or duplicat
  assert.deepEqual(config.deliveryChannels({}),['wecom']);
  assert.deepEqual(config.deliveryChannels({GENERAL_AGENT_DELIVERY_CHANNELS:'email'}),['email']);
  assert.deepEqual(config.deliveryChannels({GENERAL_AGENT_DELIVERY_CHANNELS:'wecom,email'}),['wecom','email']);
- for(const value of ['', 'email,email','sms','wecom,'])assert.throws(()=>config.deliveryChannels({GENERAL_AGENT_DELIVERY_CHANNELS:value}),/delivery_channels_invalid/);
+ assert.deepEqual(config.deliveryChannels({GENERAL_AGENT_DELIVERY_CHANNELS:'webpush'}),['webpush']);
+ assert.deepEqual(config.deliveryChannels({GENERAL_AGENT_DELIVERY_CHANNELS:'mattermost'}),['mattermost']);
+  assert.deepEqual(config.deliveryChannels({GENERAL_AGENT_DELIVERY_CHANNELS:'sms'}),['sms']);
+  assert.deepEqual(config.deliveryChannels({GENERAL_AGENT_DELIVERY_CHANNELS:'slack,sms'}),['slack','sms']);
+  for(const value of ['', 'email,email','wecom,'])assert.throws(()=>config.deliveryChannels({GENERAL_AGENT_DELIVERY_CHANNELS:value}),/delivery_channels_invalid/);
+});
+
+test('Mattermost delivery requires a configured runtime receipt client',()=>{
+ assert.throws(()=>config.requireDeliveryRuntimeConfiguration(['mattermost'],'',''),error=>error.message==='delivery_runtime_config_required');
+ assert.doesNotThrow(()=>config.requireDeliveryRuntimeConfiguration(['mattermost'],'https://runtime.example.test','runtime-secret-file'));
+ assert.doesNotThrow(()=>config.requireDeliveryRuntimeConfiguration(['email'],'',''));
+});
+
+test('Slack attachment intake is opt-in and uses the configured bot token file',()=>{
+ const env={GENERAL_AGENT_SLACK_TEAM_ID:'T111',GENERAL_AGENT_SLACK_SIGNING_SECRET_FILE:'signing-file',
+  GENERAL_AGENT_SLACK_APP_ID:'A111',GENERAL_AGENT_SLACK_BOT_USER_ID:'B111'};
+ const secret='s'.repeat(40),token='xoxb-12345678901234567890';
+ assert.deepEqual(config.slackWebhookConfiguration(env,path=>{assert.equal(path,'signing-file');return secret;}),
+  {teamId:'T111',signingSecret:secret,appId:'A111',botUserId:'B111'});
+ assert.deepEqual(config.slackWebhookConfiguration({...env,GENERAL_AGENT_SLACK_ATTACHMENTS_ENABLED:'true',
+  GENERAL_AGENT_SLACK_BOT_TOKEN_FILE:'bot-file'},path=>path==='signing-file'?secret:token),
+  {teamId:'T111',signingSecret:secret,appId:'A111',botUserId:'B111',attachmentBotToken:token});
+ assert.throws(()=>config.slackWebhookConfiguration({...env,GENERAL_AGENT_SLACK_ATTACHMENTS_ENABLED:'true'},()=>secret),
+  error=>error.message==='slack_config_invalid');
+ assert.throws(()=>config.slackWebhookConfiguration({...env,GENERAL_AGENT_SLACK_ATTACHMENTS_ENABLED:'yes'},()=>secret),
+  error=>error.message==='slack_config_invalid');
 });
 
 test('SMTP password comes from a server file and invalid config is rejected before reading it',()=>{

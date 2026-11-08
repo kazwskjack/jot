@@ -1,7 +1,9 @@
 import test from 'node:test';import assert from 'node:assert/strict';
+import {createECDH,randomBytes} from 'node:crypto';
 import {fixture} from './task-wait-fixture.mjs';
 import {TaskNotifications} from '../../src/persistent-tasks/notifications.ts';
 import {OwnerChannelBindings} from '../../src/channels/owner-bindings.ts';
+import {PushSubscriptions} from '../../src/channels/push-subscriptions.ts';
 import {ChannelDeliveryService} from '../../src/channels/delivery.ts';
 import {ChannelDeliveryWorker} from '../../src/channels/worker.ts';
 import {PersistentTaskService} from '../../src/persistent-tasks/service.ts';
@@ -9,7 +11,7 @@ import {maintainWorkbench} from '../../src/persistent-tasks/scheduler.ts';
 async function setup(t,events=['needs_confirmation'],channel='wecom'){let settings,binding;
  const f=await fixture(t,'wait_user',{beforeRun:async f=>{
   settings=new TaskNotifications(f.db);const channels=new OwnerChannelBindings(f.db,{enabled:['wecom']});
-  if(channel==='email'){const {EmailChannelBindings}=await import('../../src/channels/email-bindings.ts');let code;const email=new EmailChannelBindings(f.db,{send:async text=>{code=text.match(/[A-Za-z0-9_-]{43}/)[0];return {provider_message_id:'accepted'};}});const challenge=await email.begin('alice','events@example.test','events-email-key');email.confirm('alice',challenge.channel_binding_id,code);}else{const challenge=channels.create('alice','wecom');channels.acceptProof('wecom','event-recipient',challenge.code);}binding=channels.list('alice').items[0];
+  if(channel==='email'){const {EmailChannelBindings}=await import('../../src/channels/email-bindings.ts');let code;const email=new EmailChannelBindings(f.db,{send:async text=>{code=text.match(/[A-Za-z0-9_-]{43}/)[0];return {provider_message_id:'accepted'};}});const challenge=await email.begin('alice','events@example.test','events-email-key');email.confirm('alice',challenge.channel_binding_id,code);}else if(channel==='webpush'){const vapid=createECDH('prime256v1');vapid.generateKeys();const client=createECDH('prime256v1');client.generateKeys();const push=new PushSubscriptions(f.db,{publicKey:vapid.getPublicKey().toString('base64url'),generation:'events-vapid-generation'});binding=push.register('alice',{endpoint:'https://fcm.googleapis.com/fcm/send/events-test',keys:{p256dh:client.getPublicKey().toString('base64url'),auth:randomBytes(16).toString('base64url')}},'events-push-register-01');}else{const challenge=channels.create('alice','wecom');channels.acceptProof('wecom','event-recipient',challenge.code);}binding??=channels.list('alice').items.find(item=>item.channel===channel);
   settings.update('alice',f.task.task_id,{expected_version:0,channel_binding_ids:[binding.channel_binding_id],events});
  }});return {...f,settings,binding};
 }
@@ -21,6 +23,12 @@ test('task confirmation notices retain the verified email destination and send o
  const delivery=new ChannelDeliveryWorker(new ChannelDeliveryService(f.db),{providers:{email:{send:async(text,to)=>{sent++;assert.equal(to,'events@example.test');assert.match(text,/需要你补充信息/);return {provider_message_id:'notice'};},sendFile:async()=>{throw new Error('unused');}}}},{registerDeliveryReceipt:async()=>{throw new Error('unused');}},{resolveArtifact:()=>{throw new Error('unused');},resolveRuntime:()=>{throw new Error('unused');}});
  await delivery.processNext();await delivery.processNext();assert.equal(sent,1);
 });
+test('task confirmation notices use a verified Web Push binding and record one synthetic acceptance',async t=>{
+ const f=await setup(t,['needs_confirmation'],'webpush');await f.persistentTasks.tick();await f.persistentTasks.tick();
+ const effect=f.db.prepare('SELECT * FROM ga_channel_deliveries').get();assert.equal(effect.destination,'webpush');assert.equal(effect.recipient,f.binding.channel_binding_id);
+ let sent=0;const delivery=new ChannelDeliveryWorker(new ChannelDeliveryService(f.db),{providers:{webpush:{send:async(text,recipient)=>{sent++;assert.equal(recipient,f.binding.channel_binding_id);assert.match(text,/需要你补充信息/);return {accepted:true,status:201};},sendFile:async()=>{throw new Error('unused');}}}},{registerDeliveryReceipt:async()=>{throw new Error('text_push_has_no_runtime_receipt');}},{resolveArtifact:()=>{throw new Error('unused');},resolveRuntime:()=>{throw new Error('unused');}});
+ await delivery.processNext();await delivery.processNext();assert.equal(sent,1);assert.equal(f.db.prepare('SELECT status FROM ga_channel_deliveries').get().status,'delivered');assert.match(f.db.prepare('SELECT provider_receipt_json FROM ga_channel_deliveries').get().provider_receipt_json,/webpush-accepted/);
+});
 test('only scheduler maintenance emits a durable confirmation notice once, without a final answer or new model run',async t=>{
  const f=await setup(t);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_channel_deliveries').get().n,0);
  await f.app.inject({url:`/v1/persistent-tasks/${f.task.task_id}/occurrences`,headers:{'x-user-id':'alice'}});assert.equal(f.db.prepare('SELECT count(*) n FROM ga_channel_deliveries').get().n,0);
@@ -31,6 +39,8 @@ test('only scheduler maintenance emits a durable confirmation notice once, witho
 test('answering a pending task question before notice delivery invalidates its source proof',async t=>{
  const f=await setup(t);await f.persistentTasks.tick();const card=(await f.list())[0];
  const response=await f.send(`/v1/interactions/${card.interaction_id}/response`,{expected_version:card.version,answers:card.questions.map(q=>({question_id:q.question_id,selected_option_ids:[],custom_text:'Use the concise report.'}))});assert.equal(response.statusCode,202,response.body);
+ const sourcePolicy=f.db.prepare('SELECT model_policy_json,execution_policy_json FROM ga_runs WHERE id=?').get(f.runId),continuationPolicy=f.db.prepare('SELECT model_policy_json,execution_policy_json FROM ga_runs WHERE id=?').get(response.json().run_id);
+ assert.equal(typeof sourcePolicy.model_policy_json,'string');assert.equal(continuationPolicy.model_policy_json,sourcePolicy.model_policy_json);assert.equal(continuationPolicy.execution_policy_json,sourcePolicy.execution_policy_json);
  await worker(f.db,async()=>{throw new Error('resolved question must not notify');}).processNext();assert.equal(f.db.prepare('SELECT status FROM ga_channel_deliveries').get().status,'cancelled');assert.equal(f.db.prepare('SELECT last_reason_code FROM ga_channel_deliveries').get().last_reason_code,'TASK_NOTIFICATION_SOURCE_RESOLVED');
 });
 test('a failed run can notify without claiming business completion, but an unknown outcome never becomes a failure notice',async t=>{

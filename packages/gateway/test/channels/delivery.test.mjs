@@ -34,10 +34,12 @@ test('explicit external delivery is idempotent by effect identity', () => {
   try {
     const service = new ChannelDeliveryService(f.db);
     const input = { runId: 'run-1', messageId: 'msg-1', destination: 'wecom',
-      recipient: 'user-1', artifactRef: 'artifact-1' };
+      recipient: 'user-1', artifactRef: null, text: 'idempotent delivery state test' };
     const first = service.enqueueExternal(input);
     const second = service.enqueueExternal(input);
     assert.equal(second.effect_id, first.effect_id);
+    assert.throws(() => service.enqueueExternal({ ...input, artifactRef: 'artifact-1', text: null }),
+      /channel_delivery_artifact_pin_required/);
     assert.equal(f.db.prepare('SELECT COUNT(*) AS count FROM ga_channel_deliveries').get().count, 1);
   } finally { f.close(); }
 });
@@ -66,7 +68,7 @@ test('provider success followed by receipt failure retries receipt only', () => 
     let now = 1000;
     const service = new ChannelDeliveryService(f.db, () => now);
     service.enqueueExternal({ runId: 'run-1', messageId: 'msg-1', destination: 'wecom',
-      recipient: 'user-1', artifactRef: 'artifact-1' });
+      recipient: 'user-1', artifactRef: null, text: 'delivery state test' });
     const send = service.claim('worker-1', 30);
     assert.equal(send.phase, 'send');
     service.recordProviderSent(send.effect_id, send.generation, { provider_message_id: 'wx-1' });
@@ -83,7 +85,7 @@ test('unknown provider response is not blindly retried', () => {
   try {
     const service = new ChannelDeliveryService(f.db);
     const queued = service.enqueueExternal({ runId: 'run-1', messageId: 'msg-1',
-      destination: 'wecom', recipient: 'user-1', artifactRef: 'artifact-1' });
+      destination: 'wecom', recipient: 'user-1', artifactRef: null, text: 'delivery state test' });
     const send = service.claim('worker-1', 30);
     service.recordProviderUnknown(send.effect_id, send.generation);
     assert.equal(service.claim('worker-1', 30), null);

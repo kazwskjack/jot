@@ -13,7 +13,9 @@ CREATE TABLE IF NOT EXISTS ga_projects (
   is_default INTEGER NOT NULL DEFAULT 0 CHECK(is_default IN (0,1)),
   version INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  archived_at TEXT,
+  deleted_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_ga_projects_owner_updated ON ga_projects(owner_id,updated_at DESC,id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ga_projects_owner_default ON ga_projects(owner_id) WHERE is_default=1;
@@ -80,6 +82,31 @@ CREATE TABLE IF NOT EXISTS ga_channel_deliveries (
 CREATE INDEX IF NOT EXISTS idx_ga_channel_deliveries_claim
   ON ga_channel_deliveries(status,lease_expires_at,created_at);
 
+-- Browser push addresses and key material remain server-side. The binding id
+-- is the only recipient reference stored in task grants and delivery rows.
+CREATE TABLE IF NOT EXISTS wb_push_subscriptions (
+  channel_binding_id TEXT PRIMARY KEY REFERENCES ga_owner_channel_bindings(channel_binding_id),
+  owner_id TEXT NOT NULL,
+  endpoint TEXT NOT NULL,
+  endpoint_hash TEXT NOT NULL,
+  p256dh TEXT NOT NULL,
+  auth_secret TEXT NOT NULL,
+  vapid_generation TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(owner_id,endpoint_hash)
+);
+CREATE INDEX IF NOT EXISTS wb_push_subscription_owner
+  ON wb_push_subscriptions(owner_id,channel_binding_id);
+CREATE TABLE IF NOT EXISTS wb_push_subscription_requests (
+  owner_id TEXT NOT NULL,
+  request_key_hash TEXT NOT NULL,
+  request_hash TEXT NOT NULL,
+  channel_binding_id TEXT NOT NULL REFERENCES ga_owner_channel_bindings(channel_binding_id),
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY(owner_id,request_key_hash)
+);
+
 CREATE TABLE IF NOT EXISTS ga_runs (
   id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES ga_conversations(id) ON DELETE CASCADE,
   input_message_id TEXT REFERENCES ga_messages(id), status TEXT NOT NULL,
@@ -141,12 +168,26 @@ CREATE TABLE IF NOT EXISTS ga_interactions (
   status TEXT NOT NULL, version INTEGER NOT NULL, action_digest TEXT,
   request_json TEXT NOT NULL, response_json TEXT, expires_at TEXT, created_at TEXT NOT NULL, resolved_at TEXT
 );
+CREATE TABLE IF NOT EXISTS ga_upload_batches (
+  id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES ga_conversations(id) ON DELETE CASCADE,
+  owner_id TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('active','settled','cancelled','expired')),
+  manifest_json TEXT NOT NULL, total_size INTEGER NOT NULL, created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL, closed_at TEXT
+);
+CREATE TRIGGER IF NOT EXISTS ga_upload_batch_manifest_immutable BEFORE UPDATE ON ga_upload_batches
+  WHEN NEW.conversation_id IS NOT OLD.conversation_id OR NEW.owner_id IS NOT OLD.owner_id
+    OR NEW.manifest_json IS NOT OLD.manifest_json OR NEW.total_size IS NOT OLD.total_size
+    OR NEW.created_at IS NOT OLD.created_at OR NEW.expires_at IS NOT OLD.expires_at
+  BEGIN SELECT RAISE(ABORT,'upload_batch_immutable'); END;
 CREATE TABLE IF NOT EXISTS ga_uploads (
   id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES ga_conversations(id) ON DELETE CASCADE,
   owner_id TEXT NOT NULL, status TEXT NOT NULL, server_path TEXT NOT NULL,
   filename TEXT NOT NULL, declared_size INTEGER NOT NULL, received_size INTEGER NOT NULL DEFAULT 0,
-  declared_sha256 TEXT, actual_sha256 TEXT, mime_type TEXT, created_at TEXT NOT NULL, completed_at TEXT
+  declared_sha256 TEXT, actual_sha256 TEXT, mime_type TEXT, created_at TEXT NOT NULL, completed_at TEXT,
+  batch_id TEXT REFERENCES ga_upload_batches(id) ON DELETE CASCADE, client_file_id TEXT,
+  relative_path TEXT, expires_at TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_ga_upload_batches_active ON ga_upload_batches(owner_id,conversation_id,status,expires_at);
 CREATE TABLE IF NOT EXISTS ga_artifacts (
   id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES ga_conversations(id) ON DELETE CASCADE,
   owner_id TEXT NOT NULL, kind TEXT NOT NULL, current_version INTEGER NOT NULL,

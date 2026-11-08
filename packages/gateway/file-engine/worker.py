@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Confined file-engine process. One JSON request in, one JSON result out."""
-import hashlib, json, os, shutil, subprocess, sys, time, uuid, zipfile
+import hashlib, json, os, posixpath, re, shutil, subprocess, sys, time, uuid, zipfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 S = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+DOCUMENT_PREVIEW_MAX_CHARS = 200_000
+DOCUMENT_PREVIEW_MAX_ZIP_BYTES = 128 * 1024 * 1024
+DOCUMENT_PREVIEW_MAX_ZIP_ENTRY_BYTES = 32 * 1024 * 1024
 
 class FileEngineError(Exception):
     pass
@@ -20,17 +23,161 @@ def safe_path(value: str, job_dir: str, must_exist: bool = True) -> Path:
     if not must_exist and path.parent != root: fail("UNAUTHORIZED_FILE")
     return path
 
-def safe_zip(path: Path) -> zipfile.ZipFile:
+def safe_zip(path: Path, max_expanded: int = 512 * 1024 * 1024,
+             max_entry: int = 512 * 1024 * 1024) -> zipfile.ZipFile:
     archive = zipfile.ZipFile(path)
     infos = archive.infolist()
     if len(infos) > 10000: fail("FILE_CONTAINER_LIMIT")
     expanded = sum(item.file_size for item in infos)
     compressed = max(1, sum(item.compress_size for item in infos))
-    if expanded > 512 * 1024 * 1024 or expanded / compressed > 200: fail("FILE_CONTAINER_LIMIT")
+    if expanded > max_expanded or expanded / compressed > 200: fail("FILE_CONTAINER_LIMIT")
     for item in infos:
         name = item.filename.replace("\\", "/")
         if name.startswith("/") or ".." in name.split("/"): fail("FILE_CONTAINER_LIMIT")
+        if item.file_size > max_entry: fail("FILE_CONTAINER_LIMIT")
     return archive
+
+def preview_xml(data: bytes) -> ET.Element:
+    if len(data) > DOCUMENT_PREVIEW_MAX_ZIP_ENTRY_BYTES or re.search(rb"<!\s*(?:DOCTYPE|ENTITY)\b", data, re.I):
+        fail("DOCUMENT_PREVIEW_XML_UNSAFE")
+    try: return ET.fromstring(data)
+    except Exception: fail("DOCUMENT_PREVIEW_XML_INVALID")
+
+def take_preview_text(value: str, remaining: int) -> tuple[str, int, bool]:
+    if remaining <= 0: return "", 0, bool(value)
+    clipped = value[:remaining]
+    return clipped, remaining - len(clipped), len(clipped) < len(value)
+
+def docx_preview(path: Path) -> dict:
+    paragraphs, tables, remaining, truncated = [], [], DOCUMENT_PREVIEW_MAX_CHARS, False
+    with safe_zip(path, DOCUMENT_PREVIEW_MAX_ZIP_BYTES, DOCUMENT_PREVIEW_MAX_ZIP_ENTRY_BYTES) as archive:
+        if "word/document.xml" not in archive.namelist(): fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
+        root = preview_xml(archive.read("word/document.xml"))
+    body = root.find(".//" + W + "body")
+    if body is None: fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
+    for block in list(body):
+        if block.tag == W + "p":
+            value = "".join(node.text or "" for node in block.iter(W + "t")).strip()
+            if not value: continue
+            value, remaining, cut = take_preview_text(value, remaining)
+            paragraphs.append(value); truncated = truncated or cut
+        elif block.tag == W + "tbl":
+            rows = []
+            for row in block.findall(".//" + W + "tr"):
+                cells = []
+                for cell in row.findall(W + "tc"):
+                    value = "".join(node.text or "" for node in cell.iter(W + "t"))
+                    value, remaining, cut = take_preview_text(value, remaining)
+                    cells.append(value); truncated = truncated or cut
+                    if remaining <= 0: break
+                rows.append(cells)
+                if remaining <= 0: break
+            tables.append(rows)
+        if remaining <= 0: truncated = True; break
+    return {"paragraphs": paragraphs, "tables": tables, "truncated": truncated}
+
+def pdf_preview(path: Path) -> dict:
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(str(path))
+        if reader.is_encrypted: fail("PDF_PASSWORD_REQUIRED")
+        page_count, page_at = len(reader.pages), lambda index: reader.pages[index]
+    except ImportError:
+        try: from PyPDF2 import PdfFileReader
+        except Exception: fail("PDF_ENGINE_UNAVAILABLE")
+        stream = path.open("rb")
+        reader = PdfFileReader(stream)
+        if reader.isEncrypted: fail("PDF_PASSWORD_REQUIRED")
+        page_count, page_at = reader.getNumPages(), reader.getPage
+    pages, remaining, truncated = [], DOCUMENT_PREVIEW_MAX_CHARS, False
+    try:
+        for index in range(min(page_count, 100)):
+            value = page_at(index).extract_text() or ""
+            value, remaining, cut = take_preview_text(value, remaining)
+            pages.append({"number": index + 1, "text": value}); truncated = truncated or cut
+            if remaining <= 0:
+                truncated = truncated or index + 1 < page_count
+                break
+    finally:
+        if 'stream' in locals(): stream.close()
+    return {"page_count": page_count, "pages": pages, "truncated": truncated or page_count > len(pages)}
+
+def xlsx_preview(path: Path) -> dict:
+    shared, sheets, total_cells = [], [], 0
+    remaining, truncated = DOCUMENT_PREVIEW_MAX_CHARS, False
+    ns_rel = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+    ns_package_rel = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+    with safe_zip(path, DOCUMENT_PREVIEW_MAX_ZIP_BYTES, DOCUMENT_PREVIEW_MAX_ZIP_ENTRY_BYTES) as archive:
+        names = set(archive.namelist())
+        if "xl/workbook.xml" not in names or "xl/_rels/workbook.xml.rels" not in names: fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
+        workbook = preview_xml(archive.read("xl/workbook.xml"))
+        relationships = preview_xml(archive.read("xl/_rels/workbook.xml.rels"))
+        targets = {}
+        for relation in relationships.findall(ns_package_rel + "Relationship"):
+            if relation.attrib.get("TargetMode", "").lower() == "external": fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
+            target = relation.attrib.get("Target", "")
+            resolved = target.lstrip("/") if target.startswith("/") else posixpath.normpath(posixpath.join("xl", target))
+            if not resolved.startswith("xl/worksheets/") or ".." in resolved.split("/"):
+                fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
+            targets[relation.attrib.get("Id", "")] = resolved
+        if "xl/sharedStrings.xml" in names:
+            shared_root = preview_xml(archive.read("xl/sharedStrings.xml"))
+            shared = ["".join(node.text or "" for node in item.iter(S + "t")) for item in shared_root.findall(S + "si")]
+        sheet_nodes = list(workbook.iter(S + "sheet"))
+        if len(sheet_nodes) > 100: fail("DOCUMENT_PREVIEW_CONTAINER_LIMIT")
+        for node in sheet_nodes:
+            member = targets.get(node.attrib.get(ns_rel + "id", ""))
+            if not member or member not in names: fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
+            root = preview_xml(archive.read(member)); cells = {}
+            for cell in root.iter(S + "c"):
+                address = cell.attrib.get("r", "")
+                if not re.fullmatch(r"[A-Z]{1,3}[1-9][0-9]{0,6}", address): fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
+                value = cell.find(S + "v"); formula = cell.find(S + "f")
+                raw = value.text if value is not None else ""
+                if cell.attrib.get("t") == "s":
+                    if not raw.isdigit() or int(raw) >= len(shared): fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
+                    raw = shared[int(raw)]
+                elif cell.attrib.get("t") == "inlineStr":
+                    inline = cell.find(S + "is")
+                    raw = "".join(item.text or "" for item in inline.iter(S + "t")) if inline is not None else ""
+                elif cell.attrib.get("t") == "b": raw = "TRUE" if raw == "1" else "FALSE" if raw == "0" else raw
+                raw, remaining, cut = take_preview_text(raw, remaining)
+                formula_text = formula.text if formula is not None else None
+                if formula_text is not None:
+                    formula_text, remaining, formula_cut = take_preview_text(formula_text, remaining)
+                    cut = cut or formula_cut
+                cells[address] = {"value": raw, "formula": formula_text}
+                total_cells += 1; truncated = truncated or cut
+                if total_cells >= 5_000 or remaining <= 0:
+                    truncated = True; break
+            sheets.append({"name": node.attrib.get("name", ""), "cells": cells})
+            if total_cells >= 5_000 or remaining <= 0: break
+    return {"sheets": sheets, "truncated": truncated}
+
+def pptx_preview(path: Path) -> dict:
+    slides, remaining, truncated = [], DOCUMENT_PREVIEW_MAX_CHARS, False
+    with safe_zip(path, DOCUMENT_PREVIEW_MAX_ZIP_BYTES, DOCUMENT_PREVIEW_MAX_ZIP_ENTRY_BYTES) as archive:
+        names = set(archive.namelist())
+        if "ppt/presentation.xml" not in names: fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
+        members = sorted((name for name in names if re.fullmatch(r"ppt/slides/slide[1-9][0-9]*\.xml", name)),
+            key=lambda name: int(re.search(r"slide([0-9]+)", name).group(1)))
+        if len(members) > 500: truncated = True; members = members[:500]
+        for member in members:
+            root = preview_xml(archive.read(member))
+            value = " ".join(node.text or "" for node in root.iter() if node.tag.endswith("}t"))
+            value, remaining, cut = take_preview_text(value, remaining)
+            number = int(re.search(r"slide([0-9]+)", member).group(1))
+            slides.append({"number": number, "text": value}); truncated = truncated or cut
+            if remaining <= 0: truncated = True; break
+    return {"slides": slides, "truncated": truncated}
+
+def document_preview(path: Path, media_type: str) -> dict:
+    if "wordprocessingml" in media_type: content = docx_preview(path)
+    elif "spreadsheetml" in media_type: content = xlsx_preview(path)
+    elif "presentationml" in media_type: content = pptx_preview(path)
+    elif media_type == "application/pdf": content = pdf_preview(path)
+    else: fail("UNSUPPORTED_FORMAT_OPERATION")
+    return content
 
 def docx_read(path: Path) -> dict:
     with safe_zip(path) as z:
@@ -352,7 +499,9 @@ def execute(req: dict) -> dict:
     input_path = safe_path(str(req.get("input_path", "")), job_dir if False else str(Path(req.get("input_path", ".")).resolve().parent))
     media_type = str(req.get("media_type", ""))
     if operation in {"document.inspect", "document.read"}:
-        return {"ok": True, "engine": {"name": "python_ooxml" if media_type != "application/pdf" else "pypdf", "version": sys.version.split()[0]}, "content": inspect(input_path, media_type), "warnings": []}
+        content = document_preview(input_path, media_type) if operation == "document.inspect" else inspect(input_path, media_type)
+        engine = "pypdf" if media_type == "application/pdf" else "python_ooxml"
+        return {"ok": True, "engine": {"name": engine, "version": sys.version.split()[0]}, "content": content, "warnings": []}
     root = Path(job_dir).resolve(); root.mkdir(parents=True, exist_ok=True, mode=0o700)
     output_path = safe_path(str(req.get("output_path", "")), str(root), must_exist=False)
     if operation == "office.export_pdf": result = uno_export_pdf(req, input_path, output_path, root); engine = "libreoffice_uno"

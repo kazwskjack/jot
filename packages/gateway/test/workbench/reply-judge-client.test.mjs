@@ -13,9 +13,15 @@ test('explicit input-rate-equivalent cache accounting accepts omitted writes wit
   readSecret:()=> 'test-provider-key',fetch:async()=>Response.json({model:'judge',choices:[{finish_reason:'stop',message:{role:'assistant',content:JSON.stringify(answer)}}],usage:reported})});
  const result=await judge.invoke(request);assert.deepEqual(result.value,answer);
  assert.deepEqual(result.usage,{inputTokens:80,outputTokens:20,totalTokens:120,cacheReadTokens:20,cacheWriteTokens:0,reasoningTokens:5});
+ assert.deepEqual(result.usageEvidence,{protocol:1,source:'reply-judge-client',cacheWrite:'folded-unreported'});
  const billed=result.usage.inputTokens*route.rates.input+result.usage.cacheReadTokens*route.rates.cache_read
   +result.usage.cacheWriteTokens*route.rates.cache_write+result.usage.outputTokens*route.rates.output;
  for(const actualWrites of [0,5,80])assert.equal(billed,(80-actualWrites)*route.rates.input+actualWrites*route.rates.cache_write+20*route.rates.cache_read+20*route.rates.output);
+});
+
+test('an explicitly reported zero cache-write bucket carries reported provenance rather than folded provenance',async()=>{
+ const judge=await client(async()=>Response.json({model:'judge',choices:[{finish_reason:'stop',message:{role:'assistant',content:JSON.stringify(answer)}}],usage:{...usage,prompt_tokens_details:{cached_tokens:20,cache_write_tokens:0}}}));
+ const result=await judge.invoke(request);assert.equal(result.usage.cacheWriteTokens,0);assert.deepEqual(result.usageEvidence,{protocol:1,source:'reply-judge-client',cacheWrite:'reported'});
 });
 
 test('equivalent cache policy rejects unequal pricing before secret access and keeps missing read counts unknown',async()=>{

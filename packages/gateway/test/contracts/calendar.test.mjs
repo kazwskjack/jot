@@ -83,10 +83,11 @@ test('registered preview calculates calendar schedules without persisting tasks,
     const forged=await app.inject({method:'POST',url:'/v1/persistent-tasks/preview',headers:{'x-user-id':'alice'},payload:{trigger:daily,owner_id:'bob'}});
     assert.equal(forged.statusCode,400);
     const agent=workbench.createAgent('alice',{name:'Calendar reader'});
-    for (const trigger of [daily,weekly]) {
+    for (const trigger of [daily,weekly,{kind:'cron',expression:'* * * * *',timezone:'UTC',missed_triggers:'catch_up'}]) {
       const response=await app.inject({method:'POST',url:'/v1/persistent-tasks',headers:{'x-user-id':'alice'},payload:{...createBody(trigger),agent_id:agent.agent_id}});
       assert.equal(response.statusCode,201,response.body);
       const created=response.json();
+      if(trigger.missed_triggers)assert.equal(created.trigger.missed_triggers,trigger.missed_triggers);
       const update=await app.inject({method:'PATCH',url:`/v1/persistent-tasks/${created.task_id}`,headers:{'x-user-id':'alice'},payload:{expected_version:created.version,trigger:trigger.kind==='daily'?weekly:daily}});
       assert.equal(update.statusCode,200,update.body);
     }

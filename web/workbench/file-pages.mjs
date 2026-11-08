@@ -1,4 +1,9 @@
+/**
+ * @template {{path:string}} T
+ * @param {(cursor:string|undefined,signal:AbortSignal)=>Promise<{items:T[],next_cursor:string|null}>} load
+ */
 export function createFilePager(load){
+ /** @type {{items:T[],next_cursor:string|null,error:string,loading:boolean}} */
  let state={items:[],next_cursor:null,error:'',loading:false},generation=0,controller=null;
  const listeners=new Set(),publish=patch=>{state={...state,...patch};for(const listener of listeners)listener();};
  const read=async(cursor)=>{

@@ -7,9 +7,12 @@ import { HarnessCoordinator } from './coordinator.ts';
 import { HarnessWorker } from './worker.ts';
 import {chatPostAnswerEnabled,notifyCommittedChatAnswer} from './chat-post-answer.ts';
 import {MemoryExtractionPump} from './memory-extraction-pump.ts';
+import {MemoryDreamPump} from './memory-dream-pump.ts';
+import {MemoryDreamProductionPorts} from './memory-dream-production.ts';
 import { RuntimeEventClient } from './runtime-events.ts';
 import { SessionControllerClient } from './session-controller-client.ts';
 import { OfficialSessionRunner } from './official-session-runner.ts';
+import {createRunRuntimeDiagnosticReporter} from './runtime-diagnostic-reporter.ts';
 import { SessionBindingRepository } from './session-bindings.ts';
 import { AttachmentResolver } from '../artifacts/resolver.ts';
 import { parseWorkerConcurrency, runWorkerPool } from './worker-pool.ts';
@@ -23,15 +26,21 @@ import { ChannelDeliveryService } from '../channels/delivery.ts';
 import {NotificationArchiveMaintenance,notificationArchiveMaintenanceConfig} from '../channels/notification-maintenance.ts';
 import { WorkbenchService } from '../workbench/service.ts';
 import {createNativeWorkRuntime} from '../always-on/native-work-runtime.ts';
+import {DiscoveryAdmissionController} from '../always-on/admission.ts';
+import {DiscoveryPolicies} from '../always-on/discovery-policy.ts';
+import {ProjectActivityObserver} from '../always-on/project-activity.ts';
 import {readIsolatedTaskFileVersion} from '../persistent-tasks/isolated-output-source.ts';
 import {configureTaskOutputReader} from '../persistent-tasks/output-content.ts';
 import {configureTaskOutputDelivery} from '../persistent-tasks/output-delivery.ts';
 import {ArtifactService} from '../artifacts/service.ts';
+import {channelAttachmentIntakeConfiguration,requireChannelAttachmentInputReadiness} from '../channels/attachment-config-v2.ts';
 import { WORKBENCH_TOOL_IDS } from '../workbench/execution.ts';
 import { PersistentTaskService } from '../persistent-tasks/service.ts';
 import {TaskReplyDispatch,taskReplyDispatchEnabled} from '../persistent-tasks/reply-dispatch.ts';
 import { maintainWorkbench } from '../persistent-tasks/scheduler.ts';
 import { WorkbenchBudgetPolicy, workbenchExecutionConfiguration } from '../workbench/model-budget-policy.ts';
+import {parseDiscoveryAdmissionEnabled} from './discovery-admission-config.ts';
+import {createBrowserDriverReadinessSource,createRuntimeReadinessStorageSource,type RuntimeReadinessSources} from '../events/runtime-readiness-composition.ts';
 
 const databasePath = process.env.GENERAL_AGENT_DB?.trim() || '/var/lib/jot/jot.db';
 const workerId = process.env.GENERAL_AGENT_WORKER_ID?.trim() || `worker-${process.pid}`;
@@ -39,6 +48,8 @@ const leaseMs = Math.max(60_000, Number(process.env.GENERAL_AGENT_WORKER_LEASE_M
 const pollMs = Math.max(250, Number(process.env.GENERAL_AGENT_WORKER_POLL_MS || 1000));
 const concurrency = parseWorkerConcurrency(process.env.GENERAL_AGENT_WORKER_CONCURRENCY);
 const {workbenchExecutionReady,modelBudgetPolicy:budgetConfig} = workbenchExecutionConfiguration(process.env);
+const discoveryAdmissionEnabled=parseDiscoveryAdmissionEnabled(process.env.GENERAL_AGENT_DISCOVERY_ADMISSION_ENABLED);
+if(discoveryAdmissionEnabled&&(!workbenchExecutionReady||!budgetConfig))throw Error('discovery_admission_requires_execution_configuration');
 const replyExecutionRequested=taskReplyDispatchEnabled(process.env);
 const adapterBaseUrl = process.env.GENERAL_AGENT_SESSION_ADAPTER_URL?.trim() || 'http://127.0.0.1:18841';
 const adapterTokenFile = process.env.GENERAL_AGENT_SESSION_ADAPTER_TOKEN_FILE?.trim()
@@ -53,6 +64,7 @@ const events = new EventStore(db);
 const runs = new RunRepository(db, events,{workAgentPreset:agentPreset});
 const workbenchRoot = process.env.GENERAL_AGENT_WORKBENCH_ROOT?.trim() || join(dirname(databasePath), 'jot-workspaces');
 const budgetPolicy=budgetConfig?new WorkbenchBudgetPolicy(db,budgetConfig):undefined;
+if(discoveryAdmissionEnabled&&!budgetPolicy)throw Error('discovery_admission_requires_execution_configuration');
 const workbench = new WorkbenchService(db, {
   workspaceIds: String(process.env.GENERAL_AGENT_WORKSPACES || 'jot').split(',').map(value => value.trim()).filter(Boolean),
   root: workbenchRoot, allowedToolIds: WORKBENCH_TOOL_IDS,
@@ -61,7 +73,8 @@ const workbench = new WorkbenchService(db, {
 const nativeWork=createNativeWorkRuntime({db,workbench,executionReady:workbenchExecutionReady,...(process.env.GENERAL_AGENT_NATIVE_WORK_ROOT!==undefined?{root:process.env.GENERAL_AGENT_NATIVE_WORK_ROOT.trim()}:{}),...(budgetPolicy?{budgetPolicy}:{})});
 const persistentTasks = new PersistentTaskService(db, workbench, { projectionRoot: join(workbenchRoot, 'tasks'), events,...(budgetPolicy?{modelBudgetPolicy:budgetPolicy}:{}),...(nativeWork?{discoveryWorkOperations:nativeWork}:{}) });
 configureTaskOutputReader(db,input=>input.source?.source==='isolated'?readIsolatedTaskFileVersion(db,input.source):workbench.readFileVersion(input.owner,input.workspace,input.project,input.path,input.version,input.runId));
-configureTaskOutputDelivery(db,new ArtifactService(db,fileRoot),events);
+const artifactService=new ArtifactService(db,fileRoot);
+configureTaskOutputDelivery(db,artifactService,events);
 const coordinator = new HarnessCoordinator(db, runs, events, Date.now, {
   maxBackgroundRuns: Math.max(0, concurrency - 1), allowBackgroundRuns: workbenchExecutionReady,
 });
@@ -92,9 +105,20 @@ const runtimeClient = runtimeBaseUrl && runtimeSecretFile
   : undefined;
 const sessionClient = new SessionControllerClient(adapterBaseUrl, readFileSync(adapterTokenFile, 'utf8').trim(),
   globalThis.fetch, leafBridgeBaseUrl);
+const runtimeReadinessSources:RuntimeReadinessSources={native:sessionClient,workbench:sessionClient,
+  driver:createBrowserDriverReadinessSource(db,sessionClient),
+  ...(nativeWork?{storage:createRuntimeReadinessStorageSource(db,nativeWork.resolver)}:{})};
+const discoveryAdmission=discoveryAdmissionEnabled&&budgetPolicy?new DiscoveryAdmissionController({db,workbench,tasks:persistentTasks,
+  policies:new DiscoveryPolicies(db),coordinator,activity:new ProjectActivityObserver({db,workbench,native:sessionClient,maxAgeMs:20_000}),
+  budgetPolicy,maxAgeMs:20_000}):undefined;
+const discoveryAdmissionHook=discoveryAdmission?async(owner:string,scope:Readonly<{project_id:string;workspace_id:string;agent_id:string}>)=>{
+  try{return await discoveryAdmission.admit(owner,scope);}
+  catch{process.stderr.write('discovery_admission_retry\n');return{admitted:false,reason:'ADMISSION_RETRY',execution_authorized:false as const};}
+}:undefined;
 const workCompactionFlag=process.env.GENERAL_AGENT_WORK_COMPACTION_PROJECTION_ENABLED;
 if(workCompactionFlag!==undefined&&workCompactionFlag!=='true'&&workCompactionFlag!=='false')throw Error('work_compaction_projection_config_invalid');
 const runner = new OfficialSessionRunner(sessionClient, {
+  onPreparationTiming:createRunRuntimeDiagnosticReporter(db,events,runtimeReadinessSources),
   visibleWorkCompaction:workCompactionFlag==='true',
   ...(process.env.GENERAL_AGENT_CHAT_ENABLED==='true'?{chatAgentPreset:'jot-chat' as const}:{}),
   cwd: harnessCwd, agentPreset,...(process.env.GENERAL_AGENT_WORKBENCH_DSH_AGENT_PRESET?.trim()?{workbenchAgentPreset:process.env.GENERAL_AGENT_WORKBENCH_DSH_AGENT_PRESET.trim()}:{}),
@@ -106,6 +130,8 @@ if(ordinaryReconciliationEnabled&&!ordinarySteeringEnabled)throw Error('ordinary
 const ordinaryAttachmentSteeringEnabled=process.env.GENERAL_AGENT_ORDINARY_STEERING_ATTACHMENTS_ENABLED==='true';
 const ordinaryReconciler=ordinaryReconciliationEnabled?new OrdinarySteeringReconciler(db,events,sessionClient):undefined;
 const finalRecoveryEnabled=ordinaryFinalRecoveryEnabled(process.env);
+const channelAttachmentsEnabled=channelAttachmentIntakeConfiguration(process.env).channelAttachmentIntakeV2;
+if(channelAttachmentsEnabled)await requireChannelAttachmentInputReadiness(sessionClient);
 if(ordinaryAttachmentSteeringEnabled&&(!ordinarySteeringEnabled||!ordinaryReconciliationEnabled||!finalRecoveryEnabled))throw Error('ordinary_attachment_steering_requires_recovery_consumers');
 if(ordinaryAttachmentSteeringEnabled&&(await sessionClient.steeringAttachmentsReadiness()).ready!==true)throw Error('ordinary_attachment_steering_native_unavailable');
 if(finalRecoveryEnabled&&(await sessionClient.ordinaryRunHistoryReadiness()).ready!==true)throw Error('ordinary_final_history_unavailable');
@@ -126,12 +152,17 @@ const worker = new HarnessWorker(db, coordinator, runner, {
     stageContext: input => runtimeClient.stageContext(input, leafBridgeBaseUrl),
   } } : {}),
 });
+runtimeReadinessSources.consumer=(scope,signal)=>worker.observeConsumerReadiness(scope,signal);
 const memoryShutdown=new AbortController();
 const memoryPump=new MemoryExtractionPump(db,workbench,coordinator,sessionClient,{
   enabled:workbenchExecutionReady&&concurrency>1&&process.env.GENERAL_AGENT_MEMORY_EXTRACTION_ENABLED==='true',
   workerId:`${workerId}:memory`,leaseMs,cwd:harnessCwd,
   sessionResolver:conversationId=>sessionBindings.getOrCreateForConversation(conversationId).session_id,
 });
+const dreamEnabled=workbenchExecutionReady&&concurrency>1&&budgetPolicy!==undefined&&process.env.GENERAL_AGENT_MEMORY_DREAM_ENABLED==='true';
+const dreamPump=dreamEnabled?new MemoryDreamPump(new MemoryDreamProductionPorts({db,workbench,coordinator,worker,readiness:sessionClient,
+  sessionResolver:conversationId=>sessionBindings.getOrCreateForConversation(conversationId).session_id}),
+  {enabled:true,workerId:`${workerId}:dream`,leaseMs}):undefined;
 let stopping = false;
 const finalRecoveryLoop=async()=>{
  if(!finalRecovery)return;
@@ -160,12 +191,14 @@ const commandLoop = async()=>{
   if(!stopping)await new Promise(resolve=>setTimeout(resolve,500));
  }
 };
+let nextAttachmentRetention=0;
 const workbenchLoop = async () => {
   while (!stopping) {
+    if(channelAttachmentsEnabled&&Date.now()>=nextAttachmentRetention){nextAttachmentRetention=Date.now()+60000;try{const result=artifactService.cleanupExpiredChannelUploads();if(result.blocked)process.stderr.write(JSON.stringify({code:'CHANNEL_ATTACHMENT_RETENTION_BLOCKED',blocked:result.blocked})+'\n');}catch{process.stderr.write('channel_attachment_retention_retry\n');}}
     try{archiveMaintenance?.processNext();}catch{process.stderr.write('notification_archive_maintenance_retry\n');}
     try { replyDispatch.processNext(); } catch { process.stderr.write('task_reply_dispatch_retry\n'); }
     try {
-      await maintainWorkbench(workbench, persistentTasks, workbenchExecutionReady);
+      await maintainWorkbench(workbench, persistentTasks, workbenchExecutionReady,discoveryAdmissionHook);
     } catch { process.stderr.write('workbench_dispatch_retry\n'); }
     if (!stopping) await new Promise(resolve => setTimeout(resolve, 1000));
   }
@@ -176,7 +209,7 @@ await Promise.all([completionLoop(),commandLoop(),workbenchLoop(),finalRecoveryL
   concurrency,
   pollMs,
   shouldStop: () => stopping,
-  processNext: async () => await worker.processNext() ?? await memoryPump.processNext(memoryShutdown.signal),
+  processNext: async () => await worker.processNext() ?? await memoryPump.processNext(memoryShutdown.signal) ?? await dreamPump?.processNext(memoryShutdown.signal) ?? null,
   onError: error => {
     const code = error instanceof Error ? error.message : 'worker_error';
     process.stderr.write(`${JSON.stringify({ level: 'error', code: code.slice(0, 96) })}\n`);

@@ -1,8 +1,9 @@
 import {readOfficialStandard} from './standard-preset.mjs';
+import {JOT_PERSONALITY} from '../../src/jot-personality.mjs';
 export const name='jot-chat-preset';
 export const inject=['agentPresets','profileContext'];
-export const CHAT_PRESET_REVISION='chat-native-v1';
-export const CHAT_COMPACTION_PRESET_REVISION='chat-native-compaction-v1';
+export const CHAT_PRESET_REVISION='chat-native-v2';
+export const CHAT_COMPACTION_PRESET_REVISION='chat-native-compaction-v2';
 export const CHAT_INSTRUCTIONS=`You are Jot, a lightweight AI assistant focused on useful solutions.
 Reply naturally in the user's language. Once supported, lead with the answer or practical next step, then give the explanation, steps and tradeoffs needed to act. Preserve the user's constraints; ask only about an unresolved gap that materially changes the answer.
 Apply one verification rule to every subject, object and answer type. Before asserting an essential fact that is uncertain, ambiguous, conflicting, possibly outdated or insufficiently supported, search using the official web tools. Do not wait for the user to request verification, rely on vague familiarity or disguise a guess as a possibility.
@@ -20,7 +21,8 @@ export function buildChatPreset(original,{maintenance=false}={}){
  const valid=original?.id==='standard'&&Array.isArray(original.plugins);
  const pick=(id,name)=>{const rows=valid?original.plugins.filter(row=>row.id===id):[];if(rows.length!==1||rows[0].name!==name)throw Error('jot_chat_preset_source_invalid');return structuredClone(rows[0]);};
  const persona=pick('persona','@deepseek-ai/dsh-persona'),web=pick('tool-web','@deepseek-ai/dsh-tool-web');
- persona.config={prefix:CHAT_INSTRUCTIONS};
+ const personaConfig=persona.config??{};
+ persona.config={...personaConfig,prefix:[personaConfig.prefix,CHAT_INSTRUCTIONS,JOT_PERSONALITY].filter(value=>typeof value==='string'&&value.trim()).join('\n\n')};
  web.config={search:true,fetch:true,searchTimeoutMs:10000,fetchTimeoutMs:10000,fetchMaxOutputChars:24000};
  return{id:'jot-chat',name:'Jot Chat',order:2,plugins:[persona,web,{id:'chat-tools-policy',name:new URL('./chat-tools-policy.mjs',import.meta.url).href},...(maintenance?[{id:'chat-compaction',isolate:{compaction:true},name:new URL('./chat-compaction.mjs',import.meta.url).href,config:{auto:false}}]:[])]};
 }

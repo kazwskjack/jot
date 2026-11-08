@@ -4,6 +4,7 @@ export function consolidationCommand(batch,action){
  if(!allowed[action]?.includes(batch?.status)||!Number.isSafeInteger(batch?.version)||batch.version<1)throw new Error('整理状态已变化，请刷新后重新确认。');
  return {expected_version:batch.version};
 }
+/** @param {import('./types').MemoryConsolidation} batch */
 export function consolidationPreview(batch){
  const sources=new Map(batch.sources.map(source=>[source.memory_id,source])),changes=batch.proposal?.changes??[];
  return changes.map(change=>{

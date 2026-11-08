@@ -1,5 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { ConversationRepository } from '../conversations/repository.ts';
+import { RunRepository } from '../runs/repository.ts';
+import { EventStore } from './event-store.ts';
 import { decodeStoredContent } from '../messages/content.ts';
 import {messageAttachmentProjection} from '../messages/pinned-attachments.ts';
 import {storedConversationMessageRows,recoveredMessageTimes} from '../messages/order.ts';
@@ -16,9 +18,7 @@ export function buildSnapshot(db: DatabaseSync, conversationId: string, ownerId:
         return { message_id: row.id, run_id: row.run_id, role: row.role, status: row.status,
           blocks: content.blocks, ...(content.attachments.length ? { attachments: content.attachments } : {}), ...messageAttachmentProjection(db,row), created_at: row.created_at };
       });
-    const runs = db.prepare('SELECT * FROM ga_runs WHERE conversation_id=? ORDER BY created_at,id').all(conversationId)
-      .map((row: any) => ({ run_id: row.id, conversation_id: row.conversation_id, input_message_id: row.input_message_id,
-        status: row.status, version: row.version, created_at: row.created_at, updated_at: row.updated_at }));
+    const runs = new RunRepository(db, new EventStore(db)).list(conversationId, ownerId);
     const projectionRows = db.prepare(`SELECT e.type,e.payload_json,r.status
       FROM ga_events e LEFT JOIN ga_runs r ON r.id=e.run_id
       WHERE e.conversation_id=? AND e.seq<=? AND e.type IN ('activity.upsert','assistant.delta')

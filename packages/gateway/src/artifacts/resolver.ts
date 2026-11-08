@@ -1,7 +1,7 @@
 import {withImmediateTransaction} from '../db/database.ts';
 import {manifestFromAttachments,resolvePinnedManifest,snapshotPinnedManifest,type PinnedAttachmentSnapshot,type AttachmentManifest} from './pinned-manifest.ts';
 import { existsSync } from 'node:fs';
-import { resolve, sep } from 'node:path';
+import { resolve, sep,join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 
 export interface ResolvedAttachment {
@@ -39,6 +39,10 @@ export class AttachmentResolver {
 
   snapshotPinnedForMessage(ownerId:string,conversationId:string,manifest:unknown,leaseId:string,snapshotRoot:string,signal?:AbortSignal):Promise<PinnedAttachmentSnapshot> {
     return snapshotPinnedManifest(this.db,this.root,this.limits,ownerId,conversationId,manifest,leaseId,snapshotRoot,signal);
+  }
+
+  snapshotInputForMessage(ownerId:string,conversationId:string,manifest:unknown,leaseId:string,signal?:AbortSignal):Promise<PinnedAttachmentSnapshot>{
+    return this.snapshotPinnedForMessage(ownerId,conversationId,manifest,leaseId,join(resolve(this.root),'incoming'),signal);
   }
 
   resolveForMessage(ownerId: string, conversationId: string, artifactIds: string[], leaseId: string): ResolvedAttachment[] {

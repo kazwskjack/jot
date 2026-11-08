@@ -1,6 +1,6 @@
 import React,{useEffect,useState} from 'react';
 import type {TaskReplyHistoryPage} from './types';
-import {request} from '../jot/client';import {pathId} from './client';import {useResource} from './useResource';import {ResourceStatus,Empty} from './AgentsPanel';import {replyHistoryLabel,replyHistoryExplanation} from './reply-history-ui.mjs';
+import {request} from '../jot/client';import {pathId} from './client';import {useResource} from './useResource';import {ResourceStatus,Empty} from './PanelStatus';import {replyHistoryLabel,replyHistoryExplanation} from './reply-history-ui.mjs';
 export default function TaskReplyHistoryPanel({taskId,onConversation}:{taskId:string;onConversation?:(id:string)=>void}){
  const [cursor,setCursor]=useState<string|undefined>();const history=useResource(signal=>request<TaskReplyHistoryPage>(`/persistent-tasks/${pathId(taskId)}/replies${cursor?`?cursor=${pathId(cursor)}`:''}`,'GET',undefined,undefined,signal),taskId+':'+(cursor??''));
  useEffect(()=>setCursor(undefined),[taskId]);

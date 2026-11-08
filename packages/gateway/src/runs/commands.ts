@@ -82,8 +82,12 @@ export class RunCommandService {
         this.events.append(conversationId,runId,'run.state',{run_id:runId,conversation_id:conversationId,input_message_id:inputMessageId,
           status:'interrupted',version:Number(row.version)+1,created_at:row.created_at,updated_at:now});
       }
-      this.db.prepare('INSERT INTO ga_runs(id,conversation_id,input_message_id,status,continuation_of,checkpoint_id,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)')
-        .run(newRunId, conversationId, inputMessageId, 'queued', runId, checkpointId, 1, now, now);
+      // A continuation retains the source run's accepted policy and context;
+      // it must not take a fresh snapshot from mutable conversation settings.
+      this.db.prepare(`INSERT INTO ga_runs(id,conversation_id,input_message_id,status,continuation_of,checkpoint_id,version,created_at,updated_at,
+        model_policy_json,execution_policy_json,chat_context_json,chat_context_sha256)
+        SELECT ?,conversation_id,input_message_id,'queued',id,checkpoint_id,1,?,?,model_policy_json,execution_policy_json,chat_context_json,chat_context_sha256
+        FROM ga_runs WHERE id=?`).run(newRunId,now,now,runId);
       this.db.prepare('INSERT INTO ga_outbox(conversation_id,aggregate_type,aggregate_id,event_type,payload_json,created_at) VALUES(?,?,?,?,?,?)')
         .run(conversationId, 'run', newRunId, 'run.resumed', JSON.stringify({ continuation_of: runId, checkpoint_id: checkpointId, key }), now);
       this.events.append(conversationId, newRunId, 'run.state', {

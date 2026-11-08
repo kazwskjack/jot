@@ -13,7 +13,7 @@ export default function ConversationPicker({onOpen,onPendingChange}:{onOpen:(id:
  const writer=useMemo(()=>new ConversationCreateWriter(request,()=>render(n=>n+1)),[]);
  useEffect(()=>{onPendingChange?.(creating||writer.pending);return()=>onPendingChange?.(false);},[creating,writer.pending,onPendingChange]);
  useEffect(()=>{const warn=(event:BeforeUnloadEvent)=>{if(writer.pending){event.preventDefault();event.returnValue='';}};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);},[writer]);
- const workspaces=caps.data?.workspaces?.filter(w=>w.can_write)??[],workspaceId=workspace||workspaces[0]?.workspace_id||'';
+ const workspaces=caps.data?.workspaces?.filter(w=>w.can_write)??[],workspaceId=workspace||(caps.data?.workspace_selection?.configured?caps.data.workspace_selection.workspace_id:'')||workspaces[0]?.workspace_id||'';
  let creation:Record<string,unknown>|undefined,creationError='',chatReady=false;
  if(caps.data)try{creation=conversationCreation(caps.data,workspaceId);chatReady=conversationModeSupport(caps.data).chatReady;}catch(e){creationError=e instanceof Error?e.message:'新对话配置尚未确认';}
  const create=async(retry=false)=>{if(creating||!retry&&(!creation||writer.pending)||retry&&!writer.pending)return;setCreating(true);setError('');try{const value=await(retry?writer.retry():writer.create(creation));onOpen(value.conversation_id);}catch(e){setError(e instanceof Error?e.message:'新建对话尚未确认');}finally{setCreating(false);}};

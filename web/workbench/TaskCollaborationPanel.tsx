@@ -2,7 +2,7 @@ import React,{useEffect,useRef,useState} from 'react';
 import type {Agent,Task,SaveTaskCollaboration} from './types';
 import {workbenchApi} from './client';
 import {useResource} from './useResource';
-import {ResourceStatus} from './AgentsPanel';
+import {ResourceStatus} from './PanelStatus';
 import {ApiError} from '../jot/client';
 import {eligibleCollaborationTeams,collaborationRequest} from './task-collaboration-ui.mjs';
 

@@ -11,13 +11,14 @@ import { dirname, join, resolve } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { withImmediateTransaction } from '../db/database.ts';
 import {canonicalJson} from '../db/canonical-json.ts';
+import {ProjectRepository} from '../projects/repository.ts';
 import { ConversationRepository } from '../conversations/repository.ts';
 import { EventStore } from '../events/event-store.ts';
 import { RunRepository } from '../runs/repository.ts';
 import { RunCommandService } from '../runs/commands.ts';
 import { readPublicPage, validatePageUrl } from './public-page.ts';
-import { normalizeCalendarTrigger, nextCalendarOccurrence } from './calendar.ts';
-import type { CalendarTrigger } from './calendar.ts';
+import { normalizeCalendarTrigger, nextCalendarOccurrence, normalizeCronTrigger, nextCronOccurrence } from './calendar.ts';
+import type { CalendarTrigger, CronTrigger } from './calendar.ts';
 import { DialogueEvents, isDialogueTrigger, normalizeDialogueTrigger } from './dialogue-events.ts';
 import type { DialogueTrigger, DialogueCausation } from './dialogue-events.ts';
 import { PersistentTaskAssessmentService } from './assessments.ts';
@@ -37,7 +38,8 @@ import {pruneNotificationCaches} from '../channels/notification-retention.ts';
 type Row = Record<string, any>;
 type Agent = { agent_id: string; status: string; workspace_id: string; project_id: string; conversation_id: string;version?:number;capability_epoch?:number };
 type Workbench = { getAgent(owner: string, id: string): Agent; bindRun(owner: string, agent: string, run: string, kind?: string): unknown };
-type Trigger = CalendarTrigger | DialogueTrigger | {kind:'project_discovery';policy_id:string} | { kind: 'once' | 'interval' | 'page_change'; run_at?: string; interval_seconds?: number; url?: string };
+export type ProjectDiscoveryAdmissionHook = (owner:string,scope:Readonly<{project_id:string;workspace_id:string;agent_id:string}>)=>Promise<unknown>;
+type Trigger = CalendarTrigger | CronTrigger | DialogueTrigger | {kind:'project_discovery';policy_id:string} | { kind: 'once' | 'interval' | 'page_change'; run_at?: string; interval_seconds?: number; url?: string } | {kind:'delay';delay_seconds:number};
 type Evidence = { kind: string; reference: string; hash?: string };
 export type PersistentTaskOptions = { now?: () => Date; projectionRoot?: string; events?: EventStore;
   modelBudgetPolicy?:WorkbenchBudgetPolicy;
@@ -45,6 +47,10 @@ export type PersistentTaskOptions = { now?: () => Date; projectionRoot?: string;
   discoveryWorkOperations?: {assertOperation(runId:string,operation:string):void};
   pageReader?: (url: string) => Promise<{ text: string; url: string }>; maxTasksPerTick?: number };
 const TERMINAL = ['succeeded', 'partial', 'failed', 'cancelled', 'interrupted', 'outcome_unknown'];
+const MAX_DISCOVERY_ADMISSIONS_PER_TICK=5;
+const MAX_DISCOVERY_ADMISSIONS_IN_FLIGHT=5;
+const triggerProtocolFunction = 'jot_persistent_trigger_protocol_v1';
+const triggerProtocolConnections = new WeakSet<DatabaseSync>();
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 function canonical(value: unknown): unknown { return Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).sort(([a],[b])=>a.localeCompare(b)).map(([key,item])=>[key,canonical(item)])) : value; }
 function safeProjectionPath(target: string) {
@@ -73,6 +79,7 @@ export class PersistentTaskService {
   private readonly runs: RunRepository;
   private readonly commands: RunCommandService;
   private readonly conversations: ConversationRepository;
+  private readonly projects: ProjectRepository;
   private readonly dialogue: DialogueEvents;
   private readonly taskBudgets:TaskBudgetService;
   private readonly executionEvidence:TaskExecutionEvidence;
@@ -81,9 +88,17 @@ export class PersistentTaskService {
   private readonly replyPolicies:TaskReplyPolicies;
   private notificationCacheCursor:string|undefined;
   private discoverySourceCursor='';
+  private discoveryAdmissionCursor='';
+  private readonly discoveryAdmissionsInFlight=new Set<string>();
   private ticking = false;
   constructor(db: DatabaseSync, workbench: Workbench, options: PersistentTaskOptions = {}) {
+    if(!triggerProtocolConnections.has(db)) {
+      db.function(triggerProtocolFunction,{deterministic:true},()=>1);
+      db.function('jot_persistent_misfire_protocol_v1',{deterministic:true},()=>1);
+      triggerProtocolConnections.add(db);
+    }
     this.db = db; this.workbench = workbench; this.options = options;
+    this.projects=new ProjectRepository(db);
     this.taskBudgets=new TaskBudgetService(db,options.modelBudgetPolicy);
     const events = options.events ?? new EventStore(db);
     this.runs = new RunRepository(db, events); this.commands = new RunCommandService(db, events); this.conversations = new ConversationRepository(db);
@@ -103,7 +118,18 @@ export class PersistentTaskService {
       subtask_id TEXT PRIMARY KEY,task_id TEXT NOT NULL REFERENCES wb_persistent_tasks(task_id),title TEXT NOT NULL,
       acceptance TEXT NOT NULL,status TEXT NOT NULL,priority INTEGER NOT NULL,dependencies_json TEXT NOT NULL,
       evidence_json TEXT NOT NULL,version INTEGER NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);`);
+    // A pre-feature process has no protocol function registered on its SQLite
+    // connection. Fail closed before its interval fallback can mutate a new
+    // Cron or delay task as if it were an ordinary recurring task.
+    db.exec(`CREATE TRIGGER IF NOT EXISTS wb_task_trigger_protocol_guard BEFORE UPDATE ON wb_persistent_tasks
+      WHEN json_extract(OLD.trigger_json,'$.kind') IN ('cron','delay')
+        AND NOT EXISTS(SELECT 1 FROM pragma_function_list WHERE name='${triggerProtocolFunction}' AND narg=0)
+      BEGIN SELECT RAISE(ABORT,'task_trigger_protocol_unsupported'); END;`);
     db.exec(`CREATE TABLE IF NOT EXISTS wb_task_create_requests(owner_id TEXT NOT NULL,request_key TEXT NOT NULL,input_hash TEXT NOT NULL,task_id TEXT NOT NULL REFERENCES wb_persistent_tasks(task_id),PRIMARY KEY(owner_id,request_key));`);
+    db.exec(`CREATE TRIGGER IF NOT EXISTS wb_task_misfire_protocol_guard BEFORE UPDATE ON wb_persistent_tasks
+      WHEN json_extract(OLD.trigger_json,'$.missed_triggers') IN ('skip','catch_up')
+      AND NOT EXISTS(SELECT 1 FROM pragma_function_list WHERE name='jot_persistent_misfire_protocol_v1' AND narg=0)
+      BEGIN SELECT RAISE(ABORT,'task_trigger_protocol_unsupported'); END;`);
     installTaskRunLineage(db);
     installSubtaskState(db);
     this.executionEvidence=new TaskExecutionEvidence(db);
@@ -132,7 +158,12 @@ export class PersistentTaskService {
   private trigger(input: unknown): Trigger {
     const value = input as Row;
     if (value?.kind === 'daily' || value?.kind === 'weekly') return normalizeCalendarTrigger(input);
+    if (value?.kind === 'cron') return normalizeCronTrigger(input);
     if (value?.kind === 'conversation_message' || value?.kind === 'conversation_result') return normalizeDialogueTrigger(input);
+    if (value?.kind === 'delay') {
+      if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !['kind','delay_seconds'].includes(key))) throw new Error('invalid_delay');
+      return { kind: 'delay', delay_seconds: integer(value.delay_seconds, 0, 1, 31536000, 'invalid_delay') };
+    }
     if (!value || !['once','interval','page_change'].includes(value.kind)) throw new Error('unsupported_trigger');
     if (value.kind === 'once') {
       const when = value.run_at ?? this.now();
@@ -145,11 +176,14 @@ export class PersistentTaskService {
   private firstDue(trigger: Trigger, now: string): string | null {
     if(trigger.kind==='project_discovery')return null;
     if(isDialogueTrigger(trigger))return null;
-    return trigger.kind === 'daily' || trigger.kind === 'weekly' ? nextCalendarOccurrence(trigger, now) : ('run_at' in trigger ? trigger.run_at : undefined) ?? now;
+    if(trigger.kind==='cron')return nextCronOccurrence(trigger,now);
+    if(trigger.kind==='daily' || trigger.kind === 'weekly')return nextCalendarOccurrence(trigger, now);
+    if(trigger.kind==='delay')return new Date(Date.parse(now)+trigger.delay_seconds*1000).toISOString();
+    return ('run_at' in trigger ? trigger.run_at : undefined) ?? now;
   }
   previewTrigger(input: unknown): { next_due_at: string | null; timezone: string | null } {
     const trigger = this.trigger(input);
-    return { next_due_at: this.firstDue(trigger, this.now()), timezone: trigger.kind === 'daily' || trigger.kind === 'weekly' ? trigger.timezone : null };
+    return { next_due_at: this.firstDue(trigger, this.now()), timezone: trigger.kind === 'daily' || trigger.kind === 'weekly' || trigger.kind === 'cron' ? trigger.timezone : null };
   }
   list(owner: string) { return { items: (this.db.prepare('SELECT * FROM wb_persistent_tasks WHERE owner_id=? ORDER BY priority DESC,created_at,task_id').all(owner) as Row[]).map(row => this.value(row)) }; }
   get(owner: string, id: string) { return this.value(this.row(owner,id)); }
@@ -191,6 +225,7 @@ export class PersistentTaskService {
     }
     const title = text(input.title,'invalid_task_title',200); const objective = text(input.objective,'invalid_objective');
     const agent = this.workbench.getAgent(owner,text(input.agent_id,'invalid_agent_id',200)); if (agent.status !== 'active') throw new Error('agent_unavailable');
+    this.projects.assertOwned(agent.project_id,owner);
     const source=freezeTaskSource(this.db,owner,agent,input.source);
     const trigger:Trigger = discoveryPolicyId?{kind:'project_discovery',policy_id:discoveryPolicyId}:this.trigger(input.trigger); const priority = integer(input.priority,50,0,100,'invalid_priority');
     if(isDialogueTrigger(trigger))this.dialogue.assertOwned(owner,trigger.conversation_id);
@@ -202,7 +237,7 @@ export class PersistentTaskService {
     if(input.reply_policy!==undefined)this.replyPolicies.update(owner,id,{expected_version:0,policy:input.reply_policy});
     if(input.notification_settings!==undefined){
       const settings=input.notification_settings;
-      if(!settings||typeof settings!=='object'||Array.isArray(settings)||Object.keys(settings).some(key=>!['channel_binding_ids','events','delivery_policy'].includes(key)))throw new Error('invalid_task_notification_settings');
+      if(!settings||typeof settings!=='object'||Array.isArray(settings)||Object.keys(settings).some(key=>!['channel_binding_ids','artifact_delivery_binding_ids','events','delivery_policy'].includes(key)))throw new Error('invalid_task_notification_settings');
       new TaskNotifications(this.db).update(owner,id,{...settings,expected_version:0});
     }
     if(requestKey)this.db.prepare('INSERT INTO wb_task_create_requests VALUES(?,?,?,?)').run(owner,requestKey,digest,id);
@@ -220,6 +255,7 @@ export class PersistentTaskService {
       if(Object.hasOwn(input,'reply_policy'))throw new Error('invalid_task_reply_policy');
       const agent = this.workbench.getAgent(owner,input.agent_id === undefined ? row.agent_id : text(input.agent_id,'invalid_agent_id',200));
       if(row.source_json){const source=JSON.parse(String(row.source_json));const conversation=this.conversations.get(source.conversation_id,owner);if(conversation.workspace_id!==agent.workspace_id||conversation.project_id!==agent.project_id)throw new Error('invalid_task_source');}
+      this.projects.assertOwned(agent.project_id,owner);
       if (agent.status !== 'active') throw new Error('agent_unavailable');
       const trigger = input.trigger === undefined ? JSON.parse(row.trigger_json) : this.trigger(input.trigger);
       if(isDialogueTrigger(trigger))this.dialogue.assertOwned(owner,trigger.conversation_id);
@@ -240,7 +276,12 @@ export class PersistentTaskService {
       if(!discovery)this.assertConfigured(owner,id);
       const row=this.row(owner,id); this.cas(row,version);
       if (row.status === 'archived' && status !== 'archived') throw new Error('task_state_conflict');
-      if (status === 'active') { if (this.workbench.getAgent(owner,row.agent_id).status !== 'active') throw new Error('agent_unavailable'); if (taskRunLimitExhausted(row)) throw new Error('task_budget_exhausted'); }
+      if (status === 'active') {
+        const agent=this.workbench.getAgent(owner,row.agent_id);
+        this.projects.assertOwned(agent.project_id,owner);
+        if (agent.status !== 'active') throw new Error('agent_unavailable');
+        if (taskRunLimitExhausted(row)) throw new Error('task_budget_exhausted');
+      }
       this.db.prepare('UPDATE wb_persistent_tasks SET status=?,version=version+1,generation=generation+1,projection_pending=1,updated_at=? WHERE task_id=? AND owner_id=? AND version=?').run(status,this.now(),id,owner,version);
       this.dialogue.reset(this.row(owner,id) as any);
       if (status !== 'active') this.cancelActive(owner,id,`task_${status}`);
@@ -437,7 +478,34 @@ export class PersistentTaskService {
       return this.occurrence(this.db.prepare('SELECT * FROM wb_task_occurrences WHERE occurrence_id=?').get(occurrenceId) as Row);
     });
   }
-  async tick() {
+  private startProjectDiscoveryAdmissions(admit:ProjectDiscoveryAdmissionHook){
+    const limit=MAX_DISCOVERY_ADMISSIONS_PER_TICK;
+    const select=(after:string)=>this.db.prepare(`SELECT b.owner_id,b.policy_id,b.task_id,b.project_id,b.workspace_id,b.agent_id
+      FROM wb_discovery_task_bindings b
+      JOIN wb_discovery_policies p ON p.policy_id=b.policy_id AND p.owner_id=b.owner_id
+      JOIN wb_persistent_tasks t ON t.task_id=b.task_id AND t.owner_id=b.owner_id
+      WHERE t.status='active' AND p.state='active' AND json_extract(t.trigger_json,'$.kind')='project_discovery'
+        AND json_extract(t.trigger_json,'$.policy_id')=b.policy_id AND p.policy_id>?
+        AND NOT EXISTS(SELECT 1 FROM wb_discovery_admissions a WHERE a.policy_id=p.policy_id
+          AND a.signal_revision=coalesce((SELECT max(s.revision) FROM wb_discovery_signals s WHERE s.policy_id=p.policy_id),0))
+        AND NOT EXISTS(SELECT 1 FROM wb_task_current_occurrences o JOIN ga_runs r ON r.id=o.run_id WHERE o.task_id=t.task_id
+          AND (r.reason_code='OUTCOME_UNKNOWN' OR o.status='outcome_unknown' OR r.status NOT IN (${TERMINAL.map(()=>'?').join(',')})))
+      ORDER BY p.policy_id LIMIT ?`).all(after,...TERMINAL,limit) as Row[];
+    let rows=select(this.discoveryAdmissionCursor);
+    if(!rows.length&&this.discoveryAdmissionCursor){this.discoveryAdmissionCursor='';rows=select('');}
+    if(!rows.length){this.discoveryAdmissionCursor='';return;}
+    this.discoveryAdmissionCursor=String(rows.at(-1)!.policy_id);
+    for(const row of rows){
+      if(this.discoveryAdmissionsInFlight.size>=MAX_DISCOVERY_ADMISSIONS_IN_FLIGHT)break;
+      const taskId=String(row.task_id);if(this.discoveryAdmissionsInFlight.has(taskId))continue;
+      this.discoveryAdmissionsInFlight.add(taskId);
+      const scope=Object.freeze({project_id:String(row.project_id),workspace_id:String(row.workspace_id),agent_id:String(row.agent_id)});
+      // Native readiness is remote and bounded by the controller. Keep it off
+      // the ordinary due-task path and prevent overlapping attempts per task.
+      void Promise.resolve().then(()=>admit(String(row.owner_id),scope)).catch(()=>{}).finally(()=>this.discoveryAdmissionsInFlight.delete(taskId));
+    }
+  }
+  async tick(admitProjectDiscovery?:ProjectDiscoveryAdmissionHook) {
     if (this.ticking) return { dispatched:0,checked:0,skipped:true }; this.ticking=true;
     let dispatched=0,checked=0;
     try {
@@ -481,6 +549,18 @@ export class PersistentTaskService {
               this.monitorFailures.resolve(current.task_id);
               return true;
             }
+            const due=Date.parse(current.next_due_at),now=Date.parse(this.now());
+            const calendar=trigger.kind==='daily'||trigger.kind==='weekly';
+            const recurringCalendar=calendar||trigger.kind==='cron';
+            const policy=recurringCalendar?trigger.missed_triggers??'coalesce':'coalesce';
+            const nextCalendar=(anchor:number)=>trigger.kind==='cron'?nextCronOccurrence(trigger,anchor,false):nextCalendarOccurrence(trigger,anchor,false);
+            // A missed slot means a subsequent calendar slot is already due.
+            // Small tick latency within the current slot must not skip all work.
+            if(recurringCalendar&&policy==='skip'&&Date.parse(nextCalendar(due))<=now){
+              this.db.prepare('UPDATE wb_persistent_tasks SET next_due_at=?,retry_after_at=NULL,last_error=NULL,failure_count=0,projection_pending=1,updated_at=? WHERE task_id=?').run(nextCalendar(now),this.now(),current.task_id);
+              this.monitorFailures.resolve(current.task_id);
+              return false;
+            }
             let admitted=false;
             if (page) {
               const fingerprint=hash(page.text);
@@ -492,10 +572,8 @@ export class PersistentTaskService {
             } else {
               this.enqueue(current.owner_id,current.task_id,`schedule:${current.schedule_revision}:${current.next_due_at}`,current.next_due_at); admitted=true;
             }
-            const due=Date.parse(current.next_due_at); const now=Date.parse(this.now());
-            const calendar=trigger.kind==='daily' || trigger.kind==='weekly';
             const interval=('interval_seconds' in trigger ? trigger.interval_seconds ?? 300 : 300)*1000;
-            const next=trigger.kind==='once' ? null : calendar ? nextCalendarOccurrence(trigger,Math.max(now,due),false)
+            const next=trigger.kind==='once' || trigger.kind==='delay' ? null : recurringCalendar ? nextCalendar(policy==='catch_up'?due:Math.max(now,due))
               : new Date(due+(Math.floor(Math.max(0,now-due)/interval)+1)*interval).toISOString();
             this.db.prepare('UPDATE wb_persistent_tasks SET next_due_at=?,retry_after_at=NULL,last_error=NULL,failure_count=0,projection_pending=1,updated_at=? WHERE task_id=?').run(next,this.now(),current.task_id);
             this.monitorFailures.resolve(current.task_id);
@@ -506,6 +584,10 @@ export class PersistentTaskService {
           this.tickFailure(snapshot,error);
         }
       }
+      // Discovery has no due timestamp by design. Its original task is selected
+      // separately here, after ordinary due work has consumed its unchanged
+      // capacity. The optional hook is internal; no hook means fail closed.
+      if(admitProjectDiscovery)this.startProjectDiscoveryAdmissions(admitProjectDiscovery);
       if (this.options.projectionRoot) for (const row of this.db.prepare('SELECT owner_id,task_id FROM wb_persistent_tasks WHERE projection_pending=1 LIMIT 25').all() as Row[]) {
         try { this.project(row.owner_id,row.task_id); } catch { /* DB remains authoritative; pending projection is retried. */ }
       }

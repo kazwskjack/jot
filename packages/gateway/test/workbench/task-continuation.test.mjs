@@ -82,7 +82,7 @@ test('worker resumes persistent Session with continuation instruction rather tha
  const f=await fixture(t),r=await f.resume();assert.equal(r.statusCode,202,r.body);let sent;
  const coordinator=new HarnessCoordinator(f.db,f.runs,f.events);
  const worker=new HarnessWorker(f.db,coordinator,{run:async input=>{sent=input;return {observed:true,completed:true,reason_code:'CHAT',runtime_status:'not_required',final_text:'Controlled continuation result'};}},{workerId:'fixture-worker',leaseMs:30000,sessionResolver:()=> 'session-fixture',executionGuard:{assertRunActive:id=>{f.workbench.assertRunActive(id);f.persistentTasks.assertRunActive(id);},contextForRun:id=>f.workbench.contextForRun(id)}});
- await worker.processNext();assert.equal(sent.taskRequestId,r.json().run_id);assert.equal(sent.sessionRef,'session-fixture');assert.match(sent.message,/继续/);assert.doesNotMatch(sent.message,/持续任务：|本次执行：/);assert.match(sent.message,/不要.*重新|不要.*重复/);
+ const outcome=await worker.processNext();assert.ok(sent,`checkpoint continuation must reach the runner (${outcome.runtime_status})`);assert.deepEqual(sent.attachments,[]);assert.equal(sent.taskRequestId,r.json().run_id);assert.equal(sent.sessionRef,'session-fixture');assert.match(sent.message,/继续/);assert.doesNotMatch(sent.message,/持续任务：|本次执行：/);assert.match(sent.message,/不要.*重新|不要.*重复/);
  assert.equal(f.db.prepare("SELECT count(*) n FROM ga_messages WHERE role='assistant'").get().n,0,'Session recovery is not business acceptance');
  assert.equal(f.runs.get(r.json().run_id,'alice').error_code,'TASK_BUSINESS_REVIEW_REQUIRED');
  assert.equal(f.db.prepare('SELECT status FROM ga_candidate_answers WHERE run_id=?').get(r.json().run_id).status,'pending');

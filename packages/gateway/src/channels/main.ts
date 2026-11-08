@@ -1,20 +1,41 @@
+import {startMattermostOwnerService} from './mattermost-owner-service.ts';
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { openProductDatabase } from '../db/database.ts';
 import { ChannelDeliveryService } from './delivery.ts';
 import { ChannelDeliveryWorker, type DeliveryProvider } from './worker.ts';
-import { deliveryChannels, emailConfiguration } from './provider-config.ts';
+import { deliveryChannels, emailConfiguration, requireDeliveryRuntimeConfiguration, slackDeliveryConfiguration, smsDeliveryConfiguration } from './provider-config.ts';
 import { createEmailProvider } from './email-provider.ts';
+import { loadWebPushVapidConfiguration, createWebPushProvider } from './web-push-provider.ts';
+import { PushSubscriptions } from './push-subscriptions.ts';
 import { RuntimeEventClient } from '../harness/runtime-events.ts';
 import { ArtifactService } from '../artifacts/service.ts';
+import { writeChannelWorkerError } from './worker-error-log.ts';
+import {startMatrixChannelService} from './matrix-service.ts';
+import {createMattermostProvider} from './adapters/mattermost.ts';
+import {mattermostOwnerAccount,type MattermostOwnerAccount} from './mattermost-owner-proof.ts';
+import {createSlackDeliveryProvider} from './slack.ts';
+import {createTwilioSmsDeliveryProvider} from './sms.ts';
 
 const databasePath = process.env.GENERAL_AGENT_DB?.trim() || '/var/lib/jot/jot.db';
 const runtimeBaseUrl = String(process.env.GENERAL_AGENT_RUNTIME_BASE_URL || '').trim();
 const runtimeSecretFile = String(process.env.GENERAL_AGENT_RUNTIME_SECRET_FILE || '').trim();
 const channels = deliveryChannels(process.env);
-if (channels.includes('wecom') && (!runtimeBaseUrl || !runtimeSecretFile)) throw new Error('delivery_runtime_config_required');
+requireDeliveryRuntimeConfiguration(channels,runtimeBaseUrl,runtimeSecretFile);
+let mattermostAccount:MattermostOwnerAccount|undefined;
+if(channels.includes('mattermost')){
+  const instance=process.env.GENERAL_AGENT_MATTERMOST_BASE_URL?.trim()??'';
+  const botUserId=process.env.GENERAL_AGENT_MATTERMOST_BOT_USER_ID?.trim()??'';
+  const botToken=process.env.GENERAL_AGENT_MATTERMOST_BOT_TOKEN??'';
+  if(!instance||!botUserId||!botToken)throw new Error('mattermost_service_config_required');
+  mattermostAccount=mattermostOwnerAccount({instance,botUserId});
+}
+const webPushVapid=loadWebPushVapidConfiguration(process.env);
+if(channels.includes('webpush')&&!webPushVapid)throw new Error('push_vapid_configuration_invalid');
+const smsConfig=channels.includes('sms')?smsDeliveryConfiguration(process.env):undefined;
 const providers: Record<string, DeliveryProvider> = {};
 if (channels.includes('email')) providers.email = await createEmailProvider(emailConfiguration(process.env));
+if(channels.includes('mattermost'))providers.mattermost=createMattermostProvider({baseUrl:mattermostAccount!.instance,botToken:process.env.GENERAL_AGENT_MATTERMOST_BOT_TOKEN!});
 if (channels.includes('wecom')) {
 const modulePath = process.env.GENERAL_AGENT_WECOM_MODULE?.trim()
   || '/opt/jot/services/monitor/wecom-app.mjs';
@@ -38,6 +59,9 @@ providers.wecom = {
 }
 const db = openProductDatabase(databasePath);
 const store = new ChannelDeliveryService(db);
+if(channels.includes('slack'))providers.slack=createSlackDeliveryProvider(slackDeliveryConfiguration(process.env),db);
+if(channels.includes('webpush')&&webPushVapid)providers.webpush=createWebPushProvider(new PushSubscriptions(db,webPushVapid),webPushVapid);
+if(smsConfig)providers.sms=createTwilioSmsDeliveryProvider(smsConfig,db);
 const runtime = runtimeBaseUrl && runtimeSecretFile
   ? new RuntimeEventClient(runtimeBaseUrl, readFileSync(runtimeSecretFile))
   : { async registerDeliveryReceipt(): Promise<Record<string, unknown>> { throw new Error('delivery_runtime_config_required'); } };
@@ -46,35 +70,10 @@ const artifactRoot = process.env.GENERAL_AGENT_FILE_ROOT?.trim()
   || '/var/lib/jot/jot-files';
 const artifacts = new ArtifactService(db, artifactRoot);
 const worker = new ChannelDeliveryWorker(store, {providers}, runtime, {
-  resolveArtifact(artifactRef) {
-    const row = db.prepare(`SELECT v.server_path,v.metadata_json FROM ga_artifacts a
-      JOIN ga_artifact_versions v ON v.artifact_id=a.id AND v.version=a.current_version
-      WHERE a.id=? OR a.runtime_ref=? ORDER BY CASE WHEN a.id=? THEN 0 ELSE 1 END LIMIT 1`)
-      .get(artifactRef, artifactRef, artifactRef) as Record<string, unknown> | undefined;
-    if (!row) throw new Error('delivery_artifact_not_found');
-    const metadata = JSON.parse(String(row.metadata_json || '{}')) as Record<string, unknown>;
-    return { path: String(row.server_path),
-      displayName: String(metadata.filename || metadata.display_name || 'Universe报告.docx') };
-  },
-  resolveArtifacts(artifactRef) {
-    const artifact = db.prepare('SELECT id FROM ga_artifacts WHERE id=? OR runtime_ref=? LIMIT 1')
-      .get(artifactRef, artifactRef) as { id?: string } | undefined;
-    if (!artifact?.id) throw new Error('delivery_artifact_not_found');
-    const parts = db.prepare(`SELECT server_path,display_name FROM ga_artifact_parts
-      WHERE artifact_id=? ORDER BY part_index`).all(artifact.id) as
-      Array<{ server_path: string; display_name: string }>;
-    if (parts.length) return parts.map(part => ({ path: part.server_path,
-      displayName: part.display_name }));
-    const row = db.prepare(`SELECT v.server_path,v.metadata_json FROM ga_artifacts a
-      JOIN ga_artifact_versions v ON v.artifact_id=a.id AND v.version=a.current_version
-      WHERE a.id=?`).get(artifact.id) as Record<string, unknown> | undefined;
-    if (!row) throw new Error('delivery_artifact_not_found');
-    const metadata = JSON.parse(String(row.metadata_json || '{}')) as Record<string, unknown>;
-    return [{ path: String(row.server_path),
-      displayName: String(metadata.filename || metadata.display_name || 'Universe报告.docx') }];
-  },
-  cleanupArtifact(artifactRef) {
-    artifacts.markDeliveredAndDelete(artifactRef);
+  artifacts,
+  ...(mattermostAccount?{mattermostAccount}:{}),
+  cleanupArtifact(pin) {
+    artifacts.markPinnedDeliveredAndDelete(pin.run_id, pin);
   },
   resolveRuntime(clientRunId) {
     const row = db.prepare('SELECT runtime_run_id FROM ga_runtime_bindings WHERE run_id=?')
@@ -84,15 +83,47 @@ const worker = new ChannelDeliveryWorker(store, {providers}, runtime, {
   },
 });
 const pollMs = Math.max(250, Number(process.env.GENERAL_AGENT_DELIVERY_POLL_MS || 1000));
+let mattermostService:Awaited<ReturnType<typeof startMattermostOwnerService>>;
+let matrixService:Awaited<ReturnType<typeof startMatrixChannelService>>;
+let matrixPoll:Promise<void>|undefined;
 let stopping = false;
-for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, () => { stopping = true; });
+let stoppingWork:Promise<void>|undefined;
+const failures:unknown[]=[];
+try {
+matrixService=await startMatrixChannelService(process.env,{db});
+mattermostService=await startMattermostOwnerService(process.env,{db});
+for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, () => {
+  stopping = true;
+  stoppingWork??=Promise.all([matrixService?.stop(),mattermostService?.stop()]).then(()=>undefined).catch(error=>{failures.push(error);});
+});
 while (!stopping) {
+  if(mattermostService&&!mattermostService.running()){
+    await mattermostService.uninstall();
+    try{mattermostService=await startMattermostOwnerService(process.env,{db});}catch(error){writeChannelWorkerError(error,line=>process.stderr.write(line));}
+  }
+  // Matrix long polling shares the service lifetime without blocking delivery work.
+  if(matrixService&&!matrixPoll){
+    matrixPoll=matrixService.poll().then(()=>undefined,error=>{
+      if(stopping)return;
+      writeChannelWorkerError(error, line => process.stderr.write(line));
+    }).finally(()=>{matrixPoll=undefined;});
+  }
+  if(stopping)break;
   try {
     if (!await worker.processNext()) await new Promise(resolve => setTimeout(resolve, pollMs));
   } catch (error) {
-    process.stderr.write(`${JSON.stringify({ level: 'error', code:
-      String(error instanceof Error ? error.message : error).slice(0, 96) })}\n`);
+    writeChannelWorkerError(error, line => process.stderr.write(line));
     await new Promise(resolve => setTimeout(resolve, pollMs));
   }
 }
-db.close();
+} catch(error){failures.unshift(error);} finally {
+  try{await stoppingWork;}catch(error){failures.push(error);}
+  try{await matrixService?.close();}catch(error){failures.push(error);}
+  try{await matrixPoll;}catch(error){failures.push(error);}
+  try{await mattermostService?.uninstall();}catch(error){failures.push(error);}
+  try{db.close();}catch(error){failures.push(error);}
+}
+if(failures.length){
+  for(const error of failures)writeChannelWorkerError(error, line => process.stderr.write(line));
+  process.exitCode=1;
+}

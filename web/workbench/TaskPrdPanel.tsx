@@ -34,7 +34,8 @@ export default function TaskPrdPanel({task,executionReady,onBound}:{task:Task;ex
   <h4>将 PRD 绑定到原任务</h4>
   <p className="wb-hint">选择当前任务所属项目中的既有文件或原始上传附件。预览仅读取；确认仅冻结来源并更新原任务目标。任务仍保持暂停，后续由原有恢复 / 立即运行入口执行。</p>
   <h5>PRD 静态模板</h5><pre style={textStyle} aria-label="PRD 静态模板">{PRD_TEMPLATE}</pre>
-  <p className="wb-hint">先按模板保存到项目文件或上传附件，再刷新选择。仅支持 UTF-8 的 .md / .txt；PDF、DOCX 暂不支持提取。文字中的动作不会直接触发执行。</p>
+  <p className="wb-hint">先按模板保存到项目文件或上传附件，再刷新选择。支持 UTF-8 的 .md / .markdown / .txt；原文最多 65,536 字节，完整任务目标最多 12,000 字符。PDF、DOCX 暂不支持提取。文字中的动作不会直接触发执行。</p>
+  <p className="wb-hint">此流程由原 DSH 拆解并写入原任务账本，无需安装 Taskmaster。外部 Taskmaster CLI、配置检测和 tasks.json 导入未接入此入口。</p>
   {!executionReady&&<p className="wb-status" role="status">执行宿主尚未就绪；来源可查看，就绪后再预览绑定。</p>}
   {task.status!=='paused'&&<p className="wb-status" role="status">请先暂停原任务，并等待所有执行及未知结果核对完成。</p>}
   {resource.loading&&<p className="wb-status" role="status">正在读取来源与准备度…</p>}

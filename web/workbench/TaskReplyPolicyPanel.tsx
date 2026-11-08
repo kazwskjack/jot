@@ -2,7 +2,7 @@ import React,{useMemo,useState} from 'react';
 import {request,taskDraftScope} from '../jot/client';
 import {pathId} from './client';
 import {useResource} from './useResource';
-import {ResourceStatus} from './AgentsPanel';
+import {ResourceStatus} from './PanelStatus';
 import ReplyPolicyFields from './ReplyPolicyFields';
 import {replyPolicyInput,replyModes} from './reply-policy-ui.mjs';
 import {replyFormFromPolicy,ReplyPolicyReceiptStore} from './reply-policy-save.mjs';

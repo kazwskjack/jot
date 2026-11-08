@@ -23,3 +23,25 @@ test('authenticated routes accept lifecycle metadata and export only current own
  assert.equal((await app.inject({method:'GET',url:'/v1/workspaces/ws/memory/export'+query,headers:{'x-user-id':'bob'}})).statusCode,404);
  const spoof=await app.inject({method:'POST',url:'/v1/workspaces/ws/memory',headers,payload:{scope:'project',project_id:a.project_id,content:'Fact',verified_at:'2026-10-02T00:00:00Z'}});assert.equal(spoof.statusCode,400);
 });
+
+test('versioned memory import routes preview, reauthorize and replay one unverified batch receipt',async t=>{
+ const dir=mkdtempSync(join(base,'case-')),db=openProductDatabase(join(dir,'fixture.sqlite'));
+ const service=new WorkbenchService(db,{workspaceIds:['source-ws','target-ws'],root:join(dir,'shared')}),app=Fastify(),headers={'x-user-id':'alice'};
+ app.setErrorHandler((error,_request,reply)=>reply.code(error.message.includes('not_found')?404:400).send({error:error.message}));
+ registerWorkbenchRoutes(app,service,request=>String(request.headers['x-user-id']??''));
+ t.after(async()=>{await app.close();db.close();rmSync(dir,{recursive:true,force:true,maxRetries:5,retryDelay:20});});
+ const agent=service.createAgent('alice',{name:'Import owner'});
+ const source=service.saveMemory('alice','source-ws',{scope:'project',project_id:agent.project_id,content:'Durable project fact',verified:true});
+ const document=service.exportMemory('alice','source-ws'),importId='route-import-1';
+ const previewResponse=await app.inject({method:'POST',url:'/v1/workspaces/target-ws/memory/import/preview',headers,payload:{import_id:importId,document,target:{scope:'project',project_id:agent.project_id}}});
+ assert.equal(previewResponse.statusCode,200,previewResponse.body);const preview=previewResponse.json();
+ assert.equal(preview.items[0].source_version,source.version);assert.equal(preview.items[0].status,'ready');
+ const review=await app.inject({method:'GET',url:`/v1/workspaces/target-ws/memory/import/${importId}`,headers});
+ assert.equal(review.statusCode,200,review.body);assert.equal(review.json().input_sha256,preview.input_sha256);
+ const applied=await app.inject({method:'POST',url:`/v1/workspaces/target-ws/memory/import/${importId}/apply`,headers,payload:{expected_version:preview.version}});
+ assert.equal(applied.statusCode,200,applied.body);assert.equal(applied.json().items[0].status,'created');
+ const replay=await app.inject({method:'POST',url:`/v1/workspaces/target-ws/memory/import/${importId}/apply`,headers,payload:{expected_version:preview.version}});
+ assert.equal(replay.statusCode,200,replay.body);assert.deepEqual(replay.json(),applied.json());
+ assert.equal((await app.inject({method:'GET',url:'/v1/workspaces/target-ws/memory',headers})).json().items[0].verified,false);
+ assert.equal((await app.inject({method:'GET',url:`/v1/workspaces/target-ws/memory/import/${importId}`,headers:{'x-user-id':'bob'}})).statusCode,404);
+});

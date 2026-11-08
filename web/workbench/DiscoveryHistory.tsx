@@ -1,9 +1,9 @@
-import React,{useState} from 'react';
+import React,{useRef,useState} from 'react';
 import {taskDraftScope} from '../jot/client';
 import {workbenchApi} from './client';
 import {useResource} from './useResource';
 import {discoveryCyclePresentation,discoveryDetailMatches,discoveryCoverage} from './discovery-history.mjs';
-import type {Agent,DiscoveryCycle,DiscoveryHistoryDetail} from './types';
+import type {Agent,DiscoveryCycle,DiscoveryHistoryDetail,DiscoveryWorkCycle} from './types';
 const outcomes:Record<string,string>={proposals:'已记录方案',no_plan:'未发现支持的改进方案',blocked:'发现过程受阻'};
 function CycleState({cycle}:{cycle:DiscoveryCycle}){const view=discoveryCyclePresentation(cycle);return <p>执行状态：{view.run} · 业务状态：{view.business} · <strong>{view.acceptance}</strong></p>;}
 export function DiscoveryCycleReport({value}:{value:DiscoveryHistoryDetail}){
@@ -21,10 +21,22 @@ export function DiscoveryCycleReport({value}:{value:DiscoveryHistoryDetail}){
 }
 export default function DiscoveryHistory({agent,identity,ownerScope,disabled=false}:{agent:Agent;identity:string;ownerScope:string;disabled?:boolean}){
  const [before,setBefore]=useState<string|undefined>(),[selected,setSelected]=useState<string|null>(null),[afterPlan,setAfterPlan]=useState<string|undefined>();
+ const [creating,setCreating]=useState(false),[cycleError,setCycleError]=useState(''),[createdCycle,setCreatedCycle]=useState<DiscoveryWorkCycle|null>(null),cycleCommand=useRef<{material:string;key:string}|null>(null);
  const current=taskDraftScope()===ownerScope;
  const list=useResource(signal=>workbenchApi.discoveryHistory(agent.agent_id,before,signal),identity+':history:'+before,current),detail=useResource(signal=>workbenchApi.discoveryHistoryDetail(agent.agent_id,selected!,afterPlan,signal),identity+':detail:'+selected+':'+afterPlan,current&&!!selected);
+ const policy=useResource(signal=>workbenchApi.discoveryPolicy(agent.agent_id,signal),identity+':discovery-policy:'+selected,current&&!!selected);
  const page=current&&!list.loading&&!list.error&&list.data?.execution_authorized===false&&Array.isArray(list.data.items)?list.data:null,value=current&&!detail.loading&&!detail.error&&selected&&discoveryDetailMatches(detail.data,selected)?detail.data:null;
- const close=()=>{setSelected(null);setAfterPlan(undefined);};
+ const activePolicy=policy.data?.execution_authorized===false?policy.data.policy:null,canCreateCycle=!!value&&value.cycle.accepted&&value.report?.outcome==='proposals'&&activePolicy?.state==='active'&&activePolicy.mode==='discover_and_work'&&!createdCycle;
+ const close=()=>{setSelected(null);setAfterPlan(undefined);setCycleError('');setCreatedCycle(null);cycleCommand.current=null;};
+ const createCycle=async(planId:string)=>{
+  if(!value||!activePolicy||!canCreateCycle||creating)return;
+  const input={report_sha256:value.report!.sha256,plan_ids:[planId],expected_policy_version:activePolicy.version,expected_role_version:activePolicy.role_version,expected_role_epoch:activePolicy.role_epoch},material=JSON.stringify([agent.agent_id,value.cycle.admission_id,input]);
+  if(cycleCommand.current?.material!==material)cycleCommand.current={material,key:crypto.randomUUID()};
+  setCreating(true);setCycleError('');
+  try{const result=await workbenchApi.createDiscoveryWorkCycle(agent.agent_id,value.cycle.admission_id,input,cycleCommand.current.key);setCreatedCycle(result);cycleCommand.current=null;}
+  catch(error){setCycleError(error instanceof Error?error.message:'创建工作周期失败');}
+  finally{setCreating(false);}
+ };
  if(!current)return <p role="alert">用户范围已变化，请重新打开项目发现。</p>;
  return <section aria-label="发现周期记录"><h4>发现周期记录</h4><p className="wb-hint">仅查看原任务的来源修订、方案和报告。不显示来源正文，不应用项目修改。</p>
   {!selected?<><button disabled={disabled||list.loading} onClick={list.reload}>刷新发现记录</button>{list.loading&&<p role="status">正在读取发现记录…</p>}{list.error&&<p className="wb-error" role="alert">{list.error}</p>}
@@ -32,7 +44,7 @@ export default function DiscoveryHistory({agent,identity,ownerScope,disabled=fal
    {!list.loading&&!list.error&&page&&!page.items.length&&<p>尚无真实发现轮次。保存策略不等于已执行。</p>}
    <div className="wb-actions">{before&&<button disabled={disabled||list.loading} onClick={()=>setBefore(undefined)}>最新发现记录</button>}{page?.next_before_id&&<button disabled={disabled||list.loading} onClick={()=>setBefore(page.next_before_id!)}>更早发现记录</button>}</div>
   </>:<><div className="wb-actions"><button disabled={disabled} onClick={close}>返回发现记录</button><button disabled={disabled||detail.loading} onClick={detail.reload}>重新读取本轮报告</button></div>{detail.loading&&<p role="status">正在读取本轮报告…</p>}{detail.error&&<p className="wb-error" role="alert">{detail.error}</p>}{detail.data&&!value&&!detail.loading&&<p role="alert">报告与当前轮次不匹配，请重新读取。</p>}
-   {value&&<><DiscoveryCycleReport value={value}/><div className="wb-actions">{afterPlan&&<button disabled={disabled||detail.loading} onClick={()=>setAfterPlan(undefined)}>第一页方案</button>}{value.next_after_plan_id&&<button disabled={disabled||detail.loading} onClick={()=>setAfterPlan(value.next_after_plan_id!)}>下一页方案</button>}</div></>}
+   {value&&<><DiscoveryCycleReport value={value}/>{policy.loading&&value.cycle.accepted&&value.report?.outcome==='proposals'&&<p role="status">正在核对当前发现策略…</p>}{policy.error&&value.cycle.accepted&&value.report?.outcome==='proposals'&&<p className="wb-error" role="alert">无法核对当前发现策略：{policy.error}</p>}{!policy.loading&&!policy.error&&value.cycle.accepted&&value.report?.outcome==='proposals'&&(activePolicy?.state!=='active'||activePolicy.mode!=='discover_and_work')&&<p className="wb-hint">当前发现策略未处于启用状态或未开启“发现并工作”，不能创建工作周期。</p>}{createdCycle&&<p role="status">已创建工作周期 {createdCycle.cycle_id}；该方案尚未执行。</p>}{cycleError&&<p className="wb-error" role="alert">{cycleError}</p>}{value.cycle.accepted&&value.report?.outcome==='proposals'&&<div className="wb-message-list">{value.plans.map(plan=><article key={plan.plan_id}><button disabled={disabled||!canCreateCycle||creating||policy.loading} onClick={()=>void createCycle(plan.plan_id)}>创建此方案的工作周期</button></article>)}</div>}<div className="wb-actions">{afterPlan&&<button disabled={disabled||detail.loading} onClick={()=>setAfterPlan(undefined)}>第一页方案</button>}{value.next_after_plan_id&&<button disabled={disabled||detail.loading} onClick={()=>setAfterPlan(value.next_after_plan_id!)}>下一页方案</button>}</div></>}
   </>}
  </section>;
 }

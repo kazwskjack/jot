@@ -2,6 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {OfficialSessionRunner} from '../../src/harness/official-session-runner.ts';
 import {PreparationTiming} from '../../src/harness/preparation-timing.ts';
+import {openProductDatabase} from '../../src/db/database.ts';
+import {ConversationRepository} from '../../src/conversations/repository.ts';
+import {EventStore} from '../../src/events/event-store.ts';
+import {RunRepository} from '../../src/runs/repository.ts';
 
 function client(fail){return{
  create:async()=>{if(fail==='session_confirm')throw Error('private-error-content');return{};},
@@ -49,4 +53,60 @@ test('ordinary recovery records observation and original recovery without creati
 test('diagnostic metadata stays bounded and finish emits only once',async()=>{
  const records=[],timer=new PreparationTiming('sensitive-run','work',new AbortController().signal,r=>records.push(r));
  await timer.measure('attachments',async()=>1,()=>({attachment_count:100001,snapshot_records:-1,snapshot_has_more:true,private:'not-loggable'}));timer.finish('succeeded');timer.finish('failed');assert.equal(records.length,2);assert.equal(records[0].mode,'work');assert.equal(records[0].snapshot_has_more,true);assert.equal(records[0].attachment_count,undefined);assert.equal(records[0].snapshot_records,undefined);assert.doesNotMatch(JSON.stringify(records),/sensitive-run|not-loggable/);
+});
+
+test('timing callback receives trusted run correlation separately from its redacted record',()=>{
+ let callbackContext;
+ const records=[];
+ const timer=new PreparationTiming('private-run-reference','chat',new AbortController().signal,(record,context)=>{records.push(record);callbackContext=context;});
+ timer.finish('succeeded');
+ assert.deepEqual(callbackContext,{runId:'private-run-reference'});
+ assert.equal(records[0].run_hash.length,64);
+ assert.doesNotMatch(JSON.stringify(records),/private-run-reference/);
+});
+
+test('EventStore timing reporter persists runner records on the original run only',async()=>{
+ const db=openProductDatabase(':memory:'),events=new EventStore(db),conversations=new ConversationRepository(db),runs=new RunRepository(db,events);
+ try{
+  const conversation=conversations.create('timing-owner',{workspace_id:'ws',model:{provider:'fixture',model:'fixture'}});
+  const accepted=runs.enqueue(conversation.conversation_id,'timing-owner',{client_message_id:'timing-source',content:[{type:'text',text:'private-question-content'}]});
+  const {createRunPreparationTimingReporter}=await import('../../src/harness/preparation-timing.ts');
+  assert.equal(typeof createRunPreparationTimingReporter,'function');
+  const runner=new OfficialSessionRunner(client(),{cwd:'/fixture',agentPreset:'fixture',onPreparationTiming:createRunPreparationTimingReporter(db,events)});
+  const result=await runner.run({...input,taskRequestId:accepted.run_id});
+  assert.equal(result.completed,true);
+  const rows=db.prepare("SELECT conversation_id,run_id,payload_json FROM ga_events WHERE type='runtime.preparation_timing' AND run_id=?").all(accepted.run_id);
+  assert.ok(rows.length>0);
+  assert.ok(rows.every(row=>row.conversation_id===conversation.conversation_id&&row.run_id===accepted.run_id));
+  assert.ok(rows.every(row=>!Object.hasOwn(JSON.parse(row.payload_json),'runId')));
+  assert.doesNotMatch(JSON.stringify(rows),/private-question-content|fixture answer/);
+  assert.equal(db.prepare('SELECT count(*) n FROM ga_runs').get().n,1);
+  const before=db.prepare("SELECT count(*) n FROM ga_events WHERE type='runtime.preparation_timing'").get().n;
+  createRunPreparationTimingReporter(db,events)(JSON.parse(rows[0].payload_json),{runId:'missing-timing-run'});
+  assert.equal(db.prepare("SELECT count(*) n FROM ga_events WHERE type='runtime.preparation_timing'").get().n,before);
+ }finally{db.close();}
+});
+
+test('EventStore timing append failure cannot change success, failure or cancellation',async()=>{
+ const db=openProductDatabase(':memory:'),events=new EventStore(db),conversations=new ConversationRepository(db),runs=new RunRepository(db,events);
+ try{
+  const conversation=conversations.create('timing-owner',{workspace_id:'ws',model:{provider:'fixture',model:'fixture'}});
+  const accepted=runs.enqueue(conversation.conversation_id,'timing-owner',{client_message_id:'timing-failure-source',content:[{type:'text',text:'private-question-content'}]});
+  const {createRunPreparationTimingReporter}=await import('../../src/harness/preparation-timing.ts');
+  assert.equal(typeof createRunPreparationTimingReporter,'function');
+  const append=events.append.bind(events);let failures=0;
+  events.append=(...args)=>{if(args[2]==='runtime.preparation_timing'){failures++;throw Error('timing append unavailable');}return append(...args);};
+  const reporter=createRunPreparationTimingReporter(db,events);
+  const result=await new OfficialSessionRunner(client(),{cwd:'/fixture',agentPreset:'fixture',onPreparationTiming:reporter}).run({...input,taskRequestId:accepted.run_id});
+  assert.equal(result.completed,true);
+  assert.ok(failures>0);
+  assert.equal(db.isTransaction,false);
+  const failed=new OfficialSessionRunner(client('prompt_submit'),{cwd:'/fixture',agentPreset:'fixture',onPreparationTiming:reporter});
+  await assert.rejects(()=>failed.run({...input,taskRequestId:accepted.run_id}),/private-error-content/);
+  assert.equal(db.isTransaction,false);
+  const slow={...client(),create:async(_id,_cwd,_preset,signal)=>new Promise((resolve,reject)=>signal.addEventListener('abort',()=>reject(Error('aborted')),{once:true}))};
+  const cancelled=new OfficialSessionRunner(slow,{cwd:'/fixture',agentPreset:'fixture',timeoutMs:15,onPreparationTiming:reporter});
+  await assert.rejects(()=>cancelled.run({...input,taskRequestId:accepted.run_id}),/aborted/);
+  assert.equal(db.isTransaction,false);
+ }finally{db.close();}
 });

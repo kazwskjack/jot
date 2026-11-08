@@ -128,3 +128,37 @@ test('new task form preserves an unlimited server monetary default through expli
  const form=formState.blankTaskForm('a',undefined,{tokens:5000,nano_usd:null,model_calls:50});assert.equal(form.model_dollars,'不限额');
  const input=taskInput({...valid,...form,title:'Owned task',objective:'Read controlled source',model_budget_enabled:true},undefined,true);assert.equal(input.model_budget.nano_usd,null);
 });
+
+test('cron form submits the expression and IANA timezone without calculating due time',()=>{
+ const form={...valid,kind:'cron',expression:'0 9 * * MON-FRI',timezone:'Asia/Hong_Kong'};
+ assert.deepEqual(taskInput(form).trigger,{kind:'cron',expression:'0 9 * * MON-FRI',timezone:'Asia/Hong_Kong'});
+ assert.equal(Object.hasOwn(taskInput(form).trigger,'run_at'),false);
+});
+
+test('delay form submits bounded integer seconds and rejects invalid values',()=>{
+ assert.deepEqual(taskInput({...valid,kind:'delay',delay_seconds:'3600'}).trigger,{kind:'delay',delay_seconds:3600});
+ for(const delay_seconds of ['', '0', '-1', '1.5', '31536001', 'not-a-number'])assert.throws(()=>taskInput({...valid,kind:'delay',delay_seconds}));
+});
+
+test('editing cron and delay tasks restores their original trigger fields',()=>{
+ const cronTask={title:'Weekday review',agent_id:'a1',objective:'Review',trigger:{kind:'cron',expression:'15 8 * * 1-5',timezone:'Europe/Berlin'},budget:{max_runs:5}};
+ const delayTask={title:'One follow-up',agent_id:'a1',objective:'Follow up',trigger:{kind:'delay',delay_seconds:900},budget:{max_runs:3}};
+ const cronForm=formState.taskFormFromTask(cronTask),delayForm=formState.taskFormFromTask(delayTask);
+ assert.equal(cronForm.expression,'15 8 * * 1-5');assert.equal(cronForm.timezone,'Europe/Berlin');
+ assert.deepEqual(taskInput(cronForm).trigger,cronTask.trigger);
+ assert.equal(delayForm.delay_seconds,'900');assert.deepEqual(taskInput(delayForm).trigger,delayTask.trigger);
+});
+
+test('cron and delay summaries keep the configured trigger visible',()=>{
+ assert.match(formState.taskTriggerSummary({kind:'cron',expression:'0 9 * * 1-5',timezone:'Asia/Hong_Kong'}),/0 9 \* \* 1-5.*Asia\/Hong_Kong/);
+ assert.match(formState.taskTriggerSummary({kind:'delay',delay_seconds:300}),/300.*秒/);
+});
+
+test('editing a cron task preserves its missed-trigger policy',()=>{
+ for(const missed_triggers of ['skip','catch_up']){
+  const trigger={kind:'cron',expression:'15 8 * * 1-5',timezone:'Europe/Berlin',missed_triggers};
+  const form=formState.taskFormFromTask({title:'Weekday review',agent_id:'a1',objective:'Review',trigger,budget:{max_runs:5}});
+  form.title='Renamed review';
+  assert.deepEqual(taskInput(form).trigger,trigger);
+ }
+});

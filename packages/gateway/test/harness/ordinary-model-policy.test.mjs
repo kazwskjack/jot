@@ -6,9 +6,9 @@ import {HarnessCoordinator} from '../../src/harness/coordinator.ts';
 import {SessionBindingRepository} from '../../src/harness/session-bindings.ts';
 import {EventStore} from '../../src/events/event-store.ts';
 const token=randomBytes(32).toString('hex');
-async function fixture(overrides={}){
+async function fixture(overrides={},selectedModel){
  const service=await buildServer({databasePath:':memory:',workspaces:['ws'],internalChannelToken:token,...overrides});
- const owner='model-owner',model={provider:'fixture',model:'chosen',reasoning_effort:'high'};
+ const owner='model-owner',model=selectedModel??{provider:'fixture',model:'chosen',reasoning_effort:'high'};
  const conversation=service.conversations.create(owner,{workspace_id:'ws',title:'Model fixture',model});
  const input={client_message_id:'model-input',content:[{type:'text',text:'Synthetic task'}]};
  const source=service.runs.enqueue(conversation.conversation_id,owner,input);
@@ -41,6 +41,28 @@ test('a resolved default is bound once and exact lost-receipt retries do not cha
   assert.equal((await f.request({...payload,policy_sha256:'0'.repeat(64)})).statusCode,409);
   assert.equal((await f.request({...payload,model:{...f.model,reasoning_effort:'low'}})).statusCode,409);
   assert.throws(()=>f.service.db.prepare('UPDATE ga_runs SET model_resolution_json=NULL WHERE id=?').run(f.source.run_id),/model_resolution_immutable/);
+ }finally{await f.close();}
+});
+
+test('accepted fallback chain stays immutable and only an exact saved alternate can be resolved',async()=>{
+ const fallback={provider:'backup',model:'approved'},model={provider:'fixture',model:'chosen',reasoning_effort:'high',fallbacks:[fallback]};
+ const f=await fixture({},model);try{
+  const original=(await f.request()).json().policy;assert.deepEqual(original.model,model);
+  const allowed=await f.request({...f.body,action:'bind',policy_sha256:original.policy_sha256,model:{...fallback,reasoning_effort:'high'}});
+  assert.equal(allowed.statusCode,200);assert.deepEqual(allowed.json().policy.model,model);
+  assert.deepEqual(allowed.json().policy.resolved_model,{...fallback,reasoning_effort:'high'});
+  assert.equal((await f.request({...f.body,action:'bind',policy_sha256:original.policy_sha256,model:{provider:'unapproved',model:'route',reasoning_effort:'high'}})).statusCode,409);
+  assert.equal((await f.request({...f.body,action:'bind',policy_sha256:original.policy_sha256,model:{...fallback,reasoning_effort:'low'}})).statusCode,409);
+ }finally{await f.close();}
+});
+
+test('fallback policy rejects primary duplicates, duplicate alternates and URL-shaped fields at acceptance',async()=>{
+ const f=await fixture();try{
+  for(const fallbacks of [[{provider:'fixture',model:'chosen'}],[{provider:'backup',model:'one'},{provider:'backup',model:'one'}],[{provider:'backup',model:'one',url:'https://untrusted.invalid'}]]){
+   const model={provider:'fixture',model:'chosen',reasoning_effort:'high',fallbacks};
+   f.service.db.prepare('UPDATE ga_conversations SET model=?,version=version+1 WHERE id=?').run(JSON.stringify(model),f.conversation.conversation_id);
+   assert.throws(()=>f.service.runs.enqueue(f.conversation.conversation_id,f.owner,{client_message_id:crypto.randomUUID(),content:[{type:'text',text:'Synthetic task'}]}),/model_policy_invalid/);
+  }
  }finally{await f.close();}
 });
 

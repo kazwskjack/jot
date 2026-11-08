@@ -9,7 +9,7 @@ import {inspectOrdinaryInputBinding} from '../conversations/ordinary-input-bindi
 import { createHash } from 'node:crypto';
 import {taskWaitSupplement} from '../persistent-tasks/task-wait.ts';
 import type { DatabaseSync } from 'node:sqlite';
-import type { HarnessCoordinator } from './coordinator.ts';
+import type { HarnessCoordinator,RunLease } from './coordinator.ts';
 import { decodeStoredContent } from '../messages/content.ts';
 import type { RuntimeContextInput } from './runtime-events.ts';
 import type { JotProjection } from './session-event-projector.ts';
@@ -18,6 +18,11 @@ import { withImmediateTransaction } from '../db/database.ts';
 import type {SessionCheckpoint} from './session-checkpoints.ts';
 import {ConversationGoalControls,validateGoalControlRejection} from '../conversations/goal-controls.ts';
 import {isAbsolute} from 'node:path';
+import type {AttachmentManifest,PinnedAttachmentSnapshot} from '../artifacts/pinned-manifest.ts';
+import {readAcceptedChannelAttachmentInputV2} from '../channels/attachment-input-v2.ts';
+import type {RuntimeReadinessBoundSample,RuntimeReadinessRunScope} from '../events/runtime-readiness-composition.ts';
+
+type WorkerMessageInput={text:string;attachmentIds:string[];ownerId:string;receivedAt:number;attachmentManifest?:AttachmentManifest;attachmentSourceSha256?:string};
 
 /** Host-only result from the admitted work journal; never a browser/model field. */
 export type TrustedWorkRunWorkspace=Readonly<{kind:'isolated_work';runId:string;originalRunId:string;ownerId:string;conversationId:string;taskId:string;occurrenceId:string;sessionRef:string;cwd:string;objective:string}>;
@@ -56,10 +61,13 @@ export interface DshRunInput { enabled: true; taskRequestId: string; message: st
     requiresWorkWorkspace?:true;
     trustedWorkWorkspace?:TrustedWorkRunWorkspace;
     deferCompletionProbe: true; attachments?: ResolvedAttachment[]; universeSessionRef?: string;
+    pinnedAttachments?:PinnedAttachmentSnapshot;
+    beforeInputDispatch?:()=>void;
     originalAdmission?:Readonly<{executionLease:Readonly<{owner:string;generation:number}>}>;
     workbenchRunId?: string;
     workbenchExecutionLease?:Readonly<{owner:string;generation:number}>;
     workbenchBudgetEnforced?:boolean;
+    signal?:AbortSignal;
     checkpointTask?:boolean;
     onCheckpoint?:(receipt:SessionCheckpoint)=>Promise<void>|void;
     ordinaryCompletion?:Readonly<{executionLease:ExecutionLease;commands:()=>string[];publish:(candidate:DshRunResult,proof:OrdinaryCompletionProof,signal:AbortSignal)=>Promise<boolean>}>;
@@ -69,6 +77,7 @@ export interface DshRunInput { enabled: true; taskRequestId: string; message: st
     onWebOperationCursor?: (toolCallId: string) => number;
     onWebOperationSnapshot?: (toolCallId: string, snapshot: Record<string, unknown>) => number }
 export interface DshRunner {
+  readonly pinnedInputProtocol?:1;
   readonly conversationModeProtocol?:1;
   readonly ordinaryCompletionProtocol?:1;
   run(input:DshRunInput):Promise<DshRunResult>;
@@ -81,8 +90,9 @@ export interface RuntimeContextStager {
 }
 
 export interface ChannelTextDelivery {
-  enqueueText(input: { runId: string; messageId: string; destination: 'wecom';
+  enqueueText(input: { runId: string; messageId: string; destination: 'wecom'|'slack'|'sms';
     recipient: string; text: string }): Record<string, unknown> | null;
+  enqueuePinnedSlackArtifact?(input:{runId:string;messageId:string;recipient:string;ownerId:string;artifactId:string;version:number}):Record<string,unknown>|null;
 }
 
 export class HarnessWorker {
@@ -99,7 +109,7 @@ export class HarnessWorker {
   private readonly contextStager: RuntimeContextStager | undefined;
   private readonly sessionResolver: ((conversationId: string) => string) | undefined;
   private readonly attachmentResolver: Pick<AttachmentResolver,
-    'resolveForMessage' | 'resolveOutputs' | 'releaseLease'> | undefined;
+    'resolveForMessage' | 'resolveOutputs' | 'releaseLease'> & Partial<Pick<AttachmentResolver,'snapshotInputForMessage'>> | undefined;
   private readonly channelDelivery: ChannelTextDelivery | undefined;
   private readonly executionGuard: { assertRunActive(runId: string): void; contextForRun(runId: string): unknown } | undefined;
   private readonly workRunWorkspaceResolver:WorkRunWorkspaceResolver|undefined;
@@ -108,7 +118,7 @@ export class HarnessWorker {
   constructor(db: DatabaseSync, coordinator: HarnessCoordinator, runner: DshRunner,
     options: { workerId: string; leaseMs: number; ordinaryInputRecoveryEnabled?:boolean;ordinarySteeringEnabled?:boolean; contextStager?: RuntimeContextStager;
       sessionResolver?: (conversationId: string) => string;
-      attachmentResolver?: Pick<AttachmentResolver, 'resolveForMessage' | 'resolveOutputs' | 'releaseLease'>;
+      attachmentResolver?: Pick<AttachmentResolver, 'resolveForMessage' | 'resolveOutputs' | 'releaseLease'> & Partial<Pick<AttachmentResolver,'snapshotInputForMessage'>>;
       channelDelivery?: ChannelTextDelivery;
       workRunWorkspaceResolver?:WorkRunWorkspaceResolver;
       chatPostAnswer?:(runId:string)=>Promise<unknown>;
@@ -128,9 +138,52 @@ export class HarnessWorker {
     this.chatPostAnswer=options.chatPostAnswer;
   }
 
+  observeConsumerReadiness(scope:Readonly<RuntimeReadinessRunScope>,signal:AbortSignal):RuntimeReadinessBoundSample{
+    signal.throwIfAborted();
+    const row=scope as RuntimeReadinessRunScope|undefined;
+    const boundScope=Object.freeze({run_id:typeof row?.run_id==='string'?row.run_id:'',
+      owner_id:typeof row?.owner_id==='string'?row.owner_id:'',workspace_id:typeof row?.workspace_id==='string'?row.workspace_id:''});
+    const sample=(status:RuntimeReadinessBoundSample['status'],reason?:string):RuntimeReadinessBoundSample=>({
+      protocol:1,scope:boundScope,status,required:true,observed_at:new Date().toISOString(),...(reason?{reason}:{})});
+    if(!row||[boundScope.run_id,boundScope.owner_id,boundScope.workspace_id].some(value=>!value.trim()
+      ||value.length>256||/[\u0000-\u001f\u007f]/.test(value)))return sample('unknown','consumer_scope_invalid');
+    const active=this.readyRuns.get(row.run_id);
+    if(!active)return sample('unknown','consumer_run_not_active');
+    if(!this.db.isOpen||this.db.isTransaction)return sample('unknown','consumer_observation_unavailable');
+    try{
+      const current=this.db.prepare(`SELECT r.id AS run_id,r.status,c.owner_id,c.workspace_id,c.archived_at,
+          n.session_id,l.owner AS lease_owner,l.generation AS lease_generation,l.expires_at
+        FROM ga_runs r JOIN ga_conversations c ON c.id=r.conversation_id
+        LEFT JOIN ga_run_native_sessions n ON n.run_id=r.id AND n.conversation_id=c.id AND n.owner_id=c.owner_id
+        LEFT JOIN ga_worker_leases l ON l.resource_id=r.id WHERE r.id=?`).get(row.run_id) as
+        {run_id?:unknown;status?:unknown;owner_id?:unknown;workspace_id?:unknown;archived_at?:unknown;session_id?:unknown;
+          lease_owner?:unknown;lease_generation?:unknown;expires_at?:unknown}|undefined;
+      if(!current||current.run_id!==row.run_id||current.archived_at!==null
+        ||current.owner_id!==row.owner_id||current.workspace_id!==row.workspace_id)return sample('unknown','consumer_scope_changed');
+      if(current.status!=='running'||current.session_id!==active.sessionRef)return sample('unknown','consumer_run_not_running');
+      if(current.lease_owner!==active.executionLease.owner||Number(current.lease_generation)!==active.executionLease.generation
+        ||!Number.isFinite(Number(current.expires_at))||Number(current.expires_at)<=Date.now())return sample('unknown','consumer_lease_unconfirmed');
+      assertExecutionLease(this.db,row.run_id,active.executionLease);
+      signal.throwIfAborted();
+      return sample('ready');
+    }catch{return sample('unknown',signal.aborted?'observation_cancelled':'consumer_observation_unavailable');}
+  }
+
   async processNext(): Promise<{ run_id: string; runtime_status: string } | null> {
-    const lease = this.coordinator.claimNext(this.workerId, this.leaseMs);
+    const lease = this.coordinator.claimNext(this.workerId,this.leaseMs,this.ordinaryInputRecoveryEnabled&&this.runner.recoverInput&&this.runner.pinnedInputProtocol===1?2:1);
     if (!lease) return null;
+    return this.processLease(lease,undefined,false);
+  }
+
+  /** Run one coordinator-claimed Dream lease through the ordinary DSH worker path. */
+  async processClaimed(lease:RunLease,signal?:AbortSignal):Promise<{run_id:string;runtime_status:string}> {
+    const binding=this.db.prepare("SELECT kind FROM wb_run_bindings WHERE run_id=?").get(lease.run_id) as {kind:string}|undefined;
+    if(binding?.kind!=='memory_consolidation')throw Error('workbench_run_kind_forbidden');
+    assertExecutionLease(this.db,lease.run_id,{owner:lease.owner,generation:lease.generation});
+    return this.processLease(lease,signal,true);
+  }
+
+  private async processLease(lease:RunLease,signal:AbortSignal|undefined,dreamExecution:boolean):Promise<{run_id:string;runtime_status:string}> {
     const goalControl=this.db.prepare('SELECT control_id,owner_id,session_id,goal_id,goal_revision FROM ga_conversation_goal_controls WHERE run_id=?').get(lease.run_id) as {control_id:string;owner_id:string;session_id:string;goal_id:string;goal_revision:number}|undefined;
     // Mixed-version rollout must never fall through to replaying the original
     // human message or attachments when a continuation runner is unavailable.
@@ -179,16 +232,28 @@ export class HarnessWorker {
     }
     const controllerSessionRef = (acceptedSession?.native_session_ref as string|null) ?? (originalSession?.session_id as string|undefined) ?? goalControl?.session_id ?? this.sessionResolver?.(lease.conversation_id)
       ?? `session-${createHash('sha256').update(lease.run_id).digest('hex').slice(0, 32)}`;
-    try{pinRunNativeSession(this.db,lease.run_id,{owner:lease.owner,generation:lease.generation},controllerSessionRef);}
+    try{pinRunNativeSession(this.db,lease.run_id,{owner:lease.owner,generation:lease.generation},controllerSessionRef,dreamExecution?{allowArchivedDream:true}:{});}
     catch{this.coordinator.interruptWithoutRuntime(lease,'RUN_NATIVE_SESSION_CONFLICT');return{run_id:lease.run_id,runtime_status:'native_session_conflict'};}
     const runtimeSessionRef = runtimeSessionRefForRun(lease.run_id);
     this.coordinator.bindSession(lease, runtimeSessionRef);
-    const input = goalControl?{text:'',attachmentIds:[],ownerId:goalControl.owner_id,receivedAt:0}:this.messageInput(lease.run_id);
+    let input:WorkerMessageInput,attachments:ResolvedAttachment[]=[],pinnedSnapshot:PinnedAttachmentSnapshot|undefined;
+    try{
+      input=goalControl?{text:'',attachmentIds:[],ownerId:goalControl.owner_id,receivedAt:0}:this.messageInput(lease.run_id);
+      if(input.attachmentManifest){
+        if(!this.ordinaryInputRecoveryEnabled||!this.runner.recoverInput||this.runner.pinnedInputProtocol!==1||lease.generation>1&&!originalRecovery)throw Error('channel_attachment_input_consumer_unavailable');
+        if(!originalRecovery){
+          if(!this.attachmentResolver?.snapshotInputForMessage)throw Error('attachment_resolver_unavailable');
+          pinnedSnapshot=await this.attachmentResolver.snapshotInputForMessage(input.ownerId,lease.conversation_id,input.attachmentManifest,lease.run_id);
+        }
+      }else if(!originalRecovery&&input.attachmentIds.length){
+        if(!this.attachmentResolver)throw Error('attachment_resolver_unavailable');
+        attachments=this.attachmentResolver.resolveForMessage(input.ownerId,lease.conversation_id,input.attachmentIds,lease.run_id);
+      }
+    }catch{
+      await pinnedSnapshot?.dispose();this.attachmentResolver?.releaseLease(lease.run_id);
+      this.coordinator.interruptWithoutRuntime(lease,'CHANNEL_ATTACHMENT_INPUT_UNAVAILABLE');return{run_id:lease.run_id,runtime_status:'attachment_input_unavailable'};
+    }
     let message = originalRecovery?'':input.text;
-    const attachments = !originalRecovery&&input.attachmentIds.length
-      ? this.attachmentResolver?.resolveForMessage(input.ownerId, lease.conversation_id,
-        input.attachmentIds, lease.run_id) ?? (() => { throw new Error('attachment_resolver_unavailable'); })()
-      : [];
     if (this.contextStager&&!goalControl&&!originalRecovery) {
       if(!lease.input_message_id)throw Error('run_input_missing');
       try {
@@ -235,6 +300,53 @@ export class HarnessWorker {
           outputAttachments.map(item => item.artifactId));
         this.coordinator.finalizePublication(lease, 'succeeded', null);
         if (this.channelDelivery) {
+        const smsSources=this.db.prepare(`SELECT e.principal,e.message_id,e.conversation_id,c.owner_id
+          FROM ga_channel_message_events e JOIN ga_conversations c ON c.id=e.conversation_id
+          WHERE e.channel='sms' AND e.run_id=? AND e.conversation_id=? AND e.message_id=?`)
+          .all(lease.run_id,lease.conversation_id,lease.input_message_id) as
+          Array<{principal?:string;message_id?:string;conversation_id?:string;owner_id?:string}>;
+        if(smsSources.length===1){
+          const source=smsSources[0];
+          if(source?.message_id===lease.input_message_id&&source.conversation_id===lease.conversation_id
+            &&source.owner_id===input.ownerId&&typeof source.principal==='string'&&source.principal.trim()){
+            try {
+              this.channelDelivery.enqueueText({runId:lease.run_id,messageId:String(assistant.message_id),
+                destination:'sms',recipient:source.principal,text:finalText});
+            } catch(error){
+              process.stderr.write(`${JSON.stringify({level:'error',code:'channel_delivery_enqueue_failed',
+                detail:String(error instanceof Error?error.message:error).slice(0,96)})}\n`);
+            }
+          }
+        }
+        const slackSources = this.db.prepare(`SELECT e.channel,e.principal,e.provider_thread_id,e.conversation_id,e.message_id,c.owner_id
+          FROM ga_channel_message_events e JOIN ga_conversations c ON c.id=e.conversation_id
+          WHERE e.channel='slack' AND e.run_id=?`).all(lease.run_id) as
+          Array<{ channel?: string; principal?: string; provider_thread_id?: string; conversation_id?: string;
+            message_id?: string; owner_id?: string }>;
+        if (smsSources.length===0&&slackSources.length === 1) {
+          const source = slackSources[0];
+          if (source?.channel === 'slack' && source.conversation_id === lease.conversation_id
+            && source.message_id === lease.input_message_id && source.owner_id === input.ownerId
+            && typeof source.principal === 'string'
+            && /^slack:[A-Za-z0-9._-]{1,80}:[A-Za-z0-9._-]{1,80}$/.test(source.principal)
+            && typeof source.provider_thread_id === 'string'
+            && /^[A-Za-z0-9._-]{1,80}:\d{10,20}\.\d{1,10}$/.test(source.provider_thread_id)) {
+            try {
+              this.channelDelivery.enqueueText({ runId: lease.run_id, messageId: String(assistant.message_id),
+                destination: 'slack', recipient: source.principal, text: finalText });
+              for(const attachment of outputAttachments){
+                if(!this.channelDelivery.enqueuePinnedSlackArtifact||!Number.isSafeInteger(attachment.version)||Number(attachment.version)<1)
+                  throw Error('slack_artifact_delivery_unavailable');
+                this.channelDelivery.enqueuePinnedSlackArtifact({runId:lease.run_id,messageId:String(assistant.message_id),
+                  recipient:source.principal,ownerId:input.ownerId,artifactId:attachment.artifactId,version:Number(attachment.version)});
+              }
+            } catch (error) {
+              process.stderr.write(`${JSON.stringify({ level: 'error', code: 'channel_delivery_enqueue_failed',
+                detail: String(error instanceof Error ? error.message : error).slice(0, 96) })}\\n`);
+            }
+          }
+        }
+        if (smsSources.length===0&&slackSources.length === 0) {
         const binding = this.db.prepare(`SELECT principal FROM ga_channel_bindings
           WHERE channel='wecom' AND conversation_id=?`).get(lease.conversation_id) as
           { principal?: string } | undefined;
@@ -246,6 +358,7 @@ export class HarnessWorker {
             process.stderr.write(`${JSON.stringify({ level: 'error', code: 'channel_delivery_enqueue_failed',
               detail: String(error instanceof Error ? error.message : error).slice(0, 96) })}\n`);
           }
+        }
         }
         }
 
@@ -282,7 +395,7 @@ export class HarnessWorker {
           ||(current.root_run_id===lease.run_id?current.continuation_of!==null:!current.continuation_of||!current.checkpoint_id)
           ||resolved.sessionRef!==controllerSessionRef||saved?.session_id!==controllerSessionRef
           ||typeof resolved.cwd!=='string'||!isAbsolute(resolved.cwd)||resolved.cwd.includes('\0')
-          ||typeof resolved.objective!=='string'||!resolved.objective.trim()||goalControl||originalRecovery||attachments.length)
+          ||typeof resolved.objective!=='string'||!resolved.objective.trim()||goalControl||originalRecovery||attachments.length||pinnedSnapshot)
           throw Error('work_workspace_binding_invalid');
         trustedWorkWorkspace=Object.freeze({...resolved});
         // Continuations retain the original recovery instructions and the
@@ -309,10 +422,18 @@ export class HarnessWorker {
         }
       };
       const runInput:DshRunInput={ enabled: true, taskRequestId: lease.run_id, message, attachments,
+        ...(pinnedSnapshot?{pinnedAttachments:pinnedSnapshot,beforeInputDispatch:()=>{
+          if(this.cancelling(lease.run_id))throw Error('channel_attachment_input_cancelled');
+          if(this.db.prepare('SELECT status FROM ga_runs WHERE id=?').get(lease.run_id)?.status!=='running')throw Error('channel_attachment_input_not_running');
+          this.executionGuard?.assertRunActive(lease.run_id);
+          assertExecutionLease(this.db,lease.run_id,{owner:lease.owner,generation:lease.generation});
+          if(readAcceptedChannelAttachmentInputV2(this.db,lease.run_id)?.manifest_sha256!==input.attachmentSourceSha256)throw Error('channel_attachment_input_unproven');
+        }}:{}),
         ...(conversationPolicy?{conversationPolicy}:{}),
         ...(trustedWorkWorkspace?{requiresWorkWorkspace:true as const,trustedWorkWorkspace}:{}),
         ...(this.ordinaryInputRecoveryEnabled&&lease.generation===1&&lease.input_message_id&&!goalControl&&!workbenchContext&&!hasWorkbenchBinding?{originalAdmission:Object.freeze({executionLease:Object.freeze({owner:lease.owner,generation:lease.generation})})}:{}),
         ...(workbenchContext ? { workbenchRunId: lease.run_id,workbenchExecutionLease:Object.freeze({owner:lease.owner,generation:lease.generation}),workbenchBudgetEnforced:!!(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_model_budget_bindings'").get()&&this.db.prepare('SELECT 1 FROM wb_model_budget_bindings WHERE owner_id=? AND run_id=?').get(input.ownerId,lease.run_id)) } : {}),
+        ...(signal?{signal}:{}),
         ...(backgroundTask
           ?{checkpointTask:true,onCheckpoint:(receipt:SessionCheckpoint)=>{this.executionGuard?.assertRunActive(lease.run_id);this.coordinator.recordCheckpoint(lease,controllerSessionRef,receipt);}}:{}),
         sessionRef: controllerSessionRef, universeSessionRef: controllerSessionRef, deferCompletionProbe: true,
@@ -342,15 +463,25 @@ export class HarnessWorker {
       if(goalControl){
         try{const row=ConversationGoalControls.assertExecution(this.db,goalControl.control_id,{owner:lease.owner,generation:lease.generation});if(row.state==='rejected')reasonCode=validateGoalControlRejection(JSON.parse(row.receipt_json!)).reason_code;}catch{}
       }
-      this.coordinator.interruptWithoutRuntime(lease, reasonCode);
-      return { run_id: lease.run_id, runtime_status: 'harness_failed' };
+      this.coordinator.interruptWithoutRuntime(lease, dreamExecution?'MEMORY_DREAM_RECONCILE_REQUIRED':reasonCode);
+      return { run_id: lease.run_id, runtime_status: dreamExecution?'memory_dream_reconciliation_required':'harness_failed' };
     } finally {
       this.readyRuns.delete(lease.run_id);
       clearInterval(renewal);
       if(this.cancelling(lease.run_id))this.db.prepare('DELETE FROM ga_worker_leases WHERE resource_id=? AND owner=? AND generation=?').run(lease.run_id,lease.owner,lease.generation);
-      if (attachments.length) this.attachmentResolver?.releaseLease(lease.run_id);
+      try{await pinnedSnapshot?.dispose();}finally{if(attachments.length||pinnedSnapshot)this.attachmentResolver?.releaseLease(lease.run_id);}
     }
     if(published)return{run_id:lease.run_id,runtime_status:publishedRuntime};
+    if(dreamExecution){
+      if(this.cancelling(lease.run_id))return{run_id:lease.run_id,runtime_status:'cancel_requested'};
+      if(signal?.aborted||!result.completed){
+        this.coordinator.interruptWithoutRuntime(lease,'MEMORY_DREAM_RECONCILE_REQUIRED');
+        return{run_id:lease.run_id,runtime_status:'memory_dream_reconciliation_required'};
+      }
+      try{this.executionGuard?.assertRunActive(lease.run_id);}
+      catch{this.coordinator.interruptWithoutRuntime(lease,'MEMORY_DREAM_RECONCILE_REQUIRED');return{run_id:lease.run_id,runtime_status:'memory_dream_reconciliation_required'};}
+      return{run_id:lease.run_id,runtime_status:'memory_dream_session_completed'};
+    }
     const finalText = result.final_text?.trim();
     const stoppedCandidate=result.task_candidate??(finalText?{text:finalText,...(result.final_blocks?{blocks:result.final_blocks}:{})}:undefined);
     if(this.cancelling(lease.run_id))return {run_id:lease.run_id,runtime_status:'cancel_requested'};
@@ -391,18 +522,34 @@ export class HarnessWorker {
 
   private cancelling(runId:string){const row=this.db.prepare('SELECT status FROM ga_runs WHERE id=?').get(runId) as {status:string}|undefined;return row?.status==='cancelling'||row?.status==='cancelled';}
 
-  private messageInput(runId: string): { text: string; attachmentIds: string[]; ownerId: string; receivedAt: number } {
-    const row = this.db.prepare(`SELECT m.content_json,m.created_at,c.owner_id,r.continuation_of,r.checkpoint_id FROM ga_runs r
+  private messageInput(runId: string): WorkerMessageInput {
+    const row = this.db.prepare(`SELECT m.content_json,m.created_at,c.owner_id,r.conversation_id,r.input_message_id,r.continuation_of,r.checkpoint_id FROM ga_runs r
       JOIN ga_messages m ON m.id=r.input_message_id JOIN ga_conversations c ON c.id=r.conversation_id WHERE r.id=?`)
-      .get(runId) as { content_json: string; created_at: string; owner_id: string;continuation_of:string|null;checkpoint_id:string|null } | undefined;
+      .get(runId) as { content_json: string; created_at: string; owner_id: string;conversation_id:string;input_message_id:string;continuation_of:string|null;checkpoint_id:string|null } | undefined;
     if (!row) throw new Error('run_input_missing');
+    const checkpointContinuation=!!row.continuation_of&&!!row.checkpoint_id;
+    let pinned:ReturnType<typeof readAcceptedChannelAttachmentInputV2>;
+    if(checkpointContinuation){
+      let sourceRunId=runId,continuationOf=row.continuation_of;
+      const visited=new Set([runId]);
+      while(continuationOf){
+        if(visited.has(continuationOf))throw new Error('continuation_input_unproven');
+        visited.add(continuationOf);
+        const parent=this.db.prepare(`SELECT r.id,r.conversation_id,r.input_message_id,r.checkpoint_id,r.continuation_of,c.owner_id
+          FROM ga_runs r JOIN ga_conversations c ON c.id=r.conversation_id WHERE r.id=?`).get(continuationOf) as
+          {id:string;conversation_id:string;input_message_id:string|null;checkpoint_id:string|null;continuation_of:string|null;owner_id:string}|undefined;
+        if(!parent||parent.conversation_id!==row.conversation_id||parent.owner_id!==row.owner_id||parent.input_message_id!==row.input_message_id||parent.checkpoint_id!==row.checkpoint_id)throw new Error('continuation_input_unproven');
+        sourceRunId=parent.id;continuationOf=parent.continuation_of;
+      }
+      pinned=readAcceptedChannelAttachmentInputV2(this.db,sourceRunId);
+    }else pinned=readAcceptedChannelAttachmentInputV2(this.db,runId);
     const content = decodeStoredContent(row.content_json); const blocks = content.blocks;
     const text = blocks.filter(block => block.kind === 'text').map(block => String(block.text ?? '')).join('\n').trim();
     const attachmentIds = content.attachments.filter(Boolean);
-    if (!text && !attachmentIds.length) throw new Error('run_input_empty');
+    if (!text && !attachmentIds.length&&!pinned) throw new Error('run_input_empty');
     const receivedAt = Math.floor(Date.parse(row.created_at) / 1000);
     if (!Number.isInteger(receivedAt) || receivedAt <= 0) throw new Error('run_input_created_at_invalid');
-    if(row.continuation_of && row.checkpoint_id)return {text:'继续当前已授权任务，从持久 Session 和任务账本的最后确认点恢复。先核对已有回执、文件版本、依赖与剩余预算，再完成未确认的步骤。不要重新发送或重复执行原始请求；结果未知的点击、提交、发送先核对，无法核对则等待人工处理。保持原目标与权限范围。'+taskWaitSupplement(this.db,runId),attachmentIds:[],ownerId:row.owner_id,receivedAt};
-    return { text, attachmentIds, ownerId: row.owner_id, receivedAt };
+    if(checkpointContinuation)return {text:'继续当前已授权任务，从持久 Session 和任务账本的最后确认点恢复。先核对已有回执、文件版本、依赖与剩余预算，再完成未确认的步骤。不要重新发送或重复执行原始请求；结果未知的点击、提交、发送先核对，无法核对则等待人工处理。保持原目标与权限范围。'+taskWaitSupplement(this.db,runId),attachmentIds:[],ownerId:row.owner_id,receivedAt};
+    return { text, attachmentIds, ownerId: row.owner_id, receivedAt,...(pinned?{attachmentManifest:pinned.pinned,attachmentSourceSha256:pinned.manifest_sha256}:{}) };
   }
 }

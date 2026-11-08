@@ -1,4 +1,5 @@
-import { copyFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import type { ArtifactService } from '../artifacts/service.ts';
 import type { FileEngineAdapter, FileEngineResult } from './engine.ts';
@@ -23,17 +24,31 @@ export class FileEngineWorker {
       const inputSuffix = new Map([
         ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', '.docx'],
         ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', '.xlsx'],
+        ['application/vnd.openxmlformats-officedocument.presentationml.presentation', '.pptx'],
         ['application/vnd.ms-excel', '.xls'],
         ['application/pdf', '.pdf'],
       ]).get(String(job.mime_type));
       let engineInput = String(job.server_path);
       const readOnlyOperation = ['document.inspect', 'document.read'].includes(operation);
-      if (!readOnlyOperation) {
+      let sourceIdentity: Record<string, unknown> | undefined;
+      if (readOnlyOperation) {
+        const source = this.artifacts.download(String(job.artifact_id), String(job.owner_id), Number(job.base_version));
+        const content = source.verified_content instanceof Buffer
+          ? source.verified_content : readFileSync(String(source.server_path));
+        const digest = createHash('sha256').update(content).digest('hex');
+        if (Number(source.version) !== Number(job.base_version) || String(source.sha256) !== String(job.base_sha256)
+          || content.length !== Number(source.size_bytes) || digest !== String(job.base_sha256)) {
+          throw new Error('FILE_SOURCE_INTEGRITY_FAILED');
+        }
+        if (operation === 'document.inspect' && content.length > 20 * 1024 * 1024) {
+          throw new Error('DOCUMENT_PREVIEW_TOO_LARGE');
+        }
+        engineInput = join(directory, `input${inputSuffix || '.bin'}`);
+        writeFileSync(engineInput, content, { flag: 'wx', mode: 0o600 });
+        sourceIdentity = { artifact_id: String(job.artifact_id), version: Number(job.base_version), sha256: String(job.base_sha256) };
+      } else {
         const suffix = extname(engineInput) || inputSuffix || '.bin';
         engineInput = join(directory, `input${suffix}`);
-        copyFileSync(String(job.server_path), engineInput);
-      } else if (!extname(engineInput) && inputSuffix) {
-        engineInput = join(directory, `input${inputSuffix}`);
         copyFileSync(String(job.server_path), engineInput);
       }
       const requestedFormat = String(request.save_as?.format || '').toLowerCase();
@@ -51,7 +66,9 @@ export class FileEngineWorker {
           baseSha256: String(job.base_sha256), sourcePath: result.output_path,
           engine: result.engine, checks: result.checks ?? {}, warnings: result.warnings ?? [] });
         this.jobs.complete(String(job.job_id), Number(job.generation), { ...result, output_path: undefined, artifact: published }, Number(published.version));
-      } else this.jobs.complete(String(job.job_id), Number(job.generation), { ...result });
+      } else this.jobs.complete(String(job.job_id), Number(job.generation), {
+        ...result, ...(sourceIdentity ? { source: sourceIdentity } : {}),
+      });
     } catch (error) {
       this.jobs.fail(String(job.job_id), Number(job.generation), error instanceof Error ? error.message : 'ENGINE_CRASH');
     } finally { try { rmSync(directory, { recursive: true, force: true }); } catch {} }

@@ -1,4 +1,5 @@
 import {IsolatedWorkFiles,type IsolatedFileIdentity,type IsolatedFileOperation} from '../always-on/isolated-work-files.ts';
+import type {ArtifactService} from '../artifacts/service.ts';
 import type {TrustedWorkRunWorkspaceResolver} from '../always-on/work-run-workspace.ts';
 import type {ExecutionLease} from './execution-lease.ts';
 import type {TaskCompletionWorkScope} from '../persistent-tasks/completion-candidates.ts';
@@ -7,6 +8,9 @@ import {DiscoveryPlanning} from '../always-on/planning.ts';
 import {TaskReplySemanticChecks} from '../persistent-tasks/reply-semantic.ts';
 import type {ReplyJudgeClient} from '../persistent-tasks/reply-judge-client.ts';
 import {createAuxiliaryRunGuard} from './auxiliary-run-guard.ts';
+import {runBudgetedAuxiliaryCall} from './auxiliary-model-call.ts';
+import type {MemoryReasoningClient} from './memory-reasoning-client.ts';
+import type {MemoryReasoningProvider} from './memory-reasoning-adapter.ts';
 import {assertExecutionLease,normalizeExecutionLease} from './execution-lease.ts';
 import {assertTaskHandoffOperation} from './task-handoff-admission.ts';
 import {createTaskHandoffHost} from './task-handoff-host.ts';
@@ -17,6 +21,7 @@ import type { FastifyInstance } from 'fastify';
 import { withImmediateTransaction } from '../db/database.ts';
 import type { WorkbenchService, AgentRunContext } from './service.ts';
 import type { PersistentTaskService } from '../persistent-tasks/service.ts';
+import type {InteractionService} from '../interactions/service.ts';
 import { readPublicPage } from '../persistent-tasks/public-page.ts';
 import { PersistentTaskAssessmentService } from '../persistent-tasks/assessments.ts';
 import type { AssessmentObservations,SaveAssessmentInput } from '../persistent-tasks/assessments.ts';
@@ -27,15 +32,21 @@ import type { ModelBudgetLedger, ModelBudgetRequest } from './model-budget.ts';
 import type {TaskCollaborationService} from './task-collaboration.ts';
 import {NativeChildReservations} from './native-child-reservations.ts';
 import {NativeTaskIntents} from './native-task-intents.ts';
+import {NativeMemberOwnerControls,type NativeMemberControlClient} from './native-member-owner-controls.ts';
+import {NativeMemberMessageReceipts} from './native-member-message-receipts.ts';
+import {registerNativeMemberRoutes} from './native-member-routes.ts';
 import {savedSessionCheckpoint} from '../harness/session-checkpoints.ts';
 import {installTaskCompletionCandidates,prepareTaskPresentedFiles,validateProposedFiles} from '../persistent-tasks/completion-candidates.ts';
 import {installTaskBusinessReviews,currentTaskBusinessCertificate} from '../persistent-tasks/business-review.ts';
 import {installTaskCompletionHandshake,preparedTaskCompletion,confirmTaskCompletion} from '../persistent-tasks/completion-handshake.ts';
 import {installTaskFinalizations} from '../persistent-tasks/finalization.ts';
+import {EventStore} from '../events/event-store.ts';
+import type { McpRegistryService } from './mcp-registry.ts';
+import { McpExecutionJournal } from './mcp-execution.ts';
 
 export type NativeWorkExecution={resolver:Pick<TrustedWorkRunWorkspaceResolver,'context'|'resolveFiles'>;inspections:{collect(runId:string,lease:ExecutionLease):Promise<unknown>;current(scope:TaskCompletionWorkScope):unknown}};
 
-export const WORKBENCH_TOOL_IDS = ['universe_capabilities', 'universe_search'];
+export const WORKBENCH_TOOL_IDS = ['universe_capabilities', 'universe_search', 'browser_action'];
 
 type Input = Record<string, unknown>;
 type TaskBinding = {task_id:string;occurrence_id:string;task_version:number;generation:number;title:string;objective:string;root_run_id:string;continuation_of:string|null};
@@ -58,7 +69,8 @@ function canonical(value: unknown): string {
 
 /** Only the local authenticated DSH host may resolve a product run's identity. */
 export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSync,
-  workbench: WorkbenchService, tasks: PersistentTaskService, token: string | undefined, modelBudgets?: ModelBudgetLedger,collaboration?:TaskCollaborationService,replyJudge?:ReplyJudgeClient,nativeWork?:NativeWorkExecution) {
+  workbench: WorkbenchService, tasks: PersistentTaskService, token: string | undefined, modelBudgets?: ModelBudgetLedger,collaboration?:TaskCollaborationService,replyJudge?:ReplyJudgeClient,nativeWork?:NativeWorkExecution,
+  allowedOrigins:ReadonlySet<string>=new Set<string>(),nativeMemberClient?:NativeMemberControlClient,events?:EventStore,memoryReasoningClient?:MemoryReasoningClient, mcpRegistry?:McpRegistryService, interactions?:InteractionService,artifacts?:ArtifactService) {
   db.exec(`CREATE TABLE IF NOT EXISTS wb_tool_receipts (
     run_id TEXT NOT NULL REFERENCES ga_runs(id), call_id TEXT NOT NULL,
     request_hash TEXT NOT NULL, response_json TEXT NOT NULL, created_at TEXT NOT NULL,
@@ -68,6 +80,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       goal_id TEXT NOT NULL,goal_revision INTEGER NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)`);
   const assessments=new PersistentTaskAssessmentService(db);
   const executionEvidence = new TaskExecutionEvidence(db);
+  const mcp = mcpRegistry ? { registry: mcpRegistry, journal: new McpExecutionJournal(db, mcpRegistry, executionEvidence) } : undefined;
   const discoveryPlanning=new DiscoveryPlanning(db,workbench);
   const replyDrafts=new TaskReplyDrafts(db);
   const replyChecks=replyJudge?new TaskReplySemanticChecks(db):undefined;
@@ -87,6 +100,8 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
   installTaskFinalizations(db);
   const nativeTaskIntents=collaboration?new NativeTaskIntents(db,workbench,tasks,collaboration):undefined;
   const nativeChildren=collaboration?new NativeChildReservations(db,collaboration,nativeTaskIntents):undefined;
+  const nativeMemberMessages=nativeChildren?new NativeMemberMessageReceipts(db):undefined;
+  if(nativeChildren)registerNativeMemberRoutes(app,new NativeMemberOwnerControls(db),nativeMemberClient);
   app.post('/internal/v1/workbench/handoff',async request=>{
     authorized(request.headers.authorization);const input=object(request.body);
     fields(input,['run_id','session_ref','action','expected_policy_version','route','request']);
@@ -228,7 +243,16 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
     });
   });
   app.post('/internal/v1/workbench/native-child-source',async request=>{
-    authorized(request.headers.authorization);const input=object(request.body);fields(input,['run_id','session_ref','child_session_ref','purpose']);
+    authorized(request.headers.authorization);const input=object(request.body);
+    if(input.action==='member-message'){
+      fields(input,['run_id','session_ref','action','receipt_action','operation','request_id','child_session_ref','child_run_id','role_ref','message_sha256','result']);
+      const identity=context(input),task=requireTask(identity);
+      if(!nativeMemberMessages||identity.kind!=='task'||task.root_run_id!==identity.run_id)throw new Error('workbench_identity_forbidden');
+      if(input.receipt_action==='begin')return nativeMemberMessages.begin(identity.owner_id,input);
+      if(input.receipt_action==='complete')return nativeMemberMessages.complete(identity.owner_id,input);
+      throw new Error('invalid_native_member_message');
+    }
+    fields(input,['run_id','session_ref','child_session_ref','purpose']);
     return withImmediateTransaction(db,()=>{
       assertExecutionLease(db,String(input.run_id),input.execution_lease);const parent=context(input);requireTask(parent);
       return {source:workbench.nativeChildSource(parent.owner_id,input)};
@@ -319,10 +343,15 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       JOIN ga_runs r ON r.conversation_id=b.conversation_id WHERE b.session_id=? AND r.id=?`)
       .get(input.session_ref, input.run_id) as {owner_id: string; conversation_id: string} | undefined;
     if (!binding) throw new Error('workbench_identity_forbidden');
+    if(input.tool_name==='browser_action'&&input.execution_lease===undefined)throw new Error('workbench_execution_lease_required');
     if(input.execution_lease!==undefined)assertExecutionLease(db,input.run_id,input.execution_lease);
     workbench.assertRunActive(input.run_id); tasks.assertRunActive(input.run_id);
     const saved = workbench.contextForRun(input.run_id);
-    const resolved = saved ? {...saved, allowed_tools: saved.allowed_tools.filter(tool => WORKBENCH_TOOL_IDS.includes(tool))} : null;
+    const mcpConnections = saved && mcp ? mcp.registry.runtimeConnections(saved.owner_id, saved.agent_id).map(({ connection_id, server_name, transport, version, generation, config, tools }) =>
+      ({ connection_id, server_name, transport, version, generation, config, tools })) : [];
+    const mcpTools = mcpConnections.flatMap(connection => connection.tools.map(tool => tool.public_name));
+    const resolved = saved ? {...saved, allowed_tools: [...saved.allowed_tools.filter(tool => WORKBENCH_TOOL_IDS.includes(tool)), ...mcpTools],
+      ...(mcpConnections.length ? { mcp_connections: mcpConnections } : {})} : null;
     if (!resolved || resolved.owner_id !== binding.owner_id) throw new Error('workbench_identity_forbidden');
     if (input.tool_name !== undefined && (typeof input.tool_name !== 'string'
       || !(resolved.allowed_tools.includes(input.tool_name) || input.tool_name === 'jot_workspace'))) throw new Error('workbench_tool_forbidden');
@@ -384,31 +413,159 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
   app.post('/internal/v1/workbench/model-budget',async request=>{
     authorized(request.headers.authorization);
     const input=object(request.body);
-    const allowed:Record<string,string[]>={reserve:['request'],dispatch:['attempt_id'],settle:['attempt_id','usage'],unknown:['attempt_id','reason'],release:['attempt_id']};
+    const allowed:Record<string,string[]>={selection:[],reserve:['request'],dispatch:['attempt_id'],settle:['attempt_id','usage'],unknown:['attempt_id','reason'],release:['attempt_id'],provider_receipt:['attempt_id','stable_request_id','usage']};
     const action=String(input.action??'');if(!allowed[action])throw new Error('budget_request_invalid');
     fields(input,['run_id','session_ref','action',...allowed[action]!]);
     if(!modelBudgets)throw new Error('budget_service_unavailable');
     return withImmediateTransaction(db,()=>{
       const owner=accountingOwner(input),runId=String(input.run_id);
-      if(action==='reserve'||action==='dispatch'){
+      if(action==='selection'){
+        assertExecutionLease(db,runId,input.execution_lease);
+        const identity=context(input);
+        if(!identity.model_budget)throw new Error('budget_service_unavailable');
+        assertIdentityAccounting(identity);
+        const admission=db.prepare(`SELECT a.route_json FROM wb_model_budget_attempts a JOIN wb_model_budget_admissions q
+          ON q.run_id=a.run_id AND q.attempt_id=a.attempt_id WHERE a.run_id=? AND a.attempt_id='queue-admission' AND a.state IN ('reserved','released')`).get(runId) as {route_json:string}|undefined;
+        if(!admission)throw new Error('budget_route_unavailable');
+        const route=JSON.parse(admission.route_json) as {provider?:unknown;model?:unknown};
+        if(typeof route.provider!=='string'||typeof route.model!=='string')throw new Error('budget_route_unavailable');
+        return {route:{provider:route.provider,model:route.model}};
+      }
+      if(action==='reserve'||action==='dispatch'||action==='provider_receipt'){
         assertExecutionLease(db,runId,input.execution_lease);
         const identity=context(input);
         assertIdentityAccounting(identity);
-        assertMemoryModelAdmission(identity,action==='reserve'?(input.request as ModelBudgetRequest)?.attempt_id:input.attempt_id);
+        if(action!=='provider_receipt')assertMemoryModelAdmission(identity,action==='reserve'?(input.request as ModelBudgetRequest)?.attempt_id:input.attempt_id);
+        else if(identity.kind!=='memory_capture')throw new Error('budget_provider_receipt_invalid');
       }
       if(action==='reserve')return {receipt:modelBudgets.reserve(owner,runId,input.request as ModelBudgetRequest)};
       if(!validCallId(input.attempt_id))throw new Error('budget_request_invalid');
       const attemptId=String(input.attempt_id);
       if(action==='dispatch')return {receipt:modelBudgets.dispatch(owner,runId,attemptId)};
+      if(action==='provider_receipt')return modelBudgets.recordMemoryProviderReceipt(owner,runId,attemptId,String(input.stable_request_id??''),input.usage);
       if(action==='settle')return {receipt:modelBudgets.settle(owner,runId,attemptId,input.usage)};
       if(action==='unknown')return {receipt:modelBudgets.markUnknown(owner,runId,attemptId,String(input.reason??''))};
       return {receipt:modelBudgets.releaseUndispatched(owner,runId,attemptId)};
+    });
+  });
+  app.post('/internal/v1/workbench/browser-approval',{bodyLimit:2*1048576},async request=>{
+    authorized(request.headers.authorization);
+    const input=object(request.body);fields(input,['run_id','session_ref','action','call_id','interaction_id','action_payload','action_summary','artifact','content_base64']);
+    if(input.execution_lease===undefined)throw new Error('workbench_execution_lease_revoked');
+    normalizeExecutionLease(input.execution_lease);
+    if(!interactions)throw new Error('browser_approval_unavailable');
+    if(!['request','observe','publish_screenshot'].includes(String(input.action)))throw new Error('workbench_browser_approval_invalid');
+    return withImmediateTransaction(db,()=>{
+      const identity=context({...input,tool_name:'browser_action'});
+      const binding={ownerId:identity.owner_id,runId:identity.run_id,sessionRef:String(input.session_ref)};
+      if(input.action==='publish_screenshot'){
+        if(!artifacts||!events)throw Error('browser_artifact_unavailable');
+        if(input.interaction_id!==undefined||input.action_payload!==undefined||input.action_summary!==undefined)throw Error('browser_artifact_invalid');
+        const artifact=object(input.artifact),{browser_receipt:rawReceipt,...metadata}=artifact,receipt=object(rawReceipt);
+        if(Object.keys(metadata).sort().join(',')!=='artifact_id,mime_type,name,page_revision,sha256,size,untrusted,url'
+          ||metadata.name!=='browser-screenshot.png'||metadata.mime_type!=='image/png'||metadata.untrusted!==true
+          ||typeof metadata.artifact_id!=='string'||typeof metadata.sha256!=='string'||!/^[a-f0-9]{64}$/.test(metadata.sha256)
+          ||!Number.isSafeInteger(metadata.size)||Number(metadata.size)<8||Number(metadata.size)>1048576
+          ||receipt.kind!=='browser_operation_receipt'||receipt.status!=='succeeded'||receipt.action!=='screenshot'
+          ||receipt.run_id!==identity.run_id||receipt.call_id!==input.call_id||receipt.url!==metadata.url
+          ||receipt.result_sha256!==createHash('sha256').update(JSON.stringify(metadata)).digest('hex')
+          ||typeof input.content_base64!=='string'||input.content_base64.length>1398104)throw Error('browser_artifact_invalid');
+        const bytes=Buffer.from(input.content_base64,'base64');
+        if(bytes.toString('base64')!==input.content_base64||bytes.length!==metadata.size)throw Error('browser_artifact_invalid');
+        const approved=db.prepare(`SELECT id FROM ga_interactions WHERE run_id=? AND kind='approval'
+          AND json_extract(request_json,'$.purpose')='browser_action' AND json_extract(request_json,'$.tool_call_id')=?`).all(identity.run_id,String(input.call_id));
+        if(approved.length!==1)throw Error('browser_artifact_approval_required');
+        const actionPayload={tool:'browser_action',operation_id:receipt.operation_id,call_id:input.call_id,request_hash:receipt.request_hash,
+          url:metadata.url,action:'screenshot',page_revision:metadata.page_revision,format:'png',persist:true};
+        const observed=interactions.observeBrowserAction({...binding,interactionId:String(approved[0]!.id),callId:String(input.call_id),actionPayload});
+        if(observed.state!=='approved')throw Error('browser_artifact_approval_required');
+        const prior=db.prepare('SELECT 1 FROM ga_run_artifacts WHERE run_id=? AND artifact_id=? AND version=1').get(identity.run_id,metadata.artifact_id);
+        const published=artifacts.registerBrowserScreenshot({ownerId:identity.owner_id,runId:identity.run_id,callId:String(input.call_id),artifactId:metadata.artifact_id,content:bytes,sha256:metadata.sha256});
+        if(!prior){
+          const {artifact_id,conversation_id,file_name,media_type,size_bytes,sha256,version,status,created_at,preview_kind,origin}=published;
+          events.append(String(conversation_id),identity.run_id,'artifact.upsert',{
+            artifact_id,conversation_id,run_id:identity.run_id,file_name,media_type,size_bytes,sha256,version,status,created_at,preview_kind,origin,
+          });
+        }
+        return {artifact:published};
+      }
+      if(input.artifact!==undefined||input.content_base64!==undefined)throw Error('workbench_browser_approval_invalid');
+      if(input.action==='request'){
+        if(input.interaction_id!==undefined)throw new Error('workbench_browser_approval_invalid');
+        return{interaction:interactions.requestBrowserAction({...binding,callId:String(input.call_id??''),actionPayload:input.action_payload,actionSummary:String(input.action_summary??'')})};
+      }
+      if(input.action_summary!==undefined)throw new Error('workbench_browser_approval_invalid');
+      return interactions.observeBrowserAction({...binding,interactionId:String(input.interaction_id??''),callId:String(input.call_id??''),actionPayload:input.action_payload});
     });
   });
   app.post('/internal/v1/workbench/guard', async request => {
     authorized(request.headers.authorization);
     const input = object(request.body); fields(input, ['run_id', 'session_ref', 'tool_name']);
     return { context: context(input) };
+  });
+  app.post('/internal/v1/workbench/context-delivery',async request=>{
+    authorized(request.headers.authorization);
+    const input=object(request.body);fields(input,['run_id','session_ref','memory_retrieval_id','context_hash','references']);
+    if(typeof input.memory_retrieval_id!=='string'||!/^retrieval-[A-Za-z0-9-]{16,64}$/.test(input.memory_retrieval_id)
+      ||typeof input.context_hash!=='string'||!/^[a-f0-9]{64}$/.test(input.context_hash)
+      ||!Array.isArray(input.references)||input.references.length>200)throw new Error('memory_context_delivery_invalid');
+    const references=input.references.map(value=>{
+      const reference=object(value);
+      if(Object.keys(reference).sort().join(',')!=='memory_id,version'||typeof reference.memory_id!=='string'
+        ||!reference.memory_id||reference.memory_id.length>192||!Number.isSafeInteger(reference.version)||Number(reference.version)<1)
+        throw new Error('memory_context_delivery_invalid');
+      return{memory_id:reference.memory_id,version:Number(reference.version)};
+    });
+    return withImmediateTransaction(db,()=>{
+      const identity=context(input);
+      return{receipt:workbench.recordContextDelivery(identity.owner_id,identity.workspace_id,identity.run_id,input.memory_retrieval_id as string,input.context_hash as string,references)};
+    });
+  });
+  app.post('/internal/v1/workbench/mcp-current', async request => {
+    authorized(request.headers.authorization);
+    const input = object(request.body);
+    if (!mcp) throw new Error('mcp_service_unavailable');
+    const { run_id, session_ref, capability_epoch, ...identity } = input;
+    const hasOriginalBinding = run_id !== undefined || session_ref !== undefined || capability_epoch !== undefined;
+    const state = mcp.registry.controlState(identity);
+    if (!hasOriginalBinding) return state;
+    if (typeof run_id !== 'string' || typeof session_ref !== 'string' || !Number.isSafeInteger(capability_epoch)
+      || Number(capability_epoch) < 1 || accountingOwner(input) !== state.owner_id) throw new Error('workbench_identity_forbidden');
+    const binding = db.prepare('SELECT agent_id,epoch AS capability_epoch FROM wb_run_bindings WHERE run_id=? AND owner_id=?')
+      .get(run_id, state.owner_id) as { agent_id: string; capability_epoch: number } | undefined;
+    if (!binding || binding.agent_id !== state.agent_id || Number(binding.capability_epoch) !== Number(capability_epoch)) {
+      throw new Error('workbench_identity_forbidden');
+    }
+    return { ...state, capability_epoch: Number(binding.capability_epoch) };
+  });
+  app.post('/internal/v1/workbench/mcp-prepare', async request => {
+    authorized(request.headers.authorization);
+    const input = object(request.body); fields(input, ['run_id','session_ref','connection_id','generation','tool_id','call_id','arguments']);
+    if (!mcp) throw new Error('mcp_service_unavailable');
+    if (input.execution_lease === undefined) throw new Error('execution_lease_invalid');
+    return withImmediateTransaction(db, () => {
+      assertExecutionLease(db, String(input.run_id), input.execution_lease);
+      const current = context(input);
+      const tool = mcp.registry.authorizeTool(current.owner_id, current.agent_id, String(input.connection_id), Number(input.generation), String(input.tool_id));
+      if (!current.allowed_tools.includes(tool.public_name)) throw new Error('mcp_tool_forbidden');
+      const identity = { ...context({ ...input, tool_name: tool.public_name }), session_ref: String(input.session_ref) };
+      assertIdentityAccounting(identity);
+      return mcp.journal.begin(identity, { connection_id: input.connection_id, generation: input.generation,
+        tool_id: input.tool_id, call_id: input.call_id, arguments: input.arguments });
+    });
+  });
+  app.post('/internal/v1/workbench/mcp-settle', async request => {
+    authorized(request.headers.authorization);
+    const input = object(request.body); fields(input, ['run_id','session_ref','operation_id','state','result','reason_code']);
+    if (!mcp) throw new Error('mcp_service_unavailable');
+    if (input.state !== 'settled' && input.state !== 'unknown') throw new Error('invalid_mcp_operation_state');
+    if (input.state === 'settled' && !Object.hasOwn(input, 'result') || input.state === 'unknown' && input.result !== undefined) throw new Error('invalid_mcp_operation_state');
+    const owner = accountingOwner(input);
+    const binding = db.prepare('SELECT agent_id FROM wb_run_bindings WHERE run_id=? AND owner_id=?').get(String(input.run_id), owner) as {agent_id:string}|undefined;
+    if (!binding) throw new Error('workbench_identity_forbidden');
+    const identity = { owner_id: owner, agent_id: binding.agent_id, run_id: String(input.run_id), session_ref: String(input.session_ref) };
+    if (input.state === 'settled') return mcp.journal.settle(identity, input.operation_id, input.result);
+    return mcp.journal.markUnknown(identity, input.operation_id, input.reason_code);
   });
   app.post('/internal/v1/workbench/task-state',async request=>{
     authorized(request.headers.authorization);
@@ -539,6 +696,13 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
   app.post('/internal/v1/workbench/tool', async request => {
     authorized(request.headers.authorization);
     const input = object(request.body); fields(input, ['run_id', 'session_ref', 'operation', 'arguments', 'call_id']);
+    const initialIdentity=context({...input,tool_name:'jot_workspace'}),initialOperation=String(input.operation??'');
+    const dreamRun=initialIdentity.kind==='memory_consolidation';
+    if(dreamRun){
+      assertExecutionLease(db,initialIdentity.run_id,input.execution_lease);
+      if(!['memory.list','memory.stage','memory.propose'].includes(initialOperation))throw new Error('workbench_operation_forbidden');
+      if(!validCallId(input.call_id))throw new Error('invalid_call_id');
+    }
     if(nativeWork&&['files.list','files.read','files.write'].includes(String(input.operation))){
       const identity=context({...input,tool_name:'jot_workspace'}),candidate=nativeWork.resolver.context(identity.run_id);
       if(candidate){
@@ -578,7 +742,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       }
       // This HTTP reader pins a public address at every redirect. It never
       // inherits browser cookies, private network access or script execution.
-      const page = await readPublicPage(args.url);
+      const page = await readPublicPage(args.url,{allowedOrigins});
       return withImmediateTransaction(db, () => {
         context({...input, tool_name: 'jot_workspace'});
         const result = {url: page.url, text: page.text.slice(0, 12000), truncated: page.text.length > 12000,
@@ -592,9 +756,71 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
         return response;
       });
     }
+    const memoryListArgs=input.arguments&&typeof input.arguments==='object'&&!Array.isArray(input.arguments)?input.arguments as Input:undefined;
+    if(!dreamRun&&input.operation==='memory.list'&&validCallId(input.call_id)&&memoryReasoningClient
+      &&typeof memoryListArgs?.q==='string'&&memoryListArgs.q.trim()){
+      const cachedMemoryRead=(identity:AgentRunContext,prior:unknown)=>{
+        const cached=object(prior),oldItems=cached.items;
+        if(!Array.isArray(oldItems))throw new Error('cached_memory_result_invalid');
+        const items=workbench.filterCurrentMemoryResult(identity.owner_id,identity.workspace_id,identity.run_id,oldItems);
+        return items.length!==oldItems.length?{items,...(typeof cached.retrieval_id==='string'?{retrieval_id:cached.retrieval_id}:{}),invalidated_result:true}:prior;
+      };
+      type MemoryPreflight={cached:true;value:unknown}|{cached:false;identity:ReturnType<typeof context>;args:Input;callId:string;digest:string;attested:boolean;receipted:boolean};
+      const preflight=withImmediateTransaction(db,():MemoryPreflight=>{
+        const identity=context({...input,tool_name:'jot_workspace'}),args=object(input.arguments);fields(args,['q']);
+        tasks.assertDiscoveryOperation(identity.run_id,'memory.list');
+        if(identity.kind==='memory_capture')throw new Error('workbench_operation_forbidden');
+        const attested=!!identity.task_binding||(identity.kind==='native_team'&&!!identity.task_assignment),receipted=attested;
+        const callId=String(input.call_id);if(receipted&&!validCallId(callId))throw new Error('invalid_call_id');
+        const digest=createHash('sha256').update(canonical({operation:'memory.list',args})).digest('hex');
+        if(receipted){const prior=savedCall(identity.run_id,callId,digest);if(prior!==undefined)return {cached:true,value:cachedMemoryRead(identity,prior)};}
+        if(identity.task_binding)assertTaskDependenciesReady(db,executionEvidence,identity.owner_id,identity.task_binding.task_id,identity.run_id);
+        return {cached:false,identity,args,callId,digest,attested,receipted};
+      });
+      if(preflight.cached)return preflight.value;
+      const {identity,args,callId,digest,attested,receipted}=preflight;
+      const prepared=workbench.prepareMemoryReasoning(identity.owner_id,identity.workspace_id,String(args.q),identity.run_id);
+      const reasoningFence=createAuxiliaryRunGuard(db,workbench,tasks,identity.owner_id,identity.run_id);
+      const guard=()=>{reasoningFence.guard();context({...input,tool_name:'jot_workspace'});};
+      const providerRequest={query:prepared.query,candidates:prepared.candidates,limit:5};
+      guard();memoryReasoningClient.preflight(providerRequest);
+      const provider:MemoryReasoningProvider={selectCandidates:async request=>{
+        const invocation=await runBudgetedAuxiliaryCall({ledger:modelBudgets!,owner:identity.owner_id,runId:identity.run_id,route:memoryReasoningClient!.route,
+          purpose:'memory-reasoning',guard,invoke:()=>memoryReasoningClient!.invoke(request)});
+        return invocation.value;
+      }};
+      const selection=await workbench.selectMemoryReasoning(prepared,provider);
+      return withImmediateTransaction(db,()=>{
+        const current=context({...input,tool_name:'jot_workspace'}),currentArgs=object(input.arguments);fields(currentArgs,['q']);
+        tasks.assertDiscoveryOperation(current.run_id,'memory.list');
+        if(current.kind==='memory_capture')throw new Error('workbench_operation_forbidden');
+        const currentAttested=!!current.task_binding||(current.kind==='native_team'&&!!current.task_assignment);
+        if(currentAttested!==attested)throw new Error('workbench_identity_changed');
+        if(current.task_binding)assertTaskDependenciesReady(db,executionEvidence,current.owner_id,current.task_binding.task_id,current.run_id);
+        const prior=receipted?savedCall(current.run_id,callId,digest):undefined;
+        if(prior!==undefined)return cachedMemoryRead(current,prior);
+        const result=workbench.commitMemoryReasoningInTransaction(current.owner_id,current.workspace_id,prepared.query,current.run_id,callId,prepared,selection);
+        let response:unknown=result;
+        if(attested){const value=object(result),proof=executionEvidence.record(current.run_id,callId,'memory.list',result);response={...value,execution_receipt:proof};}
+        if(receipted&&savedCall(current.run_id,callId,digest)===undefined)saveCall(current.run_id,callId,digest,response);
+        return response;
+      });
+    }
     const toolResult=withImmediateTransaction(db, () => {
       const identity = context({...input, tool_name: 'jot_workspace'});
       const args = object(input.arguments), operation = String(input.operation ?? '');
+      const isDream=identity.kind==='memory_consolidation';
+      if(isDream){
+        assertExecutionLease(db,identity.run_id,input.execution_lease);
+        const dream=identity.memory_dream,agent=workbench.getAgent(identity.owner_id,identity.agent_id),policy=workbench.memoryDreamPolicy(identity.owner_id,identity.agent_id);
+        if(!dream||agent.status!=='active'||agent.workspace_id!==identity.workspace_id||agent.project_id!==identity.project_id
+          ||agent.capability_epoch!==dream.epoch||identity.capability_epoch!==dream.epoch||dream.project_id!==identity.project_id
+          ||!policy.enabled||policy.workspace_id!==identity.workspace_id||policy.project_id!==dream.project_id||policy.agent_id!==identity.agent_id
+          ||policy.policy_version!==dream.policy_version||policy.epoch!==dream.epoch||policy.interval_seconds!==dream.interval_seconds
+          ||policy.next_due_at!==dream.cadence_slot)throw new Error('memory_dream_policy_stale');
+        if(!['memory.list','memory.stage','memory.propose'].includes(operation))throw new Error('workbench_operation_forbidden');
+        if(!validCallId(input.call_id))throw new Error('invalid_call_id');
+      }
       const { owner_id: owner, workspace_id: workspace, project_id: project, run_id: runId } = identity;
       const keys: Record<string, string[]> = {
         'agents.list': [], 'messages.list': [],
@@ -616,6 +842,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       };
       if (!keys[operation]) throw new Error('invalid_workspace_operation');
       fields(args, keys[operation]!);
+      if(isDream&&operation==='memory.stage'&&args.scope!==undefined&&args.scope!=='project')throw new Error('workbench_operation_forbidden');
       tasks.assertDiscoveryOperation(runId,operation);
       if(identity.kind==='memory_capture'){
         const job=workbench.memoryProcessing.assertRun(owner,identity.agent_id,runId);
@@ -623,7 +850,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       }
       const mutating = ['messages.send', 'memory.save', 'memory.stage', 'memory.propose', 'memory.capture.propose', 'files.write','tasks.upsert','tasks.evidence','tasks.assess','tasks.delegate','tasks.reply_draft','discovery.plan','discovery.report'].includes(operation);
       const attested = (!!identity.task_binding||(identity.kind==='native_team'&&!!identity.task_assignment)) && !operation.startsWith('tasks.')&&(!operation.startsWith('discovery.')||operation==='discovery.source');
-      const receipted = mutating || attested;
+      const receipted = mutating || attested || isDream;
       const callId = input.call_id;
       if (receipted && !validCallId(callId)) throw new Error('invalid_call_id');
       const digest = createHash('sha256').update(canonical({operation, args})).digest('hex');
@@ -651,7 +878,10 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
         case 'messages.list': result = workbench.listMessages(owner, workspace, runId); break;
         case 'messages.send': result = workbench.sendMessage(owner, workspace,
           {...args, client_message_id: `tool-${createHash('sha256').update(`${runId}\0${String(callId)}`).digest('hex')}`}, runId); break;
-        case 'memory.list': result = validCallId(callId)?workbench.retrieveMemory(owner,workspace,args,runId,String(callId)):workbench.listMemory(owner,workspace,args,runId); break;
+        case 'memory.list': {
+          const query=isDream?{...args,scope:'project',project_id:project,agent_id:null}:args;
+          result=validCallId(callId)?workbench.retrieveMemory(owner,workspace,query,runId,String(callId)):workbench.listMemory(owner,workspace,query,runId);break;
+        }
         case 'memory.save': result = workbench.saveMemory(owner, workspace, {...args, project_id: project, verified: false}, runId); break;
         case 'memory.capture.pending': result=workbench.memoryCapture.pending(owner,identity.agent_id);break;
         case 'memory.capture.read':
@@ -662,7 +892,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
           const value=workbench.memoryCapture.propose(owner,identity.agent_id,capture_id,proposal,runId);
           result={capture_id:value.capture_id,status:value.status,version:value.version,source_count:value.source_count,notes_count:value.notes_count};break;
         }
-        case 'memory.stage': result=workbench.memoryConsolidations.stage(owner,workspace,{...args,project_id:project,...(args.scope==='private'?{agent_id:identity.agent_id}:{})},runId);break;
+        case 'memory.stage': result=workbench.memoryConsolidations.stage(owner,workspace,isDream?{...args,scope:'project',project_id:project,agent_id:null}:{...args,project_id:project,...(args.scope==='private'?{agent_id:identity.agent_id}:{})},runId);break;
         case 'memory.propose': {
           const {consolidation_id,...proposal}=args;
           if(typeof consolidation_id!=='string')throw new Error('invalid_memory_consolidation');

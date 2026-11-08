@@ -16,6 +16,7 @@ export function encodeVoiceWave(samples,sampleRate,maxBytes=2*1024*1024){
  return bytes;
 }
 
+/** @param {{signal?:AbortSignal,maxDurationMs?:number,maxBytes?:number,onLimit?:()=>void,onLevel?:(frame:{level:number,elapsedMs:number})=>void,env?:typeof globalThis}} [options] */
 export async function recordVoice({signal=new AbortController().signal,maxDurationMs=60000,maxBytes=2*1024*1024,onLimit=()=>{},onLevel=()=>{},env=globalThis}={}){
  const Audio=env.AudioContext??env.webkitAudioContext;
  if(env.isSecureContext===false||!Audio||!env.navigator?.mediaDevices?.getUserMedia)throw Error('VOICE_RECORDING_UNSUPPORTED：此浏览器无法录音，请使用支持麦克风的 HTTPS 浏览器');

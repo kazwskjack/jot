@@ -48,6 +48,7 @@ export class PrdCommandStore {
  complete(){this.storage.removeItem(this.key);}
 }
 export class PrdFlow {
+ /** @param {import('./types').Task} task @param {boolean} executionReady @param {(()=>string)|undefined} key @param {PrdCommandStore|null} [store] */
  constructor(task,executionReady,key,store=null){this.task={...task};this.executionReady=executionReady;this.save=new TaskSaveReceipt(key,store);this.sources=null;this.selection=null;this.preview=null;this.receipt=null;this.busy=false;this.refreshRequired=false;this.epoch=0;}
  get pending(){return this.save.pending;}
  get ready(){return this.executionReady&&this.task.status==='paused'&&this.sources?.task_id===this.task.task_id&&this.sources?.task_version===this.task.version&&this.sources?.readiness?.ready===true;}
@@ -80,6 +81,7 @@ export class PrdFlow {
 
 // Capture before parent dialog and navigation handlers. Browser chrome navigation
 // is covered by beforeunload; ordinary UI navigation cannot discard an unknown command.
+/** @param {Window} target @param {()=>boolean} pending @param {(node:EventTarget|null)=>boolean} inside */
 export function installPrdLeaveGuard(target,pending,inside){
  const guard=event=>{if(!pending())return;
   if(event.type==='beforeunload'){event.preventDefault();event.returnValue='';return;}

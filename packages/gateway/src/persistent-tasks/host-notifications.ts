@@ -19,7 +19,7 @@ export function enqueueHostFailure(db:DatabaseSync,episodeId:string,now:string){
  if(!settings)return;
  const text='暂时无法检查这项任务，系统会按重试策略继续检查。请在工作台查看原因和恢复选项。',payload=JSON.stringify({kind:'text',text}),seconds=Math.floor(Date.parse(now)/1000);
  for(const saved of scope.bindings){
-  const binding=db.prepare("SELECT * FROM ga_owner_channel_bindings WHERE channel_binding_id=? AND owner_id=? AND version=? AND status='verified' AND channel IN ('wecom','email')").get(saved.channel_binding_id,episode.owner_id,saved.version) as Row|undefined;if(!binding)continue;
+ const binding=db.prepare("SELECT * FROM ga_owner_channel_bindings WHERE channel_binding_id=? AND owner_id=? AND version=? AND status='verified' AND channel IN ('wecom','email','webpush')").get(saved.channel_binding_id,episode.owner_id,saved.version) as Row|undefined;if(!binding)continue;
   const effect='delivery-host-'+hash(JSON.stringify([episodeId,saved.channel_binding_id])).slice(0,32);
   db.prepare(`INSERT INTO ga_channel_deliveries(effect_id,run_id,message_id,destination,recipient,artifact_ref,payload_json,status,created_at,updated_at) VALUES(?,NULL,?,?,?,NULL,?,'pending',?,?)`).run(effect,episodeId,binding.channel,binding.principal,payload,now,now);
   db.prepare('INSERT INTO wb_task_host_notification_authorizations VALUES(?,?,?,?,?,?,?)').run(effect,episodeId,binding.channel_binding_id,binding.version,binding.channel,binding.principal,hash(payload));

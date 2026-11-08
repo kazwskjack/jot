@@ -14,6 +14,8 @@ const string={type:'string',minLength:1,maxLength:8000};
 const object=(properties,required)=>({type:'object',properties,required,additionalProperties:false});
 const sameToken=(a,b)=>typeof a==='string'&&Buffer.byteLength(a)===Buffer.byteLength(b)&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
 
+export function encodeSseEvent(event){return `id: ${event.seq}\ndata: ${JSON.stringify(event)}\n\n`;}
+
 export async function buildServer(options={}){
   const demo=options.demo??false,csrf=randomBytes(24).toString('hex');
   const flag=value=>{if(value===undefined||value==='false')return false;if(value==='true')return true;throw Error('invalid_chat_configuration');};
@@ -59,7 +61,7 @@ export async function buildServer(options={}){
     if(!store.conversation(req.params.id))return reply.code(404).send({error:'not_found'});
     let cursor=Number(req.query.after??0);if(!Number.isSafeInteger(cursor)||cursor<0)return reply.code(400).send({error:'invalid_cursor'});
     reply.hijack();streams.add(reply.raw);reply.raw.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-store','X-Accel-Buffering':'no'});reply.raw.flushHeaders();
-    const send=()=>{if(reply.raw.destroyed)return;for(const e of store.events(req.params.id,cursor)){if(reply.raw.writableLength>1000000){reply.raw.destroy();return;}reply.raw.write(`id: ${e.seq}\ndata: ${JSON.stringify(e)}\n\n`);cursor=e.seq;}};
+    const send=()=>{if(reply.raw.destroyed)return;for(const e of store.events(req.params.id,cursor)){if(reply.raw.writableLength>1000000){reply.raw.destroy();return;}reply.raw.write(encodeSseEvent(e));cursor=e.seq;}};
     send();const polling=setInterval(send,150),heartbeat=setInterval(()=>reply.raw.write(': keepalive\n\n'),15000);reply.raw.on('close',()=>{streams.delete(reply.raw);clearInterval(polling);clearInterval(heartbeat);});
   });
   app.post('/api/conversations/:id/files',{schema:{body:object({name:{type:'string',maxLength:100},text:{type:'string',maxLength:1000000}},['name','text'])}},async(req,reply)=>{

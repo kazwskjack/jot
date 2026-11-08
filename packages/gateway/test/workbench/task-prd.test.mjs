@@ -148,3 +148,19 @@ for(const [status,settled] of [[null,0],['running',0],['succeeded',0],['succeede
  f.db.prepare('INSERT INTO ga_web_operation_cursors(run_id,tool_call_id,session_ref,operation_id,last_status,items_settled,started_at,updated_at) VALUES(?,?,?,?,?,?,?,?)').run(root.run_id,'original-web-call','fixture-original-session','fixture-original-operation',status,settled,now,now);const before=f.db.prepare('SELECT * FROM ga_web_operation_cursors WHERE run_id=?').get(root.run_id);
  const response=await f.api('POST','/bind',{source:f.selection,preview_sha256:preview.preview_sha256});if(status==='succeeded'&&settled===1){assert.equal(response.statusCode,200,response.body);}else{assert.equal(response.statusCode,409,response.body);assert.equal(response.json().error.code,'PRD_EXECUTION_UNRESOLVED');assert.equal(f.persistentTasks.get('alice',f.task.task_id).version,4);assert.equal(f.db.prepare('SELECT count(*) n FROM wb_task_prd_bindings').get().n,0);}assert.deepEqual(f.db.prepare('SELECT * FROM ga_web_operation_cursors WHERE run_id=?').get(root.run_id),before);
 });
+
+
+test('PRD file inputs keep Markdown support and reject invalid UTF-8, control bytes and oversized text',async t=>{
+ const f=await fixture(t);
+ const markdown=f.workbench.writeFile('alice','ws',{project_id:f.agent.project_id,path:'requirements.markdown',content,expected_version:0});
+ const listed=(await f.api('GET','/sources')).json();assert.ok(listed.sources.some(source=>source.path==='requirements.markdown'));
+ const selection={kind:'logical_file',path:markdown.path,version:markdown.version,sha256:markdown.sha256};
+ const preview=await f.api('POST','/preview',{source:selection});assert.equal(preview.statusCode,200,preview.body);assert.equal(preview.json().content,content);
+ for(const [raw,code,status] of [[Buffer.from([0xc3,0x28]),'PRD_SOURCE_UNSUPPORTED',422],[Buffer.from('Goal\u0000hidden'),'PRD_SOURCE_UNSUPPORTED',422],[Buffer.alloc(65537,'a'),'PRD_SOURCE_TOO_LARGE',409]]){
+  const upload=f.artifacts.initUpload(f.agent.conversation_id,'alice',{file_name:'requirements.txt',size_bytes:raw.length,sha256:digest(raw),media_type:'text/plain'});
+  await f.artifacts.writeContent(upload.upload_id,'alice',(async function*(){yield raw;})());const artifact=f.artifacts.complete(upload.upload_id,'alice',{sha256:digest(raw)});
+  const rejected=await f.api('POST','/preview',{source:{kind:'upload',artifact_id:artifact.artifact_id,version:1,sha256:artifact.sha256}});
+  assert.equal(rejected.statusCode,status,rejected.body);assert.equal(rejected.json().error.code,code);
+ }
+ assert.equal(f.db.prepare('SELECT count(*) n FROM wb_task_prd_bindings').get().n,0);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_runs').get().n,0);
+});

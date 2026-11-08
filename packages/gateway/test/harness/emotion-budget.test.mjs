@@ -6,7 +6,7 @@ import {ConversationRepository} from '../../src/conversations/repository.ts';
 import {RunRepository} from '../../src/runs/repository.ts';import {EventStore} from '../../src/events/event-store.ts';
 import {buildServer} from '../../src/server.ts';
 function fixture(transport){
- const db=openProductDatabase(':memory:');const c=new ConversationRepository(db).create('alice',{workspace_id:'main',model:{provider:'fixture',id:'aux'}});
+ const db=openProductDatabase(':memory:');const c=new ConversationRepository(db).create('alice',{workspace_id:'main',model:{provider:'fixture',model:'aux'}});
  const run=new RunRepository(db,new EventStore(db)).enqueue(c.conversation_id,'alice',{client_message_id:crypto.randomUUID(),content:[{type:'text',text:'task'}]});
  db.prepare("UPDATE ga_runs SET status='running' WHERE id=?").run(run.run_id);
  const ledger=new ModelBudgetLedger(db,{routes:['openjev','laya'].map(provider=>({provider,model:'aux',revision:'fixture-v1',context_window:100,max_output_tokens:20,rates:{input:2,output:10,cache_read:1,cache_write:1}}))});

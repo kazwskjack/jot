@@ -20,7 +20,7 @@ export default function GitPendingRequests({project,allowDispatch,onPending}:{pr
     const id=hint.kind==='review-control'?hint.intent_id:result?.intent_id;if(typeof id!=='string')throw Error('GIT_REQUEST_SCOPE_CHANGED');const r=await workbenchApi.gitReview(project,id,c.signal);c.signal.throwIfAborted();if(r.project_id!==project||r.intent_id!==id||r.execution_authorized!==false)throw Error('GIT_REQUEST_SCOPE_CHANGED');if(alive.current)setView({review:r});
    }else{
     let request=hint.command.body.request_id;
-    if(hint.kind==='control'){const s=await workbenchApi.gitStatus(project,hint.execution_id!,c.signal);if(s.execution.project_id!==project||s.execution.execution_id!==hint.execution_id||s.control?.request_id!==hint.command.body.request_id||s.control.expected_state_sha256!==hint.command.body.expected_state_sha256)throw Error('GIT_REQUEST_SCOPE_CHANGED');request=s.execution.request_id}
+    if(hint.kind==='control'){const s=await workbenchApi.gitStatus(project,hint.execution_id!,c.signal);if(s.execution.project_id!==project||s.execution.execution_id!==hint.execution_id||!s.control||s.control.request_id!==hint.command.body.request_id||s.control.expected_state_sha256!==hint.command.body.expected_state_sha256)throw Error('GIT_REQUEST_SCOPE_CHANGED');request=s.execution.request_id}
     const a=await workbenchApi.gitAcceptance(project,request,c.signal);c.signal.throwIfAborted();if(a.project_id!==project||a.accepted!==true||a.execution_authorized!==false||(hint.kind==='admit'?a.intent_id!==hint.intent_id:a.execution_id!==hint.execution_id))throw Error('GIT_REQUEST_SCOPE_CHANGED');if(alive.current)setView({accepted:a});
    }
   }catch{if(alive.current&&!c.signal.aborted)setReadError('原请求已确认，当前记录尚未读取；可从操作记录继续核对。')}finally{if(alive.current)load()}

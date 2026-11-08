@@ -1,0 +1,43 @@
+import type {SkillCatalogHost,SkillCatalogScope} from './catalog.ts';
+/** Reuses operator-configured adapter transport. The bearer is transport
+ * authentication; the Host still checks the original Workbench guard. */
+export class SkillCatalogAdapterClient implements SkillCatalogHost{
+ #origin:string;#token:string;#fetch:typeof fetch;
+ constructor(baseUrl:string,token:string,fetchImpl:typeof fetch=globalThis.fetch){
+  const url=new URL(baseUrl);
+  if(url.protocol!=='http:'||!['127.0.0.1','localhost','[::1]'].includes(url.hostname)||url.pathname!=='/'||url.username||url.password||url.search||url.hash
+   ||typeof token!=='string'||token.length<32||token.length>512||/[\r\n]/.test(token)||typeof fetchImpl!=='function')throw Error('skill_catalog_adapter_configuration_invalid');
+  this.#origin=url.origin;this.#token=token;this.#fetch=fetchImpl;
+ }
+ async read({scope,signal}:{scope:SkillCatalogScope;signal?:AbortSignal}):Promise<unknown>{
+  const combined=AbortSignal.any([AbortSignal.timeout(5000),...(signal?[signal]:[])]);combined.throwIfAborted();
+  const response=await this.#fetch(this.#origin+'/v1/skills/catalog',{method:'POST',redirect:'error',cache:'no-store',
+   headers:{authorization:`Bearer ${this.#token}`,'content-type':'application/json'},body:JSON.stringify({protocol:1,scope}),signal:combined});
+  combined.throwIfAborted();
+  if(response.status===404)throw Error('skill_catalog_scope_forbidden');
+  if(response.status===409)throw Error('skill_catalog_scope_changed');
+  if(!response.ok)throw Error('skill_catalog_adapter_unavailable');
+  const reader=response.body?.getReader();if(!reader)throw Error('skill_catalog_adapter_invalid');
+  const chunks:Uint8Array[]=[];let length=0,done=false;
+  try{for(;;){const next=await reader.read();combined.throwIfAborted();if(next.done){done=true;break;}length+=next.value.byteLength;
+    if(length>8*1024*1024)throw Error('skill_catalog_adapter_invalid');chunks.push(next.value);}}
+  finally{if(!done)await reader.cancel().catch(()=>{});reader.releaseLock();}
+  try{return JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw Error('skill_catalog_adapter_invalid');}
+ }
+ async readResource({scope,skill_name,relative_path,signal}:{scope:SkillCatalogScope;skill_name:string;relative_path:string;signal?:AbortSignal}):Promise<unknown>{
+  const combined=AbortSignal.any([AbortSignal.timeout(5000),...(signal?[signal]:[])]);combined.throwIfAborted();
+  const response=await this.#fetch(this.#origin+'/v1/skills/resource',{method:'POST',redirect:'error',cache:'no-store',
+   headers:{authorization:`Bearer ${this.#token}`,'content-type':'application/json'},
+   body:JSON.stringify({protocol:1,scope,skill_name,relative_path}),signal:combined});
+  combined.throwIfAborted();
+  if(response.status===404)throw Error('skill_catalog_scope_forbidden');
+  if(response.status===409)throw Error('skill_catalog_scope_changed');
+  if(!response.ok)throw Error('skill_catalog_adapter_unavailable');
+  const reader=response.body?.getReader();if(!reader)throw Error('skill_catalog_adapter_invalid');
+  const chunks:Uint8Array[]=[];let length=0,done=false;
+  try{for(;;){const next=await reader.read();combined.throwIfAborted();if(next.done){done=true;break;}length+=next.value.byteLength;
+    if(length>512*1024)throw Error('skill_catalog_adapter_invalid');chunks.push(next.value);}}
+  finally{if(!done)await reader.cancel().catch(()=>{});reader.releaseLock();}
+  try{return JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw Error('skill_catalog_adapter_invalid');}
+ }
+}

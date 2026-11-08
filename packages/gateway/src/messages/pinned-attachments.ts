@@ -1,5 +1,7 @@
+import {createHash} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
-import {validateAttachmentManifest,type AttachmentManifest} from '../artifacts/pinned-manifest.ts';
+import {attachmentKindForMime,validateAttachmentManifest,type AttachmentManifest} from '../artifacts/pinned-manifest.ts';
+import {readAcceptedChannelAttachmentInputV2} from '../channels/attachment-input-v2.ts';
 
 export type MessageAttachmentRef={artifact_id:string;version:number;sha256:string;size_bytes:number;media_type:string;file_name:string};
 
@@ -12,6 +14,25 @@ export function pinnedAttachmentRefs(manifest:AttachmentManifest):MessageAttachm
  * message or consulting current_version. An empty list explicitly forbids the
  * UI from substituting current bytes when original provenance is unavailable. */
 export function messageAttachmentProjection(db:DatabaseSync,row:Record<string,unknown>):{attachment_refs?:MessageAttachmentRef[]}{
+ const forkLineageInstalled=Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ga_conversation_fork_messages'").get());
+ if(forkLineageInstalled&&typeof row.id==='string'&&typeof row.conversation_id==='string'&&typeof row.content_json==='string'){
+  const lineage=db.prepare(`SELECT fm.attachment_refs_json,fm.source_content_sha256
+   FROM ga_conversation_fork_messages fm JOIN ga_conversation_forks f ON f.fork_id=fm.fork_id
+   JOIN ga_conversations c ON c.id=f.target_conversation_id AND c.owner_id=f.owner_id
+   WHERE fm.target_message_id=? AND c.id=?`).get(row.id,row.conversation_id) as Record<string,unknown>|undefined;
+  if(lineage){
+   if(lineage.source_content_sha256!==createHash('sha256').update(row.content_json).digest('hex'))return{attachment_refs:[]};
+   try{
+    const refs=JSON.parse(String(lineage.attachment_refs_json));
+    if(!Array.isArray(refs))return{attachment_refs:[]};
+    const manifest=validateAttachmentManifest({protocol:1,attachments:refs.map(pin=>({...pin,kind:attachmentKindForMime(String(pin.media_type??''))}))},{maxCount:10,maxAggregateBytes:200*1024*1024});
+    return{attachment_refs:pinnedAttachmentRefs(manifest)};
+   }catch{return{attachment_refs:[]};}
+  }
+ }
+ if(row.role==='user'&&typeof row.id==='string'&&row.id.startsWith('msg-')){
+  try{const accepted=readAcceptedChannelAttachmentInputV2(db,String(row.run_id));return accepted?{attachment_refs:pinnedAttachmentRefs(accepted.pinned)}:{};}catch{return{attachment_refs:[]};}
+ }
  if(row.role!=='user'||typeof row.id!=='string'||!row.id.startsWith('message-'))return{};
  const unavailable={attachment_refs:[]};
  const command=db.prepare(`SELECT cmd.kind,cmd.status,cmd.payload_json FROM ga_run_commands cmd

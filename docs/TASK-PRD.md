@@ -49,3 +49,7 @@ node --experimental-strip-types scripts/verify-task-prd-gateway.mjs
 
 绑定的 Idempotency-Key 必须为 8–128 个可见 ASCII 字符，不能含空格。格式错误返回 422，且不会产生绑定回执或修改原任务。
 
+
+## Taskmaster 能力对照
+
+本流程复用已安装 DSH、原任务及子任务账本，不依赖或自动安装 Taskmaster。CLI 安装检测、外部 MCP 配置扫描、`.taskmaster/tasks/tasks.json` 标签导入及外部 `parse-prd --research` 不属于本入口支持能力。这里的来源是带版本/哈希的项目文件或原始上传，而不是浏览器文本框生成的任务。完整固定版本、逐文件和逐路由对照见 [M10 Taskmaster 对照](M10-TASKMASTER-COMPARISON.md)。

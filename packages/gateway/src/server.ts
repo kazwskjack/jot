@@ -12,13 +12,14 @@ import {ConversationModes} from './conversations/modes.ts';
 import {registerOrdinaryExecutionPolicy} from './conversations/execution-policy.ts';
 import {registerOrdinaryChatContext} from './conversations/chat-context-route.ts';
 import {registerOrdinaryChatWeb} from './conversations/chat-web-route.ts';
+import type {ChatWebNetworkOptions} from './conversations/chat-web-effects.ts';
 import {registerChatCompactionSource} from './conversations/chat-compaction-source-route.ts';
 import {registerChatCompactionAttempts} from './conversations/chat-compaction-attempt-route.ts';
 import type {ConversationModeClient} from './conversations/mode-policy.ts';
 import {TaskReplyDrafts} from './persistent-tasks/reply-drafts.ts';
 import Fastify from 'fastify';
 import multipart from '@fastify/multipart';
-import { createHash, createHmac } from 'node:crypto';
+import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { openProductDatabase, withImmediateTransaction } from './db/database.ts';
 import {canonicalJson} from './db/canonical-json.ts';
 import { ConversationRepository } from './conversations/repository.ts';
@@ -40,6 +41,7 @@ import type {NativeGitClient} from './git/native-transport-client.ts';
 import {WorkPublicationExecutions} from './persistent-tasks/work-publication-executions.ts';
 import { EventStore, ExpiredCursorError, FutureCursorError } from './events/event-store.ts';
 import { RunRepository } from './runs/repository.ts';
+import {readRunRuntimeDiagnostics} from './events/runtime-diagnostics.ts';
 import { buildSnapshot } from './events/snapshot.ts';
 import { EmotionAdvisor, taskEmotionEvent, userEmotionSignal, emotionAccountingRoutesFromPolicy, type EmotionAccounting } from './harness/emotion-advisor.ts';
 import { RunCommandService } from './runs/commands.ts';
@@ -47,14 +49,25 @@ import { InteractionService } from './interactions/service.ts';
 import {TaskWaitResponder} from './persistent-tasks/task-wait.ts';
 import {TaskReviewOutputs} from './persistent-tasks/review-outputs.ts';
 import { ArtifactService } from './artifacts/service.ts';
-import { createReadStream } from 'node:fs';
+import { createReadStream, lstatSync, mkdirSync, realpathSync } from 'node:fs';
 import { PassThrough, Readable } from 'node:stream';
 import { dirname, join, resolve } from 'node:path';
 import { SourceRepository } from './sources/repository.ts';
 import { ContractValidator } from './contracts/validator.ts';
 import { ChannelIntakeService } from './channels/intake.ts';
+import {registerChannelAttachmentIntakeV2,isChannelAttachmentIntakeV2Route} from './channels/attachment-routes-v2.ts';
+import {requireChannelAttachmentInputReadiness,assertChannelAttachmentInputClient} from './channels/attachment-config-v2.ts';
+import {enableChannelAttachmentProtocolV2,channelAttachmentProtocolV2Installed} from './channels/attachment-protocol-migration-v2.ts';
+import { isQQWebhookRequestAuthenticated, registerQQRoutes } from './channels/qq-routes.ts';
+import {isTwilioSmsWebhookRequest,registerTwilioSmsRoutes} from './channels/sms-routes.ts';
+import { createSlackWebhookAdapter, type SlackTransport } from './channels/slack.ts';
+import { createSlackInteractionReplyHandler } from './channels/slack-interactions.ts';
+import { slackWebhookRoutes } from './channels/slack-routes.ts';
+import type { SlackWebhookRuntimeConfig } from './channels/provider-config.ts';
 import {OwnerChannelBindings} from './channels/owner-bindings.ts';
+import { installChannelAuthorityMigration } from './channels/authority-migration.ts';
 import {EmailChannelBindings} from './channels/email-bindings.ts';
+import {PushSubscriptions} from './channels/push-subscriptions.ts';
 import { FileJobService } from './file-engine/jobs.ts';
 import { TemplateCatalog, TemplateContractError } from './file-engine/templates.ts';
 import { CrawlBatchService } from './crawl-batch/service.ts';
@@ -63,6 +76,8 @@ import { VoiceTranscriptionService } from './voice/service.ts';
 import type { VoiceAdapter } from './voice/adapter-client.ts';
 import { VOICE_MAX_BYTES, validateVoiceWave } from './voice/wav.ts';
 import { WorkbenchService } from './workbench/service.ts';
+import type {MemoryReasoningClient} from './workbench/memory-reasoning-client.ts';
+import { WorkspaceCheckpointService } from './workbench/workspace-checkpoints.ts';
 import {DiscoveryPolicies} from './always-on/discovery-policy.ts';
 import {createNativeWorkRuntime} from './always-on/native-work-runtime.ts';
 import {readIsolatedTaskFileVersion} from './persistent-tasks/isolated-output-source.ts';
@@ -72,6 +87,9 @@ import {registerDiscoveryHistoryRoutes} from './always-on/discovery-history-rout
 import {configureTaskOutputReader} from './persistent-tasks/output-content.ts';
 import {configureTaskOutputDelivery} from './persistent-tasks/output-delivery.ts';
 import { registerWorkbenchRoutes } from './workbench/routes.ts';
+import { registerWorkbenchMcpRoutes } from './workbench/mcp-routes.ts';
+import { McpRegistryService } from './workbench/mcp-registry.ts';
+import { listUnknownMcpOperations } from './workbench/mcp-execution.ts';
 import { PersistentTaskService } from './persistent-tasks/service.ts';
 import {TaskNotifications} from './persistent-tasks/notifications.ts';
 import {TaskReplyPolicies} from './persistent-tasks/reply-policy.ts';
@@ -88,8 +106,17 @@ import { WorkbenchBudgetPolicy, type ModelBudgetPolicyConfig } from './workbench
 import { TaskBudgetService, registerTaskBudgetRoutes } from './workbench/budget-public.ts';
 import {createAuxiliaryRunGuard} from './workbench/auxiliary-run-guard.ts';
 import {registerConversationGoalRoutes,type ConversationGoalClient} from './conversations/goal-routes.ts';
+import {SkillCatalogService,type SkillCatalogHost} from './skills/catalog.ts';
+import {registerSkillCatalogRoutes} from './skills/catalog-routes.ts';
 import {AttachmentResolver} from './artifacts/resolver.ts';
+import {attachmentKindForMime} from './artifacts/pinned-manifest.ts';
 import {readAttachmentSteeringReadiness,type OrdinaryAttachmentSteeringClient} from './harness/ordinary-attachment-readiness.ts';
+import {ConversationForks,installConversationForks} from './harness/conversation-fork.ts';
+import {registerConversationForkRoutes,registerConversationForkContextRoute} from './harness/conversation-fork-routes.ts';
+import type {NativeMemberControlClient} from './workbench/native-member-owner-controls.ts';
+import {createConversationForkSourceReader} from './harness/conversation-fork-source.ts';
+import {prepareForkAttachmentClones} from './harness/conversation-fork-attachments.ts';
+import {observeBrowserActionReadiness} from './events/browser-driver-readiness.ts';
 
 function actor(request: { headers: Record<string, unknown> }) {
   const id = String(request.headers['x-user-id'] || '');
@@ -98,13 +125,17 @@ function actor(request: { headers: Record<string, unknown> }) {
 }
 
 export async function buildServer(config: {
+  channelAttachmentIntakeV2?:boolean;
   modelCatalogClient?:ModelCatalogClient;
   conversationModeClient?:ConversationModeClient;
   chatModeEnabled?:boolean;
   ordinarySteeringEnabled?:boolean;
   ordinaryInputRecoveryEnabled?:boolean;
+  mattermostOwnerBinding?:{instance:string;botUserId:string};
+  matrixOwnerBindingEnabled?:boolean;
   ordinaryAttachmentSteeringEnabled?:boolean;
   ordinaryAttachmentSteeringClient?:OrdinaryAttachmentSteeringClient;
+  chatWebNetwork?:ChatWebNetworkOptions;
   workAgentPreset?:string;
   databasePath: string;
   workspaces: string[];
@@ -112,7 +143,12 @@ export async function buildServer(config: {
   csrfToken?: string;
   allowedOrigins?: string[];
   internalChannelToken?: string;
+  qqWebhook?: { appId: string; botSecret: string };
+  smsWebhook?: {accountSid:string;authToken:string;webhookUrl:string;apiKeySid:string;apiKeySecret:string};
+  slackWebhook?: SlackWebhookRuntimeConfig;
+  slackTransport?: SlackTransport;
   emailBindingSend?: (text:string,recipient:string)=>Promise<Record<string,unknown>>;
+  webPushVapid?: {publicKey:string;generation:string};
   templateRoot?: string;
   voiceEnabled?: boolean;
   voiceAdapter?: VoiceAdapter;
@@ -125,11 +161,26 @@ export async function buildServer(config: {
   modelBudgetRoutes?: ModelBudgetRoute[];
   modelBudgetPolicy?: ModelBudgetPolicyConfig | undefined;
   replyJudge?: ReplyJudgeClient;
+  /** Trusted, budgeted host client; request payloads cannot choose a provider. */
+  memoryReasoningClient?:MemoryReasoningClient;
   conversationGoalClient?: ConversationGoalClient;
+  nativeMemberClient?:NativeMemberControlClient;
+  skillCatalogClient?: SkillCatalogHost;
+  conversationForkSourceClient?:{inspectConversationForkSource(sessionId:string,signal?:AbortSignal):Promise<unknown>};
   conversationGoalResumeEnabled?:boolean;
   /** Server-only trusted provider configuration; never populated from request bodies. */
   emotion?: {env?:NodeJS.ProcessEnv;transport?:typeof fetch;accountingRoutes?:EmotionAccounting['routes']};
 }) {
+
+  if(config.matrixOwnerBindingEnabled!==undefined&&typeof config.matrixOwnerBindingEnabled!=='boolean')throw Error('matrix_binding_configuration_invalid');
+  let channelAttachmentInputReady=false;
+  if(config.channelAttachmentIntakeV2!==undefined&&typeof config.channelAttachmentIntakeV2!=='boolean')throw Error('channel_attachment_configuration_invalid');
+  if(config.channelAttachmentIntakeV2===true){
+    if(config.ordinaryInputRecoveryEnabled!==true||!config.internalChannelToken||config.internalChannelToken.length<16)throw Error('channel_attachment_original_recovery_required');
+    assertChannelAttachmentInputClient(config.conversationGoalClient);
+    try{await requireChannelAttachmentInputReadiness(config.conversationGoalClient);channelAttachmentInputReady=true;}catch{/* Original SQL receipts remain readable during a native outage. */}
+  }
+  if(config.slackWebhook?.attachmentBotToken&&!channelAttachmentInputReady)throw Error('channel_attachment_native_recovery_unavailable');
   for(const value of [config.ordinarySteeringEnabled,config.ordinaryInputRecoveryEnabled,config.ordinaryAttachmentSteeringEnabled]){if(value!==undefined&&typeof value!=='boolean')throw Error('ordinary_steering_configuration_invalid');}
   if(config.ordinarySteeringEnabled===true&&config.ordinaryInputRecoveryEnabled!==true)throw Error('ordinary_steering_recovery_required');
   if(config.ordinaryAttachmentSteeringEnabled===true&&(config.ordinarySteeringEnabled!==true||config.ordinaryInputRecoveryEnabled!==true||typeof config.ordinaryAttachmentSteeringClient?.steeringAttachmentsReadiness!=='function'))throw Error('ordinary_attachment_steering_configuration_invalid');
@@ -139,20 +190,43 @@ export async function buildServer(config: {
   try {
   const budgetPolicy = config.modelBudgetPolicy === undefined ? undefined : new WorkbenchBudgetPolicy(db,config.modelBudgetPolicy);
   const modelBudgets = budgetPolicy?.ledger ?? (config.modelBudgetRoutes === undefined ? undefined : new ModelBudgetLedger(db,{routes: config.modelBudgetRoutes}));
+  if(config.memoryReasoningClient&&!modelBudgets)throw new Error('memory_reasoning_budget_required');
   const events = new EventStore(db);
   const projects = new ProjectRepository(db);
   const gitWorkbench=new GitWorkbench(projects,config.gitRepositories??[],config.gitExecutable);
   const gitReviewIntents=new GitMutationIntents(db,projects,gitWorkbench);
   const conversations = new ConversationRepository(db, projects);
+  let conversationForks:ConversationForks|undefined;
+  if(config.conversationForkSourceClient){
+    installConversationForks(db);
+    conversationForks=new ConversationForks(db,{
+      prepareAttachments:(scope,pins,key,signal)=>prepareForkAttachmentClones(db,config.uploadRoot??join(dirname(config.databasePath),'general-agent-uploads'),scope,pins,key,signal),
+      readSource:createConversationForkSourceReader(db,{inspect:(sessionId,signal)=>config.conversationForkSourceClient!.inspectConversationForkSource(sessionId,signal)}),
+      verifyAttachments:async(scope,pins,signal)=>{
+        const resolver=new AttachmentResolver(db,config.uploadRoot??join(dirname(config.databasePath),'general-agent-uploads'));
+        const lease=`fork-verify-${randomUUID()}`;
+        try{
+          for(const pin of pins)await resolver.resolvePinnedForMessage(scope.owner_id,scope.conversation_id,{protocol:1,attachments:[{...pin,kind:attachmentKindForMime(pin.media_type)}]},lease,signal);
+        }finally{resolver.releaseLease(lease);}
+      },
+    });
+  }
   const runs = new RunRepository(db, events,{workAgentPreset:config.workAgentPreset??'jot-general'});
   const conversationModes=new ConversationModes(db,conversations,runs,config.conversationModeClient,config.chatModeEnabled===true);
   const commands = new RunCommandService(db, events);
   const artifacts = new ArtifactService(db, config.uploadRoot ?? join(dirname(config.databasePath), 'general-agent-uploads'));
+  try{artifacts.cleanupExpiredUploads();}catch(error){app.log.error(error);}
+  const uploadExpirySweep=setInterval(()=>{try{artifacts.cleanupExpiredUploads();}catch(error){app.log.error(error);}},60_000);
+  uploadExpirySweep.unref();
+  app.addHook('onClose',async()=>clearInterval(uploadExpirySweep));
   const sources = new SourceRepository(db);
   const contracts = new ContractValidator();
-  const channelIntake = new ChannelIntakeService(db, runs, config.workspaces[0] ?? 'jot');
-  const ownerChannels=new OwnerChannelBindings(db,{enabled:config.internalChannelToken?['wecom']:[]});
+  const ownerChannels=new OwnerChannelBindings(db,{enabled:[...(config.internalChannelToken?['wecom',...(config.matrixOwnerBindingEnabled===true?['matrix']:[]),...(config.mattermostOwnerBinding?['mattermost']:[]),...(config.slackWebhook?['slack']:[])]:[]),...(config.smsWebhook?['sms']:[])],...(config.mattermostOwnerBinding?{mattermost:config.mattermostOwnerBinding}:{})});
+  installChannelAuthorityMigration(db);
+  const channelIntake = new ChannelIntakeService(db, runs, config.workspaces[0] ?? 'jot', ownerChannels);
+  if(channelAttachmentInputReady){enableChannelAttachmentProtocolV2(db);artifacts.cleanupExpiredChannelUploads();}
   const emailBindings=new EmailChannelBindings(db,config.emailBindingSend?{send:config.emailBindingSend}:{});
+  const pushSubscriptions=config.webPushVapid?new PushSubscriptions(db,config.webPushVapid):undefined;
   const fileJobs = new FileJobService(db);
   const templates = new TemplateCatalog(config.templateRoot ?? resolve(process.cwd(), 'file-engine/templates'));
   const channelDelivery = new ChannelDeliveryService(db);
@@ -162,6 +236,12 @@ export async function buildServer(config: {
   const workbenchRoot = config.workbenchRoot ?? join(dirname(config.databasePath), 'jot-workspaces');
   const workbench = new WorkbenchService(db, { workspaceIds: config.workspaces,
     root: workbenchRoot, allowedToolIds: WORKBENCH_TOOL_IDS, ...(budgetPolicy ? {modelBudgetPolicy: budgetPolicy} : {}) });
+  const mcpRegistry = new McpRegistryService(db, workbench);
+  const checkpointRoot=join(realpathSync(workbenchRoot),'workspace-checkpoints');
+  try{mkdirSync(checkpointRoot,{mode:0o700});}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;}
+  const checkpointRootStat=lstatSync(checkpointRoot);
+  if(checkpointRootStat.isSymbolicLink()||!checkpointRootStat.isDirectory()||realpathSync(checkpointRoot)!==checkpointRoot)throw Error('workspace_checkpoint_storage_invalid');
+  const workspaceCheckpoints=new WorkspaceCheckpointService(db,workbench,{storageRoot:checkpointRoot});
   configureTaskOutputReader(db,input=>input.source?.source==='isolated'?readIsolatedTaskFileVersion(db,input.source):workbench.readFileVersion(input.owner,input.workspace,input.project,input.path,input.version,input.runId));
   configureTaskOutputDelivery(db,artifacts,events);
   const taskWaitResponder=new TaskWaitResponder(db,workbench,commands);
@@ -183,22 +263,29 @@ export async function buildServer(config: {
   };
   const interactions = new InteractionService(db,events,taskInteractionResponder);
   const idempotencyRequests = new WeakMap<object, { owner: string; operation: string; key: string }>();
-  const isUploadRoute=(request:any)=>['/v1/conversations/:conversationId/uploads','/v1/uploads/:uploadId/content','/v1/uploads/:uploadId/complete'].includes(request.routeOptions.url);
+  const isUploadCancelRoute=(request:any)=>request.method==='DELETE'&&['/v1/uploads/:uploadId','/v1/upload-batches/:batchId'].includes(request.routeOptions.url);
+  const isUploadRoute=(request:any)=>isUploadCancelRoute(request)||['/v1/conversations/:conversationId/uploads','/v1/conversations/:conversationId/upload-batches','/v1/uploads/:uploadId/content','/v1/uploads/:uploadId/complete'].includes(request.routeOptions.url);
   const isMemoryRestoreRoute=(request:any)=>request.method==='POST'&&request.routeOptions.url==='/v1/workspaces/:workspaceId/memory/:memoryId/restore';
   const isMemoryConsolidationRoute=(request:any)=>request.method==='POST'&&['/v1/workspaces/:workspaceId/memory-consolidations',...['propose','apply','rollback','reject'].map(action=>`/v1/workspaces/:workspaceId/memory-consolidations/:consolidationId/${action}`)].includes(request.routeOptions.url);
-  const isMemoryCaptureRoute=(request:any)=>(request.method==='PATCH'&&request.routeOptions.url==='/v1/agents/:agentId/memory-capture-policy')||(request.method==='POST'&&['/v1/agents/:agentId/memory-capture-policy/collect',...['apply','reject'].map(action=>`/v1/agents/:agentId/memory-captures/:captureId/${action}`)].includes(request.routeOptions.url));
+  const isMemoryCaptureRoute=(request:any)=>(request.method==='PATCH'&&request.routeOptions.url==='/v1/agents/:agentId/memory-capture-policy')||(request.method==='POST'&&['/v1/agents/:agentId/memory-capture-policy/collect',...['apply','reject','reconcile'].map(action=>`/v1/agents/:agentId/memory-captures/:captureId/${action}`)].includes(request.routeOptions.url));
+  const isMemoryDreamPolicyRoute=(request:any)=>request.method==='PATCH'&&request.routeOptions.url==='/v1/agents/:agentId/memory-dream-policy';
   const isGoalResumeRoute=(request:any)=>request.method==='POST'&&request.routeOptions.url==='/v1/conversations/:conversationId/goal'&&request.body?.action==='resume';
   const isDiscoveryPolicyRoute=(request:any)=>(request.method==='PATCH'&&request.routeOptions.url==='/v1/agents/:agentId/discovery-policy')||(request.method==='POST'&&request.routeOptions.url==='/v1/agents/:agentId/discovery-policy/control');
   const isModeMutationRoute=(request:any)=>request.method==='POST'&&['/v1/conversations','/v1/conversations/:conversationId/messages'].includes(request.routeOptions.url)||request.method==='PATCH'&&request.routeOptions.url==='/v1/conversations/:conversationId'&&request.body?.mode!==undefined;
   const isRunCommandRoute=(request:any)=>request.method==='POST'&&['/v1/runs/:runId/steer','/v1/runs/:runId/cancel'].includes(request.routeOptions.url);
+  const isWorkspaceSelectionRoute=(request:any)=>request.method==='POST'&&request.routeOptions.url==='/v1/workspaces/selection';
+  const isProjectMutationRoute=(request:any)=>request.method==='POST'&&['/v1/projects','/v1/projects/:projectId/lifecycle'].includes(request.routeOptions.url)||request.method==='PATCH'&&request.routeOptions.url==='/v1/projects/:projectId';
   const isGitReviewRoute=(request:any)=>request.method==='POST'&&['/v1/projects/:projectId/git/intents','/v1/projects/:projectId/git/intents/:intentId/control'].includes(request.routeOptions.url);
   const isIndexAdmissionRoute=(request:any)=>request.method==='POST'&&request.routeOptions.url==='/v1/projects/:projectId/git/intents/:intentId/admissions';
   const isIndexTransportRoute=(request:any)=>request.method==='POST'&&['/v1/projects/:projectId/git/executions/:executionId/dispatch','/v1/projects/:projectId/git/executions/:executionId/resolve'].includes(request.routeOptions.url);
   const isIndexControlAdmissionRoute=(request:any)=>request.method==='POST'&&request.routeOptions.url==='/v1/projects/:projectId/git/executions/:executionId/controls';
   const isPublicationReviewRoute=(request:any)=>request.method==='POST'&&['/v1/projects/:projectId/work-publications','/v1/projects/:projectId/work-publications/:intentId/control'].includes(request.routeOptions.url);
   const isPublicationAdmissionRoute=(request:any)=>request.method==='POST'&&request.routeOptions.url==='/v1/projects/:projectId/work-publications/:intentId/admissions';
+  const isFileLifecycleRoute=(request:any)=>request.method==='POST'&&['/v1/workspaces/:workspaceId/files/rename','/v1/workspaces/:workspaceId/files/delete'].includes(request.routeOptions.url);
   const isPublicationTransportRoute=(request:any)=>request.method==='POST'&&['/v1/projects/:projectId/work-publication-executions/:executionId/dispatch','/v1/projects/:projectId/work-publication-executions/:executionId/settle'].includes(request.routeOptions.url);
-  const atomicProtocol=(request:any)=>isIndexAdmissionRoute(request)?'git-index-admission-atomic-v1':isIndexControlAdmissionRoute(request)?'git-index-control-admission-atomic-v1':isPublicationAdmissionRoute(request)?'work-publication-admission-atomic-v1':isPublicationReviewRoute(request)?'work-publication-review-atomic-v1':isGitReviewRoute(request)?'git-review-atomic-v1':isRunCommandRoute(request)?'run-command-atomic-v1':isModeMutationRoute(request)?'conversation-mode-atomic-v1':isDiscoveryPolicyRoute(request)?'discovery-policy-atomic-v1':isGoalResumeRoute(request)?'conversation-goal-resume-atomic-v1':isUploadRoute(request)?'upload-atomic-v1':isMemoryRestoreRoute(request)?'memory-restore-atomic-v1':isMemoryConsolidationRoute(request)?'memory-consolidation-atomic-v1':isMemoryCaptureRoute(request)?'memory-capture-atomic-v1':null;
+  const isConversationForkRoute=(request:any)=>request.method==='POST'&&request.routeOptions.url==='/v1/conversations/:conversationId/fork';
+  const isMcpMutationRoute=(request:any)=>['POST /v1/agents/:agentId/mcp/connections','PATCH /v1/agents/:agentId/mcp/connections/:connectionId/config','PATCH /v1/agents/:agentId/mcp/connections/:connectionId/enabled','PUT /v1/agents/:agentId/mcp/connections/:connectionId/tools','POST /v1/agents/:agentId/mcp/connections/:connectionId/reload','DELETE /v1/agents/:agentId/mcp/connections/:connectionId'].includes(`${request.method} ${request.routeOptions.url}`);
+  const atomicProtocol=(request:any)=>isWorkspaceSelectionRoute(request)?'workspace-selection-atomic-v1':isProjectMutationRoute(request)?'project-metadata-atomic-v1':isConversationForkRoute(request)?'conversation-fork-atomic-v1':isFileLifecycleRoute(request)?'file-lifecycle-atomic-v1':isIndexAdmissionRoute(request)?'git-index-admission-atomic-v1':isIndexControlAdmissionRoute(request)?'git-index-control-admission-atomic-v1':isPublicationAdmissionRoute(request)?'work-publication-admission-atomic-v1':isPublicationReviewRoute(request)?'work-publication-review-atomic-v1':isGitReviewRoute(request)?'git-review-atomic-v1':isRunCommandRoute(request)?'run-command-atomic-v1':isModeMutationRoute(request)?'conversation-mode-atomic-v1':isDiscoveryPolicyRoute(request)?'discovery-policy-atomic-v1':isGoalResumeRoute(request)?'conversation-goal-resume-atomic-v1':isMcpMutationRoute(request)?'workbench-mcp-atomic-v1':isUploadRoute(request)?'upload-atomic-v1':isMemoryRestoreRoute(request)?'memory-restore-atomic-v1':isMemoryConsolidationRoute(request)?'memory-consolidation-atomic-v1':isMemoryCaptureRoute(request)?'memory-capture-atomic-v1':isMemoryDreamPolicyRoute(request)?'memory-dream-policy-atomic-v1':null;
   // Receipt protocol is reserved with the original request. Legacy pending rows
   // have no proof of an atomic business boundary and must not be re-executed.
   const atomicCommand=<T>(request:any,status:number,operation:()=>T):T=>{
@@ -209,7 +296,9 @@ export async function buildServer(config: {
         if(!protocol||!cached||cached.receipt_protocol!==protocol)throw new Error('idempotency_in_progress');
         if(cached.response_status!==null){if(cached.response_status!==status)throw new Error('idempotency_conflict');return JSON.parse(String(cached.response_json)) as T;}
       }
-      const result=operation(),operationId=contracts.operationFor(request.method,request.routeOptions.url);
+      const registeredRoute=request.routeOptions.url;
+      if(typeof registeredRoute!=='string')throw new Error('contract_response_invalid');
+      const result=operation(),operationId=contracts.operationFor(request.method,registeredRoute);
       if(!operationId||!contracts.validateResponse(operationId,status,result??null).valid)throw new Error('contract_response_invalid');
       if(pending&&db.prepare('UPDATE ga_idempotency SET response_status=?,response_json=? WHERE owner_id=? AND operation=? AND idempotency_key=? AND response_status IS NULL AND receipt_protocol=?')
         .run(status,JSON.stringify(result??null),pending.owner,pending.operation,pending.key,protocol).changes!==1)throw new Error('idempotency_in_progress');
@@ -217,21 +306,34 @@ export async function buildServer(config: {
     });
     idempotencyRequests.delete(request);return value;
   };
+  if(conversationForks){
+    registerConversationForkRoutes(app,{forks:conversationForks,actor,atomicCommand});
+  }
+  registerConversationForkContextRoute(app,{db,token:config.internalChannelToken,...(conversationForks?{forks:conversationForks}:{})});
   app.addContentTypeParser('application/octet-stream', (_request, stream, done) => done(null, stream));
 
   app.addHook('preValidation', async request => {
     const contentType = String(request.headers['content-type'] ?? '').split(';')[0];
     if (contentType === 'application/octet-stream' || contentType === 'multipart/form-data') return;
-    const operationId = contracts.operationFor(request.method, request.routeOptions.url ?? request.url.split('?')[0]!);
+    const registeredRoute=request.routeOptions.url;
+    const operationId=typeof registeredRoute==='string'?contracts.operationFor(request.method,registeredRoute):null;
     if (!operationId) return;
     const result = contracts.validateRequest(operationId, request.body);
-    if (!result.valid) throw new Error(operationId==='updateTaskNotifications'?'invalid_task_notification_settings':['createOwnerChannelBinding','revokeOwnerChannelBinding'].includes(operationId)?'invalid_channel_binding_request':operationId==='updateTaskModelBudget'?'budget_limit_invalid':'contract_request_invalid');
+    if (!result.valid) {
+      if(operationId==='initUploadBatch'&&result.errors.some(error=>error.keyword==='maxItems'||error.keyword==='maximum'))throw new Error('upload_batch_limit_exceeded');
+      throw new Error(operationId==='updateTaskNotifications'?'invalid_task_notification_settings':['createOwnerChannelBinding','revokeOwnerChannelBinding'].includes(operationId)?'invalid_channel_binding_request':operationId==='updateTaskModelBudget'?'budget_limit_invalid':'contract_request_invalid');
+    }
   });
 
   app.addHook('preHandler', async (request, reply) => {
+    // Original service bearer already ran in this registered route's onRequest.
+    if(isChannelAttachmentIntakeV2Route(request))return;
+    // The provider callback is public only behind its exact-URL Twilio signature check.
+    if(isTwilioSmsWebhookRequest(request))return;
     // This exact internal route retains its mandatory service bearer check.
-    if(['/internal/v1/workbench/chat-compaction-attempt','/internal/v1/workbench/chat-compaction-checkpoint','/internal/v1/workbench/git-workspace-source','/internal/v1/workbench/native-workspace-admission','/internal/v1/workbench/native-git-database'].includes(request.url.split('?')[0]!))return;
-    if (['/internal/v1/workbench/chat-compaction-source', '/internal/v1/workbench/ordinary-chat-web', '/internal/v1/workbench/ordinary-chat-context', '/internal/v1/workbench/ordinary-execution-policy', '/internal/v1/workbench/ordinary-run-history', '/internal/v1/workbench/ordinary-steering-history', '/internal/v1/workbench/ordinary-steering-binding', '/internal/v1/workbench/ordinary-input-binding', '/internal/v1/workbench/ordinary-model-policy', '/internal/v1/workbench/conversation-goal-control', '/internal/v1/channel/messages', '/internal/v1/file-tools', '/internal/v1/crawl-batches/bind', '/internal/v1/crawl-batches/events', '/internal/v1/workbench/guard', '/internal/v1/workbench/handoff', '/internal/v1/workbench/native-task-intent', '/internal/v1/workbench/native-task-intents', '/internal/v1/workbench/native-child-reservation', '/internal/v1/workbench/native-child-request', '/internal/v1/workbench/native-child-abort', '/internal/v1/workbench/native-child-published', '/internal/v1/workbench/native-child-bind', '/internal/v1/workbench/native-child-close', '/internal/v1/workbench/native-child-activate', '/internal/v1/workbench/native-child-source', '/internal/v1/workbench/native-model-recovery', '/internal/v1/workbench/tool', '/internal/v1/workbench/goal-binding', '/internal/v1/workbench/model-budget','/internal/v1/workbench/web-budget-grant','/internal/v1/workbench/web-budget-grant/close','/internal/v1/workbench/web-model-budget','/internal/v1/workbench/checkpoint','/internal/v1/workbench/task-state','/internal/v1/workbench/step-admission','/internal/v1/workbench/goal-proposal','/internal/v1/workbench/completion-intent','/internal/v1/workbench/completion-confirm','/internal/v1/workbench/completion-recovery'].includes(request.url.split('?')[0]!)) return;
+    if(['/internal/v1/workbench/chat-compaction-attempt','/internal/v1/workbench/chat-compaction-checkpoint','/internal/v1/workbench/git-workspace-source','/internal/v1/workbench/native-workspace-admission','/internal/v1/workbench/native-git-database','/hooks/v1/channels/slack'].includes(request.url.split('?')[0]!))return;
+    if (['/internal/v1/workbench/chat-compaction-source', '/internal/v1/workbench/ordinary-chat-web', '/internal/v1/workbench/ordinary-chat-context', '/internal/v1/workbench/ordinary-fork-context', '/internal/v1/workbench/ordinary-execution-policy', '/internal/v1/workbench/ordinary-run-history', '/internal/v1/workbench/ordinary-steering-history', '/internal/v1/workbench/ordinary-steering-binding', '/internal/v1/workbench/ordinary-input-binding', '/internal/v1/workbench/ordinary-model-policy', '/internal/v1/workbench/conversation-goal-control', '/internal/v1/channel/messages', '/internal/v1/channel/mattermost/proof-receipt', '/internal/v1/channel/mattermost/event-receipt', '/internal/v1/file-tools', '/internal/v1/crawl-batches/bind', '/internal/v1/crawl-batches/events', '/internal/v1/workbench/guard','/internal/v1/workbench/mcp-current','/internal/v1/workbench/mcp-prepare','/internal/v1/workbench/mcp-settle', '/internal/v1/workbench/handoff', '/internal/v1/workbench/native-task-intent', '/internal/v1/workbench/native-task-intents', '/internal/v1/workbench/native-child-reservation', '/internal/v1/workbench/native-child-request', '/internal/v1/workbench/native-child-abort', '/internal/v1/workbench/native-child-published', '/internal/v1/workbench/native-child-bind', '/internal/v1/workbench/native-child-close', '/internal/v1/workbench/native-child-activate', '/internal/v1/workbench/native-child-source', '/internal/v1/workbench/native-model-recovery', '/internal/v1/workbench/tool', '/internal/v1/workbench/browser-approval', '/internal/v1/workbench/context-delivery', '/internal/v1/workbench/goal-binding', '/internal/v1/workbench/model-budget','/internal/v1/workbench/web-budget-grant','/internal/v1/workbench/web-budget-grant/close','/internal/v1/workbench/web-model-budget','/internal/v1/workbench/checkpoint','/internal/v1/workbench/task-state','/internal/v1/workbench/step-admission','/internal/v1/workbench/goal-proposal','/internal/v1/workbench/completion-intent','/internal/v1/workbench/completion-confirm','/internal/v1/workbench/completion-recovery'].includes(request.url.split('?')[0]!)) return;
+    if (isQQWebhookRequestAuthenticated(request)) return;
     if (!config.csrfToken || request.method === 'GET' || request.method === 'HEAD' || request.method === 'OPTIONS') return;
     actor(request as any);
     const origin = String(request.headers.origin ?? '');
@@ -252,9 +354,20 @@ export async function buildServer(config: {
     }
     const idempotencyKey = String(request.headers['idempotency-key'] ?? '');
     if (!/^[\x21-\x7E]{8,128}$/.test(idempotencyKey)) throw new Error('idempotency_key_invalid');
+    // Binary imports own a content-aware immutable receipt in the workspace service.
+    if(request.method==='PUT'&&request.routeOptions.url==='/v1/workspaces/:workspaceId/files/binary')return;
+    if(request.method==='POST'&&[
+      '/v1/workspaces/:workspaceId/checkpoints',
+      '/v1/workspaces/:workspaceId/checkpoints/:checkpointId/restore-review',
+      '/v1/workspaces/:workspaceId/checkpoints/:checkpointId/restore',
+      '/v1/workspaces/:workspaceId/checkpoint-restores/:operationId/reconcile',
+    ].includes(request.routeOptions.url??'')){
+      reply.header('cache-control','private, no-store');return;
+    }
     // Binding codes are one-time secrets: the service deduplicates this request
     // by a hash, and a replay returns the challenge ID without redisclosing code.
     if(request.method==='POST'&&request.url.split('?')[0]==='/v1/channel-bindings')return;
+    if(request.method==='POST'&&request.url.split('?')[0]==='/v1/push/subscriptions')return;
     // Mailbox proof must not enter the generic idempotency request cache.
     if(request.method==='POST'&&/^\/v1\/channel-bindings\/email(?:\/[^/]+\/confirm)?$/.test(request.url.split('?')[0]!))return;
     const owner = actor(request as any);
@@ -272,11 +385,39 @@ export async function buildServer(config: {
     ).get(owner, operation, idempotencyKey) as Record<string, unknown> | undefined;
     if (existing) {
       if (existing.request_sha256 !== requestHash) throw new Error('idempotency_conflict');
+      const verifyCachedFork=(value:unknown)=>{
+        if(!isConversationForkRoute(request)||!conversationForks)return;
+        try{const frozen=conversationForks.recoverReceipt(owner,String((request.params as Record<string,unknown>).conversationId),request.body,idempotencyKey);
+          if(!frozen||canonicalJson(frozen)!==canonicalJson(value))throw Error();
+        }catch{throw new Error('idempotency_in_progress');}
+      };
       if (existing.response_status === null) {
-        if((isGitReviewRoute(request)||isIndexAdmissionRoute(request)||isIndexControlAdmissionRoute(request)||isPublicationReviewRoute(request)||isPublicationAdmissionRoute(request)||isRunCommandRoute(request)||isModeMutationRoute(request)||isDiscoveryPolicyRoute(request)||isGoalResumeRoute(request)||isMemoryRestoreRoute(request)||isMemoryConsolidationRoute(request)||isMemoryCaptureRoute(request))&&existing.receipt_protocol===atomicProtocol(request)){idempotencyRequests.set(request,{owner,operation,key:idempotencyKey});return;}
+        if(isConversationForkRoute(request)&&existing.receipt_protocol===null&&conversationForks){
+          const recovered=withImmediateTransaction(db,()=>{
+            const current=db.prepare('SELECT request_sha256,response_status,response_json,receipt_protocol FROM ga_idempotency WHERE owner_id=? AND operation=? AND idempotency_key=?')
+              .get(owner,operation,idempotencyKey) as Record<string,unknown>|undefined;
+            if(!current||current.request_sha256!==requestHash)throw new Error('idempotency_conflict');
+            if(current.response_status!==null){const body=JSON.parse(String(current.response_json));verifyCachedFork(body);return{status:Number(current.response_status),body};}
+            if(current.receipt_protocol!==null)return undefined;
+            const conversationId=String((request.params as Record<string,unknown>).conversationId);
+            const receipt=conversationForks.recoverReceipt(owner,conversationId,request.body,idempotencyKey);
+            if(!receipt)return undefined;
+            const registeredRoute=request.routeOptions.url;
+            if(typeof registeredRoute!=='string'||request.method!=='POST'||registeredRoute!=='/v1/conversations/:conversationId/fork')throw new Error('idempotency_in_progress');
+            const operationId=contracts.operationFor(request.method,registeredRoute);
+            if(!operationId||!contracts.validateResponse(operationId,201,receipt).valid)throw new Error('idempotency_in_progress');
+            const saved=db.prepare('UPDATE ga_idempotency SET response_status=201,response_json=? WHERE owner_id=? AND operation=? AND idempotency_key=? AND request_sha256=? AND response_status IS NULL AND receipt_protocol IS NULL')
+              .run(JSON.stringify(receipt),owner,operation,idempotencyKey,requestHash);
+            if(saved.changes!==1)throw new Error('idempotency_in_progress');
+            return{status:201,body:receipt};
+          });
+          if(recovered)return reply.code(recovered.status).send(recovered.body);
+        }
+        if((isWorkspaceSelectionRoute(request)||isProjectMutationRoute(request)||isConversationForkRoute(request)||isFileLifecycleRoute(request)||isGitReviewRoute(request)||isIndexAdmissionRoute(request)||isIndexControlAdmissionRoute(request)||isPublicationReviewRoute(request)||isPublicationAdmissionRoute(request)||isRunCommandRoute(request)||isModeMutationRoute(request)||isDiscoveryPolicyRoute(request)||isGoalResumeRoute(request)||isMcpMutationRoute(request)||isMemoryRestoreRoute(request)||isMemoryConsolidationRoute(request)||isMemoryCaptureRoute(request)||isMemoryDreamPolicyRoute(request))&&existing.receipt_protocol===atomicProtocol(request)){idempotencyRequests.set(request,{owner,operation,key:idempotencyKey});return;}
         if(isUploadRoute(request)&&existing.receipt_protocol==='upload-atomic-v1'){
           if(request.method==='PUT'){
-            const upload=db.prepare('SELECT status,declared_size,received_size,declared_sha256,actual_sha256,writer_token,writer_lease_until FROM ga_uploads WHERE id=? AND owner_id=?').get(String((request.params as Record<string,unknown>).uploadId),owner) as Record<string,unknown>|undefined;
+            const uploadId=String((request.params as Record<string,unknown>).uploadId),upload=db.prepare('SELECT status,declared_size,received_size,declared_sha256,actual_sha256,writer_token,writer_lease_until FROM ga_uploads WHERE id=? AND owner_id=?').get(uploadId,owner) as Record<string,unknown>|undefined;
+            if(upload)artifacts.assertUploadReceiptLive(uploadId,owner);
             if(upload&&['uploaded','completed'].includes(String(upload.status))&&upload.received_size===upload.declared_size&&upload.actual_sha256===upload.declared_sha256){
               idempotencyRequests.set(request,{owner,operation,key:idempotencyKey});atomicCommand(request,204,()=>undefined);return reply.code(204).send();
             }
@@ -290,11 +431,12 @@ export async function buildServer(config: {
         const route=request.routeOptions.url,kind=request.method==='POST'&&route==='/v1/interactions/:interactionId/response'?'interaction_response'
           :request.method==='POST'&&route==='/v1/interactions/:interactionId/decision'?'interaction_decision':undefined;
         if(kind){
+          if(typeof route!=='string'||request.method!=='POST'||!['/v1/interactions/:interactionId/response','/v1/interactions/:interactionId/decision'].includes(route))throw new Error('task_wait_receipt_state_conflict');
           const recovered=withImmediateTransaction(db,()=>{
             const interactionId=String((request.params as Record<string,unknown>).interactionId);
             const receipt=replyDrafts.recoverReceipt(owner,interactionId,kind,idempotencyKey,requestHash)??taskWaitResponder.recoverReceipt(owner,interactionId,kind,idempotencyKey,requestHash);
             if(!receipt)return;
-            const operationId=contracts.operationFor(request.method,route!);
+            const operationId=contracts.operationFor(request.method,route);
             if(!operationId||!contracts.validateResponse(operationId,202,receipt).valid)throw new Error('task_wait_receipt_state_conflict');
             db.prepare('UPDATE ga_idempotency SET response_status=202,response_json=? WHERE owner_id=? AND operation=? AND idempotency_key=? AND request_sha256=? AND response_status IS NULL')
               .run(JSON.stringify(receipt),owner,operation,idempotencyKey,requestHash);
@@ -305,6 +447,13 @@ export async function buildServer(config: {
         throw new Error('idempotency_in_progress');
       }
       const responseBody = existing.response_json === null ? null : JSON.parse(String(existing.response_json));
+      verifyCachedFork(responseBody);
+      if(existing.receipt_protocol==='upload-atomic-v1'){
+        const route=request.routeOptions.url,body=responseBody as Record<string,unknown>|null,uploadId=String((request.params as Record<string,unknown>|undefined)?.uploadId??'');
+        if(request.method==='POST'&&route==='/v1/conversations/:conversationId/upload-batches')artifacts.assertUploadBatchInitReceiptLive(String(body?.batch_id??''),owner);
+        else if(request.method==='POST'&&route==='/v1/conversations/:conversationId/uploads')artifacts.assertUploadInitReceiptLive(String(body?.upload_id??''),owner);
+        else if((request.method==='PUT'&&route==='/v1/uploads/:uploadId/content')||(request.method==='POST'&&route==='/v1/uploads/:uploadId/complete'))artifacts.assertUploadReceiptLive(uploadId,owner);
+      }
       return reply.code(Number(existing.response_status)).send(responseBody);
     }
     const now = Date.now();
@@ -315,7 +464,8 @@ export async function buildServer(config: {
   });
 
   app.addHook('onSend', async (request, reply, payload) => {
-    const operationId = contracts.operationFor(request.method, request.routeOptions.url ?? request.url.split('?')[0]!);
+    const registeredRoute=request.routeOptions.url;
+    const operationId=typeof registeredRoute==='string'?contracts.operationFor(request.method,registeredRoute):null;
     let responseValue: unknown = null;
     if (typeof payload === 'string' && payload.length) {
       try { responseValue = JSON.parse(payload); } catch { responseValue = payload; }
@@ -336,12 +486,15 @@ export async function buildServer(config: {
     return payload;
   });
 
-  app.setErrorHandler((error, _request, reply) => {
+  app.setErrorHandler((error, request, reply) => {
     const code = error instanceof Error ? error.message : 'internal_error';
     if(code==='contract_response_invalid')return reply.code(500).send({error:{code:'CONTRACT_RESPONSE_INVALID'}});
     if(code==='git_repository_unconfigured')return reply.code(503).send({error:{code:'GIT_REPOSITORY_UNCONFIGURED'}});
     if(code==='chat_mode_unavailable')return reply.code(503).send({error:{code:'CHAT_MODE_UNAVAILABLE'}});
     if(code==='conversation_mode_invalid')return reply.code(400).send({error:{code:'CONVERSATION_MODE_INVALID'}});
+    if(['invalid_file_range','invalid_file_history_query','invalid_file_history_cursor'].includes(code))return reply.code(400).send({error:{code:code.toUpperCase()}});
+    if(code==='file_source_stale')return reply.code(409).send({error:{code:'FILE_SOURCE_STALE'}});
+    if(code==='DOCUMENT_PREVIEW_TOO_LARGE')return reply.code(413).send({error:{code:'DOCUMENT_PREVIEW_TOO_LARGE'}});
     if(['active_run_mode_change','chat_model_fixed','conversation_mode_conflict','conversation_mode_scope_invalid','conversation_mode_goal_active','conversation_mode_goal_unconfirmed','conversation_mode_legacy_unconfirmed','conversation_mode_session_missing','conversation_mode_admission_required'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
     if(code==='task_run_limit_unconfirmed')return reply.code(409).send({error:{code:'TASK_RUN_LIMIT_UNCONFIRMED'}});
     if(['memory_capture_policy_stale','memory_capture_source_conflict','memory_capture_not_ready','memory_restore_expired','memory_restore_source_conflict','memory_consolidation_state_conflict','memory_consolidation_source_conflict','memory_consolidation_pending_limit','memory_consolidation_source_limit'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
@@ -353,14 +506,23 @@ export async function buildServer(config: {
     if(['handoff_identity_forbidden','handoff_execution_forbidden','handoff_role_forbidden'].includes(code))return reply.code(403).send({error:{code:code.toUpperCase()}});
     if(['handoff_usage_unresolved','handoff_operation_unresolved','handoff_lease_changed','handoff_revision_conflict','handoff_execution_conflict','handoff_execution_unbound','handoff_already_started','handoff_not_started','handoff_closed','handoff_controller_changed','handoff_route_repeated','handoff_hop_exhausted'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
     if(['channel_binding_rate_limited','email_binding_rate_limited'].includes(code))return reply.code(429).send({error:{code:code.toUpperCase()}});
+    if(['channel_message_invalid','channel_attachments_invalid','channel_attachment_staging_missing'].includes(code))return reply.code(422).send({error:{code:code.toUpperCase()}});
     if(code==='native_task_intent_invalid')return reply.code(422).send({error:{code:code.toUpperCase()}});
     if(code==='native_child_request_invalid')return reply.code(422).send({error:{code:code.toUpperCase()}});
     if(code==='native_child_identity_conflict')return reply.code(409).send({error:{code:code.toUpperCase()}});
     if(['native_child_closure_invalid','native_activation_invalid','native_spawn_publication_invalid'].includes(code))return reply.code(422).send({error:{code:code.toUpperCase()}});
     if(['native_child_closure_pending','native_child_closure_conflict','native_child_closed','native_activation_source_pending','native_activation_source_changed','native_recovery_fence_live','native_spawn_publication_unbound'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
     if(code==='channel_binding_unavailable')return reply.code(503).send({error:{code:code.toUpperCase()}});
+    if(['push_channel_unavailable','push_vapid_configuration_invalid'].includes(code))return reply.code(503).send({error:{code:code.toUpperCase()}});
+    if(code==='push_subscription_not_found')return reply.code(404).send({error:{code:code.toUpperCase()}});
+    if(code==='push_subscription_invalid')return reply.code(422).send({error:{code:code.toUpperCase()}});
     if(['channel_binding_proof_invalid','email_binding_proof_invalid','email_address_invalid'].includes(code))return reply.code(422).send({error:{code:code.toUpperCase()}});
-    if(code==='channel_principal_already_bound'||code==='channel_binding_not_verified')return reply.code(409).send({error:{code:code.toUpperCase()}});
+    if(['channel_principal_already_bound','channel_binding_not_verified','channel_message_identity_conflict',
+      'channel_authority_binding_ambiguous','channel_authority_owner_mismatch','channel_authority_mapping_invalid',
+      'channel_authority_legacy_mapping_unpinned','channel_cached_event_source_mismatch','channel_cached_event_binding_mismatch',
+      'channel_cached_thread_mismatch','channel_cached_event_link_mismatch','channel_cached_event_message_mismatch',
+      'channel_root_generation_conflict',
+      'channel_thread_generation_conflict'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
     if(code==='task_completion_handshake_invalid')return reply.code(422).send({error:{code:code.toUpperCase()}});
     if(code==='task_completion_handshake_conflict')return reply.code(409).send({error:{code:code.toUpperCase()}});
     if(code==='task_mailbox_binding_invalid')return reply.code(422).send({error:{code:code.toUpperCase()}});
@@ -370,6 +532,14 @@ export async function buildServer(config: {
     if(code==='task_reply_target_invalid')return reply.code(422).send({error:{code:code.toUpperCase()}});
     if(code==='task_reply_run_active')return reply.code(409).send({error:{code:code.toUpperCase()}});
     if(code==='task_notification_run_active')return reply.code(409).send({error:{code:code.toUpperCase()}});
+    if(code==='workspace_checkpoint_upgrade_required'||code==='workspace_checkpoint_service_unavailable'||code==='workspace_checkpoint_backup_verifier_unavailable'||code==='workspace_checkpoint_source_revision_unavailable')return reply.code(503).send({error:{code:code.toUpperCase()}});
+    if(code.startsWith('workspace_checkpoint_')&&code.endsWith('_invalid'))return reply.code(422).send({error:{code:code.toUpperCase()}});
+    if(['workspace_checkpoint_path_is_directory','workspace_path_unsafe','workspace_private_path','workspace_paths_invalid','workspace_path_collision','workspace_limit'].includes(code))return reply.code(422).send({error:{code:code.toUpperCase()}});
+    if(code.startsWith('workspace_checkpoint_')&&(
+      code.endsWith('_changed')||code.endsWith('_conflict')||code.endsWith('_corrupt')||
+      ['workspace_checkpoint_restore_busy','workspace_checkpoint_restore_closed','workspace_checkpoint_pruned','workspace_checkpoint_path_not_selected','workspace_checkpoint_retained_reference','workspace_checkpoint_lease_revoked','workspace_checkpoint_current_changed','workspace_checkpoint_prepare_unknown','workspace_checkpoint_roots_overlap'].includes(code)
+    ))return reply.code(409).send({error:{code:code.toUpperCase()}});
+    if(code==='workspace_source_changed')return reply.code(409).send({error:{code:code.toUpperCase()}});
     if (code.startsWith('budget_') && code.endsWith('_invalid')) return reply.code(422).send({error:{code:code.toUpperCase()}});
     if (code === 'model_budget_exhausted') return reply.code(429).send({error:{code:'MODEL_BUDGET_EXHAUSTED'}});
     if (code === 'budget_ceiling_exceeded') return reply.code(422).send({error:{code:'BUDGET_CEILING_EXCEEDED'}});
@@ -377,17 +547,24 @@ export async function buildServer(config: {
     if (['budget_route_unavailable','budget_service_unavailable'].includes(code)) return reply.code(503).send({error:{code:code.toUpperCase()}});
     if (code.startsWith('budget_') && (code.endsWith('_conflict') || ['budget_binding_missing','budget_run_inactive','budget_usage_unknown','budget_usage_pending','budget_window_closed','budget_policy_stale'].includes(code))) return reply.code(409).send({error:{code:code.toUpperCase()}});
     if (Number((error as { statusCode?: number }).statusCode) === 413) {
+      if ((request.routeOptions.url ?? request.url).split('?')[0] === '/hooks/v1/channels/slack') {
+        return reply.code(413).send({ error: { code: 'CHANNEL_EVENT_TOO_LARGE' } });
+      }
       return reply.code(413).send({ error: { code: 'VOICE_AUDIO_TOO_LARGE' } });
     }
     if (error instanceof TemplateContractError) {
       return reply.code(422).send({ error: { code, details: error.details } });
     }
     if ((error as { validation?: unknown }).validation) return reply.code(422).send({ error: { code: 'INVALID_WORKBENCH_REQUEST' } });
-    if (code.startsWith('invalid_') || code === 'unsupported_trigger' || code === 'idempotency_key_required') return reply.code(422).send({ error: { code: code.toUpperCase() } });
+    if (code.startsWith('invalid_') || code === 'unsupported_trigger' || code === 'idempotency_key_required' || code === 'memory_dream_policy_invalid' || code === 'mcp_control_invalid_request') return reply.code(422).send({ error: { code: code.toUpperCase() } });
+    if (code === 'mcp_reload_unavailable') return reply.code(503).send({ error: { code: code.toUpperCase() } });
+    if (['mcp_connections_limit','mcp_server_name_conflict','mcp_connection_disabled','mcp_connection_unavailable','mcp_reload_in_progress','mcp_reload_stale','mcp_tool_catalog_limit'].includes(code)) return reply.code(409).send({ error: { code: code.toUpperCase() } });
+    if (code === 'memory_capture_reconcile_unavailable') return reply.code(503).send({error:{code:'MEMORY_CAPTURE_RECONCILE_UNAVAILABLE'}});
+    if (['memory_capture_reconcile_conflict','memory_capture_reconcile_attempt_invalid','memory_capture_reconcile_run_not_interrupted','memory_capture_reconcile_live_lease','memory_capture_source_or_policy_stale','memory_capture_proposal_unavailable','memory_capture_unresolved_usage_held'].includes(code)) return reply.code(409).send({error:{code:code.toUpperCase()}});
     if (['evidence_required','dependency_cycle'].includes(code)) return reply.code(422).send({error:{code:code.toUpperCase()}});
     if (['assessment_revision_conflict','observation_revision_conflict','dependency_not_completed','dependency_evidence_unverified','task_completion_evidence_required','task_acceptance_outputs_unverified'].includes(code)) return reply.code(409).send({error:{code:code.toUpperCase()}});
     if (code.endsWith('_forbidden') || code.endsWith('_path_escape') || code.endsWith('_scope_mismatch') || code.endsWith('_workspace_mismatch')) return reply.code(403).send({ error: { code: code.toUpperCase() } });
-    if (code.endsWith('_revoked') || code.endsWith('_state_conflict') || ['agent_not_active', 'agent_unavailable', 'run_binding_conflict', 'memory_verification_required', 'task_not_active', 'task_budget_exhausted', 'task_active_occurrence', 'task_conversation_read_only', 'task_continuation_unsupported','task_continuation_conflict','task_checkpoint_unavailable','task_continuation_limit'].includes(code)) return reply.code(409).send({ error: { code: code.toUpperCase() } });
+    if (code.endsWith('_revoked') || code.endsWith('_state_conflict') || ['agent_not_active', 'agent_unavailable', 'run_binding_conflict', 'memory_verification_required', 'memory_dream_policy_stale', 'task_not_active', 'task_budget_exhausted', 'task_active_occurrence', 'task_conversation_read_only', 'task_continuation_unsupported','task_continuation_conflict','task_checkpoint_unavailable','task_continuation_limit'].includes(code)) return reply.code(409).send({ error: { code: code.toUpperCase() } });
     if (code === 'mailbox_queue_full') return reply.code(429).send({ error: { code: code.toUpperCase() } });
     if (code === 'unsafe_page_url') return reply.code(403).send({error:{code:'UNSAFE_PAGE_URL'}});
     if (code.startsWith('page_')) return reply.code(502).send({error:{code:code.toUpperCase()}});
@@ -400,15 +577,20 @@ export async function buildServer(config: {
     if (code==='discovery_report_source_coverage_required')return reply.code(409).send({error:{code:code.toUpperCase()}});
     if (['discovery_role_changed','discovery_role_unavailable'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
     if (code==='discovery_policy_invalid'||code==='discovery_command_key_invalid')return reply.code(422).send({error:{code:code.toUpperCase()}});
+    if(code==='upload_expired')return reply.code(410).send({error:{code:'UPLOAD_EXPIRED'}});
+    if(code==='upload_batch_limit_exceeded')return reply.code(413).send({error:{code:'UPLOAD_BATCH_LIMIT_EXCEEDED'}});
+    if(code==='upload_batch_concurrency_limit')return reply.code(429).send({error:{code:'UPLOAD_BATCH_CONCURRENCY_LIMIT'}});
+    if (['workspace_change_busy','project_deleted','project_has_active_tasks','project_has_pending_operations'].includes(code)) return reply.code(409).send({error:{code:code.toUpperCase()}});
     if (code.endsWith('_not_found')) return reply.code(404).send({ error: { code: code.toUpperCase() } });
-    if (['reply_review_mode_conflict','reply_draft_corrupt','reply_review_state_conflict','task_wait_response_required','version_conflict', 'active_run_model_change', 'run_state_conflict', 'run_version_conflict', 'checkpoint_invalid', 'reconciliation_required', 'interaction_kind_conflict', 'interaction_state_conflict', 'interaction_version_conflict', 'interaction_expired', 'action_digest_mismatch', 'idempotency_conflict', 'idempotency_in_progress', 'voice_idempotency_conflict', 'STALE_FILE_VERSION', 'IDEMPOTENCY_CONFLICT', 'crawl_batch_owner_mismatch'].includes(code)) return reply.code(409).send({ error: { code: code.toUpperCase() } });
-    if (['reply_evidence_unverified','interaction_answer_invalid', 'interaction_decision_invalid', 'upload_size_invalid', 'upload_sha256_invalid', 'upload_filename_invalid', 'upload_size_mismatch', 'upload_sha256_mismatch', 'artifact_diff_unsupported', 'source_evidence_required', 'source_url_invalid', 'invalid_project_title', 'invalid_conversation_state', 'FILE_REQUEST_INVALID', 'TEMPLATE_CONTENT_INVALID', 'UNSUPPORTED_FORMAT_OPERATION', 'requested_count_invalid', 'event_seq_invalid', 'input_index_invalid', 'item_id_invalid', 'owner_id_invalid', 'run_id_invalid', 'batch_id_invalid', 'conversation_id_invalid', 'crawl_url_invalid'].includes(code)) return reply.code(422).send({ error: { code: code.toUpperCase() } });
+    if (['reply_review_mode_conflict','reply_draft_corrupt','reply_review_state_conflict','task_wait_response_required','version_conflict','memory_dream_policy_version_conflict', 'active_run_model_change', 'run_state_conflict', 'run_version_conflict', 'checkpoint_invalid', 'reconciliation_required', 'interaction_kind_conflict', 'interaction_state_conflict', 'interaction_version_conflict', 'interaction_expired', 'action_digest_mismatch', 'idempotency_conflict', 'idempotency_in_progress', 'voice_idempotency_conflict', 'STALE_FILE_VERSION', 'IDEMPOTENCY_CONFLICT', 'crawl_batch_owner_mismatch'].includes(code)) return reply.code(409).send({ error: { code: code.toUpperCase() } });
+    if (['reply_evidence_unverified','interaction_answer_invalid', 'interaction_decision_invalid', 'upload_size_invalid', 'upload_sha256_invalid', 'upload_filename_invalid', 'upload_size_mismatch', 'upload_sha256_mismatch','upload_batch_invalid', 'artifact_diff_unsupported', 'source_evidence_required', 'source_url_invalid', 'invalid_project_title', 'invalid_conversation_state', 'FILE_REQUEST_INVALID', 'TEMPLATE_CONTENT_INVALID', 'UNSUPPORTED_FORMAT_OPERATION', 'requested_count_invalid', 'event_seq_invalid', 'input_index_invalid', 'item_id_invalid', 'owner_id_invalid', 'run_id_invalid', 'batch_id_invalid', 'conversation_id_invalid', 'crawl_url_invalid'].includes(code)) return reply.code(422).send({ error: { code: code.toUpperCase() } });
     if (['upload_state_conflict'].includes(code)) return reply.code(409).send({ error: { code: code.toUpperCase() } });
     if (code === 'origin_forbidden' || code === 'csrf_invalid') return reply.code(403).send({ error: { code: code.toUpperCase() } });
     if (code === 'idempotency_key_invalid') return reply.code(400).send({ error: { code: 'IDEMPOTENCY_KEY_INVALID' } });
     if(code==='ordinary_attachment_steering_unavailable')return reply.code(503).send({error:{code:'ORDINARY_ATTACHMENT_STEERING_UNAVAILABLE'}});
     if(code==='ordinary_steering_unavailable')return reply.code(503).send({error:{code:'ORDINARY_STEERING_UNAVAILABLE'}});
     if(code==='ordinary_steering_scope_unconfirmed')return reply.code(409).send({error:{code:'ORDINARY_STEERING_SCOPE_UNCONFIRMED'}});
+    if (code === 'workspace_selection_invalid' || code === 'workspace_owner_invalid') return reply.code(422).send({error:{code:code.toUpperCase()}});
     if (code === 'contract_request_invalid') return reply.code(400).send({ error: { code: 'CONTRACT_REQUEST_INVALID' } });
     if (code === 'voice_multipart_required') return reply.code(415).send({ error: { code: 'VOICE_MULTIPART_REQUIRED' } });
     if (code === 'voice_busy') return reply.code(429).send({ error: { code: 'VOICE_BUSY' } });
@@ -421,6 +603,21 @@ export async function buildServer(config: {
   });
 
   app.get('/healthz', async () => ({ ok: true, service: 'jot-general-agent-bff' }));
+  app.get('/v1/push/vapid-public-key',async(_request,reply)=>{
+    if(!pushSubscriptions)throw new Error('push_channel_unavailable');
+    reply.header('cache-control','private, no-store');
+    return pushSubscriptions.publicKey();
+  });
+  app.post('/v1/push/subscriptions',async(request,reply)=>{
+    if(!pushSubscriptions)throw new Error('push_channel_unavailable');
+    return reply.code(201).send(pushSubscriptions.register(actor(request as any),request.body as any,String(request.headers['idempotency-key']??'')));
+  });
+  app.post('/v1/push/subscriptions/:bindingId/revoke',async request=>{
+    if(!pushSubscriptions)throw new Error('push_channel_unavailable');
+    const input=request.body as Record<string,unknown>|undefined;
+    if(!input||Object.keys(input).some(key=>key!=='expected_version'&&key!=='local_endpoint')||!Number.isSafeInteger(input.expected_version)||Number(input.expected_version)<1||(input.local_endpoint!==undefined&&typeof input.local_endpoint!=='string'))throw new Error('push_subscription_invalid');
+    return pushSubscriptions.revoke(actor(request as any),String((request.params as {bindingId:string}).bindingId),Number(input.expected_version),input.local_endpoint as string|undefined);
+  });
   app.get('/v1/channel-bindings',async request=>ownerChannels.list(actor(request as any)));
   app.post('/v1/channel-bindings/email',async(request,reply)=>{
     const input=request.body as Record<string,unknown>;
@@ -453,13 +650,16 @@ export async function buildServer(config: {
     if(Object.keys(query).some(key=>key!=='cursor')||(query.cursor!==undefined&&(typeof query.cursor!=='string'||!query.cursor||query.cursor.length>200)))throw new Error('invalid_task_notification_settings');
     return taskNotifications.history(actor(request as any),String((request.params as {taskId:string}).taskId),query.cursor as string|undefined);
   });
-  registerWorkbenchRoutes(app, workbench, actor,(request,operation)=>atomicCommand(request,200,operation));
+  registerWorkbenchRoutes(app, workbench, actor,(request,operation)=>atomicCommand(request,200,operation),workspaceCheckpoints);
+  registerWorkbenchMcpRoutes(app, mcpRegistry, actor, (request,status,operation)=>atomicCommand(request,status,operation),
+    (ownerId, agentId) => listUnknownMcpOperations(db, ownerId, agentId));
   const taskDelegations=new TaskDelegationService(db,workbench,persistentTasks);
   const taskCollaboration=new TaskCollaborationService(db,workbench,persistentTasks,taskDelegations);
   registerPersistentTaskRoutes(app, persistentTasks, actor,taskDelegations,taskCollaboration);
   registerTaskPrdRoutes(app,taskPrd,actor);
   registerTaskBudgetRoutes(app,new TaskBudgetService(db,budgetPolicy),actor);
-  registerWorkbenchExecution(app, db, workbench, persistentTasks, config.internalChannelToken, modelBudgets,taskCollaboration,config.replyJudge,nativeWork);
+  registerWorkbenchExecution(app, db, workbench, persistentTasks, config.internalChannelToken, modelBudgets,taskCollaboration,config.replyJudge,nativeWork,
+    new Set(config.chatWebNetwork?.allowedOrigins ?? []),config.nativeMemberClient,events,config.memoryReasoningClient, mcpRegistry,interactions,artifacts);
   registerConversationGoalExecution(app,new ConversationGoalControls(db,events,runs),config.internalChannelToken);
   registerOrdinaryInputBinding(app,db,config.internalChannelToken);
   registerOrdinaryModelPolicy(app,db,config.internalChannelToken);
@@ -473,6 +673,18 @@ export async function buildServer(config: {
   registerOrdinarySteeringHistory(app,db,config.internalChannelToken);
   registerOrdinaryRunHistory(app,db,config.internalChannelToken);
 
+  app.post('/internal/v1/channel/mattermost/event-receipt',async(request,reply)=>{
+    const expected=String(config.internalChannelToken??'');
+    if(expected.length<16||request.headers.authorization!==`Bearer ${expected}`)return reply.code(401).send({error:{code:'UNAUTHORIZED'}});
+    return reply.send(channelIntake.lookupOriginalChannelEventReceipt(request.body));
+  });
+
+  app.post('/internal/v1/channel/mattermost/proof-receipt',async(request,reply)=>{
+    const expected=String(config.internalChannelToken??'');
+    if(expected.length<16||request.headers.authorization!==`Bearer ${expected}`)return reply.code(401).send({error:{code:'UNAUTHORIZED'}});
+    return reply.send(ownerChannels.lookupMattermost(request.body));
+  });
+
   app.post('/internal/v1/channel/messages', async (request, reply) => {
     const expected = String(config.internalChannelToken ?? '');
     if (expected.length < 16 || request.headers.authorization !== `Bearer ${expected}`) {
@@ -480,6 +692,16 @@ export async function buildServer(config: {
     }
     return reply.code(202).send(channelIntake.accept(request.body as Record<string, unknown>));
   });
+
+  if(config.channelAttachmentIntakeV2===true||channelAttachmentProtocolV2Installed(db)&&String(config.internalChannelToken??'').length>=16)registerChannelAttachmentIntakeV2(app,{db,intake:channelIntake,artifacts,internalChannelToken:config.internalChannelToken!,admission:channelAttachmentInputReady?'enabled':config.channelAttachmentIntakeV2===true?'unavailable':'recovery_only'});
+  if (config.qqWebhook) registerQQRoutes(app, { ...config.qqWebhook, intake: channelIntake });
+  if(config.smsWebhook)registerTwilioSmsRoutes(app,{...config.smsWebhook,intake:channelIntake,artifacts});
+  const slackAdapter = config.slackWebhook
+    ? createSlackWebhookAdapter({ ...config.slackWebhook, intake: channelIntake,
+      ...(config.slackWebhook.attachmentBotToken?{artifacts}:{}),
+      handleInteractionReply: createSlackInteractionReplyHandler(db, interactions, config.slackWebhook.teamId),
+      ...(config.slackTransport ? { transport: config.slackTransport } : {}) }) : undefined;
+  app.register(slackWebhookRoutes, { adapter: slackAdapter });
 
   app.post('/internal/v1/file-tools', async (request, reply) => {
     const expected = String(config.internalChannelToken ?? '');
@@ -557,12 +779,15 @@ export async function buildServer(config: {
   registerDiscoveryPolicyRoutes(app,{policies:new DiscoveryPolicies(db,{onChange:(owner,receipt,event)=>persistentTasks.synchronizeDiscoveryPolicy(owner,receipt.policy_id,event)}),actor,role:(owner,id)=>workbench.getAgent(owner,id),atomic:atomicCommand});
   registerDiscoveryHistoryRoutes(app,{history:new DiscoveryHistory(db),actor,role:(owner,id)=>workbench.getAgent(owner,id)});
   registerConversationGoalRoutes(app,{db,conversations,actor,client:config.conversationGoalClient,resumeAdmission:{enabled:config.conversationGoalResumeEnabled===true,controls:new ConversationGoalControls(db,events,runs),atomic:atomicCommand}});
+  if(config.skillCatalogClient)registerSkillCatalogRoutes(app,new SkillCatalogService(db,workbench,config.skillCatalogClient),actor);
   app.get('/v1/capabilities', async (request, reply) => {
     const ownerId = actor(request as any);
     const cancelled=new AbortController();const abort=()=>{if(!reply.raw.writableEnded)cancelled.abort();};
     request.raw.once('aborted',abort);reply.raw.once('close',abort);
-    let voice,models,modes,attachmentSteeringReady;
-    try{[voice,models,modes,attachmentSteeringReady]=await Promise.all([voiceTranscriptions.capability(),readHostModelCatalog(config.modelCatalogClient,cancelled.signal),conversationModes.capability(cancelled.signal),readAttachmentSteeringReadiness(config.ordinaryAttachmentSteeringEnabled===true,config.ordinaryAttachmentSteeringClient,cancelled.signal)]);}
+    const browserClient=config.conversationGoalClient;
+    const browserHost=typeof browserClient?.observeBrowserDriver==='function'?{observeBrowserDriver:browserClient.observeBrowserDriver.bind(browserClient)}:undefined;
+    let voice,models,modes,attachmentSteeringReady,browserActionReadiness;
+    try{[voice,models,modes,attachmentSteeringReady,browserActionReadiness]=await Promise.all([voiceTranscriptions.capability(),readHostModelCatalog(config.modelCatalogClient,cancelled.signal),conversationModes.capability(cancelled.signal),readAttachmentSteeringReadiness(config.ordinaryAttachmentSteeringEnabled===true,config.ordinaryAttachmentSteeringClient,cancelled.signal),observeBrowserActionReadiness(db,ownerId,config.workspaces,browserHost,cancelled.signal)]);}
     finally{request.raw.removeListener('aborted',abort);reply.raw.removeListener('close',abort);}
     if (config.csrfToken && request.headers['sec-fetch-site'] !== 'cross-site') {
       reply.header('x-csrf-token', config.csrfToken).header('cache-control', 'no-store');
@@ -577,20 +802,21 @@ export async function buildServer(config: {
       models, limits: { max_upload_bytes: 104857600, max_active_runs_per_conversation: 1,
         max_concurrent_sessions: 5,
         replay_retention_hours: 168, idempotency_retention_hours: 24 },
-      voice,conversation_modes:modes,
+       voice,conversation_modes:modes,conversation_forks:{protocol:1,available:config.conversationForkSourceClient!==undefined},
       conversation_commands:{protocol:1,ordinary_steer:{configured:config.ordinarySteeringEnabled===true,delivery:'original',attachments:attachmentSteeringReady}},
-      workbench: { enabled: true, agent_roles: true, independent_teams: true, agent_messages: true,
-        shared_workspace: true, memory_scopes: ['project', 'private'], memory_lifecycle: true, memory_restore: true, memory_consolidation: true, memory_retrieval_traces: true, memory_capture:true, memory_retrieval: 'local_keyword',task_readiness:true,task_prd:true,task_unlimited_runs:true,task_run_limit_protocol:1,model_budget:budgetPolicy!==undefined,
-        task_reply_policy:true,task_reply_execution:false,task_create_delivery:true,task_notifications:true,channel_bindings:!!config.internalChannelToken||!!config.emailBindingSend,email_bindings:!!config.emailBindingSend,wecom_bindings:!!config.internalChannelToken,task_notification_events:['changed','completed','failed','needs_confirmation'],
+      workbench: { enabled: true, agent_roles: true, independent_teams: true, agent_messages: true, mcp_servers: true,
+        shared_workspace: true, workspace_file_history: true, workspace_file_range: true, memory_scopes: ['project', 'private'], memory_lifecycle: true, memory_restore: true, memory_consolidation: true, memory_retrieval_traces: true, memory_capture:true, memory_retrieval: 'local_keyword',task_readiness:true,task_prd:true,task_unlimited_runs:true,task_run_limit_protocol:1,model_budget:budgetPolicy!==undefined,
+        task_reply_policy:true,task_reply_execution:false,task_create_delivery:true,task_notifications:true,channel_bindings:!!config.internalChannelToken||!!config.emailBindingSend||!!config.webPushVapid,email_bindings:!!config.emailBindingSend,wecom_bindings:!!config.internalChannelToken,matrix_bindings:!!config.internalChannelToken&&config.matrixOwnerBindingEnabled===true,webpush_bindings:!!config.webPushVapid,task_notification_events:['changed','completed','failed','needs_confirmation'],
         ...(budgetPolicy?{task_model_budget_limits:budgetPolicy.budgetSettings().limits.task_total}:{}),
         collaboration_modes: [{ id: 'single', enabled: true }, { id: 'independent_team', enabled: true },
           { id: 'subagents', enabled: false, reason: 'HOST_ADAPTER_NOT_READY' },
           { id: 'team', enabled: false, reason: 'DSH_EXPERIMENTAL_TEAM_NOT_READY' },
           { id: 'handoff', enabled: false, reason: 'HOST_ADAPTER_NOT_READY' }],
-        task_triggers: ['once', 'interval', 'page_change', 'daily', 'weekly','conversation_message','conversation_result'], notification_channels: ['in_app'],
+        task_triggers: ['once', 'interval', 'page_change', 'daily', 'weekly', 'cron', 'delay','conversation_message','conversation_result'], notification_channels: ['in_app'],
         task_schedule_limits: { default_interval_seconds: 300, min_interval_seconds: 60, max_interval_seconds: 31536000,
-          dst_gap: 'next_valid_time', dst_fold: 'first_only', missed_triggers: 'coalesce' },
-        allowed_tools: WORKBENCH_TOOL_IDS, execution_ready: config.workbenchExecutionReady === true },
+          dst_gap: 'next_valid_time', dst_fold: 'first_only', missed_triggers: 'coalesce', misfire_policies: ['coalesce','skip','catch_up'] },
+        allowed_tools: WORKBENCH_TOOL_IDS, execution_ready: config.workbenchExecutionReady === true, browser_action_readiness: browserActionReadiness },
+      ...(config.workspaces.length?{workspace_selection:workbench.getWorkspacePreference(ownerId)}:{}),
       workspaces: config.workspaces.map(workspace_id => ({ workspace_id, title: workspace_id, can_read: true, can_write: true, owner_id: ownerId }))
         .map(({ owner_id: _ignored, ...workspace }) => workspace),
     };
@@ -608,11 +834,19 @@ export async function buildServer(config: {
   registerPublicationExecutionRoutes(app,{executions:workPublicationExecutions,actor,atomic:atomicCommand});
   registerPublicationDispatchRoutes(app,{executions:workPublicationExecutions,client:config.nativeGitClient,actor});
   registerGitWorkspaceSource(app,gitIndexExecutions,config.internalChannelToken,db,workPublicationExecutions);
+  app.get('/v1/workspaces/selection', async request => workbench.getWorkspacePreference(actor(request as any)));
+  app.post('/v1/workspaces/selection', async request => atomicCommand(request,200,()=>workbench.selectWorkspace(actor(request as any),request.body as Record<string,unknown>)));
   app.get('/v1/projects', async request => projects.list(actor(request as any)));
+  app.get('/v1/projects/lifecycle', async request => projects.lifecycle(actor(request as any)));
+  app.post('/v1/projects/:projectId/lifecycle', async request => atomicCommand(request,200,()=>{
+    const {projectId}=request.params as {projectId:string};
+    const input=request.body as {action:'archive'|'restore'|'delete';expected_version:number};
+    return projects[input.action](projectId,actor(request as any),input);
+  }));
   app.post('/v1/projects', async (request, reply) =>
-    reply.code(201).send(projects.create(actor(request as any), request.body as Record<string, unknown>)));
+    reply.code(201).send(atomicCommand(request,201,()=>projects.create(actor(request as any), request.body as Record<string, unknown>))));
   app.patch('/v1/projects/:projectId', async request =>
-    projects.update((request.params as { projectId: string }).projectId, actor(request as any), request.body as Record<string, unknown>));
+    atomicCommand(request,200,()=>projects.update((request.params as { projectId: string }).projectId, actor(request as any), request.body as Record<string, unknown>)));
 
   app.get('/v1/conversations', async request => {
     const query = request.query as { limit?: string; project_id?: string; state?: string;cursor?:string };
@@ -646,7 +880,11 @@ export async function buildServer(config: {
     const owner = actor(request as any);
     const agent = workbench.agentForConversation(owner, id);
     if (agent && agent.conversation_id !== id) throw new Error('task_conversation_read_only');
-    const ordinary=agent?undefined:await conversationModes.prepareEnqueue(id,owner,request.body as Record<string,unknown>);
+    const recoveryAbort=new AbortController(),cancelRecovery=()=>{if(!reply.raw.writableEnded)recoveryAbort.abort();};
+    request.raw.once('aborted',cancelRecovery);reply.raw.once('close',cancelRecovery);
+    let ordinary:Awaited<ReturnType<typeof conversationModes.prepareEnqueue>>|undefined;
+    try{ordinary=agent?undefined:await conversationModes.prepareEnqueue(id,owner,request.body as Record<string,unknown>,recoveryAbort.signal);}
+    finally{request.raw.removeListener('aborted',cancelRecovery);reply.raw.removeListener('close',cancelRecovery);}
     const result = atomicCommand(request,202, () => {
       const current=workbench.agentForConversation(owner,id);
       if(current?.agent_id!==agent?.agent_id)throw Error('conversation_mode_scope_invalid');
@@ -658,6 +896,13 @@ export async function buildServer(config: {
     return reply.code(202).send(result);
   });
   app.get('/v1/runs/:runId', async request => runs.get((request.params as { runId: string }).runId, actor(request as any)));
+  app.get('/v1/runs/:runId/diagnostics', async request => {
+    const runId=(request.params as {runId:string}).runId;
+    runs.get(runId,actor(request as any));
+    const diagnostics=readRunRuntimeDiagnostics(db,runId);
+    if(!diagnostics)throw Error('run_not_found');
+    return diagnostics;
+  });
   app.post('/v1/runs/:runId/steer', async (request, reply) => {
     const runId = (request.params as {runId: string}).runId;
     const owner = actor(request as any); runs.get(runId, owner);
@@ -769,6 +1014,17 @@ export async function buildServer(config: {
     (request.params as { interactionId: string }).interactionId, actor(request as any), request.body as Record<string, unknown>,
     String(request.headers['idempotency-key'] || ''),
   )));
+  app.post('/v1/conversations/:conversationId/upload-batches',async(request,reply)=>reply.code(201).send(atomicCommand(request,201,()=>artifacts.initUploadBatch(
+    (request.params as {conversationId:string}).conversationId,actor(request as any),request.body as Record<string,unknown>,
+  ))));
+  app.delete('/v1/upload-batches/:batchId',async(request,reply)=>{
+    const batchId=String((request.params as Record<string,unknown>).batchId??''),owner=actor(request as any);
+    artifacts.assertUploadBatchInitReceiptLive(batchId,owner);
+    const result=atomicCommand(request,204,()=>artifacts.cancelUploadBatch(batchId,owner));
+    if(reply.sent)return result;
+    artifacts.finishCancelledBatch(batchId,owner);
+    return reply.code(204).send();
+  });
   app.post('/v1/conversations/:conversationId/uploads', async (request, reply) => reply.code(201).send(atomicCommand(request,201,()=>artifacts.initUpload(
     (request.params as { conversationId: string }).conversationId, actor(request as any), request.body as Record<string, unknown>,
   ))));
@@ -776,9 +1032,19 @@ export async function buildServer(config: {
     await artifacts.writeContent((request.params as { uploadId: string }).uploadId, actor(request as any), request.body as AsyncIterable<Uint8Array>,()=>atomicCommand(request,204,()=>undefined));
     return reply.code(204).send();
   });
-  app.post('/v1/uploads/:uploadId/complete', async (request, reply) => reply.code(201).send(atomicCommand(request,201,()=>artifacts.complete(
-    (request.params as { uploadId: string }).uploadId, actor(request as any), request.body as Record<string, unknown>,
-  ))));
+  app.post('/v1/uploads/:uploadId/complete', async (request, reply) => {
+    const uploadId=(request.params as {uploadId:string}).uploadId,owner=actor(request as any);
+    artifacts.assertUploadReceiptLive(uploadId,owner);
+    return reply.code(201).send(atomicCommand(request,201,()=>artifacts.complete(uploadId,owner,request.body as Record<string,unknown>)));
+  });
+  app.delete('/v1/uploads/:uploadId', async (request, reply) => {
+    const uploadId=String((request.params as Record<string,unknown>).uploadId??''),owner=actor(request as any);
+    artifacts.assertUploadReceiptLive(uploadId,owner);
+    const result=atomicCommand(request,204,()=>artifacts.cancelUpload(uploadId,owner));
+    if(reply.sent)return result;
+    artifacts.finishCancelledUpload(uploadId,owner);
+    return reply.code(204).send();
+  });
   app.post('/v1/artifacts/:artifactId/file-operations', async (request, reply) => {
     const input = request.body as Record<string, unknown>;
     return reply.code(202).send(fileJobs.enqueue(actor(request as any), String(input.conversation_id || ''),

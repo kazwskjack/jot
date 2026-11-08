@@ -36,3 +36,50 @@ test('a lost Host response recovers only its committed proposal and settled usag
 test('unknown provider usage blocks replay and retains the original held cost',async t=>{
  const f=fixture(t);let actual=0;f.client.extractMemory=async(session,run)=>{actual++;f.policy.ledger.reserve('alice',run,{attempt_id:'unknown-call',provider:'fixture',model:'fixture',max_tokens:20});f.policy.ledger.dispatch('alice',run,'unknown-call');f.policy.ledger.markUnknown('alice',run,'unknown-call','stream_incomplete');throw Error('stream_lost');};const result=await f.make().processNext();assert.equal(result.runtime_status,'memory_reconciliation_required');assert.equal(f.db.prepare("SELECT state FROM wb_model_budget_attempts WHERE run_id=? AND attempt_id='unknown-call'").get(result.run_id).state,'unknown');assert.equal(await f.make().processNext(),null);assert.equal(actual,1);assert.equal(f.workbench.memoryCapture.get('alice',f.agent.agent_id,f.capture.capture_id).status,'ready');
 });
+
+test('shutdown after a committed proposal reconciles the original run without re-extraction or a second apply',async t=>{
+ const f=fixture(t),shutdown=new AbortController(),extract=f.client.extractMemory;
+ f.client.extractMemory=async(...args)=>{await extract(...args);shutdown.abort(Error('worker_shutdown'));throw Error('host_response_lost');};
+ const result=await f.make().processNext(shutdown.signal);
+ assert.equal(result.runtime_status,'memory_proposed');
+ assert.equal(f.db.prepare('SELECT status FROM ga_runs WHERE id=?').get(result.run_id).status,'succeeded');
+ assert.equal(f.workbench.memoryCapture.get('alice',f.agent.agent_id,f.capture.capture_id).status,'proposed');
+ assert.equal(f.workbench.listMemory('alice','ws',{agent_id:f.agent.agent_id}).items.length,0);
+ assert.equal(await f.make().processNext(),null);
+ assert.equal(f.calls(),1);
+ assert.equal(f.creates(),1);
+ const proposal=f.workbench.memoryCapture.get('alice',f.agent.agent_id,f.capture.capture_id);
+ f.workbench.memoryCapture.apply('alice',f.agent.agent_id,f.capture.capture_id,proposal.version);
+ assert.equal(f.workbench.listMemory('alice','ws',{agent_id:f.agent.agent_id}).items.length,1);
+ assert.throws(()=>f.workbench.memoryCapture.apply('alice',f.agent.agent_id,f.capture.capture_id,proposal.version+1),/memory_capture_state_conflict/);
+ assert.equal(f.workbench.listMemory('alice','ws',{agent_id:f.agent.agent_id}).items.length,1);
+});
+
+test('a policy revoked after proposal commit prevents recovery and later replay',async t=>{
+ const f=fixture(t),extract=f.client.extractMemory;let actual=0;
+ f.client.extractMemory=async(...args)=>{actual++;await extract(...args);f.workbench.memoryCapture.setPolicy('alice',f.agent.agent_id,{expected_version:1,mode:'off'});throw Error('host_response_lost');};
+ const result=await f.make().processNext();
+ assert.equal(result.runtime_status,'memory_reconciliation_required');
+ assert.equal(f.db.prepare('SELECT status FROM ga_runs WHERE id=?').get(result.run_id).status,'interrupted');
+ assert.equal(f.workbench.memoryCapture.get('alice',f.agent.agent_id,f.capture.capture_id).policy_current,false);
+ assert.throws(()=>f.workbench.memoryCapture.apply('alice',f.agent.agent_id,f.capture.capture_id,f.workbench.memoryCapture.get('alice',f.agent.agent_id,f.capture.capture_id).version),/memory_capture_policy_stale/);
+ assert.equal(await f.make().processNext(),null);
+ assert.equal(actual,1);
+ assert.equal(f.workbench.listMemory('alice','ws',{agent_id:f.agent.agent_id}).items.length,0);
+});
+
+test('a source edit after proposal commit hides the proposal and prevents recovery or replay',async t=>{
+ const f=fixture(t),extract=f.client.extractMemory;let actual=0;
+ f.client.extractMemory=async(...args)=>{actual++;await extract(...args);const packet=f.workbench.memoryCapture.get('alice',f.agent.agent_id,f.capture.capture_id);f.db.prepare('UPDATE ga_messages SET content_json=? WHERE id=?').run('[]',packet.sources[0].message_id);throw Error('host_response_lost');};
+ const result=await f.make().processNext();
+ assert.equal(result.runtime_status,'memory_reconciliation_required');
+ assert.equal(f.db.prepare('SELECT status FROM ga_runs WHERE id=?').get(result.run_id).status,'interrupted');
+ const stale=f.workbench.memoryCapture.get('alice',f.agent.agent_id,f.capture.capture_id);
+ assert.equal(stale.sources[0].available,false);
+ assert.equal(stale.proposal_unavailable,true);
+ assert.equal(stale.proposal,null);
+ assert.throws(()=>f.workbench.memoryCapture.apply('alice',f.agent.agent_id,f.capture.capture_id,stale.version),/memory_capture_source_conflict/);
+ assert.equal(await f.make().processNext(),null);
+ assert.equal(actual,1);
+ assert.equal(f.workbench.listMemory('alice','ws',{agent_id:f.agent.agent_id}).items.length,0);
+});

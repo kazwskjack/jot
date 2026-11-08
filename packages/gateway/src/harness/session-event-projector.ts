@@ -79,7 +79,7 @@ function presentation(nameValue: unknown): ToolPresentation {
 }
 
 function detailFor(tool: ToolPresentation, runId: string): Record<string, unknown> {
-  if (tool.kind === 'search') return { queries: [], source_ids: [] }
+  if (tool.kind === 'search') return { query_count: 0, source_ids: [] }
   if (tool.kind === 'browse') return { operation: 'fetch', source_ids: [] }
   if (tool.kind === 'file_edit') return { display_path: '工作区文件', operation: 'edit', change_status: 'staging' }
   if (tool.kind === 'file_read') return { display_path: '工作区文件' }
@@ -182,12 +182,12 @@ function toolActivity(data: Record<string, unknown>, context: ProjectionContext,
     try { args = record(typeof data.arguments === 'string' ? JSON.parse(data.arguments) : data.arguments) } catch {}
     if (tool.kind === 'search') {
       const inputs = record(args?.inputs)
-      const queries = [args?.query, inputs?.query,
+      const queryValues = [args?.query, inputs?.query,
         ...(Array.isArray(args?.queries) ? args.queries : []),
         ...(Array.isArray(inputs?.queries) ? inputs.queries : [])]
         .filter((value): value is string => typeof value === 'string' && Boolean(value.trim()))
         .map(value => value.trim().slice(0, 2000))
-      detail.queries = [...new Set(queries)].slice(0, 50)
+      detail.query_count = Math.min(new Set(queryValues).size, 50)
     }
     const urls: string[] = []
     const add = (value: unknown) => {

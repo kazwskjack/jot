@@ -1,0 +1,155 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
+import Fastify from 'fastify';
+import {fixture} from './task-wait-fixture.mjs';
+import {TaskCollaborationService} from '../../src/workbench/task-collaboration.ts';
+import {TaskDelegationService} from '../../src/workbench/task-delegation.ts';
+import {NativeChildReservations} from '../../src/workbench/native-child-reservations.ts';
+import {NativeMemberOwnerControls} from '../../src/workbench/native-member-owner-controls.ts';
+import {registerNativeMemberRoutes} from '../../src/workbench/native-member-routes.ts';
+import {SessionCommandDispatcher} from '../../src/harness/command-dispatcher.ts';
+import {openProductDatabase} from '../../src/db/database.ts';
+
+async function fixtureWithTemplateRoot(t){const cwd=process.cwd();process.chdir('packages/gateway');try{return await fixture(t);}finally{process.chdir(cwd);}}
+
+test('owner interrupt receipt stays bound to the original child run after cold recovery',async t=>{
+ const f=await fixtureWithTemplateRoot(t),member=f.workbench.createAgent('alice',{name:'Native member',workspace_id:'ws',project_id:f.a.project_id});
+ const team=f.workbench.createTeam('alice',{name:'Native team',workspace_id:'ws',project_id:f.a.project_id,member_ids:[f.a.agent_id,member.agent_id]});
+ const collaboration=new TaskCollaborationService(f.db,f.workbench,f.persistentTasks,new TaskDelegationService(f.db,f.workbench,f.persistentTasks));
+ collaboration.save('alice',f.task.task_id,{expected_version:0,enabled:true,team_id:team.team_id,member_ids:[member.agent_id],max_delegations:2,max_active:1});
+ f.db.prepare("UPDATE ga_runs SET status='running' WHERE id=?").run(f.runId);
+ f.db.prepare('INSERT INTO ga_worker_leases VALUES(?,?,?,?,?) ON CONFLICT(resource_id) DO UPDATE SET owner=excluded.owner,generation=excluded.generation,expires_at=excluded.expires_at').run(f.runId,'native-worker',1,String(Date.now()+60000),'now');
+ const reservations=new NativeChildReservations(f.db,collaboration),spawnRequestHash='a'.repeat(64),execution_lease={owner:'native-worker',generation:1};
+ const reservation=reservations.reserve({run_id:f.runId,session_ref:'session-fixture',child_session_ref:'native-child',role_ref:member.agent_id,request_id:'native-request',expected_policy_version:1,execution_lease,spawn_request_hash:spawnRequestHash});
+ const child=f.workbench.prepareNativeChild('alice',reservation.reservation_id),identity={run_id:f.runId,session_ref:'session-fixture',request_id:'native-request',spawn_request_hash:spawnRequestHash,execution_lease};
+ reservations.publish({...identity,publication:{member:{id:child.session_ref,name:'Native member',role:'teammate',status:'inactive',diagnostics:[]}}});
+ const adapterCalls=[],controlApp=Fastify({logger:false}),client={listNativeMembers:async sessionId=>{adapterCalls.push(['list',sessionId]);return {members:[{id:child.session_ref,name:'Native member',role:'teammate',status:'inactive'}],execution_authorized:false};},
+  interruptNativeMember:async(sessionId,childSessionId,requestId)=>{adapterCalls.push(['interrupt',sessionId,childSessionId,requestId]);return {request_id:requestId,status:'accepted',quiescent:false,execution_authorized:false};}};
+ registerNativeMemberRoutes(controlApp,new NativeMemberOwnerControls(f.db),client);t.after(()=>controlApp.close());
+ const ownerHeaders={'x-user-id':'alice'};
+ const malformed=await controlApp.inject({method:'POST',url:`/v1/runs/${f.runId}/native-members/${child.session_ref}/messages`,headers:ownerHeaders,payload:{request_id:'malformed-wake',expected_run_version:f.runs.get(f.runId,'alice').version,text:'Explicit message.'}});
+ assert.equal(malformed.statusCode,400,malformed.body);assert.deepEqual(malformed.json(),{error:{code:'NATIVE_MEMBER_INPUT_INVALID'}});
+ const foreign=await controlApp.inject({method:'GET',url:`/v1/runs/${f.runId}/native-members`,headers:{'x-user-id':'mallory'}});
+ assert.equal(foreign.statusCode,404);assert.deepEqual(adapterCalls,[]);
+ const roster=await controlApp.inject({method:'GET',url:`/v1/runs/${f.runId}/native-members`,headers:ownerHeaders});
+ assert.equal(roster.statusCode,200,roster.body);assert.deepEqual(roster.json(),{members:[{child_session_ref:child.session_ref,name:'Native member',role:'teammate',status:'inactive'}],execution_authorized:false});
+ const stopId='owner-stop-once',stopVersion=f.runs.get(f.runId,'alice').version,stopPayload={request_id:stopId,expected_run_version:stopVersion};
+ const stopped=await controlApp.inject({method:'POST',url:`/v1/runs/${f.runId}/native-members/${child.session_ref}/interrupt`,headers:{...ownerHeaders,'idempotency-key':stopId},payload:stopPayload});
+ assert.equal(stopped.statusCode,202,stopped.body);assert.deepEqual(stopped.json(),{request_id:stopId,status:'accepted',quiescent:false,execution_authorized:false});
+ const stopReceipt=f.db.prepare('SELECT owner_id,parent_session_ref,child_run_id,child_session_ref,role_id,state FROM wb_native_member_interrupt_receipts WHERE root_run_id=? AND request_id=?').get(f.runId,stopId);
+ assert.equal(stopReceipt.owner_id,'alice');assert.equal(stopReceipt.parent_session_ref,'session-fixture');assert.equal(stopReceipt.child_run_id,child.run_id);
+ assert.equal(stopReceipt.child_session_ref,child.session_ref);assert.equal(stopReceipt.role_id,member.agent_id);assert.equal(stopReceipt.state,'accepted');
+ assert.deepEqual(adapterCalls,[['list','session-fixture'],['interrupt','session-fixture',child.session_ref,stopId]]);
+ const wrongTarget=await controlApp.inject({method:'POST',url:`/v1/runs/${f.runId}/native-members/another-child/interrupt`,headers:{...ownerHeaders,'idempotency-key':stopId},payload:stopPayload});
+ assert.equal(wrongTarget.statusCode,409);assert.equal(adapterCalls.filter(call=>call[0]==='interrupt').length,1);
+ const wrongBody=await controlApp.inject({method:'POST',url:`/v1/runs/${f.runId}/native-members/${child.session_ref}/interrupt`,headers:{...ownerHeaders,'idempotency-key':stopId},payload:{...stopPayload,expected_run_version:stopVersion+1}});
+ assert.equal(wrongBody.statusCode,409);assert.equal(adapterCalls.filter(call=>call[0]==='interrupt').length,1);
+ const crossOperation=await f.app.inject({method:'POST',url:`/v1/runs/${f.runId}/native-members/${child.session_ref}/messages`,headers:{...f.headers,'idempotency-key':stopId},payload:{request_id:stopId,expected_run_version:stopVersion,text:'A different operation with the same key.'}});
+ assert.equal(crossOperation.statusCode,409);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_run_commands WHERE run_id=? AND idempotency_key=?').get(f.runId,`native-member:${stopId}`).n,0);
+ const requestId='owner-wake-once',response=await f.app.inject({method:'POST',url:`/v1/runs/${f.runId}/native-members/${child.session_ref}/messages`,headers:{...f.headers,'idempotency-key':requestId},payload:{request_id:requestId,expected_run_version:f.runs.get(f.runId,'alice').version,text:'Continue the existing assigned task.'}});
+ assert.equal(response.statusCode,202,response.body);
+ const command=f.db.prepare("SELECT id,kind,status,payload_json FROM ga_run_commands WHERE run_id=? AND idempotency_key=?").get(f.runId,`native-member:${requestId}`);
+ assert.equal(command.kind,'native_member_control');assert.equal(command.status,'pending');
+ assert.deepEqual(JSON.parse(command.payload_json),{operation:'wake',request_id:requestId,child_session_ref:child.session_ref,child_run_id:child.run_id,role_ref:member.agent_id,text:'Continue the existing assigned task.'});
+ const replay=await f.app.inject({method:'POST',url:`/v1/runs/${f.runId}/native-members/${child.session_ref}/messages`,headers:{...f.headers,'idempotency-key':requestId},payload:{request_id:requestId,expected_run_version:f.runs.get(f.runId,'alice').version,text:'Continue the existing assigned task.'}});
+ assert.equal(replay.statusCode,202,replay.body);assert.equal(replay.json().command_id,command.id);
+ const conflict=await f.app.inject({method:'POST',url:`/v1/runs/${f.runId}/native-members/${child.session_ref}/messages`,headers:{...f.headers,'idempotency-key':requestId},payload:{request_id:requestId,expected_run_version:f.runs.get(f.runId,'alice').version,text:'Different task.'}});
+ assert.equal(conflict.statusCode,409);assert.equal(f.db.prepare("SELECT count(*) n FROM ga_run_commands WHERE run_id=? AND kind='native_member_control'").get(f.runId).n,1);
+ const base={run_id:f.runId,session_ref:'session-fixture',execution_lease,action:'member-message',operation:'wake',request_id:requestId,
+  child_session_ref:child.session_ref,child_run_id:child.run_id,role_ref:member.agent_id,
+  message_sha256:createHash('sha256').update('Continue the existing assigned task.','utf8').digest('hex')};
+ const receipt=receipt_action=>f.app.inject({method:'POST',url:'/internal/v1/workbench/native-child-source',headers:{authorization:'Bearer test-b99992d64419ae59'},payload:{...base,receipt_action}});
+ const first=await receipt('begin');assert.equal(first.statusCode,200,first.body);assert.deepEqual(first.json(),{decision:'dispatch'});
+ const retry=await receipt('begin');assert.equal(retry.statusCode,200,retry.body);assert.deepEqual(retry.json(),{decision:'unknown'});
+ assert.equal(f.db.prepare('SELECT state FROM wb_native_member_message_receipts WHERE root_run_id=? AND request_id=?').get(f.runId,requestId).state,'dispatching');
+ let dispatches=0;
+ const dispatcher=new SessionCommandDispatcher(f.db,f.events,{cancel:async()=>({settled:true}),prompt:async()=>({}),wakeNativeMember:async(sessionId,childSessionId,id,text)=>{
+  assert.equal(sessionId,'session-fixture');assert.equal(childSessionId,child.session_ref);assert.equal(id,requestId);assert.equal(text,'Continue the existing assigned task.');
+  dispatches++;return {request_id:id,status:'unknown',execution_authorized:false};
+ }},()=>true);
+ assert.equal(await dispatcher.processNext(),true);assert.equal(await dispatcher.processNext(),false);assert.equal(dispatches,1);
+ assert.equal(f.db.prepare('SELECT status FROM ga_run_commands WHERE run_id=? AND idempotency_key=?').get(f.runId,`native-member:${requestId}`).status,'applied');
+ assert.deepEqual(new NativeMemberOwnerControls(f.db).read('alice',f.runId,child.session_ref,requestId),{request_id:requestId,status:'unknown'});
+ const status=await f.app.inject({method:'GET',url:`/v1/runs/${f.runId}/native-members/${child.session_ref}/messages/${requestId}`,headers:f.headers});
+ assert.equal(status.statusCode,200,status.body);assert.deepEqual(status.json(),{request_id:requestId,status:'unknown'});
+
+ f.workbench.closeNativeChild('alice',child.run_id,{protocol:1,session_ref:child.session_ref,parent_session_ref:'session-fixture',seq_exclusive:10,turn_end_seq:9,log_sha256:'b'.repeat(64),driver_nonresident:true,inbox_pending:0});
+ f.db.prepare('UPDATE ga_worker_leases SET generation=2,expires_at=? WHERE resource_id=?').run(String(Date.now()+60000),f.runId);
+ const coldLease={owner:'native-worker',generation:2};
+ assert.deepEqual(await new NativeMemberOwnerControls(f.db).list('alice',f.runId,client),{members:[{child_session_ref:child.session_ref,name:'Native member',role:'teammate',status:'inactive'}],execution_authorized:false});
+ const coldRequestId='owner-cold-wake-once',coldWake=await f.app.inject({method:'POST',url:`/v1/runs/${f.runId}/native-members/${child.session_ref}/messages`,headers:{...f.headers,'idempotency-key':coldRequestId},payload:{request_id:coldRequestId,expected_run_version:f.runs.get(f.runId,'alice').version,text:'Continue this same assignment after recovery.'}});
+ assert.equal(coldWake.statusCode,202,coldWake.body);
+ const coldCommand=f.db.prepare('SELECT payload_json FROM ga_run_commands WHERE run_id=? AND idempotency_key=?').get(f.runId,`native-member:${coldRequestId}`);
+ assert.deepEqual(JSON.parse(coldCommand.payload_json),{operation:'wake',request_id:coldRequestId,child_session_ref:child.session_ref,child_run_id:child.run_id,role_ref:member.agent_id,text:'Continue this same assignment after recovery.'});
+ const coldBase={...base,execution_lease:coldLease,request_id:coldRequestId,child_run_id:child.run_id,message_sha256:createHash('sha256').update('Continue this same assignment after recovery.','utf8').digest('hex')};
+ const coldReceipt=action=>f.app.inject({method:'POST',url:'/internal/v1/workbench/native-child-source',headers:{authorization:'Bearer test-b99992d64419ae59'},payload:{...coldBase,receipt_action:action,...(action==='complete'?{result:'accepted'}:{})}});
+ assert.deepEqual((await coldReceipt('begin')).json(),{decision:'dispatch'});
+ const source=f.workbench.nativeChildSource('alice',{run_id:f.runId,session_ref:'session-fixture',child_session_ref:child.session_ref,execution_lease:coldLease});
+ assert.equal(source.previous_run_id,child.run_id);
+ const next=f.workbench.prepareNativeActivation('alice',{run_id:f.runId,session_ref:'session-fixture',child_session_ref:child.session_ref,previous_run_id:source.previous_run_id,previous_log_sha256:source.proof.log_sha256,previous_seq_exclusive:source.proof.seq_exclusive,execution_lease:coldLease});
+ assert.equal(next.session_ref,child.session_ref);assert.equal(next.conversation_id,child.conversation_id);assert.notEqual(next.run_id,child.run_id);
+ const nextSnapshot=JSON.parse(f.db.prepare('SELECT snapshot_json FROM wb_native_child_activations WHERE run_id=?').get(next.run_id).snapshot_json);
+ assert.equal(nextSnapshot.root_run_id,f.runId);assert.equal(nextSnapshot.parent_session_ref,'session-fixture');assert.equal(nextSnapshot.role_id,member.agent_id);
+ assert.deepEqual(nextSnapshot.root_budget_scope_ids,JSON.parse(f.db.prepare('SELECT scopes_json FROM wb_model_budget_bindings WHERE owner_id=? AND run_id=?').get('alice',f.runId).scopes_json));
+ assert.deepEqual((await coldReceipt('complete')).json(),{state:'accepted'});
+ const recoveredControlApp=Fastify({logger:false});registerNativeMemberRoutes(recoveredControlApp,new NativeMemberOwnerControls(f.db),client);t.after(()=>recoveredControlApp.close());
+ const oldStopRetry=await recoveredControlApp.inject({method:'POST',url:`/v1/runs/${f.runId}/native-members/${child.session_ref}/interrupt`,headers:{...ownerHeaders,'idempotency-key':stopId},payload:stopPayload});
+ assert.equal(oldStopRetry.statusCode,202,oldStopRetry.body);assert.deepEqual(oldStopRetry.json(),{request_id:stopId,status:'accepted',quiescent:false,execution_authorized:false});
+ assert.deepEqual(adapterCalls.filter(call=>call[0]==='interrupt'),[['interrupt','session-fixture',child.session_ref,stopId]]);
+ assert.equal(f.db.prepare('SELECT child_run_id FROM wb_native_member_interrupt_receipts WHERE root_run_id=? AND request_id=?').get(f.runId,stopId).child_run_id,child.run_id);
+ const followId='owner-after-cold-wake',followUp=await f.app.inject({method:'POST',url:`/v1/runs/${f.runId}/native-members/${child.session_ref}/messages`,headers:{...f.headers,'idempotency-key':followId},payload:{request_id:followId,expected_run_version:f.runs.get(f.runId,'alice').version,text:'Continue the same member session again.'}});
+ assert.equal(followUp.statusCode,202,followUp.body);
+ const followCommand=JSON.parse(f.db.prepare('SELECT payload_json FROM ga_run_commands WHERE run_id=? AND idempotency_key=?').get(f.runId,`native-member:${followId}`).payload_json);
+ assert.deepEqual(followCommand,{operation:'wake',request_id:followId,child_session_ref:child.session_ref,child_run_id:next.run_id,role_ref:member.agent_id,text:'Continue the same member session again.'});
+});
+
+test('unknown native member interrupt outcomes survive SQLite reopen without redispatch',async t=>{
+ const f=await fixtureWithTemplateRoot(t),member=f.workbench.createAgent('alice',{name:'Native member',workspace_id:'ws',project_id:f.a.project_id});
+ const team=f.workbench.createTeam('alice',{name:'Native team',workspace_id:'ws',project_id:f.a.project_id,member_ids:[f.a.agent_id,member.agent_id]});
+ const collaboration=new TaskCollaborationService(f.db,f.workbench,f.persistentTasks,new TaskDelegationService(f.db,f.workbench,f.persistentTasks));
+ collaboration.save('alice',f.task.task_id,{expected_version:0,enabled:true,team_id:team.team_id,member_ids:[member.agent_id],max_delegations:2,max_active:1});
+ f.db.prepare("UPDATE ga_runs SET status='running' WHERE id=?").run(f.runId);
+ f.db.prepare('INSERT INTO ga_worker_leases VALUES(?,?,?,?,?) ON CONFLICT(resource_id) DO UPDATE SET owner=excluded.owner,generation=excluded.generation,expires_at=excluded.expires_at').run(f.runId,'native-worker',1,String(Date.now()+60000),'now');
+ const reservations=new NativeChildReservations(f.db,collaboration),spawnRequestHash='a'.repeat(64),execution_lease={owner:'native-worker',generation:1};
+ const reservation=reservations.reserve({run_id:f.runId,session_ref:'session-fixture',child_session_ref:'native-child',role_ref:member.agent_id,request_id:'native-request',expected_policy_version:1,execution_lease,spawn_request_hash:spawnRequestHash});
+ const child=f.workbench.prepareNativeChild('alice',reservation.reservation_id),identity={run_id:f.runId,session_ref:'session-fixture',request_id:'native-request',spawn_request_hash:spawnRequestHash,execution_lease};
+ reservations.publish({...identity,publication:{member:{id:child.session_ref,name:'Native member',role:'teammate',status:'inactive',diagnostics:[]}}});
+ const calls=[],client={
+  listNativeMembers:async sessionId=>{calls.push(['list',sessionId]);return {members:[{id:child.session_ref,name:'Native member',role:'teammate',status:'running'}],execution_authorized:false};},
+  interruptNativeMember:async(sessionId,childSessionId,requestId)=>{calls.push(['interrupt',sessionId,childSessionId,requestId]);
+   if(requestId==='stop-unknown')throw Error('native_role_interrupt_outcome_unknown');
+   return {request_id:requestId,status:'accepted',quiescent:false,execution_authorized:false};}
+ },app=Fastify();
+ registerNativeMemberRoutes(app,new NativeMemberOwnerControls(f.db),client);let appClosed=false;t.after(async()=>{if(!appClosed)await app.close();});
+ const path=`/v1/runs/${f.runId}/native-members`,headers={'x-user-id':'alice'};
+ const denied=await app.inject({method:'GET',url:path,headers:{'x-user-id':'mallory'}});
+ assert.equal(denied.statusCode,404);assert.deepEqual(calls,[]);
+ const roster=await app.inject({method:'GET',url:path,headers});
+ assert.equal(roster.statusCode,200,roster.body);assert.deepEqual(roster.json(),{members:[{child_session_ref:child.session_ref,name:'Native member',role:'teammate',status:'running'}],execution_authorized:false});
+ const version=f.db.prepare('SELECT version,status FROM ga_runs WHERE id=?').get(f.runId);
+ const wrongVersion=await app.inject({method:'POST',url:`${path}/native-child/interrupt`,headers:{...headers,'idempotency-key':'stop-1'},payload:{request_id:'stop-1',expected_run_version:version.version+1}});
+ assert.equal(wrongVersion.statusCode,409);assert.equal(calls.length,1);
+ const missing=await app.inject({method:'POST',url:`${path}/missing-child/interrupt`,headers:{...headers,'idempotency-key':'stop-missing'},payload:{request_id:'stop-missing',expected_run_version:version.version}});
+ assert.equal(missing.statusCode,404);assert.equal(calls.length,1);
+ const stopped=await app.inject({method:'POST',url:`${path}/${child.session_ref}/interrupt`,headers:{...headers,'idempotency-key':'stop-1'},payload:{request_id:'stop-1',expected_run_version:version.version}});
+ assert.equal(stopped.statusCode,202,stopped.body);assert.deepEqual(stopped.json(),{request_id:'stop-1',status:'accepted',quiescent:false,execution_authorized:false});
+ const uncertainPayload={request_id:'stop-unknown',expected_run_version:version.version},uncertainUrl=`${path}/${child.session_ref}/interrupt`,uncertainHeaders={...headers,'idempotency-key':'stop-unknown'};
+ const uncertain=await app.inject({method:'POST',url:uncertainUrl,headers:uncertainHeaders,payload:uncertainPayload});
+ assert.equal(uncertain.statusCode,202,uncertain.body);assert.deepEqual(uncertain.json(),{request_id:'stop-unknown',status:'unknown',quiescent:false,execution_authorized:false});
+ assert.equal(f.db.prepare('SELECT state FROM wb_native_member_interrupt_receipts WHERE root_run_id=? AND request_id=?').get(f.runId,'stop-unknown').state,'unknown');
+ const receiptUrl=`${path}/${child.session_ref}/interrupts/stop-unknown`;
+ const receipt=await app.inject({method:'GET',url:receiptUrl,headers});
+ assert.equal(receipt.statusCode,200,receipt.body);assert.deepEqual(receipt.json(),{request_id:'stop-unknown',status:'unknown',quiescent:false,execution_authorized:false});
+ const wrongChildReceipt=await app.inject({method:'GET',url:`${path}/another-child/interrupts/stop-unknown`,headers});assert.equal(wrongChildReceipt.statusCode,404);
+ const foreignReceipt=await app.inject({method:'GET',url:receiptUrl,headers:{'x-user-id':'mallory'}});assert.equal(foreignReceipt.statusCode,404);
+ await app.close();appClosed=true;await f.app.close();const originalDb=f.db;f.db.close();f.db=openProductDatabase(f.fixtureConfig.databasePath);f.app=Fastify({logger:false});
+ const retryApp=Fastify();registerNativeMemberRoutes(retryApp,new NativeMemberOwnerControls(f.db),client);let retryAppClosed=false;t.after(async()=>{if(!retryAppClosed)await retryApp.close();});
+ const uncertainRetry=await retryApp.inject({method:'POST',url:uncertainUrl,headers:uncertainHeaders,payload:uncertainPayload});
+ assert.equal(uncertainRetry.statusCode,202,uncertainRetry.body);assert.deepEqual(uncertainRetry.json(),{request_id:'stop-unknown',status:'unknown',quiescent:false,execution_authorized:false});
+ const recoveredReceipt=await retryApp.inject({method:'GET',url:receiptUrl,headers});assert.equal(recoveredReceipt.statusCode,200);assert.deepEqual(recoveredReceipt.json(),receipt.json());
+ assert.equal(calls.filter(call=>call[0]==='interrupt'&&call[3]==='stop-unknown').length,1);
+ assert.deepEqual(calls,[['list','session-fixture'],['interrupt','session-fixture',child.session_ref,'stop-1'],['interrupt','session-fixture',child.session_ref,'stop-unknown']]);
+ assert.deepEqual(f.db.prepare('SELECT version,status FROM ga_runs WHERE id=?').get(f.runId),version);
+ await retryApp.close();retryAppClosed=true;f.db.close();f.db=originalDb;
+});

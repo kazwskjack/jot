@@ -1,0 +1,4 @@
+web/public/twemoji/LICENSE -text
+web/public/twemoji/LICENSE-GRAPHICS -text
+web/public/twemoji/svg/** -text
+web/jot/vendor/LICENSE.twemoji-parser.md -text

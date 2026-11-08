@@ -43,7 +43,7 @@ export function createOrdinaryInputAdmissionHost({ctx,agents,bridge,profile,admi
   const original=owned[0],signal=AbortSignal.any([original.signal,...(context.signal?[context.signal]:[])]);
   try{
    if(owned.some(record=>record.binding.runId!==original.binding.runId||!isDeepStrictEqual(record.binding.executionLease,original.binding.executionLease)))fail();
-   await wait(modelSelector({agent:context.agent,binding:original.binding,signal,check:async()=>{for(const record of owned)await verify(record);}}),signal);
+   await wait(modelSelector({agent:context.agent,binding:original.binding,signal,tokenMeter:ctx.get('tokenMeter'),check:async()=>{for(const record of owned)await verify(record);}}),signal);
    return await next();
   }catch(error){reject(original,{agent:context.agent,signal:context.signal,messages:owned.map(record=>record.message).filter(Boolean)});throw error;}
  },{prepend:true});modelHooks.set(agent,remove);};
@@ -57,7 +57,7 @@ export function createOrdinaryInputAdmissionHost({ctx,agents,bridge,profile,admi
     const prepared=await wait(contextSelector({agent:payload.agent,binding:{runId:original.binding.runId,sessionRef:original.binding.sessionRef,executionLease:original.binding.executionLease},signal,check:async()=>{for(const record of owned)await verify(record);}}),signal);
     if(prepared!==undefined){
      if(!prepared||!['startsRequestSeries','contextMessage,startsRequestSeries'].includes(Object.keys(prepared).sort().join(','))||prepared.startsRequestSeries!==true)fail();
-     if(prepared.contextMessage!==undefined){const message=prepared.contextMessage;if(message?.role!=='user'||message.source?.kind!=='jot-chat-context'||message.source.run_id!==original.binding.runId||typeof message.source.context_sha256!=='string'||!/^[a-f0-9]{64}$/.test(message.source.context_sha256)||!Array.isArray(message.content)||message.content.length!==1||message.content[0]?.type!=='text'||typeof message.content[0].text!=='string'||message.content[0].text.length>14000||decision.messages.some(item=>item.id===message.id))fail();decision={...decision,messages:[message,...decision.messages]};}
+     if(prepared.contextMessage!==undefined){const message=prepared.contextMessage;if(message?.role!=='user'||!['jot-chat-context','jot-fork-context'].includes(message.source?.kind)||message.source.run_id!==original.binding.runId||typeof message.source.context_sha256!=='string'||!/^[a-f0-9]{64}$/.test(message.source.context_sha256)||!Array.isArray(message.content)||message.content.length!==1||message.content[0]?.type!=='text'||typeof message.content[0].text!=='string'||message.content[0].text.length>14000||decision.messages.some(item=>item.id===message.id))fail();decision={...decision,messages:[message,...decision.messages]};}
      decision={...decision,startsRequestSeries:true};
     }
    }catch{try{return reject(original,{...payload,messages:[...payload.messages,...(decision.messages??[])]});}finally{for(const record of owned)record.context=null;}}

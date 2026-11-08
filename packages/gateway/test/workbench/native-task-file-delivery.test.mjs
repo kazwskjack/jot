@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {rmSync} from 'node:fs';
+import {dirname,isAbsolute,relative,resolve} from 'node:path';
 import {fixture} from './task-wait-fixture.mjs';
+import {HarnessCoordinator} from '../../src/harness/coordinator.ts';
+import {buildServer} from '../../src/server.ts';
 import {NativeTaskIntents} from '../../src/workbench/native-task-intents.ts';
 import {NativeChildReservations} from '../../src/workbench/native-child-reservations.ts';
 import {TaskCollaborationService} from '../../src/workbench/task-collaboration.ts';
@@ -24,19 +28,29 @@ async function writeMember(f){
 }
 async function memberFixture(t){let member;const f=await fixture(t,'complete',{proposalFiles:[{path:'member-report.md'}],candidate:{text:'The member report is ready.'},prepare:async f=>{member=await writeMember(f);f.persistentTasks.upsertSubtask('alice',f.task.task_id,{subtask_id:member.step.subtask_id,expected_version:member.reservation.task_assignment.subtask_version,status:'completed',evidence:[member.evidence]},f.runId);}});return {...f,member};}
 
-test('native member output is reviewed at its original version and delivered into the parent conversation once',async t=>{
- const f=await memberFixture(t),card=(await f.list())[0],base=`/v1/interactions/${card.interaction_id}/outputs`;
- assert.equal(f.db.prepare('SELECT count(*) n FROM ga_artifacts').get().n,0);f.workbench.writeFile('alice','ws',{project_id:f.member.project,path:'member-report.md',content:'Owner edited later',expected_version:1});
- const preview=await f.app.inject({url:base+'/0',headers:{'x-user-id':'alice'}});assert.equal(preview.statusCode,200,preview.body);assert.equal(preview.body,'Original member report');
- const accepted=await f.send(`/v1/interactions/${card.interaction_id}/response`,{expected_version:card.version,answers:card.questions.map(q=>({question_id:q.question_id,selected_option_ids:['accept'],custom_text:''}))});assert.equal(accepted.statusCode,202,accepted.body);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_artifacts').get().n,0);
- const before={host_status:'idle',goal:{goal_id:'goal-fixture',goal_revision:8,phase:'paused',activation:'disarmed',rounds_started:1,max_goal_rounds:1}},intent=withImmediateTransaction(f.db,()=>prepareTaskCompletion(f.db,'alice',f.runId,before));
- withImmediateTransaction(f.db,()=>confirmTaskCompletion(f.db,'alice',f.runId,intent.intent_id,{host_status:'idle',goal:{...before.goal,goal_revision:9,phase:'complete'},checkpoint:{session_ref:'session-fixture',seq_exclusive:4,turn_end_seq:2,goal_id:'goal-fixture',goal_revision:9,log_sha256:'b'.repeat(64)}}));
- const delivered=f.coordinator.finalizeReviewedTask('alice',f.runId,intent.intent_id),outputs=f.artifacts.listForRun(f.runId,'alice').items;assert.equal(outputs.length,1);assert.equal(f.artifacts.listForRun(f.member.child.run_id,'alice').items.length,0);
- const id=outputs[0].artifact_id;assert.equal(f.db.prepare('SELECT conversation_id FROM ga_artifacts WHERE id=?').get(id).conversation_id,f.occurrence.conversation_id);
- const snapshot=await f.app.inject({url:`/v1/conversations/${f.occurrence.conversation_id}/snapshot`,headers:{'x-user-id':'alice'}});assert.equal(snapshot.statusCode,200,snapshot.body);const final=snapshot.json().messages.filter(m=>m.role==='assistant');assert.equal(final.length,1);assert.deepEqual(final[0].attachments,[id]);assert.ok(snapshot.json().artifacts.some(a=>a.artifact_id===id));
- const file=await f.app.inject({url:`/v1/artifacts/${id}/download?version=1`,headers:{'x-user-id':'alice'}});assert.equal(file.statusCode,200);assert.equal(file.body,'Original member report');
- for(const url of [`/v1/artifacts/${id}/download?version=1`,`/v1/conversations/${f.occurrence.conversation_id}/snapshot`])assert.equal((await f.app.inject({url,headers:{'x-user-id':'bob'}})).statusCode,404);
- assert.deepEqual(f.coordinator.finalizeReviewedTask('alice',f.runId,intent.intent_id),delivered);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_artifacts').get().n,1);
+test('native member output survives a cold database reopen and reaches the reviewed parent attachment once',async()=>{
+ const f=await memberFixture({after(){}}),root=dirname(f.fixtureConfig.databasePath),tempRoot=resolve('.test-tmp/task-wait-interactions');let originalAppOpen=true,originalDbOpen=true,reopened;
+ try{
+  const card=(await f.list())[0],base=`/v1/interactions/${card.interaction_id}/outputs`;
+  assert.equal(f.db.prepare('SELECT count(*) n FROM ga_artifacts').get().n,0);f.workbench.writeFile('alice','ws',{project_id:f.member.project,path:'member-report.md',content:'Owner edited later',expected_version:1});
+  const preview=await f.app.inject({url:base+'/0',headers:{'x-user-id':'alice'}});assert.equal(preview.statusCode,200,preview.body);assert.equal(preview.body,'Original member report');
+  const accepted=await f.send(`/v1/interactions/${card.interaction_id}/response`,{expected_version:card.version,answers:card.questions.map(q=>({question_id:q.question_id,selected_option_ids:['accept'],custom_text:''}))});assert.equal(accepted.statusCode,202,accepted.body);assert.equal(f.db.prepare('SELECT count(*) n FROM ga_artifacts').get().n,0);
+  const before={host_status:'idle',goal:{goal_id:'goal-fixture',goal_revision:8,phase:'paused',activation:'disarmed',rounds_started:1,max_goal_rounds:1}},intent=withImmediateTransaction(f.db,()=>prepareTaskCompletion(f.db,'alice',f.runId,before));
+  withImmediateTransaction(f.db,()=>confirmTaskCompletion(f.db,'alice',f.runId,intent.intent_id,{host_status:'idle',goal:{...before.goal,goal_revision:9,phase:'complete'},checkpoint:{session_ref:'session-fixture',seq_exclusive:4,turn_end_seq:2,goal_id:'goal-fixture',goal_revision:9,log_sha256:'b'.repeat(64)}}));
+  await f.app.close();originalAppOpen=false;f.db.close();originalDbOpen=false;
+  reopened=await buildServer(f.fixtureConfig);
+  assert.equal(new TaskExecutionEvidence(reopened.db).completionVerified('alice',f.task.task_id,[f.member.evidence],f.occurrence.occurrence_id,f.member.step.subtask_id),true,'the actual member write receipt and assigned step survive database reopen');
+  const coordinator=new HarnessCoordinator(reopened.db,reopened.runs,reopened.events),delivered=coordinator.finalizeReviewedTask('alice',f.runId,intent.intent_id),outputs=reopened.artifacts.listForRun(f.runId,'alice').items;assert.equal(outputs.length,1);assert.equal(reopened.artifacts.listForRun(f.member.child.run_id,'alice').items.length,0);
+  const id=outputs[0].artifact_id;assert.equal(reopened.db.prepare('SELECT conversation_id FROM ga_artifacts WHERE id=?').get(id).conversation_id,f.occurrence.conversation_id);
+  const snapshot=await reopened.app.inject({url:`/v1/conversations/${f.occurrence.conversation_id}/snapshot`,headers:{'x-user-id':'alice'}});assert.equal(snapshot.statusCode,200,snapshot.body);const final=snapshot.json().messages.filter(m=>m.role==='assistant');assert.equal(final.length,1);assert.deepEqual(final[0].attachments,[id]);assert.ok(snapshot.json().artifacts.some(a=>a.artifact_id===id));
+  const file=await reopened.app.inject({url:`/v1/artifacts/${id}/download?version=1`,headers:{'x-user-id':'alice'}});assert.equal(file.statusCode,200);assert.equal(file.body,'Original member report');
+  for(const url of [`/v1/artifacts/${id}/download?version=1`,`/v1/conversations/${f.occurrence.conversation_id}/snapshot`])assert.equal((await reopened.app.inject({url,headers:{'x-user-id':'bob'}})).statusCode,404);
+  assert.deepEqual(coordinator.finalizeReviewedTask('alice',f.runId,intent.intent_id),delivered);assert.equal(reopened.db.prepare('SELECT count(*) n FROM ga_artifacts').get().n,1);
+ }finally{
+  if(reopened){try{await reopened.app.close();}finally{if(reopened.db.isOpen)reopened.db.close();}}
+  if(originalAppOpen){try{await f.app.close();}finally{if(f.db.isOpen)f.db.close();}}else if(originalDbOpen&&f.db.isOpen)f.db.close();
+  const child=relative(tempRoot,root);assert.ok(child&&!child.startsWith('..')&&!isAbsolute(child));rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:20});
+ }
 });
 
 test('a native file receipt cannot verify a different task step even in the same occurrence',async t=>{

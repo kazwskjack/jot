@@ -3,11 +3,14 @@ import type { DatabaseSync } from 'node:sqlite';
 import { withImmediateTransaction } from '../db/database.ts';
 import { EventStore } from '../events/event-store.ts';
 import { decodeStoredContent, encodeInputContent } from '../messages/content.ts';
-import {messageAttachmentProjection} from '../messages/pinned-attachments.ts';
+import {messageAttachmentProjection,pinnedAttachmentRefs} from '../messages/pinned-attachments.ts';
 import {snapshotAcceptedModelPolicy} from '../conversations/model-policy.ts';
 import {acceptedExecutionPolicy,conversationMode,chatModePolicy,type ChatModePolicy} from '../conversations/mode-policy.ts';
 import {ensureModeSession} from '../conversations/mode-sessions.ts';
 import {snapshotChatContext,chatContextHash} from '../conversations/chat-context.ts';
+import {normalizeChannelAttachmentManifestV2,encodeChannelAttachmentInputV2,channelAttachmentManifestDigestV2} from '../channels/attachment-manifest-v2.ts';
+
+type EnqueueOptions={executionMode?:'native';modePolicy?:ChatModePolicy;expectedConversationVersion?:number};
 
 const AUTOMATIC_TITLES = new Set(['New conversation', '新对话']);
 
@@ -35,7 +38,24 @@ export class RunRepository {
   private readonly options:{workAgentPreset?:string};
   constructor(db: DatabaseSync, events: EventStore,options:{workAgentPreset?:string}={}) { this.db = db; this.events = events;this.options=options; }
 
-  enqueue(conversationId: string, ownerId: string, input: Record<string, unknown>,options:{executionMode?:'native';modePolicy?:ChatModePolicy;expectedConversationVersion?:number}={}) {
+  usesDatabase(db: DatabaseSync): boolean { return this.db === db && this.events.usesDatabase(db); }
+
+  enqueue(conversationId:string,ownerId:string,input:Record<string,unknown>,options:EnqueueOptions={}){
+    return this.enqueueInput(conversationId,ownerId,input,options);
+  }
+
+  /** Internal producer seam only; caller owns original channel event transaction.
+   * No public route or native initial-input consumer is activated by this method. */
+  enqueueChannelAttachmentsV2(input:unknown){
+    if(!this.db.isTransaction)throw Error('channel_authority_transaction_required');
+    const {source,pinned}=normalizeChannelAttachmentManifestV2(input);
+    return this.enqueueInput(source.conversation_id,source.owner_id,{
+      client_message_id:`channel-v2:${channelAttachmentManifestDigestV2(source)}`,
+      content:[{type:'text',text:source.text}],
+    },{},id=>encodeChannelAttachmentInputV2(id,source),()=>({attachment_refs:pinnedAttachmentRefs(pinned)}));
+  }
+
+  private enqueueInput(conversationId:string,ownerId:string,input:Record<string,unknown>,options:EnqueueOptions,encode?:(messageId:string)=>unknown,projection?:()=>Record<string,unknown>) {
     const conversation = this.db.prepare('SELECT id,title FROM ga_conversations WHERE id=? AND owner_id=?')
       .get(conversationId, ownerId) as { id: string; title: string } | undefined;
     if (!conversation) throw new Error('conversation_not_found');
@@ -45,7 +65,7 @@ export class RunRepository {
     const messageId = `msg-${randomUUID()}`;
     const runId = `run-${randomUUID()}`;
     const now = new Date().toISOString();
-    const content = encodeInputContent(messageId, input.content);
+    const content = encode?encode(messageId):encodeInputContent(messageId, input.content);
     const generatedTitle = AUTOMATIC_TITLES.has(conversation.title) ? automaticTitle(input.content) : null;
     withImmediateTransaction(this.db, () => {
       const current=this.db.prepare('SELECT mode,version FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId)!;
@@ -74,12 +94,19 @@ export class RunRepository {
       const native=options.executionMode==='native'?(saved?String(saved.session_id):undefined):ensureModeSession(this.db,ownerId,conversationId,mode);
       this.db.prepare('INSERT INTO ga_runs(id,conversation_id,input_message_id,status,version,created_at,updated_at,model_policy_json,execution_policy_json,native_session_ref,native_owner_id,native_conversation_id,chat_context_json,chat_context_sha256) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
         .run(runId, conversationId, messageId, options.executionMode==='native'?'starting':'queued', 1, now, now,modelPolicy,executionPolicy,native??null,native?ownerId:null,native?conversationId:null,chatContext,chatContext===null?null:chatContextHash(chatContext));
-      this.events.append(conversationId, runId, 'message.created', this.message(messageId));
+      this.events.append(conversationId, runId, 'message.created', {...this.message(messageId),...projection?.()});
       this.events.append(conversationId, runId, 'run.state', this.get(runId, ownerId));
       this.db.prepare('INSERT INTO ga_outbox(conversation_id,aggregate_type,aggregate_id,event_type,payload_json,created_at) VALUES(?,?,?,?,?,?)')
         .run(conversationId, 'run', runId, options.executionMode==='native'?'native.run.prepared':'run.queued', JSON.stringify({ run_id: runId }), now);
     });
     return { accepted: true, message_id: messageId, run_id: runId, conversation_id: conversationId };
+  }
+
+  list(conversationId: string, ownerId: string) {
+    const rows = this.db.prepare('SELECT r.* FROM ga_runs r JOIN ga_conversations c ON c.id=r.conversation_id '
+      + 'WHERE r.conversation_id=? AND c.owner_id=? ORDER BY r.created_at,r.id')
+      .all(conversationId, ownerId) as Record<string, unknown>[];
+    return rows.map(row => this.runValue(row));
   }
 
   get(runId: string, ownerId: string) {

@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,readFile,rm,mkdir,writeFile} from 'node:fs/promises';
-import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {createHostProfile} from '../create-profile.mjs';
 import {apply as registerStandardPreset} from '../standard-preset.mjs';
 
-async function isolated(fn){const root=await mkdtemp(join(tmpdir(),'jot-host-'));try{await fn(root);}finally{await rm(root,{recursive:true,force:true});}}
+const scratch=fileURLToPath(new URL('../../../.test-tmp/',import.meta.url));
+async function isolated(fn){await mkdir(scratch,{recursive:true});const root=await mkdtemp(join(scratch,'jot-host-'));try{await fn(root);}finally{await rm(root,{recursive:true,force:true});}}
 test('creates a real official profile without secrets or automatic activation',()=>isolated(async root=>{
  const result=await createHostProfile({home:root,name:'jot',adapter:resolve('../session-adapter/index.js')});
  assert.equal(result.runtimeVersion,'0.2.1-rc.2');
@@ -24,7 +25,8 @@ test('creates a real official profile without secrets or automatic activation',(
  const patch=JSON.parse(source.replace('!!js process.cwd()','null'));
  assert.equal(patch.find(row=>row.id==='session-log-deepseek').disabled,true);
  assert.equal(patch.find(row=>row.id==='session-telemetry-otel').disabled,true);
- const insert=patch.find(row=>row.insert).insert,adapter=insert.find(row=>row.id==='jot-session-adapter');
+ const insert=patch.find(row=>row.insert).insert,provider=insert.find(row=>row.id==='jot-mcp-runtime-provider'),adapter=insert.find(row=>row.id==='jot-session-adapter');
+ assert.match(provider.name,/mcp-host-provider\.js$/);assert.ok(insert.indexOf(provider)<insert.indexOf(adapter));assert.equal(provider.config,undefined);
  assert.deepEqual(adapter.inject,['jotHostReady']);
  assert.equal(adapter.config.nativeContinuation,false);assert.equal(adapter.config.nativeRoles,false);
  assert.equal(adapter.config.voiceEnabled,false);assert.equal(adapter.config.host,'127.0.0.1');

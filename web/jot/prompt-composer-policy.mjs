@@ -11,4 +11,5 @@ export function nextEffort(options,selection){
  return efforts[(efforts.indexOf(current)+1)%efforts.length];
 }
 export function isSubmitKey(event){return event.key==='Enter'&&!event.shiftKey&&!event.isComposing&&event.keyCode!==229;}
+/** @param {{focused?:boolean,value?:string,hasAttachments?:boolean,voiceActive?:boolean,menu?:'model'|'fallback'|'more'|null}} options */
 export function isComposerExpanded({focused=false,value='',hasAttachments=false,voiceActive=false,menu=null}){return Boolean(focused||value.trim()||hasAttachments||voiceActive||menu);}

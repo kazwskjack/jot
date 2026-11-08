@@ -5,11 +5,21 @@ import {captureNativeChildClosure,verifyNativeChildPrefix,recoverNativePublicati
 import {createHash} from 'node:crypto';
 import {AsyncLocalStorage} from 'node:async_hooks';
 const canonical=value=>JSON.stringify(value,(_key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item);
+const nativeId=value=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(value);
+const validRecoverySource=(source,parent,childId)=>{
+ const proof=source?.proof;
+ return nativeId(source?.previous_run_id)&&nativeId(source?.role_ref)&&proof?.session_ref===childId&&proof?.parent_session_ref===parent?.id
+  &&proof?.driver_nonresident===true&&proof?.inbox_pending===0&&Number.isSafeInteger(proof?.seq_exclusive)&&proof.seq_exclusive>=1
+  &&Number.isSafeInteger(proof?.turn_end_seq)&&proof.turn_end_seq>=0&&proof.turn_end_seq<proof.seq_exclusive
+  &&typeof proof?.log_sha256==='string'&&/^[a-f0-9]{64}$/.test(proof.log_sha256);
+};
 /** Explicit candidate composition. Does not alter default Host configuration.
  * Native Team and Subagent services retain their original runtime ownership.
  */
 export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistence,providerName='jot-native-role',automaticClosures=false,nativeRecovery=false,durableSpawns=false,handoffAdmission,onMemberClosed,reconcileOperations,nativeOperationOrigin}){
- if(!ctx?.agents||typeof ctx?.subagents?.registerProvider!=='function'||typeof ctx?.subagents?.drainContinuableChildren!=='function'||typeof ctx?.agentTeams?.spawnTeammate!=='function'
+ const drainChildren=typeof ctx?.subagents?.drainChildren==='function'?ctx.subagents.drainChildren.bind(ctx.subagents)
+  :typeof ctx?.subagents?.drainContinuableChildren==='function'?ctx.subagents.drainContinuableChildren.bind(ctx.subagents):undefined;
+ if(!ctx?.agents||typeof ctx?.subagents?.registerProvider!=='function'||!drainChildren||typeof ctx?.agentTeams?.spawnTeammate!=='function'
   ||typeof bridge?.bindingFor!=='function'||typeof bridge?.guardBudget!=='function'||typeof bridge?.attach!=='function'||typeof selectModel!=='function')throw new Error('native_role_host_incompatible');
  if(typeof automaticClosures!=='boolean'||automaticClosures&&(typeof persistence?.flush!=='function'||typeof persistence?.open!=='function'||typeof ctx.sessionProjections?.stateOf!=='function'))throw new Error('native_role_closure_host_incompatible');
  if(typeof nativeRecovery!=='boolean'||nativeRecovery&&!automaticClosures)throw new Error('native_role_recovery_host_incompatible');
@@ -103,7 +113,7 @@ export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistenc
    if(closing.has(key)){const receipt=await closing.get(key);return notifyClosed(parent,accepted,receipt,signal);}
    const operation=(async()=>{
     // Run outside the child's disposal stack, then drain before reading proof.
-    await ctx.subagents.drainContinuableChildren(parent,[id]);
+    await drainChildren(parent,[id]);
     const observer=nativeOperationOrigin===undefined?reconcileOperations:createNativeOperationObserver({origin:nativeOperationOrigin,authorize:async scope=>{
      if(scope.sessionRef!==accepted.agent.id||bridge.bindingFor(accepted.agent)!==accepted.binding)throw Error('native_role_closure_identity_changed');
      await bridge.guard(accepted.agent,scope.signal);
@@ -126,6 +136,122 @@ export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistenc
  }):()=>{};
  return {provider,admission,
   async closeMember(parent,id,options){if(disposed)throw new Error('native_role_host_disposed');return closeMember(parent,id,options);},
+  async listMembers(parent,{signal}={}){
+   if(disposed)throw Error('native_role_host_disposed');
+   if(signal!==undefined&&typeof signal.throwIfAborted!=='function')throw Error('native_role_member_input_invalid');
+   if(typeof ctx.agentTeams?.listMembers!=='function')throw Error('native_role_member_unavailable');
+   const parentBinding=bridge.bindingFor(parent),ids=published.get(parent);
+   if(!parentBinding||ctx.agents.get(parent?.id)!==parent||bridge.bindingFor(parent)!==parentBinding)throw Error('native_role_member_binding_invalid');
+   signal?.throwIfAborted();
+   const roster=ctx.agentTeams.listMembers(parent);
+   if(!Array.isArray(roster))throw Error('native_role_member_roster_invalid');
+   const seen=new Set(),members=[];
+   for(const row of roster){
+    const accepted=admission.accepted.get(row?.id);
+    if(row?.role!=='teammate'||!nativeId(row?.id)||typeof row.name!=='string'||!row.name.trim()||row.name.length>80||typeof row.status!=='string'||!row.status||row.status.length>64||seen.has(row.id))throw Error('native_role_member_roster_invalid');
+    seen.add(row.id);
+    if(accepted){
+     if(!ids?.has(row.id)||accepted.parent!==parent)continue;
+     if(row.name!==accepted.agent?.name)throw Error('native_role_member_roster_invalid');
+    }else{
+     if(!nativeRecovery)continue;
+     try{
+      await bridge.guardBudget(parent,signal);
+      const response=await bridge.request('native-child-source',parentBinding,{child_session_ref:row.id},signal);
+      if(!validRecoverySource(response?.source,parent,row.id))throw Error('native_role_member_roster_invalid');
+     }catch(error){
+      signal?.throwIfAborted();
+      if(['native_activation_source_pending','workbench_identity_forbidden','task_collaboration_revoked','native_child_parent_revoked'].includes(error?.message))continue;
+      throw error;
+     }
+     if(ctx.agents.get(parent.id)!==parent||bridge.bindingFor(parent)!==parentBinding)throw Error('native_role_member_binding_invalid');
+    }
+    members.push(Object.freeze({id:row.id,name:row.name,role:'teammate',status:row.status}));
+   }
+   signal?.throwIfAborted();
+   if(ctx.agents.get(parent.id)!==parent||bridge.bindingFor(parent)!==parentBinding)throw Error('native_role_member_binding_invalid');
+   return members;
+  },
+  async interruptMember(parent,childId,{requestId,signal:requestSignal}={}){
+   if(disposed)throw Error('native_role_host_disposed');
+   if(typeof requestId!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(requestId)
+    ||requestSignal!==undefined&&typeof requestSignal.throwIfAborted!=='function')throw Error('native_role_interrupt_input_invalid');
+   if(typeof ctx.agentTeams?.interrupt!=='function')throw Error('native_role_interrupt_unavailable');
+   const signal=requestSignal?AbortSignal.any([requestSignal,shutdown.signal]):shutdown.signal,parentBinding=bridge.bindingFor(parent),accepted=admission.accepted.get(childId);
+   const check=()=>{
+    signal.throwIfAborted();
+    if(disposed||ctx.agents.get(parent?.id)!==parent||accepted?.parent!==parent||accepted.agent?.id!==childId||accepted.parentBinding!==parentBinding
+     ||bridge.bindingFor(parent)!==parentBinding||accepted.binding?.sessionRef!==childId||!published.get(parent)?.has(childId)
+     ||closed.has(accepted.binding.runId)||closing.has(accepted.binding.runId))throw Error('native_role_interrupt_member_invalid');
+    const roster=ctx.agentTeams.listMembers(parent),rows=roster.filter(row=>row?.id===childId&&row.role==='teammate'&&['running','inactive'].includes(row.status));
+    if(rows.length!==1||rows[0].name!==accepted.agent.name||roster.filter(row=>row?.name===rows[0].name&&row.role==='teammate').length!==1)throw Error('native_role_interrupt_member_invalid');
+    return rows[0];
+   };
+   if(!parentBinding||!accepted)throw Error('native_role_interrupt_member_invalid');
+   const member=check();
+   await ctx.agentTeams.interrupt(parent,member.name);
+   if(ctx.agents.get(parent.id)!==parent||bridge.bindingFor(parent)!==parentBinding)throw Error('native_role_interrupt_outcome_unknown');
+   return {request_id:requestId,status:'accepted',quiescent:false,execution_authorized:false};
+  },
+  async wakeMember(parent,childId,{requestId,text,signal:requestSignal}={}){
+   if(disposed)throw Error('native_role_host_disposed');
+   if(typeof requestId!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(requestId)||typeof text!=='string'||!text.trim()
+    ||Buffer.byteLength(text,'utf8')>32768||requestSignal!==undefined&&typeof requestSignal.throwIfAborted!=='function')throw Error('native_role_wake_invalid');
+   if(typeof ctx.agentTeams?.listMembers!=='function'||typeof ctx.agentTeams?.sendMessage!=='function')throw Error('native_role_wake_unavailable');
+   const signal=requestSignal?AbortSignal.any([requestSignal,shutdown.signal]):shutdown.signal,parentBinding=bridge.bindingFor(parent),accepted=admission.accepted.get(childId);
+   const rosterMember=()=>{
+    signal.throwIfAborted();
+    if(disposed||ctx.agents.get(parent?.id)!==parent||bridge.bindingFor(parent)!==parentBinding)throw Error('native_role_wake_binding_invalid');
+    const roster=ctx.agentTeams.listMembers(parent),rows=roster.filter(row=>row?.id===childId&&row.role==='teammate'&&['running','inactive'].includes(row.status));
+    if(rows.length!==1||typeof rows[0].name!=='string'||!rows[0].name.trim()||roster.filter(row=>row?.name===rows[0].name&&row.role==='teammate').length!==1)throw Error('native_role_wake_member_invalid');
+    return rows[0];
+   };
+   const checkAccepted=(current,previousRunId)=>{
+    const member=rosterMember();
+    if(!current||current.parent!==parent||current.agent?.id!==childId||current.parentBinding!==parentBinding||current.binding?.sessionRef!==childId
+     ||!published.get(parent)?.has(childId)||closed.has(current.binding.runId)||closing.has(current.binding.runId)
+     ||member.name!==current.agent.name||previousRunId!==undefined&&(current.roleRef===undefined||current.binding.runId===previousRunId))throw Error('native_role_wake_binding_invalid');
+    return member;
+   };
+   if(!parentBinding||ctx.agents.get(parent?.id)!==parent||typeof ctx.agentTeams?.listMembers!=='function')throw Error('native_role_wake_binding_invalid');
+   const receiptInput={action:'member-message',operation:'wake',request_id:requestId,child_session_ref:childId,
+    message_sha256:createHash('sha256').update(text,'utf8').digest('hex')};
+   await bridge.guardBudget(parent,signal);
+   let member,source;
+   if(accepted){
+    if(accepted.parent!==parent||accepted.parentBinding!==parentBinding||accepted.binding?.sessionRef!==childId||!published.get(parent)?.has(childId)
+     ||closed.has(accepted.binding.runId)||closing.has(accepted.binding.runId))throw Error('native_role_wake_binding_invalid');
+    member=checkAccepted(accepted);
+   }else{
+    if(!nativeRecovery)throw Error('native_role_wake_binding_invalid');
+    member=rosterMember();
+    const response=await bridge.request('native-child-source',parentBinding,{child_session_ref:childId},signal);source=response?.source;
+    if(!validRecoverySource(source,parent,childId))throw Error('native_role_wake_binding_invalid');
+    if(disposed||ctx.agents.get(parent.id)!==parent||bridge.bindingFor(parent)!==parentBinding)throw Error('native_role_wake_binding_invalid');
+   }
+   const receiptIdentity=accepted?{child_run_id:accepted.binding.runId,role_ref:accepted.roleRef}:{child_run_id:source.previous_run_id,role_ref:source.role_ref};
+   Object.assign(receiptInput,receiptIdentity);
+   if(!member)throw Error('native_role_wake_member_invalid');
+   const check=()=>accepted?checkAccepted(accepted):rosterMember();
+   const begin=await bridge.request('native-child-source',parentBinding,{...receiptInput,receipt_action:'begin'},signal);
+   if(!begin||Object.keys(begin).join(',')!=='decision')throw Error('native_role_wake_receipt_invalid');
+   if(begin.decision==='accepted')return {request_id:requestId,status:'accepted',execution_authorized:false};
+   if(begin.decision==='unknown')return {request_id:requestId,status:'unknown',execution_authorized:false};
+   if(begin.decision!=='dispatch')throw Error('native_role_wake_receipt_invalid');
+   let status='unknown';
+   try{
+    await bridge.guardBudget(parent,signal);const target=check();
+    const result=await ctx.agentTeams.sendMessage(parent,{target:target.name,content:[{type:'text',text}],signal});
+    status=result?.status==='accepted'?'accepted':'unknown';
+    if(status==='accepted'&&!accepted)checkAccepted(admission.accepted.get(childId),source.previous_run_id);else check();
+    await bridge.guardBudget(parent,signal);
+   }catch{status='unknown';}
+   try{
+    const completed=await bridge.request('native-child-source',parentBinding,{...receiptInput,receipt_action:'complete',result:status},signal);
+    if(!completed||Object.keys(completed).join(',')!=='state'||completed.state!==status)status='unknown';
+   }catch{status='unknown';}
+   return {request_id:requestId,status,execution_authorized:false};
+  },
   async flushClosures(){await Promise.allSettled([...observations]);await Promise.allSettled([...closing.values()]);await Promise.allSettled([...notifying.values()]);if(closureFailures.size)throw new Error('native_role_closure_pending');},
   spawn(parent,intent,request){
    let requestHash,requestKey,parentBinding,snapshot;
@@ -201,7 +327,7 @@ export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistenc
     if(closures.some(result=>result.status==='rejected'))throw new Error('native_role_closure_failed');
     // Keep admission installed while creation drains. Removing it immediately
     // would let a prepared child publish without the role/model barrier.
-    const results=await Promise.allSettled([...published].map(([parent,ids])=>ctx.subagents.drainContinuableChildren(parent,[...ids])));
+     const results=await Promise.allSettled([...published].map(([parent,ids])=>drainChildren(parent,[...ids])));
     if(results.some(result=>result.status==='rejected'))throw new Error('native_role_drain_failed');
     if(automaticClosures){
      const finalClosures=await Promise.allSettled([...published].flatMap(([parent,ids])=>[...ids].map(id=>closeMember(parent,id))));

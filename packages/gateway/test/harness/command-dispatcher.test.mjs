@@ -5,6 +5,7 @@ import {EventStore} from '../../src/events/event-store.ts';
 import {RunRepository} from '../../src/runs/repository.ts';
 import {RunCommandService} from '../../src/runs/commands.ts';
 import {SessionCommandDispatcher} from '../../src/harness/command-dispatcher.ts';
+import {SessionControllerClient} from '../../src/harness/session-controller-client.ts';
 import {reserveOrdinarySteeringCustody} from '../../src/harness/ordinary-steering-custody.ts';
 import {mkdtempSync,rmSync,readFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
@@ -19,6 +20,18 @@ function fixture(path=':memory:'){
  db.prepare('INSERT INTO ga_harness_session_bindings(conversation_id,owner_id,session_id,created_at,updated_at) VALUES(?,?,?,?,?)').run('c','u','s','now','now');
  return {db,events,runs,receipt,commands:new RunCommandService(db,events)};
 }
+
+test('native member wake client sends the exact parent and child request and validates its receipt',async()=>{
+ const calls=[],client=new SessionControllerClient('http://127.0.0.1:18791','x'.repeat(32),async(input,init)=>{
+  calls.push({input:String(input),init});return new Response(JSON.stringify({request_id:'wake-1',status:'unknown',execution_authorized:false}),{status:200,headers:{'content-type':'application/json'}});
+ });
+ assert.deepEqual(await client.wakeNativeMember('parent-session','child-session','wake-1','Continue.',new AbortController().signal),
+  {request_id:'wake-1',status:'unknown',execution_authorized:false});
+ assert.equal(calls.length,1);assert.equal(calls[0].input,'http://127.0.0.1:18791/v1/sessions/parent-session/native-members/child-session/messages');
+ assert.deepEqual(JSON.parse(calls[0].init.body),{request_id:'wake-1',text:'Continue.'});
+ const invalid=new SessionControllerClient('http://127.0.0.1:18791','x'.repeat(32),async()=>new Response(JSON.stringify({request_id:'wake-1',status:'rejected',execution_authorized:false}),{status:200}));
+ await assert.rejects(invalid.wakeNativeMember('parent-session','child-session','wake-1','Continue.'),/native_member_wake_receipt_invalid/);
+});
 
 async function reserved(x){
  const {HarnessCoordinator}=await import('../../src/harness/coordinator.ts');

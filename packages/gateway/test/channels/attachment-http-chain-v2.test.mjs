@@ -1,0 +1,45 @@
+import test from 'node:test';import assert from 'node:assert/strict';import{createHash}from'node:crypto';import{mkdirSync,mkdtempSync,rmSync}from'node:fs';import{join,resolve}from'node:path';
+import{buildServer}from'../../src/server.ts';import{OwnerChannelBindings}from'../../src/channels/owner-bindings.ts';
+import{HarnessWorker}from'../../src/harness/worker.ts';import{HarnessCoordinator}from'../../src/harness/coordinator.ts';import{AttachmentResolver}from'../../src/artifacts/resolver.ts';import{OfficialSessionRunner}from'../../src/harness/official-session-runner.ts';import{SessionControllerClient}from'../../src/harness/session-controller-client.ts';
+test('authenticated v2 HTTP chain recovers lost original admission ACK, consumes exact native bytes once, and preserves the original canonical answer',async t=>{
+ const parent=resolve('test-tmp');mkdirSync(parent,{recursive:true});const root=mkdtempSync(join(parent,'channel-http-v2-')),token='synthetic-internal-channel-token-thirty-two';
+ const readiness={stageVerifiedFile:async()=>assert.fail('readiness is not a file upload'),recoverInput:async()=>assert.fail('readiness is not a recovery'),ordinaryRunHistoryReadiness:async()=>({protocol:1,ready:true,execution_authorized:false})};
+ const settings={databasePath:join(root,'db.sqlite'),workspaces:['ws'],uploadRoot:join(root,'files'),templateRoot:resolve('packages/gateway/file-engine/templates'),internalChannelToken:token,csrfToken:'synthetic-csrf-strong-token',allowedOrigins:['http://localhost:3058'],channelAttachmentIntakeV2:true,ordinaryInputRecoveryEnabled:true,conversationGoalClient:readiness};
+ let product=await buildServer(settings),app=product.app;const bindings=new OwnerChannelBindings(product.db,{enabled:['wecom']});
+ let loseAck=true,loseReserveAck=true;app.addHook('onSend',async(request,reply,payload)=>{
+  if(loseReserveAck&&request.url==='/internal/v2/channel/attachment-batches'&&reply.statusCode===201){loseReserveAck=false;throw Error('synthetic_reservation_ack_lost');}
+  if(loseAck&&request.url.endsWith('/admit')&&reply.statusCode===202){loseAck=false;throw Error('synthetic_admission_ack_lost');}return payload;
+ });
+ t.after(async()=>{await app.close();product.db.close();rmSync(root,{recursive:true,force:true});});
+ const challenge=bindings.create('alice','wecom','http-v2-original-binding'),auth={authorization:'Bearer '+token};
+ const proof=await product.app.inject({method:'POST',url:'/internal/v1/channel/messages',headers:auth,payload:{channel:'wecom',principal:'tenant:alice',message_id:'proof',text:'/jot-bind '+challenge.code,attachments:[]}});assert.equal(proof.statusCode,202,proof.body);
+ const bytes=Buffer.from('Synthetic original HTTP attachment'),sha256=createHash('sha256').update(bytes).digest('hex');
+ const request={protocol:2,event:{channel:'wecom',principal:'tenant:alice',thread_id:'http-thread',message_id:'http-files'},text:'Read the exact file',attachments:[{index:0,provider_file_id:'provider-http-file',file_name:'one.txt',media_type:'text/plain',size_bytes:bytes.length,sha256}]},prefix='/internal/v2/channel/attachment-batches';
+ const counts=()=>['ga_uploads','ga_conversations','ga_artifacts','ga_runs','ga_channel_message_events'].map(table=>Number(product.db.prepare('SELECT count(*) n FROM '+table).get().n));
+ assert.equal((await app.inject({method:'POST',url:prefix,payload:request})).statusCode,401);assert.deepEqual(counts(),[0,0,0,0,0]);
+ const absent=await app.inject({method:'POST',url:prefix+'/lookup',headers:auth,payload:request});assert.equal(absent.json().state,'not_observed');assert.equal(absent.json().automatic_replay,false);assert.deepEqual(counts(),[0,0,0,0,0]);
+ assert.equal((await app.inject({method:'POST',url:prefix,headers:auth,payload:{...request,owner_id:'mallory'}})).statusCode,422);assert.deepEqual(counts(),[0,0,0,0,0]);
+ const reserved=await app.inject({method:'POST',url:prefix,headers:auth,payload:request});assert.equal(reserved.statusCode,500,reserved.body);assert.deepEqual(counts(),[1,0,0,0,0]);
+ const recoveredStage=(await app.inject({method:'POST',url:prefix+'/lookup',headers:auth,payload:request})).json(),stage=recoveredStage.stage;assert.equal(recoveredStage.state,'stage_observed');assert.equal(recoveredStage.automatic_replay,false);assert.equal(JSON.stringify(stage).includes(root),false);
+ assert.deepEqual((await app.inject({method:'POST',url:prefix,headers:auth,payload:request})).json(),stage);assert.deepEqual(counts(),[1,0,0,0,0]);
+ const partUrl=prefix+'/'+stage.stage_key+'/parts/0';assert.equal((await app.inject({method:'PUT',url:partUrl,headers:{...auth,'content-type':'application/octet-stream','x-channel-manifest-sha256':'f'.repeat(64)},payload:bytes})).statusCode,409);
+ const part=await app.inject({method:'PUT',url:partUrl,headers:{...auth,'content-type':'application/octet-stream','x-channel-manifest-sha256':stage.manifest_sha256},payload:bytes});assert.equal(part.statusCode,200,part.body);assert.deepEqual(counts(),[1,0,0,0,0]);
+ const admit={method:'POST',url:prefix+'/'+stage.stage_key+'/admit',headers:auth,payload:{protocol:2,manifest_sha256:stage.manifest_sha256}};
+ assert.equal((await app.inject(admit)).statusCode,500);assert.deepEqual(counts(),[1,1,1,1,1]);
+ const lookup=await app.inject({method:'POST',url:prefix+'/lookup',headers:auth,payload:request});assert.equal(lookup.statusCode,200,lookup.body);const receipt=lookup.json();assert.equal(receipt.state,'admitted');
+ assert.deepEqual((await app.inject(admit)).json(),receipt);assert.deepEqual(counts(),[1,1,1,1,1]);
+ const changed=await app.inject({method:'POST',url:prefix,headers:auth,payload:{...request,text:'Changed'}});assert.equal(changed.statusCode,409);assert.deepEqual(counts(),[1,1,1,1,1]);
+ assert.equal((await app.inject({method:'POST',url:prefix+'/lookup',headers:auth,payload:{...request,text:'Changed'}})).json().automatic_replay,false);assert.deepEqual(counts(),[1,1,1,1,1]);
+ assert.equal(Number(product.db.prepare("SELECT count(*) n FROM ga_idempotency WHERE operation LIKE '%/internal/v2/channel/%'").get().n),0);
+ let uploads=0,prompts=0;
+ const http=new SessionControllerClient('http://127.0.0.1:18841',token,async(_url,init)=>{uploads++;const chunks=[];for await(const chunk of init.body)chunks.push(Buffer.from(chunk));assert.deepEqual(Buffer.concat(chunks),bytes);return new Response(JSON.stringify({receipt_id:'receipt-http-exact',file:{attachmentId:'sha256:'+sha256,bytes:bytes.length,name:'one.txt'}}),{status:200,headers:{'content-type':'application/json'}});});
+ const client={create:async()=>({}),stageVerifiedFile:http.stageVerifiedFile.bind(http),prompt:async(_session,_request,content,_mode,_signal,original)=>{prompts++;assert.equal(original.run_id,receipt.receipt.run_id);assert.equal(content.at(-1).receipt_id,'receipt-http-exact');return{};},async *follow(){yield{type:'snapshot',cursor:0,records:[]};yield{type:'event',event:{type:'assistant/message',seq:1,data:{message:{content:[{type:'text',text:'Synthetic HTTP chain answer'}]}}}};yield{type:'event',event:{type:'turn/end',seq:2,data:{reason:{kind:'completed'}}}};}};
+ const worker=new HarnessWorker(product.db,new HarnessCoordinator(product.db,product.runs,product.events),new OfficialSessionRunner(client,{cwd:root,agentPreset:'jot-general'}),{workerId:'http-v2-worker',leaseMs:30000,ordinaryInputRecoveryEnabled:true,attachmentResolver:new AttachmentResolver(product.db,join(root,'files'))});
+ await worker.processNext();assert.equal(product.runs.get(receipt.receipt.run_id,'alice').status,'succeeded');assert.equal(uploads,1);assert.equal(prompts,1);
+ assert.equal(Number(product.db.prepare("SELECT count(*) n FROM ga_messages WHERE run_id=? AND role='assistant'").get(receipt.receipt.run_id).n),1);
+ assert.deepEqual((await app.inject(admit)).json(),receipt);assert.equal(await worker.processNext(),null);assert.equal(prompts,1);assert.equal(Number(product.db.prepare('SELECT count(*) n FROM ga_artifact_leases').get().n),0);
+ await app.close();product.db.close();product=await buildServer({...settings,conversationGoalClient:{...readiness,ordinaryRunHistoryReadiness:async()=>({protocol:1,ready:false,execution_authorized:false})}});app=product.app;
+ assert.deepEqual((await app.inject({method:'POST',url:prefix+'/lookup',headers:auth,payload:request})).json(),receipt);assert.equal((await app.inject(admit)).statusCode,503);assert.equal(prompts,1);
+ await app.close();product.db.close();product=await buildServer({...settings,channelAttachmentIntakeV2:false,ordinaryInputRecoveryEnabled:false,conversationGoalClient:undefined});app=product.app;
+ assert.deepEqual((await app.inject({method:'POST',url:prefix+'/lookup',headers:auth,payload:request})).json(),receipt);assert.equal(app.hasRoute({method:'POST',url:prefix+'/:stageKey/admit'}),false);assert.ok([401,404].includes((await app.inject(admit)).statusCode));assert.equal(prompts,1);assert.deepEqual(counts(),[1,1,1,1,1]);
+});

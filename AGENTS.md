@@ -30,3 +30,11 @@ This repository uses the pinned local @mindmux/brain-md development dependency. 
 
 If native notes/history are available, keep relevant brain page IDs and unresolved task state in notes; search history for earlier task evidence. After context rollover, re-read relevant pages through the CLI for current project facts. Do not copy task history into the brain.
 <!-- END brain.md -->
+
+<!-- BEGIN ponytail-full-2026-10-24 -->
+## Ponytail (full)
+
+- Use Ponytail full for project code changes; read .agents/skills/ponytail/SKILL.md before editing.
+- Trace real callers, tests, configuration and exports; reuse existing implementations, the standard library and installed dependencies; make the smallest complete change.
+- Preserve existing roles, shared writer assignments, permissions, validation, security, error handling and acceptance authority. This guidance grants no additional permissions.
+<!-- END ponytail-full-2026-10-24 -->

@@ -3,7 +3,7 @@ import {blankReplyForm,replyModes} from './reply-policy-ui.mjs';
 import {request} from '../jot/client';
 import {workbenchApi} from './client';
 import {useResource} from './useResource';
-import {ResourceStatus} from './AgentsPanel';
+import {ResourceStatus} from './PanelStatus';
 import type {ConversationPage} from '../jot/types';
 
 export default function ReplyPolicyFields({value,onChange,workspaceId,projectId,bindingsEnabled,executionEnabled=false}:{value?:Record<string,any>;onChange:(value:Record<string,any>)=>void;workspaceId?:string;projectId?:string;bindingsEnabled:boolean;executionEnabled?:boolean}){

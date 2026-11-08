@@ -9,7 +9,8 @@ import {workspaceRelativePath,workspaceSelection,validateWorkspaceManifest,works
 type Limits={max_entries:number;max_total_bytes:number;max_file_bytes:number;max_depth:number};
 type Root={path:string;canonical:string;dev:bigint;ino:bigint};
 type Entry={path:string;kind:'file'|'directory';stat:BigIntStats;canonical:string};
-type Issued={root:Root;paths:readonly string[];selection:Map<string,'file'|'directory'>;limits:Limits;receipt:string};
+type ObservedEntry=Entry|Readonly<{path:string;kind:'absent'}>;
+type Issued={root:Root;paths:readonly string[];selection:Map<string,'file'|'directory'|'absent'>;limits:Limits;receipt:string;manifestProtocol:1|2};
 const defaults:Limits={max_entries:50000,max_total_bytes:2*1024**3,max_file_bytes:1024**3,max_depth:100};
 const failure=(code:string)=>Error(code);
 function limitsOf(value:SnapshotWorkspaceInput['limits']):Limits{
@@ -22,6 +23,18 @@ async function safe(path:string){let current=resolve(path);for(;;){const stat=aw
 async function rootOf(value:string):Promise<Root>{if(typeof value!=='string'||!isAbsolute(value)||resolve(value)===parse(resolve(value)).root)throw failure('workspace_root_invalid');const path=await safe(value),stat=await lstat(path,{bigint:true});if(!stat.isDirectory())throw failure('workspace_root_invalid');return {path,canonical:await realpath(path),dev:stat.dev,ino:stat.ino};}
 async function assertRoot(root:Root){await safe(root.path);const stat=await lstat(root.path,{bigint:true});if(!stat.isDirectory()||stat.dev!==root.dev||stat.ino!==root.ino||await realpath(root.path)!==root.canonical)throw failure('workspace_root_changed');}
 async function entryOf(root:Root,path:string):Promise<Entry>{workspaceRelativePath(path);await assertRoot(root);const absolute=join(root.path,...path.split('/'));await safe(absolute);const stat=await lstat(absolute,{bigint:true}),canonical=await realpath(absolute);if(!inside(root.canonical,canonical)||!stat.isFile()&&!stat.isDirectory()||stat.isFile()&&stat.nlink!==1n)throw failure('workspace_path_unsafe');return {path,kind:stat.isDirectory()?'directory':'file',stat,canonical};}
+async function existingEntry(root:Root,path:string):Promise<Entry|null>{
+ workspaceRelativePath(path);await assertRoot(root);let parent=root.path,parts=path.split('/');
+ for(let index=0;index<parts.length;index++){
+  const part=parts[index]!,absolute=join(parent,part);let stat:BigIntStats;
+  try{await safe(absolute);stat=await lstat(absolute,{bigint:true});}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return null;throw error;}
+  const canonical=await realpath(absolute),isLast=index===parts.length-1;
+  if(stat.isSymbolicLink()||!inside(root.canonical,canonical)||!stat.isFile()&&!stat.isDirectory()||stat.isFile()&&stat.nlink!==1n||!isLast&&!stat.isDirectory())throw failure('workspace_path_unsafe');
+  if(isLast)return {path,kind:stat.isDirectory()?'directory':'file',stat,canonical};
+  parent=absolute;
+ }
+ throw failure('workspace_path_unsafe');
+}
 function same(a:Entry,b:Entry){return a.path===b.path&&a.kind===b.kind&&a.canonical===b.canonical&&metadata(a.stat)===metadata(b.stat);}
 function key(path:string){return path.normalize('NFC').toLowerCase();}
 async function check(guard:WorkspaceGuard,signal:AbortSignal,phase:Parameters<WorkspaceGuard>[0]['phase'],snapshot_id:string,relative_path:string|null){
@@ -41,11 +54,11 @@ function validateRecovery(value:unknown,id:string):SnapshotRecoveryRecord{
  if(!exact(value.limits,Object.keys(defaults)))throw failure('workspace_recovery_invalid');const limits=limitsOf(value.limits as Limits);
  const selection=value.selection;if(!Array.isArray(selection)||selection.length!==manifest.paths.length)throw failure('workspace_recovery_invalid');
  const entries=new Map(manifest.entries.map(e=>[e.path,e])),kinds=selection.map((entry,index)=>{
-  if(!exact(entry,['path','kind'])||entry.path!==manifest.paths[index]||!['file','directory'].includes(String(entry.kind))||entries.has(String(entry.path))&&entries.get(String(entry.path))?.kind!==entry.kind)throw failure('workspace_recovery_invalid');
-  return Object.freeze({path:entry.path as string,kind:entry.kind as 'file'|'directory'});
+  if(!exact(entry,['path','kind'])||entry.path!==manifest.paths[index]||!['file','directory','absent'].includes(String(entry.kind))||entries.has(String(entry.path))&&entries.get(String(entry.path))?.kind!==entry.kind)throw failure('workspace_recovery_invalid');
+  return Object.freeze({path:entry.path as string,kind:entry.kind as 'file'|'directory'|'absent'});
  });
  if(manifest.entries.length>limits.max_entries||manifest.entries.some(e=>e.path.split('/').length>limits.max_depth||e.kind==='file'&&e.bytes>limits.max_file_bytes))throw failure('workspace_recovery_invalid');
- const file_count=manifest.entries.filter(e=>e.kind==='file').length,directory_count=manifest.entries.length-file_count,total_bytes=manifest.entries.reduce((sum,e)=>sum+(e.kind==='file'?e.bytes:0),0),receipt=value.receipt;
+ const file_count=manifest.entries.filter(e=>e.kind==='file').length,directory_count=manifest.entries.filter(e=>e.kind==='directory').length,total_bytes=manifest.entries.reduce((sum,e)=>sum+(e.kind==='file'?e.bytes:0),0),receipt=value.receipt;
  if(!Number.isSafeInteger(total_bytes)||total_bytes>limits.max_total_bytes||!exact(receipt,['protocol','provider','snapshot_id','manifest_sha256','file_count','directory_count','total_bytes','created_at','status','execution_authorized'])||receipt.protocol!==1||receipt.provider!=='snapshot-copy'||receipt.snapshot_id!==id||receipt.manifest_sha256!==workspaceManifestHash(manifest)||receipt.file_count!==file_count||receipt.directory_count!==directory_count||receipt.total_bytes!==total_bytes||receipt.status!=='ready'||receipt.execution_authorized!==false||typeof receipt.created_at!=='string'||!Number.isFinite(Date.parse(receipt.created_at))||new Date(receipt.created_at).toISOString()!==receipt.created_at)throw failure('workspace_recovery_invalid');
  if(isolated_root.path!==join(storage_root.path,id)||!inside(storage_root.canonical,isolated_root.canonical)||relative(storage_root.canonical,isolated_root.canonical)!==id)throw failure('workspace_recovery_invalid');
  return Object.freeze({protocol:1,provider:'snapshot-copy',snapshot_id:id,storage_root,isolated_root,manifest,receipt:Object.freeze({...receipt}) as WorkspaceCreationReceipt,selection:Object.freeze(kinds),limits:Object.freeze(limits)});
@@ -68,7 +81,13 @@ async function inventory(root:Root,paths:readonly string[],limits:Limits,guard:W
  }else for(const path of paths){const parts=path.split('/');for(let n=1;n<parts.length;n++)await add(parts.slice(0,n).join('/'),false);await add(path,true);}
  return [...values.values()].sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
 }
-function identities(entries:Entry[]){return canonicalJson(entries.map(e=>({path:e.path,kind:e.kind,canonical:e.canonical,metadata:metadata(e.stat)})));}
+function observedIdentities(entries:readonly ObservedEntry[]){return canonicalJson(entries.map(e=>'stat' in e?{path:e.path,kind:e.kind,canonical:e.canonical,metadata:metadata(e.stat)}:{path:e.path,kind:e.kind}));}
+async function inventoryObserved(root:Root,paths:readonly string[],limits:Limits,guard:WorkspaceGuard,signal:AbortSignal,id:string,selection?:Map<string,'file'|'directory'|'absent'>):Promise<ObservedEntry[]>{
+ const present:string[]=[],absent:ObservedEntry[]=[];
+ for(const path of paths){await check(guard,signal,'verify',id,path);if(await existingEntry(root,path))present.push(path);else absent.push({path,kind:'absent'});}
+ const entries=selection?await inventory(root,paths,limits,guard,signal,id,selection as Map<string,'file'|'directory'>):await inventory(root,present,limits,guard,signal,id);
+ return [...entries,...absent].sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
+}
 async function hashFile(root:Root,entry:Entry,guard:WorkspaceGuard,signal:AbortSignal,id:string):Promise<string>{
  if(!same(entry,await entryOf(root,entry.path)))throw failure('workspace_source_changed');const handle=await open(entry.canonical,constants.O_RDONLY|(constants.O_NOFOLLOW??0));
  try{if(metadata(await handle.stat({bigint:true}))!==metadata(entry.stat))throw failure('workspace_source_changed');const hash=createHash('sha256');let bytes=0;
@@ -107,14 +126,14 @@ export class SnapshotCopyWorkspaceProvider implements WorkspaceProvider{
    const sourceCheck=async()=>{await check(input.guard,input.signal,'verify',id,null);try{await input.assertCurrent();}catch{throw failure('workspace_source_changed');}await check(input.guard,input.signal,'verify',id,null);};
    const entries=new Map(manifest.entries.map(entry=>[entry.path,entry]));
    if(!Array.isArray(input.selection)||input.selection.length!==paths.length)throw failure('workspace_selection_invalid');
-   const selection=new Map<string,'file'|'directory'>();for(const [i,entry] of input.selection.entries()){
-    if(!exact(entry,['path','kind'])||typeof entry.path!=='string'||typeof entry.kind!=='string'||entry.path!==paths[i]||!['file','directory'].includes(entry.kind)||entries.has(entry.path)&&entries.get(entry.path)!.kind!==entry.kind)throw failure('workspace_selection_invalid');selection.set(entry.path,entry.kind as 'file'|'directory');
+   const selection=new Map<string,'file'|'directory'|'absent'>();for(const [i,entry] of input.selection.entries()){
+    if(!exact(entry,['path','kind'])||typeof entry.path!=='string'||typeof entry.kind!=='string'||entry.path!==paths[i]||!['file','directory','absent'].includes(entry.kind)||entries.has(entry.path)&&entries.get(entry.path)!.kind!==entry.kind)throw failure('workspace_selection_invalid');selection.set(entry.path,entry.kind as 'file'|'directory'|'absent');
    }
    const total=manifest.entries.reduce((n,e)=>n+(e.kind==='file'?e.bytes:0),0);
    if(!Number.isSafeInteger(total)||total>limits.max_total_bytes||manifest.entries.length>limits.max_entries||manifest.entries.some(e=>e.path.split('/').length>limits.max_depth||e.kind==='file'&&e.bytes>limits.max_file_bytes))throw failure('workspace_limit');
    await check(input.guard,input.signal,'prepare',id,null);await sourceCheck();const storage=await rootOf(input.storageRoot);await assertRoot(storage);
    const isolated=join(storage.path,id);await mkdir(isolated,{mode:0o700});created=true;const target=await rootOf(isolated);
-   for(const entry of manifest.entries){await check(input.guard,input.signal,'copy',id,entry.path);await assertRoot(target);const destination=join(target.path,...entry.path.split('/'));await safe(dirname(destination));
+   for(const entry of manifest.entries){await check(input.guard,input.signal,'copy',id,entry.path);await assertRoot(target);if(entry.kind==='absent')continue;const destination=join(target.path,...entry.path.split('/'));await safe(dirname(destination));
     if(entry.kind==='directory'){await mkdir(destination,{mode:0o700});continue;}
     const handle=await open(destination,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|(constants.O_NOFOLLOW??0),entry.executable?0o700:0o600);
     try{let bytes=0;const digest=createHash('sha256');for await(const chunk of input.read(entry.path)){
@@ -124,55 +143,74 @@ export class SnapshotCopyWorkspaceProvider implements WorkspaceProvider{
      await handle.sync();if(bytes!==entry.bytes||digest.digest('hex')!==entry.sha256)throw failure('workspace_source_changed');
     }finally{await handle.close();}
    }
-   await sourceCheck();const before=await inventory(target,paths,limits,input.guard,input.signal,id,selection);if(before.length!==manifest.entries.length)throw failure('workspace_copy_verification_failed');
+   await sourceCheck();const before=manifest.protocol===2?await inventoryObserved(target,paths,limits,input.guard,input.signal,id,selection):await inventory(target,paths,limits,input.guard,input.signal,id,selection as Map<string,'file'|'directory'>);if(before.length!==manifest.entries.length)throw failure('workspace_copy_verification_failed');
    for(const entry of before){const expected=entries.get(entry.path);if(!expected||entry.kind!==expected.kind||entry.kind==='file'&&(expected.kind!=='file'||Number(entry.stat.size)!==expected.bytes||!!(entry.stat.mode&0o100n)!==expected.executable||await hashFile(target,entry,input.guard,input.signal,id)!==expected.sha256))throw failure('workspace_copy_verification_failed');}
    await check(input.guard,input.signal,'publish',id,null);await sourceCheck();await assertRoot(storage);await assertRoot(target);
-   if(identities(before)!==identities(await inventory(target,paths,limits,input.guard,input.signal,id,selection)))throw failure('workspace_copy_verification_failed');
+   const after=manifest.protocol===2?await inventoryObserved(target,paths,limits,input.guard,input.signal,id,selection):await inventory(target,paths,limits,input.guard,input.signal,id,selection as Map<string,'file'|'directory'>);if(observedIdentities(before)!==observedIdentities(after))throw failure('workspace_copy_verification_failed');
    const receipt=Object.freeze({protocol:1 as const,provider:'snapshot-copy' as const,snapshot_id:id,manifest_sha256:workspaceManifestHash(manifest),file_count:manifest.entries.filter(e=>e.kind==='file').length,directory_count:manifest.entries.filter(e=>e.kind==='directory').length,total_bytes:total,created_at:new Date().toISOString(),status:'ready' as const,execution_authorized:false as const});
    const result=Object.freeze({isolated_root:isolated,manifest,receipt}),record=validateRecovery({protocol:1,provider:'snapshot-copy',snapshot_id:id,storage_root:savedRoot(storage),isolated_root:savedRoot(target),manifest,receipt,selection:paths.map(path=>({path,kind:selection.get(path)!})),limits},id);
    if(this.recoveryStore){try{await this.recoveryStore.commit(record);}catch{throw failure('workspace_recovery_commit_unknown');}}
    await sourceCheck();await check(input.guard,input.signal,'publish',id,null);await assertRoot(storage);await assertRoot(target);
-   this.issued.set(result,{root:target,paths,selection,limits,receipt:canonicalJson(receipt)});return result;
+   this.issued.set(result,{root:target,paths,selection,limits,receipt:canonicalJson(receipt),manifestProtocol:manifest.protocol});return result;
   }catch(error){const code=error instanceof Error&&/^workspace_[a-z_]+$/.test(error.message)?error.message:input?.signal?.aborted?'workspace_cancelled':'workspace_materialization_failed';throw Object.assign(failure(code),{snapshot_id:id,residual_possible:created});}
  }
  async create(input:SnapshotWorkspaceInput):Promise<WorkspaceSnapshot>{
   const id='workspace-snapshot-'+randomUUID();let created=false;
   try{
-   controls(input.guard,input.signal);const limits=limitsOf(input.limits),paths=workspaceSelection(input.paths);await check(input.guard,input.signal,'prepare',id,null);
+   controls(input.guard,input.signal);if(input.includeAbsentPaths!==undefined&&typeof input.includeAbsentPaths!=='boolean')throw failure('workspace_snapshot_input_invalid');const includeAbsent=input.includeAbsentPaths===true,limits=limitsOf(input.limits),paths=workspaceSelection(input.paths);await check(input.guard,input.signal,'prepare',id,null);
    const source=await rootOf(input.sourceRoot),storage=await rootOf(input.storageRoot);for(const part of source.path.slice(parse(source.path).root.length).split(sep))workspaceRelativePath(part);if(inside(source.canonical,storage.canonical)||inside(storage.canonical,source.canonical))throw failure('workspace_roots_overlap');
-   const entries=await inventory(source,paths,limits,input.guard,input.signal,id),selection=new Map(paths.map(path=>[path,entries.find(e=>e.path===path)!.kind]));
+   const sourceObserved=includeAbsent?await inventoryObserved(source,paths,limits,input.guard,input.signal,id):await inventory(source,paths,limits,input.guard,input.signal,id),entries=sourceObserved.filter((entry):entry is Entry=>'stat'in entry),selection=new Map<string,'file'|'directory'|'absent'>(paths.map(path=>{const selected=entries.find(entry=>entry.path===path);return [path,selected?.kind??'absent'];}));
    await assertRoot(storage);const isolated=join(storage.path,id);await mkdir(isolated,{mode:0o700});created=true;const target=await rootOf(isolated),output:WorkspaceManifestEntry[]=[];
    for(const entry of entries){await check(input.guard,input.signal,'copy',id,entry.path);await assertRoot(target);
     if(entry.kind==='directory'){await safe(dirname(join(target.path,...entry.path.split('/'))));await mkdir(join(target.path,...entry.path.split('/')),{mode:0o700});output.push({path:entry.path,kind:'directory'});}
     else output.push(await copyFile(source,target,entry,input.guard,input.signal,id));
    }
-   await check(input.guard,input.signal,'verify',id,null);if(identities(entries)!==identities(await inventory(source,paths,limits,input.guard,input.signal,id)))throw failure('workspace_source_changed');
+   const currentSource=includeAbsent?await inventoryObserved(source,paths,limits,input.guard,input.signal,id):await inventory(source,paths,limits,input.guard,input.signal,id);await check(input.guard,input.signal,'verify',id,null);if(observedIdentities(sourceObserved)!==observedIdentities(currentSource))throw failure('workspace_source_changed');
    const outputs=new Map(output.map(entry=>[entry.path,entry]));
    for(const entry of entries.filter(e=>e.kind==='file'))if(await hashFile(source,entry,input.guard,input.signal,id)!==(outputs.get(entry.path) as {sha256:string}).sha256)throw failure('workspace_source_changed');
-   await check(input.guard,input.signal,'publish',id,null);if(identities(entries)!==identities(await inventory(source,paths,limits,input.guard,input.signal,id)))throw failure('workspace_source_changed');
-   const manifest=validateWorkspaceManifest({protocol:1,provider:'snapshot-copy',paths,entries:output});
-   const targetEntries=await inventory(target,paths,limits,input.guard,input.signal,id,selection);if(targetEntries.length!==entries.length)throw failure('workspace_copy_verification_failed');
-   for(const entry of targetEntries){const expected=outputs.get(entry.path);if(!expected||expected.kind!==entry.kind||entry.kind==='file'&&(expected.kind!=='file'||!!(entry.stat.mode&0o100n)!==expected.executable||await hashFile(target,entry,input.guard,input.signal,id)!==expected.sha256))throw failure('workspace_copy_verification_failed');}
-   if(identities(entries)!==identities(await inventory(source,paths,limits,input.guard,input.signal,id))||identities(targetEntries)!==identities(await inventory(target,paths,limits,input.guard,input.signal,id,selection)))throw failure('workspace_source_changed');
-   const receipt=Object.freeze({protocol:1 as const,provider:'snapshot-copy' as const,snapshot_id:id,manifest_sha256:workspaceManifestHash(manifest),file_count:output.filter(e=>e.kind==='file').length,directory_count:output.filter(e=>e.kind==='directory').length,total_bytes:output.reduce((sum,e)=>sum+(e.kind==='file'?e.bytes:0),0),created_at:new Date().toISOString(),status:'ready' as const,execution_authorized:false as const});
+   await check(input.guard,input.signal,'publish',id,null);const publishSource=includeAbsent?await inventoryObserved(source,paths,limits,input.guard,input.signal,id):await inventory(source,paths,limits,input.guard,input.signal,id);if(observedIdentities(sourceObserved)!==observedIdentities(publishSource))throw failure('workspace_source_changed');
+   const outputEntries:WorkspaceManifestEntry[]=includeAbsent?[...output,...sourceObserved.filter(entry=>!('stat'in entry)).map(entry=>({path:entry.path,kind:'absent' as const}))]:output,manifest=validateWorkspaceManifest({protocol:includeAbsent?2:1,provider:'snapshot-copy',paths,entries:outputEntries});
+   const targetEntries=includeAbsent?await inventoryObserved(target,paths,limits,input.guard,input.signal,id,selection):await inventory(target,paths,limits,input.guard,input.signal,id,selection as Map<string,'file'|'directory'>);if(targetEntries.length!==manifest.entries.length)throw failure('workspace_copy_verification_failed');
+   for(const entry of targetEntries){const expected=outputs.get(entry.path)??manifest.entries.find(candidate=>candidate.path===entry.path);if(!expected||expected.kind!==entry.kind||entry.kind==='file'&&(expected.kind!=='file'||!!(entry.stat.mode&0o100n)!==expected.executable||await hashFile(target,entry,input.guard,input.signal,id)!==expected.sha256))throw failure('workspace_copy_verification_failed');}
+   const publishTarget=includeAbsent?await inventoryObserved(target,paths,limits,input.guard,input.signal,id,selection):await inventory(target,paths,limits,input.guard,input.signal,id,selection as Map<string,'file'|'directory'>);if(observedIdentities(targetEntries)!==observedIdentities(publishTarget))throw failure('workspace_copy_verification_failed');
+   // Target verification awaits host guards; reobserve source before constructing or committing the ready record.
+   await check(input.guard,input.signal,'verify',id,null);const finalSource=includeAbsent?await inventoryObserved(source,paths,limits,input.guard,input.signal,id):await inventory(source,paths,limits,input.guard,input.signal,id);if(observedIdentities(sourceObserved)!==observedIdentities(finalSource))throw failure('workspace_source_changed');
+   for(const entry of entries.filter(e=>e.kind==='file'))if(await hashFile(source,entry,input.guard,input.signal,id)!==(outputs.get(entry.path) as {sha256:string}).sha256)throw failure('workspace_source_changed');
+   const receipt=Object.freeze({protocol:1 as const,provider:'snapshot-copy' as const,snapshot_id:id,manifest_sha256:workspaceManifestHash(manifest),file_count:outputEntries.filter(e=>e.kind==='file').length,directory_count:outputEntries.filter(e=>e.kind==='directory').length,total_bytes:outputEntries.reduce((sum,e)=>sum+(e.kind==='file'?e.bytes:0),0),created_at:new Date().toISOString(),status:'ready' as const,execution_authorized:false as const});
    const result=Object.freeze({isolated_root:isolated,manifest,receipt});
    if(this.recoveryStore){
     const record=validateRecovery({protocol:1,provider:'snapshot-copy',snapshot_id:id,storage_root:savedRoot(storage),isolated_root:savedRoot(target),manifest,receipt,selection:paths.map(path=>({path,kind:selection.get(path)!})),limits},id);
     try{await this.recoveryStore.commit(record);}catch{throw failure('workspace_recovery_commit_unknown');}
     await check(input.guard,input.signal,'publish',id,null);
    }
-   this.issued.set(result,{root:target,paths,selection,limits,receipt:canonicalJson(receipt)});return result;
+   this.issued.set(result,{root:target,paths,selection,limits,receipt:canonicalJson(receipt),manifestProtocol:manifest.protocol});return result;
   }catch(error){const code=error instanceof Error&&/^workspace_[a-z_]+$/.test(error.message)?error.message:input?.signal?.aborted?'workspace_cancelled':'workspace_snapshot_failed';const safeError=Object.assign(failure(code),{snapshot_id:id,residual_possible:created});throw safeError;}
  }
  async inspect(input:WorkspaceInspectionInput):Promise<WorkspaceInspection>{
   try{
   controls(input.guard,input.signal);const issued=this.issued.get(input.snapshot);if(!issued||canonicalJson(input.snapshot.receipt)!==issued.receipt||workspaceManifestHash(input.snapshot.manifest)!==input.snapshot.receipt.manifest_sha256||input.snapshot.isolated_root!==issued.root.path)throw failure('workspace_snapshot_untrusted');
   const id=input.snapshot.receipt.snapshot_id;await check(input.guard,input.signal,'verify',id,null);await assertRoot(issued.root);
-  const before=await inventory(issued.root,issued.paths,issued.limits,input.guard,input.signal,id,issued.selection),entries:WorkspaceManifestEntry[]=[];
-  for(const entry of before)entries.push(entry.kind==='directory'?{path:entry.path,kind:'directory'}:{path:entry.path,kind:'file',sha256:await hashFile(issued.root,entry,input.guard,input.signal,id),bytes:Number(entry.stat.size),executable:!!(entry.stat.mode&0o100n)});
-  await check(input.guard,input.signal,'publish',id,null);if(identities(before)!==identities(await inventory(issued.root,issued.paths,issued.limits,input.guard,input.signal,id,issued.selection)))throw failure('workspace_source_changed');
-  const manifest=validateWorkspaceManifest({protocol:1,provider:'snapshot-copy',paths:issued.paths,entries});return Object.freeze({snapshot_id:id,manifest,manifest_sha256:workspaceManifestHash(manifest),execution_authorized:false});
+  const before=issued.manifestProtocol===2?await inventoryObserved(issued.root,issued.paths,issued.limits,input.guard,input.signal,id,issued.selection):await inventory(issued.root,issued.paths,issued.limits,input.guard,input.signal,id,issued.selection as Map<string,'file'|'directory'>),entries:WorkspaceManifestEntry[]=[];
+  for(const entry of before)entries.push(!('stat'in entry)?entry:entry.kind==='directory'?{path:entry.path,kind:'directory'}:{path:entry.path,kind:'file',sha256:await hashFile(issued.root,entry,input.guard,input.signal,id),bytes:Number(entry.stat.size),executable:!!(entry.stat.mode&0o100n)});
+  await check(input.guard,input.signal,'publish',id,null);const after=issued.manifestProtocol===2?await inventoryObserved(issued.root,issued.paths,issued.limits,input.guard,input.signal,id,issued.selection):await inventory(issued.root,issued.paths,issued.limits,input.guard,input.signal,id,issued.selection as Map<string,'file'|'directory'>);if(observedIdentities(before)!==observedIdentities(after))throw failure('workspace_source_changed');
+  const manifest=validateWorkspaceManifest({protocol:issued.manifestProtocol,provider:'snapshot-copy',paths:issued.paths,entries});return Object.freeze({snapshot_id:id,manifest,manifest_sha256:workspaceManifestHash(manifest),execution_authorized:false});
   }catch(error){throw failure(error instanceof Error&&/^workspace_[a-z_]+$/.test(error.message)?error.message:input?.signal?.aborted?'workspace_cancelled':'workspace_inspection_failed');}
+ }
+ /** Bounded verified byte stream from an exact selected file in a trusted
+  * snapshot. It is read-only and grants no destination or write authority. */
+ async *read(snapshot:WorkspaceSnapshot,path:string,guard:WorkspaceGuard,signal:AbortSignal):AsyncIterable<Uint8Array>{
+  let handle:Awaited<ReturnType<typeof open>>|undefined;
+  try{
+   controls(guard,signal);const issued=this.issued.get(snapshot);if(!issued||canonicalJson(snapshot.receipt)!==issued.receipt||workspaceManifestHash(snapshot.manifest)!==snapshot.receipt.manifest_sha256||snapshot.isolated_root!==issued.root.path)throw failure('workspace_snapshot_untrusted');
+   workspaceRelativePath(path);if(!issued.paths.includes(path))throw failure('workspace_file_not_selected');const entry=snapshot.manifest.entries.find(value=>value.path===path);if(!entry||entry.kind!=='file')throw failure('workspace_file_not_found');
+   const id=snapshot.receipt.snapshot_id;await check(guard,signal,'verify',id,path);await assertRoot(issued.root);const file=await entryOf(issued.root,path);if(file.kind!=='file'||Number(file.stat.size)!==entry.bytes||!!(file.stat.mode&0o100n)!==entry.executable)throw failure('workspace_source_changed');
+   handle=await open(file.canonical,constants.O_RDONLY|(constants.O_NOFOLLOW??0));if(metadata(await handle.stat({bigint:true}))!==metadata(file.stat))throw failure('workspace_source_changed');
+   const digest=createHash('sha256');let bytes=0;
+   for await(const chunk of handle.createReadStream({autoClose:false,highWaterMark:65536,signal})) {await check(guard,signal,'verify',id,path);bytes+=chunk.length;if(bytes>entry.bytes)throw failure('workspace_source_changed');digest.update(chunk);yield chunk;}
+   if(bytes!==entry.bytes||digest.digest('hex')!==entry.sha256||metadata(await handle.stat({bigint:true}))!==metadata(file.stat)||!same(file,await entryOf(issued.root,path)))throw failure('workspace_source_changed');
+   await check(guard,signal,'publish',id,path);await assertRoot(issued.root);
+  }catch(error){throw failure(error instanceof Error&&/^workspace_[a-z_]+$/.test(error.message)?error.message:signal?.aborted?'workspace_cancelled':'workspace_read_failed');}
+  finally{await handle?.close();}
  }
  /** Reissues a trusted host artifact reference only. Does not grant current
   * project, task, execution or apply authority and never repairs/re-copies files. */
@@ -184,7 +222,7 @@ export class SnapshotCopyWorkspaceProvider implements WorkspaceProvider{
    if(!saved)throw failure('workspace_recovery_not_found');const record=validateRecovery(saved,id);await check(input.guard,input.signal,'verify',id,null);
    const storage=await rootOf(input.storageRoot);if(canonicalJson(savedRoot(storage))!==canonicalJson(record.storage_root))throw failure('workspace_recovery_storage_changed');
    const isolated=await rootOf(record.isolated_root.path);if(canonicalJson(savedRoot(isolated))!==canonicalJson(record.isolated_root)||isolated.path!==join(storage.path,id)||relative(storage.canonical,isolated.canonical)!==id)throw failure('workspace_recovery_root_changed');
-   const snapshot=Object.freeze({isolated_root:isolated.path,manifest:record.manifest,receipt:record.receipt});this.issued.set(snapshot,{root:isolated,paths:record.manifest.paths,selection:new Map(record.selection.map(entry=>[entry.path,entry.kind])),limits:record.limits,receipt:canonicalJson(record.receipt)});
+   const snapshot=Object.freeze({isolated_root:isolated.path,manifest:record.manifest,receipt:record.receipt});this.issued.set(snapshot,{root:isolated,paths:record.manifest.paths,selection:new Map(record.selection.map(entry=>[entry.path,entry.kind])),limits:record.limits,receipt:canonicalJson(record.receipt),manifestProtocol:record.manifest.protocol});
    try{await this.inspect({snapshot,guard:input.guard,signal:input.signal});await assertRoot(storage);await assertRoot(isolated);if(input.signal.aborted)throw failure('workspace_cancelled');}
    catch(error){this.issued.delete(snapshot);throw error;}
    return snapshot;

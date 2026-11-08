@@ -47,6 +47,8 @@ test('keeps decodable text previewable and active content non-inline', () => {
     assert.equal(detectContentType(text, 'text/plain').previewKind, 'text');
     const svg = join(directory, 'vector'); writeFileSync(svg, '<svg onload="alert(1)"></svg>');
     assert.deepEqual(detectContentType(svg, 'image/svg+xml'), { mediaType: 'image/svg+xml', previewKind: 'unsupported', kind: 'file' });
+    const html = join(directory, 'page'); writeFileSync(html, '<script>alert(1)</script>');
+    assert.deepEqual(detectContentType(html, 'text/html'), { mediaType: 'text/html', previewKind: 'unsupported', kind: 'file' });
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 

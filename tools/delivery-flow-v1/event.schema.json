@@ -1,0 +1,292 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "event.schema.json",
+  "title": "Delivery flow owner event v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "event_id",
+    "event_type",
+    "occurred_at",
+    "owner",
+    "packet_id",
+    "source_class"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "event_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "event_type": {
+      "enum": [
+        "ready",
+        "received",
+        "integrated",
+        "test",
+        "rework",
+        "accepted",
+        "product_work_started",
+        "blocked",
+        "resumed",
+        "next_primary"
+      ],
+      "description": "accepted records a workflow stage only. It is not a formal AC acceptance or status change."
+    },
+    "occurred_at": {
+      "$ref": "#/definitions/utcTimestamp"
+    },
+    "owner": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Producer actor. It may differ from task_owner."
+    },
+    "packet_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique source packet or revision identity for queue stages, independent of task_id. R3 actor_reported events use the reserved actor-task:<task_owner>:<task_id> grouping key; it is excluded from source-packet snapshots and summaries."
+    },
+    "task_owner": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_class": {
+      "enum": [
+        "inherited_wip",
+        "new_development"
+      ]
+    },
+    "trial_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "timestamp_provenance": {
+      "$ref": "#/definitions/timestampProvenance"
+    },
+    "candidate_commit": {
+      "type": "string",
+      "pattern": "^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$"
+    },
+    "candidate_tree": {
+      "type": "string",
+      "pattern": "^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$"
+    },
+    "manifest_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "manifest_sha256": {
+      "$ref": "#/definitions/sha256"
+    },
+    "ac_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "next_owner": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ready_at": {
+      "$ref": "#/definitions/utcTimestamp"
+    },
+    "claim_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "queue_action": {
+      "type": "string",
+      "minLength": 1
+    },
+    "evidence_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "evidence_sha256": {
+      "$ref": "#/definitions/sha256"
+    },
+    "evidence": {
+      "type": "object"
+    }
+  },
+  "dependencies": {
+    "manifest_path": [
+      "manifest_sha256"
+    ],
+    "manifest_sha256": [
+      "manifest_path"
+    ],
+    "evidence_path": [
+      "evidence_sha256"
+    ],
+    "evidence_sha256": [
+      "evidence_path"
+    ]
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "enum": ["product_work_started", "blocked", "resumed", "next_primary"]
+          }
+        },
+        "required": ["event_type"]
+      },
+      "then": {
+        "required": ["trial_id", "task_owner", "task_id", "timestamp_provenance"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "trial_id": {
+            "const": "jot-parallel-r3-20261025"
+          }
+        },
+        "required": ["trial_id"]
+      },
+      "then": {
+        "required": ["task_owner", "task_id", "timestamp_provenance"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "next_primary"
+          }
+        },
+        "required": ["event_type"]
+      },
+      "then": {
+        "required": ["next_owner"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "test"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "evidence": {
+            "$ref": "#/definitions/testEvidence"
+          }
+        },
+        "required": [
+          "evidence"
+        ]
+      }
+    }
+  ],
+  "additionalProperties": true,
+  "definitions": {
+    "utcTimestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{64}$"
+    },
+    "timestampProvenance": {
+      "type": "object",
+      "required": [
+        "basis",
+        "process_observed_at",
+        "actor_reported_at",
+        "native_observed_at"
+      ],
+      "properties": {
+        "basis": {
+          "enum": ["actor_reported", "process_observed", "native_observed"]
+        },
+        "process_observed_at": {
+          "anyOf": [{"$ref": "#/definitions/utcTimestamp"}, {"type": "null"}]
+        },
+        "actor_reported_at": {
+          "anyOf": [{"$ref": "#/definitions/utcTimestamp"}, {"type": "null"}]
+        },
+        "native_observed_at": {
+          "anyOf": [{"$ref": "#/definitions/utcTimestamp"}, {"type": "null"}]
+        }
+      },
+      "additionalProperties": false
+    },
+    "evidenceFile": {
+      "type": "object",
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "$ref": "#/definitions/sha256"
+        }
+      },
+      "additionalProperties": true
+    },
+    "testEvidence": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/evidenceFile"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "test_result"
+            },
+            "result": {
+              "type": "string",
+              "enum": [
+                "passed",
+                "failed"
+              ]
+            },
+            "job_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "exit_code": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "result",
+            "job_id",
+            "exit_code"
+          ]
+        }
+      ]
+    }
+  }
+}

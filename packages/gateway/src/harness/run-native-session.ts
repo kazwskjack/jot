@@ -6,7 +6,7 @@ const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 /** Pin the exact native identity before dispatch, under the original Worker
  * lease. A conversation pointer is initialization data, never recovery authority
  * once this run has a saved identity. This does not activate a native Session. */
-export function pinRunNativeSession(db:DatabaseSync,runId:string,lease:unknown,sessionId:string){
+export function pinRunNativeSession(db:DatabaseSync,runId:string,lease:unknown,sessionId:string,options:{allowArchivedDream?:boolean}={}){
  if(typeof sessionId!=='string'||!ID.test(sessionId))throw Error('run_native_session_invalid');
  return withImmediateTransaction(db,()=>{
   assertExecutionLease(db,runId,lease);
@@ -14,7 +14,8 @@ export function pinRunNativeSession(db:DatabaseSync,runId:string,lease:unknown,s
    FROM ga_runs r JOIN ga_conversations c ON c.id=r.conversation_id
    LEFT JOIN ga_harness_session_bindings b ON b.conversation_id=c.id WHERE r.id=?`).get(runId);
   if(!row||typeof row.owner_id!=='string'||typeof row.conversation_id!=='string'
-   ||!['starting','running'].includes(String(row.status))||row.archived_at!==null
+   ||!['starting','running'].includes(String(row.status))||row.archived_at!==null&&options.allowArchivedDream!==true
+   ||options.allowArchivedDream===true&&!db.prepare("SELECT 1 FROM wb_run_bindings WHERE run_id=? AND kind='memory_consolidation'").get(runId)
    ||row.native_session_ref!==null&&row.native_session_ref!==sessionId
    ||row.native_session_ref!==null&&(row.native_owner_id!==row.owner_id||row.native_conversation_id!==row.conversation_id)
    ||row.native_session_ref===null&&(row.native_owner_id!==null||row.native_conversation_id!==null)

@@ -32,6 +32,17 @@ test('workbench forwarding fixes owner server-side and keeps gateway authenticat
  assert.equal((await service.app.inject({...request,headers:{'x-csrf-token':'wrong'}})).statusCode,403);
  assert.equal((await service.app.inject({...request,headers:{...request.headers,origin:'https://evil.example'}})).statusCode,403);assert.equal(requests.length,1);
 });
+test('workbench forwards the explicitly registered Push public-key and owner lifecycle routes',async t=>{
+ const requests=[];
+ const service=await buildServer({demo:true,database:':memory:',root:'.test-tmp/proxy-files',workbench:{url:'http://127.0.0.1:18831',owner:'local-user',csrf:'test-upstream-auth',fetch:async(url,init)=>{requests.push({url,init});return new Response('{"public_key":"public-only"}',{headers:{'content-type':'application/json'}});}}});t.after(()=>service.close());const csrf=(await service.app.inject({url:'/api/capabilities'})).json().csrf;
+ const response=await service.app.inject({url:'/workbench-api/v1/push/vapid-public-key','headers':{'x-csrf-token':csrf}});
+ assert.equal(response.statusCode,200,response.body);assert.deepEqual(response.json(),{public_key:'public-only'});
+ assert.equal(requests[0].url,'http://127.0.0.1:18831/v1/push/vapid-public-key');assert.equal(requests[0].init.headers['x-user-id'],'local-user');
+ const registered=await service.app.inject({method:'POST',url:'/workbench-api/v1/push/subscriptions',headers:{'x-csrf-token':csrf,'idempotency-key':'push-proxy-register'},payload:{endpoint:'https://push.example.net/token'}});
+ assert.equal(registered.statusCode,200,registered.body);assert.equal(requests[1].url,'http://127.0.0.1:18831/v1/push/subscriptions');
+ const denied=await service.app.inject({url:'/workbench-api/v1/push/admin'});assert.equal(denied.statusCode,400);assert.equal(requests.length,2);
+ const bareFamily=await service.app.inject({url:'/workbench-api/v1/push'});assert.equal(bareFamily.statusCode,400);assert.equal(requests.length,2);
+});
 test('workbench can be disabled and configured upstream cannot escape loopback',async t=>{
  const service=await buildServer({demo:true,database:':memory:',root:'.test-tmp/proxy-files'});t.after(()=>service.close());
  assert.equal((await service.app.inject({url:'/workbench-api/v1/capabilities'})).statusCode,503);

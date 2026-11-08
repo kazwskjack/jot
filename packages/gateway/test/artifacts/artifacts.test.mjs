@@ -47,6 +47,14 @@ test('upload is server-pathed, hashed, immutable, downloadable, previewable, and
     service.db.prepare('INSERT INTO ga_artifact_versions(artifact_id,version,server_path,sha256,size_bytes,mime_type,metadata_json,created_at) VALUES(?,?,?,?,?,?,?,?)')
       .run(artifact.artifact_id, 2, secondPath, createHash('sha256').update('hello\nagent\n').digest('hex'), 12, 'text/plain', JSON.stringify({ file_name: 'safe.txt', status: 'ready', preview_kind: 'text', origin: 'edited' }), new Date().toISOString());
     service.db.prepare('UPDATE ga_artifacts SET current_version=2 WHERE id=?').run(artifact.artifact_id);
+    const historicalPreview = await service.app.inject({ method: 'GET', url: `/v1/artifacts/${artifact.artifact_id}/preview?version=1`, headers });
+    assert.equal(historicalPreview.statusCode, 200);
+    assert.equal(historicalPreview.json().version, 1);
+    assert.equal(historicalPreview.json().text, 'hello\nworld\n');
+    const currentPreview = await service.app.inject({ method: 'GET', url: `/v1/artifacts/${artifact.artifact_id}/preview?version=2`, headers });
+    assert.equal(currentPreview.json().text, 'hello\nagent\n');
+    const foreignPreview = await service.app.inject({ method: 'GET', url: `/v1/artifacts/${artifact.artifact_id}/preview?version=1`, headers: { ...headers, 'x-user-id': 'foreign' } });
+    assert.equal(foreignPreview.statusCode, 404);
     const diff = await service.app.inject({ method: 'GET', url: `/v1/artifacts/${artifact.artifact_id}/diff?from_version=1&to_version=2`, headers });
     assert.match(diff.json().unified_diff, /-world/);
     assert.match(diff.json().unified_diff, /\+agent/);

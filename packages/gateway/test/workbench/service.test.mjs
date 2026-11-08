@@ -111,6 +111,19 @@ test('deletion revokes bound capabilities, cancels queued runs and is restart re
   assert.equal(restarted.listMessages('a', 'ws-1').items[0].status, 'recipient_deleted');
   assert.equal(restarted.deleteAgent('a', a.agent_id, restarted.getAgent('a', a.agent_id).version).status, 'deleted');
 });
+test('role deletion preview counts incoming, outgoing and self-addressed messages that deletion will close', t => {
+  const { service, db } = fixture(t), a = service.createAgent('a', { name: 'A' }), b = service.createAgent('a', { name: 'B' });
+  const incoming = service.sendMessage('a', 'ws-1', { sender_agent_id: b.agent_id, recipient_agent_id: a.agent_id, text: 'incoming', client_message_id: 'incoming' });
+  const processing = service.sendMessage('a', 'ws-1', { sender_agent_id: b.agent_id, recipient_agent_id: a.agent_id, text: 'processing', client_message_id: 'processing' });
+  db.prepare("UPDATE wb_agent_messages SET status='processing' WHERE message_id=?").run(processing.message_id);
+  const outgoing = service.sendMessage('a', 'ws-1', { sender_agent_id: a.agent_id, recipient_agent_id: b.agent_id, text: 'outgoing', client_message_id: 'outgoing' });
+  const self = service.sendMessage('a', 'ws-1', { sender_agent_id: a.agent_id, recipient_agent_id: a.agent_id, text: 'self', client_message_id: 'self' });
+  const preview = service.deletionPreview('a', a.agent_id);
+  assert.equal(preview.pending_message_count, 4);
+  service.deleteAgent('a', a.agent_id, preview.version);
+  const status = message => db.prepare('SELECT status FROM wb_agent_messages WHERE message_id=?').get(message.message_id).status;
+  assert.deepEqual([status(incoming), status(processing), status(outgoing), status(self)], ['recipient_deleted', 'recipient_deleted', 'sender_deleted', 'recipient_deleted']);
+});
 test('mailbox uses a real queued run and publishes only completed assistant output with bounded replies', t => {
   const { service, db } = fixture(t);
   const a = service.createAgent('a', { name: 'A' });

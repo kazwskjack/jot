@@ -9,13 +9,15 @@ import { RunRepository } from '../../src/runs/repository.ts';
 import { HarnessCoordinator } from '../../src/harness/coordinator.ts';
 import { HarnessWorker } from '../../src/harness/worker.ts';
 import {ModelBudgetLedger} from '../../src/workbench/model-budget.ts';
+import {OwnerChannelBindings} from '../../src/channels/owner-bindings.ts';
+import {installChannelAuthorityMigration} from '../../src/channels/authority-migration.ts';
 
 function fixture(text, content) {
   const directory = mkdtempSync(join(tmpdir(), 'ga-worker-'));
   const db = openProductDatabase(join(directory, 'db.sqlite'));
   const events = new EventStore(db); const runs = new RunRepository(db, events);
   db.prepare("INSERT INTO ga_conversations(id,owner_id,workspace_id,title,model,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)")
-    .run('conv-1', 'owner-1', 'ws', 't', '{}', 1, 'now', 'now');
+    .run('conv-1', 'owner-1', 'ws', 't', '{\"provider\":\"fixture\",\"model\":\"fixture\"}', 1, 'now', 'now');
   const receipt = runs.enqueue('conv-1', 'owner-1', { client_message_id: 'm1',
     content: content ?? [{ type: 'text', text }] });
   return { directory, db, events, runs, receipt };
@@ -40,6 +42,36 @@ test('worker does not overwrite cancelling with interrupted when DSH ends',async
  }},{workerId:'worker-1',leaseMs:30000});
  await worker.processNext();assert.equal(x.runs.get(x.receipt.run_id,'owner-1').status,'cancelling');assert.equal(worker.isReady(x.receipt.run_id),false);
  }finally{x.db.close();rmSync(x.directory,{recursive:true,force:true})}
+});
+
+test('consumer readiness is bound to this worker live run lease and scope',async()=>{
+ const x=fixture('consumer readiness');let entered,release,processing;
+ const active=new Promise(resolve=>{entered=resolve}),hold=new Promise(resolve=>{release=resolve;});
+ try{
+  const worker=new HarnessWorker(x.db,new HarnessCoordinator(x.db,x.runs,x.events),{run:async input=>{
+   input.onReady();entered();await hold;return{observed:true,completed:false,reason_code:'SESSION_TURN_INTERRUPTED',runtime_status:'not_required'};
+  }},{workerId:'consumer-worker',leaseMs:30000});
+  processing=worker.processNext();await active;
+  const signal=new AbortController().signal,scope={run_id:x.receipt.run_id,owner_id:'owner-1',workspace_id:'ws'};
+  const changesBefore=x.db.prepare('SELECT total_changes() n').get().n;
+  const ready=await worker.observeConsumerReadiness(scope,signal);
+  assert.deepEqual([ready.protocol,ready.scope,ready.status,ready.required],[1,scope,'ready',true]);
+  assert.ok(Number.isFinite(Date.parse(ready.observed_at)));
+  assert.equal((await worker.observeConsumerReadiness({...scope,owner_id:'foreign-owner'},signal)).status,'unknown');
+  assert.equal((await worker.observeConsumerReadiness({...scope,workspace_id:'foreign-workspace'},signal)).status,'unknown');
+  assert.equal((await worker.observeConsumerReadiness({...scope,run_id:'foreign-run'},signal)).status,'unknown');
+  assert.equal(x.db.prepare('SELECT total_changes() n').get().n,changesBefore);
+  const lease=x.db.prepare('SELECT generation,expires_at FROM ga_worker_leases WHERE resource_id=?').get(x.receipt.run_id);
+  x.db.prepare('UPDATE ga_worker_leases SET expires_at=? WHERE resource_id=?').run(String(Date.now()-1),x.receipt.run_id);
+  assert.equal((await worker.observeConsumerReadiness(scope,signal)).status,'unknown');
+  x.db.prepare('UPDATE ga_worker_leases SET expires_at=? WHERE resource_id=?').run(lease.expires_at,x.receipt.run_id);
+  const generation=lease.generation;
+  x.db.prepare('UPDATE ga_worker_leases SET generation=generation+1 WHERE resource_id=?').run(x.receipt.run_id);
+  assert.equal((await worker.observeConsumerReadiness(scope,signal)).status,'unknown');
+  x.db.prepare('UPDATE ga_worker_leases SET generation=? WHERE resource_id=?').run(generation,x.receipt.run_id);
+  release();await processing;
+  assert.equal((await worker.observeConsumerReadiness(scope,signal)).status,'unknown');
+ }finally{release?.();await processing?.catch(()=>{});x.db.close();rmSync(x.directory,{recursive:true,force:true});}
 });
 
 test('Harness final text completes ordinary chat without Runtime completion gating', async () => {
@@ -100,6 +132,8 @@ test('background task cannot publish or notify an intermediate answer when its r
 
 test('Harness enqueues the final assistant text for a bound WeCom channel', async () => {
   const x = fixture('需要登录'); const deliveries = [];
+  new OwnerChannelBindings(x.db,{enabled:['wecom']});
+  installChannelAuthorityMigration(x.db);
   x.db.prepare('INSERT INTO ga_channel_bindings(channel,principal,conversation_id,created_at,updated_at) VALUES(?,?,?,?,?)')
     .run('wecom', 'user-1', 'conv-1', 'now', 'now');
   try {
@@ -288,6 +322,40 @@ test('worker validates generated outputs and attaches them to the canonical assi
     assert.deepEqual(calls.at(-1), ['release', `${x.receipt.run_id}:outputs`])
   } finally { x.db.close(); rmSync(x.directory, { recursive: true, force: true }); }
 })
+
+test('Harness queues generated Slack files alongside the final answer', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ga-worker-slack-output-'));
+  const db = openProductDatabase(join(directory, 'db.sqlite'));
+  const events = new EventStore(db); const runs = new RunRepository(db, events);
+  db.prepare("INSERT INTO ga_conversations(id,owner_id,workspace_id,title,model,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)")
+    .run('conv-1', 'owner-1', 'ws', 't', '{"provider":"fixture","model":"model"}', 1, 'now', 'now');
+  const receipt = runs.enqueue('conv-1', 'owner-1', { client_message_id: 'slack-m1',
+    content: [{ type: 'text', text: '修改文档' }] });
+  const x = { directory, db, events, runs, receipt }; const deliveries = [];
+  try {
+    addArtifact(x, 'artifact-slack-output', 5);
+    x.db.exec(`CREATE TABLE ga_channel_message_events(channel TEXT,principal TEXT,provider_thread_id TEXT,
+      conversation_id TEXT,message_id TEXT,run_id TEXT)`);
+    x.db.prepare('INSERT INTO ga_channel_message_events VALUES(?,?,?,?,?,?)').run('slack','slack:T111:U111',
+      'C111:1761000000.000001','conv-1',x.receipt.message_id,x.receipt.run_id);
+    const output = { artifactId: 'artifact-slack-output', displayName: '结果.docx',
+      mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      sizeBytes: 100, sha256: 'a'.repeat(64), localPath: '/safe/final.docx', kind: 'document', version: 5 };
+    const worker = new HarnessWorker(x.db, new HarnessCoordinator(x.db, x.runs, x.events), {
+      run: async () => ({ observed: true, completed: true, reason_code: 'SESSION_TURN_COMPLETED',
+        runtime_status: 'not_required', final_text: '已完成。', output_artifact_refs: ['artifact-slack-output'],
+        presented_files: [{ path: '/safe/final.docx' }] }),
+    }, { workerId: 'worker-slack-output', leaseMs: 30_000,
+      attachmentResolver: { resolveForMessage: () => [], resolveOutputs: () => [output], releaseLease: () => {} },
+      channelDelivery: { enqueueText: input => deliveries.push({ kind: 'text', ...input }),
+        enqueuePinnedSlackArtifact: input => deliveries.push({ kind: 'file', ...input }) } });
+    await worker.processNext();
+    assert.deepEqual(deliveries.map(item => item.kind), ['text', 'file']);
+    assert.equal(deliveries[1].artifactId, 'artifact-slack-output');
+    assert.equal(deliveries[1].version, 5);
+    assert.equal(deliveries[1].ownerId, 'owner-1');
+  } finally { x.db.close(); rmSync(x.directory, { recursive: true, force: true }); }
+});
 
 test('worker persists a verified output artifact when final prose is interrupted', async () => {
   const x = fixture('修改文档')

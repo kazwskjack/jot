@@ -50,7 +50,11 @@ test('a repeated model tool call ID returns its recorded result without repeatin
   const call={id:'once',type:'function',function:{name:'file_write',arguments:'{"name":"a.txt","text":"ok"}'}};
   const agent=new Agent(store,{provider:async()=>++turn<3?{role:'assistant',content:null,tool_calls:[call]}:{role:'assistant',content:'done'},tools:{definitions:[],execute:async()=>({written:++writes})}});
   const run=store.accept(store.createConversation().id,'write once','1').run;
-  try {await agent.execute(run);assert.equal(writes,1);assert.equal(store.run(run.id).status,'succeeded');}
+  try {
+    await agent.execute(run);assert.equal(writes,1);assert.equal(store.run(run.id).status,'succeeded');
+    const results=store.events(run.conversation_id,0).filter(event=>event.type==='tool.result');
+    assert.equal(results.length,2);assert.deepEqual(results.map(event=>event.data.call_id),['once','once']);
+  }
   finally{await agent.close();store.close();}
 });
 

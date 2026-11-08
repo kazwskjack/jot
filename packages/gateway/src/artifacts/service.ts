@@ -1,13 +1,60 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { basename, join,dirname,resolve,sep } from 'node:path';
-import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync,writeFileSync,lstatSync } from 'node:fs';
+import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync,writeFileSync,lstatSync,opendirSync } from 'node:fs';
 import { once } from 'node:events';
 import type { DatabaseSync } from 'node:sqlite';
 import { withImmediateTransaction } from '../db/database.ts';
+import { canonicalJson } from '../db/canonical-json.ts';
 import { detectContentType } from './content-type.ts';
 import {sameTaskFileLocation} from '../persistent-tasks/output-content.ts';
 import {readIsolatedTaskFileVersion} from '../persistent-tasks/isolated-output-source.ts';
 import {taskFileSource,type TaskFileScope,type TaskFileLocation} from '../persistent-tasks/task-file-source.ts';
+import {AttachmentResolver} from './resolver.ts';
+import {normalizeChannelAttachmentManifestV2,channelAttachmentManifestDigestV2,type ChannelAttachmentSourceV2} from '../channels/attachment-manifest-v2.ts';
+import {channelUploadStageKeyV2,channelUploadIdV2,channelUploadArtifactIdV2,channelStageRequestDigestV2} from '../channels/attachment-stage-v2.ts';
+
+export interface PinnedArtifactCleanupInput {
+  run_id: string;
+  kind: 'artifact';
+  schema_version: 1;
+  owner_id: string;
+  conversation_id: string;
+  artifact_id: string;
+  version: number;
+  sha256: string;
+  size_bytes: number;
+  manifest_sha256: string;
+  manifest: Array<{ part_index: number; display_name: string; sha256: string; size_bytes: number; mime_type: string }>;
+}
+
+function isRecord(value: unknown): value is Record<string, any> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) && !Buffer.isBuffer(value);
+}
+
+const UPLOAD_RETENTION_MS=24*60*60*1000,UPLOAD_WRITER_LEASE_MS=300000,UPLOAD_BATCH_MAX_FILES=500,UPLOAD_BATCH_MAX_BYTES=2*1024*1024*1024,UPLOAD_BATCH_MAX_ACTIVE=3;
+
+type UploadBatchFile={client_file_id:string;file_name:string;relative_path:string;media_type:string;size_bytes:number;sha256:string};
+
+function uploadBatchFiles(input:Record<string,unknown>,maxBytes:number):{files:UploadBatchFile[];total:number}{
+  if(!Array.isArray(input.files)||input.files.length<1)throw new Error('upload_batch_invalid');
+  if(input.files.length>UPLOAD_BATCH_MAX_FILES)throw new Error('upload_batch_limit_exceeded');
+  const ids=new Set<string>(),paths=new Set<string>();let total=0;
+  const files=input.files.map((value):UploadBatchFile=>{
+    if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('upload_batch_invalid');
+    const file=value as Record<string,unknown>,clientFileId=String(file.client_file_id??''),fileName=String(file.file_name??''),relativePath=String(file.relative_path??''),mediaType=String(file.media_type??''),size=Number(file.size_bytes),sha256=String(file.sha256??'');
+    if(!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(clientFileId)||ids.has(clientFileId))throw new Error('upload_batch_invalid');
+    if(!fileName||fileName.length>255||fileName==='.'||fileName==='..'||/[\\/\u0000-\u001f\u007f]/.test(fileName))throw new Error('upload_batch_invalid');
+    const parts=relativePath.split('/'),pathKey=relativePath.toLowerCase();
+    if(!relativePath||relativePath.length>1024||/^[A-Za-z]:/.test(relativePath)||parts.some(part=>!part||part==='.'||part==='..'||part.length>255||/[\\\u0000-\u001f\u007f]/.test(part))||parts.at(-1)!==fileName||paths.has(pathKey))throw new Error('upload_batch_invalid');
+    if(!Number.isSafeInteger(size)||size<1||size>maxBytes)throw new Error('upload_size_invalid');
+    if(!mediaType||mediaType.length>255||/[\u0000-\u001f\u007f]/.test(mediaType))throw new Error('upload_batch_invalid');
+    if(!/^[a-f0-9]{64}$/.test(sha256))throw new Error('upload_sha256_invalid');
+    ids.add(clientFileId);paths.add(pathKey);total+=size;
+    return {client_file_id:clientFileId,file_name:fileName,relative_path:relativePath,media_type:mediaType,size_bytes:size,sha256};
+  });
+  if(total>UPLOAD_BATCH_MAX_BYTES)throw new Error('upload_batch_limit_exceeded');
+  return {files,total};
+}
 
 function rejectTaskOutputSymlinks(path:string):void {
   let current=resolve(path);
@@ -15,9 +62,11 @@ function rejectTaskOutputSymlinks(path:string):void {
 }
 
 export class ArtifactService {
+  private readonly channelFinalizing=new Set<string>();
   private readonly db: DatabaseSync;
   private readonly root: string;
   private readonly incomingRoot: string;
+  private readonly activeUploadWriters = new Map<string, () => void>();
   private readonly uploadRoot: string;
   private readonly generatedRoot: string;
   private readonly editedRoot: string;
@@ -42,6 +91,145 @@ export class ArtifactService {
         OR json_extract(NEW.metadata_json,'$.origin') IS NOT json_extract(OLD.metadata_json,'$.origin')
         OR json_extract(NEW.metadata_json,'$.task_file') IS NOT json_extract(OLD.metadata_json,'$.task_file'))
       BEGIN SELECT RAISE(ABORT,'task_output_artifact_immutable'); END;`);
+  }
+
+  usesDatabase(db: DatabaseSync): boolean { return this.db === db; }
+
+  /** Durable reservation in original ga_uploads; no conversation/artifact yet. */
+  reserveChannelUploadBatch(input:unknown){
+    if(!this.db.isTransaction)throw Error('channel_authority_transaction_required');
+    const {source}=normalizeChannelAttachmentManifestV2(input),key=channelUploadStageKeyV2(source.event),requestHash=channelStageRequestDigestV2(source);
+    const previous=this.readChannelUploadBatch(key);
+    if(previous){
+      if(previous.request_sha256!==requestHash||canonicalJson(previous.source)!==canonicalJson(source))throw Object.assign(Error('channel_attachment_event_conflict'),{statusCode:409});
+      if(previous.state==='expired'||previous.state!=='finalized'&&Date.parse(previous.expires_at)<=Date.now())throw Error('channel_attachment_stage_expired');
+      return previous;
+    }
+    const now=new Date().toISOString(),expires=new Date(Date.now()+3600000).toISOString();
+    for(const part of source.attachments){
+      const id=channelUploadIdV2(key,requestHash,part.index);
+      if(part.artifact_id!==channelUploadArtifactIdV2(id))throw Error('channel_attachment_stage_invalid');
+      this.db.prepare(`INSERT INTO ga_uploads(id,conversation_id,owner_id,status,server_path,filename,declared_size,declared_sha256,mime_type,created_at,
+        channel_stage_key,channel_request_sha256,channel_source_json,channel_part_index,channel_expires_at)
+        VALUES(?,NULL,?,'created',?,?,?,?,?,?,?,?,?,?,?)`).run(id,source.owner_id,join(this.incomingRoot,id+'.part'),part.file_name,part.size_bytes,part.sha256,part.media_type,now,key,requestHash,canonicalJson(source),part.index,expires);
+    }
+    return this.readChannelUploadBatch(key)!;
+  }
+
+  readChannelUploadBatch(key:string){
+    if(typeof key!=='string'||!/^channel-stage-[a-f0-9]{64}$/.test(key))throw Error('channel_attachment_stage_invalid');
+    const rows=this.db.prepare('SELECT * FROM ga_uploads WHERE channel_stage_key=? ORDER BY channel_part_index').all(key);
+    if(!rows.length)return undefined;
+    const first=rows[0]!,source=normalizeChannelAttachmentManifestV2(JSON.parse(String(first.channel_source_json))).source;
+    const requestHash=channelStageRequestDigestV2(source),sourceJson=canonicalJson(source),expires=String(first.channel_expires_at);
+    if(channelUploadStageKeyV2(source.event)!==key||rows.length!==source.attachments.length||!Number.isFinite(Date.parse(expires)))throw Error('channel_attachment_stage_unproven');
+    const parts=source.attachments.map((part,index)=>{
+      const row=rows[index]!,id=channelUploadIdV2(key,requestHash,index);
+      if(row.id!==id||row.owner_id!==source.owner_id||row.channel_part_index!==index||row.channel_request_sha256!==requestHash||row.channel_source_json!==sourceJson||row.channel_expires_at!==expires
+        ||row.filename!==part.file_name||row.declared_size!==part.size_bytes||row.declared_sha256!==part.sha256||row.mime_type!==part.media_type||part.artifact_id!==channelUploadArtifactIdV2(id)
+        ||row.conversation_id!==null&&row.conversation_id!==source.conversation_id||!['created','uploading','uploaded','completed','expired','expired_clean'].includes(String(row.status)))throw Error('channel_attachment_stage_unproven');
+      return Object.freeze({...part,upload_id:id});
+    });
+    const completed=rows.filter(row=>row.status==='completed').length;
+    if(completed&&completed!==rows.length)throw Error('channel_attachment_stage_unproven');
+    const expired=rows.filter(row=>row.status==='expired'||row.status==='expired_clean').length;if(expired&&expired!==rows.length)throw Error('channel_attachment_stage_unproven');
+    const state=expired?'expired' as const:completed===rows.length?'finalized' as const:rows.every(row=>row.status==='uploaded')?'staged' as const:'staging' as const;
+    return Object.freeze({protocol:2 as const,state,stage_key:key,request_sha256:requestHash,manifest_sha256:channelAttachmentManifestDigestV2(source),source,parts:Object.freeze(parts),expires_at:expires});
+  }
+
+  async writeChannelUploadPart(key:string,index:number,content:AsyncIterable<Uint8Array>,signal?:AbortSignal){
+    const stage=this.readChannelUploadBatch(key);
+    if(!stage||!Number.isSafeInteger(index)||!stage.parts[index]||stage.state==='finalized'||stage.state==='expired'||Date.parse(stage.expires_at)<=Date.now())throw Error('channel_attachment_stage_unavailable');
+    const part=stage.parts[index]!,row=this.upload(part.upload_id,stage.source.owner_id);
+    const stream=(async function*(){for await(const bytes of content){signal?.throwIfAborted();yield bytes;}signal?.throwIfAborted();})();
+    if(row.status==='uploaded'){
+      let size=0;const hash=createHash('sha256');for await(const chunk of stream){size+=chunk.length;if(size>part.size_bytes)throw Error('upload_size_mismatch');hash.update(chunk);}
+      if(size!==part.size_bytes||hash.digest('hex')!==part.sha256)throw Error('upload_sha256_mismatch');return;
+    }
+    await this.writeContent(part.upload_id,stage.source.owner_id,stream,()=>{
+      if(this.upload(part.upload_id,stage.source.owner_id).actual_sha256!==part.sha256)throw Error('upload_sha256_mismatch');
+    });
+  }
+
+  /** Verify all original upload files before creating any admission objects. */
+  prepareChannelUploadBatch(key:string,signal?:AbortSignal){
+    if(this.db.isTransaction)throw Error('attachment_verification_transaction_forbidden');
+    const stage=this.readChannelUploadBatch(key);
+    if(!stage||stage.state!=='staged')throw Error('channel_attachment_batch_incomplete');
+    if(Date.parse(stage.expires_at)<=Date.now())throw Error('channel_attachment_stage_expired');
+    for(const part of stage.parts){
+      signal?.throwIfAborted();const row=this.upload(part.upload_id,stage.source.owner_id),finalPath=join(this.uploadRoot,part.artifact_id),path=existsSync(finalPath)?finalPath:String(row.server_path);
+      const same=(a:string,b:string)=>process.platform==='win32'?resolve(a).toLowerCase()===resolve(b).toLowerCase():resolve(a)===resolve(b);
+      if(!same(path,finalPath)&&!same(dirname(path),this.incomingRoot))throw Error('channel_attachment_stage_path_invalid');
+      rejectTaskOutputSymlinks(path);const stat=lstatSync(path);
+      if(!stat.isFile()||stat.size!==part.size_bytes||row.received_size!==part.size_bytes||row.actual_sha256!==part.sha256)throw Error('upload_content_mismatch');
+      const bytes=readFileSync(path);if(bytes.length!==part.size_bytes||createHash('sha256').update(bytes).digest('hex')!==part.sha256)throw Error('upload_content_mismatch');
+      if(detectContentType(path,part.media_type).mediaType!==part.media_type)throw Error('channel_attachment_media_mismatch');
+    }
+    signal?.throwIfAborted();return stage;
+  }
+
+  /** Original complete() calls are nested in the caller's single admission txn.
+   * Its stable rename mapping also recovers files moved before a DB rollback. */
+  finalizeChannelUploadBatch(key:string,conversationId:string){
+    if(!this.db.isTransaction)throw Error('channel_authority_transaction_required');
+    const stage=this.readChannelUploadBatch(key);
+    if(!stage||stage.state!=='staged'||stage.source.conversation_id!==conversationId||Date.parse(stage.expires_at)<=Date.now())throw Error('channel_attachment_batch_incomplete');
+    for(const part of stage.parts){
+      this.db.prepare('UPDATE ga_uploads SET conversation_id=? WHERE id=? AND conversation_id IS NULL').run(conversationId,part.upload_id);
+      this.channelFinalizing.add(part.upload_id);
+      try{
+        const result=this.complete(part.upload_id,stage.source.owner_id,{sha256:part.sha256});
+        if(result.artifact_id!==part.artifact_id||result.sha256!==part.sha256||result.size_bytes!==part.size_bytes||result.media_type!==part.media_type)throw Error('channel_attachment_stage_unproven');
+      }finally{this.channelFinalizing.delete(part.upload_id);}
+    }
+    return stage.source;
+  }
+
+  /** Bounded original-upload retention. Keep immutable expired rows as source
+   * tombstones; delete only unregistered, fenced batch bytes under own roots. */
+  cleanupExpiredChannelUploads(limit=20,now=Date.now()){
+    if(this.db.isTransaction||!Number.isSafeInteger(limit)||limit<1||limit>100||!Number.isFinite(now))throw Error('channel_attachment_cleanup_invalid');
+    const cutoff=new Date(now).toISOString(),retry=new Date(now+60000).toISOString(),keys=this.db.prepare("SELECT DISTINCT channel_stage_key FROM ga_uploads WHERE channel_stage_key IS NOT NULL AND channel_expires_at<=? AND status NOT IN('completed','expired_clean') AND (channel_cleanup_after IS NULL OR channel_cleanup_after<=?) ORDER BY channel_stage_key LIMIT ?").all(cutoff,cutoff,limit);
+    let expired=0,removed=0,blocked=0;
+    for(const row of keys){
+      let files:string[];
+      try{files=withImmediateTransaction(this.db,()=>{
+        const key=String(row.channel_stage_key),stage=this.readChannelUploadBatch(key);if(!stage||stage.state==='finalized')return[];
+        if(this.db.prepare("SELECT 1 FROM ga_uploads WHERE channel_stage_key=? AND status='uploading' AND writer_lease_until>? LIMIT 1").get(key,cutoff))throw Error('channel_attachment_cleanup_writer_live');
+        const event=stage.source.event;
+        if(this.db.prepare('SELECT 1 FROM ga_channel_message_events WHERE channel=? AND principal=? AND provider_thread_id=? AND provider_message_id=?').get(event.channel,event.principal,event.thread_id,event.message_id))throw Error('channel_attachment_cleanup_admission_observed');
+        const candidates:string[]=[];
+        for(const part of stage.parts){
+          if(this.db.prepare('SELECT 1 FROM ga_artifacts WHERE id=?').get(part.artifact_id))throw Error('channel_attachment_cleanup_artifact_observed');
+          const upload=this.upload(part.upload_id,stage.source.owner_id),incoming=resolve(String(upload.server_path)),final=resolve(this.uploadRoot,part.artifact_id);
+          const same=(a:string,b:string)=>process.platform==='win32'?resolve(a).toLowerCase()===resolve(b).toLowerCase():resolve(a)===resolve(b);
+          if(!same(dirname(incoming),this.incomingRoot)&&!same(incoming,final))throw Error('channel_attachment_stage_path_invalid');
+          candidates.push(incoming,final);
+        }
+        this.db.prepare("UPDATE ga_uploads SET status='expired',writer_token=NULL,writer_lease_until=NULL WHERE channel_stage_key=?").run(key);
+        if(stage.state!=='expired')expired++;return [...new Set(candidates)];
+      });}catch{blocked++;this.db.prepare("UPDATE ga_uploads SET channel_cleanup_after=? WHERE channel_stage_key=? AND status<>'completed'").run(retry,String(row.channel_stage_key));continue;}
+      let failed=false;
+      for(const path of files){try{if(!existsSync(path))continue;rejectTaskOutputSymlinks(path);if(!lstatSync(path).isFile())throw Error('channel_attachment_stage_path_invalid');unlinkSync(path);removed++;}catch{blocked++;failed=true;}}
+      if(failed)this.db.prepare("UPDATE ga_uploads SET channel_cleanup_after=? WHERE channel_stage_key=? AND status='expired'").run(retry,String(row.channel_stage_key));
+      else this.db.prepare("UPDATE ga_uploads SET status='expired_clean',channel_cleanup_after=NULL WHERE channel_stage_key=? AND status='expired'").run(String(row.channel_stage_key));
+    }
+    return Object.freeze({protocol:2 as const,expired_batches:expired,removed_files:removed,blocked});
+  }
+
+  /** Existing exact-version snapshot primitive, not a durable upload reservation.
+   * Own transient lease and unlinked byte descriptors remain live until dispose. */
+  async snapshotPinnedInput(ownerId:string,conversationId:string,manifest:unknown,signal?:AbortSignal){
+    if(this.db.isTransaction)throw Error('attachment_verification_transaction_forbidden');
+    if(!this.db.prepare('SELECT 1 FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId))throw Error('conversation_not_found');
+    const resolver=new AttachmentResolver(this.db,this.root),lease=`channel-v2-snapshot-${randomUUID()}`;
+    try{
+      const snapshot=await resolver.snapshotPinnedForMessage(ownerId,conversationId,manifest,lease,this.incomingRoot,signal);
+      return Object.freeze({manifest:snapshot.manifest,sources:snapshot.sources,async dispose(){
+        try{await snapshot.dispose();}finally{resolver.releaseLease(lease);}
+      }});
+    }catch(error){resolver.releaseLease(lease);throw error;}
   }
 
   /** Copies only a trusted task write receipt's exact UTF8 bytes. Publication
@@ -203,6 +391,48 @@ export class ArtifactService {
     return { items };
   }
 
+  registerBrowserScreenshot(input:{ownerId:string;runId:string;callId:string;artifactId:string;content:Buffer;sha256:string}){
+    if(!this.db.isTransaction)throw Error('browser_artifact_transaction_required');
+    if(!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(input.artifactId)
+      ||!Buffer.isBuffer(input.content)||input.content.length<8||input.content.length>1048576
+      ||!input.content.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))
+      ||createHash('sha256').update(input.content).digest('hex')!==input.sha256)throw Error('browser_artifact_invalid');
+    const run=this.db.prepare('SELECT r.conversation_id FROM ga_runs r JOIN ga_conversations c ON c.id=r.conversation_id WHERE r.id=? AND c.owner_id=?')
+      .get(input.runId,input.ownerId) as {conversation_id:string}|undefined;
+    if(!run)throw Error('run_not_found');
+    const runtimeRef='browser-screenshot:'+createHash('sha256').update(JSON.stringify([input.runId,input.callId])).digest('hex');
+    const prior=this.db.prepare(`SELECT a.id,a.owner_id,a.conversation_id,a.runtime_ref,v.sha256,v.size_bytes,v.server_path FROM ga_artifacts a
+      JOIN ga_artifact_versions v ON v.artifact_id=a.id AND v.version=1 WHERE a.id=? OR a.runtime_ref=?`).all(input.artifactId,runtimeRef) as Array<Record<string,unknown>>;
+    const directory=join(this.generatedRoot,input.artifactId),destination=join(directory,'version-1.png');
+    rejectTaskOutputSymlinks(destination);
+    if(prior.length){
+      const item=prior[0]!;
+      if(prior.length!==1||item.id!==input.artifactId||item.owner_id!==input.ownerId||item.conversation_id!==run.conversation_id
+        ||item.runtime_ref!==runtimeRef||item.sha256!==input.sha256||Number(item.size_bytes)!==input.content.length||item.server_path!==destination
+        ||!this.db.prepare('SELECT 1 FROM ga_run_artifacts WHERE run_id=? AND artifact_id=? AND version=1').get(input.runId,input.artifactId))throw Error('browser_artifact_conflict');
+      const bytes=readFileSync(destination);
+      if(bytes.length!==input.content.length||createHash('sha256').update(bytes).digest('hex')!==input.sha256)throw Error('browser_artifact_content_changed');
+      return this.get(input.artifactId,input.ownerId,1);
+    }
+    mkdirSync(directory,{recursive:true,mode:0o700});rejectTaskOutputSymlinks(destination);
+    if(existsSync(destination)){
+      const bytes=readFileSync(destination);
+      if(bytes.length!==input.content.length||createHash('sha256').update(bytes).digest('hex')!==input.sha256)throw Error('browser_artifact_content_changed');
+    }else{
+      const pending=join(directory,'pending-'+randomUUID()+'.png');
+      try{writeFileSync(pending,input.content,{flag:'wx',mode:0o600});renameSync(pending,destination);}finally{if(existsSync(pending))unlinkSync(pending);}
+    }
+    const now=new Date().toISOString();
+    this.db.prepare('INSERT INTO ga_artifacts(id,conversation_id,owner_id,kind,current_version,runtime_ref,created_at,updated_at) VALUES(?,?,?,?,1,?,?,?)')
+      .run(input.artifactId,run.conversation_id,input.ownerId,'browser_screenshot',runtimeRef,now,now);
+    this.db.prepare('INSERT INTO ga_artifact_versions VALUES(?,1,?,?,?,?,?,?)').run(input.artifactId,destination,input.sha256,input.content.length,'image/png',
+      JSON.stringify({file_name:'browser-screenshot.png',status:'ready',origin:'generated',preview_kind:'image'}),now);
+    this.db.prepare('INSERT INTO ga_artifact_archives(artifact_id,backup_status,local_state,last_used_at,created_at,updated_at) VALUES(?,?,?,?,?,?)')
+      .run(input.artifactId,'pending','present',now,now,now);
+    this.db.prepare('INSERT INTO ga_run_artifacts VALUES(?, ?,1,?)').run(input.runId,input.artifactId,now);
+    return this.get(input.artifactId,input.ownerId,1);
+  }
+
   registerTemplateInstance(input: { ownerId: string; conversationId: string; callId: string;
     templateId: string; templateVersion: string; templateSha256: string; format: 'docx' | 'xlsx'; sourcePath: string }): Record<string, unknown> {
     if (!this.db.prepare('SELECT 1 FROM ga_conversations WHERE id=? AND owner_id=?')
@@ -238,23 +468,40 @@ export class ArtifactService {
   }
 
   initUpload(conversationId: string, ownerId: string, input: Record<string, unknown>) {
-    if (!this.db.prepare('SELECT 1 FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId, ownerId)) throw new Error('conversation_not_found');
-    const size = Number(input.size_bytes);
-    if (!Number.isInteger(size) || size < 1 || size > this.maxBytes) throw new Error('upload_size_invalid');
-    const sha = String(input.sha256 || '');
-    if (!/^[a-f0-9]{64}$/.test(sha)) throw new Error('upload_sha256_invalid');
-    const filename = basename(String(input.file_name || '').replaceAll('\\', '/'));
-    if (!filename || filename === '.' || filename === '..') throw new Error('upload_filename_invalid');
-    const id = `upload-${randomUUID()}`; const now = new Date();
-    const path = join(this.incomingRoot, `${id}.part`);
-    this.db.prepare('INSERT INTO ga_uploads(id,conversation_id,owner_id,status,server_path,filename,declared_size,declared_sha256,mime_type,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)')
-      .run(id, conversationId, ownerId, 'created', path, filename, size, sha, String(input.media_type), now.toISOString());
-    return { upload_id: id, expires_at: new Date(now.getTime() + 3600000).toISOString(), max_bytes: this.maxBytes };
+    const filename=basename(String(input.file_name||'').replaceAll('\\','/'));
+    if(!filename||filename==='.'||filename==='..')throw new Error('upload_filename_invalid');
+    const receipt=this.initUploadBatch(conversationId,ownerId,{files:[{client_file_id:'legacy-file',file_name:filename,
+      relative_path:String(input.relative_path||filename),media_type:String(input.media_type||''),size_bytes:input.size_bytes,sha256:input.sha256}]});
+    return {upload_id:receipt.files[0]!.upload_id,expires_at:receipt.expires_at,max_bytes:this.maxBytes};
+  }
+
+  initUploadBatch(conversationId:string,ownerId:string,input:Record<string,unknown>){
+    const {files,total}=uploadBatchFiles(input,this.maxBytes);
+    return withImmediateTransaction(this.db,()=>{
+      if(!this.db.prepare('SELECT 1 FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId))throw new Error('conversation_not_found');
+      const now=new Date(),createdAt=now.toISOString(),expiresAt=new Date(now.getTime()+UPLOAD_RETENTION_MS).toISOString();
+      const active=Number((this.db.prepare(`SELECT count(*) n FROM ga_upload_batches WHERE owner_id=? AND conversation_id=?
+        AND status='active' AND expires_at>?`).get(ownerId,conversationId,createdAt) as {n:number}).n);
+      if(active>=UPLOAD_BATCH_MAX_ACTIVE)throw new Error('upload_batch_concurrency_limit');
+      const batchId=`upload-batch-${randomUUID()}`;
+      this.db.prepare('INSERT INTO ga_upload_batches(id,conversation_id,owner_id,status,manifest_json,total_size,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?)')
+        .run(batchId,conversationId,ownerId,'active',JSON.stringify(files),total,createdAt,expiresAt);
+      const insert=this.db.prepare(`INSERT INTO ga_uploads(id,conversation_id,owner_id,status,server_path,filename,declared_size,declared_sha256,mime_type,created_at,
+        batch_id,client_file_id,relative_path,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+      const receipts=files.map(file=>{
+        const uploadId=`upload-${randomUUID()}`;
+        insert.run(uploadId,conversationId,ownerId,'created',join(this.incomingRoot,`${uploadId}.part`),file.file_name,file.size_bytes,file.sha256,file.media_type,createdAt,
+          batchId,file.client_file_id,file.relative_path,expiresAt);
+        return {client_file_id:file.client_file_id,upload_id:uploadId,max_bytes:this.maxBytes};
+      });
+      return {batch_id:batchId,expires_at:expiresAt,files:receipts};
+    });
   }
 
   async writeContent(uploadId: string, ownerId: string, content: AsyncIterable<Uint8Array>, commitReceipt?:()=>void): Promise<void> {
     const row = this.upload(uploadId, ownerId);
-    const writer=randomUUID(),now=new Date().toISOString(),leaseMs=300000,path=join(this.incomingRoot,`${uploadId}.${writer}.part`);
+    this.assertUploadLive(row);
+    const writer=randomUUID(),now=new Date().toISOString(),leaseMs=UPLOAD_WRITER_LEASE_MS,path=join(this.incomingRoot,`${uploadId}.${writer}.part`);
     if (this.db.prepare(`UPDATE ga_uploads SET status='uploading',writer_token=?,writer_lease_until=?,server_path=?,received_size=0,actual_sha256=NULL
       WHERE id=? AND owner_id=? AND (status='created' OR (status='uploading' AND writer_token IS NOT NULL AND writer_lease_until<=?))`)
       .run(writer,new Date(Date.now()+leaseMs).toISOString(),path,uploadId,ownerId,now).changes !== 1) {
@@ -263,19 +510,36 @@ export class ArtifactService {
     const declared = Number(row.declared_size);
     let lost=false;
     const owned=()=>{
-      if(lost||!this.db.prepare("SELECT 1 FROM ga_uploads WHERE id=? AND owner_id=? AND status='uploading' AND writer_token=? AND writer_lease_until>?")
-        .get(uploadId,ownerId,writer,new Date().toISOString()))throw new Error('upload_writer_lost');
+      const time=new Date().toISOString(),current=this.db.prepare(`SELECT status,writer_token,writer_lease_until,expires_at,batch_id FROM ga_uploads WHERE id=? AND owner_id=?`)
+        .get(uploadId,ownerId) as Record<string,unknown>|undefined;
+      if(current?.expires_at&&Date.parse(String(current.expires_at))<=Date.parse(time)){
+        this.expireUploadBatch(String(current.batch_id),time);
+        throw new Error('upload_expired');
+      }
+      if(lost||current?.status!=='uploading'||current.writer_token!==writer||!current.writer_lease_until||String(current.writer_lease_until)<=time
+        ||!current.expires_at||String(current.expires_at)<=time)throw new Error('upload_writer_lost');
     };
-    const heartbeat=setInterval(()=>{try{
-      const time=new Date().toISOString();
-      if(this.db.prepare("UPDATE ga_uploads SET writer_lease_until=? WHERE id=? AND owner_id=? AND status='uploading' AND writer_token=? AND writer_lease_until>?")
-        .run(new Date(Date.now()+leaseMs).toISOString(),uploadId,ownerId,writer,time).changes!==1)lost=true;
-    }catch{lost=true;}},20000);heartbeat.unref();
     const digest = createHash('sha256'); const output = createWriteStream(path, { flags: 'wx', mode: 0o600 });
     let streamError:Error|undefined;
     // A fenced writer can still have buffered writes when it is destroyed.
     // Keep errors observed until close, then remove only its own generation.
     output.on('error',error=>{streamError=error;});
+    const input=content as AsyncIterable<Uint8Array>&{destroy?:(error?:Error)=>unknown};
+    const stopWriter=()=>{
+      lost=true;const error=new Error('upload_writer_lost');
+      try{input.destroy?.(error);}catch{}
+      output.destroy(error);
+    };
+    this.activeUploadWriters.set(uploadId,stopWriter);
+    const heartbeat=setInterval(()=>{try{
+      const time=new Date().toISOString();
+      if(this.db.prepare("UPDATE ga_uploads SET writer_lease_until=? WHERE id=? AND owner_id=? AND status='uploading' AND writer_token=? AND writer_lease_until>? AND expires_at>?")
+        .run(new Date(Date.now()+leaseMs).toISOString(),uploadId,ownerId,writer,time,time).changes!==1){
+        const current=this.db.prepare('SELECT batch_id,expires_at FROM ga_uploads WHERE id=? AND owner_id=?').get(uploadId,ownerId) as {batch_id?:string;expires_at?:string}|undefined;
+        if(current?.batch_id&&current.expires_at&&current.expires_at<=time)this.expireUploadBatch(current.batch_id,time);
+        stopWriter();
+      }
+    }catch{stopWriter();}},20000);heartbeat.unref();
     let received = 0;
     try {
       for await (const value of content) {
@@ -293,8 +557,8 @@ export class ArtifactService {
       const sha=digest.digest('hex');
       withImmediateTransaction(this.db,()=>{
         owned();
-        if(this.db.prepare("UPDATE ga_uploads SET status='uploaded',received_size=?,actual_sha256=?,writer_token=NULL,writer_lease_until=NULL WHERE id=? AND writer_token=? AND status='uploading'")
-          .run(received,sha,uploadId,writer).changes!==1)throw new Error('upload_writer_lost');
+        if(this.db.prepare("UPDATE ga_uploads SET status='uploaded',received_size=?,actual_sha256=?,writer_token=NULL,writer_lease_until=NULL WHERE id=? AND writer_token=? AND status='uploading' AND expires_at>?")
+          .run(received,sha,uploadId,writer,new Date().toISOString()).changes!==1)throw new Error('upload_writer_lost');
         commitReceipt?.();
       });
     } catch (error) {
@@ -302,12 +566,158 @@ export class ArtifactService {
       if(!output.closed)await new Promise<void>(resolve=>output.once('close',()=>resolve()));
       try { unlinkSync(path); } catch {}
       this.db.prepare("UPDATE ga_uploads SET status='created',received_size=0,actual_sha256=NULL,writer_token=NULL,writer_lease_until=NULL WHERE id=? AND writer_token=? AND status='uploading'").run(uploadId,writer);
+      this.db.prepare("UPDATE ga_uploads SET writer_token=NULL,writer_lease_until=NULL WHERE id=? AND writer_token=? AND status='cancelled'").run(uploadId,writer);
+      const current=this.db.prepare('SELECT status,batch_id,expires_at FROM ga_uploads WHERE id=? AND owner_id=?').get(uploadId,ownerId) as {status?:string;batch_id?:string;expires_at?:string}|undefined;
+      if(current&&(current.status==='expired'||current.expires_at&&current.expires_at<=new Date().toISOString())){
+        this.expireUploadBatch(String(current.batch_id??''),new Date().toISOString());
+        throw new Error('upload_expired');
+      }
       throw error;
-    }finally{clearInterval(heartbeat);}
+    }finally{
+      clearInterval(heartbeat);
+      if(this.activeUploadWriters.get(uploadId)===stopWriter)this.activeUploadWriters.delete(uploadId);
+      const terminal=this.db.prepare('SELECT status FROM ga_uploads WHERE id=? AND owner_id=?').get(uploadId,ownerId) as {status?:string}|undefined;
+      if(terminal?.status==='cancelled')this.cleanupCancelledUpload(uploadId,ownerId);
+      if(terminal?.status==='expired')this.cleanupExpiredUpload(uploadId,ownerId);
+    }
+  }
+
+  cancelUpload(uploadId:string,ownerId:string):void {
+    const row=this.upload(uploadId,ownerId);
+    this.assertUploadLive(row);
+    if(row.status==='cancelled')return;
+    if(!['created','uploading','uploaded'].includes(String(row.status)))throw new Error('upload_state_conflict');
+    const outerTransaction=this.db.isTransaction;
+    withImmediateTransaction(this.db,()=>{
+      if(this.db.prepare("UPDATE ga_uploads SET status='cancelled',writer_token=NULL,writer_lease_until=NULL WHERE id=? AND owner_id=? AND status=?")
+        .run(uploadId,ownerId,String(row.status)).changes!==1)throw new Error('upload_state_conflict');
+      this.settleUploadBatch(String(row.batch_id));
+    });
+    if(!outerTransaction)this.finishCancelledUpload(uploadId,ownerId);
+  }
+
+  finishCancelledUpload(uploadId:string,ownerId:string):void { this.activeUploadWriters.get(uploadId)?.();this.cleanupCancelledUpload(uploadId,ownerId); }
+
+  finishCancelledBatch(batchId:string,ownerId:string):void {
+    const rows=this.db.prepare("SELECT id,owner_id FROM ga_uploads WHERE batch_id=? AND owner_id=? AND status='cancelled'").all(batchId,ownerId) as Array<{id:string;owner_id:string}>;
+    for(const row of rows)this.finishCancelledUpload(row.id,row.owner_id);
+  }
+
+  cleanupCancelledUpload(uploadId:string,ownerId:string):void {
+    const row=this.upload(uploadId,ownerId);
+    if(row.status!=='cancelled'||row.writer_token||this.activeUploadWriters.has(uploadId))return;
+    const path=resolve(String(row.server_path));
+    if(dirname(path)!==resolve(this.incomingRoot))throw new Error('upload_state_conflict');
+    try{unlinkSync(path);}catch(error){if(!['ENOENT','EBUSY','EPERM','EACCES'].includes((error as NodeJS.ErrnoException).code??''))throw error;}
+  }
+
+  cancelUploadBatch(batchId:string,ownerId:string):void {
+    const batch=this.db.prepare('SELECT * FROM ga_upload_batches WHERE id=? AND owner_id=?').get(batchId,ownerId) as Record<string,unknown>|undefined;
+    if(!batch)throw new Error('upload_batch_not_found');
+    if(batch.status==='expired')throw new Error('upload_expired');
+    if(batch.status==='cancelled'||batch.status==='settled')return;
+    const now=new Date().toISOString();
+    if(String(batch.expires_at)<=now){this.expireUploadBatch(batchId,now);throw new Error('upload_expired');}
+    const outerTransaction=this.db.isTransaction;
+    const children=withImmediateTransaction(this.db,()=>{
+      const rows=this.db.prepare("SELECT id,owner_id FROM ga_uploads WHERE batch_id=? AND status IN ('created','uploading','uploaded')").all(batchId) as Array<{id:string;owner_id:string}>;
+      if(this.db.prepare("UPDATE ga_upload_batches SET status='cancelled',closed_at=? WHERE id=? AND owner_id=? AND status='active'")
+        .run(now,batchId,ownerId).changes!==1)throw new Error('upload_state_conflict');
+      this.db.prepare("UPDATE ga_uploads SET status='cancelled',writer_token=NULL,writer_lease_until=NULL WHERE batch_id=? AND status IN ('created','uploading','uploaded')")
+        .run(batchId);
+      return rows;
+    });
+    if(!outerTransaction)for(const child of children)this.finishCancelledUpload(child.id,child.owner_id);
+  }
+
+  cleanupExpiredUploads(now=new Date()):number {
+    const time=now.toISOString();
+    const batches=this.db.prepare("SELECT id FROM ga_upload_batches WHERE status='active' AND expires_at<=?").all(time) as Array<{id:string}>;
+    for(const batch of batches)this.expireUploadBatch(batch.id,time);
+    const expired=this.db.prepare("SELECT id,owner_id FROM ga_uploads WHERE status='expired'").all() as Array<{id:string;owner_id:string}>;
+    for(const row of expired)this.cleanupExpiredUpload(row.id,row.owner_id);
+    const cancelled=this.db.prepare("SELECT id,owner_id FROM ga_uploads WHERE status='cancelled'").all() as Array<{id:string;owner_id:string}>;
+    for(const row of cancelled)this.cleanupCancelledUpload(row.id,row.owner_id);
+    this.cleanupOrphanedUploadGenerations(now);
+    return batches.length;
+  }
+
+  assertUploadInitReceiptLive(uploadId:string,ownerId:string):void {
+    const row=this.upload(uploadId,ownerId);
+    this.assertUploadBatchInitReceiptLive(String(row.batch_id??''),ownerId);
+  }
+
+  assertUploadBatchInitReceiptLive(batchId:string,ownerId:string):void {
+    const batch=this.db.prepare('SELECT status,expires_at FROM ga_upload_batches WHERE id=? AND owner_id=?').get(batchId,ownerId) as {status?:string;expires_at?:string}|undefined;
+    if(!batch)throw new Error('upload_batch_not_found');
+    const now=new Date().toISOString();
+    if(batch.status==='expired'||!batch.expires_at||batch.expires_at<=now){
+      this.expireUploadBatch(batchId,now);
+      throw new Error('upload_expired');
+    }
+  }
+
+  assertUploadReceiptLive(uploadId:string,ownerId:string):void { this.assertUploadLive(this.upload(uploadId,ownerId)); }
+
+  private cleanupExpiredUpload(uploadId:string,ownerId:string):void {
+    const row=this.db.prepare('SELECT status,writer_token,server_path FROM ga_uploads WHERE id=? AND owner_id=?').get(uploadId,ownerId) as Record<string,unknown>|undefined;
+    if(row?.status!=='expired'||row.writer_token||this.activeUploadWriters.has(uploadId))return;
+    const path=resolve(String(row.server_path));
+    if(dirname(path)!==resolve(this.incomingRoot))throw new Error('upload_state_conflict');
+    try{unlinkSync(path);}catch(error){if(!['ENOENT','EBUSY','EPERM','EACCES'].includes((error as NodeJS.ErrnoException).code??''))throw error;}
+  }
+
+  private cleanupOrphanedUploadGenerations(now:Date):void {
+    const incomingRoot=resolve(this.incomingRoot),staleBefore=now.getTime()-UPLOAD_WRITER_LEASE_MS,directory=opendirSync(incomingRoot);
+    try{
+      for(;;){
+        const entry=directory.readSync();if(!entry)break;
+        if(!entry.isFile())continue;
+        const match=/^(upload-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.part$/.exec(entry.name);
+        if(!match)continue;
+        const uploadId=match[1]!,path=resolve(incomingRoot,entry.name);
+        if(dirname(path)!==incomingRoot||this.activeUploadWriters.has(uploadId))continue;
+        let stat;try{stat=lstatSync(path);}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')continue;throw error;}
+        if(!stat.isFile()||stat.mtimeMs>staleBefore)continue;
+        const row=this.db.prepare('SELECT status,server_path,writer_lease_until FROM ga_uploads WHERE id=?').get(uploadId) as Record<string,unknown>|undefined;
+        if(!row||typeof row.server_path!=='string'||resolve(row.server_path)===path)continue;
+        if(row.status==='uploading'){
+          const leaseUntil=Date.parse(String(row.writer_lease_until??''));
+          if(!Number.isFinite(leaseUntil)||leaseUntil>now.getTime())continue;
+        }
+        try{unlinkSync(path);}catch(error){if(!['ENOENT','EBUSY','EPERM','EACCES'].includes((error as NodeJS.ErrnoException).code??''))throw error;}
+      }
+    }finally{directory.closeSync();}
+  }
+
+  private expireUploadBatch(batchId:string,now:string):void {
+    if(this.db.isTransaction)return;
+    const batch=this.db.prepare("SELECT status,expires_at FROM ga_upload_batches WHERE id=?").get(batchId) as {status?:string;expires_at?:string}|undefined;
+    if(!batch||batch.status!=='active'||!batch.expires_at||batch.expires_at>now)return;
+    const children=withImmediateTransaction(this.db,()=>{
+      const rows=this.db.prepare("SELECT id,owner_id FROM ga_uploads WHERE batch_id=? AND status IN ('created','uploading','uploaded')").all(batchId) as Array<{id:string;owner_id:string}>;
+      if(this.db.prepare("UPDATE ga_upload_batches SET status='expired',closed_at=? WHERE id=? AND status='active' AND expires_at<=?")
+        .run(now,batchId,now).changes!==1)return [];
+      this.db.prepare("UPDATE ga_uploads SET status='expired',writer_token=NULL,writer_lease_until=NULL WHERE batch_id=? AND status IN ('created','uploading','uploaded')")
+        .run(batchId);
+      return rows;
+    });
+    for(const child of children)this.activeUploadWriters.get(child.id)?.();
+    for(const child of children)this.cleanupExpiredUpload(child.id,child.owner_id);
+  }
+
+  private settleUploadBatch(batchId:string):void {
+    if(!batchId)return;
+    const now=new Date().toISOString();
+    this.db.prepare(`UPDATE ga_upload_batches SET status='settled',closed_at=? WHERE id=? AND status='active'
+      AND NOT EXISTS(SELECT 1 FROM ga_uploads WHERE batch_id=? AND status IN ('created','uploading','uploaded'))`)
+      .run(now,batchId,batchId);
   }
 
   complete(uploadId: string, ownerId: string, input: Record<string, unknown>) {
     const row = this.upload(uploadId, ownerId);
+    if(row.channel_stage_key&&!this.channelFinalizing.has(uploadId))throw Error('channel_attachment_batch_finalization_required');
+    this.assertUploadLive(row);
     if (!['uploaded','completed'].includes(String(row.status))) throw new Error('upload_state_conflict');
     const requested = String(input.sha256 || '');
     if (requested !== row.declared_sha256 || requested !== row.actual_sha256) throw new Error('upload_sha256_mismatch');
@@ -335,7 +745,7 @@ export class ArtifactService {
     const mediaType = detected.mediaType;
     const previewKind = detected.previewKind;
     if(sourcePath!==finalPath)renameSync(sourcePath, finalPath);
-    const metadata = { file_name: row.filename, status: 'ready', preview_kind: previewKind, origin: 'upload' };
+    const metadata = { file_name: row.filename, relative_path: row.relative_path, status: 'ready', preview_kind: previewKind, origin: 'upload' };
     withImmediateTransaction(this.db, () => {
       this.db.prepare('INSERT INTO ga_artifacts(id,conversation_id,owner_id,kind,current_version,created_at,updated_at) VALUES(?,?,?,?,?,?,?)')
         .run(artifactId, conversationId, ownerId, 'upload', 1, now, now);
@@ -345,6 +755,7 @@ export class ArtifactService {
         artifact_id,backup_status,local_state,last_used_at,created_at,updated_at
       ) VALUES(?,?,?,?,?,?)`).run(artifactId, 'pending', 'present', now, now, now);
       this.db.prepare("UPDATE ga_uploads SET status='completed',completed_at=? WHERE id=?").run(now, uploadId);
+      this.settleUploadBatch(String(row.batch_id));
     });
     return this.get(artifactId, ownerId, 1);
   }
@@ -491,6 +902,135 @@ export class ArtifactService {
       size_bytes: Number(version.size_bytes), sha256: String(version.sha256), parts };
   }
 
+  /** Mark only the pinned source version and manifest after its provider/runtime receipt was accepted. */
+  markPinnedDeliveredAndDelete(runId: string, value: unknown): Record<string, unknown> {
+    const pinKeys = ['artifact_id', 'conversation_id', 'kind', 'manifest', 'manifest_sha256',
+      'owner_id', 'run_id', 'schema_version', 'sha256', 'size_bytes', 'version'].sort().join(',');
+    const manifestKeys = ['display_name', 'mime_type', 'part_index', 'sha256', 'size_bytes'].sort().join(',');
+    if (typeof runId !== 'string' || !runId.trim() || !isRecord(value) || value.run_id !== runId
+      || Object.keys(value).sort().join(',') !== pinKeys || value.kind !== 'artifact'
+      || value.schema_version !== 1 || typeof value.owner_id !== 'string' || !value.owner_id
+      || typeof value.conversation_id !== 'string' || !value.conversation_id
+      || typeof value.artifact_id !== 'string' || !value.artifact_id
+      || !Number.isSafeInteger(value.version) || value.version < 1
+      || typeof value.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(value.sha256)
+      || !Number.isSafeInteger(value.size_bytes) || value.size_bytes < 1 || value.size_bytes > 104857600
+      || typeof value.manifest_sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(value.manifest_sha256)
+      || !Array.isArray(value.manifest) || !value.manifest.length || value.manifest.length > 50) {
+      throw new Error('channel_delivery_artifact_pin_invalid');
+    }
+    const manifest = value.manifest.map((part: unknown, index: number) => {
+      if (!isRecord(part) || Object.keys(part).sort().join(',') !== manifestKeys
+        || part.part_index !== index + 1 || typeof part.display_name !== 'string'
+        || !part.display_name || part.display_name.length > 255 || /[\u0000-\u001f\u007f\\/]/u.test(part.display_name)
+        || typeof part.mime_type !== 'string' || !part.mime_type || part.mime_type.length > 200
+        || /[\u0000-\u001f\u007f]/u.test(part.mime_type)
+        || typeof part.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(part.sha256)
+        || !Number.isSafeInteger(part.size_bytes) || part.size_bytes < 1 || part.size_bytes > 104857600) {
+        throw new Error('channel_delivery_artifact_pin_invalid');
+      }
+      return { part_index: Number(part.part_index), display_name: part.display_name,
+        sha256: part.sha256, size_bytes: Number(part.size_bytes), mime_type: part.mime_type };
+    });
+    const totalBytes = manifest.reduce((sum, part) => sum + part.size_bytes, 0);
+    if (totalBytes !== value.size_bytes || totalBytes > 104857600
+      || createHash('sha256').update(canonicalJson(manifest)).digest('hex') !== value.manifest_sha256) {
+      throw new Error('channel_delivery_artifact_pin_invalid');
+    }
+
+    return withImmediateTransaction(this.db, () => {
+      const source = this.db.prepare(`SELECT a.owner_id,a.conversation_id,a.kind,v.version,v.sha256,v.size_bytes,
+          v.mime_type,v.metadata_json
+        FROM ga_artifacts a JOIN ga_artifact_versions v ON v.artifact_id=a.id
+        JOIN ga_runs r ON r.id=? AND r.conversation_id=a.conversation_id
+        JOIN ga_conversations c ON c.id=a.conversation_id AND c.owner_id=a.owner_id
+        WHERE a.id=? AND a.owner_id=? AND a.conversation_id=? AND v.version=?`)
+        .get(runId, value.artifact_id, value.owner_id, value.conversation_id, value.version) as
+        Record<string, any> | undefined;
+      const association = this.db.prepare(`SELECT 1 FROM ga_run_artifacts
+        WHERE run_id=? AND artifact_id=? AND version=?`).get(runId, value.artifact_id, value.version);
+      if (!source || !association || source.owner_id !== value.owner_id
+        || source.conversation_id !== value.conversation_id || Number(source.version) !== value.version
+        || !['task_output_file', 'generated_document_group'].includes(String(source.kind))
+        || source.sha256 !== value.sha256 || Number(source.size_bytes) !== value.size_bytes) {
+        throw new Error('channel_delivery_artifact_authority_missing');
+      }
+
+      let actualManifest: Array<Record<string, unknown>>;
+      let partRows: Array<Record<string, any>> = [];
+      if (source.kind === 'task_output_file') {
+        const verified = this.download(value.artifact_id, value.owner_id, value.version);
+        let metadata: Record<string, any>;
+        try { metadata = JSON.parse(String(verified.metadata_json)); }
+        catch { throw new Error('channel_delivery_artifact_source_mismatch'); }
+        const taskFile = metadata.task_file;
+        const displayName = metadata.file_name ?? metadata.filename ?? metadata.display_name;
+        if (!Buffer.isBuffer(verified.verified_content) || verified.verified_content.length !== value.size_bytes
+          || Number(verified.version) !== value.version || verified.sha256 !== value.sha256
+          || Number(verified.size_bytes) !== value.size_bytes || verified.mime_type !== source.mime_type
+          || typeof displayName !== 'string' || !displayName
+          || !isRecord(taskFile) || typeof taskFile.run_id !== 'string' || !taskFile.run_id.trim()
+          || taskFile.sha256 !== value.sha256 || !['ready', 'delivered'].includes(String(metadata.status))) {
+          throw new Error('channel_delivery_artifact_source_mismatch');
+        }
+        actualManifest = [{ part_index: 1, display_name: displayName, sha256: String(verified.sha256),
+          size_bytes: Number(verified.size_bytes), mime_type: String(verified.mime_type) }];
+      } else {
+        const produced = this.readProducedGroup(value.owner_id, runId, value.artifact_id, value.version);
+        if (produced.artifact_id !== value.artifact_id || produced.version !== value.version
+          || produced.run_id !== runId || produced.conversation_id !== value.conversation_id
+          || produced.sha256 !== value.sha256 || Number(produced.size_bytes) !== value.size_bytes) {
+          throw new Error('channel_delivery_artifact_source_mismatch');
+        }
+        actualManifest = produced.parts.map((part: Record<string, unknown>) => ({ part_index: part.part_index,
+          display_name: part.display_name, sha256: part.sha256, size_bytes: part.size_bytes, mime_type: part.mime_type }));
+        partRows = this.db.prepare(`SELECT part_index,metadata_json FROM ga_artifact_parts
+          WHERE artifact_id=? ORDER BY part_index`).all(value.artifact_id) as Array<Record<string, any>>;
+        if (partRows.length !== actualManifest.length) throw new Error('channel_delivery_artifact_source_mismatch');
+        for (const row of partRows) {
+          let partMetadata: Record<string, any>;
+          try { partMetadata = JSON.parse(String(row.metadata_json)); }
+          catch { throw new Error('channel_delivery_artifact_source_mismatch'); }
+          if (!['ready', 'delivered'].includes(String(partMetadata.status))) {
+            throw new Error('channel_delivery_artifact_source_mismatch');
+          }
+        }
+      }
+      if (canonicalJson(actualManifest) !== canonicalJson(manifest)
+        || createHash('sha256').update(canonicalJson(actualManifest)).digest('hex') !== value.manifest_sha256) {
+        throw new Error('channel_delivery_artifact_manifest_mismatch');
+      }
+
+      const now = new Date().toISOString();
+      let metadata: Record<string, any>;
+      try { metadata = JSON.parse(String(source.metadata_json)); }
+      catch { throw new Error('channel_delivery_artifact_source_mismatch'); }
+      metadata.status = 'delivered';
+      metadata.delivered_at = now;
+      const changed = this.db.prepare(`UPDATE ga_artifact_versions SET metadata_json=?
+        WHERE artifact_id=? AND version=?`).run(JSON.stringify(metadata), value.artifact_id, value.version).changes;
+      if (changed !== 1) throw new Error('channel_delivery_artifact_source_mismatch');
+      if (source.kind === 'generated_document_group') {
+        const updatePart = this.db.prepare(`UPDATE ga_artifact_parts SET metadata_json=?
+          WHERE artifact_id=? AND part_index=?`);
+        for (let index = 0; index < partRows.length; index += 1) {
+          const partMetadata = JSON.parse(String(partRows[index]!.metadata_json)) as Record<string, any>;
+          partMetadata.status = 'delivered';
+          partMetadata.delivered_at = now;
+          const partChanged = updatePart.run(JSON.stringify(partMetadata), value.artifact_id,
+            Number(partRows[index]!.part_index)).changes;
+          if (partChanged !== 1) throw new Error('channel_delivery_artifact_source_mismatch');
+        }
+      }
+      this.db.prepare('UPDATE ga_artifacts SET updated_at=? WHERE id=?').run(now, value.artifact_id);
+      this.db.prepare(`UPDATE ga_artifact_archives SET backup_status=CASE
+        WHEN backup_status='verified' THEN backup_status ELSE 'pending' END,updated_at=? WHERE artifact_id=?`)
+        .run(now, value.artifact_id);
+      return { artifact_ref: value.artifact_id, version: value.version,
+        deleted_files: 0, retained_parts: partRows.length, status: 'delivered_backup_pending' };
+    });
+  }
+
   markDeliveredAndDelete(reference: string): Record<string, unknown> {
     const artifact = this.db.prepare('SELECT id FROM ga_artifacts WHERE id=? OR runtime_ref=? LIMIT 1')
       .get(reference, reference) as { id?: string } | undefined;
@@ -531,6 +1071,7 @@ export class ArtifactService {
     const archive = this.db.prepare('SELECT backup_status,local_state,remote_path FROM ga_artifact_archives WHERE artifact_id=?')
       .get(id) as Record<string, unknown> | undefined;
     return { artifact_id: id, conversation_id: row.conversation_id, file_name: meta.file_name,
+      ...(typeof meta.relative_path==='string'?{relative_path:meta.relative_path}:{}),
       media_type: row.mime_type, size_bytes: Number(row.size_bytes), sha256: row.sha256,
       version: Number(row.version), status: meta.status, created_at: row.created_at,
       preview_kind: meta.preview_kind, origin: meta.origin,
@@ -606,6 +1147,16 @@ export class ArtifactService {
   private upload(id: string, ownerId: string) {
     const row = this.db.prepare('SELECT * FROM ga_uploads WHERE id=? AND owner_id=?').get(id, ownerId) as Record<string, unknown> | undefined;
     if (!row) throw new Error('upload_not_found'); return row;
+  }
+  private assertUploadLive(row:Record<string,unknown>):void {
+    if(row.status==='completed')return;
+    const now=new Date().toISOString();
+    if(row.status==='expired'||!row.expires_at||String(row.expires_at)<=now){
+      this.expireUploadBatch(String(row.batch_id??''),now);
+      throw new Error('upload_expired');
+    }
+    const batch=this.db.prepare('SELECT status FROM ga_upload_batches WHERE id=?').get(String(row.batch_id??'')) as {status?:string}|undefined;
+    if(batch?.status==='expired')throw new Error('upload_expired');
   }
   private version(id: string, ownerId: string, version?: number) {
     const row = this.db.prepare(`SELECT v.*,a.conversation_id FROM ga_artifacts a JOIN ga_artifact_versions v ON v.artifact_id=a.id

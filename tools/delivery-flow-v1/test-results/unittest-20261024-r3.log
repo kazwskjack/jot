@@ -1,0 +1,20 @@
+test_accepted_event_is_workflow_only_and_emits_no_formal_ac_fields (test_metrics.MetricsTests.test_accepted_event_is_workflow_only_and_emits_no_formal_ac_fields) ... ok
+test_bad_or_non_utc_timestamps_are_rejected (test_metrics.MetricsTests.test_bad_or_non_utc_timestamps_are_rejected) ... ok
+test_cli_emits_workflow_json_without_formal_ac_fields (test_metrics.MetricsTests.test_cli_emits_workflow_json_without_formal_ac_fields) ... ok
+test_completed_trial_requires_exactly_7200_seconds (test_metrics.MetricsTests.test_completed_trial_requires_exactly_7200_seconds) ... ok
+test_conflicting_duplicate_event_id_fails_closed (test_metrics.MetricsTests.test_conflicting_duplicate_event_id_fails_closed) ... ok
+test_duplicate_json_keys_are_rejected (test_metrics.MetricsTests.test_duplicate_json_keys_are_rejected) ... ok
+test_identical_event_ids_are_deduplicated_across_owner_files (test_metrics.MetricsTests.test_identical_event_ids_are_deduplicated_across_owner_files) ... ok
+test_inherited_wip_and_new_work_are_counted_separately (test_metrics.MetricsTests.test_inherited_wip_and_new_work_are_counted_separately) ... ok
+test_passed_result_with_nonzero_exit_code_is_rejected (test_metrics.MetricsTests.test_passed_result_with_nonzero_exit_code_is_rejected) ... ok
+test_sorts_out_of_order_events_and_calculates_stage_durations (test_metrics.MetricsTests.test_sorts_out_of_order_events_and_calculates_stage_durations) ... ok
+test_source_class_cannot_change_for_a_packet (test_metrics.MetricsTests.test_source_class_cannot_change_for_a_packet) ... ok
+test_test_event_requires_hashed_result_evidence (test_metrics.MetricsTests.test_test_event_requires_hashed_result_evidence) ... ok
+test_test_result_arrays_and_objects_fail_with_value_error (test_metrics.MetricsTests.test_test_result_arrays_and_objects_fail_with_value_error) ... ok
+test_trial_snapshot_times_must_match_window_boundaries (test_metrics.MetricsTests.test_trial_snapshot_times_must_match_window_boundaries) ... ok
+test_trial_template_is_prepared_without_start_or_end_snapshots (test_metrics.MetricsTests.test_trial_template_is_prepared_without_start_or_end_snapshots) ... ok
+
+----------------------------------------------------------------------
+Ran 15 tests in 0.080s
+
+OK
