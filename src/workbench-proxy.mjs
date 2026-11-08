@@ -121,13 +121,13 @@ export function registerWorkbenchProxy(app,config,localCsrf){
    const key=req.headers['idempotency-key'];
    if(settingsRoute.kind==='write'&&(!SETTINGS_KEY.test(key??'')||!req.body||typeof req.body!=='object'||Array.isArray(req.body)
     ||Object.keys(req.body).sort().join(',')!=='expected_schema_fingerprint,expected_version,settings'
-    ||!Number.isSafeInteger(req.body.expected_version)||req.body.expected_version<0||!SETTINGS_HASH.test(req.body.expected_schema_fingerprint??'')
+    ||!Number.isSafeInteger(req.body.expected_version)||req.body.expected_version<1||!SETTINGS_HASH.test(req.body.expected_schema_fingerprint??'')
     ||!req.body.settings||typeof req.body.settings!=='object'||Array.isArray(req.body.settings)))return reply.code(422).send({error:{code:'HOST_SETTINGS_INVALID'}});
    if(settingsRoute.kind==='approval'&&(!req.body||typeof req.body!=='object'||Array.isArray(req.body)
     ||Object.keys(req.body).sort().join(',')!=='command,purpose'||req.body.purpose!=='settings.update'
     ||!req.body.command||typeof req.body.command!=='object'||Array.isArray(req.body.command)
     ||Object.keys(req.body.command).sort().join(',')!=='expected_schema_fingerprint,expected_version,idempotency_key,settings'
-    ||!SETTINGS_KEY.test(req.body.command.idempotency_key??'')||!Number.isSafeInteger(req.body.command.expected_version)||req.body.command.expected_version<0
+    ||!SETTINGS_KEY.test(req.body.command.idempotency_key??'')||!Number.isSafeInteger(req.body.command.expected_version)||req.body.command.expected_version<1
     ||!SETTINGS_HASH.test(req.body.command.expected_schema_fingerprint??'')||!req.body.command.settings||typeof req.body.command.settings!=='object'||Array.isArray(req.body.command.settings)))
     return reply.code(422).send({error:{code:'HOST_SETTINGS_INVALID'}});
    if(settingsRoute.kind==='read'&&req.body!==undefined)return reply.code(422).send({error:{code:'HOST_SETTINGS_INVALID'}});

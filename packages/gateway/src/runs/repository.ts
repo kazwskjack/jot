@@ -1,3 +1,4 @@
+import {hostSettingsAdmissionIsClosed} from '../host-admin/settings-admission-fence.ts';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { withImmediateTransaction } from '../db/database.ts';
@@ -68,6 +69,7 @@ export class RunRepository {
     const content = encode?encode(messageId):encodeInputContent(messageId, input.content);
     const generatedTitle = AUTOMATIC_TITLES.has(conversation.title) ? automaticTitle(input.content) : null;
     withImmediateTransaction(this.db, () => {
+      if(hostSettingsAdmissionIsClosed(this.db))throw Error('host_settings_admission_fenced');
       const current=this.db.prepare('SELECT mode,version FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId)!;
       if(options.expectedConversationVersion!==undefined&&options.expectedConversationVersion!==current.version)throw Error('version_conflict');
       const mode=conversationMode(current.mode),chat=mode==='chat'?chatModePolicy(options.modePolicy):undefined;
@@ -114,6 +116,30 @@ export class RunRepository {
       .get(runId, ownerId) as Record<string, unknown> | undefined;
     if (!row) throw new Error('run_not_found');
     return this.runValue(row);
+  }
+
+  /**
+   * Activity source for a selected live DSH profile. The caller supplies only
+   * SessionStore.list() references from that profile; owner-native runs that
+   * cannot be mapped to that set make the source unknown rather than zero.
+   */
+  hostSettingsActivityImpact(ownerId: string, sessionRefs: unknown) {
+    const id = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+    if (!id.test(ownerId) || !Array.isArray(sessionRefs) || sessionRefs.length > 500
+      || sessionRefs.some(value => typeof value !== 'string' || !id.test(value))
+      || new Set(sessionRefs).size !== sessionRefs.length) return { kind: 'unknown' as const };
+
+    const active = this.db.prepare(`SELECT r.id,r.conversation_id,r.native_session_ref,r.native_owner_id,r.native_conversation_id
+      FROM ga_runs r JOIN ga_conversations c ON c.id=r.conversation_id
+      WHERE c.owner_id=? AND r.status IN ('queued','starting','running','waiting_user','waiting_approval','cancelling')
+        AND (r.native_session_ref IS NOT NULL OR r.execution_policy_json IS NULL)`)
+      .all(ownerId) as Array<{ id: string; conversation_id: string; native_session_ref: string|null;
+        native_owner_id: string|null; native_conversation_id: string|null }>;
+    const live = new Set(sessionRefs as string[]);
+    if (active.some(row => !row.native_session_ref || row.native_owner_id !== ownerId
+      || row.native_conversation_id !== row.conversation_id || !live.has(row.native_session_ref)))
+      return { kind: 'unknown' as const };
+    return { kind: 'ready' as const, active_runs: active.length, active_sessions: live.size };
   }
 
   applyRuntimeOutcome(runId: string, outcome: { status: string; runtime_revision: number; reason_code: string | null }, guard?: () => void) {

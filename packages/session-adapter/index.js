@@ -1,3 +1,4 @@
+import {createHostPolicyBootstrapRuntime,resolveHostPolicyBootstrapRuntimeConfig,validateHostPolicyBootstrapRuntimeConfig} from './host-policy-bootstrap-runtime.js'
 import {createChatCompactionManager} from './chat-compaction-manager.js'
 import {createChatCheckpointRecovery} from './chat-checkpoint-recovery.js'
 import {createChatPostAnswer} from './chat-post-answer.js'
@@ -258,7 +259,7 @@ async function createOrResumeSession({controller,request,agents,sessions,session
   return value
 }
 
-export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,skillContentCommand,skillCatalogCommand,skillResourceCommand,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation=false,sessionNotFoundError,modelCatalogReader,requireOrdinaryModelPolicy=false,chatExecutionPolicy,chatModeReadiness,mcpControlRoute }) {
+export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,skillContentCommand,skillCatalogCommand,skillResourceCommand,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation=false,sessionNotFoundError,modelCatalogReader,requireOrdinaryModelPolicy=false,chatExecutionPolicy,chatModeReadiness,mcpControlRoute,hostPolicyBootstrap,hostSettingsProductHandler,hostAdmissionGuard }) {
   const allowedPresets=new Set(ALLOWED_AGENT_PRESETS)
   if(chatExecutionPolicy!==undefined){normalizeChatExecutionPolicy(chatExecutionPolicy);if(!requireOrdinaryModelPolicy||!ordinaryInputAdmissionHost)throw Error('ordinary_execution_policy_config_invalid');allowedPresets.add('jot-chat')}
   const voiceHandler = voiceEnabled ? createVoiceAdapterHandler({ speechController, token }) : null
@@ -287,8 +288,56 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
     })
   }
 
-  return async ({ method, url, headers, body, signal = new AbortController().signal }) => {
+  const dispatch=async ({ method, url, headers, body, signal = new AbortController().signal },activityAdmissionId) => {
     if (!authorized(headers.authorization, token)) return json(401, { error: 'unauthorized' })
+    if(hostSettingsProductHandler&&url.pathname.startsWith('/v1/host-admin/settings/')&&url.pathname!=='/v1/host-admin/settings/readiness'){
+      const result=await hostSettingsProductHandler({path:url.pathname,method,authorization:headers.authorization,body,...(url.pathname==='/v1/host-admin/settings/write'&&typeof activityAdmissionId==='string'?{activityAdmissionId}:{})});
+      if(result)return json(result.status,result.payload);
+    }
+    if(url.pathname==='/v1/host-admin/bootstrap/redeem'||url.pathname==='/v1/host-admin/settings/read'||url.pathname==='/v1/host-admin/settings/readiness'){
+      if(!hostPolicyBootstrap)return json(404,{error:'not_found'});
+      if(method!=='POST')return json(405,{error:'method_not_allowed'});
+      const isRedeem=url.pathname==='/v1/host-admin/bootstrap/redeem';
+      const isReadiness=url.pathname==='/v1/host-admin/settings/readiness';
+      const expectedKeys=isRedeem?'code,state':'namespace,ticket';
+      if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).sort().join(',')!==expectedKeys)return json(422,{error:'invalid_host_admin_input'});
+      if(isRedeem&&![body.state,body.code].every(value=>typeof value==='string'&&/^[A-Za-z0-9_-]{43}$/.test(value))
+        ||!isRedeem&&(typeof body.ticket!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(body.ticket)||typeof body.namespace!=='string'||!/^[a-z][a-z0-9._-]{0,127}$/.test(body.namespace)))return json(422,{error:'invalid_host_admin_input'});
+      if(!isRedeem&&body.namespace==='jot-host-policy')return json(403,{reason_code:url.pathname.endsWith('/readiness')?'HOST_READINESS_DENIED':'HOST_SETTINGS_DENIED'});
+      let result;
+      try{
+        result=isRedeem
+          ?await hostPolicyBootstrap.redeemCode({authorization:headers.authorization,state:body.state,code:body.code})
+          :isReadiness
+            ?await hostPolicyBootstrap.readReadiness({authorization:headers.authorization,ticket:body.ticket,namespace:body.namespace})
+            :await hostPolicyBootstrap.readSettings({authorization:headers.authorization,ticket:body.ticket,namespace:body.namespace});
+      }catch{return json(503,{reason_code:isRedeem?'HOST_BOOTSTRAP_DENIED':isReadiness?'HOST_READINESS_UNAVAILABLE':'HOST_SETTINGS_UNAVAILABLE'});}
+      if(!result?.ok){
+        const reason=String(result?.reason??'');
+        const status=/unavailable|clock_unavailable|capacity/.test(reason)?503:
+          /namespace_forbidden|component_unauthenticated|caller_unauthenticated/.test(reason)?403:
+          /invalid/.test(reason)?422:409;
+        return json(status,{reason_code:isRedeem?'HOST_BOOTSTRAP_DENIED':isReadiness?'HOST_READINESS_DENIED':'HOST_SETTINGS_DENIED'});
+      }
+      if(isRedeem){
+        if(Object.keys(result).sort().join(',')!=='expires_at,ok,ticket'||typeof result.ticket!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(result.ticket)
+          ||!Number.isSafeInteger(result.expires_at))return json(503,{reason_code:'HOST_BOOTSTRAP_DENIED'});
+        return json(200,{ticket:result.ticket,expires_at:result.expires_at});
+      }
+      if(isReadiness){
+        const readiness=result.readiness;
+        if(Object.keys(result).sort().join(',')!=='ok,readiness'||!readiness||typeof readiness!=='object'||Array.isArray(readiness)
+          ||readiness.protocol!==1||typeof readiness.as_of!=='string'||readiness.scope?.namespace!==body.namespace)
+          return json(503,{reason_code:'HOST_READINESS_UNAVAILABLE'});
+        return json(200,result);
+      }
+      const snapshot=result.settings;
+      if(Object.keys(result).sort().join(',')!=='ok,settings'||!snapshot||typeof snapshot!=='object'||Array.isArray(snapshot)
+        ||Object.keys(snapshot).sort().join(',')!=='as_of,has_document,namespaces,protocol,source,state,writable'
+        ||snapshot.protocol!==1||snapshot.source!=='dsh-settings-controller'||!Array.isArray(snapshot.namespaces)||snapshot.namespaces.length!==1
+        ||snapshot.namespaces[0]?.namespace!==body.namespace)return json(503,{reason_code:'HOST_SETTINGS_UNAVAILABLE'});
+      return json(200,{settings:snapshot});
+    }
     if (url.pathname === '/internal/v1/mcp/reload' || url.pathname === '/internal/v1/mcp/cancel'
       || url.pathname === '/internal/v1/mcp/remove') {
       if (typeof mcpControlRoute !== 'function') return json(503, { error: 'mcp_control_unavailable' })
@@ -829,7 +878,16 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       return { status: 200, stream: controller.follow(request, signal) }
     }
     return json(404, { error: 'not_found' })
-  }
+  };
+  const quietPost=(request)=>request?.method==='POST'&&(['/v1/host-admin/bootstrap/redeem','/v1/host-admin/settings/read','/v1/host-admin/settings/editor/read','/v1/host-admin/settings/attempt/read','/v1/host-admin/settings/readiness','/v1/models','/v1/conversation-modes/readiness'].includes(request?.url?.pathname));
+  return async request=>{
+    if(!hostAdmissionGuard||quietPost(request)||!authorized(request?.headers?.authorization,token))return dispatch(request);
+    let admission;
+    try{admission=await hostAdmissionGuard.begin();}catch{return json(503,{reason_code:'HOST_SETTINGS_UNAVAILABLE'});}
+    if(typeof admission!=='string'||!admission)return json(409,{reason_code:'HOST_SETTINGS_DENIED'});
+    try{return await dispatch(request,request?.method==='POST'&&request?.url?.pathname==='/v1/host-admin/settings/write'?admission:undefined);}
+    finally{try{await hostAdmissionGuard.end(admission);}catch{}}
+  };
 }
 
 async function readJson(req, limit = 1024 * 1024) {
@@ -843,6 +901,11 @@ async function readJson(req, limit = 1024 * 1024) {
 }
 
 export function apply(ctx, config = {}) {
+  if(config.hostSettingsBootstrap!==undefined)validateHostPolicyBootstrapRuntimeConfig(config.hostSettingsBootstrap)
+  if(config.hostSettingsOwnerRoutesEnabled!==undefined&&typeof config.hostSettingsOwnerRoutesEnabled!=='boolean')throw Error('host_settings_owner_routes_config_invalid')
+  if(config.hostSettingsOwnerRoutesEnabled===true&&config.hostSettingsBootstrap===undefined)throw Error('host_settings_owner_routes_config_invalid')
+  if(config.hostSettingsWriteEnabled!==undefined&&typeof config.hostSettingsWriteEnabled!=='boolean')throw Error('host_settings_write_config_invalid')
+  if(config.hostSettingsWriteEnabled===true&&(!config.hostSettingsBootstrap||config.hostSettingsOwnerRoutesEnabled!==true||config.hostSettingsWriteNamespace!=='jot-session-adapter'||!config.hostSettingsBootstrap.namespaces.includes(config.hostSettingsWriteNamespace)||String(process.env[config.workbenchTokenEnv||'GENERAL_AGENT_INTERNAL_CHANNEL_TOKEN']||'').length<32))throw Error('host_settings_write_config_invalid')
   const mcpRuntimeProvider=config.mcpRuntimeProvider??ctx.get?.('jotMcpRuntimeProvider')
   if(mcpRuntimeProvider!==undefined&&(!mcpRuntimeProvider||typeof mcpRuntimeProvider.setup!=='function'||typeof mcpRuntimeProvider.attach!=='function'))throw Error('jot_session_adapter_config_invalid')
   const nativeGitConfig=config.nativeGit===undefined?undefined:normalizeNativeGitHostConfig(config.nativeGit)
@@ -926,6 +989,18 @@ export function apply(ctx, config = {}) {
       browserDriverObserverForAgent:agent=>ctx.agentPresets?.serviceFor?.(agent,'jotBrowserToolRegistrar'),
       mcpRuntimeProvider,
     }) : undefined
+    const hostPolicyBootstrapConfig=config.hostSettingsBootstrap===undefined?undefined:resolveHostPolicyBootstrapRuntimeConfig(config.hostSettingsBootstrap,{
+      webServer:ctx.get?.('webServer')??ctx.webServer,workbenchBridge
+    })
+    const hostPolicyBootstrapRuntime=hostPolicyBootstrapConfig===undefined?undefined:createHostPolicyBootstrapRuntime({
+      ctx,token,config:hostPolicyBootstrapConfig,settingsOwnerRoutesEnabled:config.hostSettingsOwnerRoutesEnabled===true,
+      hostSettingsWriteEnabled:config.hostSettingsWriteEnabled===true,hostSettingsWriteNamespace:config.hostSettingsWriteNamespace,
+      hostSettingsProductSchema:config.hostSettingsProductSchema,workbenchBridge
+    })
+    const hostAdmissionGuard=config.hostSettingsWriteEnabled===true?{
+      begin:async()=>{const result=await workbenchBridge.requestHostSettings('admission/begin',{});return result?.kind==='admitted'?result.admission_id:undefined;},
+      end:async admission_id=>workbenchBridge.requestHostSettings('admission/end',{admission_id})
+    }:undefined
     const mcpControlHost=workbenchBridge&&typeof mcpRuntimeProvider?.resolveReloadScopes==='function'
       ?createMcpControlHost({resolveScopes:(ownerId,agentId,signal)=>mcpRuntimeProvider.resolveReloadScopes(ownerId,agentId,signal),
         assertCurrent:async(identity,_phase,signal,controlConfig)=>(await workbenchBridge.mcpControlState(identity,signal,controlConfig)).state})
@@ -1024,11 +1099,16 @@ export function apply(ctx, config = {}) {
       if(typeof ApiSessionNotFound!=='function'||!(ApiSessionNotFound.prototype instanceof Error))throw Error('jot_session_controller_incompatible')
     }
     const chatModeReadiness=createChatModeReadiness({enabled:config.ordinaryChatModeReadiness,policy:chatExecutionPolicy,mounted:ctx.get?.('jotChatPresetReady'),context:config.ordinaryChatContext,web:config.ordinaryChatWeb,modelSelection:config.ordinaryModelSelection,admission:!!ordinaryInputAdmissionHost});
+    for(const ownerRoute of [hostPolicyBootstrapRuntime?.ownerRoute,hostPolicyBootstrapRuntime?.ownerApprovalRoute].filter(Boolean)){
+      const connection=ctx.get?.('connection')??ctx.connection;
+      const dispose=connection.fetch.register(ownerRoute);
+      ctx.effect(()=>()=>dispose());
+    }
     const handler = createAdapterHandler({ controller: ctx.sessionController, fileUploads: ctx.fileUploads, agents: ctx.agents,
       sessions:ctx.sessions,persistence:ctx.sessionPersistence,sessionNotFoundError:ApiSessionNotFound,
       speechController, voiceEnabled, token, workbenchBridge, skillContentCommand, skillCatalogCommand, skillResourceCommand,
       budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation:config.nativeIdleObservation===true,
-      chatModeReadiness,modelCatalogReader:createModelCatalogReader({llm:ctx.llm,enabled:config.ordinaryModelSelection===true,routeHealth:modelRouteHealth}),requireOrdinaryModelPolicy:config.ordinaryModelSelection===true,...(chatExecutionPolicy?{chatExecutionPolicy}:{}),mcpControlRoute })
+      chatModeReadiness,modelCatalogReader:createModelCatalogReader({llm:ctx.llm,enabled:config.ordinaryModelSelection===true,routeHealth:modelRouteHealth}),requireOrdinaryModelPolicy:config.ordinaryModelSelection===true,...(chatExecutionPolicy?{chatExecutionPolicy}:{}),mcpControlRoute,...(hostPolicyBootstrapRuntime?.bootstrap?{hostPolicyBootstrap:hostPolicyBootstrapRuntime.bootstrap}:{}),...(hostPolicyBootstrapRuntime?.productHandler?{hostSettingsProductHandler:hostPolicyBootstrapRuntime.productHandler}:{}),...(hostAdmissionGuard?{hostAdmissionGuard}:{}) })
     const server = createServer(async (req, res) => {
       const abort = new AbortController()
       req.once('aborted', () => abort.abort())
@@ -1036,7 +1116,7 @@ export function apply(ctx, config = {}) {
       try {
         const url = new URL(req.url, `http://${host}:${port}`)
         const isFileUpload = /^\/v1\/sessions\/[^/]+\/files$/.test(url.pathname)
-        const bodyLimit = url.pathname.startsWith('/v1/voice/') ? 4 * 1024 * 1024 : 32 * 1024 * 1024
+        const bodyLimit = url.pathname.startsWith('/v1/host-admin/') ? 4096 : url.pathname.startsWith('/v1/voice/') ? 4 * 1024 * 1024 : 32 * 1024 * 1024
         const result = await handler({ method: req.method, url, headers: req.headers,
           body: isFileUpload ? req : await readJson(req, bodyLimit), signal: abort.signal })
         if (result.stream) {

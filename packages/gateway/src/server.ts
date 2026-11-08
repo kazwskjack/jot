@@ -1,3 +1,4 @@
+import {registerHostSettingsInternalRoutes} from './host-admin/settings-internal-routes.ts';
 import {registerHostAdminRoutes,type HostSettingsClient} from './host-admin/routes.ts';
 import {registerChatCompactionCheckpoints} from './conversations/chat-compaction-checkpoint-route.ts';
 import {reserveOrdinarySteeringCustody} from './harness/ordinary-steering-custody.ts';
@@ -388,6 +389,8 @@ export async function buildServer(config: {
   });
 
   app.addHook('preHandler', async (request, reply) => {
+    // These server-registered component routes verify their own mandatory bearer.
+    if((request.routeOptions.config as {hostSettingsInternal?:boolean}).hostSettingsInternal===true)return;
     // Original service bearer already ran in this registered route's onRequest.
     if(isChannelAttachmentIntakeV2Route(request))return;
     // The provider callback is public only behind its exact-URL Twilio signature check.
@@ -559,6 +562,7 @@ export async function buildServer(config: {
     if(error instanceof Error&&'code' in error&&error.code==='ERR_SQLITE_ERROR'
       &&'errcode' in error&&typeof error.errcode==='number'&&(error.errcode&0xff)===5)
       return reply.code(503).send({error:{code:'DATABASE_BUSY'}});
+    if(code==='host_settings_admission_fenced')return reply.code(503).send({error:{code:'HOST_SETTINGS_ADMISSION_FENCED'}});
     if(code==='contract_response_invalid')return reply.code(500).send({error:{code:'CONTRACT_RESPONSE_INVALID'}});
     if(code==='git_repository_unconfigured')return reply.code(503).send({error:{code:'GIT_REPOSITORY_UNCONFIGURED'}});
     if(code==='chat_mode_unavailable')return reply.code(503).send({error:{code:'CHAT_MODE_UNAVAILABLE'}});
@@ -728,6 +732,7 @@ export async function buildServer(config: {
   const taskCollaboration=new TaskCollaborationService(db,workbench,persistentTasks,taskDelegations);
   registerPersistentTaskRoutes(app, persistentTasks, actor,taskDelegations,taskCollaboration,atomicCommand);
   registerHostAdminRoutes(app,{...config.hostAdmin,authenticatedActor:request=>actor(request as {headers:Record<string,unknown>})});
+  if(config.hostAdmin?.writeEnabled===true)registerHostSettingsInternalRoutes(app,{db,token:config.internalChannelToken??'',enabled:true,runs});
   registerTaskPrdRoutes(app,taskPrd,actor);
   registerTaskBudgetRoutes(app,new TaskBudgetService(db,budgetPolicy),actor);
   registerWorkbenchExecution(app, db, workbench, persistentTasks, config.internalChannelToken, modelBudgets,taskCollaboration,config.replyJudge,nativeWork,

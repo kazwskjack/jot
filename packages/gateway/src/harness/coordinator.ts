@@ -1,3 +1,4 @@
+import {hostSettingsAdmissionIsClosed} from '../host-admin/settings-admission-fence.ts';
 import type { DatabaseSync } from 'node:sqlite';
 import {assertMemoryProcessingIdentity} from '../workbench/memory-processing.ts';
 import {WORKSPACE_RESERVATION_MATCH} from '../workbench/workspace-coordination.ts';
@@ -92,6 +93,7 @@ export class HarnessCoordinator {
   private claim(workerId:string,leaseMs:number,memoryRunId?:string,inputProtocol:1|2=1,memoryKind?:'memory_capture'|'memory_consolidation',recoverInterrupted=false):RunLease|null{
     const now = this.now();
     return withImmediateTransaction(this.db, () => {
+      if(hostSettingsAdmissionIsClosed(this.db))return null;
       const hasBindings=Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_run_bindings'").get());
       if(memoryRunId===undefined&&hasBindings)this.queueStaleBrowserTakeovers(now);
       const versionedInput=this.db.prepare('PRAGMA table_info(ga_channel_message_events)').all().some(column=>column.name==='content_protocol');

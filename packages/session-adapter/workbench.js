@@ -314,6 +314,26 @@ export class WorkbenchBridge {
     }
   }
 
+  /** Host settings operations use the existing component Bearer without a
+   * fabricated run/session binding. Only this exact private operation set is
+   * reachable through the Adapter's Host settings composition.
+   */
+  async requestHostSettings(operation,payload={},signal){
+    const allowed=new Set(['version/read','version/inspect','version/reconcile','activity/preview','receipt/lookup','receipt/reserve','receipt/dispatched','receipt/complete','receipt/reject','receipt/unknown',
+      'admission/begin','admission/end','fence/close','fence/status','fence/release']);
+    if(!allowed.has(operation)||!payload||typeof payload!=='object'||Array.isArray(payload))throw Error('host_settings_internal_request_invalid');
+    signal?.throwIfAborted();
+    const timed=AbortSignal.timeout(15_000),response=await this.fetch(`${this.origin}/internal/v1/host-settings/${operation}`,{
+      method:'POST',redirect:'error',headers:{authorization:`Bearer ${this.token}`,'content-type':'application/json'},
+      body:JSON.stringify(payload),signal:signal?AbortSignal.any([signal,timed]):timed
+    });
+    if(!response.ok)throw Error('host_settings_internal_unavailable');
+    let value;try{value=await response.json();}catch{throw Error('host_settings_internal_unavailable');}
+    if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!=='result')throw Error('host_settings_internal_unavailable');
+    signal?.throwIfAborted();
+    return value.result;
+  }
+
   async check(current, toolName, signal) {
     if(current.parentGuard)await current.parentGuard(signal);
     const response = await this.request('guard', current.binding, toolName ? { tool_name: toolName } : {}, signal);
