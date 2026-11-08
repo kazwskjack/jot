@@ -10,7 +10,8 @@ export class MemoryImportStore {
   if(text.length>4096)throw new Error('记忆导入恢复记录无效');
   const value=JSON.parse(text),batch=value?.batch,command=value?.command;
   if(!value||Object.keys(value).sort().join(',')!=='batch,command,version'||value.version!==1
-   ||!batch||Object.keys(batch).sort().join(',')!=='import_id,target'
+   ||!batch||!['import_id,target','import_id,mode,target'].includes(Object.keys(batch).sort().join(','))
+   ||batch.mode!==undefined&&batch.mode!=='replace_scope'
    ||typeof batch.import_id!=='string'||! /^[A-Za-z0-9_-]{1,128}$/.test(batch.import_id)
    ||JSON.stringify(batch.target)!==JSON.stringify(this.target))throw new Error('记忆导入恢复记录无效');
   if(command!==null){
@@ -24,9 +25,10 @@ export class MemoryImportStore {
   return value;
  }
  path(id){return `/workspaces/${encodeURIComponent(this.workspace)}/memory/import/${encodeURIComponent(id)}/apply`;}
- saveBatch(id){
+ saveBatch(id,mode='append'){
   if(this.read())throw new Error('请先核对已有导入记录');
-  this.storage.setItem(this.key,JSON.stringify({version:1,batch:{import_id:id,target:this.target},command:null}));
+  if(!['append','replace_scope'].includes(mode))throw new Error('记忆导入模式无效');
+  this.storage.setItem(this.key,JSON.stringify({version:1,batch:{import_id:id,target:this.target,...(mode==='replace_scope'?{mode}:{})},command:null}));
   this.read();
  }
  saveCommand(command,expected){

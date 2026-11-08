@@ -630,11 +630,13 @@ export type WorkbenchMemoryImportItem = {
  target_key:string;target_expected_version:number;status:"ready"|"skipped"|"conflict";reason:string|null;source_local:boolean;
 };
 export type WorkbenchMemoryImportReceipt = {
+ mode?:"replace_scope";replacement?:WorkbenchMemoryReplacementReceipt;
  source_bundle?:WorkbenchMemoryImportBundle;
  import_id:string;status:"applied";version:number;target:WorkbenchMemoryImportTarget;applied_at:string;
  items:Array<(Omit<WorkbenchMemoryImportItem,"status">&{status:"skipped"})|{source_memory_id:string;source_version:number;memory_id:string;version:number;status:"created"}>;
 };
 export type WorkbenchMemoryImportPreview = {
+ mode?:"replace_scope";replacement?:WorkbenchMemoryReplacement;
  source_bundle?:WorkbenchMemoryImportBundle;
  schema_version:1;document_workspace_id:string;target:WorkbenchMemoryImportTarget;
  counts:{total:number;ready:number;skipped:number;conflict:number};items:WorkbenchMemoryImportItem[];
@@ -651,3 +653,9 @@ export type WorkbenchMemoryImportBundle = {
 export type WorkbenchMemoryImportBundleSource = {
  import_id:string;input_sha256:string;sha256:string;bundle:Record<string,unknown>;execution_authorized:false;
 };
+
+export type WorkbenchMemoryReplacementItem = {memory_id:string;version:number;content_sha256:string;content_chars:number;verified:boolean;expires_at:string|null};
+export type WorkbenchMemoryReplacement = {scope_sha256:string;count:number;items:WorkbenchMemoryReplacementItem[]};
+export type WorkbenchMemoryReplacementReceipt = {scope_sha256:string;count:number;items:Array<{memory_id:string;from_version:number;result_version:number;status:"deleted"}>};
+
+export type WorkbenchMemoryImportReplacementSource = {import_id:string;preview_version:number;memory_id:string;version:number;sha256:string;memory:WorkbenchMemory;execution_authorized:false};

@@ -2005,5 +2005,14 @@
     "WorkbenchMemoryImportBundleSource",
     "200",
     "Read the complete immutable pinned upstream snapshot from the original owner-scoped batch. Reauthorize original target scope, validate original input and bundle SHA-256, and return all source files and original index/Dream metadata as data. This read grants no execution authority. Responses remain private and no-store."
+  ],
+  [
+    "GET",
+    "/v1/workspaces/{workspace_id}/memory/import/{import_id}/replacement/{memory_id}",
+    "getWorkbenchMemoryImportReplacementSource",
+    null,
+    "WorkbenchMemoryImportReplacementSource",
+    "200",
+    "Read one original immutable memory revision from the exact owner-scoped replacement preview version, including after retirement. Reauthorize target scope, match the original full replacement inventory, verify original revision scope, status, metadata and content SHA-256. Returns source data with no execution authority."
   ]
 ]

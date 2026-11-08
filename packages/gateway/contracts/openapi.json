@@ -25402,6 +25402,149 @@
           }
         }
       }
+    },
+    "/v1/workspaces/{workspace_id}/memory/import/{import_id}/replacement/{memory_id}": {
+      "get": {
+        "operationId": "getWorkbenchMemoryImportReplacementSource",
+        "tags": [
+          "workbench"
+        ],
+        "description": "Read one original immutable memory revision from the exact owner-scoped replacement preview version, including after retirement. Reauthorize target scope, match the original full replacement inventory, verify original revision scope, status, metadata and content SHA-256. Returns source data with no execution authority.",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "import_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "memory_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "preview_version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Original pre-retirement memory source",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchMemoryImportReplacementSource"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Original source, authorization, version or integrity error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Original source, authorization, version or integrity error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Original source, authorization, version or integrity error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Original source, authorization, version or integrity error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Original source, authorization, version or integrity error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Original source, authorization, version or integrity error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Original source, authorization, version or integrity error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Original source, authorization, version or integrity error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -49944,9 +50087,36 @@
                 "$ref": "#/components/schemas/PilotdeckMemorySnapshotBundle"
               }
             ]
+          },
+          "mode": {
+            "enum": [
+              "append",
+              "replace_scope"
+            ]
           }
         },
-        "description": "Accept original Jot versioned exports or pinned v4 current-project snapshots. Retain full upstream source files and metadata in the immutable original batch. Normalize at most 200 unverified note inputs, splitting long files at Unicode scalar boundaries. Global user files and non-note files stay retained source data. Original input JSON is bounded to 5000000 characters. Derived internal note documents are bounded to 12000000 characters."
+        "description": "Accept original Jot versioned exports or pinned v4 current-project snapshots. Retain full upstream source files and metadata in the immutable original batch. Normalize at most 200 unverified note inputs, splitting long files at Unicode scalar boundaries. Global user files and non-note files stay retained source data. Original input JSON is bounded to 5000000 characters. Derived internal note documents are bounded to 12000000 characters. Optional replace_scope explicitly reviews and retires every active memory in the original selected target scope through original versioned deletion. The default append representation preserves historical input hashes.",
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "mode"
+              ],
+              "properties": {
+                "mode": {
+                  "const": "replace_scope"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "document": {
+                  "$ref": "#/components/schemas/PilotdeckMemorySnapshotBundle"
+                }
+              }
+            }
+          }
+        ]
       },
       "WorkbenchMemoryImportItem": {
         "type": "object",
@@ -50131,7 +50301,23 @@
           },
           "source_bundle": {
             "$ref": "#/components/schemas/WorkbenchMemoryImportBundle"
+          },
+          "mode": {
+            "const": "replace_scope"
+          },
+          "replacement": {
+            "$ref": "#/components/schemas/WorkbenchMemoryReplacementReceipt"
           }
+        },
+        "dependentRequired": {
+          "mode": [
+            "replacement",
+            "source_bundle"
+          ],
+          "replacement": [
+            "mode",
+            "source_bundle"
+          ]
         }
       },
       "WorkbenchMemoryImportPreview": {
@@ -50234,6 +50420,12 @@
           },
           "source_bundle": {
             "$ref": "#/components/schemas/WorkbenchMemoryImportBundle"
+          },
+          "mode": {
+            "const": "replace_scope"
+          },
+          "replacement": {
+            "$ref": "#/components/schemas/WorkbenchMemoryReplacement"
           }
         },
         "allOf": [
@@ -50251,7 +50443,17 @@
               ]
             }
           }
-        ]
+        ],
+        "dependentRequired": {
+          "mode": [
+            "replacement",
+            "source_bundle"
+          ],
+          "replacement": [
+            "mode",
+            "source_bundle"
+          ]
+        }
       },
       "ApplyWorkbenchMemoryImport": {
         "type": "object",
@@ -50450,6 +50652,172 @@
           },
           "bundle": {
             "$ref": "#/components/schemas/PilotdeckMemorySnapshotBundle"
+          },
+          "execution_authorized": {
+            "const": false
+          }
+        }
+      },
+      "WorkbenchMemoryReplacementItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "memory_id",
+          "version",
+          "content_sha256",
+          "content_chars",
+          "verified",
+          "expires_at"
+        ],
+        "properties": {
+          "memory_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "content_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "content_chars": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "verified": {
+            "type": "boolean"
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "WorkbenchMemoryReplacement": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "scope_sha256",
+          "count",
+          "items"
+        ],
+        "properties": {
+          "scope_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkbenchMemoryReplacementItem"
+            }
+          }
+        }
+      },
+      "WorkbenchMemoryReplacementReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "scope_sha256",
+          "count",
+          "items"
+        ],
+        "properties": {
+          "scope_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "memory_id",
+                "from_version",
+                "result_version",
+                "status"
+              ],
+              "properties": {
+                "memory_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "from_version": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "result_version": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "status": {
+                  "const": "deleted"
+                }
+              }
+            }
+          }
+        }
+      },
+      "WorkbenchMemoryImportReplacementSource": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "import_id",
+          "preview_version",
+          "memory_id",
+          "version",
+          "sha256",
+          "memory",
+          "execution_authorized"
+        ],
+        "properties": {
+          "import_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "preview_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "memory_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "memory": {
+            "$ref": "#/components/schemas/WorkbenchMemory"
           },
           "execution_authorized": {
             "const": false

@@ -110,11 +110,16 @@ export function registerWorkbenchRoutes(app: FastifyInstance, service: Workbench
   app.get('/v1/workspaces/:workspaceId/memory-consolidations/:consolidationId',async request=>service.memoryConsolidations.get(actor(request),param(request,'workspaceId'),param(request,'consolidationId')));
   app.post('/v1/workspaces/:workspaceId/memory-consolidations/:consolidationId/propose',async request=>restoreCommand(request,()=>service.memoryConsolidations.propose(actor(request),param(request,'workspaceId'),param(request,'consolidationId'),body(request,['expected_version','summary','changes']))));
   for(const action of ['apply','rollback','reject'] as const)app.post(`/v1/workspaces/:workspaceId/memory-consolidations/:consolidationId/${action}`,async request=>restoreCommand(request,()=>service.memoryConsolidations[action](actor(request),param(request,'workspaceId'),param(request,'consolidationId'),version(body(request,['expected_version'])))));
-  app.post('/v1/workspaces/:workspaceId/memory/import/preview',{bodyLimit:20_100_000},async(request,reply)=>{privateReply(reply);return restoreCommand(request,()=>service.memoryImports.preview(actor(request),param(request,'workspaceId'),body(request,['import_id','document','target'])));});
+  app.post('/v1/workspaces/:workspaceId/memory/import/preview',{bodyLimit:20_100_000},async(request,reply)=>{privateReply(reply);return restoreCommand(request,()=>service.memoryImports.preview(actor(request),param(request,'workspaceId'),body(request,['import_id','document','target','mode'])));});
   app.get('/v1/workspaces/:workspaceId/memory/import/:importId',async(request,reply)=>{
     privateReply(reply);
     if(Object.keys(query(request)).length)throw new Error('invalid_memory_import');
     return service.memoryImports.get(actor(request),param(request,'workspaceId'),param(request,'importId'));
+  });
+  app.get('/v1/workspaces/:workspaceId/memory/import/:importId/replacement/:memoryId',async(request,reply)=>{
+    privateReply(reply);const input=query(request);
+    if(Object.keys(input).join(',')!=='preview_version'||typeof input.preview_version!=='string'||!/^[1-9][0-9]{0,15}$/.test(input.preview_version))throw Error('invalid_memory_import');
+    return service.memoryImports.replacementSource(actor(request),param(request,'workspaceId'),param(request,'importId'),param(request,'memoryId'),Number(input.preview_version));
   });
   app.get('/v1/workspaces/:workspaceId/memory/import/:importId/source',async(request,reply)=>{
     privateReply(reply);if(Object.keys(query(request)).length)throw Error('invalid_memory_import');
