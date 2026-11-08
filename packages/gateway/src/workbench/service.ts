@@ -465,7 +465,7 @@ export class WorkbenchService {
     const bindings=await readHostModelMetadataBindings(this.options.modelMetadataClient,modelMetadataRoutes(source.model),signal);
     if(bindings)return {source,bindings};
   }
-  private modelAcceptanceOptions(owner:string,roleId:string,conversationId:string|undefined,prepared?:PreparedModelAcceptance){
+  modelAcceptanceOptions(owner:string,roleId:string,conversationId:string|undefined,prepared?:PreparedModelAcceptance){
     if(!prepared)return {};
     if(canonicalJson(this.modelAcceptanceSource(owner,roleId,conversationId))!==canonicalJson(prepared.source))throw Error('model_metadata_changed');
     return {modelPolicyOverride:prepared.source.model,modelMetadataBindings:prepared.bindings};

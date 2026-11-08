@@ -34,6 +34,7 @@ export class DiscoveryAdmissionController{
   const scope=Object.freeze({...initial.scope});
   if(initial.mode!=='discover_only')return refused('ISOLATED_WORK_CYCLE_REQUIRED');
   const source=this.sources.collect(owner,scope);if(!source.caught_up)return refused(source.reason??'SOURCE_PENDING');
+  const prepared=await o.tasks.prepareDiscoveryModelAcceptance(owner,initial.policy_id,signal);
   const observation=await o.activity.observe({owner_id:owner,...scope},signal);
   if(observation.reason)return refused(observation.reason);
   signal?.throwIfAborted();
@@ -73,7 +74,7 @@ export class DiscoveryAdmissionController{
     // do not hash an unbounded source history under the writer lock.
     return {policy_version:p.version,role_version:p.role_version,role_epoch:p.role_epoch,signal_revision:current.signal_revision,
       signal_sha256:hash([p.policy_id,current.signal_revision,head??null]),activity_sha256:observation.source_sha256,budget_policy_revision:budget.budget_policy_revision};
-   });
+   },prepared);
   }catch(error){if(error instanceof Error&&error.message.startsWith('discovery_gate:'))return refused(error.message.slice('discovery_gate:'.length));throw error;}
   return Object.freeze({admitted:true,reason:null,occurrence_id:occurrence.occurrence_id,execution_authorized:false as const});
  }

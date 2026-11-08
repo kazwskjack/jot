@@ -38,7 +38,9 @@ export class WorkAdmissionController{
   // Recover a committed response without observing or replaying any new work.
   try{return accepted(this.records.get(owner,scope,grantId));}catch(error){if(!(error instanceof Error)||error.message!=='work_admission_not_found')throw error;}
   const source=this.sources.collect(owner,scope);if(!source.caught_up||source.reason)return refused(source.reason??'SOURCE_PENDING');
-  const grant=this.grants.guard(owner,scope,grantId),observation=await o.activity.observe({owner_id:owner,...scope},signal);
+  const grant=this.grants.guard(owner,scope,grantId);
+  const prepared=await o.tasks.prepareTaskModelAcceptance(owner,grant.task_id,signal);
+  const observation=await o.activity.observe({owner_id:owner,...scope},signal);
   if(observation.reason)return refused(observation.reason);signal.throwIfAborted();
   const inspected=await o.workspace.inspect(owner,scope,grant.cycle_id,{signal});signal.throwIfAborted();
   if(inspected.workspace.source_sha256!==grant.source_sha256||inspected.workspace.snapshot.receipt.snapshot_id!==grant.snapshot_id
@@ -73,7 +75,7 @@ export class WorkAdmissionController{
     return {activity_sha256:observation.source_sha256,native_sha256:digest(observation),capacity_sha256:digest(capacity),
      source_verified_sha256:sourceVerified,snapshot_verified_sha256:inspected.result.manifest_sha256,
      budget_policy_revision:budget.budget_policy_revision,observed_at:Math.min(observation.observed_at,budget.observed_at,capacity.observed_at)};
-   });return accepted(admission);
+   },prepared);return accepted(admission);
   }catch(error){if(error instanceof Error&&error.message.startsWith('work_admission_gate:'))return refused(error.message.slice('work_admission_gate:'.length));throw error;}
  }
 }
