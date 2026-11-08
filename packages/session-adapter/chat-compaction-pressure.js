@@ -1,4 +1,5 @@
 import {isDeepStrictEqual} from 'node:util';
+import {observePreparedModelMetadata} from './trusted-model-metadata.js';
 const integer=v=>Number.isSafeInteger(v)&&v>=0;
 const route=v=>v&&typeof v.provider==='string'&&v.provider.length>0&&typeof v.model==='string'&&v.model.length>0;
 function cancellable(value,signal){
@@ -14,7 +15,7 @@ function cancellable(value,signal){
  * policy must be the host's resolved exact-target policy, not browser input.
  * The threshold mirrors pinned dsh-compaction-basic 0.2.1-rc.2: minimum of
  * window ratio and window minus effective completion reservation/headroom. */
-export async function inspectChatCompactionPressure({session,expectedModel,policy,tokenMeter,llm,signal}){
+export async function inspectChatCompactionPressure({session,expectedModel,policy,tokenMeter,llm,signal,observeMetadata}){
  if(!(signal instanceof AbortSignal))throw Error('chat_compaction_signal_required');
  signal.throwIfAborted();
  const result=(reason,extra={})=>Object.freeze({protocol:1,decision:'skip',reason,...extra,execution_authorized:false});
@@ -32,6 +33,12 @@ export async function inspectChatCompactionPressure({session,expectedModel,polic
   if(session.seq!==seq||!isDeepStrictEqual(session.requestHeader(),header)||!isDeepStrictEqual(expectedModel,selectedModel)||!isDeepStrictEqual(policy,resolvedPolicy)||!isDeepStrictEqual(first,second))return result('STATE_CHANGED');
   // Pinned SDK LlmResolvedModelInfo uses provider + id for exact-route identity.
   if(info?.provider!==selectedModel.provider||info.id!==selectedModel.model)return result('ROUTE_UNCONFIRMED');
+  if(observeMetadata!==undefined){
+   if(typeof observeMetadata!=='function')return result('METADATA_UNAVAILABLE');
+   const metadata=observePreparedModelMetadata(info,{provider:selectedModel.provider,model:selectedModel.model});
+   if(metadata.state!=='ready')return result('METADATA_UNAVAILABLE');
+   observeMetadata(metadata);
+  }
   const window=info?.context?.contextWindow,declaredDefault=info?.defaultMaxTokens;
   if(!integer(window)||window===0||declaredDefault!==undefined&&!integer(declaredDefault)||config.maxTokens!==undefined&&!integer(config.maxTokens))return result('METADATA_UNAVAILABLE');
   const reserved=config.maxTokens??declaredDefault??0;

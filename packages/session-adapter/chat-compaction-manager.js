@@ -27,7 +27,8 @@ export function createChatCompactionManager({ctx,bridge,agents,presets,runtime,o
     const intent=await read(),engine=presets.serviceFor(agent,'compaction');if(engine?.jotChatCompactionProtocol!==1||engine.config?.auto!==false||!engine.jotChatCompactionIdentity||typeof engine.compactNow!=='function')fail();
     const engineIdentity=engine.jotChatCompactionIdentity;
     const observed=await observe({scope,expectedSourceSha256:source_sha256,signal:active});identity();
-    const pressure=await inspectChatCompactionPressure({session,expectedModel:intent.source.model,policy:{thresholdRatio:engine.config.thresholdRatio,headroomTokens:engine.config.headroomTokens},tokenMeter,llm,signal:active});identity();
+    let modelMetadata;
+    const pressure=await inspectChatCompactionPressure({session,expectedModel:intent.source.model,policy:{thresholdRatio:engine.config.thresholdRatio,headroomTokens:engine.config.headroomTokens},tokenMeter,llm,signal:active,observeMetadata:value=>{modelMetadata=value;}});identity();
     if(pressure.decision!=='needed')return{protocol:1,status:'skipped',reason:pressure.reason,compaction_executed:false,execution_authorized:false};
     const proof=await completionReader({scope,expectedSourceSha256:intent.source.history_sha256,signal:active});identity();if(digest(proof)!==observed.native?.proof_sha256||session.seq!==proof.raw_event_count)fail();
     const publishesCheckpoint=intent.source.policy.context_revision==='checkpoint-text-v2';
@@ -35,7 +36,7 @@ export function createChatCompactionManager({ctx,bridge,agents,presets,runtime,o
     if(before&&digest({header:before.header,inheritedEventCount:before.inheritedEventCount,events:before.events})!==proof.raw_sha256)fail();
     const attempt=Object.freeze({scope,intent_id,attempt_id:'chat-compact-'+randomUUID(),observer_id:observer,witness:chatMaintenanceNativeWitness(proof)});let entry,settled;
     const check=async scoped=>{scoped.throwIfAborted();identity();if(before){const events=session.snapshotEvents(0),start=events.at(-1);if(events.length!==proof.raw_event_count+1||digest({header:session.header,inheritedEventCount:session.inheritedEventCount,events:events.slice(0,proof.raw_event_count)})!==proof.raw_sha256||start.type!=='compaction/start'||start.data.sourceCommandId!==attempt.attempt_id||start.data.turn!==null)fail();}if(runtime.get(agent)!==entry||presets.serviceFor(agent,'compaction')?.jotChatCompactionIdentity!==engineIdentity)fail();await read();scoped.throwIfAborted();};
-    entry=Object.freeze({attempt,model:Object.freeze(structuredClone(intent.source.model)),signal:active,check,request:async(...args)=>{const response=await bridge.request(...args);if(args[2]?.action==='settle'&&response?.receipt?.state==='settled')settled=response.receipt;return response;}});
+    entry=Object.freeze({attempt,model:Object.freeze(structuredClone(intent.source.model)),modelMetadata:structuredClone(modelMetadata),signal:active,check,request:async(...args)=>{const response=await bridge.request(...args);if(args[2]?.action==='settle'&&response?.receipt?.state==='settled')settled=response.receipt;return response;}});
     await read();const result=await runtime.withOperation(agent,entry,()=>engine.compactNow(agent,active,attempt.attempt_id));await read();let checkpoint;
     if(publishesCheckpoint&&result){
      if(!settled||settled.attempt_id!==attempt.attempt_id||typeof ctx.sessions?.flush!=='function')fail();
