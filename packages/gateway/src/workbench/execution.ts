@@ -234,6 +234,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
     const reservationId=input.reservation_id;
     const source=withReadTransaction(db,()=>{
       const identity=context(input);assertExecutionLease(db,identity.run_id,input.execution_lease);
+      tasks.assertDiscoveryOperation(identity.run_id,'tasks.delegate');
       const saved=db.prepare('SELECT role_id FROM wb_native_child_reservations WHERE reservation_id=? AND owner_id=? AND root_run_id=?').get(reservationId,identity.owner_id,identity.run_id);
       if(!saved)throw Error('workbench_identity_forbidden');
       if(!modelMetadataClient||db.prepare('SELECT 1 FROM wb_native_child_runs WHERE reservation_id=? AND owner_id=?').get(reservationId,identity.owner_id))return;
@@ -242,6 +243,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
     const prepared=await prepareNativeModel(source);
     return withImmediateTransaction(db,()=>{
       const identity=context(input);assertExecutionLease(db,identity.run_id,input.execution_lease);
+      tasks.assertDiscoveryOperation(identity.run_id,'tasks.delegate');
       if(!db.prepare('SELECT 1 FROM wb_native_child_reservations WHERE reservation_id=? AND owner_id=? AND root_run_id=?').get(reservationId,identity.owner_id,identity.run_id))throw new Error('workbench_identity_forbidden');
       const child=workbench.prepareNativeChild(identity.owner_id,reservationId,prepared);
       return {binding:{runId:child.run_id,sessionRef:child.session_ref,executionLease:normalizeExecutionLease(input.execution_lease)}};
@@ -256,6 +258,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
     fields(input,['run_id','session_ref','child_session_ref','previous_run_id','previous_log_sha256','previous_seq_exclusive']);
     const source=withReadTransaction(db,()=>{
       assertExecutionLease(db,String(input.run_id),input.execution_lease);const parent=context(input);requireTask(parent);
+      tasks.assertDiscoveryOperation(parent.run_id,'tasks.delegate');
       const previous=db.prepare(`SELECT n.snapshot_json,r.conversation_id FROM wb_native_execution_runs n JOIN ga_runs r ON r.id=n.run_id
         WHERE n.run_id=? AND n.owner_id=? AND n.child_session_ref=?`).get(String(input.previous_run_id),parent.owner_id,String(input.child_session_ref));
       if(!modelMetadataClient||!previous||db.prepare('SELECT 1 FROM wb_native_child_activations WHERE previous_run_id=?').get(String(input.previous_run_id)))return;
@@ -266,6 +269,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
     const prepared=await prepareNativeModel(source);
     return withImmediateTransaction(db,()=>{
       assertExecutionLease(db,String(input.run_id),input.execution_lease);const parent=context(input);requireTask(parent);
+      tasks.assertDiscoveryOperation(parent.run_id,'tasks.delegate');
       const child=workbench.prepareNativeActivation(parent.owner_id,input,prepared);
       return {binding:{runId:child.run_id,sessionRef:child.session_ref,executionLease:normalizeExecutionLease(input.execution_lease)}};
     });
@@ -276,7 +280,10 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       fields(input,['run_id','session_ref','action','receipt_action','operation','request_id','child_session_ref','child_run_id','role_ref','message_sha256','result']);
       const identity=context(input),task=requireTask(identity);
       if(!nativeMemberMessages||identity.kind!=='task'||task.root_run_id!==identity.run_id)throw new Error('workbench_identity_forbidden');
-      if(input.receipt_action==='begin')return nativeMemberMessages.begin(identity.owner_id,input);
+      if(input.receipt_action==='begin'){
+        tasks.assertDiscoveryOperation(identity.run_id,'tasks.delegate');
+        return nativeMemberMessages.begin(identity.owner_id,input);
+      }
       if(input.receipt_action==='complete')return nativeMemberMessages.complete(identity.owner_id,input);
       throw new Error('invalid_native_member_message');
     }

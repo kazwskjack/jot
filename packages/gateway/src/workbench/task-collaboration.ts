@@ -51,6 +51,7 @@ export class TaskCollaborationService {
  get(owner:string,taskId:string){this.tasks.get(owner,taskId);return publicPolicy(latest(this.db,owner,taskId));}
  authorizeNativeMember(owner:string,runId:string,memberId:string,expectedVersion:number){
   this.workbench.assertRunActive(runId);this.tasks.assertRunActive(runId);
+  this.tasks.assertDiscoveryOperation(runId,'tasks.delegate');
   const context=this.workbench.contextForRun(runId);
   const current=this.db.prepare(`SELECT o.task_id,o.occurrence_id,o.generation FROM wb_task_current_occurrences c
    JOIN wb_task_run_occurrences o ON o.run_id=c.run_id WHERE c.run_id=?`).get(runId) as {task_id:string;occurrence_id:string;generation:number}|undefined;
@@ -94,9 +95,11 @@ export class TaskCollaborationService {
  delegateByLead(owner:string,runId:string,input:{subtask_id:string;expected_subtask_version:number;recipient_agent_id:string;client_message_id:string}){
   return withImmediateTransaction(this.db,()=>{
    this.workbench.assertRunActive(runId);this.tasks.assertRunActive(runId);
+   this.tasks.assertDiscoveryOperation(runId,'tasks.delegate');
    const context=this.workbench.contextForRun(runId);
-   const current=this.db.prepare('SELECT task_id,occurrence_id FROM wb_task_current_occurrences WHERE run_id=?').get(runId) as {task_id:string;occurrence_id:string}|undefined;
+   const current=this.db.prepare('SELECT task_id,occurrence_id,trigger_key FROM wb_task_current_occurrences WHERE run_id=?').get(runId) as {task_id:string;occurrence_id:string;trigger_key:string}|undefined;
    if(!current||context?.kind!=='task'||context.owner_id!==owner)throw new Error('task_collaboration_forbidden');
+   if(current.trigger_key.startsWith('discovery-work:'))throw new Error('task_collaboration_forbidden');
    if(!this.db.prepare("SELECT 1 FROM ga_runs WHERE id=? AND status IN ('starting','running')").get(runId))throw new Error('task_collaboration_forbidden');
    if(!this.db.prepare('SELECT 1 FROM wb_model_budget_bindings WHERE run_id=? AND owner_id=?').get(runId,owner))throw new Error('budget_service_unavailable');
    const grant=latest(this.db,owner,current.task_id);
