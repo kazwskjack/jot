@@ -19,7 +19,8 @@ export function SkillCatalogView({value,paths,resources,definitions={},onPathCha
  onPathChange:(name:string,path:string)=>void;onReadResource:(name:string)=>void;onUseSkill:(name:string)=>void;
 }){
  return <section aria-label="当前会话技能目录"><h3>当前会话技能</h3>
-  <p>工作区 {value.viewScope.workspace_id} · 项目 {value.viewScope.project_id} · 角色 {value.viewScope.agent_id}</p>
+  <p>工作区 {value.viewScope.workspace_id} · 项目 {value.viewScope.project_id??'未绑定'} · {'kind' in value.viewScope
+   ?`原生会话 ${value.viewScope.session_ref}`:`角色 ${value.viewScope.agent_id}`}</p>
   <p>目录只显示元数据。资源读取只返回你选择的相对路径；内容按纯文本显示，不会执行。</p>
   {!value.complete?<p role="status">技能发现尚未完成，请重试。</p>:value.items.length===0?<p>当前会话没有可见技能。</p>:
    <ul>{value.items.map(item=>{const selected=resources[item.name],definition=definitions[item.name];return <li key={item.name}><strong>{item.name}</strong><p>{item.description}</p>

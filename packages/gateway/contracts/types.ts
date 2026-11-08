@@ -468,7 +468,9 @@ export type PluginProfileOperation = {
 } & ({state:'settled';response:PluginProfileResult;response_status:200}
   | {state:'reserved'|'dispatched'|'unknown';response?:never;response_status?:never});
 
-export type RunSkillCatalogScope = {conversation_id:string;workspace_id:string;project_id:string;agent_id:string;run_id:string;capability_epoch:number};
+export type WorkbenchSkillCatalogScope = {conversation_id:string;workspace_id:string;project_id:string;agent_id:string;run_id:string;capability_epoch:number};
+export type OrdinarySkillCatalogScope = {kind:'ordinary';conversation_id:string;workspace_id:string;project_id:string|null;run_id:string;session_ref:string;mode:'work'|'chat';run_version:number;conversation_version:number};
+export type RunSkillCatalogScope = WorkbenchSkillCatalogScope | OrdinarySkillCatalogScope;
 export type NativeCommandDescriptor = import('../../skills/catalog-contract.js').CommandManifest;
 export type NativeCommandCatalog = import('../../skills/catalog-contract.js').SkillCommandCatalog;
 export type RunSkillCatalogObservation = import('../../skills/catalog-contract.js').SkillCatalogObservation & {viewScope:RunSkillCatalogScope};

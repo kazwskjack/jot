@@ -21490,7 +21490,7 @@
         "tags": [
           "skills"
         ],
-        "description": "Read original-scope native skills and optional command descriptors. The default view contains skill metadata, while commands=1 includes effective commands.list(originalAgent) descriptors. Select name alone for one native SkillDefinition, its body hash and definition hash, plus allowlisted version/license values from native provider metadata. Null means the provider metadata supplies no usable value. Select name and path together for one inert relative resource. Query forms are exclusive. The response carries execution_authorized=false under the original run permissions. Add manifest=source to a name-only selection for the original registry-selected instruction file, read through the native filesystem boundary and checked against the selected definition body. Its top-level version/license and text SHA-256 are returned under manifest.original, with selected-skill-frontmatter provenance and coverage by definitionSha256.",
+        "description": "Read original-scope native skills and optional command descriptors. The default view contains skill metadata, while commands=1 includes effective commands.list(originalAgent) descriptors. Select name alone for one native SkillDefinition, its body hash and definition hash, plus allowlisted version/license values from native provider metadata. Null means the provider metadata supplies no usable value. Select name and path together for one inert relative resource. Query forms are exclusive. The response carries execution_authorized=false under the original run permissions. Add manifest=source to a name-only selection for the original registry-selected instruction file, read through the native filesystem boundary and checked against the selected definition body. Its top-level version/license and text SHA-256 are returned under manifest.original, with selected-skill-frontmatter provenance and coverage by definitionSha256. Ordinary active runs use the stored original owner/conversation/run/native-Session lineage, current mode and run/conversation versions. The resident Agent and exact native preset are rechecked around reads. Ordinary scopes include kind=ordinary and carry their original Session identity and versions.",
         "parameters": [
           {
             "name": "run_id",
@@ -41311,37 +41311,14 @@
         "additionalProperties": false
       },
       "RunSkillCatalogScope": {
-        "type": "object",
-        "properties": {
-          "conversation_id": {
-            "type": "string"
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/WorkbenchSkillCatalogScope"
           },
-          "workspace_id": {
-            "type": "string"
-          },
-          "project_id": {
-            "type": "string"
-          },
-          "agent_id": {
-            "type": "string"
-          },
-          "run_id": {
-            "type": "string"
-          },
-          "capability_epoch": {
-            "type": "integer",
-            "minimum": 1
+          {
+            "$ref": "#/components/schemas/OrdinarySkillCatalogScope"
           }
-        },
-        "required": [
-          "conversation_id",
-          "workspace_id",
-          "project_id",
-          "agent_id",
-          "run_id",
-          "capability_epoch"
-        ],
-        "additionalProperties": false
+        ]
       },
       "SkillCatalogManifest": {
         "type": "object",
@@ -41680,6 +41657,92 @@
           "definitionSha256",
           "execution_authorized",
           "viewScope"
+        ],
+        "additionalProperties": false
+      },
+      "WorkbenchSkillCatalogScope": {
+        "type": "object",
+        "properties": {
+          "conversation_id": {
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "agent_id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "capability_epoch": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "conversation_id",
+          "workspace_id",
+          "project_id",
+          "agent_id",
+          "run_id",
+          "capability_epoch"
+        ],
+        "additionalProperties": false
+      },
+      "OrdinarySkillCatalogScope": {
+        "type": "object",
+        "properties": {
+          "conversation_id": {
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "session_ref": {
+            "type": "string"
+          },
+          "kind": {
+            "const": "ordinary"
+          },
+          "project_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "work",
+              "chat"
+            ]
+          },
+          "run_version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "conversation_version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "conversation_id",
+          "workspace_id",
+          "run_id",
+          "session_ref",
+          "kind",
+          "project_id",
+          "mode",
+          "run_version",
+          "conversation_version"
         ],
         "additionalProperties": false
       }

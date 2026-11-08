@@ -1,7 +1,23 @@
 import type {FastifyInstance,FastifyRequest} from 'fastify';
+import {timingSafeEqual} from 'node:crypto';
 import type {SkillCatalogService} from './catalog.ts';
 /** Pending root-owned server registration; uses the existing actor resolver. */
-export function registerSkillCatalogRoutes(app:FastifyInstance,service:SkillCatalogService,actor:(request:FastifyRequest)=>string){
+export function registerSkillCatalogRoutes(app:FastifyInstance,service:SkillCatalogService,actor:(request:FastifyRequest)=>string,token?:string){
+ app.post('/internal/v1/workbench/ordinary-skill-scope',{config:{skillReadInternal:true},bodyLimit:32768},async(request,reply)=>{
+  const actual=String(request.headers.authorization??''),expected=`Bearer ${token??''}`;
+  if(!token||token.length<16||Buffer.byteLength(actual)!==Buffer.byteLength(expected)
+   ||!timingSafeEqual(Buffer.from(actual),Buffer.from(expected)))return reply.code(401).send({error:{code:'UNAUTHORIZED'}});
+  const input=request.body as Record<string,unknown>;
+  if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).sort().join(',')!=='run_id,scope,session_ref'
+   ||!input.scope||typeof input.scope!=='object'||Array.isArray(input.scope))return reply.code(422).send({error:{code:'SKILL_CATALOG_INPUT_INVALID'}});
+  const scope=input.scope as Record<string,unknown>;
+  if(scope.run_id!==input.run_id||scope.session_ref!==input.session_ref)return reply.code(409).send({error:{code:'SKILL_CATALOG_CHANGED'}});
+  try{return service.authorizeOrdinaryScope(scope);}
+  catch(error){
+   if(error instanceof Error&&['skill_catalog_scope_forbidden','skill_catalog_scope_changed'].includes(error.message))return reply.code(409).send({error:{code:'SKILL_CATALOG_CHANGED'}});
+   throw error;
+  }
+ });
  app.get('/v1/runs/:runId/skills',async(request,reply)=>{
   reply.header('cache-control','private, no-store').header('x-content-type-options','nosniff');
   const query=request.query as Record<string,unknown>,keys=Object.keys(query);

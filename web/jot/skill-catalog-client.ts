@@ -2,7 +2,9 @@ import {request,taskDraftScope} from './client';
 import {validateSkillCatalogView,validateSkillResourceView,validateSkillDefinitionView,catalogDigestInput} from '../../packages/skills/catalog-contract.js';
 type SkillCatalogObservation=Omit<ReturnType<typeof validateSkillCatalogView>,'items'>&{items:Array<ReturnType<typeof import('../../packages/skills/catalog-contract.js').skillManifest>>};
 type SkillResourceView=Awaited<ReturnType<typeof validateSkillResourceView>>;
-export interface SkillCatalogViewScope{conversation_id:string;workspace_id:string;project_id:string;agent_id:string;run_id:string;capability_epoch:number}
+export interface WorkbenchSkillViewScope{conversation_id:string;workspace_id:string;project_id:string;agent_id:string;run_id:string;capability_epoch:number}
+export interface OrdinarySkillViewScope{kind:'ordinary';conversation_id:string;workspace_id:string;project_id:string|null;run_id:string;session_ref:string;mode:'work'|'chat';run_version:number;conversation_version:number}
+export type SkillCatalogViewScope=WorkbenchSkillViewScope|OrdinarySkillViewScope;
 export interface SkillCatalogResponse extends SkillCatalogObservation{viewScope:SkillCatalogViewScope}
 export interface SkillResourceResponse extends SkillResourceView{viewScope:SkillCatalogViewScope}
 export type SkillDefinitionResponse=Awaited<ReturnType<typeof validateSkillDefinitionView>>&{viewScope:SkillCatalogViewScope};
@@ -14,6 +16,16 @@ function viewScope(value:unknown,runId:string):SkillCatalogViewScope{
  const keys=['conversation_id','workspace_id','project_id','agent_id','run_id','capability_epoch'];
  if(!value||typeof value!=='object'||Array.isArray(value))throw Error('skill_catalog_invalid');
  const scope=value as Record<string,unknown>;
+ if(scope.kind==='ordinary'){
+  const expected=['kind','conversation_id','workspace_id','project_id','run_id','session_ref','mode','run_version','conversation_version'];
+  if(Object.keys(scope).sort().join(',')!==expected.sort().join(',')||scope.run_id!==runId
+   ||!['conversation_id','workspace_id','session_ref'].every(key=>typeof scope[key]==='string'&&ID.test(scope[key] as string))
+   ||scope.project_id!==null&&(typeof scope.project_id!=='string'||!ID.test(scope.project_id))
+   ||!['work','chat'].includes(String(scope.mode))||!['run_version','conversation_version'].every(key=>Number.isSafeInteger(scope[key])&&Number(scope[key])>=1))throw Error('skill_catalog_invalid');
+  return {kind:'ordinary',conversation_id:scope.conversation_id as string,workspace_id:scope.workspace_id as string,
+   project_id:scope.project_id as string|null,run_id:runId,session_ref:scope.session_ref as string,mode:scope.mode as 'work'|'chat',
+   run_version:Number(scope.run_version),conversation_version:Number(scope.conversation_version)};
+ }
  if(Object.keys(scope).sort().join(',')!==keys.sort().join(',')||scope.run_id!==runId
   ||keys.filter(k=>k!=='capability_epoch').some(k=>typeof scope[k]!=='string'||!ID.test(String(scope[k])))
   ||!Number.isSafeInteger(scope.capability_epoch)||Number(scope.capability_epoch)<1)throw Error('skill_catalog_invalid');

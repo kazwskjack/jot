@@ -397,6 +397,7 @@ export async function buildServer(config: {
     if((request.routeOptions.config as {hostSettingsInternal?:boolean}).hostSettingsInternal===true)return;
     if((request.routeOptions.config as {pluginProfileInternal?:boolean}).pluginProfileInternal===true)return;
     if((request.routeOptions.config as {hookExecutionInternal?:boolean}).hookExecutionInternal===true)return;
+    if((request.routeOptions.config as {skillReadInternal?:boolean}).skillReadInternal===true)return;
     // Original service bearer already ran in this registered route's onRequest.
     if(isChannelAttachmentIntakeV2Route(request))return;
     // The provider callback is public only behind its exact-URL Twilio signature check.
@@ -872,7 +873,7 @@ export async function buildServer(config: {
   registerDiscoveryPolicyRoutes(app,{policies:new DiscoveryPolicies(db,{onChange:(owner,receipt,event)=>persistentTasks.synchronizeDiscoveryPolicy(owner,receipt.policy_id,event)}),actor,role:(owner,id)=>workbench.getAgent(owner,id),atomic:atomicCommand});
   registerDiscoveryHistoryRoutes(app,{history:new DiscoveryHistory(db),actor,role:(owner,id)=>workbench.getAgent(owner,id)});
   registerConversationGoalRoutes(app,{db,conversations,actor,client:config.conversationGoalClient,resumeAdmission:{enabled:config.conversationGoalResumeEnabled===true,controls:new ConversationGoalControls(db,events,runs),atomic:atomicCommand}});
-  if(config.skillCatalogClient)registerSkillCatalogRoutes(app,new SkillCatalogService(db,workbench,config.skillCatalogClient),actor);
+  if(config.skillCatalogClient)registerSkillCatalogRoutes(app,new SkillCatalogService(db,workbench,config.skillCatalogClient),actor,config.internalChannelToken);
   app.get('/v1/capabilities', async (request, reply) => {
     const ownerId = actor(request as any);
     const cancelled=new AbortController();const abort=()=>{if(!reply.raw.writableEnded)cancelled.abort();};

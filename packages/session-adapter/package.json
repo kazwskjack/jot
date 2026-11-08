@@ -51,6 +51,7 @@
     "skill-catalog-reader.js",
     "skill-registry.js",
     "skill-source-manifest.js",
+    "skill-read-scope.js",
     "workbench.js",
     "workbench-goal.js",
     "host-execution-lease.js",

@@ -1,7 +1,14 @@
 import {createHash} from 'node:crypto';
+import {isDeepStrictEqual} from 'node:util';
+import {readOrdinarySkillScope,type OrdinarySkillScope} from './ordinary-scope.ts';
 import type {DatabaseSync} from 'node:sqlite';
 import type {WorkbenchService} from '../workbench/service.ts';
-export type SkillCatalogScope=Readonly<{owner_id:string;project_id:string;workspace_id:string;agent_id:string;run_id:string;session_ref:string;capability_epoch:number}>;
+type WorkbenchSkillCatalogScope=Readonly<{owner_id:string;project_id:string;workspace_id:string;agent_id:string;run_id:string;session_ref:string;capability_epoch:number}>;
+export type SkillCatalogScope=WorkbenchSkillCatalogScope|OrdinarySkillScope;
+function viewScope(scope:SkillCatalogScope,conversationId:string){
+ if('kind' in scope){const {owner_id,...view}=scope;return view;}
+ return {conversation_id:conversationId,project_id:scope.project_id,workspace_id:scope.workspace_id,agent_id:scope.agent_id,run_id:scope.run_id,capability_epoch:scope.capability_epoch};
+}
 export type SkillCatalogHost=Readonly<{
  read:(input:{scope:SkillCatalogScope;signal?:AbortSignal;include_commands?:true})=>Promise<unknown>;
  readResource?:(input:{scope:SkillCatalogScope;skill_name:string;relative_path:string;signal?:AbortSignal})=>Promise<unknown>;
@@ -30,7 +37,8 @@ export class SkillCatalogService{
    WHERE r.id=? AND c.owner_id=? AND c.archived_at IS NULL`).get(runId,owner) as Row|undefined;
   if(!row)throw Error('skill_catalog_scope_forbidden');
   const context=this.workbench.contextForRun(runId);
-  if(!context||context.owner_id!==owner||context.workspace_id!==row.workspace_id||context.project_id!==row.project_id)throw Error('skill_catalog_scope_forbidden');
+  if(!context)return {scope:readOrdinarySkillScope(this.db,owner,runId) as SkillCatalogScope,conversation_id:String(row.conversation_id)};
+  if(context.owner_id!==owner||context.workspace_id!==row.workspace_id||context.project_id!==row.project_id)throw Error('skill_catalog_scope_forbidden');
   this.workbench.assertRunActive(runId);
   let session:string;
   if(row.native_session_ref!==null){
@@ -43,6 +51,14 @@ export class SkillCatalogService{
    run_id:runId,session_ref:session,capability_epoch:context.capability_epoch};
   return {scope,conversation_id:String(row.conversation_id)};
  }
+ authorizeOrdinaryScope(value:unknown){
+  if(!value||typeof value!=='object'||Array.isArray(value))throw Error('skill_catalog_scope_forbidden');
+  const scope=value as OrdinarySkillScope;
+  if(typeof scope.owner_id!=='string'||typeof scope.run_id!=='string')throw Error('skill_catalog_scope_forbidden');
+  const current=readOrdinarySkillScope(this.db,scope.owner_id,scope.run_id);
+  if(!isDeepStrictEqual(current,value))throw Error('skill_catalog_scope_changed');
+  return {scope:current,execution_authorized:false};
+ }
  async read(owner:string,runId:string,signal?:AbortSignal,includeCommands=false){
   signal?.throwIfAborted();const before=this.bound(owner,runId);
   const response=await this.host.read({scope:before.scope,...(signal?{signal}:{}),...(includeCommands?{include_commands:true as const}:{})}) as Row;
@@ -54,8 +70,9 @@ export class SkillCatalogService{
   const api=await contract(),catalog=api.validateSkillCatalogView(response.catalog);
   const hash=createHash('sha256').update(api.catalogDigestInput(catalog)).digest('hex');
   if(hash!==catalog.catalogSha256)throw Error('skill_catalog_invalid');
-  return {...catalog,viewScope:{conversation_id:before.conversation_id,project_id:before.scope.project_id,workspace_id:before.scope.workspace_id,
-   agent_id:before.scope.agent_id,run_id:runId,capability_epoch:before.scope.capability_epoch}};
+  signal?.throwIfAborted();
+  if(JSON.stringify(before)!==JSON.stringify(this.bound(owner,runId)))throw Error('skill_catalog_scope_changed');
+  return {...catalog,viewScope:viewScope(before.scope,before.conversation_id)};
  }
  async readDefinition(owner:string,runId:string,name:string,signal?:AbortSignal,includeSourceManifest=false){
   signal?.throwIfAborted();
@@ -74,8 +91,7 @@ export class SkillCatalogService{
   signal?.throwIfAborted();
   if(definition.name!==name||includeSourceManifest&&!definition.manifest.original
    ||JSON.stringify(before)!==JSON.stringify(this.bound(owner,runId)))throw Error('skill_catalog_scope_changed');
-  return {...definition,viewScope:{conversation_id:before.conversation_id,project_id:before.scope.project_id,
-   workspace_id:before.scope.workspace_id,agent_id:before.scope.agent_id,run_id:runId,capability_epoch:before.scope.capability_epoch}};
+  return {...definition,viewScope:viewScope(before.scope,before.conversation_id)};
  }
  async readResource(owner:string,runId:string,skill_name:string,relative_path:string,signal?:AbortSignal){
   signal?.throwIfAborted();if(!SKILL.test(skill_name)||typeof relative_path!=='string'||relative_path.length<1||relative_path.length>512)throw Error('skill_catalog_invalid');
@@ -88,7 +104,8 @@ export class SkillCatalogService{
    ||Object.entries(before.scope).some(([key,value])=>response.scope[key]!==value))throw Error('skill_catalog_scope_changed');
   const api=await contract(),resource=await api.validateSkillResourceView(response.resource);
   if(resource.name!==skill_name||resource.relativePath!==relative_path)throw Error('skill_catalog_scope_changed');
-  return {...resource,viewScope:{conversation_id:before.conversation_id,project_id:before.scope.project_id,workspace_id:before.scope.workspace_id,
-   agent_id:before.scope.agent_id,run_id:runId,capability_epoch:before.scope.capability_epoch}};
+  signal?.throwIfAborted();
+  if(JSON.stringify(before)!==JSON.stringify(this.bound(owner,runId)))throw Error('skill_catalog_scope_changed');
+  return {...resource,viewScope:viewScope(before.scope,before.conversation_id)};
  }
 }

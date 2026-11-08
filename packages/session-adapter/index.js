@@ -378,11 +378,11 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       try { return json(200, await skillContentCommand(body, { signal })) }
       catch (error) {
         const code = error instanceof Error ? error.message : ''
-        if (code === 'skill_content_scope_forbidden') return json(404, { error: 'skill_content_not_found' })
+        if (['skill_content_scope_forbidden','skill_catalog_scope_forbidden'].includes(code)) return json(404, { error: 'skill_content_not_found' })
         if (['skill_content_command_invalid', 'skill_name_invalid', 'skill_resource_provider_unsupported'].includes(code)) return json(422, { error: 'skill_content_input_invalid' })
         if (['skill_not_found', 'skill_not_user_invocable', 'skill_resource_path_unsafe'].includes(code)) return json(404, { error: 'skill_content_not_found' })
         if (['skill_content_too_large','skill_resource_too_large'].includes(code)) return json(413, { error: 'skill_content_too_large' })
-        if (['skill_catalog_incomplete', 'skill_definition_changed', 'skill_content_scope_changed','skill_resource_changed'].includes(code)) return json(409, { error: 'skill_content_changed' })
+        if (['skill_catalog_incomplete', 'skill_definition_changed', 'skill_content_scope_changed','skill_catalog_scope_changed','skill_resource_changed'].includes(code)) return json(409, { error: 'skill_content_changed' })
         return json(503, { error: 'skill_content_unavailable' })
       }
     }
@@ -1099,7 +1099,7 @@ export function apply(ctx, config = {}) {
     if(mcpControlHost)ctx.effect(()=>()=>mcpControlHost.dispose())
     let skillYamlParser;
     const skillContentCommand = workbenchBridge && typeof ctx.agents?.get === 'function' && typeof ctx.sessions?.get === 'function'
-      ? createSkillContentCommand(createSkillContentReader({ agents: ctx.agents, sessions: ctx.sessions, bridge: workbenchBridge,
+      ? createSkillContentCommand(createSkillContentReader({ agents: ctx.agents, sessions: ctx.sessions, bridge: workbenchBridge,ordinaryPresets,
         parseYaml:(text,options)=>{
           if(!skillYamlParser){
             const nativeRequire=createRequire(ctx.get('profileContext').installAnchor);
@@ -1110,10 +1110,10 @@ export function apply(ctx, config = {}) {
         }}))
       : undefined
     const skillCatalogCommand = workbenchBridge && typeof ctx.agents?.get === 'function' && typeof ctx.sessions?.get === 'function'
-      ? createSkillCatalogCommand(createSkillCatalogReader({ agents: ctx.agents, sessions: ctx.sessions, bridge: workbenchBridge }))
+      ? createSkillCatalogCommand(createSkillCatalogReader({ agents: ctx.agents, sessions: ctx.sessions, bridge: workbenchBridge,ordinaryPresets }))
       : undefined
     const skillResourceCommand = workbenchBridge && typeof ctx.agents?.get === 'function' && typeof ctx.sessions?.get === 'function'
-      ? createSkillResourceCommand(createSkillResourceReader({ agents: ctx.agents, sessions: ctx.sessions, bridge: workbenchBridge }))
+      ? createSkillResourceCommand(createSkillResourceReader({ agents: ctx.agents, sessions: ctx.sessions, bridge: workbenchBridge,ordinaryPresets }))
       : undefined
     let nativeWorkspaceAdmissionGate
     if(config.nativeWorkspaceAdmission===true){

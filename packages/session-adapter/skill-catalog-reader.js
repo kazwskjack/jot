@@ -1,35 +1,18 @@
-import {isAbsolute} from 'node:path';
+import {isDeepStrictEqual} from 'node:util';
+import {normalizeSkillReadScope as scopeOf,createSkillReadBinding} from './skill-read-scope.js';
 import {readSkillCatalogView,readSkillResourceView} from '../skills/catalog-view.js';
 import {validateSkillCatalogView,validateSkillResourceView} from '../skills/catalog-contract.js';
-const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
-const KEYS=['owner_id','project_id','workspace_id','agent_id','run_id','session_ref','capability_epoch'];
 const originalReaders=new WeakSet();
 const originalResourceReaders=new WeakSet();
 const exact=(value,keys)=>!!value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join(',')===[...keys].sort().join(',');
-function scopeOf(value){
- if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!==[...KEYS].sort().join(',')
-  ||KEYS.slice(0,-1).some(k=>typeof value[k]!=='string'||!ID.test(value[k]))||!Number.isSafeInteger(value.capability_epoch)||value.capability_epoch<1)throw Error('skill_catalog_scope_forbidden');
- return Object.freeze({...value});
-}
 /** Borrow the resident Agent and its original authenticated Workbench guard.
  * This reader neither restores Sessions nor mints tickets/reservations. */
-export function createSkillCatalogReader({agents,sessions,bridge}={}){
+export function createSkillCatalogReader({agents,sessions,bridge,ordinaryPresets}={}){
  if(typeof agents?.get!=='function'||typeof sessions?.get!=='function'||typeof bridge?.guard!=='function'
   ||typeof bridge?.bindingFor!=='function'||typeof bridge?.request!=='function')throw Error('skill_catalog_host_unavailable');
  const reader=async({scope:input,signal,include_commands=false}={})=>{
   const scope=scopeOf(input),bounded=AbortSignal.any([AbortSignal.timeout(5000),...(signal?[signal]:[])]);
-  const agent=agents.get(scope.session_ref),session=sessions.get(scope.session_ref),binding=agent&&bridge.bindingFor(agent),cwd=session?.header?.cwd;
-  const check=()=>{
-   bounded.throwIfAborted();
-   if(!agent||agent.id!==scope.session_ref||agent.session!==session||session?.id!==scope.session_ref||typeof cwd!=='string'||!isAbsolute(cwd)
-    ||session.header.cwd!==cwd||agents.get(scope.session_ref)!==agent||sessions.get(scope.session_ref)!==session
-    ||bridge.bindingFor(agent)!==binding||binding?.runId!==scope.run_id||binding?.sessionRef!==scope.session_ref)throw Error('skill_catalog_scope_changed');
-  };
-  const authorize=async()=>{
-   check();await bridge.guard(agent,bounded);check();
-   const {context}=await bridge.request('guard',binding,{},bounded);check();
-   if(!context||KEYS.filter(k=>k!=='session_ref').some(k=>context[k]!==scope[k]))throw Error('skill_catalog_scope_forbidden');
-  };
+  const {agent,cwd,authorize}=createSkillReadBinding({scope,signal:bounded,agents,sessions,bridge,ordinaryPresets});
   await authorize();const skills=agent.ctx?.get('skills');
   const commands=include_commands?agent.ctx?.get('commands',false):undefined;
   const catalog=await readSkillCatalogView({skills,cwd,scope:agent,signal:bounded,includeCommands:include_commands,commands});
@@ -51,29 +34,18 @@ export function createSkillCatalogCommand(readCatalog){
   const result=await readCatalog({scope,...(signal?{signal}:{}),...(request.include_commands?{include_commands:true}:{})});signal?.throwIfAborted();
   if(!exact(result,['catalog','scope']))throw Error('skill_catalog_scope_changed');
   const observed=scopeOf(result.scope);
-  if(KEYS.some(key=>observed[key]!==scope[key]))throw Error('skill_catalog_scope_changed');
+  if(!isDeepStrictEqual(observed,scope))throw Error('skill_catalog_scope_changed');
   return {scope:{...scope},catalog:validateSkillCatalogView(result.catalog)};
  };
 }
 
 /** Borrow the same resident Agent and original guard for one explicitly selected resource. */
-export function createSkillResourceReader({agents,sessions,bridge}={}){
+export function createSkillResourceReader({agents,sessions,bridge,ordinaryPresets}={}){
  if(typeof agents?.get!=='function'||typeof sessions?.get!=='function'||typeof bridge?.guard!=='function'
   ||typeof bridge?.bindingFor!=='function'||typeof bridge?.request!=='function')throw Error('skill_catalog_host_unavailable');
  const reader=async({scope:input,skill_name,relative_path,signal}={})=>{
   const scope=scopeOf(input),bounded=AbortSignal.any([AbortSignal.timeout(5000),...(signal?[signal]:[])]);
-  const agent=agents.get(scope.session_ref),session=sessions.get(scope.session_ref),binding=agent&&bridge.bindingFor(agent),cwd=session?.header?.cwd;
-  const check=()=>{
-   bounded.throwIfAborted();
-   if(!agent||agent.id!==scope.session_ref||agent.session!==session||session?.id!==scope.session_ref||typeof cwd!=='string'||!isAbsolute(cwd)
-    ||session.header.cwd!==cwd||agents.get(scope.session_ref)!==agent||sessions.get(scope.session_ref)!==session
-    ||bridge.bindingFor(agent)!==binding||binding?.runId!==scope.run_id||binding?.sessionRef!==scope.session_ref)throw Error('skill_catalog_scope_changed');
-  };
-  const authorize=async()=>{
-   check();await bridge.guard(agent,bounded);check();
-   const {context}=await bridge.request('guard',binding,{},bounded);check();
-   if(!context||KEYS.filter(k=>k!=='session_ref').some(k=>context[k]!==scope[k]))throw Error('skill_catalog_scope_forbidden');
-  };
+  const {agent,cwd,authorize}=createSkillReadBinding({scope,signal:bounded,agents,sessions,bridge,ordinaryPresets});
   await authorize();
   const resource=await readSkillResourceView({skills:agent.ctx?.get('skills'),fs:agent.ctx?.get('fs'),name:skill_name,
    relativePath:relative_path,cwd,scope:agent,signal:bounded});
@@ -91,7 +63,7 @@ export function createSkillResourceCommand(readResource){
   const scope=scopeOf(request.scope);signal?.throwIfAborted();
   const result=await readResource({scope,skill_name:request.skill_name,relative_path:request.relative_path,...(signal?{signal}:{})});signal?.throwIfAborted();
   if(!exact(result,['resource','scope']))throw Error('skill_catalog_scope_changed');
-  const observed=scopeOf(result.scope);if(KEYS.some(key=>observed[key]!==scope[key]))throw Error('skill_catalog_scope_changed');
+  const observed=scopeOf(result.scope);if(!isDeepStrictEqual(observed,scope))throw Error('skill_catalog_scope_changed');
   const resource=await validateSkillResourceView(result.resource);
   if(resource.name!==request.skill_name||resource.relativePath!==request.relative_path)throw Error('skill_catalog_scope_changed');
   return {scope:{...scope},resource};
