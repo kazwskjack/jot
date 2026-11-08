@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import { withImmediateTransaction } from '../db/database.ts';
+import { withImmediateTransaction, withReadTransaction } from '../db/database.ts';
 import {HostResourceObservations} from './host-resource-observations.ts';
 
 export interface ModelBudgetRoute {
@@ -245,7 +245,7 @@ export class ModelBudgetLedger {
     const value=record(input,['provider','model','max_tokens'],'budget_request_invalid');
     if(!routeName(value.provider)||!routeName(value.model))throw new Error('budget_request_invalid');
     if(value.max_tokens!==undefined)count(value.max_tokens,'budget_request_invalid',1);
-    return withImmediateTransaction(this.db,()=>{
+    return withReadTransaction(this.db,()=>{
       const ids=this.binding(owner,runId);this.admissionGuard();
       if(!['starting','running'].includes(this.run(owner,runId).status))throw new Error('budget_run_inactive');
       this.assertKnownUsage(owner,runId);

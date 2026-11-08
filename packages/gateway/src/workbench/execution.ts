@@ -18,7 +18,7 @@ import {WebDecisionBudgetService} from './web-decision-budget.ts';
 import { createHash, timingSafeEqual, randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { FastifyInstance } from 'fastify';
-import { withImmediateTransaction } from '../db/database.ts';
+import { withImmediateTransaction, withReadTransaction } from '../db/database.ts';
 import type { WorkbenchService, AgentRunContext } from './service.ts';
 import type { PersistentTaskService } from '../persistent-tasks/service.ts';
 import type {InteractionService} from '../interactions/service.ts';
@@ -595,7 +595,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
   app.post('/internal/v1/workbench/step-admission',async request=>{
     authorized(request.headers.authorization);
     const input=object(request.body);fields(input,['run_id','session_ref','route']);
-    return withImmediateTransaction(db,()=>{
+    return withReadTransaction(db,()=>{
       const identity=context(input),task=requireTask(identity);
       if(!eligibleTaskOccurrence(db,identity.owner_id,task.task_id,identity.run_id))throw new Error('task_execution_revoked');
       const run=db.prepare('SELECT status FROM ga_runs WHERE id=?').get(identity.run_id) as {status:string}|undefined;

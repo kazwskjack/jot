@@ -179,6 +179,15 @@ function installUploadBatchStorage(db:DatabaseSync):void {
 }
 
 export function withImmediateTransaction<T>(db: DatabaseSync, operation: () => T): T {
+  return withTransaction(db, 'BEGIN IMMEDIATE', operation);
+}
+
+/** Keep preliminary reads in one snapshot without reserving the database writer. */
+export function withReadTransaction<T>(db: DatabaseSync, operation: () => T): T {
+  return withTransaction(db, 'BEGIN DEFERRED', operation);
+}
+
+function withTransaction<T>(db: DatabaseSync, begin: 'BEGIN IMMEDIATE' | 'BEGIN DEFERRED', operation: () => T): T {
   if (db.isTransaction) {
     const savepoint = `ga_nested_${++savepointSequence}`;
     db.exec(`SAVEPOINT ${savepoint}`);
@@ -191,7 +200,7 @@ export function withImmediateTransaction<T>(db: DatabaseSync, operation: () => T
       throw error;
     }
   }
-  db.exec('BEGIN IMMEDIATE');
+  db.exec(begin);
   try {
     const value = operation();
     db.exec('COMMIT');
