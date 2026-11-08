@@ -24,9 +24,12 @@ version `0.2.1-rc.2` dispatch lifecycle through an instance compatibility seam.
 Its installed source is pinned by `runtime-patches/dsh-llm-0.2.1-rc.2-dispatch-sha256.json`.
 The retained MIT notice applies to this native runtime compatibility work.
 
-`chat-compaction-engine.js` adapts the media omission approach from PilotDeck
+`compaction-images.js` adapts the media omission approach from PilotDeck
 revision `783499ffdb2d501bf590b2e035acd027a882df10`,
 `src/context/compaction/stripMultimedia.ts`, to native DSH user/tool messages.
 The upstream AGPL-3.0 notice and retained complete license above apply.
 Jot retains native message identities and image occurrence references while
 leaving original attachments, text and durable Session events intact.
+
+`chat-compaction-engine.js` and `../dsh-host/work-compaction.mjs` consume that
+shared transformation through the original native summarization hook.

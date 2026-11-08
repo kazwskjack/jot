@@ -11,6 +11,11 @@ export function buildStandardPreset(original){
  if(personas.length!==1)throw Error('jot_standard_preset_source_invalid');
  const config=personas[0].config??{};
  personas[0].config={...config,prefix:[config.prefix,JOT_PERSONALITY].filter(value=>typeof value==='string'&&value.trim()).join('\n\n')};
+ const compaction=result.plugins.filter(row=>row.id==='compaction'&&row.name==='cordis:group'&&row.group===true&&row.isolate?.compaction===true);
+ if(compaction.length!==1||!Array.isArray(compaction[0].config))throw Error('jot_standard_compaction_source_invalid');
+ const basic=compaction[0].config.filter(row=>row.id==='compaction-basic'&&row.name==='@deepseek-ai/dsh-compaction-basic');
+ if(basic.length!==1)throw Error('jot_standard_compaction_source_invalid');
+ basic[0].name=new URL('./work-compaction.mjs',import.meta.url).href;
  const planning=result.plugins.filter(row=>row.id==='planning'&&row.name==='cordis:group'&&row.group===true&&row.isolate?.planMode===true);
  if(planning.length!==1||!Array.isArray(planning[0].config)
   ||planning[0].config.filter(row=>row.id==='plan-mode'&&row.name==='@deepseek-ai/dsh-plan-mode').length!==1
