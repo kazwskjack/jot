@@ -11,7 +11,7 @@ const messages={
  PRD_PREVIEW_VERSION_CONFLICT:'预览与原任务版本不一致，请刷新并重新选择来源。',
  PRD_SOURCE_UNAVAILABLE:'来源已移除或不可读取，请刷新并重新选择。',
  PRD_SOURCE_UNSUPPORTED:'来源格式不支持，请使用 UTF-8 文本、Markdown 或有效的 Taskmaster JSON 任务文件。',
- PRD_TASKMASTER_UNAVAILABLE:'当前用户 profile 的 Taskmaster 安装资料暂不可读取。可继续使用原 PRD 文件来源流程。',
+ PRD_TASKMASTER_UNAVAILABLE:'当前用户运行环境的 Taskmaster 安装资料暂不可读取。可继续使用原 PRD 文件来源流程。',
  PRD_TASKMASTER_CONTEXT_CHANGED:'任务或角色已变化，请刷新后重新读取来源。',
  PRD_TASKMASTER_IMPORT_UNAVAILABLE:'项目文件导入暂不可用，请保留原请求并稍后重试。',
  PRD_TASKMASTER_IMPORT_UNCONFIRMED:'项目文件导入回执待核对，请保留原请求并重试原回执。',

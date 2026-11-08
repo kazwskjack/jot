@@ -22509,7 +22509,7 @@
         "tags": [
           "persistent-tasks"
         ],
-        "description": "Observe only the current owner-bound DSH profile Taskmaster package manifest and CLI entry file. Package version and license are declarations, with hashes and no execution authorization. Original task ownership and task/role versions are rechecked. No package installation or CLI execution occurs.",
+        "description": "Observe the current owner-bound DSH profile package, then literal package-manager shims or executable links in the original Host PATH. Recheck owner/profile, PATH and original CLI source identities. Package version/license are declarations with manifest/CLI hashes and no execution authorization. Original task/role versions are rechecked.",
         "parameters": [
           {
             "name": "task_id",
@@ -43736,7 +43736,11 @@
             "pattern": "^dsh-profile-[a-f0-9]{48}$"
           },
           "scope": {
-            "const": "owner_profile"
+            "enum": [
+              "owner_profile",
+              "host_path",
+              "profile_and_path"
+            ]
           },
           "status": {
             "enum": [
@@ -43827,6 +43831,12 @@
                 },
                 "reason_code": {
                   "type": "null"
+                },
+                "scope": {
+                  "enum": [
+                    "owner_profile",
+                    "host_path"
+                  ]
                 }
               }
             },
@@ -43846,6 +43856,12 @@
                 },
                 "reason_code": {
                   "const": "package_not_installed"
+                },
+                "scope": {
+                  "enum": [
+                    "owner_profile",
+                    "profile_and_path"
+                  ]
                 }
               }
             }

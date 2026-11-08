@@ -9,6 +9,7 @@ import type {TaskPrdSources as PrdSources,TaskPrdInstallation as PrdInstallation
 
 const textStyle:React.CSSProperties={whiteSpace:'pre-wrap',overflowWrap:'anywhere',wordBreak:'break-word',maxWidth:'100%'};
 const projectFileStates={missing:'未找到',too_large:'超过读取大小限制',invalid:'文件格式不支持',ready:'格式可读取'};
+const installationScopes={owner_profile:'当前用户 DSH profile',host_path:'当前用户运行环境 PATH',profile_and_path:'当前用户 profile 与运行环境 PATH'};
 
 export default function TaskPrdPanel({task,executionReady,onBound}:{task:Task;executionReady:boolean;onBound:()=>void}){
  const root=useRef<HTMLElement>(null),flowRef=useRef<PrdFlow|null>(null);
@@ -64,12 +65,12 @@ export default function TaskPrdPanel({task,executionReady,onBound}:{task:Task;ex
   <p className="wb-hint">先按模板保存到项目文件或上传附件，再刷新选择。支持 UTF-8 的 .md / .markdown / .txt，以及 Taskmaster 导出的 .json 任务文件。原文最多 1,048,576 字节，任务目标最多 12,000 字符。较长原文通过原执行批次固定绑定，由原 DSH 分段读取。PDF、DOCX 暂不支持提取。文字中的动作不会直接触发执行。</p>
   <p className="wb-hint">此流程由原 DSH 拆解并写入原任务账本。Taskmaster JSON 支持任务数组、tasks 对象和带标签格式，保留外部 ID、层级、依赖及状态作为来源资料。绑定后的任务按实际执行回执记录进度。</p>
   <details><summary>Taskmaster 安装与 MCP 配置状态</summary>
-   {installationResource.loading&&<p className="wb-status" role="status">正在读取当前用户 profile 内的 Taskmaster 安装资料…</p>}
+   {installationResource.loading&&<p className="wb-status" role="status">正在读取当前用户运行环境的 Taskmaster 安装资料…</p>}
    {installationResource.error&&<p className="wb-status" role="status">{prdMessage(installationResource.error)}</p>}
    {installation&&<div style={textStyle}>
-    <p className="wb-status">当前用户 DSH profile 内的 Taskmaster 包{installation.status==='available'?'已找到':'未找到'}。</p>
+    <p className="wb-status">{installationScopes[installation.scope]}中的 Taskmaster 包{installation.status==='available'?'已找到':'未找到'}。</p>
     {installation.status==='available'&&<dl><dt>包声明版本</dt><dd>{installation.version}</dd><dt>许可证声明</dt><dd>{installation.license??'未提供'}</dd><dt>包清单 SHA-256</dt><dd>{installation.manifest_sha256}</dd><dt>CLI 入口 SHA-256</dt><dd>{installation.cli_entry_sha256}</dd></dl>}
-    <p className="wb-hint">安装观察基于当前用户 profile 内的 package.json 与 CLI 入口文件，版本取自包声明。许可证声明保留给原安装审核流程。</p>
+    <p className="wb-hint">安装观察读取原用户 profile 或其运行环境 PATH 指向的包清单与 CLI 入口，版本取自包声明。许可证声明保留给原安装审核流程。</p>
    </div>}
    <p className="wb-hint">显示原角色 MCP 注册表中按名称、命令或包参数匹配的连接及已发现目录状态。可在此角色的 MCP 连接面板配置、重载及审核工具。PRD 文件绑定继续检查原任务准备度。</p>
    {resource.data&&!taskmaster?.registry_available&&<p className="wb-status">MCP 注册表状态尚不可读取。</p>}

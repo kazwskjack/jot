@@ -1770,7 +1770,7 @@
     null,
     "TaskPrdInstallation",
     "200",
-    "Read only the original owner-bound profile package metadata and CLI entry, with native file hashes. No installation or execution authorization."
+    "Read original owner-profile package or Host PATH CLI-link/shim metadata with stable package/entry hashes. Package declarations and observations grant no execution authority."
   ],
   [
     "GET",

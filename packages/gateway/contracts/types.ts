@@ -503,7 +503,7 @@ export type NativePlanModeAccepted = NativeCommandQueryAccepted;
 export type NativePlanModeClose = {name:'plan'};
 export type NativePlanModeReconcile = Record<string,never>;
 
-export type TaskmasterInstallation = {protocol:1;owner_id:string;profile_id:string;scope:"owner_profile";status:"available"|"missing";version:string|null;license:string|null;manifest_sha256:string|null;cli_entry_sha256:string|null;reason_code:"package_not_installed"|null;observed_at:string;execution_authorized:false};
+export type TaskmasterInstallation = {protocol:1;owner_id:string;profile_id:string;scope:"owner_profile"|"host_path"|"profile_and_path";status:"available"|"missing";version:string|null;license:string|null;manifest_sha256:string|null;cli_entry_sha256:string|null;reason_code:"package_not_installed"|null;observed_at:string;execution_authorized:false};
 export type TaskPrdInstallation = {task_id:string;task_version:number;installation:TaskmasterInstallation};
 
 export type TaskPrdProjectFile = {path:".taskmaster/config.json"|".taskmaster/tasks/tasks.json";state:"missing"|"too_large"|"invalid"|"ready";size:number;sha256:string|null;content:string|null;task_count:number|null;tags:string[]};
