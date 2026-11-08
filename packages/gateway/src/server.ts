@@ -112,6 +112,7 @@ import {createAuxiliaryRunGuard} from './workbench/auxiliary-run-guard.ts';
 import {registerConversationGoalRoutes,type ConversationGoalClient} from './conversations/goal-routes.ts';
 import {SkillCatalogService,type SkillCatalogHost} from './skills/catalog.ts';
 import {registerSkillCatalogRoutes} from './skills/catalog-routes.ts';
+import {registerNativeCommandQueryRoutes} from './skills/command-query-routes.ts';
 import {AttachmentResolver} from './artifacts/resolver.ts';
 import {attachmentKindForMime} from './artifacts/pinned-manifest.ts';
 import {readAttachmentSteeringReadiness,type OrdinaryAttachmentSteeringClient} from './harness/ordinary-attachment-readiness.ts';
@@ -432,6 +433,9 @@ export async function buildServer(config: {
     }
     const idempotencyKey = String(request.headers['idempotency-key'] ?? '');
     if (!/^[\x21-\x7E]{8,128}$/.test(idempotencyKey)) throw new Error('idempotency_key_invalid');
+    if((request.routeOptions.config as {nativeCommandQueryMutation?:boolean}).nativeCommandQueryMutation===true){
+      reply.header('cache-control','private, no-store');return;
+    }
     // Binary imports own a content-aware immutable receipt in the workspace service.
     if(request.method==='PUT'&&request.routeOptions.url==='/v1/workspaces/:workspaceId/files/binary')return;
     if(request.method==='POST'&&[
@@ -873,7 +877,11 @@ export async function buildServer(config: {
   registerDiscoveryPolicyRoutes(app,{policies:new DiscoveryPolicies(db,{onChange:(owner,receipt,event)=>persistentTasks.synchronizeDiscoveryPolicy(owner,receipt.policy_id,event)}),actor,role:(owner,id)=>workbench.getAgent(owner,id),atomic:atomicCommand});
   registerDiscoveryHistoryRoutes(app,{history:new DiscoveryHistory(db),actor,role:(owner,id)=>workbench.getAgent(owner,id)});
   registerConversationGoalRoutes(app,{db,conversations,actor,client:config.conversationGoalClient,resumeAdmission:{enabled:config.conversationGoalResumeEnabled===true,controls:new ConversationGoalControls(db,events,runs),atomic:atomicCommand}});
-  if(config.skillCatalogClient)registerSkillCatalogRoutes(app,new SkillCatalogService(db,workbench,config.skillCatalogClient),actor,config.internalChannelToken);
+  if(config.skillCatalogClient){
+    const catalog=new SkillCatalogService(db,workbench,config.skillCatalogClient);
+    registerSkillCatalogRoutes(app,catalog,actor,config.internalChannelToken);
+    registerNativeCommandQueryRoutes(app,{db,catalog,client:config.skillCatalogClient,actor,token:config.internalChannelToken});
+  }
   app.get('/v1/capabilities', async (request, reply) => {
     const ownerId = actor(request as any);
     const cancelled=new AbortController();const abort=()=>{if(!reply.raw.writableEnded)cancelled.abort();};

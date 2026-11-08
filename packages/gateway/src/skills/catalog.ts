@@ -13,6 +13,7 @@ export type SkillCatalogHost=Readonly<{
  read:(input:{scope:SkillCatalogScope;signal?:AbortSignal;include_commands?:true})=>Promise<unknown>;
  readResource?:(input:{scope:SkillCatalogScope;skill_name:string;relative_path:string;signal?:AbortSignal})=>Promise<unknown>;
  readDefinition?:(input:{scope:SkillCatalogScope;name:string;signal?:AbortSignal;include_source_manifest?:true})=>Promise<unknown>;
+ executeCommandQuery?:(packet:Record<string,unknown>)=>Promise<unknown>;
 }>;
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 const SKILL=/^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -58,6 +59,10 @@ export class SkillCatalogService{
   const current=readOrdinarySkillScope(this.db,scope.owner_id,scope.run_id);
   if(!isDeepStrictEqual(current,value))throw Error('skill_catalog_scope_changed');
   return {scope:current,execution_authorized:false};
+ }
+ originalScope(owner:string,runId:string){return this.bound(owner,runId).scope;}
+ assertScopeCurrent(scope:SkillCatalogScope){
+  if(!isDeepStrictEqual(this.bound(scope.owner_id,scope.run_id).scope,scope))throw Error('skill_catalog_scope_changed');
  }
  async read(owner:string,runId:string,signal?:AbortSignal,includeCommands=false){
   signal?.throwIfAborted();const before=this.bound(owner,runId);

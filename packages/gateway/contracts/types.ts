@@ -479,3 +479,10 @@ export type RunSkillDefinitionObservation = import('../../skills/catalog-contrac
 export type RunSkillReadResponse = RunSkillCatalogObservation | RunSkillResourceObservation | RunSkillDefinitionObservation;
 
 export type SkillSourceManifest = import('../../skills/catalog-contract.js').SkillSourceManifest;
+
+export type NativeCommandQuery = import('../../skills/command-query.js').NativeCommandQuery;
+export type NativeCommandQueryResult = import('../../skills/command-query.js').NativeCommandQueryResult;
+export type NativeCommandQueryAccepted = {accepted:true;request_id:string;run_id:string};
+export type NativeCommandQuerySummary = {request_id:string;run_id:string;name:'permission'|'goal';state:'prepared'|'dispatched'|'settled'|'rejected'|'unknown';updated_at:string};
+export type NativeCommandQueryOperation = NativeCommandQuerySummary & {result?:NativeCommandQueryResult};
+export type NativeCommandQueryPage = {items:NativeCommandQuerySummary[]};

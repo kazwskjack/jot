@@ -52,6 +52,7 @@
     "skill-registry.js",
     "skill-source-manifest.js",
     "skill-read-scope.js",
+    "native-command-query.js",
     "workbench.js",
     "workbench-goal.js",
     "host-execution-lease.js",

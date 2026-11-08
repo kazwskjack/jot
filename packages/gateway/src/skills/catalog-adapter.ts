@@ -43,6 +43,12 @@ export class SkillCatalogAdapterClient implements SkillCatalogHost{
   finally{if(!done)await reader.cancel().catch(()=>{});reader.releaseLock();}
   try{return JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw Error('skill_catalog_adapter_invalid');}
  }
+ async executeCommandQuery(packet:Record<string,unknown>):Promise<unknown>{
+  const response=await this.#fetch(this.#origin+'/v1/commands/query',{method:'POST',redirect:'error',cache:'no-store',
+   headers:{authorization:`Bearer ${this.#token}`,'content-type':'application/json'},body:JSON.stringify(packet),signal:AbortSignal.timeout(35000)});
+  if(!response.ok)throw Error('native_command_query_response_unknown');
+  return response.json();
+ }
  async readResource({scope,skill_name,relative_path,signal}:{scope:SkillCatalogScope;skill_name:string;relative_path:string;signal?:AbortSignal}):Promise<unknown>{
   const combined=AbortSignal.any([AbortSignal.timeout(5000),...(signal?[signal]:[])]);combined.throwIfAborted();
   const response=await this.#fetch(this.#origin+'/v1/skills/resource',{method:'POST',redirect:'error',cache:'no-store',

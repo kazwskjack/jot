@@ -1672,5 +1672,32 @@
     "RunSkillReadResponse",
     "200",
     "Read original-scope native skills and optional command descriptors. The default view contains skill metadata, while commands=1 includes effective commands.list(originalAgent) descriptors. Select name alone for one native SkillDefinition, its body hash and definition hash, plus allowlisted version/license values from native provider metadata. Null means the provider metadata supplies no usable value. Select name and path together for one inert relative resource. Query forms are exclusive. The response carries execution_authorized=false under the original run permissions. Add manifest=source to a name-only selection for the original registry-selected instruction file, read through the native filesystem boundary and checked against the selected definition body. Its top-level version/license and text SHA-256 are returned under manifest.original, with selected-skill-frontmatter provenance and coverage by definitionSha256. Ordinary active runs use the stored original owner/conversation/run/native-Session lineage, current mode and run/conversation versions. The resident Agent and exact native preset are rechecked around reads. Ordinary scopes include kind=ordinary and carry their original Session identity and versions."
+  ],
+  [
+    "POST",
+    "/v1/runs/{run_id}/native-command-queries",
+    "Invoke an original no-argument /permission or /goal state query through native commands.execute. Request ID must equal Idempotency-Key. Only a newly prepared original request receives a private one-time dispatch capability. Native logs are flushed before known settlement. Recover by original request ID after response loss; pending and unknown operations never receive a fresh dispatch grant. Mutating command arguments and model calls have separate domain admission paths.",
+    "NativeCommandQuery",
+    "NativeCommandQueryAccepted",
+    "202",
+    "Invoke an original no-argument /permission or /goal state query through native commands.execute. Request ID must equal Idempotency-Key. Only a newly prepared original request receives a private one-time dispatch capability. Native logs are flushed before known settlement. Recover by original request ID after response loss; pending and unknown operations never receive a fresh dispatch grant. Mutating command arguments and model calls have separate domain admission paths."
+  ],
+  [
+    "GET",
+    "/v1/runs/{run_id}/native-command-queries",
+    "Read the most recent 50 original owner/run query operation summaries.",
+    null,
+    "NativeCommandQueryPage",
+    "200",
+    "Read the most recent 50 original owner/run query operation summaries."
+  ],
+  [
+    "GET",
+    "/v1/runs/{run_id}/native-command-queries/{request_id}",
+    "Recover the persisted original operation and any known native command result after cancellation, response loss or run completion.",
+    null,
+    "NativeCommandQueryOperation",
+    "200",
+    "Recover the persisted original operation and any known native command result after cancellation, response loss or run completion."
   ]
 ]
