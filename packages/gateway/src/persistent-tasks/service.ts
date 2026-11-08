@@ -333,6 +333,9 @@ export class PersistentTaskService {
     const native=this.db.prepare('SELECT root_run_id FROM wb_native_execution_runs WHERE run_id=?').get(runId) as Row|undefined;
     return native?query(native.root_run_id):undefined;
   }
+  isDiscoveryPlanningRun(runId:string):boolean{
+    return !this.discoveryWorkForRun(runId)&&!!this.discoveryForRun(runId);
+  }
   /** Planning cycles cannot acquire write/delegate/message authority through the
    * generic workspace tool. A later work phase requires its own isolated scope. */
   assertDiscoveryOperation(runId:string,operation:string){

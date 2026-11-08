@@ -374,10 +374,11 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
     if(input.execution_lease!==undefined)assertExecutionLease(db,input.run_id,input.execution_lease);
     workbench.assertRunActive(input.run_id); tasks.assertRunActive(input.run_id);
     const saved = workbench.contextForRun(input.run_id);
-    const mcpConnections = saved && mcp ? mcp.registry.runtimeConnections(saved.owner_id, saved.agent_id).map(({ connection_id, server_name, transport, version, generation, config, tools }) =>
+    const planning = tasks.isDiscoveryPlanningRun(input.run_id);
+    const mcpConnections = saved && !planning && mcp ? mcp.registry.runtimeConnections(saved.owner_id, saved.agent_id).map(({ connection_id, server_name, transport, version, generation, config, tools }) =>
       ({ connection_id, server_name, transport, version, generation, config, tools })) : [];
     const mcpTools = mcpConnections.flatMap(connection => connection.tools.map(tool => tool.public_name));
-    const resolved = saved ? {...saved, allowed_tools: [...saved.allowed_tools.filter(tool => WORKBENCH_TOOL_IDS.includes(tool)), ...mcpTools],
+    const resolved = saved ? {...saved, allowed_tools: planning ? [] : [...saved.allowed_tools.filter(tool => WORKBENCH_TOOL_IDS.includes(tool)), ...mcpTools],
       ...(mcpConnections.length ? { mcp_connections: mcpConnections } : {})} : null;
     if (!resolved || resolved.owner_id !== binding.owner_id) throw new Error('workbench_identity_forbidden');
     if (input.tool_name !== undefined && (typeof input.tool_name !== 'string'
