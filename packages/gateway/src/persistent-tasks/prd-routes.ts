@@ -51,13 +51,16 @@ export const prdWorkResourceRequestSchema={type:'object',additionalProperties:fa
 export const prdWorkPreparationRequestSchema={...prdWorkResourceRequestSchema,required:[...prdWorkResourceRequestSchema.required,'expected_cycle_version'],properties:{
  ...prdWorkResourceRequestSchema.properties,expected_cycle_version:{type:'integer',minimum:1,maximum:Number.MAX_SAFE_INTEGER},
 }};
+export const prdWorkAdmissionRequestSchema={...prdWorkResourceRequestSchema,required:[...prdWorkResourceRequestSchema.required,'grant_id'],properties:{
+ ...prdWorkResourceRequestSchema.properties,grant_id:{type:'string',minLength:1,maxLength:256},
+}};
 /** Outer server retains actor/origin/CSRF validation. taskPrdCommand routes must
  * bypass its generic ledger: preview is read-only; bind has an atomic receipt. */
 export function registerTaskPrdRoutes(app:FastifyInstance,service:TaskPrdService,actor:(r:FastifyRequest)=>string,atomicCommand?:<T>(request:FastifyRequest,status:number,operation:()=>T)=>T){
  const task=(r:FastifyRequest)=>(r.params as {taskId:string}).taskId;
  const errorHandler=(error:FastifyError,r:FastifyRequest,reply:FastifyReply)=>{
   const code=error.validation?'invalid_workbench_request':error.message;
-  const status=['prd_taskmaster_unavailable','prd_taskmaster_project_unavailable','prd_taskmaster_import_unavailable','prd_taskmaster_import_unconfirmed','prd_work_plan_integrity_failed','prd_work_plan_acceptance_integrity_failed','prd_work_plan_acceptance_unavailable','work_cycle_corrupt','prd_work_handoff_unavailable','prd_work_handoff_integrity_failed','prd_work_preparation_integrity_failed','prd_work_preparation_unavailable','work_grant_corrupt','workspace_journal_corrupt','work_cycle_source_corrupt'].includes(code)?503:code==='unauthorized'?401:['origin_forbidden','csrf_invalid'].includes(code)?403:['task_not_found','agent_not_found','prd_template_not_found','prd_work_plan_not_found','work_cycle_not_found'].includes(code)?404:
+  const status=['prd_taskmaster_unavailable','prd_taskmaster_project_unavailable','prd_taskmaster_import_unavailable','prd_taskmaster_import_unconfirmed','prd_work_plan_integrity_failed','prd_work_plan_acceptance_integrity_failed','prd_work_plan_acceptance_unavailable','work_cycle_corrupt','prd_work_handoff_unavailable','prd_work_handoff_integrity_failed','prd_work_preparation_integrity_failed','prd_work_preparation_unavailable','prd_work_admission_unavailable','prd_work_admission_integrity_failed','work_admission_corrupt','work_grant_corrupt','workspace_journal_corrupt','work_cycle_source_corrupt'].includes(code)?503:code==='unauthorized'?401:['origin_forbidden','csrf_invalid'].includes(code)?403:['task_not_found','agent_not_found','prd_template_not_found','prd_work_plan_not_found','work_cycle_not_found'].includes(code)?404:
    code.startsWith('invalid_')||code==='work_cycle_invalid'||code==='contract_request_invalid'||code==='idempotency_key_required'||code==='idempotency_key_invalid'||code==='prd_source_unsupported'?422:
    code.startsWith('prd_')||code.startsWith('work_cycle_')||code.startsWith('work_grant_')||code.startsWith('workspace_journal_')||['version_conflict','idempotency_conflict','workspace_coordination_required'].includes(code)?409:500;
   const publicCode=status===500?'INTERNAL_ERROR':code.toUpperCase(),requestId=/^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$/.test(r.id)?r.id:randomUUID();
@@ -104,6 +107,13 @@ export function registerTaskPrdRoutes(app:FastifyInstance,service:TaskPrdService
  app.post('/v1/persistent-tasks/:taskId/prd/work-plan-grant',{validatorCompiler,errorHandler,schema:{params,body:prdWorkResourceRequestSchema}},async(r,reply)=>{
   reply.header('cache-control','private, no-store');if(!atomicCommand)throw Error('prd_work_preparation_unavailable');
   return atomicCommand(r,200,()=>service.authorizeWork(actor(r),task(r),r.body,r.headers['idempotency-key']));
+ });
+ app.get('/v1/persistent-tasks/:taskId/prd/work-plans/:planId/admission',{validatorCompiler,errorHandler,schema:{params:{...params,required:['taskId','planId'],properties:{...params.properties,planId:{type:'string',pattern:'^prd-plan-[a-f0-9]{64}$'}}}}},async(r,reply)=>{
+  reply.header('cache-control','private, no-store');return service.workAdmission(actor(r),task(r),(r.params as {planId:string}).planId);
+ });
+ app.post('/v1/persistent-tasks/:taskId/prd/work-plan-admit',{validatorCompiler,errorHandler,schema:{params,body:prdWorkAdmissionRequestSchema}},async(r,reply)=>{
+  reply.header('cache-control','private, no-store');if(!atomicCommand)throw Error('prd_work_admission_unavailable');
+  return atomicCommand(r,200,()=>service.requestWorkAdmission(actor(r),task(r),r.body,r.headers['idempotency-key']));
  });
  app.get('/v1/persistent-tasks/:taskId/prd/templates',{validatorCompiler,errorHandler,schema:{params}},async(r,reply)=>{
   reply.header('cache-control','private, no-store');return service.templates(actor(r),task(r));

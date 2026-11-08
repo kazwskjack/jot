@@ -1,3 +1,5 @@
+import {WorkAdmissionController} from '../always-on/work-admission.ts';
+import {PrdWorkAdmissionRequests} from '../persistent-tasks/prd-work-admission.ts';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { openProductDatabase } from '../db/database.ts';
@@ -112,6 +114,9 @@ const runtimeReadinessSources:RuntimeReadinessSources={native:sessionClient,work
 const discoveryAdmission=discoveryAdmissionEnabled&&budgetPolicy?new DiscoveryAdmissionController({db,workbench,tasks:persistentTasks,
   policies:new DiscoveryPolicies(db),coordinator,activity:new ProjectActivityObserver({db,workbench,native:sessionClient,maxAgeMs:20_000}),
   budgetPolicy,maxAgeMs:20_000}):undefined;
+const prdWorkRequests=nativeWork&&budgetPolicy?new PrdWorkAdmissionRequests(db,new WorkAdmissionController({db,tasks:persistentTasks,
+ policies:new DiscoveryPolicies(db),coordinator,activity:new ProjectActivityObserver({db,workbench,native:sessionClient,maxAgeMs:20_000}),
+ workspace:nativeWork.workspace,budgetPolicy,maxAgeMs:20_000})):undefined;
 const discoveryAdmissionHook=discoveryAdmission?async(owner:string,scope:Readonly<{project_id:string;workspace_id:string;agent_id:string}>)=>{
   try{return await discoveryAdmission.admit(owner,scope);}
   catch{process.stderr.write('discovery_admission_retry\n');return{admitted:false,reason:'ADMISSION_RETRY',execution_authorized:false as const};}
@@ -193,10 +198,13 @@ const commandLoop = async()=>{
  }
 };
 let nextAttachmentRetention=0;
+let prdWorkCheck:Promise<unknown>|undefined;
 const workbenchLoop = async () => {
   while (!stopping) {
     if(channelAttachmentsEnabled&&Date.now()>=nextAttachmentRetention){nextAttachmentRetention=Date.now()+60000;try{const result=artifactService.cleanupExpiredChannelUploads();if(result.blocked)process.stderr.write(JSON.stringify({code:'CHANNEL_ATTACHMENT_RETENTION_BLOCKED',blocked:result.blocked})+'\n');}catch{process.stderr.write('channel_attachment_retention_retry\n');}}
     try{archiveMaintenance?.processNext();}catch{process.stderr.write('notification_archive_maintenance_retry\n');}
+    if(prdWorkRequests&&!prdWorkCheck&&!stopping)prdWorkCheck=prdWorkRequests.processNext(memoryShutdown.signal)
+      .catch(()=>{if(!stopping)process.stderr.write('prd_work_admission_retry\n');}).finally(()=>{prdWorkCheck=undefined;});
     try { replyDispatch.processNext(); } catch { process.stderr.write('task_reply_dispatch_retry\n'); }
     try {
       await maintainWorkbench(workbench, persistentTasks, workbenchExecutionReady,discoveryAdmissionHook);
@@ -216,4 +224,5 @@ await Promise.all([completionLoop(),commandLoop(),workbenchLoop(),finalRecoveryL
     process.stderr.write(`${JSON.stringify({ level: 'error', code: code.slice(0, 96) })}\n`);
   },
 })]);
+await prdWorkCheck;
 db.close();

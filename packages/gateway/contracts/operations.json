@@ -1942,5 +1942,23 @@
     "TaskPrdWorkResources",
     "200",
     "Read immutable bounded original snapshot-review and grant projections, or original preparation uncertainty, for one owned PRD cycle. Root paths and private recovery records remain host-private. Historical reads do not renew authority or verify current bytes."
+  ],
+  [
+    "POST",
+    "/v1/persistent-tasks/{task_id}/prd/work-plan-admit",
+    "Request original PRD work admission",
+    "TaskPrdWorkAdmissionRequest",
+    "TaskPrdWorkAdmissionReceipt",
+    "200",
+    "Persist an explicit owner request for the exact original PRD work grant. The existing Worker consumes it using real native idle, activity, source byte inspection, coordinator capacity and original cumulative task budgets. Original grant-level occurrence replay prevents duplicate admissions. This receipt records request acceptance only."
+  ],
+  [
+    "GET",
+    "/v1/persistent-tasks/{task_id}/prd/work-plans/{plan_id}/admission",
+    "Read original PRD work admission",
+    null,
+    "TaskPrdWorkAdmissionState",
+    "200",
+    "Read the durable owner admission request, bounded original admission lineage and latest deferred gate reason. Historical admission does not prove native execution or completion."
   ]
 ]

@@ -608,3 +608,8 @@ export type TaskPrdWorkGrant={
  paths:string[];role_version:number;role_epoch:number;created_at:string;execution_authorized:false;source_bytes_verified:false;
 };
 export type TaskPrdWorkResources={task_id:string;plan_id:string;cycle_id:string|null;available:boolean;preparation:TaskPrdWorkPreparation|null;grant:TaskPrdWorkGrant|null;preparation_uncertain:boolean;reasons:string[];execution_authorized:false};
+
+export type TaskPrdWorkAdmissionRequest={plan_id:string;cycle_id:string;grant_id:string;preview_sha256:string};
+export type TaskPrdWorkAdmissionReceipt={protocol:1;task_id:string;plan_id:string;cycle_id:string;grant_id:string;grant_sha256:string;created_at:string;accepted:true;execution_authorized:false};
+export type TaskPrdWorkAdmissionState={task_id:string;plan_id:string;available:boolean;request:TaskPrdWorkAdmissionReceipt|null;
+ admission:{grant_id:string;occurrence_id:string;run_id:string;conversation_id:string;created_at:string}|null;reason:string|null;execution_authorized:false};

@@ -1,3 +1,4 @@
+import TaskPrdWorkAdmission from './TaskPrdWorkAdmission';
 import React,{useEffect,useState} from 'react';
 import {request} from '../jot/client';
 import {useResource} from './useResource';
@@ -20,8 +21,8 @@ function checkedGrant(value:TaskPrdWorkGrant,taskId:string,planId:string,cycleId
   ||typeof value.grant_id!=='string'||!value.grant_id||typeof value.snapshot_id!=='string'||!value.snapshot_id||!Array.isArray(value.paths))throw Error('PRD_WORK_RESOURCE_RECEIPT_INVALID');
  return value;
 }
-export default function TaskPrdWorkResources({taskId,planId,cycle,acceptanceHash,locked,prepareSave,grantSave,onStateChange}:{
- taskId:string;planId:string|null;cycle:TaskPrdWorkCycle|null;acceptanceHash:string|null;locked:boolean;prepareSave:TaskSaveReceipt;grantSave:TaskSaveReceipt;onStateChange:()=>void;
+export default function TaskPrdWorkResources({taskId,planId,cycle,acceptanceHash,locked,prepareSave,grantSave,admitSave,onStateChange}:{
+ taskId:string;planId:string|null;cycle:TaskPrdWorkCycle|null;acceptanceHash:string|null;locked:boolean;prepareSave:TaskSaveReceipt;grantSave:TaskSaveReceipt;admitSave:TaskSaveReceipt;onStateChange:()=>void;
 }){
  const [copyConfirmed,setCopyConfirmed]=useState(false),[grantConfirmed,setGrantConfirmed]=useState(false),[error,setError]=useState('');
  const [preparedReceipt,setPreparedReceipt]=useState<TaskPrdWorkPreparation|null>(null),[grantReceipt,setGrantReceipt]=useState<TaskPrdWorkGrant|null>(null);
@@ -66,7 +67,7 @@ export default function TaskPrdWorkResources({taskId,planId,cycle,acceptanceHash
   }catch(e){if(!grantSave.pending)setGrantConfirmed(false);setError(prdMessage(e instanceof Error?e.message:'原路径范围确认回执待确认'));}
   finally{onStateChange();}
  }
- if(!cycle&&!prepareSave.pending&&!grantSave.pending&&!preparedReceipt&&!grantReceipt)return null;
+ if(!cycle&&!prepareSave.pending&&!grantSave.pending&&!admitSave.pending&&!preparedReceipt&&!grantReceipt)return null;
  return <section aria-label="原工作快照与路径范围" style={{overflowWrap:'anywhere'}}>
   <h5>原工作快照与路径范围</h5>
   <p className="wb-hint">先核对规划交接与费用记录，再准备原逻辑文件快照并确认路径范围。实际执行时仍会核对快照字节、原生空闲、容量和累计预算。</p>
@@ -85,10 +86,11 @@ export default function TaskPrdWorkResources({taskId,planId,cycle,acceptanceHash
    {!grant&&editable&&<label className="wb-checkbox"><input type="checkbox" checked={grantConfirmed} disabled={locked} onChange={event=>setGrantConfirmed(event.target.checked)}/>已核对原快照、校验哈希及以上全部路径，确认保存原 grant。</label>}
   </>}
   {(editable&&!!review&&!grant||grantSave.pending)&&<button type="button" disabled={grantSave.busy||(!grantSave.pending&&(locked||!grantConfirmed))} onClick={()=>void authorize()}>{grantSave.busy?'正在保存原 grant…':grantSave.pending?'重试原 grant 回执':'确认原路径范围'}</button>}
-  {grant&&<p role="status">原 grant {grant.grant_id} · SHA-256 {grant.grant_sha256}。执行准入请求入口继续开发。</p>}
+  {grant&&<p role="status">原 grant {grant.grant_id} · SHA-256 {grant.grant_sha256}。</p>}
   {(prepareSave.pending||grantSave.pending)&&<p role="status">原请求及 key 已保留，请重试对应原回执。</p>}
   {preparedReceipt&&<p role="status">原准备回执 {preparedReceipt.snapshot_id} · {preparedReceipt.review_sha256}</p>}
   {grantReceipt&&<p role="status">原 grant 回执 {grantReceipt.grant_id} · {grantReceipt.grant_sha256}</p>}
+  <TaskPrdWorkAdmission taskId={taskId} planId={planId} grant={grant??null} ready={cycle?.state==='open'} locked={locked} save={admitSave} onStateChange={onStateChange}/>
   {error&&<p className="wb-error" role="alert">{error}</p>}
  </section>;
 }

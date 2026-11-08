@@ -360,6 +360,7 @@ export async function buildServer(config: {
     'POST /v1/persistent-tasks/:taskId/prd/work-plan-handoff',
     'POST /v1/persistent-tasks/:taskId/prd/work-plan-prepare',
     'POST /v1/persistent-tasks/:taskId/prd/work-plan-grant',
+    'POST /v1/persistent-tasks/:taskId/prd/work-plan-admit',
   ]);
   const isPersistentTaskMutationRoute=(request:any)=>persistentTaskMutationRoutes.has(`${request.method} ${request.routeOptions.url}`);
   const isPluginProfileMutationRoute=(request:any)=>request.routeOptions.config?.pluginProfileMutation===true;

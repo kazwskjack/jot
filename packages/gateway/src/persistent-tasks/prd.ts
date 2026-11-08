@@ -1,3 +1,5 @@
+import {installPrdWorkAdmissionRequests,requestPrdWorkAdmission,readPrdWorkAdmission} from './prd-work-admission.ts';
+import {prdExecutionReasons} from './prd-execution-readiness.ts';
 import {createHash,randomUUID} from 'node:crypto';
 import {closeSync,fstatSync,lstatSync,openSync,readSync} from 'node:fs';
 import {dirname,join,resolve} from 'node:path';
@@ -33,7 +35,6 @@ const sha=(value:string|Buffer)=>createHash('sha256').update(value).digest('hex'
 const supported=(name:string)=>/\.(md|markdown|txt|json)$/i.test(name);
 const supportedMedia=(name:string,mediaType:string)=>mediaType.startsWith('text/')||/\.json$/i.test(name)&&mediaType.split(';',1)[0]!.trim().toLowerCase()==='application/json';
 const MAX_BYTES=1048576,MAX_OBJECTIVE=12000;
-const terminal=['succeeded','partial','failed','cancelled','interrupted'];
 type PrdOptions={uploadRoot:string;workResources?:PrdWorkResourcePorts;handoffCommands?:Pick<RunCommandService,'cancel'>;mcpRegistry?:Pick<McpRegistryService,'taskmasterConnections'>;installationClient?:TaskmasterInstallationClient;projectSource?:Pick<GitWorkbench,'taskmasterFiles'>&Partial<Pick<GitWorkbench,'taskmasterPrdFiles'|'taskmasterPrdFile'>>};
 function object(value:unknown,keys:string[]):Row{
  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!keys.includes(key)))throw Error('invalid_prd_request');return value as Row;
@@ -73,10 +74,9 @@ export class TaskPrdService {
   installPrdWorkPlans(db);
   installPrdWorkPlanAcceptances(db);
   installPrdWorkResources(db);
+  installPrdWorkAdmissionRequests(db);
  }
  private latest(owner:string,taskId:string){return this.db.prepare('SELECT * FROM wb_task_prd_bindings WHERE owner_id=? AND task_id=? ORDER BY revision DESC LIMIT 1').get(owner,taskId) as Row|undefined;}
- private installed(name:string){return !!this.db.prepare('SELECT 1 FROM sqlite_master WHERE name=?').get(name);}
- private taskRunsSQL(){return ['wb_task_run_occurrences','wb_native_execution_runs','wb_task_auxiliary_runs'].filter(name=>this.installed(name)).map(name=>`SELECT run_id,task_id FROM ${name}`).join(' UNION ALL ');}
  private receipt(row:Row):PrdReceipt{return {binding_id:row.binding_id,task_id:row.task_id,task_version:row.task_version,revision:row.revision,
   source:JSON.parse(row.source_json),content_sha256:row.content_sha256,objective_sha256:row.objective_sha256,created_at:row.created_at,execution_authorized:false};}
  private scope(owner:string,taskId:string){const task=this.tasks.get(owner,taskId),role=this.workbench.getAgent(owner,task.agent_id);return {task,role};}
@@ -87,28 +87,7 @@ export class TaskPrdService {
   const prior=this.latest(owner,task.task_id);
   if(prior&&task.objective!==prior.objective)reasons.push('PRD_OBJECTIVE_CHANGED');return [...new Set(reasons)];
  }
- private executionReasons(owner:string,taskId:string){
-  const reasons:string[]=[];
-  if(this.db.prepare(`SELECT 1 FROM wb_task_current_occurrences o JOIN ga_runs r ON r.id=o.run_id WHERE o.task_id=?
-   AND (r.reason_code='OUTCOME_UNKNOWN' OR o.status='outcome_unknown' OR r.status NOT IN (${terminal.map(()=>'?').join(',')})) LIMIT 1`).get(taskId,...terminal))reasons.push('PRD_EXECUTION_UNRESOLVED');
-  // A terminal root does not close an already reserved native child. Only the
-  // original trusted abort/closure receipts can establish its quiescence.
-  if(this.installed('wb_native_child_reservations')&&this.db.prepare(`SELECT 1 FROM wb_native_child_reservations q
-   LEFT JOIN wb_native_creation_aborts a ON a.reservation_id=q.reservation_id LEFT JOIN wb_native_child_closures c ON c.reservation_id=q.reservation_id
-   WHERE q.task_id=? AND q.owner_id=? AND a.reservation_id IS NULL AND c.reservation_id IS NULL LIMIT 1`).get(taskId,owner))reasons.push('PRD_EXECUTION_UNRESOLVED');
-  if(this.installed('wb_native_execution_runs')&&this.db.prepare(`SELECT 1 FROM wb_native_execution_runs n
-   JOIN ga_runs r ON r.id=n.run_id LEFT JOIN wb_native_execution_closures c ON c.run_id=n.run_id WHERE n.task_id=? AND n.owner_id=?
-   AND (c.run_id IS NULL OR r.reason_code='OUTCOME_UNKNOWN' OR r.status NOT IN (${terminal.map(()=>'?').join(',')})) LIMIT 1`).get(taskId,owner,...terminal))reasons.push('PRD_EXECUTION_UNRESOLVED');
-  if(this.installed('wb_task_auxiliary_runs')&&this.db.prepare(`SELECT 1 FROM wb_task_auxiliary_runs a JOIN ga_runs r ON r.id=a.run_id
-   WHERE a.task_id=? AND a.owner_id=? AND (r.reason_code='OUTCOME_UNKNOWN' OR r.status NOT IN (${terminal.map(()=>'?').join(',')})) LIMIT 1`).get(taskId,owner,...terminal))reasons.push('PRD_EXECUTION_UNRESOLVED');
-  const runs=this.taskRunsSQL();
-  if(this.installed('wb_model_budget_attempts')){
-   if(this.db.prepare(`SELECT 1 FROM wb_model_budget_attempts a JOIN (${runs}) o ON o.run_id=a.run_id WHERE o.task_id=? AND a.state IN ('reserved','in_flight','unknown') LIMIT 1`).get(taskId))reasons.push('PRD_BUDGET_UNRESOLVED');
-  }
-  if(this.installed('ga_web_operation_cursors')&&this.db.prepare(`SELECT 1 FROM ga_web_operation_cursors c JOIN (${runs}) o ON o.run_id=c.run_id WHERE o.task_id=?
-   AND (c.last_status IS NULL OR c.last_status NOT IN ('succeeded','partial','failed','cancelled') OR c.items_settled<>1) LIMIT 1`).get(taskId))reasons.push('PRD_EXECUTION_UNRESOLVED');
-  return [...new Set(reasons)];
- }
+ private executionReasons(owner:string,taskId:string){return prdExecutionReasons(this.db,owner,taskId);}
  workPlanHandoff(owner:string,taskId:string,planId:string){
   this.workPlan(owner,taskId,planId);
   return withReadTransaction(this.db,()=>readPrdWorkHandoff(this.db,owner,taskId,planId,!!this.options.handoffCommands,()=>this.executionReasons(owner,taskId)));
@@ -116,6 +95,12 @@ export class TaskPrdService {
  requestWorkPlanHandoff(owner:string,taskId:string,input:unknown){
   this.tasks.get(owner,taskId);
   return requestPrdWorkHandoff(this.db,this.options.handoffCommands,owner,taskId,input);
+ }
+ workAdmission(owner:string,taskId:string,planId:string){
+  this.workPlan(owner,taskId,planId);return readPrdWorkAdmission(this.db,owner,taskId,planId,!!this.options.workResources);
+ }
+ requestWorkAdmission(owner:string,taskId:string,input:unknown,key:unknown){
+  this.tasks.get(owner,taskId);return requestPrdWorkAdmission(this.db,!!this.options.workResources,owner,taskId,input,key);
  }
  workResources(owner:string,taskId:string,planId:string){
   this.workPlan(owner,taskId,planId);return readPrdWorkResources(this.db,owner,taskId,planId,!!this.options.workResources,()=>this.executionReasons(owner,taskId));

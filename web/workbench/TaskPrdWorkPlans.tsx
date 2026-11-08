@@ -14,8 +14,8 @@ function checkAcceptance(value:TaskPrdWorkPlanAcceptance,taskId:string,planId:st
   ||!/^prd-acceptance-[a-f0-9]{64}$/.test(value.acceptance_id)||!/^[a-f0-9]{64}$/.test(value.sha256))throw Error('PRD_WORK_PLAN_ACCEPTANCE_INTEGRITY_FAILED');
  return value;
 }
-export default function TaskPrdWorkPlans({task,locked,ready,save,cycleSave,handoffSave,prepareSave,grantSave,onStateChange}:{
- task:Task;locked:boolean;ready:boolean;save:TaskSaveReceipt;cycleSave:TaskSaveReceipt;handoffSave:TaskSaveReceipt;prepareSave:TaskSaveReceipt;grantSave:TaskSaveReceipt;onStateChange:()=>void;
+export default function TaskPrdWorkPlans({task,locked,ready,save,cycleSave,handoffSave,prepareSave,grantSave,admitSave,onStateChange}:{
+ task:Task;locked:boolean;ready:boolean;save:TaskSaveReceipt;cycleSave:TaskSaveReceipt;handoffSave:TaskSaveReceipt;prepareSave:TaskSaveReceipt;grantSave:TaskSaveReceipt;admitSave:TaskSaveReceipt;onStateChange:()=>void;
 }){
  const taskId=task.task_id,identity=`${taskId}:${task.version}:${task.status}:${ready}`;
  const currentIdentity=useRef(identity);currentIdentity.current=identity;
@@ -95,12 +95,12 @@ export default function TaskPrdWorkPlans({task,locked,ready,save,cycleSave,hando
    {!accepted&&(task.version!==detail.task_version||!['active','budget_exhausted'].includes(task.status))&&<p role="status">当前任务状态或版本与提案不匹配，请由原任务在有效执行批次重新提交计划。</p>}
    {acceptance.loading&&<p role="status">正在核对原确认记录…</p>}
    {acceptance.error&&<p className="wb-error" role="alert">{prdMessage(acceptance.error)} <button type="button" disabled={locked||busy} onClick={acceptance.reload}>重新读取确认记录</button></p>}
-   {accepted?<p role="status">已有提案确认记录 {accepted.acceptance_id} · SHA-256 {accepted.sha256}。工作准入接线继续开发。</p>:<label className="wb-checkbox"><input type="checkbox" checked={confirmed} disabled={locked||busy||!canAccept} onChange={event=>setConfirmed(event.target.checked)}/>我已核对固定原文、文件路径、步骤和原账本，确认保存本提案的核对记录。</label>}
+   {accepted?<p role="status">已有提案确认记录 {accepted.acceptance_id} · SHA-256 {accepted.sha256}。可继续核对工作循环、规划交接、快照及准入记录。</p>:<label className="wb-checkbox"><input type="checkbox" checked={confirmed} disabled={locked||busy||!canAccept} onChange={event=>setConfirmed(event.target.checked)}/>我已核对固定原文、文件路径、步骤和原账本，确认保存本提案的核对记录。</label>}
   </div>}
   {(detail||save.pending)&&<button type="button" disabled={save.busy||(!save.pending&&(locked||busy||!canAccept||!confirmed))} onClick={()=>void accept()}>{save.busy?'正在保存确认记录…':save.pending?'重试原提案确认回执':'确认文件计划提案'}</button>}
   {save.pending&&<p role="status">提案确认结果待核对，已保留原请求及 key。请重试原回执。</p>}
   {receipt&&!detail&&<p role="status" style={textStyle}>原提案确认回执已恢复 {receipt.acceptance_id} · {receipt.sha256}。</p>}
-  <TaskPrdWorkCycle taskId={taskId} plan={detail} acceptance={accepted||null} locked={locked||busy} ready={ready} save={cycleSave} handoffSave={handoffSave} prepareSave={prepareSave} grantSave={grantSave} onStateChange={onStateChange}/>
+  <TaskPrdWorkCycle taskId={taskId} plan={detail} acceptance={accepted||null} locked={locked||busy} ready={ready} save={cycleSave} handoffSave={handoffSave} prepareSave={prepareSave} grantSave={grantSave} admitSave={admitSave} onStateChange={onStateChange}/>
   {error&&<p className="wb-error" role="alert">{error}</p>}
  </details>;
 }

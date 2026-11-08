@@ -1,5 +1,29 @@
 import {TaskSaveReceipt} from './task-save.mjs';
 const messages={
+ INVALID_PRD_WORK_ADMISSION:'准入请求无效，请重新核对原 grant。',
+ PRD_WORK_ADMISSION_UNAVAILABLE:'原 Worker 工作配置尚未就绪，请保留原请求。',
+ PRD_WORK_ADMISSION_SCOPE_CHANGED:'原计划、grant 或工作循环已变化，请重新核对。',
+ PRD_WORK_ADMISSION_INTEGRITY_FAILED:'原准入记录校验未完成，请保留请求并稍后重读。',
+ PRD_WORK_ADMISSION_RECEIPT_INVALID:'原准入回执待核对，请保留原请求并重试。',
+ ADMISSION_PENDING:'准入请求已保存，等待现有 Worker 核对。',
+ ADMISSION_CHECKING:'现有 Worker 正在核对原生状态、快照字节和预算。',
+ ADMISSION_RETRY:'准入条件尚待确认，原请求继续保留并由现有 Worker 重试。',
+ CAPACITY_UNAVAILABLE:'原 Worker 容量暂不可用，保留请求并等待。',
+ NATIVE_IDLE_UNCONFIRMED:'原生空闲状态待确认。',
+ OBSERVATION_STALE:'原生或预算观测已过期，等待重新核对。',
+ AUTHORITY_CHANGED:'原角色或授权版本已变化，请核对原任务与工作循环。',
+ AGENT_BUSY:'原角色仍有执行，等待原生空闲。',
+ HOST_UNAVAILABLE:'原生 Host 暂不可用，请核对原环境状态。',
+ WORKSPACE_UNAVAILABLE:'原工作区暂不可用，请核对原项目。',
+ ROLE_UNAVAILABLE:'原角色暂不可用，请核对原角色状态。',
+ BUDGET_BLOCKED:'原任务预算已阻塞，请核对原累计费用和执行次数。',
+ BUDGET_UNCONFIRMED:'原任务预算尚待确认。',
+ SOURCE_CHANGED:'原来源已经变化，请重新核对原工作循环。',
+ WORK_CYCLE_CLOSED:'原工作循环已关闭，请核对原计划。',
+ WORK_CYCLE_AUTHORITY_REVOKED:'原工作循环权限已变化，请重新核对。',
+ WORK_GRANT_AUTHORITY_REVOKED:'原 grant 权限已变化，请重新核对。',
+ WORK_ADMISSION_SOURCE_CHANGED:'原来源版本已变化，请重新核对。',
+ WORK_ADMISSION_SNAPSHOT_CHANGED:'原快照已变化，请保留记录并核对。',
  PRD_TASK_MUST_BE_PAUSED:'请先暂停原任务，再绑定 PRD。',
  PRD_ROLE_UNAVAILABLE:'原执行角色不可用，请先检查角色状态与权限。',
  PRD_EXECUTION_UNRESOLVED:'原任务仍有执行或未知执行结果，请先等待并核对回执。',
@@ -90,7 +114,7 @@ function selection(source){
 function rejected(error){return Number.isInteger(error?.status)&&error.status>=400&&error.status<500&&error.status!==408&&error.message!=='IDEMPOTENCY_IN_PROGRESS';}
 export class PrdCommandStore {
  constructor(storage,scope,taskId,operation='bind'){
-  if(!/^[a-f0-9]{64}$/.test(scope)||!['bind','taskmaster-import','template-apply','taskmaster-prd-import','work-plan-accept','work-plan-cycle','work-plan-handoff','work-plan-prepare','work-plan-grant'].includes(operation))throw Error('PRD 回执用户范围不可用');
+  if(!/^[a-f0-9]{64}$/.test(scope)||!['bind','taskmaster-import','template-apply','taskmaster-prd-import','work-plan-accept','work-plan-cycle','work-plan-handoff','work-plan-prepare','work-plan-grant','work-plan-admit'].includes(operation))throw Error('PRD 回执用户范围不可用');
   this.storage=storage;this.operation=operation;this.path=`/persistent-tasks/${encodeURIComponent(taskId)}/prd/${operation}`;
   this.key=`jot-task-prd/v1/${scope}/${encodeURIComponent(taskId)}`+(operation==='bind'?'':`/${operation}`);
  }
@@ -116,6 +140,10 @@ export class PrdCommandStore {
    if(Object.keys(body).sort().join(',')!=='cycle_id,expected_run_version,plan_id,preview_sha256,run_id'
     ||typeof body.plan_id!=='string'||!/^prd-plan-[a-f0-9]{64}$/.test(body.plan_id)||typeof body.cycle_id!=='string'||!body.cycle_id||body.cycle_id.length>256
     ||typeof body.run_id!=='string'||!body.run_id||body.run_id.length>200||!Number.isSafeInteger(body.expected_run_version)||body.expected_run_version<1)throw Error('PRD 原请求回执无效，请保留本站存储以便核对');
+  }else if(this.operation==='work-plan-admit'){
+   const body=command.body;
+   if(Object.keys(body).sort().join(',')!=='cycle_id,grant_id,plan_id,preview_sha256'||typeof body.plan_id!=='string'||!/^prd-plan-[a-f0-9]{64}$/.test(body.plan_id)
+    ||[body.cycle_id,body.grant_id].some(id=>typeof id!=='string'||!id||id.length>256))throw Error('PRD 原请求回执无效，请保留本站存储以便核对');
   }else if(this.operation==='work-plan-prepare'||this.operation==='work-plan-grant'){
    const body=command.body,keys=this.operation==='work-plan-prepare'?'cycle_id,expected_cycle_version,plan_id,preview_sha256':'cycle_id,plan_id,preview_sha256';
    if(Object.keys(body).sort().join(',')!==keys||typeof body.plan_id!=='string'||!/^prd-plan-[a-f0-9]{64}$/.test(body.plan_id)

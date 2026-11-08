@@ -24530,6 +24530,207 @@
           }
         }
       }
+    },
+    "/v1/persistent-tasks/{task_id}/prd/work-plan-admit": {
+      "post": {
+        "operationId": "requestTaskPrdWorkAdmission",
+        "tags": [
+          "persistent-tasks"
+        ],
+        "description": "Persist an explicit owner request for the exact original PRD work grant. The existing Worker consumes it using real native idle, activity, source byte inspection, coordinator capacity and original cumulative task budgets. Original grant-level occurrence replay prevents duplicate admissions. This receipt records request acceptance only.",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Confirm original PRD work grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskPrdWorkAdmissionReceipt"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Original scope or PRD operation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Original scope or PRD operation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Original scope or PRD operation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Original scope or PRD operation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Original scope or PRD operation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Original scope or PRD operation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskPrdWorkAdmissionRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/persistent-tasks/{task_id}/prd/work-plans/{plan_id}/admission": {
+      "get": {
+        "operationId": "getTaskPrdWorkAdmission",
+        "tags": [
+          "persistent-tasks"
+        ],
+        "description": "Read the durable owner admission request, bounded original admission lineage and latest deferred gate reason. Historical admission does not prove native execution or completion.",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^prd-plan-[a-f0-9]{64}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Original PRD work resource state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskPrdWorkAdmissionState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Original task proposal unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Original task proposal unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Original task proposal unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Original task proposal unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Original task proposal unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -48304,6 +48505,188 @@
               "type": "string",
               "maxLength": 200
             }
+          }
+        }
+      },
+      "TaskPrdWorkAdmissionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "plan_id",
+          "cycle_id",
+          "grant_id",
+          "preview_sha256"
+        ],
+        "properties": {
+          "plan_id": {
+            "type": "string",
+            "pattern": "^prd-plan-[a-f0-9]{64}$"
+          },
+          "cycle_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "grant_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "preview_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        }
+      },
+      "TaskPrdWorkAdmissionReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "protocol",
+          "task_id",
+          "plan_id",
+          "cycle_id",
+          "grant_id",
+          "grant_sha256",
+          "created_at",
+          "accepted",
+          "execution_authorized"
+        ],
+        "properties": {
+          "protocol": {
+            "type": "integer",
+            "const": 1
+          },
+          "task_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "plan_id": {
+            "type": "string",
+            "pattern": "^prd-plan-[a-f0-9]{64}$"
+          },
+          "cycle_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "grant_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "grant_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "accepted": {
+            "type": "boolean",
+            "const": true
+          },
+          "execution_authorized": {
+            "type": "boolean",
+            "const": false
+          }
+        }
+      },
+      "TaskPrdWorkAdmissionState": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "task_id",
+          "plan_id",
+          "available",
+          "request",
+          "admission",
+          "reason",
+          "execution_authorized"
+        ],
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "plan_id": {
+            "type": "string",
+            "pattern": "^prd-plan-[a-f0-9]{64}$"
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "request": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskPrdWorkAdmissionReceipt"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "admission": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "grant_id",
+                  "occurrence_id",
+                  "run_id",
+                  "conversation_id",
+                  "created_at"
+                ],
+                "properties": {
+                  "grant_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "occurrence_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "run_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "conversation_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "created_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,95}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "execution_authorized": {
+            "type": "boolean",
+            "const": false
           }
         }
       }

@@ -1,3 +1,4 @@
+import {prdExecutionReasons} from '../persistent-tasks/prd-execution-readiness.ts';
 import {createHash} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
 import {canonicalJson} from '../db/canonical-json.ts';
@@ -20,10 +21,7 @@ const digest=(value:unknown)=>createHash('sha256').update(canonicalJson(value)).
 const refused=(reason:string)=>Object.freeze({admitted:false as const,reason,execution_authorized:false as const});
 const accepted=(admission:WorkAdmissionRecord)=>Object.freeze({admitted:true as const,reason:null,admission,execution_authorized:false as const});
 
-/** Internal original-occurrence admission prerequisite, deliberately not wired
- * to public tools, maintenance or Worker dispatch. A queue receipt is not a
- * completed native-work integration: isolated tools, evidence and trusted
- * Session/Goal bindings must all be configured before that path is exposed.
+/** Original occurrence admission with trusted native/source observations.
  * Every awaited source/artifact/native observation occurs outside SQL locks. */
 export class WorkAdmissionController{
  private readonly o:Options;private readonly grants:WorkGrants;private readonly records:WorkAdmissionRecords;private readonly budgets:TaskBudgetService;private readonly sources:DiscoverySourceCollector;
@@ -65,6 +63,7 @@ export class WorkAdmissionController{
     if(!o.activity.isCurrent(observation))deny('SOURCE_CHANGED');
     const budget=this.budgets.observeAdmission(owner,grant.task_id),capacity=o.coordinator.observeBackgroundCapacity(owner),facts=observation.facts;
     if(grant.admission_id===null){
+     const unresolved=prdExecutionReasons(o.db,owner,grant.task_id);if(unresolved.length)deny(unresolved[0]!);
      const now=Date.now(),times=[observation.observed_at,budget.observed_at,capacity.observed_at];
      if(times.some(time=>!Number.isSafeInteger(time)||time<1||time>now||now-time>o.maxAgeMs))deny('OBSERVATION_STALE');
      if(digest(observation.scope)!==digest({owner_id:owner,...scope})||facts.role_version!==grant.role_version||facts.role_epoch!==grant.role_epoch)deny('AUTHORITY_CHANGED');
