@@ -44,6 +44,7 @@ import {createMcpDiscoveryScopeResolver} from './mcp-discovery-control.js'
 import {createGatewayPluginProfileReceiptClient,createDshProfilePluginControl} from './dsh-profile-plugin-control.js'
 import {createPluginProfileEvidence} from './plugin-profile-evidence.js'
 import {createHooksConfiguration} from './hooks-config.js'
+import {createHooksRuntime} from './hooks-runtime.js'
 import {resolveOwnerBoundDshProfileContext} from './dsh-profile-binding.js'
 
 import {normalizeLeaseTakeoverRequest,settleLeaseTakeover} from './lease-takeover.js'
@@ -922,6 +923,10 @@ export function apply(ctx, config = {}) {
   if(config.hooks!==undefined){
     const hooksConfiguration=createHooksConfiguration(config.hooks);
     ctx.provide('jotHooksConfiguration',hooksConfiguration);
+    const hooksRuntime=createHooksRuntime({configuration:hooksConfiguration,
+      resolveExecutor:()=>ctx.get('jotHookExecutionAuthority',false)});
+    ctx.provide('jotHooksRuntime',hooksRuntime);
+    ctx.effect(()=>()=>hooksRuntime.close());
   }
   if(config.pluginProfileEnabled!==undefined&&typeof config.pluginProfileEnabled!=='boolean')throw Error('plugin_profile_config_invalid');
   if(config.pluginProfileEnabled===true&&config.hostSettingsBootstrap===undefined)throw Error('plugin_profile_bootstrap_required');

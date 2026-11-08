@@ -1,11 +1,13 @@
 {
   "name": "jot-session-adapter",
   "version": "0.1.0",
-  "license": "Apache-2.0",
+  "license": "SEE LICENSE IN THIRD_PARTY_NOTICES.md",
   "private": true,
   "type": "module",
   "main": "index.js",
   "files": [
+    "THIRD_PARTY_NOTICES.md",
+    "runtime-patches/PILOTDECK-AGPL-3.0.txt",
     "index.js",
     "dsh-profile-binding.js",
     "dsh-profile-plugin-lifecycle.js",
@@ -21,6 +23,8 @@
     "host-policy.js",
     "host-readiness.js",
     "hooks-config.js",
+    "hooks-protocol.js",
+    "hooks-runtime.js",
     "host-settings-migration-proof.js",
     "host-settings-owner-approval-route.js",
     "host-settings-product-service.js",

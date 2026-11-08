@@ -1,4 +1,5 @@
-// Adapted from the pinned PilotDeck Hook event and persistent configuration parser.
+// Adapted from PilotDeck revision 783499ffdb2d501bf590b2e035acd027a882df10.
+// See runtime-patches/PILOTDECK-AGPL-3.0.txt for the upstream GNU AGPL v3 license.
 export const HOOK_EVENTS = Object.freeze([
   'PreToolUse','PostToolUse','PostToolUseFailure','Notification','UserPromptSubmit','PreModelRequest',
   'SessionStart','SessionEnd','Stop','StopFailure','SubagentStart','SubagentStop','PreCompact','PostCompact',

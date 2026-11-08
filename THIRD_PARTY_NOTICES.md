@@ -48,3 +48,13 @@ Original explanations of a technology choice do not claim authorship of that tec
 Jot bundles the unmodified Twemoji v17.0.3 SVG artwork from `web/public/twemoji/svg/` (4,009 files), from the official [v17.0.3 release](https://github.com/jdecked/twemoji/releases/tag/v17.0.3). The graphics are licensed under CC BY 4.0; the complete license and attribution are in `web/public/twemoji/LICENSE-GRAPHICS` and `web/public/twemoji/NOTICE.md`. The repository MIT notice is retained at `web/public/twemoji/LICENSE`.
 
 The Unicode matcher is adapted from the official `@twemoji/parser` 17.0.2 package, pinned by Twemoji API 17.0.3. The CommonJS parser was converted to ESM and its asset URL defaults to local SVG files; no npm dependency or runtime CDN access was added. The complete MIT license is at `web/jot/vendor/LICENSE.twemoji-parser.md`.
+
+## PilotDeck Hook integration
+
+`packages/session-adapter/hooks-config.js`, `hooks-protocol.js` and
+`hooks-runtime.js` contain adapted portions of PilotDeck revision
+`783499ffdb2d501bf590b2e035acd027a882df10`. The upstream project declares GNU
+Affero General Public License v3.0. The complete upstream license is retained
+at `packages/session-adapter/runtime-patches/PILOTDECK-AGPL-3.0.txt`.
+The corresponding Adapter package notice identifies the source directories and
+Jot adaptations. These files retain the separately applicable upstream terms.
