@@ -1879,5 +1879,23 @@
     "TaskPrdWorkPlanAcceptanceState",
     "200",
     "Read the immutable original owner review receipt for this owned task/plan, or null when no review has been saved. Historical acceptance grants no live execution or path authority."
+  ],
+  [
+    "POST",
+    "/v1/persistent-tasks/{task_id}/prd/work-plan-cycle",
+    "Control original PRD work-cycle resource",
+    "TaskPrdWorkCycleCommand",
+    "TaskPrdWorkCycle",
+    "200",
+    "Create or close the original work-cycle resource for one immutable owner-confirmed PRD proposal. Creation rechecks exact current task/role/source/occurrence/ledger facts and retains the original task budget scope, without allocating or resetting budget. Keep discovery-only source fields null and persist real PRD origin association. Reuse original cycle commands, open project/workspace slot and owner atomic HTTP receipt. One resource per owner acceptance. Closing revokes the resource through the original versioned command. No run or filesystem effects are dispatched."
+  ],
+  [
+    "GET",
+    "/v1/persistent-tasks/{task_id}/prd/work-plans/{plan_id}/cycle",
+    "Read original PRD work-cycle resource",
+    null,
+    "TaskPrdWorkCycleState",
+    "200",
+    "Read the original owned PRD proposal work-cycle resource and immutable review origin, or null before creation. Historical read grants no execution authority."
   ]
 ]

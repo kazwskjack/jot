@@ -23,14 +23,16 @@ export default function TaskPrdPanel({task,executionReady,onBound}:{task:Task;ex
    const templateStore=scope?new PrdCommandStore(sessionStorage,scope,task.task_id,'template-apply'):null;
    const documentStore=scope?new PrdCommandStore(sessionStorage,scope,task.task_id,'taskmaster-prd-import'):null;
    const workPlanStore=scope?new PrdCommandStore(sessionStorage,scope,task.task_id,'work-plan-accept'):null;
-   store?.read();importStore?.read();templateStore?.read();documentStore?.read();workPlanStore?.read();
-   return {store,importStore,templateStore,documentStore,workPlanStore,error:''};
-  }catch(e){return {store:null,importStore:null,templateStore:null,documentStore:null,workPlanStore:null,error:e instanceof Error?e.message:'本机 PRD 回执不可读取'};}
+   const cycleStore=scope?new PrdCommandStore(sessionStorage,scope,task.task_id,'work-plan-cycle'):null;
+   store?.read();importStore?.read();templateStore?.read();documentStore?.read();workPlanStore?.read();cycleStore?.read();
+   return {store,importStore,templateStore,documentStore,workPlanStore,cycleStore,error:''};
+  }catch(e){return {store:null,importStore:null,templateStore:null,documentStore:null,workPlanStore:null,cycleStore:null,error:e instanceof Error?e.message:'本机 PRD 回执不可读取'};}
  });
  const [importSave]=useState(()=>new TaskSaveReceipt(undefined,recovery.importStore));
  const [templateSave]=useState(()=>new TaskSaveReceipt(undefined,recovery.templateStore));
  const [documentSave]=useState(()=>new TaskSaveReceipt(undefined,recovery.documentStore));
  const [workPlanSave]=useState(()=>new TaskSaveReceipt(undefined,recovery.workPlanStore));
+ const [cycleSave]=useState(()=>new TaskSaveReceipt(undefined,recovery.cycleStore));
  const [importConfirmed,setImportConfirmed]=useState(false),[importReceipt,setImportReceipt]=useState<PrdImport|null>(null);
  const [savedSource,setSavedSource]=useState<{task_version:number;source:Extract<TaskPrdSource,{kind:'logical_file'}>}|null>(null);
  if(!flowRef.current)flowRef.current=new PrdFlow(task,executionReady,undefined,recovery.store);
@@ -44,13 +46,13 @@ export default function TaskPrdPanel({task,executionReady,onBound}:{task:Task;ex
  const savedFile=savedSource?.task_version===task.version?savedSource.source:null;
  const sourcesData=useMemo(()=>resource.data&&savedFile&&!resource.data.sources.some(source=>source.kind==='logical_file'&&source.path===savedFile.path&&source.version===savedFile.version&&source.sha256===savedFile.sha256)
   ?{...resource.data,sources:[...resource.data.sources,savedFile]}:resource.data,[resource.data,savedFile]);
- useEffect(()=>{if(sourcesData&&!flow.pending&&!flow.busy&&!importSave.pending&&!importSave.busy&&!templateSave.pending&&!templateSave.busy&&!documentSave.pending&&!documentSave.busy&&!workPlanSave.pending&&!workPlanSave.busy){flow.setSources(sourcesData);setIndex('');setConfirmed(false);draw();}},[sourcesData]);
+ useEffect(()=>{if(sourcesData&&!flow.pending&&!flow.busy&&!importSave.pending&&!importSave.busy&&!templateSave.pending&&!templateSave.busy&&!documentSave.pending&&!documentSave.busy&&!workPlanSave.pending&&!workPlanSave.busy&&!cycleSave.pending&&!cycleSave.busy){flow.setSources(sourcesData);setIndex('');setConfirmed(false);draw();}},[sourcesData]);
  useEffect(()=>setImportConfirmed(false),[identity,projectResource.data?.import_preview_sha256]);
- useEffect(()=>installPrdLeaveGuard(window,()=>flow.pending||importSave.pending||templateSave.pending||documentSave.pending||workPlanSave.pending,node=>node instanceof Node&&Boolean(root.current?.contains(node))),[flow,importSave,templateSave,documentSave,workPlanSave]);
+ useEffect(()=>installPrdLeaveGuard(window,()=>flow.pending||importSave.pending||templateSave.pending||documentSave.pending||workPlanSave.pending||cycleSave.pending,node=>node instanceof Node&&Boolean(root.current?.contains(node))),[flow,importSave,templateSave,documentSave,workPlanSave,cycleSave]);
  const unavailable=resource.loading||!!resource.error||!!recovery.error||!flow.ready;
- const locked=flow.busy||flow.pending||importSave.busy||importSave.pending||templateSave.busy||templateSave.pending||documentSave.busy||documentSave.pending||workPlanSave.busy||workPlanSave.pending;
+ const locked=flow.busy||flow.pending||importSave.busy||importSave.pending||templateSave.busy||templateSave.pending||documentSave.busy||documentSave.pending||workPlanSave.busy||workPlanSave.pending||cycleSave.busy||cycleSave.pending;
  async function operate(action:()=>Promise<unknown>,binding=false){
-  if(flow.busy||importSave.busy||importSave.pending||templateSave.busy||templateSave.pending||documentSave.busy||documentSave.pending||workPlanSave.busy||workPlanSave.pending)return;setError('');
+  if(flow.busy||importSave.busy||importSave.pending||templateSave.busy||templateSave.pending||documentSave.busy||documentSave.pending||workPlanSave.busy||workPlanSave.pending||cycleSave.busy||cycleSave.pending)return;setError('');
   try{const work=action();draw();await work;if(binding){setConfirmed(false);setIndex('');resource.reload();onBound();}}
   catch(e){setError(`${prdMessage(e instanceof Error?e.message:'PRD 操作未完成')}${flow.refreshRequired?' 预览已失效，正在刷新，请重新选择来源。':''}`);if(flow.refreshRequired){setIndex('');setConfirmed(false);resource.reload();}}
   finally{draw();}
@@ -67,7 +69,7 @@ export default function TaskPrdPanel({task,executionReady,onBound}:{task:Task;ex
  const importReady=!unavailable&&!projectResource.loading&&!projectResource.error&&project?.target?.path==='.taskmaster/tasks/tasks.json'
   &&/^[a-f0-9]{64}$/.test(project.import_preview_sha256??'')&&project.files.some(file=>file.path==='.taskmaster/tasks/tasks.json'&&file.state==='ready');
  async function importProject(){
-  if(flow.busy||flow.pending||importSave.busy||templateSave.busy||templateSave.pending||documentSave.busy||documentSave.pending||workPlanSave.busy||workPlanSave.pending)return;
+  if(flow.busy||flow.pending||importSave.busy||templateSave.busy||templateSave.pending||documentSave.busy||documentSave.pending||workPlanSave.busy||workPlanSave.pending||cycleSave.busy||cycleSave.pending)return;
   if(!importSave.pending&&(!importReady||!importConfirmed||!project))return;
   setError('');
   const checkedRequest=async(path:string,method:string,body:{preview_sha256:string},key:string)=>{
@@ -88,7 +90,7 @@ export default function TaskPrdPanel({task,executionReady,onBound}:{task:Task;ex
   <p className="wb-hint">选择当前任务所属项目中的既有文件或原始上传附件。预览仅读取；确认仅冻结来源并更新原任务目标。任务仍保持暂停，后续由原有恢复 / 立即运行入口执行。</p>
   <TaskPrdTemplates task={task} locked={locked||!!recovery.error} ready={!unavailable} save={templateSave} onStateChange={draw} onSaved={fileSaved}/>
   <TaskPrdProjectFiles task={task} locked={locked||!!recovery.error} ready={!unavailable} save={documentSave} onStateChange={draw} onSaved={fileSaved}/>
-  <TaskPrdWorkPlans task={task} locked={locked||!!recovery.error} ready={executionReady&&!recovery.error} save={workPlanSave} onStateChange={draw}/>
+  <TaskPrdWorkPlans task={task} locked={locked||!!recovery.error} ready={executionReady&&!recovery.error} save={workPlanSave} cycleSave={cycleSave} onStateChange={draw}/>
   <p className="wb-hint">已保存的 PRD 位于原逻辑文件版本库，可在共享工作区的“共同文件”中选择对应项目，编辑、重命名或删除。保存新版本后刷新此处来源，重新预览并绑定。</p>
   <p className="wb-hint">先按模板保存到项目文件或上传附件，再刷新选择。支持 UTF-8 的 .md / .markdown / .txt，以及 Taskmaster 导出的 .json 任务文件。原文最多 1,048,576 字节，任务目标最多 12,000 字符。较长原文通过原执行批次固定绑定，由原 DSH 分段读取。PDF、DOCX 暂不支持提取。文字中的动作不会直接触发执行。</p>
   <p className="wb-hint">此流程由原 DSH 拆解并写入原任务账本。Taskmaster JSON 支持任务数组、tasks 对象和带标签格式，保留外部 ID、层级、依赖及状态作为来源资料。绑定后的任务按实际执行回执记录进度。</p>
@@ -122,7 +124,7 @@ export default function TaskPrdPanel({task,executionReady,onBound}:{task:Task;ex
     </li>)}</ul>
    </div>}
    <label className="wb-checkbox"><input type="checkbox" checked={importConfirmed} disabled={locked||!importReady} onChange={e=>setImportConfirmed(e.target.checked)}/>我已核对任务文件原文、来源哈希和目标版本，确认将这份快照保存为项目文件的新版本。</label>
-   <button type="button" disabled={flow.busy||flow.pending||importSave.busy||templateSave.busy||templateSave.pending||documentSave.busy||documentSave.pending||workPlanSave.busy||workPlanSave.pending||!!recovery.error||(!importSave.pending&&(!importReady||!importConfirmed))} onClick={()=>void importProject()}>{importSave.busy?'正在保存文件…':importSave.pending?'重试原导入回执':'保存项目任务文件'}</button>
+   <button type="button" disabled={flow.busy||flow.pending||importSave.busy||templateSave.busy||templateSave.pending||documentSave.busy||documentSave.pending||workPlanSave.busy||workPlanSave.pending||cycleSave.busy||cycleSave.pending||!!recovery.error||(!importSave.pending&&(!importReady||!importConfirmed))} onClick={()=>void importProject()}>{importSave.busy?'正在保存文件…':importSave.pending?'重试原导入回执':'保存项目任务文件'}</button>
    {importSave.pending&&<p className="wb-status" role="status">导入结果待确认，已保留原请求及 key。请重试读取原回执。</p>}
    {importReceipt&&<p className="wb-status" role="status" style={textStyle}>已保存 {importReceipt.file.path} · v{importReceipt.file.version} · SHA-256 {importReceipt.file.sha256}。可从下方来源选择继续预览和绑定。</p>}
    <p className="wb-hint">CLI 安装、运行版本检查及其余任务操作继续补齐。连接状态沿用原注册表的发现结果，执行时沿用原角色权限、运行身份和预算校验。</p>
@@ -146,7 +148,7 @@ export default function TaskPrdPanel({task,executionReady,onBound}:{task:Task;ex
    <label className="wb-checkbox"><input type="checkbox" checked={confirmed} disabled={locked||unavailable} onChange={e=>setConfirmed(e.target.checked)}/>我已阅读原文、任务目标和读取说明，确认仅绑定此原暂停任务，不创建任务、不恢复或启动执行。</label>
   </>}
   {flow.pending&&<p className="wb-status" role="status">绑定结果尚未确认。保留原来源、请求内容和请求 key；确认回执前不能修改选择或离开，请重试原请求。</p>}
-  {(preview||flow.pending)&&<button className="wb-primary" type="button" disabled={flow.busy||importSave.busy||importSave.pending||templateSave.busy||templateSave.pending||documentSave.busy||documentSave.pending||workPlanSave.busy||workPlanSave.pending||(!flow.pending&&(unavailable||!confirmed))} onClick={()=>void operate(()=>flow.bind(request,confirmed),true)}>{flow.busy&&flow.pending?'正在确认绑定…':flow.pending?'重试原绑定请求':'确认绑定原暂停任务'}</button>}
+  {(preview||flow.pending)&&<button className="wb-primary" type="button" disabled={flow.busy||importSave.busy||importSave.pending||templateSave.busy||templateSave.pending||documentSave.busy||documentSave.pending||workPlanSave.busy||workPlanSave.pending||cycleSave.busy||cycleSave.pending||(!flow.pending&&(unavailable||!confirmed))} onClick={()=>void operate(()=>flow.bind(request,confirmed),true)}>{flow.busy&&flow.pending?'正在确认绑定…':flow.pending?'重试原绑定请求':'确认绑定原暂停任务'}</button>}
   {error&&<p className="wb-error" role="alert">{error}</p>}
   {binding&&<div role="status"><p>{flow.receipt?'已冻结绑定到原任务；任务保持暂停。':'原任务已有冻结的 PRD 绑定。'}</p><dl style={textStyle}><dt>绑定 / 修订</dt><dd>{binding.binding_id} / {binding.revision}</dd><dt>任务版本</dt><dd>{binding.task_version}</dd><dt>冻结原文 SHA-256</dt><dd>{binding.content_sha256}</dd><dt>冻结目标 SHA-256</dt><dd>{binding.objective_sha256}</dd></dl></div>}
  </section>;

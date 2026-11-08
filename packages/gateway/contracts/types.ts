@@ -581,3 +581,10 @@ export type TaskPrdWorkPlanAcceptance={
  occurrence_id:string;root_run_id:string;planning_current_run_id:string;created_at:string;accepted:true;execution_authorized:false;
 };
 export type TaskPrdWorkPlanAcceptanceState={task_id:string;plan_id:string;acceptance:TaskPrdWorkPlanAcceptance|null;execution_authorized:false};
+
+export type TaskPrdWorkCycle=Omit<DiscoveryWorkCycle,"admission_id"|"report_sha256"|"policy_version">&{
+ admission_id:null;report_sha256:null;policy_version:null;
+ origin:{kind:"task_prd";acceptance_id:string;acceptance_sha256:string;plan_id:string;plan_sha256:string};
+};
+export type TaskPrdWorkCycleCommand={action:"create";plan_id:string;preview_sha256:string}|{action:"close";plan_id:string;preview_sha256:string;cycle_id:string;expected_version:number};
+export type TaskPrdWorkCycleState={task_id:string;plan_id:string;cycle:TaskPrdWorkCycle|null;execution_authorized:false};

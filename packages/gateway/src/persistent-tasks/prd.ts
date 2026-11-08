@@ -16,6 +16,7 @@ import {readUtf8Range,validateFileRange} from '../workbench/utf8-range.ts';
 import {prdTemplates,renderPrdTemplate} from './prd-templates.ts';
 import {workspaceRelativePath} from '../always-on/workspace-provider.ts';
 import {taskmasterPrdPath} from '../workbench/taskmaster-path.ts';
+import {WorkCycles} from '../always-on/work-cycles.ts';
 import {prdWorkPlanAuthority} from './prd-work-plan-authority.ts';
 import {installPrdWorkPlanAcceptances,acceptPrdWorkPlan,readPrdWorkPlanAcceptance} from './prd-work-plan-acceptances.ts';
 import {installPrdWorkPlans,proposePrdWorkPlan,listPrdWorkPlans,getPrdWorkPlan} from './prd-work-plans.ts';
@@ -386,6 +387,27 @@ export class TaskPrdService {
     ||facts.role.version!==request.expected_role_version||facts.role.capability_epoch!==request.expected_role_epoch)throw Error('prd_work_plan_scope_changed');
    return facts;
   });
+ }
+ workPlanCycle(owner:string,taskId:string,planId:string){
+  this.workPlan(owner,taskId,planId);
+  return {task_id:taskId,plan_id:planId,cycle:new WorkCycles(this.db).prdCycle(owner,taskId,planId),execution_authorized:false as const};
+ }
+ controlWorkPlanCycle(owner:string,taskId:string,input:unknown,key:unknown){
+  const request=object(input,['action','plan_id','preview_sha256','cycle_id','expected_version']);
+  const keys=request.action==='create'?'action,plan_id,preview_sha256':request.action==='close'?'action,cycle_id,expected_version,plan_id,preview_sha256':'';
+  if(!keys||Object.keys(request).sort().join(',')!==keys||typeof request.plan_id!=='string'||!/^prd-plan-[a-f0-9]{64}$/.test(request.plan_id)
+   ||typeof request.preview_sha256!=='string'||!/^[a-f0-9]{64}$/.test(request.preview_sha256))throw Error('invalid_prd_work_cycle');
+  if(typeof key!=='string'||!/^[\x21-\x7e]{8,128}$/.test(key))throw Error('idempotency_key_invalid');
+  this.tasks.get(owner,taskId);
+  const acceptance=readPrdWorkPlanAcceptance(this.db,owner,taskId,request.plan_id);
+  if(!acceptance||acceptance.sha256!==request.preview_sha256)throw Error('work_cycle_prd_review_changed');
+  const cycles=new WorkCycles(this.db),scope={agent_id:acceptance.role.agent_id,project_id:acceptance.role.project_id,workspace_id:acceptance.role.workspace_id};
+  const commandKey='prd-cycle-'+sha(canonicalJson({task_id:taskId,key}));
+  if(request.action==='create')return cycles.createPrd(owner,scope,taskId,{plan_id:request.plan_id,acceptance_sha256:request.preview_sha256},commandKey);
+  if(typeof request.cycle_id!=='string'||!request.cycle_id||request.cycle_id.length>256||!Number.isSafeInteger(request.expected_version)||request.expected_version<1)throw Error('invalid_prd_work_cycle');
+  const cycle=cycles.prdCycle(owner,taskId,request.plan_id);
+  if(!cycle||cycle.cycle_id!==request.cycle_id)throw Error('work_cycle_not_found');
+  return cycles.close(owner,scope,cycle.cycle_id,{expected_version:request.expected_version},commandKey);
  }
  readRunSource(owner:string,runId:string,input:unknown){
   const args=object(input,['binding_id','offset_bytes','limit_bytes']);

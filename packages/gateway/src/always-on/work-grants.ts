@@ -39,6 +39,7 @@ export class WorkGrants{
  }
  private facts(owner:string,scope:WorkCycleScope,cycleId:string,input:AuthorizeWork){
   const cycle=this.cycles.guard(owner,scope,cycleId);
+  if(cycle.admission_id===null)fail('work_grant_origin_unavailable');
   if(cycle.version!==input.expected_cycle_version||cycle.policy_version!==input.expected_policy_version||cycle.role_version!==input.expected_role_version||cycle.role_epoch!==input.expected_role_epoch)fail('work_grant_version_conflict');
   const row=this.db.prepare('SELECT * FROM wb_discovery_work_cycles WHERE cycle_id=?').get(cycleId) as Row;
   const occurrence=this.db.prepare('SELECT generation FROM wb_task_current_occurrences WHERE occurrence_id=? AND task_id=?').get(cycle.occurrence_id,cycle.task_id) as Row|undefined;

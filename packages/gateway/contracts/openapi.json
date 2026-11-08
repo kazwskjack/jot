@@ -23818,6 +23818,207 @@
           }
         }
       }
+    },
+    "/v1/persistent-tasks/{task_id}/prd/work-plan-cycle": {
+      "post": {
+        "operationId": "controlTaskPrdWorkCycle",
+        "tags": [
+          "persistent-tasks"
+        ],
+        "description": "Create or close the original work-cycle resource for one immutable owner-confirmed PRD proposal. Creation rechecks exact current task/role/source/occurrence/ledger facts and retains the original task budget scope, without allocating or resetting budget. Keep discovery-only source fields null and persist real PRD origin association. Reuse original cycle commands, open project/workspace slot and owner atomic HTTP receipt. One resource per owner acceptance. Closing revokes the resource through the original versioned command. No run or filesystem effects are dispatched.",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Original PRD work-cycle command receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskPrdWorkCycle"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Original scope or PRD operation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Original scope or PRD operation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Original scope or PRD operation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Original scope or PRD operation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Original scope or PRD operation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Original scope or PRD operation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskPrdWorkCycleCommand"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/persistent-tasks/{task_id}/prd/work-plans/{plan_id}/cycle": {
+      "get": {
+        "operationId": "readTaskPrdWorkCycle",
+        "tags": [
+          "persistent-tasks"
+        ],
+        "description": "Read the original owned PRD proposal work-cycle resource and immutable review origin, or null before creation. Historical read grants no execution authority.",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^prd-plan-[a-f0-9]{64}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Original PRD work-cycle resource state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskPrdWorkCycleState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Original task proposal unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Original task proposal unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Original task proposal unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Original task proposal unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Original task proposal unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -46827,6 +47028,220 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/TaskPrdWorkPlanAcceptance"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "execution_authorized": {
+            "type": "boolean",
+            "const": false
+          }
+        }
+      },
+      "TaskPrdWorkCycle": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "cycle_id",
+          "version",
+          "state",
+          "admission_id",
+          "occurrence_id",
+          "task_id",
+          "root_run_id",
+          "report_sha256",
+          "policy_version",
+          "role_version",
+          "role_epoch",
+          "plans",
+          "created_at",
+          "closed_at",
+          "execution_authorized",
+          "origin"
+        ],
+        "properties": {
+          "cycle_id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "open",
+              "closed"
+            ]
+          },
+          "admission_id": {
+            "type": "null"
+          },
+          "occurrence_id": {
+            "type": "string"
+          },
+          "task_id": {
+            "type": "string"
+          },
+          "root_run_id": {
+            "type": "string"
+          },
+          "report_sha256": {
+            "type": "null"
+          },
+          "policy_version": {
+            "type": "null"
+          },
+          "role_version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "role_epoch": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "plans": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiscoveryWorkCyclePlan"
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "closed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "execution_authorized": {
+            "const": false
+          },
+          "origin": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "acceptance_id",
+              "acceptance_sha256",
+              "plan_id",
+              "plan_sha256"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "task_prd"
+              },
+              "acceptance_id": {
+                "type": "string",
+                "pattern": "^prd-acceptance-[a-f0-9]{64}$"
+              },
+              "acceptance_sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "plan_id": {
+                "type": "string",
+                "pattern": "^prd-plan-[a-f0-9]{64}$"
+              },
+              "plan_sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            }
+          }
+        }
+      },
+      "TaskPrdWorkCycleCommand": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "action",
+              "plan_id",
+              "preview_sha256"
+            ],
+            "properties": {
+              "action": {
+                "type": "string",
+                "const": "create"
+              },
+              "plan_id": {
+                "type": "string",
+                "pattern": "^prd-plan-[a-f0-9]{64}$"
+              },
+              "preview_sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "action",
+              "plan_id",
+              "preview_sha256",
+              "cycle_id",
+              "expected_version"
+            ],
+            "properties": {
+              "action": {
+                "type": "string",
+                "const": "close"
+              },
+              "plan_id": {
+                "type": "string",
+                "pattern": "^prd-plan-[a-f0-9]{64}$"
+              },
+              "preview_sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "cycle_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "expected_version": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              }
+            }
+          }
+        ]
+      },
+      "TaskPrdWorkCycleState": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "task_id",
+          "plan_id",
+          "cycle",
+          "execution_authorized"
+        ],
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "plan_id": {
+            "type": "string",
+            "pattern": "^prd-plan-[a-f0-9]{64}$"
+          },
+          "cycle": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TaskPrdWorkCycle"
               },
               {
                 "type": "null"

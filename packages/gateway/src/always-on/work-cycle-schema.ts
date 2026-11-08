@@ -1,4 +1,5 @@
 import type {DatabaseSync} from 'node:sqlite';
+import {installPrdWorkCycleOrigins} from './prd-work-cycle-origin.ts';
 
 export const workCycleOriginCheck=`CHECK(
  (admission_id IS NOT NULL AND report_sha256 IS NOT NULL AND policy_version IS NOT NULL AND signal_revision IS NOT NULL AND signal_sha256 IS NOT NULL)
@@ -37,4 +38,6 @@ export function installWorkCycles(db:DatabaseSync){db.exec(`
  CREATE TRIGGER IF NOT EXISTS wb_work_cycle_command_no_replace BEFORE INSERT ON wb_discovery_work_cycle_commands
  WHEN EXISTS(SELECT 1 FROM wb_discovery_work_cycle_commands WHERE owner_id=NEW.owner_id AND command_key=NEW.command_key)
  BEGIN SELECT RAISE(ABORT,'work_cycle_command_immutable'); END;
- `);}
+ `);
+ installPrdWorkCycleOrigins(db);
+}
