@@ -1861,5 +1861,23 @@
     "TaskPrdWorkPlan",
     "200",
     "Read one immutable owned proposal and original source, role, file paths, full-read evidence and frozen subtask ledger. Canonical snapshot hash is verified. Input is bounded to 128 KiB and original frozen ledger to 4 MiB at production. Proposal remains unaccepted with no execution authority."
+  ],
+  [
+    "POST",
+    "/v1/persistent-tasks/{task_id}/prd/work-plan-accept",
+    "Confirm original PRD file-work proposal",
+    "TaskPrdWorkPlanAcceptanceRequest",
+    "TaskPrdWorkPlanAcceptance",
+    "200",
+    "Save an explicit owner review of one exact original PRD file-work proposal. Recheck original task version/generation, active role/version/epoch/workspace/project, fixed source binding/hash and both occurrence and current subtask ledgers. Persist immutable acceptance and original request/key replay through the existing atomic task command. The record remains review material for later original work admission and path authorization."
+  ],
+  [
+    "GET",
+    "/v1/persistent-tasks/{task_id}/prd/work-plans/{plan_id}/acceptance",
+    "Read original PRD proposal review",
+    null,
+    "TaskPrdWorkPlanAcceptanceState",
+    "200",
+    "Read the immutable original owner review receipt for this owned task/plan, or null when no review has been saved. Historical acceptance grants no live execution or path authority."
   ]
 ]

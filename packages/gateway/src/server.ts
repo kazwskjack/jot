@@ -355,6 +355,7 @@ export async function buildServer(config: {
     'POST /v1/persistent-tasks/:taskId/prd/taskmaster-import',
     'POST /v1/persistent-tasks/:taskId/prd/template-apply',
     'POST /v1/persistent-tasks/:taskId/prd/taskmaster-prd-import',
+    'POST /v1/persistent-tasks/:taskId/prd/work-plan-accept',
   ]);
   const isPersistentTaskMutationRoute=(request:any)=>persistentTaskMutationRoutes.has(`${request.method} ${request.routeOptions.url}`);
   const isPluginProfileMutationRoute=(request:any)=>request.routeOptions.config?.pluginProfileMutation===true;

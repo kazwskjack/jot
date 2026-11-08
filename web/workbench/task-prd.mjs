@@ -38,6 +38,11 @@ const messages={
  PRD_WORK_PLAN_UNAVAILABLE:'文件计划提案入口暂不可用。',
  PRD_WORK_PLAN_NOT_FOUND:'此任务的文件计划提案不可访问。',
  PRD_WORK_PLAN_INTEGRITY_FAILED:'文件计划提案原记录校验未完成，请稍后重读。',
+ INVALID_PRD_WORK_PLAN_ACCEPTANCE:'提案确认请求无效，请重新核对提案及版本。',
+ PRD_WORK_PLAN_LEDGER_CHANGED:'提案提交后原账本已变化，请由原任务重新提交当前计划。',
+ PRD_WORK_PLAN_ACCEPTANCE_CONFLICT:'此提案已有另一份确认请求，请读取原确认记录。',
+ PRD_WORK_PLAN_ACCEPTANCE_INTEGRITY_FAILED:'提案确认回执校验未完成，请保留原请求并重试原回执。',
+ PRD_WORK_PLAN_ACCEPTANCE_UNAVAILABLE:'提案确认入口暂不可用，请保留原请求并稍后重试。',
  INVALID_PRD_WORK_PLAN_LEDGER_TOO_LARGE:'本次原子任务账本超过 4 MiB 的提案冻结上限。',
  INVALID_PRD_FILE_NAME:'项目 PRD 文件名无效，请选择单层 Markdown 或文本文件。',
  INVALID_PRD_TEMPLATE_FILE:'模板文件名无效，请使用单层 Markdown 或文本文件名。',
@@ -58,7 +63,7 @@ function selection(source){
 function rejected(error){return Number.isInteger(error?.status)&&error.status>=400&&error.status<500&&error.status!==408&&error.message!=='IDEMPOTENCY_IN_PROGRESS';}
 export class PrdCommandStore {
  constructor(storage,scope,taskId,operation='bind'){
-  if(!/^[a-f0-9]{64}$/.test(scope)||!['bind','taskmaster-import','template-apply','taskmaster-prd-import'].includes(operation))throw Error('PRD 回执用户范围不可用');
+  if(!/^[a-f0-9]{64}$/.test(scope)||!['bind','taskmaster-import','template-apply','taskmaster-prd-import','work-plan-accept'].includes(operation))throw Error('PRD 回执用户范围不可用');
   this.storage=storage;this.operation=operation;this.path=`/persistent-tasks/${encodeURIComponent(taskId)}/prd/${operation}`;
   this.key=`jot-task-prd/v1/${scope}/${encodeURIComponent(taskId)}`+(operation==='bind'?'':`/${operation}`);
  }
@@ -70,6 +75,11 @@ export class PrdCommandStore {
     ||!['web-app','api','mobile-app','data-analysis'].includes(body.template_id)||typeof body.file_name!=='string'||!body.file_name||body.file_name.length>200
     ||(values!==undefined&&(!values||typeof values!=='object'||Array.isArray(values)||Object.keys(values).length>32
      ||Object.entries(values).some(([key,value])=>!key||key.length>100||typeof value!=='string'||value.length>2000))))throw Error('PRD 原请求回执无效，请保留本站存储以便核对');
+  }else if(this.operation==='work-plan-accept'){
+   const body=command.body;
+   if(Object.keys(body).sort().join(',')!=='expected_role_epoch,expected_role_version,expected_task_version,plan_id,preview_sha256'
+    ||typeof body.plan_id!=='string'||!/^prd-plan-[a-f0-9]{64}$/.test(body.plan_id)
+    ||[body.expected_task_version,body.expected_role_version,body.expected_role_epoch].some(value=>!Number.isSafeInteger(value)||value<1))throw Error('PRD 原请求回执无效，请保留本站存储以便核对');
   }else if(this.operation==='taskmaster-prd-import'){
    if(Object.keys(command.body).sort().join(',')!=='file_name,preview_sha256'||typeof command.body.file_name!=='string'||!command.body.file_name||command.body.file_name.length>255)throw Error('PRD 原请求回执无效，请保留本站存储以便核对');
   }else if(this.operation==='bind'?(JSON.stringify(selection(command.body.source))!==JSON.stringify(command.body.source)||Object.keys(command.body).sort().join(',')!=='preview_sha256,source')

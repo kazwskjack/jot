@@ -571,3 +571,13 @@ export type TaskPrdWorkPlan = {
 };
 export type TaskPrdWorkPlanSummary = Pick<TaskPrdWorkPlan,"plan_id"|"sha256"|"task_version"|"occurrence_id"|"run_id"|"summary"|"created_at"|"accepted"|"execution_authorized">&{binding_id:string;path_count:number;subtask_count:number};
 export type TaskPrdWorkPlanPage = {task_id:string;items:TaskPrdWorkPlanSummary[];next_before_id:string|null;execution_authorized:false};
+
+export type TaskPrdWorkPlanAcceptanceRequest={
+ plan_id:string;preview_sha256:string;expected_task_version:number;expected_role_version:number;expected_role_epoch:number;
+};
+export type TaskPrdWorkPlanAcceptance={
+ protocol:1;acceptance_id:string;task_id:string;plan_id:string;plan_sha256:string;request_sha256:string;sha256:string;
+ task_version:number;task_generation:number;role:TaskPrdWorkPlan["role"];source:TaskPrdWorkPlan["source"];ledger_sha256:string;
+ occurrence_id:string;root_run_id:string;planning_current_run_id:string;created_at:string;accepted:true;execution_authorized:false;
+};
+export type TaskPrdWorkPlanAcceptanceState={task_id:string;plan_id:string;acceptance:TaskPrdWorkPlanAcceptance|null;execution_authorized:false};
