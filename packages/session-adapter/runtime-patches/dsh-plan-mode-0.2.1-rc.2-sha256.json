@@ -1,0 +1,12 @@
+{
+  "protocol": 1,
+  "package": "@deepseek-ai/dsh-plan-mode",
+  "version": "0.2.1-rc.2",
+  "locked_integrity": "sha512-/2KLdk8jArJHcC28tRfDffDA2uX2VDVrVx16QH5Jkr7zs642vLRIQk9OV8v9sYH5Bo25yUBmO6TNWKFOaJkI2w==",
+  "source_sha256": "39a825b066aefe948c3bd6bdb69f229d68436c8561a7058df2184abd6c5fd552",
+  "line_endings": "LF normalized before hashing",
+  "seam": "Wrap only the scoped native pendingIntents WeakMap get/set/delete methods. Persist complete pending selections and clears as plugin:jot-plan-mode/pending records. Restore the native in-memory selection before assembly; native accepted-step mode publication and narration retain ownership. Historical command-only records remain operation evidence and do not manufacture an unrecorded pending selection.",
+  "loading": "Companion plugin in the original isolated planning group of Jot standard presets. Validate the installed native module hash, version and controller identity before attaching the instance seam.",
+  "license": "MIT",
+  "license_file": "runtime-patches/DSH-MIT-LICENSE.txt"
+}

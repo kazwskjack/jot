@@ -45,6 +45,7 @@
     "mcp-host-stdio.js",
     "mcp-stdio-runtime.js",
     "runtime-patches/dsh-mcp-client-0.2.1-rc.2-sha256.json",
+    "runtime-patches/dsh-plan-mode-0.2.1-rc.2-sha256.json",
     "mcp-runtime.js",
     "voice.js",
     "skill-content-reader.js",

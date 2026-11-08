@@ -13,3 +13,8 @@ identity preservation, output-event matching and owned cancellation/teardown.
 
 DSH-derived compatibility code retains its upstream notices and the MIT license
 in `runtime-patches/DSH-MIT-LICENSE.txt`.
+
+`../dsh-host/plan-mode-recovery.mjs` integrates the scoped native plan controller
+from `@deepseek-ai/dsh-plan-mode` version `0.2.1-rc.2`. Its compatibility seam
+is pinned by `runtime-patches/dsh-plan-mode-0.2.1-rc.2-sha256.json`.
+The retained MIT notice applies to the native controller compatibility work.

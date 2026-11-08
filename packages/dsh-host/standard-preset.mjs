@@ -11,6 +11,11 @@ export function buildStandardPreset(original){
  if(personas.length!==1)throw Error('jot_standard_preset_source_invalid');
  const config=personas[0].config??{};
  personas[0].config={...config,prefix:[config.prefix,JOT_PERSONALITY].filter(value=>typeof value==='string'&&value.trim()).join('\n\n')};
+ const planning=result.plugins.filter(row=>row.id==='planning'&&row.name==='cordis:group'&&row.group===true&&row.isolate?.planMode===true);
+ if(planning.length!==1||!Array.isArray(planning[0].config)
+  ||planning[0].config.filter(row=>row.id==='plan-mode'&&row.name==='@deepseek-ai/dsh-plan-mode').length!==1
+  ||planning[0].config.some(row=>row.id==='jot-plan-mode-recovery'))throw Error('jot_standard_plan_source_invalid');
+ planning[0].config.push({id:'jot-plan-mode-recovery',name:new URL('./plan-mode-recovery.mjs',import.meta.url).href});
  return result;
 }
 export async function readOfficialStandard(ctx){
