@@ -98,7 +98,8 @@ export class WebDecisionBudgetService {
     const attempt=old?.attempt_id??'web-'+digest(JSON.stringify([grant.grant_id,input.provider,input.model,input.request_id,input.request_hash]));
     const receipt=ledger.reserve(owner,run,{attempt_id:attempt,provider:input.provider,model:input.model,purpose:'web-decision'});
     if(!old)this.db.prepare('INSERT INTO wb_web_model_attempts VALUES(?,?,?,?,?,?,?)').run(grant.grant_id!,run,attempt,String(input.request_id),input.provider,input.model,String(input.request_hash));
-    return {fresh:!old,receipt};
+    const request=old??{provider:input.provider,model:input.model,request_id:input.request_id,request_hash:input.request_hash};
+    return {fresh:!old,receipt,request:{provider:request.provider,model:request.model,request_id:request.request_id,request_hash:request.request_hash}};
    }
    const allowed:Record<string,string[]>={dispatch:['action','attempt_id'],settle:['action','attempt_id','usage'],unknown:['action','attempt_id','reason'],release:['action','attempt_id'],response_record:['action','attempt_id','response_json','response_hash'],response_read:['action','attempt_id']};if(!allowed[action])throw new Error('invalid_web_budget_request');fields(input,allowed[action]!);if(!id(input.attempt_id))throw new Error('invalid_web_budget_request');const mapped=this.db.prepare('SELECT 1 FROM wb_web_model_attempts WHERE grant_id=? AND run_id=? AND attempt_id=?').get(grant.grant_id!,run,String(input.attempt_id));if(!mapped)throw new Error('web_budget_attempt_forbidden');const attempt=String(input.attempt_id),route=this.db.prepare('SELECT route_json,state FROM wb_model_budget_attempts WHERE run_id=? AND attempt_id=?').get(run,attempt)!;const byCall=JSON.parse(String(route.route_json)).billing?.unit==='dispatched_call';
    if(action==='response_record'||action==='response_read'){

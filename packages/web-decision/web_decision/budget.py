@@ -105,6 +105,24 @@ def invoke_provider_call(provider, model, request_id, payload, invoke, usage=Non
     return BudgetedPredictor(invoke, provider, model, usage, journal=True).predict(wire)
 
 
+def _receipt_identity(receipt, attempt, identity):
+    """Detach acknowledgement data and retain the original route/pricing revision."""
+    if not isinstance(receipt, dict) or receipt.get('attempt_id') != attempt:
+        raise BudgetFailure('web_budget_reconciliation_required')
+    receipt = dict(receipt)
+    fields = ('provider', 'model', 'pricing_revision', 'bound_exceeded')
+    if 'pricing_revision' in identity or any(field in receipt for field in fields):
+        revision = receipt.get('pricing_revision')
+        if (receipt.get('provider') != identity['provider']
+                or receipt.get('model') != identity['model']
+                or type(revision) is not int or revision < 1
+                or type(receipt.get('bound_exceeded')) is not bool
+                or 'pricing_revision' in identity and revision != identity['pricing_revision']):
+            raise BudgetFailure('web_budget_reconciliation_required')
+        identity['pricing_revision'] = revision
+    return receipt
+
+
 class BudgetedPredictor:
     def __init__(self, invoke, provider, model, usage=None, *, journal=False):
         if (not callable(invoke) or provider not in ('openjev', 'laya')
@@ -116,6 +134,8 @@ class BudgetedPredictor:
 
     def predict(self, request):
         command = _command.get()
+        invoke, usage, journal = self.invoke, self.usage, self.journal
+        identity = {'provider': self.provider, 'model': self.model}
         if (not callable(command) or not isinstance(request, dict)
                 or not isinstance(request.get('request_id'), str)
                 or not _ID.fullmatch(request['request_id'])):
@@ -126,20 +146,25 @@ class BudgetedPredictor:
             if len(body) > 524288:
                 raise BudgetFailure()
             frozen = json.loads(body)
-            reserved = command({'action': 'reserve', 'request_id': frozen['request_id'],
-                                'provider': self.provider, 'model': self.model,
-                                'request_hash': sha256(body).hexdigest()})
+            binding = {'request_id': frozen['request_id'], 'provider': identity['provider'],
+                       'model': identity['model'], 'request_hash': sha256(body).hexdigest()}
+            reserved = command({'action': 'reserve', **binding})
+            if 'request' in reserved and reserved['request'] != binding:
+                raise BudgetFailure('web_budget_reconciliation_required')
             receipt = reserved['receipt']
             attempt = receipt['attempt_id']
             if not isinstance(attempt, str) or not _ID.fullmatch(attempt):
                 raise BudgetFailure('web_budget_reconciliation_required')
+            receipt = _receipt_identity(receipt, attempt, identity)
+            if receipt.get('bound_exceeded') is True:
+                raise BudgetFailure('web_budget_exhausted')
             if reserved.get('fresh') is not True:
-                if self.journal and reserved.get('fresh') is False and receipt.get('state') in ('in_flight', 'unknown', 'settled'):
+                if journal and reserved.get('fresh') is False and receipt.get('state') in ('in_flight', 'unknown', 'settled'):
                     from .response_codec import decode_response
                     recorded = command({'action': 'response_read', 'attempt_id': attempt}).get('response')
                     if recorded is None:
                         raise BudgetFailure('web_budget_reconciliation_required')
-                    return self._finish(command, attempt, receipt, decode_response(recorded))
+                    return self._finish(command, attempt, receipt, decode_response(recorded), usage, identity)
                 raise BudgetFailure('web_budget_reconciliation_required')
             if receipt.get('state') != 'reserved':
                 raise BudgetFailure('web_budget_reconciliation_required')
@@ -153,20 +178,23 @@ class BudgetedPredictor:
             # Set before awaiting: a lost acknowledgement does not mean unsent.
             dispatched = True
             response = command({'action': 'dispatch', 'attempt_id': attempt})
-            receipt = response['receipt']
+            receipt = _receipt_identity(response['receipt'], attempt, identity)
             if receipt.get('attempt_id') != attempt or receipt.get('state') not in ('in_flight', 'settled'):
                 raise BudgetFailure()
         except Exception:
             self._unknown(command, attempt, 'transport_unknown')
             raise BudgetFailure('web_budget_dispatch_unknown') from None
 
+        if receipt.get('bound_exceeded') is True:
+            raise BudgetFailure('web_budget_exhausted')
+
         try:
-            result = self.invoke(frozen)
+            result = invoke(frozen)
         except Exception:
             if dispatched:
                 self._unknown(command, attempt, 'provider_failed')
             raise BudgetFailure('web_budget_provider_failed') from None
-        if self.journal:
+        if journal:
             try:
                 from .response_codec import encode_response, decode_response
                 encoded = encode_response(result)
@@ -182,24 +210,30 @@ class BudgetedPredictor:
             except Exception:
                 self._unknown(command, attempt, 'settlement_pending')
                 raise BudgetFailure('web_budget_response_pending') from None
-        return self._finish(command, attempt, receipt, result)
+        return self._finish(command, attempt, receipt, result, usage, identity)
 
-    def _finish(self, command, attempt, receipt, result):
+    def _finish(self, command, attempt, receipt, result, usage_reader, identity):
+        receipt = _receipt_identity(receipt, attempt, identity)
+        if receipt.get('bound_exceeded') is True:
+            raise BudgetFailure('web_budget_exhausted')
         if receipt['state'] == 'settled':
             # Configured dispatched-call quota is already charged. Never invent
             # tokens from payload size, duration, scores, or result contents.
             return result
         try:
-            usage = self.usage(result) if self.usage else None
+            usage = usage_reader(result) if usage_reader else None
             if usage is None:
                 self._unknown(command, attempt, 'usage_incomplete')
                 raise BudgetFailure('web_budget_usage_unknown')
             settled = command({'action': 'settle', 'attempt_id': attempt, 'usage': usage})['receipt']
-            if settled.get('attempt_id') != attempt or settled.get('state') != 'settled':
+            settled = _receipt_identity(settled, attempt, identity)
+            if settled.get('state') != 'settled':
                 raise BudgetFailure()
+            if settled.get('bound_exceeded') is True:
+                raise BudgetFailure('web_budget_exhausted')
             return result
         except BudgetFailure as error:
-            if str(error) == 'web_budget_usage_unknown':
+            if str(error) in ('web_budget_usage_unknown', 'web_budget_exhausted'):
                 raise
             self._unknown(command, attempt, 'settlement_pending')
             raise BudgetFailure('web_budget_settlement_unknown') from None
