@@ -1,4 +1,4 @@
-import type {TrustedModelMetadataClient} from './model-metadata.ts';
+import {validateTrustedModelMetadataEnvelope,type TrustedModelMetadataClient} from './model-metadata.ts';
 import type {Capabilities} from '../../contracts/types.ts';
 export interface ModelCatalogClient extends TrustedModelMetadataClient{modelCatalog(signal:AbortSignal):Promise<unknown>}
 const plain=(value:unknown):value is Record<string,unknown>=>!!value&&typeof value==='object'&&!Array.isArray(value);
@@ -23,13 +23,20 @@ export async function readHostModelCatalog(client:ModelCatalogClient|undefined,s
   if(!plain(value)||Object.keys(value).sort().join(',')!=='models,protocol,ready'||value.protocol!==1||value.ready!==true||!Array.isArray(value.models)||value.models.length>4096)return[];
   const seen=new Set<string>(),result:Capabilities['models']=[];
   for(const row of value.models){
-   if(!plain(row)||!['model,provider,reasoning_output,supported_reasoning_efforts','health,model,provider,reasoning_output,supported_reasoning_efforts'].includes(Object.keys(row).sort().join(','))
+   if(!plain(row)||Object.keys(row).some(key=>!['model','provider','reasoning_output','supported_reasoning_efforts','health','metadata'].includes(key))
     ||typeof row.provider!=='string'||!ID.test(row.provider)||typeof row.model!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,255}$/.test(row.model)
     ||typeof row.reasoning_output!=='string'||!['provider','summary','none'].includes(row.reasoning_output)||!Array.isArray(row.supported_reasoning_efforts)||row.supported_reasoning_efforts.length>64
     ||row.supported_reasoning_efforts.some(id=>typeof id!=='string'||!ID.test(id))||new Set(row.supported_reasoning_efforts).size!==row.supported_reasoning_efforts.length)return[];
    const routeHealth=health(row.health);if(!routeHealth)return[];
+   const trusted=row.metadata===undefined?undefined:validateTrustedModelMetadataEnvelope(row.metadata,{provider:row.provider,model:row.model});
+   if(trusted&&JSON.stringify(trusted.metadata.reasoning?.efforts.map(effort=>effort.id)??[])!==JSON.stringify(row.supported_reasoning_efforts))return[];
+   const compatibility:Capabilities['models'][number]['compatibility']=trusted?{
+    input_modalities:trusted.metadata.inputModalities??null,context_window:trusted.metadata.context?.contextWindow??null,
+    default_max_tokens:trusted.metadata.defaultMaxTokens??null,default_reasoning_effort:trusted.metadata.reasoning?.defaultEffort??null,
+    digest_revision:trusted.binding.digest_revision,metadata_digest:trusted.binding.metadata_digest,execution_authorized:false,
+   }:undefined;
    const key=JSON.stringify([row.provider,row.model]);if(seen.has(key))return[];seen.add(key);
-   result.push({provider:row.provider,model:row.model,reasoning_output:row.reasoning_output as 'provider'|'summary'|'none',supported_reasoning_efforts:[...row.supported_reasoning_efforts] as string[],health:routeHealth});
+   result.push({provider:row.provider,model:row.model,reasoning_output:row.reasoning_output as 'provider'|'summary'|'none',supported_reasoning_efforts:[...row.supported_reasoning_efforts] as string[],health:routeHealth,...(compatibility?{compatibility}:{}),...(trusted?.metadata.name===undefined?{}:{label:trusted.metadata.name})});
   }
   return result;
  }catch{return[];}finally{if(abort)bounded.removeEventListener('abort',abort);}

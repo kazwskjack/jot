@@ -1,3 +1,4 @@
+import {observePreparedModelMetadata} from './trusted-model-metadata.js';
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 const MODEL=/^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,255}$/;
 const unavailable=()=>({protocol:1,ready:false,models:[]});
@@ -23,15 +24,15 @@ export function createModelCatalogReader({llm,enabled=false,routeHealth}){
    const models=groups.flat();if(models.length>4096||new Set(models.map(row=>JSON.stringify(row))).size!==models.length)return unavailable();
    const result=await batches(models,async row=>{
     bounded.throwIfAborted();const resolved=await wait(llm.resolveModelInfo(row.provider,row.model,bounded),bounded);
-    if(resolved?.provider!==row.provider||resolved.id!==row.model)throw Error('catalog_invalid');
-    const efforts=resolved.reasoning?.efforts?.map(effort=>effort.id)??[];
-    if(!Array.isArray(efforts)||efforts.length>64||efforts.some(id=>typeof id!=='string'||!ID.test(id))||new Set(efforts).size!==efforts.length)throw Error('catalog_invalid');
+    const metadata=observePreparedModelMetadata(resolved,row);
+    if(metadata.state!=='ready')throw Error('catalog_invalid');
+    const efforts=metadata.metadata.reasoning?.efforts.map(effort=>effort.id)??[];
     // Effort metadata alone does not prove that reasoning deltas are exposed.
     const health=typeof routeHealth?.read==='function'?routeHealth.read(row.provider,row.model):{status:'unknown',observed_at:null,expires_at:null};
     if(!health||!['healthy','unhealthy','stale','unknown'].includes(health.status)
      ||health.status==='unknown'&&(health.observed_at!==null||health.expires_at!==null)
      ||health.status!=='unknown'&&(!Number.isSafeInteger(health.observed_at)||health.observed_at<0||!Number.isSafeInteger(health.expires_at)||health.expires_at<health.observed_at))throw Error('catalog_invalid');
-    return{...row,reasoning_output:'none',supported_reasoning_efforts:efforts,health:{status:health.status,observed_at:health.observed_at,expires_at:health.expires_at}};
+    return{...row,reasoning_output:'none',supported_reasoning_efforts:efforts,metadata,health:{status:health.status,observed_at:health.observed_at,expires_at:health.expires_at}};
    });
    bounded.throwIfAborted();return{protocol:1,ready:true,models:result};
   }catch{return unavailable();}

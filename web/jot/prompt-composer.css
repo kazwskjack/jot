@@ -32,6 +32,9 @@
 .jot-prompt-composer .jot-prompt-menu button{display:flex;align-items:center;gap:8px;width:100%;min-height:36px;margin:0;padding:8px;border:0;border-radius:8px;background:transparent;text-align:left;font-size:13px;line-height:20px}
 .jot-prompt-menu button span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .jot-prompt-menu small{margin-left:auto;opacity:.6;font-size:10px;overflow-wrap:anywhere}
+.jot-prompt-menu .jot-prompt-model-text{display:flex;flex:1;min-width:0;flex-direction:column;align-items:flex-start;white-space:normal}
+.jot-prompt-menu .jot-prompt-model-text>span{max-width:100%}
+.jot-prompt-menu .jot-prompt-model-text small{margin-left:0;white-space:normal}
 .jot-prompt-menu-note{margin:4px 8px;padding:6px 0;opacity:.72;font-size:11px;line-height:16px}
 .jot-prompt-menu button:not(:disabled):hover,.jot-prompt-menu button[aria-checked="true"]{background:var(--composer-hover,rgba(127,127,127,.12))}
 .jot-prompt-more-menu{left:auto;right:0}

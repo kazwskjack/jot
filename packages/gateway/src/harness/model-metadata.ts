@@ -9,6 +9,8 @@ export type TrustedModelMetadataBinding=Readonly<{
  provider:string;model:string;digest_revision:'jot-model-metadata-v1';metadata_digest:string;
  source_config_revision:string|null;upstream_revision:string|null
 }>;
+type TrustedModelMetadata={provider:string;id:string;name?:string;context?:{contextWindow:number};defaultMaxTokens?:number;
+ reasoning?:{efforts:Array<{id:string}>;defaultEffort?:string};inputModalities?:string[]};
 const DIGEST_REVISION='jot-model-metadata-v1';
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 const MODEL=/^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,255}$/;
@@ -60,7 +62,21 @@ function validateMetadata(value:unknown,route:{provider:string;model:string}){
   if(!Array.isArray(value.inputModalities)||value.inputModalities.length>16||value.inputModalities.some(item=>typeof item!=='string'||!/^[a-z][a-z0-9_-]{0,31}$/.test(item))||new Set(value.inputModalities).size!==value.inputModalities.length)return;
   result.inputModalities=[...value.inputModalities];
  }
- return result;
+ return result as TrustedModelMetadata;
+}
+
+/** Shared pure verifier for authenticated read responses and advisory catalogue rows. */
+export function validateTrustedModelMetadataEnvelope(value:unknown,route:{provider:string;model:string}){
+  const keys=['digest_revision','execution_authorized','id','metadata','metadata_digest','protocol','provider','source_config_revision','state','upstream_revision'];
+  if(!plain(value)||!exact(value,keys)||value.protocol!==1||value.state!=='ready'||value.execution_authorized!==false||value.digest_revision!==DIGEST_REVISION
+   ||value.provider!==route.provider||value.id!==route.model||typeof value.metadata_digest!=='string'||!HASH.test(value.metadata_digest)
+   ||value.source_config_revision!==null&&!safeRevision(value.source_config_revision)||value.upstream_revision!==null&&!safeRevision(value.upstream_revision))throw Error('model_metadata_invalid');
+  const metadata=validateMetadata(value.metadata,route);if(!metadata)throw Error('model_metadata_invalid');
+  const digest=createHash('sha256').update(canonical({digest_revision:DIGEST_REVISION,metadata})).digest('hex');
+  if(!timingSafeEqual(Buffer.from(digest,'hex'),Buffer.from(value.metadata_digest,'hex')))throw Error('model_metadata_invalid');
+  const binding=Object.freeze({provider:route.provider,model:route.model,digest_revision:DIGEST_REVISION,metadata_digest:digest,
+   source_config_revision:value.source_config_revision as string|null,upstream_revision:value.upstream_revision as string|null});
+  return {binding,metadata};
 }
 
 /** Validates the authenticated DSH snapshot and returns only immutable route identity plus its content digest. */
@@ -79,15 +95,7 @@ export async function readHostTrustedModelMetadata(client:TrustedModelMetadataCl
    throw Error('model_metadata_unavailable');
   }
   if(value.state==='changed')throw Error('model_metadata_changed');
-  const keys=['digest_revision','execution_authorized','id','metadata','metadata_digest','protocol','provider','source_config_revision','state','upstream_revision'];
-  if(!exact(value,keys)||value.protocol!==1||value.state!=='ready'||value.execution_authorized!==false||value.digest_revision!==DIGEST_REVISION
-   ||value.provider!==route.provider||value.id!==route.model||typeof value.metadata_digest!=='string'||!HASH.test(value.metadata_digest)
-   ||value.source_config_revision!==null&&!safeRevision(value.source_config_revision)||value.upstream_revision!==null&&!safeRevision(value.upstream_revision))throw Error('model_metadata_invalid');
-  const metadata=validateMetadata(value.metadata,route);if(!metadata)throw Error('model_metadata_invalid');
-  const digest=createHash('sha256').update(canonical({digest_revision:DIGEST_REVISION,metadata})).digest('hex');
-  if(!timingSafeEqual(Buffer.from(digest,'hex'),Buffer.from(value.metadata_digest,'hex')))throw Error('model_metadata_invalid');
-  return Object.freeze({provider:route.provider,model:route.model,digest_revision:DIGEST_REVISION,metadata_digest:digest,
-   source_config_revision:value.source_config_revision as string|null,upstream_revision:value.upstream_revision as string|null});
+  return validateTrustedModelMetadataEnvelope(value,route).binding;
  }catch(error){
   if(signal?.aborted)throw signal.reason??error;
   const message=error instanceof Error?error.message:'';
