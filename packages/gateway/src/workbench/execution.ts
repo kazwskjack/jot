@@ -417,7 +417,8 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
     const action=String(input.action??'');if(!allowed[action])throw new Error('budget_request_invalid');
     fields(input,['run_id','session_ref','action',...allowed[action]!]);
     if(!modelBudgets)throw new Error('budget_service_unavailable');
-    return withImmediateTransaction(db,()=>{
+    const transaction=action==='selection'?withReadTransaction:withImmediateTransaction;
+    return transaction(db,()=>{
       const owner=accountingOwner(input),runId=String(input.run_id);
       if(action==='selection'){
         assertExecutionLease(db,runId,input.execution_lease);
@@ -501,7 +502,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
   app.post('/internal/v1/workbench/guard', async request => {
     authorized(request.headers.authorization);
     const input = object(request.body); fields(input, ['run_id', 'session_ref', 'tool_name']);
-    return { context: context(input) };
+    return withReadTransaction(db,()=>({context:context(input)}));
   });
   app.post('/internal/v1/workbench/context-delivery',async request=>{
     authorized(request.headers.authorization);
@@ -570,7 +571,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
   app.post('/internal/v1/workbench/task-state',async request=>{
     authorized(request.headers.authorization);
     const input=object(request.body);fields(input,['run_id','session_ref']);
-    return withImmediateTransaction(db,()=>{
+    return withReadTransaction(db,()=>{
       const identity=context(input),task=requireTask(identity);
       if(!eligibleTaskOccurrence(db,identity.owner_id,task.task_id,identity.run_id))throw new Error('task_execution_revoked');
       const current=db.prepare(`SELECT o.business_state,r.status AS run_status FROM wb_task_current_occurrences o
@@ -619,7 +620,8 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
   app.post('/internal/v1/workbench/goal-binding',async request=>{
     authorized(request.headers.authorization);
     const input=object(request.body);fields(input,['run_id','session_ref','action','goal_id','goal_revision']);
-    return withImmediateTransaction(db,()=>{
+    const transaction=input.action==='get'?withReadTransaction:withImmediateTransaction;
+    return transaction(db,()=>{
       const identity=context(input),task=requireTask(identity);
       const prior=db.prepare('SELECT goal_id,goal_revision FROM wb_native_goal_bindings WHERE run_id=? AND occurrence_id=?').get(task.root_run_id,task.occurrence_id) as {goal_id:string;goal_revision:number}|undefined;
       if(input.action==='get'){
