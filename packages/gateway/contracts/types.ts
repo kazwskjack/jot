@@ -674,3 +674,17 @@ export type WorkbenchMemoryImportSourceHistory = {
  import_id:string;input_sha256:string;sha256:string;execution_authorized:false;
  section:WorkbenchMemoryImportHistorySection;content_sha256:string;text:string;page:WorkbenchMemoryImportPage;
 };
+
+
+export type BrainPublicationInput = {project_id:string;page_id:string;title:string;summary:string;memory_ids:string[]};
+export type BrainPublicationSummary = {
+ publication_id:string;workspace_id:string;project_id:string;page_id:string;title:string;summary:string;
+ status:'proposed'|'applied'|'rejected';version:number;created_at:string;updated_at:string;
+};
+export type BrainPublication = BrainPublicationSummary & {
+ brain_root:string;current:boolean;
+ sources:{memory_id:string;version:number;content:string|null;verified:boolean}[];
+ files:{path:string;expected_version:number;before_content:string|null;content:string}[];
+ results:WorkbenchFile[]|null;
+};
+export type BrainPublicationPage = {items:BrainPublicationSummary[];next_before_id:string|null};

@@ -325,6 +325,7 @@ export async function buildServer(config: {
   const isMemoryRestoreRoute=(request:any)=>request.method==='POST'&&request.routeOptions.url==='/v1/workspaces/:workspaceId/memory/:memoryId/restore';
   const isMemoryConsolidationRoute=(request:any)=>request.method==='POST'&&['/v1/workspaces/:workspaceId/memory-consolidations',...['propose','apply','rollback','reject'].map(action=>`/v1/workspaces/:workspaceId/memory-consolidations/:consolidationId/${action}`)].includes(request.routeOptions.url);
   const isMemoryCaptureRoute=(request:any)=>(request.method==='PATCH'&&request.routeOptions.url==='/v1/agents/:agentId/memory-capture-policy')||(request.method==='POST'&&['/v1/agents/:agentId/memory-capture-policy/collect',...['apply','reject','reconcile'].map(action=>`/v1/agents/:agentId/memory-captures/:captureId/${action}`)].includes(request.routeOptions.url));
+  const isMemoryBrainRoute=(request:any)=>request.method==='POST'&&['/v1/workspaces/:workspaceId/brain-publications/preview',...['apply','reject'].map(action=>`/v1/workspaces/:workspaceId/brain-publications/:publicationId/${action}`)].includes(request.routeOptions.url);
   const isMemoryDreamPolicyRoute=(request:any)=>request.method==='PATCH'&&request.routeOptions.url==='/v1/agents/:agentId/memory-dream-policy';
   const isGoalResumeRoute=(request:any)=>request.method==='POST'&&request.routeOptions.url==='/v1/conversations/:conversationId/goal'&&request.body?.action==='resume';
   const isDiscoveryPolicyRoute=(request:any)=>(request.method==='PATCH'&&request.routeOptions.url==='/v1/agents/:agentId/discovery-policy')||(request.method==='POST'&&request.routeOptions.url==='/v1/agents/:agentId/discovery-policy/control');
@@ -365,7 +366,12 @@ export async function buildServer(config: {
   ]);
   const isPersistentTaskMutationRoute=(request:any)=>persistentTaskMutationRoutes.has(`${request.method} ${request.routeOptions.url}`);
   const isPluginProfileMutationRoute=(request:any)=>request.routeOptions.config?.pluginProfileMutation===true;
-  const atomicProtocol=(request:any)=>isPluginProfileMutationRoute(request)?PLUGIN_PROFILE_RECEIPT_PROTOCOL:isPersistentTaskMutationRoute(request)?'persistent-task-atomic-v1':isWorkspaceSelectionRoute(request)?'workspace-selection-atomic-v1':isProjectMutationRoute(request)?'project-metadata-atomic-v1':isConversationForkRoute(request)?'conversation-fork-atomic-v1':isFileLifecycleRoute(request)?'file-lifecycle-atomic-v1':isIndexAdmissionRoute(request)?'git-index-admission-atomic-v1':isIndexControlAdmissionRoute(request)?'git-index-control-admission-atomic-v1':isPublicationAdmissionRoute(request)?'work-publication-admission-atomic-v1':isPublicationReviewRoute(request)?'work-publication-review-atomic-v1':isGitReviewRoute(request)?'git-review-atomic-v1':isRunCommandRoute(request)?'run-command-atomic-v1':isModeMutationRoute(request)?'conversation-mode-atomic-v1':isDiscoveryPolicyRoute(request)?'discovery-policy-atomic-v1':isGoalResumeRoute(request)?'conversation-goal-resume-atomic-v1':isMcpMutationRoute(request)?'workbench-mcp-atomic-v1':isUploadRoute(request)?'upload-atomic-v1':isMemoryImportRoute(request)?'memory-import-atomic-v1':isMemoryRestoreRoute(request)?'memory-restore-atomic-v1':isMemoryConsolidationRoute(request)?'memory-consolidation-atomic-v1':isMemoryCaptureRoute(request)?'memory-capture-atomic-v1':isMemoryDreamPolicyRoute(request)?'memory-dream-policy-atomic-v1':null;
+  const atomicProtocol=(request:any)=>isPluginProfileMutationRoute(request)?PLUGIN_PROFILE_RECEIPT_PROTOCOL:isPersistentTaskMutationRoute(request)?'persistent-task-atomic-v1':isWorkspaceSelectionRoute(request)?'workspace-selection-atomic-v1':isProjectMutationRoute(request)?'project-metadata-atomic-v1':isConversationForkRoute(request)?'conversation-fork-atomic-v1':isFileLifecycleRoute(request)?'file-lifecycle-atomic-v1':isIndexAdmissionRoute(request)?'git-index-admission-atomic-v1':isIndexControlAdmissionRoute(request)?'git-index-control-admission-atomic-v1':isPublicationAdmissionRoute(request)?'work-publication-admission-atomic-v1':isPublicationReviewRoute(request)?'work-publication-review-atomic-v1':isGitReviewRoute(request)?'git-review-atomic-v1':isRunCommandRoute(request)?'run-command-atomic-v1':isModeMutationRoute(request)?'conversation-mode-atomic-v1':isDiscoveryPolicyRoute(request)?'discovery-policy-atomic-v1':isGoalResumeRoute(request)?'conversation-goal-resume-atomic-v1':isMcpMutationRoute(request)?'workbench-mcp-atomic-v1':isUploadRoute(request)?'upload-atomic-v1':isMemoryImportRoute(request)?'memory-import-atomic-v1':isMemoryRestoreRoute(request)?'memory-restore-atomic-v1':isMemoryConsolidationRoute(request)?'memory-consolidation-atomic-v1':isMemoryBrainRoute(request)?'memory-brain-atomic-v1':isMemoryCaptureRoute(request)?'memory-capture-atomic-v1':isMemoryDreamPolicyRoute(request)?'memory-dream-policy-atomic-v1':null;
+  const readBrainReceipt=(request:any,owner:string,value:unknown)=>{
+    const receipt=value as {publication_id?:unknown}|null;
+    if(!receipt||typeof receipt.publication_id!=='string')throw Error('brain_publication_receipt_invalid');
+    return workbench.memoryBrain.get(owner,String(request.params.workspaceId),receipt.publication_id);
+  };
   // Receipt protocol is reserved with the original request. Legacy pending rows
   // have no proof of an atomic business boundary and must not be re-executed.
   const atomicCommand=<T>(request:any,status:number,operation:()=>T):T=>{
@@ -374,7 +380,7 @@ export async function buildServer(config: {
       if(pending){
         const cached=db.prepare('SELECT response_status,response_json,receipt_protocol FROM ga_idempotency WHERE owner_id=? AND operation=? AND idempotency_key=?').get(pending.owner,pending.operation,pending.key) as Record<string,unknown>|undefined;
         if(!protocol||!cached||cached.receipt_protocol!==protocol)throw new Error('idempotency_in_progress');
-        if(cached.response_status!==null){if(cached.response_status!==status)throw new Error('idempotency_conflict');return JSON.parse(String(cached.response_json)) as T;}
+        if(cached.response_status!==null){if(cached.response_status!==status)throw new Error('idempotency_conflict');const saved=JSON.parse(String(cached.response_json));return (isMemoryBrainRoute(request)?readBrainReceipt(request,pending.owner,saved):saved) as T;}
       }
       const registeredRoute=request.routeOptions.url;
       if(typeof registeredRoute!=='string')throw new Error('contract_response_invalid');
@@ -515,7 +521,7 @@ export async function buildServer(config: {
             .run(owner,operation,idempotencyKey,requestHash));
           if(upgraded.changes===1){idempotencyRequests.set(request,{owner,operation,key:idempotencyKey});return;}
         }
-        if((isPersistentTaskMutationRoute(request)||isWorkspaceSelectionRoute(request)||isProjectMutationRoute(request)||isConversationForkRoute(request)||isFileLifecycleRoute(request)||isGitReviewRoute(request)||isIndexAdmissionRoute(request)||isIndexControlAdmissionRoute(request)||isPublicationReviewRoute(request)||isPublicationAdmissionRoute(request)||isRunCommandRoute(request)||isModeMutationRoute(request)||isDiscoveryPolicyRoute(request)||isGoalResumeRoute(request)||isMcpMutationRoute(request)||isMemoryImportRoute(request)||isMemoryRestoreRoute(request)||isMemoryConsolidationRoute(request)||isMemoryCaptureRoute(request)||isMemoryDreamPolicyRoute(request))&&existing.receipt_protocol===atomicProtocol(request)){idempotencyRequests.set(request,{owner,operation,key:idempotencyKey});return;}
+        if((isPersistentTaskMutationRoute(request)||isWorkspaceSelectionRoute(request)||isProjectMutationRoute(request)||isConversationForkRoute(request)||isFileLifecycleRoute(request)||isGitReviewRoute(request)||isIndexAdmissionRoute(request)||isIndexControlAdmissionRoute(request)||isPublicationReviewRoute(request)||isPublicationAdmissionRoute(request)||isRunCommandRoute(request)||isModeMutationRoute(request)||isDiscoveryPolicyRoute(request)||isGoalResumeRoute(request)||isMcpMutationRoute(request)||isMemoryImportRoute(request)||isMemoryRestoreRoute(request)||isMemoryConsolidationRoute(request)||isMemoryCaptureRoute(request)||isMemoryBrainRoute(request)||isMemoryDreamPolicyRoute(request))&&existing.receipt_protocol===atomicProtocol(request)){idempotencyRequests.set(request,{owner,operation,key:idempotencyKey});return;}
         if(isUploadRoute(request)&&existing.receipt_protocol==='upload-atomic-v1'){
           if(request.method==='PUT'){
             const uploadId=String((request.params as Record<string,unknown>).uploadId),upload=db.prepare('SELECT status,declared_size,received_size,declared_sha256,actual_sha256,writer_token,writer_lease_until FROM ga_uploads WHERE id=? AND owner_id=?').get(uploadId,owner) as Record<string,unknown>|undefined;
@@ -550,6 +556,7 @@ export async function buildServer(config: {
       }
       const responseBody = existing.response_json === null ? null : JSON.parse(String(existing.response_json));
       verifyCachedFork(responseBody);
+      if(isMemoryBrainRoute(request)){reply.header('cache-control','private, no-store');return reply.code(Number(existing.response_status)).send(readBrainReceipt(request,owner,responseBody));}
       if(existing.receipt_protocol==='upload-atomic-v1'){
         const route=request.routeOptions.url,body=responseBody as Record<string,unknown>|null,uploadId=String((request.params as Record<string,unknown>|undefined)?.uploadId??'');
         if(request.method==='POST'&&route==='/v1/conversations/:conversationId/upload-batches')artifacts.assertUploadBatchInitReceiptLive(String(body?.batch_id??''),owner);
@@ -609,6 +616,8 @@ export async function buildServer(config: {
     if(code==='memory_import_file_source_unavailable')return reply.code(503).send({error:{code:'MEMORY_IMPORT_FILE_SOURCE_UNAVAILABLE'}});
     if(code==='memory_import_file_source_changed')return reply.code(409).send({error:{code:'MEMORY_IMPORT_FILE_SOURCE_CHANGED'}});
     if(code==='memory_import_replace_unavailable')return reply.code(503).send({error:{code:'MEMORY_IMPORT_REPLACE_UNAVAILABLE'}});
+    if(['brain_runtime_unavailable','brain_render_failed'].includes(code))return reply.code(503).send({error:{code:code.toUpperCase()}});
+    if(code.startsWith('brain_publication_')&&code!=='brain_publication_not_found')return reply.code(409).send({error:{code:code.toUpperCase()}});
     if(code==='memory_scope_forbidden')return reply.code(403).send({error:{code:'MEMORY_SCOPE_FORBIDDEN'}});
     if(code==='file_source_stale')return reply.code(409).send({error:{code:'FILE_SOURCE_STALE'}});
     if(code==='DOCUMENT_PREVIEW_TOO_LARGE')return reply.code(413).send({error:{code:'DOCUMENT_PREVIEW_TOO_LARGE'}});

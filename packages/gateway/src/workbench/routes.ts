@@ -67,6 +67,26 @@ const teamFields = ['name', 'workspace_id', 'project_id', 'member_ids'];
 export function registerWorkbenchRoutes(app: FastifyInstance, service: WorkbenchService, actor: Actor,restoreCommand:(request:FastifyRequest,operation:()=>unknown)=>unknown=(_request,operation)=>operation(),checkpoints?:WorkspaceCheckpointService): void {
   const checkpointService=()=>{if(!checkpoints)throw new Error('workspace_checkpoint_service_unavailable');return checkpoints;};
   const privateReply=(reply:{header:(name:string,value:string)=>unknown})=>reply.header('cache-control','private, no-store');
+  app.post('/v1/workspaces/:workspaceId/brain-publications/preview',async(request,reply)=>{
+    privateReply(reply);const owner=actor(request),workspace=param(request,'workspaceId');
+    const prepared=await service.memoryBrain.prepare(owner,workspace,body(request,['project_id','page_id','title','summary','memory_ids']));
+    return restoreCommand(request,()=>service.memoryBrain.preview(owner,workspace,prepared));
+  });
+  app.get('/v1/workspaces/:workspaceId/brain-publications',async(request,reply)=>{
+    privateReply(reply);const input=query(request);
+    if(Object.keys(input).some(key=>!['project_id','before_id'].includes(key))||typeof input.project_id!=='string'||!input.project_id||input.before_id!==undefined&&typeof input.before_id!=='string')throw Error('invalid_brain_publication');
+    return service.memoryBrain.list(actor(request),param(request,'workspaceId'),input.project_id,input.before_id as string|undefined);
+  });
+  app.get('/v1/workspaces/:workspaceId/brain-publications/:publicationId',async(request,reply)=>{
+    privateReply(reply);if(Object.keys(query(request)).length)throw Error('invalid_brain_publication');
+    return service.memoryBrain.get(actor(request),param(request,'workspaceId'),param(request,'publicationId'));
+  });
+  app.post('/v1/workspaces/:workspaceId/brain-publications/:publicationId/apply',async(request,reply)=>{privateReply(reply);return restoreCommand(request,()=>{
+    const input=body(request,['expected_version']);return service.memoryBrain.apply(actor(request),param(request,'workspaceId'),param(request,'publicationId'),input.expected_version as number);
+  });});
+  app.post('/v1/workspaces/:workspaceId/brain-publications/:publicationId/reject',async(request,reply)=>{privateReply(reply);return restoreCommand(request,()=>{
+    const input=body(request,['expected_version']);return service.memoryBrain.reject(actor(request),param(request,'workspaceId'),param(request,'publicationId'),input.expected_version as number);
+  });});
   app.get('/v1/agents', async request => service.listAgents(actor(request)));
   app.post('/v1/agents', async (request, reply) => reply.code(201).send(service.createAgent(actor(request), body(request, agentFields))));
   app.get('/v1/agents/:agentId', async request => service.getAgent(actor(request), param(request, 'agentId')));

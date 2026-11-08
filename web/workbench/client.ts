@@ -1,3 +1,4 @@
+import type {BrainPublication,BrainPublicationPage} from '../../packages/gateway/contracts/types';
 import type {WorkbenchMemoryImportTarget,WorkbenchMemoryImportPreview,WorkbenchMemoryImportBundleSource,WorkbenchMemoryImportHistorySection,WorkbenchMemoryImportSourceHistory,WorkbenchMemoryImportReplacementSource} from '../../packages/gateway/contracts/types';
 import {createHostAdminClient} from './host-admin-client.mjs';
 import type {MemoryRetrieval,MemoryRetrievalPage} from './types';
@@ -120,6 +121,8 @@ export const workbenchApi={
  messages:(workspace:string,signal?:AbortSignal)=>request<{items:AgentMessage[]}>(`/workspaces/${pathId(workspace)}/agent-messages`,'GET',undefined,undefined,signal),
  taskMessages:(workspace:string,occurrenceId:string,signal?:AbortSignal)=>request<{items:AgentMessage[]}>(`/workspaces/${pathId(workspace)}/agent-messages?occurrence_id=${pathId(occurrenceId)}`,'GET',undefined,undefined,signal),
  sendMessage:(workspace:string,input:unknown,key:string)=>request(`/workspaces/${pathId(workspace)}/agent-messages`,'POST',input,key),
+ brainPublications:(workspace:string,project:string,before:string|undefined,signal?:AbortSignal)=>request<BrainPublicationPage>(`/workspaces/${pathId(workspace)}/brain-publications?project_id=${pathId(project)}${before?'&before_id='+pathId(before):''}`,'GET',undefined,undefined,signal),
+ brainPublication:(workspace:string,id:string,signal?:AbortSignal)=>request<BrainPublication>(`/workspaces/${pathId(workspace)}/brain-publications/${pathId(id)}`,'GET',undefined,undefined,signal),
  memories:(workspace:string,query:string,signal?:AbortSignal)=>request<{items:Memory[]}>(`/workspaces/${pathId(workspace)}/memory${query}`,'GET',undefined,undefined,signal),
  memoryHistory:(workspace:string,memoryId:string,signal?:AbortSignal,beforeVersion?:number)=>request<MemoryHistoryPage>(`/workspaces/${pathId(workspace)}/memory/${pathId(memoryId)}/history${beforeVersion===undefined?'':`?before_version=${beforeVersion}`}`,'GET',undefined,undefined,signal),
  memoryRetrievals:(workspace:string,agentId:string,before?:string,signal?:AbortSignal)=>request<MemoryRetrievalPage>(`/workspaces/${pathId(workspace)}/memory-retrievals?agent_id=${pathId(agentId)}${before?`&before_id=${pathId(before)}`:''}`,'GET',undefined,undefined,signal),

@@ -2023,5 +2023,50 @@
     "WorkbenchMemoryImportSourceHistory",
     "200",
     "Read immutable imported source history through the original owner/workspace/target authorization and captured input digest. Revalidate complete source bytes or inline bundle digest before projecting metadata, Case, index or Dream JSON. Preserve all captured fields and ordering. Offset/limit address UTF-16 units of the complete compact JSON section. Pages preserve Unicode scalars and a one-unit limit may return two units to advance. content_sha256 binds the entire UTF-8 encoded JSON section. Absent original values return JSON null. Native index jobs and execution history continue under their original authorities. Responses are private and no-store."
+  ],
+  [
+    "POST",
+    "/v1/workspaces/{workspace_id}/brain-publications/preview",
+    "previewBrainPublication",
+    "BrainPublicationInput",
+    "BrainPublication",
+    "200",
+    "Render a reviewed project-memory publication using the pinned Brain CLI in private staging. Freeze exact project-memory versions, original Brain inventory and generated file changes. Only project-scope active unexpired memories are eligible. Original user/private memories remain in the original ledger. No live project-file write occurs before explicit application."
+  ],
+  [
+    "GET",
+    "/v1/workspaces/{workspace_id}/brain-publications",
+    "listBrainPublications",
+    null,
+    "BrainPublicationPage",
+    "200",
+    "List owner-scoped original Brain publication previews and receipts in bounded creation-order pages."
+  ],
+  [
+    "GET",
+    "/v1/workspaces/{workspace_id}/brain-publications/{publication_id}",
+    "readBrainPublication",
+    null,
+    "BrainPublication",
+    "200",
+    "Read the immutable publication preview or original file receipts. Source changes close approval and suppress obsolete source bodies. Brain pages are project files read on demand and are never a second live-memory injection source."
+  ],
+  [
+    "POST",
+    "/v1/workspaces/{workspace_id}/brain-publications/{publication_id}/apply",
+    "applyBrainPublication",
+    "BrainPublicationControl",
+    "BrainPublication",
+    "200",
+    "Apply an explicitly reviewed Brain publication through original project-file version CAS in one database transaction. Revalidate every original source version, expiry and complete Brain target inventory before effects. Preserve the original applied receipt on retry. This operation does not change, delete or verify original memories. Cached retries return the original publication and file receipts through a fresh owner/source-scoped read, suppressing obsolete source bodies. The publication target is the original logical project BRAIN.md and brain/ tree."
+  ],
+  [
+    "POST",
+    "/v1/workspaces/{workspace_id}/brain-publications/{publication_id}/reject",
+    "rejectBrainPublication",
+    "BrainPublicationControl",
+    "BrainPublication",
+    "200",
+    "Reject a proposed Brain publication by exact version without changing original memory or project files."
   ]
 ]

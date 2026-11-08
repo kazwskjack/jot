@@ -1,4 +1,5 @@
 import {MemoryCaptureService} from './memory-capture.ts';
+import {MemoryBrainService} from './memory-brain.ts';
 import {assertWorkspaceWritable} from './workspace-coordination.ts';
 import {listProjectFiles,type FileListOptions} from './file-list.ts';
 import {installWorkbenchSourceRevisions} from '../always-on/workbench-source-revisions.ts';
@@ -106,6 +107,7 @@ export class WorkbenchService {
   readonly memoryImports: MemoryImportService;
   readonly memoryRetrievals: MemoryRetrievalLog;
   readonly memoryCapture: MemoryCaptureService;
+  readonly memoryBrain: MemoryBrainService;
   readonly memoryProcessing: MemoryProcessingRegistry;
   constructor(db: DatabaseSync, options: WorkbenchOptions) {
     this.db = db; this.options = options;
@@ -249,6 +251,13 @@ export class WorkbenchService {
       save:(owner,workspace,input)=>this.saveMemory(owner,workspace,input),
       remove:(owner,workspace,memoryId,version)=>this.deleteMemory(owner,workspace,memoryId,version),
       readFile:(owner,workspace,project,path,version,sha256)=>this.readBinaryFile(owner,workspace,project,path,version,sha256),
+    });
+    this.memoryBrain=new MemoryBrainService(db,{
+      authorize:(owner,workspace,project)=>{this.workspace(workspace);this.projects.assertOwned(project,owner);},
+      validatePath:path=>{this.filePath(path);},
+      root:(owner,workspace,project)=>this.projectRoot(owner,workspace,project),
+      read:(owner,workspace,project,path)=>this.readFile(owner,workspace,project,path),
+      write:(owner,workspace,input)=>this.writeFile(owner,workspace,input),
     });
     this.memoryCapture=new MemoryCaptureService(db,{
       authorizeAccounting:(owner,agentId,projectId)=>{this.getAgent(owner,agentId);this.projects.get(projectId,owner);},
