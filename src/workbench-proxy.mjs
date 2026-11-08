@@ -218,6 +218,7 @@ export function registerWorkbenchProxy(app,config,localCsrf){
   finally{clearTimeout(timer);}
  };
  app.route({method:['GET','POST','PATCH','DELETE'],url:'/workbench-api/v1/*',handler});
+ app.route({method:'PUT',url:'/workbench-api/v1/agents/:agentId/mcp/connections/:connectionId/tools',handler});
  app.route({method:'PUT',url:'/workbench-api/v1/uploads/:uploadId/content',bodyLimit:104857600,handler});
  app.route({method:'PUT',url:'/workbench-api/v1/workspaces/:workspaceId/files',handler});
   app.route({method:'PUT',url:'/workbench-api/v1/workspaces/:workspaceId/files/binary',bodyLimit:104857600,handler});

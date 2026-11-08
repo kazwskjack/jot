@@ -1,0 +1,43 @@
+.wb-mcp{max-width:1120px;min-width:0;color:inherit;font:14px/1.6 'J Geist','jot Chinese',sans-serif}
+.wb-mcp .wb-toolbar{align-items:flex-start;flex-wrap:wrap;margin-bottom:12px}
+.wb-mcp .wb-toolbar h2{margin:0;font-size:27px;font-weight:500;letter-spacing:-.04em}
+.wb-mcp .wb-toolbar p{margin:5px 0;color:var(--wb-muted,#68758a)}
+.wb-mcp .wb-hint{max-width:900px;color:var(--wb-muted,#68758a)}
+.wb-mcp-list{display:grid;gap:14px;margin:18px 0}
+.wb-mcp-card{min-width:0;border:1px solid var(--wb-border,#8796aa35);border-radius:16px;padding:20px;background:var(--wb-surface,#ffffffb8);overflow-wrap:anywhere}
+.wb-mcp-card .wb-card-top{align-items:flex-start}
+.wb-mcp-card h3{margin:0;font-size:18px;font-weight:500}
+.wb-mcp-card small,.wb-mcp-card .wb-status{color:var(--wb-muted,#68758a)}
+.wb-mcp-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin:16px 0}
+.wb-mcp-meta div{border:1px solid var(--wb-border,#8796aa35);border-radius:10px;padding:8px 10px;min-width:0}
+.wb-mcp-meta dt{font-size:11px;color:var(--wb-muted,#68758a)}
+.wb-mcp-meta dd{margin:2px 0 0;overflow-wrap:anywhere}
+.wb-mcp-card>.wb-actions{margin:14px 0}
+.wb-mcp-tools{border-top:1px solid var(--wb-border,#8796aa35);padding-top:12px}
+.wb-mcp-tools>h4,.wb-mcp-tool h4{margin:4px 0 10px;font-weight:500}
+.wb-mcp-tool{min-width:0;border:1px solid var(--wb-border,#8796aa35);border-radius:12px;padding:12px;margin:10px 0}
+.wb-mcp-tool .wb-card-top{justify-content:space-between;gap:12px;flex-wrap:wrap}
+.wb-mcp-tool p{margin:8px 0;overflow-wrap:anywhere}
+.wb-mcp-description{white-space:pre-wrap}
+.wb-mcp-tool details{margin:10px 0}
+.wb-mcp-tool summary{cursor:pointer;color:var(--wb-muted,#68758a)}
+.wb-mcp-tool pre,.wb-mcp-review pre{max-width:100%;max-height:360px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:12px;border:1px solid var(--wb-border,#8796aa35);border-radius:9px;background:#8796aa0b;font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace}
+.wb-mcp-review{max-width:900px}
+.wb-mcp-review h4{margin:12px 0 4px;font-weight:500}
+.wb-mcp-review code,.wb-mcp-tool code{overflow-wrap:anywhere}
+@media(max-width:650px){.wb-mcp .wb-toolbar h2{font-size:24px}.wb-mcp-card{padding:16px}.wb-mcp .wb-actions{gap:6px}.wb-mcp .wb-actions button{font-size:12px;padding:7px 9px}}
+
+.wb-mcp dialog.wb-mcp-review {
+  width:min(900px,calc(100vw - 32px));
+  max-height:calc(100vh - 48px);
+  overflow:auto;
+  color:inherit;
+  background:var(--wb-surface,#fff);
+}
+.wb-mcp dialog.wb-mcp-review::backdrop {
+  background:#16203480;
+}
+
+.wb-mcp dialog.wb-mcp-review:not([open]) {
+  display:none;
+}
