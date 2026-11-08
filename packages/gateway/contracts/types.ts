@@ -560,3 +560,14 @@ export type TaskPrdProjectDocumentSource = {
 export type TaskPrdProjectDocumentImport = Omit<TaskPrdTemplateApply,"file">&{
  file:Omit<TaskPrdTemplateApply["file"],"source">&{source:TaskPrdProjectDocumentSource};
 };
+
+export type TaskPrdWorkPlan = {
+ protocol:1;plan_id:string;task_id:string;task_version:number;objective_sha256:string;
+ role:TaskPrdPreview["role"]&{workspace_id:string;project_id:string};source:{binding_id:string;content_sha256:string;size:number};
+ occurrence_id:string;root_run_id:string;run_id:string;call_id:string;summary:string;rationale:string;
+ changes:Array<{path:string;description:string;steps:string[];verification:string[]}>;
+ evidence:Array<{kind:"tool_receipt";reference:string;hash:string}>;subtasks:TaskSubtask[];ledger_sha256:string;sha256:string;
+ created_at:string;accepted:false;execution_authorized:false;
+};
+export type TaskPrdWorkPlanSummary = Pick<TaskPrdWorkPlan,"plan_id"|"sha256"|"task_version"|"occurrence_id"|"run_id"|"summary"|"created_at"|"accepted"|"execution_authorized">&{binding_id:string;path_count:number;subtask_count:number};
+export type TaskPrdWorkPlanPage = {task_id:string;items:TaskPrdWorkPlanSummary[];next_before_id:string|null;execution_authorized:false};

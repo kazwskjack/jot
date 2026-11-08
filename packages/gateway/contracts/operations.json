@@ -1843,5 +1843,23 @@
     "TaskPrdProjectDocumentImport",
     "200",
     "Re-read the selected document to match its exact confirmed preview, then commit through original paused task, role, unresolved-execution/fees, workspace and target-version guards. Reuse original atomic persistent-task command, immutable binary file version and durable receipt. Preserve exact request/key replay before fresh I/O after HTTP receipt expiry. Original source preview/bind follows separately."
+  ],
+  [
+    "GET",
+    "/v1/persistent-tasks/{task_id}/prd/work-plans",
+    "List original PRD file-work proposals",
+    null,
+    "TaskPrdWorkPlanPage",
+    "200",
+    "Read owned task proposal summaries, 20 per page, from original DSH planning calls. Sources retain immutable PRD binding, occurrence/run, full-read IO evidence and original subtask ledger. Metadata grants no work admission or execution authority."
+  ],
+  [
+    "GET",
+    "/v1/persistent-tasks/{task_id}/prd/work-plans/{plan_id}",
+    "Read original PRD file-work proposal",
+    null,
+    "TaskPrdWorkPlan",
+    "200",
+    "Read one immutable owned proposal and original source, role, file paths, full-read evidence and frozen subtask ledger. Canonical snapshot hash is verified. Input is bounded to 128 KiB and original frozen ledger to 4 MiB at production. Proposal remains unaccepted with no execution authority."
   ]
 ]

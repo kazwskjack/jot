@@ -43,7 +43,7 @@ export function readPrdRunSource(db:DatabaseSync,owner:string,taskId:string,obje
   if(!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_task_prd_occurrence_sources'").get())return undefined;
   const row=db.prepare(`SELECT binding_id,objective,base_objective,source_json,content_sha256,content
     FROM wb_task_prd_bindings WHERE owner_id=? AND task_id=? ORDER BY revision DESC LIMIT 1`).get(owner,taskId) as PrdBindingSource|undefined;
-  if(!row||row.objective!==objective||row.objective!==row.base_objective)return undefined;
+  if(!row||row.objective!==objective)return undefined;
   return {binding_id:row.binding_id,context:prdRunSourceContext(row)};
 }
 

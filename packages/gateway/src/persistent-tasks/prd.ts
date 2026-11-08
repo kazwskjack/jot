@@ -16,6 +16,7 @@ import {readUtf8Range,validateFileRange} from '../workbench/utf8-range.ts';
 import {prdTemplates,renderPrdTemplate} from './prd-templates.ts';
 import {workspaceRelativePath} from '../always-on/workspace-provider.ts';
 import {taskmasterPrdPath} from '../workbench/taskmaster-path.ts';
+import {installPrdWorkPlans,proposePrdWorkPlan,listPrdWorkPlans,getPrdWorkPlan} from './prd-work-plans.ts';
 
 type Row=Record<string,any>;
 export type PrdSelection={kind:'logical_file';path:string;version:number;sha256:string}|{kind:'upload';artifact_id:string;version:number;sha256:string};
@@ -63,6 +64,7 @@ export class TaskPrdService {
    CREATE TRIGGER IF NOT EXISTS wb_task_prd_no_update BEFORE UPDATE ON wb_task_prd_bindings BEGIN SELECT RAISE(ABORT,'task_prd_immutable'); END;
    CREATE TRIGGER IF NOT EXISTS wb_task_prd_no_delete BEFORE DELETE ON wb_task_prd_bindings BEGIN SELECT RAISE(ABORT,'task_prd_immutable'); END;`);
   installPrdRunSources(db);
+  installPrdWorkPlans(db);
  }
  private latest(owner:string,taskId:string){return this.db.prepare('SELECT * FROM wb_task_prd_bindings WHERE owner_id=? AND task_id=? ORDER BY revision DESC LIMIT 1').get(owner,taskId) as Row|undefined;}
  private installed(name:string){return !!this.db.prepare('SELECT 1 FROM sqlite_master WHERE name=?').get(name);}
@@ -345,16 +347,30 @@ export class TaskPrdService {
   return {...preview,preview_sha256:sha(canonicalJson(preview))};
  }
  private runSource(owner:string,runId:string,includeContent=false){
-  return this.db.prepare(`SELECT p.binding_id,p.objective,p.base_objective,p.source_json,p.content_sha256,s.source_context,
+  return this.db.prepare(`SELECT p.binding_id,p.task_id,s.occurrence_id,s.root_run_id,p.objective,p.base_objective,p.source_json,p.content_sha256,s.source_context,
    CASE WHEN ?=1 OR s.source_context='' THEN p.content ELSE '' END AS content FROM wb_task_run_occurrences o
    JOIN wb_task_prd_occurrence_sources s ON s.occurrence_id=o.occurrence_id AND s.root_run_id=o.root_run_id AND s.task_id=o.task_id
    JOIN wb_task_prd_bindings p ON p.binding_id=s.binding_id AND p.owner_id=s.owner_id AND p.task_id=s.task_id
    JOIN wb_persistent_tasks t ON t.task_id=s.task_id AND t.owner_id=s.owner_id
-   WHERE o.run_id=? AND s.owner_id=?`).get(includeContent?1:0,runId,owner) as PrdBindingSource|undefined;
+   WHERE o.run_id=? AND s.owner_id=?`).get(includeContent?1:0,runId,owner) as (PrdBindingSource&{task_id:string;occurrence_id:string;root_run_id:string})|undefined;
  }
  runSourceContext(owner:string,runId:string):string|undefined {
   const row=this.runSource(owner,runId);return row?prdRunSourceContext(row):undefined;
  }
+ proposeRunPlan(owner:string,runId:string,callId:string,input:unknown){
+  return withImmediateTransaction(this.db,()=>{
+   this.workbench.assertRunActive(runId);const source=this.runSource(owner,runId,true);if(!source)throw Error('prd_source_unavailable');
+   const {task,role}=this.scope(owner,source.task_id);
+   const binding=this.db.prepare(`SELECT b.kind,b.agent_id,b.epoch,c.workspace_id,c.project_id FROM wb_run_bindings b
+    JOIN ga_runs r ON r.id=b.run_id JOIN ga_conversations c ON c.id=r.conversation_id AND c.owner_id=b.owner_id WHERE b.run_id=? AND b.owner_id=?`).get(runId,owner) as Row|undefined;
+   if(!binding||binding.kind!=='task'||binding.agent_id!==role.agent_id||binding.epoch!==role.capability_epoch||role.status!=='active'
+    ||binding.workspace_id!==role.workspace_id||binding.project_id!==role.project_id)throw Error('prd_work_plan_scope_changed');
+   if(task.objective!==source.objective)throw Error('prd_objective_changed');
+   return proposePrdWorkPlan(this.db,owner,runId,callId,task,role,source,this.tasks.subtasks(owner,task.task_id,source.occurrence_id).items,input);
+  });
+ }
+ workPlans(owner:string,taskId:string,before:unknown){this.tasks.get(owner,taskId);return listPrdWorkPlans(this.db,owner,taskId,before);}
+ workPlan(owner:string,taskId:string,planId:string){this.tasks.get(owner,taskId);return getPrdWorkPlan(this.db,owner,taskId,planId);}
  readRunSource(owner:string,runId:string,input:unknown){
   const args=object(input,['binding_id','offset_bytes','limit_bytes']);
   if(typeof args.binding_id!=='string'||!args.binding_id||args.binding_id.length>200)throw Error('invalid_prd_source');

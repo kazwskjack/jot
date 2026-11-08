@@ -30,13 +30,19 @@ export function registerTaskPrdRoutes(app:FastifyInstance,service:TaskPrdService
  const task=(r:FastifyRequest)=>(r.params as {taskId:string}).taskId;
  const errorHandler=(error:FastifyError,r:FastifyRequest,reply:FastifyReply)=>{
   const code=error.validation?'invalid_workbench_request':error.message;
-  const status=['prd_taskmaster_unavailable','prd_taskmaster_project_unavailable','prd_taskmaster_import_unavailable','prd_taskmaster_import_unconfirmed'].includes(code)?503:code==='unauthorized'?401:['origin_forbidden','csrf_invalid'].includes(code)?403:['task_not_found','agent_not_found','prd_template_not_found'].includes(code)?404:
+  const status=['prd_taskmaster_unavailable','prd_taskmaster_project_unavailable','prd_taskmaster_import_unavailable','prd_taskmaster_import_unconfirmed','prd_work_plan_integrity_failed'].includes(code)?503:code==='unauthorized'?401:['origin_forbidden','csrf_invalid'].includes(code)?403:['task_not_found','agent_not_found','prd_template_not_found','prd_work_plan_not_found'].includes(code)?404:
    code.startsWith('invalid_')||code==='contract_request_invalid'||code==='idempotency_key_required'||code==='prd_source_unsupported'?422:
    code.startsWith('prd_')||['version_conflict','idempotency_conflict','workspace_coordination_required'].includes(code)?409:500;
   const publicCode=status===500?'INTERNAL_ERROR':code.toUpperCase(),requestId=/^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$/.test(r.id)?r.id:randomUUID();
   return reply.code(status).send({error:{code:publicCode,message:publicCode,retryable:status>=500},request_id:requestId});
  };
  const params={type:'object',additionalProperties:false,required:['taskId'],properties:{taskId:{type:'string',minLength:1,maxLength:200}}};
+ app.get('/v1/persistent-tasks/:taskId/prd/work-plans',{validatorCompiler,errorHandler,schema:{params,querystring:{type:'object',additionalProperties:false,properties:{before_id:{type:'string',minLength:1,maxLength:200}}}}},async(r,reply)=>{
+  reply.header('cache-control','private, no-store');return service.workPlans(actor(r),task(r),(r.query as {before_id?:string}).before_id);
+ });
+ app.get('/v1/persistent-tasks/:taskId/prd/work-plans/:planId',{validatorCompiler,errorHandler,schema:{params:{...params,required:['taskId','planId'],properties:{...params.properties,planId:{type:'string',minLength:1,maxLength:200}}}}},async(r,reply)=>{
+  reply.header('cache-control','private, no-store');return service.workPlan(actor(r),task(r),(r.params as {planId:string}).planId);
+ });
  app.get('/v1/persistent-tasks/:taskId/prd/templates',{validatorCompiler,errorHandler,schema:{params}},async(r,reply)=>{
   reply.header('cache-control','private, no-store');return service.templates(actor(r),task(r));
  });
