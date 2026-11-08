@@ -1,4 +1,5 @@
 import {AsyncLocalStorage} from 'node:async_hooks';
+import {createHash} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
 
 const blocked = result => result.effects.find(effect => effect.type === 'block'
@@ -8,7 +9,7 @@ const reason = effect => typeof effect?.reason === 'string' ? effect.reason
   : typeof effect?.result?.message === 'string' ? effect.result.message : 'HOOK_BLOCKED';
 
 /** Borrow native Agent event scopes. Hook execution authority remains with the Host port. */
-export function createAgentHooksBridge({runtime,configuration,resolveSource}) {
+export function createAgentHooksBridge({runtime,configuration,resolveSource,createUserMessage}) {
   if (typeof runtime?.run !== 'function' || configuration?.protocol !== 1 || typeof resolveSource !== 'function') {
     throw new Error('hooks_agent_bridge_invalid');
   }
@@ -30,7 +31,17 @@ export function createAgentHooksBridge({runtime,configuration,resolveSource}) {
       payload:{...payload,transcriptAvailable:false},matchQuery:payload.toolName??event,context,signal,
     }));
     await source.assertCurrent(signal);
-    return result;
+    return {...result,scope:source.scope};
+  }
+  function additionalContexts(result,event,execution) {
+    const effects = result.effects.filter(effect=>effect.type==='additional_context');
+    if (!effects.length || typeof createUserMessage!=='function') return [];
+    return effects.map(effect=>createUserMessage({
+      source:{kind:'jot-hooks',form:'notice',summary:'Hook context after tool execution',
+        ...result.scope,hook_event:event,hook_name:effect.source,tool_call_id:execution.callId,
+        content_sha256:createHash('sha256').update(effect.content,'utf8').digest('hex')},
+      content:[{type:'text',text:effect.content}],
+    }));
   }
   function setup(agentCtx,agent) {
     if (closed) throw new Error('hooks_agent_bridge_closed');
@@ -74,11 +85,15 @@ export function createAgentHooksBridge({runtime,configuration,resolveSource}) {
               :{toolResponse:outcome.value??outcome.content})},exec.signal,exec);
         } catch {return decision;}
         if (!result) return decision;
+        let contexts;
+        try {contexts = [...(decision.additionalContexts??[]),...additionalContexts(result,event,exec)];}
+        catch {return decision;}
         const refusal = blocked(result);
-        if (refusal) return {kind:'block',feedback:[{type:'text',text:'Hook blocked the result after tool dispatch. Recover the original operation before repeating an effect. '+reason(refusal)}]};
-        // Preserve the original structured outcome and execution receipt. Projection
-        // updates require the native content/finalization boundary in the effect adapter.
-        return decision;
+        if (refusal) return {kind:'block',feedback:[{type:'text',text:'Hook blocked the result after tool dispatch. Recover the original operation before repeating an effect. '+reason(refusal)}],
+          ...(contexts.length?{additionalContexts:contexts}:{})};
+        // The native scheduler commits these contexts with the original result.
+        // Preserve the structured value, content projection and execution receipt.
+        return contexts.length ? {...decision,additionalContexts:contexts} : decision;
       }));
       disposers.push(agentCtx.on('agent/pre-step',async(event,next)=>{
         if (event.agent !== agent || !configured('UserPromptSubmit')) return next();

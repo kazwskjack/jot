@@ -1032,7 +1032,12 @@ export function apply(ctx, config = {}) {
         ctx.provide('jotHookCallbacks',Object.freeze({register:callbacks.register}));
         ctx.effect(()=>()=>callbacks.close());
       }
+      let createHookContextMessage;
       const hooksBridge=createAgentHooksBridge({runtime:hooksRuntime,configuration:hooksConfiguration,
+        createUserMessage:input=>{
+          createHookContextMessage??=createRequire(ctx.get('profileContext').installAnchor)('@deepseek-ai/dsh-llm').createUserMessage;
+          return createHookContextMessage(input);
+        },
         resolveSource:async(agent,signal)=>{
           if(ctx.agents.get(agent.id)!==agent)throw Error('hook_original_binding_changed');
           const source=await workbenchBridge.hooksSource(agent,signal);
