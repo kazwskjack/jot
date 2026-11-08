@@ -16,6 +16,7 @@ import {readUtf8Range,validateFileRange} from '../workbench/utf8-range.ts';
 import {prdTemplates,renderPrdTemplate} from './prd-templates.ts';
 import {workspaceRelativePath} from '../always-on/workspace-provider.ts';
 import {taskmasterPrdPath} from '../workbench/taskmaster-path.ts';
+import {installPrdWorkResources,preparePrdWorkSnapshot,readPrdWorkResources,authorizePrdWork,type PrdWorkResourcePorts} from './prd-work-resources.ts';
 import type {RunCommandService} from '../runs/commands.ts';
 import {readPrdWorkHandoff,requestPrdWorkHandoff} from './prd-work-handoff.ts';
 import {WorkCycles} from '../always-on/work-cycles.ts';
@@ -33,7 +34,7 @@ const supported=(name:string)=>/\.(md|markdown|txt|json)$/i.test(name);
 const supportedMedia=(name:string,mediaType:string)=>mediaType.startsWith('text/')||/\.json$/i.test(name)&&mediaType.split(';',1)[0]!.trim().toLowerCase()==='application/json';
 const MAX_BYTES=1048576,MAX_OBJECTIVE=12000;
 const terminal=['succeeded','partial','failed','cancelled','interrupted'];
-type PrdOptions={uploadRoot:string;handoffCommands?:Pick<RunCommandService,'cancel'>;mcpRegistry?:Pick<McpRegistryService,'taskmasterConnections'>;installationClient?:TaskmasterInstallationClient;projectSource?:Pick<GitWorkbench,'taskmasterFiles'>&Partial<Pick<GitWorkbench,'taskmasterPrdFiles'|'taskmasterPrdFile'>>};
+type PrdOptions={uploadRoot:string;workResources?:PrdWorkResourcePorts;handoffCommands?:Pick<RunCommandService,'cancel'>;mcpRegistry?:Pick<McpRegistryService,'taskmasterConnections'>;installationClient?:TaskmasterInstallationClient;projectSource?:Pick<GitWorkbench,'taskmasterFiles'>&Partial<Pick<GitWorkbench,'taskmasterPrdFiles'|'taskmasterPrdFile'>>};
 function object(value:unknown,keys:string[]):Row{
  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!keys.includes(key)))throw Error('invalid_prd_request');return value as Row;
 }
@@ -71,6 +72,7 @@ export class TaskPrdService {
   installPrdRunSources(db);
   installPrdWorkPlans(db);
   installPrdWorkPlanAcceptances(db);
+  installPrdWorkResources(db);
  }
  private latest(owner:string,taskId:string){return this.db.prepare('SELECT * FROM wb_task_prd_bindings WHERE owner_id=? AND task_id=? ORDER BY revision DESC LIMIT 1').get(owner,taskId) as Row|undefined;}
  private installed(name:string){return !!this.db.prepare('SELECT 1 FROM sqlite_master WHERE name=?').get(name);}
@@ -114,6 +116,16 @@ export class TaskPrdService {
  requestWorkPlanHandoff(owner:string,taskId:string,input:unknown){
   this.tasks.get(owner,taskId);
   return requestPrdWorkHandoff(this.db,this.options.handoffCommands,owner,taskId,input);
+ }
+ workResources(owner:string,taskId:string,planId:string){
+  this.workPlan(owner,taskId,planId);return readPrdWorkResources(this.db,owner,taskId,planId,!!this.options.workResources,()=>this.executionReasons(owner,taskId));
+ }
+ prepareWorkSnapshot(owner:string,taskId:string,input:unknown,key:unknown,signal:AbortSignal){
+  this.tasks.get(owner,taskId);
+  return preparePrdWorkSnapshot(this.db,this.options.workResources,owner,taskId,input,key,()=>this.executionReasons(owner,taskId),signal);
+ }
+ authorizeWork(owner:string,taskId:string,input:unknown,key:unknown){
+  this.tasks.get(owner,taskId);return authorizePrdWork(this.db,this.options.workResources,owner,taskId,input,key);
  }
  templates(owner:string,taskId:string){
   const {task}=this.scope(owner,taskId);return {task_id:taskId,task_version:task.version,templates:prdTemplates()};

@@ -309,7 +309,7 @@ export async function buildServer(config: {
     ...(nativeWork?{discoveryWorkOperations:nativeWork}:{}),
   });
   const taskNotifications=new TaskNotifications(db);
-  const taskPrd=new TaskPrdService(db,workbench,persistentTasks,artifacts,{uploadRoot:config.uploadRoot??join(dirname(config.databasePath),'general-agent-uploads'),mcpRegistry,projectSource:gitWorkbench,...(nativeWork?{handoffCommands:commands}:{}),...(config.taskmasterInstallationClient?{installationClient:config.taskmasterInstallationClient}:{})});
+  const taskPrd=new TaskPrdService(db,workbench,persistentTasks,artifacts,{uploadRoot:config.uploadRoot??join(dirname(config.databasePath),'general-agent-uploads'),mcpRegistry,projectSource:gitWorkbench,...(nativeWork?{handoffCommands:commands,workResources:nativeWork}:{}),...(config.taskmasterInstallationClient?{installationClient:config.taskmasterInstallationClient}:{})});
   const taskReplyPolicies=new TaskReplyPolicies(db);
   const replyDrafts=new TaskReplyDrafts(db,events);
   const replyHistory=new TaskReplyHistory(db);
@@ -358,6 +358,8 @@ export async function buildServer(config: {
     'POST /v1/persistent-tasks/:taskId/prd/work-plan-accept',
     'POST /v1/persistent-tasks/:taskId/prd/work-plan-cycle',
     'POST /v1/persistent-tasks/:taskId/prd/work-plan-handoff',
+    'POST /v1/persistent-tasks/:taskId/prd/work-plan-prepare',
+    'POST /v1/persistent-tasks/:taskId/prd/work-plan-grant',
   ]);
   const isPersistentTaskMutationRoute=(request:any)=>persistentTaskMutationRoutes.has(`${request.method} ${request.routeOptions.url}`);
   const isPluginProfileMutationRoute=(request:any)=>request.routeOptions.config?.pluginProfileMutation===true;

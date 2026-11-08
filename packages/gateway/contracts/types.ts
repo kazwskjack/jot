@@ -595,3 +595,16 @@ export type TaskPrdWorkHandoffState={
  task_id:string;plan_id:string;cycle_id:string|null;available:boolean;planning:{run_id:string;status:string;version:number}|null;
  command_id:string|null;requested:boolean;settled:boolean;reasons:string[];execution_authorized:false;
 };
+
+export type TaskPrdWorkPreparationRequest={plan_id:string;cycle_id:string;preview_sha256:string;expected_cycle_version:number};
+export type TaskPrdWorkGrantRequest={plan_id:string;cycle_id:string;preview_sha256:string};
+export type TaskPrdWorkPreparation={
+ protocol:1;task_id:string;plan_id:string;cycle_id:string;cycle_version:number;acceptance_sha256:string;snapshot_id:string;
+ source_sha256:string;manifest_sha256:string;source_record_sha256:string;snapshot_record_sha256:string;review_sha256:string;
+ role_version:number;role_epoch:number;file_count:number;total_bytes:number;paths:string[];created_at:string;execution_authorized:false;source_bytes_verified:false;
+};
+export type TaskPrdWorkGrant={
+ protocol:1;task_id:string;plan_id:string;cycle_id:string;grant_id:string;grant_sha256:string;review_sha256:string;snapshot_id:string;source_sha256:string;
+ paths:string[];role_version:number;role_epoch:number;created_at:string;execution_authorized:false;source_bytes_verified:false;
+};
+export type TaskPrdWorkResources={task_id:string;plan_id:string;cycle_id:string|null;available:boolean;preparation:TaskPrdWorkPreparation|null;grant:TaskPrdWorkGrant|null;preparation_uncertain:boolean;reasons:string[];execution_authorized:false};

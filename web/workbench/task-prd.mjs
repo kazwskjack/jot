@@ -38,6 +38,15 @@ const messages={
  PRD_WORK_PLAN_UNAVAILABLE:'文件计划提案入口暂不可用。',
  PRD_WORK_PLAN_NOT_FOUND:'此任务的文件计划提案不可访问。',
  PRD_WORK_PLAN_INTEGRITY_FAILED:'文件计划提案原记录校验未完成，请稍后重读。',
+ INVALID_PRD_WORK_RESOURCE:'快照或路径确认请求无效，请重新读取原记录。',
+ PRD_WORK_PREPARATION_UNAVAILABLE:'原工作快照或 grant 尚未配置，请保留原请求。',
+ PRD_WORK_PREPARATION_CHANGED:'原快照、确认来源或循环版本已变化，请核对原记录。',
+ PRD_WORK_PREPARATION_UNRESOLVED:'原执行或费用尚未收束，请先核对交接记录中的阻塞项。',
+ PRD_WORK_PREPARATION_INTEGRITY_FAILED:'原快照或 grant 记录校验未完成，请保留请求并稍后重读。',
+ PRD_WORK_RESOURCE_RECEIPT_INVALID:'原快照或 grant 回执待核对，请保留原请求并重试。',
+ WORK_GRANT_BUDGET_UNCONFIRMED:'原任务预算或执行次数待核对，请查看原任务额度。',
+ WORK_GRANT_EXISTS:'此循环已有原 grant，请重新读取资源记录。',
+ WORK_GRANT_SOURCE_CHANGED:'原逻辑文件版本已变化，请核对原工作循环。',
  INVALID_PRD_WORK_HANDOFF:'规划交接请求无效，请重新核对原运行和版本。',
  PRD_WORK_HANDOFF_UNAVAILABLE:'原生工作交接尚未配置，请保留原请求。',
  PRD_WORK_HANDOFF_SCOPE_CHANGED:'规划运行或确认来源已变化，请重新读取原记录。',
@@ -81,7 +90,7 @@ function selection(source){
 function rejected(error){return Number.isInteger(error?.status)&&error.status>=400&&error.status<500&&error.status!==408&&error.message!=='IDEMPOTENCY_IN_PROGRESS';}
 export class PrdCommandStore {
  constructor(storage,scope,taskId,operation='bind'){
-  if(!/^[a-f0-9]{64}$/.test(scope)||!['bind','taskmaster-import','template-apply','taskmaster-prd-import','work-plan-accept','work-plan-cycle','work-plan-handoff'].includes(operation))throw Error('PRD 回执用户范围不可用');
+  if(!/^[a-f0-9]{64}$/.test(scope)||!['bind','taskmaster-import','template-apply','taskmaster-prd-import','work-plan-accept','work-plan-cycle','work-plan-handoff','work-plan-prepare','work-plan-grant'].includes(operation))throw Error('PRD 回执用户范围不可用');
   this.storage=storage;this.operation=operation;this.path=`/persistent-tasks/${encodeURIComponent(taskId)}/prd/${operation}`;
   this.key=`jot-task-prd/v1/${scope}/${encodeURIComponent(taskId)}`+(operation==='bind'?'':`/${operation}`);
  }
@@ -107,6 +116,11 @@ export class PrdCommandStore {
    if(Object.keys(body).sort().join(',')!=='cycle_id,expected_run_version,plan_id,preview_sha256,run_id'
     ||typeof body.plan_id!=='string'||!/^prd-plan-[a-f0-9]{64}$/.test(body.plan_id)||typeof body.cycle_id!=='string'||!body.cycle_id||body.cycle_id.length>256
     ||typeof body.run_id!=='string'||!body.run_id||body.run_id.length>200||!Number.isSafeInteger(body.expected_run_version)||body.expected_run_version<1)throw Error('PRD 原请求回执无效，请保留本站存储以便核对');
+  }else if(this.operation==='work-plan-prepare'||this.operation==='work-plan-grant'){
+   const body=command.body,keys=this.operation==='work-plan-prepare'?'cycle_id,expected_cycle_version,plan_id,preview_sha256':'cycle_id,plan_id,preview_sha256';
+   if(Object.keys(body).sort().join(',')!==keys||typeof body.plan_id!=='string'||!/^prd-plan-[a-f0-9]{64}$/.test(body.plan_id)
+    ||typeof body.cycle_id!=='string'||!body.cycle_id||body.cycle_id.length>256
+    ||this.operation==='work-plan-prepare'&&(!Number.isSafeInteger(body.expected_cycle_version)||body.expected_cycle_version<1))throw Error('PRD 原请求回执无效，请保留本站存储以便核对');
   }else if(this.operation==='taskmaster-prd-import'){
    if(Object.keys(command.body).sort().join(',')!=='file_name,preview_sha256'||typeof command.body.file_name!=='string'||!command.body.file_name||command.body.file_name.length>255)throw Error('PRD 原请求回执无效，请保留本站存储以便核对');
   }else if(this.operation==='bind'?(JSON.stringify(selection(command.body.source))!==JSON.stringify(command.body.source)||Object.keys(command.body).sort().join(',')!=='preview_sha256,source')

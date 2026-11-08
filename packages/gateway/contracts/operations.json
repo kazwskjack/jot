@@ -1915,5 +1915,32 @@
     "TaskPrdWorkHandoffState",
     "200",
     "Read original planning run/version, exact cancellation command status and original task execution/fee drain blockers. Settled requires the original applied cancel command, cancelled run, unchanged native binding and no retained task execution/fee blockers. Native idle/capacity/budget admission remains separate. Read grants no execution authority."
+  ],
+  [
+    "POST",
+    "/v1/persistent-tasks/{task_id}/prd/work-plan-prepare",
+    "Prepare original PRD work snapshot",
+    "TaskPrdWorkPreparationRequest",
+    "TaskPrdWorkPreparation",
+    "200",
+    "Prepare or recover the original logical work-cycle snapshot with original source/role/ledger/byte guards and cancellation. IO occurs outside the SQL business transaction. Commit a bounded immutable review projection and original request/key receipt, preserving private root witnesses internally. Existing uncertain preparations retain original recovery holds. No model or execution dispatch."
+  ],
+  [
+    "POST",
+    "/v1/persistent-tasks/{task_id}/prd/work-plan-grant",
+    "Confirm original PRD work grant",
+    "TaskPrdWorkGrantRequest",
+    "TaskPrdWorkGrant",
+    "200",
+    "Confirm the exact prepared review hash through original WorkGrants, retaining task scope, role versions, original source inventory, snapshot witnesses, granted paths and cumulative budget readiness. Original grant command owns replay after HTTP receipt expiry. The projection grants no runtime dispatch or fresh byte verification."
+  ],
+  [
+    "GET",
+    "/v1/persistent-tasks/{task_id}/prd/work-plans/{plan_id}/resources",
+    "Read original PRD work resources",
+    null,
+    "TaskPrdWorkResources",
+    "200",
+    "Read immutable bounded original snapshot-review and grant projections, or original preparation uncertainty, for one owned PRD cycle. Root paths and private recovery records remain host-private. Historical reads do not renew authority or verify current bytes."
   ]
 ]

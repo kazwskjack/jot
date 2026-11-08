@@ -4,6 +4,7 @@ import type {WorkbenchBudgetPolicy} from '../workbench/model-budget-policy.ts';
 import {DiscoveryPolicies} from './discovery-policy.ts';
 import {LogicalWorkCycleWorkspaceManager} from './logical-work-cycle-workspace.ts';
 import {TrustedWorkRunWorkspaceResolver} from './work-run-workspace.ts';
+import {WorkGrants} from './work-grants.ts';
 import {WorkInspections} from './work-inspections.ts';
 import {installIsolatedWorkFiles} from './isolated-work-file-schema.ts';
 import {configureTaskCompletionWorkEvidence} from '../persistent-tasks/completion-candidates.ts';
@@ -21,7 +22,7 @@ export function createNativeWorkRuntime(options:{db:DatabaseSync;workbench:Workb
  configureTaskCompletionWorkEvidence(options.db,scope=>inspections.current(scope));
  const operations=new Set(['files.list','files.read','files.write','files.delete','tasks.get','tasks.subtasks','tasks.next','tasks.reply_drafts',
   'tasks.work.plan.read','tasks.prd.read','tasks.upsert','tasks.evidence','tasks.assessment','tasks.observe','tasks.assess','tasks.delegate']);
- return {resolver,inspections,assertOperation(runId:string,operation:string){
+ return {resolver,inspections,workspace,grants:new WorkGrants(options.db,options.budgetPolicy),assertOperation(runId:string,operation:string){
   if(!resolver.context(runId))throw Error('work_admission_execution_unavailable');
   if(!operations.has(operation))throw Error('work_operation_denied');
  }};

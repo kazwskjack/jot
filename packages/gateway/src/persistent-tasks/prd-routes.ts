@@ -45,15 +45,21 @@ export const prdWorkHandoffRequestSchema={type:'object',additionalProperties:fal
   preview_sha256:{type:'string',pattern:'^[a-f0-9]{64}$'},run_id:{type:'string',minLength:1,maxLength:200},
   expected_run_version:{type:'integer',minimum:1,maximum:Number.MAX_SAFE_INTEGER},
  }};
+export const prdWorkResourceRequestSchema={type:'object',additionalProperties:false,required:['plan_id','cycle_id','preview_sha256'],properties:{
+ plan_id:{type:'string',pattern:'^prd-plan-[a-f0-9]{64}$'},cycle_id:{type:'string',minLength:1,maxLength:256},preview_sha256:{type:'string',pattern:'^[a-f0-9]{64}$'},
+}};
+export const prdWorkPreparationRequestSchema={...prdWorkResourceRequestSchema,required:[...prdWorkResourceRequestSchema.required,'expected_cycle_version'],properties:{
+ ...prdWorkResourceRequestSchema.properties,expected_cycle_version:{type:'integer',minimum:1,maximum:Number.MAX_SAFE_INTEGER},
+}};
 /** Outer server retains actor/origin/CSRF validation. taskPrdCommand routes must
  * bypass its generic ledger: preview is read-only; bind has an atomic receipt. */
 export function registerTaskPrdRoutes(app:FastifyInstance,service:TaskPrdService,actor:(r:FastifyRequest)=>string,atomicCommand?:<T>(request:FastifyRequest,status:number,operation:()=>T)=>T){
  const task=(r:FastifyRequest)=>(r.params as {taskId:string}).taskId;
  const errorHandler=(error:FastifyError,r:FastifyRequest,reply:FastifyReply)=>{
   const code=error.validation?'invalid_workbench_request':error.message;
-  const status=['prd_taskmaster_unavailable','prd_taskmaster_project_unavailable','prd_taskmaster_import_unavailable','prd_taskmaster_import_unconfirmed','prd_work_plan_integrity_failed','prd_work_plan_acceptance_integrity_failed','prd_work_plan_acceptance_unavailable','work_cycle_corrupt','prd_work_handoff_unavailable','prd_work_handoff_integrity_failed'].includes(code)?503:code==='unauthorized'?401:['origin_forbidden','csrf_invalid'].includes(code)?403:['task_not_found','agent_not_found','prd_template_not_found','prd_work_plan_not_found','work_cycle_not_found'].includes(code)?404:
+  const status=['prd_taskmaster_unavailable','prd_taskmaster_project_unavailable','prd_taskmaster_import_unavailable','prd_taskmaster_import_unconfirmed','prd_work_plan_integrity_failed','prd_work_plan_acceptance_integrity_failed','prd_work_plan_acceptance_unavailable','work_cycle_corrupt','prd_work_handoff_unavailable','prd_work_handoff_integrity_failed','prd_work_preparation_integrity_failed','prd_work_preparation_unavailable','work_grant_corrupt','workspace_journal_corrupt','work_cycle_source_corrupt'].includes(code)?503:code==='unauthorized'?401:['origin_forbidden','csrf_invalid'].includes(code)?403:['task_not_found','agent_not_found','prd_template_not_found','prd_work_plan_not_found','work_cycle_not_found'].includes(code)?404:
    code.startsWith('invalid_')||code==='work_cycle_invalid'||code==='contract_request_invalid'||code==='idempotency_key_required'||code==='idempotency_key_invalid'||code==='prd_source_unsupported'?422:
-   code.startsWith('prd_')||code.startsWith('work_cycle_')||['version_conflict','idempotency_conflict','workspace_coordination_required'].includes(code)?409:500;
+   code.startsWith('prd_')||code.startsWith('work_cycle_')||code.startsWith('work_grant_')||code.startsWith('workspace_journal_')||['version_conflict','idempotency_conflict','workspace_coordination_required'].includes(code)?409:500;
   const publicCode=status===500?'INTERNAL_ERROR':code.toUpperCase(),requestId=/^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$/.test(r.id)?r.id:randomUUID();
   return reply.code(status).send({error:{code:publicCode,message:publicCode,retryable:status>=500},request_id:requestId});
  };
@@ -84,6 +90,20 @@ export function registerTaskPrdRoutes(app:FastifyInstance,service:TaskPrdService
  app.post('/v1/persistent-tasks/:taskId/prd/work-plan-handoff',{validatorCompiler,errorHandler,schema:{params,body:prdWorkHandoffRequestSchema}},async(r,reply)=>{
   reply.header('cache-control','private, no-store');if(!atomicCommand)throw Error('prd_work_handoff_unavailable');
   return atomicCommand(r,200,()=>service.requestWorkPlanHandoff(actor(r),task(r),r.body));
+ });
+ app.get('/v1/persistent-tasks/:taskId/prd/work-plans/:planId/resources',{validatorCompiler,errorHandler,schema:{params:{...params,required:['taskId','planId'],properties:{...params.properties,planId:{type:'string',pattern:'^prd-plan-[a-f0-9]{64}$'}}}}},async(r,reply)=>{
+  reply.header('cache-control','private, no-store');return service.workResources(actor(r),task(r),(r.params as {planId:string}).planId);
+ });
+ app.post('/v1/persistent-tasks/:taskId/prd/work-plan-prepare',{validatorCompiler,errorHandler,schema:{params,body:prdWorkPreparationRequestSchema}},async(r,reply)=>{
+  reply.header('cache-control','private, no-store');if(!atomicCommand)throw Error('prd_work_preparation_unavailable');
+  const controller=new AbortController(),aborted=()=>controller.abort(),closed=()=>{if(!reply.raw.writableEnded)controller.abort();};
+  r.raw.once('aborted',aborted);reply.raw.once('close',closed);if(r.raw.aborted||reply.raw.destroyed)controller.abort();
+  try{const commit=await service.prepareWorkSnapshot(actor(r),task(r),r.body,r.headers['idempotency-key'],controller.signal);return atomicCommand(r,200,commit);}
+  finally{r.raw.off('aborted',aborted);reply.raw.off('close',closed);}
+ });
+ app.post('/v1/persistent-tasks/:taskId/prd/work-plan-grant',{validatorCompiler,errorHandler,schema:{params,body:prdWorkResourceRequestSchema}},async(r,reply)=>{
+  reply.header('cache-control','private, no-store');if(!atomicCommand)throw Error('prd_work_preparation_unavailable');
+  return atomicCommand(r,200,()=>service.authorizeWork(actor(r),task(r),r.body,r.headers['idempotency-key']));
  });
  app.get('/v1/persistent-tasks/:taskId/prd/templates',{validatorCompiler,errorHandler,schema:{params}},async(r,reply)=>{
   reply.header('cache-control','private, no-store');return service.templates(actor(r),task(r));
