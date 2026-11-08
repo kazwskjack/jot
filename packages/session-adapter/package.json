@@ -23,6 +23,7 @@
     "host-policy.js",
     "host-readiness.js",
     "hooks-config.js",
+    "hooks-agent-bridge.js",
     "hooks-protocol.js",
     "hooks-runtime.js",
     "host-settings-migration-proof.js",

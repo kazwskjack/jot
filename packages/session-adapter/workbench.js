@@ -515,6 +515,23 @@ export class WorkbenchBridge {
     return Object.freeze({binding:owned,scope,mapping:saved===null?null:Object.freeze({...saved})});
   }
   bindingFor(agent){return this.installed.get(agent)?.current.binding;}
+
+  async hooksSource(agent,signal){
+    const state=this.installed.get(agent),current=state?.current;
+    if(!current)return null;
+    const assertCurrent=async requestSignal=>{
+      if(state.current!==current||agent.session?.id!==current.binding.sessionRef)throw Error('hook_original_binding_changed');
+      await this.guard(agent,requestSignal);
+      if(state.current!==current)throw Error('hook_original_binding_changed');
+    };
+    await assertCurrent(signal);
+    const context=current.context;
+    return Object.freeze({agent,binding:current.binding,assertCurrent,scope:Object.freeze({
+      owner_id:context.owner_id,agent_id:context.agent_id,workspace_id:context.workspace_id,
+      project_id:context.project_id,capability_epoch:context.capability_epoch,
+      run_id:current.binding.runId,session_ref:current.binding.sessionRef
+    })});
+  }
   memoryCaptureBindingFor(agent){const current=this.installed.get(agent)?.current;return current?.context.kind==='memory_capture'?current.binding:undefined;}
   taskRootBindingFor(agent){const current=this.installed.get(agent)?.current;return current?.context.kind==='task'&&current.context.task_binding?.root_run_id===current.binding.runId?current.binding:undefined;}
 

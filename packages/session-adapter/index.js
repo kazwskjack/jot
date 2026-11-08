@@ -45,6 +45,7 @@ import {createGatewayPluginProfileReceiptClient,createDshProfilePluginControl} f
 import {createPluginProfileEvidence} from './plugin-profile-evidence.js'
 import {createHooksConfiguration} from './hooks-config.js'
 import {createHooksRuntime} from './hooks-runtime.js'
+import {createAgentHooksBridge} from './hooks-agent-bridge.js'
 import {resolveOwnerBoundDshProfileContext} from './dsh-profile-binding.js'
 
 import {normalizeLeaseTakeoverRequest,settleLeaseTakeover} from './lease-takeover.js'
@@ -920,10 +921,11 @@ async function readJson(req, limit = 1024 * 1024) {
 }
 
 export function apply(ctx, config = {}) {
+  let hooksConfiguration,hooksRuntime;
   if(config.hooks!==undefined){
-    const hooksConfiguration=createHooksConfiguration(config.hooks);
+    hooksConfiguration=createHooksConfiguration(config.hooks);
     ctx.provide('jotHooksConfiguration',hooksConfiguration);
-    const hooksRuntime=createHooksRuntime({configuration:hooksConfiguration,
+    hooksRuntime=createHooksRuntime({configuration:hooksConfiguration,
       resolveExecutor:()=>ctx.get('jotHookExecutionAuthority',false)});
     ctx.provide('jotHooksRuntime',hooksRuntime);
     ctx.effect(()=>()=>hooksRuntime.close());
@@ -1019,6 +1021,22 @@ export function apply(ctx, config = {}) {
       browserDriverObserverForAgent:agent=>ctx.agentPresets?.serviceFor?.(agent,'jotBrowserToolRegistrar'),
       mcpRuntimeProvider,
     }) : undefined
+    if(hooksRuntime&&workbenchBridge){
+      const hooksBridge=createAgentHooksBridge({runtime:hooksRuntime,configuration:hooksConfiguration,
+        resolveSource:async(agent,signal)=>{
+          if(ctx.agents.get(agent.id)!==agent)throw Error('hook_original_binding_changed');
+          const source=await workbenchBridge.hooksSource(agent,signal);
+          if(!source)return null;
+          return Object.freeze({...source,assertCurrent:async requestSignal=>{
+            if(ctx.agents.get(agent.id)!==agent)throw Error('hook_original_binding_changed');
+            await source.assertCurrent(requestSignal);
+            if(ctx.agents.get(agent.id)!==agent)throw Error('hook_original_binding_changed');
+          }});
+        }});
+      ctx.on('agent/created',({agent})=>hooksBridge.setup(agent.ctx,agent));
+      for(const agent of ctx.agents.list())hooksBridge.setup(agent.ctx,agent);
+      ctx.effect(()=>()=>hooksBridge.close());
+    }
     const hostPolicyBootstrapConfig=config.hostSettingsBootstrap===undefined?undefined:resolveHostPolicyBootstrapRuntimeConfig(config.hostSettingsBootstrap,{
       webServer:ctx.get?.('webServer')??ctx.webServer,workbenchBridge
     })
