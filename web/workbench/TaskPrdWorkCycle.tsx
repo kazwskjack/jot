@@ -1,4 +1,5 @@
 import React,{useEffect,useState} from 'react';
+import TaskPrdWorkHandoff from './TaskPrdWorkHandoff';
 import {request} from '../jot/client';
 import {useResource} from './useResource';
 import {prdMessage} from './task-prd.mjs';
@@ -12,8 +13,8 @@ function checked(value:Cycle,taskId:string,planId:string,acceptanceHash:string){
   ||!Number.isSafeInteger(value.version)||value.version<1||!['open','closed'].includes(value.state))throw Error('PRD_WORK_CYCLE_RECEIPT_INVALID');
  return value;
 }
-export default function TaskPrdWorkCycle({taskId,plan,acceptance,locked,ready,save,onStateChange}:{
- taskId:string;plan:TaskPrdWorkPlan|null;acceptance:TaskPrdWorkPlanAcceptance|null;locked:boolean;ready:boolean;save:TaskSaveReceipt;onStateChange:()=>void;
+export default function TaskPrdWorkCycle({taskId,plan,acceptance,locked,ready,save,handoffSave,onStateChange}:{
+ taskId:string;plan:TaskPrdWorkPlan|null;acceptance:TaskPrdWorkPlanAcceptance|null;locked:boolean;ready:boolean;save:TaskSaveReceipt;handoffSave:TaskSaveReceipt;onStateChange:()=>void;
 }){
  const [confirmed,setConfirmed]=useState(false),[error,setError]=useState(''),[receipt,setReceipt]=useState<Cycle|null>(null);
  const identity=`${taskId}:${plan?.plan_id??''}:${acceptance?.sha256??''}`;
@@ -44,7 +45,7 @@ export default function TaskPrdWorkCycle({taskId,plan,acceptance,locked,ready,sa
   }catch(e){if(!save.pending)setConfirmed(false);setError(prdMessage(e instanceof Error?e.message:'原工作循环回执待核对'));}
   finally{onStateChange();}
  }
- if(!acceptance&&!save.pending&&!receipt)return null;
+ if(!acceptance&&!save.pending&&!handoffSave.pending&&!receipt)return null;
  return <section aria-label="PRD 原工作循环" style={{overflowWrap:'anywhere'}}>
   <h5>原工作循环资源</h5>
   <p className="wb-hint">循环保留原任务、规划批次和累计预算。当前提供资源创建及关闭，执行准入接线继续开发。</p>
@@ -56,6 +57,7 @@ export default function TaskPrdWorkCycle({taskId,plan,acceptance,locked,ready,sa
   {(current&&cycle?.state!=='closed'||save.pending)&&<button type="button" disabled={save.busy||(!save.pending&&(locked||(!cycle&&!ready)||!confirmed||resource.loading||!!resource.error))} onClick={()=>void submit()}>{save.busy?'正在保存循环回执…':save.pending?'重试原循环回执':cycle?'关闭原循环':'创建原工作循环'}</button>}
   {save.pending&&<p role="status">原请求及 key 已保留，请重试原循环回执。</p>}
   {receipt&&<p role="status">原命令回执 {receipt.cycle_id} · v{receipt.version} · {receipt.state==='open'?'开放':'已关闭'}。</p>}
+  <TaskPrdWorkHandoff taskId={taskId} planId={plan?.plan_id??null} cycle={cycle??null} acceptanceHash={acceptance?.sha256??null} locked={locked} save={handoffSave} onStateChange={onStateChange}/>
   {error&&<p role="alert" className="wb-error">{error}</p>}
  </section>;
 }

@@ -5,7 +5,7 @@ import type {DatabaseSync} from 'node:sqlite';
 import type {WorkbenchService} from '../workbench/service.ts';
 import type {ArtifactService} from '../artifacts/service.ts';
 import type {PersistentTaskService} from './service.ts';
-import {withImmediateTransaction} from '../db/database.ts';
+import {withImmediateTransaction,withReadTransaction} from '../db/database.ts';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {taskmasterSourceSummary} from './taskmaster-source.ts';
 import type {McpRegistryService} from '../workbench/mcp-registry.ts';
@@ -16,6 +16,8 @@ import {readUtf8Range,validateFileRange} from '../workbench/utf8-range.ts';
 import {prdTemplates,renderPrdTemplate} from './prd-templates.ts';
 import {workspaceRelativePath} from '../always-on/workspace-provider.ts';
 import {taskmasterPrdPath} from '../workbench/taskmaster-path.ts';
+import type {RunCommandService} from '../runs/commands.ts';
+import {readPrdWorkHandoff,requestPrdWorkHandoff} from './prd-work-handoff.ts';
 import {WorkCycles} from '../always-on/work-cycles.ts';
 import {prdWorkPlanAuthority} from './prd-work-plan-authority.ts';
 import {installPrdWorkPlanAcceptances,acceptPrdWorkPlan,readPrdWorkPlanAcceptance} from './prd-work-plan-acceptances.ts';
@@ -31,7 +33,7 @@ const supported=(name:string)=>/\.(md|markdown|txt|json)$/i.test(name);
 const supportedMedia=(name:string,mediaType:string)=>mediaType.startsWith('text/')||/\.json$/i.test(name)&&mediaType.split(';',1)[0]!.trim().toLowerCase()==='application/json';
 const MAX_BYTES=1048576,MAX_OBJECTIVE=12000;
 const terminal=['succeeded','partial','failed','cancelled','interrupted'];
-type PrdOptions={uploadRoot:string;mcpRegistry?:Pick<McpRegistryService,'taskmasterConnections'>;installationClient?:TaskmasterInstallationClient;projectSource?:Pick<GitWorkbench,'taskmasterFiles'>&Partial<Pick<GitWorkbench,'taskmasterPrdFiles'|'taskmasterPrdFile'>>};
+type PrdOptions={uploadRoot:string;handoffCommands?:Pick<RunCommandService,'cancel'>;mcpRegistry?:Pick<McpRegistryService,'taskmasterConnections'>;installationClient?:TaskmasterInstallationClient;projectSource?:Pick<GitWorkbench,'taskmasterFiles'>&Partial<Pick<GitWorkbench,'taskmasterPrdFiles'|'taskmasterPrdFile'>>};
 function object(value:unknown,keys:string[]):Row{
  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!keys.includes(key)))throw Error('invalid_prd_request');return value as Row;
 }
@@ -79,26 +81,39 @@ export class TaskPrdService {
  private reasons(owner:string,task:ReturnType<PersistentTaskService['get']>,role:ReturnType<WorkbenchService['getAgent']>){
   const reasons:string[]=[];if(task.trigger.kind==='project_discovery')reasons.push('PRD_MANAGED_TASK_FORBIDDEN');
   if(task.status!=='paused')reasons.push('PRD_TASK_MUST_BE_PAUSED');if(role.status!=='active')reasons.push('PRD_ROLE_UNAVAILABLE');
+  reasons.push(...this.executionReasons(owner,task.task_id));
+  const prior=this.latest(owner,task.task_id);
+  if(prior&&task.objective!==prior.objective)reasons.push('PRD_OBJECTIVE_CHANGED');return [...new Set(reasons)];
+ }
+ private executionReasons(owner:string,taskId:string){
+  const reasons:string[]=[];
   if(this.db.prepare(`SELECT 1 FROM wb_task_current_occurrences o JOIN ga_runs r ON r.id=o.run_id WHERE o.task_id=?
-   AND (r.reason_code='OUTCOME_UNKNOWN' OR o.status='outcome_unknown' OR r.status NOT IN (${terminal.map(()=>'?').join(',')})) LIMIT 1`).get(task.task_id,...terminal))reasons.push('PRD_EXECUTION_UNRESOLVED');
+   AND (r.reason_code='OUTCOME_UNKNOWN' OR o.status='outcome_unknown' OR r.status NOT IN (${terminal.map(()=>'?').join(',')})) LIMIT 1`).get(taskId,...terminal))reasons.push('PRD_EXECUTION_UNRESOLVED');
   // A terminal root does not close an already reserved native child. Only the
   // original trusted abort/closure receipts can establish its quiescence.
   if(this.installed('wb_native_child_reservations')&&this.db.prepare(`SELECT 1 FROM wb_native_child_reservations q
    LEFT JOIN wb_native_creation_aborts a ON a.reservation_id=q.reservation_id LEFT JOIN wb_native_child_closures c ON c.reservation_id=q.reservation_id
-   WHERE q.task_id=? AND q.owner_id=? AND a.reservation_id IS NULL AND c.reservation_id IS NULL LIMIT 1`).get(task.task_id,owner))reasons.push('PRD_EXECUTION_UNRESOLVED');
+   WHERE q.task_id=? AND q.owner_id=? AND a.reservation_id IS NULL AND c.reservation_id IS NULL LIMIT 1`).get(taskId,owner))reasons.push('PRD_EXECUTION_UNRESOLVED');
   if(this.installed('wb_native_execution_runs')&&this.db.prepare(`SELECT 1 FROM wb_native_execution_runs n
    JOIN ga_runs r ON r.id=n.run_id LEFT JOIN wb_native_execution_closures c ON c.run_id=n.run_id WHERE n.task_id=? AND n.owner_id=?
-   AND (c.run_id IS NULL OR r.reason_code='OUTCOME_UNKNOWN' OR r.status NOT IN (${terminal.map(()=>'?').join(',')})) LIMIT 1`).get(task.task_id,owner,...terminal))reasons.push('PRD_EXECUTION_UNRESOLVED');
+   AND (c.run_id IS NULL OR r.reason_code='OUTCOME_UNKNOWN' OR r.status NOT IN (${terminal.map(()=>'?').join(',')})) LIMIT 1`).get(taskId,owner,...terminal))reasons.push('PRD_EXECUTION_UNRESOLVED');
   if(this.installed('wb_task_auxiliary_runs')&&this.db.prepare(`SELECT 1 FROM wb_task_auxiliary_runs a JOIN ga_runs r ON r.id=a.run_id
-   WHERE a.task_id=? AND a.owner_id=? AND (r.reason_code='OUTCOME_UNKNOWN' OR r.status NOT IN (${terminal.map(()=>'?').join(',')})) LIMIT 1`).get(task.task_id,owner,...terminal))reasons.push('PRD_EXECUTION_UNRESOLVED');
+   WHERE a.task_id=? AND a.owner_id=? AND (r.reason_code='OUTCOME_UNKNOWN' OR r.status NOT IN (${terminal.map(()=>'?').join(',')})) LIMIT 1`).get(taskId,owner,...terminal))reasons.push('PRD_EXECUTION_UNRESOLVED');
   const runs=this.taskRunsSQL();
   if(this.installed('wb_model_budget_attempts')){
-   if(this.db.prepare(`SELECT 1 FROM wb_model_budget_attempts a JOIN (${runs}) o ON o.run_id=a.run_id WHERE o.task_id=? AND a.state IN ('reserved','in_flight','unknown') LIMIT 1`).get(task.task_id))reasons.push('PRD_BUDGET_UNRESOLVED');
+   if(this.db.prepare(`SELECT 1 FROM wb_model_budget_attempts a JOIN (${runs}) o ON o.run_id=a.run_id WHERE o.task_id=? AND a.state IN ('reserved','in_flight','unknown') LIMIT 1`).get(taskId))reasons.push('PRD_BUDGET_UNRESOLVED');
   }
   if(this.installed('ga_web_operation_cursors')&&this.db.prepare(`SELECT 1 FROM ga_web_operation_cursors c JOIN (${runs}) o ON o.run_id=c.run_id WHERE o.task_id=?
-   AND (c.last_status IS NULL OR c.last_status NOT IN ('succeeded','partial','failed','cancelled') OR c.items_settled<>1) LIMIT 1`).get(task.task_id))reasons.push('PRD_EXECUTION_UNRESOLVED');
-  const prior=this.latest(owner,task.task_id);
-  if(prior&&task.objective!==prior.objective)reasons.push('PRD_OBJECTIVE_CHANGED');return [...new Set(reasons)];
+   AND (c.last_status IS NULL OR c.last_status NOT IN ('succeeded','partial','failed','cancelled') OR c.items_settled<>1) LIMIT 1`).get(taskId))reasons.push('PRD_EXECUTION_UNRESOLVED');
+  return [...new Set(reasons)];
+ }
+ workPlanHandoff(owner:string,taskId:string,planId:string){
+  this.workPlan(owner,taskId,planId);
+  return withReadTransaction(this.db,()=>readPrdWorkHandoff(this.db,owner,taskId,planId,!!this.options.handoffCommands,()=>this.executionReasons(owner,taskId)));
+ }
+ requestWorkPlanHandoff(owner:string,taskId:string,input:unknown){
+  this.tasks.get(owner,taskId);
+  return requestPrdWorkHandoff(this.db,this.options.handoffCommands,owner,taskId,input);
  }
  templates(owner:string,taskId:string){
   const {task}=this.scope(owner,taskId);return {task_id:taskId,task_version:task.version,templates:prdTemplates()};

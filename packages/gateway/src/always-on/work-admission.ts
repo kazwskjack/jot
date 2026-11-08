@@ -38,9 +38,9 @@ export class WorkAdmissionController{
   // Recover a committed response without observing or replaying any new work.
   try{return accepted(this.records.get(owner,scope,grantId));}catch(error){if(!(error instanceof Error)||error.message!=='work_admission_not_found')throw error;}
   const selected=this.grants.get(owner,scope,grantId);
-  // shortcut: PRD planning handoff is pending; keep dispatch closed until original native custody is wired.
-  if(selected.admission_id===null)return refused('PRD_WORK_HANDOFF_PENDING');
-  const source=this.sources.collect(owner,scope);if(!source.caught_up||source.reason)return refused(source.reason??'SOURCE_PENDING');
+  if(selected.admission_id!==null){
+   const source=this.sources.collect(owner,scope);if(!source.caught_up||source.reason)return refused(source.reason??'SOURCE_PENDING');
+  }
   const grant=this.grants.guard(owner,scope,grantId);
   const prepared=await o.tasks.prepareTaskModelAcceptance(owner,grant.task_id,signal);
   const observation=await o.activity.observe({owner_id:owner,...scope},signal);
@@ -55,25 +55,41 @@ export class WorkAdmissionController{
   try{
    const admission=o.tasks.enqueueDiscoveryWork(owner,grantId,(task,current)=>{
     signal.throwIfAborted();
-    const sourceNow=this.sources.collect(owner,scope);
-    if(!sourceNow.caught_up||sourceNow.reason)throw Error('work_admission_gate:'+(sourceNow.reason??'SOURCE_PENDING'));
+    if(grant.admission_id!==null){
+     const sourceNow=this.sources.collect(owner,scope);
+     if(!sourceNow.caught_up||sourceNow.reason)throw Error('work_admission_gate:'+(sourceNow.reason??'SOURCE_PENDING'));
+    }
     const fresh=this.grants.guard(owner,scope,grantId);
     if(digest(fresh)!==digest(grant)||digest(current)!==digest(grant))throw Error('work_admission_authority_revoked');
     const deny=(reason:string):never=>{throw Error('work_admission_gate:'+reason);};
     if(!o.activity.isCurrent(observation))deny('SOURCE_CHANGED');
-    const policy=o.policies.get(owner,scope).policy;if(!policy||policy.version!==grant.policy_version)deny('AUTHORITY_CHANGED');
-    const p=policy!,budget=this.budgets.observeAdmission(owner,grant.task_id),capacity=o.coordinator.observeBackgroundCapacity(owner),facts=observation.facts;
-    const advice=evaluateDiscoveryGates({protocol:1,enabled:p.effective_state==='active',scope:{owner_id:owner,...scope},revision:p.version,
-     role_version:p.role_version,role_epoch:p.role_epoch,cooldown_ms:p.cooldown_ms,recent_input_ms:p.recent_input_ms},
-    {protocol:1,scope:{owner_id:owner,...scope},policy_revision:p.version,role_version:facts.role_version,role_epoch:facts.role_epoch,
-     observed_at:Math.min(observation.observed_at,budget.observed_at,capacity.observed_at),project_present:true,workspace_ready:facts.workspace_ready,
-     role_active:facts.role_active,host_ready:facts.host_ready,native_idle:facts.native_idle,run_busy:facts.run_busy,
-     last_user_input_at:facts.last_user_input_at,last_completed_at:facts.last_terminal_at,budget:budget.budget,background_slots:capacity.available,
-     // This is work within an already admitted cycle, not a fresh cycle.
-     // The original task still counts and limits its occurrences independently.
-     dormant_at_revision:null,signal_revision:grant.signal_revision,cycle_slots:null,reservation:'available'},
-    {now:Date.now(),max_age_ms:o.maxAgeMs});
-    if(!advice.eligible)deny(advice.reason!);
+    const budget=this.budgets.observeAdmission(owner,grant.task_id),capacity=o.coordinator.observeBackgroundCapacity(owner),facts=observation.facts;
+    if(grant.admission_id===null){
+     const now=Date.now(),times=[observation.observed_at,budget.observed_at,capacity.observed_at];
+     if(times.some(time=>!Number.isSafeInteger(time)||time<1||time>now||now-time>o.maxAgeMs))deny('OBSERVATION_STALE');
+     if(digest(observation.scope)!==digest({owner_id:owner,...scope})||facts.role_version!==grant.role_version||facts.role_epoch!==grant.role_epoch)deny('AUTHORITY_CHANGED');
+     if(!facts.workspace_ready)deny('WORKSPACE_UNAVAILABLE');
+     if(!facts.role_active)deny('ROLE_UNAVAILABLE');
+     if(!facts.host_ready)deny('HOST_UNAVAILABLE');
+     if(facts.run_busy||facts.native_idle==='busy')deny('AGENT_BUSY');
+     if(facts.native_idle!=='idle')deny('NATIVE_IDLE_UNCONFIRMED');
+     if(budget.budget!=='allowed')deny(budget.budget==='blocked'?'BUDGET_BLOCKED':'BUDGET_UNCONFIRMED');
+     if(!capacity.enabled||!Number.isSafeInteger(capacity.available)||capacity.available<1)deny('CAPACITY_UNAVAILABLE');
+    }else{
+     const policy=o.policies.get(owner,scope).policy;if(!policy||policy.version!==grant.policy_version)deny('AUTHORITY_CHANGED');
+     const p=policy!;
+     const advice=evaluateDiscoveryGates({protocol:1,enabled:p.effective_state==='active',scope:{owner_id:owner,...scope},revision:p.version,
+      role_version:p.role_version,role_epoch:p.role_epoch,cooldown_ms:p.cooldown_ms,recent_input_ms:p.recent_input_ms},
+     {protocol:1,scope:{owner_id:owner,...scope},policy_revision:p.version,role_version:facts.role_version,role_epoch:facts.role_epoch,
+      observed_at:Math.min(observation.observed_at,budget.observed_at,capacity.observed_at),project_present:true,workspace_ready:facts.workspace_ready,
+      role_active:facts.role_active,host_ready:facts.host_ready,native_idle:facts.native_idle,run_busy:facts.run_busy,
+      last_user_input_at:facts.last_user_input_at,last_completed_at:facts.last_terminal_at,budget:budget.budget,background_slots:capacity.available,
+      // This is work within an already admitted cycle, not a fresh cycle.
+      // The original task still counts and limits its occurrences independently.
+      dormant_at_revision:null,signal_revision:grant.signal_revision,cycle_slots:null,reservation:'available'},
+     {now:Date.now(),max_age_ms:o.maxAgeMs});
+     if(!advice.eligible)deny(advice.reason!);
+    }
     if(budget.budget_policy_revision===null)throw Error('work_admission_budget_unconfirmed');
     return {activity_sha256:observation.source_sha256,native_sha256:digest(observation),capacity_sha256:digest(capacity),
      source_verified_sha256:sourceVerified,snapshot_verified_sha256:inspected.result.manifest_sha256,

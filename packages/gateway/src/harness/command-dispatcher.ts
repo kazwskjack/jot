@@ -104,6 +104,19 @@ export class SessionCommandDispatcher {
      if(await this.processLeaseTakeover(row,payload)){this.takeoverRetries.delete(String(row.id));return true;}
     continue;
    }else if(row.kind==='cancel'){
+    if(payload.reason==='prd_work_handoff'){
+     const handoff=payload.handoff;
+     const current=handoff&&typeof handoff==='object'&&!Array.isArray(handoff)
+      &&['cycle_id','plan_id','acceptance_sha256','session_id'].every(key=>typeof handoff[key]==='string'&&handoff[key].length>0)
+      &&row.session_id===handoff.session_id&&this.db.prepare(`SELECT 1
+      FROM wb_discovery_work_cycles c JOIN wb_task_prd_work_cycle_origins origin ON origin.cycle_id=c.cycle_id
+      JOIN wb_task_current_occurrences o ON o.occurrence_id=c.occurrence_id AND o.task_id=c.task_id AND o.run_id=c.current_run_id
+      WHERE c.cycle_id=? AND c.owner_id=? AND origin.plan_id=? AND origin.acceptance_sha256=? AND o.run_id=?`)
+      .get(handoff.cycle_id,row.conversation_owner,handoff.plan_id,handoff.acceptance_sha256,row.run_id);
+     const replaced=this.db.prepare(`SELECT 1 FROM ga_runs WHERE conversation_id=? AND id<>?
+      AND status IN ('starting','running','waiting_user','waiting_approval','cancelling') LIMIT 1`).get(row.conversation_id,row.run_id);
+     if(!current||replaced){this.superseded(row.id);return true;}
+    }
     // A run without a Session binding has never entered this Session adapter.
     const receipt=row.session_id?await this.client.cancel(row.session_id):{settled:true};
     if(receipt.settled!==true)throw new Error('session_cancel_unconfirmed');

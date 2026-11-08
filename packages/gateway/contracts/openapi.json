@@ -24019,6 +24019,207 @@
           }
         }
       }
+    },
+    "/v1/persistent-tasks/{task_id}/prd/work-plan-handoff": {
+      "post": {
+        "operationId": "requestTaskPrdWorkHandoff",
+        "tags": [
+          "persistent-tasks"
+        ],
+        "description": "Explicitly request cancellation of the exact original planning run for PRD work handoff through the existing RunCommandService and native Session command dispatcher. Recheck the immutable cycle/review and current planning run/version/native binding. Preserve original task and occurrence generation, unfinished ledger and cumulative budgets. Return the original cancellation command receipt on exact replay. Request acceptance does not prove native cancellation, fee/child drain or execution admission.",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Original planning cancellation request receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskPrdWorkHandoffReceipt"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Original scope or PRD operation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Original scope or PRD operation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Original scope or PRD operation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Original scope or PRD operation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Original scope or PRD operation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Original scope or PRD operation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskPrdWorkHandoffRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/persistent-tasks/{task_id}/prd/work-plans/{plan_id}/handoff": {
+      "get": {
+        "operationId": "readTaskPrdWorkHandoff",
+        "tags": [
+          "persistent-tasks"
+        ],
+        "description": "Read original planning run/version, exact cancellation command status and original task execution/fee drain blockers. Settled requires the original applied cancel command, cancelled run, unchanged native binding and no retained task execution/fee blockers. Native idle/capacity/budget admission remains separate. Read grants no execution authority.",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^prd-plan-[a-f0-9]{64}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Original planning cancellation and drain state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskPrdWorkHandoffState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Original task proposal unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Original task proposal unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Original task proposal unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Original task proposal unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Original task proposal unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -47247,6 +47448,199 @@
                 "type": "null"
               }
             ]
+          },
+          "execution_authorized": {
+            "type": "boolean",
+            "const": false
+          }
+        }
+      },
+      "TaskPrdWorkHandoffRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "plan_id",
+          "cycle_id",
+          "preview_sha256",
+          "run_id",
+          "expected_run_version"
+        ],
+        "properties": {
+          "plan_id": {
+            "type": "string",
+            "pattern": "^prd-plan-[a-f0-9]{64}$"
+          },
+          "cycle_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "preview_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "run_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "expected_run_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        }
+      },
+      "TaskPrdWorkHandoffReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "protocol",
+          "task_id",
+          "plan_id",
+          "cycle_id",
+          "run_id",
+          "command_id",
+          "accepted",
+          "execution_authorized"
+        ],
+        "properties": {
+          "protocol": {
+            "type": "integer",
+            "const": 1
+          },
+          "task_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "plan_id": {
+            "type": "string",
+            "pattern": "^prd-plan-[a-f0-9]{64}$"
+          },
+          "cycle_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "run_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "command_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "accepted": {
+            "type": "boolean",
+            "const": true
+          },
+          "execution_authorized": {
+            "type": "boolean",
+            "const": false
+          }
+        }
+      },
+      "TaskPrdWorkHandoffState": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "task_id",
+          "plan_id",
+          "cycle_id",
+          "available",
+          "planning",
+          "command_id",
+          "requested",
+          "settled",
+          "reasons",
+          "execution_authorized"
+        ],
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "plan_id": {
+            "type": "string",
+            "pattern": "^prd-plan-[a-f0-9]{64}$"
+          },
+          "cycle_id": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "planning": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "run_id",
+                  "status",
+                  "version"
+                ],
+                "properties": {
+                  "run_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "status": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "version": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "command_id": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requested": {
+            "type": "boolean"
+          },
+          "settled": {
+            "type": "boolean"
+          },
+          "reasons": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "type": "string",
+              "maxLength": 200
+            }
           },
           "execution_authorized": {
             "type": "boolean",

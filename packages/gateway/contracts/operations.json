@@ -1897,5 +1897,23 @@
     "TaskPrdWorkCycleState",
     "200",
     "Read the original owned PRD proposal work-cycle resource and immutable review origin, or null before creation. Historical read grants no execution authority."
+  ],
+  [
+    "POST",
+    "/v1/persistent-tasks/{task_id}/prd/work-plan-handoff",
+    "Request original PRD planning handoff",
+    "TaskPrdWorkHandoffRequest",
+    "TaskPrdWorkHandoffReceipt",
+    "200",
+    "Explicitly request cancellation of the exact original planning run for PRD work handoff through the existing RunCommandService and native Session command dispatcher. Recheck the immutable cycle/review and current planning run/version/native binding. Preserve original task and occurrence generation, unfinished ledger and cumulative budgets. Return the original cancellation command receipt on exact replay. Request acceptance does not prove native cancellation, fee/child drain or execution admission."
+  ],
+  [
+    "GET",
+    "/v1/persistent-tasks/{task_id}/prd/work-plans/{plan_id}/handoff",
+    "Read original PRD planning handoff",
+    null,
+    "TaskPrdWorkHandoffState",
+    "200",
+    "Read original planning run/version, exact cancellation command status and original task execution/fee drain blockers. Settled requires the original applied cancel command, cancelled run, unchanged native binding and no retained task execution/fee blockers. Native idle/capacity/budget admission remains separate. Read grants no execution authority."
   ]
 ]

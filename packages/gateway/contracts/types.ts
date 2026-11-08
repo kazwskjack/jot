@@ -588,3 +588,10 @@ export type TaskPrdWorkCycle=Omit<DiscoveryWorkCycle,"admission_id"|"report_sha2
 };
 export type TaskPrdWorkCycleCommand={action:"create";plan_id:string;preview_sha256:string}|{action:"close";plan_id:string;preview_sha256:string;cycle_id:string;expected_version:number};
 export type TaskPrdWorkCycleState={task_id:string;plan_id:string;cycle:TaskPrdWorkCycle|null;execution_authorized:false};
+
+export type TaskPrdWorkHandoffRequest={plan_id:string;cycle_id:string;preview_sha256:string;run_id:string;expected_run_version:number};
+export type TaskPrdWorkHandoffReceipt={protocol:1;task_id:string;plan_id:string;cycle_id:string;run_id:string;command_id:string;accepted:true;execution_authorized:false};
+export type TaskPrdWorkHandoffState={
+ task_id:string;plan_id:string;cycle_id:string|null;available:boolean;planning:{run_id:string;status:string;version:number}|null;
+ command_id:string|null;requested:boolean;settled:boolean;reasons:string[];execution_authorized:false;
+};
