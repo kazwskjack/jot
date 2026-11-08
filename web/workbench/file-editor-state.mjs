@@ -49,7 +49,8 @@ function draftStorageKeys(storage,ownerScope){
 export function validateWorkspaceFilePath(value){
  if(typeof value!=='string'||!value||value.length>400||value.startsWith('/')||/^[A-Za-z]:/.test(value)||/[\\:\x00-\x1f]/.test(value))throw new Error('workspace_path_unsafe');
  const parts=value.split('/');
- if(parts.some(part=>!part||part==='.'||part==='..'||part.startsWith('.')||/[. ]$|[<>"|?*]/.test(part)||/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(part)))throw new Error('workspace_path_unsafe');
+ const taskmaster=value==='.taskmaster/tasks/tasks.json'||parts.length===3&&parts[0]==='.taskmaster'&&parts[1]==='docs'&&/\.(md|markdown|txt)$/i.test(parts[2]);
+ if(parts.some((part,index)=>!part||part==='.'||part==='..'||part.startsWith('.')&&!(taskmaster&&index===0)||/[. ]$|[<>"|?*]/.test(part)||/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(part)))throw new Error('workspace_path_unsafe');
  return value;
 }
 
