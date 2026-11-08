@@ -1,3 +1,5 @@
+import {readHostModelMetadataBindings,type TrustedModelMetadataClient} from '../harness/model-metadata.ts';
+import {modelMetadataRoutes,acceptedModelPolicyMetadata} from '../conversations/model-policy.ts';
 import {IsolatedWorkFiles,type IsolatedFileIdentity,type IsolatedFileOperation} from '../always-on/isolated-work-files.ts';
 import type {ArtifactService} from '../artifacts/service.ts';
 import type {TrustedWorkRunWorkspaceResolver} from '../always-on/work-run-workspace.ts';
@@ -71,7 +73,7 @@ function canonical(value: unknown): string {
 /** Only the local authenticated DSH host may resolve a product run's identity. */
 export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSync,
   workbench: WorkbenchService, tasks: PersistentTaskService, token: string | undefined, modelBudgets?: ModelBudgetLedger,collaboration?:TaskCollaborationService,replyJudge?:ReplyJudgeClient,nativeWork?:NativeWorkExecution,
-  allowedOrigins:ReadonlySet<string>=new Set<string>(),nativeMemberClient?:NativeMemberControlClient,events?:EventStore,memoryReasoningClient?:MemoryReasoningClient, mcpRegistry?:McpRegistryService, interactions?:InteractionService,artifacts?:ArtifactService) {
+  allowedOrigins:ReadonlySet<string>=new Set<string>(),nativeMemberClient?:NativeMemberControlClient,events?:EventStore,memoryReasoningClient?:MemoryReasoningClient, mcpRegistry?:McpRegistryService, interactions?:InteractionService,artifacts?:ArtifactService,modelMetadataClient?:TrustedModelMetadataClient) {
   db.exec(`CREATE TABLE IF NOT EXISTS wb_tool_receipts (
     run_id TEXT NOT NULL REFERENCES ga_runs(id), call_id TEXT NOT NULL,
     request_hash TEXT NOT NULL, response_json TEXT NOT NULL, created_at TEXT NOT NULL,
@@ -219,15 +221,28 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
     const input=object(request.body);fields(input,['run_id','session_ref','request_id','spawn_request_hash','publication']);
     context(input);return {publication:nativeChildren.publish(input)};
   });
+  const prepareNativeModel=async(source:ReturnType<WorkbenchService['nativeModelAcceptanceSource']>|undefined)=>{
+    if(!source)return;
+    const bindings=await readHostModelMetadataBindings(modelMetadataClient,modelMetadataRoutes(source.model));
+    if(bindings)return {source,bindings};
+  };
   app.post('/internal/v1/workbench/native-child-bind',async request=>{
     authorized(request.headers.authorization);const input=object(request.body);
     fields(input,['run_id','session_ref','reservation_id']);
     if(typeof input.reservation_id!=='string')throw new Error('native_child_request_invalid');
     const reservationId=input.reservation_id;
+    const source=withReadTransaction(db,()=>{
+      const identity=context(input);assertExecutionLease(db,identity.run_id,input.execution_lease);
+      const saved=db.prepare('SELECT role_id FROM wb_native_child_reservations WHERE reservation_id=? AND owner_id=? AND root_run_id=?').get(reservationId,identity.owner_id,identity.run_id);
+      if(!saved)throw Error('workbench_identity_forbidden');
+      if(!modelMetadataClient||db.prepare('SELECT 1 FROM wb_native_child_runs WHERE reservation_id=? AND owner_id=?').get(reservationId,identity.owner_id))return;
+      return workbench.nativeModelAcceptanceSource(identity.owner_id,String(saved.role_id));
+    });
+    const prepared=await prepareNativeModel(source);
     return withImmediateTransaction(db,()=>{
       const identity=context(input);assertExecutionLease(db,identity.run_id,input.execution_lease);
       if(!db.prepare('SELECT 1 FROM wb_native_child_reservations WHERE reservation_id=? AND owner_id=? AND root_run_id=?').get(reservationId,identity.owner_id,identity.run_id))throw new Error('workbench_identity_forbidden');
-      const child=workbench.prepareNativeChild(identity.owner_id,reservationId);
+      const child=workbench.prepareNativeChild(identity.owner_id,reservationId,prepared);
       return {binding:{runId:child.run_id,sessionRef:child.session_ref,executionLease:normalizeExecutionLease(input.execution_lease)}};
     });
   });
@@ -238,9 +253,19 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
   app.post('/internal/v1/workbench/native-child-activate',async request=>{
     authorized(request.headers.authorization);const input=object(request.body);
     fields(input,['run_id','session_ref','child_session_ref','previous_run_id','previous_log_sha256','previous_seq_exclusive']);
+    const source=withReadTransaction(db,()=>{
+      assertExecutionLease(db,String(input.run_id),input.execution_lease);const parent=context(input);requireTask(parent);
+      const previous=db.prepare(`SELECT n.snapshot_json,r.conversation_id FROM wb_native_execution_runs n JOIN ga_runs r ON r.id=n.run_id
+        WHERE n.run_id=? AND n.owner_id=? AND n.child_session_ref=?`).get(String(input.previous_run_id),parent.owner_id,String(input.child_session_ref));
+      if(!modelMetadataClient||!previous||db.prepare('SELECT 1 FROM wb_native_child_activations WHERE previous_run_id=?').get(String(input.previous_run_id)))return;
+      const saved=JSON.parse(String(previous.snapshot_json));
+      if(saved.parent_session_ref!==input.session_ref)throw Error('workbench_identity_forbidden');
+      return workbench.nativeModelAcceptanceSource(parent.owner_id,String(saved.role_id),String(previous.conversation_id));
+    });
+    const prepared=await prepareNativeModel(source);
     return withImmediateTransaction(db,()=>{
       assertExecutionLease(db,String(input.run_id),input.execution_lease);const parent=context(input);requireTask(parent);
-      const child=workbench.prepareNativeActivation(parent.owner_id,input);
+      const child=workbench.prepareNativeActivation(parent.owner_id,input,prepared);
       return {binding:{runId:child.run_id,sessionRef:child.session_ref,executionLease:normalizeExecutionLease(input.execution_lease)}};
     });
   });
@@ -432,7 +457,10 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
         if(!admission)throw new Error('budget_route_unavailable');
         const route=JSON.parse(admission.route_json) as {provider?:unknown;model?:unknown};
         if(typeof route.provider!=='string'||typeof route.model!=='string')throw new Error('budget_route_unavailable');
-        return {route:{provider:route.provider,model:route.model}};
+        const run=db.prepare('SELECT model_policy_json FROM ga_runs WHERE id=?').get(runId);
+        const selected={provider:route.provider,model:route.model};
+        const metadata=typeof run?.model_policy_json==='string'?acceptedModelPolicyMetadata(run.model_policy_json,selected):undefined;
+        return {route:selected,...(metadata?{metadata_binding:metadata}:{})};
       }
       if(action==='reserve'||action==='dispatch'||action==='provider_receipt'){
         assertExecutionLease(db,runId,input.execution_lease);

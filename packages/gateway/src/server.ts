@@ -759,7 +759,7 @@ export async function buildServer(config: {
   registerTaskPrdRoutes(app,taskPrd,actor);
   registerTaskBudgetRoutes(app,new TaskBudgetService(db,budgetPolicy),actor);
   registerWorkbenchExecution(app, db, workbench, persistentTasks, config.internalChannelToken, modelBudgets,taskCollaboration,config.replyJudge,nativeWork,
-    new Set(config.chatWebNetwork?.allowedOrigins ?? []),config.nativeMemberClient,events,config.memoryReasoningClient, mcpRegistry,interactions,artifacts);
+    new Set(config.chatWebNetwork?.allowedOrigins ?? []),config.nativeMemberClient,events,config.memoryReasoningClient, mcpRegistry,interactions,artifacts,config.modelCatalogClient);
   registerConversationGoalExecution(app,new ConversationGoalControls(db,events,runs),config.internalChannelToken);
   registerOrdinaryInputBinding(app,db,config.internalChannelToken);
   registerOrdinaryModelPolicy(app,db,config.internalChannelToken);

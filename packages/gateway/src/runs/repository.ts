@@ -12,7 +12,7 @@ import {ensureModeSession} from '../conversations/mode-sessions.ts';
 import {snapshotChatContext,chatContextHash} from '../conversations/chat-context.ts';
 import {normalizeChannelAttachmentManifestV2,encodeChannelAttachmentInputV2,channelAttachmentManifestDigestV2} from '../channels/attachment-manifest-v2.ts';
 
-type EnqueueOptions={executionMode?:'native';modePolicy?:ChatModePolicy;expectedConversationVersion?:number;modelMetadataBindings?:TrustedModelMetadataBinding[]};
+type EnqueueOptions={executionMode?:'native';modePolicy?:ChatModePolicy;expectedConversationVersion?:number;modelMetadataBindings?:TrustedModelMetadataBinding[];modelPolicyOverride?:Parameters<typeof snapshotAcceptedModelPolicy>[3]};
 
 const AUTOMATIC_TITLES = new Set(['New conversation', '新对话']);
 
@@ -43,6 +43,7 @@ export class RunRepository {
   usesDatabase(db: DatabaseSync): boolean { return this.db === db && this.events.usesDatabase(db); }
 
   enqueue(conversationId:string,ownerId:string,input:Record<string,unknown>,options:EnqueueOptions={}){
+    if(options.modelPolicyOverride!==undefined&&options.executionMode!=='native')throw Error('model_policy_override_invalid');
     return this.enqueueInput(conversationId,ownerId,input,options);
   }
 
@@ -76,7 +77,7 @@ export class RunRepository {
       const mode=conversationMode(current.mode),chat=mode==='chat'?chatModePolicy(options.modePolicy):undefined;
       if(options.executionMode==='native'&&mode!=='work')throw Error('conversation_mode_scope_invalid');
       if(mode==='work'&&options.modePolicy!==undefined)throw Error('conversation_mode_policy_invalid');
-      const modelPolicy=snapshotAcceptedModelPolicy(this.db,conversationId,ownerId,chat?.model,options.modelMetadataBindings);
+      const modelPolicy=snapshotAcceptedModelPolicy(this.db,conversationId,ownerId,options.modelPolicyOverride??chat?.model,options.modelMetadataBindings);
       // Native child preparation retains its original reservation/role/archived
       // conversation contract; it is not ordinary Chat/Work input admission.
       const executionPolicy=options.executionMode==='native'?null:acceptedExecutionPolicy(mode,Number(current.version),modelPolicy,this.options.workAgentPreset??'jot-general',chat);

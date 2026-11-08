@@ -37,6 +37,15 @@ export function acceptedModelPolicyCandidates(serialized:unknown){
  if(canonicalModelJson(original)!==serialized)throw Error('model_policy_invalid');
  return [{provider:model.provider,model:model.model},...(model.fallbacks??[])];
 }
+/** Read only a binding that was saved in the original immutable accepted policy. */
+export function acceptedModelPolicyMetadata(serialized:unknown,route:{provider:string;model:string}){
+ const routes=acceptedModelPolicyCandidates(serialized),original=JSON.parse(String(serialized));
+ if(original.metadata_bindings===undefined)return;
+ const bindings=acceptedModelMetadataBindings(original.metadata_bindings,routes);
+ const binding=bindings.find(item=>item.provider===route.provider&&item.model===route.model);
+ if(!binding)throw Error('model_metadata_changed');
+ return binding;
+}
 /** Called inside acceptance's existing transaction, never from mutable metadata at dispatch. */
 export function snapshotAcceptedModelPolicy(db:DatabaseSync,conversationId:string,ownerId:string,modelOverride?:Selection,metadataBindings?:TrustedModelMetadataBinding[]){
  if(!db.isTransaction)throw Error('model_policy_acceptance_transaction_required');

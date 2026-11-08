@@ -17,19 +17,23 @@ export function createBudgetModelSelector({route,llm,agents,bridge,registry,toke
   if(agent?.session)policies.delete(agent.session);
   if(!agent||typeof check!=='function'||typeof llm?.resolveCallConfig!=='function'||typeof agents?.selectForNextRequest!=='function')throw new Error('workbench_model_host_incompatible');
   signal?.throwIfAborted();await check();signal?.throwIfAborted();
-  let selected=original;const binding=bridge?.bindingFor?.(agent),assertBinding=()=>{if(binding?.executionLease&&bridge.bindingFor(agent)!==binding)throw new Error('workbench_model_binding_changed');};
+  let selected=original,acceptedMetadata;const binding=bridge?.bindingFor?.(agent),assertBinding=()=>{if(binding?.executionLease&&bridge.bindingFor(agent)!==binding)throw new Error('workbench_model_binding_changed');};
   if(binding?.executionLease){
    const response=await bridge.request('model-budget',binding,{action:'selection'},signal),route=response?.route;
    assertBinding();
    if(!route||Object.keys(route).sort().join(',')!=='model,provider'||typeof route.provider!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(route.provider)
     ||typeof route.model!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,255}$/.test(route.model))throw new Error('workbench_model_host_incompatible');
    selected=Object.freeze({provider:route.provider,model:route.model});
+   acceptedMetadata=response.metadata_binding;
   }
   signal?.throwIfAborted();await check();signal?.throwIfAborted();
   const session=agent.session;
   if(!session||session.id!==agent.id)fail();
   const metadata=await readMetadata(selected,signal);signal?.throwIfAborted();assertBinding();
   if(metadata.state!=='ready')fail();
+  if(acceptedMetadata!==undefined&&!isDeepStrictEqual(acceptedMetadata,{provider:selected.provider,model:selected.model,
+   digest_revision:metadata.digest_revision,metadata_digest:metadata.metadata_digest,
+   source_config_revision:metadata.source_config_revision,upstream_revision:metadata.upstream_revision}))fail();
   await check();signal?.throwIfAborted();assertBinding();
   const resolved=await llm.resolveCallConfig({...selected},signal);signal?.throwIfAborted();assertBinding();
   if(resolved?.provider!==selected.provider||resolved?.model!==selected.model)throw new Error('workbench_model_route_changed');

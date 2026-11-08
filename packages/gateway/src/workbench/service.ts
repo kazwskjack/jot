@@ -11,7 +11,7 @@ import { createHash, createHmac, createCipheriv, createDecipheriv, randomBytes, 
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
-import { withImmediateTransaction } from '../db/database.ts';
+import { withImmediateTransaction,withReadTransaction } from '../db/database.ts';
 import { canonicalJson } from '../db/canonical-json.ts';
 import { ConversationRepository } from '../conversations/repository.ts';
 import { ProjectRepository } from '../projects/repository.ts';
@@ -20,6 +20,7 @@ import { RunRepository } from '../runs/repository.ts';
 import { RunCommandService } from '../runs/commands.ts';
 import { MemoryLifecycle, memoryExpired, memoryMetadata, rankMemory, rankMemoryDetailed, serializeMemory, type MemoryRankAdapter } from './memory-lifecycle.ts';
 import {MemoryReasoningAdapter,type MemoryReasoningCandidate,type MemoryReasoningProvider,type MemoryReasoningResult} from './memory-reasoning-adapter.ts';
+import type {TrustedModelMetadataBinding} from '../harness/model-metadata.ts';
 import type { WorkbenchBudgetPolicy } from './model-budget-policy.ts';
 import {installTaskRunLineage,bindTaskContinuation} from '../persistent-tasks/task-runs.ts';
 import {installTaskMailbox,bindTaskMailbox,currentTaskMailbox,taskMemberCapacityAvailable} from './task-mailbox.ts';
@@ -441,18 +442,34 @@ export class WorkbenchService {
       this.options.modelBudgetPolicy?.allocate(owner,runId);
     });
   }
+  nativeModelAcceptanceSource(owner:string,roleId:string,conversationId?:string){
+    return withReadTransaction(this.db,()=>{
+      const role=this.active(owner,roleId),conversation=this.conversations.get(conversationId??role.conversation_id,owner);
+      const policy=this.options.modelBudgetPolicy;
+      if(!policy)throw Error('budget_service_unavailable');
+      return {role_id:roleId,role_version:role.version,role_epoch:role.capability_epoch,
+        conversation_id:conversation.conversation_id,conversation_version:conversation.version,original_model:conversation.model,
+        budget_revision:policy.observedRevision(),model:policy.admissionModel(conversation.model)};
+    });
+  }
+  private nativeModelAcceptanceOptions(owner:string,roleId:string,conversationId:string|undefined,prepared?:{source:ReturnType<WorkbenchService['nativeModelAcceptanceSource']>;bindings:TrustedModelMetadataBinding[]}){
+    if(!prepared)return {};
+    if(canonicalJson(this.nativeModelAcceptanceSource(owner,roleId,conversationId))!==canonicalJson(prepared.source))throw Error('model_metadata_changed');
+    return {modelPolicyOverride:prepared.source.model,modelMetadataBindings:prepared.bindings};
+  }
   /** Authenticated native host only. Preparing records never starts a driver. */
-  prepareNativeChild(owner:string,reservationId:string){
+  prepareNativeChild(owner:string,reservationId:string,prepared?:{source:ReturnType<WorkbenchService['nativeModelAcceptanceSource']>;bindings:TrustedModelMetadataBinding[]}){
     return this.transaction(()=>{
       const saved=assertNativeReservation(this.db,owner,reservationId);
       const prior=this.db.prepare('SELECT run_id FROM wb_native_child_runs WHERE reservation_id=? AND owner_id=?').get(reservationId,owner) as {run_id:string}|undefined;
       if(prior){this.assertRunActive(prior.run_id);const run=this.runs.get(prior.run_id,owner);return {run_id:prior.run_id,conversation_id:String(run.conversation_id),session_ref:saved.child_session_ref};}
       const role=this.active(owner,saved.role_id);
       if(role.version!==saved.role_version||role.capability_epoch!==saved.role_epoch)throw new Error('task_collaboration_revoked');
+      const modelOptions=this.nativeModelAcceptanceOptions(owner,saved.role_id,undefined,prepared);
       const model=this.conversations.get(role.conversation_id,owner).model;
       const conversation=this.conversations.create(owner,{workspace_id:saved.workspace_id,project_id:saved.project_id,title:`Team：${role.name}`,model});
       const now=timestamp();this.db.prepare('UPDATE ga_conversations SET archived_at=? WHERE id=?').run(now,conversation.conversation_id);
-      const run=this.runs.enqueue(conversation.conversation_id,owner,{client_message_id:`native:${reservationId}`,content:[{type:'text',text:'原生Team成员运行；使用已保存角色和同一工作区，只在父任务权限内处理成员消息。'}]},{executionMode:'native'});
+      const run=this.runs.enqueue(conversation.conversation_id,owner,{client_message_id:`native:${reservationId}`,content:[{type:'text',text:'原生Team成员运行；使用已保存角色和同一工作区，只在父任务权限内处理成员消息。'}]},{executionMode:'native',...modelOptions});
       this.db.prepare('INSERT INTO wb_native_child_runs VALUES(?,?,?,?,?,?,?,?,?)').run(String(run.run_id),reservationId,owner,saved.root_run_id,saved.task_id,saved.occurrence_id,saved.role_id,saved.child_session_ref,now);
       this.bindRun(owner,saved.role_id,String(run.run_id),'native_team');
       this.db.prepare('INSERT INTO ga_harness_session_bindings VALUES(?,?,?,?,?)').run(conversation.conversation_id,owner,saved.child_session_ref,now,now);
@@ -507,7 +524,7 @@ export class WorkbenchService {
   }
   /** Prepare a new execution identity for the same durable native Session.
    * This does not deliver messages or start an SDK driver. */
-  prepareNativeActivation(owner:string,input:Input){
+  prepareNativeActivation(owner:string,input:Input,prepared?:{source:ReturnType<WorkbenchService['nativeModelAcceptanceSource']>;bindings:TrustedModelMetadataBinding[]}){
     const keys=['run_id','session_ref','child_session_ref','previous_run_id','previous_log_sha256','previous_seq_exclusive','execution_lease'];
     if(!input||Object.keys(input).some(key=>!keys.includes(key))||keys.slice(0,4).some(key=>typeof input[key]!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(String(input[key])))
       ||typeof input.previous_log_sha256!=='string'||!/^[a-f0-9]{64}$/.test(input.previous_log_sha256)||!Number.isSafeInteger(input.previous_seq_exclusive)||Number(input.previous_seq_exclusive)<1)throw new Error('native_activation_invalid');
@@ -533,8 +550,9 @@ export class WorkbenchService {
       if(existing){if(hash(String(existing.snapshot_json))!==digest)throw new Error('native_activation_source_changed');this.assertRunActive(String(existing.run_id));return {run_id:String(existing.run_id),conversation_id:String(previous.conversation_id),session_ref:saved.child_session_ref};}
       const policy=this.db.prepare('SELECT max_active FROM wb_task_collaboration_grants WHERE owner_id=? AND task_id=? AND version=?').get(owner,saved.task_id,saved.policy_version) as Row|undefined;
       if(!policy||!taskMemberCapacityAvailable(this.db,owner,saved.occurrence_id,Number(policy.max_active)))throw new Error('task_collaboration_exhausted');
+      const modelOptions=this.nativeModelAcceptanceOptions(owner,saved.role_id,String(previous.conversation_id),prepared);
       const activationId=`activation-${randomUUID()}`,now=timestamp();
-      const run=this.runs.enqueue(String(previous.conversation_id),owner,{client_message_id:activationId,content:[{type:'text',text:'原生Team成员恢复；同一会话中的新执行身份，仅处理原生邮箱消息。'}]},{executionMode:'native'});
+      const run=this.runs.enqueue(String(previous.conversation_id),owner,{client_message_id:activationId,content:[{type:'text',text:'原生Team成员恢复；同一会话中的新执行身份，仅处理原生邮箱消息。'}]},{executionMode:'native',...modelOptions});
       this.db.prepare('INSERT INTO wb_native_child_activations VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').run(String(run.run_id),activationId,saved.reservation_id,String(input.previous_run_id),owner,snapshot.root_run_id,saved.task_id,saved.occurrence_id,saved.role_id,saved.child_session_ref,JSON.stringify(snapshot),now);
       this.bindRun(owner,saved.role_id,String(run.run_id),'native_team');
       return {run_id:String(run.run_id),conversation_id:String(previous.conversation_id),session_ref:saved.child_session_ref};

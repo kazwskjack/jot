@@ -10,7 +10,7 @@ import {ChatCompactionAttempts} from './chat-compaction-attempts.ts';
 import {CHAT_CHECKPOINT_REVISION,latestChatCheckpoint} from './chat-checkpoint-store.ts';
 import {validateChatContext} from './chat-context.ts';
 import {canonicalModelJson,modelMetadataRoutes} from './model-policy.ts';
-import {readHostTrustedModelMetadata,readHostTrustedModelMetadataEnabled,type TrustedModelMetadataBinding,type TrustedModelMetadataClient} from '../harness/model-metadata.ts';
+import {readHostModelMetadataBindings,type TrustedModelMetadataClient} from '../harness/model-metadata.ts';
 
 type RecoveryCandidate={scope:{owner_id:string;conversation_id:string;run_id:string;session_ref:string;expected_run_version:number};intentId:string;sourceSha:string;parentId:string|null};
 const CHAT_RECOVERY_MS=1000;
@@ -118,18 +118,7 @@ export class ConversationModes{
   if(current.archived)throw Error('conversation_mode_conflict');
   const policy=current.mode==='chat'?await this.chatPolicy():undefined;
   if(current.mode==='chat'&&!policy)throw Error('chat_mode_unavailable');
-  let modelMetadataBindings:TrustedModelMetadataBinding[]|undefined;
-  const metadataEnabled=await readHostTrustedModelMetadataEnabled(this.modelMetadataClient,signal);
-  if(metadataEnabled===true&&typeof this.modelMetadataClient?.trustedModelMetadata!=='function')throw Error('model_metadata_unavailable');
-  if(typeof this.modelMetadataClient?.trustedModelMetadata==='function'&&metadataEnabled!==false){
-   const routes=modelMetadataRoutes(policy?.model??current.model),signalBound=signal?AbortSignal.any([signal,AbortSignal.timeout(4500)]):AbortSignal.timeout(4500);
-   const read=()=>Promise.all(routes.map(route=>readHostTrustedModelMetadata(this.modelMetadataClient,route,signalBound)));
-   const first=await read(),second=await read();signalBound.throwIfAborted();
-   if(canonicalModelJson(first)!==canonicalModelJson(second))throw Error('model_metadata_changed');
-   if(metadataEnabled===true&&first.some(binding=>binding===undefined))throw Error('model_metadata_changed');
-   if(first.some(binding=>binding===undefined)&&first.some(binding=>binding!==undefined))throw Error('model_metadata_unavailable');
-   if(first.every((binding):binding is TrustedModelMetadataBinding=>binding!==undefined))modelMetadataBindings=first;
-  }
+  const modelMetadataBindings=await readHostModelMetadataBindings(this.modelMetadataClient,modelMetadataRoutes(policy?.model??current.model),signal);
   const candidate=current.mode==='chat'?recoveryCandidate(this.db,owner,id,policy):undefined;
   if(candidate&&typeof this.client?.recoverChatCheckpoint==='function'&&!signal?.aborted){
    const deadline=AbortSignal.timeout(CHAT_RECOVERY_MS),bounded=signal?AbortSignal.any([signal,deadline]):deadline;

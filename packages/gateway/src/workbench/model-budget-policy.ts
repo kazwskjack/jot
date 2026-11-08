@@ -7,7 +7,7 @@ import { ModelBudgetLedger, normalizeModelBudgetRoutes, type ModelBudgetLimits, 
 import {installTaskMailbox,currentTaskMailbox} from './task-mailbox.ts';
 import {assertNativeRun} from './native-child-identity.ts';
 import {assertMemoryProcessingIdentity} from './memory-processing.ts';
-import {acceptedModelPolicyCandidates} from '../conversations/model-policy.ts';
+import {acceptedModelPolicyCandidates,modelMetadataRoutes} from '../conversations/model-policy.ts';
 
 const categories = ['owner_daily','project_daily','agent_daily','task_total','occurrence','chat_root','mailbox_thread'] as const;
 type Category = typeof categories[number];
@@ -139,6 +139,15 @@ export class WorkbenchBudgetPolicy {
     const row = this.db.prepare('SELECT * FROM wb_model_budget_policy_registry WHERE singleton=1').get() as Row | undefined;
     if (!row || Number(row.revision) !== this.config.revision || row.policy_hash !== this.fingerprint) throw new Error('budget_policy_stale');
   }
+  private admissionRoutes(candidates:Array<{provider:string;model:string}>){
+    const configured=this.config.admission_route;
+    return candidates[0]!.provider===configured.provider&&candidates[0]!.model===configured.model?candidates:[configured];
+  }
+  admissionModel(source:unknown){
+    this.assertCurrent();
+    const candidates=this.admissionRoutes(modelMetadataRoutes(source));
+    return {...candidates[0]!,...(candidates.length>1?{fallbacks:candidates.slice(1)}:{})};
+  }
   observedRevision(){this.assertCurrent();return this.config.revision;}
   budgetSettings() {
     this.assertCurrent();
@@ -246,8 +255,7 @@ export class WorkbenchBudgetPolicy {
       const scopes = definitions.map(definition => ({key:definition.key,...this.ledger.createScope(owner,definition.key,
         this.config.limits[definition.category],definition.daily ? window : {})}));
       this.ledger.bindRun(owner,runId,scopes.map(scope => scope.scope_id));
-      const candidates=acceptedModelPolicyCandidates(run.model_policy_json),configured=this.config.admission_route;
-      const admissionRoutes=candidates[0]!.provider===configured.provider&&candidates[0]!.model===configured.model?candidates:[configured];
+      const admissionRoutes=this.admissionRoutes(acceptedModelPolicyCandidates(run.model_policy_json));
       let admissionFailure:Error|undefined;
       for(const route of admissionRoutes){
         try{this.ledger.admitRun(owner,runId,route);admissionFailure=undefined;break;}

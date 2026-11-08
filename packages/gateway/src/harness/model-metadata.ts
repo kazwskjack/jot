@@ -108,3 +108,17 @@ export function acceptedModelMetadataBindings(value:unknown,routes:Array<{provid
  const keys=normalized.map(item=>JSON.stringify([item.provider,item.model]));if(new Set(keys).size!==keys.length)throw Error('model_metadata_invalid');
  return normalized;
 }
+
+/** Resolve outside SQL, then carry the stable detached bindings into acceptance. */
+export async function readHostModelMetadataBindings(client:TrustedModelMetadataClient|undefined,routes:Array<{provider:string;model:string}>,signal?:AbortSignal):Promise<TrustedModelMetadataBinding[]|undefined>{
+ const enabled=await readHostTrustedModelMetadataEnabled(client,signal);
+ if(enabled===true&&typeof client?.trustedModelMetadata!=='function')throw Error('model_metadata_unavailable');
+ if(typeof client?.trustedModelMetadata!=='function'||enabled===false)return;
+ const bounded=AbortSignal.any([AbortSignal.timeout(4500),...(signal?[signal]:[])]);
+ const read=()=>Promise.all(routes.map(route=>readHostTrustedModelMetadata(client,route,bounded)));
+ const first=await read(),second=await read();bounded.throwIfAborted();
+ if(canonical(first)!==canonical(second))throw Error('model_metadata_changed');
+ if(enabled===true&&first.some(binding=>binding===undefined))throw Error('model_metadata_changed');
+ if(first.some(binding=>binding===undefined)&&first.some(binding=>binding!==undefined))throw Error('model_metadata_unavailable');
+ if(first.every((binding):binding is TrustedModelMetadataBinding=>binding!==undefined))return first;
+}
