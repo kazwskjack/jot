@@ -50,6 +50,7 @@
     "skill-content-reader.js",
     "skill-catalog-reader.js",
     "skill-registry.js",
+    "skill-source-manifest.js",
     "workbench.js",
     "workbench-goal.js",
     "host-execution-lease.js",

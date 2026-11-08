@@ -28,14 +28,14 @@ export async function readSkillCatalog(runId:string,ownerScope:string,signal:Abo
  const hash=[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(catalogDigestInput(catalog))))].map(v=>v.toString(16).padStart(2,'0')).join('');current();
  if(hash!==catalog.catalogSha256)throw Error('skill_catalog_invalid');return {...catalog,viewScope:scope};
 }
-export async function readSelectedSkillDefinition(runId:string,ownerScope:string,name:string,signal:AbortSignal):Promise<SkillDefinitionResponse>{
+export async function readSelectedSkillDefinition(runId:string,ownerScope:string,name:string,signal:AbortSignal,includeSourceManifest=false):Promise<SkillDefinitionResponse>{
  if(!ID.test(runId)||!SKILL.test(name)||name.length>128)throw Error('skill_catalog_invalid');
  const current=()=>{signal.throwIfAborted();if(!/^[a-f0-9]{64}$/.test(ownerScope)||taskDraftScope()!==ownerScope)throw Error('SKILL_CATALOG_SCOPE_CHANGED');};
- current();const query=new URLSearchParams({name});
+ current();const query=new URLSearchParams({name});if(includeSourceManifest)query.set('manifest','source');
  const raw=await request<SkillDefinitionResponse>(`/runs/${encodeURIComponent(runId)}/skills?${query}`,'GET',undefined,undefined,signal);current();
  if(!raw||typeof raw!=='object'||Array.isArray(raw))throw Error('skill_catalog_invalid');
  const {viewScope:rawScope,...candidate}=raw,definition=await validateSkillDefinitionView(candidate),scope=viewScope(rawScope,runId);current();
- if(definition.name!==name)throw Error('skill_catalog_invalid');
+ if(definition.name!==name||includeSourceManifest&&!definition.manifest.original)throw Error('skill_catalog_invalid');
  return {...definition,viewScope:scope};
 }
 export async function readSelectedSkillResource(runId:string,ownerScope:string,skillName:string,relativePath:string,signal:AbortSignal):Promise<SkillResourceResponse>{

@@ -21490,7 +21490,7 @@
         "tags": [
           "skills"
         ],
-        "description": "Read original-scope native skills and optional command descriptors. The default view contains skill metadata, while commands=1 includes effective commands.list(originalAgent) descriptors. Select name alone for one native SkillDefinition, its body hash and definition hash, plus allowlisted version/license values from native provider metadata. Null means the provider metadata supplies no usable value. Select name and path together for one inert relative resource. Query forms are exclusive. The response carries execution_authorized=false under the original run permissions.",
+        "description": "Read original-scope native skills and optional command descriptors. The default view contains skill metadata, while commands=1 includes effective commands.list(originalAgent) descriptors. Select name alone for one native SkillDefinition, its body hash and definition hash, plus allowlisted version/license values from native provider metadata. Null means the provider metadata supplies no usable value. Select name and path together for one inert relative resource. Query forms are exclusive. The response carries execution_authorized=false under the original run permissions. Add manifest=source to a name-only selection for the original registry-selected instruction file, read through the native filesystem boundary and checked against the selected definition body. Its top-level version/license and text SHA-256 are returned under manifest.original, with selected-skill-frontmatter provenance and coverage by definitionSha256.",
         "parameters": [
           {
             "name": "run_id",
@@ -21526,6 +21526,17 @@
               "minLength": 1,
               "maxLength": 512
             }
+          },
+          {
+            "name": "manifest",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "source"
+              ]
+            },
+            "description": "Requires name and selects the original file frontmatter observation."
           }
         ],
         "responses": {
@@ -41601,6 +41612,41 @@
               },
               "source": {
                 "const": "native-provider-metadata"
+              },
+              "original": {
+                "type": "object",
+                "properties": {
+                  "version": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "minLength": 1,
+                    "maxLength": 512
+                  },
+                  "license": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "minLength": 1,
+                    "maxLength": 512
+                  },
+                  "source": {
+                    "const": "selected-skill-frontmatter"
+                  },
+                  "textSha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                },
+                "required": [
+                  "version",
+                  "license",
+                  "source",
+                  "textSha256"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [

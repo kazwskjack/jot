@@ -475,3 +475,5 @@ export type RunSkillCatalogObservation = import('../../skills/catalog-contract.j
 export type RunSkillResourceObservation = import('../../skills/catalog-contract.js').SkillResourceView & {viewScope:RunSkillCatalogScope};
 export type RunSkillDefinitionObservation = import('../../skills/catalog-contract.js').SkillDefinitionView & {viewScope:RunSkillCatalogScope};
 export type RunSkillReadResponse = RunSkillCatalogObservation | RunSkillResourceObservation | RunSkillDefinitionObservation;
+
+export type SkillSourceManifest = import('../../skills/catalog-contract.js').SkillSourceManifest;

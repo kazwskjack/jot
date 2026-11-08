@@ -4,6 +4,7 @@ type ResourceState={loading?:boolean;value?:SkillResourceResponse;error?:string}
 type DefinitionState={loading?:boolean;value?:SkillDefinitionResponse;error?:string};
 export function skillResourceErrorMessage(error:unknown){
  const code=error instanceof Error?error.message:'';
+ if(code==='SKILL_SOURCE_MANIFEST_UNAVAILABLE')return '该技能未提供可沿当前权限读取的原始文件声明，可读取技能详情中的原生元数据。';
  if(code==='SKILL_CATALOG_NOT_FOUND')return '找不到该技能或相对路径，请检查输入后重试。';
  if(code==='SKILL_CATALOG_INPUT_INVALID'||code==='skill_catalog_invalid')return '技能资源路径或响应无效，请检查相对路径格式。';
  if(code==='SKILL_CATALOG_CHANGED'||code==='SKILL_CATALOG_SCOPE_CHANGED')return '技能目录或会话权限已变化，请刷新目录后重试。';
@@ -14,7 +15,7 @@ export function skillResourceErrorMessage(error:unknown){
 }
 export function SkillCatalogView({value,paths,resources,definitions={},onPathChange,onReadResource,onReadDefinition,onUseSkill}:{
  value:SkillCatalogResponse;paths:Record<string,string>;resources:Record<string,ResourceState>;
- definitions?:Record<string,DefinitionState>;onReadDefinition?:(name:string)=>void;
+ definitions?:Record<string,DefinitionState>;onReadDefinition?:(name:string,includeSourceManifest?:boolean)=>void;
  onPathChange:(name:string,path:string)=>void;onReadResource:(name:string)=>void;onUseSkill:(name:string)=>void;
 }){
  return <section aria-label="当前会话技能目录"><h3>当前会话技能</h3>
@@ -29,11 +30,17 @@ export function SkillCatalogView({value,paths,resources,definitions={},onPathCha
     <button type="button" disabled={!item.invocation.userInvocable||!paths[item.name]?.trim()||selected?.loading} onClick={()=>onReadResource(item.name)}>{selected?.loading?'正在读取…':'读取所选资源'}</button>
     <button type="button" disabled={!item.invocation.userInvocable} onClick={()=>onUseSkill(item.name)}>使用技能</button>
     {onReadDefinition&&<button type="button" disabled={!item.invocation.userInvocable||definition?.loading} onClick={()=>onReadDefinition(item.name)}>{definition?.loading?'正在读取详情…':'读取技能详情'}</button>}
+    {onReadDefinition&&<button type="button" disabled={!item.invocation.userInvocable||definition?.loading} onClick={()=>onReadDefinition(item.name,true)}>读取原始声明</button>}
     {definition?.error&&<p role="alert">{definition.error}</p>}
     {definition?.value&&<section aria-label={`${item.name} 技能详情`}>
      <p>定义来源 {definition.value.source} · {definition.value.provider}</p>
      <dl><dt>原生元数据版本</dt><dd>{definition.value.manifest.version??'未提供'}</dd>
       <dt>原生元数据许可证</dt><dd>{definition.value.manifest.license??'未提供'}</dd></dl>
+     {definition.value.manifest.original&&<>
+      <dl><dt>文件顶层版本</dt><dd>{definition.value.manifest.original.version??'未提供'}</dd>
+       <dt>文件顶层许可证</dt><dd>{definition.value.manifest.original.license??'未提供'}</dd></dl>
+      <p>原始声明 SHA-256 <code>{definition.value.manifest.original.textSha256}</code></p>
+     </>}
      <p>正文 SHA-256 <code>{definition.value.bodySha256}</code></p>
      <p>定义 SHA-256 <code>{definition.value.definitionSha256}</code></p>
      <pre>{definition.value.content}</pre>
@@ -68,13 +75,13 @@ export default function SkillCatalogPanel({runId,ownerScope,onUseSkill}:{runId:s
    if(!abort.signal.aborted&&pending.current.get(name)===abort)setResources(old=>({...old,[name]:{value}}));
   },error=>{if(!abort.signal.aborted&&pending.current.get(name)===abort)setResources(old=>({...old,[name]:{error:skillResourceErrorMessage(error)}}));});
  };
- const readDefinition=(name:string)=>{
+ const readDefinition=(name:string,includeSourceManifest=false)=>{
   for(const [key,request] of pending.current){
    if(key.startsWith('definition/')){request.abort();pending.current.delete(key);}
   }
   const key='definition/'+name,abort=new AbortController();
   pending.current.set(key,abort);setDefinitions({[name]:{loading:true}});
-  void readSelectedSkillDefinition(runId,ownerScope,name,abort.signal).then(value=>{
+  void readSelectedSkillDefinition(runId,ownerScope,name,abort.signal,includeSourceManifest).then(value=>{
    if(!abort.signal.aborted&&pending.current.get(key)===abort)setDefinitions({[name]:{value}});
   },error=>{if(!abort.signal.aborted&&pending.current.get(key)===abort)setDefinitions({[name]:{error:skillResourceErrorMessage(error)}});});
  };

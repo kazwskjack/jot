@@ -37,7 +37,9 @@ export function catalogDigestInput(value){return JSON.stringify({protocol:1,comp
  ...(value.commands===undefined?{}:{commands:value.commands})});}
 export function skillDefinitionDigestInput(value){
  return JSON.stringify({protocol:1,...skillManifest(value),content:value.content,bodySha256:value.bodySha256,
-  manifest:{version:value.manifest.version,license:value.manifest.license,source:value.manifest.source},execution_authorized:false});
+  manifest:{version:value.manifest.version,license:value.manifest.license,source:value.manifest.source,
+   ...(value.manifest.original===undefined?{}:{original:{version:value.manifest.original.version,license:value.manifest.original.license,
+    source:value.manifest.original.source,textSha256:value.manifest.original.textSha256}})},execution_authorized:false});
 }
 /** Explicitly selected native definition with allowlisted provider metadata. */
 export async function validateSkillDefinitionView(value){
@@ -45,14 +47,21 @@ export async function validateSkillDefinitionView(value){
  if(!exact(value,[...Object.keys(manifest),'protocol','content','bodySha256','manifest','definitionSha256','execution_authorized'])
   ||!exact(value.invocation,['modelInvocable','userInvocable'])||value.protocol!==1||value.execution_authorized!==false
   ||!manifest.invocation.userInvocable||typeof value.content!=='string'||new TextEncoder().encode(value.content).byteLength>1024*1024
-  ||!sha(value.bodySha256)||!sha(value.definitionSha256)||!exact(value.manifest,['version','license','source'])
+  ||!sha(value.bodySha256)||!sha(value.definitionSha256)||!exact(value.manifest,['version','license','source',
+   ...(object(value.manifest)&&Object.hasOwn(value.manifest,'original')?['original']:[])])
   ||value.manifest.source!=='native-provider-metadata'
   ||['version','license'].some(key=>value.manifest[key]!==null&&(typeof value.manifest[key]!=='string'
    ||value.manifest[key].length<1||value.manifest[key].length>512||/[\u0000-\u001f\u007f]/u.test(value.manifest[key]))))invalid();
+ const original=value.manifest.original;
+ if(Object.hasOwn(value.manifest,'original')&&(!exact(original,['version','license','source','textSha256'])
+  ||original.source!=='selected-skill-frontmatter'||!sha(original.textSha256)
+  ||['version','license'].some(key=>original[key]!==null&&(typeof original[key]!=='string'||original[key].length<1
+   ||original[key].length>512||/[\u0000-\u001f\u007f]/u.test(original[key])))))invalid();
  const digest=async text=>[...new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256',new TextEncoder().encode(text)))].map(byte=>byte.toString(16).padStart(2,'0')).join('');
  if(await digest(value.content)!==value.bodySha256||await digest(skillDefinitionDigestInput(value))!==value.definitionSha256)invalid();
  return {protocol:1,...manifest,content:value.content,bodySha256:value.bodySha256,
-  manifest:{version:value.manifest.version,license:value.manifest.license,source:value.manifest.source},
+  manifest:{version:value.manifest.version,license:value.manifest.license,source:value.manifest.source,
+   ...(original===undefined?{}:{original:{version:original.version,license:original.license,source:original.source,textSha256:original.textSha256}})},
   definitionSha256:value.definitionSha256,execution_authorized:false};
 }
 /** Allowlist the observation. Provider paths, opaque locators and arbitrary metadata never cross this boundary. */

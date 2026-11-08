@@ -28,7 +28,7 @@ function summary(skill) {
 }
 
 /** Read the selected user skill through the resident DSH SkillRegistry API. */
-export async function loadUserSkill({ skills, name, cwd, scope, signal, includeManifest = false } = {}) {
+export async function loadUserSkill({ skills, name, cwd, scope, signal, includeManifest = false, includeSourceManifest = false, readOriginalManifest } = {}) {
   if (!skills || typeof skills.snapshot !== 'function' || typeof skills.get !== 'function') throw fail('skills_service_unavailable')
   if (typeof name !== 'string' || !SKILL_NAME.test(name)) throw fail('skill_name_invalid')
   signal?.throwIfAborted()
@@ -67,5 +67,10 @@ export async function loadUserSkill({ skills, name, cwd, scope, signal, includeM
   const view = {protocol:1,...skillManifest(definition),content:skill.content,bodySha256:skill.bodySha256,
     manifest:{version:metadataText(definition.metadata?.version),license:metadataText(definition.metadata?.license),source:'native-provider-metadata'},
     execution_authorized:false}
+  if(includeSourceManifest){
+    if(typeof readOriginalManifest!=='function')throw fail('skill_resource_provider_unsupported')
+    view.manifest.original=await readOriginalManifest({definition,cwd,scope,signal})
+    signal?.throwIfAborted()
+  }
   return {...view,definitionSha256:createHash('sha256').update(skillDefinitionDigestInput(view),'utf8').digest('hex')}
 }

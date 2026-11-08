@@ -368,7 +368,9 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
     if (url.pathname === '/v1/skills/read') {
       if (method !== 'POST') return json(405, { error: 'method_not_allowed' })
       if (!body || typeof body !== 'object' || Array.isArray(body)
-        || Object.keys(body).sort().join(',') !== (body.include_manifest===true?'include_manifest,name,protocol,scope':'name,protocol,scope') || body.protocol !== 1
+        || Object.keys(body).sort().join(',') !== (body.include_manifest===true
+          ? (body.include_source_manifest===true?'include_manifest,include_source_manifest,name,protocol,scope':'include_manifest,name,protocol,scope')
+          :'name,protocol,scope') || body.protocol !== 1
         || typeof body.name !== 'string' || !body.scope || typeof body.scope !== 'object' || Array.isArray(body.scope)) {
         return json(422, { error: 'skill_content_input_invalid' })
       }
@@ -377,10 +379,10 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       catch (error) {
         const code = error instanceof Error ? error.message : ''
         if (code === 'skill_content_scope_forbidden') return json(404, { error: 'skill_content_not_found' })
-        if (['skill_content_command_invalid', 'skill_name_invalid'].includes(code)) return json(422, { error: 'skill_content_input_invalid' })
-        if (['skill_not_found', 'skill_not_user_invocable'].includes(code)) return json(404, { error: 'skill_content_not_found' })
-        if (code === 'skill_content_too_large') return json(413, { error: 'skill_content_too_large' })
-        if (['skill_catalog_incomplete', 'skill_definition_changed', 'skill_content_scope_changed'].includes(code)) return json(409, { error: 'skill_content_changed' })
+        if (['skill_content_command_invalid', 'skill_name_invalid', 'skill_resource_provider_unsupported'].includes(code)) return json(422, { error: 'skill_content_input_invalid' })
+        if (['skill_not_found', 'skill_not_user_invocable', 'skill_resource_path_unsafe'].includes(code)) return json(404, { error: 'skill_content_not_found' })
+        if (['skill_content_too_large','skill_resource_too_large'].includes(code)) return json(413, { error: 'skill_content_too_large' })
+        if (['skill_catalog_incomplete', 'skill_definition_changed', 'skill_content_scope_changed','skill_resource_changed'].includes(code)) return json(409, { error: 'skill_content_changed' })
         return json(503, { error: 'skill_content_unavailable' })
       }
     }
@@ -1095,8 +1097,17 @@ export function apply(ctx, config = {}) {
       :undefined
     const mcpControlRoute=mcpControlHost?createMcpControlRouteHandler(mcpControlHost):undefined
     if(mcpControlHost)ctx.effect(()=>()=>mcpControlHost.dispose())
+    let skillYamlParser;
     const skillContentCommand = workbenchBridge && typeof ctx.agents?.get === 'function' && typeof ctx.sessions?.get === 'function'
-      ? createSkillContentCommand(createSkillContentReader({ agents: ctx.agents, sessions: ctx.sessions, bridge: workbenchBridge }))
+      ? createSkillContentCommand(createSkillContentReader({ agents: ctx.agents, sessions: ctx.sessions, bridge: workbenchBridge,
+        parseYaml:(text,options)=>{
+          if(!skillYamlParser){
+            const nativeRequire=createRequire(ctx.get('profileContext').installAnchor);
+            const provider=nativeRequire.resolve('@deepseek-ai/dsh-skill-filesystem/package.json');
+            skillYamlParser=createRequire(provider)('yaml').parse;
+          }
+          return skillYamlParser(text,options);
+        }}))
       : undefined
     const skillCatalogCommand = workbenchBridge && typeof ctx.agents?.get === 'function' && typeof ctx.sessions?.get === 'function'
       ? createSkillCatalogCommand(createSkillCatalogReader({ agents: ctx.agents, sessions: ctx.sessions, bridge: workbenchBridge }))
