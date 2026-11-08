@@ -1,3 +1,4 @@
+import {awaitWithSignal} from './mcp-agent-provider.js';
 import {createHash} from 'node:crypto';
 import {open,lstat} from 'node:fs/promises';
 import {isAbsolute,resolve} from 'node:path';
@@ -14,20 +15,32 @@ export function normalizeMcpStdioPolicy(value){
   ||!Array.isArray(value.connections)||value.connections.length>64)fail();
  const keys=new Set();
  const connections=value.connections.map(row=>{
-  if(!exact(row,['agent_id','connection_id','server_name','command','command_sha256','args','cwd','files'])
+  if(!(exact(row,['agent_id','connection_id','server_name','command','command_sha256','args','cwd','files'])
+   ||exact(row,['agent_id','connection_id','server_name','command','command_sha256','args','cwd','files','env']))
    ||![row.agent_id,row.connection_id].every(id=>typeof id==='string'&&ID.test(id))
    ||typeof row.server_name!=='string'||!/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(row.server_name)
    ||typeof row.command!=='string'||row.command.length>1024||!isAbsolute(row.command)||typeof row.command_sha256!=='string'||!HASH.test(row.command_sha256)
    ||typeof row.cwd!=='string'||row.cwd.length>2048||!isAbsolute(row.cwd)||!Array.isArray(row.args)||row.args.length>64
    ||row.args.some(arg=>typeof arg!=='string'||arg.length>4096||arg.includes('\0'))
    ||!object(row.files)||Object.keys(row.files).length>64)fail();
+  const input=row.env??{};
+  if(!object(input)||Object.keys(input).length>64)fail();
+  const env=Object.create(null),names=new Set();
+  for(const [name,mapping] of Object.entries(input)){
+   const identity=process.platform==='win32'?name.toUpperCase():name;
+   if(!/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(name)||names.has(identity)||!exact(mapping,['reference','native_ref'])
+    ||typeof mapping.reference!=='string'||!/^secret:\/\/[A-Za-z0-9][A-Za-z0-9._:/-]{0,253}$/.test(mapping.reference)
+    ||!mapping.reference.startsWith('secret://'+value.owner_id+'/')||mapping.reference.length<=('secret://'+value.owner_id+'/').length
+    ||typeof mapping.native_ref!=='string'||!/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(mapping.native_ref))fail();
+   names.add(identity);env[name]=Object.freeze({...mapping});
+  }
   const key=JSON.stringify([row.agent_id,row.connection_id]);if(keys.has(key))fail();keys.add(key);
   const files=Object.create(null);
   for(const [file,hash] of Object.entries(row.files)){
    if(file.length>4096||!isAbsolute(file)||typeof hash!=='string'||!HASH.test(hash)||Object.hasOwn(files,resolve(file)))fail();
    files[resolve(file)]=hash;
   }
-  return Object.freeze({...row,command:resolve(row.command),cwd:resolve(row.cwd),args:Object.freeze([...row.args]),files:Object.freeze(files)});
+  return Object.freeze({...row,command:resolve(row.command),cwd:resolve(row.cwd),args:Object.freeze([...row.args]),files:Object.freeze(files),env:Object.freeze(env)});
  });
  return Object.freeze({owner_id:value.owner_id,connections:Object.freeze(connections)});
 }
@@ -61,7 +74,8 @@ export function createMcpHostStdioAuthorization({policy,readIdentity}={}){
    if(before.ownerId!==approved.owner_id||request.ownerId!==approved.owner_id||!row||request.serverName!==row.server_name
     ||typeof request.command!=='string'||!isAbsolute(request.command)||resolve(request.command)!==row.command
     ||typeof request.cwd!=='string'||!isAbsolute(request.cwd)||resolve(request.cwd)!==row.cwd
-    ||!isDeepStrictEqual(request.args,row.args))return false;
+    ||!isDeepStrictEqual(request.args,row.args)
+    ||!isDeepStrictEqual({...request.envRefs},Object.fromEntries(Object.entries(row.env).map(([name,value])=>[name,value.reference]))))return false;
    const directory=await lstat(row.cwd);if(!directory.isDirectory()||directory.isSymbolicLink())return false;
    if(!await matchesFile(row.command,row.command_sha256,signal))return false;
    for(const [path,hash] of Object.entries(row.files))if(!await matchesFile(path,hash,signal))return false;
@@ -69,5 +83,45 @@ export function createMcpHostStdioAuthorization({policy,readIdentity}={}){
    const after=readIdentity();
    return after.ownerId===before.ownerId&&after.profileId===before.profileId;
   }catch{return false;}
+ };
+}
+
+/** Resolve current native references at transport creation, outside persisted plugin config. */
+export function createMcpHostStdioTransports({policy,readIdentity,readCredentials,authorize,createTransport}={}){
+ const approved=normalizeMcpStdioPolicy(policy);
+ if([readIdentity,readCredentials,authorize,createTransport].some(value=>typeof value!=='function'))fail();
+ return async({ownerId,agentId,connection,signal,assertCurrent})=>{
+  const row=approved.connections.find(row=>row.agent_id===agentId&&row.connection_id===connection.connection_id);
+  if(!row)fail();
+  const profileId=readIdentity().profileId;
+  return async config=>{
+   try{
+    const current=AbortSignal.any([signal,AbortSignal.timeout(60000)]);
+    const check=async()=>{
+     current.throwIfAborted();
+     const identity=readIdentity();
+     if(identity.ownerId!==ownerId||ownerId!==approved.owner_id||identity.profileId!==profileId)fail();
+     await awaitWithSignal(Promise.resolve(assertCurrent()),current);
+     current.throwIfAborted();
+    };
+    await check();
+    if(config.transport!=='stdio'||config.command!==connection.config.command
+     ||config.cwd!==(connection.config.cwd??'')||!isDeepStrictEqual(config.args,connection.config.args??[])
+     ||!object(config.env)||Object.keys(config.env).length)fail();
+    const request={ownerId,agentId,connectionId:connection.connection_id,serverName:connection.server_name,
+     command:config.command,args:config.args,cwd:config.cwd,envRefs:connection.config.env_refs,signal:current};
+    if(await awaitWithSignal(Promise.resolve(authorize(request)),current)!==true)fail();
+    const provider=readCredentials(),env=Object.create(null);
+    for(const [name,mapping] of Object.entries(row.env)){
+     if(typeof provider?.resolve!=='function')fail();
+     const resolved=await awaitWithSignal(Promise.resolve(provider.resolve(mapping.native_ref)),current);
+     if(typeof resolved?.value!=='string'||!resolved.value||resolved.value.length>16384||resolved.value.includes('\0'))fail();
+     env[name]=resolved.value;
+    }
+    await check();
+    if(provider!==readCredentials())fail();
+    return createTransport({command:row.command,args:[...row.args],cwd:row.cwd,env});
+   }catch{fail();}
+  };
  };
 }

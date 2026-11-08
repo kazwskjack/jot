@@ -1,4 +1,5 @@
-import {createMcpHostStdioAuthorization,normalizeMcpStdioPolicy} from './mcp-host-stdio.js';
+import {loadScopedMcpStdioRuntime} from './mcp-stdio-runtime.js';
+import {createMcpHostStdioAuthorization,createMcpHostStdioTransports,normalizeMcpStdioPolicy} from './mcp-host-stdio.js';
 import {createMcpHostHttpFetch,normalizeMcpHttpPolicy} from './mcp-host-http.js';
 import {resolveOwnerBoundDshProfileContext} from './dsh-profile-binding.js';
 import { createRequire } from 'node:module';
@@ -34,7 +35,8 @@ export async function apply(ctx,config={}) {
   if (clientManifest.name !== '@deepseek-ai/dsh-mcp-client' || clientManifest.version !== '0.2.1-rc.2') {
     throw Error('jot_mcp_host_client_version_mismatch');
   }
-  const mcpPlugin = await import(pathToFileURL(clientEntry).href);
+  const stdioRuntime=stdioPolicy?await loadScopedMcpStdioRuntime(clientEntry,()=>ctx.logger.warn('mcp_stdio_stderr_received')):undefined;
+  const mcpPlugin = stdioRuntime?.plugin??await import(pathToFileURL(clientEntry).href);
   if (mcpPlugin.name !== 'mcp-client' || typeof mcpPlugin.apply !== 'function') {
     throw Error('jot_mcp_host_client_invalid');
   }
@@ -44,7 +46,10 @@ export async function apply(ctx,config={}) {
   const authorizeStdio=stdioPolicy?createMcpHostStdioAuthorization({policy:stdioPolicy,readIdentity}):undefined;
   const httpFetchForConnection=httpPolicy?createMcpHostHttpFetch({policy:httpPolicy,readIdentity,
     readCredentials:()=>ctx.get('credentials')}):undefined;
-  const provider = createMcpAgentRuntimeProvider({mcpPlugin,...(httpFetchForConnection?{httpFetchForConnection}:{}),...(authorizeStdio?{authorizeStdio}:{})});
+  const stdioTransportForConnection=stdioPolicy?createMcpHostStdioTransports({policy:stdioPolicy,readIdentity,
+    readCredentials:()=>ctx.get('credentials'),authorize:authorizeStdio,createTransport:stdioRuntime.createTransport}):undefined;
+  const provider = createMcpAgentRuntimeProvider({mcpPlugin,...(httpFetchForConnection?{httpFetchForConnection}:{}),
+    ...(authorizeStdio?{authorizeStdio}:{}),...(stdioTransportForConnection?{stdioTransportForConnection}:{})});
   ctx.on('credentials/reference-updated', () => provider.invalidateCredentials());
   ctx.on('agent/created', ({agent}) => provider.setup(agent.ctx, agent));
   for (const agent of ctx.agents.list()) provider.setup(agent.ctx, agent);

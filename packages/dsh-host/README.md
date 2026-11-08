@@ -118,10 +118,22 @@ stops startup. Keep executables, entry files and dependencies in operator-owned
 installation directories. Full installation integrity and dependency lifecycle
 remain part of the MCP installation work.
 
-This startup policy currently requires the Workbench connection's `env_refs`
-to be empty. Native DSH owns the existing subprocess environment scrubbing and
-process lifecycle. Stdio credential-reference resolution still needs a native
-transport seam that keeps values out of plugin configuration.
+Stdio policy optionally supplies an `env` mapping. Each environment name maps
+to `{reference, native_ref}`. Its `reference` must match the exact owner-scoped
+`secret://` handle in the Workbench connection's `env_refs`. The native reference
+is resolved for every new transport, after original connection admission and
+file fingerprint checks. Credential changes invalidate old MCP generations.
+
+The Host loads the pinned `0.2.1-rc.2` MCP client with one in-memory transport
+creation seam. A normalized source fingerprint bounds that adaptation. Native
+ESM import targets, tool registration, connection supervision, subprocess
+environment scrubbing and transport shutdown remain composed from the original
+packages. The runtime fingerprint and MIT notice ship with the adapter.
+
+Secret values are passed to the native transport constructor. The MCP plugin
+configuration retains an empty `env` object. Child stderr is drained and emits
+one `mcp_stdio_stderr_received` status per transport. Detailed stderr content is
+suppressed at this boundary to keep credential values out of logs.
 
 ## Windows startup
 

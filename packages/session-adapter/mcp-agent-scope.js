@@ -141,15 +141,16 @@ export function createMcpAgentScopeRegistry({ mcpPlugin } = {}) {
 
   /** `config` must already be authorized and transport-approved by the Host. */
   async function mount(options) {
-    if (!isObject(options) || Object.keys(options).some(key => !['agent', 'config', 'signal', 'hostFetch'].includes(key))) {
+    if (!isObject(options) || Object.keys(options).some(key => !['agent', 'config', 'signal', 'hostFetch', 'hostTransport'].includes(key))) {
       throw new Error('mcp_agent_scope_invalid');
     }
-    const { agent, config, signal, hostFetch } = options;
+    const { agent, config, signal, hostFetch, hostTransport } = options;
     if (!isObject(agent) || signal !== undefined && (!signal || typeof signal.throwIfAborted !== 'function'
       || typeof signal.addEventListener !== 'function' || typeof signal.removeEventListener !== 'function')) {
       throw new Error('mcp_agent_scope_invalid');
     }
     if (hostFetch !== undefined && typeof hostFetch !== 'function') throw new Error('mcp_agent_scope_invalid');
+    if(hostTransport!==undefined&&(typeof hostTransport!=='function'||mcpPlugin.hostTransportProtocol!==1||config.transport!=='stdio'))throw Error('mcp_agent_scope_invalid');
     signal?.throwIfAborted();
     const agentCtx = contexts.get(agent);
     if (!agentCtx) throw new Error('mcp_agent_scope_unavailable');
@@ -157,7 +158,13 @@ export function createMcpAgentScopeRegistry({ mcpPlugin } = {}) {
     let fiber, forwarder;
     try {
       if(hostFetch!==undefined)forwarder=await createScopedHttpForwarder(config,hostFetch,signal);
-      fiber = agentCtx.plugin(mcpPlugin, forwarder?{...config,url:forwarder.url}:config);
+      const plugin=hostTransport?{...mcpPlugin,apply(inner,value){
+        inner.provide('jotMcpTransportFactory',hostTransport);
+        return mcpPlugin.apply(inner,value);
+      }}:mcpPlugin;
+      if(hostTransport&&typeof agentCtx.isolate!=='function')throw Error('mcp_agent_scope_invalid');
+      const mountContext=hostTransport?agentCtx.isolate('jotMcpTransportFactory'):agentCtx;
+      fiber = mountContext.plugin(plugin, forwarder?{...config,url:forwarder.url}:config);
       if (!fiber || typeof fiber.then !== 'function' || typeof fiber.dispose !== 'function') {
         throw new Error('mcp_agent_fiber_invalid');
       }

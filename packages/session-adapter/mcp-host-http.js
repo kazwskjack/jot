@@ -33,7 +33,7 @@ export function normalizeMcpHttpPolicy(value){
   for(const [name,mapping] of Object.entries(row.headers)){
    const lower=name.toLowerCase();
    if(!HEADER.test(name)||RESERVED.has(lower)||Object.hasOwn(headers,lower)||!exact(mapping,['reference','native_ref','prefix'])
-    ||typeof mapping.reference!=='string'||mapping.reference.length>264||!mapping.reference.startsWith('secret://'+value.owner_id+'/')
+    ||typeof mapping.reference!=='string'||mapping.reference.length>264||!mapping.reference.startsWith('secret://'+value.owner_id+'/')||mapping.reference.length<=('secret://'+value.owner_id+'/').length
     ||!/^secret:\/\/[A-Za-z0-9][A-Za-z0-9._:/-]{0,253}$/.test(mapping.reference)
     ||typeof mapping.native_ref!=='string'||!REF.test(mapping.native_ref)||!['','Bearer '].includes(mapping.prefix))fail();
    headers[lower]=Object.freeze({...mapping});

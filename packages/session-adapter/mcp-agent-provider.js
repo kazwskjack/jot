@@ -103,19 +103,17 @@ function reloadServerName(identity, source, existingNames) {
 
 /**
  * Convert a credential-free Gateway stdio connection to the locked DSH
- * `StdioConfig` shape. Gateway secret refs need an explicit trusted translator
- * port such as `translateCredentialRef(secretRef, { agent, connectionId })`,
- * plus a separately approved DSH credential resolver. This candidate has no
- * mapping config, invokes no translator, and never reads secret values.
+ * `StdioConfig` shape. A scoped Host transport resolves approved references
+ * at connection creation. Credential values remain outside this config.
  * Streamable HTTP uses the separately scoped Host fetch policy.
  */
-export function toDshMcpStdioConfig(connection) {
+export function toDshMcpStdioConfig(connection,{allowCredentialRefs=false}={}) {
   if (!isObject(connection) || connection.transport !== 'stdio' || !isObject(connection.config)
     || connection.config.transport !== 'stdio' || connection.config.server_name !== connection.server_name) {
     fail('mcp_agent_transport_unavailable');
   }
   const config = connection.config;
-  if (!isObject(config.env_refs) || Object.keys(config.env_refs).length !== 0) {
+  if (!isObject(config.env_refs) || !allowCredentialRefs && Object.keys(config.env_refs).length !== 0) {
     fail('mcp_agent_credential_mapping_unavailable');
   }
   if (typeof config.command !== 'string' || !config.command
@@ -160,9 +158,10 @@ export function toDshMcpHttpConfig(connection) {
  * from model calls or webpage content. Setup must be called from the locked
  * DSH `AgentSetup(agentCtx, agent)` callback for each unpublished Agent.
  */
-export function createMcpAgentRuntimeProvider({ mcpPlugin, authorizeStdio, httpFetchForConnection } = {}) {
+export function createMcpAgentRuntimeProvider({ mcpPlugin, authorizeStdio, httpFetchForConnection, stdioTransportForConnection } = {}) {
   if (authorizeStdio !== undefined && typeof authorizeStdio !== 'function'
-    || httpFetchForConnection !== undefined && typeof httpFetchForConnection !== 'function') fail('mcp_agent_provider_invalid');
+    || httpFetchForConnection !== undefined && typeof httpFetchForConnection !== 'function'
+    || stdioTransportForConnection !== undefined && (typeof stdioTransportForConnection !== 'function'||mcpPlugin?.hostTransportProtocol!==1)) fail('mcp_agent_provider_invalid');
   const scopes = createMcpAgentScopeRegistry({ mcpPlugin });
   const contexts = new WeakMap();
   const activeByAgent = new WeakMap();
@@ -256,15 +255,19 @@ export function createMcpAgentRuntimeProvider({ mcpPlugin, authorizeStdio, httpF
         // binding supplies a new stdio or tool execution permission.
         if (config.transport !== 'stdio' || source.server_name !== config.server_name) fail('mcp_reload_transport_unavailable');
         const staged = { ...source, version: identity.config_version, generation: identity.generation, config };
-        const dshConfig = toDshMcpStdioConfig(staged);
+        const dshConfig = toDshMcpStdioConfig(staged,{allowCredentialRefs:!!stdioTransportForConnection});
         if (!authorizeStdio || await authorizeStdio(Object.freeze({ agent, ownerId, agentId, signal:linked.signal, connectionId: source.connection_id,
-          serverName: config.server_name, command: dshConfig.command, args: dshConfig.args, cwd: dshConfig.cwd })) !== true) fail('mcp_agent_stdio_forbidden');
+          serverName: config.server_name, command: dshConfig.command, args: dshConfig.args, cwd: dshConfig.cwd, envRefs:config.env_refs })) !== true) fail('mcp_agent_stdio_forbidden');
         await check();
         const before = scope.tools.schemas(agent);
         if (!Array.isArray(before)) fail('mcp_reload_catalog_unproven');
         const candidateServer = reloadServerName(identity, source, new Set(before.map(tool => tool?.name)));
         const prefix = `${RAW_TOOL_PREFIX}${candidateServer}__`;
-        fiber = await scopes.mount({ agent, config: Object.freeze({ ...dshConfig, serverName: candidateServer }), signal: linked.signal });
+        const hostTransport=stdioTransportForConnection?await stdioTransportForConnection({ownerId,agentId,connection:staged,
+          signal:linked.signal,assertCurrent:check}):undefined;
+        if(stdioTransportForConnection&&typeof hostTransport!=='function')fail('mcp_reload_transport_unavailable');
+        fiber = await scopes.mount({ agent, config: Object.freeze({ ...dshConfig, serverName: candidateServer }), signal: linked.signal,
+          ...(hostTransport?{hostTransport}:{}) });
         handle = Object.freeze({ close: async () => {
           await fiber.close(); binding.handles.delete(handle); linked.dispose();
         } });
@@ -468,7 +471,7 @@ export function createMcpAgentRuntimeProvider({ mcpPlugin, authorizeStdio, httpF
       const serverNames = new Set();
       const prepared = connections.map(connection => {
         const dshConfig = connection.transport === 'stdio'
-          ? toDshMcpStdioConfig(connection) : toDshMcpHttpConfig(connection);
+          ? toDshMcpStdioConfig(connection,{allowCredentialRefs:!!stdioTransportForConnection}) : toDshMcpHttpConfig(connection);
         if (serverNames.has(dshConfig.serverName)) fail('mcp_agent_config_invalid');
         serverNames.add(dshConfig.serverName);
         const rawNames = new Set();
@@ -487,7 +490,7 @@ export function createMcpAgentRuntimeProvider({ mcpPlugin, authorizeStdio, httpF
           serverName: connection.server_name,
           command: dshConfig.command,
           args: dshConfig.args,
-          cwd: dshConfig.cwd,
+          cwd: dshConfig.cwd, envRefs:connection.config.env_refs,
         });
         let authorized = false;
         try { authorized = await authorizeStdio(request) === true; } catch { /* Fail closed with a stable code. */ }
@@ -541,7 +544,13 @@ export function createMcpAgentRuntimeProvider({ mcpPlugin, authorizeStdio, httpF
           }
           if (typeof hostFetch !== 'function') fail('mcp_agent_http_unavailable');
         }
-        const pendingMount = scopes.mount({ agent, config: dshConfig, signal: linked.signal, ...(hostFetch ? {hostFetch} : {}) }).then(fiber => {
+        const hostTransport=connection.transport==='stdio'&&stdioTransportForConnection
+          ?await awaitWithSignal(Promise.resolve(stdioTransportForConnection({ownerId,agentId,connection,binding:bound,
+            signal:linked.signal,assertCurrent:assertConnectionCurrent})),linked.signal):undefined;
+        if(connection.transport==='stdio'&&stdioTransportForConnection&&typeof hostTransport!=='function')fail('mcp_agent_transport_unavailable');
+        await assertConnectionCurrent();
+        const pendingMount = scopes.mount({ agent, config: dshConfig, signal: linked.signal, ...(hostFetch ? {hostFetch} : {}),
+          ...(hostTransport?{hostTransport}:{}) }).then(fiber => {
           state.fibers.push(fiber);
           connectionState.fibers.push(fiber);
           return fiber;

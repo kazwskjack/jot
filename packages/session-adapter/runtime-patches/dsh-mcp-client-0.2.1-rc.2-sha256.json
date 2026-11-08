@@ -1,0 +1,13 @@
+{
+  "protocol": 1,
+  "package": "@deepseek-ai/dsh-mcp-client",
+  "version": "0.2.1-rc.2",
+  "locked_integrity": "sha512-H5nwrx+krm9nBYKC176bB08Z0Z/+vAuQg0yv9cMpaTUEDvsnM2bBTY5paVaD6Z4YPym4XMNmgoQIpn8CUlNFLw==",
+  "source_sha256": "758d8fc473b700b5d351158d06ce9f9e92c16e8b25497b08bb7bd2122a87f5dd",
+  "line_endings": "LF normalized before hashing",
+  "seam": "Replace the one createTransport(config) call with an optional scoped jotMcpTransportFactory service.",
+  "loading": "In-memory ESM adaptation with native import-condition resolution. Installed source remains at its original path.",
+  "license": "MIT",
+  "license_file": "runtime-patches/DSH-MIT-LICENSE.txt",
+  "source_label": "jot-dsh-mcp-client-0.2.1-rc.2-host-transport.mjs"
+}
