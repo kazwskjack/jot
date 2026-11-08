@@ -47,6 +47,7 @@ import {createHooksConfiguration} from './hooks-config.js'
 import {createHooksRuntime} from './hooks-runtime.js'
 import {createAgentHooksBridge} from './hooks-agent-bridge.js'
 import {createHookCallbackAuthority} from './hooks-callback-authority.js'
+import {readHookStopPayload} from './hooks-stop-source.js'
 import {resolveOwnerBoundDshProfileContext} from './dsh-profile-binding.js'
 
 import {normalizeLeaseTakeoverRequest,settleLeaseTakeover} from './lease-takeover.js'
@@ -1034,6 +1035,8 @@ export function apply(ctx, config = {}) {
       }
       let createHookContextMessage;
       const hooksBridge=createAgentHooksBridge({runtime:hooksRuntime,configuration:hooksConfiguration,
+        readStopPayload:(agent,turn,signal)=>readHookStopPayload({agent,turn,signal,
+          sessions:ctx.sessions,persistence:ctx.sessionPersistence,readAgent:id=>ctx.agents.get(id)}),
         createUserMessage:input=>{
           createHookContextMessage??=createRequire(ctx.get('profileContext').installAnchor)('@deepseek-ai/dsh-llm').createUserMessage;
           return createHookContextMessage(input);

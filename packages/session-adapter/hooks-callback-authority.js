@@ -4,7 +4,7 @@ import {dshProfilePluginActionSha256 as sha256} from './dsh-profile-plugin-opera
 import {parseHookOutput} from './hooks-protocol.js';
 
 const toolEvents = new Set(['PreToolUse','PostToolUse','PostToolUseFailure']);
-const turnEvents = new Set(['UserPromptSubmit','PreModelRequest']);
+const turnEvents = new Set(['UserPromptSubmit','PreModelRequest','Stop']);
 const unavailable = code => ({outcome:'non_blocking_error',stdout:'',stderr:code,exitCode:1});
 
 function normalize(value,event) {

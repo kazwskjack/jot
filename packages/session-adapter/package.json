@@ -27,6 +27,7 @@
     "hooks-callback-authority.js",
     "hooks-protocol.js",
     "hooks-runtime.js",
+    "hooks-stop-source.js",
     "host-settings-migration-proof.js",
     "host-settings-owner-approval-route.js",
     "host-settings-product-service.js",

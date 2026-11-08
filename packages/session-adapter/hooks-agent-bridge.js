@@ -9,7 +9,7 @@ const reason = effect => typeof effect?.reason === 'string' ? effect.reason
   : typeof effect?.result?.message === 'string' ? effect.result.message : 'HOOK_BLOCKED';
 
 /** Borrow native Agent event scopes. Hook execution authority remains with the Host port. */
-export function createAgentHooksBridge({runtime,configuration,resolveSource,createUserMessage}) {
+export function createAgentHooksBridge({runtime,configuration,resolveSource,createUserMessage,readStopPayload}) {
   if (typeof runtime?.run !== 'function' || configuration?.protocol !== 1 || typeof resolveSource !== 'function') {
     throw new Error('hooks_agent_bridge_invalid');
   }
@@ -110,6 +110,17 @@ export function createAgentHooksBridge({runtime,configuration,resolveSource,crea
         const result = await invoke(agent,'PreModelRequest',{provider:request.provider,model:request.model,turn:event.turn,step:event.step},event.signal);
         if (result && blocked(result)) throw new Error('HOOK_MODEL_REQUEST_BLOCKED');
         return request;
+      }));
+      disposers.push(agentCtx.on('agent/turn-stopping',async event=>{
+        if (event.agent!==agent || !configured('Stop') || closed || running.getStore()?.has(agent)) return;
+        if (!await resolveSource(agent,event.signal)) return;
+        if (typeof readStopPayload!=='function') throw new Error('hook_stop_source_unavailable');
+        const payload = await readStopPayload(agent,event.turn,event.signal);
+        const result = await invoke(agent,'Stop',payload,event.signal);
+        const refusal = result && blocked(result);
+        // Upstream Stop refusal is a terminal lifecycle failure. The native
+        // turn owner records that error and closes its original turn boundary.
+        if (refusal) throw Object.assign(new Error(reason(refusal)),{code:'HOOK_STOP_BLOCKED'});
       }));
       agentCtx.effect(()=>dispose,'jotAgentHooksBridge()');
     } catch (error) {dispose();throw error;}
