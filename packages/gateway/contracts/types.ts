@@ -394,10 +394,10 @@ export type ProjectDiscoveryTaskTrigger = {kind:"project_discovery";policy_id:st
 
 export type TaskPrdSelection = {kind:"logical_file";path:string;version:number;sha256:string}|{kind:"upload";artifact_id:string;version:number;sha256:string};
 export type TaskPrdSource = TaskPrdSelection & {name:string;size:number};
-export type TaskPrdPreviewRequest = {source:TaskPrdSelection};
-export type TaskPrdBindRequest = {source:TaskPrdSelection;preview_sha256:string};
-export type TaskPrdReceipt = {binding_id:string;task_id:string;task_version:number;revision:number;source:TaskPrdSource;content_sha256:string;objective_sha256:string;created_at:string;execution_authorized:false};
-export type TaskPrdPreview = {task_id:string;task_version:number;role:{agent_id:string;version:number;capability_epoch:number};source:TaskPrdSource;content:string;objective:string;source_delivery?:"reference";source_instructions?:string;preview_sha256:string;execution_authorized:false};
+export type TaskPrdPreviewRequest = {num_tasks?:number;source:TaskPrdSelection};
+export type TaskPrdBindRequest = {num_tasks?:number;source:TaskPrdSelection;preview_sha256:string};
+export type TaskPrdReceipt = {num_tasks?:number;binding_id:string;task_id:string;task_version:number;revision:number;source:TaskPrdSource;content_sha256:string;objective_sha256:string;created_at:string;execution_authorized:false};
+export type TaskPrdPreview = {num_tasks?:number;task_id:string;task_version:number;role:{agent_id:string;version:number;capability_epoch:number};source:TaskPrdSource;content:string;objective:string;source_delivery?:"reference";source_instructions?:string;preview_sha256:string;execution_authorized:false};
 export type TaskmasterMcpStatus = {connection_id:string;server_name:string;version:number;enabled:boolean;state:string;active_generation:number;pending_generation:number|null;approved_tool_count:number};
 export type TaskPrdTaskmasterStatus = {registry_available:boolean;connections:TaskmasterMcpStatus[]};
 export type TaskPrdSources = {task_id:string;task_version:number;readiness:{ready:boolean;reasons:string[]};sources:TaskPrdSource[];truncated:boolean;binding:TaskPrdReceipt|null;taskmaster?:TaskPrdTaskmasterStatus};

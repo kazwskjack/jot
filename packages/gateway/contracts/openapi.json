@@ -36981,6 +36981,12 @@
         "properties": {
           "source": {
             "$ref": "#/components/schemas/TaskPrdSelection"
+          },
+          "num_tasks": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "description": "Optional owner-confirmed exact native subtask count. Immutable with the PRD binding and checked against the original occurrence ledger when proposing work."
           }
         }
       },
@@ -36998,6 +37004,12 @@
           "preview_sha256": {
             "type": "string",
             "pattern": "^[a-f0-9]{64}$"
+          },
+          "num_tasks": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "description": "Optional owner-confirmed exact native subtask count. Immutable with the PRD binding and checked against the original occurrence ledger when proposing work."
           }
         }
       },
@@ -37053,6 +37065,12 @@
           },
           "execution_authorized": {
             "const": false
+          },
+          "num_tasks": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "description": "Optional owner-confirmed exact native subtask count. Immutable with the PRD binding and checked against the original occurrence ledger when proposing work."
           }
         }
       },
@@ -37132,6 +37150,12 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 16384
+          },
+          "num_tasks": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "description": "Optional owner-confirmed exact native subtask count. Immutable with the PRD binding and checked against the original occurrence ledger when proposing work."
           }
         },
         "dependentRequired": {

@@ -11,8 +11,8 @@ export const prdSelectionSchema={oneOf:[
  {type:'object',additionalProperties:false,required:['kind','path','version','sha256'],properties:{kind:{const:'logical_file'},path:{type:'string',minLength:1,maxLength:1024},version:{type:'integer',minimum:1,maximum:Number.MAX_SAFE_INTEGER},sha256:{type:'string',pattern:'^[a-f0-9]{64}$'}}},
  {type:'object',additionalProperties:false,required:['kind','artifact_id','version','sha256'],properties:{kind:{const:'upload'},artifact_id:{type:'string',minLength:1,maxLength:200},version:{type:'integer',minimum:1,maximum:Number.MAX_SAFE_INTEGER},sha256:{type:'string',pattern:'^[a-f0-9]{64}$'}}},
 ]};
-export const prdPreviewRequestSchema={type:'object',additionalProperties:false,required:['source'],properties:{source:prdSelectionSchema}};
-export const prdBindRequestSchema={type:'object',additionalProperties:false,required:['source','preview_sha256'],properties:{source:prdSelectionSchema,preview_sha256:{type:'string',pattern:'^[a-f0-9]{64}$'}}};
+export const prdPreviewRequestSchema={type:'object',additionalProperties:false,required:['source'],properties:{source:prdSelectionSchema,num_tasks:{type:'integer',minimum:1,maximum:Number.MAX_SAFE_INTEGER}}};
+export const prdBindRequestSchema={type:'object',additionalProperties:false,required:['source','preview_sha256'],properties:{source:prdSelectionSchema,num_tasks:{type:'integer',minimum:1,maximum:Number.MAX_SAFE_INTEGER},preview_sha256:{type:'string',pattern:'^[a-f0-9]{64}$'}}};
 export const prdTemplateRequestSchema={type:'object',additionalProperties:false,required:['template_id','file_name'],properties:{
  template_id:{type:'string',enum:['web-app','api','mobile-app','data-analysis']},file_name:{type:'string',minLength:1,maxLength:200},
  values:{type:'object',maxProperties:32,propertyNames:{minLength:1,maxLength:100},additionalProperties:{type:'string',maxLength:2000}},

@@ -1,3 +1,4 @@
+import {readPrdTaskCount} from './prd-task-count.ts';
 import {createHash} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
 import {canonicalJson} from '../db/canonical-json.ts';
@@ -56,6 +57,8 @@ export function proposePrdWorkPlan(db:DatabaseSync,owner:string,runId:string,cal
   if(prior.request_sha256!==requestHash)throw Error('idempotency_conflict');
   return view(prior);
  }
+ const numTasks=readPrdTaskCount(db,source.binding_id);
+ if(numTasks!==undefined&&subtasks.length!==numTasks)throw Error('prd_work_plan_task_count_mismatch');
  const summary=text(request.summary),rationale=text(request.rationale,8000);
  if(!Array.isArray(request.changes)||!request.changes.length||request.changes.length>32)throw invalid();
  const changes=request.changes.map((item:unknown)=>{
