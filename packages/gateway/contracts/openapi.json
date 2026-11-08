@@ -34830,6 +34830,73 @@
                 "type": "null"
               }
             ]
+          },
+          "taskmaster": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "registry_available",
+              "connections"
+            ],
+            "properties": {
+              "registry_available": {
+                "type": "boolean"
+              },
+              "connections": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "connection_id",
+                    "server_name",
+                    "version",
+                    "enabled",
+                    "state",
+                    "active_generation",
+                    "pending_generation",
+                    "approved_tool_count"
+                  ],
+                  "properties": {
+                    "connection_id": {
+                      "type": "string"
+                    },
+                    "server_name": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "state": {
+                      "type": "string"
+                    },
+                    "active_generation": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "pending_generation": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "approved_tool_count": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       },

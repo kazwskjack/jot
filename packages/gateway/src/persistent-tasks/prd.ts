@@ -8,6 +8,7 @@ import type {PersistentTaskService} from './service.ts';
 import {withImmediateTransaction} from '../db/database.ts';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {taskmasterSourceSummary} from './taskmaster-source.ts';
+import type {McpRegistryService} from '../workbench/mcp-registry.ts';
 
 type Row=Record<string,any>;
 export type PrdSelection={kind:'logical_file';path:string;version:number;sha256:string}|{kind:'upload';artifact_id:string;version:number;sha256:string};
@@ -19,6 +20,7 @@ const supported=(name:string)=>/\.(md|markdown|txt|json)$/i.test(name);
 const supportedMedia=(name:string,mediaType:string)=>mediaType.startsWith('text/')||/\.json$/i.test(name)&&mediaType.split(';',1)[0]!.trim().toLowerCase()==='application/json';
 const MAX_BYTES=65536,MAX_OBJECTIVE=12000;
 const terminal=['succeeded','partial','failed','cancelled','interrupted'];
+type PrdOptions={uploadRoot:string;mcpRegistry?:Pick<McpRegistryService,'taskmasterConnections'>};
 function object(value:unknown,keys:string[]):Row{
  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!keys.includes(key)))throw Error('invalid_prd_request');return value as Row;
 }
@@ -42,8 +44,8 @@ function readBounded(path:string):Buffer{
  * scheduler or budget. Only the original task update is committed on confirm. */
 export class TaskPrdService {
  private readonly db:DatabaseSync;private readonly workbench:WorkbenchService;private readonly tasks:PersistentTaskService;
- private readonly artifacts:ArtifactService;private readonly options:{uploadRoot:string};
- constructor(db:DatabaseSync,workbench:WorkbenchService,tasks:PersistentTaskService,artifacts:ArtifactService,options:{uploadRoot:string}){
+ private readonly artifacts:ArtifactService;private readonly options:PrdOptions;
+ constructor(db:DatabaseSync,workbench:WorkbenchService,tasks:PersistentTaskService,artifacts:ArtifactService,options:PrdOptions){
   this.db=db;this.workbench=workbench;this.tasks=tasks;this.artifacts=artifacts;this.options=options;
   db.exec(`CREATE TABLE IF NOT EXISTS wb_task_prd_bindings(
    binding_id TEXT PRIMARY KEY,task_id TEXT NOT NULL REFERENCES wb_persistent_tasks(task_id),owner_id TEXT NOT NULL,
@@ -94,7 +96,8 @@ export class TaskPrdService {
   const sources:PrdSource[]=[...files.slice(0,200).filter(row=>supported(row.path)&&row.size<=MAX_BYTES).map(row=>({kind:'logical_file' as const,path:String(row.path),name:String(row.path),version:Number(row.version),sha256:String(row.sha256),size:Number(row.size)})),
    ...uploads.slice(0,100).flatMap(row=>{const meta=JSON.parse(row.metadata_json);return supported(String(meta.file_name))&&supportedMedia(String(meta.file_name),String(row.mime_type))&&row.size_bytes<=MAX_BYTES&&meta.status==='ready'
     ?[{kind:'upload' as const,artifact_id:String(row.id),name:String(meta.file_name),version:Number(row.version),sha256:String(row.sha256),size:Number(row.size_bytes)}]:[];})];
-  const prior=this.latest(owner,taskId);return {task_id:taskId,task_version:task.version,readiness:{ready:reasons.length===0,reasons},sources,truncated:files.length>200||uploads.length>100,binding:prior?this.receipt(prior):null};
+  const taskmaster={registry_available:!!this.options.mcpRegistry,connections:this.options.mcpRegistry?.taskmasterConnections(owner,role.agent_id)??[]};
+  const prior=this.latest(owner,taskId);return {task_id:taskId,task_version:task.version,readiness:{ready:reasons.length===0,reasons},sources,truncated:files.length>200||uploads.length>100,binding:prior?this.receipt(prior):null,taskmaster};
  }
  private loadSource(owner:string,role:ReturnType<WorkbenchService['getAgent']>,source:PrdSelection):{source:PrdSource;content:string}{
   let raw:Buffer,info:PrdSource;

@@ -307,7 +307,7 @@ export async function buildServer(config: {
     ...(nativeWork?{discoveryWorkOperations:nativeWork}:{}),
   });
   const taskNotifications=new TaskNotifications(db);
-  const taskPrd=new TaskPrdService(db,workbench,persistentTasks,artifacts,{uploadRoot:config.uploadRoot??join(dirname(config.databasePath),'general-agent-uploads')});
+  const taskPrd=new TaskPrdService(db,workbench,persistentTasks,artifacts,{uploadRoot:config.uploadRoot??join(dirname(config.databasePath),'general-agent-uploads'),mcpRegistry});
   const taskReplyPolicies=new TaskReplyPolicies(db);
   const replyDrafts=new TaskReplyDrafts(db,events);
   const replyHistory=new TaskReplyHistory(db);

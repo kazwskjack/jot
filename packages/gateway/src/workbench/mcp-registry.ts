@@ -32,6 +32,10 @@ export type McpRuntimeConnection = {
   transport: McpTransport; version: number; generation: number; config: McpConnectionConfig;
   tools: McpRuntimeToolProjection[];
 };
+export type TaskmasterMcpStatus = Pick<McpConnectionProjection,
+  'connection_id' | 'server_name' | 'version' | 'enabled' | 'state' | 'active_generation' | 'pending_generation'> & {
+  approved_tool_count: number;
+};
 export type McpReloadRequest = {
   owner_id: string; agent_id: string; connection_id: string; version: number; config_version: number; generation: number; config: McpConnectionConfig;
   assertCurrent: () => void; signal: AbortSignal;
@@ -259,6 +263,25 @@ export class McpRegistryService {
     const rows = this.db.prepare("SELECT * FROM wb_mcp_connections WHERE owner_id=? AND agent_id=? AND runtime_state!='removed' ORDER BY created_at,connection_id")
       .all(owner, agentId) as Row[];
     return { items: rows.map(row => this.project(row)) };
+  }
+
+  taskmasterConnections(owner: string, agentId: string): TaskmasterMcpStatus[] {
+    this.agent(owner, agentId);
+    const rows = this.db.prepare("SELECT * FROM wb_mcp_connections WHERE owner_id=? AND agent_id=? AND runtime_state!='removed' ORDER BY created_at,connection_id")
+      .all(owner, agentId) as Row[];
+    return rows.flatMap(row => {
+      const config = JSON.parse(String(row.config_json)) as McpConnectionConfig;
+      const command = config.command?.split(/[\\/]/).pop() ?? '';
+      const matches = /task-?master/i.test(config.server_name)
+        || /^task-master(?:-ai)?(?:\.(?:cmd|exe|bat))?$/i.test(command)
+        || config.args?.some(arg => /^task-master-ai(?:@[^\s]+)?$/.test(arg));
+      if (!matches) return [];
+      const connection = this.project(row);
+      return [{connection_id: connection.connection_id, server_name: connection.server_name,
+        version: connection.version, enabled: connection.enabled, state: connection.state,
+        active_generation: connection.active_generation, pending_generation: connection.pending_generation,
+        approved_tool_count: connection.tools.filter(tool => tool.approved).length}];
+    });
   }
 
   /** Authenticated Adapter control-plane view; never includes config or secrets. */

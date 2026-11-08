@@ -3,10 +3,8 @@ import type {Task} from './types';
 import {request,taskDraftScope} from '../jot/client';
 import {useResource} from './useResource';
 import {PrdFlow,PrdCommandStore,PRD_TEMPLATE,installPrdLeaveGuard,prdMessage} from './task-prd.mjs';
+import type {TaskPrdSources as PrdSources} from '../../packages/gateway/contracts/types';
 
-type PrdSource=({kind:'logical_file';path:string}|{kind:'upload';artifact_id:string})&{version:number;sha256:string;name:string;size:number};
-type PrdReceipt={binding_id:string;task_id:string;task_version:number;revision:number;source:PrdSource;content_sha256:string;objective_sha256:string;created_at:string;execution_authorized:false};
-type PrdSources={task_id:string;task_version:number;readiness:{ready:boolean;reasons:string[]};sources:PrdSource[];truncated:boolean;binding:PrdReceipt|null};
 const textStyle:React.CSSProperties={whiteSpace:'pre-wrap',overflowWrap:'anywhere',wordBreak:'break-word',maxWidth:'100%'};
 
 export default function TaskPrdPanel({task,executionReady,onBound}:{task:Task;executionReady:boolean;onBound:()=>void}){
@@ -29,13 +27,23 @@ export default function TaskPrdPanel({task,executionReady,onBound}:{task:Task;ex
   finally{draw();}
  }
  function refresh(){if(locked)return;flow.invalidate();setIndex('');setConfirmed(false);setError('');resource.reload();draw();}
- const preview=flow.preview,binding=flow.receipt??resource.data?.binding;
+ const preview=flow.preview,binding=flow.receipt??resource.data?.binding,taskmaster=resource.data?.taskmaster;
  return <section ref={root} className="wb-form" aria-label="PRD 绑定原任务" style={{minWidth:0,maxWidth:'100%',overflowWrap:'anywhere'}}>
   <h4>将 PRD 绑定到原任务</h4>
   <p className="wb-hint">选择当前任务所属项目中的既有文件或原始上传附件。预览仅读取；确认仅冻结来源并更新原任务目标。任务仍保持暂停，后续由原有恢复 / 立即运行入口执行。</p>
   <h5>PRD 静态模板</h5><pre style={textStyle} aria-label="PRD 静态模板">{PRD_TEMPLATE}</pre>
   <p className="wb-hint">先按模板保存到项目文件或上传附件，再刷新选择。支持 UTF-8 的 .md / .markdown / .txt，以及 Taskmaster 导出的 .json 任务文件。原文最多 65,536 字节，完整任务目标最多 12,000 字符。PDF、DOCX 暂不支持提取。文字中的动作不会直接触发执行。</p>
-  <p className="wb-hint">此流程由原 DSH 拆解并写入原任务账本。Taskmaster JSON 支持任务数组、tasks 对象和带标签格式，保留外部 ID、层级、依赖及状态作为来源资料。外部状态不会直接变成本任务的完成证据。CLI 安装、配置检测及直接写入外部 tasks.json 尚未接入此入口。</p>
+  <p className="wb-hint">此流程由原 DSH 拆解并写入原任务账本。Taskmaster JSON 支持任务数组、tasks 对象和带标签格式，保留外部 ID、层级、依赖及状态作为来源资料。绑定后的任务按实际执行回执记录进度。</p>
+  <details><summary>Taskmaster MCP 配置状态</summary>
+   <p className="wb-hint">显示原角色 MCP 注册表中按名称、命令或包参数匹配的连接及已发现目录状态。可在此角色的 MCP 连接面板配置、重载及审核工具。PRD 文件绑定继续检查原任务准备度。</p>
+   {resource.data&&!taskmaster?.registry_available&&<p className="wb-status">MCP 注册表状态尚不可读取。</p>}
+   {taskmaster?.registry_available&&taskmaster.connections.length===0&&<p className="wb-status">此角色尚未配置匹配的 Taskmaster MCP 连接。</p>}
+   {taskmaster?.registry_available&&taskmaster.connections.length>0&&<ul>{taskmaster.connections.map(connection=><li key={connection.connection_id}>
+      {connection.server_name} · v{connection.version} · {connection.enabled?'已启用':'已禁用'} · {connection.state} · 已发现代次 {connection.active_generation} · 已批准工具 {connection.approved_tool_count}
+      {connection.pending_generation!==null&&` · 待重载代次 ${connection.pending_generation}`}
+     </li>)}</ul>}
+   <p className="wb-hint">CLI 安装、版本检查及外部项目配置文件检测仍待接入。这里的连接状态仅表示原注册表的发现结果，执行时沿用原角色权限、运行身份和预算校验。</p>
+  </details>
   {!executionReady&&<p className="wb-status" role="status">执行宿主尚未就绪；来源可查看，就绪后再预览绑定。</p>}
   {task.status!=='paused'&&<p className="wb-status" role="status">请先暂停原任务，并等待所有执行及未知结果核对完成。</p>}
   {resource.loading&&<p className="wb-status" role="status">正在读取来源与准备度…</p>}

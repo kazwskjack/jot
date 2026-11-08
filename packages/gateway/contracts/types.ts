@@ -398,7 +398,9 @@ export type TaskPrdPreviewRequest = {source:TaskPrdSelection};
 export type TaskPrdBindRequest = {source:TaskPrdSelection;preview_sha256:string};
 export type TaskPrdReceipt = {binding_id:string;task_id:string;task_version:number;revision:number;source:TaskPrdSource;content_sha256:string;objective_sha256:string;created_at:string;execution_authorized:false};
 export type TaskPrdPreview = {task_id:string;task_version:number;role:{agent_id:string;version:number;capability_epoch:number};source:TaskPrdSource;content:string;objective:string;preview_sha256:string;execution_authorized:false};
-export type TaskPrdSources = {task_id:string;task_version:number;readiness:{ready:boolean;reasons:string[]};sources:TaskPrdSource[];truncated:boolean;binding:TaskPrdReceipt|null};
+export type TaskmasterMcpStatus = {connection_id:string;server_name:string;version:number;enabled:boolean;state:string;active_generation:number;pending_generation:number|null;approved_tool_count:number};
+export type TaskPrdTaskmasterStatus = {registry_available:boolean;connections:TaskmasterMcpStatus[]};
+export type TaskPrdSources = {task_id:string;task_version:number;readiness:{ready:boolean;reasons:string[]};sources:TaskPrdSource[];truncated:boolean;binding:TaskPrdReceipt|null;taskmaster?:TaskPrdTaskmasterStatus};
 
 export type GitReviewPrepare = {request_id:string;action:"stage"|"unstage"|"commit"|"discard"|"delete-untracked";paths:string[];snapshot_id:string;message?:string};
 export type GitReviewControl = {request_id:string;expected_version:number;action:"approve"|"cancel";review_sha256:string};
