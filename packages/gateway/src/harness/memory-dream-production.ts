@@ -11,7 +11,7 @@ import type {MemoryDreamClaim,MemoryDreamCandidate,MemoryDreamEvidence,MemoryDre
 type Row=Record<string,any>;
 type Options={db:DatabaseSync;workbench:WorkbenchService;coordinator:HarnessCoordinator;worker:Pick<HarnessWorker,'processClaimed'>;
  sessionResolver:(conversationId:string)=>string;readiness?:{memoryExtractionReadiness(signal:AbortSignal):Promise<Record<string,unknown>>}};
-const unavailable=(error:unknown)=>error instanceof Error&&/^(memory_dream_(?:policy_stale|slot_finalized)|agent_capability_revoked|model_budget_exhausted|budget_(?:window_closed|route_unavailable|binding_invalid))$/.test(error.message);
+const unavailable=(error:unknown)=>error instanceof Error&&/^(memory_dream_(?:policy_stale|slot_finalized)|model_metadata_(?:changed|invalid|unavailable)|agent_capability_revoked|model_budget_exhausted|budget_(?:window_closed|route_unavailable|binding_invalid))$/.test(error.message);
 const samePolicy=(left:MemoryDreamCandidate['policy'],right:MemoryDreamCandidate['policy'])=>left.owner_id===right.owner_id&&left.workspace_id===right.workspace_id
  &&left.project_id===right.project_id&&left.agent_id===right.agent_id&&left.scope==='project'&&right.scope==='project'
  &&left.enabled===true&&right.enabled===true&&left.policy_version===right.policy_version&&left.epoch===right.epoch&&left.cadence_slot===right.cadence_slot;
@@ -41,8 +41,9 @@ export class MemoryDreamProductionPorts implements MemoryDreamPumpPorts{
 
  async claim(candidate:MemoryDreamCandidate,workerId:string,leaseMs:number):Promise<MemoryDreamClaim|null>{
   try{
+   const commit=await this.workbench.prepareMemoryConsolidationAdmission(candidate.policy.owner_id,candidate.policy.agent_id,candidate.policy.policy_version,candidate.policy.cadence_slot);
    return withImmediateTransaction(this.db,()=>{
-    const prepared=this.workbench.prepareMemoryConsolidation(candidate.policy.owner_id,candidate.policy.agent_id,candidate.policy.policy_version,candidate.policy.cadence_slot);
+    const prepared=commit();
     if(!samePolicy(candidate.policy,{...prepared.policy,scope:'project',cadence_slot:prepared.cadence_slot,due_at:candidate.policy.due_at})
       ||candidate.mode==='recovery'&&prepared.run_id!==candidate.run_id||candidate.mode==='fresh'&&candidate.run_id!==undefined)throw Error('memory_dream_policy_stale');
     const lease=this.coordinator.claimMemoryConsolidation(workerId,leaseMs,prepared.run_id,candidate.mode==='recovery');

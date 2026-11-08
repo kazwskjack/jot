@@ -59,14 +59,14 @@ export class MemoryProcessingRegistry{
  }
  get(owner:string,agentId:string,captureId:string){const actor=this.actor(owner,agentId),row=this.row(owner,agentId,captureId);if(!row)throw Error('memory_processing_not_found');if(row.workspace_id!==actor.workspace_id||row.project_id!==actor.project_id)throw Error('memory_processing_scope_conflict');return this.view(row);}
  assertRun(owner:string,agentId:string,runId:string){const actor=this.actor(owner,agentId),row=assertMemoryProcessingIdentity(this.db,owner,runId);if(row.agent_id!==agentId||row.epoch!==actor.capability_epoch)throw Error('memory_processing_scope_conflict');const source=this.ports.source(owner,agentId,String(row.capture_id));if(!source.sources.length||source.sources.some(item=>!item.available))throw Error('memory_processing_source_unavailable');return row;}
- prepare(owner:string,agentId:string,captureId:string){return withImmediateTransaction(this.db,()=>{
+ prepare(owner:string,agentId:string,captureId:string,createRun?:Ports['createRun']){return withImmediateTransaction(this.db,()=>{
   const actor=this.actor(owner,agentId),existing=this.row(owner,agentId,captureId);if(existing)return this.get(owner,agentId,captureId);
   const source=this.ports.source(owner,agentId,captureId);
   if(source.capture_id!==captureId||source.agent_id!==agentId||source.workspace_id!==actor.workspace_id||source.project_id!==actor.project_id||source.status!=='ready'||!source.policy_current||!source.sources.length||source.sources.some(item=>item.available!==true))throw Error('memory_processing_source_unavailable');
   const original=this.db.prepare(`SELECT r.status,c.owner_id,c.workspace_id,c.project_id FROM ga_runs r JOIN ga_conversations c ON c.id=r.conversation_id WHERE r.id=? AND r.conversation_id=?`).get(source.source_run_id,source.source_conversation_id) as Row|undefined;
   if(!original||!['succeeded','partial'].includes(String(original.status))||original.owner_id!==owner||original.workspace_id!==actor.workspace_id||original.project_id!==actor.project_id)throw Error('memory_processing_source_unavailable');
   if(this.db.prepare(`SELECT 1 FROM ga_runs r JOIN wb_run_bindings b ON b.run_id=r.id WHERE b.owner_id=? AND b.agent_id=? AND r.status IN ('queued','starting','running','waiting_user','waiting_approval','cancelling') LIMIT 1`).get(owner,agentId))throw Error('memory_processing_busy');
-  const run=this.ports.createRun(owner,actor);
+  const run=createRun?createRun(owner,actor):this.ports.createRun(owner,actor);
   const created=this.db.prepare(`SELECT r.id FROM ga_runs r JOIN ga_conversations c ON c.id=r.conversation_id WHERE r.id=? AND r.conversation_id=? AND c.owner_id=? AND c.workspace_id=? AND c.project_id=? AND r.status='queued'`).get(run.run_id,run.conversation_id,owner,actor.workspace_id,actor.project_id);
   if(!created||run.run_id===source.source_run_id||run.conversation_id===source.source_conversation_id)throw Error('memory_processing_scope_conflict');
   this.db.prepare('INSERT INTO wb_memory_processing_runs VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').run(run.run_id,run.conversation_id,captureId,source.source_run_id,source.source_conversation_id,owner,actor.workspace_id,actor.project_id,agentId,actor.capability_epoch,source.policy_version,source.version,new Date().toISOString());

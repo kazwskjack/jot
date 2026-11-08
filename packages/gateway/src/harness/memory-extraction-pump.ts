@@ -39,10 +39,11 @@ export class MemoryExtractionPump{
   const control=new AbortController(),combined=signal?AbortSignal.any([signal,control.signal]):control.signal;
   combined.throwIfAborted();
   if((await this.client.memoryExtractionReadiness(AbortSignal.any([combined,AbortSignal.timeout(15000)]))).ready!==true)return null;
+  const admissionSignal=AbortSignal.any([combined,AbortSignal.timeout(6000)]);
   for(const candidate of this.candidates()){
    let runId=candidate.processor_run_id;
-   try{if(!runId)runId=this.workbench.prepareMemoryProcessing(candidate.owner_id,candidate.agent_id,candidate.capture_id).processor_run_id;}
-   catch(error){if(error instanceof Error&&/^(memory_processing_|model_budget_exhausted|budget_|agent_not_active)/.test(error.message))continue;throw error;}
+   try{if(!runId)runId=(await this.workbench.prepareMemoryProcessingAdmission(candidate.owner_id,candidate.agent_id,candidate.capture_id,admissionSignal)).processor_run_id;}
+   catch(error){combined.throwIfAborted();if(admissionSignal.aborted)return null;if(error instanceof Error&&/^(memory_processing_|model_metadata_|model_budget_exhausted|budget_|agent_not_active)/.test(error.message))continue;throw error;}
    const lease=this.coordinator.claimMemoryExtraction(this.options.workerId,this.options.leaseMs,runId);
    if(!lease)continue;
    let timer:ReturnType<typeof setInterval>|undefined;

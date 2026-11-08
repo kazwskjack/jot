@@ -65,9 +65,13 @@ const runs = new RunRepository(db, events,{workAgentPreset:agentPreset});
 const workbenchRoot = process.env.GENERAL_AGENT_WORKBENCH_ROOT?.trim() || join(dirname(databasePath), 'jot-workspaces');
 const budgetPolicy=budgetConfig?new WorkbenchBudgetPolicy(db,budgetConfig):undefined;
 if(discoveryAdmissionEnabled&&!budgetPolicy)throw Error('discovery_admission_requires_execution_configuration');
+const leafBridgeBaseUrl = process.env.GENERAL_AGENT_LEAF_BRIDGE_BASE_URL?.trim()
+  || 'http://127.0.0.1:18792';
+const sessionClient = new SessionControllerClient(adapterBaseUrl, readFileSync(adapterTokenFile, 'utf8').trim(),
+  globalThis.fetch, leafBridgeBaseUrl);
 const workbench = new WorkbenchService(db, {
   workspaceIds: String(process.env.GENERAL_AGENT_WORKSPACES || 'jot').split(',').map(value => value.trim()).filter(Boolean),
-  root: workbenchRoot, allowedToolIds: WORKBENCH_TOOL_IDS,
+  root: workbenchRoot, allowedToolIds: WORKBENCH_TOOL_IDS,modelMetadataClient:sessionClient,
   ...(budgetPolicy ? {modelBudgetPolicy:budgetPolicy} : {}),
 });
 const nativeWork=createNativeWorkRuntime({db,workbench,executionReady:workbenchExecutionReady,...(process.env.GENERAL_AGENT_NATIVE_WORK_ROOT!==undefined?{root:process.env.GENERAL_AGENT_NATIVE_WORK_ROOT.trim()}:{}),...(budgetPolicy?{budgetPolicy}:{})});
@@ -98,13 +102,9 @@ const workContextForRun=(runId:string,initialize=false)=>{
 const attachmentResolver = new AttachmentResolver(db, fileRoot);
 const runtimeBaseUrl = process.env.GENERAL_AGENT_RUNTIME_BASE_URL?.trim();
 const runtimeSecretFile = process.env.GENERAL_AGENT_RUNTIME_SECRET_FILE?.trim();
-const leafBridgeBaseUrl = process.env.GENERAL_AGENT_LEAF_BRIDGE_BASE_URL?.trim()
-  || 'http://127.0.0.1:18792';
 const runtimeClient = runtimeBaseUrl && runtimeSecretFile
   ? new RuntimeEventClient(runtimeBaseUrl, readFileSync(runtimeSecretFile))
   : undefined;
-const sessionClient = new SessionControllerClient(adapterBaseUrl, readFileSync(adapterTokenFile, 'utf8').trim(),
-  globalThis.fetch, leafBridgeBaseUrl);
 const runtimeReadinessSources:RuntimeReadinessSources={native:sessionClient,workbench:sessionClient,
   driver:createBrowserDriverReadinessSource(db,sessionClient),
   ...(nativeWork?{storage:createRuntimeReadinessStorageSource(db,nativeWork.resolver)}:{})};
