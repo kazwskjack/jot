@@ -4,6 +4,7 @@ import {request,taskDraftScope} from '../jot/client';
 import {workbenchApi} from './client';
 import {useMutationReceipt} from './useMutationReceipt';
 import {MemoryImportStore} from './memory-import-store.mjs';
+import MemoryImportBundle from './MemoryImportBundle';
 
 const reasons:Record<string,string>={source_superseded:'来源已被替代',source_tombstone:'来源已删除',source_expired:'来源已过期',source_changed:'来源版本或内容已变化',target_exists:'此来源版本已导入',target_tombstone:'此来源的导入记忆已删除或被替代',provenance_limit:'来源引用已达上限'};
 const states={ready:'可导入',skipped:'跳过',conflict:'冲突'};
@@ -11,6 +12,8 @@ const pageSize=25;
 function importMessage(reason:unknown){
  const code=reason instanceof Error?reason.message:'';
  if(['MEMORY_IMPORT_CONFLICT','VERSION_CONFLICT'].includes(code))return '来源、目标或预览版本已变化，整批未写入。请重新核对原文件。';
+ if(code==='MEMORY_IMPORT_BUNDLE_NOTE_LIMIT')return '此源包转换后超过原批次的 200 条记忆上限，整批未写入。请按源项目记忆文件拆分批次，保留每个文件完整内容。';
+ if(code==='INVALID_MEMORY_IMPORT_BUNDLE')return '请核对 clawxmemory-memory-snapshot.v4 当前项目包的格式、重复路径及目录层级。';
  if(code==='MEMORY_IMPORT_ID_CONFLICT')return '此批次已绑定另一份来源或目标。请读取原记录，或结束此批次后选择其他文件。';
  return code||'记忆导入未完成，请核对原记录';
 }
@@ -78,7 +81,7 @@ export default function MemoryImport({workspace,selection,onChanged,onBusyChange
   setBusy(true);setError('');
   try{
    const pending=recovery.store.read()?.command;
-   if(!pending&&(!view||!confirmed||view.status!=='previewed'||view.counts.conflict||!view.counts.total))return;
+   if(!pending&&(!view||!confirmed||view.status!=='previewed'||view.counts.conflict||!view.counts.total&&!view.source_bundle))return;
    const value=await mutation.submit(pending?.path??recovery.store.path(id),'POST',pending?.body??{expected_version:view!.version}) as WorkbenchMemoryImportReceipt;
    if(current()){setReceipt(value);setView(previous=>previous?{...previous,status:'applied',receipt:value}:null);setConfirmed(false);onChanged();}
   }catch(reason){if(current())setError(importMessage(reason));}
@@ -91,13 +94,14 @@ export default function MemoryImport({workspace,selection,onChanged,onBusyChange
  const blocked=busy||mutation.pending||!!recovery.error;
  return <section className="wb-form" aria-label="版本化记忆导入" aria-busy={busy}>
   <h3>导入记忆 JSON</h3>
-  <p className="wb-hint">选择 Jot 导出的 schema_version 1 文档，文件最多 20 MB、最多 200 条记忆、每条 500 个历史版本，文档 JSON 最多 5,000,000 字符。核对后整批导入为待核实记忆。删除标记、过期来源及冲突会由服务端重新检查。</p>
+  <p className="wb-hint">选择 Jot schema_version 1 文档或上游 clawxmemory-memory-snapshot.v4 当前项目包，文件最多 20 MB、原始 JSON 最多 5,000,000 字符。原批次最多 200 条记忆、每条 500 个历史版本。上游长文件按完整字符分段，每段最多 20,000 字符，源包保留完整原文。核对后整批导入为待核实记忆。删除标记、过期来源及冲突会由服务端重新检查。</p>
   <p>目标工作区 {workspace} · 项目 {target.project_id} · {target.scope==='private'?`角色私有 ${target.agent_id}`:'项目共享'}</p>
   {(error||recovery.error)&&<p className="wb-error" role="alert">{error||recovery.error}</p>}
   <label>选择记忆文件<input type="file" accept=".json,application/json" disabled={blocked||!recovery.store||view?.status==='applied'} onChange={event=>void choose(event)}/></label>
   {id&&<><p style={{overflowWrap:'anywhere'}}>导入批次 {id}</p><div className="wb-actions"><button type="button" disabled={busy} onClick={()=>void refresh()}>{document.current&&!mutation.pending?'重新核对原文件':'读取原导入记录'}</button><button type="button" disabled={blocked} onClick={clear}>结束此批次并选择其他文件</button></div></>}
   {mutation.pending&&<p role="status">原导入结果待确认，已保留批次、目标、版本与请求编号。刷新页面后仍可重试原请求。</p>}
   {view&&<><p>来源工作区 {view.document_workspace_id} · 预览 v{view.version} · 可导入 {view.counts.ready} 条 · 跳过 {view.counts.skipped} 条 · 冲突 {view.counts.conflict} 条</p><p style={{overflowWrap:'anywhere'}}>输入 SHA-256 {view.input_sha256}</p>
+   {view.source_bundle&&<MemoryImportBundle key={`${id}:${view.input_sha256}:${view.source_bundle.sha256}`} workspace={workspace} importId={id} inputHash={view.input_sha256} bundle={view.source_bundle}/>}
    <div className="wb-message-list">{view.items.slice(page*pageSize,(page+1)*pageSize).map(item=><article key={item.target_key}>
     <strong>{item.source_memory_id} · v{item.source_version} · {states[item.status]}</strong>{item.reason&&<p>{reasons[item.reason]??item.reason}</p>}
     <p>{item.source_local?'服务端已有此来源':'外部导出来源'} · 目标当前版本 {item.target_expected_version}</p>
@@ -106,7 +110,7 @@ export default function MemoryImport({workspace,selection,onChanged,onBusyChange
    {view.items.length>pageSize&&<div className="wb-actions"><button type="button" disabled={busy||page===0} onClick={()=>setPage(page-1)}>上一页</button><span>第 {page+1} 页，共 {Math.ceil(view.items.length/pageSize)} 页</span><button type="button" disabled={busy||(page+1)*pageSize>=view.items.length} onClick={()=>setPage(page+1)}>下一页</button></div>}
    {view.status==='previewed'&&<label className="wb-checkbox"><input type="checkbox" checked={confirmed} disabled={blocked||!!view.counts.conflict} onChange={event=>setConfirmed(event.target.checked)}/>我已核对目标范围、全部来源与冲突，确认按此版本整批导入。</label>}
   </>}
-  {(mutation.pending||view?.status==='previewed')&&<button type="button" disabled={busy||!!recovery.error||!mutation.pending&&(!confirmed||!view||!!view.counts.conflict||!view.counts.total)} onClick={()=>void apply()}>{busy?'正在处理…':mutation.pending?'重试原导入请求':'确认导入'}</button>}
+  {(mutation.pending||view?.status==='previewed')&&<button type="button" disabled={busy||!!recovery.error||!mutation.pending&&(!confirmed||!view||!!view.counts.conflict||!view.counts.total&&!view.source_bundle)} onClick={()=>void apply()}>{busy?'正在处理…':mutation.pending?'重试原导入请求':'确认导入'}</button>}
   {receipt&&<div role="status"><p>批次已应用，时间 {receipt.applied_at}。创建 {receipt.items.filter(item=>item.status==='created').length} 条，跳过 {receipt.items.filter(item=>item.status==='skipped').length} 条。</p><details><summary>查看逐条回执</summary>{receipt.items.map(item=><p key={item.source_memory_id}>{item.source_memory_id} · 来源 v{item.source_version} · {item.status==='created'?`已创建 ${item.memory_id} v${item.version}`:'已跳过'}</p>)}</details></div>}
  </section>;
 }

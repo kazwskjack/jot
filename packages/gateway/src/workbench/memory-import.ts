@@ -1,3 +1,4 @@
+import {pilotdeckMemoryImport,type PilotdeckMemoryImportSource} from './pilotdeck-memory-import.ts';
 import {createHash} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
 import {withImmediateTransaction} from '../db/database.ts';
@@ -13,6 +14,7 @@ type Source=MemoryValue & {
 type PreviewItem={source_memory_id:string;source_version:number;source_history_versions:number[];source_content:string;source_provenance:Array<{kind:string;reference:string}>;source_revision:string|null;source_expires_at:string|null;target_key:string;target_expected_version:number;status:'ready'|'skipped'|'conflict';reason:string|null;source_local:boolean};
 type Ports={authorizeTarget(owner:string,workspace:string,target:Target):Target;save(owner:string,workspace:string,input:Input):MemoryValue};
 type Batch=Record<string,string|number|null>;
+type Snapshot={document:ReturnType<typeof normalizeDocument>;target:Target;source_bundle?:PilotdeckMemoryImportSource};
 
 const digest=(value:unknown)=>{const encoded=JSON.stringify(value);if(typeof encoded!=='string')invalid();return createHash('sha256').update(encoded).digest('hex');};
 function invalid():never{throw new Error('invalid_memory_import');}
@@ -52,9 +54,9 @@ function normalizeSource(value:unknown,workspaceId:string):Source{
  return {...row,memory_id,workspace_id,project_id,scope:scope as Target['scope'],agent_id,content:content as string,verified:verified as boolean,version:Number(version),status:String(status),
   provenance,source_revision,expires_at,supersedes,history} as Source;
 }
-function normalizeDocument(value:unknown):{schema_version:1;workspace_id:string;exported_at:string;items:Source[]}{
+function normalizeDocument(value:unknown,maxCharacters=5_000_000):{schema_version:1;workspace_id:string;exported_at:string;items:Source[]}{
  let encoded:string|undefined;try{encoded=JSON.stringify(value);}catch{invalid();}
- if(typeof encoded!=='string'||encoded.length>5_000_000)invalid();
+ if(typeof encoded!=='string'||encoded.length>maxCharacters)invalid();
  const document=object(value);exact(document,['schema_version','workspace_id','exported_at','items']);
  const rawItems=document.items;if(document.schema_version!==1||!Array.isArray(rawItems)||rawItems.length>200)invalid();
  const workspace_id=label(document.workspace_id),exported_at=label(document.exported_at,64);
@@ -96,7 +98,7 @@ export class MemoryImportService{
    for(const source of provenance){
     if(source.kind!=='import'||typeof source.reference!=='string')continue;
     const prefix=source.reference.slice(0,source.reference.lastIndexOf('@')+1);
-    if(!prefix||!/^[1-9][0-9]*$/.test(source.reference.slice(prefix.length)))continue;
+    if(!prefix||!/^(?:[1-9][0-9]*|[a-f0-9]{64})$/.test(source.reference.slice(prefix.length)))continue;
     const state={expected:Number(row.version),reason:row.status==='active'?'target_exists' as const:'target_tombstone' as const};
     if(!states.has(source.reference))states.set(source.reference,state);
     if(row.status!=='active'&&!states.has(prefix))states.set(prefix,state);
@@ -104,43 +106,55 @@ export class MemoryImportService{
   }
   return states;
  }
- private inspect(owner:string,workspace:string,target:Target,document:ReturnType<typeof normalizeDocument>){
+ private inspect(owner:string,workspace:string,target:Target,document:ReturnType<typeof normalizeDocument>,sourceBundle?:PilotdeckMemoryImportSource){
   const targets=this.targetStates(owner,workspace,target);
   const items:PreviewItem[]=document.items.map(source=>{
-   const targetKey=`jot-import-v1:${digest([target.scope,target.project_id,target.agent_id]).slice(0,16)}:${source.workspace_id}/${source.memory_id}@${source.version}`;
+   const targetKey=`${sourceBundle?'jot-import-v2':'jot-import-v1'}:${digest([target.scope,target.project_id,target.agent_id]).slice(0,16)}:${source.workspace_id}/${source.memory_id}@${sourceBundle?source.source_revision:source.version}`;
    const local=this.sourceState(owner,source),targetState=targets.get(targetKey.slice(0,targetKey.lastIndexOf('@')+1))??targets.get(targetKey)??{expected:0,reason:null};
    let reason=local.reason??targetState.reason,status:PreviewItem['status']=reason?(reason==='source_expired'||reason==='source_superseded'?'skipped':'conflict'):'ready';
    if(source.provenance.length>=20&&status==='ready'){reason='provenance_limit';status='conflict';}
    return {source_memory_id:source.memory_id,source_version:source.version,source_history_versions:source.history.map(row=>Number(row.version)),source_content:source.content,
     source_provenance:source.provenance,source_revision:source.source_revision,source_expires_at:source.expires_at,target_key:targetKey,target_expected_version:targetState.expected,status,reason,source_local:local.local};
   });
-  return {schema_version:1,document_workspace_id:document.workspace_id,target,counts:{total:items.length,ready:items.filter(item=>item.status==='ready').length,
+  return {schema_version:1,document_workspace_id:document.workspace_id,target,...(sourceBundle?{source_bundle:sourceBundle.summary}:{}),counts:{total:items.length,ready:items.filter(item=>item.status==='ready').length,
    skipped:items.filter(item=>item.status==='skipped').length,conflict:items.filter(item=>item.status==='conflict').length},items};
  }
  preview(owner:string,workspace:string,input:Input){return withImmediateTransaction(this.db,()=>{
-  exact(input,['import_id','document','target']);const importId=label(input.import_id,128),document=normalizeDocument(input.document);
+  exact(input,['import_id','document','target']);const importId=label(input.import_id,128);
   const requestedTarget=normalizeTarget(input.target),target=this.ports.authorizeTarget(owner,workspace,requestedTarget);
   if(JSON.stringify(target)!==JSON.stringify(requestedTarget))throw new Error('memory_scope_forbidden');
-  const inputValue={document,target},inputJson=JSON.stringify(inputValue),inputHash=digest(inputValue),now=new Date().toISOString();
+  const imported=pilotdeckMemoryImport(input.document,JSON.stringify([workspace,target.project_id]));
+  const document=normalizeDocument(imported?.document??input.document,imported?12_000_000:5_000_000);
+  const inputValue:Snapshot={document,target,...(imported?{source_bundle:imported.source}:{})};
+  const inputJson=JSON.stringify(inputValue),inputHash=digest(inputValue),now=new Date().toISOString();
   const old=this.db.prepare('SELECT * FROM wb_memory_import_batches WHERE owner_id=? AND workspace_id=? AND import_id=?').get(owner,workspace,importId) as Batch|undefined;
   if(old){
    if(old.input_sha256!==inputHash||old.input_json!==inputJson)throw new Error('memory_import_id_conflict');
    if(old.status==='applied')return previewView(old);
-   const fresh=this.inspect(owner,workspace,target,document),freshJson=JSON.stringify(fresh);
+   const fresh=this.inspect(owner,workspace,target,document,inputValue.source_bundle),freshJson=JSON.stringify(fresh);
    if(freshJson!==old.preview_json){this.db.prepare('UPDATE wb_memory_import_batches SET preview_json=?,version=version+1,updated_at=? WHERE owner_id=? AND workspace_id=? AND import_id=? AND status=\'previewed\'')
     .run(freshJson,now,owner,workspace,importId);}
    return previewView(this.db.prepare('SELECT * FROM wb_memory_import_batches WHERE owner_id=? AND workspace_id=? AND import_id=?').get(owner,workspace,importId) as Batch);
   }
-  const preview=this.inspect(owner,workspace,target,document);
+  const preview=this.inspect(owner,workspace,target,document,inputValue.source_bundle);
   this.db.prepare(`INSERT INTO wb_memory_import_batches(owner_id,workspace_id,import_id,input_sha256,input_json,preview_json,version,status,receipt_json,created_at,updated_at)
    VALUES(?,?,?,?,?,?,1,'previewed',NULL,?,?)`).run(owner,workspace,importId,inputHash,inputJson,JSON.stringify(preview),now,now);
   return previewView(this.db.prepare('SELECT * FROM wb_memory_import_batches WHERE owner_id=? AND workspace_id=? AND import_id=?').get(owner,workspace,importId) as Batch);
  });}
  get(owner:string,workspace:string,importId:string){
   const row=this.db.prepare('SELECT * FROM wb_memory_import_batches WHERE owner_id=? AND workspace_id=? AND import_id=?').get(owner,workspace,importId) as Batch|undefined;
-  if(!row)throw new Error('memory_import_not_found');const snapshot=JSON.parse(String(row.input_json)) as {document:ReturnType<typeof normalizeDocument>;target:Target};
+  if(!row)throw new Error('memory_import_not_found');const snapshot=JSON.parse(String(row.input_json)) as Snapshot;
   const target=this.ports.authorizeTarget(owner,workspace,snapshot.target);if(JSON.stringify(target)!==JSON.stringify(snapshot.target))throw new Error('memory_scope_forbidden');
   return previewView(row);
+ }
+ source(owner:string,workspace:string,importId:string){
+  this.get(owner,workspace,importId);
+  const row=this.db.prepare('SELECT * FROM wb_memory_import_batches WHERE owner_id=? AND workspace_id=? AND import_id=?').get(owner,workspace,importId) as Batch;
+  const snapshot=JSON.parse(String(row.input_json)) as Snapshot;
+  if(digest(snapshot)!==row.input_sha256)throw Error('memory_import_digest_conflict');
+  const source=snapshot.source_bundle;if(!source)throw Error('memory_import_bundle_not_found');
+  if(digest(source.bundle)!==source.summary.sha256)throw Error('memory_import_digest_conflict');
+  return {import_id:importId,input_sha256:String(row.input_sha256),sha256:source.summary.sha256,bundle:source.bundle,execution_authorized:false as const};
  }
  apply(owner:string,workspace:string,input:Input){return withImmediateTransaction(this.db,()=>{
   exact(input,['import_id','expected_version']);const importId=label(input.import_id,128);
@@ -148,10 +162,10 @@ export class MemoryImportService{
   const row=this.db.prepare('SELECT * FROM wb_memory_import_batches WHERE owner_id=? AND workspace_id=? AND import_id=?').get(owner,workspace,importId) as Batch|undefined;
   if(!row)throw new Error('memory_import_not_found');if(row.status==='applied')return JSON.parse(String(row.receipt_json));
   if(Number(input.expected_version)!==Number(row.version))throw new Error('version_conflict');
-  const snapshot=JSON.parse(String(row.input_json)) as {document:ReturnType<typeof normalizeDocument>;target:Target};
+  const snapshot=JSON.parse(String(row.input_json)) as Snapshot;
   if(digest(snapshot)!==row.input_sha256)throw new Error('memory_import_digest_conflict');
   const target=this.ports.authorizeTarget(owner,workspace,snapshot.target);if(JSON.stringify(target)!==JSON.stringify(snapshot.target))throw new Error('memory_scope_forbidden');
-  const fresh=this.inspect(owner,workspace,target,snapshot.document);
+  const fresh=this.inspect(owner,workspace,target,snapshot.document,snapshot.source_bundle);
   if(fresh.counts.conflict||JSON.stringify(fresh)!==row.preview_json)throw new Error('memory_import_conflict');
   const sourceById=new Map(snapshot.document.items.map(source=>[source.memory_id,source]));
   const results:Input[]=[];
@@ -164,7 +178,8 @@ export class MemoryImportService{
    if(typeof saved.memory_id!=='string'||saved.version!==1||saved.verified!==false||saved.status!=='active')throw new Error('memory_import_write_conflict');
    results.push({source_memory_id:item.source_memory_id,source_version:item.source_version,memory_id:String(saved.memory_id),version:Number(saved.version),status:'created'});
   }
-  const receipt={import_id:importId,status:'applied',version:Number(row.version),target,items:results,applied_at:new Date().toISOString()};
+  const receipt={import_id:importId,status:'applied',version:Number(row.version),target,items:results,
+   ...(snapshot.source_bundle?{source_bundle:snapshot.source_bundle.summary}:{}),applied_at:new Date().toISOString()};
   this.db.prepare("UPDATE wb_memory_import_batches SET status='applied',receipt_json=?,updated_at=? WHERE owner_id=? AND workspace_id=? AND import_id=? AND status='previewed' AND version=?")
    .run(JSON.stringify(receipt),receipt.applied_at,owner,workspace,importId,Number(row.version));
   return receipt;

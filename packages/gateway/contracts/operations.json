@@ -1996,5 +1996,14 @@
     "WorkbenchMemoryImportReceipt",
     "200",
     "Apply the exact reviewed preview version atomically through original memory saves. Recheck source and target states. Conflict rejects the whole batch. New notes are unverified. Deleted or superseded imports block reimport of later versions of the same source. Immutable original applied receipts recover response loss without replaying writes."
+  ],
+  [
+    "GET",
+    "/v1/workspaces/{workspace_id}/memory/import/{import_id}/source",
+    "getWorkbenchMemoryImportBundleSource",
+    null,
+    "WorkbenchMemoryImportBundleSource",
+    "200",
+    "Read the complete immutable pinned upstream snapshot from the original owner-scoped batch. Reauthorize original target scope, validate original input and bundle SHA-256, and return all source files and original index/Dream metadata as data. This read grants no execution authority. Responses remain private and no-store."
   ]
 ]

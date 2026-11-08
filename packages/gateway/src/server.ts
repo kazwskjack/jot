@@ -606,6 +606,7 @@ export async function buildServer(config: {
     if(code==='conversation_mode_invalid')return reply.code(400).send({error:{code:'CONVERSATION_MODE_INVALID'}});
     if(['invalid_file_range','invalid_file_history_query','invalid_file_history_cursor'].includes(code))return reply.code(400).send({error:{code:code.toUpperCase()}});
     if(['memory_import_id_conflict','memory_import_conflict','memory_import_digest_conflict','memory_import_write_conflict'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
+    if(code==='memory_import_bundle_note_limit')return reply.code(422).send({error:{code:'MEMORY_IMPORT_BUNDLE_NOTE_LIMIT'}});
     if(code==='memory_scope_forbidden')return reply.code(403).send({error:{code:'MEMORY_SCOPE_FORBIDDEN'}});
     if(code==='file_source_stale')return reply.code(409).send({error:{code:'FILE_SOURCE_STALE'}});
     if(code==='DOCUMENT_PREVIEW_TOO_LARGE')return reply.code(413).send({error:{code:'DOCUMENT_PREVIEW_TOO_LARGE'}});

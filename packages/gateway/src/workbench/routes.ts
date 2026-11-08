@@ -116,6 +116,10 @@ export function registerWorkbenchRoutes(app: FastifyInstance, service: Workbench
     if(Object.keys(query(request)).length)throw new Error('invalid_memory_import');
     return service.memoryImports.get(actor(request),param(request,'workspaceId'),param(request,'importId'));
   });
+  app.get('/v1/workspaces/:workspaceId/memory/import/:importId/source',async(request,reply)=>{
+    privateReply(reply);if(Object.keys(query(request)).length)throw Error('invalid_memory_import');
+    return service.memoryImports.source(actor(request),param(request,'workspaceId'),param(request,'importId'));
+  });
   app.post('/v1/workspaces/:workspaceId/memory/import/:importId/apply',async(request,reply)=>{privateReply(reply);return restoreCommand(request,()=>service.memoryImports.apply(actor(request),param(request,'workspaceId'),{...body(request,['expected_version']),import_id:param(request,'importId')}));});
   app.get('/v1/workspaces/:workspaceId/memory', async request => service.listMemory(actor(request), param(request, 'workspaceId'), query(request)));
   app.get('/v1/workspaces/:workspaceId/memory/export', async request => service.exportMemory(actor(request), param(request, 'workspaceId'), query(request)));

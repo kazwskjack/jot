@@ -630,12 +630,24 @@ export type WorkbenchMemoryImportItem = {
  target_key:string;target_expected_version:number;status:"ready"|"skipped"|"conflict";reason:string|null;source_local:boolean;
 };
 export type WorkbenchMemoryImportReceipt = {
+ source_bundle?:WorkbenchMemoryImportBundle;
  import_id:string;status:"applied";version:number;target:WorkbenchMemoryImportTarget;applied_at:string;
  items:Array<(Omit<WorkbenchMemoryImportItem,"status">&{status:"skipped"})|{source_memory_id:string;source_version:number;memory_id:string;version:number;status:"created"}>;
 };
 export type WorkbenchMemoryImportPreview = {
+ source_bundle?:WorkbenchMemoryImportBundle;
  schema_version:1;document_workspace_id:string;target:WorkbenchMemoryImportTarget;
  counts:{total:number;ready:number;skipped:number;conflict:number};items:WorkbenchMemoryImportItem[];
  import_id:string;input_sha256:string;version:number;status:"previewed"|"applied";created_at:string;updated_at:string;
  receipt?:WorkbenchMemoryImportReceipt;
+};
+
+export type WorkbenchMemoryImportBundle = {
+ format_version:"clawxmemory-memory-snapshot.v4";sha256:string;file_count:number;global_file_count:number;memory_file_count:number;
+ source_only_file_count:number;deprecated_file_count:number;total_utf8_bytes:number;execution_authorized:false;
+ metadata:{exported_at:string|null;last_indexed_at:string|null;last_dream_at:string|null;last_dream_status:string|null;
+ last_dream_summary_chars:number;case_trace_count:number;index_trace_count:number;dream_trace_count:number};
+};
+export type WorkbenchMemoryImportBundleSource = {
+ import_id:string;input_sha256:string;sha256:string;bundle:Record<string,unknown>;execution_authorized:false;
 };
