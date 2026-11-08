@@ -15,7 +15,8 @@ type Source=MemoryValue & {
 type PreviewItem={source_memory_id:string;source_version:number;source_history_versions:number[];source_content:string;source_provenance:Array<{kind:string;reference:string}>;source_revision:string|null;source_expires_at:string|null;target_key:string;target_expected_version:number;status:'ready'|'skipped'|'conflict';reason:string|null;source_local:boolean};
 type Ports={authorizeTarget(owner:string,workspace:string,target:Target):Target;save(owner:string,workspace:string,input:Input):MemoryValue;remove?(owner:string,workspace:string,memoryId:string,version:number):{memory_id:string;status:string};readFile?(owner:string,workspace:string,project:string,path:string,version:number,sha256:string):{path:string;version:number;sha256:string;size:number;content:Buffer}};
 type Batch=Record<string,string|number|null>;
-type Snapshot={document:ReturnType<typeof normalizeDocument>;target:Target;source_bundle?:PilotdeckMemoryImportSource;mode?:'replace_scope';source_file?:WorkbenchMemoryImportFileSource};
+type Snapshot={target:Target;source_bundle?:PilotdeckMemoryImportSource;mode?:'replace_scope';source_file?:WorkbenchMemoryImportFileSource}
+ &({document:ReturnType<typeof normalizeDocument>;document_source?:never}|{document?:never;document_source:'pilotdeck-v4-notes-v1'});
 
 const digest=(value:unknown)=>{const encoded=JSON.stringify(value);if(typeof encoded!=='string')invalid();return createHash('sha256').update(encoded).digest('hex');};
 function invalid():never{throw new Error('invalid_memory_import');}
@@ -64,14 +65,20 @@ function normalizeSource(value:unknown,workspaceId:string):Source{
   provenance,source_revision,expires_at,supersedes,history} as Source;
 }
 function normalizeDocument(value:unknown,maxCharacters=5_000_000,maxItems=200):{schema_version:1;workspace_id:string;exported_at:string;items:Source[]}{
- let encoded:string|undefined;try{encoded=JSON.stringify(value);}catch{invalid();}
- if(typeof encoded!=='string'||encoded.length>maxCharacters)invalid();
  const document=object(value);exact(document,['schema_version','workspace_id','exported_at','items']);
  const rawItems=document.items;if(document.schema_version!==1||!Array.isArray(rawItems)||rawItems.length>maxItems)invalid();
  const workspace_id=label(document.workspace_id),exported_at=label(document.exported_at,64);
  if(!Number.isFinite(Date.parse(exported_at)))invalid();
- const items=rawItems.map((item:unknown)=>normalizeSource(item,workspace_id));
- if(new Set(items.map(item=>item.memory_id)).size!==items.length)invalid();
+ // Count the exact original JSON size without forming one aggregate derived-document string.
+ let characters:number;try{characters=JSON.stringify({...document,items:[]}).length;}catch{invalid();}
+ if(characters>maxCharacters)invalid();
+ const items:Source[]=[],ids=new Set<string>();
+ for(const item of rawItems){
+  const source=normalizeSource(item,workspace_id);if(ids.has(source.memory_id))invalid();
+  let encoded:string|undefined;try{encoded=JSON.stringify(item);}catch{invalid();}
+  if(typeof encoded!=='string')invalid();characters+=encoded.length+(items.length?1:0);
+  if(characters>maxCharacters)invalid();ids.add(source.memory_id);items.push(source);
+ }
  return {schema_version:1 as const,workspace_id,exported_at,items};
 }
 type ImportPage={offset:number;limit:number};
@@ -87,6 +94,17 @@ function receiptPage(receipt:any,page?:ImportPage){
 function viewPage(view:any,page?:ImportPage){
  if(!page)return view;
  return {...view,...pageItems(view.items as Input[],page),...(view.receipt?{receipt:receiptPage(view.receipt,page)}:{})};
+}
+function samePreview(preview:{items:PreviewItem[]},encoded:string){
+ // The original preview shape ends with items. Compare its exact JSON without a second aggregate string.
+ const {items,...header}=preview,prefix=JSON.stringify(header).slice(0,-1)+',"items":[';
+ if(!encoded.startsWith(prefix))return false;
+ let offset=prefix.length;
+ for(let index=0;index<items.length;index++){
+  const part=(index?',':'')+JSON.stringify(items[index]);
+  if(!encoded.startsWith(part,offset))return false;offset+=part.length;
+ }
+ return encoded.length===offset+2&&encoded.startsWith(']}',offset);
 }
 function previewView(row:Batch){return {...JSON.parse(String(row.preview_json)),import_id:String(row.import_id),input_sha256:String(row.input_sha256),version:Number(row.version),status:String(row.status),created_at:String(row.created_at),updated_at:String(row.updated_at),
   ...(row.receipt_json===null?{}:{receipt:JSON.parse(String(row.receipt_json))})};}
@@ -108,6 +126,22 @@ export class MemoryImportService{
   if(file.path!==selection.path||file.version!==selection.version||file.sha256!==selection.sha256||file.size!==selection.size
    ||file.content.byteLength!==selection.size||createHash('sha256').update(file.content).digest('hex')!==selection.sha256)throw Error('memory_import_digest_conflict');
   return file.content;
+ }
+ private readDocument(owner:string,workspace:string,snapshot:Snapshot){
+  const bytes=snapshot.source_file?this.readFileSource(owner,workspace,snapshot.target,snapshot.source_file):undefined;
+  if(snapshot.document_source===undefined){if(!snapshot.document)throw Error('memory_import_digest_conflict');return snapshot.document;}
+  if(snapshot.document_source!=='pilotdeck-v4-notes-v1'||snapshot.document||!snapshot.source_bundle)throw Error('memory_import_digest_conflict');
+  let material:unknown;
+  if(bytes){
+   try{material=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));}catch{throw Error('invalid_memory_import_file_source');}
+  }else{
+   const source=snapshot.source_bundle;
+   if(!('bundle' in source)||digest(source.bundle)!==source.summary.sha256)throw Error('memory_import_digest_conflict');
+   material=source.bundle;
+  }
+  const imported=pilotdeckMemoryImport(material,JSON.stringify([workspace,snapshot.target.project_id]),snapshot.source_file?104_857_600:5_000_000,snapshot.source_file?.sha256);
+  if(!imported||JSON.stringify(imported.source.summary)!==JSON.stringify(snapshot.source_bundle.summary))throw Error('memory_import_digest_conflict');
+  return normalizeDocument(imported.document,Number.MAX_SAFE_INTEGER,Number.MAX_SAFE_INTEGER);
  }
  private sourceState(owner:string,source:Source){
   const row=this.db.prepare('SELECT * FROM wb_memories WHERE owner_id=? AND workspace_id=? AND memory_id=?').get(owner,source.workspace_id,source.memory_id) as MemoryRow|undefined;
@@ -180,6 +214,7 @@ export class MemoryImportService{
   if(JSON.stringify(target)!==JSON.stringify(requestedTarget))throw new Error('memory_scope_forbidden');
   if(input.mode!==undefined&&input.mode!=='append'&&input.mode!=='replace_scope')invalid();
   const mode=input.mode==='replace_scope'?'replace_scope' as const:undefined;
+  const old=this.db.prepare("SELECT *,json_extract(input_json,'$.document_source') AS document_source FROM wb_memory_import_batches WHERE owner_id=? AND workspace_id=? AND import_id=?").get(owner,workspace,importId) as Batch|undefined;
   const selected=fileSelection(input.document),sourceFile=selected?{...selected,workspace_id:workspace,project_id:target.project_id}:undefined;
   let material=input.document;
   if(sourceFile){
@@ -189,17 +224,18 @@ export class MemoryImportService{
   const imported=pilotdeckMemoryImport(material,JSON.stringify([workspace,target.project_id]),sourceFile?104_857_600:5_000_000,sourceFile?.sha256);
   if(mode&&!imported)invalid();
   if(mode&&!this.ports.remove)throw Error('memory_import_replace_unavailable');
-  const document=normalizeDocument(imported?.document??material,imported?(sourceFile?400_000_000:160_000_000):5_000_000,imported?Number.MAX_SAFE_INTEGER:200);
+  // Preserve old immutable document captures and their original hashes on refresh/retry.
+  const compact=!!imported&&(!old||old.document_source==='pilotdeck-v4-notes-v1');
+  const document=normalizeDocument(imported?.document??material,imported?(compact?Number.MAX_SAFE_INTEGER:sourceFile?400_000_000:160_000_000):5_000_000,imported?Number.MAX_SAFE_INTEGER:200);
   const sourceBundle:PilotdeckMemoryImportSource|undefined=imported?(sourceFile?{source_file:sourceFile,summary:imported.source.summary}:imported.source):undefined;
-  const inputValue:Snapshot={document,target,...(sourceBundle?{source_bundle:sourceBundle}:{}),...(mode?{mode}:{}),...(sourceFile?{source_file:sourceFile}:{})};
-  const inputJson=JSON.stringify(inputValue),inputHash=digest(inputValue),now=new Date().toISOString();
-  const old=this.db.prepare('SELECT * FROM wb_memory_import_batches WHERE owner_id=? AND workspace_id=? AND import_id=?').get(owner,workspace,importId) as Batch|undefined;
+  const inputValue:Snapshot={...(compact?{document_source:'pilotdeck-v4-notes-v1' as const}:{document}),target,...(sourceBundle?{source_bundle:sourceBundle}:{}),...(mode?{mode}:{}),...(sourceFile?{source_file:sourceFile}:{})};
+  const inputJson=JSON.stringify(inputValue),inputHash=createHash('sha256').update(inputJson,'utf8').digest('hex'),now=new Date().toISOString();
   if(old){
    if(old.input_sha256!==inputHash||old.input_json!==inputJson)throw new Error('memory_import_id_conflict');
    if(old.status==='applied')return viewPage(previewView(old),page);
-   const fresh=this.inspect(owner,workspace,target,document,inputValue.source_bundle,mode,sourceFile),freshJson=JSON.stringify(fresh);
-   if(freshJson!==old.preview_json){this.db.prepare('UPDATE wb_memory_import_batches SET preview_json=?,version=version+1,updated_at=? WHERE owner_id=? AND workspace_id=? AND import_id=? AND status=\'previewed\'')
-    .run(freshJson,now,owner,workspace,importId);}
+   const fresh=this.inspect(owner,workspace,target,document,inputValue.source_bundle,mode,sourceFile);
+   if(!samePreview(fresh,String(old.preview_json))){this.db.prepare('UPDATE wb_memory_import_batches SET preview_json=?,version=version+1,updated_at=? WHERE owner_id=? AND workspace_id=? AND import_id=? AND status=\'previewed\'')
+    .run(JSON.stringify(fresh),now,owner,workspace,importId);}
    return viewPage(previewView(this.db.prepare('SELECT * FROM wb_memory_import_batches WHERE owner_id=? AND workspace_id=? AND import_id=?').get(owner,workspace,importId) as Batch),page);
   }
   const preview=this.inspect(owner,workspace,target,document,inputValue.source_bundle,mode,sourceFile);
@@ -266,14 +302,14 @@ export class MemoryImportService{
   const snapshot=JSON.parse(String(row.input_json)) as Snapshot;
   if(digest(snapshot)!==row.input_sha256)throw new Error('memory_import_digest_conflict');
   const target=this.ports.authorizeTarget(owner,workspace,snapshot.target);if(JSON.stringify(target)!==JSON.stringify(snapshot.target))throw new Error('memory_scope_forbidden');
-  if(snapshot.source_file)this.readFileSource(owner,workspace,target,snapshot.source_file);
-  const fresh=this.inspect(owner,workspace,target,snapshot.document,snapshot.source_bundle,snapshot.mode,snapshot.source_file);
-  if(fresh.counts.conflict||JSON.stringify(fresh)!==row.preview_json)throw new Error('memory_import_conflict');
-  const sourceById=new Map(snapshot.document.items.map(source=>[source.memory_id,source]));
+  const document=this.readDocument(owner,workspace,snapshot);
+  const fresh=this.inspect(owner,workspace,target,document,snapshot.source_bundle,snapshot.mode,snapshot.source_file);
+  if(fresh.counts.conflict||!samePreview(fresh,String(row.preview_json)))throw new Error('memory_import_conflict');
   const results:Input[]=[];
-  for(const item of fresh.items){
+  for(const [index,item] of fresh.items.entries()){
    if(item.status==='skipped'){results.push({...item});continue;}
-   const source=sourceById.get(item.source_memory_id)!;
+   const source=document.items[index];
+   if(!source||source.memory_id!==item.source_memory_id)throw Error('memory_import_digest_conflict');
    const provenance=[...source.provenance,{kind:'import',reference:item.target_key}];
    const saved=this.ports.save(owner,workspace,{scope:target.scope,project_id:target.project_id,agent_id:target.agent_id,
     content:source.content,verified:false,provenance,source_revision:source.source_revision,expires_at:source.expires_at,supersedes:null});
