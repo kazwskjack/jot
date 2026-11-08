@@ -1,3 +1,4 @@
+import {MemoryImportItems,importItemsManifest,type ImportItemsBatch} from './memory-import-items.ts';
 import {pilotdeckMemoryImport,pilotdeckMemoryImportHistory,type PilotdeckMemoryImportSource} from './pilotdeck-memory-import.ts';
 import {createHash} from 'node:crypto';
 import type {WorkbenchMemoryImportFileSelection,WorkbenchMemoryImportFileSource,WorkbenchMemoryImportHistorySection} from '../../contracts/types.ts';
@@ -106,14 +107,47 @@ function samePreview(preview:{items:PreviewItem[]},encoded:string){
  }
  return encoded.length===offset+2&&encoded.startsWith(']}',offset);
 }
-function previewView(row:Batch){return {...JSON.parse(String(row.preview_json)),import_id:String(row.import_id),input_sha256:String(row.input_sha256),version:Number(row.version),status:String(row.status),created_at:String(row.created_at),updated_at:String(row.updated_at),
-  ...(row.receipt_json===null?{}:{receipt:JSON.parse(String(row.receipt_json))})};}
 
 /** Durable import previews and idempotent writes over the existing Jot memory authority. */
 export class MemoryImportService{
- private readonly db:DatabaseSync;private readonly ports:Ports;
+ private readonly db:DatabaseSync;private readonly ports:Ports;private readonly storedItems:MemoryImportItems;
  constructor(db:DatabaseSync,ports:Ports){this.db=db;this.ports=ports;
   if(!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_memory_import_batches'").get())throw new Error('memory_import_schema_required');
+  this.storedItems=new MemoryImportItems(db);
+ }
+ private batch(owner:string,workspace:string,row:Batch):ImportItemsBatch{return {owner,workspace,importId:String(row.import_id),version:Number(row.version)};}
+ private packItems(value:any,receipt=false){
+  let created=0,skipped=0;
+  if(receipt)for(const item of value.items){if(item.status==='created')created++;if(item.status==='skipped')skipped++;}
+  return {...value,items:[],items_storage:{...importItemsManifest(value.items),...(receipt?{totals:{total:value.items.length,created,skipped}}:{})}};
+ }
+ private payload(owner:string,workspace:string,row:Batch,receipt:boolean,page?:ImportPage){
+  const value=JSON.parse(String(receipt?row.receipt_json:row.preview_json));
+  if(!value.items_storage)return receipt?receiptPage(value,page):viewPage(value,page);
+  if(page)pageItems([],page);
+  const {items_storage:storage,...result}=value,range=page??{offset:0,limit:storage.count};
+  if(!Array.isArray(value.items)||value.items.length||!receipt&&value.counts?.total!==storage.count)throw Error('memory_import_digest_conflict');
+  const items=this.storedItems.read(this.batch(owner,workspace,row),receipt?'receipt':'preview',storage,range);
+  const next=range.offset+items.length;
+  if(receipt&&(!storage.totals||storage.totals.total!==storage.count||!Number.isSafeInteger(storage.totals.created)
+   ||storage.totals.created<0||!Number.isSafeInteger(storage.totals.skipped)||storage.totals.skipped<0
+   ||storage.totals.created+storage.totals.skipped!==storage.count))throw Error('memory_import_digest_conflict');
+  return {...result,items,...(page?{page:{offset:page.offset,limit:page.limit,total:storage.count,next_offset:next<storage.count?next:null},
+   ...(receipt?{totals:storage.totals}:{})}:{})};
+ }
+ private view(owner:string,workspace:string,row:Batch,page?:ImportPage){
+  return {...this.payload(owner,workspace,row,false,page),import_id:String(row.import_id),input_sha256:String(row.input_sha256),version:Number(row.version),
+   status:String(row.status),created_at:String(row.created_at),updated_at:String(row.updated_at),
+   ...(row.receipt_json===null?{}:{receipt:this.payload(owner,workspace,row,true,page)})};
+ }
+ private matchesPreview(owner:string,workspace:string,row:Batch,fresh:any){
+  const projected=this.db.prepare("SELECT json_extract(preview_json,'$.items_storage') AS storage FROM wb_memory_import_batches WHERE owner_id=? AND workspace_id=? AND import_id=? AND version=?")
+   .get(owner,workspace,String(row.import_id),Number(row.version)) as {storage:string|null}|undefined;
+  if(!projected)throw Error('memory_import_conflict');
+  if(projected.storage===null)return samePreview(fresh,String(row.preview_json));
+  if(JSON.stringify(this.packItems(fresh))!==row.preview_json)return false;
+  this.storedItems.read(this.batch(owner,workspace,row),'preview',JSON.parse(projected.storage));
+  return true;
  }
  private readFileSource(owner:string,workspace:string,target:Target,source:WorkbenchMemoryImportFileSource){
   if(source.workspace_id!==workspace||source.project_id!==target.project_id)throw Error('memory_scope_forbidden');
@@ -232,29 +266,35 @@ export class MemoryImportService{
   const inputJson=JSON.stringify(inputValue),inputHash=createHash('sha256').update(inputJson,'utf8').digest('hex'),now=new Date().toISOString();
   if(old){
    if(old.input_sha256!==inputHash||old.input_json!==inputJson)throw new Error('memory_import_id_conflict');
-   if(old.status==='applied')return viewPage(previewView(old),page);
+   if(old.status==='applied')return this.view(owner,workspace,old,page);
    const fresh=this.inspect(owner,workspace,target,document,inputValue.source_bundle,mode,sourceFile);
-   if(!samePreview(fresh,String(old.preview_json))){this.db.prepare('UPDATE wb_memory_import_batches SET preview_json=?,version=version+1,updated_at=? WHERE owner_id=? AND workspace_id=? AND import_id=? AND status=\'previewed\'')
-    .run(JSON.stringify(fresh),now,owner,workspace,importId);}
-   return viewPage(previewView(this.db.prepare('SELECT * FROM wb_memory_import_batches WHERE owner_id=? AND workspace_id=? AND import_id=?').get(owner,workspace,importId) as Batch),page);
+   if(!this.matchesPreview(owner,workspace,old,fresh)){
+    const stored=compact?this.packItems(fresh):fresh;
+    const changed=this.db.prepare("UPDATE wb_memory_import_batches SET preview_json=?,version=version+1,updated_at=? WHERE owner_id=? AND workspace_id=? AND import_id=? AND status='previewed' AND version=?")
+     .run(JSON.stringify(stored),now,owner,workspace,importId,Number(old.version));
+    if(changed.changes!==1)throw Error('memory_import_conflict');
+    if(compact)this.storedItems.write({owner,workspace,importId,version:Number(old.version)+1},'preview',fresh.items,stored.items_storage);
+   }
+   return this.view(owner,workspace,this.db.prepare('SELECT * FROM wb_memory_import_batches WHERE owner_id=? AND workspace_id=? AND import_id=?').get(owner,workspace,importId) as Batch,page);
   }
-  const preview=this.inspect(owner,workspace,target,document,inputValue.source_bundle,mode,sourceFile);
+  const preview=this.inspect(owner,workspace,target,document,inputValue.source_bundle,mode,sourceFile),stored=compact?this.packItems(preview):preview;
   this.db.prepare(`INSERT INTO wb_memory_import_batches(owner_id,workspace_id,import_id,input_sha256,input_json,preview_json,version,status,receipt_json,created_at,updated_at)
-   VALUES(?,?,?,?,?,?,1,'previewed',NULL,?,?)`).run(owner,workspace,importId,inputHash,inputJson,JSON.stringify(preview),now,now);
-  return viewPage(previewView(this.db.prepare('SELECT * FROM wb_memory_import_batches WHERE owner_id=? AND workspace_id=? AND import_id=?').get(owner,workspace,importId) as Batch),page);
+   VALUES(?,?,?,?,?,?,1,'previewed',NULL,?,?)`).run(owner,workspace,importId,inputHash,inputJson,JSON.stringify(stored),now,now);
+  if(compact)this.storedItems.write({owner,workspace,importId,version:1},'preview',preview.items,stored.items_storage);
+  return this.view(owner,workspace,this.db.prepare('SELECT * FROM wb_memory_import_batches WHERE owner_id=? AND workspace_id=? AND import_id=?').get(owner,workspace,importId) as Batch,page);
  });}
  get(owner:string,workspace:string,importId:string,page?:ImportPage){
   const row=this.db.prepare('SELECT * FROM wb_memory_import_batches WHERE owner_id=? AND workspace_id=? AND import_id=?').get(owner,workspace,importId) as Batch|undefined;
   if(!row)throw new Error('memory_import_not_found');const snapshot=JSON.parse(String(row.input_json)) as Snapshot;
   if(digest(snapshot)!==row.input_sha256)throw Error('memory_import_digest_conflict');
   const target=this.ports.authorizeTarget(owner,workspace,snapshot.target);if(JSON.stringify(target)!==JSON.stringify(snapshot.target))throw new Error('memory_scope_forbidden');
-  const view=previewView(row);
+  const view=this.view(owner,workspace,row,page);
   if(JSON.stringify(view.target)!==JSON.stringify(target)||view.mode!==snapshot.mode||JSON.stringify(view.source_file)!==JSON.stringify(snapshot.source_file))throw Error('memory_import_digest_conflict');
   if(view.replacement&&(view.replacement.count!==view.replacement.items.length||digest({target,items:view.replacement.items})!==view.replacement.scope_sha256))throw Error('memory_import_digest_conflict');
-  return viewPage(view,page);
+  return view;
  }
  replacementSource(owner:string,workspace:string,importId:string,memoryId:string,expectedVersion:number){
-  const view=this.get(owner,workspace,importId);
+  const view=this.get(owner,workspace,importId,{offset:0,limit:1});
   if(!Number.isSafeInteger(expectedVersion)||expectedVersion<1)invalid();
   if(view.version!==expectedVersion)throw Error('memory_import_conflict');
   const item=(view.replacement?.items as Array<{memory_id:string;version:number;content_sha256:string;content_chars:number;verified:boolean;expires_at:string|null}>|undefined)
@@ -272,7 +312,7 @@ export class MemoryImportService{
   return {import_id:importId,preview_version:expectedVersion,memory_id:memoryId,version:item.version,sha256:item.content_sha256,memory,execution_authorized:false as const};
  }
  source(owner:string,workspace:string,importId:string,history?:{section:WorkbenchMemoryImportHistorySection;offset:number;limit:number}){
-  this.get(owner,workspace,importId);
+  this.get(owner,workspace,importId,{offset:0,limit:1});
   const row=this.db.prepare('SELECT * FROM wb_memory_import_batches WHERE owner_id=? AND workspace_id=? AND import_id=?').get(owner,workspace,importId) as Batch;
   const snapshot=JSON.parse(String(row.input_json)) as Snapshot;
   if(digest(snapshot)!==row.input_sha256)throw Error('memory_import_digest_conflict');
@@ -297,14 +337,14 @@ export class MemoryImportService{
   exact(input,['import_id','expected_version']);const importId=label(input.import_id,128);
   if(!Number.isSafeInteger(input.expected_version)||Number(input.expected_version)<1)invalid();
   const row=this.db.prepare('SELECT * FROM wb_memory_import_batches WHERE owner_id=? AND workspace_id=? AND import_id=?').get(owner,workspace,importId) as Batch|undefined;
-  if(!row)throw new Error('memory_import_not_found');if(row.status==='applied')return receiptPage(JSON.parse(String(row.receipt_json)),page);
+  if(!row)throw new Error('memory_import_not_found');if(row.status==='applied')return this.payload(owner,workspace,row,true,page);
   if(Number(input.expected_version)!==Number(row.version))throw new Error('version_conflict');
   const snapshot=JSON.parse(String(row.input_json)) as Snapshot;
   if(digest(snapshot)!==row.input_sha256)throw new Error('memory_import_digest_conflict');
   const target=this.ports.authorizeTarget(owner,workspace,snapshot.target);if(JSON.stringify(target)!==JSON.stringify(snapshot.target))throw new Error('memory_scope_forbidden');
   const document=this.readDocument(owner,workspace,snapshot);
   const fresh=this.inspect(owner,workspace,target,document,snapshot.source_bundle,snapshot.mode,snapshot.source_file);
-  if(fresh.counts.conflict||!samePreview(fresh,String(row.preview_json)))throw new Error('memory_import_conflict');
+  if(fresh.counts.conflict||!this.matchesPreview(owner,workspace,row,fresh))throw new Error('memory_import_conflict');
   const results:Input[]=[];
   for(const [index,item] of fresh.items.entries()){
    if(item.status==='skipped'){results.push({...item});continue;}
@@ -332,8 +372,10 @@ export class MemoryImportService{
   const receipt={import_id:importId,status:'applied',version:Number(row.version),target,items:results,
    ...(snapshot.source_bundle?{source_bundle:snapshot.source_bundle.summary}:{}),...(snapshot.source_file?{source_file:snapshot.source_file}:{}),
    ...(fresh.replacement?{mode:'replace_scope',replacement:{scope_sha256:fresh.replacement.scope_sha256,count:retired.length,items:retired}}:{}),applied_at:new Date().toISOString()};
+  const stored=snapshot.document_source?this.packItems(receipt,true):receipt;
+  if(snapshot.document_source)this.storedItems.write(this.batch(owner,workspace,row),'receipt',results,stored.items_storage);
   const applied=this.db.prepare("UPDATE wb_memory_import_batches SET status='applied',receipt_json=?,updated_at=? WHERE owner_id=? AND workspace_id=? AND import_id=? AND status='previewed' AND version=?")
-   .run(JSON.stringify(receipt),receipt.applied_at,owner,workspace,importId,Number(row.version));
+   .run(JSON.stringify(stored),receipt.applied_at,owner,workspace,importId,Number(row.version));
   if(applied.changes!==1)throw Error('memory_import_conflict');
   return receiptPage(receipt,page);
  });}
