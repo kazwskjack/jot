@@ -53,7 +53,7 @@ function isolatedMutationFacts(db:DatabaseSync,runId:string,callId:string,result
    const assignment=member.task_assignment,paths=assignment?.file_paths;
    // Legacy historical receipts predate member path assignments. New issuance
    // and every receipt carrying that field must attest the exact frozen scope.
-   if(live||paths!==undefined){
+   if(live||paths!==undefined||kind==='files.delete'){
     if(!assignment||assignment.task_id!==admission.task_id||assignment.occurrence_id!==admission.occurrence_id
      ||!Array.isArray(paths)||!paths.length||paths.length>32||new Set(paths).size!==paths.length
      ||paths.some(path=>typeof path!=='string'||!grant.plan_paths.includes(path))||!paths.includes(row.path))throw fail();

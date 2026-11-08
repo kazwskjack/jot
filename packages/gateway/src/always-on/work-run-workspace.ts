@@ -14,6 +14,7 @@ import {WorkspaceJournal} from './workspace-journal.ts';
 import type {LogicalWorkCycleWorkspaceManager} from './logical-work-cycle-workspace.ts';
 import type {IsolatedFileIdentity,ResolvedIsolatedFiles} from './isolated-work-files.ts';
 import {workspaceRelativePath,type WorkspaceManifest,type SnapshotRecoveryRecord} from './workspace-provider.ts';
+import {isolatedDeleteFacts} from '../persistent-tasks/isolated-output-source.ts';
 
 type Options={db:DatabaseSync;workbench:Pick<WorkbenchService,'assertRunActive'>;policies:DiscoveryPolicies;workspace:Pick<LogicalWorkCycleWorkspaceManager,'inspect'>};
 type FullPlan=ReturnType<DiscoveryHistory['detail']>['plans'][number];
@@ -105,7 +106,7 @@ export class TrustedWorkRunWorkspaceResolver{
    const row=db.prepare('SELECT r.*,i.identity_json FROM wb_isolated_file_results r JOIN wb_isolated_file_intents i ON i.call_key=r.call_key WHERE r.cycle_id=? AND r.snapshot_id=? AND r.path=? AND r.version IS NOT NULL ORDER BY r.version DESC LIMIT 1').get(admission.cycle_id,admission.snapshot_id,path) as Record<string,any>|undefined;
    if(!row)continue;
    const identity=JSON.parse(row.identity_json),response=JSON.parse(row.response_json),native=this.memberRecord(admission.owner_id,identity.run_id);
-   const producer=this.records.byRun(admission.owner_id,native?.root_run_id??identity.run_id),bytes=Buffer.from(row.bytes);
+   const producer=this.records.byRun(admission.owner_id,native?.root_run_id??identity.run_id),deleted=row.sha256===null,bytes=deleted?Buffer.alloc(0):Buffer.from(row.bytes);
    // A closed member's immutable assignment still identifies its committed bytes.
    if(native){
     const saved=JSON.parse(native.snapshot_json) as NativeReservation,assignment=saved.task_assignment;
@@ -114,8 +115,11 @@ export class TrustedWorkRunWorkspaceResolver{
      ||saved.task_id!==admission.task_id||saved.occurrence_id!==admission.occurrence_id||!assignment||assignment.task_id!==admission.task_id
      ||assignment.occurrence_id!==admission.occurrence_id||!Array.isArray(assignment.file_paths)||!assignment.file_paths.includes(path))throw fail('version_changed');
    }
-   if(!producer||producer.grant_id!==admission.grant_id||identity.owner_id!==admission.owner_id||identity.workspace_id!==admission.scope.workspace_id||identity.project_id!==admission.scope.project_id||identity.agent_id!==admission.scope.agent_id||identity.cycle_id!==admission.cycle_id||identity.snapshot_id!==admission.snapshot_id||identity.occurrence_id!==admission.occurrence_id||response.receipt_id!==row.receipt_id||response.run_id!==identity.run_id||response.call_id!==identity.call_id||response.sha256!==row.sha256||response.version!==row.version||createHash('sha256').update(bytes).digest('hex')!==row.sha256)throw fail('version_changed');
-   expected.set(path,{path,kind:'file',sha256:row.sha256,bytes:bytes.length,executable:false});
+   if(!producer||producer.grant_id!==admission.grant_id||identity.owner_id!==admission.owner_id||identity.workspace_id!==admission.scope.workspace_id||identity.project_id!==admission.scope.project_id||identity.agent_id!==admission.scope.agent_id||identity.cycle_id!==admission.cycle_id||identity.snapshot_id!==admission.snapshot_id||identity.occurrence_id!==admission.occurrence_id||response.receipt_id!==row.receipt_id||response.run_id!==identity.run_id||response.call_id!==identity.call_id||response.sha256!==row.sha256||response.version!==row.version||!deleted&&createHash('sha256').update(bytes).digest('hex')!==row.sha256)throw fail('version_changed');
+   if(deleted){
+    isolatedDeleteFacts(db,identity.run_id,identity.call_id,response);
+    if(manifest.protocol===2&&manifest.paths.includes(path))expected.set(path,{path,kind:'absent'});else expected.delete(path);
+   }else expected.set(path,{path,kind:'file',sha256:row.sha256,bytes:bytes.length,executable:false});
    const parts=path.split('/');parts.pop();while(parts.length){const directory=parts.join('/');if(!expected.has(directory))expected.set(directory,{path:directory,kind:'directory'});parts.pop();}
   }
   if(manifest.entries.length!==expected.size)throw fail('isolated_changed');
