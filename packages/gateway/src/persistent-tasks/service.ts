@@ -350,7 +350,7 @@ export class PersistentTaskService {
     if(!this.discoveryForRun(runId))return;
     this.assertRunActive(runId);
     if(!['agents.list','messages.list','memory.list','files.list','files.read','tasks.get','tasks.subtasks','tasks.next','tasks.reply_drafts',
-      'tasks.upsert','tasks.evidence','tasks.assessment','tasks.observe','tasks.assess','discovery.context','discovery.source','discovery.plan','discovery.report'].includes(operation))throw Error('discovery_planning_read_only');
+      'tasks.upsert','tasks.evidence','tasks.assessment','tasks.observe','tasks.assess','discovery.context','discovery.history','discovery.source','discovery.plan','discovery.report'].includes(operation))throw Error('discovery_planning_read_only');
   }
   private active(id: string) {
     return Boolean(this.db.prepare(`SELECT 1 FROM wb_task_current_occurrences o JOIN ga_runs r ON r.id=o.run_id WHERE o.task_id=? AND (r.reason_code='OUTCOME_UNKNOWN' OR o.status='outcome_unknown' OR r.status NOT IN (${TERMINAL.map(() => '?').join(',')})) LIMIT 1`).get(id,...TERMINAL));

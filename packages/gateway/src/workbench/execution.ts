@@ -903,7 +903,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
         'tasks.observe': ['subtask_id','observations'],
         'tasks.assess': ['subtask_id','expected_task_version','expected_subtask_version','expected_assessment_revision','expected_observation_revision','observations','expires_at'],
         'tasks.next': [],'tasks.reply_draft':['text','evidence'],'tasks.reply_drafts':[],
-        'discovery.context':['after_revision','plan_id','after_plan_id'],'discovery.source':['revision','offset'],
+        'discovery.context':['after_revision','plan_id','after_plan_id'],'discovery.history':['admission_id','before_id','after_plan_id'],'discovery.source':['revision','offset'],
         'discovery.plan':['summary','rationale','changes','evidence'],'discovery.report':['outcome','summary','limitations','plan_ids','evidence'],
       };
       if (!keys[operation]) throw new Error('invalid_workspace_operation');
@@ -936,6 +936,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
         assertTaskDependenciesReady(db,executionEvidence,owner,identity.task_binding.task_id,runId);
       let result: unknown;
       switch (operation) {
+        case 'discovery.history': result=discoveryPlanning.history(runId,args.admission_id as string|undefined,args.before_id as string|undefined,args.after_plan_id as string|undefined);break;
         case 'discovery.context': result=discoveryPlanning.context(runId,args.after_revision as number|undefined,args.plan_id as string|undefined,args.after_plan_id as string|undefined);break;
         case 'discovery.source': result=discoveryPlanning.source(runId,{revision:args.revision,offset:args.offset??0});break;
         case 'discovery.plan': result=discoveryPlanning.plan(runId,String(callId),args);break;

@@ -1,3 +1,4 @@
+import {DiscoveryHistory} from './discovery-history.ts';
 import {createHash} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
 import type {WorkbenchService} from '../workbench/service.ts';
@@ -69,6 +70,16 @@ export class DiscoveryPlanning{
   const inputs=this.db.prepare("SELECT id,created_at,updated_at,status FROM ga_messages WHERE conversation_id=? AND role='user' ORDER BY id").all(row.conversation_id);
   const plans=this.db.prepare('SELECT plan_id,payload_sha256,scope_sha256 FROM wb_discovery_plans WHERE occurrence_id=? ORDER BY plan_id').all(row.occurrence_id);
   return digest({base:this.base(row),run,steps,inputs,plans});
+ }
+ history(run:string,admissionId?:string,beforeId?:string,afterPlan?:string){
+  const row=this.scope(run),history=new DiscoveryHistory(this.db);
+  const scope={agent_id:row.agent_id,project_id:row.project_id,workspace_id:row.workspace_id};
+  if(admissionId!==undefined){
+   if(beforeId!==undefined)throw Error('discovery_planning_invalid');
+   return history.detail(row.owner_id,scope,text(admissionId,256),afterPlan===undefined?undefined:text(afterPlan,256));
+  }
+  if(afterPlan!==undefined)throw Error('discovery_planning_invalid');
+  return history.list(row.owner_id,scope,beforeId===undefined?undefined:text(beforeId,256));
  }
  context(run:string,after=0,planId?:string,afterPlan=''){
   const row=this.scope(run),cursor=count(after),plans=this.db.prepare('SELECT plan_id,payload_json FROM wb_discovery_plans WHERE occurrence_id=? AND plan_id>? ORDER BY plan_id LIMIT 50').all(row.occurrence_id,afterPlan===''?'':text(afterPlan,128)) as Row[];
