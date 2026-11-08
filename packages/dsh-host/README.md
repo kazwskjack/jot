@@ -55,6 +55,25 @@ live schema and settings. A missing descriptor, mismatched fingerprint,
 unconfirmed migration, loaded native session or active run holds the write.
 Product settings versions begin at 1. Native DSH revisions may begin at 0.
 
+Host-enabled settings configuration also accepts an optional `credentialRefs`
+array of up to 64 native environment-variable reference names. This allowlist
+mounts `/api/jot-host-credentials` on the original DSH owner Connection. Enable
+`JOT_HOST_CREDENTIALS_ENABLED=true` on the BFF to show its link in Jot settings.
+
+The native owner page describes handles and configuration status, then sends
+explicit rotation or removal through the original `credentials.set/unset`
+Remote. A one-use, expiring page nonce binds each request to the selected owner
+profile. Jot's BFF receives the owner-page URL. Credential values go directly to
+the native Host and its credential provider.
+
+Credential changes fence existing Jot MCP generations and retire their reload
+bindings. Cleanup failure blocks further writes and new MCP attachments until
+Host restart. A failure after dispatch leaves that change outcome unknown. Removing a stored value may reveal an ambient environment
+or dotenv value. That result is reported as `credential_fallback_still_configured`
+and requires removal of that native source before revocation can be confirmed.
+Rotation changes future reference resolution. Revoking the provider's external
+API key or authorization grant uses that provider's own administration surface.
+
 ## Windows startup
 
 Use a private installation directory outside the Agent workspace and Git checkout.

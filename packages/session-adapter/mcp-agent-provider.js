@@ -172,6 +172,9 @@ export function createMcpAgentRuntimeProvider({ mcpPlugin, authorizeStdio, httpF
   const reloadBindings = new Set();
   const retiredReloadClosures = new Set();
   let providerClosed = false;
+  let credentialGeneration = 0;
+  let credentialsInvalidating = false;
+  let credentialInvalidationFailed = false;
   let providerClosePromise;
 
   async function closeAgent(agent) {
@@ -198,6 +201,7 @@ export function createMcpAgentRuntimeProvider({ mcpPlugin, authorizeStdio, httpF
   /** Trusted Workbench binding only: the caller supplies the ORIGINAL read-only
    * operation/context source. This volatile index stores no operation receipts. */
   function bindReloadScope({ agent, ownerId, agentId, capabilityEpoch, connections, readOriginalState } = {}) {
+    if (credentialsInvalidating || credentialInvalidationFailed) fail('mcp_agent_credentials_changing');
     if (providerClosed) fail('mcp_agent_provider_closed');
     const scope = contexts.get(agent);
     if (!scope) fail('mcp_agent_scope_unavailable');
@@ -316,7 +320,7 @@ export function createMcpAgentRuntimeProvider({ mcpPlugin, authorizeStdio, httpF
 
   async function resolveReloadScopes(ownerId, agentId, signal) {
     signal?.throwIfAborted();
-    if (providerClosed) return [];
+    if (providerClosed || credentialsInvalidating || credentialInvalidationFailed) return [];
     const scopes = [], agents = new Set();
     for (const binding of reloadBindings) {
       if (!binding.active || binding.ownerId !== ownerId || binding.agentId !== agentId
@@ -364,6 +368,8 @@ export function createMcpAgentRuntimeProvider({ mcpPlugin, authorizeStdio, httpF
 
   async function attach(options) {
     if (providerClosed) fail('mcp_agent_provider_closed');
+    if (credentialsInvalidating || credentialInvalidationFailed) fail('mcp_agent_credentials_changing');
+    const admittedCredentialGeneration = credentialGeneration;
     if (!isObject(options) || Object.keys(options).some(key => !['agent', 'connections', 'signal', 'ownerId', 'agentId', 'assertCurrent'].includes(key))
       || !isObject(options.agent) || !isAbortSignal(options.signal)) fail('mcp_agent_provider_invalid');
     const { agent, signal, ownerId, agentId, assertCurrent } = options;
@@ -455,7 +461,8 @@ export function createMcpAgentRuntimeProvider({ mcpPlugin, authorizeStdio, httpF
 
     const ensureActive = () => {
       signal?.throwIfAborted();
-      if (!state.active || activeByAgent.get(agent) !== state) fail('mcp_agent_generation_closed');
+      if (credentialsInvalidating || admittedCredentialGeneration !== credentialGeneration
+        || !state.active || activeByAgent.get(agent) !== state) fail('mcp_agent_generation_closed');
     };
     try {
       ensureActive();
@@ -569,7 +576,8 @@ export function createMcpAgentRuntimeProvider({ mcpPlugin, authorizeStdio, httpF
           name: tool.public_name,
           output: outputWithExecutionReceipt(native.output),
           execute: async (args, exec) => {
-            if (!state.active || activeByAgent.get(agent) !== state) fail('mcp_agent_generation_closed');
+            if (credentialsInvalidating || admittedCredentialGeneration !== credentialGeneration
+              || !state.active || activeByAgent.get(agent) !== state) fail('mcp_agent_generation_closed');
             if (!connectionState.active) fail('mcp_agent_connection_closed');
             const call = (async () => {
               try {
@@ -602,6 +610,23 @@ export function createMcpAgentRuntimeProvider({ mcpPlugin, authorizeStdio, httpF
     }
   }
 
+  async function invalidateCredentials() {
+    if (credentialInvalidationFailed) fail('mcp_agent_credential_invalidation_failed');
+    if (providerClosed) fail('mcp_agent_provider_closed');
+    const generation = ++credentialGeneration;
+    credentialsInvalidating = true;
+    // Closing starts synchronously, fencing old tool aliases before any await.
+    const retirements = [...reloadBindings].map(binding => retireReloadBinding(binding));
+    const results = await Promise.allSettled([
+      ...[...activeStates].map(state => state.close()), ...retirements, ...retiredReloadClosures,
+    ]);
+    if (results.some(result => result.status === 'rejected')) {
+      credentialInvalidationFailed = true;
+      fail('mcp_agent_credential_invalidation_failed');
+    }
+    if (generation === credentialGeneration) credentialsInvalidating = false;
+  }
+
   async function close() {
     if (!providerClosePromise) {
       providerClosed = true;
@@ -614,5 +639,5 @@ export function createMcpAgentRuntimeProvider({ mcpPlugin, authorizeStdio, httpF
     return providerClosePromise;
   }
 
-  return Object.freeze({ setup, attach, bindReloadScope, resolveReloadScopes, close });
+  return Object.freeze({ setup, attach, bindReloadScope, resolveReloadScopes, invalidateCredentials, close });
 }

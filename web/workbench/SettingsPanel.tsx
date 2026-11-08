@@ -3,6 +3,7 @@ import type {Caps,HostAdminClient,HostOnboardingSnapshot,HostReadinessResponse,H
 import {taskDraftScope} from '../jot/client';
 import {createHostSettingsSaveAttempt,hostSettingsSaveCommand} from './host-settings-save-attempt.mjs';
 import {createHostSettingsRecovery} from './host-settings-recovery.mjs';
+import HostCredentialsPanel from './HostCredentialsPanel';
 import HostReadinessPanel from './HostReadinessPanel';
 import HostSettingsPanel from './HostSettingsPanel';
 import HostSettingsReadPanel from './HostSettingsReadPanel';
@@ -177,6 +178,7 @@ export default function SettingsPanel({caps,client}:{caps:Caps;client:HostAdminC
   <h2>模型、凭据与安装设置</h2>
   <p className="wb-page-intro">只读 readiness 需要你明确启动宿主授权；无获准来源的状态保持未知或不支持。此页不收集凭据、不测试提供方，也不会创建会话或发送模型请求。</p>
   <div className="wb-settings-grid">
+   {settingsReadEnabled&&<HostCredentialsPanel client={client} scopeKey={currentTaskScope}/>}
    <HostReadinessPanel enabled={readinessEnabled} namespaces={caps.workbench?.host_settings_read_namespaces} client={client} jotCapabilities={caps} scopeKey={currentTaskScope} onReadiness={setReadiness}/>
    <HostSettingsReadPanel enabled={settingsReadEnabled} namespaces={caps.workbench?.host_settings_read_namespaces} client={client} scopeKey={currentTaskScope}/>
    <HostSettingsPanel enabled={settingsEnabled} state={settings} readiness={null} onDraftChange={draft=>setSettings(state=>hostSettingsDraftChanged(state,draft))} onUseHostValues={()=>setSettings(state=>hostSettingsUseServerSnapshot(state))} onReload={()=>void reloadSettings()} onSave={()=>void saveSettings()}/>

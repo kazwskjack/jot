@@ -28,8 +28,10 @@ export async function buildServer(options={}){
   const hostSettingsWriteEnabled=hostSettingsWriteFlag==='true',hostSettingsWriteNamespace=process.env.JOT_HOST_SETTINGS_WRITE_NAMESPACE?.trim()||'';
   if(hostSettingsWriteEnabled&&(hostSettingsFlag!=='true'||!hostSettingsWriteNamespace)||!hostSettingsWriteEnabled&&hostSettingsWriteNamespace)
     throw Error('invalid_host_settings_write_configuration');
+  const hostCredentialsFlag=process.env.JOT_HOST_CREDENTIALS_ENABLED;
+  if(hostCredentialsFlag!==undefined&&!['true','false'].includes(hostCredentialsFlag)||hostCredentialsFlag==='true'&&hostSettingsFlag!=='true')throw Error('invalid_host_credentials_configuration');
   const defaultWorkbench={url:process.env.JOT_WORKBENCH_URL,owner:process.env.JOT_WORKBENCH_OWNER,csrf:process.env.JOT_WORKBENCH_CSRF_TOKEN,
-    ...(hostSettingsFlag==='true'?{hostBootstrap:{enabled:true,dshOrigin:process.env.JOT_DSH_ORIGIN,jotOrigin:process.env.JOT_PUBLIC_ORIGIN,
+    ...(hostSettingsFlag==='true'?{hostBootstrap:{enabled:true,credentialManagementEnabled:hostCredentialsFlag==='true',dshOrigin:process.env.JOT_DSH_ORIGIN,jotOrigin:process.env.JOT_PUBLIC_ORIGIN,
       namespaces:(process.env.JOT_HOST_SETTINGS_NAMESPACES??'').split(',').map(value=>value.trim()).filter(Boolean),
       ...(hostSettingsWriteEnabled?{writeEnabled:true,writeNamespace:hostSettingsWriteNamespace}:{})}}:{})};
   const workbench=workbenchConfig(options.workbench??defaultWorkbench);

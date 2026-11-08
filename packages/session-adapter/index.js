@@ -1,3 +1,4 @@
+import {validateHostCredentialRefs} from './host-credentials-owner-route.js'
 import {createHostPolicyBootstrapRuntime,resolveHostPolicyBootstrapRuntimeConfig,validateHostPolicyBootstrapRuntimeConfig} from './host-policy-bootstrap-runtime.js'
 import {createChatCompactionManager} from './chat-compaction-manager.js'
 import {createChatCheckpointRecovery} from './chat-checkpoint-recovery.js'
@@ -901,6 +902,7 @@ async function readJson(req, limit = 1024 * 1024) {
 }
 
 export function apply(ctx, config = {}) {
+  if(config.hostCredentialRefs!==undefined&&validateHostCredentialRefs(config.hostCredentialRefs).length&&(!config.hostSettingsBootstrap||config.hostSettingsOwnerRoutesEnabled!==true))throw Error('host_credentials_route_invalid')
   if(config.hostSettingsBootstrap!==undefined)validateHostPolicyBootstrapRuntimeConfig(config.hostSettingsBootstrap)
   if(config.hostSettingsOwnerRoutesEnabled!==undefined&&typeof config.hostSettingsOwnerRoutesEnabled!=='boolean')throw Error('host_settings_owner_routes_config_invalid')
   if(config.hostSettingsOwnerRoutesEnabled===true&&config.hostSettingsBootstrap===undefined)throw Error('host_settings_owner_routes_config_invalid')
@@ -995,7 +997,7 @@ export function apply(ctx, config = {}) {
     const hostPolicyBootstrapRuntime=hostPolicyBootstrapConfig===undefined?undefined:createHostPolicyBootstrapRuntime({
       ctx,token,config:hostPolicyBootstrapConfig,settingsOwnerRoutesEnabled:config.hostSettingsOwnerRoutesEnabled===true,
       hostSettingsWriteEnabled:config.hostSettingsWriteEnabled===true,hostSettingsWriteNamespace:config.hostSettingsWriteNamespace,
-      hostSettingsProductSchema:config.hostSettingsProductSchema,workbenchBridge
+      hostSettingsProductSchema:config.hostSettingsProductSchema,hostCredentialRefs:config.hostCredentialRefs,workbenchBridge
     })
     const hostAdmissionGuard=config.hostSettingsWriteEnabled===true?{
       begin:async()=>{const result=await workbenchBridge.requestHostSettings('admission/begin',{});return result?.kind==='admitted'?result.admission_id:undefined;},
@@ -1099,7 +1101,7 @@ export function apply(ctx, config = {}) {
       if(typeof ApiSessionNotFound!=='function'||!(ApiSessionNotFound.prototype instanceof Error))throw Error('jot_session_controller_incompatible')
     }
     const chatModeReadiness=createChatModeReadiness({enabled:config.ordinaryChatModeReadiness,policy:chatExecutionPolicy,mounted:ctx.get?.('jotChatPresetReady'),context:config.ordinaryChatContext,web:config.ordinaryChatWeb,modelSelection:config.ordinaryModelSelection,admission:!!ordinaryInputAdmissionHost});
-    for(const ownerRoute of [hostPolicyBootstrapRuntime?.ownerRoute,hostPolicyBootstrapRuntime?.ownerApprovalRoute].filter(Boolean)){
+    for(const ownerRoute of [hostPolicyBootstrapRuntime?.ownerRoute,hostPolicyBootstrapRuntime?.ownerApprovalRoute,hostPolicyBootstrapRuntime?.credentialsOwnerRoute].filter(Boolean)){
       const connection=ctx.get?.('connection')??ctx.connection;
       const dispose=connection.fetch.register(ownerRoute);
       ctx.effect(()=>()=>dispose());

@@ -41,15 +41,17 @@ export function workbenchConfig(input){
  let hostBootstrap;
  if(input.hostBootstrap!==undefined){
   const value=input.hostBootstrap;
-  const basic=exactObject(value,['enabled','dshOrigin','jotOrigin','namespaces']);
-  const writable=exactObject(value,['enabled','dshOrigin','jotOrigin','namespaces','writeEnabled','writeNamespace'])&&value.writeEnabled===true
+  const {credentialManagementEnabled,...settings}=value??{};
+  if(credentialManagementEnabled!==undefined&&typeof credentialManagementEnabled!=='boolean')throw Error('invalid_workbench_host_credentials_config');
+  const basic=exactObject(settings,['enabled','dshOrigin','jotOrigin','namespaces']);
+  const writable=exactObject(settings,['enabled','dshOrigin','jotOrigin','namespaces','writeEnabled','writeNamespace'])&&value.writeEnabled===true
    &&value.writeNamespace==='jot-session-adapter'&&SETTINGS_NAMESPACE.test(value.writeNamespace)
    &&Array.isArray(value.namespaces)&&value.namespaces.includes(value.writeNamespace);
   if(!value||typeof value!=='object'||Array.isArray(value)||(!basic&&!writable)||value.enabled!==true
    ||!canonicalOrigin(value.dshOrigin)||!canonicalOrigin(value.jotOrigin,true)||value.dshOrigin===value.jotOrigin
    ||!Array.isArray(value.namespaces)||value.namespaces.length===0||value.namespaces.length>64||value.namespaces.some(name=>typeof name!=='string'||!/^[a-z][a-z0-9._-]{0,127}$/.test(name)||name==='jot-host-policy')
    ||new Set(value.namespaces).size!==value.namespaces.length)throw new Error('invalid_workbench_host_bootstrap_config');
-  hostBootstrap={enabled:true,dshOrigin:value.dshOrigin,jotOrigin:value.jotOrigin,namespaces:[...value.namespaces],...(writable?{writeEnabled:true,writeNamespace:value.writeNamespace}:{})};
+  hostBootstrap={enabled:true,...(credentialManagementEnabled?{credentialManagementEnabled:true}:{}),dshOrigin:value.dshOrigin,jotOrigin:value.jotOrigin,namespaces:[...value.namespaces],...(writable?{writeEnabled:true,writeNamespace:value.writeNamespace}:{})};
  }
  return {...input,...(hostBootstrap?{hostBootstrap}:{}),url:url.origin,fetch:input.fetch??fetch};
 }
@@ -60,6 +62,12 @@ export function registerWorkbenchProxy(app,config,localCsrf){
  const emptyBody={type:'object',properties:{},required:[],additionalProperties:false};
  const bootstrapBody={type:'object',properties:{state:{type:'string',pattern:'^[A-Za-z0-9_-]{43}$'},code:{type:'string',pattern:'^[A-Za-z0-9_-]{43}$'}},required:['state','code'],additionalProperties:false};
  if(hostBootstrap){
+  app.post('/api/host/bootstrap/credentials',{schema:{body:emptyBody}},async(request,reply)=>{
+   if(!exactObject(request.body,[]))return publicBootstrapError(reply,422,'HOST_CREDENTIALS_INVALID');
+   if(!sameWorkbenchOrigin(request,hostBootstrap.jotOrigin))return publicBootstrapError(reply,403,'HOST_CREDENTIALS_ORIGIN_DENIED');
+   reply.header('cache-control','no-store');
+   return hostBootstrap.credentialManagementEnabled===true?{enabled:true,owner_url:hostBootstrap.dshOrigin+'/api/jot-host-credentials'}:{enabled:false};
+  });
   app.post('/api/host/bootstrap/challenge',{
    preValidation:async(request,reply)=>{if(!exactObject(request.body,[]))return publicBootstrapError(reply,422,'HOST_BOOTSTRAP_INVALID');},
    schema:{body:emptyBody}

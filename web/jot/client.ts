@@ -30,7 +30,7 @@ export async function requestBytes(path:string,signal?:AbortSignal):Promise<Uint
  }finally{timed.dispose()}
 }
 
-export async function hostBootstrapRequest(action:'challenge'|'redeem',body:Record<string,string>|undefined,signal?:AbortSignal):Promise<unknown>{
+export async function hostBootstrapRequest(action:'challenge'|'redeem'|'credentials',body:Record<string,string>|undefined,signal?:AbortSignal):Promise<unknown>{
  const timed=deadline(signal,30000);
  try{
   const response=await fetch(`/api/host/bootstrap/${action}`,{method:'POST',headers:{'Content-Type':'application/json','X-jot-token':csrfToken},credentials:'same-origin',cache:'no-store',redirect:'error',signal:timed.signal,body:JSON.stringify(body??{})});

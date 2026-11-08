@@ -1,3 +1,4 @@
+import {createHostCredentialsOwnerRoute,validateHostCredentialRefs} from './host-credentials-owner-route.js';
 import {randomUUID,timingSafeEqual} from 'node:crypto';
 import {isAbsolute,join} from 'node:path';
 import {createHostPolicyGrantAuthority,createHostSettingsPolicyFacade,HOST_POLICY_NAMESPACE} from './host-policy.js';
@@ -56,8 +57,10 @@ export function resolveHostPolicyBootstrapRuntimeConfig(config,{webServer,workbe
 /** Build an opt-in DSH runtime using only its existing Gateway component Bearer,
  * SettingsController, Connection owner page and Typert Gateway owner Remote. */
 export function createHostPolicyBootstrapRuntime({ctx,token,config,settingsOwnerRoutesEnabled=false,hostSettingsWriteEnabled=false,
- hostSettingsWriteNamespace,workbenchBridge,hostSettingsProductSchema,now=()=>Date.now()}={}){
+ hostSettingsWriteNamespace,workbenchBridge,hostSettingsProductSchema,hostCredentialRefs=[],now=()=>Date.now()}={}){
   validateHostPolicyBootstrapRuntimeConfig(config);
+  const credentialRefs=validateHostCredentialRefs(hostCredentialRefs);
+  if(credentialRefs.length&&settingsOwnerRoutesEnabled!==true)throw TypeError('host_credentials_route_invalid');
   if(typeof settingsOwnerRoutesEnabled!=='boolean')throw new TypeError('host_bootstrap_owner_routes_flag_invalid');
   if(typeof hostSettingsWriteEnabled!=='boolean'||hostSettingsWriteEnabled&&(!settingsOwnerRoutesEnabled||hostSettingsWriteNamespace!=='jot-session-adapter'||!config.namespaces.includes(hostSettingsWriteNamespace)))
     throw new TypeError('host_settings_write_config_invalid');
@@ -133,6 +136,13 @@ export function createHostPolicyBootstrapRuntime({ctx,token,config,settingsOwner
     try{return{status:200,payload:{approval:await approvalProducer.prepare(input.body)}};}
     catch{return{status:503,payload:{error:'host_settings_approval_source_unavailable'}};}
   }:undefined;
-  return Object.freeze({hostInstanceId,bootstrap,ownerRoute,...(productHandler?{productHandler}:{}),
+  const credentialsOwnerRoute=credentialRefs.length?createHostCredentialsOwnerRoute({connection,typertGateway,dshOrigin:config.dshOrigin,
+    references:credentialRefs,readIdentity:()=>resolveOwnerBoundDshProfileContext(service(ctx,'profileContext')),
+    beforeChange:async()=>{
+      const provider=service(ctx,'jotMcpRuntimeProvider');
+      if(typeof provider?.invalidateCredentials!=='function')throw Error('host_credential_consumers_unavailable');
+      await provider.invalidateCredentials();
+    },now}):undefined;
+  return Object.freeze({hostInstanceId,bootstrap,ownerRoute,...(credentialsOwnerRoute?{credentialsOwnerRoute}:{}),...(productHandler?{productHandler}:{}),
     ...(approvalProducer?{ownerApprovalRoute:approvalProducer.ownerRoute}:{})});
 }

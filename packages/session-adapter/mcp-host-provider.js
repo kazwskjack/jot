@@ -37,6 +37,7 @@ export async function apply(ctx) {
   // resolver. The provider therefore keeps both transports fail-closed. Never
   // derive command, network, credential, or owner authorization from model input.
   const provider = createMcpAgentRuntimeProvider({ mcpPlugin });
+  ctx.on('credentials/reference-updated', () => provider.invalidateCredentials());
   ctx.on('agent/created', ({agent}) => provider.setup(agent.ctx, agent));
   for (const agent of ctx.agents.list()) provider.setup(agent.ctx, agent);
   ctx.provide('jotMcpRuntimeProvider', provider);

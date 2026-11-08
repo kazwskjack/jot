@@ -60,6 +60,7 @@ export type OnboardingDraft={mode:'agent'|'demo'|null;workspace_id:string|null;p
 export type HostOnboardingSnapshot={version:number;schema_version:number;current_step:OnboardingStep;draft:OnboardingDraft;last_receipt_id:string|null;last_error_code:string|null};
 export type HostOnboardingPatch={expected_version:number;current_step:OnboardingStep;draft:OnboardingDraft};
 export type HostAdminClient={
+ credentials?:(signal?:AbortSignal)=>Promise<{enabled:boolean;owner_url?:string}>;
  approveSettingsRead:(signal?:AbortSignal)=>Promise<{approved:true;namespaces:string[]}>;
  namespaceSettings:(namespace:string,signal?:AbortSignal)=>Promise<HostNamespaceSettingsSnapshot>;
  readiness:(namespace:string,signal?:AbortSignal)=>Promise<HostReadinessResponse>;

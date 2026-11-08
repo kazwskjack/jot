@@ -12,6 +12,7 @@
     "host-policy-bootstrap-runtime.js",
     "host-policy-bootstrap.js",
     "host-policy-config.js",
+    "host-credentials-owner-route.js",
     "host-policy-constants.js",
     "host-policy.js",
     "host-readiness.js",

@@ -91,6 +91,14 @@ function approveSettingsWrite(request,namespace,command,key,{signal,timeoutMs=12
 export function createHostAdminClient(request,bootstrapRequest=async()=>{throw new Error('HOST_BOOTSTRAP_UNAVAILABLE');}){
  const editorPath=namespace=>{if(typeof namespace!=='string'||!/^[a-z][a-z0-9._-]{0,127}$/.test(namespace)||namespace==='jot-host-policy')throw Error('HOST_SETTINGS_NAMESPACE_INVALID');return`?namespace=${encodeURIComponent(namespace)}`;};
  return Object.freeze({
+  credentials:async signal=>{
+   const result=await bootstrapRequest('credentials',{},signal);
+   if(exactKeys(result,['enabled'])&&result.enabled===false)return{enabled:false};
+   if(!exactKeys(result,['enabled','owner_url'])||result.enabled!==true||typeof result.owner_url!=='string')throw Error('HOST_CREDENTIALS_UNAVAILABLE');
+   const url=new URL(result.owner_url);
+   if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.search||url.hash||url.pathname!=='/api/jot-host-credentials')throw Error('HOST_CREDENTIALS_UNAVAILABLE');
+   return{enabled:true,owner_url:url.href};
+  },
   approveSettingsRead:signal=>approveSettingsRead(bootstrapRequest,{signal}),
   namespaceSettings:(namespace,signal)=>{
    if(typeof namespace!=='string'||!/^[a-z][a-z0-9._-]{0,127}$/.test(namespace)||namespace==='jot-host-policy')return Promise.reject(new Error('HOST_SETTINGS_NAMESPACE_INVALID'));
