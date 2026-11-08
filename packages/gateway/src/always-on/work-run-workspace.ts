@@ -14,6 +14,7 @@ import {WorkspaceJournal} from './workspace-journal.ts';
 import type {LogicalWorkCycleWorkspaceManager} from './logical-work-cycle-workspace.ts';
 import type {IsolatedFileIdentity,ResolvedIsolatedFiles} from './isolated-work-files.ts';
 import {workspaceRelativePath,type WorkspaceManifest,type SnapshotRecoveryRecord} from './workspace-provider.ts';
+import {selectedPrdWorkObjective,readSelectedPrdWorkPlan} from './prd-work-plan-context.ts';
 import {isolatedDeleteFacts} from '../persistent-tasks/isolated-output-source.ts';
 
 type Options={db:DatabaseSync;workbench:Pick<WorkbenchService,'assertRunActive'>;policies:DiscoveryPolicies;workspace:Pick<LogicalWorkCycleWorkspaceManager,'inspect'>};
@@ -57,8 +58,11 @@ export class TrustedWorkRunWorkspaceResolver{
   if(!intent||!record||intent.snapshot_id!==admission.snapshot_id||record.snapshot_id!==admission.snapshot_id||digest(record)!==grant.snapshot_record_sha256)throw fail('journal_changed');
   const session=db.prepare('SELECT session_id FROM ga_harness_session_bindings WHERE owner_id=? AND conversation_id=?').get(run.owner_id,run.conversation_id) as {session_id:string}|undefined;
   if(!session?.session_id)throw fail('session_missing');
-  // shortcut: PRD native context is pending; derive only supported original Goal inputs.
-  if(grant.admission_id===null)throw fail('prd_context_pending');
+  if(grant.admission_id===null){
+   const objective=selectedPrdWorkObjective(db,grant);
+   return freezeWorkAdmission({work_binding:{kind:'isolated_work' as const,original_run_id:admission.run_id,occurrence_id:admission.occurrence_id},
+    native_workspace:{protocol:1 as const,cwd:record.isolated_root.path},objective,admission,grant,record,sessionRef:session.session_id});
+  }
   const selected=new Map<string,FullPlan>();let cursor:string|undefined;const seen=new Set<string>();
   do{
    const page=this.history.detail(run.owner_id,admission.scope,grant.admission_id,cursor);
@@ -72,6 +76,15 @@ export class TrustedWorkRunWorkspaceResolver{
   if(selected.size!==grant.plans.length)throw fail('plan_missing');
   const objective=selectedWorkObjective(grant.plans.map(plan=>selected.get(plan.plan_id)!));
   return freezeWorkAdmission({work_binding:{kind:'isolated_work' as const,original_run_id:admission.run_id,occurrence_id:admission.occurrence_id},native_workspace:{protocol:1 as const,cwd:record.isolated_root.path},objective,admission,grant,record,sessionRef:session.session_id});
+ }
+ readPlan(runId:string,input:unknown,lease:ExecutionLease){
+  const read=()=>{
+   const bound=this.context(runId,lease);
+   if(!bound||bound.grant.admission_id!==null)throw Error('work_plan_source_unavailable');
+   return readSelectedPrdWorkPlan(this.o.db,bound.grant,input);
+  };
+  if(this.o.db.isTransaction)return read();
+  this.o.db.exec('BEGIN DEFERRED');try{return read();}finally{this.o.db.exec('ROLLBACK');}
  }
  private memberRecord(owner:string,runId:string):NativeMemberRecord|undefined{
   const {db}=this.o;
@@ -130,10 +143,14 @@ export class TrustedWorkRunWorkspaceResolver{
  async inspectForRun(runId:string,lease:ExecutionLease){
   if(this.o.db.isTransaction)throw fail('outer_transaction_forbidden');
   let binding=this.context(runId,lease);if(!binding)return null;
-  const source=this.sources.collect(binding.admission.owner_id,binding.admission.scope);if(!source.caught_up||source.reason)throw fail('source_unconfirmed');
+  if(binding.grant.admission_id!==null){
+   const source=this.sources.collect(binding.admission.owner_id,binding.admission.scope);if(!source.caught_up||source.reason)throw fail('source_unconfirmed');
+  }
   binding=this.context(runId,lease)!;this.pending(binding.admission.cycle_id);const frozen=digest(binding);
   const inspected=await this.o.workspace.inspect(binding.admission.owner_id,binding.admission.scope,binding.admission.cycle_id,{signal:new AbortController().signal});
-  const sourceNow=this.sources.collect(binding.admission.owner_id,binding.admission.scope);if(!sourceNow.caught_up||sourceNow.reason)throw fail('source_unconfirmed');
+  if(binding.grant.admission_id!==null){
+   const sourceNow=this.sources.collect(binding.admission.owner_id,binding.admission.scope);if(!sourceNow.caught_up||sourceNow.reason)throw fail('source_unconfirmed');
+  }
   const current=this.context(runId,lease);if(!current||digest(current)!==frozen)throw fail('binding_changed');this.pending(binding.admission.cycle_id);
   if(inspected.workspace.snapshot.isolated_root!==binding.record.isolated_root.path||inspected.workspace.source_sha256!==binding.grant.source_sha256||inspected.workspace.snapshot.receipt.snapshot_id!==binding.admission.snapshot_id||inspected.result.snapshot_id!==binding.admission.snapshot_id||canonicalJson(inspected.workspace.plan_paths)!==canonicalJson(binding.grant.plan_paths))throw fail('snapshot_changed');
   this.reconcile(binding,inspected.result.manifest);

@@ -48,7 +48,7 @@ import type { McpRegistryService } from './mcp-registry.ts';
 import { McpExecutionJournal } from './mcp-execution.ts';
 import {HookExecutionJournal} from './hook-execution.ts';
 
-export type NativeWorkExecution={resolver:Pick<TrustedWorkRunWorkspaceResolver,'context'|'resolveFiles'>;inspections:{collect(runId:string,lease:ExecutionLease):Promise<unknown>;current(scope:TaskCompletionWorkScope):unknown}};
+export type NativeWorkExecution={resolver:Pick<TrustedWorkRunWorkspaceResolver,'context'|'resolveFiles'>&Partial<Pick<TrustedWorkRunWorkspaceResolver,'readPlan'>>;inspections:{collect(runId:string,lease:ExecutionLease):Promise<unknown>;current(scope:TaskCompletionWorkScope):unknown}};
 
 export const WORKBENCH_TOOL_IDS = ['universe_capabilities', 'universe_search', 'browser_action'];
 
@@ -924,7 +924,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
         'memory.stage':['scope','memory_ids'],'memory.propose':['consolidation_id','expected_version','summary','changes'],'memory.consolidation':['consolidation_id'],
         'memory.capture.pending':[], 'memory.capture.read':['capture_id'], 'memory.capture.propose':['capture_id','expected_version','summary','notes'],
         'files.list': [], 'files.read': ['path'], 'files.write': ['path', 'content', 'expected_version'],
-        'tasks.get': [],'tasks.prd.read':['binding_id','offset_bytes','limit_bytes'],'tasks.prd.plan':['summary','rationale','changes','evidence'],'tasks.subtasks': ['occurrence_id'],
+        'tasks.work.plan.read':['plan_id','offset_bytes','limit_bytes'],'tasks.get': [],'tasks.prd.read':['binding_id','offset_bytes','limit_bytes'],'tasks.prd.plan':['summary','rationale','changes','evidence'],'tasks.subtasks': ['occurrence_id'],
         'tasks.upsert': ['subtask_id','expected_version','title','acceptance','priority','status','dependencies','evidence'],
         'tasks.delegate':['subtask_id','expected_subtask_version','recipient_agent_id','file_paths'],
         'tasks.evidence': ['evidence'],
@@ -944,7 +944,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
         if(!['memory.capture.read','memory.capture.propose'].includes(operation)||args.capture_id!==job.capture_id)throw new Error('workbench_operation_forbidden');
       }
       const mutating = ['messages.send', 'memory.save', 'memory.stage', 'memory.propose', 'memory.capture.propose', 'files.write','tasks.prd.plan','tasks.upsert','tasks.evidence','tasks.assess','tasks.delegate','tasks.reply_draft','discovery.plan','discovery.report'].includes(operation);
-      const attested = operation==='tasks.prd.read' || (!!identity.task_binding||(identity.kind==='native_team'&&!!identity.task_assignment)) && !operation.startsWith('tasks.')&&(!operation.startsWith('discovery.')||operation==='discovery.source');
+      const attested = operation==='tasks.prd.read'||operation==='tasks.work.plan.read' || (!!identity.task_binding||(identity.kind==='native_team'&&!!identity.task_assignment)) && !operation.startsWith('tasks.')&&(!operation.startsWith('discovery.')||operation==='discovery.source');
       const receipted = mutating || attested || isDream;
       const callId = input.call_id;
       if (receipted && !validCallId(callId)) throw new Error('invalid_call_id');
@@ -1007,8 +1007,18 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
           const task=requireTask(identity);result={task:tasks.get(owner,task.task_id),occurrence:tasks.occurrences(owner,task.task_id).items.find(item=>item.occurrence_id===task.occurrence_id),collaboration:collaboration?.get(owner,task.task_id)??{enabled:false}};break;
         }
         case 'tasks.prd.read': {
-          requireTask(identity);if(!taskPrd)throw Error('prd_source_unavailable');
-          result=taskPrd.readRunSource(owner,runId,args);break;
+          if(!taskPrd)throw Error('prd_source_unavailable');
+          let sourceRunId=runId;
+          if(nativeWork?.resolver.context(runId)){
+            const work=nativeWork.resolver.context(runId,normalizeExecutionLease(input.execution_lease));
+            if(!work)throw Error('prd_source_unavailable');
+            sourceRunId=work.member?.root_run_id??runId;
+          }else requireTask(identity);
+          result=taskPrd.readRunSource(owner,sourceRunId,args);break;
+        }
+        case 'tasks.work.plan.read': {
+          if(!nativeWork?.resolver.readPlan)throw Error('work_plan_source_unavailable');
+          result=nativeWork.resolver.readPlan(runId,args,normalizeExecutionLease(input.execution_lease));break;
         }
         case 'tasks.prd.plan': {
           requireTask(identity);if(!taskPrd?.proposeRunPlan)throw Error('prd_work_plan_unavailable');

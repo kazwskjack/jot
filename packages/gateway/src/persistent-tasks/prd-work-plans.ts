@@ -48,7 +48,7 @@ function view(row:Row){
 /** Proposal material only. Original task/role, current ledger and pinned source are supplied by the scoped service. */
 export function proposePrdWorkPlan(db:DatabaseSync,owner:string,runId:string,callId:string,task:Row,role:Row,source:Row,subtasks:unknown[],input:unknown){
  if(!db.isTransaction)throw Error('prd_work_plan_transaction_required');
- if(!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(callId))throw invalid();
+ if(!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(callId))throw invalid();
  const request=object(input,['summary','rationale','changes','evidence']),requestHash=digest(request);
  if(Buffer.byteLength(canonicalJson(request),'utf8')>131072)throw invalid();
  const prior=db.prepare('SELECT * FROM wb_task_prd_work_plans WHERE owner_id=? AND run_id=? AND call_id=?').get(owner,runId,callId) as Row|undefined;
