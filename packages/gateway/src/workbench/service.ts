@@ -1391,6 +1391,17 @@ export class WorkbenchService {
       WHERE owner_id=? AND workspace_id=? AND project_id=? AND path=? ORDER BY version,run_id`).all(owner,workspace,project,path) as Row[]){
       refs.push({kind:'file_write_run',run_id:String(row.run_id),path,version:Number(row.version),sha256:String(row.sha256),size:Number(row.size)});
     }
+    // A binding retains its original Agent's immutable workspace/project after task reassignment.
+    if(hasTable('wb_task_prd_bindings'))for(const row of this.db.prepare(`SELECT b.binding_id,b.task_id,b.revision,v.version,v.sha256,v.size
+      FROM wb_task_prd_bindings b JOIN wb_agents a ON a.owner_id=b.owner_id AND a.agent_id=json_extract(b.role_json,'$.agent_id')
+      JOIN wb_file_versions v ON v.owner_id=b.owner_id AND v.workspace_id=a.workspace_id AND v.project_id=a.project_id
+        AND v.path=json_extract(b.source_json,'$.path') AND v.version=json_extract(b.source_json,'$.version')
+        AND v.sha256=json_extract(b.source_json,'$.sha256') AND v.size=json_extract(b.source_json,'$.size')
+      WHERE b.owner_id=? AND a.workspace_id=? AND a.project_id=? AND v.path=? AND json_extract(b.source_json,'$.kind')='logical_file'
+      ORDER BY b.task_id,b.revision,b.binding_id`).all(owner,workspace,project,path) as Row[]){
+      refs.push({kind:'task_prd_binding',binding_id:String(row.binding_id),task_id:String(row.task_id),binding_revision:Number(row.revision),
+        path,version:Number(row.version),sha256:String(row.sha256),size:Number(row.size)});
+    }
     if(hasTable('wb_task_file_execution_receipts'))for(const row of this.db.prepare(`SELECT receipt_id,run_id,version,sha256,size FROM wb_task_file_execution_receipts
       WHERE owner_id=? AND workspace_id=? AND project_id=? AND path=? ORDER BY version,receipt_id`).all(owner,workspace,project,path) as Row[]){
       refs.push({kind:'task_file_execution',receipt_id:String(row.receipt_id),run_id:String(row.run_id),path,version:Number(row.version),sha256:String(row.sha256),size:Number(row.size)});
@@ -1504,10 +1515,11 @@ export class WorkbenchService {
           task_file_execution:['kind','receipt_id','run_id','path','version','sha256','size'],
           task_completion_file_output:['kind','candidate_id','receipt_id','path','location','version','sha256','size'],
           task_output_artifact:['kind','artifact_id','artifact_version','receipt_id','run_id','path','version'],
+          task_prd_binding:['kind','binding_id','task_id','binding_revision','path','version','sha256','size'],
         };
         if(!ref||!Object.hasOwn(fields,String(ref.kind)))return false;const names=fields[String(ref.kind)]!;
         if(!exact(ref,names)||ref.path!==path||this.filePath(ref.path)!==ref.path)return false;
-        return names.every(name=>name==='kind'||name==='path'||(name==='version'||name==='artifact_version'?positive(ref[name]):name==='size'?nonnegative(ref[name]):name==='sha256'?digest(ref[name]):name==='location'?['file_outputs','workspace_file_outputs'].includes(ref[name]):id(ref[name])));
+        return names.every(name=>name==='kind'||name==='path'||(name==='version'||name==='artifact_version'||name==='binding_revision'?positive(ref[name]):name==='size'?nonnegative(ref[name]):name==='sha256'?digest(ref[name]):name==='location'?['file_outputs','workspace_file_outputs'].includes(ref[name]):id(ref[name])));
       });
       const common=['protocol','action','command_key','project_id','workspace_id','source','source_refs','preview_sha256','applied_at'];
       if(!exact(receipt,receipt.action==='rename'?[...common,'target','target_refs']:common)||receipt.protocol!==1||!['rename','delete'].includes(receipt.action)||
