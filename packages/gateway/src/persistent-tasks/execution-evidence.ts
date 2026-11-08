@@ -41,7 +41,8 @@ export class TaskExecutionEvidence {
   }
 
   private recordInside(runId: string, callId: string, operation: string, result: unknown): ExecutionEvidence {
-    if (operation.startsWith('tasks.')) throw new Error('invalid_execution_evidence_operation');
+    // PRD reads are actual source IO issued by the scoped reader.
+    if (operation.startsWith('tasks.')&&operation!=='tasks.prd.read') throw new Error('invalid_execution_evidence_operation');
     let file:Record<string,string|number>|undefined;
     let isolated:Record<string,any>|undefined;
     if(operation==='files.delete')isolatedDeleteFacts(this.db,runId,callId,result,true);
