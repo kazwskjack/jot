@@ -190,11 +190,16 @@ export function registerWorkbenchProxy(app,config,localCsrf){
    }catch{return reply.code(502).send({error:{code:`${prefix}_UNAVAILABLE`}});}
    finally{clearTimeout(timer);}
   }
-  const allowed=/^\/v1\/(capabilities|agents|persistent-tasks|teams|workspaces|runs|conversations|interactions|channel-bindings|push|projects|artifacts|uploads)(?:\/|$)/;
+  const allowed=/^\/v1\/(capabilities|plugin-profile|agents|persistent-tasks|teams|workspaces|runs|conversations|interactions|channel-bindings|push|projects|artifacts|uploads)(?:\/|$)/;
   const pushAllowed=(req.method==='GET'&&suffix==='/v1/push/vapid-public-key')
    ||(req.method==='POST'&&suffix==='/v1/push/subscriptions')
    ||(req.method==='POST'&&/^\/v1\/push\/subscriptions\/[^/]+\/revoke$/.test(suffix));
-  if(!allowed.test(suffix)||((suffix==='/v1/push'||suffix.startsWith('/v1/push/'))&&!pushAllowed)||/%(?:2e|2f|5c)/i.test(suffix)||suffix.includes('\\'))return reply.code(400).send({error:{code:'INVALID_WORKBENCH_PATH'}});
+  const pluginBundle=/^\/v1\/plugin-profile\/bundles\/([^/]+)(?:\/enabled)?$/.exec(suffix);
+  let scopedBundle=false;
+  if(pluginBundle){
+   try{const name=decodeURIComponent(pluginBundle[1]);scopedBundle=name.length<=192&&/^@[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(name)&&encodeURIComponent(name)===pluginBundle[1];}catch{}
+  }
+  if(!allowed.test(suffix)||((suffix==='/v1/push'||suffix.startsWith('/v1/push/'))&&!pushAllowed)||/%(?:2e|5c)/i.test(suffix)||/%2f/i.test(suffix)&&!scopedBundle||suffix.includes('\\'))return reply.code(400).send({error:{code:'INVALID_WORKBENCH_PATH'}});
   const headers={'x-user-id':config.owner,'x-csrf-token':config.csrf,'origin':`http://${req.headers.host??'localhost'}`,'accept':req.headers.accept??'application/json'};
   if(req.headers['idempotency-key'])headers['idempotency-key']=req.headers['idempotency-key'];
   if(req.headers['last-event-id'])headers['last-event-id']=req.headers['last-event-id'];

@@ -161,6 +161,7 @@ export type InteractionPage = { items: Array<Interaction> };
 export type BrowserActionReadinessItem = { protocol: 1; run_id: string; workspace_id: string; status: "ready" | "unknown" | "failed"; required: true; observed_at: string; reason?: string; execution_authorized: false };
 export type WorkbenchCollaborationMode = ({ id: "single"; enabled: true }) | ({ id: "independent_team"; enabled: true }) | ({ id: "subagents"; enabled: false; reason: "HOST_ADAPTER_NOT_READY" }) | ({ id: "team"; enabled: false; reason: "DSH_EXPERIMENTAL_TEAM_NOT_READY" }) | ({ id: "handoff"; enabled: false; reason: "HOST_ADAPTER_NOT_READY" });
 export type WorkbenchCapabilities = {
+  plugin_profiles?: boolean;
   host_settings_read?: boolean;
   host_settings_write?: boolean;
   host_settings_write_namespace?: string;
@@ -444,3 +445,18 @@ export type ChannelId = 'api-server'|'bluebubbles'|'cli'|'dingtalk'|'discord'|'e
 export type WorkspaceCheckpointRestoreRequestStatus = {command_key:string;request_sha256:string;command_sha256:string;execution_authorized:false;restore_authorized:false}&({state:'unobserved'}|{state:'recorded_pending';operation_id:string}|{state:'settled';operation_id:string;receipt:WorkspaceCheckpointRestoreReceipt}|{state:'terminal_rejected';no_effect:true;reason:'workspace_checkpoint_review_changed'});
 export type ForkConversationInput = { expected_version: number; through_message_id: string };
 export type ConversationForkReceipt = { conversation_id: string; fork_id: string; source: { conversation_id: string; through_message_id: string; head_sha256: string }; state: "ready" };
+
+export type PluginProfileBundle = {name:string; installed?:boolean; enabled?:boolean; version?:string};
+export type PluginProfileBundlePage = {bundles:PluginProfileBundle[]};
+export type PluginProfileInstall = {spec:string; enabled:boolean};
+export type PluginProfileEnable = {enabled:boolean};
+export type PluginProfileResult = {
+  application:'applied'|'restart-required'|'overridden'|'failed'|'cancelled'; changed:boolean;
+  stage?:string; bundle?:string; version?:string; restartReason?:string; failedAt?:string;
+  error?:{code:string}; packageResult?:{exitCode:number;kind?:string;timedOut?:boolean};
+};
+export type PluginProfileOperation = {
+  route_operation:string; request_sha256:string;
+  operation_id:string; operation:'plugin.bundle.install'|'plugin.bundle.enable'|'plugin.bundle.remove';
+} & ({state:'settled';response:PluginProfileResult;response_status:200}
+  | {state:'reserved'|'dispatched'|'unknown';response?:never;response_status?:never});

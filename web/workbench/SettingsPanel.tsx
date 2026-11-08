@@ -4,6 +4,7 @@ import {taskDraftScope} from '../jot/client';
 import {createHostSettingsSaveAttempt,hostSettingsSaveCommand} from './host-settings-save-attempt.mjs';
 import {createHostSettingsRecovery} from './host-settings-recovery.mjs';
 import HostCredentialsPanel from './HostCredentialsPanel';
+import PluginProfilesPanel from './PluginProfilesPanel';
 import HostReadinessPanel from './HostReadinessPanel';
 import HostSettingsPanel from './HostSettingsPanel';
 import HostSettingsReadPanel from './HostSettingsReadPanel';
@@ -34,6 +35,12 @@ export default function SettingsPanel({caps,client}:{caps:Caps;client:HostAdminC
  const reportPending=useContext(MutationPending),pendingCount=useRef(0);
  const beginMutation=useCallback(()=>{pendingCount.current+=1;reportPending(true);},[reportPending]);
  const endMutation=useCallback(()=>{pendingCount.current=Math.max(0,pendingCount.current-1);reportPending(pendingCount.current>0);},[reportPending]);
+ const pluginPending=useRef(false);
+ const reportPluginPending=useCallback((pending:boolean)=>{
+  if(pluginPending.current===pending)return;
+  pluginPending.current=pending;
+  if(pending)beginMutation();else endMutation();
+ },[beginMutation,endMutation]);
  const [settings,setSettings]=useState(initialHostSettingsState);
  const [readiness,setReadiness]=useState<HostReadinessResponse|null>(null);
  const settingsRef=useRef(settings);settingsRef.current=settings;
@@ -176,8 +183,9 @@ export default function SettingsPanel({caps,client}:{caps:Caps;client:HostAdminC
 
  return <>
   <h2>模型、凭据与安装设置</h2>
-  <p className="wb-page-intro">只读 readiness 需要你明确启动宿主授权；无获准来源的状态保持未知或不支持。此页不收集凭据、不测试提供方，也不会创建会话或发送模型请求。</p>
+  <p className="wb-page-intro">查看模型目录、宿主状态及凭据入口，管理当前 Host profile 的设置与插件包。</p>
   <div className="wb-settings-grid">
+   {caps.workbench?.plugin_profiles===true&&<PluginProfilesPanel key={currentTaskScope} scopeKey={currentTaskScope} onPendingChange={reportPluginPending}/>}
    {settingsReadEnabled&&<HostCredentialsPanel client={client} scopeKey={currentTaskScope}/>}
    <HostReadinessPanel enabled={readinessEnabled} namespaces={caps.workbench?.host_settings_read_namespaces} client={client} jotCapabilities={caps} scopeKey={currentTaskScope} onReadiness={setReadiness}/>
    <HostSettingsReadPanel enabled={settingsReadEnabled} namespaces={caps.workbench?.host_settings_read_namespaces} client={client} scopeKey={currentTaskScope}/>

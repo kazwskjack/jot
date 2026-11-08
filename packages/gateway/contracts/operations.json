@@ -1609,5 +1609,50 @@
     null,
     "204",
     "仅所有者可取消批次中尚未封存的文件；重复请求幂等，活动writer会被fencing并清理。已完成artifact保留。"
+  ],
+  [
+    "GET",
+    "/v1/plugin-profile/bundles",
+    "读取原生插件包",
+    null,
+    "PluginProfileBundlePage",
+    "200",
+    "Host owner-profile scope. Original persistent receipts fence dispatch and preserve unknown outcomes."
+  ],
+  [
+    "POST",
+    "/v1/plugin-profile/bundles",
+    "安装或升级原生插件包",
+    "PluginProfileInstall",
+    "PluginProfileResult",
+    "200",
+    "Host owner-profile scope. Original persistent receipts fence dispatch and preserve unknown outcomes."
+  ],
+  [
+    "PATCH",
+    "/v1/plugin-profile/bundles/{bundle_name}/enabled",
+    "更新原生插件包启用状态",
+    "PluginProfileEnable",
+    "PluginProfileResult",
+    "200",
+    "Host owner-profile scope. Original persistent receipts fence dispatch and preserve unknown outcomes."
+  ],
+  [
+    "DELETE",
+    "/v1/plugin-profile/bundles/{bundle_name}",
+    "移除原生插件包",
+    null,
+    "PluginProfileResult",
+    "200",
+    "Host owner-profile scope. Original persistent receipts fence dispatch and preserve unknown outcomes."
+  ],
+  [
+    "GET",
+    "/v1/plugin-profile/operations/{operation_id}",
+    "读取原插件操作回执",
+    null,
+    "PluginProfileOperation",
+    "200",
+    "Host owner-profile scope. Original persistent receipts fence dispatch and preserve unknown outcomes."
   ]
 ]

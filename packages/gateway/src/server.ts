@@ -897,6 +897,7 @@ export async function buildServer(config: {
        voice,conversation_modes:modes,conversation_forks:{protocol:1,available:config.conversationForkSourceClient!==undefined},
       conversation_commands:{protocol:1,ordinary_steer:{configured:config.ordinarySteeringEnabled===true,delivery:'original',attachments:attachmentSteeringReady}},
       workbench: { enabled: true,
+        plugin_profiles:config.pluginProfileClient!==undefined,
         host_settings_read:config.hostAdmin?.enabled===true&&!!config.hostAdmin.client,
         ...(config.hostAdmin?.enabled&&config.hostAdmin.client?{host_readiness_namespaces:config.hostAdmin.namespaces??[]}:{}),
         host_readiness:config.hostAdmin?.enabled===true&&typeof config.hostAdmin.client?.readHostReadiness==='function',

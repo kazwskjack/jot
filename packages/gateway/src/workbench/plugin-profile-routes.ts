@@ -7,6 +7,9 @@ type ReceiptValue = { state: 'reserved' | 'dispatched' | 'settled' | 'unknown'; 
 type ReceiptContext = { ownerId: string; profileId: string; operation: string; operationId: string; actionSha256: string };
 type RouteContext = { ownerId: string; routeOperation: string; operation: string; operationId: string; actionSha256: string };
 type ReceiptExecutor = {
+  lookupOperation(ownerId: string, operationId: string): {
+    route_operation: string; request_sha256: string; operation_id: string; operation: string; state: ReceiptValue['state']; response?: unknown; response_status?: number;
+  };
   bindReservation(input: RouteContext): ReceiptValue;
   lookupReservation(input: RouteContext): ReceiptValue;
   markUnknownReservation(input: RouteContext): ReceiptValue;
@@ -108,6 +111,7 @@ function publicError(reply: FastifyReply, status: number, code: string) {
 
 function publicHandler(handler: (request: FastifyRequest, reply: FastifyReply) => unknown | Promise<unknown>) {
   return async (request: FastifyRequest, reply: FastifyReply) => {
+    reply.header('cache-control', 'private, no-store');
     try { return await handler(request, reply); }
     catch (error) {
       const code = error instanceof Error ? error.message : '';
@@ -171,6 +175,18 @@ export function registerPluginProfileRoutes(app: FastifyInstance, options: {
     noQuery(request);
     const ownerId = actor(request);
     return safeBundleList(await client.pluginProfileBundles(ownerId));
+  }));
+
+  app.get('/v1/plugin-profile/operations/:operationId', publicHandler(async (request, reply) => {
+    noQuery(request);
+    const operationId = object(request.params).operationId;
+    if (typeof operationId !== 'string' || !OPERATION_ID.test(operationId)) fail('plugin_profile_request_invalid');
+    try { return receipts.lookupOperation(actor(request), operationId); }
+    catch (error) {
+      const code = error instanceof Error ? error.message : '';
+      if (code === 'plugin_profile_receipt_not_found') return publicError(reply, 404, 'PLUGIN_PROFILE_RECEIPT_NOT_FOUND');
+      throw error;
+    }
   }));
 
   async function mutate(request: FastifyRequest, reply: FastifyReply, operation: string, action: Input,

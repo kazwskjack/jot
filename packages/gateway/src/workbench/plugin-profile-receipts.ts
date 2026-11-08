@@ -300,6 +300,22 @@ export function createPluginProfileReceiptExecutor(db: DatabaseSync, { now = () 
       return withImmediateTransaction(db, () => markUnknownInTransaction(db, context));
     },
 
+    lookupOperation(ownerId: string, operationId: string) {
+      if (!ID.test(ownerId) || !OPERATION_ID.test(operationId)) fail('plugin_profile_receipt_request_invalid');
+      const rows = db.prepare(`SELECT * FROM ga_idempotency
+        WHERE owner_id=? AND idempotency_key=? AND receipt_protocol=?`)
+        .all(ownerId, operationId, PLUGIN_PROFILE_RECEIPT_PROTOCOL) as Row[];
+      if (!rows.length) fail('plugin_profile_receipt_not_found');
+      if (rows.length !== 1) fail('plugin_profile_receipt_state_conflict');
+      const row = rows[0]!;
+      if (typeof row.operation_code !== 'string' || !OPERATIONS.has(row.operation_code)) fail('plugin_profile_receipt_corrupt');
+      if (typeof row.request_sha256 !== 'string' || !HASH.test(row.request_sha256)) fail('plugin_profile_receipt_corrupt');
+      const originalRoute = routeOperation(row.operation);
+      const value = stateValue(row);
+      return {route_operation:originalRoute, request_sha256:row.request_sha256, operation_id: operationId, operation: row.operation_code, state: value.state,
+        ...(value.state === 'settled' ? {response: value.response, response_status: value.responseStatus} : {})};
+    },
+
     lookup(value: unknown): ReceiptValue {
       const context = operationContext(value);
       return stateValue(contextRow(db, context));
