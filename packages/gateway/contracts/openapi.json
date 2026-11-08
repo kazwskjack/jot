@@ -12934,7 +12934,7 @@
         "tags": [
           "workbench"
         ],
-        "description": "Owner-scoped read-only recovery projection. No model calls, retries, usage release, proposal apply, storage mutation, or emitted events.",
+        "description": "Read owner-scoped original capture, source/policy, processing-run and usage facts. Interrupted ready, proposed and no_notes captures expose up to 20 original provider receipts awaiting reconciliation. Settled usage without a persisted proposal and settled no-notes outcomes have distinct states. Original source, policy and ownership guards remain authoritative.",
         "parameters": [
           {
             "name": "agent_id",
@@ -13018,7 +13018,7 @@
         "tags": [
           "workbench"
         ],
-        "description": "Owner-scoped reconciliation of a verified original provider usage receipt. Settles the exact unknown attempt and never retries model extraction or applies the proposal.",
+        "description": "Owner-scoped reconciliation of an exact verified original provider usage receipt for an interrupted ready, proposed or no_notes capture. Revalidate original source/policy/epoch/version, original processing/source-run bindings, request/route digests and expired worker lease before settling the original ledger attempt. Full settled usage closes the original run successfully for committed proposed/no_notes outcomes, or as failed when a proposal was not persisted or a budget bound was exceeded. Recovery reuses the original run, provider request and ledger attempt and preserves its immutable reconciliation receipt.",
         "parameters": [
           {
             "name": "agent_id",
@@ -36776,6 +36776,8 @@
           "recovery_state": {
             "enum": [
               "committed_proposal_settled",
+              "usage_settled_without_proposal",
+              "no_notes_settled",
               "unresolved_usage_held",
               "source_or_policy_stale",
               "budget_bound_exceeded",
@@ -36872,6 +36874,8 @@
           "state": {
             "enum": [
               "committed_proposal_settled",
+              "usage_settled_without_proposal",
+              "no_notes_settled",
               "budget_bound_exceeded",
               "usage_reconciled_held"
             ]

@@ -1032,7 +1032,7 @@
     null,
     "MemoryCaptureRecovery",
     "200",
-    "Owner-scoped read-only recovery projection. No model calls, retries, usage release, proposal apply, storage mutation, or emitted events."
+    "Read owner-scoped original capture, source/policy, processing-run and usage facts. Interrupted ready, proposed and no_notes captures expose up to 20 original provider receipts awaiting reconciliation. Settled usage without a persisted proposal and settled no-notes outcomes have distinct states. Original source, policy and ownership guards remain authoritative."
   ],
   [
     "POST",
@@ -1041,7 +1041,7 @@
     "MemoryCaptureReconcileInput",
     "MemoryCaptureReconciliation",
     "200",
-    "Owner-scoped reconciliation of a verified original provider usage receipt. Settles the exact unknown attempt and never retries model extraction or applies the proposal."
+    "Owner-scoped reconciliation of an exact verified original provider usage receipt for an interrupted ready, proposed or no_notes capture. Revalidate original source/policy/epoch/version, original processing/source-run bindings, request/route digests and expired worker lease before settling the original ledger attempt. Full settled usage closes the original run successfully for committed proposed/no_notes outcomes, or as failed when a proposal was not persisted or a budget bound was exceeded. Recovery reuses the original run, provider request and ledger attempt and preserves its immutable reconciliation receipt."
   ],
   [
     "POST",

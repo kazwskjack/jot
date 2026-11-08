@@ -21,6 +21,10 @@ export function captureFinalizedTaskReportForDatabase(db:DatabaseSync,owner:stri
 function exact(input:Input,allowed:string[]){if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(key=>!allowed.includes(key)))throw new Error('invalid_memory_capture');}
 function text(value:unknown,max:number):string{if(typeof value!=='string'||!value.trim()||value.length>max)throw new Error('invalid_memory_capture');return (value as string).trim();}
 function expected(value:unknown,version:number){if(!Number.isSafeInteger(value)||Number(value)<0)throw new Error('invalid_memory_capture');if(value!==version)throw new Error('version_conflict');}
+function reconcilableCapture(row:Row){
+ if(row.status==='ready')return row.proposal_json===null&&row.processor_run_id===null;
+ return ['proposed','no_notes'].includes(String(row.status))&&row.proposal_json!==null&&row.processor_run_id!==null;
+}
 function captureText(value:string,maxCharacters:number){
  let end=Math.min(value.length,maxCharacters);
  if(end<value.length&&(value.codePointAt(end-1)??0)>0xffff)end--;
@@ -203,12 +207,15 @@ export class MemoryCaptureService{
   const current=policyCurrent&&sourcesCurrent,hasProposal=row.status==='proposed'&&row.proposal_json!==null;
   const proposalAvailable=current&&sources.length>0&&hasProposal&&usageState==='settled'&&!['unknown','unavailable'].includes(processorRunStatus);
   const usageUnresolved=usageState.startsWith('held_')||['unresolved','unavailable'].includes(usageState)||(hasProposal&&(usageState!=='settled'||['unknown','unavailable'].includes(processorRunStatus)));
-  const recoveryState=!current?'source_or_policy_stale':usageBoundExceeded?'budget_bound_exceeded':usageUnresolved?'unresolved_usage_held':proposalAvailable?'committed_proposal_settled':'no_recovery_needed';
+  const closedState=row.status==='ready'?'usage_settled_without_proposal':row.status==='no_notes'?'no_notes_settled':'no_recovery_needed';
+  const recoveryState=!current?'source_or_policy_stale':usageBoundExceeded?'budget_bound_exceeded':usageUnresolved?'unresolved_usage_held':proposalAvailable?'committed_proposal_settled':usageState==='settled'?closedState:'no_recovery_needed';
   const providerReceiptTable=!!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_model_budget_provider_receipts'").get();
-  const evidenceRefs=runId&&current&&hasProposal&&run?.status==='interrupted'&&run.reason_code==='MEMORY_EXTRACTION_RECONCILE_REQUIRED'&&providerReceiptTable
+  const evidenceRefs=runId&&current&&reconcilableCapture(row)&&run?.status==='interrupted'&&run.reason_code==='MEMORY_EXTRACTION_RECONCILE_REQUIRED'&&providerReceiptTable
    ?this.db.prepare(`SELECT receipt.attempt_id,receipt.evidence_ref FROM wb_model_budget_provider_receipts receipt
      JOIN wb_model_budget_attempts attempt ON attempt.run_id=receipt.run_id AND attempt.attempt_id=receipt.attempt_id
-     WHERE receipt.run_id=? AND receipt.owner_id=? AND (attempt.state IN ('in_flight','unknown') OR (attempt.state='settled' AND attempt.bound_exceeded=1)) ORDER BY receipt.attempt_id`).all(runId,owner) as Array<{attempt_id:string;evidence_ref:string}>:[];
+     WHERE receipt.run_id=? AND receipt.owner_id=? AND (attempt.state IN ('in_flight','unknown') OR (attempt.state='settled' AND attempt.bound_exceeded=1))
+       AND NOT EXISTS(SELECT 1 FROM wb_memory_capture_reconciliations done WHERE done.run_id=receipt.run_id AND done.attempt_id=receipt.attempt_id)
+      ORDER BY receipt.attempt_id LIMIT 20`).all(runId,owner) as Array<{attempt_id:string;evidence_ref:string}>:[];
   return {capture_status:String(row.status),processor_run_status:processorRunStatus,proposal_available:proposalAvailable,usage_state:usageState,recovery_state:recoveryState,
    reconciliation_evidence:evidenceRefs.map(item=>({attempt_id:item.attempt_id,evidence_ref:item.evidence_ref,policy_version:Number(row.policy_version),epoch:Number(row.epoch)}))};
  });}
@@ -221,7 +228,7 @@ export class MemoryCaptureService{
   const snapshot=this.readSnapshot(()=>{
    const row=this.row(owner,agentId,id);expected(input.expected_capture_version,Number(row.version));
    if(Number(input.expected_policy_version)!==Number(row.policy_version)||Number(input.expected_epoch)!==Number(row.epoch))throw new Error('memory_capture_reconcile_conflict');
-   if(row.status!=='proposed'||row.proposal_json===null)throw new Error('memory_capture_proposal_unavailable');
+   if(!reconcilableCapture(row))throw new Error('memory_capture_proposal_unavailable');
    const processing=this.db.prepare(`SELECT p.*,r.status AS run_status,r.reason_code AS run_reason_code,r.conversation_id AS run_conversation_id,b.kind,b.owner_id AS binding_owner,b.agent_id AS binding_agent,b.epoch AS binding_epoch,
     c.owner_id AS conversation_owner,c.workspace_id AS conversation_workspace,c.project_id AS conversation_project
     FROM wb_memory_processing_runs p JOIN ga_runs r ON r.id=p.processor_run_id JOIN wb_run_bindings b ON b.run_id=p.processor_run_id
@@ -230,6 +237,8 @@ export class MemoryCaptureService{
     ||processing.binding_owner!==owner||processing.binding_agent!==agentId||Number(processing.binding_epoch)!==Number(row.epoch)||processing.kind!=='memory_capture'
     ||processing.conversation_id!==processing.run_conversation_id||processing.conversation_owner!==owner||processing.conversation_workspace!==row.workspace_id||processing.conversation_project!==row.project_id)
     throw new Error('memory_capture_reconcile_conflict');
+   if(row.status==='ready'?Number(row.version)!==Number(processing.source_version)
+    :row.processor_run_id!==processing.processor_run_id||Number(row.version)<=Number(processing.source_version))throw new Error('memory_capture_reconcile_conflict');
    if(!this.policyCurrent(row)||this.sources(row).length===0||this.sources(row).some(source=>!this.currentSource(row,source)))throw new Error('memory_capture_source_or_policy_stale');
    const runId=String(processing.processor_run_id),prior=this.db.prepare('SELECT * FROM wb_memory_capture_reconciliations WHERE run_id=? AND attempt_id=?').get(runId,attemptId) as Record<string,unknown>|undefined;
    if(prior)return {row,processing,attempt:null,prior,proof:null};
@@ -256,7 +265,7 @@ export class MemoryCaptureService{
    ||proofKeys.some(key=>payload[key]!==snapshot.proof![key])||!payload.usage||typeof payload.usage!=='object'||Array.isArray(payload.usage))throw new Error('memory_capture_unresolved_usage_held');
   return withImmediateTransaction(this.db,()=>{
    const row=this.row(owner,agentId,id);expected(input.expected_capture_version,Number(row.version));
-   if(row.status!=='proposed'||row.proposal_json===null)throw new Error('memory_capture_proposal_unavailable');
+   if(!reconcilableCapture(row))throw new Error('memory_capture_proposal_unavailable');
    if(!this.policyCurrent(row)||this.sources(row).length===0||this.sources(row).some(source=>!this.currentSource(row,source))||Number(row.policy_version)!==Number(input.expected_policy_version)||Number(row.epoch)!==Number(input.expected_epoch))throw new Error('memory_capture_source_or_policy_stale');
    const runId=String(snapshot.proof!.run_id),prior=this.db.prepare('SELECT * FROM wb_memory_capture_reconciliations WHERE run_id=? AND attempt_id=?').get(runId,attemptId) as Record<string,unknown>|undefined;
    if(prior){if(prior.evidence_sha256!==evidenceSha)throw new Error('memory_capture_reconcile_conflict');return JSON.parse(String(prior.result_json));}
@@ -271,10 +280,15 @@ export class MemoryCaptureService{
    if(receipt.state!=='settled')throw new Error('memory_capture_unresolved_usage_held');
    const attempts=this.db.prepare('SELECT state,bound_exceeded FROM wb_model_budget_attempts WHERE run_id=?').all(runId) as Array<{state:string;bound_exceeded:number}>;
    const allClosed=attempts.some(item=>item.state==='settled')&&attempts.every(item=>['settled','released'].includes(item.state)),exceeded=attempts.some(item=>item.bound_exceeded!==0);
-   const state=allClosed&&!exceeded?'committed_proposal_settled':exceeded?'budget_bound_exceeded':'usage_reconciled_held';
+   const settledState=row.status==='ready'?'usage_settled_without_proposal':row.status==='no_notes'?'no_notes_settled':'committed_proposal_settled';
+   const state=exceeded?'budget_bound_exceeded':allClosed?settledState:'usage_reconciled_held';
    const result={state,run_id:runId,reconciled_attempt_id:attemptId,evidence_sha256:evidenceSha};
    this.db.prepare('INSERT INTO wb_memory_capture_reconciliations VALUES(?,?,?,?,?,?,?,?)').run(runId,attemptId,id,evidenceRef,evidenceSha,Buffer.from(bytes).toString('utf8'),JSON.stringify(result),now());
-   if(allClosed)this.ports.finalizeRun!(runId,exceeded?'failed':'succeeded',exceeded?'MEMORY_EXTRACTION_BUDGET_BOUND_EXCEEDED':null);
+   if(allClosed){
+    const missingProposal=row.status==='ready';
+    this.ports.finalizeRun!(runId,exceeded||missingProposal?'failed':'succeeded',
+     exceeded?'MEMORY_EXTRACTION_BUDGET_BOUND_EXCEEDED':missingProposal?'MEMORY_EXTRACTION_PROPOSAL_UNAVAILABLE':null);
+   }
    return result;
   });
  }
