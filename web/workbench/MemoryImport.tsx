@@ -32,7 +32,7 @@ export default function MemoryImport({workspace,selection,onChanged,onBusyChange
  const mutation=useMutationReceipt(recovery.store??undefined,undefined,async(path,method,body,key)=>{
   if(!current())throw new Error('账号范围已改变，请返回原账号核对');
   const value=await request<WorkbenchMemoryImportReceipt>(path,method,body,key),batch=recovery.store?.read()?.batch;
-  if(!batch||!matches(value,batch.import_id)||(value.status!=='applied'||value.version!==(body as {expected_version:number}).expected_version))throw new Error('导入回执与原批次不一致，请重试原请求');
+  if(!batch||!matches(value,batch.import_id)||value.status!=='applied')throw new Error('导入回执与原批次不一致，请重试原请求');
   return value;
  });
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
