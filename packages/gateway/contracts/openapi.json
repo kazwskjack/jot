@@ -25851,6 +25851,16 @@
             "items": {
               "$ref": "#/components/schemas/BrowserActionReadinessItem"
             }
+          },
+          "host_settings_read": {
+            "type": "boolean"
+          },
+          "host_settings_write": {
+            "type": "boolean"
+          },
+          "host_settings_write_namespace": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9._-]{0,127}$"
           }
         },
         "required": [

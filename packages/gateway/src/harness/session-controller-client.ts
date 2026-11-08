@@ -1,3 +1,4 @@
+import {validateHostSettingsProductCommand,validateHostSettingsProductResult,validateHostSettingsEditor,validateHostSettingsApprovalRequest,type HostSettingsProductCommand,type HostSettingsApprovalRequest} from '../host-admin/settings-product-contract.ts';
 import type {PinnedByteSource} from '../artifacts/pinned-byte-source.ts';
 import {normalizeExecutionLease,type ExecutionLease} from '../workbench/execution-lease.ts'
 import {ordinaryRunCompletionSource,validateOrdinaryRunCompletion,normalizeOrdinaryRunHistoryScope,type OrdinaryRunHistoryScope} from './ordinary-run-completion.ts'
@@ -118,6 +119,23 @@ const SAFE_ADAPTER_REASON_CODES = new Set([
   'DSH_MODEL_UNAVAILABLE', 'DSH_SESSION_NOT_FOUND', 'DSH_PROMPT_REJECTED',
 ])
 
+function hostOpaqueToken(value:unknown):value is string{return typeof value==='string'&&/^[A-Za-z0-9_-]{43}$/.test(value)}
+export type HostNamespaceSettingsSnapshot=Readonly<{protocol:1;source:'dsh-settings-controller';as_of:string|null;state:'ready'|'partial'|'unknown'|'unavailable';writable:boolean|null;has_document:boolean|null;
+ namespaces:readonly Readonly<{namespace:string;state:'ready'|'partial'|'unknown';auto_generate:boolean|null;revision:number|null;schema:unknown;value:unknown;applies:string;secrets:readonly Readonly<{path:readonly (string|number)[];set:boolean}>[]}>[]}>;
+function validateHostSettingsSnapshot(value:unknown,namespace:string):HostNamespaceSettingsSnapshot{
+ if(!value||typeof value!=='object'||Array.isArray(value))throw Error('host_settings_snapshot_invalid');const row=value as Record<string,unknown>;
+ if(Object.keys(row).sort().join(',')!=='as_of,has_document,namespaces,protocol,source,state,writable'||row.protocol!==1||row.source!=='dsh-settings-controller'
+  ||row.as_of!==null&&typeof row.as_of!=='string'||row.writable!==null&&typeof row.writable!=='boolean'||row.has_document!==null&&typeof row.has_document!=='boolean'
+  ||!['ready','partial','unknown','unavailable'].includes(String(row.state))||!Array.isArray(row.namespaces)||row.namespaces.length!==1)throw Error('host_settings_snapshot_invalid');
+ const item=row.namespaces[0] as Record<string,unknown>|undefined;
+ if(!item||typeof item!=='object'||Array.isArray(item)||Object.keys(item).sort().join(',')!=='applies,auto_generate,namespace,revision,schema,secrets,state,value'
+  ||item.namespace!==namespace||namespace==='jot-host-policy'||!['ready','partial','unknown'].includes(String(item.state))
+  ||item.auto_generate!==null&&typeof item.auto_generate!=='boolean'||item.revision!==null&&!Number.isSafeInteger(item.revision)
+  ||typeof item.applies!=='string'||!Array.isArray(item.secrets))throw Error('host_settings_snapshot_invalid');
+ for(const secret of item.secrets){if(!secret||typeof secret!=='object'||Array.isArray(secret)||Object.keys(secret).sort().join(',')!=='path,set'||typeof secret.set!=='boolean'||!Array.isArray(secret.path)||secret.path.some((part:unknown)=>typeof part!=='string'&&!Number.isInteger(part)))throw Error('host_settings_snapshot_invalid');}
+ return value as HostNamespaceSettingsSnapshot;
+}
+
 export class SessionAdapterError extends Error {
   readonly reasonCode: string
   readonly status:number
@@ -200,6 +218,77 @@ export class SessionControllerClient {
     signal?.throwIfAborted();const deadline=AbortSignal.timeout(CHAT_RECOVERY_TIMEOUT_MS),active=signal?AbortSignal.any([signal,deadline]):deadline;
     const value=await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/chat-checkpoint-recovery`,{history:scope,intent_id:intentId},active);
     return validateChatCheckpointRecovery(value,sessionId,scope);
+  }
+
+  async redeemHostBootstrap(state:string,code:string,signal?:AbortSignal){
+    if(!hostOpaqueToken(state)||!hostOpaqueToken(code))throw Error('host_bootstrap_input_invalid');
+    const value=await this.post('/v1/host-admin/bootstrap/redeem',{state,code},signal);
+    if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!=='expires_at,ticket'
+      ||!hostOpaqueToken(value.ticket)||!Number.isSafeInteger(value.expires_at))throw Error('host_bootstrap_receipt_invalid');
+    return{ticket:value.ticket as string,expires_at:value.expires_at as number};
+  }
+
+  async readHostSettings(ticket:string,namespace:string,signal?:AbortSignal):Promise<HostNamespaceSettingsSnapshot>{
+    if(!hostOpaqueToken(ticket))throw Error('host_bootstrap_ticket_invalid');
+    if(typeof namespace!=='string'||!/^[a-z][a-z0-9._-]{0,127}$/.test(namespace)||namespace==='jot-host-policy')throw Error('host_settings_namespace_invalid');
+    const value=await this.post('/v1/host-admin/settings/read',{ticket,namespace},signal);
+    if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).join(',')!=='settings')throw Error('host_settings_snapshot_invalid');
+    return validateHostSettingsSnapshot(value.settings,namespace);
+  }
+
+  async readHostReadiness(ticket:string,namespace:string,signal?:AbortSignal):Promise<Readonly<Record<string,unknown>>>{
+    if(!hostOpaqueToken(ticket))throw Error('host_bootstrap_ticket_invalid');
+    if(typeof namespace!=='string'||!/^[a-z][a-z0-9._-]{0,127}$/.test(namespace)||namespace==='jot-host-policy')throw Error('host_readiness_namespace_invalid');
+    const value=await this.post('/v1/host-admin/settings/readiness',{ticket,namespace},signal);
+    const readiness=value?.readiness as Record<string,unknown>|undefined;
+    const scope=readiness?.scope as Record<string,unknown>|undefined;
+    if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!=='ok,readiness'||value.ok!==true
+      ||!readiness||typeof readiness!=='object'||Array.isArray(readiness)||readiness.protocol!==1
+      ||readiness.as_of!==null&&typeof readiness.as_of!=='string'
+      ||!scope||typeof scope!=='object'||Array.isArray(scope)||scope.namespace!==namespace
+      ||!['ready','partial','unknown','unavailable'].includes(String(scope.state))
+      ||scope.revision!==null&&!Number.isSafeInteger(scope.revision))throw Error('host_readiness_snapshot_invalid');
+    return readiness;
+  }
+
+  private hostSettingsProductScope(ticket:string,namespace:string,key?:string){
+    if(!hostOpaqueToken(ticket)||typeof namespace!=='string'||!/^[a-z][a-z0-9._-]{0,127}$/.test(namespace)||namespace==='jot-host-policy'||key!==undefined&&!/^[A-Za-z0-9_-]{8,128}$/.test(key))throw Error('host_settings_product_scope_invalid');
+  }
+  async readHostSettingsEditor(ticket:string,namespace:string,signal?:AbortSignal){
+    this.hostSettingsProductScope(ticket,namespace);
+    const value=await this.post('/v1/host-admin/settings/editor/read',{ticket,namespace},signal);
+    if(!value||Object.keys(value).join(',')!=='settings')throw Error('host_settings_product_invalid');
+    return validateHostSettingsEditor(value.settings,namespace);
+  }
+  async saveHostSettings(ticket:string,namespace:string,command:HostSettingsProductCommand,key:string,signal?:AbortSignal){
+    this.hostSettingsProductScope(ticket,namespace,key);validateHostSettingsProductCommand(command);
+    const value=await this.post('/v1/host-admin/settings/write',{ticket,namespace,idempotency_key:key,command},signal);
+    if(!value||Object.keys(value).join(',')!=='result')throw Error('host_settings_product_invalid');
+    return validateHostSettingsProductResult(value.result,namespace);
+  }
+  async queryHostSettingsAttempt(ticket:string,namespace:string,key:string,signal?:AbortSignal){
+    this.hostSettingsProductScope(ticket,namespace,key);
+    const value=await this.post('/v1/host-admin/settings/attempt/read',{ticket,namespace,idempotency_key:key},signal);
+    if(!value||Object.keys(value).join(',')!=='result')throw Error('host_settings_product_invalid');
+    return validateHostSettingsProductResult(value.result,namespace);
+  }
+  async prepareHostSettingsApproval(ticket:string,namespace:string,actorId:string,input:HostSettingsApprovalRequest,signal?:AbortSignal){
+    this.hostSettingsProductScope(ticket,namespace);validateHostSettingsApprovalRequest(input);
+    if(typeof actorId!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(actorId))throw Error('host_settings_approval_actor_invalid');
+    const value=await this.post('/v1/host-admin/settings/approval/prepare',{ticket,namespace,authenticated_actor_id:actorId,...input},signal);
+    const rawApproval=value?.approval;
+    if(!rawApproval||typeof rawApproval!=='object'||Array.isArray(rawApproval))throw Error('host_settings_approval_invalid');
+    const approval=rawApproval as Record<string,unknown>;
+    if(!value||Object.keys(value).join(',')!=='approval'||!approval||Object.keys(approval).sort().join(',')!=='challenge_id,expires_at,owner_approval_url,purpose,review_sha256'
+      ||approval.purpose!==input.purpose||typeof approval.challenge_id!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(approval.challenge_id)
+      ||typeof approval.review_sha256!=='string'||!/^[a-f0-9]{64}$/.test(approval.review_sha256)
+      ||typeof approval.expires_at!=='number'||!Number.isSafeInteger(approval.expires_at)||approval.expires_at<=Date.now()
+      ||typeof approval.owner_approval_url!=='string')throw Error('host_settings_approval_invalid');
+    const url=new URL(approval.owner_approval_url);
+    if(!['http:','https:'].includes(url.protocol)||!['127.0.0.1','localhost','[::1]'].includes(url.hostname)||url.username||url.password||url.hash
+      ||url.pathname!=='/api/jot-host-settings/approval'||url.searchParams.size!==1||url.searchParams.get('challenge_id')!==approval.challenge_id)
+      throw Error('host_settings_approval_invalid');
+    return approval as Record<string,unknown>;
   }
 
   async prompt(sessionId: string, requestId: string, content: string | SessionPromptPart[],

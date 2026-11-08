@@ -1,3 +1,4 @@
+import {registerHostAdminRoutes,type HostSettingsClient} from './host-admin/routes.ts';
 import {registerChatCompactionCheckpoints} from './conversations/chat-compaction-checkpoint-route.ts';
 import {reserveOrdinarySteeringCustody} from './harness/ordinary-steering-custody.ts';
 import {registerOrdinarySteeringBinding} from './conversations/ordinary-steering-binding.ts';
@@ -165,6 +166,7 @@ export async function buildServer(config: {
   workspaces: string[];
   ingressMode?: GatewayIngressMode;
   ownerPrincipalResolver?: VerifiedOwnerPrincipalResolver;
+  hostAdmin?:{enabled?:boolean;namespaces?:string[];client?:HostSettingsClient;writeEnabled?:boolean;writeNamespace?:string};
   uploadRoot?: string;
   csrfToken?: string;
   allowedOrigins?: string[];
@@ -198,6 +200,7 @@ export async function buildServer(config: {
   emotion?: {env?:NodeJS.ProcessEnv;transport?:typeof fetch;accountingRoutes?:EmotionAccounting['routes']};
 }) {
 
+  if(config.hostAdmin?.writeEnabled&&config.hostAdmin.enabled!==true)throw Error('host_settings_write_configuration_invalid');
   const ingressMode = config.ingressMode ?? 'standalone-local';
   if (ingressMode !== 'standalone-local' && ingressMode !== 'public-api') throw new Error('config_ingress_mode_invalid');
   if (ingressMode === 'public-api' && typeof config.ownerPrincipalResolver?.resolve !== 'function') throw new Error('config_public_api_identity_required');
@@ -399,6 +402,10 @@ export async function buildServer(config: {
     if (!(config.allowedOrigins ?? []).includes(origin)) throw new Error('origin_forbidden');
     const csrf = String(request.headers['x-csrf-token'] ?? '');
     if (config.csrfToken.length < 16 || csrf !== config.csrfToken) throw new Error('csrf_invalid');
+    // Host tickets and writes use the original Host context and attempt receipt.
+    const hostReceipt=(request.routeOptions.config as {hostSettingsReceiptProtocol?:string}).hostSettingsReceiptProtocol;
+    if(request.method==='PATCH'&&hostReceipt==='host-settings-original-attempt-v1')return;
+    if(request.method==='POST'&&['/v1/host/bootstrap/redeem','/v1/host/settings/approval-requests'].includes(request.routeOptions.url??''))return;
     // Only these server-registered route markers use the PRD service's own
     // immutable transaction/receipt; never persist read-only preview requests.
     const prdCommand=(request.routeOptions.config as {taskPrdCommand?:string}).taskPrdCommand;
@@ -720,6 +727,7 @@ export async function buildServer(config: {
   const taskDelegations=new TaskDelegationService(db,workbench,persistentTasks);
   const taskCollaboration=new TaskCollaborationService(db,workbench,persistentTasks,taskDelegations);
   registerPersistentTaskRoutes(app, persistentTasks, actor,taskDelegations,taskCollaboration,atomicCommand);
+  registerHostAdminRoutes(app,{...config.hostAdmin,authenticatedActor:request=>actor(request as {headers:Record<string,unknown>})});
   registerTaskPrdRoutes(app,taskPrd,actor);
   registerTaskBudgetRoutes(app,new TaskBudgetService(db,budgetPolicy),actor);
   registerWorkbenchExecution(app, db, workbench, persistentTasks, config.internalChannelToken, modelBudgets,taskCollaboration,config.replyJudge,nativeWork,
@@ -868,7 +876,13 @@ export async function buildServer(config: {
         replay_retention_hours: 168, idempotency_retention_hours: 24 },
        voice,conversation_modes:modes,conversation_forks:{protocol:1,available:config.conversationForkSourceClient!==undefined},
       conversation_commands:{protocol:1,ordinary_steer:{configured:config.ordinarySteeringEnabled===true,delivery:'original',attachments:attachmentSteeringReady}},
-      workbench: { enabled: true, agent_roles: true, independent_teams: true, agent_messages: true, mcp_servers: true,
+      workbench: { enabled: true,
+        host_settings_read:config.hostAdmin?.enabled===true&&!!config.hostAdmin.client,
+        ...(config.hostAdmin?.enabled&&config.hostAdmin.client?{host_readiness_namespaces:config.hostAdmin.namespaces??[]}:{}),
+        host_readiness:config.hostAdmin?.enabled===true&&typeof config.hostAdmin.client?.readHostReadiness==='function',
+        host_settings_write:config.hostAdmin?.enabled===true&&config.hostAdmin.writeEnabled===true&&!!config.hostAdmin.client,
+        ...(config.hostAdmin?.writeEnabled&&config.hostAdmin.writeNamespace?{host_settings_write_namespace:config.hostAdmin.writeNamespace}:{}),
+        agent_roles: true, independent_teams: true, agent_messages: true, mcp_servers: true,
         shared_workspace: true, workspace_file_history: true, workspace_file_range: true, memory_scopes: ['project', 'private'], memory_lifecycle: true, memory_restore: true, memory_consolidation: true, memory_retrieval_traces: true, memory_capture:true, memory_retrieval: 'local_keyword',task_readiness:true,task_prd:true,task_unlimited_runs:true,task_run_limit_protocol:1,model_budget:budgetPolicy!==undefined,
         task_reply_policy:true,task_reply_execution:false,task_create_delivery:true,task_notifications:true,channel_bindings:!!config.internalChannelToken||!!config.emailBindingSend||!!config.webPushVapid,email_bindings:!!config.emailBindingSend,wecom_bindings:!!config.internalChannelToken,matrix_bindings:!!config.internalChannelToken&&config.matrixOwnerBindingEnabled===true,webpush_bindings:!!config.webPushVapid,task_notification_events:['changed','completed','failed','needs_confirmation'],
         ...(budgetPolicy?{task_model_budget_limits:budgetPolicy.budgetSettings().limits.task_total}:{}),
