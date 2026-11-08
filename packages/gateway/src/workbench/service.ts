@@ -13,6 +13,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { withImmediateTransaction,withReadTransaction } from '../db/database.ts';
 import { canonicalJson } from '../db/canonical-json.ts';
+import {readUtf8Range,validateFileRange} from './utf8-range.ts';
 import { ConversationRepository } from '../conversations/repository.ts';
 import { ProjectRepository } from '../projects/repository.ts';
 import { EventStore } from '../events/event-store.ts';
@@ -1711,17 +1712,11 @@ export class WorkbenchService {
    * last complete scalar that fits within the requested byte limit. */
   readFileVersionRange(owner:string,workspaceId:string,projectId:string,filePath:string,version:number,expectedSha256:string,offsetBytes:number,limitBytes:number,runId?:string) {
     if(typeof expectedSha256!=='string'||!/^[a-f0-9]{64}$/.test(expectedSha256))throw new Error('invalid_file_range');
-    if(!Number.isSafeInteger(offsetBytes)||offsetBytes<0||!Number.isSafeInteger(limitBytes)||limitBytes<1||limitBytes>65_536)throw new Error('invalid_file_range');
+    validateFileRange(offsetBytes,limitBytes);
     const file=this.readFileVersion(owner,workspaceId,projectId,filePath,version,runId);
     if(file.sha256!==expectedSha256)throw new Error('file_source_stale');
     const bytes=Buffer.from(file.content,'utf8');
-    if(offsetBytes>bytes.length)throw new Error('invalid_file_range');
-    if(offsetBytes<bytes.length&&(bytes[offsetBytes]!&0xc0)===0x80)throw new Error('invalid_file_range');
-    let end=Math.min(bytes.length,offsetBytes+limitBytes);
-    while(end>offsetBytes&&end<bytes.length&&(bytes[end]!&0xc0)===0x80)end--;
-    if(end===offsetBytes&&offsetBytes<bytes.length)throw new Error('invalid_file_range');
-    const content=bytes.subarray(offsetBytes,end).toString('utf8');
-    return {path:file.path,version:file.version,sha256:file.sha256,size:file.size,offset_bytes:offsetBytes,returned_bytes:end-offsetBytes,eof:end===bytes.length,content};
+    return {path:file.path,version:file.version,sha256:file.sha256,size:file.size,...readUtf8Range(bytes,offsetBytes,limitBytes)};
   }
   /** A stable, exclusive version cursor keeps later writes out of older pages. */
   listFileVersions(owner:string,workspaceId:string,projectId:string,filePath:string,beforeVersion:number|undefined,limit:number,runId?:string) {

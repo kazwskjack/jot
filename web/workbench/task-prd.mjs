@@ -74,7 +74,7 @@ export class PrdFlow {
   const epoch=this.epoch,source=structuredClone(this.selection);this.busy=true;this.preview=null;
   try{const value=await request(`/persistent-tasks/${encodeURIComponent(this.task.task_id)}/prd/preview`,'POST',{source});
    if(epoch!==this.epoch)return;
-   if(value.task_id!==this.task.task_id||value.task_version!==this.task.version||value.execution_authorized!==false||JSON.stringify(selection(value.source))!==JSON.stringify(source)||typeof value.content!=='string'||typeof value.objective!=='string'||!/^[a-f0-9]{64}$/.test(value.preview_sha256))throw Error('PRD_PREVIEW_VERSION_CONFLICT');
+   if(value.task_id!==this.task.task_id||value.task_version!==this.task.version||value.execution_authorized!==false||JSON.stringify(selection(value.source))!==JSON.stringify(source)||typeof value.content!=='string'||typeof value.objective!=='string'||(value.source_delivery!==undefined&&(value.source_delivery!=='reference'||typeof value.source_instructions!=='string'||!value.source_instructions||value.source_instructions.length>16384))||(value.source_delivery===undefined&&value.source_instructions!==undefined)||!/^[a-f0-9]{64}$/.test(value.preview_sha256))throw Error('PRD_PREVIEW_VERSION_CONFLICT');
    this.preview=value;
   }catch(error){if(rejected(error)||/CONFLICT/.test(error.message))this.invalidate();throw error;}finally{this.busy=false;}
  }

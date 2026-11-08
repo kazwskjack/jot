@@ -23,6 +23,7 @@ import type { FastifyInstance } from 'fastify';
 import { withImmediateTransaction, withReadTransaction } from '../db/database.ts';
 import type { WorkbenchService, AgentRunContext } from './service.ts';
 import type { PersistentTaskService } from '../persistent-tasks/service.ts';
+import type {TaskPrdService} from '../persistent-tasks/prd.ts';
 import type {InteractionService} from '../interactions/service.ts';
 import { readPublicPage } from '../persistent-tasks/public-page.ts';
 import { PersistentTaskAssessmentService } from '../persistent-tasks/assessments.ts';
@@ -73,7 +74,7 @@ function canonical(value: unknown): string {
 /** Only the local authenticated DSH host may resolve a product run's identity. */
 export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSync,
   workbench: WorkbenchService, tasks: PersistentTaskService, token: string | undefined, modelBudgets?: ModelBudgetLedger,collaboration?:TaskCollaborationService,replyJudge?:ReplyJudgeClient,nativeWork?:NativeWorkExecution,
-  allowedOrigins:ReadonlySet<string>=new Set<string>(),nativeMemberClient?:NativeMemberControlClient,events?:EventStore,memoryReasoningClient?:MemoryReasoningClient, mcpRegistry?:McpRegistryService, interactions?:InteractionService,artifacts?:ArtifactService,modelMetadataClient?:TrustedModelMetadataClient) {
+  allowedOrigins:ReadonlySet<string>=new Set<string>(),nativeMemberClient?:NativeMemberControlClient,events?:EventStore,memoryReasoningClient?:MemoryReasoningClient, mcpRegistry?:McpRegistryService, interactions?:InteractionService,artifacts?:ArtifactService,modelMetadataClient?:TrustedModelMetadataClient,taskPrd?:Pick<TaskPrdService,'readRunSource'|'runSourceContext'>) {
   db.exec(`CREATE TABLE IF NOT EXISTS wb_tool_receipts (
     run_id TEXT NOT NULL REFERENCES ga_runs(id), call_id TEXT NOT NULL,
     request_hash TEXT NOT NULL, response_json TEXT NOT NULL, created_at TEXT NOT NULL,
@@ -364,7 +365,8 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
     if(!row)return;
     const trusted=nativeWork?.resolver.context(runId);
     if(!nativeWork&&db.prepare(`SELECT 1 FROM wb_discovery_work_admissions WHERE owner_id=? AND occurrence_id=? AND task_id=?`).get(owner,row.occurrence_id,row.task_id))throw Error('work_admission_execution_unavailable');
-    return {...row,...(trusted?{objective:trusted.objective}:{})};
+    const prdContext=trusted?undefined:taskPrd?.runSourceContext(owner,runId);
+    return {...row,...(trusted?{objective:trusted.objective}:prdContext?{objective:`${row.objective}\n\n${prdContext}`}:{})};
   }
   function requireTask(identity:AgentRunContext):TaskBinding {
     const task=taskBinding(identity.run_id,identity.owner_id);
@@ -922,7 +924,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
         'memory.stage':['scope','memory_ids'],'memory.propose':['consolidation_id','expected_version','summary','changes'],'memory.consolidation':['consolidation_id'],
         'memory.capture.pending':[], 'memory.capture.read':['capture_id'], 'memory.capture.propose':['capture_id','expected_version','summary','notes'],
         'files.list': [], 'files.read': ['path'], 'files.write': ['path', 'content', 'expected_version'],
-        'tasks.get': [],'tasks.subtasks': ['occurrence_id'],
+        'tasks.get': [],'tasks.prd.read':['binding_id','offset_bytes','limit_bytes'],'tasks.subtasks': ['occurrence_id'],
         'tasks.upsert': ['subtask_id','expected_version','title','acceptance','priority','status','dependencies','evidence'],
         'tasks.delegate':['subtask_id','expected_subtask_version','recipient_agent_id','file_paths'],
         'tasks.evidence': ['evidence'],
@@ -942,7 +944,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
         if(!['memory.capture.read','memory.capture.propose'].includes(operation)||args.capture_id!==job.capture_id)throw new Error('workbench_operation_forbidden');
       }
       const mutating = ['messages.send', 'memory.save', 'memory.stage', 'memory.propose', 'memory.capture.propose', 'files.write','tasks.upsert','tasks.evidence','tasks.assess','tasks.delegate','tasks.reply_draft','discovery.plan','discovery.report'].includes(operation);
-      const attested = (!!identity.task_binding||(identity.kind==='native_team'&&!!identity.task_assignment)) && !operation.startsWith('tasks.')&&(!operation.startsWith('discovery.')||operation==='discovery.source');
+      const attested = operation==='tasks.prd.read' || (!!identity.task_binding||(identity.kind==='native_team'&&!!identity.task_assignment)) && !operation.startsWith('tasks.')&&(!operation.startsWith('discovery.')||operation==='discovery.source');
       const receipted = mutating || attested || isDream;
       const callId = input.call_id;
       if (receipted && !validCallId(callId)) throw new Error('invalid_call_id');
@@ -1003,6 +1005,10 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
         case 'files.write': result = workbench.writeFile(owner, workspace, {...args, project_id: project}, runId); break;
         case 'tasks.get': {
           const task=requireTask(identity);result={task:tasks.get(owner,task.task_id),occurrence:tasks.occurrences(owner,task.task_id).items.find(item=>item.occurrence_id===task.occurrence_id),collaboration:collaboration?.get(owner,task.task_id)??{enabled:false}};break;
+        }
+        case 'tasks.prd.read': {
+          requireTask(identity);if(!taskPrd)throw Error('prd_source_unavailable');
+          result=taskPrd.readRunSource(owner,runId,args);break;
         }
         case 'tasks.delegate': {
           requireTask(identity);if(!collaboration)throw new Error('task_collaboration_forbidden');

@@ -60,7 +60,7 @@ export default function TaskPrdPanel({task,executionReady,onBound}:{task:Task;ex
   <h4>将 PRD 绑定到原任务</h4>
   <p className="wb-hint">选择当前任务所属项目中的既有文件或原始上传附件。预览仅读取；确认仅冻结来源并更新原任务目标。任务仍保持暂停，后续由原有恢复 / 立即运行入口执行。</p>
   <h5>PRD 静态模板</h5><pre style={textStyle} aria-label="PRD 静态模板">{PRD_TEMPLATE}</pre>
-  <p className="wb-hint">先按模板保存到项目文件或上传附件，再刷新选择。支持 UTF-8 的 .md / .markdown / .txt，以及 Taskmaster 导出的 .json 任务文件。原文最多 65,536 字节，完整任务目标最多 12,000 字符。PDF、DOCX 暂不支持提取。文字中的动作不会直接触发执行。</p>
+  <p className="wb-hint">先按模板保存到项目文件或上传附件，再刷新选择。支持 UTF-8 的 .md / .markdown / .txt，以及 Taskmaster 导出的 .json 任务文件。原文最多 65,536 字节，任务目标最多 12,000 字符。较长原文通过原执行批次固定绑定，由原 DSH 分段读取。PDF、DOCX 暂不支持提取。文字中的动作不会直接触发执行。</p>
   <p className="wb-hint">此流程由原 DSH 拆解并写入原任务账本。Taskmaster JSON 支持任务数组、tasks 对象和带标签格式，保留外部 ID、层级、依赖及状态作为来源资料。绑定后的任务按实际执行回执记录进度。</p>
   <details><summary>Taskmaster 安装与 MCP 配置状态</summary>
    {installationResource.loading&&<p className="wb-status" role="status">正在读取当前用户 profile 内的 Taskmaster 安装资料…</p>}
@@ -112,7 +112,8 @@ export default function TaskPrdPanel({task,executionReady,onBound}:{task:Task;ex
   {preview&&<><h5>精确预览</h5><dl style={textStyle}><dt>原任务 / 版本</dt><dd>{preview.task_id} / v{preview.task_version}</dd><dt>原执行角色 / 版本 / 权限纪元</dt><dd>{preview.role.agent_id} / v{preview.role.version} / {preview.role.capability_epoch}</dd><dt>来源 / 版本 / SHA-256</dt><dd>{preview.source.name} / v{preview.source.version} / {preview.source.sha256}</dd><dt>预览 SHA-256</dt><dd>{preview.preview_sha256}</dd></dl>
    <h5>PRD 原文</h5><pre aria-label="PRD 原文" style={textStyle}>{preview.content}</pre>
    <h5>完整任务目标</h5><pre aria-label="完整任务目标" style={textStyle}>{preview.objective}</pre>
-   <label className="wb-checkbox"><input type="checkbox" checked={confirmed} disabled={locked||unavailable} onChange={e=>setConfirmed(e.target.checked)}/>我已阅读原文和完整目标，确认仅绑定此原暂停任务，不创建任务、不恢复或启动执行。</label>
+   {preview.source_delivery==='reference'&&<><h5>固定原文分段读取说明</h5><p className="wb-hint">原执行输入和原 Goal 会携带本批固定来源的读取说明与绑定参数。原 DSH 读取完整原文后沿用原任务账本拆解。</p><pre aria-label="固定原文分段读取说明" style={textStyle}>{preview.source_instructions}</pre></>}
+   <label className="wb-checkbox"><input type="checkbox" checked={confirmed} disabled={locked||unavailable} onChange={e=>setConfirmed(e.target.checked)}/>我已阅读原文、任务目标和读取说明，确认仅绑定此原暂停任务，不创建任务、不恢复或启动执行。</label>
   </>}
   {flow.pending&&<p className="wb-status" role="status">绑定结果尚未确认。保留原来源、请求内容和请求 key；确认回执前不能修改选择或离开，请重试原请求。</p>}
   {(preview||flow.pending)&&<button className="wb-primary" type="button" disabled={flow.busy||importSave.busy||importSave.pending||(!flow.pending&&(unavailable||!confirmed))} onClick={()=>void operate(()=>flow.bind(request,confirmed),true)}>{flow.busy&&flow.pending?'正在确认绑定…':flow.pending?'重试原绑定请求':'确认绑定原暂停任务'}</button>}
