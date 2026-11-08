@@ -249,6 +249,23 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       return {binding:{runId:child.run_id,sessionRef:child.session_ref,executionLease:normalizeExecutionLease(input.execution_lease)}};
     });
   });
+  app.post('/internal/v1/workbench/native-child-observation',async request=>{
+    authorized(request.headers.authorization);const input=object(request.body);
+    fields(input,['run_id','session_ref','parent_session_ref']);
+    if(!nativeChildren||typeof input.parent_session_ref!=='string')throw new Error('workbench_identity_forbidden');
+    return withReadTransaction(db,()=>{
+      const owner=accountingOwner(input);
+      const native=db.prepare(`SELECT n.child_session_ref,n.snapshot_json FROM wb_native_execution_runs n
+        JOIN wb_run_bindings b ON b.run_id=n.run_id AND b.owner_id=n.owner_id AND b.kind='native_team'
+        WHERE n.run_id=? AND n.owner_id=?`).get(String(input.run_id),owner) as {child_session_ref:string;snapshot_json:string}|undefined;
+      if(!native||native.child_session_ref!==input.session_ref)throw new Error('workbench_identity_forbidden');
+      const saved=JSON.parse(native.snapshot_json);
+      if(!saved||typeof saved!=='object'||Array.isArray(saved)||saved.owner_id!==owner||saved.child_session_ref!==input.session_ref
+        ||saved.parent_session_ref!==input.parent_session_ref)throw new Error('workbench_identity_forbidden');
+      return {protocol:1,kind:'native_child_closure_observation',run_id:input.run_id,session_ref:input.session_ref,
+        parent_session_ref:saved.parent_session_ref,snapshot_sha256:createHash('sha256').update(native.snapshot_json).digest('hex'),execution_authorized:false};
+    });
+  });
   app.post('/internal/v1/workbench/native-child-close',async request=>{
     authorized(request.headers.authorization);const input=object(request.body);fields(input,['run_id','session_ref','proof']);
     return workbench.closeNativeChild(accountingOwner(input),String(input.run_id),object(input.proof));

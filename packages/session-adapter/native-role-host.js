@@ -114,10 +114,22 @@ export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistenc
    const operation=(async()=>{
     // Run outside the child's disposal stack, then drain before reading proof.
     await drainChildren(parent,[id]);
+    let observationSource;
     const observer=nativeOperationOrigin===undefined?reconcileOperations:createNativeOperationObserver({origin:nativeOperationOrigin,authorize:async scope=>{
-     if(scope.sessionRef!==accepted.agent.id||bridge.bindingFor(accepted.agent)!==accepted.binding)throw Error('native_role_closure_identity_changed');
-     await bridge.guard(accepted.agent,scope.signal);
-     if(bridge.bindingFor(accepted.agent)!==accepted.binding)throw Error('native_role_closure_identity_changed');
+     const check=()=>{
+      const current=bridge.bindingFor(accepted.agent);
+      if(scope.sessionRef!==accepted.agent.id||scope.sessionRef!==accepted.binding.sessionRef
+       ||current!==undefined&&current!==accepted.binding)throw Error('native_role_closure_identity_changed');
+     };
+     check();
+     const source=await bridge.request('native-child-observation',accepted.binding,{parent_session_ref:parent.id},scope.signal);
+     check();scope.signal?.throwIfAborted();
+     if(!source||Object.keys(source).sort().join(',')!=='execution_authorized,kind,parent_session_ref,protocol,run_id,session_ref,snapshot_sha256'
+      ||source.protocol!==1||source.kind!=='native_child_closure_observation'||source.execution_authorized!==false
+      ||source.run_id!==accepted.binding.runId||source.session_ref!==scope.sessionRef||source.parent_session_ref!==parent.id
+      ||typeof source.snapshot_sha256!=='string'||!/^[a-f0-9]{64}$/.test(source.snapshot_sha256)
+      ||observationSource!==undefined&&observationSource!==source.snapshot_sha256)throw Error('native_role_closure_identity_changed');
+     observationSource=source.snapshot_sha256;
     }});
     const proof=await captureNativeChildClosure({agent:accepted.agent,parentSessionRef:parent.id,registry:ctx.agents,persistence,projections:ctx.sessionProjections,signal,reconcileOperations:observer});
     const receipt=await bridge.request('native-child-close',accepted.binding,{proof},signal);
