@@ -36984,9 +36984,9 @@
           },
           "num_tasks": {
             "type": "integer",
-            "minimum": 1,
+            "minimum": 0,
             "maximum": 9007199254740991,
-            "description": "Optional owner-confirmed exact native subtask count. Immutable with the PRD binding and checked against the original occurrence ledger when proposing work."
+            "description": "Optional owner-confirmed native subtask count. Zero selects automatic decomposition and is omitted from the fixed-count binding receipt. Positive values are immutable with the PRD binding and checked against the original occurrence ledger when proposing work. Under append, the positive count covers added subtasks."
           },
           "append": {
             "type": "boolean",
@@ -37015,9 +37015,9 @@
           },
           "num_tasks": {
             "type": "integer",
-            "minimum": 1,
+            "minimum": 0,
             "maximum": 9007199254740991,
-            "description": "Optional owner-confirmed exact native subtask count. Immutable with the PRD binding and checked against the original occurrence ledger when proposing work."
+            "description": "Optional owner-confirmed native subtask count. Zero selects automatic decomposition and is omitted from the fixed-count binding receipt. Positive values are immutable with the PRD binding and checked against the original occurrence ledger when proposing work. Under append, the positive count covers added subtasks."
           },
           "append": {
             "type": "boolean",

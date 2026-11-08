@@ -5,7 +5,7 @@ const messages={
  PRD_WORK_PLAN_RESEARCH_UNVERIFIED:'研究资料回执与原读取结果未完成核对。',
  PRD_WORK_PLAN_APPEND_CHANGED:'追加基线中的原生子任务定义或依赖已变化，请保留基线后重新提交计划。',
  PRD_APPEND_SOURCE_INTEGRITY_FAILED:'原追加基线校验未完成，请保留回执并稍后重读。',
- INVALID_PRD_TASK_COUNT:'期望任务数需为正安全整数，或留空交由原 DSH 拆解。',
+ INVALID_PRD_TASK_COUNT:'期望任务数需为非负安全整数，0 或留空由原 DSH 自动拆解。',
  PRD_WORK_PLAN_TASK_COUNT_MISMATCH:'本批原生子任务账本数量与已确认期望数量不一致。',
  PRD_TASKMASTER_RUNTIME_UNAVAILABLE:'Taskmaster 实际运行版本尚待确认，请重读安装资料后再观察。',
  INVALID_PRD_WORK_ADMISSION:'准入请求无效，请重新核对原 grant。',
@@ -166,7 +166,7 @@ export class PrdCommandStore {
     ||this.operation==='work-plan-prepare'&&(!Number.isSafeInteger(body.expected_cycle_version)||body.expected_cycle_version<1))throw Error('PRD 原请求回执无效，请保留本站存储以便核对');
   }else if(this.operation==='taskmaster-prd-import'){
    if(Object.keys(command.body).sort().join(',')!=='file_name,preview_sha256'||typeof command.body.file_name!=='string'||!command.body.file_name||command.body.file_name.length>255)throw Error('PRD 原请求回执无效，请保留本站存储以便核对');
-  }else if(this.operation==='bind'?(JSON.stringify(selection(command.body.source))!==JSON.stringify(command.body.source)||Object.keys(command.body).some(key=>!['source','preview_sha256','num_tasks','append','research'].includes(key))||['append','research'].some(key=>Object.hasOwn(command.body,key)&&typeof command.body[key]!=='boolean')||Object.hasOwn(command.body,'num_tasks')&&(!Number.isSafeInteger(command.body.num_tasks)||command.body.num_tasks<1))
+  }else if(this.operation==='bind'?(JSON.stringify(selection(command.body.source))!==JSON.stringify(command.body.source)||Object.keys(command.body).some(key=>!['source','preview_sha256','num_tasks','append','research'].includes(key))||['append','research'].some(key=>Object.hasOwn(command.body,key)&&typeof command.body[key]!=='boolean')||Object.hasOwn(command.body,'num_tasks')&&(!Number.isSafeInteger(command.body.num_tasks)||command.body.num_tasks<0))
    :Object.keys(command.body).join(',')!=='preview_sha256')throw Error('PRD 原请求回执无效，请保留本站存储以便核对');
   return {command};
  }
@@ -184,7 +184,7 @@ export class PrdFlow {
  setSources(data){this.assertEditable();this.sources=data;this.selection=null;this.preview=null;this.refreshRequired=false;this.epoch++;}
  choose(index){this.assertEditable();this.selection=index===''?null:selection(this.sources?.sources[index]);this.preview=null;this.receipt=null;this.epoch++;}
  setTaskCount(value){
-  this.assertEditable();const count=value===''?undefined:Number(value);this.preview=null;this.receipt=null;this.epoch++;
+  this.assertEditable();const input=value===''?undefined:Number(value),count=input===0?undefined:input;this.preview=null;this.receipt=null;this.epoch++;
   if(count!==undefined&&(!Number.isSafeInteger(count)||count<1))throw Error('INVALID_PRD_TASK_COUNT');this.numTasks=count;
  }
  setAppend(value){this.assertEditable();if(typeof value!=='boolean')throw Error('PRD_PREVIEW_VERSION_CONFLICT');this.append=value;this.preview=null;this.receipt=null;this.epoch++;}
@@ -202,8 +202,8 @@ export class PrdFlow {
   if(this.busy)throw Error('正在处理绑定');
   if(!this.pending&&(!confirmed||!this.preview||!this.ready))throw Error('请阅读预览并显式确认绑定原暂停任务');
   this.busy=true;
-  const checkedRequest=async(...args)=>{const result=await request(...args);
-   if(!result||result.research!==(args[2]?.research===true?true:undefined)||!appendMatches(result,args[2]?.append===true)||result.num_tasks!==args[2]?.num_tasks||result.task_id!==this.task.task_id||typeof result.binding_id!=='string'||!result.binding_id||!Number.isSafeInteger(result.task_version)||!Number.isSafeInteger(result.revision)||result.execution_authorized!==false||!/^[a-f0-9]{64}$/.test(result.content_sha256)||!/^[a-f0-9]{64}$/.test(result.objective_sha256))throw Error('PRD_BIND_RECEIPT_INVALID');
+  const checkedRequest=async(...args)=>{const result=await request(...args),expectedCount=args[2]?.num_tasks===0?undefined:args[2]?.num_tasks;
+   if(!result||result.research!==(args[2]?.research===true?true:undefined)||!appendMatches(result,args[2]?.append===true)||result.num_tasks!==expectedCount||result.task_id!==this.task.task_id||typeof result.binding_id!=='string'||!result.binding_id||!Number.isSafeInteger(result.task_version)||!Number.isSafeInteger(result.revision)||result.execution_authorized!==false||!/^[a-f0-9]{64}$/.test(result.content_sha256)||!/^[a-f0-9]{64}$/.test(result.objective_sha256))throw Error('PRD_BIND_RECEIPT_INVALID');
    return result;
   };
   try{const result=await this.save.submit(checkedRequest,`/persistent-tasks/${encodeURIComponent(this.task.task_id)}/prd/bind`,'POST',this.pending?{}:{source:selection(this.preview.source),...(this.preview.research?{research:true}:{}),...(this.preview.append?{append:true}:{}),preview_sha256:this.preview.preview_sha256,...(this.preview.num_tasks===undefined?{}:{num_tasks:this.preview.num_tasks})});this.receipt=result;this.preview=null;return result;}

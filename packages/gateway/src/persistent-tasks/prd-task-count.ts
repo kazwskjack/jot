@@ -9,13 +9,14 @@ export function installPrdTaskCounts(db:DatabaseSync){
  BEGIN SELECT RAISE(ABORT,'prd_task_count_immutable'); END;`);
 }
 export function prdTaskCountInput(value:unknown):number|undefined{
- if(value===undefined)return undefined;
+ if(value===undefined||value===0)return undefined;
  if(!Number.isSafeInteger(value)||Number(value)<1)throw Error('invalid_prd_task_count');
  return value as number;
 }
 export function readPrdTaskCount(db:DatabaseSync,bindingId:string):number|undefined{
  if(!db.prepare("SELECT 1 FROM sqlite_master WHERE name='wb_task_prd_task_counts' AND type='table'").get())return undefined;
  const row=db.prepare('SELECT num_tasks FROM wb_task_prd_task_counts WHERE binding_id=?').get(bindingId) as {num_tasks:number}|undefined;
+ if(row&&(!Number.isSafeInteger(row.num_tasks)||row.num_tasks<1))throw Error('invalid_prd_task_count');
  return prdTaskCountInput(row?.num_tasks);
 }
 export function prdTaskCountInstructions(numTasks:number|undefined,appendBaseCount?:number):string{
