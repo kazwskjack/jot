@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { assertMcpExecutionInput, compileMcpToolInputValidator, validateMcpConnections } from './mcp-runtime.js';
 import { createMcpAgentScopeRegistry } from './mcp-agent-scope.js';
-import { normalizeMcpControlReload } from './mcp-control-host.js';
+import { normalizeMcpControlReload, normalizeMcpControlTools } from './mcp-control-host.js';
 
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const RAW_TOOL_PREFIX = 'mcp__';
@@ -89,12 +89,13 @@ function nativeToolName(serverName, rawName) {
   return name;
 }
 
-function reloadServerName(identity, source, existingNames) {
+function reloadServerName(identity, source, existingNames, toolName) {
   const tuple = [identity.owner_id, identity.agent_id, identity.connection_id, identity.generation].join('\0');
   for (let attempt = 0; attempt < 16; attempt++) {
     const serverName = 'j' + createHash('sha256').update(tuple + '\0' + attempt).digest('hex').slice(0, 6);
     try {
-      const names = source.tools.map(tool => nativeToolName(serverName, tool.raw_name));
+      if ([...existingNames].some(name => typeof name === 'string' && name.startsWith(`${RAW_TOOL_PREFIX}${serverName}__`))) continue;
+      const names = source.tools.map(tool => toolName(serverName, tool.raw_name));
       if (new Set(names).size === names.length && names.every(name => !existingNames.has(name))) return serverName;
     } catch { /* A shorter candidate name may fit a valid native tool name. */ }
   }
@@ -162,6 +163,8 @@ export function createMcpAgentRuntimeProvider({ mcpPlugin, authorizeStdio, httpF
   if (authorizeStdio !== undefined && typeof authorizeStdio !== 'function'
     || httpFetchForConnection !== undefined && typeof httpFetchForConnection !== 'function'
     || stdioTransportForConnection !== undefined && (typeof stdioTransportForConnection !== 'function'||mcpPlugin?.hostTransportProtocol!==1)) fail('mcp_agent_provider_invalid');
+  const toolName = mcpPlugin?.hostCatalogueProtocol === 1 && typeof mcpPlugin.jotPublicToolName === 'function'
+    ? mcpPlugin.jotPublicToolName : nativeToolName;
   const scopes = createMcpAgentScopeRegistry({ mcpPlugin });
   const contexts = new WeakMap();
   const activeByAgent = new WeakMap();
@@ -222,52 +225,70 @@ export function createMcpAgentRuntimeProvider({ mcpPlugin, authorizeStdio, httpF
       const { protocol, config, ...identity } = request;
       if (identity.owner_id !== ownerId || identity.agent_id !== agentId) fail('mcp_reload_scope_stale');
       const source = snapshot.find(row => row.connection_id === identity.connection_id);
-      if (!source) fail('mcp_reload_connection_unavailable');
       const active = activeByAgent.get(agent);
       const priorConnection = active?.connectionStates.get(identity.connection_id);
       const priorRuntimeLive = () => !!active && activeByAgent.get(agent) === active && active.active
         && !!priorConnection && priorConnection.active && !priorConnection.controller.signal.aborted
-        && priorConnection.fibers.length > 0 && priorConnection.version === source.version
+        && !!source && priorConnection.fibers.length > 0 && priorConnection.version === source.version
         && priorConnection.generation === source.generation && isDeepStrictEqual(priorConnection.connection, source);
       const linked = combineSignals(input.signal, binding.controller.signal);
       let fiber, handle;
-      const check = async () => {
+      const check = async (allowActive = false) => {
         ensure(); linked.signal.throwIfAborted();
-        await awaitWithSignal(Promise.resolve().then(() => input.assertCurrent('pending')), linked.signal);
-        ensure();
         const state = await awaitWithSignal(Promise.resolve().then(() => readOriginalState(
           Object.freeze({ owner_id: ownerId, agent_id: agentId, capability_epoch: capabilityEpoch }), identity, linked.signal, config)), linked.signal);
         ensure();
-        if (state?.state !== 'pending') fail('mcp_reload_operation_unknown');
+        if (state?.state !== 'pending' && !(allowActive && state?.state === 'active')) fail('mcp_reload_operation_unknown');
         if (state.owner_id !== ownerId || state.agent_id !== agentId || state.capability_epoch !== capabilityEpoch
           || !isDeepStrictEqual(state.identity, identity)) fail('mcp_reload_scope_stale');
+        await awaitWithSignal(Promise.resolve().then(() => input.assertCurrent(state.state)), linked.signal);
+        ensure();
       };
       try {
         await check();
-        if (identity.version !== source.version || identity.generation !== source.generation + 1
-          || ![source.version, source.version + 1].includes(identity.config_version)
-          || identity.config_version === source.version && !isDeepStrictEqual(config, source.config)) {
-          fail('mcp_reload_scope_stale');
+        // A cold discovery is authorized by the original pending operation,
+        // including its exact config and generation, rather than a local cache.
+        if (priorConnection) {
+          if (!priorRuntimeLive() || identity.version !== source.version || identity.generation !== source.generation + 1
+            || ![source.version, source.version + 1].includes(identity.config_version)
+            || identity.config_version === source.version && !isDeepStrictEqual(config, source.config)) fail('mcp_reload_scope_stale');
+          if (priorConnection.pending.size || priorConnection.calls.size) fail('mcp_reload_prior_runtime_busy');
         }
-        if (!priorRuntimeLive()) fail('mcp_reload_prior_runtime_unavailable');
-        if (priorConnection.pending.size || priorConnection.calls.size) fail('mcp_reload_prior_runtime_busy');
-        // Preserve the existing Host policy; neither a reload nor an operator
-        // binding supplies a new stdio or tool execution permission.
-        if (config.transport !== 'stdio' || source.server_name !== config.server_name) fail('mcp_reload_transport_unavailable');
-        const staged = { ...source, version: identity.config_version, generation: identity.generation, config };
-        const dshConfig = toDshMcpStdioConfig(staged,{allowCredentialRefs:!!stdioTransportForConnection});
-        if (!authorizeStdio || await authorizeStdio(Object.freeze({ agent, ownerId, agentId, signal:linked.signal, connectionId: source.connection_id,
-          serverName: config.server_name, command: dshConfig.command, args: dshConfig.args, cwd: dshConfig.cwd, envRefs:config.env_refs })) !== true) fail('mcp_agent_stdio_forbidden');
+        const staged = {
+          connection_id: identity.connection_id, server_name: config.server_name, transport: config.transport,
+          version: identity.config_version, generation: identity.generation, config, tools: [],
+        };
+        const dshConfig = config.transport === 'stdio'
+          ? toDshMcpStdioConfig(staged, {allowCredentialRefs: !!stdioTransportForConnection}) : toDshMcpHttpConfig(staged);
+        // Reload retains the same independently configured Host transport policy.
+        if (config.transport === 'stdio') {
+          const authorized = authorizeStdio && await awaitWithSignal(Promise.resolve(authorizeStdio(Object.freeze({
+            agent, ownerId, agentId, signal: linked.signal, connectionId: identity.connection_id,
+            serverName: config.server_name, command: dshConfig.command, args: dshConfig.args,
+            cwd: dshConfig.cwd, envRefs: config.env_refs,
+          }))), linked.signal);
+          if (authorized !== true) fail('mcp_agent_stdio_forbidden');
+        }
+        if (config.transport === 'streamable-http' && !httpFetchForConnection) fail('mcp_agent_http_unavailable');
         await check();
         const before = scope.tools.schemas(agent);
         if (!Array.isArray(before)) fail('mcp_reload_catalog_unproven');
-        const candidateServer = reloadServerName(identity, source, new Set(before.map(tool => tool?.name)));
+        const candidateServer = reloadServerName(identity, source ?? staged, new Set(before.map(tool => tool?.name)), toolName);
         const prefix = `${RAW_TOOL_PREFIX}${candidateServer}__`;
-        const hostTransport=stdioTransportForConnection?await stdioTransportForConnection({ownerId,agentId,connection:staged,
-          signal:linked.signal,assertCurrent:check}):undefined;
-        if(stdioTransportForConnection&&typeof hostTransport!=='function')fail('mcp_reload_transport_unavailable');
-        fiber = await scopes.mount({ agent, config: Object.freeze({ ...dshConfig, serverName: candidateServer }), signal: linked.signal,
-          ...(hostTransport?{hostTransport}:{}) });
+        const transportRequest = {
+          ownerId, agentId, connection: staged, signal: linked.signal, assertCurrent: () => check(true),
+        };
+        const hostTransport = config.transport === 'stdio' && stdioTransportForConnection
+          ? await awaitWithSignal(Promise.resolve(stdioTransportForConnection(transportRequest)), linked.signal) : undefined;
+        const hostFetch = config.transport === 'streamable-http'
+          ? await awaitWithSignal(Promise.resolve(httpFetchForConnection(transportRequest)), linked.signal) : undefined;
+        if (config.transport === 'stdio' && stdioTransportForConnection && typeof hostTransport !== 'function'
+          || config.transport === 'streamable-http' && typeof hostFetch !== 'function') fail('mcp_reload_transport_unavailable');
+        await check();
+        fiber = await scopes.mount({
+          agent, captureCatalogue: true, config: Object.freeze({...dshConfig, serverName: candidateServer}), signal: linked.signal,
+          ...(hostTransport ? {hostTransport} : {}), ...(hostFetch ? {hostFetch} : {}),
+        });
         handle = Object.freeze({ close: async () => {
           await fiber.close(); binding.handles.delete(handle); linked.dispose();
         } });
@@ -275,23 +296,30 @@ export function createMcpAgentRuntimeProvider({ mcpPlugin, authorizeStdio, httpF
         await check();
         const visible = scope.tools.schemas(agent);
         if (!Array.isArray(visible)) fail('mcp_reload_catalog_unproven');
-        const known = new Map(source.tools.map(tool => [nativeToolName(candidateServer, tool.raw_name), tool]));
-        const discovered = visible.filter(tool => typeof tool?.name === 'string' && tool.name.startsWith(prefix)).map(tool => {
-          const original = known.get(tool.name), definition = scope.tools.get(tool.name, agent);
-          // The SDK does not expose raw names for normalized/hashed additions.
-          // Refuse them rather than invent a raw name or omit an unknown tool.
-          if (!original || !definition || !isDeepStrictEqual(definition.parameters, tool.parameters)
-            || definition.description !== tool.description) fail('mcp_reload_catalog_unproven');
-          return { ...original, description: tool.description, input_schema: tool.parameters };
+        const known = new Map((source?.tools ?? []).map(tool => [toolName(candidateServer, tool.raw_name), tool]));
+        const candidateTools = visible.filter(tool => typeof tool?.name === 'string' && tool.name.startsWith(prefix));
+        const discovered = typeof fiber.readCatalogue === 'function' ? fiber.readCatalogue() : candidateTools.map(tool => {
+          const original = known.get(tool.name);
+          if (!original) fail('mcp_reload_catalog_unproven');
+          return {name: original.raw_name, description: tool.description, input_schema: tool.parameters};
         });
-        const checked = validateMcpConnections([{ ...staged, tools: discovered }]);
+        const checked = normalizeMcpControlTools(discovered);
+        if (checked.length !== candidateTools.length) fail('mcp_reload_catalog_unproven');
+        for (const tool of checked) {
+          const name = toolName(candidateServer, tool.name), definition = scope.tools.get(name, agent);
+          if (!candidateTools.some(candidate => candidate.name === name) || !definition
+            || !isDeepStrictEqual(definition.parameters, tool.input_schema)
+            || definition.description !== tool.description) fail('mcp_reload_catalog_unproven');
+          compileMcpToolInputValidator(tool.input_schema);
+        }
         await check();
-        if (!priorRuntimeLive()) fail('mcp_reload_prior_runtime_unavailable');
-        if (priorConnection.pending.size || priorConnection.calls.size) fail('mcp_reload_prior_runtime_busy');
-        await awaitWithSignal(active.closeConnection(identity.connection_id), linked.signal);
-        await check();
-        return Object.freeze({ tools: Object.freeze(checked.connections[0].tools.map(tool => Object.freeze({
-          name: tool.raw_name, description: tool.description, input_schema: tool.input_schema }))), close: handle.close });
+        if (priorConnection) {
+          if (!priorRuntimeLive()) fail('mcp_reload_prior_runtime_unavailable');
+          if (priorConnection.pending.size || priorConnection.calls.size) fail('mcp_reload_prior_runtime_busy');
+          await awaitWithSignal(active.closeConnection(identity.connection_id), linked.signal);
+          await check();
+        }
+        return Object.freeze({ tools: deepFreeze(structuredClone(checked)), close: handle.close });
       } catch (error) {
         let candidateClosed = true;
         try { if (handle) await handle.close(); else if (fiber) await fiber.close(); }
@@ -478,7 +506,7 @@ export function createMcpAgentRuntimeProvider({ mcpPlugin, authorizeStdio, httpF
         const tools = connection.tools.map(tool => {
           if (rawNames.has(tool.raw_name)) fail('mcp_agent_tool_generation_mismatch');
           rawNames.add(tool.raw_name);
-          const dshName = nativeToolName(connection.server_name, tool.raw_name);
+          const dshName = toolName(connection.server_name, tool.raw_name);
           return { approved: tool, dshName, priorDefinition: scope.tools.get(dshName, agent) };
         });
         return { connection, dshConfig, tools };

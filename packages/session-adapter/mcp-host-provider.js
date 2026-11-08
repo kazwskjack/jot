@@ -5,7 +5,6 @@ import {resolveOwnerBoundDshProfileContext} from './dsh-profile-binding.js';
 import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { createMcpAgentRuntimeProvider } from './mcp-agent-provider.js';
 
 export const name = 'jot-mcp-host-provider';
@@ -35,8 +34,8 @@ export async function apply(ctx,config={}) {
   if (clientManifest.name !== '@deepseek-ai/dsh-mcp-client' || clientManifest.version !== '0.2.1-rc.2') {
     throw Error('jot_mcp_host_client_version_mismatch');
   }
-  const stdioRuntime=stdioPolicy?await loadScopedMcpStdioRuntime(clientEntry,()=>ctx.logger.warn('mcp_stdio_stderr_received')):undefined;
-  const mcpPlugin = stdioRuntime?.plugin??await import(pathToFileURL(clientEntry).href);
+  const stdioRuntime=await loadScopedMcpStdioRuntime(clientEntry,()=>ctx.logger.warn('mcp_stdio_stderr_received'));
+  const mcpPlugin = stdioRuntime.plugin;
   if (mcpPlugin.name !== 'mcp-client' || typeof mcpPlugin.apply !== 'function') {
     throw Error('jot_mcp_host_client_invalid');
   }

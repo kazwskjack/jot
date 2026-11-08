@@ -1,3 +1,4 @@
+import {normalizeMcpControlTools} from './mcp-control-host.js';
 import {createServer} from 'node:http';
 import {randomBytes} from 'node:crypto';
 import {Readable} from 'node:stream';
@@ -141,10 +142,11 @@ export function createMcpAgentScopeRegistry({ mcpPlugin } = {}) {
 
   /** `config` must already be authorized and transport-approved by the Host. */
   async function mount(options) {
-    if (!isObject(options) || Object.keys(options).some(key => !['agent', 'config', 'signal', 'hostFetch', 'hostTransport'].includes(key))) {
+    if (!isObject(options) || Object.keys(options).some(key => !['agent', 'config', 'signal', 'hostFetch', 'hostTransport', 'captureCatalogue'].includes(key))) {
       throw new Error('mcp_agent_scope_invalid');
     }
-    const { agent, config, signal, hostFetch, hostTransport } = options;
+    const { agent, config, signal, hostFetch, hostTransport, captureCatalogue = false } = options;
+    if (typeof captureCatalogue !== 'boolean') throw new Error('mcp_agent_scope_invalid');
     if (!isObject(agent) || signal !== undefined && (!signal || typeof signal.throwIfAborted !== 'function'
       || typeof signal.addEventListener !== 'function' || typeof signal.removeEventListener !== 'function')) {
       throw new Error('mcp_agent_scope_invalid');
@@ -155,15 +157,22 @@ export function createMcpAgentScopeRegistry({ mcpPlugin } = {}) {
     const agentCtx = contexts.get(agent);
     if (!agentCtx) throw new Error('mcp_agent_scope_unavailable');
 
-    let fiber, forwarder;
+    let fiber, forwarder, catalogue;
     try {
       if(hostFetch!==undefined)forwarder=await createScopedHttpForwarder(config,hostFetch,signal);
-      const plugin=hostTransport?{...mcpPlugin,apply(inner,value){
-        inner.provide('jotMcpTransportFactory',hostTransport);
-        return mcpPlugin.apply(inner,value);
-      }}:mcpPlugin;
-      if(hostTransport&&typeof agentCtx.isolate!=='function')throw Error('mcp_agent_scope_invalid');
-      const mountContext=hostTransport?agentCtx.isolate('jotMcpTransportFactory'):agentCtx;
+      const observe = captureCatalogue && mcpPlugin.hostCatalogueProtocol === 1 ? value => {
+        if (value?.serverName !== config.serverName) throw new Error('mcp_reload_catalog_unproven');
+        catalogue = structuredClone(normalizeMcpControlTools(value.tools));
+      } : undefined;
+      const plugin = hostTransport || observe ? {...mcpPlugin, apply(inner, value) {
+        if (hostTransport) inner.provide('jotMcpTransportFactory', hostTransport);
+        if (observe) inner.provide('jotMcpCatalogueObserver', observe);
+        return mcpPlugin.apply(inner, value);
+      }} : mcpPlugin;
+      if ((hostTransport || observe) && typeof agentCtx.isolate !== 'function') throw new Error('mcp_agent_scope_invalid');
+      let mountContext = agentCtx;
+      if (hostTransport) mountContext = mountContext.isolate('jotMcpTransportFactory');
+      if (observe) mountContext = mountContext.isolate('jotMcpCatalogueObserver');
       fiber = mountContext.plugin(plugin, forwarder?{...config,url:forwarder.url}:config);
       if (!fiber || typeof fiber.then !== 'function' || typeof fiber.dispose !== 'function') {
         throw new Error('mcp_agent_fiber_invalid');
@@ -182,6 +191,10 @@ export function createMcpAgentScopeRegistry({ mcpPlugin } = {}) {
 
     let closePromise;
     return Object.freeze({
+      ...(captureCatalogue && mcpPlugin.hostCatalogueProtocol === 1 ? {readCatalogue() {
+        if (!catalogue) throw new Error('mcp_reload_catalog_unproven');
+        return structuredClone(catalogue);
+      }} : {}),
       close() {
         if (!closePromise) closePromise = Promise.all([Promise.resolve().then(()=>fiber.dispose()),forwarder?.close()]).then(()=>undefined);
         return closePromise;

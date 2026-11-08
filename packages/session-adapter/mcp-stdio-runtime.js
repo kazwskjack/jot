@@ -39,7 +39,7 @@ async function runtimeImport(specifier,require){
  fail();
 }
 
-/** Adapt one transport creation site in the locked client, retaining original lifecycle code. */
+/** Add scoped transport/catalogue ports to the locked client and retain its lifecycle. */
 export async function loadScopedMcpStdioRuntime(entry,onStderr){
  try{
   const require=createRequire(entry),source=(await readFile(entry,'utf8')).replace(/\r\n/g,'\n');
@@ -48,18 +48,22 @@ export async function loadScopedMcpStdioRuntime(entry,onStderr){
   if(source.split(needle).length!==2)fail();
   const specifiers=[...new Set([...source.matchAll(/\bfrom\s+["']([^"']+)["']/g)].map(match=>match[1]))];
   const imports=new Map(await Promise.all(specifiers.map(async specifier=>[specifier,await runtimeImport(specifier,require)])));
-  const adapted=source.replace(needle,
+  const catalogueNeedle='for (const [publicName, definition] of definitions) disposers.set(publicName, ctx.tools.register(definition));';
+  if(source.split(catalogueNeedle).length!==2)fail();
+  const catalogueObserver='\tconst observe = ctx.get("jotMcpCatalogueObserver");\n'+
+   '\tif (observe) observe({serverName: opts.serverName, tools: response.tools.map(tool => ({name: tool.name, description: tool.description ?? "", input_schema: tool.inputSchema}))});\n';
+  const adapted=source.replace(catalogueNeedle,catalogueNeedle+'\n'+catalogueObserver).replace(needle,
    'const hostTransportFactory = ctx.get("jotMcpTransportFactory");\n'+
    '\t\t\ttransport = hostTransportFactory ? await hostTransportFactory(config) : createTransport(config);')
    .replace(/\bfrom\s+["']([^"']+)["']/g,(_match,specifier)=>'from '+JSON.stringify(imports.get(specifier)));
   const [plugin,stdio,subprocess]=await Promise.all([
-   import('data:text/javascript;base64,'+Buffer.from(adapted+'\n//# sourceURL=jot-dsh-mcp-client-0.2.1-rc.2-host-transport.mjs').toString('base64')),
+   import('data:text/javascript;base64,'+Buffer.from(adapted+'\nexport { publicToolName as jotPublicToolName };\n//# sourceURL=jot-dsh-mcp-client-0.2.1-rc.2-host-transport.mjs').toString('base64')),
    import(imports.get('@modelcontextprotocol/client/stdio')),
    import(imports.get('@deepseek-ai/dsh-subprocess')),
   ]);
   if(plugin.name!=='mcp-client'||typeof stdio.StdioClientTransport!=='function'||typeof subprocess.scrubbedParentEnv!=='function')fail();
   return Object.freeze({
-   plugin:Object.freeze({...plugin,hostTransportProtocol:1}),
+   plugin:Object.freeze({...plugin,hostTransportProtocol:1,hostCatalogueProtocol:1}),
    createTransport(params){
     const transport=new stdio.StdioClientTransport({...params,env:{...subprocess.scrubbedParentEnv(),...params.env},stderr:'pipe'});
     let reported=false;

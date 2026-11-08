@@ -79,7 +79,7 @@ function normalizeMcpControlRemove(value) {
   return Object.freeze({ protocol: 1, owner_id: value.owner_id, agent_id: value.agent_id, connection_id: value.connection_id });
 }
 
-function normalizeTools(value) {
+export function normalizeMcpControlTools(value) {
   if (!Array.isArray(value) || value.length > 100) fail('mcp_control_catalog_invalid');
   const names = new Set();
   const tools = value.map(tool => {
@@ -297,7 +297,7 @@ export function createMcpControlHost({ resolveScopes, assertCurrent, guardInterv
       }
       entry.handles.push(handle);
       record.finish({ ok: true });
-      catalogs.push(normalizeTools(handle.tools));
+      catalogs.push(normalizeMcpControlTools(handle.tools));
       await current(entry, 'pending');
     }
     const first = catalogs[0];

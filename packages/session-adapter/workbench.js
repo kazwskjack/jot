@@ -641,7 +641,7 @@ export class WorkbenchBridge {
     if (this.attempts.get(agent) !== attempt) { await mcpRuntime.close(); throw new Error('workbench_attach_superseded'); }
     let removeReloadScope;
     try {
-      if (frozen.mcp_connections?.length && typeof this.mcpRuntimeProvider?.bindReloadScope === 'function') {
+      if (typeof this.mcpRuntimeProvider?.bindReloadScope === 'function') {
         removeReloadScope = this.mcpRuntimeProvider.bindReloadScope({
           agent, ownerId: frozen.owner_id, agentId: frozen.agent_id, capabilityEpoch: frozen.capability_epoch,
           connections: frozen.mcp_connections ?? [],
