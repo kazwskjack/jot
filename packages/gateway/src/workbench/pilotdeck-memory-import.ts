@@ -43,7 +43,7 @@ export function pilotdeckMemoryImport(value:unknown,namespace:string,maxCharacte
  let scope=value.scope;
  if(projectionVersion===2)scope=typeof scope==='string'?scope.trim()||undefined:undefined;
  if(!/^[a-f0-9]{64}$/.test(sourceHash)||value.formatVersion!==formatVersion||scope!==undefined&&scope!=='current_project'||!Array.isArray(value.files))invalid();
- const bundle=value as Bundle,files:Array<{path:string;content:string}>=[],paths=new Set<string>();
+ const bundle=value as Bundle,files:Array<{path:string;content:string;status?:'active'|'superseded'}>=[],paths=new Set<string>();
  for(const input of bundle.files){
   if(!record(input)||typeof input.content!=='string')invalid();
   const path=relativePath(input.relativePath);if(paths.has(path))invalid();
@@ -52,7 +52,6 @@ export function pilotdeckMemoryImport(value:unknown,namespace:string,maxCharacte
  const ordered=[...paths].map(path=>path+'/').sort();
  for(let index=1;index<ordered.length;index++)if(ordered[index]!.startsWith(ordered[index-1]!))invalid();
  const workspaceId='pilotdeck-'+hash(namespace);
- const items:Array<Record<string,unknown>>=[];
  const noteTypes=projectionVersion===1?['project','feedback','general_project_meta']:['user','project','feedback','general_project_meta'];
  const noteScopes=projectionVersion===1?['project']:['project','global'];
  let globalFiles=0,memoryFiles=0,sourceOnlyFiles=0,totalBytes=0,deprecatedFiles=0;
@@ -67,20 +66,27 @@ export function pilotdeckMemoryImport(value:unknown,namespace:string,maxCharacte
   if((!note&&!projectMeta)||!file.content.trim()){sourceOnlyFiles++;continue;}
   memoryFiles++;
   const deprecated=header.get('deprecated')==='true';if(deprecated)deprecatedFiles++;
-  const fileHash=hash(file.content),pathHash=hash(file.path),version=projectionVersion;
-  let offset=0,part=0;
-  while(offset<file.content.length){
-   let end=Math.min(file.content.length,offset+20_000);
-   if(end<file.content.length&&file.content.charCodeAt(end-1)>=0xd800&&file.content.charCodeAt(end-1)<=0xdbff)end--;
-   const content=file.content.slice(offset,end);offset=end;part++;
-   if(!content.trim())continue;
-   const memoryId=`pilotdeck-${pathHash}-${part}`,status=deprecated?'superseded':'active';
-   const provenance=[{kind:'pilotdeck_snapshot',reference:sourceHash},{kind:'pilotdeck_file',reference:file.path.length<=2048?file.path:`sha256:${pathHash}`},{kind:'sha256',reference:fileHash}];
-   items.push({memory_id:memoryId,workspace_id:workspaceId,project_id:'current_project',scope:'project',agent_id:null,
-    content,verified:false,version,status,provenance,source_revision:fileHash,expires_at:null,supersedes:null,
-    history:[{version,content,verified:false,status}]});
+  file.status=deprecated?'superseded':'active';
+ }
+ function* sourceItems(){
+  for(const file of files){
+   if(file.status===undefined)continue;
+   const fileHash=hash(file.content),pathHash=hash(file.path),version=projectionVersion;
+   let offset=0,part=0;
+   while(offset<file.content.length){
+    let end=Math.min(file.content.length,offset+20_000);
+    if(end<file.content.length&&file.content.charCodeAt(end-1)>=0xd800&&file.content.charCodeAt(end-1)<=0xdbff)end--;
+    const content=file.content.slice(offset,end);offset=end;part++;
+    if(!content.trim())continue;
+    const memoryId=`pilotdeck-${pathHash}-${part}`,status=file.status;
+    const provenance=[{kind:'pilotdeck_snapshot',reference:sourceHash},{kind:'pilotdeck_file',reference:file.path.length<=2048?file.path:`sha256:${pathHash}`},{kind:'sha256',reference:fileHash}];
+    yield {memory_id:memoryId,workspace_id:workspaceId,project_id:'current_project',scope:'project',agent_id:null,
+     content,verified:false,version,status,provenance,source_revision:fileHash,expires_at:null,supersedes:null,
+     history:[{version,content,verified:false,status}]};
+   }
   }
  }
+
  const exported=typeof bundle.exportedAt==='string'?Date.parse(bundle.exportedAt):NaN;
  const summary:WorkbenchMemoryImportBundle={format_version:formatVersion,sha256:sourceHash,file_count:files.length,
   global_file_count:globalFiles,memory_file_count:memoryFiles,source_only_file_count:sourceOnlyFiles,deprecated_file_count:deprecatedFiles,
@@ -90,7 +96,7 @@ export function pilotdeckMemoryImport(value:unknown,namespace:string,maxCharacte
    case_trace_count:Array.isArray(bundle.recentCaseTraces)?bundle.recentCaseTraces.length:0,
    index_trace_count:Array.isArray(bundle.recentIndexTraces)?bundle.recentIndexTraces.length:0,
    dream_trace_count:Array.isArray(bundle.recentDreamTraces)?bundle.recentDreamTraces.length:0},execution_authorized:false};
- return {document:{schema_version:1,workspace_id:workspaceId,exported_at:Number.isFinite(exported)?new Date(exported).toISOString():'1970-01-01T00:00:00.000Z',items},
+ return {document:{schema_version:1,workspace_id:workspaceId,exported_at:Number.isFinite(exported)?new Date(exported).toISOString():'1970-01-01T00:00:00.000Z',items:{[Symbol.iterator]:sourceItems}},
   source:{bundle,summary} satisfies PilotdeckMemoryImportSource};
 }
 

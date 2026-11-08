@@ -65,23 +65,29 @@ function normalizeSource(value:unknown,workspaceId:string):Source{
  return {...row,memory_id,workspace_id,project_id,scope:scope as Target['scope'],agent_id,content:content as string,verified:verified as boolean,version:Number(version),status:String(status),
   provenance,source_revision,expires_at,supersedes,history} as Source;
 }
-function normalizeDocument(value:unknown,maxCharacters=5_000_000,maxItems=200):{schema_version:1;workspace_id:string;exported_at:string;items:Source[]}{
+function normalizeDocument(value:unknown,maxCharacters=5_000_000,maxItems=200,derived=false,deferred=false):{schema_version:1;workspace_id:string;exported_at:string;items:Iterable<Source>}{
  const document=object(value);exact(document,['schema_version','workspace_id','exported_at','items']);
- const rawItems=document.items;if(document.schema_version!==1||!Array.isArray(rawItems)||rawItems.length>maxItems)invalid();
+ const rawItems=document.items;
+ if(document.schema_version!==1||Array.isArray(rawItems)&&rawItems.length>maxItems)invalid();
+ if(!Array.isArray(rawItems)&&(!derived||!rawItems||typeof rawItems!=='object'||typeof (rawItems as Iterable<unknown>)[Symbol.iterator]!=='function'))invalid();
  const workspace_id=label(document.workspace_id),exported_at=label(document.exported_at,64);
  if(!Number.isFinite(Date.parse(exported_at)))invalid();
  // Count the exact original JSON size without forming one aggregate derived-document string.
- let characters:number;try{characters=JSON.stringify({...document,items:[]}).length;}catch{invalid();}
- if(characters>maxCharacters)invalid();
- const items:Source[]=[],ids=new Set<string>();
- for(const item of rawItems){
-  const source=normalizeSource(item,workspace_id);if(ids.has(source.memory_id))invalid();
-  let encoded:string|undefined;try{encoded=JSON.stringify(item);}catch{invalid();}
-  if(typeof encoded!=='string')invalid();characters+=encoded.length+(items.length?1:0);
-  if(characters>maxCharacters)invalid();ids.add(source.memory_id);items.push(source);
+ let baseCharacters:number;try{baseCharacters=JSON.stringify({...document,items:[]}).length;}catch{invalid();}
+ if(baseCharacters>maxCharacters)invalid();
+ function* sourceItems():Generator<Source>{
+  const ids=new Set<string>();let characters=baseCharacters,count=0;
+  for(const item of rawItems as Iterable<unknown>){
+   if(count>=maxItems)invalid();
+   const source=normalizeSource(item,workspace_id);if(ids.has(source.memory_id))invalid();
+   let encoded:string|undefined;try{encoded=JSON.stringify(item);}catch{invalid();}
+   if(typeof encoded!=='string')invalid();characters+=encoded.length+(count?1:0);
+   if(characters>maxCharacters)invalid();ids.add(source.memory_id);count++;yield source;
+  }
  }
- return {schema_version:1 as const,workspace_id,exported_at,items};
+ return {schema_version:1 as const,workspace_id,exported_at,items:deferred?{[Symbol.iterator]:sourceItems}:Array.from(sourceItems())};
 }
+
 type ImportPage={offset:number;limit:number};
 function pageItems<T>(items:T[],page:ImportPage){
  if(!Number.isSafeInteger(page.offset)||page.offset<0||!Number.isSafeInteger(page.limit)||page.limit<1||page.limit>100)invalid();
@@ -190,7 +196,7 @@ export class MemoryImportService{
   }
   const imported=pilotdeckMemoryImport(material,JSON.stringify([workspace,snapshot.target.project_id]),snapshot.source_file?104_857_600:5_000_000,snapshot.source_file?.sha256,snapshot.document_source==='pilotdeck-v4-notes-v1'?1:2);
   if(!imported||JSON.stringify(imported.source.summary)!==JSON.stringify(snapshot.source_bundle.summary))throw Error('memory_import_digest_conflict');
-  return normalizeDocument(imported.document,Number.MAX_SAFE_INTEGER,Number.MAX_SAFE_INTEGER);
+  return normalizeDocument(imported.document,Number.MAX_SAFE_INTEGER,Number.MAX_SAFE_INTEGER,true,true);
  }
  private sourceState(owner:string,source:Source){
   const row=this.db.prepare('SELECT * FROM wb_memories WHERE owner_id=? AND workspace_id=? AND memory_id=?').get(owner,source.workspace_id,source.memory_id) as MemoryRow|undefined;
@@ -259,17 +265,18 @@ export class MemoryImportService{
  }
  private inspect(owner:string,workspace:string,target:Target,document:ReturnType<typeof normalizeDocument>,sourceBundle?:PilotdeckMemoryImportSource,mode?:'replace_scope',sourceFile?:WorkbenchMemoryImportFileSource){
   const targets=this.targetStates(owner,workspace,target);
-  const items:PreviewItem[]=document.items.map(source=>{
+  const items:PreviewItem[]=[];let ready=0,skipped=0,conflict=0;
+  for(const source of document.items){
    const targetKey=`${sourceBundle?'jot-import-v2':'jot-import-v1'}:${digest([target.scope,target.project_id,target.agent_id]).slice(0,16)}:${source.workspace_id}/${source.memory_id}@${sourceBundle?source.source_revision:source.version}`;
    const local=this.sourceState(owner,source),targetState=targets.get(targetKey.slice(0,targetKey.lastIndexOf('@')+1))??targets.get(targetKey)??{expected:0,reason:null};
    let reason=local.reason??(mode==='replace_scope'&&targetState.reason==='target_exists'?null:targetState.reason),status:PreviewItem['status']=reason?(reason==='source_expired'||reason==='source_superseded'?'skipped':'conflict'):'ready';
    if(source.provenance.length>=20&&status==='ready'){reason='provenance_limit';status='conflict';}
-   return {source_memory_id:source.memory_id,source_version:source.version,source_history_versions:source.history.map(row=>Number(row.version)),source_content:source.content,
-    source_provenance:source.provenance,source_revision:source.source_revision,source_expires_at:source.expires_at,target_key:targetKey,target_expected_version:targetState.expected,status,reason,source_local:local.local};
-  });
+   if(status==='ready')ready++;if(status==='skipped')skipped++;if(status==='conflict')conflict++;
+   items.push({source_memory_id:source.memory_id,source_version:source.version,source_history_versions:source.history.map(row=>Number(row.version)),source_content:source.content,
+    source_provenance:source.provenance,source_revision:source.source_revision,source_expires_at:source.expires_at,target_key:targetKey,target_expected_version:targetState.expected,status,reason,source_local:local.local});
+  }
   return {schema_version:1,document_workspace_id:document.workspace_id,target,...(sourceBundle?{source_bundle:sourceBundle.summary}:{}),...(sourceFile?{source_file:sourceFile}:{}),
-   ...(mode==='replace_scope'?{mode,replacement:this.replacement(owner,workspace,target)}:{}),counts:{total:items.length,ready:items.filter(item=>item.status==='ready').length,
-   skipped:items.filter(item=>item.status==='skipped').length,conflict:items.filter(item=>item.status==='conflict').length},items};
+   ...(mode==='replace_scope'?{mode,replacement:this.replacement(owner,workspace,target)}:{}),counts:{total:items.length,ready,skipped,conflict},items};
  }
  preview(owner:string,workspace:string,input:Input,page?:ImportPage){return withImmediateTransaction(this.db,()=>{
   exact(input,['import_id','document','target','mode']);const importId=label(input.import_id,128);
@@ -290,7 +297,7 @@ export class MemoryImportService{
   if(mode&&!this.ports.remove)throw Error('memory_import_replace_unavailable');
   // Preserve old immutable document captures and their original hashes on refresh/retry.
   const compact=!!imported&&(!old||old.document_source==='pilotdeck-v4-notes-v1'||old.document_source==='pilotdeck-v4-notes-v2');
-  const document=normalizeDocument(imported?.document??material,imported?(compact?Number.MAX_SAFE_INTEGER:sourceFile?400_000_000:160_000_000):5_000_000,imported?Number.MAX_SAFE_INTEGER:200);
+  const document=normalizeDocument(imported?.document??material,imported?(compact?Number.MAX_SAFE_INTEGER:sourceFile?400_000_000:160_000_000):5_000_000,imported?Number.MAX_SAFE_INTEGER:200,!!imported,compact);
   const sourceBundle:PilotdeckMemoryImportSource|undefined=imported?(sourceFile?{source_file:sourceFile,summary:imported.source.summary}:imported.source):undefined;
   const inputValue:Snapshot={...(compact?{document_source:projectionVersion===1?'pilotdeck-v4-notes-v1' as const:'pilotdeck-v4-notes-v2' as const}:{document}),target,...(sourceBundle?{source_bundle:sourceBundle}:{}),...(mode?{mode}:{}),...(sourceFile?{source_file:sourceFile}:{})};
   const inputJson=JSON.stringify(inputValue),inputHash=createHash('sha256').update(inputJson,'utf8').digest('hex'),now=new Date().toISOString();
@@ -384,16 +391,18 @@ export class MemoryImportService{
   if(fresh.counts.conflict||!this.matchesPreview(owner,workspace,row,fresh))throw new Error('memory_import_conflict');
   const ports=this.ports,db=this.db;let created=0,skipped=0;
   function* applyItems():Generator<Input>{
-   for(const [index,item] of fresh.items.entries()){
+   let index=0;
+   for(const source of document.items){
+    const item=fresh.items[index++];
+    if(!item||source.memory_id!==item.source_memory_id)throw Error('memory_import_digest_conflict');
     if(item.status==='skipped'){skipped++;yield {...item};continue;}
-    const source=document.items[index];
-    if(!source||source.memory_id!==item.source_memory_id)throw Error('memory_import_digest_conflict');
     const provenance=[...source.provenance,{kind:'import',reference:item.target_key}];
     const saved=ports.save(owner,workspace,{scope:target.scope,project_id:target.project_id,agent_id:target.agent_id,
      content:source.content,verified:false,provenance,source_revision:source.source_revision,expires_at:source.expires_at,supersedes:null});
     if(typeof saved.memory_id!=='string'||saved.version!==1||saved.verified!==false||saved.status!=='active')throw Error('memory_import_write_conflict');
     created++;yield {source_memory_id:item.source_memory_id,source_version:item.source_version,memory_id:String(saved.memory_id),version:Number(saved.version),status:'created'};
    }
+   if(index!==fresh.items.length)throw Error('memory_import_digest_conflict');
   }
   function* retireItems():Generator<Input>{
    if(!fresh.replacement)return;
