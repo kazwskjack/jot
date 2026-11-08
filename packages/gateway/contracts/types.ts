@@ -630,6 +630,7 @@ export type WorkbenchMemoryImportItem = {
  target_key:string;target_expected_version:number;status:"ready"|"skipped"|"conflict";reason:string|null;source_local:boolean;
 };
 export type WorkbenchMemoryImportReceipt = {
+ source_file?:WorkbenchMemoryImportFileSource;
  page?:WorkbenchMemoryImportPage;totals?:{total:number;created:number;skipped:number};
  mode?:"replace_scope";replacement?:WorkbenchMemoryReplacementReceipt;
  source_bundle?:WorkbenchMemoryImportBundle;
@@ -637,6 +638,7 @@ export type WorkbenchMemoryImportReceipt = {
  items:Array<(Omit<WorkbenchMemoryImportItem,"status">&{status:"skipped"})|{source_memory_id:string;source_version:number;memory_id:string;version:number;status:"created"}>;
 };
 export type WorkbenchMemoryImportPreview = {
+ source_file?:WorkbenchMemoryImportFileSource;
  page?:WorkbenchMemoryImportPage;
  mode?:"replace_scope";replacement?:WorkbenchMemoryReplacement;
  source_bundle?:WorkbenchMemoryImportBundle;
@@ -653,7 +655,7 @@ export type WorkbenchMemoryImportBundle = {
  last_dream_summary_chars:number;case_trace_count:number;index_trace_count:number;dream_trace_count:number};
 };
 export type WorkbenchMemoryImportBundleSource = {
- import_id:string;input_sha256:string;sha256:string;bundle:Record<string,unknown>;execution_authorized:false;
+ import_id:string;input_sha256:string;sha256:string;bundle?:Record<string,unknown>;source_file?:WorkbenchMemoryImportFileSource;execution_authorized:false;
 };
 
 export type WorkbenchMemoryReplacementItem = {memory_id:string;version:number;content_sha256:string;content_chars:number;verified:boolean;expires_at:string|null};
@@ -663,3 +665,6 @@ export type WorkbenchMemoryReplacementReceipt = {scope_sha256:string;count:numbe
 export type WorkbenchMemoryImportReplacementSource = {import_id:string;preview_version:number;memory_id:string;version:number;sha256:string;memory:WorkbenchMemory;execution_authorized:false};
 
 export type WorkbenchMemoryImportPage = {offset:number;limit:number;total:number;next_offset:number|null};
+
+export type WorkbenchMemoryImportFileSelection = {kind:"workspace_file";path:string;version:number;sha256:string;size:number};
+export type WorkbenchMemoryImportFileSource = WorkbenchMemoryImportFileSelection&{workspace_id:string;project_id:string};

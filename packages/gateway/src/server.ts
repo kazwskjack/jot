@@ -606,6 +606,8 @@ export async function buildServer(config: {
     if(code==='conversation_mode_invalid')return reply.code(400).send({error:{code:'CONVERSATION_MODE_INVALID'}});
     if(['invalid_file_range','invalid_file_history_query','invalid_file_history_cursor'].includes(code))return reply.code(400).send({error:{code:code.toUpperCase()}});
     if(['memory_import_id_conflict','memory_import_conflict','memory_import_digest_conflict','memory_import_write_conflict'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
+    if(code==='memory_import_file_source_unavailable')return reply.code(503).send({error:{code:'MEMORY_IMPORT_FILE_SOURCE_UNAVAILABLE'}});
+    if(code==='memory_import_file_source_changed')return reply.code(409).send({error:{code:'MEMORY_IMPORT_FILE_SOURCE_CHANGED'}});
     if(code==='memory_import_replace_unavailable')return reply.code(503).send({error:{code:'MEMORY_IMPORT_REPLACE_UNAVAILABLE'}});
     if(code==='memory_scope_forbidden')return reply.code(403).send({error:{code:'MEMORY_SCOPE_FORBIDDEN'}});
     if(code==='file_source_stale')return reply.code(409).send({error:{code:'FILE_SOURCE_STALE'}});

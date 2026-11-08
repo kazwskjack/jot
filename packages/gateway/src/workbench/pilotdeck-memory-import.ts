@@ -1,11 +1,11 @@
 import {createHash} from 'node:crypto';
 import {posix,win32} from 'node:path';
-import type {WorkbenchMemoryImportBundle} from '../../contracts/types.ts';
+import type {WorkbenchMemoryImportBundle,WorkbenchMemoryImportFileSource} from '../../contracts/types.ts';
 
 const formatVersion='clawxmemory-memory-snapshot.v4';
 const hash=(value:string)=>createHash('sha256').update(value,'utf8').digest('hex');
 type Bundle=Record<string,unknown>&{formatVersion:typeof formatVersion;files:Array<{relativePath:string;content:string}>};
-export type PilotdeckMemoryImportSource={bundle:Bundle;summary:WorkbenchMemoryImportBundle};
+export type PilotdeckMemoryImportSource={summary:WorkbenchMemoryImportBundle}&({bundle:Bundle}|{source_file:WorkbenchMemoryImportFileSource});
 function invalid():never{throw Error('invalid_memory_import_bundle');}
 function record(value:unknown):value is Record<string,unknown>{return !!value&&typeof value==='object'&&!Array.isArray(value);}
 
@@ -32,10 +32,14 @@ function frontmatter(content:string){
 function metadataText(bundle:Bundle,key:string){const value=bundle[key];return typeof value==='string'&&value.length<=128?value:null;}
 
 /** Convert the pinned current-project snapshot into original unverified note inputs, retaining its complete source. */
-export function pilotdeckMemoryImport(value:unknown,namespace:string){
+export function pilotdeckMemoryImport(value:unknown,namespace:string,maxCharacters=5_000_000,sourceSha256?:string){
  if(!record(value)||value.formatVersion===undefined)return null;
- let encoded:string|undefined;try{encoded=JSON.stringify(value);}catch{invalid();}
- if(typeof encoded!=='string'||encoded.length>5_000_000||value.formatVersion!==formatVersion||value.scope!==undefined&&value.scope!=='current_project'||!Array.isArray(value.files))invalid();
+ let sourceHash=sourceSha256;
+ if(sourceHash===undefined){
+  let encoded:string|undefined;try{encoded=JSON.stringify(value);}catch{invalid();}
+  if(typeof encoded!=='string'||encoded.length>maxCharacters)invalid();sourceHash=hash(encoded);
+ }
+ if(!/^[a-f0-9]{64}$/.test(sourceHash)||value.formatVersion!==formatVersion||value.scope!==undefined&&value.scope!=='current_project'||!Array.isArray(value.files))invalid();
  const bundle=value as Bundle,files:Array<{path:string;content:string}>=[],paths=new Set<string>();
  for(const input of bundle.files){
   if(!record(input)||typeof input.content!=='string')invalid();
@@ -44,7 +48,7 @@ export function pilotdeckMemoryImport(value:unknown,namespace:string){
  }
  const ordered=[...paths].map(path=>path+'/').sort();
  for(let index=1;index<ordered.length;index++)if(ordered[index]!.startsWith(ordered[index-1]!))invalid();
- const sourceHash=hash(encoded),workspaceId='pilotdeck-'+hash(namespace);
+ const workspaceId='pilotdeck-'+hash(namespace);
  const items:Array<Record<string,unknown>>=[];
  let globalFiles=0,memoryFiles=0,sourceOnlyFiles=0,totalBytes=0,deprecatedFiles=0;
  for(const file of files){

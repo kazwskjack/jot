@@ -15,6 +15,11 @@ export default function MemoryImportBundle({workspace,importId,inputHash,bundle}
    const value=await workbenchApi.memoryImportSource(workspace,importId);
    if(value.import_id!==importId||value.input_sha256!==inputHash||value.sha256!==bundle.sha256||value.execution_authorized!==false)
     throw Error('源包回执与原导入批次不一致');
+   if(value.source_file){
+    if(value.source_file.kind!=='workspace_file'||value.source_file.sha256!==bundle.sha256)throw Error('源文件与原始源包 SHA-256 不一致');
+    if(current())setSource(value);return;
+   }
+   if(!value.bundle)throw Error('原始源包内容不可用');
    const bytes=new TextEncoder().encode(JSON.stringify(value.bundle)),digest=await crypto.subtle.digest('SHA-256',bytes);
    const actual=Array.from(new Uint8Array(digest),byte=>byte.toString(16).padStart(2,'0')).join('');
    if(actual!==bundle.sha256)throw Error('源包内容与 SHA-256 不一致');
@@ -23,7 +28,7 @@ export default function MemoryImportBundle({workspace,importId,inputHash,bundle}
   finally{if(current())setBusy(false);}
  };
  const download=()=>{
-  if(!source||!current())return;
+  if(!source?.bundle||!current())return;
   const blob=new Blob([JSON.stringify(source.bundle,null,2)+'\n'],{type:'application/json'}),url=URL.createObjectURL(blob),anchor=window.document.createElement('a');
   try{anchor.href=url;anchor.download=`pilotdeck-memory-${bundle.sha256}.json`;window.document.body.appendChild(anchor);anchor.click();}
   finally{anchor.remove();URL.revokeObjectURL(url);}
@@ -39,6 +44,7 @@ export default function MemoryImportBundle({workspace,importId,inputHash,bundle}
   <p style={{overflowWrap:'anywhere'}}>源包 SHA-256 {bundle.sha256}</p>
   {error&&<p role="alert" className="wb-error">{error}</p>}
   <button type="button" disabled={busy} onClick={()=>void read()}>{busy?'正在读取并核对源包…':'读取完整源包'}</button>
-  {source&&<><button type="button" onClick={download}>下载已核对源包</button><details><summary>分段查看完整文件与状态记录</summary><PrdTextPreview content={JSON.stringify(source.bundle,null,2)} label="记忆源包" style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}/></details></>}
+  {source?.source_file&&<p role="status">已核对原项目文件 {source.source_file.path} 的 v{source.source_file.version}。可通过上方原始源文件入口下载完整字节。</p>}
+  {source?.bundle&&<><button type="button" onClick={download}>下载已核对源包</button><details><summary>分段查看完整文件与状态记录</summary><PrdTextPreview content={JSON.stringify(source.bundle,null,2)} label="记忆源包" style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}/></details></>}
  </section>;
 }

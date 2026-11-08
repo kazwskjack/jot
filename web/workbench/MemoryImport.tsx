@@ -1,11 +1,12 @@
 import React,{useEffect,useMemo,useRef,useState} from 'react';
-import type {WorkbenchMemoryImportPreview,WorkbenchMemoryImportReceipt,WorkbenchMemoryImportTarget} from '../../packages/gateway/contracts/types';
+import type {WorkbenchMemoryImportPreview,WorkbenchMemoryImportReceipt,WorkbenchMemoryImportTarget,WorkbenchMemoryImportFileSelection} from '../../packages/gateway/contracts/types';
 import {request,taskDraftScope} from '../jot/client';
 import {workbenchApi} from './client';
 import {useMutationReceipt} from './useMutationReceipt';
 import {MemoryImportStore} from './memory-import-store.mjs';
 import MemoryImportBundle from './MemoryImportBundle';
 import MemoryImportReplacement from './MemoryImportReplacement';
+import MemoryImportProjectFiles,{MemoryImportSourceFile} from './MemoryImportProjectFiles';
 
 const reasons:Record<string,string>={source_superseded:'来源已被替代',source_tombstone:'来源已删除',source_expired:'来源已过期',source_changed:'来源版本或内容已变化',target_exists:'此来源版本已导入',target_tombstone:'此来源的导入记忆已删除或被替代',provenance_limit:'来源引用已达上限'};
 const states={ready:'可导入',skipped:'跳过',conflict:'冲突'};
@@ -13,6 +14,8 @@ const pageSize=25;
 function importMessage(reason:unknown){
  const code=reason instanceof Error?reason.message:'';
  if(['MEMORY_IMPORT_CONFLICT','VERSION_CONFLICT'].includes(code))return '来源、目标或预览版本已变化，整批未写入。请重新核对原文件。';
+ if(code==='MEMORY_IMPORT_FILE_SOURCE_CHANGED')return '项目源文件的版本、大小或 SHA-256 与所选记录不一致，请核对原版本。';
+ if(code==='INVALID_MEMORY_IMPORT_FILE_SOURCE')return '所选项目文件须为 UTF-8 JSON 记忆来源。';
  if(code==='INVALID_MEMORY_IMPORT_BUNDLE')return '请核对 clawxmemory-memory-snapshot.v4 当前项目包的格式、重复路径及目录层级。';
  if(code==='MEMORY_IMPORT_ID_CONFLICT')return '此批次已绑定另一份来源或目标。请读取原记录，或结束此批次后选择其他文件。';
  return code||'记忆导入未完成，请核对原记录';
@@ -26,13 +29,14 @@ export default function MemoryImport({workspace,selection,onChanged,onBusyChange
   try{const store=new MemoryImportStore(sessionStorage,owner,workspace,target);return {store,batch:store.read()?.batch??null,error:''};}
   catch(error){return {store:null,batch:null,error:error instanceof Error?error.message:'记忆导入恢复记录不可用'};}
  },[owner,workspace,selection.scope,selection.project_id,selection.agent_id]);
+ const [projectFiles,setProjectFiles]=useState(false);
  const [mode,setMode]=useState<'append'|'replace_scope'>(recovery.batch?.mode??'append');
  const [id,setId]=useState(recovery.batch?.import_id??''),[view,setView]=useState<WorkbenchMemoryImportPreview|null>(null);
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[confirmed,setConfirmed]=useState(false),[page,setPage]=useState(0);
  const [receipt,setReceipt]=useState<WorkbenchMemoryImportReceipt|null>(null);
  const [receiptPage,setReceiptPage]=useState(0);
  useEffect(()=>setReceiptPage(0),[receipt]);
- const document=useRef<unknown>(null),alive=useRef(true);
+ const document=useRef<unknown>(recovery.batch?.source_file??null),alive=useRef(true);
  const current=()=>alive.current&&taskDraftScope()===owner;
  const matches=(value:{import_id:string;target:WorkbenchMemoryImportTarget},expected:string)=>value?.import_id===expected&&JSON.stringify(value.target)===JSON.stringify(target);
  const mutation=useMutationReceipt(recovery.store??undefined,undefined,async(path,method,body,key)=>{
@@ -58,6 +62,15 @@ export default function MemoryImport({workspace,selection,onChanged,onBusyChange
   const value=await workbenchApi.previewMemoryImport(workspace,{import_id:batchId,document:source,target,...(mode==='replace_scope'?{mode}:{})},crypto.randomUUID(),undefined,0);
   if(!matches(value,batchId))throw new Error('导入预览与所选目标范围不一致');
   if(current()){setView(value);setReceipt(value.receipt??null);setConfirmed(false);setPage(0);}
+ };
+ const chooseProjectFile=async(source:WorkbenchMemoryImportFileSelection)=>{
+  if(busy||mutation.pending||!recovery.store||!current())return;setBusy(true);setError('');setConfirmed(false);
+  try{
+   const batchId=id||crypto.randomUUID();
+   if(!id){recovery.store.saveBatch(batchId,mode,source);setId(batchId);}
+   document.current=source;await preview(source,batchId);
+  }catch(reason){if(current())setError(importMessage(reason));}
+  finally{if(current())setBusy(false);}
  };
  const choose=async(event:React.ChangeEvent<HTMLInputElement>)=>{
   const file=event.target.files?.[0];event.target.value='';if(!file||busy||mutation.pending||!recovery.store)return;
@@ -102,14 +115,17 @@ export default function MemoryImport({workspace,selection,onChanged,onBusyChange
  const blocked=busy||mutation.pending||!!recovery.error;
  return <section className="wb-form" aria-label="版本化记忆导入" aria-busy={busy}>
   <h3>导入记忆 JSON</h3>
-  <p className="wb-hint">选择 Jot schema_version 1 文档或上游 clawxmemory-memory-snapshot.v4 当前项目包，文件最多 20 MB、原始 JSON 最多 5,000,000 字符。Jot 格式每批最多 200 条记忆、每条 500 个历史版本。上游文件包按完整字符分段生成全部条目，每段最多 20,000 字符，按服务端分页核对，源包保留完整原文。核对后整批导入为待核实记忆。删除标记、过期来源及冲突会由服务端重新检查。</p>
+  <p className="wb-hint">选择 Jot schema_version 1 文档或上游 clawxmemory-memory-snapshot.v4 当前项目包，文件最多 20 MB、本地 JSON 最多 5,000,000 字符。较大源包可从已上传的项目文件中选取精确版本。Jot 格式每批最多 200 条记忆、每条 500 个历史版本。上游文件包按完整字符分段生成全部条目，每段最多 20,000 字符，按服务端分页核对，源包保留完整原文。核对后整批导入为待核实记忆。删除标记、过期来源及冲突会由服务端重新检查。</p>
   <p>目标工作区 {workspace} · 项目 {target.project_id} · {target.scope==='private'?`角色私有 ${target.agent_id}`:'项目共享'}</p>
   {(error||recovery.error)&&<p className="wb-error" role="alert">{error||recovery.error}</p>}
   <label>导入方式<select value={mode} disabled={blocked||!!id} onChange={event=>setMode(event.target.value as 'append'|'replace_scope')}><option value="append">追加到所选范围</option><option value="replace_scope">用上游文件包替换所选范围</option></select></label>
-  <label>选择记忆文件<input type="file" accept=".json,application/json" disabled={blocked||!recovery.store||view?.status==='applied'} onChange={event=>void choose(event)}/></label>
+  <button type="button" disabled={blocked} onClick={()=>setProjectFiles(value=>!value)}>{projectFiles?'收起项目源文件':'从已上传的项目文件选择'}</button>
+  {projectFiles&&<MemoryImportProjectFiles workspace={workspace} project={target.project_id} disabled={blocked||!recovery.store||view?.status==='applied'} onSelect={source=>void chooseProjectFile(source)}/>}
+  <label>选择本地记忆文件<input type="file" accept=".json,application/json" disabled={blocked||!recovery.store||view?.status==='applied'} onChange={event=>void choose(event)}/></label>
   {id&&<><p style={{overflowWrap:'anywhere'}}>导入批次 {id}</p><div className="wb-actions"><button type="button" disabled={busy} onClick={()=>void refresh()}>{document.current&&!mutation.pending?'重新核对原文件':'读取原导入记录'}</button><button type="button" disabled={blocked} onClick={clear}>结束此批次并选择其他文件</button></div></>}
   {mutation.pending&&<p role="status">原导入结果待确认，已保留批次、目标、版本与请求编号。刷新页面后仍可重试原请求。</p>}
   {view&&<><p>来源工作区 {view.document_workspace_id} · 预览 v{view.version} · 可导入 {view.counts.ready} 条 · 跳过 {view.counts.skipped} 条 · 冲突 {view.counts.conflict} 条</p><p style={{overflowWrap:'anywhere'}}>输入 SHA-256 {view.input_sha256}</p>
+   {view.source_file&&<MemoryImportSourceFile key={`${id}:${view.source_file.version}:${view.source_file.sha256}`} source={view.source_file}/>}
    {view.source_bundle&&<MemoryImportBundle key={`${id}:${view.input_sha256}:${view.source_bundle.sha256}`} workspace={workspace} importId={id} inputHash={view.input_sha256} bundle={view.source_bundle}/>}
    {view.replacement&&<MemoryImportReplacement key={`${id}:${view.version}:${view.replacement.scope_sha256}`} workspace={workspace} importId={id} previewVersion={view.version} replacement={view.replacement}/>}
    <div className="wb-message-list">{(view.page?view.items:view.items.slice(page*pageSize,(page+1)*pageSize)).map(item=><article key={item.target_key}>

@@ -24865,7 +24865,7 @@
         "tags": [
           "workbench"
         ],
-        "description": "Create or refresh a durable owner-scoped import preview with one immutable input and target. Inspect source versions, scopes, provenance, duplicates and tombstones. This command changes no formal memory. Atomic request receipt and preview persist in one transaction. Optional offset and limit must be supplied together. They project item transport only. Full immutable source, conflict checks, scope replacement and batch application remain authoritative. Paged receipts include exact full-batch created/skipped totals. Original mutation keys preserve the first returned page. Fetch further pages with GET using the same original batch identifier.",
+        "description": "Create or refresh a durable owner-scoped import preview with one immutable input and target. Inspect source versions, scopes, provenance, duplicates and tombstones. This command changes no formal memory. Atomic request receipt and preview persist in one transaction. Optional offset and limit must be supplied together. They project item transport only. Full immutable source, conflict checks, scope replacement and batch application remain authoritative. Paged receipts include exact full-batch created/skipped totals. Original mutation keys preserve the first returned page. Fetch further pages with GET using the same original batch identifier. File-backed input captures one original owner/workspace/target-project file version and byte hash. Original immutable file versions retain the complete source. The source read returns its verified descriptor, and the original owner-bound binary file reader supplies exact bytes. Formal application rechecks that source version and its bytes.",
         "parameters": [
           {
             "name": "workspace_id",
@@ -25177,7 +25177,7 @@
         "tags": [
           "workbench"
         ],
-        "description": "Apply the exact reviewed preview version atomically through original memory saves. Recheck source and target states. Conflict rejects the whole batch. New notes are unverified. Deleted or superseded imports block reimport of later versions of the same source. Immutable original applied receipts recover response loss without replaying writes. Optional offset and limit must be supplied together. They project item transport only. Full immutable source, conflict checks, scope replacement and batch application remain authoritative. Paged receipts include exact full-batch created/skipped totals. Original mutation keys preserve the first returned page. Fetch further pages with GET using the same original batch identifier.",
+        "description": "Apply the exact reviewed preview version atomically through original memory saves. Recheck source and target states. Conflict rejects the whole batch. New notes are unverified. Deleted or superseded imports block reimport of later versions of the same source. Immutable original applied receipts recover response loss without replaying writes. Optional offset and limit must be supplied together. They project item transport only. Full immutable source, conflict checks, scope replacement and batch application remain authoritative. Paged receipts include exact full-batch created/skipped totals. Original mutation keys preserve the first returned page. Fetch further pages with GET using the same original batch identifier. File-backed input captures one original owner/workspace/target-project file version and byte hash. Original immutable file versions retain the complete source. The source read returns its verified descriptor, and the original owner-bound binary file reader supplies exact bytes. Formal application rechecks that source version and its bytes.",
         "parameters": [
           {
             "name": "workspace_id",
@@ -25346,7 +25346,7 @@
         "tags": [
           "workbench"
         ],
-        "description": "Read the complete immutable pinned upstream snapshot from the original owner-scoped batch. Reauthorize original target scope, validate original input and bundle SHA-256, and return all source files and original index/Dream metadata as data. This read grants no execution authority. Responses remain private and no-store.",
+        "description": "Read the complete immutable pinned upstream snapshot from the original owner-scoped batch. Reauthorize original target scope, validate original input and bundle SHA-256, and return all source files and original index/Dream metadata as data. This read grants no execution authority. Responses remain private and no-store. File-backed input captures one original owner/workspace/target-project file version and byte hash. Original immutable file versions retain the complete source. The source read returns its verified descriptor, and the original owner-bound binary file reader supplies exact bytes. Formal application rechecks that source version and its bytes.",
         "parameters": [
           {
             "name": "workspace_id",
@@ -50145,6 +50145,9 @@
               },
               {
                 "$ref": "#/components/schemas/PilotdeckMemorySnapshotBundle"
+              },
+              {
+                "$ref": "#/components/schemas/WorkbenchMemoryImportFileSelection"
               }
             ]
           },
@@ -50155,7 +50158,7 @@
             ]
           }
         },
-        "description": "Accept original Jot versioned exports or pinned v4 current-project snapshots. Original Jot documents retain the 200-item bound. Retain every converted upstream note and full original source under the 5000000-character raw input bound. Derived internal documents are bounded to 160000000 characters. Optional offset/limit projects preview and receipt items without narrowing original batch approval or application. Explicit replace_scope reviews and retires the complete original selected target through original versioned deletion.",
+        "description": "Accept original Jot documents, pinned v4 current-project snapshots or an exact immutable source file version from the original owner/workspace/target project. Inline JSON retains the 5000000-character bound. Project file sources use the original owned byte reader and are bounded to 104857600 bytes, with exact version/SHA-256/size. Original immutable file versions retain complete file-backed upstream source bytes. Derived documents use 160000000 characters for inline upstream sources or 400000000 for file-backed upstream sources. Jot documents use the 200-item and 5000000-character rules. Source versions are rechecked before formal application.",
         "allOf": [
           {
             "if": {
@@ -50171,7 +50174,14 @@
             "then": {
               "properties": {
                 "document": {
-                  "$ref": "#/components/schemas/PilotdeckMemorySnapshotBundle"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/PilotdeckMemorySnapshotBundle"
+                    },
+                    {
+                      "$ref": "#/components/schemas/WorkbenchMemoryImportFileSelection"
+                    }
+                  ]
                 }
               }
             }
@@ -50395,6 +50405,9 @@
                 "maximum": 9007199254740991
               }
             }
+          },
+          "source_file": {
+            "$ref": "#/components/schemas/WorkbenchMemoryImportFileSource"
           }
         },
         "dependentRequired": {
@@ -50560,6 +50573,9 @@
           },
           "page": {
             "$ref": "#/components/schemas/WorkbenchMemoryImportPage"
+          },
+          "source_file": {
+            "$ref": "#/components/schemas/WorkbenchMemoryImportFileSource"
           }
         },
         "allOf": [
@@ -50806,7 +50822,6 @@
           "import_id",
           "input_sha256",
           "sha256",
-          "bundle",
           "execution_authorized"
         ],
         "properties": {
@@ -50828,8 +50843,33 @@
           },
           "execution_authorized": {
             "const": false
+          },
+          "source_file": {
+            "$ref": "#/components/schemas/WorkbenchMemoryImportFileSource"
           }
-        }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "bundle"
+            ],
+            "not": {
+              "required": [
+                "source_file"
+              ]
+            }
+          },
+          {
+            "required": [
+              "source_file"
+            ],
+            "not": {
+              "required": [
+                "bundle"
+              ]
+            }
+          }
+        ]
       },
       "WorkbenchMemoryReplacementItem": {
         "type": "object",
@@ -51029,6 +51069,88 @@
             ],
             "minimum": 0,
             "maximum": 9007199254740991
+          }
+        }
+      },
+      "WorkbenchMemoryImportFileSelection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "path",
+          "version",
+          "sha256",
+          "size"
+        ],
+        "properties": {
+          "kind": {
+            "const": "workspace_file"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 400
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 104857600
+          }
+        }
+      },
+      "WorkbenchMemoryImportFileSource": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "path",
+          "version",
+          "sha256",
+          "size",
+          "workspace_id",
+          "project_id"
+        ],
+        "properties": {
+          "kind": {
+            "const": "workspace_file"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 400
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 104857600
+          },
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "project_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
           }
         }
       }

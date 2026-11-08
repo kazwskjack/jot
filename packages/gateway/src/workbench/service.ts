@@ -248,6 +248,7 @@ export class WorkbenchService {
       },
       save:(owner,workspace,input)=>this.saveMemory(owner,workspace,input),
       remove:(owner,workspace,memoryId,version)=>this.deleteMemory(owner,workspace,memoryId,version),
+      readFile:(owner,workspace,project,path,version,sha256)=>this.readBinaryFile(owner,workspace,project,path,version,sha256),
     });
     this.memoryCapture=new MemoryCaptureService(db,{
       agent:(owner,agentId)=>{const agent=this.active(owner,agentId);this.projects.assertOwned(agent.project_id,owner);return agent;},
