@@ -12934,7 +12934,7 @@
         "tags": [
           "workbench"
         ],
-        "description": "Read owner-scoped original capture, source/policy, processing-run and usage facts. Interrupted ready, proposed and no_notes captures expose up to 20 original provider receipts awaiting reconciliation. Settled usage without a persisted proposal and settled no-notes outcomes have distinct states. Original source, policy and ownership guards remain authoritative.",
+        "description": "Read owner-scoped original capture, processing-run and usage facts with a frozen capture binding. Stopped ready, proposed, no_notes and rejected captures expose up to 20 original provider receipts awaiting reconciliation, including after source, policy or role revocation. Source/proposal execution and application retain their original current-authority guards.",
         "parameters": [
           {
             "name": "agent_id",
@@ -13018,7 +13018,7 @@
         "tags": [
           "workbench"
         ],
-        "description": "Owner-scoped reconciliation of an exact verified original provider usage receipt for an interrupted ready, proposed or no_notes capture. Revalidate original source/policy/epoch/version, original processing/source-run bindings, request/route digests and expired worker lease before settling the original ledger attempt. Full settled usage closes the original run successfully for committed proposed/no_notes outcomes, or as failed when a proposal was not persisted or a budget bound was exceeded. Recovery reuses the original run, provider request and ledger attempt and preserves its immutable reconciliation receipt.",
+        "description": "Owner-scoped settlement of an exact verified original provider usage receipt for a stopped ready, proposed, no_notes or rejected capture. Revalidate original capture policy/epoch/version, processing/source-run bindings, request/route digests and expired worker lease before settling the original ledger attempt. Source, policy or role revocation keeps extraction and application authority revoked while allowing original owner accounting. Only an interrupted original run is finalized after all usage closes, preserving other stopped outcomes. Missing proposals, revoked captures and exceeded budget bounds have failed interrupted-run outcomes. Immutable reconciliation receipts preserve exact original requests.",
         "parameters": [
           {
             "name": "agent_id",
@@ -36752,6 +36752,7 @@
               "partial",
               "failed",
               "interrupted",
+              "cancelled",
               "cancelling",
               "not_started",
               "unavailable",
@@ -36778,6 +36779,7 @@
               "committed_proposal_settled",
               "usage_settled_without_proposal",
               "no_notes_settled",
+              "closed_capture_usage_settled",
               "unresolved_usage_held",
               "source_or_policy_stale",
               "budget_bound_exceeded",
@@ -36819,6 +36821,53 @@
               ],
               "additionalProperties": false
             }
+          },
+          "capture_binding": {
+            "type": "object",
+            "properties": {
+              "capture_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "agent_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "workspace_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "project_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "policy_version": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "epoch": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "capture_id",
+              "agent_id",
+              "workspace_id",
+              "project_id",
+              "version",
+              "policy_version",
+              "epoch"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
@@ -36876,6 +36925,7 @@
               "committed_proposal_settled",
               "usage_settled_without_proposal",
               "no_notes_settled",
+              "closed_capture_usage_settled",
               "budget_bound_exceeded",
               "usage_reconciled_held"
             ]

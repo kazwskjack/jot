@@ -8,9 +8,11 @@ export function captureAction(value,action){
 }
 export function capturePolicyInput(policy,enabled,assistant,automation){if(!Number.isSafeInteger(policy?.version)||policy.version<0||[enabled,assistant,automation].some(value=>typeof value!=='boolean'))throw Error('capture_unavailable');return {expected_version:policy.version,mode:enabled?'suggest':'off',include_assistant:assistant,include_automation:automation};}
 export function captureReconcileInput(capture,recovery,epoch,evidence){
- if(!capture||!['ready','proposed','no_notes'].includes(capture.status)||!Number.isSafeInteger(capture.version)||capture.version<1||!Number.isSafeInteger(capture.policy_version)||capture.policy_version<0||
-  !recovery||recovery.capture_status!==capture.status||recovery.processor_run_status!=='interrupted'||recovery.proposal_available!==false||!['held_unknown','held_in_flight','held_mixed','unresolved'].includes(recovery.usage_state)||!['unresolved_usage_held','budget_bound_exceeded'].includes(recovery.recovery_state)||
-  !Number.isSafeInteger(epoch)||epoch<0||typeof evidence?.attempt_id!=='string'||!evidence.attempt_id||typeof evidence.evidence_ref!=='string'||!evidence.evidence_ref||
-  !Array.isArray(recovery.reconciliation_evidence)||!recovery.reconciliation_evidence.some(item=>item?.attempt_id===evidence.attempt_id&&item?.evidence_ref===evidence.evidence_ref))throw Error('capture_unavailable');
+ const binding=recovery?.capture_binding;
+ const receipt=Array.isArray(recovery?.reconciliation_evidence)?recovery.reconciliation_evidence.find(item=>item?.attempt_id===evidence?.attempt_id&&item?.evidence_ref===evidence?.evidence_ref):null;
+ if(!capture||!['ready','proposed','no_notes','rejected'].includes(capture.status)||!Number.isSafeInteger(capture.version)||capture.version<1||!Number.isSafeInteger(capture.policy_version)||capture.policy_version<0||
+  !recovery||recovery.capture_status!==capture.status||!['interrupted','failed','cancelled','succeeded','partial'].includes(recovery.processor_run_status)||recovery.proposal_available!==false||!['held_unknown','held_in_flight','held_mixed','unresolved'].includes(recovery.usage_state)||!['unresolved_usage_held','budget_bound_exceeded','source_or_policy_stale'].includes(recovery.recovery_state)||
+  !Number.isSafeInteger(epoch)||epoch<0||typeof evidence?.attempt_id!=='string'||!evidence.attempt_id||typeof evidence.evidence_ref!=='string'||!evidence.evidence_ref||!receipt||
+  (binding&&(binding.capture_id!==capture.capture_id||binding.agent_id!==capture.agent_id||binding.workspace_id!==capture.workspace_id||binding.project_id!==capture.project_id||binding.version!==capture.version||binding.policy_version!==capture.policy_version||binding.epoch!==epoch||receipt.policy_version!==binding.policy_version||receipt.epoch!==binding.epoch)))throw Error('capture_unavailable');
  return {expected_capture_version:capture.version,expected_policy_version:capture.policy_version,expected_epoch:epoch,attempt_id:evidence.attempt_id,evidence_ref:evidence.evidence_ref};
 }

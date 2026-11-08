@@ -251,6 +251,7 @@ export class WorkbenchService {
       readFile:(owner,workspace,project,path,version,sha256)=>this.readBinaryFile(owner,workspace,project,path,version,sha256),
     });
     this.memoryCapture=new MemoryCaptureService(db,{
+      authorizeAccounting:(owner,agentId,projectId)=>{this.getAgent(owner,agentId);this.projects.get(projectId,owner);},
       agent:(owner,agentId)=>{const agent=this.active(owner,agentId);this.projects.assertOwned(agent.project_id,owner);return agent;},
       assertRun:(owner,agentId,runId)=>{const agent=this.active(owner,agentId),context=this.runIdentity(owner,agent.workspace_id,runId);if(context.agent_id!==agentId||context.project_id!==agent.project_id)throw new Error('memory_scope_forbidden');},
       save:(owner,workspace,input)=>this.saveMemory(owner,workspace,input),
