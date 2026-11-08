@@ -1,3 +1,5 @@
+import {registerPluginProfileRoutes,type PluginProfileClient} from './workbench/plugin-profile-routes.ts';
+import {createPluginProfileReceiptExecutor,PLUGIN_PROFILE_RECEIPT_PROTOCOL} from './workbench/plugin-profile-receipts.ts';
 import {registerHostSettingsInternalRoutes} from './host-admin/settings-internal-routes.ts';
 import {registerHostAdminRoutes,type HostSettingsClient} from './host-admin/routes.ts';
 import {registerChatCompactionCheckpoints} from './conversations/chat-compaction-checkpoint-route.ts';
@@ -167,6 +169,7 @@ export async function buildServer(config: {
   workspaces: string[];
   ingressMode?: GatewayIngressMode;
   ownerPrincipalResolver?: VerifiedOwnerPrincipalResolver;
+  pluginProfileClient?:PluginProfileClient;
   hostAdmin?:{enabled?:boolean;namespaces?:string[];client?:HostSettingsClient;writeEnabled?:boolean;writeNamespace?:string};
   uploadRoot?: string;
   csrfToken?: string;
@@ -348,7 +351,8 @@ export async function buildServer(config: {
     'POST /v1/persistent-tasks/:taskId/delegations',
   ]);
   const isPersistentTaskMutationRoute=(request:any)=>persistentTaskMutationRoutes.has(`${request.method} ${request.routeOptions.url}`);
-  const atomicProtocol=(request:any)=>isPersistentTaskMutationRoute(request)?'persistent-task-atomic-v1':isWorkspaceSelectionRoute(request)?'workspace-selection-atomic-v1':isProjectMutationRoute(request)?'project-metadata-atomic-v1':isConversationForkRoute(request)?'conversation-fork-atomic-v1':isFileLifecycleRoute(request)?'file-lifecycle-atomic-v1':isIndexAdmissionRoute(request)?'git-index-admission-atomic-v1':isIndexControlAdmissionRoute(request)?'git-index-control-admission-atomic-v1':isPublicationAdmissionRoute(request)?'work-publication-admission-atomic-v1':isPublicationReviewRoute(request)?'work-publication-review-atomic-v1':isGitReviewRoute(request)?'git-review-atomic-v1':isRunCommandRoute(request)?'run-command-atomic-v1':isModeMutationRoute(request)?'conversation-mode-atomic-v1':isDiscoveryPolicyRoute(request)?'discovery-policy-atomic-v1':isGoalResumeRoute(request)?'conversation-goal-resume-atomic-v1':isMcpMutationRoute(request)?'workbench-mcp-atomic-v1':isUploadRoute(request)?'upload-atomic-v1':isMemoryRestoreRoute(request)?'memory-restore-atomic-v1':isMemoryConsolidationRoute(request)?'memory-consolidation-atomic-v1':isMemoryCaptureRoute(request)?'memory-capture-atomic-v1':isMemoryDreamPolicyRoute(request)?'memory-dream-policy-atomic-v1':null;
+  const isPluginProfileMutationRoute=(request:any)=>request.routeOptions.config?.pluginProfileMutation===true;
+  const atomicProtocol=(request:any)=>isPluginProfileMutationRoute(request)?PLUGIN_PROFILE_RECEIPT_PROTOCOL:isPersistentTaskMutationRoute(request)?'persistent-task-atomic-v1':isWorkspaceSelectionRoute(request)?'workspace-selection-atomic-v1':isProjectMutationRoute(request)?'project-metadata-atomic-v1':isConversationForkRoute(request)?'conversation-fork-atomic-v1':isFileLifecycleRoute(request)?'file-lifecycle-atomic-v1':isIndexAdmissionRoute(request)?'git-index-admission-atomic-v1':isIndexControlAdmissionRoute(request)?'git-index-control-admission-atomic-v1':isPublicationAdmissionRoute(request)?'work-publication-admission-atomic-v1':isPublicationReviewRoute(request)?'work-publication-review-atomic-v1':isGitReviewRoute(request)?'git-review-atomic-v1':isRunCommandRoute(request)?'run-command-atomic-v1':isModeMutationRoute(request)?'conversation-mode-atomic-v1':isDiscoveryPolicyRoute(request)?'discovery-policy-atomic-v1':isGoalResumeRoute(request)?'conversation-goal-resume-atomic-v1':isMcpMutationRoute(request)?'workbench-mcp-atomic-v1':isUploadRoute(request)?'upload-atomic-v1':isMemoryRestoreRoute(request)?'memory-restore-atomic-v1':isMemoryConsolidationRoute(request)?'memory-consolidation-atomic-v1':isMemoryCaptureRoute(request)?'memory-capture-atomic-v1':isMemoryDreamPolicyRoute(request)?'memory-dream-policy-atomic-v1':null;
   // Receipt protocol is reserved with the original request. Legacy pending rows
   // have no proof of an atomic business boundary and must not be re-executed.
   const atomicCommand=<T>(request:any,status:number,operation:()=>T):T=>{
@@ -391,6 +395,7 @@ export async function buildServer(config: {
   app.addHook('preHandler', async (request, reply) => {
     // These server-registered component routes verify their own mandatory bearer.
     if((request.routeOptions.config as {hostSettingsInternal?:boolean}).hostSettingsInternal===true)return;
+    if((request.routeOptions.config as {pluginProfileInternal?:boolean}).pluginProfileInternal===true)return;
     // Original service bearer already ran in this registered route's onRequest.
     if(isChannelAttachmentIntakeV2Route(request))return;
     // The provider callback is public only behind its exact-URL Twilio signature check.
@@ -399,12 +404,14 @@ export async function buildServer(config: {
     if(['/internal/v1/workbench/chat-compaction-attempt','/internal/v1/workbench/chat-compaction-checkpoint','/internal/v1/workbench/git-workspace-source','/internal/v1/workbench/native-workspace-admission','/internal/v1/workbench/native-git-database','/hooks/v1/channels/slack'].includes(request.url.split('?')[0]!))return;
     if (['/internal/v1/workbench/chat-compaction-source', '/internal/v1/workbench/ordinary-chat-web', '/internal/v1/workbench/ordinary-chat-context', '/internal/v1/workbench/ordinary-fork-context', '/internal/v1/workbench/ordinary-execution-policy', '/internal/v1/workbench/ordinary-run-history', '/internal/v1/workbench/ordinary-steering-history', '/internal/v1/workbench/ordinary-steering-binding', '/internal/v1/workbench/ordinary-input-binding', '/internal/v1/workbench/ordinary-model-policy', '/internal/v1/workbench/conversation-goal-control', '/internal/v1/channel/messages', '/internal/v1/channel/mattermost/proof-receipt', '/internal/v1/channel/mattermost/event-receipt', '/internal/v1/file-tools', '/internal/v1/crawl-batches/bind', '/internal/v1/crawl-batches/events', '/internal/v1/workbench/guard','/internal/v1/workbench/mcp-current','/internal/v1/workbench/mcp-prepare','/internal/v1/workbench/mcp-settle', '/internal/v1/workbench/handoff', '/internal/v1/workbench/native-task-intent', '/internal/v1/workbench/native-task-intents', '/internal/v1/workbench/native-child-reservation', '/internal/v1/workbench/native-child-request', '/internal/v1/workbench/native-child-abort', '/internal/v1/workbench/native-child-published', '/internal/v1/workbench/native-child-bind', '/internal/v1/workbench/native-child-close', '/internal/v1/workbench/native-child-activate', '/internal/v1/workbench/native-child-source', '/internal/v1/workbench/native-model-recovery', '/internal/v1/workbench/tool', '/internal/v1/workbench/browser-approval', '/internal/v1/workbench/context-delivery', '/internal/v1/workbench/goal-binding', '/internal/v1/workbench/model-budget','/internal/v1/workbench/web-budget-grant','/internal/v1/workbench/web-budget-grant/close','/internal/v1/workbench/web-model-budget','/internal/v1/workbench/checkpoint','/internal/v1/workbench/task-state','/internal/v1/workbench/step-admission','/internal/v1/workbench/goal-proposal','/internal/v1/workbench/completion-intent','/internal/v1/workbench/completion-confirm','/internal/v1/workbench/completion-recovery'].includes(request.url.split('?')[0]!)) return;
     if (isQQWebhookRequestAuthenticated(request)) return;
-    if (!config.csrfToken || request.method === 'GET' || request.method === 'HEAD' || request.method === 'OPTIONS') return;
+    if ((!config.csrfToken && !isPluginProfileMutationRoute(request)) || request.method === 'GET' || request.method === 'HEAD' || request.method === 'OPTIONS') return;
     actor(request as any);
-    const origin = String(request.headers.origin ?? '');
-    if (!(config.allowedOrigins ?? []).includes(origin)) throw new Error('origin_forbidden');
-    const csrf = String(request.headers['x-csrf-token'] ?? '');
-    if (config.csrfToken.length < 16 || csrf !== config.csrfToken) throw new Error('csrf_invalid');
+    if(config.csrfToken){
+      const origin = String(request.headers.origin ?? '');
+      if (!(config.allowedOrigins ?? []).includes(origin)) throw new Error('origin_forbidden');
+      const csrf = String(request.headers['x-csrf-token'] ?? '');
+      if (config.csrfToken.length < 16 || csrf !== config.csrfToken) throw new Error('csrf_invalid');
+    }
     // Host tickets and writes use the original Host context and attempt receipt.
     const hostReceipt=(request.routeOptions.config as {hostSettingsReceiptProtocol?:string}).hostSettingsReceiptProtocol;
     if(request.method==='PATCH'&&hostReceipt==='host-settings-original-attempt-v1')return;
@@ -461,6 +468,7 @@ export async function buildServer(config: {
         }catch{throw new Error('idempotency_in_progress');}
       };
       if (existing.response_status === null) {
+        if(isPluginProfileMutationRoute(request)&&existing.receipt_protocol===PLUGIN_PROFILE_RECEIPT_PROTOCOL)return;
         if(isConversationForkRoute(request)&&existing.receipt_protocol===null&&conversationForks){
           const recovered=withImmediateTransaction(db,()=>{
             const current=db.prepare('SELECT request_sha256,response_status,response_json,receipt_protocol FROM ga_idempotency WHERE owner_id=? AND operation=? AND idempotency_key=?')
@@ -544,6 +552,8 @@ export async function buildServer(config: {
       payload = JSON.stringify({ error: { code: 'CONTRACT_RESPONSE_INVALID' } });
       responseValue = { error: { code: 'CONTRACT_RESPONSE_INVALID' } };
     }
+    // Plugin dispatch and unknown outcomes are settled only through their original receipt executor.
+    if(isPluginProfileMutationRoute(request))return payload;
     const pending = idempotencyRequests.get(request);
     if (!pending) return payload;
     // An error response must not replace a recoverable reservation or another
@@ -725,6 +735,11 @@ export async function buildServer(config: {
     if(Object.keys(query).some(key=>key!=='cursor')||(query.cursor!==undefined&&(typeof query.cursor!=='string'||!query.cursor||query.cursor.length>200)))throw new Error('invalid_task_notification_settings');
     return taskNotifications.history(actor(request as any),String((request.params as {taskId:string}).taskId),query.cursor as string|undefined);
   });
+  if(config.pluginProfileClient){
+    if(!config.internalChannelToken||config.internalChannelToken.length<16)throw Error('plugin_profile_routes_config_invalid');
+    registerPluginProfileRoutes(app,{actor,client:config.pluginProfileClient,
+      receipts:createPluginProfileReceiptExecutor(db),internalChannelToken:config.internalChannelToken});
+  }
   registerWorkbenchRoutes(app, workbench, actor,(request,operation)=>atomicCommand(request,200,operation),workspaceCheckpoints);
   registerWorkbenchMcpRoutes(app, mcpRegistry, actor, (request,status,operation)=>atomicCommand(request,status,operation),
     (ownerId, agentId) => listUnknownMcpOperations(db, ownerId, agentId));

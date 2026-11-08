@@ -197,6 +197,39 @@ export class SessionControllerClient {
     return value
   }
 
+  /** Profile identity is Host-selected; only the Gateway-derived owner and original request key cross this channel. */
+  async pluginProfileBundles(ownerId: string, signal?: AbortSignal) {
+    if (typeof ownerId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(ownerId)) throw Error('plugin_profile_request_invalid')
+    return this.post('/v1/plugin-profile/bundles/list', {owner_id: ownerId}, signal)
+  }
+
+  async installPluginProfileBundle(input: {ownerId: string; operationId: string; spec: string; enabled: boolean}, signal?: AbortSignal) {
+    if (!input || typeof input.ownerId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(input.ownerId)
+      || typeof input.operationId !== 'string' || !/^[\x21-\x7e]{8,128}$/.test(input.operationId)
+      || typeof input.spec !== 'string' || !input.spec.trim() || input.spec.length > 512 || typeof input.enabled !== 'boolean') throw Error('plugin_profile_request_invalid')
+    return this.post('/v1/plugin-profile/bundles/install', {
+      owner_id: input.ownerId, operation_id: input.operationId, spec: input.spec, enabled: input.enabled,
+    }, signal)
+  }
+
+  async enablePluginProfileBundle(input: {ownerId: string; operationId: string; name: string; enabled: boolean}, signal?: AbortSignal) {
+    if (!input || typeof input.ownerId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(input.ownerId)
+      || typeof input.operationId !== 'string' || !/^[\x21-\x7e]{8,128}$/.test(input.operationId)
+      || typeof input.name !== 'string' || !input.name.trim() || input.name.length > 192 || typeof input.enabled !== 'boolean') throw Error('plugin_profile_request_invalid')
+    return this.post('/v1/plugin-profile/bundles/enable', {
+      owner_id: input.ownerId, operation_id: input.operationId, name: input.name, enabled: input.enabled,
+    }, signal)
+  }
+
+  async removePluginProfileBundle(input: {ownerId: string; operationId: string; name: string}, signal?: AbortSignal) {
+    if (!input || typeof input.ownerId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(input.ownerId)
+      || typeof input.operationId !== 'string' || !/^[\x21-\x7e]{8,128}$/.test(input.operationId)
+      || typeof input.name !== 'string' || !input.name.trim() || input.name.length > 192) throw Error('plugin_profile_request_invalid')
+    return this.post('/v1/plugin-profile/bundles/remove', {
+      owner_id: input.ownerId, operation_id: input.operationId, name: input.name,
+    }, signal)
+  }
+
   async create(sessionId: string, cwd: string, agentPreset: string, signal?: AbortSignal, workbenchRunId?: string, workbenchExecutionLease?: ExecutionLease,workWorkspace?:Readonly<{protocol:1}>) {
     return await this.post('/v1/sessions', {
       session_id: sessionId, cwd, agent_preset: agentPreset,

@@ -8,6 +8,9 @@
   "files": [
     "index.js",
     "dsh-profile-binding.js",
+    "dsh-profile-plugin-lifecycle.js",
+    "dsh-profile-plugin-operation.js",
+    "dsh-profile-plugin-control.js",
     "host-policy-bootstrap-owner.js",
     "host-policy-bootstrap-runtime.js",
     "host-policy-bootstrap.js",

@@ -15,14 +15,16 @@ const HASH=/^[a-f0-9]{64}$/;
 function profileHostSettings(value,gatewayOrigin){
  if(value===undefined)return undefined;
  try{
-  if(!(exact(value,['ownerId','bootstrap','productSchema','writeNamespace'])||exact(value,['ownerId','bootstrap','productSchema','writeNamespace','credentialRefs']))||!record(value.bootstrap)||!record(value.productSchema))throw Error();
+  if(!record(value)||!['ownerId','bootstrap','productSchema','writeNamespace'].every(key=>Object.hasOwn(value,key))
+   ||Object.keys(value).some(key=>!['ownerId','bootstrap','productSchema','writeNamespace','credentialRefs','pluginProfileEnabled'].includes(key))
+   ||value.pluginProfileEnabled!==undefined&&typeof value.pluginProfileEnabled!=='boolean'||!record(value.bootstrap)||!record(value.productSchema))throw Error();
   validateHostPolicyBootstrapRuntimeConfig(value.bootstrap);
   if(typeof value.ownerId!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value.ownerId)||value.bootstrap.gatewayOrigin!==gatewayOrigin||!value.bootstrap.namespaces.includes(value.writeNamespace)
    ||value.writeNamespace!=='jot-session-adapter'
    ||!exact(value.productSchema,['schema_fingerprint','schema_version'])||!Number.isSafeInteger(value.productSchema.schema_version)
    ||value.productSchema.schema_version<1||!HASH.test(value.productSchema.schema_fingerprint??''))throw Error();
   return{ownerId:value.ownerId,bootstrap:{...value.bootstrap,namespaces:[...value.bootstrap.namespaces]},writeNamespace:value.writeNamespace,
-   productSchema:{...value.productSchema},credentialRefs:validateHostCredentialRefs(value.credentialRefs??[])};
+   productSchema:{...value.productSchema},pluginProfileEnabled:value.pluginProfileEnabled===true,credentialRefs:validateHostCredentialRefs(value.credentialRefs??[])};
  }catch{throw Error('host_profile_settings_invalid');}
 }
 
@@ -63,7 +65,7 @@ export async function createHostProfile({home,name='jot',adapter=fileURLToPath(n
    ...(configuredHostSettings?[{id:'jot-host-policy',name:pathToFileURL(policyEntry).href,config:{}}]:[]),
    {id:'jot-mcp-runtime-provider',name:pathToFileURL(mcpProvider).href,...(configuredMcpHttpPolicy||configuredMcpStdioPolicy?{config:{...(configuredMcpHttpPolicy?{httpPolicy:configuredMcpHttpPolicy}:{}),...(configuredMcpStdioPolicy?{stdioPolicy:configuredMcpStdioPolicy}:{})}}:{})},
    {id:'jot-session-adapter',name:pathToFileURL(adapter).href,inject:['jotHostReady'],config:{host:'127.0.0.1',port:18841,tokenEnv:'JOT_SESSION_ADAPTER_TOKEN',workbenchTokenEnv:'GENERAL_AGENT_INTERNAL_CHANNEL_TOKEN',workbenchOrigin:origin,nativeContinuation:!!route,nativeRoles:false,webBudgetEnabled:false,voiceEnabled:false,...(route?{workbenchModel:route}:{}),
-    ...(configuredHostSettings?{hostSettingsBootstrap:configuredHostSettings.bootstrap,hostSettingsOwnerRoutesEnabled:true,hostSettingsWriteEnabled:true,hostSettingsWriteNamespace:configuredHostSettings.writeNamespace,hostSettingsProductSchema:configuredHostSettings.productSchema,hostCredentialRefs:configuredHostSettings.credentialRefs}:{})}},
+    ...(configuredHostSettings?{pluginProfileEnabled:configuredHostSettings.pluginProfileEnabled,hostSettingsBootstrap:configuredHostSettings.bootstrap,hostSettingsOwnerRoutesEnabled:true,hostSettingsWriteEnabled:true,hostSettingsWriteNamespace:configuredHostSettings.writeNamespace,hostSettingsProductSchema:configuredHostSettings.productSchema,hostCredentialRefs:configuredHostSettings.credentialRefs}:{})}},
   ]},
  ];
  // Preserve the official lazy expression. JSON is valid YAML; this one value

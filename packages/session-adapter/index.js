@@ -41,6 +41,7 @@ import {createNativeWorkspaceAdmissionGate} from './native-workspace-factory.js'
 import {createNativeGitHost,normalizeNativeGitHostConfig} from './native-git-host.js'
 import {createMcpControlHost,createMcpControlRouteHandler} from './mcp-control-host.js'
 import {createMcpDiscoveryScopeResolver} from './mcp-discovery-control.js'
+import {createGatewayPluginProfileReceiptClient,createDshProfilePluginControl} from './dsh-profile-plugin-control.js'
 import {resolveOwnerBoundDshProfileContext} from './dsh-profile-binding.js'
 
 import {normalizeLeaseTakeoverRequest,settleLeaseTakeover} from './lease-takeover.js'
@@ -262,7 +263,7 @@ async function createOrResumeSession({controller,request,agents,sessions,session
   return value
 }
 
-export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,skillContentCommand,skillCatalogCommand,skillResourceCommand,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation=false,sessionNotFoundError,modelCatalogReader,requireOrdinaryModelPolicy=false,chatExecutionPolicy,chatModeReadiness,mcpControlRoute,hostPolicyBootstrap,hostSettingsProductHandler,hostAdmissionGuard }) {
+export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,skillContentCommand,skillCatalogCommand,skillResourceCommand,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation=false,sessionNotFoundError,modelCatalogReader,requireOrdinaryModelPolicy=false,chatExecutionPolicy,chatModeReadiness,mcpControlRoute,pluginProfileControl,hostPolicyBootstrap,hostSettingsProductHandler,hostAdmissionGuard }) {
   const allowedPresets=new Set(ALLOWED_AGENT_PRESETS)
   if(chatExecutionPolicy!==undefined){normalizeChatExecutionPolicy(chatExecutionPolicy);if(!requireOrdinaryModelPolicy||!ordinaryInputAdmissionHost)throw Error('ordinary_execution_policy_config_invalid');allowedPresets.add('jot-chat')}
   const voiceHandler = voiceEnabled ? createVoiceAdapterHandler({ speechController, token }) : null
@@ -293,6 +294,18 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
 
   const dispatch=async ({ method, url, headers, body, signal = new AbortController().signal },activityAdmissionId) => {
     if (!authorized(headers.authorization, token)) return json(401, { error: 'unauthorized' })
+    if(url.pathname.startsWith('/v1/plugin-profile/')){
+      if(method!=='POST')return json(405,{error:'method_not_allowed'});
+      if(typeof pluginProfileControl?.handle!=='function')return json(503,{error:'plugin_profile_unavailable'});
+      try{return json(200,await pluginProfileControl.handle({method,pathname:url.pathname,body,signal}));}
+      catch(error){
+        const code=String(error?.code??error?.message??'');
+        if(code==='plugin_profile_scope_mismatch'||code==='plugin_operation_not_authorized')return json(403,{error:'plugin_operation_not_authorized'});
+        if(['plugin_operation_unknown','plugin_profile_receipt_not_found','plugin_profile_receipt_state_conflict','plugin_profile_receipt_scope_mismatch'].includes(code))return json(409,{error:'plugin_operation_unknown'});
+        if(['plugin_profile_request_invalid','plugin_operation_request_invalid','plugin_operation_id_invalid','plugin_install_spec_invalid','plugin_bundle_name_invalid'].includes(code))return json(422,{error:'plugin_profile_request_invalid'});
+        return json(503,{error:'plugin_profile_unavailable'});
+      }
+    }
     if(hostSettingsProductHandler&&url.pathname.startsWith('/v1/host-admin/settings/')&&url.pathname!=='/v1/host-admin/settings/readiness'){
       const result=await hostSettingsProductHandler({path:url.pathname,method,authorization:headers.authorization,body,...(url.pathname==='/v1/host-admin/settings/write'&&typeof activityAdmissionId==='string'?{activityAdmissionId}:{})});
       if(result)return json(result.status,result.payload);
@@ -904,6 +917,8 @@ async function readJson(req, limit = 1024 * 1024) {
 }
 
 export function apply(ctx, config = {}) {
+  if(config.pluginProfileEnabled!==undefined&&typeof config.pluginProfileEnabled!=='boolean')throw Error('plugin_profile_config_invalid');
+  if(config.pluginProfileEnabled===true&&config.hostSettingsBootstrap===undefined)throw Error('plugin_profile_bootstrap_required');
   if(config.hostCredentialRefs!==undefined&&validateHostCredentialRefs(config.hostCredentialRefs).length&&(!config.hostSettingsBootstrap||config.hostSettingsOwnerRoutesEnabled!==true))throw Error('host_credentials_route_invalid')
   if(config.hostSettingsBootstrap!==undefined)validateHostPolicyBootstrapRuntimeConfig(config.hostSettingsBootstrap)
   if(config.hostSettingsOwnerRoutesEnabled!==undefined&&typeof config.hostSettingsOwnerRoutesEnabled!=='boolean')throw Error('host_settings_owner_routes_config_invalid')
@@ -1001,6 +1016,18 @@ export function apply(ctx, config = {}) {
       hostSettingsWriteEnabled:config.hostSettingsWriteEnabled===true,hostSettingsWriteNamespace:config.hostSettingsWriteNamespace,
       hostSettingsProductSchema:config.hostSettingsProductSchema,hostCredentialRefs:config.hostCredentialRefs,workbenchBridge
     })
+    let pluginProfileControl;
+    if(config.pluginProfileEnabled===true){
+      if(!workbenchBridge||workbenchToken.length<16)throw Error('plugin_profile_host_unavailable');
+      try{
+        pluginProfileControl=createDshProfilePluginControl({
+          binding:resolveOwnerBoundDshProfileContext(ctx.get('profileContext')),
+          pluginManager:ctx.get('pluginManager'),
+          policyAuthority:ctx.get('jotHostPluginMutationAuthority',false),
+          gatewayReceiptExecutor:createGatewayPluginProfileReceiptClient({origin:workbenchBridge.origin,token:workbenchToken})
+        });
+      }catch(cause){throw Error('plugin_profile_host_unavailable',{cause});}
+    }
     const hostAdmissionGuard=config.hostSettingsWriteEnabled===true?{
       begin:async()=>{const result=await workbenchBridge.requestHostSettings('admission/begin',{});return result?.kind==='admitted'?result.admission_id:undefined;},
       end:async admission_id=>workbenchBridge.requestHostSettings('admission/end',{admission_id})
@@ -1114,7 +1141,7 @@ export function apply(ctx, config = {}) {
       sessions:ctx.sessions,persistence:ctx.sessionPersistence,sessionNotFoundError:ApiSessionNotFound,
       speechController, voiceEnabled, token, workbenchBridge, skillContentCommand, skillCatalogCommand, skillResourceCommand,
       budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation:config.nativeIdleObservation===true,
-      chatModeReadiness,modelCatalogReader:createModelCatalogReader({llm:ctx.llm,enabled:config.ordinaryModelSelection===true,routeHealth:modelRouteHealth}),requireOrdinaryModelPolicy:config.ordinaryModelSelection===true,...(chatExecutionPolicy?{chatExecutionPolicy}:{}),mcpControlRoute,...(hostPolicyBootstrapRuntime?.bootstrap?{hostPolicyBootstrap:hostPolicyBootstrapRuntime.bootstrap}:{}),...(hostPolicyBootstrapRuntime?.productHandler?{hostSettingsProductHandler:hostPolicyBootstrapRuntime.productHandler}:{}),...(hostAdmissionGuard?{hostAdmissionGuard}:{}) })
+      chatModeReadiness,modelCatalogReader:createModelCatalogReader({llm:ctx.llm,enabled:config.ordinaryModelSelection===true,routeHealth:modelRouteHealth}),requireOrdinaryModelPolicy:config.ordinaryModelSelection===true,...(chatExecutionPolicy?{chatExecutionPolicy}:{}),mcpControlRoute,pluginProfileControl,...(hostPolicyBootstrapRuntime?.bootstrap?{hostPolicyBootstrap:hostPolicyBootstrapRuntime.bootstrap}:{}),...(hostPolicyBootstrapRuntime?.productHandler?{hostSettingsProductHandler:hostPolicyBootstrapRuntime.productHandler}:{}),...(hostAdmissionGuard?{hostAdmissionGuard}:{}) })
     const server = createServer(async (req, res) => {
       const abort = new AbortController()
       req.once('aborted', () => abort.abort())
