@@ -1816,5 +1816,32 @@
     "TaskPrdTemplateApply",
     "200",
     "Confirm the exact template preview under the original paused task, role, unresolved-execution and workspace write guards. Reuse original atomic command, file versions, target CAS and durable binary import receipts. Replays retain original body and key. File remains source material for the original PRD bind flow."
+  ],
+  [
+    "GET",
+    "/v1/persistent-tasks/{task_id}/prd/taskmaster-prd-files",
+    "List original project PRD files",
+    null,
+    "TaskPrdProjectDocuments",
+    "200",
+    "Page the original operator-bound owner/project .taskmaster/docs directory, 50 Markdown/text files per page. Stable directory, alias, file and repository witnesses are checked. No content reads or execution authorization. Unsupported document entries are counted."
+  ],
+  [
+    "POST",
+    "/v1/persistent-tasks/{task_id}/prd/taskmaster-prd-preview",
+    "Preview exact original project PRD document",
+    "TaskPrdProjectDocumentRequest",
+    "TaskPrdProjectDocumentPreview",
+    "200",
+    "Read at most 1 MiB from one safe single-level Markdown/text document in the original configured project repository. Recheck owner/task/role/project context. Strict UTF-8/text validation and exact content/source/repository hashes. Capture the original logical target version for confirmation. Read-only under original authentication, Origin and CSRF."
+  ],
+  [
+    "POST",
+    "/v1/persistent-tasks/{task_id}/prd/taskmaster-prd-import",
+    "Import confirmed original project PRD document",
+    "TaskPrdProjectDocumentImportRequest",
+    "TaskPrdProjectDocumentImport",
+    "200",
+    "Re-read the selected document to match its exact confirmed preview, then commit through original paused task, role, unresolved-execution/fees, workspace and target-version guards. Reuse original atomic persistent-task command, immutable binary file version and durable receipt. Preserve exact request/key replay before fresh I/O after HTTP receipt expiry. Original source preview/bind follows separately."
   ]
 ]

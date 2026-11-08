@@ -6,7 +6,7 @@ import type {ValidateFunction} from 'ajv';
 const Ajv=(AjvModule as unknown as {default:new(options:Record<string,unknown>)=>{compile(schema:unknown):ValidateFunction}}).default;
 const ajv=new Ajv({strict:false,coerceTypes:false,removeAdditional:false});
 const validatorCompiler=({schema}:{schema:unknown})=>ajv.compile(schema);
-declare module 'fastify' {interface FastifyContextConfig {taskPrdCommand?:'preview'|'bind'|'template-preview'}}
+declare module 'fastify' {interface FastifyContextConfig {taskPrdCommand?:'preview'|'bind'|'template-preview'|'project-prd-preview'}}
 export const prdSelectionSchema={oneOf:[
  {type:'object',additionalProperties:false,required:['kind','path','version','sha256'],properties:{kind:{const:'logical_file'},path:{type:'string',minLength:1,maxLength:1024},version:{type:'integer',minimum:1,maximum:Number.MAX_SAFE_INTEGER},sha256:{type:'string',pattern:'^[a-f0-9]{64}$'}}},
  {type:'object',additionalProperties:false,required:['kind','artifact_id','version','sha256'],properties:{kind:{const:'upload'},artifact_id:{type:'string',minLength:1,maxLength:200},version:{type:'integer',minimum:1,maximum:Number.MAX_SAFE_INTEGER},sha256:{type:'string',pattern:'^[a-f0-9]{64}$'}}},
@@ -19,6 +19,10 @@ export const prdTemplateRequestSchema={type:'object',additionalProperties:false,
 }};
 export const prdTemplateApplySchema={...prdTemplateRequestSchema,required:['template_id','file_name','preview_sha256'],properties:{
  ...prdTemplateRequestSchema.properties,preview_sha256:{type:'string',pattern:'^[a-f0-9]{64}$'},
+}};
+export const prdProjectDocumentRequestSchema={type:'object',additionalProperties:false,required:['file_name'],properties:{file_name:{type:'string',minLength:1,maxLength:255}}};
+export const prdProjectDocumentImportSchema={...prdProjectDocumentRequestSchema,required:['file_name','preview_sha256'],properties:{
+ ...prdProjectDocumentRequestSchema.properties,preview_sha256:{type:'string',pattern:'^[a-f0-9]{64}$'},
 }};
 /** Outer server retains actor/origin/CSRF validation. taskPrdCommand routes must
  * bypass its generic ledger: preview is read-only; bind has an atomic receipt. */
@@ -49,6 +53,17 @@ export function registerTaskPrdRoutes(app:FastifyInstance,service:TaskPrdService
  });
  app.get('/v1/persistent-tasks/:taskId/prd/taskmaster-project',{validatorCompiler,errorHandler,schema:{params}},async(r,reply)=>{
   reply.header('cache-control','private, no-store');return service.taskmasterProject(actor(r),task(r));
+ });
+ app.get('/v1/persistent-tasks/:taskId/prd/taskmaster-prd-files',{validatorCompiler,errorHandler,schema:{params,querystring:{type:'object',additionalProperties:false,properties:{after:{type:'string',minLength:1,maxLength:255}}}}},async(r,reply)=>{
+  reply.header('cache-control','private, no-store');return service.taskmasterPrdFiles(actor(r),task(r),(r.query as {after?:string}).after);
+ });
+ app.post('/v1/persistent-tasks/:taskId/prd/taskmaster-prd-preview',{validatorCompiler,errorHandler,config:{taskPrdCommand:'project-prd-preview'},schema:{params,body:prdProjectDocumentRequestSchema}},async(r,reply)=>{
+  reply.header('cache-control','private, no-store');return service.taskmasterPrdPreview(actor(r),task(r),r.body);
+ });
+ app.post('/v1/persistent-tasks/:taskId/prd/taskmaster-prd-import',{validatorCompiler,errorHandler,schema:{params,body:prdProjectDocumentImportSchema}},async(r,reply)=>{
+  reply.header('cache-control','private, no-store');if(!atomicCommand)throw Error('prd_taskmaster_import_unavailable');
+  const commit=await service.prepareTaskmasterPrdImport(actor(r),task(r),r.body,r.headers['idempotency-key']);
+  return atomicCommand(r,200,commit);
  });
  app.post('/v1/persistent-tasks/:taskId/prd/taskmaster-import',{validatorCompiler,errorHandler,schema:{params,body:{type:'object',additionalProperties:false,required:['preview_sha256'],properties:{preview_sha256:{type:'string',pattern:'^[a-f0-9]{64}$'}}}}},async(r,reply)=>{
   reply.header('cache-control','private, no-store');if(!atomicCommand)throw Error('prd_taskmaster_import_unavailable');

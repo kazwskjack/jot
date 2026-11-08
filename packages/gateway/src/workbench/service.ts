@@ -32,7 +32,7 @@ import {installNativeChildRuns,assertNativeReservation,assertNativeRun,assertNat
 import {assertExecutionLease} from './execution-lease.ts';
 
 type Input = Record<string, unknown>;
-import type {TaskPrdImportSource,TaskPrdTemplateSource} from '../../contracts/types.ts';
+import type {TaskPrdImportSource,TaskPrdTemplateSource,TaskPrdProjectDocumentSource} from '../../contracts/types.ts';
 type PreparedModelAcceptance={source:ReturnType<WorkbenchService['modelAcceptanceSource']>;bindings:TrustedModelMetadataBinding[]};
 type Row = Record<string, string | number | null>;
 type FileLifecycleAction = 'rename' | 'delete';
@@ -1773,20 +1773,22 @@ export class WorkbenchService {
       WHERE owner_id=? AND workspace_id=? AND project_id=? AND command_key=?`).get(owner,workspace,projectId,this.fileLifecycleRequestKey(key)) as {receipt_json:string;receipt_sha256:string}|undefined;
     return row?this.fileLifecycleReceipt(row):undefined;
   }
-  writeBinaryFile(owner: string, workspaceId: string, input: Input, content: Buffer, provenance?:TaskPrdImportSource|TaskPrdTemplateSource) {
+  writeBinaryFile(owner: string, workspaceId: string, input: Input, content: Buffer, provenance?:TaskPrdImportSource|TaskPrdTemplateSource|TaskPrdProjectDocumentSource) {
     const workspace=this.workspace(workspaceId),project=text(input.project_id,'invalid_project_id',128),path=this.filePath(input.path),
       expected=integer(input.expected_version),key=this.fileLifecycleRequestKey(input.command_key);
     if(!Buffer.isBuffer(content)||content.byteLength>104_857_600)throw new Error('invalid_binary_file_content');
     this.projects.assertOwned(project,owner);
     if(provenance){
-      const template=provenance.kind==='prd_template',keys=Object.keys(provenance).sort().join(',');
+      const template=provenance.kind==='prd_template',projectPrd=provenance.kind==='taskmaster_prd_import',keys=Object.keys(provenance).sort().join(',');
       const validKind=template
         ?keys==='kind,preview_sha256,relative_path,request_sha256,task_id,task_version,template_id,template_sha256'
           &&/^\.taskmaster\/docs\/[^/]+\.(md|markdown|txt)$/i.test(path)&&['web-app','api','mobile-app','data-analysis'].includes(provenance.template_id)
+        :projectPrd?keys==='kind,preview_sha256,relative_path,repository_sha256,request_sha256,source_sha256,task_id,task_version'
+          &&/^\.taskmaster\/docs\/[^/]+\.(md|markdown|txt)$/i.test(path)
         :provenance.kind==='taskmaster_project_import'&&keys==='kind,preview_sha256,relative_path,repository_sha256,source_sha256,task_id,task_version'
           &&path==='.taskmaster/tasks/tasks.json';
       const hashes=template?[provenance.preview_sha256,provenance.request_sha256,provenance.template_sha256]
-        :[provenance.preview_sha256,provenance.source_sha256,provenance.repository_sha256];
+        :[provenance.preview_sha256,provenance.source_sha256,provenance.repository_sha256,...(projectPrd?[provenance.request_sha256]:[])];
       if(!validKind||provenance.relative_path!==path||typeof provenance.task_id!=='string'||!provenance.task_id
         ||!Number.isSafeInteger(provenance.task_version)||provenance.task_version<1
         ||hashes.some(value=>typeof value!=='string'||!/^[a-f0-9]{64}$/.test(value)))throw Error('invalid_binary_file_source');

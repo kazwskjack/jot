@@ -31,6 +31,7 @@ const messages={
  CSRF_INVALID:'页面验证已失效，请刷新当前页面后重试原请求。',
  ORIGIN_FORBIDDEN:'当前页面来源未获允许，请从正式工作台重新打开。',
  INTERNAL_ERROR:'服务暂未确认结果，请稍后重试原请求。',
+ INVALID_PRD_FILE_NAME:'项目 PRD 文件名无效，请选择单层 Markdown 或文本文件。',
  INVALID_PRD_TEMPLATE_FILE:'模板文件名无效，请使用单层 Markdown 或文本文件名。',
  INVALID_PRD_TEMPLATE_VALUES:'模板字段须为最多 32 个字符串字段，每个值最多 2,000 字符。',
  PRD_TEMPLATE_NOT_FOUND:'模板已变化，请刷新模板目录后重新选择。',
@@ -49,7 +50,7 @@ function selection(source){
 function rejected(error){return Number.isInteger(error?.status)&&error.status>=400&&error.status<500&&error.status!==408&&error.message!=='IDEMPOTENCY_IN_PROGRESS';}
 export class PrdCommandStore {
  constructor(storage,scope,taskId,operation='bind'){
-  if(!/^[a-f0-9]{64}$/.test(scope)||!['bind','taskmaster-import','template-apply'].includes(operation))throw Error('PRD 回执用户范围不可用');
+  if(!/^[a-f0-9]{64}$/.test(scope)||!['bind','taskmaster-import','template-apply','taskmaster-prd-import'].includes(operation))throw Error('PRD 回执用户范围不可用');
   this.storage=storage;this.operation=operation;this.path=`/persistent-tasks/${encodeURIComponent(taskId)}/prd/${operation}`;
   this.key=`jot-task-prd/v1/${scope}/${encodeURIComponent(taskId)}`+(operation==='bind'?'':`/${operation}`);
  }
@@ -61,6 +62,8 @@ export class PrdCommandStore {
     ||!['web-app','api','mobile-app','data-analysis'].includes(body.template_id)||typeof body.file_name!=='string'||!body.file_name||body.file_name.length>200
     ||(values!==undefined&&(!values||typeof values!=='object'||Array.isArray(values)||Object.keys(values).length>32
      ||Object.entries(values).some(([key,value])=>!key||key.length>100||typeof value!=='string'||value.length>2000))))throw Error('PRD 原请求回执无效，请保留本站存储以便核对');
+  }else if(this.operation==='taskmaster-prd-import'){
+   if(Object.keys(command.body).sort().join(',')!=='file_name,preview_sha256'||typeof command.body.file_name!=='string'||!command.body.file_name||command.body.file_name.length>255)throw Error('PRD 原请求回执无效，请保留本站存储以便核对');
   }else if(this.operation==='bind'?(JSON.stringify(selection(command.body.source))!==JSON.stringify(command.body.source)||Object.keys(command.body).sort().join(',')!=='preview_sha256,source')
    :Object.keys(command.body).join(',')!=='preview_sha256')throw Error('PRD 原请求回执无效，请保留本站存储以便核对');
   return {command};

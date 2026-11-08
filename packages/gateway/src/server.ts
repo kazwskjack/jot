@@ -354,6 +354,7 @@ export async function buildServer(config: {
     'POST /v1/persistent-tasks/:taskId/delegations',
     'POST /v1/persistent-tasks/:taskId/prd/taskmaster-import',
     'POST /v1/persistent-tasks/:taskId/prd/template-apply',
+    'POST /v1/persistent-tasks/:taskId/prd/taskmaster-prd-import',
   ]);
   const isPersistentTaskMutationRoute=(request:any)=>persistentTaskMutationRoutes.has(`${request.method} ${request.routeOptions.url}`);
   const isPluginProfileMutationRoute=(request:any)=>request.routeOptions.config?.pluginProfileMutation===true;
@@ -426,7 +427,7 @@ export async function buildServer(config: {
     // Only these server-registered route markers use the PRD service's own
     // immutable transaction/receipt; never persist read-only preview requests.
     const prdCommand=(request.routeOptions.config as {taskPrdCommand?:string}).taskPrdCommand;
-    if(request.method==='POST'&&['preview','bind','template-preview'].includes(prdCommand??''))return;
+    if(request.method==='POST'&&['preview','bind','template-preview','project-prd-preview'].includes(prdCommand??''))return;
     // Preview only computes a schedule; retain authentication and CSRF without persisting requests.
     if (request.method === 'POST' && request.url.split('?')[0] === '/v1/persistent-tasks/preview') return;
     if ((request.routeOptions.url ?? request.url).includes('/voice/transcriptions')) return;

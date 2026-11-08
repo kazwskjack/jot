@@ -1,12 +1,13 @@
 import {createHash} from 'node:crypto';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {constants} from 'node:fs';
-import {lstat as nativeLstat,open,realpath,readdir,mkdir,mkdtemp,writeFile,rm,utimes} from 'node:fs/promises';
+import {lstat as nativeLstat,open,opendir,realpath,readdir,mkdir,mkdtemp,writeFile,rm,utimes} from 'node:fs/promises';
 import {isAbsolute,resolve,join,dirname,relative,sep,basename} from 'node:path';
 import {tmpdir} from 'node:os';
 import {workspaceRelativePath} from '../always-on/workspace-provider.ts';
 import {gitExecutable,readGit} from './process.ts';
 import {readCommitTree,type GitCommitReviewWitness} from './commit-tree.ts';
+import {taskmasterPrdPath} from '../workbench/taskmaster-path.ts';
 
 export type GitInspectionOptions={root:string;gitDirectory?:string;commonDirectory?:string;executable?:string;limits?:Partial<{maxOutputBytes:number;timeoutMs:number;maxEntries:number;maxMetadataEntries:number;maxDiffBytes:number}>};
 export type GitEntry={path:string;original_path?:string;index_status:string;worktree_status:string;conflicted:boolean;kind:'file'|'directory'|'symlink'|'missing'|'other'};
@@ -19,7 +20,7 @@ export type GitPublicationTargetFile={path:string;kind:'file'|'missing';sha256:s
 export type GitPublicationTargetWitness={protocol:1;kind:'publication_target';snapshot_id:string;repository_sha256:string;
  head:GitSnapshot['head'];index_sha256:string|null;files:GitPublicationTargetFile[];attributes:GitReviewWitness['attributes'];execution_authorized:false;target_sha256:string};
 export type GitPublicationTargetRead={witness:GitPublicationTargetWitness;contents:Map<string,Buffer>};
-export type TaskmasterProjectFile={path:'.taskmaster/config.json'|'.taskmaster/tasks/tasks.json';kind:'missing'|'too_large'|'file';size:number;sha256:string|null;content:Buffer|null};
+export type TaskmasterProjectFile<Path extends string='.taskmaster/config.json'|'.taskmaster/tasks/tasks.json'>={path:Path;kind:'missing'|'too_large'|'file';size:number;sha256:string|null;content:Buffer|null};
 const hash=(value:string|Buffer)=>createHash('sha256').update(value).digest('hex');
 const same=(a:string,b:string)=>process.platform==='win32'?a.toLowerCase()===b.toLowerCase():a===b;
 const within=(root:string,path:string)=>same(root,path)||same(root+sep,path.slice(0,root.length+1));
@@ -73,8 +74,11 @@ export class GitRepositoryInspection{
  protected async bytes(path:string,max:number,expected?:string){
   const before=await lstat(path);if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1n||before.size>max||expected!==undefined&&witness(before)!==expected)throw Error('git_path_unavailable');
   const file=await open(path,constants.O_RDONLY|(constants.O_NOFOLLOW??0));try{
-   if(witness(await file.stat({bigint:true}))!==witness(before))throw Error('git_snapshot_changed');const bytes=await file.readFile();
-   if(bytes.length>max||witness(await file.stat({bigint:true}))!==witness(before)||witness(await lstat(path))!==witness(before))throw Error('git_snapshot_changed');return bytes;
+   if(witness(await file.stat({bigint:true}))!==witness(before))throw Error('git_snapshot_changed');
+   // One overflow byte detects growth without allowing readFile to follow it indefinitely.
+   const bytes=Buffer.alloc(Number(before.size)+1);let length=0;
+   while(length<bytes.length){const {bytesRead}=await file.read(bytes,length,bytes.length-length,length);if(!bytesRead)break;length+=bytesRead;}
+   if(length!==Number(before.size)||witness(await file.stat({bigint:true}))!==witness(before)||witness(await lstat(path))!==witness(before))throw Error('git_snapshot_changed');return bytes.subarray(0,length);
   }finally{await file.close();}
  }
  protected async run(context:ReadContext,args:string[],signal?:AbortSignal,allowMissing=false){
@@ -149,31 +153,85 @@ export class GitRepositoryInspection{
  async inspect(signal?:AbortSignal):Promise<GitSnapshot>{const context=await this.context(signal);try{return await this.inspectContext(context,signal);}finally{await context.dispose();}}
  /** Fixed Taskmaster inputs from the operator-bound repository, without a Git command or write. */
  async taskmasterFiles(signal?:AbortSignal){
-  const before=await this.anchors(signal),files:TaskmasterProjectFile[]=[];
+  return this.taskmasterInputs([{path:'.taskmaster/config.json',maxBytes:65536},{path:'.taskmaster/tasks/tasks.json',maxBytes:1048576}] as const,signal);
+ }
+ async taskmasterPrdFile(fileName:string,signal?:AbortSignal){
+  return this.taskmasterInputs([{path:taskmasterPrdPath(fileName),maxBytes:1048576}],signal);
+ }
+ private async taskmasterInputs<Path extends string>(inputs:readonly {path:Path;maxBytes:number}[],signal?:AbortSignal){
+  const before=await this.anchors(signal),files:TaskmasterProjectFile<Path>[]=[];
   const facts:GitPublicationTargetFile[]=[];
-  const paths=['.taskmaster/config.json','.taskmaster/tasks/tasks.json'] as const;
-  for(const path of paths){
+  for(const {path,maxBytes} of inputs){
    signal?.throwIfAborted();
-   const fact=await this.publicationPath(path,signal);
+   const fact=await this.publicationPath(path,signal,Number.MAX_SAFE_INTEGER);
    let content:Buffer|null=null;
-   const maxBytes=path==='.taskmaster/config.json'?65536:1048576;
    if(fact.kind==='file'&&fact.size<=maxBytes){
     const stat=await lstat(join(this.root,path));
     if(hash(witness(stat))!==fact.stat_sha256)throw Error('git_snapshot_changed');
     content=await this.bytes(join(this.root,path),maxBytes,witness(stat));
    }
-   if(canonicalJson(await this.publicationPath(path,signal))!==canonicalJson(fact))throw Error('git_snapshot_changed');
+   if(canonicalJson(await this.publicationPath(path,signal,Number.MAX_SAFE_INTEGER))!==canonicalJson(fact))throw Error('git_snapshot_changed');
    const sha256=content===null?null:hash(content);
    facts.push({...fact,sha256});
    files.push({path,kind:fact.kind==='missing'?'missing':content===null?'too_large':'file',size:fact.size,sha256,content});
   }
   for(const {sha256,...fact} of facts){
-   if(canonicalJson(await this.publicationPath(fact.path,signal))!==canonicalJson(fact))throw Error('git_snapshot_changed');
+   if(canonicalJson(await this.publicationPath(fact.path,signal,Number.MAX_SAFE_INTEGER))!==canonicalJson(fact))throw Error('git_snapshot_changed');
   }
   const after=await this.anchors(signal);
   if(after.repository!==before.repository||after.metadata!==before.metadata)throw Error('git_snapshot_changed');
   signal?.throwIfAborted();
   return {repository_sha256:before.repository,source_sha256:hash(canonicalJson({repository:before.repository,metadata:before.metadata,files:facts})),files};
+ }
+ private async taskmasterPrdNames(signal?:AbortSignal){
+  let current=this.root;const directories=[hash(witness(await lstat(current)))];
+  for(const part of ['.taskmaster','docs']){
+   signal?.throwIfAborted();const aliases:string[]=[];let count=0;
+   for await(const entry of await opendir(current)){
+    signal?.throwIfAborted();if(++count>this.limits.maxMetadataEntries)throw Error('git_metadata_limit');
+    if(entry.name.normalize('NFC').toLowerCase()===part)aliases.push(entry.name);
+   }
+   if(aliases.length>1||aliases.length===1&&aliases[0]!==part)throw Error('git_path_unavailable');
+   if(!aliases.length)return {state:'missing' as const,directories,names:[] as string[],unsupported_count:0};
+   current=join(current,part);const stat=await lstat(current);
+   if(!stat.isDirectory()||stat.isSymbolicLink())throw Error('git_path_unavailable');
+   directories.push(hash(witness(stat)));
+  }
+  const names:string[]=[];let count=0,unsupported=0;
+  for await(const entry of await opendir(current)){
+   signal?.throwIfAborted();if(++count>this.limits.maxMetadataEntries)throw Error('git_metadata_limit');
+   if(!/\.(md|markdown|txt)$/i.test(entry.name))continue;
+   if(!entry.isFile()){unsupported++;continue;}
+   try{taskmasterPrdPath(entry.name);}catch{unsupported++;continue;}
+   names.push(entry.name);
+  }
+  names.sort();
+  if(new Set(names.map(name=>name.normalize('NFC').toLowerCase())).size!==names.length)throw Error('git_path_unavailable');
+  return {state:'present' as const,directories,names,unsupported_count:unsupported};
+ }
+ private async taskmasterPrdFact(path:string,signal?:AbortSignal){
+  signal?.throwIfAborted();const fact=await this.file(path);
+  if(fact.kind==='missing')return {path,kind:'missing' as const,size:0,stat_sha256:null};
+  if(fact.kind!=='file')throw Error('git_path_unavailable');
+  const stat=await lstat(join(this.root,path));
+  if(witness(stat)!==fact.stamp||stat.size>BigInt(Number.MAX_SAFE_INTEGER))throw Error('git_snapshot_changed');
+  return {path,kind:'file' as const,size:Number(stat.size),stat_sha256:hash(fact.stamp)};
+ }
+ async taskmasterPrdFiles(after:string|undefined,signal?:AbortSignal){
+  if(after!==undefined)taskmasterPrdPath(after);
+  const before=await this.anchors(signal),listing=await this.taskmasterPrdNames(signal);
+  const candidates=listing.names.filter(name=>after===undefined||name>after),names=candidates.slice(0,50);
+  const facts:Awaited<ReturnType<GitRepositoryInspection['taskmasterPrdFact']>>[]=[];
+  for(const name of names)facts.push(await this.taskmasterPrdFact(taskmasterPrdPath(name),signal));
+  if(canonicalJson(await this.taskmasterPrdNames(signal))!==canonicalJson(listing))throw Error('git_snapshot_changed');
+  for(const fact of facts)if(canonicalJson(await this.taskmasterPrdFact(fact.path,signal))!==canonicalJson(fact))throw Error('git_snapshot_changed');
+  const end=await this.anchors(signal);
+  if(end.repository!==before.repository||end.metadata!==before.metadata)throw Error('git_snapshot_changed');
+  signal?.throwIfAborted();
+  return {repository_sha256:before.repository,source_sha256:hash(canonicalJson({repository:before.repository,metadata:before.metadata,listing,files:facts})),
+   directory_state:listing.state,total:listing.names.length,unsupported_count:listing.unsupported_count,
+   files:facts.map(fact=>({name:basename(fact.path),path:fact.path,size:fact.size,state:fact.kind==='missing'?'missing' as const:fact.size>1048576?'too_large' as const:'available' as const})),
+   next_after:candidates.length>names.length?names[names.length-1]!:null};
  }
  private async attributeManifest(paths:readonly string[],signal?:AbortSignal):Promise<GitReviewWitness['attributes']>{
   const names=new Set<string>();for(const path of paths){const parts=path.split('/');parts.pop();while(true){names.add([...parts,'.gitattributes'].join('/'));if(names.size>this.limits.maxMetadataEntries)throw Error('git_metadata_limit');if(!parts.length)break;parts.pop();}}
@@ -183,7 +241,7 @@ export class GitRepositoryInspection{
  }
  /** A distinct before-state read for publication, including clean and absent
   * targets. It does not widen the dirty-only stage/unstage witness. */
- private async publicationPath(path:string,signal?:AbortSignal):Promise<Omit<GitPublicationTargetFile,'sha256'>>{
+ private async publicationPath(path:string,signal?:AbortSignal,maxBytes=32*1024*1024):Promise<Omit<GitPublicationTargetFile,'sha256'>>{
   signal?.throwIfAborted();const parts=path.split('/'),ancestors:GitPublicationTargetFile['ancestors']=[{path:null,kind:'directory',identity_sha256:hash(await this.directory(this.root))}];let current=this.root;
   const missing=():Omit<GitPublicationTargetFile,'sha256'>=>({path,kind:'missing',size:0,mode:0,stat_sha256:null,ancestors});
   for(let index=0;index<parts.length;index++){
@@ -199,7 +257,7 @@ export class GitRepositoryInspection{
     if(!stat.isDirectory())throw Error('git_path_unavailable');
     ancestors.push({path:parts.slice(0,index+1).join('/'),kind:'directory',identity_sha256:hash(identity(stat))});
    }else{
-    if(!stat.isFile()||stat.nlink!==1n||stat.size>32n*1024n*1024n)throw Error('git_path_unavailable');
+    if(!stat.isFile()||stat.nlink!==1n||stat.size>BigInt(maxBytes))throw Error('git_path_unavailable');
     return{path,kind:'file',size:Number(stat.size),mode:Number(stat.mode&0o777n),stat_sha256:hash(witness(stat)),ancestors};
    }
   }throw Error('git_path_unavailable');

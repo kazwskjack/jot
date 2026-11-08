@@ -538,3 +538,23 @@ export type TaskPrdTemplateApply = {
  task_id:string;task_version:number;preview_sha256:string;execution_authorized:false;
  file:{protocol:1;workspace_id:string;project_id:string;path:string;version:number;sha256:string;size:number;source:TaskPrdTemplateSource;updated_at:string};
 };
+
+export type TaskPrdProjectDocumentEntry = {name:string;path:string;size:number;state:"available"|"missing"|"too_large"};
+export type TaskPrdProjectDocuments = {
+ task_id:string;task_version:number;project_id:string;repository_sha256:string;source_sha256:string;
+ directory_state:"missing"|"present";total:number;unsupported_count:number;files:TaskPrdProjectDocumentEntry[];next_after:string|null;execution_authorized:false;
+};
+export type TaskPrdProjectDocumentRequest = {file_name:string};
+export type TaskPrdProjectDocumentPreview = {
+ task_id:string;task_version:number;project_id:string;workspace_id:string;role:TaskPrdPreview["role"];
+ repository_sha256:string;source_sha256:string;preview_sha256:string;execution_authorized:false;
+ file:{path:string;state:"ready"|"missing"|"too_large"|"invalid";size:number;sha256:string|null;content:string|null};
+ target:TaskPrdTemplatePreview["target"];
+};
+export type TaskPrdProjectDocumentImportRequest = TaskPrdProjectDocumentRequest&{preview_sha256:string};
+export type TaskPrdProjectDocumentSource = {
+ kind:"taskmaster_prd_import";relative_path:string;task_id:string;task_version:number;preview_sha256:string;request_sha256:string;source_sha256:string;repository_sha256:string;
+};
+export type TaskPrdProjectDocumentImport = Omit<TaskPrdTemplateApply,"file">&{
+ file:Omit<TaskPrdTemplateApply["file"],"source">&{source:TaskPrdProjectDocumentSource};
+};

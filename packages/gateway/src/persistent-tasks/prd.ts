@@ -15,6 +15,7 @@ import {installPrdRunSources,prdReferenceInstructions,prdRunSourceContext,type P
 import {readUtf8Range,validateFileRange} from '../workbench/utf8-range.ts';
 import {prdTemplates,renderPrdTemplate} from './prd-templates.ts';
 import {workspaceRelativePath} from '../always-on/workspace-provider.ts';
+import {taskmasterPrdPath} from '../workbench/taskmaster-path.ts';
 
 type Row=Record<string,any>;
 export type PrdSelection={kind:'logical_file';path:string;version:number;sha256:string}|{kind:'upload';artifact_id:string;version:number;sha256:string};
@@ -26,7 +27,7 @@ const supported=(name:string)=>/\.(md|markdown|txt|json)$/i.test(name);
 const supportedMedia=(name:string,mediaType:string)=>mediaType.startsWith('text/')||/\.json$/i.test(name)&&mediaType.split(';',1)[0]!.trim().toLowerCase()==='application/json';
 const MAX_BYTES=1048576,MAX_OBJECTIVE=12000;
 const terminal=['succeeded','partial','failed','cancelled','interrupted'];
-type PrdOptions={uploadRoot:string;mcpRegistry?:Pick<McpRegistryService,'taskmasterConnections'>;installationClient?:TaskmasterInstallationClient;projectSource?:Pick<GitWorkbench,'taskmasterFiles'>};
+type PrdOptions={uploadRoot:string;mcpRegistry?:Pick<McpRegistryService,'taskmasterConnections'>;installationClient?:TaskmasterInstallationClient;projectSource?:Pick<GitWorkbench,'taskmasterFiles'>&Partial<Pick<GitWorkbench,'taskmasterPrdFiles'|'taskmasterPrdFile'>>};
 function object(value:unknown,keys:string[]):Row{
  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!keys.includes(key)))throw Error('invalid_prd_request');return value as Row;
 }
@@ -175,6 +176,71 @@ export class TaskPrdService {
    target:{path:'.taskmaster/tasks/tasks.json' as const,version:Number(targetRow?.version??0),sha256:targetRow?String(targetRow.sha256):null,size:Number(targetRow?.size??0)},
    repository_sha256:source.repository_sha256,source_sha256:source.source_sha256,files,execution_authorized:false as const};
   return {...view,import_preview_sha256:sha(canonicalJson(view))};
+ }
+ async taskmasterPrdFiles(owner:string,taskId:string,after:unknown){
+  if(after!==undefined)taskmasterPrdPath(after);
+  const {task,role}=this.scope(owner,taskId);
+  if(!this.options.projectSource?.taskmasterPrdFiles)throw Error('prd_taskmaster_project_unavailable');
+  let source:Awaited<ReturnType<GitWorkbench['taskmasterPrdFiles']>>;
+  try{source=await this.options.projectSource.taskmasterPrdFiles(owner,role.project_id,after as string|undefined,AbortSignal.timeout(15000));}
+  catch{throw Error('prd_taskmaster_project_unavailable');}
+  this.assertProjectContext(owner,taskId,task,role);
+  return {task_id:taskId,task_version:task.version,project_id:role.project_id,...source,execution_authorized:false as const};
+ }
+ private assertProjectContext(owner:string,taskId:string,task:ReturnType<PersistentTaskService['get']>,role:ReturnType<WorkbenchService['getAgent']>){
+  const current=this.scope(owner,taskId);
+  if(current.task.version!==task.version||current.role.agent_id!==role.agent_id||current.role.version!==role.version
+   ||current.role.capability_epoch!==role.capability_epoch||current.role.project_id!==role.project_id||current.role.workspace_id!==role.workspace_id)throw Error('prd_taskmaster_context_changed');
+ }
+ async taskmasterPrdPreview(owner:string,taskId:string,input:unknown){
+  const request=object(input,['file_name']),path=taskmasterPrdPath(request.file_name),fileName=request.file_name as string;
+  const {task,role}=this.scope(owner,taskId);
+  if(!this.options.projectSource?.taskmasterPrdFile)throw Error('prd_taskmaster_project_unavailable');
+  let source:Awaited<ReturnType<GitWorkbench['taskmasterPrdFile']>>;
+  try{source=await this.options.projectSource.taskmasterPrdFile(owner,role.project_id,fileName,AbortSignal.timeout(15000));}
+  catch{throw Error('prd_taskmaster_project_unavailable');}
+  this.assertProjectContext(owner,taskId,task,role);
+  const selected=source.files[0];if(source.files.length!==1||selected?.path!==path)throw Error('prd_source_integrity_failed');
+  let state:'missing'|'too_large'|'invalid'|'ready'=selected.kind==='file'?'invalid':selected.kind,content:string|null=null;
+  if(selected.content!==null){
+   if(selected.content.length>MAX_BYTES||selected.content.length!==selected.size||sha(selected.content)!==selected.sha256)throw Error('prd_source_integrity_failed');
+   try{
+    const text=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(selected.content);
+    if(!text.trim()||/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(text))throw Error('prd_source_unsupported');
+    content=text;state='ready';
+   }catch{state='invalid';}
+  }
+  const target=this.db.prepare('SELECT version,sha256,size FROM wb_files WHERE owner_id=? AND workspace_id=? AND project_id=? AND path=?').get(owner,role.workspace_id,role.project_id,path) as Row|undefined;
+  const view={task_id:taskId,task_version:task.version,project_id:role.project_id,workspace_id:role.workspace_id,
+   role:{agent_id:role.agent_id,version:role.version,capability_epoch:role.capability_epoch},repository_sha256:source.repository_sha256,source_sha256:source.source_sha256,
+   file:{path,state,size:selected.size,sha256:selected.sha256,content},
+   target:{path,version:Number(target?.version??0),sha256:target?String(target.sha256):null,size:Number(target?.size??0)},execution_authorized:false as const};
+  return {...view,preview_sha256:sha(canonicalJson(view))};
+ }
+ async prepareTaskmasterPrdImport(owner:string,taskId:string,input:unknown,key:unknown){
+  const request=object(input,['file_name','preview_sha256']),path=taskmasterPrdPath(request.file_name);
+  if(typeof request.preview_sha256!=='string'||!/^[a-f0-9]{64}$/.test(request.preview_sha256))throw Error('invalid_prd_request');
+  if(typeof key!=='string'||!/^[\x21-\x7E]{8,128}$/.test(key))throw Error('idempotency_key_invalid');
+  const previewHash=request.preview_sha256,requestHash=sha(canonicalJson(request)),commandKey='prd-project-doc-'+sha(canonicalJson({task_id:taskId,key}));
+  const recovered=this.fileImportReceipt(owner,taskId,commandKey,previewHash,'taskmaster_prd_import',requestHash);
+  if(recovered)return ()=>recovered;
+  const view=await this.taskmasterPrdPreview(owner,taskId,{file_name:request.file_name});
+  if(view.preview_sha256!==previewHash)throw Error('prd_preview_changed');
+  if(view.file.state!=='ready'||view.file.content===null)throw Error('prd_source_unsupported');
+  const content=Buffer.from(view.file.content,'utf8');
+  if(content.length!==view.file.size||sha(content)!==view.file.sha256)throw Error('prd_source_integrity_failed');
+  return ()=>withImmediateTransaction(this.db,()=>{
+   const prior=this.fileImportReceipt(owner,taskId,commandKey,previewHash,'taskmaster_prd_import',requestHash);if(prior)return prior;
+   const {task,role}=this.scope(owner,taskId);
+   if(task.version!==view.task_version||role.agent_id!==view.role.agent_id||role.version!==view.role.version||role.capability_epoch!==view.role.capability_epoch
+    ||role.project_id!==view.project_id||role.workspace_id!==view.workspace_id)throw Error('prd_taskmaster_context_changed');
+   const reasons=this.reasons(owner,task,role);if(reasons.length)throw Error(reasons[0]!.toLowerCase());
+   const file=this.workbench.writeBinaryFile(owner,role.workspace_id,{project_id:role.project_id,path,expected_version:view.target.version,command_key:commandKey},content,{
+    kind:'taskmaster_prd_import',relative_path:path,task_id:taskId,task_version:view.task_version,preview_sha256:previewHash,request_sha256:requestHash,
+    source_sha256:view.source_sha256,repository_sha256:view.repository_sha256,
+   });
+   return {task_id:taskId,task_version:view.task_version,preview_sha256:previewHash,file,execution_authorized:false as const};
+  });
  }
  private fileImportReceipt(owner:string,taskId:string,key:string,previewHash:string,kind='taskmaster_project_import',requestHash?:string){
   this.tasks.get(owner,taskId);
