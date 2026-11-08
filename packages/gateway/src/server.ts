@@ -118,10 +118,34 @@ import {createConversationForkSourceReader} from './harness/conversation-fork-so
 import {prepareForkAttachmentClones} from './harness/conversation-fork-attachments.ts';
 import {observeBrowserActionReadiness} from './events/browser-driver-readiness.ts';
 
-function actor(request: { headers: Record<string, unknown> }) {
+type GatewayIngressMode = 'standalone-local' | 'public-api';
+const MAX_OWNER_PRINCIPAL_EXPIRY_EPOCH_SECONDS = 253_402_300_799; // 9999-12-31T23:59:59Z
+type VerifiedOwnerPrincipal = { ownerId: string; issuer: string; subject: string; /** Unix epoch seconds, never milliseconds. */ expiresAtEpochSeconds: number };
+type VerifiedOwnerPrincipalResolver = {
+  /** Server-only verifier. It must derive ownerId from a trusted issuer/session, never from x-user-id. */
+  resolve(request: { headers: Record<string, unknown> }): VerifiedOwnerPrincipal | null;
+};
+
+function headerActor(request: { headers: Record<string, unknown> }) {
   const id = String(request.headers['x-user-id'] || '');
   if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(id)) throw new Error('unauthorized');
   return id;
+}
+
+function verifiedPrincipalActor(request: { headers: Record<string, unknown> }, resolver: VerifiedOwnerPrincipalResolver) {
+  let principal: VerifiedOwnerPrincipal | null;
+  try { principal = resolver.resolve(request); } catch { throw new Error('unauthorized'); }
+  const nowEpochSeconds = Math.floor(Date.now() / 1000);
+  if (!principal
+    || typeof principal.ownerId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(principal.ownerId)
+    || typeof principal.issuer !== 'string' || !principal.issuer.trim() || principal.issuer.length > 512
+    || typeof principal.subject !== 'string' || !principal.subject.trim() || principal.subject.length > 512
+    || !Number.isSafeInteger(principal.expiresAtEpochSeconds)
+    || principal.expiresAtEpochSeconds <= nowEpochSeconds
+    || principal.expiresAtEpochSeconds > MAX_OWNER_PRINCIPAL_EXPIRY_EPOCH_SECONDS) {
+    throw new Error('unauthorized');
+  }
+  return principal.ownerId;
 }
 
 export async function buildServer(config: {
@@ -139,6 +163,8 @@ export async function buildServer(config: {
   workAgentPreset?:string;
   databasePath: string;
   workspaces: string[];
+  ingressMode?: GatewayIngressMode;
+  ownerPrincipalResolver?: VerifiedOwnerPrincipalResolver;
   uploadRoot?: string;
   csrfToken?: string;
   allowedOrigins?: string[];
@@ -171,6 +197,26 @@ export async function buildServer(config: {
   /** Server-only trusted provider configuration; never populated from request bodies. */
   emotion?: {env?:NodeJS.ProcessEnv;transport?:typeof fetch;accountingRoutes?:EmotionAccounting['routes']};
 }) {
+
+  const ingressMode = config.ingressMode ?? 'standalone-local';
+  if (ingressMode !== 'standalone-local' && ingressMode !== 'public-api') throw new Error('config_ingress_mode_invalid');
+  if (ingressMode === 'public-api' && typeof config.ownerPrincipalResolver?.resolve !== 'function') throw new Error('config_public_api_identity_required');
+  if (ingressMode === 'public-api'
+    && (typeof config.csrfToken !== 'string' || config.csrfToken.length < 16
+      || !Array.isArray(config.allowedOrigins) || config.allowedOrigins.length === 0
+      || config.allowedOrigins.some(origin => typeof origin !== 'string' || !origin.trim()))) {
+    throw new Error('config_public_api_browser_protection_required');
+  }
+  const ownerByRequest = new WeakMap<object, string>();
+  const actor = (request: { headers: Record<string, unknown> }) => {
+    const bound = ownerByRequest.get(request);
+    if (bound) return bound;
+    const owner = ingressMode === 'public-api'
+      ? verifiedPrincipalActor(request, config.ownerPrincipalResolver!)
+      : headerActor(request);
+    ownerByRequest.set(request, owner);
+    return owner;
+  };
 
   if(config.matrixOwnerBindingEnabled!==undefined&&typeof config.matrixOwnerBindingEnabled!=='boolean')throw Error('matrix_binding_configuration_invalid');
   let channelAttachmentInputReady=false;

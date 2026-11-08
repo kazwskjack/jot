@@ -22,6 +22,11 @@ export function chatWebNetworkConfiguration(env:NodeJS.ProcessEnv):ChatWebNetwor
 }
 
 export function loadBffConfig() {
+  const requestedIngressMode = process.env.GENERAL_AGENT_INGRESS_MODE?.trim() || 'standalone-local';
+  if (requestedIngressMode !== 'standalone-local' && requestedIngressMode !== 'public-api') throw new Error('config_ingress_mode_invalid');
+  // No real verified-principal resolver is wired into the production composition yet.
+  if (requestedIngressMode === 'public-api') throw new Error('config_public_api_identity_required');
+  const ingressMode = 'standalone-local' as const;
   const csrfToken = required('GENERAL_AGENT_CSRF_TOKEN');
   if (csrfToken.length < 16) throw new Error('config_csrf_token_too_short');
   const allowedOrigins = required('GENERAL_AGENT_ALLOWED_ORIGINS').split(',').map(item => item.trim()).filter(Boolean);
@@ -31,6 +36,7 @@ export function loadBffConfig() {
   const host = process.env.GENERAL_AGENT_HOST?.trim() || '127.0.0.1';
   if (!['127.0.0.1', 'localhost', '::1'].includes(host.toLowerCase())) throw new Error('config_public_api_identity_required');
   return {
+    ingressMode,
     host,
     port: Number(process.env.GENERAL_AGENT_PORT || 18831),
     databasePath,
