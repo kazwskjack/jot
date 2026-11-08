@@ -24,6 +24,7 @@
     "host-readiness.js",
     "hooks-config.js",
     "hooks-agent-bridge.js",
+    "hooks-callback-authority.js",
     "hooks-protocol.js",
     "hooks-runtime.js",
     "host-settings-migration-proof.js",

@@ -14,7 +14,7 @@ export function createAgentHooksBridge({runtime,configuration,resolveSource}) {
   }
   const agents = new Map(), running = new AsyncLocalStorage();
   let closed = false;
-  const configured = event => configuration.settings[event]?.some(matcher => matcher.hooks.length) === true;
+  const configured = event => runtime.hasEvent(event);
   async function invoke(agent,event,payload,signal,execution) {
     if (closed || running.getStore()?.has(agent) || !configured(event)) return null;
     const source = await resolveSource(agent,signal);
@@ -43,7 +43,7 @@ export function createAgentHooksBridge({runtime,configuration,resolveSource}) {
     };
     agents.set(agent,dispose);
     try {
-      if (configured('PreToolUse')) disposers.push(agentCtx.on('tools/pre-execute',async(exec,next)=>{
+      disposers.push(agentCtx.on('tools/pre-execute',async(exec,next)=>{
         const decision = await next();
         if (exec.agent !== agent || ['deny','cancel'].includes(decision.kind)) return decision;
         const result = await invoke(agent,'PreToolUse',{toolName:exec.name,toolInput:exec.arguments,toolUseId:exec.callId},exec.signal,exec);
@@ -63,7 +63,7 @@ export function createAgentHooksBridge({runtime,configuration,resolveSource}) {
         if (decision.kind === 'allow' && ask) return {kind:'ask',reason:reason(ask)};
         return decision;
       }));
-      if (configured('PostToolUse') || configured('PostToolUseFailure')) disposers.push(agentCtx.on('tools/post-execute',async(exec,outcome,next)=>{
+      disposers.push(agentCtx.on('tools/post-execute',async(exec,outcome,next)=>{
         const decision = await next();
         if (exec.agent !== agent || decision.kind === 'block') return decision;
         const event = outcome.isError ? 'PostToolUseFailure' : 'PostToolUse';
@@ -80,8 +80,8 @@ export function createAgentHooksBridge({runtime,configuration,resolveSource}) {
         // updates require the native content/finalization boundary in the effect adapter.
         return decision;
       }));
-      if (configured('UserPromptSubmit')) disposers.push(agentCtx.on('agent/pre-step',async(event,next)=>{
-        if (event.agent !== agent) return next();
+      disposers.push(agentCtx.on('agent/pre-step',async(event,next)=>{
+        if (event.agent !== agent || !configured('UserPromptSubmit')) return next();
         const messages = event.messages.filter(message=>message.source?.kind==='user');
         if (!messages.length) return next();
         const prompt = messages.flatMap(message=>message.content.filter(block=>block.type==='text').map(block=>block.text)).join('\n');
@@ -89,7 +89,7 @@ export function createAgentHooksBridge({runtime,configuration,resolveSource}) {
         if (result && blocked(result)) return {kind:'reject'};
         return next();
       },{prepend:true}));
-      if (configured('PreModelRequest')) disposers.push(agentCtx.on('agent/request',async(event,next)=>{
+      disposers.push(agentCtx.on('agent/request',async(event,next)=>{
         const request = await next();
         if (event.agent !== agent) return request;
         const result = await invoke(agent,'PreModelRequest',{provider:request.provider,model:request.model,turn:event.turn,step:event.step},event.signal);

@@ -28,14 +28,14 @@ function condition(value, input) {
 /** Native executor ports own authorization, budgets, effects and durable operation recovery. */
 export function createHooksRuntime({configuration,resolveExecutor}) {
   if (configuration?.protocol !== 1 || typeof resolveExecutor !== 'function') throw new Error('hooks_runtime_invalid');
-  const lifetime = new AbortController(), jobs = new Map(), lineage = new AsyncLocalStorage();
+  const lifetime = new AbortController(), jobs = new Map(), lineage = new AsyncLocalStorage(), callbacks = new Map();
   let closed = false, closing;
   async function run(input) {
     input.signal.throwIfAborted();
     const hookInput = createHookInput(input.event,input.base,input.payload);
     if (input.matchQuery !== undefined && (typeof input.matchQuery !== 'string' || input.matchQuery.length > 4096)) throw new Error('hook_match_query_invalid');
     const effects=[],events=[],blockingErrors=[],nonBlockingErrors=[],pendingAsync=[];
-    for (const matcher of configuration.settings[input.event] ?? []) {
+    for (const matcher of [...(configuration.settings[input.event] ?? []), ...[...callbacks.values()].filter(value=>value.event===input.event).map(value=>value.matcher)]) {
       input.signal?.throwIfAborted();
       if (!match(matcher.matcher,input.matchQuery)) continue;
       for (const hook of matcher.hooks) {
@@ -82,6 +82,18 @@ export function createHooksRuntime({configuration,resolveExecutor}) {
     return {effects,events,blockingErrors,nonBlockingErrors,pendingAsync,execution_authorized:false};
   }
   return Object.freeze({
+    hasEvent(event) {
+      return configuration.settings[event]?.some(matcher=>matcher.hooks.length) === true
+        || [...callbacks.values()].some(value=>value.event===event);
+    },
+    registerCallbackMatcher(declaration) {
+      if (closed || !configuration.supported_events.includes(declaration.event)) throw new Error('hook_callback_invalid');
+      const key = Symbol('runtime Hook callback');
+      callbacks.set(key,{event:declaration.event,matcher:{matcher:declaration.matcher,hooks:[{
+        type:'callback',name:declaration.name,if:declaration.if,statusMessage:declaration.statusMessage,
+      }]}});
+      return () => callbacks.delete(key);
+    },
     run(input) {
       if (closed) return Promise.reject(new Error('hooks_runtime_closed'));
       if (!input || typeof input !== 'object') return Promise.reject(new Error('hook_input_invalid'));
@@ -96,6 +108,7 @@ export function createHooksRuntime({configuration,resolveExecutor}) {
     close() {
       if (!closing) {
         closed = true;
+        callbacks.clear();
         lifetime.abort(new Error('hooks_runtime_closed'));
         // An unload triggered by a Hook cannot wait for its own suspended caller chain.
         const current = lineage.getStore();

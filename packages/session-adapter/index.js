@@ -46,6 +46,7 @@ import {createPluginProfileEvidence} from './plugin-profile-evidence.js'
 import {createHooksConfiguration} from './hooks-config.js'
 import {createHooksRuntime} from './hooks-runtime.js'
 import {createAgentHooksBridge} from './hooks-agent-bridge.js'
+import {createHookCallbackAuthority} from './hooks-callback-authority.js'
 import {resolveOwnerBoundDshProfileContext} from './dsh-profile-binding.js'
 
 import {normalizeLeaseTakeoverRequest,settleLeaseTakeover} from './lease-takeover.js'
@@ -1022,6 +1023,15 @@ export function apply(ctx, config = {}) {
       mcpRuntimeProvider,
     }) : undefined
     if(hooksRuntime&&workbenchBridge){
+      if(!ctx.get('jotHookExecutionAuthority',false)){
+        const callbacks=createHookCallbackAuthority({runtime:hooksRuntime,bridge:workbenchBridge,
+          readAgent:id=>ctx.agents.get(id),
+          readIdentity:()=>resolveOwnerBoundDshProfileContext(ctx.get('profileContext')),
+          approvalForAgent:agent=>ctx.agentPresets?.serviceFor?.(agent,'approval')??ctx.get('approval',false)});
+        ctx.provide('jotHookExecutionAuthority',callbacks);
+        ctx.provide('jotHookCallbacks',Object.freeze({register:callbacks.register}));
+        ctx.effect(()=>()=>callbacks.close());
+      }
       const hooksBridge=createAgentHooksBridge({runtime:hooksRuntime,configuration:hooksConfiguration,
         resolveSource:async(agent,signal)=>{
           if(ctx.agents.get(agent.id)!==agent)throw Error('hook_original_binding_changed');

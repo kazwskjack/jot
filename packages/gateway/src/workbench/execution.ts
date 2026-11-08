@@ -43,6 +43,7 @@ import {installTaskFinalizations} from '../persistent-tasks/finalization.ts';
 import {EventStore} from '../events/event-store.ts';
 import type { McpRegistryService } from './mcp-registry.ts';
 import { McpExecutionJournal } from './mcp-execution.ts';
+import {HookExecutionJournal} from './hook-execution.ts';
 
 export type NativeWorkExecution={resolver:Pick<TrustedWorkRunWorkspaceResolver,'context'|'resolveFiles'>;inspections:{collect(runId:string,lease:ExecutionLease):Promise<unknown>;current(scope:TaskCompletionWorkScope):unknown}};
 
@@ -80,6 +81,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       goal_id TEXT NOT NULL,goal_revision INTEGER NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)`);
   const assessments=new PersistentTaskAssessmentService(db);
   const executionEvidence = new TaskExecutionEvidence(db);
+  const hookJournal = new HookExecutionJournal(db);
   const mcp = mcpRegistry ? { registry: mcpRegistry, journal: new McpExecutionJournal(db, mcpRegistry, executionEvidence) } : undefined;
   const discoveryPlanning=new DiscoveryPlanning(db,workbench);
   const replyDrafts=new TaskReplyDrafts(db);
@@ -539,6 +541,38 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
     }
     return { ...state, capability_epoch: Number(binding.capability_epoch) };
   });
+  app.post('/internal/v1/workbench/hook-prepare',{config:{hookExecutionInternal:true}},async request=>{
+    authorized(request.headers.authorization);
+    const input=object(request.body);fields(input,['run_id','session_ref','hook_id','event','event_id','request_hash']);
+    if(input.execution_lease===undefined)throw Error('execution_lease_invalid');
+    return withImmediateTransaction(db,()=>{
+      assertExecutionLease(db,String(input.run_id),input.execution_lease);
+      const identity={...context(input),session_ref:String(input.session_ref)};
+      assertIdentityAccounting(identity);
+      return hookJournal.prepare(identity,{hook_id:input.hook_id,event:input.event,event_id:input.event_id,request_hash:input.request_hash});
+    });
+  });
+  app.post('/internal/v1/workbench/hook-dispatch',{config:{hookExecutionInternal:true}},async request=>{
+    authorized(request.headers.authorization);
+    const input=object(request.body);fields(input,['run_id','session_ref','operation_id']);
+    if(input.execution_lease===undefined)throw Error('execution_lease_invalid');
+    return withImmediateTransaction(db,()=>{
+      assertExecutionLease(db,String(input.run_id),input.execution_lease);
+      const identity={...context(input),session_ref:String(input.session_ref)};
+      assertIdentityAccounting(identity);
+      return hookJournal.dispatch(identity,input.operation_id);
+    });
+  });
+  for(const action of ['state','settle'] as const)app.post(`/internal/v1/workbench/hook-${action}`,
+    {config:{hookExecutionInternal:true},bodyLimit:3*1024*1024},async request=>{
+      authorized(request.headers.authorization);
+      const input=object(request.body);fields(input,action==='state'?['run_id','session_ref','operation_id']:['run_id','session_ref','operation_id','state','result']);
+      const owner=accountingOwner(input);
+      const binding=db.prepare('SELECT agent_id FROM wb_run_bindings WHERE run_id=? AND owner_id=?').get(String(input.run_id),owner) as {agent_id:string}|undefined;
+      if(!binding)throw Error('workbench_identity_forbidden');
+      const identity={owner_id:owner,agent_id:binding.agent_id,run_id:String(input.run_id),session_ref:String(input.session_ref)};
+      return action==='state'?hookJournal.read(identity,input.operation_id):hookJournal.finish(identity,{operation_id:input.operation_id,state:input.state,...(Object.hasOwn(input,'result')?{result:input.result}:{})});
+    });
   app.post('/internal/v1/workbench/mcp-prepare', async request => {
     authorized(request.headers.authorization);
     const input = object(request.body); fields(input, ['run_id','session_ref','connection_id','generation','tool_id','call_id','arguments']);

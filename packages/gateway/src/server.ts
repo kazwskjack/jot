@@ -396,6 +396,7 @@ export async function buildServer(config: {
     // These server-registered component routes verify their own mandatory bearer.
     if((request.routeOptions.config as {hostSettingsInternal?:boolean}).hostSettingsInternal===true)return;
     if((request.routeOptions.config as {pluginProfileInternal?:boolean}).pluginProfileInternal===true)return;
+    if((request.routeOptions.config as {hookExecutionInternal?:boolean}).hookExecutionInternal===true)return;
     // Original service bearer already ran in this registered route's onRequest.
     if(isChannelAttachmentIntakeV2Route(request))return;
     // The provider callback is public only behind its exact-URL Twilio signature check.
