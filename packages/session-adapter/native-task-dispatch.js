@@ -7,15 +7,18 @@ export function createNativeTaskDispatcher({bridge,host,scheduler}){
   signal?.throwIfAborted();
   const check=()=>{if(!binding||bridge.bindingFor(agent)!==binding)throw new Error('workbench_binding_changed');signal?.throwIfAborted();};
   check();
-  if(!ID.test(String(callId))||!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>!['subtask_id','expected_subtask_version','recipient_agent_id'].includes(k))
+  if(!ID.test(String(callId))||!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>!['subtask_id','expected_subtask_version','recipient_agent_id','file_paths'].includes(k))
    ||!ID.test(String(args.subtask_id))||!ID.test(String(args.recipient_agent_id))||!Number.isSafeInteger(args.expected_subtask_version)||args.expected_subtask_version<1)throw new Error('workbench_arguments_invalid');
-  const frozen=Object.freeze({...args}),requestId='delegate-'+createHash('sha256').update(JSON.stringify([binding.runId,binding.sessionRef,callId])).digest('hex');
+  if(args.file_paths!==undefined&&(!Array.isArray(args.file_paths)||args.file_paths.length<1||args.file_paths.length>32
+   ||args.file_paths.some(path=>typeof path!=='string'||!path||path.length>4096)||new Set(args.file_paths).size!==args.file_paths.length))throw new Error('workbench_arguments_invalid');
+  const frozen=Object.freeze({...args,...(args.file_paths===undefined?{}:{file_paths:Object.freeze([...args.file_paths])})}),requestId='delegate-'+createHash('sha256').update(JSON.stringify([binding.runId,binding.sessionRef,callId])).digest('hex');
   await bridge.guardBudget(agent,signal);check();
   const {plan}=await bridge.request('native-task-intent',binding,{...frozen,request_id:requestId},signal);check();
   if(!plan||plan.protocol!==1||plan.execution_authorized!==false||plan.request_id!==requestId||plan.role_ref!==frozen.recipient_agent_id
     ||plan.subtask_id!==frozen.subtask_id||plan.expected_subtask_version!==frozen.expected_subtask_version||!Number.isSafeInteger(plan.expected_policy_version)||plan.expected_policy_version<1
     ||typeof plan.name!=='string'||!plan.name.trim()||plan.name.length>80||typeof plan.description!=='string'||!plan.description.trim()||plan.description.length>2000
     ||typeof plan.text!=='string'||!plan.text.trim()||plan.text.length>32000)throw new Error('native_task_plan_invalid');
+  if(JSON.stringify(plan.file_paths)!==JSON.stringify(frozen.file_paths))throw new Error('native_task_plan_invalid');
   if(scheduler){if(typeof scheduler.submit!=='function')throw Error('native_task_scheduler_unavailable');return scheduler.submit(agent,binding,plan,signal);}
   const result=await host.spawn(agent,{roleRef:plan.role_ref,policyVersion:plan.expected_policy_version,requestId},
     {name:'role-'+createHash('sha256').update(JSON.stringify([plan.role_ref,requestId])).digest('hex').slice(0,20),description:plan.description,prompt:[{type:'text',text:plan.text}],context:'fresh',signal});

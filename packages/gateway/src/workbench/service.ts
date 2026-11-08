@@ -44,7 +44,7 @@ export interface Agent {
 export interface AgentRunContext {
   run_id: string; agent_id: string; owner_id: string; workspace_id: string; project_id: string; instructions: string;
   name: string; capability_epoch: number; allowed_tools: string[]; memories: Input[]; kind: string; memory_retrieval_id?: string;
-  task_assignment?:{subtask_id:string;subtask_version:number;title:string;acceptance:string;dependencies:string[]};
+  task_assignment?:{subtask_id:string;subtask_version:number;title:string;acceptance:string;dependencies:string[];file_paths?:string[]};
   memory_capture?:{capture_id:string;source_run_id:string;source_version:number;policy_version:number};
   memory_dream?:{policy_version:number;epoch:number;project_id:string;cadence_slot:string;interval_seconds:number};
 }

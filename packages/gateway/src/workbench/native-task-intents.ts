@@ -1,3 +1,6 @@
+import {WorkAdmissionRecords} from '../always-on/work-admission-records.ts';
+import {WorkGrants} from '../always-on/work-grants.ts';
+import {workspaceRelativePath} from '../always-on/workspace-provider.ts';
 import {createHash} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
 import {withImmediateTransaction} from '../db/database.ts';
@@ -6,9 +9,9 @@ import {taskDependencyReasons,assertDependencyReasons} from '../persistent-tasks
 import type {WorkbenchService} from './service.ts';
 import type {PersistentTaskService} from '../persistent-tasks/service.ts';
 import type {TaskCollaborationService} from './task-collaboration.ts';
-type Input={request_id:string;subtask_id:string;expected_subtask_version:number;recipient_agent_id:string};
+type Input={request_id:string;subtask_id:string;expected_subtask_version:number;recipient_agent_id:string;file_paths?:string[]};
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
-export type NativeTaskAssignment={task_id:string;occurrence_id:string;subtask_id:string;subtask_version:number;title:string;acceptance:string;dependencies:string[]};
+export type NativeTaskAssignment={task_id:string;occurrence_id:string;subtask_id:string;subtask_version:number;title:string;acceptance:string;dependencies:string[];file_paths?:string[]};
 export function assertNativeTaskAssignment(db:DatabaseSync,owner:string,assignment:NativeTaskAssignment){
  const step=db.prepare(`SELECT s.version,s.status,s.dependencies_json FROM wb_task_subtasks s JOIN wb_persistent_tasks t ON t.task_id=s.task_id
    WHERE t.owner_id=? AND s.task_id=? AND s.subtask_id=?`).get(owner,assignment.task_id,assignment.subtask_id) as {version:number;status:string;dependencies_json:string}|undefined;
@@ -28,19 +31,30 @@ export class NativeTaskIntents {
     CREATE TRIGGER IF NOT EXISTS wb_native_task_intent_no_delete BEFORE DELETE ON wb_native_task_intents BEGIN SELECT RAISE(ABORT,'native_task_intent_immutable'); END;`);
  }
  prepare(owner:string,runId:string,input:Input){
-  if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(k=>!['request_id','subtask_id','expected_subtask_version','recipient_agent_id'].includes(k))
+  if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(k=>!['request_id','subtask_id','expected_subtask_version','recipient_agent_id','file_paths'].includes(k))
     ||['request_id','subtask_id','recipient_agent_id'].some(k=>typeof input[k as keyof Input]!=='string'||!ID.test(String(input[k as keyof Input])))
     ||!Number.isSafeInteger(input.expected_subtask_version)||input.expected_subtask_version<1)throw new Error('native_task_intent_invalid');
+  let filePaths:string[]|undefined;
+  if(input.file_paths!==undefined){
+   if(!Array.isArray(input.file_paths)||input.file_paths.length<1||input.file_paths.length>32||new Set(input.file_paths).size!==input.file_paths.length)throw new Error('native_task_intent_invalid');
+   try{filePaths=input.file_paths.map(workspaceRelativePath);}catch{throw new Error('native_task_intent_invalid');}
+  }
   return withImmediateTransaction(this.db,()=>{
    const context=this.workbench.contextForRun(runId);
    if(!context||context.owner_id!==owner||context.kind!=='task')throw new Error('task_collaboration_forbidden');
    const current=this.db.prepare('SELECT task_id,occurrence_id FROM wb_task_current_occurrences WHERE run_id=?').get(runId) as {task_id:string;occurrence_id:string}|undefined;
    if(!current)throw new Error('task_execution_revoked');
+   const records=new WorkAdmissionRecords(this.db),work=records.byRun(owner,runId);
+   if(work){
+    const admitted=records.guard(owner,runId);
+    const grant=new WorkGrants(this.db).get(owner,admitted.scope,admitted.grant_id);
+    if(!filePaths||filePaths.some(path=>!grant.plan_paths.includes(path)))throw new Error('task_collaboration_forbidden');
+   }else if(filePaths!==undefined)throw new Error('native_task_intent_invalid');
    const prior=this.db.prepare('SELECT input_hash,plan_json FROM wb_native_task_intents WHERE owner_id=? AND root_run_id=? AND request_id=?').get(owner,runId,input.request_id) as {input_hash:string;plan_json:string}|undefined;
    const policy=this.collaboration.get(owner,current.task_id),saved=prior?JSON.parse(prior.plan_json):undefined;
    this.collaboration.authorizeNativeMember(owner,runId,input.recipient_agent_id,saved?.expected_policy_version??policy.version);
    if(!this.db.prepare('SELECT 1 FROM wb_model_budget_bindings WHERE owner_id=? AND run_id=?').get(owner,runId))throw new Error('budget_service_unavailable');
-   const digest=createHash('sha256').update(JSON.stringify([input.request_id,input.subtask_id,input.expected_subtask_version,input.recipient_agent_id])).digest('hex');
+   const digest=createHash('sha256').update(JSON.stringify([input.request_id,input.subtask_id,input.expected_subtask_version,input.recipient_agent_id,...(filePaths===undefined?[]:[filePaths])])).digest('hex');
    if(prior&&prior.input_hash!==digest)throw new Error('idempotency_conflict');
    const step=this.tasks.subtasks(owner,current.task_id).items.find(s=>s.subtask_id===input.subtask_id);
    const bound=prior&&this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_native_child_reservations'").get()&&this.db.prepare('SELECT snapshot_json FROM wb_native_child_reservations WHERE owner_id=? AND root_run_id=? AND request_id=?').get(owner,runId,input.request_id) as {snapshot_json:string}|undefined;
@@ -52,7 +66,7 @@ export class NativeTaskIntents {
    const role=this.workbench.getAgent(owner,input.recipient_agent_id);
    const plan={protocol:1,request_id:input.request_id,role_ref:role.agent_id,expected_policy_version:policy.version,
      task_id:current.task_id,occurrence_id:current.occurrence_id,subtask_id:step.subtask_id,expected_subtask_version:step.version,
-     dependencies:step.dependencies,name:role.name,description:`Task member: ${role.name}`,
+     dependencies:step.dependencies,...(filePaths===undefined?{}:{file_paths:filePaths}),name:role.name,description:`Task member: ${role.name}`,
      text:`Execute the assigned step: ${step.title}\nAcceptance: ${step.acceptance}\nReturn materials, source references and remaining limitations to the lead. Do not declare the parent task complete, delegate more members or expand authorization.`,execution_authorized:false};
    this.db.prepare('INSERT INTO wb_native_task_intents VALUES(?,?,?,?,?,?)').run(owner,runId,input.request_id,digest,JSON.stringify(plan),new Date().toISOString());
    return plan;
@@ -97,10 +111,10 @@ export class NativeTaskIntents {
   if(!row)return;
   const plan=JSON.parse(row.plan_json);
   if(plan.role_ref!==roleRef||plan.expected_policy_version!==policyVersion)throw new Error('task_assignment_revoked');
-  this.prepare(owner,runId,{request_id:requestId,subtask_id:plan.subtask_id,expected_subtask_version:plan.expected_subtask_version,recipient_agent_id:roleRef});
+  this.prepare(owner,runId,{request_id:requestId,subtask_id:plan.subtask_id,expected_subtask_version:plan.expected_subtask_version,recipient_agent_id:roleRef,...(plan.file_paths===undefined?{}:{file_paths:plan.file_paths})});
   const assigned=this.tasks.upsertSubtask(owner,plan.task_id,{subtask_id:plan.subtask_id,expected_version:plan.expected_subtask_version,status:'running'},runId);
   return {task_id:plan.task_id,occurrence_id:plan.occurrence_id,subtask_id:assigned.subtask_id,subtask_version:assigned.version,
-    title:assigned.title,acceptance:assigned.acceptance,dependencies:assigned.dependencies};
+    title:assigned.title,acceptance:assigned.acceptance,dependencies:assigned.dependencies,...(plan.file_paths===undefined?{}:{file_paths:[...plan.file_paths]})};
  }
 
 }

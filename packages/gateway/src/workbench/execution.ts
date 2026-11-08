@@ -180,14 +180,15 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
   });
   app.post('/internal/v1/workbench/native-task-intent',async request=>{
     authorized(request.headers.authorization);const input=object(request.body);
-    fields(input,['run_id','session_ref','request_id','subtask_id','expected_subtask_version','recipient_agent_id']);
+    fields(input,['run_id','session_ref','request_id','subtask_id','expected_subtask_version','recipient_agent_id','file_paths']);
     if(!nativeTaskIntents)throw new Error('task_collaboration_forbidden');
     return withImmediateTransaction(db,()=>{
       assertExecutionLease(db,String(input.run_id),input.execution_lease);
       const identity=context(input);requireTask(identity);
       return {plan:nativeTaskIntents.prepare(identity.owner_id,identity.run_id,{
         request_id:input.request_id as string,subtask_id:input.subtask_id as string,
-        expected_subtask_version:input.expected_subtask_version as number,recipient_agent_id:input.recipient_agent_id as string})};
+        expected_subtask_version:input.expected_subtask_version as number,recipient_agent_id:input.recipient_agent_id as string,
+        ...(input.file_paths===undefined?{}:{file_paths:input.file_paths as string[]})})};
     });
   });
   app.post('/internal/v1/workbench/native-task-intents',async request=>{
@@ -898,7 +899,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
         'files.list': [], 'files.read': ['path'], 'files.write': ['path', 'content', 'expected_version'],
         'tasks.get': [],'tasks.subtasks': ['occurrence_id'],
         'tasks.upsert': ['subtask_id','expected_version','title','acceptance','priority','status','dependencies','evidence'],
-        'tasks.delegate':['subtask_id','expected_subtask_version','recipient_agent_id'],
+        'tasks.delegate':['subtask_id','expected_subtask_version','recipient_agent_id','file_paths'],
         'tasks.evidence': ['evidence'],
         'tasks.assessment': ['subtask_id','observations'],
         'tasks.observe': ['subtask_id','observations'],
