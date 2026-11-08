@@ -29,7 +29,7 @@ import type {WorkbenchBudgetPolicy} from '../workbench/model-budget-policy.ts';
 import {installTaskRunLineage} from './task-runs.ts';
 import {TaskExecutionEvidence} from './execution-evidence.ts';
 import {eligibleTaskOccurrence,taskDependencyReasons,assertDependencyReasons} from './execution-eligibility.ts';
-import {installSubtaskState,beginSubtaskOccurrence,recordSubtaskState,occurrenceSubtaskRows,subtaskOccurrence} from './subtask-state.ts';
+import {installSubtaskState,beginSubtaskOccurrence,recordSubtaskState,readTaskSubtasks,subtaskOccurrence} from './subtask-state.ts';
 import {TaskNotificationSignals} from './notification-signals.ts';
 import {TaskNotifications} from './notifications.ts';
 import {TaskReplyPolicies} from './reply-policy.ts';
@@ -679,8 +679,7 @@ export class PersistentTaskService {
   }
   subtasks(owner: string,id: string,occurrenceId?:string) {
     this.row(owner,id);
-    const rows=occurrenceId===undefined ? this.db.prepare('SELECT * FROM wb_task_subtasks WHERE task_id=? ORDER BY priority DESC,created_at,subtask_id').all(id) as Row[] : occurrenceSubtaskRows(this.db,id,occurrenceId);
-    return { items:rows.map(row=>({subtask_id:String(row.subtask_id),task_id:id,title:String(row.title),acceptance:String(row.acceptance),status:String(row.status),priority:Number(row.priority),dependencies:JSON.parse(row.dependencies_json) as string[],evidence:JSON.parse(row.evidence_json) as Evidence[],version:Number(row.version),created_at:String(row.created_at),updated_at:String(row.updated_at)})) };
+    return {items:readTaskSubtasks(this.db,id,occurrenceId)};
   }
   readiness(owner: string,id: string) {
     this.row(owner,id);

@@ -1,16 +1,21 @@
 import type {DatabaseSync} from 'node:sqlite';
+
+export const workCycleOriginCheck=`CHECK(
+ (admission_id IS NOT NULL AND report_sha256 IS NOT NULL AND policy_version IS NOT NULL AND signal_revision IS NOT NULL AND signal_sha256 IS NOT NULL)
+ OR (admission_id IS NULL AND report_sha256 IS NULL AND policy_version IS NULL AND signal_revision IS NULL AND signal_sha256 IS NULL))`;
+
 /** Resource identities only. Original tasks, native Goal and budget ledgers stay
  * authoritative; this table does not represent another execution lifecycle. */
 export function installWorkCycles(db:DatabaseSync){db.exec(`
  CREATE TABLE IF NOT EXISTS wb_discovery_work_cycles(
   cycle_id TEXT PRIMARY KEY,owner_id TEXT NOT NULL,project_id TEXT NOT NULL,workspace_id TEXT NOT NULL,agent_id TEXT NOT NULL,
-  admission_id TEXT NOT NULL REFERENCES wb_discovery_admissions(admission_id),occurrence_id TEXT NOT NULL REFERENCES wb_task_occurrences(occurrence_id),
+  admission_id TEXT REFERENCES wb_discovery_admissions(admission_id),occurrence_id TEXT NOT NULL REFERENCES wb_task_occurrences(occurrence_id),
   task_id TEXT NOT NULL REFERENCES wb_persistent_tasks(task_id),root_run_id TEXT NOT NULL REFERENCES ga_runs(id),current_run_id TEXT NOT NULL REFERENCES ga_runs(id),
-  report_sha256 TEXT NOT NULL,policy_version INTEGER NOT NULL,role_version INTEGER NOT NULL,role_epoch INTEGER NOT NULL,
-  task_version INTEGER NOT NULL,task_generation INTEGER NOT NULL,signal_revision INTEGER NOT NULL,signal_sha256 TEXT NOT NULL,
+  report_sha256 TEXT,policy_version INTEGER,role_version INTEGER NOT NULL,role_epoch INTEGER NOT NULL,
+  task_version INTEGER NOT NULL,task_generation INTEGER NOT NULL,signal_revision INTEGER,signal_sha256 TEXT,
   task_budget_scope_id TEXT NOT NULL,plans_json TEXT NOT NULL,plans_sha256 TEXT NOT NULL,
   version INTEGER NOT NULL CHECK(version>0),state TEXT NOT NULL CHECK(state IN ('open','closed')),created_at TEXT NOT NULL,closed_at TEXT,
-  CHECK((state='open' AND closed_at IS NULL) OR (state='closed' AND closed_at IS NOT NULL)));
+  CHECK((state='open' AND closed_at IS NULL) OR (state='closed' AND closed_at IS NOT NULL)),${workCycleOriginCheck});
  CREATE UNIQUE INDEX IF NOT EXISTS wb_work_cycle_open_slot ON wb_discovery_work_cycles(owner_id,project_id,workspace_id) WHERE state='open';
  CREATE TABLE IF NOT EXISTS wb_discovery_work_cycle_commands(owner_id TEXT NOT NULL,command_key TEXT NOT NULL,command_sha256 TEXT NOT NULL,
   cycle_id TEXT NOT NULL REFERENCES wb_discovery_work_cycles(cycle_id),receipt_json TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(owner_id,command_key));

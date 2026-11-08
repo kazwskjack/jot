@@ -57,3 +57,14 @@ export function occurrenceSubtaskRows(db:DatabaseSync,taskId:string,occurrenceId
   .all(occurrenceId) as {snapshot_json:string}[];
  return rows.map(row=>JSON.parse(row.snapshot_json) as Row).sort((a,b)=>b.priority-a.priority||String(a.created_at).localeCompare(String(b.created_at))||String(a.subtask_id).localeCompare(String(b.subtask_id)));
 }
+
+/** The original public ledger projection, shared by task reads and source guards. */
+export function readTaskSubtasks(db:DatabaseSync,taskId:string,occurrenceId?:string){
+ const rows=occurrenceId===undefined
+  ?db.prepare('SELECT * FROM wb_task_subtasks WHERE task_id=? ORDER BY priority DESC,created_at,subtask_id').all(taskId) as Row[]
+  :occurrenceSubtaskRows(db,taskId,occurrenceId);
+ return rows.map(row=>({subtask_id:String(row.subtask_id),task_id:taskId,title:String(row.title),acceptance:String(row.acceptance),
+  status:String(row.status),priority:Number(row.priority),dependencies:JSON.parse(row.dependencies_json) as string[],
+  evidence:JSON.parse(row.evidence_json) as Array<{kind:string;reference:string;hash?:string}>,version:Number(row.version),
+  created_at:String(row.created_at),updated_at:String(row.updated_at)}));
+}

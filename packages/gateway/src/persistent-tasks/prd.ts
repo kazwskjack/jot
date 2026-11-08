@@ -16,6 +16,7 @@ import {readUtf8Range,validateFileRange} from '../workbench/utf8-range.ts';
 import {prdTemplates,renderPrdTemplate} from './prd-templates.ts';
 import {workspaceRelativePath} from '../always-on/workspace-provider.ts';
 import {taskmasterPrdPath} from '../workbench/taskmaster-path.ts';
+import {prdWorkPlanAuthority} from './prd-work-plan-authority.ts';
 import {installPrdWorkPlanAcceptances,acceptPrdWorkPlan,readPrdWorkPlanAcceptance} from './prd-work-plan-acceptances.ts';
 import {installPrdWorkPlans,proposePrdWorkPlan,listPrdWorkPlans,getPrdWorkPlan} from './prd-work-plans.ts';
 
@@ -380,24 +381,10 @@ export class TaskPrdService {
  acceptWorkPlan(owner:string,taskId:string,input:unknown,key:unknown){
   this.tasks.get(owner,taskId);
   return acceptPrdWorkPlan(this.db,owner,taskId,input,key,request=>{
-   const plan=this.workPlan(owner,taskId,request.plan_id),{task,role}=this.scope(owner,taskId);
-   if(plan.sha256!==request.preview_sha256||task.version!==request.expected_task_version||task.version!==plan.task_version
-    ||role.version!==request.expected_role_version||role.capability_epoch!==request.expected_role_epoch
-    ||canonicalJson(plan.role)!==canonicalJson({agent_id:role.agent_id,version:role.version,capability_epoch:role.capability_epoch,workspace_id:role.workspace_id,project_id:role.project_id})
-    ||role.status!=='active'||!['active','budget_exhausted'].includes(task.status)||sha(task.objective)!==plan.objective_sha256)throw Error('prd_work_plan_scope_changed');
-   const occurrence=this.db.prepare(`SELECT o.root_run_id,o.run_id,o.generation FROM wb_task_current_occurrences o
-    JOIN wb_task_subtask_scope s ON s.occurrence_id=o.occurrence_id AND s.task_id=o.task_id
-    WHERE o.occurrence_id=? AND o.task_id=?`).get(plan.occurrence_id,taskId) as Row|undefined;
-   if(!occurrence||occurrence.root_run_id!==plan.root_run_id||occurrence.generation!==task.generation)throw Error('prd_work_plan_scope_changed');
-   const source=this.runSource(owner,plan.run_id,true),latest=this.latest(owner,taskId);
-   if(!source||latest?.binding_id!==plan.source.binding_id||source.binding_id!==plan.source.binding_id||source.root_run_id!==plan.root_run_id
-    ||source.occurrence_id!==plan.occurrence_id||source.content_sha256!==plan.source.content_sha256||source.objective!==task.objective
-    ||sha(source.content)!==plan.source.content_sha256||Buffer.byteLength(source.content,'utf8')!==plan.source.size)throw Error('prd_work_plan_scope_changed');
-   const ledger=this.tasks.subtasks(owner,taskId,plan.occurrence_id).items,current=this.tasks.subtasks(owner,taskId).items;
-   const byId=(a:{subtask_id:string},b:{subtask_id:string})=>Buffer.compare(Buffer.from(a.subtask_id),Buffer.from(b.subtask_id));
-   if(sha(canonicalJson(ledger))!==plan.ledger_sha256||canonicalJson([...current].sort(byId))!==canonicalJson([...ledger].sort(byId)))throw Error('prd_work_plan_ledger_changed');
-   return {task_version:task.version,task_generation:task.generation,role:plan.role,source:plan.source,ledger_sha256:plan.ledger_sha256,
-    occurrence_id:plan.occurrence_id,root_run_id:plan.root_run_id,planning_current_run_id:String(occurrence.run_id)};
+   const {plan,facts}=prdWorkPlanAuthority(this.db,owner,taskId,request.plan_id);
+   if(plan.sha256!==request.preview_sha256||facts.task_version!==request.expected_task_version
+    ||facts.role.version!==request.expected_role_version||facts.role.capability_epoch!==request.expected_role_epoch)throw Error('prd_work_plan_scope_changed');
+   return facts;
   });
  }
  readRunSource(owner:string,runId:string,input:unknown){

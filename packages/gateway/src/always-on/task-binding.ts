@@ -4,6 +4,7 @@ import {installDiscoveryPolicySchema} from './discovery-policy.ts';
 import {installDiscoveryAdmissions} from './admission-schema.ts';
 import {installDiscoveryPlanning} from './planning.ts';
 import {installWorkCycles} from './work-cycle-schema.ts';
+import {migrateWorkCycleOrigins} from './work-cycle-origin-migration.ts';
 import {installWorkspaceJournal} from './workspace-journal-schema.ts';
 import {installWorkCycleSources} from './work-cycle-source-schema.ts';
 import {installWorkGrants} from './work-grant-schema.ts';
@@ -11,6 +12,7 @@ import {installWorkAdmissions} from './work-admission-schema.ts';
 /** Stable task/budget identity. Generic occurrence admission stays closed;
  * the trusted planning path requires an immutable original-occurrence receipt. */
 export function installDiscoveryTaskBindings(db:DatabaseSync){
+ migrateWorkCycleOrigins(db);
  withImmediateTransaction(db,()=>{installDiscoveryPolicySchema(db);db.exec(`CREATE TABLE IF NOT EXISTS wb_discovery_task_bindings(
   policy_id TEXT PRIMARY KEY REFERENCES wb_discovery_policies(policy_id),task_id TEXT NOT NULL UNIQUE REFERENCES wb_persistent_tasks(task_id),
   owner_id TEXT NOT NULL,project_id TEXT NOT NULL,workspace_id TEXT NOT NULL,agent_id TEXT NOT NULL,
