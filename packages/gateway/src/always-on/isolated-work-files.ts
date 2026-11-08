@@ -11,7 +11,7 @@ export type IsolatedFileIdentity=Readonly<{owner_id:string;workspace_id:string;p
 export type IsolatedFileOperation={operation:'files.list'}|{operation:'files.read';path:string}|{operation:'files.write';path:string;content:string;expected_version:number};
 export type IsolatedFileResult=Readonly<{source:'isolated';receipt_id:string;cycle_id:string;snapshot_id:string;run_id:string;occurrence_id:string;call_id:string;[key:string]:unknown}>;
 /** This resolver and synchronous guard are host injection boundaries, never model input. */
-export type ResolvedIsolatedFiles={workspace:LogicalPreparedWorkCycleWorkspace;record:SnapshotRecoveryRecord;binding:Readonly<Omit<IsolatedFileIdentity,'call_id'>>;guard:()=>void};
+export type ResolvedIsolatedFiles={workspace:LogicalPreparedWorkCycleWorkspace;record:SnapshotRecoveryRecord;binding:Readonly<Omit<IsolatedFileIdentity,'call_id'>>;writePaths?:readonly string[];guard:()=>void};
 type Options={db:DatabaseSync;resolve:(identity:IsolatedFileIdentity)=>Promise<ResolvedIsolatedFiles>;commitReceipt:(db:DatabaseSync,result:IsolatedFileResult)=>void};
 type Fact={kind:'file'|'directory';identity:string;sha256?:string;size?:number};
 const sha=(v:string|Uint8Array)=>createHash('sha256').update(v).digest('hex');
@@ -84,7 +84,7 @@ export class IsolatedWorkFiles{
   const bound=await this.options.resolve(identity),w=bound.workspace,r=bound.record;
   if(w.cycle.cycle_id!==identity.cycle_id||canonicalJson(bound.binding)!==canonicalJson(Object.fromEntries(Object.entries(identity).filter(([k])=>k!=='call_id')))||w.snapshot.receipt.snapshot_id!==identity.snapshot_id||r.snapshot_id!==identity.snapshot_id||canonicalJson(w.snapshot.manifest)!==canonicalJson(r.manifest))throw fail('binding_invalid');
   syncGuard(bound.guard);
-  if(operation.operation==='files.write'&&!w.plan_paths.includes(operation.path))throw fail('path_not_granted');
+  if(operation.operation==='files.write'&&(!w.plan_paths.includes(operation.path)||bound.writePaths!==undefined&&!bound.writePaths.includes(operation.path)))throw fail('path_not_granted');
   if(db.prepare('SELECT 1 FROM wb_isolated_file_pending WHERE cycle_id=?').get(identity.cycle_id))throw fail('pending');
   const before=await this.inventory(bound);
   if(operation.operation==='files.write'&&(Buffer.byteLength(operation.content)>r.limits.max_file_bytes||before.total-(before.map.get(operation.path)?.size??0)+Buffer.byteLength(operation.content)>r.limits.max_total_bytes||operation.path.split('/').length>r.limits.max_depth))throw fail('limit');

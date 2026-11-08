@@ -777,13 +777,14 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
         tasks.assertDiscoveryOperation(identity.run_id,operation);
         if(!validCallId(input.call_id))throw Error('invalid_call_id');
         const callId=String(input.call_id),digest=createHash('sha256').update(canonical({operation,args})).digest('hex'),prior=savedCall(identity.run_id,callId,digest);if(prior!==undefined)return prior;
-        const task=requireTask(identity);assertTaskDependenciesReady(db,executionEvidence,identity.owner_id,task.task_id,identity.run_id);
+        const taskId=bound.admission.task_id,taskRunId=bound.member?.root_run_id??identity.run_id;
+        assertTaskDependenciesReady(db,executionEvidence,identity.owner_id,taskId,taskRunId);
         const fileIdentity:IsolatedFileIdentity={owner_id:identity.owner_id,...bound.admission.scope,run_id:identity.run_id,occurrence_id:bound.admission.occurrence_id,cycle_id:bound.admission.cycle_id,snapshot_id:bound.admission.snapshot_id,call_id:callId};
         const captured=canonical(bound);
         const isolated=new IsolatedWorkFiles({db,resolve:value=>nativeWork.resolver.resolveFiles(value,lease),commitReceipt:(_db,result)=>{
           const current=context({...input,tool_name:'jot_workspace'});assertExecutionLease(db,current.run_id,lease);tasks.assertDiscoveryOperation(current.run_id,operation);
           if(canonical(nativeWork.resolver.context(current.run_id,lease))!==captured)throw Error('work_workspace_binding_changed');
-          assertTaskDependenciesReady(db,executionEvidence,current.owner_id,task.task_id,current.run_id);
+          assertTaskDependenciesReady(db,executionEvidence,current.owner_id,taskId,taskRunId);
           if(savedCall(current.run_id,callId,digest)!==undefined)throw Error('isolated_file_original_receipt_conflict');
           const response={...result,execution_receipt:executionEvidence.record(current.run_id,callId,operation,result)};saveCall(current.run_id,callId,digest,response);
         }});

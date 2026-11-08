@@ -61,6 +61,30 @@ const ARGUMENT_KEYS = {
   'tasks.assessment': ['subtask_id','observations'], 'tasks.observe': ['subtask_id','observations'],
   'tasks.assess': ['subtask_id','expected_task_version','expected_subtask_version','expected_assessment_revision','expected_observation_revision','observations','expires_at'], 'tasks.next': [],
 };
+function createIsolatedWorkGuard(agent, context) {
+  if (context.work_binding === undefined && context.native_workspace === undefined) return;
+  const session = agent?.session;
+  const authority = value => canonicalJson({binding:value.work_binding,workspace:value.native_workspace,file_paths:value.task_assignment?.file_paths});
+  const expected = authority(context);
+  const check = value => {
+    const binding = value.work_binding, workspace = value.native_workspace;
+    if (agent.session !== session || session?.id !== agent.id || workspace?.protocol !== 1
+      || typeof workspace.cwd !== 'string' || !workspace.cwd || session.header?.cwd !== workspace.cwd
+      || binding?.kind !== 'isolated_work' || !ID.test(binding.original_run_id ?? '') || !ID.test(binding.occurrence_id ?? '')
+      || value.model_budget?.protocol !== 1 || value.model_budget.enforced !== true || authority(value) !== expected) {
+      throw new Error('work_workspace_binding_changed');
+    }
+    if (value.kind === 'native_team') {
+      const assignment = value.task_assignment;
+      if (!assignment || assignment.occurrence_id !== binding.occurrence_id || !Array.isArray(assignment.file_paths) || !assignment.file_paths.length) {
+        throw new Error('work_workspace_member_assignment_invalid');
+      }
+    } else if (value.kind !== 'task' || value.task_binding?.root_run_id !== binding.original_run_id
+      || value.task_binding?.occurrence_id !== binding.occurrence_id) throw new Error('work_workspace_binding_invalid');
+  };
+  check(context);
+  return check;
+}
 function decodeMcpExecutionEnvelope(encoded) {
   let envelope;
   try { envelope = JSON.parse(encoded); } catch { throw new Error('mcp_operation_unknown'); }
@@ -339,6 +363,8 @@ export class WorkbenchBridge {
     const response = await this.request('guard', current.binding, toolName ? { tool_name: toolName } : {}, signal);
     if(current.parentGuard)await current.parentGuard(signal);
     const context = validContext(response.context, current.binding);
+    if (current.isolatedWorkGuard) current.isolatedWorkGuard(context);
+    else if (context.work_binding !== undefined || context.native_workspace !== undefined) throw new Error('work_workspace_binding_changed');
     if (['owner_id', 'agent_id', 'workspace_id', 'project_id', 'capability_epoch'].some(key => context[key] !== current.context[key])) {
       throw new Error('workbench_run_forbidden');
     }
@@ -608,6 +634,7 @@ export class WorkbenchBridge {
     // Frozen host configuration is obtained from the Gateway, never from the
     // browser or the Session creation body's persona/owner/path fields.
     const frozen = validContext(response.context, trustedBinding);
+    const isolatedWorkGuard = createIsolatedWorkGuard(agent, frozen);
     if(frozen.model_budget&&!trustedBinding.executionLease&&!readOnlyCompletion&&completionIntentId===undefined)throw new Error('workbench_binding_lease_required');
     if (this.attempts.get(agent) !== attempt) throw new Error('workbench_attach_superseded');
     if(typeof readOnlyCompletion!=='boolean'||readOnlyCompletion&&completionIntentId!==undefined)throw new Error('workbench_completion_forbidden');
@@ -677,7 +704,7 @@ export class WorkbenchBridge {
     } catch (error) { await mcpRuntime.close(); throw error; }
     const allowedTools = frozen.allowed_tools.filter(name => SAFE_TOOLS.has(name) || mcpRuntime.toolNames.includes(name));
     const current = { binding: trustedBinding, context: frozen, allowed: new Set([...allowedTools.filter(name=>name!=='browser_action'), 'jot_workspace']),
-      mcpRuntime, parentGuard:parentGuard??prior?.current.parentGuard, contextDelivery:null };
+      mcpRuntime, parentGuard:parentGuard??prior?.current.parentGuard, isolatedWorkGuard, contextDelivery:null };
     // Scoped registrations stay installed once. A failed validation or a failed
     // later attach cannot remove the previously active monotonic protection.
     if (prior) {

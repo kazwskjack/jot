@@ -3,19 +3,26 @@ import type {DatabaseSync} from 'node:sqlite';
 import {canonicalJson} from '../db/canonical-json.ts';
 import type {TrustedWorkRunWorkspace} from '../harness/worker.ts';
 import {assertExecutionLease,type ExecutionLease} from '../workbench/execution-lease.ts';
+import {assertNativeRun,type NativeReservation} from '../workbench/native-child-identity.ts';
 import type {WorkbenchService} from '../workbench/service.ts';
 import type {DiscoveryPolicies} from './discovery-policy.ts';
 import {DiscoveryHistory} from './discovery-history.ts';
 import {DiscoverySourceCollector} from './source-collector.ts';
-import {WorkAdmissionRecords,freezeWorkAdmission} from './work-admission-records.ts';
-import {WorkGrants} from './work-grants.ts';
+import {WorkAdmissionRecords,freezeWorkAdmission,type WorkAdmissionRecord} from './work-admission-records.ts';
+import {WorkGrants,type WorkGrant} from './work-grants.ts';
 import {WorkspaceJournal} from './workspace-journal.ts';
 import type {LogicalWorkCycleWorkspaceManager} from './logical-work-cycle-workspace.ts';
 import type {IsolatedFileIdentity,ResolvedIsolatedFiles} from './isolated-work-files.ts';
-import type {WorkspaceManifest} from './workspace-provider.ts';
+import {workspaceRelativePath,type WorkspaceManifest,type SnapshotRecoveryRecord} from './workspace-provider.ts';
 
 type Options={db:DatabaseSync;workbench:Pick<WorkbenchService,'assertRunActive'>;policies:DiscoveryPolicies;workspace:Pick<LogicalWorkCycleWorkspaceManager,'inspect'>};
 type FullPlan=ReturnType<DiscoveryHistory['detail']>['plans'][number];
+type NativeMemberRecord={root_run_id:string;child_session_ref:string;snapshot_json:string;role_id:string;conversation_id:string;workspace_id:string;project_id:string};
+type WorkRunContext=Readonly<{
+ work_binding:{kind:'isolated_work';original_run_id:string;occurrence_id:string};native_workspace:{protocol:1;cwd:string};
+ objective:string;admission:WorkAdmissionRecord;grant:WorkGrant;record:SnapshotRecoveryRecord;sessionRef:string;
+ member?:Readonly<{run_id:string;root_run_id:string;role_id:string;conversation_id:string;file_paths:readonly string[]}>;
+}>;
 const fail=(reason:string)=>Error('work_workspace_'+reason);
 const digest=(value:unknown)=>createHash('sha256').update(canonicalJson(value)).digest('hex');
 
@@ -32,16 +39,16 @@ export function selectedWorkObjective(plans:readonly FullPlan[]):string{
 export class TrustedWorkRunWorkspaceResolver{
  private readonly o:Options;private readonly records:WorkAdmissionRecords;private readonly grants:WorkGrants;private readonly journal:WorkspaceJournal;private readonly history:DiscoveryHistory;private readonly sources:DiscoverySourceCollector;
  constructor(options:Options){this.o=options;this.records=new WorkAdmissionRecords(options.db);this.grants=new WorkGrants(options.db);this.journal=new WorkspaceJournal(options.db);this.history=new DiscoveryHistory(options.db);this.sources=new DiscoverySourceCollector(options.db,options.policies);}
- context(runId:string,lease?:ExecutionLease){
+ context(runId:string,lease?:ExecutionLease):WorkRunContext|null{
   const {db}=this.o;if(db.isTransaction)return this.derive(runId,lease);
   db.exec('BEGIN DEFERRED');try{return this.derive(runId,lease);}finally{db.exec('ROLLBACK');}
  }
- private derive(runId:string,lease?:ExecutionLease){
+ private derive(runId:string,lease?:ExecutionLease):WorkRunContext|null{
   const {db}=this.o;
   const run=db.prepare('SELECT c.owner_id,r.conversation_id FROM ga_runs r JOIN ga_conversations c ON c.id=r.conversation_id WHERE r.id=?').get(runId) as {owner_id:string;conversation_id:string}|undefined;
   if(!run)throw fail('run_missing');
   const admission=this.records.byRun(run.owner_id,runId);
-  if(!admission){if(db.prepare("SELECT 1 FROM wb_task_run_occurrences WHERE run_id=? AND trigger_key LIKE 'discovery-work:%'").get(runId))throw fail('admission_missing');return null;}
+  if(!admission){if(db.prepare("SELECT 1 FROM wb_task_run_occurrences WHERE run_id=? AND trigger_key LIKE 'discovery-work:%'").get(runId))throw fail('admission_missing');return this.memberContext(run.owner_id,runId,lease);}
   if(lease)assertExecutionLease(db,runId,lease);
   this.o.workbench.assertRunActive(runId);this.records.guard(run.owner_id,runId);
   if(db.prepare("SELECT 1 FROM wb_model_budget_attempts a JOIN wb_model_budget_bindings b ON b.run_id=a.run_id JOIN json_each(b.scopes_json) s WHERE b.owner_id=? AND a.state='unknown' AND s.value=? LIMIT 1").get(run.owner_id,admission.task_budget_scope_id))throw fail('budget_usage_unknown');
@@ -63,6 +70,33 @@ export class TrustedWorkRunWorkspaceResolver{
   const objective=selectedWorkObjective(grant.plans.map(plan=>selected.get(plan.plan_id)!));
   return freezeWorkAdmission({work_binding:{kind:'isolated_work' as const,original_run_id:admission.run_id,occurrence_id:admission.occurrence_id},native_workspace:{protocol:1 as const,cwd:record.isolated_root.path},objective,admission,grant,record,sessionRef:session.session_id});
  }
+ private memberRecord(owner:string,runId:string):NativeMemberRecord|undefined{
+  const {db}=this.o;
+  if(!db.prepare("SELECT 1 FROM sqlite_master WHERE type IN ('table','view') AND name='wb_native_execution_runs'").get())return;
+  return db.prepare(`SELECT n.root_run_id,n.child_session_ref,n.snapshot_json,n.role_id,r.conversation_id,c.workspace_id,c.project_id
+   FROM wb_native_execution_runs n JOIN ga_runs r ON r.id=n.run_id JOIN ga_conversations c ON c.id=r.conversation_id
+   WHERE n.run_id=? AND n.owner_id=? AND c.owner_id=n.owner_id`).get(runId,owner) as NativeMemberRecord|undefined;
+ }
+ private memberContext(owner:string,runId:string,lease?:ExecutionLease):WorkRunContext|null{
+  const native=this.memberRecord(owner,runId);
+  if(!native||!this.records.byRun(owner,native.root_run_id))return null;
+  const saved=assertNativeRun(this.o.db,owner,runId);
+  if(lease)assertExecutionLease(this.o.db,runId,lease);
+  this.o.workbench.assertRunActive(runId);
+  const parent=this.derive(native.root_run_id,lease);
+  const assignment=saved.task_assignment;
+  if(!parent||parent.member||saved.owner_id!==owner||saved.root_run_id!==native.root_run_id
+   ||saved.child_session_ref!==native.child_session_ref||saved.role_id!==native.role_id
+   ||native.workspace_id!==parent.admission.scope.workspace_id||native.project_id!==parent.admission.scope.project_id
+   ||saved.workspace_id!==native.workspace_id||saved.project_id!==native.project_id
+   ||saved.task_id!==parent.admission.task_id||saved.occurrence_id!==parent.admission.occurrence_id
+   ||!assignment||assignment.task_id!==parent.admission.task_id||assignment.occurrence_id!==parent.admission.occurrence_id)throw fail('member_binding');
+  const paths=assignment.file_paths;
+  if(!Array.isArray(paths)||paths.length<1||paths.length>32||new Set(paths).size!==paths.length
+   ||paths.some(path=>!parent.grant.plan_paths.includes(path)||workspaceRelativePath(path)!==path))throw fail('member_assignment');
+  return freezeWorkAdmission({...parent,sessionRef:saved.child_session_ref,
+   member:{run_id:runId,root_run_id:native.root_run_id,role_id:saved.role_id,conversation_id:native.conversation_id,file_paths:[...paths]}});
+ }
  private pending(cycleId:string){if(this.o.db.prepare('SELECT 1 FROM wb_isolated_file_pending WHERE cycle_id=?').get(cycleId))throw fail('pending');}
  private reconcile(binding:NonNullable<ReturnType<TrustedWorkRunWorkspaceResolver['context']>>,manifest:WorkspaceManifest){
   const {db}=this.o,{grant,record,admission}=binding,expected=new Map(record.manifest.entries.map(entry=>[entry.path,entry]));
@@ -70,7 +104,16 @@ export class TrustedWorkRunWorkspaceResolver{
   for(const path of plans){
    const row=db.prepare('SELECT r.*,i.identity_json FROM wb_isolated_file_results r JOIN wb_isolated_file_intents i ON i.call_key=r.call_key WHERE r.cycle_id=? AND r.snapshot_id=? AND r.path=? AND r.version IS NOT NULL ORDER BY r.version DESC LIMIT 1').get(admission.cycle_id,admission.snapshot_id,path) as Record<string,any>|undefined;
    if(!row)continue;
-   const identity=JSON.parse(row.identity_json),response=JSON.parse(row.response_json),producer=this.records.byRun(admission.owner_id,identity.run_id),bytes=Buffer.from(row.bytes);
+   const identity=JSON.parse(row.identity_json),response=JSON.parse(row.response_json),native=this.memberRecord(admission.owner_id,identity.run_id);
+   const producer=this.records.byRun(admission.owner_id,native?.root_run_id??identity.run_id),bytes=Buffer.from(row.bytes);
+   // A closed member's immutable assignment still identifies its committed bytes.
+   if(native){
+    const saved=JSON.parse(native.snapshot_json) as NativeReservation,assignment=saved.task_assignment;
+    if(saved.owner_id!==admission.owner_id||saved.root_run_id!==native.root_run_id||saved.child_session_ref!==native.child_session_ref
+     ||saved.role_id!==native.role_id||native.workspace_id!==admission.scope.workspace_id||native.project_id!==admission.scope.project_id
+     ||saved.task_id!==admission.task_id||saved.occurrence_id!==admission.occurrence_id||!assignment||assignment.task_id!==admission.task_id
+     ||assignment.occurrence_id!==admission.occurrence_id||!Array.isArray(assignment.file_paths)||!assignment.file_paths.includes(path))throw fail('version_changed');
+   }
    if(!producer||producer.grant_id!==admission.grant_id||identity.owner_id!==admission.owner_id||identity.workspace_id!==admission.scope.workspace_id||identity.project_id!==admission.scope.project_id||identity.agent_id!==admission.scope.agent_id||identity.cycle_id!==admission.cycle_id||identity.snapshot_id!==admission.snapshot_id||identity.occurrence_id!==admission.occurrence_id||response.receipt_id!==row.receipt_id||response.run_id!==identity.run_id||response.call_id!==identity.call_id||response.sha256!==row.sha256||response.version!==row.version||createHash('sha256').update(bytes).digest('hex')!==row.sha256)throw fail('version_changed');
    expected.set(path,{path,kind:'file',sha256:row.sha256,bytes:bytes.length,executable:false});
    const parts=path.split('/');parts.pop();while(parts.length){const directory=parts.join('/');if(!expected.has(directory))expected.set(directory,{path:directory,kind:'directory'});parts.pop();}
@@ -92,13 +135,13 @@ export class TrustedWorkRunWorkspaceResolver{
  }
  async resolve(runId:string,lease:ExecutionLease):Promise<TrustedWorkRunWorkspace|null>{
   const bound=await this.inspectForRun(runId,lease);if(!bound)return null;const a=bound.admission;
-  return freezeWorkAdmission({kind:'isolated_work',runId,originalRunId:a.run_id,ownerId:a.owner_id,conversationId:a.conversation_id,taskId:a.task_id,occurrenceId:a.occurrence_id,sessionRef:bound.sessionRef,cwd:bound.native_workspace.cwd,objective:bound.objective});
+  return freezeWorkAdmission({kind:'isolated_work',runId,originalRunId:a.run_id,ownerId:a.owner_id,conversationId:bound.member?.conversation_id??a.conversation_id,taskId:a.task_id,occurrenceId:a.occurrence_id,sessionRef:bound.sessionRef,cwd:bound.native_workspace.cwd,objective:bound.objective});
  }
  async resolveFiles(identity:IsolatedFileIdentity,lease:ExecutionLease):Promise<ResolvedIsolatedFiles>{
   const bound=await this.inspectForRun(identity.run_id,lease);if(!bound)throw fail('admission_missing');const a=bound.admission;
   const binding={owner_id:a.owner_id,...a.scope,cycle_id:a.cycle_id,snapshot_id:a.snapshot_id,run_id:identity.run_id,occurrence_id:a.occurrence_id};
   for(const key of Object.keys(binding) as (keyof typeof binding)[])if(identity[key]!==binding[key])throw fail('file_identity');
   const expected=digest(this.context(identity.run_id,lease));
-  return {workspace:bound.workspace,record:bound.record,binding,guard:()=>{if(digest(this.context(identity.run_id,lease))!==expected)throw fail('binding_changed');}};
+  return {workspace:bound.workspace,record:bound.record,binding,...(bound.member?{writePaths:bound.member.file_paths}:{}),guard:()=>{if(digest(this.context(identity.run_id,lease))!==expected)throw fail('binding_changed');}};
  }
 }
