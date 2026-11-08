@@ -27,6 +27,7 @@
     "mcp-agent-provider.js",
     "mcp-agent-scope.js",
     "mcp-control-host.js",
+    "mcp-discovery-control.js",
     "mcp-host-provider.js",
     "mcp-host-http.js",
     "mcp-host-stdio.js",

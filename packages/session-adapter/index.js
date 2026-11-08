@@ -40,6 +40,8 @@ import { createSkillCatalogCommand, createSkillCatalogReader, createSkillResourc
 import {createNativeWorkspaceAdmissionGate} from './native-workspace-factory.js'
 import {createNativeGitHost,normalizeNativeGitHostConfig} from './native-git-host.js'
 import {createMcpControlHost,createMcpControlRouteHandler} from './mcp-control-host.js'
+import {createMcpDiscoveryScopeResolver} from './mcp-discovery-control.js'
+import {resolveOwnerBoundDshProfileContext} from './dsh-profile-binding.js'
 
 import {normalizeLeaseTakeoverRequest,settleLeaseTakeover} from './lease-takeover.js'
 import {browserToolsConfigFromEnvironment,createBrowserToolsPlugin} from '../dsh-host/browser-tools.mjs'
@@ -1004,7 +1006,9 @@ export function apply(ctx, config = {}) {
       end:async admission_id=>workbenchBridge.requestHostSettings('admission/end',{admission_id})
     }:undefined
     const mcpControlHost=workbenchBridge&&typeof mcpRuntimeProvider?.resolveReloadScopes==='function'
-      ?createMcpControlHost({resolveScopes:(ownerId,agentId,signal)=>mcpRuntimeProvider.resolveReloadScopes(ownerId,agentId,signal),
+      ?createMcpControlHost({resolveScopes:createMcpDiscoveryScopeResolver({agents:ctx.agents,provider:mcpRuntimeProvider,
+          readState:(identity,signal,controlConfig)=>workbenchBridge.mcpControlState(identity,signal,controlConfig),
+          readOwnerBinding:()=>resolveOwnerBoundDshProfileContext(ctx.get('profileContext'))}),
         assertCurrent:async(identity,_phase,signal,controlConfig)=>(await workbenchBridge.mcpControlState(identity,signal,controlConfig)).state})
       :undefined
     const mcpControlRoute=mcpControlHost?createMcpControlRouteHandler(mcpControlHost):undefined

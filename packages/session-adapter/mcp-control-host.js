@@ -202,6 +202,7 @@ export function createMcpControlHost({ resolveScopes, assertCurrent, guardInterv
     if (entry.closePromise) return entry.closePromise;
     entry.state = 'closed';
     clearTimeout(entry.guardTimer);
+    for (const unlink of entry.unlinkHandles.splice(0)) unlink();
     entry.controller.abort(Object.assign(new Error(reason), { name: 'AbortError' }));
     entry.unlinkRequest?.();
     entry.unlinkDeadline?.();
@@ -297,6 +298,17 @@ export function createMcpControlHost({ resolveScopes, assertCurrent, guardInterv
       }
       entry.handles.push(handle);
       record.finish({ ok: true });
+      if (handle.signal !== undefined) {
+        if (typeof handle.signal?.addEventListener !== 'function' || typeof handle.signal?.removeEventListener !== 'function'
+          || typeof handle.signal.aborted !== 'boolean') fail('mcp_control_unavailable');
+        const onAbort = () => { void closeFromGuard(entry, 'mcp_control_scope_retired'); };
+        handle.signal.addEventListener('abort', onAbort, {once: true});
+        entry.unlinkHandles.push(() => handle.signal.removeEventListener('abort', onAbort));
+        if (handle.signal.aborted) {
+          await closeEntry(entry, 'mcp_control_scope_retired');
+          fail('mcp_control_stale');
+        }
+      }
       catalogs.push(normalizeMcpControlTools(handle.tools));
       await current(entry, 'pending');
     }
@@ -347,7 +359,7 @@ export function createMcpControlHost({ resolveScopes, assertCurrent, guardInterv
     const deadline = AbortSignal.timeout(reloadTimeoutMs);
     const entry = { key, identity, request, digest, controller, handles: [], startups: new Set(), state: 'starting', activeSeen: false, reclaimed: false,
       stagedAt: 0, guardTimer: undefined, closePromise: undefined, unlinkRequest: undefined, unlinkDeadline: undefined,
-      promise: undefined, tools: undefined };
+      promise: undefined, tools: undefined, unlinkHandles: [] };
     entry.unlinkRequest = linkSignal(signal, controller);
     entry.unlinkDeadline = linkSignal(deadline, controller);
     entries.set(key, entry);

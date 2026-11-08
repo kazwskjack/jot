@@ -199,20 +199,21 @@ export function createMcpAgentRuntimeProvider({ mcpPlugin, authorizeStdio, httpF
     return binding.retirement;
   }
 
-  /** Trusted Workbench binding only: the caller supplies the ORIGINAL read-only
+  /** Trusted Workbench or owner-profile discovery binding: the caller supplies the ORIGINAL read-only
    * operation/context source. This volatile index stores no operation receipts. */
-  function bindReloadScope({ agent, ownerId, agentId, capabilityEpoch, connections, readOriginalState } = {}) {
+  function bindReloadScope({ agent, ownerId, agentId, capabilityEpoch, connections, readOriginalState, discoveryOnly = false } = {}) {
     if (credentialsInvalidating || credentialInvalidationFailed) fail('mcp_agent_credentials_changing');
     if (providerClosed) fail('mcp_agent_provider_closed');
     const scope = contexts.get(agent);
     if (!scope) fail('mcp_agent_scope_unavailable');
     if (![ownerId, agentId].every(value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(value))
       || !Number.isSafeInteger(capabilityEpoch) || capabilityEpoch < 1
-      || typeof readOriginalState !== 'function' || typeof scope.tools.schemas !== 'function') fail('mcp_reload_binding_invalid');
+      || typeof discoveryOnly !== 'boolean' || typeof readOriginalState !== 'function'
+      || typeof scope.tools.schemas !== 'function') fail('mcp_reload_binding_invalid');
     const validated = validateMcpConnections(connections, ownerId);
     const snapshot = deepFreeze(structuredClone(validated.connections));
     retireReloadBinding(reloadByAgent.get(agent));
-    const binding = { agent, scope, ownerId, agentId, capabilityEpoch, connections: snapshot, readOriginalState,
+    const binding = { agent, scope, ownerId, agentId, capabilityEpoch, connections: snapshot, readOriginalState, discoveryOnly,
       controller: new AbortController(), active: true, jobs: new Set(), handles: new Set(), retirement: undefined };
     const ensure = () => {
       binding.controller.signal.throwIfAborted();
@@ -345,7 +346,8 @@ export function createMcpAgentRuntimeProvider({ mcpPlugin, authorizeStdio, httpF
       },
     });
     reloadByAgent.set(agent, binding); reloadBindings.add(binding);
-    return () => retireReloadBinding(binding);
+    const remove = () => retireReloadBinding(binding);
+    return Object.freeze(Object.assign(remove, {scope: binding.scopeHandle, signal: binding.controller.signal}));
   }
 
   async function resolveReloadScopes(ownerId, agentId, signal) {
@@ -353,7 +355,7 @@ export function createMcpAgentRuntimeProvider({ mcpPlugin, authorizeStdio, httpF
     if (providerClosed || credentialsInvalidating || credentialInvalidationFailed) return [];
     const scopes = [], agents = new Set();
     for (const binding of reloadBindings) {
-      if (!binding.active || binding.ownerId !== ownerId || binding.agentId !== agentId
+      if (binding.discoveryOnly || !binding.active || binding.ownerId !== ownerId || binding.agentId !== agentId
         || reloadByAgent.get(binding.agent) !== binding || contexts.get(binding.agent) !== binding.scope) continue;
       agents.add(binding.agent);
       scopes.push(binding.scopeHandle);
