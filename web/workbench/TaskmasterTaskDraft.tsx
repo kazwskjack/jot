@@ -38,7 +38,7 @@ export default function TaskmasterTaskDraft({content,disabled,onDraft}:{content:
  return <details open={open} onToggle={event=>setOpen(event.currentTarget.open)}>
   <summary>Taskmaster 任务字段编辑</summary>
   <p className="wb-hint">新增和修改作用于此逻辑文件草稿，保存使用原文件权限、会话恢复和版本比较。原文件中的其余字段会保留，JSON 通常按两空格缩进整理，接近 1 MiB 上限时使用紧凑格式。外部任务状态继续作为来源资料。</p>
-  {open&&!source&&<p role="alert">当前草稿无法解析。请先在文本草稿中修正 Taskmaster JSON。</p>}
+  {open&&!source&&(content.trim()?<p role="alert">当前草稿无法解析。请先在文本草稿中修正 Taskmaster JSON。</p>:<button type="button" disabled={disabled} onClick={()=>{onDraft('{\n  "tasks": []\n}\n');setBasis(null);setMessage('已初始化任务文件草稿，请继续比较修改并确认保存。');}}>初始化空任务文件草稿</button>)}
   {source&&<>
    <button type="button" disabled={disabled} onClick={add}>新增顶层任务</button>
    <TaskmasterSourceTasks content={content} onEdit={edit} disabled={disabled}/>

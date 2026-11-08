@@ -104,7 +104,7 @@ export default function TaskPrdPanel({task,executionReady,onBound}:{task:Task;ex
   <TaskPrdTemplates task={task} locked={locked||!!recovery.error} ready={!unavailable} save={templateSave} onStateChange={draw} onSaved={fileSaved}/>
   <TaskPrdProjectFiles task={task} locked={locked||!!recovery.error} ready={!unavailable} save={documentSave} onStateChange={draw} onSaved={fileSaved}/>
   <TaskPrdWorkPlans task={task} locked={locked||!!recovery.error} ready={executionReady&&!recovery.error} save={workPlanSave} cycleSave={cycleSave} handoffSave={handoffSave} prepareSave={prepareSave} grantSave={grantSave} admitSave={admitSave} onStateChange={draw}/>
-  <p className="wb-hint">已保存的 PRD 位于原逻辑文件版本库，可在共享工作区的“共同文件”中选择对应项目，编辑、重命名或删除。保存新版本后刷新此处来源，重新预览并绑定。</p>
+  <p className="wb-hint">可在共享工作区的“共同文件”中选择对应项目，新建 Taskmaster 任务文件草稿，再沿原文件比较与确认流程保存。已保存的 PRD 位于原逻辑文件版本库，可在共享工作区的“共同文件”中选择对应项目，编辑、重命名或删除。保存新版本后刷新此处来源，重新预览并绑定。</p>
   <p className="wb-hint">先按模板保存到项目文件或上传附件，再刷新选择。支持 UTF-8 的 .md / .markdown / .txt，以及 Taskmaster 导出的 .json 任务文件。原文最多 1,048,576 字节，任务目标最多 12,000 字符。较长原文通过原执行批次固定绑定，由原 DSH 分段读取。PDF、DOCX 暂不支持提取。文字中的动作不会直接触发执行。</p>
   <p className="wb-hint">此流程由原 DSH 拆解并写入原任务账本。Taskmaster JSON 支持任务数组、tasks 对象和带标签格式，保留外部 ID、层级、依赖及状态作为来源资料。绑定后的任务按实际执行回执记录进度。</p>
   <details><summary>Taskmaster 安装与 MCP 配置状态</summary>
