@@ -10,7 +10,7 @@ const messages={
  PRD_PREVIEW_CHANGED:'任务、角色或来源已变化，预览已失效，请重新预览确认。',
  PRD_PREVIEW_VERSION_CONFLICT:'预览与原任务版本不一致，请刷新并重新选择来源。',
  PRD_SOURCE_UNAVAILABLE:'来源已移除或不可读取，请刷新并重新选择。',
- PRD_SOURCE_UNSUPPORTED:'来源格式不支持，请使用 UTF-8 文本或 Markdown 附件。',
+ PRD_SOURCE_UNSUPPORTED:'来源格式不支持，请使用 UTF-8 文本、Markdown 或有效的 Taskmaster JSON 任务文件。',
  PRD_SOURCE_TOO_LARGE:'来源超过服务允许的大小，请精简需求后重新选择。',
  PRD_OBJECTIVE_TOO_LARGE:'完整任务目标超过服务允许的长度，请精简需求后重新预览。',
  PRD_SOURCE_INTEGRITY_FAILED:'来源内容与记录哈希不一致，请检查文件后重新选择。',
