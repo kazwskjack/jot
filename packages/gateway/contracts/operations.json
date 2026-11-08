@@ -1977,7 +1977,7 @@
     "PreviewWorkbenchMemoryImport",
     "WorkbenchMemoryImportPreview",
     "200",
-    "Create or refresh a durable owner-scoped import preview with one immutable input and target. Inspect source versions, scopes, provenance, duplicates and tombstones. This command changes no formal memory. Atomic request receipt and preview persist in one transaction."
+    "Create or refresh a durable owner-scoped import preview with one immutable input and target. Inspect source versions, scopes, provenance, duplicates and tombstones. This command changes no formal memory. Atomic request receipt and preview persist in one transaction. Optional offset and limit must be supplied together. They project item transport only. Full immutable source, conflict checks, scope replacement and batch application remain authoritative. Paged receipts include exact full-batch created/skipped totals. Original mutation keys preserve the first returned page. Fetch further pages with GET using the same original batch identifier. File-backed input captures one original owner/workspace/target-project file version and byte hash. Original immutable file versions retain the complete source. The source read returns its verified descriptor, and the original owner-bound binary file reader supplies exact bytes. Formal application rechecks that source version and its bytes. Optional offset/limit also page the replacement preimage inventory and retirement receipt by the same cursor. Nested page totals and count describe the complete replacement scope. Clients can use further original batch GETs to navigate each list independently. Unpaged responses retain complete arrays."
   ],
   [
     "GET",
@@ -1986,7 +1986,7 @@
     null,
     "WorkbenchMemoryImportPreview",
     "200",
-    "Read the original owner-scoped import preview and its optional applied receipt. Recheck target access and return exact source content, versions, conflicts and target scope for review."
+    "Read the original owner-scoped import preview and its optional applied receipt. Recheck target access and return exact source content, versions, conflicts and target scope for review. Optional offset and limit must be supplied together. They project item transport only. Full immutable source, conflict checks, scope replacement and batch application remain authoritative. Paged receipts include exact full-batch created/skipped totals. Optional offset/limit also page the replacement preimage inventory and retirement receipt by the same cursor. Nested page totals and count describe the complete replacement scope. Clients can use further original batch GETs to navigate each list independently. Unpaged responses retain complete arrays."
   ],
   [
     "POST",
@@ -1995,7 +1995,7 @@
     "ApplyWorkbenchMemoryImport",
     "WorkbenchMemoryImportReceipt",
     "200",
-    "Apply the exact reviewed preview version atomically through original memory saves. Recheck source and target states. Conflict rejects the whole batch. New notes are unverified. Deleted or superseded imports block reimport of later versions of the same source. Immutable original applied receipts recover response loss without replaying writes."
+    "Apply the exact reviewed preview version atomically through original memory saves. Recheck source and target states. Conflict rejects the whole batch. New notes are unverified. Deleted or superseded imports block reimport of later versions of the same source. Immutable original applied receipts recover response loss without replaying writes. Optional offset and limit must be supplied together. They project item transport only. Full immutable source, conflict checks, scope replacement and batch application remain authoritative. Paged receipts include exact full-batch created/skipped totals. Original mutation keys preserve the first returned page. Fetch further pages with GET using the same original batch identifier. File-backed input captures one original owner/workspace/target-project file version and byte hash. Original immutable file versions retain the complete source. The source read returns its verified descriptor, and the original owner-bound binary file reader supplies exact bytes. Formal application rechecks that source version and its bytes. Optional offset/limit also page the replacement preimage inventory and retirement receipt by the same cursor. Nested page totals and count describe the complete replacement scope. Clients can use further original batch GETs to navigate each list independently. Unpaged responses retain complete arrays."
   ],
   [
     "GET",

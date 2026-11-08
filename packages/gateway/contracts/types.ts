@@ -659,8 +659,8 @@ export type WorkbenchMemoryImportBundleSource = {
 };
 
 export type WorkbenchMemoryReplacementItem = {memory_id:string;version:number;content_sha256:string;content_chars:number;verified:boolean;expires_at:string|null};
-export type WorkbenchMemoryReplacement = {scope_sha256:string;count:number;items:WorkbenchMemoryReplacementItem[]};
-export type WorkbenchMemoryReplacementReceipt = {scope_sha256:string;count:number;items:Array<{memory_id:string;from_version:number;result_version:number;status:"deleted"}>};
+export type WorkbenchMemoryReplacement = {scope_sha256:string;count:number;page?:WorkbenchMemoryImportPage;items:WorkbenchMemoryReplacementItem[]};
+export type WorkbenchMemoryReplacementReceipt = {scope_sha256:string;count:number;page?:WorkbenchMemoryImportPage;items:Array<{memory_id:string;from_version:number;result_version:number;status:"deleted"}>};
 
 export type WorkbenchMemoryImportReplacementSource = {import_id:string;preview_version:number;memory_id:string;version:number;sha256:string;memory:WorkbenchMemory;execution_authorized:false};
 
