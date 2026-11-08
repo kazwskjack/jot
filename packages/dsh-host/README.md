@@ -31,6 +31,30 @@ integrity check or mark an untested plugin combination ready. Local SDK fixtures
 with scripted model transport prove wiring; they do not prove production rollout
 or remote-provider quality.
 
+## Host settings provisioning
+
+`createHostProfile` accepts an optional `hostSettings` object. The CLI accepts its
+private JSON file as the fourth argument, after the workbench route file.
+The object supplies `ownerId`, `bootstrap`, `productSchema` and `writeNamespace`.
+`bootstrap` contains `gatewayId`, `actorId`, `dshOrigin`, `jotOrigin`,
+`gatewayOrigin`, `namespaces` and `maxBindingLifetimeMs`. `gatewayOrigin` must
+match the workbench origin. `writeNamespace` is `jot-session-adapter` and must
+appear in `namespaces`. `productSchema` supplies `schema_version` (at least 1)
+and the actual native schema's 64-character SHA-256 `schema_fingerprint`.
+
+Host-enabled preparation writes the selected owner's native profile binding,
+registers the volatile Host policy namespace and passes the explicit bootstrap,
+owner-route and product settings configuration to the Adapter. The existing MCP
+provider remains composed. Both `JOT_SESSION_ADAPTER_TOKEN` and
+`GENERAL_AGENT_INTERNAL_CHANNEL_TOKEN` require at least 32 characters for this
+configuration. Enable the matching BFF and Gateway Host settings flags using the
+same allowed origins and namespace.
+
+The native SettingsController must expose the selected namespace with its actual
+live schema and settings. A missing descriptor, mismatched fingerprint,
+unconfirmed migration, loaded native session or active run holds the write.
+Product settings versions begin at 1. Native DSH revisions may begin at 0.
+
 ## Windows startup
 
 Use a private installation directory outside the Agent workspace and Git checkout.
