@@ -1969,5 +1969,32 @@
     "TaskPrdRuntimeVersion",
     "200",
     "Explicitly run the already installed owner-selected Node CLI entry with fixed --version arguments. Match profile, manifest and CLI hashes before and after probing. Bound execution to 15 seconds and combined output to 64 KiB. Propagate cancellation, await process close and retain one in-flight probe per adapter. Return the parsed runtime version separately from the manifest declaration. Raw output and physical paths remain private. This transient observation grants no task execution authority."
+  ],
+  [
+    "POST",
+    "/v1/workspaces/{workspace_id}/memory/import/preview",
+    "previewWorkbenchMemoryImport",
+    "PreviewWorkbenchMemoryImport",
+    "WorkbenchMemoryImportPreview",
+    "200",
+    "Create or refresh a durable owner-scoped import preview with one immutable input and target. Inspect source versions, scopes, provenance, duplicates and tombstones. This command changes no formal memory. Atomic request receipt and preview persist in one transaction."
+  ],
+  [
+    "GET",
+    "/v1/workspaces/{workspace_id}/memory/import/{import_id}",
+    "getWorkbenchMemoryImport",
+    null,
+    "WorkbenchMemoryImportPreview",
+    "200",
+    "Read the original owner-scoped import preview and its optional applied receipt. Recheck target access and return exact source content, versions, conflicts and target scope for review."
+  ],
+  [
+    "POST",
+    "/v1/workspaces/{workspace_id}/memory/import/{import_id}/apply",
+    "applyWorkbenchMemoryImport",
+    "ApplyWorkbenchMemoryImport",
+    "WorkbenchMemoryImportReceipt",
+    "200",
+    "Apply the exact reviewed preview version atomically through original memory saves. Recheck source and target states. Conflict rejects the whole batch. New notes are unverified. Deleted or superseded imports block reimport of later versions of the same source. Immutable original applied receipts recover response loss without replaying writes."
   ]
 ]

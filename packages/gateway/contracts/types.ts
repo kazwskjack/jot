@@ -166,7 +166,7 @@ export type WorkbenchCapabilities = {
   host_settings_read?: boolean;
   host_settings_write?: boolean;
   host_settings_write_namespace?: string;
-  enabled: boolean; agent_roles: boolean; independent_teams: boolean; agent_messages: boolean; shared_workspace: boolean; workspace_file_history?: boolean; workspace_file_range?: boolean; memory_scopes: Array<"project" | "private">; collaboration_modes: Array<WorkbenchCollaborationMode>; task_triggers: Array<"once" | "interval" | "page_change" | "daily" | "weekly" | "cron" | "delay" | "conversation_message" | "conversation_result">; task_schedule_limits?: WorkbenchTaskScheduleLimits; notification_channels: Array<"in_app">; allowed_tools: Array<"universe_capabilities" | "universe_search" | "browser_action">; execution_ready: boolean; browser_action_readiness?: BrowserActionReadinessItem[]; memory_lifecycle?: boolean; memory_restore?: boolean; memory_consolidation?: boolean; memory_retrieval_traces?: boolean; memory_capture?: boolean; memory_retrieval?: "local_keyword"; task_readiness?:boolean;task_prd?:boolean; task_unlimited_runs?: boolean; task_run_limit_protocol?: 1; model_budget?: boolean; task_model_budget_limits?: ModelBudgetLimits; task_reply_policy?: boolean; task_reply_execution?: false; task_create_delivery?: boolean; task_notifications?: boolean; channel_bindings?: boolean; email_bindings?: boolean; wecom_bindings?: boolean; matrix_bindings?: boolean; webpush_bindings?: boolean; sms_bindings?: boolean;task_notification_events?:TaskNotificationEventKind[]; mcp_servers?: boolean; host_readiness?:boolean; host_readiness_namespaces?:string[] };
+  enabled: boolean; agent_roles: boolean; independent_teams: boolean; agent_messages: boolean; shared_workspace: boolean; workspace_file_history?: boolean; workspace_file_range?: boolean; memory_scopes: Array<"project" | "private">; collaboration_modes: Array<WorkbenchCollaborationMode>; task_triggers: Array<"once" | "interval" | "page_change" | "daily" | "weekly" | "cron" | "delay" | "conversation_message" | "conversation_result">; task_schedule_limits?: WorkbenchTaskScheduleLimits; notification_channels: Array<"in_app">; allowed_tools: Array<"universe_capabilities" | "universe_search" | "browser_action">; execution_ready: boolean; browser_action_readiness?: BrowserActionReadinessItem[]; memory_lifecycle?: boolean; memory_import?: boolean; memory_restore?: boolean; memory_consolidation?: boolean; memory_retrieval_traces?: boolean; memory_capture?: boolean; memory_retrieval?: "local_keyword"; task_readiness?:boolean;task_prd?:boolean; task_unlimited_runs?: boolean; task_run_limit_protocol?: 1; model_budget?: boolean; task_model_budget_limits?: ModelBudgetLimits; task_reply_policy?: boolean; task_reply_execution?: false; task_create_delivery?: boolean; task_notifications?: boolean; channel_bindings?: boolean; email_bindings?: boolean; wecom_bindings?: boolean; matrix_bindings?: boolean; webpush_bindings?: boolean; sms_bindings?: boolean;task_notification_events?:TaskNotificationEventKind[]; mcp_servers?: boolean; host_readiness?:boolean; host_readiness_namespaces?:string[] };
 export type AgentRole = { agent_id: string; name: string; instructions: string; workspace_id: string; project_id: string; conversation_id: string; status: "active" | "disabled" | "deleting" | "deleted"; version: number; capability_epoch: number; allowed_tools: Array<"universe_capabilities" | "universe_search" | "browser_action">; created_at: string; updated_at: string };
 export type AgentRolePage = { items: Array<AgentRole> };
 export type CreateAgentRole = { name: string; instructions?: string; workspace_id?: string; project_id?: string; allowed_tools?: Array<"universe_capabilities" | "universe_search" | "browser_action"> };
@@ -622,3 +622,20 @@ export type TaskmasterRuntimeVersion={protocol:1;owner_id:string;profile_id:stri
 export type TaskPrdRuntimeVersion={task_id:string;task_version:number;runtime:TaskmasterRuntimeVersion};
 
 export type TaskPrdAppendSource={task_count:number;sha256:string;subtasks:TaskSubtask[]};
+
+export type WorkbenchMemoryImportTarget = {scope:"project"|"private";project_id:string;agent_id:string|null};
+export type WorkbenchMemoryImportItem = {
+ source_memory_id:string;source_version:number;source_history_versions:number[];source_content:string;
+ source_provenance:Array<{kind:string;reference:string}>;source_revision:string|null;source_expires_at:string|null;
+ target_key:string;target_expected_version:number;status:"ready"|"skipped"|"conflict";reason:string|null;source_local:boolean;
+};
+export type WorkbenchMemoryImportReceipt = {
+ import_id:string;status:"applied";version:number;target:WorkbenchMemoryImportTarget;applied_at:string;
+ items:Array<(Omit<WorkbenchMemoryImportItem,"status">&{status:"skipped"})|{source_memory_id:string;source_version:number;memory_id:string;version:number;status:"created"}>;
+};
+export type WorkbenchMemoryImportPreview = {
+ schema_version:1;document_workspace_id:string;target:WorkbenchMemoryImportTarget;
+ counts:{total:number;ready:number;skipped:number;conflict:number};items:WorkbenchMemoryImportItem[];
+ import_id:string;input_sha256:string;version:number;status:"previewed"|"applied";created_at:string;updated_at:string;
+ receipt?:WorkbenchMemoryImportReceipt;
+};

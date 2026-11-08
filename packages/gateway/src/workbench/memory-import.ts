@@ -87,20 +87,28 @@ export class MemoryImportService{
   if(memoryExpired(row))return {local:true,reason:'source_expired'};
   return {local:true,reason:null};
  }
- private targetState(owner:string,workspace:string,target:Target,targetKey:string){
-  const rows=this.db.prepare('SELECT * FROM wb_memories WHERE owner_id=? AND workspace_id=? AND project_id=? AND scope=? AND agent_id IS ?')
+ private targetStates(owner:string,workspace:string,target:Target){
+  const rows=this.db.prepare('SELECT version,status,provenance_json FROM wb_memories WHERE owner_id=? AND workspace_id=? AND project_id=? AND scope=? AND agent_id IS ?')
    .all(owner,workspace,target.project_id,target.scope,target.agent_id) as MemoryRow[];
-  const row=rows.find(value=>{
-   try{return (JSON.parse(String(value.provenance_json??'[]')) as Array<{kind?:string;reference?:string}>).some(source=>source.kind==='import'&&source.reference===targetKey);}
-   catch{return false;}
-  });
-  if(!row)return {expected:0 as const,reason:null};
-  return {expected:Number(row.version),reason:row.status==='active'?'target_exists':'target_tombstone'};
+  const states=new Map<string,{expected:number;reason:'target_exists'|'target_tombstone'}>();
+  for(const row of rows){
+   const provenance=JSON.parse(String(row.provenance_json??'[]')) as Array<{kind?:string;reference?:string}>;
+   for(const source of provenance){
+    if(source.kind!=='import'||typeof source.reference!=='string')continue;
+    const prefix=source.reference.slice(0,source.reference.lastIndexOf('@')+1);
+    if(!prefix||!/^[1-9][0-9]*$/.test(source.reference.slice(prefix.length)))continue;
+    const state={expected:Number(row.version),reason:row.status==='active'?'target_exists' as const:'target_tombstone' as const};
+    if(!states.has(source.reference))states.set(source.reference,state);
+    if(row.status!=='active'&&!states.has(prefix))states.set(prefix,state);
+   }
+  }
+  return states;
  }
  private inspect(owner:string,workspace:string,target:Target,document:ReturnType<typeof normalizeDocument>){
+  const targets=this.targetStates(owner,workspace,target);
   const items:PreviewItem[]=document.items.map(source=>{
    const targetKey=`jot-import-v1:${digest([target.scope,target.project_id,target.agent_id]).slice(0,16)}:${source.workspace_id}/${source.memory_id}@${source.version}`;
-   const local=this.sourceState(owner,source),targetState=this.targetState(owner,workspace,target,targetKey);
+   const local=this.sourceState(owner,source),targetState=targets.get(targetKey.slice(0,targetKey.lastIndexOf('@')+1))??targets.get(targetKey)??{expected:0,reason:null};
    let reason=local.reason??targetState.reason,status:PreviewItem['status']=reason?(reason==='source_expired'||reason==='source_superseded'?'skipped':'conflict'):'ready';
    if(source.provenance.length>=20&&status==='ready'){reason='provenance_limit';status='conflict';}
    return {source_memory_id:source.memory_id,source_version:source.version,source_history_versions:source.history.map(row=>Number(row.version)),source_content:source.content,

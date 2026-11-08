@@ -207,7 +207,7 @@ export function registerWorkbenchProxy(app,config,localCsrf){
    const binaryDownload=req.method==='GET'&&/^\/v1\/workspaces\/[^/]+\/files\/binary$/.test(suffix);
   if(binary&&!Buffer.isBuffer(req.body))return reply.code(415).send({error:{code:'BINARY_UPLOAD_REQUIRED'}});
   if(req.body!==undefined)headers['content-type']=binary?'application/octet-stream':'application/json';
-   if(binary||binaryDownload)reply.header('cache-control','private, no-store');
+   if(binary||binaryDownload||/^\/v1\/workspaces\/[^/]+\/memory\/import(?:\/|$)/.test(suffix))reply.header('cache-control','private, no-store');
    const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),binary||binaryDownload?120000:30000);
   req.raw.once('aborted',()=>controller.abort());reply.raw.once('close',()=>controller.abort());
   try{
@@ -222,6 +222,7 @@ export function registerWorkbenchProxy(app,config,localCsrf){
   }catch{return reply.code(502).send({error:{code:'WORKBENCH_UNAVAILABLE',message:'The local workbench gateway did not respond.'}});}
   finally{clearTimeout(timer);}
  };
+ app.route({method:'POST',url:'/workbench-api/v1/workspaces/:workspaceId/memory/import/preview',bodyLimit:20_100_000,handler});
  app.route({method:['GET','POST','PATCH','DELETE'],url:'/workbench-api/v1/*',handler});
  app.route({method:'PUT',url:'/workbench-api/v1/agents/:agentId/mcp/connections/:connectionId/tools',handler});
  app.route({method:'PUT',url:'/workbench-api/v1/uploads/:uploadId/content',bodyLimit:104857600,handler});
