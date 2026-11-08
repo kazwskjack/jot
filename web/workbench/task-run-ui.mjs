@@ -27,6 +27,7 @@ export function taskResumeError(error){
  if(error?.status===409&&['RUN_VERSION_CONFLICT','RUN_STATE_CONFLICT','TASK_CONTINUATION_CONFLICT','CHECKPOINT_INVALID','TASK_CHECKPOINT_UNAVAILABLE'].includes(code))return '执行状态已更新，请刷新后的当前进度再试。';
  if(['RECONCILIATION_REQUIRED','BUDGET_USAGE_UNKNOWN'].includes(code))return '上次动作或用量尚待核对，暂不能继续。';
  if(['MODEL_BUDGET_EXHAUSTED','BUDGET_EXHAUSTED','BUDGET_UNCONFIGURED','TASK_BUDGET_EXHAUSTED'].includes(code))return '当前额度不足或尚未配置，请先检查模型预算。';
+ if(code==='DATABASE_BUSY')return '数据库繁忙，恢复结果尚待确认，请先刷新本次执行记录。';
  if(code==='TASK_CONTINUATION_LIMIT')return '本次执行已达到恢复次数上限，不能重置进度继续。';
  if(error?.status===403||error?.status===404)return '当前执行不可访问，请刷新执行记录。';
  return '尚未确认恢复结果。请重试同一次恢复请求，或刷新执行记录查看进展。';

@@ -411,7 +411,7 @@ export class WorkbenchGoalBridge {
       state.revision=after.revision;
     }catch(error){
       if(state.binding===binding){
-        if(!state.revoked&&!state.suspended&&['model_budget_exhausted','budget_usage_unknown','budget_usage_pending','budget_window_closed','budget_policy_stale','budget_route_unavailable','budget_service_unavailable'].includes(error.message)){
+        if(!state.revoked&&!state.suspended&&['workbench_database_busy','model_budget_exhausted','budget_usage_unknown','budget_usage_pending','budget_window_closed','budget_policy_stale','budget_route_unavailable','budget_service_unavailable'].includes(error.message)){
           // Inside pre-step the Agent is not idle. Fence and pause synchronously;
           // waiting for whenIdle here would deadlock the very step being denied.
           state.suspended=true;state.driverGranted=false;

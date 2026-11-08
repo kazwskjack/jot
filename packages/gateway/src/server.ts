@@ -479,7 +479,8 @@ export async function buildServer(config: {
     if (!pending) return payload;
     // An error response must not replace a recoverable reservation or another
     // writer's success. Successful upload receipts already committed atomically.
-    if(atomicProtocol(request)&&reply.statusCode>=400)return payload;
+    // Server failures leave the original reservation available for reconciliation.
+    if(reply.statusCode>=500||atomicProtocol(request)&&reply.statusCode>=400)return payload;
     db.prepare(
       'UPDATE ga_idempotency SET response_status=?,response_json=? WHERE owner_id=? AND operation=? AND idempotency_key=?',
     ).run(reply.statusCode, JSON.stringify(responseValue), pending.owner, pending.operation, pending.key);
@@ -488,6 +489,10 @@ export async function buildServer(config: {
 
   app.setErrorHandler((error, request, reply) => {
     const code = error instanceof Error ? error.message : 'internal_error';
+    // Extended SQLite BUSY results retain primary result code 5.
+    if(error instanceof Error&&'code' in error&&error.code==='ERR_SQLITE_ERROR'
+      &&'errcode' in error&&typeof error.errcode==='number'&&(error.errcode&0xff)===5)
+      return reply.code(503).send({error:{code:'DATABASE_BUSY'}});
     if(code==='contract_response_invalid')return reply.code(500).send({error:{code:'CONTRACT_RESPONSE_INVALID'}});
     if(code==='git_repository_unconfigured')return reply.code(503).send({error:{code:'GIT_REPOSITORY_UNCONFIGURED'}});
     if(code==='chat_mode_unavailable')return reply.code(503).send({error:{code:'CHAT_MODE_UNAVAILABLE'}});

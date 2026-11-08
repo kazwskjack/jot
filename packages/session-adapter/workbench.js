@@ -41,7 +41,7 @@ const SAFE_TOOLS = new Set(['universe_capabilities', 'universe_search','browser_
 const BUDGETED_TOOLS = new Set(['universe_capabilities','universe_search']);
 const MCP_TOOL_NAME = /^jot_mcp_[a-z0-9_]{1,50}$/;
 const MCP_CONTROL_IDENTITY_KEYS = ['owner_id', 'agent_id', 'connection_id', 'version', 'config_version', 'generation'];
-const STEP_FAILURE_CODES=new Set(['budget_route_unavailable','model_budget_exhausted','budget_usage_unknown','budget_usage_pending','budget_window_closed','budget_policy_stale','budget_service_unavailable','workbench_model_host_incompatible','workbench_run_forbidden','workbench_goal_unavailable','workbench_goal_stopped','workbench_goal_identity_conflict','workbench_goal_binding_changed','workbench_step_admission_invalid']);
+const STEP_FAILURE_CODES=new Set(['workbench_database_busy','budget_route_unavailable','model_budget_exhausted','budget_usage_unknown','budget_usage_pending','budget_window_closed','budget_policy_stale','budget_service_unavailable','workbench_model_host_incompatible','workbench_run_forbidden','workbench_goal_unavailable','workbench_goal_stopped','workbench_goal_identity_conflict','workbench_goal_binding_changed','workbench_step_admission_invalid']);
 function canonicalJson(value){if(Array.isArray(value))return`[${value.map(canonicalJson).join(',')}]`;if(value&&typeof value==='object')return`{${Object.keys(value).sort().map(key=>`${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`;return JSON.stringify(value)??'null';}
 function browserActionDigest(binding,callId,actionPayload){return'sha256:'+createHash('sha256').update(canonicalJson({run_id:binding.runId,session_ref:binding.sessionRef,call_id:callId,action_payload:actionPayload})).digest('hex');}
 export function stepFailureCode(error){return STEP_FAILURE_CODES.has(error?.message)?error.message:'workbench_step_failed';}
@@ -228,29 +228,26 @@ export class WorkbenchBridge {
       signal: signal ? AbortSignal.any([signal, timed]) : timed,
     });
     if (!response.ok) {
+      let code;
+      try { code = (await response.json())?.error?.code; } catch {}
+      if(response.status===503&&code==='DATABASE_BUSY')throw new Error('workbench_database_busy');
       if(path==='ordinary-chat-web'&&response.status===409){
-        let code;try{code=(await response.json())?.error?.code;}catch{}
         if(code==='CHAT_WEB_ALLOWANCE_CONSUMED')throw Error('CHAT_WEB_ALLOWANCE_CONSUMED');
       }
       if(path==='native-child-abort'&&response.status===409){
-        let code;try{code=(await response.json())?.error?.code;}catch{}
         if(code==='NATIVE_CREATION_OUTCOME_UNKNOWN')throw Error('native_creation_outcome_unknown');
       }
       if(path==='step-admission'){
-        let code;try{code=(await response.json())?.error?.code;}catch{}
         const statuses={MODEL_BUDGET_EXHAUSTED:429,BUDGET_USAGE_UNKNOWN:409,BUDGET_USAGE_PENDING:409,
           BUDGET_WINDOW_CLOSED:409,BUDGET_POLICY_STALE:409,BUDGET_ROUTE_UNAVAILABLE:503,BUDGET_SERVICE_UNAVAILABLE:503};
         if(Object.hasOwn(statuses,code)&&response.status===statuses[code])throw new Error(code.toLowerCase());
       }
       if(path==='tool'&&response.status===429){
-        let code;try{code=(await response.json())?.error?.code;}catch{}
         if(code==='TASK_COLLABORATION_EXHAUSTED')throw new Error('task_collaboration_exhausted');
       }
       // A recoverable prerequisite conflict is not role revocation. Expose only
       // fixed codes from the authenticated loopback Gateway, never its details.
       if (response.status === 409 && ['guard', 'tool', 'goal-proposal'].includes(path)) {
-        let code;
-        try { code = (await response.json())?.error?.code; } catch {}
         if (['guard','tool'].includes(path)&&['DEPENDENCY_NOT_COMPLETED', 'DEPENDENCY_EVIDENCE_UNVERIFIED', 'DEPENDENCY_CYCLE'].includes(code))
           throw new Error(code.toLowerCase());
         if(path==='tool'&&code==='VERSION_CONFLICT')throw new Error('version_conflict');

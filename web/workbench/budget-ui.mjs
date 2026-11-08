@@ -20,5 +20,5 @@ export function budgetReason(reason){
  return names[scope]&&dimensions[field]?`${names[scope]}${dimensions[field]}不足以预留下一次调用`:'暂时不能继续调用模型，请检查任务状态';
 }
 export function budgetError(code){
- return ({BUDGET_LIMIT_BELOW_COMMITMENT:'上限不能低于已消耗与预留的总量，请先处理当前运行。',BUDGET_CEILING_EXCEEDED:'设置超过服务器允许的上限。',BUDGET_LIMIT_VERSION_CONFLICT:'额度已被更新，请取消编辑，刷新预算后重新设置。',BUDGET_POLICY_STALE:'服务器配置已更新，请稍后刷新重试。',BUDGET_SERVICE_UNAVAILABLE:'服务器尚未启用模型预算。',MODEL_BUDGET_EXHAUSTED:'模型预算不足，请查看额度与消耗。',BUDGET_USAGE_UNKNOWN:'上次模型用量尚待确认，暂时不能开始新的执行。'})[code]??'预算操作未完成，请检查填写内容或刷新重试。';
+ return ({DATABASE_BUSY:'数据库繁忙，请先刷新查看原操作记录。',BUDGET_LIMIT_BELOW_COMMITMENT:'上限不能低于已消耗与预留的总量，请先处理当前运行。',BUDGET_CEILING_EXCEEDED:'设置超过服务器允许的上限。',BUDGET_LIMIT_VERSION_CONFLICT:'额度已被更新，请取消编辑，刷新预算后重新设置。',BUDGET_POLICY_STALE:'服务器配置已更新，请稍后刷新重试。',BUDGET_SERVICE_UNAVAILABLE:'服务器尚未启用模型预算。',MODEL_BUDGET_EXHAUSTED:'模型预算不足，请查看额度与消耗。',BUDGET_USAGE_UNKNOWN:'上次模型用量尚待确认，暂时不能开始新的执行。'})[code]??'预算操作未完成，请检查填写内容或刷新重试。';
 }
