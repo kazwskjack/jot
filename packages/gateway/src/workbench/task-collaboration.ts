@@ -99,7 +99,7 @@ export class TaskCollaborationService {
    const context=this.workbench.contextForRun(runId);
    const current=this.db.prepare('SELECT task_id,occurrence_id,trigger_key FROM wb_task_current_occurrences WHERE run_id=?').get(runId) as {task_id:string;occurrence_id:string;trigger_key:string}|undefined;
    if(!current||context?.kind!=='task'||context.owner_id!==owner)throw new Error('task_collaboration_forbidden');
-   if(current.trigger_key.startsWith('discovery-work:'))throw new Error('task_collaboration_forbidden');
+   if(current.trigger_key.startsWith('discovery-work:')||current.trigger_key.startsWith('prd-work:'))throw new Error('task_collaboration_forbidden');
    if(!this.db.prepare("SELECT 1 FROM ga_runs WHERE id=? AND status IN ('starting','running')").get(runId))throw new Error('task_collaboration_forbidden');
    if(!this.db.prepare('SELECT 1 FROM wb_model_budget_bindings WHERE run_id=? AND owner_id=?').get(runId,owner))throw new Error('budget_service_unavailable');
    const grant=latest(this.db,owner,current.task_id);

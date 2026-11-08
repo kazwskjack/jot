@@ -204,7 +204,7 @@ export class HarnessWorker {
     const workLineage=()=>this.db.prepare("SELECT 1 FROM sqlite_master WHERE name='wb_task_run_occurrences'").get()
       ?this.db.prepare(`SELECT o.run_id,o.root_run_id,o.task_id,o.occurrence_id,o.conversation_id,t.owner_id,r.continuation_of,r.checkpoint_id
         FROM wb_task_run_occurrences o JOIN wb_persistent_tasks t ON t.task_id=o.task_id JOIN ga_runs r ON r.id=o.run_id
-        WHERE o.run_id=? AND o.trigger_key LIKE 'discovery-work:%'`).get(lease.run_id):undefined;
+        WHERE o.run_id=? AND (o.trigger_key LIKE 'discovery-work:%' OR o.trigger_key LIKE 'prd-work:%')`).get(lease.run_id):undefined;
     const initialWorkLineage=workLineage();
     const workMarker=(context:unknown)=>context&&typeof context==='object'&&'work_binding' in context?context.work_binding:undefined;
     const requiresWorkWorkspace=!!initialWorkLineage||workMarker(workbenchContext)!==undefined;

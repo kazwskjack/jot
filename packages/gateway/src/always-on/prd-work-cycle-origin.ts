@@ -31,10 +31,10 @@ export function installPrdWorkCycleOrigins(db:DatabaseSync){
   BEFORE ${operation} ON wb_task_prd_work_cycle_origins BEGIN SELECT RAISE(ABORT,'work_cycle_prd_origin_immutable'); END;`);
 }
 
-export function prdCycleAcceptance(db:DatabaseSync,owner:string,taskId:string,planId:string,expectedHash:string){
+export function prdCycleAcceptance(db:DatabaseSync,owner:string,taskId:string,planId:string,expectedHash:string,workCycleId?:string){
  const acceptance=readPrdWorkPlanAcceptance(db,owner,taskId,planId);
  if(!acceptance||acceptance.sha256!==expectedHash)throw Error('work_cycle_prd_review_changed');
- const {plan,facts}=prdWorkPlanAuthority(db,owner,taskId,planId);
+ const {plan,facts}=prdWorkPlanAuthority(db,owner,taskId,planId,workCycleId);
  if(plan.sha256!==acceptance.plan_sha256)throw Error('work_cycle_corrupt');
  for(const key of ['task_version','task_generation','role','source','ledger_sha256','occurrence_id','root_run_id','planning_current_run_id'] as const){
   if(canonicalJson(facts[key])!==canonicalJson(acceptance[key]))throw Error('work_cycle_authority_revoked');

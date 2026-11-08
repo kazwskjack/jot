@@ -17,6 +17,19 @@ export function installWorkGrants(db:DatabaseSync){db.exec(`
   WHERE c.cycle_id=NEW.cycle_id AND c.owner_id=NEW.owner_id AND c.project_id=NEW.project_id AND c.workspace_id=NEW.workspace_id
   AND c.agent_id=NEW.agent_id AND c.version=NEW.cycle_version AND c.state='open' AND r.snapshot_id=NEW.snapshot_id)
  BEGIN SELECT RAISE(ABORT,'work_grant_scope_invalid'); END;
+ CREATE TRIGGER IF NOT EXISTS wb_work_grant_prd_origin BEFORE INSERT ON wb_discovery_work_grants
+ WHEN EXISTS(SELECT 1 FROM wb_discovery_work_cycles c WHERE c.cycle_id=NEW.cycle_id AND c.admission_id IS NULL)
+ AND NOT EXISTS(SELECT 1 FROM wb_task_prd_work_cycle_origins o JOIN wb_discovery_work_cycles c ON c.cycle_id=o.cycle_id
+  WHERE o.cycle_id=NEW.cycle_id AND o.owner_id=NEW.owner_id AND o.task_id=c.task_id
+   AND c.agent_id=NEW.agent_id AND c.project_id=NEW.project_id AND c.workspace_id=NEW.workspace_id
+   AND json_type(NEW.grant_json,'$.admission_id')='null' AND json_type(NEW.grant_json,'$.report_sha256')='null'
+   AND json_type(NEW.grant_json,'$.policy_version')='null' AND json_type(NEW.grant_json,'$.signal_revision')='null'
+   AND json_type(NEW.grant_json,'$.signal_sha256')='null' AND json_extract(NEW.grant_json,'$.origin.kind')='task_prd'
+   AND json_extract(NEW.grant_json,'$.origin.acceptance_id')=o.acceptance_id
+   AND json_extract(NEW.grant_json,'$.origin.acceptance_sha256')=o.acceptance_sha256
+   AND json_extract(NEW.grant_json,'$.origin.plan_id')=o.plan_id AND json_extract(NEW.grant_json,'$.origin.plan_sha256')=o.plan_sha256
+   AND json_extract(NEW.grant_json,'$.task_id')=o.task_id)
+ BEGIN SELECT RAISE(ABORT,'work_grant_prd_origin_invalid'); END;
  CREATE TRIGGER IF NOT EXISTS wb_discovery_work_grant_command_scope BEFORE INSERT ON wb_discovery_work_grant_commands
  WHEN NOT EXISTS(SELECT 1 FROM wb_discovery_work_grants g WHERE g.grant_id=NEW.grant_id AND g.owner_id=NEW.owner_id AND g.grant_json=NEW.receipt_json)
  BEGIN SELECT RAISE(ABORT,'work_grant_scope_invalid'); END;`);

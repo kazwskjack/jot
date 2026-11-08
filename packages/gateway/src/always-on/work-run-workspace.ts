@@ -49,7 +49,7 @@ export class TrustedWorkRunWorkspaceResolver{
   const run=db.prepare('SELECT c.owner_id,r.conversation_id FROM ga_runs r JOIN ga_conversations c ON c.id=r.conversation_id WHERE r.id=?').get(runId) as {owner_id:string;conversation_id:string}|undefined;
   if(!run)throw fail('run_missing');
   const admission=this.records.byRun(run.owner_id,runId);
-  if(!admission){if(db.prepare("SELECT 1 FROM wb_task_run_occurrences WHERE run_id=? AND trigger_key LIKE 'discovery-work:%'").get(runId))throw fail('admission_missing');return this.memberContext(run.owner_id,runId,lease);}
+  if(!admission){if(db.prepare("SELECT 1 FROM wb_task_run_occurrences WHERE run_id=? AND (trigger_key LIKE 'discovery-work:%' OR trigger_key LIKE 'prd-work:%')").get(runId))throw fail('admission_missing');return this.memberContext(run.owner_id,runId,lease);}
   if(lease)assertExecutionLease(db,runId,lease);
   this.o.workbench.assertRunActive(runId);this.records.guard(run.owner_id,runId);
   if(db.prepare("SELECT 1 FROM wb_model_budget_attempts a JOIN wb_model_budget_bindings b ON b.run_id=a.run_id JOIN json_each(b.scopes_json) s WHERE b.owner_id=? AND a.state='unknown' AND s.value=? LIMIT 1").get(run.owner_id,admission.task_budget_scope_id))throw fail('budget_usage_unknown');
@@ -57,6 +57,8 @@ export class TrustedWorkRunWorkspaceResolver{
   if(!intent||!record||intent.snapshot_id!==admission.snapshot_id||record.snapshot_id!==admission.snapshot_id||digest(record)!==grant.snapshot_record_sha256)throw fail('journal_changed');
   const session=db.prepare('SELECT session_id FROM ga_harness_session_bindings WHERE owner_id=? AND conversation_id=?').get(run.owner_id,run.conversation_id) as {session_id:string}|undefined;
   if(!session?.session_id)throw fail('session_missing');
+  // shortcut: PRD native context is pending; derive only supported original Goal inputs.
+  if(grant.admission_id===null)throw fail('prd_context_pending');
   const selected=new Map<string,FullPlan>();let cursor:string|undefined;const seen=new Set<string>();
   do{
    const page=this.history.detail(run.owner_id,admission.scope,grant.admission_id,cursor);

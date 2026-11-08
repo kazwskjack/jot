@@ -121,7 +121,7 @@ export class WorkCycles{
   const row=this.row(owner,scope,cycleId);
   if(row.state!=='open')throw Error('work_cycle_closed');
   if(row.admission_id===null){
-   const origin=readPrdCycleOrigin(this.db,row),{plan,facts}=prdCycleAcceptance(this.db,owner,row.task_id,origin.plan_id,origin.acceptance_sha256);
+   const origin=readPrdCycleOrigin(this.db,row),{plan,facts}=prdCycleAcceptance(this.db,owner,row.task_id,origin.plan_id,origin.acceptance_sha256,row.cycle_id);
    const plans=[{plan_id:plan.plan_id,sha256:plan.sha256,paths:[...new Set<string>(plan.changes.map((change:Row)=>String(change.path)))].sort()}];
    if(this.budget(owner,{root_run_id:facts.root_run_id,task_id:row.task_id})!==row.task_budget_scope_id)throw Error('work_cycle_budget_binding_unconfirmed');
    if(canonicalJson(plans)!==row.plans_json)throw Error('work_cycle_corrupt');

@@ -216,7 +216,7 @@ function inspectAdmittedTaskPolicy(db:DatabaseSync,scope:Readonly<RuntimeReadine
       ||row.workspace_id!==scope.workspace_id||row.agent_workspace!==scope.workspace_id||row.agent_project!==row.project_id
       ||row.task_agent!==row.agent_id||row.agent_status!=='active'||row.epoch!==row.capability_epoch
       ||!['active','budget_exhausted'].includes(String(row.task_status))||row.generation!==row.task_generation
-      ||typeof row.trigger_key!=='string'||!row.trigger_key.startsWith('discovery-work:')
+      ||typeof row.trigger_key!=='string'||(!row.trigger_key.startsWith('discovery-work:')&&!row.trigger_key.startsWith('prd-work:'))
       ||row.root_run_id===undefined||row.conversation_id!==current.conversation_id)
       throw Error('policy_admission_unconfirmed');
     let context:Record<string,unknown>;

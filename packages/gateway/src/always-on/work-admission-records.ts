@@ -23,6 +23,7 @@ export function assertWorkGrantAuthority(db:DatabaseSync,grant:WorkGrant){
  const cycle=new WorkCycles(db).guard(grant.owner_id,grant.scope,grant.cycle_id),row=db.prepare('SELECT * FROM wb_discovery_work_cycles WHERE cycle_id=?').get(grant.cycle_id) as Row;
  if(cycle.version!==grant.cycle_version||cycle.task_id!==grant.task_id||cycle.admission_id!==grant.admission_id||cycle.report_sha256!==grant.report_sha256||workAdmissionDigest(cycle.plans)!==grant.plans_sha256)throw Error('work_admission_authority_revoked');
  for(const key of ['task_version','task_generation','task_budget_scope_id','signal_revision','signal_sha256'])if(row[key]!==grant[key as keyof WorkGrant])throw Error('work_admission_authority_revoked');
+ if(cycle.admission_id===null&&canonicalJson(grant.origin)!==canonicalJson(cycle.origin))throw Error('work_admission_authority_revoked');
  const planning=db.prepare('SELECT o.generation,c.generation AS current_generation,c.run_id FROM wb_task_occurrences o JOIN wb_task_current_occurrences c ON c.occurrence_id=o.occurrence_id WHERE o.occurrence_id=? AND o.task_id=?').get(grant.planning_occurrence_id,grant.task_id) as Row|undefined;
  if(!planning||planning.generation<0||planning.generation!==grant.planning_source_generation||planning.current_generation!==grant.planning_occurrence_generation||planning.run_id!==grant.planning_current_run_id)throw Error('work_admission_authority_revoked');
  const source=new WorkCycleSources(db).get(grant.owner_id,grant.scope,grant.cycle_id),journal=new WorkspaceJournal(db),intent=journal.intent(grant.owner_id,grant.scope,grant.cycle_id),record=journal.record(grant.owner_id,grant.scope,grant.cycle_id,grant.snapshot_id);
@@ -67,7 +68,7 @@ export class WorkAdmissionRecords{
  guard(owner:string,runId:string):WorkAdmissionRecord{return this.read(()=>{
   const record=this.byRun(owner,runId);if(!record)throw Error('work_admission_not_found');const grant=new WorkGrants(this.db).get(owner,record.scope,record.grant_id);assertWorkGrantAuthority(this.db,grant);
   const occurrence=this.db.prepare(`SELECT o.*,c.run_id AS current_run_id,c.generation AS current_generation FROM wb_task_occurrences o JOIN wb_task_current_occurrences c ON c.occurrence_id=o.occurrence_id WHERE o.occurrence_id=? AND o.task_id=?`).get(record.occurrence_id,record.task_id) as Row|undefined;
-  if(!occurrence||occurrence.generation!==record.task_generation||occurrence.current_generation!==record.task_generation||occurrence.current_run_id!==runId||occurrence.run_id!==record.run_id||occurrence.conversation_id!==record.conversation_id||occurrence.trigger_key!=='discovery-work:'+record.grant_id)throw Error('work_admission_authority_revoked');
+  if(!occurrence||occurrence.generation!==record.task_generation||occurrence.current_generation!==record.task_generation||occurrence.current_run_id!==runId||occurrence.run_id!==record.run_id||occurrence.conversation_id!==record.conversation_id||occurrence.trigger_key!==(grant.admission_id===null?'prd-work:':'discovery-work:')+record.grant_id)throw Error('work_admission_authority_revoked');
   assertWorkBudgetBinding(this.db,owner,record.run_id,record.task_id,record.task_budget_scope_id);assertWorkBudgetBinding(this.db,owner,runId,record.task_id,record.task_budget_scope_id);return record;
  });}
 }

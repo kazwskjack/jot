@@ -33,7 +33,7 @@ export function readReservedNativePlacements(db:DatabaseSync,scope:WorkspaceOper
    if(cache.has(runId))return cache.get(runId)!;valid(cache.size<10000);
    let value:History|null;try{value=readHistoricalWorkSnapshot(db,scope.owner_id,runId)}catch(error){
     if(!(error instanceof Error)||error.message!=='work_snapshot_history_not_found')throw error;
-    valid(!db.prepare("SELECT 1 FROM wb_task_run_occurrences WHERE run_id=? AND trigger_key LIKE 'discovery-work:%'").get(runId));value=null;
+    valid(!db.prepare("SELECT 1 FROM wb_task_run_occurrences WHERE run_id=? AND (trigger_key LIKE 'discovery-work:%' OR trigger_key LIKE 'prd-work:%')").get(runId));value=null;
    }
    if(value)valid(value.owner_id===scope.owner_id&&value.project_id===scope.project_id);cache.set(runId,value);return value;
   };

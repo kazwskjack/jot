@@ -470,7 +470,8 @@ export class PersistentTaskService {
       if(!this.options.modelBudgetPolicy||proof.budget_policy_revision!==this.options.modelBudgetPolicy.observedRevision())throw Error('work_admission_invalid');
       assertWorkGrantAuthority(this.db,grant);
       let record:WorkAdmissionRecord|undefined;
-      this.enqueue(owner,task.task_id,'discovery-work:'+grantId,this.now(),[{kind:'discovery_work_grant',reference:grantId,hash:workAdmissionDigest(grant)}],'',undefined,
+      const prd=grant.admission_id===null;
+      this.enqueue(owner,task.task_id,(prd?'prd-work:':'discovery-work:')+grantId,this.now(),[{kind:prd?'task_prd_work_grant':'discovery_work_grant',reference:grantId,hash:workAdmissionDigest(grant)}],'',undefined,
         (occurrenceId,runId,conversationId)=>{
           record=freezeWorkAdmission({protocol:1,grant_id:grantId,grant_sha256:workAdmissionDigest(grant),owner_id:owner,scope:{...grant.scope},cycle_id:grant.cycle_id,snapshot_id:grant.snapshot_id,source_sha256:grant.source_sha256,plans_sha256:grant.plans_sha256,paths_sha256:grant.paths_sha256,task_id:grant.task_id,task_version:grant.task_version,task_generation:grant.task_generation,task_budget_scope_id:grant.task_budget_scope_id,occurrence_id:occurrenceId,run_id:runId,conversation_id:conversationId,observation:{...proof},created_at:this.now(),execution_authorized:false});
           this.db.prepare('INSERT INTO wb_discovery_work_admissions VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(grantId,owner,grant.task_id,grant.task_version,grant.task_generation,occurrenceId,runId,conversationId,canonicalJson(record),workAdmissionDigest(record),record.created_at);

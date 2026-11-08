@@ -119,7 +119,7 @@ function completionSnapshot(db:DatabaseSync,runId:string) {
   a.held_tokens,a.held_nano_usd,a.usage_json,a.actual_tokens,a.actual_nano_usd,a.bound_exceeded
   FROM wb_model_budget_attempts a JOIN ${occurrenceRuns} o ON o.run_id=a.run_id
   WHERE o.owner_id=? AND o.occurrence_id=? ORDER BY a.run_id,a.attempt_id`).all(scope.owner_id,scope.occurrence_id);
- const isWork=!!db.prepare("SELECT 1 FROM wb_task_occurrences WHERE occurrence_id=? AND trigger_key LIKE 'discovery-work:%'").get(scope.occurrence_id);
+ const isWork=!!db.prepare("SELECT 1 FROM wb_task_occurrences WHERE occurrence_id=? AND (trigger_key LIKE 'discovery-work:%' OR trigger_key LIKE 'prd-work:%')").get(scope.occurrence_id);
  const isolated_work_evidence=isWork?workEvidenceReaders.get(db)?.({...scope,runId}):undefined;
  if(isWork&&types.isPromise(isolated_work_evidence)){
   void Promise.prototype.then.call(isolated_work_evidence,undefined,()=>{});

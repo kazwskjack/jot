@@ -35,7 +35,7 @@ export class SessionBindingRepository {
       }
       const work=this.db.prepare("SELECT 1 FROM sqlite_master WHERE name='wb_task_occurrences' AND type='table'").get()
         &&this.db.prepare("SELECT 1 FROM sqlite_master WHERE name='wb_task_current_occurrences' AND type IN('table','view')").get()
-        ?this.db.prepare("SELECT run_id,root_run_id FROM wb_task_current_occurrences WHERE conversation_id=? AND trigger_key LIKE 'discovery-work:%'").get(conversationId) as {run_id:string;root_run_id:string}|undefined:undefined
+        ?this.db.prepare("SELECT run_id,root_run_id FROM wb_task_current_occurrences WHERE conversation_id=? AND (trigger_key LIKE 'discovery-work:%' OR trigger_key LIKE 'prd-work:%')").get(conversationId) as {run_id:string;root_run_id:string}|undefined:undefined
       // A prefix migration is ordinary Session policy, never permission to
       // replace an admitted work Goal's saved execution identity.
       if(work){

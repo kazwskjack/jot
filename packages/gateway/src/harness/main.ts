@@ -92,7 +92,7 @@ const sessionBindings = new SessionBindingRepository(db, sessionPrefix);
 const workContextForRun=(runId:string,initialize=false)=>{
  const saved=workbench.contextForRun(runId);
  const base=saved&&persistentTasks.isDiscoveryPlanningRun(runId)?{...saved,allowed_tools:[]}:saved;
- const work=db.prepare("SELECT conversation_id FROM wb_task_run_occurrences WHERE run_id=? AND trigger_key LIKE 'discovery-work:%'").get(runId) as {conversation_id:string}|undefined;
+ const work=db.prepare("SELECT conversation_id FROM wb_task_run_occurrences WHERE run_id=? AND (trigger_key LIKE 'discovery-work:%' OR trigger_key LIKE 'prd-work:%')").get(runId) as {conversation_id:string}|undefined;
  if(!work)return base;
  if(!nativeWork)throw Error('work_admission_execution_unavailable');
  if(initialize&&!db.prepare('SELECT 1 FROM ga_harness_session_bindings WHERE conversation_id=?').get(work.conversation_id))sessionBindings.getOrCreateForConversation(work.conversation_id);

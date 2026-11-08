@@ -37,6 +37,9 @@ export class WorkAdmissionController{
   const scope=Object.freeze({...inputScope});
   // Recover a committed response without observing or replaying any new work.
   try{return accepted(this.records.get(owner,scope,grantId));}catch(error){if(!(error instanceof Error)||error.message!=='work_admission_not_found')throw error;}
+  const selected=this.grants.get(owner,scope,grantId);
+  // shortcut: PRD native handoff/context is pending; keep original dispatch closed until it is wired.
+  if(selected.admission_id===null)return refused('PRD_WORK_CONTEXT_PENDING');
   const source=this.sources.collect(owner,scope);if(!source.caught_up||source.reason)return refused(source.reason??'SOURCE_PENDING');
   const grant=this.grants.guard(owner,scope,grantId);
   const prepared=await o.tasks.prepareTaskModelAcceptance(owner,grant.task_id,signal);

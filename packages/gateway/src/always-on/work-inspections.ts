@@ -40,7 +40,7 @@ export class WorkInspections{
    CREATE TRIGGER IF NOT EXISTS wb_work_inspections_no_delete BEFORE DELETE ON wb_discovery_work_inspections BEGIN SELECT RAISE(ABORT,'work_inspection_immutable'); END;
    CREATE TRIGGER IF NOT EXISTS wb_work_inspections_no_replace BEFORE INSERT ON wb_discovery_work_inspections WHEN EXISTS(SELECT 1 FROM wb_discovery_work_inspections WHERE inspection_id=NEW.inspection_id) BEGIN SELECT RAISE(ABORT,'work_inspection_immutable'); END;`);
  }
- private isWork(runId:string){return !!this.db.prepare("SELECT 1 FROM wb_task_run_occurrences WHERE run_id=? AND trigger_key LIKE 'discovery-work:%'").get(runId);}
+ private isWork(runId:string){return !!this.db.prepare("SELECT 1 FROM wb_task_run_occurrences WHERE run_id=? AND (trigger_key LIKE 'discovery-work:%' OR trigger_key LIKE 'prd-work:%')").get(runId);}
  private quiescent(binding:Binding){
   const db=this.db,a=binding.admission;
   if(db.prepare(`SELECT 1 FROM wb_native_child_reservations q WHERE q.owner_id=? AND q.occurrence_id=?
@@ -123,7 +123,7 @@ export class WorkInspections{
  current(scope:TaskCompletionWorkScope):FrozenIsolatedWorkEvidence|undefined{
   const read=()=>{
    if(!this.isWork(scope.runId)){
-    if(this.db.prepare("SELECT 1 FROM wb_task_occurrences WHERE occurrence_id=? AND trigger_key LIKE 'discovery-work:%'").get(scope.occurrence_id))throw fail();
+    if(this.db.prepare("SELECT 1 FROM wb_task_occurrences WHERE occurrence_id=? AND (trigger_key LIKE 'discovery-work:%' OR trigger_key LIKE 'prd-work:%')").get(scope.occurrence_id))throw fail();
     return undefined;
    }
    const facts=this.inputs(scope.runId),a=facts.binding.admission,context=JSON.parse(scope.frozen_context);
