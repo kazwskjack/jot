@@ -221,7 +221,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
     const input=object(request.body);fields(input,['run_id','session_ref','request_id','spawn_request_hash','publication']);
     context(input);return {publication:nativeChildren.publish(input)};
   });
-  const prepareNativeModel=async(source:ReturnType<WorkbenchService['nativeModelAcceptanceSource']>|undefined)=>{
+  const prepareNativeModel=async(source:ReturnType<WorkbenchService['modelAcceptanceSource']>|undefined)=>{
     if(!source)return;
     const bindings=await readHostModelMetadataBindings(modelMetadataClient,modelMetadataRoutes(source.model));
     if(bindings)return {source,bindings};
@@ -236,7 +236,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       const saved=db.prepare('SELECT role_id FROM wb_native_child_reservations WHERE reservation_id=? AND owner_id=? AND root_run_id=?').get(reservationId,identity.owner_id,identity.run_id);
       if(!saved)throw Error('workbench_identity_forbidden');
       if(!modelMetadataClient||db.prepare('SELECT 1 FROM wb_native_child_runs WHERE reservation_id=? AND owner_id=?').get(reservationId,identity.owner_id))return;
-      return workbench.nativeModelAcceptanceSource(identity.owner_id,String(saved.role_id));
+      return workbench.modelAcceptanceSource(identity.owner_id,String(saved.role_id));
     });
     const prepared=await prepareNativeModel(source);
     return withImmediateTransaction(db,()=>{
@@ -260,7 +260,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       if(!modelMetadataClient||!previous||db.prepare('SELECT 1 FROM wb_native_child_activations WHERE previous_run_id=?').get(String(input.previous_run_id)))return;
       const saved=JSON.parse(String(previous.snapshot_json));
       if(saved.parent_session_ref!==input.session_ref)throw Error('workbench_identity_forbidden');
-      return workbench.nativeModelAcceptanceSource(parent.owner_id,String(saved.role_id),String(previous.conversation_id));
+      return workbench.modelAcceptanceSource(parent.owner_id,String(saved.role_id),String(previous.conversation_id));
     });
     const prepared=await prepareNativeModel(source);
     return withImmediateTransaction(db,()=>{

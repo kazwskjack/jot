@@ -289,7 +289,7 @@ export async function buildServer(config: {
     config.voiceEnabled ? config.voiceAdapter : undefined);
   const workbenchRoot = config.workbenchRoot ?? join(dirname(config.databasePath), 'jot-workspaces');
   const workbench = new WorkbenchService(db, { workspaceIds: config.workspaces,
-    root: workbenchRoot, allowedToolIds: WORKBENCH_TOOL_IDS, ...(budgetPolicy ? {modelBudgetPolicy: budgetPolicy} : {}) });
+    root: workbenchRoot, allowedToolIds: WORKBENCH_TOOL_IDS,modelMetadataClient:config.modelCatalogClient, ...(budgetPolicy ? {modelBudgetPolicy: budgetPolicy} : {}) });
   const mcpRegistry = new McpRegistryService(db, workbench);
   const checkpointRoot=join(realpathSync(workbenchRoot),'workspace-checkpoints');
   try{mkdirSync(checkpointRoot,{mode:0o700});}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;}

@@ -3,7 +3,7 @@ import type { PersistentTaskService, ProjectDiscoveryAdmissionHook } from './ser
 
 /** Cleanup never depends on host readiness. Autonomous admission does. */
 export async function maintainWorkbench(
-  workbench: Pick<WorkbenchService, 'resumeDeletions' | 'processMailbox'> & Partial<Pick<WorkbenchService,'reconcileBudgets' | 'collectMemoryCaptures'>>,
+  workbench: Pick<WorkbenchService, 'resumeDeletions' | 'processMailbox'> & Partial<Pick<WorkbenchService,'reconcileBudgets' | 'collectMemoryCaptures' | 'processMailboxWithMetadata'>>,
   tasks: Pick<PersistentTaskService, 'tick'> & Partial<Pick<PersistentTaskService,'maintainNotifications'|'collectDiscoverySources'>>,
   executionReady: boolean,
   admitProjectDiscovery?:ProjectDiscoveryAdmissionHook,
@@ -15,6 +15,7 @@ export async function maintainWorkbench(
   tasks.maintainNotifications?.();
   if (executionReady !== true) return { execution_ready: false, cleanup, ...memory };
   const sources=tasks.collectDiscoverySources?.();
-  workbench.processMailbox();
+  if(workbench.processMailboxWithMetadata)await workbench.processMailboxWithMetadata();
+  else workbench.processMailbox();
   return { execution_ready: true, cleanup, ...memory,...(sources===undefined?{}:{discovery_sources:sources}), tasks: await tasks.tick(admitProjectDiscovery) };
 }

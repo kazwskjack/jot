@@ -77,7 +77,10 @@ export function registerWorkbenchRoutes(app: FastifyInstance, service: Workbench
   app.patch('/v1/agents/:agentId', async request => service.updateAgent(actor(request), param(request, 'agentId'), body(request, [...agentFields, 'expected_version', 'status'])));
   app.get('/v1/agents/:agentId/deletion-preview', async request => service.deletionPreview(actor(request), param(request, 'agentId')));
   app.delete('/v1/agents/:agentId', async request => service.deleteAgent(actor(request), param(request, 'agentId'), version(body(request, ['expected_version']))));
-  app.post('/v1/agents/:agentId/messages', async (request, reply) => reply.code(202).send(service.enqueueAgentMessage(actor(request), param(request, 'agentId'), body(request, ['text', 'client_message_id']))));
+  app.post('/v1/agents/:agentId/messages', async (request, reply) => {
+    const commit=await service.prepareAgentMessage(actor(request),param(request,'agentId'),body(request,['text','client_message_id']));
+    return reply.code(202).send(commit());
+  });
   app.get('/v1/teams', async request => service.listTeams(actor(request)));
   app.post('/v1/teams', async (request, reply) => reply.code(201).send(service.createTeam(actor(request), body(request, teamFields))));
   app.get('/v1/teams/:teamId', async request => service.getTeam(actor(request), param(request, 'teamId')));

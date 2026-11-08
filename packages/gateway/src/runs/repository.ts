@@ -43,7 +43,6 @@ export class RunRepository {
   usesDatabase(db: DatabaseSync): boolean { return this.db === db && this.events.usesDatabase(db); }
 
   enqueue(conversationId:string,ownerId:string,input:Record<string,unknown>,options:EnqueueOptions={}){
-    if(options.modelPolicyOverride!==undefined&&options.executionMode!=='native')throw Error('model_policy_override_invalid');
     return this.enqueueInput(conversationId,ownerId,input,options);
   }
 
@@ -75,7 +74,7 @@ export class RunRepository {
       const current=this.db.prepare('SELECT mode,version FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId)!;
       if(options.expectedConversationVersion!==undefined&&options.expectedConversationVersion!==current.version)throw Error('version_conflict');
       const mode=conversationMode(current.mode),chat=mode==='chat'?chatModePolicy(options.modePolicy):undefined;
-      if(options.executionMode==='native'&&mode!=='work')throw Error('conversation_mode_scope_invalid');
+      if((options.executionMode==='native'||options.modelPolicyOverride!==undefined)&&mode!=='work')throw Error('conversation_mode_scope_invalid');
       if(mode==='work'&&options.modePolicy!==undefined)throw Error('conversation_mode_policy_invalid');
       const modelPolicy=snapshotAcceptedModelPolicy(this.db,conversationId,ownerId,options.modelPolicyOverride??chat?.model,options.modelMetadataBindings);
       // Native child preparation retains its original reservation/role/archived

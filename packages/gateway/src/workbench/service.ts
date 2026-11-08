@@ -20,7 +20,8 @@ import { RunRepository } from '../runs/repository.ts';
 import { RunCommandService } from '../runs/commands.ts';
 import { MemoryLifecycle, memoryExpired, memoryMetadata, rankMemory, rankMemoryDetailed, serializeMemory, type MemoryRankAdapter } from './memory-lifecycle.ts';
 import {MemoryReasoningAdapter,type MemoryReasoningCandidate,type MemoryReasoningProvider,type MemoryReasoningResult} from './memory-reasoning-adapter.ts';
-import type {TrustedModelMetadataBinding} from '../harness/model-metadata.ts';
+import {readHostModelMetadataBindings,type TrustedModelMetadataClient,type TrustedModelMetadataBinding} from '../harness/model-metadata.ts';
+import {modelMetadataRoutes} from '../conversations/model-policy.ts';
 import type { WorkbenchBudgetPolicy } from './model-budget-policy.ts';
 import {installTaskRunLineage,bindTaskContinuation} from '../persistent-tasks/task-runs.ts';
 import {installTaskMailbox,bindTaskMailbox,currentTaskMailbox,taskMemberCapacityAvailable} from './task-mailbox.ts';
@@ -30,6 +31,7 @@ import {installNativeChildRuns,assertNativeReservation,assertNativeRun,assertNat
 import {assertExecutionLease} from './execution-lease.ts';
 
 type Input = Record<string, unknown>;
+type PreparedModelAcceptance={source:ReturnType<WorkbenchService['modelAcceptanceSource']>;bindings:TrustedModelMetadataBinding[]};
 type Row = Record<string, string | number | null>;
 type FileLifecycleAction = 'rename' | 'delete';
 type FileLifecycleReference = Record<string, string | number | null>;
@@ -53,6 +55,7 @@ export interface WorkbenchOptions {
   workspaceIds: string[]; root: string; allowedToolIds?: string[]; maxMailboxRunsPerDay?: number;
   memoryRankAdapter?: MemoryRankAdapter;
   modelBudgetPolicy?: WorkbenchBudgetPolicy;
+  modelMetadataClient?:TrustedModelMetadataClient;
 }
 export interface PreparedMemoryReasoning {owner_id:string;workspace_id:string;run_id:string;query:string;candidates:MemoryReasoningCandidate[];candidate_pool_truncated:boolean}
 const MAX_REASONING_CANDIDATES=200,MAX_REASONING_CANDIDATE_CHARS=20_000,MAX_REASONING_TOTAL_CHARS=200_000;
@@ -442,30 +445,34 @@ export class WorkbenchService {
       this.options.modelBudgetPolicy?.allocate(owner,runId);
     });
   }
-  nativeModelAcceptanceSource(owner:string,roleId:string,conversationId?:string){
+  modelAcceptanceSource(owner:string,roleId:string,conversationId?:string){
     return withReadTransaction(this.db,()=>{
-      const role=this.active(owner,roleId),conversation=this.conversations.get(conversationId??role.conversation_id,owner);
+      const role=this.active(owner,roleId);
+      // Inspect legacy source rows without triggering repository migrations in a read transaction.
+      const conversation=this.db.prepare('SELECT id,model,version FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId??role.conversation_id,owner);
+      if(!conversation)throw Error('conversation_not_found');
+      const model=JSON.parse(String(conversation.model));
       const policy=this.options.modelBudgetPolicy;
       if(!policy)throw Error('budget_service_unavailable');
       return {role_id:roleId,role_version:role.version,role_epoch:role.capability_epoch,
-        conversation_id:conversation.conversation_id,conversation_version:conversation.version,original_model:conversation.model,
-        budget_revision:policy.observedRevision(),model:policy.admissionModel(conversation.model)};
+        conversation_id:String(conversation.id),conversation_version:Number(conversation.version),original_model:model,
+        budget_revision:policy.observedRevision(),model:policy.admissionModel(model)};
     });
   }
-  private nativeModelAcceptanceOptions(owner:string,roleId:string,conversationId:string|undefined,prepared?:{source:ReturnType<WorkbenchService['nativeModelAcceptanceSource']>;bindings:TrustedModelMetadataBinding[]}){
+  private modelAcceptanceOptions(owner:string,roleId:string,conversationId:string|undefined,prepared?:PreparedModelAcceptance){
     if(!prepared)return {};
-    if(canonicalJson(this.nativeModelAcceptanceSource(owner,roleId,conversationId))!==canonicalJson(prepared.source))throw Error('model_metadata_changed');
+    if(canonicalJson(this.modelAcceptanceSource(owner,roleId,conversationId))!==canonicalJson(prepared.source))throw Error('model_metadata_changed');
     return {modelPolicyOverride:prepared.source.model,modelMetadataBindings:prepared.bindings};
   }
   /** Authenticated native host only. Preparing records never starts a driver. */
-  prepareNativeChild(owner:string,reservationId:string,prepared?:{source:ReturnType<WorkbenchService['nativeModelAcceptanceSource']>;bindings:TrustedModelMetadataBinding[]}){
+  prepareNativeChild(owner:string,reservationId:string,prepared?:PreparedModelAcceptance){
     return this.transaction(()=>{
       const saved=assertNativeReservation(this.db,owner,reservationId);
       const prior=this.db.prepare('SELECT run_id FROM wb_native_child_runs WHERE reservation_id=? AND owner_id=?').get(reservationId,owner) as {run_id:string}|undefined;
       if(prior){this.assertRunActive(prior.run_id);const run=this.runs.get(prior.run_id,owner);return {run_id:prior.run_id,conversation_id:String(run.conversation_id),session_ref:saved.child_session_ref};}
       const role=this.active(owner,saved.role_id);
       if(role.version!==saved.role_version||role.capability_epoch!==saved.role_epoch)throw new Error('task_collaboration_revoked');
-      const modelOptions=this.nativeModelAcceptanceOptions(owner,saved.role_id,undefined,prepared);
+      const modelOptions=this.modelAcceptanceOptions(owner,saved.role_id,undefined,prepared);
       const model=this.conversations.get(role.conversation_id,owner).model;
       const conversation=this.conversations.create(owner,{workspace_id:saved.workspace_id,project_id:saved.project_id,title:`Team：${role.name}`,model});
       const now=timestamp();this.db.prepare('UPDATE ga_conversations SET archived_at=? WHERE id=?').run(now,conversation.conversation_id);
@@ -524,7 +531,7 @@ export class WorkbenchService {
   }
   /** Prepare a new execution identity for the same durable native Session.
    * This does not deliver messages or start an SDK driver. */
-  prepareNativeActivation(owner:string,input:Input,prepared?:{source:ReturnType<WorkbenchService['nativeModelAcceptanceSource']>;bindings:TrustedModelMetadataBinding[]}){
+  prepareNativeActivation(owner:string,input:Input,prepared?:PreparedModelAcceptance){
     const keys=['run_id','session_ref','child_session_ref','previous_run_id','previous_log_sha256','previous_seq_exclusive','execution_lease'];
     if(!input||Object.keys(input).some(key=>!keys.includes(key))||keys.slice(0,4).some(key=>typeof input[key]!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(String(input[key])))
       ||typeof input.previous_log_sha256!=='string'||!/^[a-f0-9]{64}$/.test(input.previous_log_sha256)||!Number.isSafeInteger(input.previous_seq_exclusive)||Number(input.previous_seq_exclusive)<1)throw new Error('native_activation_invalid');
@@ -550,7 +557,7 @@ export class WorkbenchService {
       if(existing){if(hash(String(existing.snapshot_json))!==digest)throw new Error('native_activation_source_changed');this.assertRunActive(String(existing.run_id));return {run_id:String(existing.run_id),conversation_id:String(previous.conversation_id),session_ref:saved.child_session_ref};}
       const policy=this.db.prepare('SELECT max_active FROM wb_task_collaboration_grants WHERE owner_id=? AND task_id=? AND version=?').get(owner,saved.task_id,saved.policy_version) as Row|undefined;
       if(!policy||!taskMemberCapacityAvailable(this.db,owner,saved.occurrence_id,Number(policy.max_active)))throw new Error('task_collaboration_exhausted');
-      const modelOptions=this.nativeModelAcceptanceOptions(owner,saved.role_id,String(previous.conversation_id),prepared);
+      const modelOptions=this.modelAcceptanceOptions(owner,saved.role_id,String(previous.conversation_id),prepared);
       const activationId=`activation-${randomUUID()}`,now=timestamp();
       const run=this.runs.enqueue(String(previous.conversation_id),owner,{client_message_id:activationId,content:[{type:'text',text:'原生Team成员恢复；同一会话中的新执行身份，仅处理原生邮箱消息。'}]},{executionMode:'native',...modelOptions});
       this.db.prepare('INSERT INTO wb_native_child_activations VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').run(String(run.run_id),activationId,saved.reservation_id,String(input.previous_run_id),owner,snapshot.root_run_id,saved.task_id,saved.occurrence_id,saved.role_id,saved.child_session_ref,JSON.stringify(snapshot),now);
@@ -824,12 +831,33 @@ export class WorkbenchService {
     if (!context || context.owner_id !== owner || context.workspace_id !== workspace) throw new Error('invalid_message_identity');
     return context;
   }
-  enqueueAgentMessage(owner: string, agentId: string, input: Input) {
+  async prepareAgentMessage(owner:string,agentId:string,input:Input,signal?:AbortSignal){
+    const frozen={text:text(input.text,'invalid_message_text'),client_message_id:text(input.client_message_id,'invalid_client_message_id',128)};
+    const before=withReadTransaction(this.db,()=>{
+      const agent=this.active(owner,agentId);
+      const duplicate=this.db.prepare('SELECT id,run_id FROM ga_messages WHERE conversation_id=? AND client_message_id=?').get(agent.conversation_id,frozen.client_message_id);
+      return {conversationId:agent.conversation_id,duplicate,source:duplicate||!this.options.modelMetadataClient||!this.options.modelBudgetPolicy?undefined:this.modelAcceptanceSource(owner,agentId)};
+    });
+    const bindings=before.source?await readHostModelMetadataBindings(this.options.modelMetadataClient,modelMetadataRoutes(before.source.model),signal):undefined;
+    const prepared=before.source&&bindings?{source:before.source,bindings}:undefined;
+    return ()=>this.transaction(()=>{
+      signal?.throwIfAborted();
+      if(this.active(owner,agentId).conversation_id!==before.conversationId)throw Error('version_conflict');
+      if(before.duplicate){
+        const current=this.db.prepare('SELECT id,run_id FROM ga_messages WHERE conversation_id=? AND client_message_id=?').get(before.conversationId,frozen.client_message_id);
+        if(!current||current.id!==before.duplicate.id||current.run_id!==before.duplicate.run_id)throw Error('version_conflict');
+      }
+      return this.enqueueAgentMessage(owner,agentId,frozen,prepared);
+    });
+  }
+  enqueueAgentMessage(owner: string, agentId: string, input: Input,prepared?:PreparedModelAcceptance) {
     const value = text(input.text, 'invalid_message_text');
     const clientId = text(input.client_message_id, 'invalid_client_message_id', 128);
     return this.transaction(() => {
       const agent = this.active(owner, agentId);
-      const result = this.runs.enqueue(agent.conversation_id, owner, { client_message_id: clientId, content: [{ type: 'text', text: value }] });
+      const duplicate=this.db.prepare('SELECT 1 FROM ga_messages WHERE conversation_id=? AND client_message_id=?').get(agent.conversation_id,clientId);
+      const modelOptions=duplicate?{}:this.modelAcceptanceOptions(owner,agentId,undefined,prepared);
+      const result = this.runs.enqueue(agent.conversation_id, owner, { client_message_id: clientId, content: [{ type: 'text', text: value }] },modelOptions);
       // Returning an existing receipt is not execution admission. Keep bindRun's
       // active-run fence for actual binding/dispatch, including terminal runs.
       const bound=this.db.prepare('SELECT owner_id,agent_id,kind FROM wb_run_bindings WHERE run_id=?').get(String(result.run_id)) as Row|undefined;
@@ -1195,7 +1223,32 @@ export class WorkbenchService {
       return this.messageValue(this.db.prepare('SELECT * FROM wb_agent_messages WHERE message_id=?').get(messageId) as Row);
     });
   }
-  processMailbox() {
+  async processMailboxWithMetadata(){
+    if(!this.options.modelMetadataClient||!this.options.modelBudgetPolicy)return this.processMailbox();
+    const cleanup=this.processMailbox(new Map());
+    const pending=this.db.prepare("SELECT message_id,owner_id,recipient_agent_id FROM wb_agent_messages WHERE status='pending' AND auto_reply=1 ORDER BY created_at,message_id LIMIT 10").all();
+    const prepared=new Map<string,PreparedModelAcceptance|undefined>(),byRecipient=new Map<string,Promise<PreparedModelAcceptance|undefined>>();
+    const signal=AbortSignal.timeout(6000);
+    await Promise.all(pending.map(async message=>{
+      const owner=String(message.owner_id),recipient=String(message.recipient_agent_id),key=JSON.stringify([owner,recipient]);
+      try{
+        let read=byRecipient.get(key);
+        if(!read){
+          read=(async()=>{
+            signal.throwIfAborted();
+            const source=this.modelAcceptanceSource(owner,recipient);
+            const bindings=await readHostModelMetadataBindings(this.options.modelMetadataClient,modelMetadataRoutes(source.model),signal);
+            return bindings?{source,bindings}:undefined;
+          })();
+          byRecipient.set(key,read);
+        }
+        prepared.set(String(message.message_id),await read);
+      }catch{/* Unavailable metadata leaves pending messages for the next maintenance tick. */}
+    }));
+    const admitted=this.processMailbox(prepared);
+    return {queued:admitted.queued,completed:cleanup.completed+admitted.completed};
+  }
+  processMailbox(prepared?:ReadonlyMap<string,PreparedModelAcceptance|undefined>) {
     let queued = 0, completed = 0;
     const processing = this.db.prepare("SELECT * FROM wb_agent_messages WHERE status='processing' ORDER BY created_at LIMIT 50").all() as Row[];
     for (const msg of processing) this.transaction(() => {
@@ -1254,6 +1307,8 @@ export class WorkbenchService {
       const activeRun = this.db.prepare(`SELECT 1 FROM ga_runs r JOIN wb_run_bindings b ON b.run_id=r.id
         WHERE b.agent_id=? AND r.status IN ('queued','starting','running','waiting_user','waiting_approval','cancelling') LIMIT 1`).get(recipientId);
       if (activeRun) return;
+      if(prepared&&!prepared.has(String(msg.message_id)))return;
+      const modelOptions=this.modelAcceptanceOptions(owner,recipientId,undefined,prepared?.get(String(msg.message_id)));
       const thread = this.db.prepare('SELECT * FROM wb_message_threads WHERE thread_id=?').get(String(msg.thread_id)) as Row;
       const day = now.slice(0, 10);
       this.db.prepare('INSERT INTO wb_mailbox_budgets VALUES(?,?,0) ON CONFLICT DO NOTHING').run(owner, day);
@@ -1267,7 +1322,7 @@ export class WorkbenchService {
       const prompt = assignment
         ? `这是用户授权的单个子任务派工。仅按冻结的步骤与验收要求执行，使用当前角色已授权的工具和工作区；交回材料、文件路径及剩余问题供主控核验。不得编辑父任务账本、验收父任务、再派发成员或自行向外部发送内容。\n冻结步骤：${JSON.stringify(assignment)}\n原派工：${msg.text}`
         : `这是工作区内部成员交流，不是用户派发业务任务。只分析并回复本条消息，不扩大权限、创建业务任务或向外部发送内容。\n发送成员：${msg.sender_agent_id}\n消息：${msg.text}`;
-      const run = this.runs.enqueue(conversation.conversation_id, owner, { client_message_id: `mailbox:${msg.message_id}`, content: [{ type: 'text', text: prompt }] });
+      const run = this.runs.enqueue(conversation.conversation_id, owner, { client_message_id: `mailbox:${msg.message_id}`, content: [{ type: 'text', text: prompt }] },modelOptions);
       this.db.prepare("UPDATE wb_agent_messages SET status='processing',run_id=?,updated_at=? WHERE message_id=? AND status='pending'").run(String(run.run_id), now, String(msg.message_id));
       if(taskRoot)this.db.prepare('INSERT INTO wb_task_auxiliary_runs VALUES(?,?,?,?,?,?,?)').run(String(run.run_id),String(msg.thread_id),owner,taskRoot.task_id,taskRoot.occurrence_id,taskRoot.root_run_id,now);
       this.bindRun(owner, recipientId, String(run.run_id), 'internal_mailbox');
@@ -1275,10 +1330,9 @@ export class WorkbenchService {
       this.db.prepare('UPDATE wb_mailbox_budgets SET reserved_runs=reserved_runs+1 WHERE owner_id=? AND day=?').run(owner, day);
       queued++;
       }); } catch (error) {
-        if (!(error instanceof Error) || !['model_budget_exhausted','budget_window_closed','budget_usage_unknown'].includes(error.message)) throw error;
-        // An uncertain receipt is a temporary shared fence, not a permanent
-        // quota failure. The rolled-back message can resume after settlement.
-        if(error.message==='budget_usage_unknown')continue;
+        if (!(error instanceof Error) || !['model_budget_exhausted','budget_window_closed','budget_usage_unknown','model_metadata_changed'].includes(error.message)) throw error;
+        // Keep uncertain usage and metadata drift retryable without consuming mailbox quotas.
+        if(error.message==='budget_usage_unknown'||error.message==='model_metadata_changed')continue;
         this.db.prepare("UPDATE wb_agent_messages SET status='budget_exhausted',updated_at=? WHERE message_id=? AND status='pending'")
           .run(timestamp(),String(msg.message_id));
       }
