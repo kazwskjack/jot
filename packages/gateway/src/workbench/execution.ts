@@ -490,13 +490,14 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
         const metadata=typeof run?.model_policy_json==='string'?acceptedModelPolicyMetadata(run.model_policy_json,selected):undefined;
         return {route:selected,...(metadata?{metadata_binding:metadata}:{})};
       }
-      if(action==='reserve'||action==='dispatch'||action==='provider_receipt'){
-        assertExecutionLease(db,runId,input.execution_lease);
+      if(action==='reserve'||action==='dispatch'||action==='provider_receipt')assertExecutionLease(db,runId,input.execution_lease);
+      if(action==='reserve'||action==='dispatch'){
         const identity=context(input);
         assertIdentityAccounting(identity);
-        if(action!=='provider_receipt')assertMemoryModelAdmission(identity,action==='reserve'?(input.request as ModelBudgetRequest)?.attempt_id:input.attempt_id);
-        else if(identity.kind!=='memory_capture')throw new Error('budget_provider_receipt_invalid');
+        assertMemoryModelAdmission(identity,action==='reserve'?(input.request as ModelBudgetRequest)?.attempt_id:input.attempt_id);
       }
+      // The original dispatched stream can report usage after source revocation.
+      // Its Session, live lease and immutable memory binding still fence accounting.
       if(action==='reserve')return {receipt:modelBudgets.reserve(owner,runId,input.request as ModelBudgetRequest)};
       if(!validCallId(input.attempt_id))throw new Error('budget_request_invalid');
       const attemptId=String(input.attempt_id);

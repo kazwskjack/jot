@@ -585,11 +585,13 @@ export class ModelBudgetLedger {
       const identity=this.db.prepare(`SELECT p.capture_id,p.source_run_id,p.source_conversation_id,p.source_version,p.policy_version,p.epoch,
         c.source_json,c.owner_id,c.agent_id,c.workspace_id,c.project_id,r.status,b.kind,b.owner_id AS binding_owner,b.agent_id AS binding_agent,b.epoch AS binding_epoch
         FROM wb_memory_processing_runs p JOIN wb_memory_captures c ON c.capture_id=p.capture_id
-        JOIN ga_runs r ON r.id=p.processor_run_id JOIN wb_run_bindings b ON b.run_id=p.processor_run_id
-        WHERE p.processor_run_id=? AND p.owner_id=? AND p.agent_id=c.agent_id AND p.workspace_id=c.workspace_id AND p.project_id=c.project_id
+        JOIN ga_runs r ON r.id=p.processor_run_id AND r.conversation_id=p.conversation_id
+        JOIN ga_conversations conversation ON conversation.id=r.conversation_id AND conversation.owner_id=p.owner_id AND conversation.workspace_id=p.workspace_id AND conversation.project_id=p.project_id
+        JOIN wb_run_bindings b ON b.run_id=p.processor_run_id
+        WHERE p.processor_run_id=? AND p.owner_id=? AND c.owner_id=p.owner_id AND p.agent_id=c.agent_id AND p.workspace_id=c.workspace_id AND p.project_id=c.project_id
           AND p.capture_id=c.capture_id AND p.source_run_id=c.source_run_id AND p.source_conversation_id=c.source_conversation_id
           AND p.policy_version=c.policy_version AND p.epoch=c.epoch AND b.owner_id=p.owner_id AND b.agent_id=p.agent_id AND b.epoch=p.epoch AND b.kind='memory_capture'
-          AND r.status IN ('starting','running')`).get(runId,owner) as Record<string,unknown>|undefined;
+          AND r.status IN ('starting','running','interrupted','failed','cancelled','succeeded','partial')`).get(runId,owner) as Record<string,unknown>|undefined;
       if(!identity||identity.owner_id!==owner||identity.binding_owner!==owner||identity.binding_agent!==identity.agent_id||identity.binding_epoch!==identity.epoch)throw new Error('budget_provider_receipt_invalid');
       const requestSha=createHash('sha256').update(row.request_json!).digest('hex'),routeSha=createHash('sha256').update(row.route_json!).digest('hex'),sourceSha=createHash('sha256').update(String(identity.source_json??'')).digest('hex');
       const payload={protocol:1,kind:'memory_provider_usage_v1',owner_id:owner,workspace_id:identity.workspace_id,project_id:identity.project_id,
