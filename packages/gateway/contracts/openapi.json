@@ -36987,6 +36987,10 @@
             "minimum": 1,
             "maximum": 9007199254740991,
             "description": "Optional owner-confirmed exact native subtask count. Immutable with the PRD binding and checked against the original occurrence ledger when proposing work."
+          },
+          "append": {
+            "type": "boolean",
+            "description": "Explicitly retain original native subtask definitions and dependencies as an immutable binding baseline. num_tasks then counts newly added subtasks."
           }
         }
       },
@@ -37010,6 +37014,10 @@
             "minimum": 1,
             "maximum": 9007199254740991,
             "description": "Optional owner-confirmed exact native subtask count. Immutable with the PRD binding and checked against the original occurrence ledger when proposing work."
+          },
+          "append": {
+            "type": "boolean",
+            "description": "Explicitly retain original native subtask definitions and dependencies as an immutable binding baseline. num_tasks then counts newly added subtasks."
           }
         }
       },
@@ -37071,7 +37079,38 @@
             "minimum": 1,
             "maximum": 9007199254740991,
             "description": "Optional owner-confirmed exact native subtask count. Immutable with the PRD binding and checked against the original occurrence ledger when proposing work."
+          },
+          "append": {
+            "type": "boolean",
+            "const": true
+          },
+          "append_source": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "task_count",
+              "sha256"
+            ],
+            "properties": {
+              "task_count": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            }
           }
+        },
+        "dependentRequired": {
+          "append": [
+            "append_source"
+          ],
+          "append_source": [
+            "append"
+          ]
         }
       },
       "TaskPrdPreview": {
@@ -37156,6 +37195,13 @@
             "minimum": 1,
             "maximum": 9007199254740991,
             "description": "Optional owner-confirmed exact native subtask count. Immutable with the PRD binding and checked against the original occurrence ledger when proposing work."
+          },
+          "append": {
+            "type": "boolean",
+            "const": true
+          },
+          "append_source": {
+            "$ref": "#/components/schemas/TaskPrdAppendSource"
           }
         },
         "dependentRequired": {
@@ -37164,6 +37210,12 @@
           ],
           "source_instructions": [
             "source_delivery"
+          ],
+          "append": [
+            "append_source"
+          ],
+          "append_source": [
+            "append"
           ]
         }
       },
@@ -49038,6 +49090,32 @@
           },
           "runtime": {
             "$ref": "#/components/schemas/TaskmasterRuntimeVersion"
+          }
+        }
+      },
+      "TaskPrdAppendSource": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "task_count",
+          "sha256",
+          "subtasks"
+        ],
+        "properties": {
+          "task_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "subtasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskSubtask"
+            }
           }
         }
       }

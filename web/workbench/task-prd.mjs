@@ -1,5 +1,7 @@
 import {TaskSaveReceipt} from './task-save.mjs';
 const messages={
+ PRD_WORK_PLAN_APPEND_CHANGED:'追加基线中的原生子任务定义或依赖已变化，请保留基线后重新提交计划。',
+ PRD_APPEND_SOURCE_INTEGRITY_FAILED:'原追加基线校验未完成，请保留回执并稍后重读。',
  INVALID_PRD_TASK_COUNT:'期望任务数需为正安全整数，或留空交由原 DSH 拆解。',
  PRD_WORK_PLAN_TASK_COUNT_MISMATCH:'本批原生子任务账本数量与已确认期望数量不一致。',
  PRD_TASKMASTER_RUNTIME_UNAVAILABLE:'Taskmaster 实际运行版本尚待确认，请重读安装资料后再观察。',
@@ -115,6 +117,11 @@ function selection(source){
  return {kind:source.kind,[field]:source[field],version:source.version,sha256:source.sha256};
 }
 function rejected(error){return Number.isInteger(error?.status)&&error.status>=400&&error.status<500&&error.status!==408&&error.message!=='IDEMPOTENCY_IN_PROGRESS';}
+function appendMatches(value,enabled){
+ if(!enabled)return value.append===undefined&&value.append_source===undefined;
+ const source=value.append_source;
+ return value.append===true&&!!source&&Number.isSafeInteger(source.task_count)&&source.task_count>=0&&/^[a-f0-9]{64}$/.test(source.sha256);
+}
 export class PrdCommandStore {
  constructor(storage,scope,taskId,operation='bind'){
   if(!/^[a-f0-9]{64}$/.test(scope)||!['bind','taskmaster-import','template-apply','taskmaster-prd-import','work-plan-accept','work-plan-cycle','work-plan-handoff','work-plan-prepare','work-plan-grant','work-plan-admit'].includes(operation))throw Error('PRD 回执用户范围不可用');
@@ -154,7 +161,7 @@ export class PrdCommandStore {
     ||this.operation==='work-plan-prepare'&&(!Number.isSafeInteger(body.expected_cycle_version)||body.expected_cycle_version<1))throw Error('PRD 原请求回执无效，请保留本站存储以便核对');
   }else if(this.operation==='taskmaster-prd-import'){
    if(Object.keys(command.body).sort().join(',')!=='file_name,preview_sha256'||typeof command.body.file_name!=='string'||!command.body.file_name||command.body.file_name.length>255)throw Error('PRD 原请求回执无效，请保留本站存储以便核对');
-  }else if(this.operation==='bind'?(JSON.stringify(selection(command.body.source))!==JSON.stringify(command.body.source)||Object.keys(command.body).sort().join(',')!==(Object.hasOwn(command.body,'num_tasks')?'num_tasks,preview_sha256,source':'preview_sha256,source')||Object.hasOwn(command.body,'num_tasks')&&(!Number.isSafeInteger(command.body.num_tasks)||command.body.num_tasks<1))
+  }else if(this.operation==='bind'?(JSON.stringify(selection(command.body.source))!==JSON.stringify(command.body.source)||Object.keys(command.body).some(key=>!['source','preview_sha256','num_tasks','append'].includes(key))||Object.hasOwn(command.body,'append')&&typeof command.body.append!=='boolean'||Object.hasOwn(command.body,'num_tasks')&&(!Number.isSafeInteger(command.body.num_tasks)||command.body.num_tasks<1))
    :Object.keys(command.body).join(',')!=='preview_sha256')throw Error('PRD 原请求回执无效，请保留本站存储以便核对');
   return {command};
  }
@@ -163,7 +170,7 @@ export class PrdCommandStore {
 }
 export class PrdFlow {
  /** @param {import('./types').Task} task @param {boolean} executionReady @param {(()=>string)|undefined} key @param {PrdCommandStore|null} [store] */
- constructor(task,executionReady,key,store=null){this.task={...task};this.executionReady=executionReady;this.save=new TaskSaveReceipt(key,store);this.sources=null;this.selection=null;this.preview=null;this.receipt=null;this.numTasks=undefined;this.busy=false;this.refreshRequired=false;this.epoch=0;}
+ constructor(task,executionReady,key,store=null){this.task={...task};this.executionReady=executionReady;this.save=new TaskSaveReceipt(key,store);this.sources=null;this.selection=null;this.preview=null;this.receipt=null;this.numTasks=undefined;this.append=false;this.busy=false;this.refreshRequired=false;this.epoch=0;}
  get pending(){return this.save.pending;}
  get ready(){return this.executionReady&&this.task.status==='paused'&&this.sources?.task_id===this.task.task_id&&this.sources?.task_version===this.task.version&&this.sources?.readiness?.ready===true;}
  assertEditable(){if(this.pending)throw Error('请先确认原绑定回执');if(this.busy)throw Error('正在读取预览');}
@@ -175,12 +182,13 @@ export class PrdFlow {
   this.assertEditable();const count=value===''?undefined:Number(value);this.preview=null;this.receipt=null;this.epoch++;
   if(count!==undefined&&(!Number.isSafeInteger(count)||count<1))throw Error('INVALID_PRD_TASK_COUNT');this.numTasks=count;
  }
+ setAppend(value){this.assertEditable();if(typeof value!=='boolean')throw Error('PRD_PREVIEW_VERSION_CONFLICT');this.append=value;this.preview=null;this.receipt=null;this.epoch++;}
  async loadPreview(request){
   this.assertEditable();if(!this.selection)throw Error('请重新选择来源');if(!this.ready)throw Error('请暂停原任务并等待执行与来源就绪');
-  const epoch=this.epoch,source=structuredClone(this.selection),numTasks=this.numTasks;this.busy=true;this.preview=null;
-  try{const value=await request(`/persistent-tasks/${encodeURIComponent(this.task.task_id)}/prd/preview`,'POST',{source,...(numTasks===undefined?{}:{num_tasks:numTasks})});
+  const epoch=this.epoch,source=structuredClone(this.selection),numTasks=this.numTasks,append=this.append;this.busy=true;this.preview=null;
+  try{const value=await request(`/persistent-tasks/${encodeURIComponent(this.task.task_id)}/prd/preview`,'POST',{source,...(append?{append:true}:{}),...(numTasks===undefined?{}:{num_tasks:numTasks})});
    if(epoch!==this.epoch)return;
-   if(value.num_tasks!==numTasks||value.task_id!==this.task.task_id||value.task_version!==this.task.version||value.execution_authorized!==false||JSON.stringify(selection(value.source))!==JSON.stringify(source)||typeof value.content!=='string'||typeof value.objective!=='string'||(value.source_delivery!==undefined&&(value.source_delivery!=='reference'||typeof value.source_instructions!=='string'||!value.source_instructions||value.source_instructions.length>16384))||(value.source_delivery===undefined&&value.source_instructions!==undefined)||!/^[a-f0-9]{64}$/.test(value.preview_sha256))throw Error('PRD_PREVIEW_VERSION_CONFLICT');
+   if(!appendMatches(value,append)||append&&(!Array.isArray(value.append_source.subtasks)||value.append_source.subtasks.length!==value.append_source.task_count)||value.num_tasks!==numTasks||value.task_id!==this.task.task_id||value.task_version!==this.task.version||value.execution_authorized!==false||JSON.stringify(selection(value.source))!==JSON.stringify(source)||typeof value.content!=='string'||typeof value.objective!=='string'||(value.source_delivery!==undefined&&(value.source_delivery!=='reference'||typeof value.source_instructions!=='string'||!value.source_instructions||value.source_instructions.length>16384))||(value.source_delivery===undefined&&value.source_instructions!==undefined)||!/^[a-f0-9]{64}$/.test(value.preview_sha256))throw Error('PRD_PREVIEW_VERSION_CONFLICT');
    this.preview=value;
   }catch(error){if(rejected(error)||/CONFLICT/.test(error.message))this.invalidate();throw error;}finally{this.busy=false;}
  }
@@ -189,10 +197,10 @@ export class PrdFlow {
   if(!this.pending&&(!confirmed||!this.preview||!this.ready))throw Error('请阅读预览并显式确认绑定原暂停任务');
   this.busy=true;
   const checkedRequest=async(...args)=>{const result=await request(...args);
-   if(!result||result.num_tasks!==args[2]?.num_tasks||result.task_id!==this.task.task_id||typeof result.binding_id!=='string'||!result.binding_id||!Number.isSafeInteger(result.task_version)||!Number.isSafeInteger(result.revision)||result.execution_authorized!==false||!/^[a-f0-9]{64}$/.test(result.content_sha256)||!/^[a-f0-9]{64}$/.test(result.objective_sha256))throw Error('PRD_BIND_RECEIPT_INVALID');
+   if(!result||!appendMatches(result,args[2]?.append===true)||result.num_tasks!==args[2]?.num_tasks||result.task_id!==this.task.task_id||typeof result.binding_id!=='string'||!result.binding_id||!Number.isSafeInteger(result.task_version)||!Number.isSafeInteger(result.revision)||result.execution_authorized!==false||!/^[a-f0-9]{64}$/.test(result.content_sha256)||!/^[a-f0-9]{64}$/.test(result.objective_sha256))throw Error('PRD_BIND_RECEIPT_INVALID');
    return result;
   };
-  try{const result=await this.save.submit(checkedRequest,`/persistent-tasks/${encodeURIComponent(this.task.task_id)}/prd/bind`,'POST',this.pending?{}:{source:selection(this.preview.source),preview_sha256:this.preview.preview_sha256,...(this.preview.num_tasks===undefined?{}:{num_tasks:this.preview.num_tasks})});this.receipt=result;this.preview=null;return result;}
+  try{const result=await this.save.submit(checkedRequest,`/persistent-tasks/${encodeURIComponent(this.task.task_id)}/prd/bind`,'POST',this.pending?{}:{source:selection(this.preview.source),...(this.preview.append?{append:true}:{}),preview_sha256:this.preview.preview_sha256,...(this.preview.num_tasks===undefined?{}:{num_tasks:this.preview.num_tasks})});this.receipt=result;this.preview=null;return result;}
   catch(error){if(!this.pending&&rejected(error))this.invalidate();throw error;}finally{this.busy=false;}
  }
 }

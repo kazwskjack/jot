@@ -18,6 +18,7 @@ export function readPrdTaskCount(db:DatabaseSync,bindingId:string):number|undefi
  const row=db.prepare('SELECT num_tasks FROM wb_task_prd_task_counts WHERE binding_id=?').get(bindingId) as {num_tasks:number}|undefined;
  return prdTaskCountInput(row?.num_tasks);
 }
-export function prdTaskCountInstructions(numTasks:number|undefined):string{
+export function prdTaskCountInstructions(numTasks:number|undefined,appendBaseCount?:number):string{
+ if(numTasks!==undefined&&appendBaseCount!==undefined)return `\n用户已确认新增原生子任务数 ${numTasks}，原账本基线 ${appendBaseCount} 项，合计 ${appendBaseCount+numTasks} 项。完整保留固定 PRD 要求及原账本定义，原文件计划提交会核对实际数量。\n`;
  return numTasks===undefined?'':`\n用户已确认期望原生子任务数 ${numTasks}。完整读取固定 PRD，使用原 tasks.upsert 建立该数量的真实原生子任务及依赖。tasks.prd.plan 会核对本批原生子任务账本数量。资料不足或原预算不足时说明阻塞，不能省略原文要求、伪造子任务或新增额度。\n`;
 }

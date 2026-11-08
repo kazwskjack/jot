@@ -1,3 +1,4 @@
+import {readPrdAppendSource,assertPrdAppendLedger,type PrdAppendSource} from './prd-append-source.ts';
 import {readPrdTaskCount} from './prd-task-count.ts';
 import {createHash} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
@@ -47,7 +48,7 @@ function view(row:Row){
 }
 
 /** Proposal material only. Original task/role, current ledger and pinned source are supplied by the scoped service. */
-export function proposePrdWorkPlan(db:DatabaseSync,owner:string,runId:string,callId:string,task:Row,role:Row,source:Row,subtasks:unknown[],input:unknown){
+export function proposePrdWorkPlan(db:DatabaseSync,owner:string,runId:string,callId:string,task:Row,role:Row,source:Row,subtasks:PrdAppendSource['subtasks'],input:unknown){
  if(!db.isTransaction)throw Error('prd_work_plan_transaction_required');
  if(!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(callId))throw invalid();
  const request=object(input,['summary','rationale','changes','evidence']),requestHash=digest(request);
@@ -57,8 +58,9 @@ export function proposePrdWorkPlan(db:DatabaseSync,owner:string,runId:string,cal
   if(prior.request_sha256!==requestHash)throw Error('idempotency_conflict');
   return view(prior);
  }
- const numTasks=readPrdTaskCount(db,source.binding_id);
- if(numTasks!==undefined&&subtasks.length!==numTasks)throw Error('prd_work_plan_task_count_mismatch');
+ const numTasks=readPrdTaskCount(db,source.binding_id),appendSource=readPrdAppendSource(db,source.binding_id);
+ assertPrdAppendLedger(appendSource,subtasks);
+ if(numTasks!==undefined&&subtasks.length-(appendSource?.task_count??0)!==numTasks)throw Error('prd_work_plan_task_count_mismatch');
  const summary=text(request.summary),rationale=text(request.rationale,8000);
  if(!Array.isArray(request.changes)||!request.changes.length||request.changes.length>32)throw invalid();
  const changes=request.changes.map((item:unknown)=>{

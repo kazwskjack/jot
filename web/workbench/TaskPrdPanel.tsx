@@ -77,6 +77,7 @@ export default function TaskPrdPanel({task,executionReady,onBound}:{task:Task;ex
   flow.invalidate();setIndex('');setConfirmed(false);resource.reload();projectResource.reload();draw();
  }
  const preview=flow.preview,binding=flow.receipt??resource.data?.binding,taskmaster=resource.data?.taskmaster;
+ const appendLedger=useMemo(()=>preview?.append_source?JSON.stringify(preview.append_source.subtasks,null,2):'',[preview?.preview_sha256]);
  const installation=installationResource.data?.task_id===task.task_id&&installationResource.data.task_version===task.version?installationResource.data.installation:null;
  const project=projectResource.data?.task_id===task.task_id&&projectResource.data.task_version===task.version?projectResource.data:null;
  const importReady=!unavailable&&!projectResource.loading&&!projectResource.error&&project?.target?.path==='.taskmaster/tasks/tasks.json'
@@ -155,12 +156,14 @@ export default function TaskPrdPanel({task,executionReady,onBound}:{task:Task;ex
   {!resource.loading&&sourcesData?.sources.length===0&&<p className="wb-empty">当前任务作用域没有可选的文本来源。</p>}
   <label>PRD 来源<select value={index} disabled={locked||unavailable} onChange={e=>{try{flow.choose(e.target.value);setIndex(e.target.value);setConfirmed(false);setError('');draw();}catch(e){setError(e instanceof Error?e.message:'来源不可用');}}}><option value="">选择精确版本的已有来源</option>{sourcesData?.sources.map((source,i)=><option key={`${source.kind}:${source.kind==='logical_file'?source.path:source.artifact_id}:${source.version}:${source.sha256}`} value={i}>{source.name} · {source.kind==='upload'?'原始上传':'项目文件'} · v{source.version}</option>)}</select></label>
   {flow.selection&&<dl style={textStyle}><dt>来源版本</dt><dd>v{flow.selection.version}</dd><dt>SHA-256</dt><dd>{flow.selection.sha256}</dd></dl>}
+  <label className="wb-checkbox"><input type="checkbox" checked={flow.append} disabled={locked||unavailable} onChange={event=>{try{flow.setAppend(event.target.checked);setConfirmed(false);setError('');draw();}catch(e){setError(prdMessage(e instanceof Error?e.message:'PRD_PREVIEW_VERSION_CONFLICT'));}}}/>追加到原原生子任务账本，保留原 ID、定义和依赖。启用后期望数量指新增项。</label>
   <label>期望原生子任务数（可留空）<input type="number" min="1" max={Number.MAX_SAFE_INTEGER} step="1" value={flow.numTasks??''} disabled={locked||unavailable} onChange={event=>{try{flow.setTaskCount(event.target.value);setConfirmed(false);setError('');}catch(e){setError(prdMessage(e instanceof Error?e.message:'INVALID_PRD_TASK_COUNT'));}draw();}}/></label>
   <button type="button" disabled={locked||unavailable||!flow.selection} onClick={()=>{setConfirmed(false);void operate(()=>flow.loadPreview(request));}}>{flow.busy&&!flow.pending?'正在读取预览…':'只读预览'}</button>
   {preview&&<><h5>精确预览</h5><dl style={textStyle}><dt>原任务 / 版本</dt><dd>{preview.task_id} / v{preview.task_version}</dd><dt>原执行角色 / 版本 / 权限纪元</dt><dd>{preview.role.agent_id} / v{preview.role.version} / {preview.role.capability_epoch}</dd><dt>来源 / 版本 / SHA-256</dt><dd>{preview.source.name} / v{preview.source.version} / {preview.source.sha256}</dd><dt>预览 SHA-256</dt><dd>{preview.preview_sha256}</dd></dl>
    <h5>PRD 原文</h5><PrdTextPreview content={preview.content} label="PRD 原文" style={textStyle}/>
    <h5>完整任务目标</h5><pre aria-label="完整任务目标" style={textStyle}>{preview.objective}</pre>
    {preview.source_delivery==='reference'&&<><h5>固定原文分段读取说明</h5><p className="wb-hint">原执行输入和原 Goal 会携带本批固定来源的读取说明与绑定参数。原 DSH 读取完整原文后沿用原任务账本拆解。</p><pre aria-label="固定原文分段读取说明" style={textStyle}>{preview.source_instructions}</pre></>}
+   {preview.append_source&&<details><summary>固定追加基线 {preview.append_source.task_count} 项</summary><p>SHA-256 {preview.append_source.sha256}。原状态与证据保留为历史来源，新批次沿原规则重新核对。</p><PrdTextPreview content={appendLedger} label="追加基线账本" style={textStyle}/></details>}
    {preview.num_tasks!==undefined&&<p>已选期望原生子任务数 {preview.num_tasks}。提交文件计划时会核对实际账本数量。</p>}
    <label className="wb-checkbox"><input type="checkbox" checked={confirmed} disabled={locked||unavailable} onChange={e=>setConfirmed(e.target.checked)}/>我已阅读原文、任务目标和读取说明，确认仅绑定此原暂停任务，不创建任务、不恢复或启动执行。</label>
   </>}
