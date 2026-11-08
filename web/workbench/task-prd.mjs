@@ -12,7 +12,10 @@ const messages={
  PRD_SOURCE_UNAVAILABLE:'来源已移除或不可读取，请刷新并重新选择。',
  PRD_SOURCE_UNSUPPORTED:'来源格式不支持，请使用 UTF-8 文本、Markdown 或有效的 Taskmaster JSON 任务文件。',
  PRD_TASKMASTER_UNAVAILABLE:'当前用户 profile 的 Taskmaster 安装资料暂不可读取。可继续使用原 PRD 文件来源流程。',
- PRD_TASKMASTER_CONTEXT_CHANGED:'任务或角色已变化，请刷新后重新读取安装资料。',
+ PRD_TASKMASTER_CONTEXT_CHANGED:'任务或角色已变化，请刷新后重新读取来源。',
+ PRD_TASKMASTER_IMPORT_UNAVAILABLE:'项目文件导入暂不可用，请保留原请求并稍后重试。',
+ PRD_TASKMASTER_IMPORT_UNCONFIRMED:'项目文件导入回执待核对，请保留原请求并重试原回执。',
+ WORKSPACE_COORDINATION_REQUIRED:'项目正在进行目录协调操作，请等待原回执完成后重试。',
  PRD_TASKMASTER_PROJECT_UNAVAILABLE:'项目 Taskmaster 文件暂不可读取，请确认服务器已配置此项目的 Git 目录且文件保持稳定。可继续使用原 PRD 文件来源流程。',
  PRD_SOURCE_TOO_LARGE:'来源超过服务允许的大小，请精简需求后重新选择。',
  PRD_OBJECTIVE_TOO_LARGE:'完整任务目标超过服务允许的长度，请精简需求后重新预览。',
@@ -42,9 +45,15 @@ function selection(source){
 }
 function rejected(error){return Number.isInteger(error?.status)&&error.status>=400&&error.status<500&&error.status!==408&&error.message!=='IDEMPOTENCY_IN_PROGRESS';}
 export class PrdCommandStore {
- constructor(storage,scope,taskId){if(!/^[a-f0-9]{64}$/.test(scope))throw Error('PRD 回执用户范围不可用');this.storage=storage;this.path=`/persistent-tasks/${encodeURIComponent(taskId)}/prd/bind`;this.key=`jot-task-prd/v1/${scope}/${encodeURIComponent(taskId)}`;}
+ constructor(storage,scope,taskId,operation='bind'){
+  if(!/^[a-f0-9]{64}$/.test(scope)||!['bind','taskmaster-import'].includes(operation))throw Error('PRD 回执用户范围不可用');
+  this.storage=storage;this.operation=operation;this.path=`/persistent-tasks/${encodeURIComponent(taskId)}/prd/${operation}`;
+  this.key=`jot-task-prd/v1/${scope}/${encodeURIComponent(taskId)}`+(operation==='bind'?'':'/taskmaster-import');
+ }
  read(){const raw=this.storage.getItem(this.key);if(!raw)return null;if(raw.length>16000)throw Error('PRD 回执过大');const value=JSON.parse(raw),command=value?.command;
-  if(!command||command.path!==this.path||command.method!=='POST'||typeof command.key!=='string'||!command.key||command.key.length>200||!/^[a-f0-9]{64}$/.test(command.body?.preview_sha256)||JSON.stringify(selection(command.body.source))!==JSON.stringify(command.body.source)||Object.keys(command.body).sort().join(',')!=='preview_sha256,source')throw Error('PRD 原请求回执无效，请保留本站存储以便核对');
+  if(!command||command.path!==this.path||command.method!=='POST'||typeof command.key!=='string'||!command.key||command.key.length>200||!/^[a-f0-9]{64}$/.test(command.body?.preview_sha256))throw Error('PRD 原请求回执无效，请保留本站存储以便核对');
+  if(this.operation==='bind'?(JSON.stringify(selection(command.body.source))!==JSON.stringify(command.body.source)||Object.keys(command.body).sort().join(',')!=='preview_sha256,source')
+   :Object.keys(command.body).join(',')!=='preview_sha256')throw Error('PRD 原请求回执无效，请保留本站存储以便核对');
   return {command};
  }
  saveCommand(command){if(command===null){this.complete();return;}this.storage.setItem(this.key,JSON.stringify({command}));}

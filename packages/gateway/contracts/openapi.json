@@ -22688,6 +22688,122 @@
           }
         }
       }
+    },
+    "/v1/persistent-tasks/{task_id}/prd/taskmaster-import": {
+      "post": {
+        "operationId": "importTaskPrdTaskmasterProject",
+        "tags": [
+          "persistent-tasks"
+        ],
+        "description": "Confirm one exact original project tasks.json snapshot and target logical-file version. Recheck paused task, role/capability, unresolved execution and workspace write fences, then use original immutable file versions and binary-import receipts in the original atomic command transaction. Durable original receipt lookup precedes fresh source I/O. Import leaves task objective, run state and cumulative budget unchanged. Select the resulting file through original PRD preview/bind.",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskPrdImportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Original immutable file import receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskPrdImport"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Original task/source/target or receipt unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Original task/source/target or receipt unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Original task/source/target or receipt unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Original task/source/target or receipt unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Original task/source/target or receipt unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Original task/source/target or receipt unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Original task/source/target or receipt unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -43871,6 +43987,202 @@
                   }
                 }
               ]
+            }
+          },
+          "execution_authorized": {
+            "const": false
+          },
+          "role": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "agent_id",
+              "version",
+              "capability_epoch"
+            ],
+            "properties": {
+              "agent_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "capability_epoch": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              }
+            }
+          },
+          "target": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "version",
+              "sha256",
+              "size"
+            ],
+            "properties": {
+              "path": {
+                "const": ".taskmaster/tasks/tasks.json"
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "sha256": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "import_preview_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        }
+      },
+      "TaskPrdImportRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "preview_sha256"
+        ],
+        "properties": {
+          "preview_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        }
+      },
+      "TaskPrdImport": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "task_id",
+          "task_version",
+          "preview_sha256",
+          "file",
+          "execution_authorized"
+        ],
+        "properties": {
+          "task_id": {
+            "type": "string"
+          },
+          "task_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "preview_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "file": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "protocol",
+              "workspace_id",
+              "project_id",
+              "path",
+              "version",
+              "sha256",
+              "size",
+              "source",
+              "updated_at"
+            ],
+            "properties": {
+              "protocol": {
+                "const": 1
+              },
+              "workspace_id": {
+                "type": "string"
+              },
+              "project_id": {
+                "type": "string"
+              },
+              "path": {
+                "const": ".taskmaster/tasks/tasks.json"
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 65536
+              },
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "relative_path",
+                  "task_id",
+                  "task_version",
+                  "preview_sha256",
+                  "source_sha256",
+                  "repository_sha256"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "taskmaster_project_import"
+                  },
+                  "relative_path": {
+                    "const": ".taskmaster/tasks/tasks.json"
+                  },
+                  "task_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "task_version": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "preview_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "source_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "repository_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              },
+              "updated_at": {
+                "type": "string",
+                "format": "date-time"
+              }
             }
           },
           "execution_authorized": {

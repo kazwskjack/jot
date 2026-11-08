@@ -1780,5 +1780,14 @@
     "TaskPrdProject",
     "200",
     "Original owner/project repository file witnesses, strict bounded UTF-8 JSON and Taskmaster task-format reads. Config content withheld. Read-only; no import or execution."
+  ],
+  [
+    "POST",
+    "/v1/persistent-tasks/{task_id}/prd/taskmaster-import",
+    "Import exact original project Taskmaster file",
+    "TaskPrdImportRequest",
+    "TaskPrdImport",
+    "200",
+    "Original immutable file version/import receipt and atomic command only. Exact snapshot confirmation, target CAS and paused/no-unresolved task/role/workspace guards. No task execution or budget mutation."
   ]
 ]

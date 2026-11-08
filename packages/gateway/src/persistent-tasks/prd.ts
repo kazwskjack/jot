@@ -125,8 +125,63 @@ export class TaskPrdService {
   const current=this.scope(owner,taskId);
   if(current.task.version!==task.version||current.role.agent_id!==role.agent_id||current.role.version!==role.version
    ||current.role.capability_epoch!==role.capability_epoch)throw Error('prd_taskmaster_context_changed');
-  return {task_id:taskId,task_version:task.version,project_id:role.project_id,repository_sha256:source.repository_sha256,
-   source_sha256:source.source_sha256,files,execution_authorized:false as const};
+  const targetRow=this.db.prepare('SELECT version,sha256,size FROM wb_files WHERE owner_id=? AND workspace_id=? AND project_id=? AND path=?')
+   .get(owner,role.workspace_id,role.project_id,'.taskmaster/tasks/tasks.json') as Row|undefined;
+  const view={task_id:taskId,task_version:task.version,project_id:role.project_id,role:{agent_id:role.agent_id,version:role.version,capability_epoch:role.capability_epoch},
+   target:{path:'.taskmaster/tasks/tasks.json' as const,version:Number(targetRow?.version??0),sha256:targetRow?String(targetRow.sha256):null,size:Number(targetRow?.size??0)},
+   repository_sha256:source.repository_sha256,source_sha256:source.source_sha256,files,execution_authorized:false as const};
+  return {...view,import_preview_sha256:sha(canonicalJson(view))};
+ }
+ private taskmasterImportReceipt(owner:string,taskId:string,key:string,previewHash:string){
+  this.tasks.get(owner,taskId);
+  const rows=this.db.prepare(`SELECT workspace_id,project_id FROM wb_file_binary_import_commands WHERE owner_id=? AND command_key=?
+   AND json_extract(receipt_json,'$.source.kind')='taskmaster_project_import' AND json_extract(receipt_json,'$.source.task_id')=? LIMIT 2`)
+   .all(owner,key,taskId) as Row[];
+  if(!rows.length)return undefined;
+  if(rows.length!==1)throw Error('prd_taskmaster_import_unconfirmed');
+  const file=this.workbench.binaryImportReceipt(owner,String(rows[0]!.workspace_id),String(rows[0]!.project_id),key);
+  if(!file||file.protocol!==1||file.path!=='.taskmaster/tasks/tasks.json')throw Error('prd_taskmaster_import_unconfirmed');
+  const source=file.source as Row;
+  if(source?.kind!=='taskmaster_project_import'||source.task_id!==taskId)throw Error('prd_taskmaster_import_unconfirmed');
+  if(source.preview_sha256!==previewHash)throw Error('idempotency_conflict');
+  return {task_id:taskId,task_version:Number(source.task_version),preview_sha256:previewHash,file,execution_authorized:false as const};
+ }
+ async prepareTaskmasterImport(owner:string,taskId:string,input:unknown,key:unknown){
+  const request=object(input,['preview_sha256']);
+  if(Object.keys(request).length!==1||typeof request.preview_sha256!=='string'||!/^[a-f0-9]{64}$/.test(request.preview_sha256)){
+   throw Error('invalid_prd_request');
+  }
+  if(typeof key!=='string'||!/^[\x21-\x7E]{8,128}$/.test(key))throw Error('idempotency_key_invalid');
+  const previewHash=request.preview_sha256;
+  const commandKey='prd-taskmaster-'+sha(canonicalJson({task_id:taskId,key}));
+  const recovered=this.taskmasterImportReceipt(owner,taskId,commandKey,previewHash);
+  if(recovered)return ()=>recovered;
+
+  const view=await this.taskmasterProject(owner,taskId);
+  if(view.import_preview_sha256!==previewHash)throw Error('prd_preview_changed');
+  const selected=view.files.find(file=>file.path==='.taskmaster/tasks/tasks.json');
+  if(selected?.state!=='ready'||selected.content===null)throw Error('prd_source_unsupported');
+  const content=Buffer.from(selected.content,'utf8');
+  if(sha(content)!==selected.sha256||content.length!==selected.size)throw Error('prd_source_integrity_failed');
+
+  return ()=>withImmediateTransaction(this.db,()=>{
+   const prior=this.taskmasterImportReceipt(owner,taskId,commandKey,previewHash);
+   if(prior)return prior;
+   const {task,role}=this.scope(owner,taskId);
+   if(task.version!==view.task_version||role.agent_id!==view.role.agent_id||role.version!==view.role.version
+    ||role.capability_epoch!==view.role.capability_epoch||role.project_id!==view.project_id){
+    throw Error('prd_taskmaster_context_changed');
+   }
+   const reasons=this.reasons(owner,task,role);
+   if(reasons.length)throw Error(reasons[0]!.toLowerCase());
+   const file=this.workbench.writeBinaryFile(owner,role.workspace_id,{
+    project_id:role.project_id,path:view.target.path,expected_version:view.target.version,command_key:commandKey,
+   },content,{
+    kind:'taskmaster_project_import',relative_path:view.target.path,task_id:taskId,task_version:view.task_version,
+    preview_sha256:previewHash,source_sha256:view.source_sha256,repository_sha256:view.repository_sha256,
+   });
+   return {task_id:taskId,task_version:view.task_version,preview_sha256:previewHash,file,execution_authorized:false as const};
+  });
  }
  sources(owner:string,taskId:string){
   const {task,role}=this.scope(owner,taskId),reasons=this.reasons(owner,task,role);

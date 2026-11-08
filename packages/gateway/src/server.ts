@@ -352,6 +352,7 @@ export async function buildServer(config: {
     'POST /v1/persistent-tasks/:taskId/subtasks',
     'PATCH /v1/persistent-tasks/:taskId/collaboration',
     'POST /v1/persistent-tasks/:taskId/delegations',
+    'POST /v1/persistent-tasks/:taskId/prd/taskmaster-import',
   ]);
   const isPersistentTaskMutationRoute=(request:any)=>persistentTaskMutationRoutes.has(`${request.method} ${request.routeOptions.url}`);
   const isPluginProfileMutationRoute=(request:any)=>request.routeOptions.config?.pluginProfileMutation===true;
@@ -758,7 +759,7 @@ export async function buildServer(config: {
   registerPersistentTaskRoutes(app, persistentTasks, actor,taskDelegations,taskCollaboration,atomicCommand);
   registerHostAdminRoutes(app,{...config.hostAdmin,authenticatedActor:request=>actor(request as {headers:Record<string,unknown>})});
   if(config.hostAdmin?.writeEnabled===true)registerHostSettingsInternalRoutes(app,{db,token:config.internalChannelToken??'',enabled:true,runs});
-  registerTaskPrdRoutes(app,taskPrd,actor);
+  registerTaskPrdRoutes(app,taskPrd,actor,atomicCommand);
   registerTaskBudgetRoutes(app,new TaskBudgetService(db,budgetPolicy),actor);
   registerWorkbenchExecution(app, db, workbench, persistentTasks, config.internalChannelToken, modelBudgets,taskCollaboration,config.replyJudge,nativeWork,
     new Set(config.chatWebNetwork?.allowedOrigins ?? []),config.nativeMemberClient,events,config.memoryReasoningClient, mcpRegistry,interactions,artifacts,config.modelCatalogClient);
