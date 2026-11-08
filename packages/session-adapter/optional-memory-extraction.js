@@ -25,6 +25,7 @@ export function createOptionalMemoryExtractionHost({config,bridge,llm,route}={})
   }catch{return false;}
  }
  return {
+  prepareDispatch:options=>host?.prepareDispatch(options),
   async readiness(){return await ready()?{ready:true}:{ready:false,reason:'memory_extraction_runtime_unavailable'};},
   async run(agent,options){if(!await ready())throw Error('memory_extraction_runtime_unavailable');return host.run(agent,options);},
   async dispose(){disposed=true;await prepared;await host?.dispose();},

@@ -1192,9 +1192,10 @@ export function apply(ctx, config = {}) {
     if(conversationGoalRunHost)ctx.effect(()=>()=>conversationGoalRunHost.dispose())
     const executionPolicyReader=chatExecutionPolicy?createOrdinaryExecutionPolicyReader({bridge:workbenchBridge,chatPolicy:chatExecutionPolicy}):undefined
     const ordinaryModelSelector=config.ordinaryModelSelection===true?createOrdinaryModelSelector({bridge:workbenchBridge,llm:ctx.llm,agents:ctx.sessionController.agents,registry:ctx.agents,routeHealth:modelRouteHealth,readTrustedModelMetadata:trustedModelMetadataReader,ordinaryPresets,...(executionPolicyReader?{executionPolicyReader}:{})}):undefined
+    let memoryExtractionHost
     if(ordinaryModelSelector||budgetModelSelector){
       const dispatchGuard=installNativeModelDispatchGuard({llm:ctx.llm,installAnchor:ctx.get('profileContext').installAnchor,
-        prepareDispatch:options=>budgetModelSelector?.prepareDispatch(options)??ordinaryModelSelector?.prepareDispatch(options)})
+        prepareDispatch:options=>memoryExtractionHost?.prepareDispatch(options)??budgetModelSelector?.prepareDispatch(options)??ordinaryModelSelector?.prepareDispatch(options)})
       ctx.effect(()=>()=>dispatchGuard.dispose())
     }
     const contextOptions=config.ordinaryInputAdmission?{bridge:workbenchBridge,sessions:ctx.sessions,createUserMessage:createRequire(ctx.get('profileContext').installAnchor)('@deepseek-ai/dsh-llm').createUserMessage}:undefined
@@ -1226,7 +1227,7 @@ export function apply(ctx, config = {}) {
     if(ordinaryClaimedComposer)ctx.effect(()=>()=>ordinaryClaimedComposer.dispose())
     const ordinaryInputRunHost=config.ordinaryInputRecovery===undefined?undefined:createOrdinaryInputRunHost({controller:ctx.sessionController,agents:ctx.agents,bridge:workbenchBridge,ordinaryPresets,verifyComposition:config.ordinaryInputRecovery.verifyComposition,inputAdmissionHost:ordinaryInputAdmissionHost,claimedComposer:ordinaryClaimedComposer,...attachmentHistoryOptions})
     if(ordinaryInputRunHost)ctx.effect(()=>()=>ordinaryInputRunHost.dispose())
-    const memoryExtractionHost=createOptionalMemoryExtractionHost({config:config.memoryExtraction,bridge:workbenchBridge,llm:ctx.llm,route:config.workbenchModel})
+    memoryExtractionHost=createOptionalMemoryExtractionHost({config:config.memoryExtraction,bridge:workbenchBridge,llm:ctx.llm,route:config.workbenchModel})
     if(memoryExtractionHost)ctx.effect(()=>()=>memoryExtractionHost.dispose())
     let ApiSessionNotFound
     if(workbenchBridge||typeof ctx.sessionController.inspect==='function'&&typeof ctx.sessionController.resolveAgent==='function'){

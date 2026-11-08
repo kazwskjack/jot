@@ -11,8 +11,9 @@ export function assertPreparedModelCapabilities({route,metadata,sessionId,option
   ||observed.digest_revision!==metadata?.digest_revision)fail();
  if(!Array.isArray(originalOptions.messages))fail();
  const has=type=>originalOptions.messages.some(message=>Array.isArray(message?.content)&&message.content.some(block=>block?.type===type));
+ const hasText=has('text')||typeof originalOptions.system==='string'&&originalOptions.system.length>0;
  if(has('image')&&!observed.metadata.inputModalities?.includes('image')
-  ||has('text')&&observed.metadata.inputModalities&&!observed.metadata.inputModalities.includes('text'))fail();
+  ||hasText&&observed.metadata.inputModalities&&!observed.metadata.inputModalities.includes('text'))fail();
  const limit=observed.metadata.context?.contextWindow,output=options.maxTokens??observed.metadata.defaultMaxTokens;
  if(!positive(limit)||!positive(output)||output>limit)fail();
  return observed.metadata;

@@ -22619,7 +22619,8 @@
                   "session-title",
                   "emotion",
                   "web-decision",
-                  "reply-verification"
+                  "reply-verification",
+                  "memory-extraction"
                 ]
               },
               {

@@ -11,7 +11,7 @@ export interface ModelBudgetRoute {
   billing?: {unit:'dispatched_call';nano_usd:number};
 }
 export interface ModelBudgetLimits { tokens: number; nano_usd: number | null; model_calls: number }
-export interface ModelBudgetRequest { attempt_id: string; provider: string; model: string; max_tokens?: number; purpose?: 'compaction' | 'session-title' | 'emotion' | 'web-decision' | 'reply-verification' | 'memory-reasoning' }
+export interface ModelBudgetRequest { attempt_id: string; provider: string; model: string; max_tokens?: number; purpose?: 'compaction' | 'session-title' | 'emotion' | 'web-decision' | 'reply-verification' | 'memory-reasoning' | 'memory-extraction' }
 export type ModelBudgetUsageEvidence={protocol:1;source:'reply-judge-client';cacheWrite:'reported'|'folded-unreported'};export type TaskBudgetAttemptState = 'reserved'|'in_flight'|'unknown'|'settled'|'released';
 export type TaskBudgetAttemptUsage = {status:'settled'|'unknown'|'unavailable'|'not_metered';input_tokens:string|null;output_tokens:string|null;cache_read_tokens:string|null;cache_write_tokens:string|null;reasoning_tokens:string|null;total_tokens:string|null};
 export type TaskBudgetAttemptProjection = {attempt_ref:string;purpose:ModelBudgetRequest['purpose']|null;state:TaskBudgetAttemptState;created_at:string;updated_at:string;
@@ -356,7 +356,7 @@ export class ModelBudgetLedger {
       let purpose:TaskBudgetAttemptProjection['purpose']=null;
       try{
         const request=JSON.parse(row.request_json!) as {purpose?:unknown};
-        if(['compaction','session-title','emotion','web-decision','reply-verification'].includes(String(request.purpose)))purpose=request.purpose as TaskBudgetAttemptProjection['purpose'];
+        if(['compaction','session-title','emotion','web-decision','reply-verification','memory-extraction'].includes(String(request.purpose)))purpose=request.purpose as TaskBudgetAttemptProjection['purpose'];
       }catch{/* A malformed private request never escapes the projection. */}
       const emptyUsage=(status:TaskBudgetAttemptUsage['status']):TaskBudgetAttemptUsage=>({status,input_tokens:null,output_tokens:null,cache_read_tokens:null,cache_write_tokens:null,reasoning_tokens:null,total_tokens:null});
       let usage=emptyUsage(state==='unknown'?'unknown':'unavailable');
@@ -418,7 +418,7 @@ export class ModelBudgetLedger {
   private reserveAttempt(owner: string, runId: string, input: ModelBudgetRequest, allowQueued: boolean) {
     const value = record(input,['attempt_id','provider','model','max_tokens','purpose'],'budget_request_invalid');
     if (!identifier(value.attempt_id) || !routeName(value.provider) || !routeName(value.model)
-      || (value.purpose !== undefined && !['compaction','session-title','emotion','web-decision','reply-verification','memory-reasoning'].includes(String(value.purpose)))) throw new Error('budget_request_invalid');
+      || (value.purpose !== undefined && !['compaction','session-title','emotion','web-decision','reply-verification','memory-reasoning','memory-extraction'].includes(String(value.purpose)))) throw new Error('budget_request_invalid');
     if (value.max_tokens !== undefined) count(value.max_tokens,'budget_request_invalid',1);
     const request = JSON.stringify({attempt_id: value.attempt_id,provider: value.provider,model: value.model,
       ...(value.max_tokens === undefined ? {} : {max_tokens: value.max_tokens}),...(value.purpose === undefined ? {} : {purpose: value.purpose})});
