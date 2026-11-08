@@ -1,0 +1,10 @@
+{
+  "protocol": 1,
+  "package": "@deepseek-ai/dsh-llm",
+  "version": "0.2.1-rc.2",
+  "source_sha256": "d18d8ae4c8d961e628708c1e4698e09716a0ebb80e55a672e0bde1029bec1155",
+  "line_endings": "LF normalized before hashing",
+  "seam": "Wrap only the original runtime instance adapterStream, normalizeModelInfo and forAdapter. Scope each original iterator operation with AsyncLocalStorage, retain actual prepared-generation metadata and validate ordinary main-call policy synchronously before native adapter dispatch. Preserve original adapter identity, replay-state filtering, projections, middleware, failure normalization and iterator cleanup.",
+  "license": "MIT",
+  "license_file": "runtime-patches/DSH-MIT-LICENSE.txt"
+}

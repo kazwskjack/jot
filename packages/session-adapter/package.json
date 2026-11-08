@@ -68,6 +68,8 @@
     "image-output.js",
     "budget-model-selection.js",
     "ordinary-model-selection.js",
+    "native-model-dispatch-guard.js",
+    "runtime-patches/dsh-llm-0.2.1-rc.2-dispatch-sha256.json",
     "ordinary-execution-policy.js",
     "chat-context.js",
     "chat-compaction-pressure.js",

@@ -19,6 +19,7 @@ import { isAbsolute } from 'node:path'
 import { createVoiceAdapterHandler } from './voice.js'
 import {createBudgetModelSelector} from './budget-model-selection.js'
 import {createOrdinaryModelSelector} from './ordinary-model-selection.js'
+import {installNativeModelDispatchGuard} from './native-model-dispatch-guard.js'
 import {createOrdinaryExecutionPolicyReader,normalizeChatExecutionPolicy} from './ordinary-execution-policy.js'
 import {createOrdinaryContextSelector} from './chat-context.js'
 import {createChatWebSelector} from './chat-web.js'
@@ -1190,7 +1191,11 @@ export function apply(ctx, config = {}) {
     const conversationGoalRunHost=config.conversationGoalResume===true?createConversationGoalRunHost({controller:ctx.sessionController,agents:ctx.agents,persistence:ctx.sessionPersistence,bridge:workbenchBridge,ordinaryPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted'))}):undefined
     if(conversationGoalRunHost)ctx.effect(()=>()=>conversationGoalRunHost.dispose())
     const executionPolicyReader=chatExecutionPolicy?createOrdinaryExecutionPolicyReader({bridge:workbenchBridge,chatPolicy:chatExecutionPolicy}):undefined
-    const ordinaryModelSelector=config.ordinaryModelSelection===true?createOrdinaryModelSelector({bridge:workbenchBridge,llm:ctx.llm,agents:ctx.sessionController.agents,registry:ctx.agents,routeHealth:modelRouteHealth,readTrustedModelMetadata:trustedModelMetadataReader,...(executionPolicyReader?{executionPolicyReader}:{})}):undefined
+    const ordinaryModelSelector=config.ordinaryModelSelection===true?createOrdinaryModelSelector({bridge:workbenchBridge,llm:ctx.llm,agents:ctx.sessionController.agents,registry:ctx.agents,routeHealth:modelRouteHealth,readTrustedModelMetadata:trustedModelMetadataReader,ordinaryPresets,...(executionPolicyReader?{executionPolicyReader}:{})}):undefined
+    if(ordinaryModelSelector){
+      const dispatchGuard=installNativeModelDispatchGuard({llm:ctx.llm,installAnchor:ctx.get('profileContext').installAnchor,prepareDispatch:ordinaryModelSelector.prepareDispatch})
+      ctx.effect(()=>()=>dispatchGuard.dispose())
+    }
     const contextOptions=config.ordinaryInputAdmission?{bridge:workbenchBridge,sessions:ctx.sessions,createUserMessage:createRequire(ctx.get('profileContext').installAnchor)('@deepseek-ai/dsh-llm').createUserMessage}:undefined
     const contextSelector=contextOptions?createOrdinaryContextSelector({...contextOptions,...(config.ordinaryChatContext===true?{chatPolicy:chatExecutionPolicy}:{})}):undefined
     const webSelector=config.ordinaryChatWeb===true?createChatWebSelector({bridge:workbenchBridge,sessions:ctx.sessions,chatPolicy:chatExecutionPolicy}):undefined

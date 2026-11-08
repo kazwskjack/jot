@@ -108,6 +108,25 @@ export function createTrustedModelMetadataConsumer({readTrustedModelMetadata,ena
  };
 }
 
+/** Observe the metadata of an already prepared native call without resolving again. */
+export function observePreparedModelMetadata(info,route){
+ if(info?.provider!==route.provider||info?.id!==route.model)return changed('ROUTE_MISMATCH');
+ // Project known SDK fields before validation; never serialize adapter config,
+ // credentials, transport settings or other unrelated runtime metadata.
+ const candidate={provider:info.provider,id:info.id,
+  ...(info.name===undefined?{}:{name:info.name}),
+  ...(info.context===undefined?{}:{context:info.context}),
+  ...(info.defaultMaxTokens===undefined?{}:{defaultMaxTokens:info.defaultMaxTokens}),
+  ...(info.reasoning===undefined?{}:{reasoning:{efforts:Array.isArray(info.reasoning?.efforts)
+   ?info.reasoning.efforts.map(effort=>({id:effort?.id})):info.reasoning?.efforts,
+   ...(info.reasoning?.defaultEffort===undefined?{}:{defaultEffort:info.reasoning.defaultEffort})}}),
+  ...(info.inputModalities===undefined?{}:{inputModalities:info.inputModalities})};
+ const metadata=projectMetadata(candidate);if(!metadata)return unavailable('INVALID_METADATA');
+ return validate({protocol:1,state:'ready',provider:route.provider,id:route.model,metadata,
+  metadata_digest:createHash('sha256').update(canonical({digest_revision:DIGEST_REVISION,metadata})).digest('hex'),
+  digest_revision:DIGEST_REVISION,source_config_revision:null,upstream_revision:null},route);
+}
+
 /** Reads only DSH's resolved model metadata. The digest is the content revision;
  * this SDK seam exposes no independently verifiable provider-config revision. */
 export function createTrustedModelMetadataProducer({llm,enabled=false}={}){
@@ -121,20 +140,7 @@ export function createTrustedModelMetadataProducer({llm,enabled=false}={}){
    const info=await readWithSignal((_route,currentSignal)=>llm.resolveModelInfo(route.provider,route.model,currentSignal),route,bounded);
    bounded.throwIfAborted();
    if(info?.provider!==route.provider||info?.id!==route.model)return changed('ROUTE_MISMATCH');
-   // Project known SDK fields before validation; never serialize adapter config,
-   // credentials, transport settings or other unrelated runtime metadata.
-   const candidate={provider:info.provider,id:info.id,
-    ...(info.name===undefined?{}:{name:info.name}),
-    ...(info.context===undefined?{}:{context:info.context}),
-    ...(info.defaultMaxTokens===undefined?{}:{defaultMaxTokens:info.defaultMaxTokens}),
-    ...(info.reasoning===undefined?{}:{reasoning:{efforts:Array.isArray(info.reasoning?.efforts)
-     ?info.reasoning.efforts.map(effort=>({id:effort?.id})):info.reasoning?.efforts,
-     ...(info.reasoning?.defaultEffort===undefined?{}:{defaultEffort:info.reasoning.defaultEffort})}}),
-    ...(info.inputModalities===undefined?{}:{inputModalities:info.inputModalities})};
-   const metadata=projectMetadata(candidate);if(!metadata)return unavailable('INVALID_METADATA');
-   return validate({protocol:1,state:'ready',provider:route.provider,id:route.model,metadata,
-    metadata_digest:createHash('sha256').update(canonical({digest_revision:DIGEST_REVISION,metadata})).digest('hex'),
-    digest_revision:DIGEST_REVISION,source_config_revision:null,upstream_revision:null},route);
+   return observePreparedModelMetadata(info,route);
   }catch(error){
    if(bounded.aborted)throw(bounded.reason??error);
    return unavailable('PRODUCER_UNAVAILABLE');

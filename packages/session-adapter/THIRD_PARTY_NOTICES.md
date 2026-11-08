@@ -18,3 +18,8 @@ in `runtime-patches/DSH-MIT-LICENSE.txt`.
 from `@deepseek-ai/dsh-plan-mode` version `0.2.1-rc.2`. Its compatibility seam
 is pinned by `runtime-patches/dsh-plan-mode-0.2.1-rc.2-sha256.json`.
 The retained MIT notice applies to the native controller compatibility work.
+
+`native-model-dispatch-guard.js` integrates the original `@deepseek-ai/dsh-llm`
+version `0.2.1-rc.2` dispatch lifecycle through an instance compatibility seam.
+Its installed source is pinned by `runtime-patches/dsh-llm-0.2.1-rc.2-dispatch-sha256.json`.
+The retained MIT notice applies to this native runtime compatibility work.

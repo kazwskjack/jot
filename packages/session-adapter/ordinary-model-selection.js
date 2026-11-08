@@ -2,7 +2,7 @@ import {createHash} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
 import {readOrdinaryInputAuthority} from './ordinary-input-resume.js';
 import {normalizeHostExecutionLease} from './workbench.js';
-import {createTrustedModelMetadataConsumer,createTrustedModelMetadataProducer} from './trusted-model-metadata.js';
+import {createTrustedModelMetadataConsumer,createTrustedModelMetadataProducer,observePreparedModelMetadata} from './trusted-model-metadata.js';
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 const plain=value=>!!value&&typeof value==='object'&&!Array.isArray(value);
 const canonical=value=>JSON.stringify(value,(_key,item)=>plain(item)?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item);
@@ -50,12 +50,14 @@ function metadataBindings(value,selected){
  });
 }
 /** Only original run authority selects the native route. No default setting is saved. */
-export function createOrdinaryModelSelector({bridge,llm,agents,registry,executionPolicyReader,routeHealth,readTrustedModelMetadata}){
+export function createOrdinaryModelSelector({bridge,llm,agents,registry,executionPolicyReader,routeHealth,readTrustedModelMetadata,ordinaryPresets}){
  if(typeof bridge?.request!=='function'||typeof llm?.resolveCallConfig!=='function'||typeof agents?.selectForNextRequest!=='function'||typeof agents?.selectionFor!=='function'||typeof registry?.get!=='function'||executionPolicyReader!==undefined&&typeof executionPolicyReader!=='function'||routeHealth!==undefined&&typeof routeHealth?.select!=='function')fail();
  if(readTrustedModelMetadata!==undefined&&typeof readTrustedModelMetadata!=='function')fail();
  const readMetadata=createTrustedModelMetadataConsumer({enabled:true,
   readTrustedModelMetadata:readTrustedModelMetadata??createTrustedModelMetadataProducer({llm,enabled:true})});
+ const dispatchPolicies=new WeakMap();
  const select=async({agent,binding,check,signal,tokenMeter,inputMessages=[]})=>{
+  if(agent?.session)dispatchPolicies.delete(agent.session);
   if(!Array.isArray(inputMessages))fail();
   const requiredInput=()=>{
    if(typeof agent?.session?.deriveMessages!=='function')fail();
@@ -147,6 +149,32 @@ export function createOrdinaryModelSelector({bridge,llm,agents,registry,executio
   await assertSessionFitsRoute({session:agent.session,tokenMeter,llm,route:chosen,callConfig:resolved,signal});await fence();
   await assertMetadata(chosen,bound);
   if(typeof agents.selectionFor!=='function'||!isDeepStrictEqual(agents.selectionFor(agent).current,native))agents.selectForNextRequest(agent,native);
+  dispatchPolicies.set(session,{agent,signal,route:structuredClone(chosen),metadata:observedMetadata.get(JSON.stringify([chosen.provider,chosen.model])),tokenMeter});
  };
- return Object.assign(select,{prepareAgent(agent){if(registry.get(agent?.id)!==agent)fail();agents.selectionFor(agent);}});
+ const prepareDispatch=originalOptions=>{
+  if(typeof originalOptions?.sessionId!=='string')return;
+  const agent=registry.get(originalOptions?.sessionId),session=agent?.session;
+  // Auxiliary calls have their own admission and metadata integration work item.
+  if(!session||!ordinaryPresets?.has(session.header?.agentPreset)||originalOptions.purpose!==undefined)return;
+  const policy=dispatchPolicies.get(session);
+  return ({options,modelInfo,stopped})=>{
+   originalOptions.signal?.throwIfAborted();policy?.signal?.throwIfAborted();
+   if(stopped||!policy||dispatchPolicies.get(session)!==policy||registry.get(agent.id)!==agent||agent.session!==session
+    ||policy.agent!==agent||agent.id!==session.id||options.sessionId!==session.id
+    ||options.provider!==policy.route.provider||options.model!==policy.route.model
+    ||options.reasoningEffort!==policy.route.reasoning_effort)fail();
+   const observed=observePreparedModelMetadata(modelInfo,{provider:options.provider,model:options.model});
+   if(observed.state!=='ready'||observed.metadata_digest!==policy.metadata?.metadata_digest
+    ||observed.digest_revision!==policy.metadata?.digest_revision)fail();
+   if(!Array.isArray(originalOptions.messages))fail();
+   const has=type=>originalOptions.messages.some(message=>Array.isArray(message?.content)&&message.content.some(block=>block?.type===type));
+   if(has('image')&&!observed.metadata.inputModalities?.includes('image')
+    ||has('text')&&observed.metadata.inputModalities&&!observed.metadata.inputModalities.includes('text'))fail();
+   const measured=policy.tokenMeter.measure(session),limit=observed.metadata.context?.contextWindow;
+   const output=options.maxTokens??observed.metadata.defaultMaxTokens;
+   if(!integer(measured?.totalTokens)||!integer(limit)||limit===0||!integer(output)||output===0
+    ||!Number.isSafeInteger(measured.totalTokens+output)||measured.totalTokens+output>limit)fail();
+  };
+ };
+ return Object.assign(select,{prepareDispatch,prepareAgent(agent){if(registry.get(agent?.id)!==agent)fail();agents.selectionFor(agent);}});
 }
