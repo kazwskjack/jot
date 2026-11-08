@@ -131,6 +131,7 @@ export default function TaskPrdPanel({task,executionReady,onBound}:{task:Task;ex
    {projectResource.error&&<p className="wb-status" role="status">{prdMessage(projectResource.error)}</p>}
    {project&&<div style={textStyle}>
     <dl><dt>原项目</dt><dd>{project.project_id}</dd><dt>项目文件来源 SHA-256</dt><dd>{project.source_sha256}</dd></dl>
+    {project.directory_state&&<p className="wb-hint">{project.directory_state==='present'?'原项目 .taskmaster 目录已存在。上游 CLI 初始化会拒绝此目录，配置或任务文件缺失时需继续核对已有项目内容。':'原项目 .taskmaster 目录尚不存在，符合上游 CLI 初始化的目录前置条件。完整初始化执行入口仍在接入中。'}</p>}
     {project.target&&<dl><dt>保存目标 / 当前版本</dt><dd>{project.target.path} / v{project.target.version}</dd><dt>导入预览 SHA-256</dt><dd>{project.import_preview_sha256}</dd></dl>}
     <ul>{project.files.map(file=><li key={file.path}>
      {file.path} · {projectFileStates[file.state]} · {file.size} 字节

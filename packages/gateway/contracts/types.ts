@@ -509,7 +509,7 @@ export type TaskmasterInstallation = {protocol:1;owner_id:string;profile_id:stri
 export type TaskPrdInstallation = {task_id:string;task_version:number;installation:TaskmasterInstallation};
 
 export type TaskPrdProjectFile = {path:".taskmaster/config.json"|".taskmaster/tasks/tasks.json";state:"missing"|"too_large"|"invalid"|"ready";size:number;sha256:string|null;content:string|null;task_count:number|null;tags:string[]};
-export type TaskPrdProject = {task_id:string;task_version:number;project_id:string;repository_sha256:string;source_sha256:string;files:TaskPrdProjectFile[];execution_authorized:false;role?:{agent_id:string;version:number;capability_epoch:number};target?:{path:".taskmaster/tasks/tasks.json";version:number;sha256:string|null;size:number};import_preview_sha256?:string};
+export type TaskPrdProject = {directory_state?:"missing"|"present";task_id:string;task_version:number;project_id:string;repository_sha256:string;source_sha256:string;files:TaskPrdProjectFile[];execution_authorized:false;role?:{agent_id:string;version:number;capability_epoch:number};target?:{path:".taskmaster/tasks/tasks.json";version:number;sha256:string|null;size:number};import_preview_sha256?:string};
 
 export type TaskPrdImportSource = {
   kind:"taskmaster_project_import";relative_path:".taskmaster/tasks/tasks.json";

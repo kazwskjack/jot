@@ -181,7 +181,10 @@ export class GitRepositoryInspection{
   const after=await this.anchors(signal);
   if(after.repository!==before.repository||after.metadata!==before.metadata)throw Error('git_snapshot_changed');
   signal?.throwIfAborted();
-  return {repository_sha256:before.repository,source_sha256:hash(canonicalJson({repository:before.repository,metadata:before.metadata,files:facts})),files};
+  const directory=facts[0]?.ancestors.find(ancestor=>ancestor.path==='.taskmaster');
+  if(!directory||facts.some(fact=>canonicalJson(fact.ancestors.find(ancestor=>ancestor.path==='.taskmaster'))!==canonicalJson(directory)))throw Error('git_snapshot_changed');
+  return {repository_sha256:before.repository,source_sha256:hash(canonicalJson({repository:before.repository,metadata:before.metadata,files:facts})),
+   directory_state:directory.kind==='directory'?'present' as const:'missing' as const,files};
  }
  private async taskmasterPrdNames(signal?:AbortSignal){
   let current=this.root;const directories=[hash(witness(await lstat(current)))];

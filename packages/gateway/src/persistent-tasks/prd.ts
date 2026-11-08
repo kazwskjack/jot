@@ -216,7 +216,7 @@ export class TaskPrdService {
   const view={task_id:taskId,task_version:task.version,project_id:role.project_id,role:{agent_id:role.agent_id,version:role.version,capability_epoch:role.capability_epoch},
    target:{path:'.taskmaster/tasks/tasks.json' as const,version:Number(targetRow?.version??0),sha256:targetRow?String(targetRow.sha256):null,size:Number(targetRow?.size??0)},
    repository_sha256:source.repository_sha256,source_sha256:source.source_sha256,files,execution_authorized:false as const};
-  return {...view,import_preview_sha256:sha(canonicalJson(view))};
+  return {...view,directory_state:source.directory_state,import_preview_sha256:sha(canonicalJson(view))};
  }
  async taskmasterPrdFiles(owner:string,taskId:string,after:unknown){
   if(after!==undefined)taskmasterPrdPath(after);

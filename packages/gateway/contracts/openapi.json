@@ -46362,6 +46362,14 @@
           "import_preview_sha256": {
             "type": "string",
             "pattern": "^[a-f0-9]{64}$"
+          },
+          "directory_state": {
+            "type": "string",
+            "enum": [
+              "missing",
+              "present"
+            ],
+            "description": "Stable original .taskmaster directory observation. A present directory prevents upstream CLI initialization even when config/tasks files are missing. This observation does not authorize initialization."
           }
         }
       },
