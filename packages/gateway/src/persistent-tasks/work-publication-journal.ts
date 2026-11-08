@@ -43,8 +43,10 @@ function stepsFor(plan:PublicationPlan,source:ReturnType<typeof review>):Publica
   &&Array.isArray(plan.files)&&plan.files.length===source.selection.paths.length);
  for(const [index,file] of plan.files.entries()){
   const change=source.changes[index],before=source.target.files[index];
-  valid(exact(file,'kind,mode,path,scratch,sha256,size')&&file.path===source.selection.paths[index]&&file.path===change.path&&file.kind===change.kind
-   &&file.sha256===change.after.sha256&&file.size===change.after.bytes&&(before.kind==='file'?file.mode===before.mode:[0o644,0o666].includes(file.mode)));
+  const content=file.kind==='delete'?change.before:change.after;
+  valid(exact(file,'kind,mode,path,scratch,sha256,size')&&['add','modify','delete'].includes(file.kind)&&file.path===source.selection.paths[index]&&file.path===change.path&&file.kind===change.kind
+   &&content?.kind==='file'&&file.sha256===content.sha256&&file.size===content.bytes&&(before.kind==='file'?file.mode===before.mode:[0o644,0o666].includes(file.mode)));
+  if(file.kind==='delete')valid(change.after===null&&before.kind==='file'&&before.sha256===file.sha256&&before.size===file.size);
   const parent=file.path.includes('/')?file.path.slice(0,file.path.lastIndexOf('/')+1):'';
   valid(workspaceRelativePath(file.scratch)===file.scratch&&new RegExp('^\\.jot-publication-[a-f0-9-]{36}\\.tmp$').test(file.scratch.slice(parent.length))&&file.scratch.startsWith(parent));
  }
@@ -62,12 +64,13 @@ function stepsFor(plan:PublicationPlan,source:ReturnType<typeof review>):Publica
  }
  const directories=[...required].sort((a,b)=>a.split('/').length-b.split('/').length||(a<b?-1:a>b?1:0));
  const result:PublicationStep[]=directories.map(path=>({plan_id:plan.plan_id,step_id:'directory:'+path,phase:'directory',path}));
- for(const file of plan.files)for(const phase of ['stage','publish'] as const)result.push({plan_id:plan.plan_id,step_id:phase+':'+file.path,phase,path:file.path,scratch:file.scratch,sha256:file.sha256,size:file.size});
+ for(const file of plan.files)for(const phase of ['stage',file.kind==='delete'?'delete':'publish'] as const)result.push({plan_id:plan.plan_id,step_id:phase+':'+file.path,phase,path:file.path,scratch:file.scratch,sha256:file.sha256,size:file.size});
  return result;
 }
 function effectFact(effect:PublicationEffect,expected:PublicationStep){
  const {fact,...step}=effect;valid(canonicalJson(step)===canonicalJson(expected));
  if(expected.phase==='directory'){valid(exact(fact,'identity,kind')&&fact.kind==='directory'&&IDENTITY.test(fact.identity));return;}
+ if(expected.phase==='delete'){valid(exact(fact,'kind')&&fact.kind==='absent');return;}
  valid(exact(fact,'identity,kind,mode,sha256,size,stat_sha256')&&fact.kind==='file'&&IDENTITY.test(fact.identity)&&SHA.test(fact.stat_sha256)
   &&fact.sha256===expected.sha256&&fact.size===expected.size&&Number.isSafeInteger(fact.mode)&&fact.mode>=0&&fact.mode<=0o777);
 }
@@ -95,7 +98,7 @@ export function readWorkPublicationJournal(db:DatabaseSync,row:Row,now:()=>numbe
    else if(entry.kind==='applied'){
     valid(plan&&!pending&&!applied&&effects.length===steps.length&&exact(payload,'execution_authorized,files,plan_id,protocol,state,target_sha256')
      &&payload.protocol===1&&payload.execution_authorized===false&&payload.state==='applied'&&payload.plan_id===plan.plan_id&&payload.target_sha256===row.target_sha256);
-    const files=effects.filter(e=>e.phase==='publish').map(e=>{const {kind,...fact}=e.fact;return{path:e.path,...fact};});
+    const files=effects.filter(e=>e.phase==='publish'||e.phase==='delete').map(e=>{if(e.phase==='delete')return{path:e.path,kind:'absent'};const {kind,...fact}=e.fact;return{path:e.path,...fact};});
     valid(canonicalJson(payload.files)===canonicalJson(files));applied={...entry,sha256:saved.record_sha256};
    }else if(entry.kind==='finish'){
     const state=applied?'applied':effects.length||pending?'unknown':plan?'prepared':payload.state==='cancelled_before_preparation'?'cancelled_before_preparation':'failed_before_preparation';

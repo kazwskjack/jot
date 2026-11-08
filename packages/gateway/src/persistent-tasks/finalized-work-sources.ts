@@ -114,7 +114,7 @@ export class FinalizedWorkSources{
   requireFact(row.owner_id===owner&&row.task_id===s.task_id&&row.occurrence_id===s.occurrence_id&&row.cycle_id===work.cycle_id&&row.snapshot_id===work.snapshot_id
    &&row.evidence_json===canonicalJson(evidence)&&row.inputs_sha256===hash(inputs)&&inputs.protocol===1&&inputs.run_id===runId
    &&inputs.binding_sha256===evidence.binding_sha256&&Array.isArray(inputs.calls)&&hash(inputs.calls)===work.call_set_sha256);
-  const writeIds:string[]=[],deletedVersions=new Map<string,number>();
+  const writeIds:string[]=[],deletedVersions=new Map<string,{path:string;version:number;previous_sha256:string;previous_size:number;receipt_id:string;producing_run_id:string}>();
   for(const call of inputs.calls){
    requireFact(call&&call.intent&&call.proof&&call.ledger);
    const actual=db.prepare(`SELECT i.*,r.receipt_id,r.path,r.version,r.sha256,r.bytes,r.response_json FROM wb_isolated_file_intents i
@@ -127,7 +127,8 @@ export class FinalizedWorkSources{
    if(call.proof.operation==='files.write')writeIds.push(call.proof.receipt_id);
    if(call.proof.operation==='files.delete'){
     const deleted=isolatedDeleteFacts(db,call.proof.run_id,call.proof.call_id,JSON.parse(actual.response_json));
-    deletedVersions.set(deleted.path,Math.max(deletedVersions.get(deleted.path)??0,deleted.version));
+    if((deletedVersions.get(deleted.path)?.version??0)<deleted.version)deletedVersions.set(deleted.path,{path:deleted.path,version:deleted.version,
+     previous_sha256:deleted.previous_sha256,previous_size:deleted.previous_size,receipt_id:call.proof.receipt_id,producing_run_id:call.proof.run_id});
    }
   }
   requireFact(Array.isArray(evidence.write_receipt_ids)&&new Set(writeIds).size===writeIds.length&&canonicalJson(writeIds.sort())===canonicalJson(evidence.write_receipt_ids));
@@ -141,7 +142,7 @@ export class FinalizedWorkSources{
    if(previous)requireFact(previous.source.version!==value.version);
    if(!previous||previous.source.version<value.version)versions.set(value.path,{source,content:verified.content});
   }
-  for(const [path,version] of deletedVersions)if((versions.get(path)?.source.version??0)<version)versions.delete(path);
+  for(const [path,deleted] of deletedVersions)if((versions.get(path)?.source.version??0)<deleted.version)versions.delete(path);
   for(const output of s.workspace_file_outputs??[]){
    const file=versions.get(output.path);requireFact(output.verified===true&&output.content_verified===true&&output.source==='isolated'&&file
     &&file.source.receipt_id===output.receipt_id&&file.source.version===output.version&&file.source.sha256===output.sha256&&file.source.size===output.size);
@@ -152,12 +153,17 @@ export class FinalizedWorkSources{
   });
   // Unsupported changes stay explicit. A future publisher must reject this list,
   // not quietly turn partial text provenance into full-tree apply permission.
+  const deletions=work.diff.changes.flatMap(change=>{
+   if(change.kind!=='delete'||change.before.kind!=='file'||versions.has(change.path))return [];
+   const deleted=deletedVersions.get(change.path);return deleted?[deleted]:[];
+  }).sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
+  const deletedPaths=new Set(deletions.map(deleted=>deleted.path));
   const unsupported_changes=work.diff.changes.filter(change=>!(change.kind==='add'&&change.after.kind==='file'&&!change.after.executable&&versions.has(change.path)
-   ||change.kind==='modify'&&!change.mode_changed&&versions.has(change.path))).map(change=>({kind:change.kind,path:change.path}));
+   ||change.kind==='modify'&&!change.mode_changed&&versions.has(change.path)||change.kind==='delete'&&deletedPaths.has(change.path))).map(change=>({kind:change.kind,path:change.path}));
   const facts={protocol:1 as const,source:'isolated' as const,owner_id:owner,workspace_id:f.workspace_id,project_id:f.project_id,agent_id:s.agent_id,
    task_id:s.task_id,occurrence_id:s.occurrence_id,run_id:runId,final_message_id:f.message_id,candidate_id:candidate.candidate_id,certificate_id:f.certificate_id,
    completion_intent_id:f.intent_id,snapshot_sha256:cert.snapshot_hash,candidate_sha256:cert.candidate_hash,native_proof_sha256:native.proof_hash,
-   work_review:work,files,unsupported_changes,execution_authorized:false as const};
+   work_review:work,files,...(deletions.length?{deletions}:{}),unsupported_changes,execution_authorized:false as const};
   const completed_checkpoint=validateCheckpoint(originalJson(native.proof_json).checkpoint);
   return {summary:freezeWorkAdmission({...facts,source_sha256:hash(facts)}),versions,admission,session_ref:completed_checkpoint.session_ref,completed_checkpoint};
  }
@@ -178,12 +184,13 @@ export class FinalizedWorkSources{
   return this.snapshot(()=>{
    if(!Array.isArray(paths)||!paths.length||paths.length>100||new Set(paths).size!==paths.length)throw Error('completed_work_source_not_found');
    const value=this.material(owner,runId);if(value.summary.source_sha256!==expectedSourceSha256)throw Error('completed_work_source_conflict');
-   const files=new Map<string,Buffer>();for(const path of paths){const file=value.versions.get(path);if(!file)throw Error('completed_work_source_not_found');files.set(path,Buffer.from(file.content,'utf8'));}
+   const files=new Map<string,Buffer|null>(),deletedPaths=new Set(value.summary.deletions?.map(deleted=>deleted.path)??[]);for(const path of paths){const file=value.versions.get(path);
+    if(file)files.set(path,Buffer.from(file.content,'utf8'));else if(deletedPaths.has(path))files.set(path,null);else throw Error('completed_work_source_not_found');}
    return{summary:value.summary,files};
   });
  }
  content(owner:string,runId:string,path:string,expectedSourceSha256:string):Buffer{
-  return this.readSelection(owner,runId,[path],expectedSourceSha256).files.get(path)!;
+  const content=this.readSelection(owner,runId,[path],expectedSourceSha256).files.get(path);if(!content)throw Error('completed_work_source_unsupported');return content;
  }
 }
 export type FinalizedWorkNativePlacement=ReturnType<FinalizedWorkSources['nativePlacement']>;

@@ -166,7 +166,7 @@ export class WorkPublicationExecutions{
   const row=this.row(owner,project,id);this.receipt(row);const journal=readWorkPublicationJournal(this.db,row),reservation=readWorkspaceOperation(this.db,this.scope(row));
   const state=reservation?.state!=='released_settled'?(journal.applied?'applied_pending_settlement':journal.disposition?'abandon_pending_settlement':journal.state):journal.state;
   return freezeWorkAdmission({execution_id:id,project_id:project,intent_id:row.intent_id,request_id:row.request_id,state,
-   files:journal.effects.filter(effect=>effect.phase==='publish').map(effect=>({path:effect.path,sha256:effect.sha256,size:effect.size})),
+   files:journal.effects.filter(effect=>effect.phase==='publish'||effect.phase==='delete').map(effect=>effect.phase==='delete'?{path:effect.path,kind:'absent' as const}:{path:effect.path,sha256:effect.sha256,size:effect.size}),
    pending_path:journal.pending?.path??null,journal_sha256:journal.tail_sha256,execution_authorized:false as const});
  });}
  /** Original immutable owner-command acknowledgement, independently of

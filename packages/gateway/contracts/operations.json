@@ -1212,7 +1212,7 @@
     "WorkPublicationPrepare",
     "WorkPublicationReview",
     "201",
-    "Owner review only; approval does not admit or dispatch file effects. Replays return the original receipt; GET returns current review state."
+    "Owner review only; approval does not admit or dispatch file effects. Replays return the original receipt; GET returns current review state. Selected verified text-file deletions show the original content and an absent target result under the same review/admission flow."
   ],
   [
     "GET",
@@ -1221,7 +1221,7 @@
     null,
     "WorkPublicationReview",
     "200",
-    "Owner review only; approval does not admit or dispatch file effects. Replays return the original receipt; GET returns current review state."
+    "Owner review only; approval does not admit or dispatch file effects. Replays return the original receipt; GET returns current review state. Selected verified text-file deletions show the original content and an absent target result under the same review/admission flow."
   ],
   [
     "POST",
@@ -1230,7 +1230,7 @@
     "WorkPublicationControl",
     "WorkPublicationReview",
     "200",
-    "Owner review only; approval does not admit or dispatch file effects. Replays return the original receipt; GET returns current review state."
+    "Owner review only; approval does not admit or dispatch file effects. Replays return the original receipt; GET returns current review state. Selected verified text-file deletions show the original content and an absent target result under the same review/admission flow."
   ],
   [
     "GET",
@@ -1239,7 +1239,7 @@
     null,
     "WorkPublicationSource",
     "200",
-    "Read-only original immutable completed-work proof and file versions. No root lookup, approval, execution admission or dispatch."
+    "Read-only original immutable completed-work proof and file versions. No root lookup, approval, execution admission or dispatch. Verified deletion descriptors retain original mutation receipt and preimage metadata."
   ],
   [
     "POST",
@@ -1266,7 +1266,7 @@
     null,
     "WorkPublicationStatus",
     "200",
-    "Original immutable publication acceptance or current journal; never dispatches native effects."
+    "Original immutable publication acceptance or current journal; never dispatches native effects. Confirmed deletion effects appear as path/kind=absent entries after the journaled delete phase."
   ],
   [
     "POST",
@@ -1275,7 +1275,7 @@
     "WorkPublicationDispatch",
     "WorkPublicationStatus",
     "200",
-    "Original explicit owner native command or immutable command receipt; never automatically replay an unknown effect."
+    "Original explicit owner native command or immutable command receipt; never automatically replay an unknown effect. Confirmed deletion effects appear as path/kind=absent entries after the journaled delete phase."
   ],
   [
     "POST",

@@ -117,19 +117,24 @@ export class WorkPublicationIntents{
     ||!input.paths.some(path=>path.startsWith(change.path+'/')&&source.work_review.diff.changes.some(entry=>entry.path===path&&entry.kind==='add'&&entry.after.kind==='file')))
     fail('source_unsupported');
   }
-  for(const path of input.paths){const change=source.work_review.diff.changes.find(entry=>entry.path===path);if(!change||!['add','modify'].includes(change.kind))fail('selection_invalid');}
+  for(const path of input.paths){const change=source.work_review.diff.changes.find(entry=>entry.path===path);if(!change||!['add','modify','delete'].includes(change.kind))fail('selection_invalid');}
   return result;
  }
- private changes(source:Source,selected:Map<string,Buffer>,target:GitPublicationTargetRead){
+ private changes(source:Source,selected:Map<string,Buffer|null>,target:GitPublicationTargetRead){
+  const deletedPaths=new Set(source.deletions?.map(item=>item.path)??[]);
   return [...selected].map(([path,bytes])=>{
    const base=source.work_review.base_manifest.entries.find(entry=>entry.path===path),after=source.work_review.result_manifest.entries.find(entry=>entry.path===path),before=target.witness.files.find(entry=>entry.path===path);
-   if(!before||after?.kind!=='file'||bytesHash(bytes)!==after.sha256||bytes.length!==after.bytes||base&&base.kind!=='file')fail('source_unsupported');
+   const deletion=bytes===null;
+   if(!before||base&&base.kind!=='file')fail('source_unsupported');
+   if(deletion){
+    if(base?.kind!=='file'||after&&after.kind!=='absent'||!deletedPaths.has(path))fail('source_unsupported');
+   }else if(after?.kind!=='file'||bytesHash(bytes)!==after.sha256||bytes.length!==after.bytes)fail('source_unsupported');
    const original=target.contents.get(path);
    if(base?.kind==='file'){
     if(before.kind!=='file'||before.sha256!==base.sha256||before.size!==base.bytes||Boolean(before.mode&0o111)!==base.executable||!original||bytesHash(original)!==before.sha256||original.length!==before.size)fail('target_base_changed');
    }else if(before.kind!=='missing'||original!==undefined)fail('target_base_changed');
-   let beforeText:string|null=null,afterText:string;try{const decoder=new TextDecoder('utf8',{fatal:true});afterText=decoder.decode(bytes);if(original)beforeText=decoder.decode(original);if(bytes.includes(0)||original?.includes(0))fail('source_unsupported');}catch{fail('source_unsupported');}
-   return{path,kind:base?'modify' as const:'add' as const,before:base??null,after,before_text:beforeText,after_text:afterText};
+   let beforeText:string|null=null,afterText:string|null=null;try{const decoder=new TextDecoder('utf8',{fatal:true});if(bytes!==null)afterText=decoder.decode(bytes);if(original)beforeText=decoder.decode(original);if(bytes?.includes(0)||original?.includes(0))fail('source_unsupported');}catch{fail('source_unsupported');}
+   return{path,kind:deletion?'delete' as const:base?'modify' as const:'add' as const,before:base??null,after:deletion?null:after,before_text:beforeText,after_text:afterText};
   });
  }
  async prepare(owner:string,project:string,input:WorkPublicationPrepare,signal?:AbortSignal){return (await this.prepareChange(owner,project,input,signal))();}

@@ -9,10 +9,10 @@ import {freezeWorkAdmission} from '../always-on/work-admission-records.ts';
 
 type Row=Record<string,any>;
 type FileFact={kind:'file';identity:string;stat_sha256:string;sha256:string;size:number;mode:number};
-export type PublicationStep={plan_id:string;step_id:string;phase:'directory'|'stage'|'publish';path:string;scratch?:string;sha256?:string;size?:number};
-export type PublicationEffect=PublicationStep&{fact:FileFact|{kind:'directory';identity:string}};
-export type PublicationPlan=Readonly<{protocol:1;plan_id:string;target_sha256:string;repository_sha256:string;files:readonly {path:string;kind:'add'|'modify';scratch:string;sha256:string;size:number;mode:number}[];execution_authorized:false}>;
-export type PublicationReceipt=Readonly<{protocol:1;plan_id:string;target_sha256:string;state:'applied';files:readonly {path:string;sha256:string;size:number;identity:string;stat_sha256:string;mode:number}[];execution_authorized:false}>;
+export type PublicationStep={plan_id:string;step_id:string;phase:'directory'|'stage'|'publish'|'delete';path:string;scratch?:string;sha256?:string;size?:number};
+export type PublicationEffect=PublicationStep&{fact:FileFact|{kind:'directory';identity:string}|{kind:'absent'}};
+export type PublicationPlan=Readonly<{protocol:1;plan_id:string;target_sha256:string;repository_sha256:string;files:readonly {path:string;kind:'add'|'modify'|'delete';scratch:string;sha256:string;size:number;mode:number}[];execution_authorized:false}>;
+export type PublicationReceipt=Readonly<{protocol:1;plan_id:string;target_sha256:string;state:'applied';files:readonly ({path:string;sha256:string;size:number;identity:string;stat_sha256:string;mode:number}|{path:string;kind:'absent'})[];execution_authorized:false}>;
 export type PublicationAuthority={authorize:()=>void;prepared:(plan:PublicationPlan)=>void;intent:(step:PublicationStep)=>void;apply:(step:PublicationStep,operation:()=>PublicationEffect)=>PublicationEffect;completed:(result:PublicationReceipt)=>void};
 type Stored={state:'ready'|'consumed';witness:GitPublicationTargetWitness;bytes:Map<string,Buffer>;facts:Map<string,FileFact|null>;parents:Map<string,string|null>;directories:Map<string,string>;metadata:string;dot:string;scratch:Map<string,FileFact>};
 const hash=(value:string|Buffer)=>createHash('sha256').update(value).digest('hex');
@@ -65,17 +65,24 @@ export class GitPublicationEffects extends GitIndexEffects{
   for(const [path,fact] of stored.scratch)if(canonicalJson(this.fileFact(join(this.root,path)))!==canonicalJson(fact))fail('target_changed');
   for(const attribute of stored.witness.attributes){this.relativeCurrent(attribute.path);if((this.fileFact(join(this.root,attribute.path))?.sha256??null)!==attribute.sha256)fail('target_changed');}
  }
- async preparePublication(raw:GitPublicationTargetWitness,changes:readonly Row[],materials:ReadonlyMap<string,Buffer>,signal?:AbortSignal):Promise<PublicationPlan>{
+ async preparePublication(raw:GitPublicationTargetWitness,changes:readonly Row[],materials:ReadonlyMap<string,Buffer|null>,signal?:AbortSignal):Promise<PublicationPlan>{
   signal?.throwIfAborted();if(!raw||!Array.isArray(changes)||!changes.length||changes.length>100||!(materials instanceof Map))fail('plan_invalid');
   const witness=structuredClone(raw),{target_sha256,...payload}=witness;if(witness.protocol!==1||witness.kind!=='publication_target'||witness.execution_authorized!==false||digest(payload)!==target_sha256)fail('plan_invalid');
   const paths=changes.map(change=>workspaceRelativePath(change.path));if(canonicalJson(paths)!==canonicalJson(witness.files.map(file=>file.path))||materials.size!==paths.length)fail('plan_invalid');
   const bytes=new Map<string,Buffer>();let total=0;const id='work-publication-plan-'+randomUUID();
   const files=changes.map(change=>{
-   const before=witness.files.find(file=>file.path===change.path)!,body=materials.get(change.path);if(!Buffer.isBuffer(body))fail('plan_invalid');const copied=Buffer.from(body);
+   const before=witness.files.find(file=>file.path===change.path)!,body=materials.get(change.path);
+   const folder=dirname(change.path),scratch=(folder==='.'?'':folder+'/')+'.jot-publication-'+randomUUID()+'.tmp';
+   if(change.kind==='delete'){
+    if(body!==null||change.after!==null||change.before?.kind!=='file'||change.before.path!==change.path||before.kind!=='file'
+     ||change.before.sha256!==before.sha256||change.before.bytes!==before.size||change.before.executable!==Boolean(before.mode&0o111))fail('source_changed');
+    return{path:change.path as string,kind:'delete' as const,scratch,sha256:before.sha256!,size:before.size,mode:before.mode};
+   }
+   if(!Buffer.isBuffer(body))fail('plan_invalid');const copied=Buffer.from(body);
    if(!change.after||change.after.kind!=='file'||change.after.path!==change.path||change.after.executable!==false||hash(copied)!==change.after.sha256||copied.length!==change.after.bytes||copied.length>32*1024*1024||(total+=copied.length)>64*1024*1024)fail('source_changed');
    if(change.kind==='add'){if(change.before!==null||before.kind!=='missing')fail('source_changed');}
    else if(change.kind==='modify'){if(change.before?.kind!=='file'||before.kind!=='file'||change.before.sha256!==before.sha256||change.before.bytes!==before.size)fail('source_changed');}else fail('source_unsupported');
-   bytes.set(change.path,copied);const folder=dirname(change.path),scratch=(folder==='.'?'':folder+'/')+'.jot-publication-'+randomUUID()+'.tmp';
+   bytes.set(change.path,copied);
    return{path:change.path as string,kind:change.kind as 'add'|'modify',scratch,sha256:hash(copied),size:copied.length,mode:before.kind==='file'?before.mode:process.platform==='win32'?0o666:0o644};
   });
   const current=await this.publicationTarget(paths,signal);if(canonicalJson(current.witness)!==canonicalJson(witness))fail('target_changed');signal?.throwIfAborted();
@@ -103,6 +110,20 @@ export class GitPublicationEffects extends GitIndexEffects{
   }
   for(const file of plan.files){
    const stage:PublicationStep={plan_id:plan.plan_id,step_id:'stage:'+file.path,phase:'stage',path:file.path,scratch:file.scratch,sha256:file.sha256,size:file.size};
+   if(file.kind==='delete'){
+    await step(stage,()=>{
+     const target=join(this.root,file.path),scratch=join(this.root,file.scratch),before=stored.facts.get(file.path)!;
+     this.relativeCurrent(file.scratch);const fd=openSync(scratch,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|(constants.O_NOFOLLOW??0),0o600);
+     let reserved:string;try{reserved=identity(fstatSync(fd,{bigint:true}));}finally{closeSync(fd);}
+     const reservation=this.fileFact(scratch);if(!reservation||reservation.identity!==reserved!||reservation.size!==0)fail('target_changed');
+     renameSync(target,scratch);const fact=this.fileFact(scratch);
+     if(!before||!fact||fact.identity!==before.identity||fact.sha256!==file.sha256||fact.size!==file.size||fact.mode!==file.mode)fail('target_changed');
+     stored.facts.set(file.path,null);stored.scratch.set(file.scratch,fact);return{...stage,fact};
+    });
+    const removal:PublicationStep={...stage,step_id:'delete:'+file.path,phase:'delete'};
+    await step(removal,()=>{unlinkSync(join(this.root,file.scratch));stored.scratch.delete(file.scratch);return{...removal,fact:{kind:'absent'}};});
+    continue;
+   }
    await step(stage,()=>{const path=join(this.root,file.scratch);this.relativeCurrent(file.scratch);const fd=openSync(path,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|(constants.O_NOFOLLOW??0),file.mode);
     try{writeFileSync(fd,stored.bytes.get(file.path)!);fchmodSync(fd,file.mode);fsyncSync(fd);}finally{closeSync(fd);}const fact=this.fileFact(path);if(!fact||fact.sha256!==file.sha256||fact.size!==file.size||fact.mode!==file.mode)fail('target_changed');stored.scratch.set(file.scratch,fact);return{...stage,fact};});
    const publish:PublicationStep={...stage,step_id:'publish:'+file.path,phase:'publish'};
@@ -110,7 +131,10 @@ export class GitPublicationEffects extends GitIndexEffects{
     if(file.kind==='add'){linkSync(scratch,target);unlinkSync(scratch);}else renameSync(scratch,target);
     const fact=this.fileFact(target);if(!fact||fact.identity!==owned.identity||fact.sha256!==file.sha256||fact.size!==file.size||fact.mode!==file.mode)fail('target_changed');stored.scratch.delete(file.scratch);stored.facts.set(file.path,fact);return{...publish,fact};});
   }
-  guard();const result:PublicationReceipt=freezeWorkAdmission({protocol:1,plan_id:plan.plan_id,target_sha256:plan.target_sha256,state:'applied',files:plan.files.map(file=>({path:file.path,...stored.facts.get(file.path)!})).map(({kind,...file})=>file),execution_authorized:false});
+  guard();const result:PublicationReceipt=freezeWorkAdmission({protocol:1,plan_id:plan.plan_id,target_sha256:plan.target_sha256,state:'applied',files:plan.files.map(file=>{
+   const fact=stored.facts.get(file.path);if(file.kind==='delete'){if(fact!==null)fail('target_changed');return{path:file.path,kind:'absent' as const};}
+   if(!fact)fail('target_changed');const {kind,...value}=fact;return{path:file.path,...value};
+  }),execution_authorized:false});
   sync(()=>authority.completed(result));guard();return result;
  }
 }

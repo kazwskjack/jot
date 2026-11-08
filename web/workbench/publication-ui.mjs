@@ -23,7 +23,16 @@ export function publicationSelection(source,scope){
  if(!source||source.source!=='isolated'||!scope||!['project_id','run_id','task_id'].every(key=>id(scope[key])&&source[key]===scope[key])||!sha(source.source_sha256)
   ||!Array.isArray(source.files)||!source.work_review||source.work_review.execution_authorized!==false||!Array.isArray(source.work_review.diff?.changes))fail();
  const files=new Map();for(const file of source.files){if(!file||!relative(file.path)||!sha(file.sha256)||!Number.isSafeInteger(file.version)||file.version<1||!Number.isSafeInteger(file.size_bytes)||file.size_bytes<0||files.has(file.path))fail();files.set(file.path,file)}
+ const deletedRows=source.deletions===undefined?[]:source.deletions;if(!Array.isArray(deletedRows))fail();
+ const deletions=new Map();for(const file of deletedRows){
+  if(!file||!relative(file.path)||!Number.isSafeInteger(file.version)||file.version<1||!sha(file.previous_sha256)
+   ||!Number.isSafeInteger(file.previous_size)||file.previous_size<0||!id(file.receipt_id)||!id(file.producing_run_id)||files.has(file.path)||deletions.has(file.path))fail();
+  deletions.set(file.path,file);
+ }
  const paths=[];for(const change of source.work_review.diff.changes){
+  if(change.kind==='delete'&&change.before?.kind==='file'){
+   if(!relative(change.path)||change.before.path!==change.path)fail();if(deletions.has(change.path))paths.push(change.path);continue;
+  }
   if(!['add','modify'].includes(change.kind)||change.after?.kind!=='file'||change.mode_changed||change.kind==='add'&&change.after.executable)continue;
   const file=files.get(change.path);if(!relative(change.path)||change.after.path!==change.path||!file||file.sha256!==change.after.sha256||file.size_bytes!==change.after.bytes)fail();
   paths.push(change.path);

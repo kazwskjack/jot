@@ -37236,6 +37236,52 @@
                 "producing_run_id"
               ]
             }
+          },
+          "deletions": {
+            "type": "array",
+            "maxItems": 200000,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "path",
+                "version",
+                "previous_sha256",
+                "previous_size",
+                "receipt_id",
+                "producing_run_id"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096,
+                  "pattern": "^(?!/)(?!.*\\\\)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$)).+$"
+                },
+                "version": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "previous_sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "previous_size": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "receipt_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                },
+                "producing_run_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                }
+              }
+            }
           }
         },
         "required": [
@@ -37310,7 +37356,8 @@
           "kind": {
             "enum": [
               "add",
-              "modify"
+              "modify",
+              "delete"
             ]
           },
           "before": {
@@ -37324,7 +37371,14 @@
             ]
           },
           "after": {
-            "$ref": "#/components/schemas/WorkReviewEntry"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkReviewEntry"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "before_text": {
             "type": [
@@ -37333,7 +37387,10 @@
             ]
           },
           "after_text": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -37343,6 +37400,54 @@
           "after",
           "before_text",
           "after_text"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "delete"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "before": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/WorkReviewEntry"
+                    },
+                    {
+                      "properties": {
+                        "kind": {
+                          "const": "file"
+                        }
+                      }
+                    }
+                  ]
+                },
+                "after": {
+                  "type": "null"
+                },
+                "before_text": {
+                  "type": "string"
+                },
+                "after_text": {
+                  "type": "null"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "after": {
+                  "$ref": "#/components/schemas/WorkReviewEntry"
+                },
+                "after_text": {
+                  "type": "string"
+                }
+              }
+            }
+          }
         ]
       },
       "WorkPublicationReview": {
@@ -37559,29 +37664,52 @@
             "type": "array",
             "maxItems": 100,
             "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "path": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 4096,
-                  "pattern": "^(?!/)(?!.*\\\\)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$)).+$"
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096,
+                      "pattern": "^(?!/)(?!.*\\\\)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$)).+$"
+                    },
+                    "sha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "size": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "sha256",
+                    "size"
+                  ]
                 },
-                "sha256": {
-                  "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
-                },
-                "size": {
-                  "type": "integer",
-                  "minimum": 0,
-                  "maximum": 9007199254740991
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "path",
+                    "kind"
+                  ],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096,
+                      "pattern": "^(?!/)(?!.*\\\\)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$)).+$"
+                    },
+                    "kind": {
+                      "const": "absent"
+                    }
+                  }
                 }
-              },
-              "required": [
-                "path",
-                "sha256",
-                "size"
               ]
             }
           },

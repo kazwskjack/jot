@@ -412,9 +412,11 @@ export type GitIndexExecutionResult = Omit<GitIndexAcceptance,"accepted"> & {pat
 export type WorkPublicationPrepare = {request_id:string;source_run_id:string;source_sha256:string;paths:string[]};
 export type WorkPublicationControl = GitReviewControl;
 export type WorkPublicationSource = {source:'isolated';workspace_id:string;project_id:string;agent_id:string;task_id:string;occurrence_id:string;run_id:string;
- final_message_id:string;candidate_id:string;certificate_id:string;completion_intent_id:string;snapshot_sha256:string;candidate_sha256:string;native_proof_sha256:string;source_sha256:string;files:Array<{path:string;version:number;sha256:string;size_bytes:number;receipt_id:string;producing_run_id:string}>;work_review:TaskWorkReview};
+ final_message_id:string;candidate_id:string;certificate_id:string;completion_intent_id:string;snapshot_sha256:string;candidate_sha256:string;native_proof_sha256:string;source_sha256:string;files:Array<{path:string;version:number;sha256:string;size_bytes:number;receipt_id:string;producing_run_id:string}>;
+ deletions?:Array<{path:string;version:number;previous_sha256:string;previous_size:number;receipt_id:string;producing_run_id:string}>;work_review:TaskWorkReview};
 export type WorkPublicationTarget = {snapshot_id:string;repository_sha256:string;head:GitSnapshot['head'];index_sha256:string|null;target_sha256:string};
-export type WorkPublicationChange = {path:string;kind:'add'|'modify';before:WorkReviewEntry|null;after:WorkReviewEntry;before_text:string|null;after_text:string};
+export type WorkPublicationChange = {path:string;kind:'add'|'modify';before:WorkReviewEntry|null;after:WorkReviewEntry;before_text:string|null;after_text:string}
+ | {path:string;kind:'delete';before:Extract<WorkReviewEntry,{kind:'file'}>;after:null;before_text:string;after_text:null};
 export type WorkPublicationReview = {intent_id:string;project_id:string;source:WorkPublicationSource;target:WorkPublicationTarget;changes:WorkPublicationChange[];paths:string[];
  review_sha256:string;version:number;state:'prepared'|'approved'|'cancelled';created_at:string;updated_at:string;execution_authorized:false};
 
@@ -422,7 +424,7 @@ export type WorkPublicationAdmission = {request_id:string;expected_version:numbe
 export type WorkPublicationAcceptance = {protocol:1;execution_id:string;operation_kind:'work_publication';project_id:string;intent_id:string;request_id:string;
  review_version:number;review_sha256:string;source_sha256:string;target_sha256:string;state:'accepted';accepted_at:string;execution_authorized:false};
 export type WorkPublicationStatus = {execution_id:string;project_id:string;intent_id:string;request_id:string;state:'not_started'|'running'|'interrupted'|'unknown'|'prepared'|'cancelled_before_preparation'|'failed_before_preparation'|'applied'|'abandoned_unknown'|'applied_pending_settlement'|'abandon_pending_settlement';
- files:Array<{path:string;sha256:string;size:number}>;pending_path:string|null;journal_sha256:string|null;execution_authorized:false};
+ files:Array<{path:string;sha256:string;size:number}|{path:string;kind:'absent'}>;pending_path:string|null;journal_sha256:string|null;execution_authorized:false};
 
 export type WorkPublicationDispatch = Record<string,never>;
 export type WorkPublicationSettlementCommand = {request_id:string;action:'confirm_recorded'|'abandon_unknown';expected_journal_sha256:string;acknowledge_unknown:true};
