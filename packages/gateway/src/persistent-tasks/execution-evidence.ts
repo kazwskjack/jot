@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import {installIsolatedOutputSources} from './isolated-output-schema.ts';
-import {isolatedFileFacts} from './isolated-output-source.ts';
+import {isolatedFileFacts,isolatedDeleteFacts} from './isolated-output-source.ts';
 import {withImmediateTransaction} from '../db/database.ts';
 
 export type ExecutionEvidence = { kind: string; reference: string; hash?: string };
@@ -36,7 +36,7 @@ export class TaskExecutionEvidence {
   }
 
   record(runId: string, callId: string, operation: string, result: unknown): ExecutionEvidence {
-    if(operation==='files.write'&&!this.db.isTransaction)throw new Error('file_execution_receipt_transaction_required');
+    if(['files.write','files.delete'].includes(operation)&&!this.db.isTransaction)throw new Error('file_execution_receipt_transaction_required');
     return withImmediateTransaction(this.db,()=>this.recordInside(runId,callId,operation,result));
   }
 
@@ -44,6 +44,7 @@ export class TaskExecutionEvidence {
     if (operation.startsWith('tasks.')) throw new Error('invalid_execution_evidence_operation');
     let file:Record<string,string|number>|undefined;
     let isolated:Record<string,any>|undefined;
+    if(operation==='files.delete')isolatedDeleteFacts(this.db,runId,callId,result,true);
     if(operation==='files.write'){
       if(!this.db.isTransaction)throw new Error('file_execution_receipt_transaction_required');
       if(!result||typeof result!=='object')throw new Error('file_execution_output_unverified');

@@ -10,16 +10,30 @@ const sha=(v:string|Uint8Array)=>createHash('sha256').update(v).digest('hex');
 const fail=()=>Error('file_execution_output_unverified');
 /** Validate original immutable IO journal and admission. Live authority is checked
  * only when issuing the original proof, never when reading historical output. */
-export function isolatedFileFacts(db:DatabaseSync,runId:string,callId:string,result:unknown,live=false):Row{
+function isolatedMutationFacts(db:DatabaseSync,runId:string,callId:string,result:unknown,kind:'files.write'|'files.delete',live:boolean):Row{
  try{
   if(!result||typeof result!=='object')throw fail();const value=result as Row;
   if(value.source!=='isolated'||typeof value.receipt_id!=='string'||!Number.isSafeInteger(value.version)||value.version<1||!Number.isSafeInteger(value.size)||value.size<0)throw fail();
-  const row=db.prepare(`SELECT r.*,i.identity_json,i.operation_json,i.digest FROM wb_isolated_file_results r JOIN wb_isolated_file_intents i ON i.call_key=r.call_key WHERE r.receipt_id=?`).get(value.receipt_id) as Row|undefined;if(!row)throw fail();
+  const row=db.prepare(`SELECT r.*,i.identity_json,i.operation_json,i.before_json,i.digest FROM wb_isolated_file_results r JOIN wb_isolated_file_intents i ON i.call_key=r.call_key WHERE r.receipt_id=?`).get(value.receipt_id) as Row|undefined;if(!row)throw fail();
   const identity=JSON.parse(row.identity_json),operation=JSON.parse(row.operation_json),saved=JSON.parse(row.response_json);
-  if(canonicalJson(saved)!==row.response_json||canonicalJson(saved)!==canonicalJson(value)||sha(canonicalJson(identity))!==row.call_key||sha(canonicalJson({identity,operation}))!==row.digest||operation.operation!=='files.write'||operation.path!==row.path||operation.expected_version+1!==row.version||typeof operation.content!=='string')throw fail();
+  if(canonicalJson(saved)!==row.response_json||canonicalJson(saved)!==canonicalJson(value)||sha(canonicalJson(identity))!==row.call_key||sha(canonicalJson({identity,operation}))!==row.digest||operation.operation!==kind||operation.path!==row.path||operation.expected_version+1!==row.version)throw fail();
   for(const [key,v]of Object.entries(identity))if(value[key]!==v)throw fail();
   if(identity.run_id!==runId||identity.call_id!==callId||identity.cycle_id!==row.cycle_id||identity.snapshot_id!==row.snapshot_id||value.path!==row.path||value.version!==row.version||value.sha256!==row.sha256)throw fail();
-  const bytes=Buffer.from(row.bytes);if(bytes.length!==value.size||sha(bytes)!==row.sha256||!bytes.equals(Buffer.from(operation.content)))throw fail();
+  let bytes=Buffer.alloc(0);
+  if(kind==='files.write'){
+   if(typeof operation.content!=='string')throw fail();bytes=Buffer.from(row.bytes);
+   if(bytes.length!==value.size||sha(bytes)!==row.sha256||!bytes.equals(Buffer.from(operation.content)))throw fail();
+  }else{
+   const keys=[...Object.keys(identity),'source','receipt_id','path','version','sha256','size','deleted','previous_sha256','previous_size','updated_at'].sort().join(',');
+   const before=JSON.parse(row.before_json),initial=new Map<string,Row>(before).get(row.path);
+   const previous=db.prepare('SELECT max(version) version FROM wb_isolated_file_results WHERE cycle_id=? AND snapshot_id=? AND path=? AND version<?').get(row.cycle_id,row.snapshot_id,row.path,row.version);
+   if(Object.keys(value).sort().join(',')!==keys||Object.keys(operation).sort().join(',')!=='expected_version,operation,path'
+    ||!Number.isSafeInteger(operation.expected_version)||operation.expected_version<0||Number(previous?.version??0)!==operation.expected_version
+    ||canonicalJson(before)!==row.before_json||initial?.kind!=='file'||typeof initial.identity!=='string'||!initial.identity
+    ||typeof initial.sha256!=='string'||!/^[a-f0-9]{64}$/.test(initial.sha256)||!Number.isSafeInteger(initial.size)||initial.size<0
+    ||value.deleted!==true||value.sha256!==null||value.size!==0||row.bytes!==null||value.previous_sha256!==initial.sha256||value.previous_size!==initial.size
+    ||typeof value.updated_at!=='string'||new Date(value.updated_at).toISOString()!==value.updated_at)throw fail();
+  }
   const binding=db.prepare(`SELECT b.kind,b.context_json,r.conversation_id FROM wb_run_bindings b JOIN ga_runs r ON r.id=b.run_id JOIN ga_conversations c ON c.id=r.conversation_id AND c.owner_id=b.owner_id WHERE b.run_id=? AND b.owner_id=? AND c.workspace_id=? AND c.project_id=?`).get(runId,identity.owner_id,identity.workspace_id,identity.project_id) as Row|undefined;
   if(!binding)throw fail();const context=JSON.parse(binding.context_json);if(context.workspace_id!==identity.workspace_id||context.project_id!==identity.project_id)throw fail();
   let lead=runId,member:Row|undefined;if(binding.kind==='native_team'){
@@ -45,9 +59,12 @@ export function isolatedFileFacts(db:DatabaseSync,runId:string,callId:string,res
      ||paths.some(path=>typeof path!=='string'||!grant.plan_paths.includes(path))||!paths.includes(row.path))throw fail();
    }
   }
-  return {...identity,task_id:admission.task_id,path:row.path,version:row.version,sha256:row.sha256,size:bytes.length,bytes,conversation_id:binding.conversation_id};
+  return {...identity,task_id:admission.task_id,path:row.path,version:row.version,sha256:row.sha256,size:bytes.length,bytes,conversation_id:binding.conversation_id,
+   ...(kind==='files.delete'?{deleted:true,previous_sha256:value.previous_sha256,previous_size:value.previous_size}:{})};
  }catch{throw fail();}
 }
+export function isolatedFileFacts(db:DatabaseSync,runId:string,callId:string,result:unknown,live=false):Row{return isolatedMutationFacts(db,runId,callId,result,'files.write',live);}
+export function isolatedDeleteFacts(db:DatabaseSync,runId:string,callId:string,result:unknown,live=false):Row{return isolatedMutationFacts(db,runId,callId,result,'files.delete',live);}
 /** Scoped synchronous immutable BLOB read; no filesystem/root or live permission. */
 export function readIsolatedTaskFileVersion(db:DatabaseSync,source:TaskFileSource):TaskOutputReadResult{
  try{

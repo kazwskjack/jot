@@ -795,11 +795,11 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       if(!['memory.list','memory.stage','memory.propose'].includes(initialOperation))throw new Error('workbench_operation_forbidden');
       if(!validCallId(input.call_id))throw new Error('invalid_call_id');
     }
-    if(nativeWork&&['files.list','files.read','files.write'].includes(String(input.operation))){
+    if(nativeWork&&['files.list','files.read','files.write','files.delete'].includes(String(input.operation))){
       const identity=context({...input,tool_name:'jot_workspace'}),candidate=nativeWork.resolver.context(identity.run_id);
       if(candidate){
         const lease=normalizeExecutionLease(input.execution_lease),bound=nativeWork.resolver.context(identity.run_id,lease)!;
-        const operation=String(input.operation),args=object(input.arguments),keys=operation==='files.list'?[]:operation==='files.read'?['path']:['path','content','expected_version'];fields(args,keys);
+        const operation=String(input.operation),args=object(input.arguments),keys=operation==='files.list'?[]:operation==='files.read'?['path']:operation==='files.delete'?['path','expected_version']:['path','content','expected_version'];fields(args,keys);
         tasks.assertDiscoveryOperation(identity.run_id,operation);
         if(!validCallId(input.call_id))throw Error('invalid_call_id');
         const callId=String(input.call_id),digest=createHash('sha256').update(canonical({operation,args})).digest('hex'),prior=savedCall(identity.run_id,callId,digest);if(prior!==undefined)return prior;

@@ -3,7 +3,7 @@ import type {DatabaseSync} from 'node:sqlite';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {WorkAdmissionRecords,freezeWorkAdmission} from '../always-on/work-admission-records.ts';
 import {projectWorkReviewEvidence} from './review-work-evidence.ts';
-import {readIsolatedTaskFileVersion} from './isolated-output-source.ts';
+import {readIsolatedTaskFileVersion,isolatedDeleteFacts} from './isolated-output-source.ts';
 import {validateTaskCompletionBoundary} from './completion-handshake.ts';
 import {validateCheckpoint} from '../harness/session-checkpoints.ts';
 import type {TaskFileSource} from './task-file-source.ts';
@@ -114,7 +114,7 @@ export class FinalizedWorkSources{
   requireFact(row.owner_id===owner&&row.task_id===s.task_id&&row.occurrence_id===s.occurrence_id&&row.cycle_id===work.cycle_id&&row.snapshot_id===work.snapshot_id
    &&row.evidence_json===canonicalJson(evidence)&&row.inputs_sha256===hash(inputs)&&inputs.protocol===1&&inputs.run_id===runId
    &&inputs.binding_sha256===evidence.binding_sha256&&Array.isArray(inputs.calls)&&hash(inputs.calls)===work.call_set_sha256);
-  const writeIds:string[]=[];
+  const writeIds:string[]=[],deletedVersions=new Map<string,number>();
   for(const call of inputs.calls){
    requireFact(call&&call.intent&&call.proof&&call.ledger);
    const actual=db.prepare(`SELECT i.*,r.receipt_id,r.path,r.version,r.sha256,r.bytes,r.response_json FROM wb_isolated_file_intents i
@@ -125,6 +125,10 @@ export class FinalizedWorkSources{
    requireFact(canonicalJson(intent)===canonicalJson(call.intent)&&canonicalJson(proof)===canonicalJson(call.proof)&&canonicalJson(ledger)===canonicalJson(call.ledger)
     &&(bytes===null?null:bytesHash(Buffer.from(bytes)))===call.bytes_sha256);
    if(call.proof.operation==='files.write')writeIds.push(call.proof.receipt_id);
+   if(call.proof.operation==='files.delete'){
+    const deleted=isolatedDeleteFacts(db,call.proof.run_id,call.proof.call_id,JSON.parse(actual.response_json));
+    deletedVersions.set(deleted.path,Math.max(deletedVersions.get(deleted.path)??0,deleted.version));
+   }
   }
   requireFact(Array.isArray(evidence.write_receipt_ids)&&new Set(writeIds).size===writeIds.length&&canonicalJson(writeIds.sort())===canonicalJson(evidence.write_receipt_ids));
   const versions=new Map<string,{source:TaskFileSource;content:string}>();
@@ -137,6 +141,7 @@ export class FinalizedWorkSources{
    if(previous)requireFact(previous.source.version!==value.version);
    if(!previous||previous.source.version<value.version)versions.set(value.path,{source,content:verified.content});
   }
+  for(const [path,version] of deletedVersions)if((versions.get(path)?.source.version??0)<version)versions.delete(path);
   for(const output of s.workspace_file_outputs??[]){
    const file=versions.get(output.path);requireFact(output.verified===true&&output.content_verified===true&&output.source==='isolated'&&file
     &&file.source.receipt_id===output.receipt_id&&file.source.version===output.version&&file.source.sha256===output.sha256&&file.source.size===output.size);

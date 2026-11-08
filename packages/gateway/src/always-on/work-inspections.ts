@@ -5,7 +5,7 @@ import {withImmediateTransaction} from '../db/database.ts';
 import type {ExecutionLease} from '../workbench/execution-lease.ts';
 import type {TaskCompletionWorkScope} from '../persistent-tasks/completion-candidates.ts';
 import {TaskExecutionEvidence} from '../persistent-tasks/execution-evidence.ts';
-import {readIsolatedTaskFileVersion} from '../persistent-tasks/isolated-output-source.ts';
+import {readIsolatedTaskFileVersion,isolatedDeleteFacts} from '../persistent-tasks/isolated-output-source.ts';
 import {freezeWorkAdmission} from './work-admission-records.ts';
 import type {TrustedWorkRunWorkspaceResolver} from './work-run-workspace.ts';
 import {createWorkspaceDiff} from './workspace-diff.ts';
@@ -69,7 +69,7 @@ export class WorkInspections{
     ||hash(identity)!==row.call_key||hash({identity,operation})!==row.digest)throw fail();
    for(const [key,value]of Object.entries({owner_id:a.owner_id,...a.scope,occurrence_id:a.occurrence_id,cycle_id:a.cycle_id,snapshot_id:a.snapshot_id}))if(identity[key]!==value)throw fail();
    for(const [key,value]of Object.entries(identity))if(result[key]!==value)throw fail();
-   if(result.source!=='isolated'||result.receipt_id!==row.receipt_id||!['files.read','files.list','files.write'].includes(operation.operation))throw fail();
+   if(result.source!=='isolated'||result.receipt_id!==row.receipt_id||!['files.read','files.list','files.write','files.delete'].includes(operation.operation))throw fail();
    const receipts=db.prepare('SELECT * FROM wb_task_execution_receipts WHERE run_id=? AND call_id=?').all(identity.run_id,identity.call_id) as Row[];
    if(receipts.length!==1)throw fail();const proof=receipts[0]!;
    const ref={kind:'tool_receipt' as const,reference:proof.receipt_id,hash:proof.result_hash};
@@ -82,6 +82,7 @@ export class WorkInspections{
     const source=db.prepare('SELECT * FROM wb_task_isolated_file_execution_receipts WHERE receipt_id=?').get(proof.receipt_id) as Row|undefined;if(!source)throw fail();
     readIsolatedTaskFileVersion(db,{...source,source:'isolated',conversation_id:a.conversation_id,native:identity.run_id!==runId} as Parameters<typeof readIsolatedTaskFileVersion>[1]);writes.push(proof.receipt_id);
    }
+   if(operation.operation==='files.delete')isolatedDeleteFacts(db,identity.run_id,identity.call_id,result);
    const {bytes,...stored}=row;
    return {intent:stored,bytes_sha256:bytes===null?null:bytesHash(Buffer.from(bytes)),proof,ledger};
   });

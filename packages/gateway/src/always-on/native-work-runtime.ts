@@ -19,7 +19,7 @@ export function createNativeWorkRuntime(options:{db:DatabaseSync;workbench:Workb
  const resolver=new TrustedWorkRunWorkspaceResolver({db:options.db,workbench:options.workbench,policies,workspace});
  const inspections=new WorkInspections({db:options.db,resolver});
  configureTaskCompletionWorkEvidence(options.db,scope=>inspections.current(scope));
- const operations=new Set(['files.list','files.read','files.write','tasks.get','tasks.subtasks','tasks.next','tasks.reply_drafts',
+ const operations=new Set(['files.list','files.read','files.write','files.delete','tasks.get','tasks.subtasks','tasks.next','tasks.reply_drafts',
   'tasks.upsert','tasks.evidence','tasks.assessment','tasks.observe','tasks.assess','tasks.delegate']);
  return {resolver,inspections,assertOperation(runId:string,operation:string){
   if(!resolver.context(runId))throw Error('work_admission_execution_unavailable');

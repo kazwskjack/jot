@@ -1,6 +1,6 @@
 import {createHash,randomUUID} from 'node:crypto';
 import {constants,type BigIntStats} from 'node:fs';
-import {lstat,realpath,readdir,open,mkdir,rename} from 'node:fs/promises';
+import {lstat,realpath,readdir,open,mkdir,rename,unlink} from 'node:fs/promises';
 import {resolve,dirname,join,relative,sep,isAbsolute} from 'node:path';
 import type {DatabaseSync} from 'node:sqlite';
 import {canonicalJson} from '../db/canonical-json.ts';
@@ -8,7 +8,7 @@ import {workspaceRelativePath,type SnapshotRecoveryRecord} from './workspace-pro
 import type {LogicalPreparedWorkCycleWorkspace} from './logical-work-cycle-workspace.ts';
 
 export type IsolatedFileIdentity=Readonly<{owner_id:string;workspace_id:string;project_id:string;agent_id:string;cycle_id:string;snapshot_id:string;run_id:string;occurrence_id:string;call_id:string}>;
-export type IsolatedFileOperation={operation:'files.list'}|{operation:'files.read';path:string}|{operation:'files.write';path:string;content:string;expected_version:number};
+export type IsolatedFileOperation={operation:'files.list'}|{operation:'files.read';path:string}|{operation:'files.write';path:string;content:string;expected_version:number}|{operation:'files.delete';path:string;expected_version:number};
 export type IsolatedFileResult=Readonly<{source:'isolated';receipt_id:string;cycle_id:string;snapshot_id:string;run_id:string;occurrence_id:string;call_id:string;[key:string]:unknown}>;
 /** This resolver and synchronous guard are host injection boundaries, never model input. */
 export type ResolvedIsolatedFiles={workspace:LogicalPreparedWorkCycleWorkspace;record:SnapshotRecoveryRecord;binding:Readonly<Omit<IsolatedFileIdentity,'call_id'>>;writePaths?:readonly string[];guard:()=>void};
@@ -24,7 +24,8 @@ function parseOperation(input:IsolatedFileOperation):IsolatedFileOperation{
  const keys=Object.keys(input).sort().join(',');
  if(input.operation==='files.list'&&keys==='operation')return Object.freeze({...input});
  if(input.operation==='files.read'&&keys==='operation,path')return Object.freeze({...input,path:workspaceRelativePath(input.path)});
- if(input.operation==='files.write'&&keys==='content,expected_version,operation,path'&&typeof input.content==='string'&&Buffer.byteLength(input.content)<=1_048_576&&Number.isSafeInteger(input.expected_version)&&input.expected_version>=0)return Object.freeze({...input,path:workspaceRelativePath(input.path)});
+ if(input.operation==='files.write'&&keys==='content,expected_version,operation,path'&&typeof input.content==='string'&&Buffer.byteLength(input.content)<=1_048_576&&Number.isSafeInteger(input.expected_version)&&input.expected_version>=0&&input.expected_version<Number.MAX_SAFE_INTEGER)return Object.freeze({...input,path:workspaceRelativePath(input.path)});
+ if(input.operation==='files.delete'&&keys==='expected_version,operation,path'&&Number.isSafeInteger(input.expected_version)&&input.expected_version>=0&&input.expected_version<Number.MAX_SAFE_INTEGER)return Object.freeze({...input,path:workspaceRelativePath(input.path)});
  throw fail('operation_invalid');
 }
 function identityOf(value:IsolatedFileIdentity){const keys=['owner_id','workspace_id','project_id','agent_id','cycle_id','snapshot_id','run_id','occurrence_id','call_id'];if(!value||Object.keys(value).sort().join(',')!==keys.sort().join(',')||keys.some(k=>typeof value[k as keyof IsolatedFileIdentity]!=='string'||!value[k as keyof IsolatedFileIdentity]||value[k as keyof IsolatedFileIdentity].length>256))throw fail('identity_invalid');return Object.freeze({...value});}
@@ -54,7 +55,7 @@ export class IsolatedWorkFiles{
    if(meta(await handle.stat({bigint:true}))!==meta(before))throw fail('file_changed');await this.rootCurrent(bound);await this.safePath(bound.record.isolated_root.path,path);if(meta(await lstat(target,{bigint:true}))!==meta(before))throw fail('file_changed');return {bytes:Buffer.concat(chunks),identity:meta(before),size,sha256:hash.digest('hex')};
   }finally{await handle.close();}
  }
- private async inventory(bound:ResolvedIsolatedFiles,changed?:{path:string;sha256:string;size:number}){
+ private async inventory(bound:ResolvedIsolatedFiles,changed?:{path:string;sha256:string|null;size:number}){
   await this.rootCurrent(bound);const map=new Map<string,Fact>();let total=0;
   const visit=async(path:string):Promise<void>=>{workspaceRelativePath(path);if(path.split('/').length>bound.record.limits.max_depth||map.size>=bound.record.limits.max_entries)throw fail('limit');
    const target=await this.safePath(bound.record.isolated_root.path,path),s=await lstat(target,{bigint:true});
@@ -68,7 +69,7 @@ export class IsolatedWorkFiles{
   for(const path of plans){
    const latest=this.options.db.prepare('SELECT sha256,length(bytes) size FROM wb_isolated_file_results WHERE cycle_id=? AND snapshot_id=? AND path=? AND version IS NOT NULL ORDER BY version DESC LIMIT 1').get(bound.binding.cycle_id,bound.binding.snapshot_id,path);
    const original=base.get(path),expected=changed?.path===path?changed:latest??(original?.kind==='file'?{sha256:original.sha256,size:original.bytes}:undefined),actual=map.get(path);
-   if(expected? !actual||actual.kind!=='file'||actual.sha256!==expected.sha256||actual.size!==Number(expected.size):!!actual)throw fail('file_changed');
+   if(expected&&expected.sha256!==null? !actual||actual.kind!=='file'||actual.sha256!==expected.sha256||actual.size!==Number(expected.size):!!actual)throw fail('file_changed');
   }
   for(const [path,fact]of map){const expected=base.get(path);if(plans.has(path)){if(fact.kind!=='file')throw fail('path_unsafe');continue;}if(!expected){if(fact.kind==='directory'&&structural(path))continue;throw fail('context_changed');}if(fact.kind!==expected.kind||expected.kind==='file'&&(fact.sha256!==expected.sha256||fact.size!==expected.bytes))throw fail('context_changed');}
   for(const [path]of base)if(!plans.has(path)&&!map.has(path))throw fail('context_changed');
@@ -84,16 +85,41 @@ export class IsolatedWorkFiles{
   const bound=await this.options.resolve(identity),w=bound.workspace,r=bound.record;
   if(w.cycle.cycle_id!==identity.cycle_id||canonicalJson(bound.binding)!==canonicalJson(Object.fromEntries(Object.entries(identity).filter(([k])=>k!=='call_id')))||w.snapshot.receipt.snapshot_id!==identity.snapshot_id||r.snapshot_id!==identity.snapshot_id||canonicalJson(w.snapshot.manifest)!==canonicalJson(r.manifest))throw fail('binding_invalid');
   syncGuard(bound.guard);
-  if(operation.operation==='files.write'&&(!w.plan_paths.includes(operation.path)||bound.writePaths!==undefined&&!bound.writePaths.includes(operation.path)))throw fail('path_not_granted');
+  const mutating=operation.operation==='files.write'||operation.operation==='files.delete';
+  if(mutating&&(!w.plan_paths.includes(operation.path)||bound.writePaths!==undefined&&!bound.writePaths.includes(operation.path)))throw fail('path_not_granted');
   if(db.prepare('SELECT 1 FROM wb_isolated_file_pending WHERE cycle_id=?').get(identity.cycle_id))throw fail('pending');
   const before=await this.inventory(bound);
+  if(operation.operation==='files.delete'&&before.map.get(operation.path)?.kind!=='file')throw fail('not_found');
   if(operation.operation==='files.write'&&(Buffer.byteLength(operation.content)>r.limits.max_file_bytes||before.total-(before.map.get(operation.path)?.size??0)+Buffer.byteLength(operation.content)>r.limits.max_total_bytes||operation.path.split('/').length>r.limits.max_depth))throw fail('limit');
-  transaction(db,()=>{syncGuard(bound.guard);if(db.prepare('SELECT 1 FROM wb_isolated_file_pending WHERE cycle_id=?').get(identity.cycle_id))throw fail('pending');if(operation.operation==='files.write'&&this.currentVersion(identity,operation.path)!==operation.expected_version)throw fail('version_conflict');db.prepare('INSERT INTO wb_isolated_file_intents VALUES(?,?,?,?,?,?,?,?)').run(key,identity.cycle_id,identity.snapshot_id,canonicalJson(identity),canonicalJson(operation),digest,canonicalJson([...before.map]),new Date().toISOString());db.prepare('INSERT INTO wb_isolated_file_pending VALUES(?,?)').run(identity.cycle_id,key);});
+  transaction(db,()=>{syncGuard(bound.guard);if(db.prepare('SELECT 1 FROM wb_isolated_file_pending WHERE cycle_id=?').get(identity.cycle_id))throw fail('pending');if(mutating&&this.currentVersion(identity,operation.path)!==operation.expected_version)throw fail('version_conflict');db.prepare('INSERT INTO wb_isolated_file_intents VALUES(?,?,?,?,?,?,?,?)').run(key,identity.cycle_id,identity.snapshot_id,canonicalJson(identity),canonicalJson(operation),digest,canonicalJson([...before.map]),new Date().toISOString());db.prepare('INSERT INTO wb_isolated_file_pending VALUES(?,?)').run(identity.cycle_id,key);});
   const directories=new Map([...before.map].filter(([,fact])=>fact.kind==='directory').map(([path,fact])=>[path,fact.identity.split(':').slice(0,3).join(':')]));
   let bytes:Buffer|undefined;let output:Record<string,unknown>;
-  if(operation.operation==='files.list')output={files:[...before.map].filter(([,f])=>f.kind==='file').map(([path,f])=>({path,size:f.size,sha256:f.sha256,version:this.currentVersion(identity,path)}))};
+  if(operation.operation==='files.list'){
+   const deleted=db.prepare(`SELECT path,version FROM wb_isolated_file_results r WHERE cycle_id=? AND snapshot_id=? AND version IS NOT NULL AND sha256 IS NULL
+    AND NOT EXISTS(SELECT 1 FROM wb_isolated_file_results newer WHERE newer.cycle_id=r.cycle_id AND newer.snapshot_id=r.snapshot_id AND newer.path=r.path AND newer.version>r.version) ORDER BY path`)
+    .all(identity.cycle_id,identity.snapshot_id).map(row=>({path:String(row.path),version:Number(row.version)}));
+   output={files:[...before.map].filter(([,f])=>f.kind==='file').map(([path,f])=>({path,size:f.size,sha256:f.sha256,version:this.currentVersion(identity,path)})),...(deleted.length?{deleted_files:deleted}:{})};
+  }
   else if(operation.operation==='files.read'){const result=await this.bytes(bound,operation.path);if(result.bytes.length>1_048_576)throw fail('read_limit');output={path:operation.path,content:result.bytes.toString('utf8'),size:result.bytes.length,sha256:sha(result.bytes),version:this.currentVersion(identity,operation.path)};}
-  else{
+  else if(operation.operation==='files.delete'){
+   const initial=before.map.get(operation.path)!,target=await this.safePath(r.isolated_root.path,operation.path),original=await lstat(target,{bigint:true});
+   if(meta(original)!==initial.identity)throw fail('file_changed');
+   const quarantine=join(dirname(target),'.jot-delete-'+randomUUID());
+   const handle=await open(quarantine,constants.O_CREAT|constants.O_EXCL|constants.O_RDWR|(constants.O_NOFOLLOW??0),0o600);
+   let reserved:BigIntStats;try{reserved=await handle.stat({bigint:true});}finally{await handle.close();}
+   await this.rootCurrent(bound);await this.ancestorsCurrent(bound,directories);await this.safePath(r.isolated_root.path,operation.path);
+   if(meta(await lstat(target,{bigint:true}))!==initial.identity||meta(await lstat(quarantine,{bigint:true}))!==meta(reserved!))throw fail('file_changed');
+   syncGuard(bound.guard);await rename(target,quarantine);
+   // Keep uncertain bytes quarantined if the renamed file differs from the captured preimage.
+   const removed=await lstat(quarantine,{bigint:true});
+   if(!removed.isFile()||removed.nlink!==1n||removed.dev!==original.dev||removed.ino!==original.ino||removed.mode!==original.mode
+    ||removed.size!==original.size||removed.mtimeNs!==original.mtimeNs)throw fail('delete_uncertain');
+   const captured=await this.bytes(bound,relative(r.isolated_root.path,quarantine).split(sep).join('/'),false);
+   if(captured.sha256!==initial.sha256||captured.size!==initial.size)throw fail('delete_uncertain');
+   await this.rootCurrent(bound);await this.ancestorsCurrent(bound,directories);syncGuard(bound.guard);
+   if(meta(await lstat(quarantine,{bigint:true}))!==captured.identity)throw fail('delete_uncertain');await unlink(quarantine);
+   output={path:operation.path,version:operation.expected_version+1,sha256:null,size:0,deleted:true,previous_sha256:initial.sha256,previous_size:initial.size,updated_at:new Date().toISOString()};
+  }else{
    bytes=Buffer.from(operation.content);const parent=dirname(operation.path).replaceAll('\\','/');
    if(parent!=='.'){const parts=parent.split('/');for(let n=1;n<=parts.length;n++){const p=parts.slice(0,n).join('/');await this.rootCurrent(bound);await this.ancestorsCurrent(bound,directories);const safe=await this.safePath(r.isolated_root.path,p,true);try{await mkdir(safe);}catch(e){if((e as NodeJS.ErrnoException).code!=='EEXIST')throw e;}await this.safePath(r.isolated_root.path,p);if(!directories.has(p))directories.set(p,meta(await lstat(safe,{bigint:true})).split(':').slice(0,3).join(':'));}}
    const target=await this.safePath(r.isolated_root.path,operation.path,true),temp=join(dirname(target),'.jot-write-'+randomUUID());await this.rootCurrent(bound);
@@ -108,13 +134,13 @@ export class IsolatedWorkFiles{
    const after=await this.bytes(bound,operation.path);if(sha(after.bytes)!==sha(bytes))throw fail('write_uncertain');
    output={path:operation.path,version:operation.expected_version+1,sha256:sha(bytes),size:bytes.length,updated_at:new Date().toISOString()};
   }
-  await this.inventory(bound,operation.operation==='files.write'?{path:operation.path,sha256:sha(bytes!),size:bytes!.length}:undefined);syncGuard(bound.guard);
+  await this.inventory(bound,operation.operation==='files.write'?{path:operation.path,sha256:sha(bytes!),size:bytes!.length}:operation.operation==='files.delete'?{path:operation.path,sha256:null,size:0}:undefined);syncGuard(bound.guard);
   await this.ancestorsCurrent(bound,directories);
   const result:IsolatedFileResult=Object.freeze({...identity,source:'isolated',receipt_id:randomUUID(),...output});
-  transaction(db,()=>{syncGuard(bound.guard);if(!db.prepare('SELECT 1 FROM wb_isolated_file_pending WHERE cycle_id=? AND call_key=?').get(identity.cycle_id,key))throw fail('pending_changed');db.prepare('INSERT INTO wb_isolated_file_results VALUES(?,?,?,?,?,?,?,?,?)').run(key,result.receipt_id,identity.cycle_id,identity.snapshot_id,'path'in operation?operation.path:null,operation.operation==='files.write'?Number(result.version):null,operation.operation==='files.write'?String(result.sha256):null,bytes??null,canonicalJson(result));const committed=this.options.commitReceipt(db,result) as unknown;if(committed&&typeof(committed as PromiseLike<unknown>).then==='function')throw fail('receipt_must_be_synchronous');db.prepare('DELETE FROM wb_isolated_file_pending WHERE cycle_id=? AND call_key=?').run(identity.cycle_id,key);});return result;
+  transaction(db,()=>{syncGuard(bound.guard);if(!db.prepare('SELECT 1 FROM wb_isolated_file_pending WHERE cycle_id=? AND call_key=?').get(identity.cycle_id,key))throw fail('pending_changed');db.prepare('INSERT INTO wb_isolated_file_results VALUES(?,?,?,?,?,?,?,?,?)').run(key,result.receipt_id,identity.cycle_id,identity.snapshot_id,'path'in operation?operation.path:null,mutating?Number(result.version):null,operation.operation==='files.write'?String(result.sha256):null,bytes??null,canonicalJson(result));const committed=this.options.commitReceipt(db,result) as unknown;if(committed&&typeof(committed as PromiseLike<unknown>).then==='function')throw fail('receipt_must_be_synchronous');db.prepare('DELETE FROM wb_isolated_file_pending WHERE cycle_id=? AND call_key=?').run(identity.cycle_id,key);});return result;
  }
  /** Internal immutable output source; caller must authorize original receipt scope. */
- version(receiptId:string){const row=this.options.db.prepare('SELECT bytes,response_json FROM wb_isolated_file_results WHERE receipt_id=? AND version IS NOT NULL').get(receiptId);if(!row)throw fail('version_missing');return Object.freeze({...JSON.parse(String(row.response_json)),content:Buffer.from(row.bytes as Uint8Array).toString('utf8')});}
+ version(receiptId:string){const row=this.options.db.prepare('SELECT bytes,response_json FROM wb_isolated_file_results WHERE receipt_id=? AND version IS NOT NULL AND bytes IS NOT NULL').get(receiptId);if(!row)throw fail('version_missing');return Object.freeze({...JSON.parse(String(row.response_json)),content:Buffer.from(row.bytes as Uint8Array).toString('utf8')});}
 }
 
 
