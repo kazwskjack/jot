@@ -11,7 +11,7 @@ export interface ModelBudgetRoute {
   billing?: {unit:'dispatched_call';nano_usd:number};
 }
 export interface ModelBudgetLimits { tokens: number; nano_usd: number | null; model_calls: number }
-export interface ModelBudgetRequest { attempt_id: string; provider: string; model: string; max_tokens?: number; purpose?: 'compaction' | 'session-title' | 'emotion' | 'web-decision' | 'reply-verification' | 'memory-reasoning' | 'memory-extraction' }
+export interface ModelBudgetRequest { attempt_id: string; provider: string; model: string; max_tokens?: number; configuration_sha256?:string;request_sha256?:string; purpose?: 'compaction' | 'session-title' | 'emotion' | 'web-decision' | 'reply-verification' | 'memory-reasoning' | 'memory-extraction' }
 export type ModelBudgetUsageEvidence={protocol:1;source:'reply-judge-client';cacheWrite:'reported'|'folded-unreported'};export type TaskBudgetAttemptState = 'reserved'|'in_flight'|'unknown'|'settled'|'released';
 export type TaskBudgetAttemptUsage = {status:'settled'|'unknown'|'unavailable'|'not_metered';input_tokens:string|null;output_tokens:string|null;cache_read_tokens:string|null;cache_write_tokens:string|null;reasoning_tokens:string|null;total_tokens:string|null};
 export type TaskBudgetAttemptProjection = {attempt_ref:string;purpose:ModelBudgetRequest['purpose']|null;state:TaskBudgetAttemptState;created_at:string;updated_at:string;
@@ -356,7 +356,7 @@ export class ModelBudgetLedger {
       let purpose:TaskBudgetAttemptProjection['purpose']=null;
       try{
         const request=JSON.parse(row.request_json!) as {purpose?:unknown};
-        if(['compaction','session-title','emotion','web-decision','reply-verification','memory-extraction'].includes(String(request.purpose)))purpose=request.purpose as TaskBudgetAttemptProjection['purpose'];
+        if(['compaction','session-title','emotion','web-decision','reply-verification','memory-extraction','memory-reasoning'].includes(String(request.purpose)))purpose=request.purpose as TaskBudgetAttemptProjection['purpose'];
       }catch{/* A malformed private request never escapes the projection. */}
       const emptyUsage=(status:TaskBudgetAttemptUsage['status']):TaskBudgetAttemptUsage=>({status,input_tokens:null,output_tokens:null,cache_read_tokens:null,cache_write_tokens:null,reasoning_tokens:null,total_tokens:null});
       let usage=emptyUsage(state==='unknown'?'unknown':'unavailable');
@@ -365,16 +365,16 @@ export class ModelBudgetLedger {
           const saved=JSON.parse(row.usage_json) as Record<string,unknown>;
           if(saved.unit==='dispatched_call'&&saved.token_usage==='not_metered')usage=emptyUsage('not_metered');
           else{
+            const route=JSON.parse(row.route_json!) as ModelBudgetRoute;
             const hasEvidence=Object.hasOwn(saved,'usageEvidence');
             const evidence=isCacheWriteEvidence(saved.usageEvidence)?saved.usageEvidence:null;
-            const evidenceValid=evidence!==null&&purpose==='reply-verification'
-              &&(evidence.cacheWrite!=='folded-unreported'||saved.cacheWriteTokens==='0');
-            const foldedCacheWrite=evidence!==null&&purpose==='reply-verification'&&evidence.cacheWrite==='folded-unreported'&&saved.cacheWriteTokens==='0';
+            const evidenceValid=evidence!==null&&['reply-verification','memory-reasoning'].includes(String(purpose))
+              &&(evidence.cacheWrite!=='folded-unreported'||saved.cacheWriteTokens==='0'&&route.rates.input===route.rates.cache_write);
+            const foldedCacheWrite=evidence!==null&&['reply-verification','memory-reasoning'].includes(String(purpose))&&evidence.cacheWrite==='folded-unreported'&&saved.cacheWriteTokens==='0';
             const number=(value:unknown)=>typeof value==='string'&&/^\d+$/.test(value)?value:null;
             const input=number(saved.inputTokens),output=number(saved.outputTokens),read=number(saved.cacheReadTokens),write=number(saved.cacheWriteTokens),total=number(saved.totalTokens);
             const reasoning=saved.reasoningTokens===null?null:number(saved.reasoningTokens);
-            const route=JSON.parse(row.route_json!) as ModelBudgetRoute;
-            const ambiguousLegacyWrite=!hasEvidence&&purpose==='reply-verification'&&saved.cacheWriteTokens==='0'
+            const ambiguousLegacyWrite=!hasEvidence&&['reply-verification','memory-reasoning'].includes(String(purpose))&&saved.cacheWriteTokens==='0'
               &&route.rates.input===route.rates.cache_write;
             const unknownWrite=foldedCacheWrite||ambiguousLegacyWrite;
             if(hasEvidence&&!evidenceValid)usage=emptyUsage('unknown');
@@ -416,12 +416,18 @@ export class ModelBudgetLedger {
     });
   }
   private reserveAttempt(owner: string, runId: string, input: ModelBudgetRequest, allowQueued: boolean) {
-    const value = record(input,['attempt_id','provider','model','max_tokens','purpose'],'budget_request_invalid');
+    const value = record(input,['attempt_id','provider','model','max_tokens','purpose','configuration_sha256','request_sha256'],'budget_request_invalid');
     if (!identifier(value.attempt_id) || !routeName(value.provider) || !routeName(value.model)
       || (value.purpose !== undefined && !['compaction','session-title','emotion','web-decision','reply-verification','memory-reasoning','memory-extraction'].includes(String(value.purpose)))) throw new Error('budget_request_invalid');
     if (value.max_tokens !== undefined) count(value.max_tokens,'budget_request_invalid',1);
+    if(value.configuration_sha256!==undefined||value.request_sha256!==undefined){
+      if(typeof value.configuration_sha256!=='string'||!/^[a-f0-9]{64}$/.test(value.configuration_sha256)
+       ||typeof value.request_sha256!=='string'||!/^[a-f0-9]{64}$/.test(value.request_sha256)
+       ||!['reply-verification','memory-reasoning'].includes(String(value.purpose)))throw Error('budget_request_invalid');
+    }
     const request = JSON.stringify({attempt_id: value.attempt_id,provider: value.provider,model: value.model,
-      ...(value.max_tokens === undefined ? {} : {max_tokens: value.max_tokens}),...(value.purpose === undefined ? {} : {purpose: value.purpose})});
+      ...(value.max_tokens === undefined ? {} : {max_tokens: value.max_tokens}),...(value.purpose === undefined ? {} : {purpose: value.purpose}),
+      ...(value.configuration_sha256===undefined?{}:{configuration_sha256:value.configuration_sha256,request_sha256:value.request_sha256})});
     return withImmediateTransaction(this.db,() => {
       const ids = this.binding(owner,runId);
       const prior = this.db.prepare('SELECT * FROM wb_model_budget_attempts WHERE run_id=? AND attempt_id=?').get(runId,String(value.attempt_id)) as Row | undefined;
@@ -522,13 +528,14 @@ export class ModelBudgetLedger {
   settle(owner: string, runId: string, attemptId: string, input: unknown, usageEvidence?:unknown) {
     return withImmediateTransaction(this.db,() => {
       const row = this.attempt(owner,runId,attemptId);
-      if((JSON.parse(row.route_json!) as ModelBudgetRoute).billing)throw new Error('budget_usage_invalid');
+      const route=JSON.parse(row.route_json!) as ModelBudgetRoute;
+      if(route.billing)throw new Error('budget_usage_invalid');
       if (!['in_flight','unknown','settled'].includes(row.state!)) throw new Error('budget_dispatch_conflict');
       const value = record(input,['inputTokens','outputTokens','totalTokens','cacheReadTokens','cacheWriteTokens','reasoningTokens'],'budget_usage_invalid');
       if(usageEvidence!==undefined){
         const request=JSON.parse(row.request_json!) as ModelBudgetRequest;
-        if(!isCacheWriteEvidence(usageEvidence)||request.purpose!=='reply-verification'
-          ||(usageEvidence.cacheWrite==='folded-unreported'&&value.cacheWriteTokens!==0)
+        if(!isCacheWriteEvidence(usageEvidence)||!['reply-verification','memory-reasoning'].includes(String(request.purpose))
+          ||(usageEvidence.cacheWrite==='folded-unreported'&&(value.cacheWriteTokens!==0||route.rates.input!==route.rates.cache_write))
           ||(usageEvidence.cacheWrite==='reported'&&!Number.isSafeInteger(value.cacheWriteTokens)))throw new Error('budget_usage_invalid');
       }
       const uncached = BigInt(count(value.inputTokens,'budget_usage_invalid')), output = BigInt(count(value.outputTokens,'budget_usage_invalid'));
@@ -546,7 +553,7 @@ export class ModelBudgetLedger {
         if (row.state === 'settled') throw new Error('budget_settlement_conflict');
         return this.markUnknown(owner,runId,attemptId,'usage_incomplete');
       }
-      const tokens = uncached + output + read + write, route: ModelBudgetRoute = JSON.parse(row.route_json!);
+      const tokens = uncached + output + read + write;
       const cost = uncached * BigInt(route.rates.input) + output * BigInt(route.rates.output) + read * BigInt(route.rates.cache_read) + write * BigInt(route.rates.cache_write);
       const normalized = JSON.stringify({inputTokens: String(uncached),outputTokens: String(output),cacheReadTokens: String(read),cacheWriteTokens: String(write),totalTokens: String(tokens),reasoningTokens: reasoning === undefined ? null : String(reasoning),...(usageEvidence===undefined?{}:{usageEvidence:{protocol:1,source:'reply-judge-client',cacheWrite:usageEvidence.cacheWrite}})});
       if (row.state === 'settled') { if (row.usage_json !== normalized) throw new Error('budget_settlement_conflict'); return this.receipt(row); }

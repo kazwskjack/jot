@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import {openSync,closeSync,fstatSync,readSync} from 'node:fs';
 import type {ModelBudgetRoute,ModelBudgetUsageEvidence} from '../workbench/model-budget.ts';
 import type {ReplyCheckRequest} from './reply-semantic.ts';
@@ -23,7 +24,10 @@ function normalizedUsage(value:any,foldUnreportedWrites=false){
  return {usage:{inputTokens:value.prompt_tokens-read-write,outputTokens:value.completion_tokens,totalTokens:value.total_tokens,cacheReadTokens:read,cacheWriteTokens:write,...(reasoning===undefined?{}:{reasoningTokens:reasoning})},
   ...(reportedWrite||foldedUnreportedWrite?{usageEvidence:{protocol:1,source:'reply-judge-client',cacheWrite:reportedWrite?'reported':'folded-unreported'} satisfies ModelBudgetUsageEvidence}:{})};
 }
-export type ReplyJudgeClient={route:{provider:string;model:string};preflight:(request:ReplyCheckRequest)=>void;invoke:(request:ReplyCheckRequest)=>Promise<{value:unknown;usage:unknown;usageEvidence?:ModelBudgetUsageEvidence}>};
+type ReplyJudgeResult={value:unknown;usage:unknown;usageEvidence?:ModelBudgetUsageEvidence};
+export type PreparedReplyJudgeCall=Readonly<{route:Readonly<{provider:string;model:string}>;configuration_sha256:string;request_sha256:string;invoke:()=>Promise<ReplyJudgeResult>}>;
+export type ReplyJudgeClient={readonly route:Readonly<{provider:string;model:string}>;preflight:(request:ReplyCheckRequest)=>void;
+ prepare?:(request:ReplyCheckRequest)=>PreparedReplyJudgeCall;invoke:(request:ReplyCheckRequest)=>Promise<ReplyJudgeResult>};
 /** Server-owned optional compatible endpoint. This is an assessor, without
  * tools/session history/recipients; DSH remains the sole task planner. */
 export function createReplyJudgeClient(input:unknown,routes:ModelBudgetRoute[],options:{readSecret?:(path:string)=>string;fetch?:Fetch}={}):ReplyJudgeClient{
@@ -42,12 +46,17 @@ export function createReplyJudgeClient(input:unknown,routes:ModelBudgetRoute[],o
  try{key=(options.readSecret??(path=>readBounded(path,4096)))(config.api_key_file).replace(/[\r\n]+$/,'');}catch{throw new Error('reply_judge_secret_unavailable');}
  if(!key||key.length>4096||/[^\x21-\x7E]/.test(key))throw new Error('reply_judge_secret_invalid');
  const endpoint=`${url.toString().replace(/\/$/,'')}/chat/completions`,fetch=options.fetch??globalThis.fetch;
- const prepare=(request:ReplyCheckRequest)=>{
+ const encode=(request:ReplyCheckRequest)=>{
   const body={model:route.model,messages:[{role:'system',content:request.instructions},{role:'user',content:JSON.stringify({text:request.text,direction:request.direction,sources:request.sources,response_format:request.response_format})}],stream:false,max_completion_tokens:route.max_output_tokens,response_format:{type:'json_object'}};
   const encoded=JSON.stringify(body);if(Buffer.byteLength(encoded,'utf8')>config.max_input_bytes)throw new Error('reply_judge_input_too_large');return encoded;
  };
- return {route:{provider:route.provider,model:route.model},preflight:request=>{prepare(request);},invoke:async request=>{
-  const body=prepare(request);const response=await fetch(endpoint,{method:'POST',headers:{'content-type':'application/json',authorization:`Bearer ${key}`},body,redirect:'error',signal:AbortSignal.timeout(config.timeout_ms)});
+ const identity=Object.freeze({provider:route.provider,model:route.model});
+ // The revision covers the retained deployment configuration, never the loaded API key.
+ const configurationSha256=createHash('sha256').update(JSON.stringify({provider:route.provider,model:route.model,endpoint,
+  context_window:route.context_window,max_output_tokens:route.max_output_tokens,pricing_revision:route.revision,rates:route.rates,max_input_bytes:config.max_input_bytes,
+  timeout_ms:config.timeout_ms,response_model_ids:config.response_model_ids,cache_write_policy:config.cache_write_policy})).digest('hex');
+ const send=async(body:string):Promise<ReplyJudgeResult>=>{
+  const response=await fetch(endpoint,{method:'POST',headers:{'content-type':'application/json',authorization:`Bearer ${key}`},body,redirect:'error',signal:AbortSignal.timeout(config.timeout_ms)});
   if(!response.ok){await response.body?.cancel();throw new Error('reply_judge_http_failed');}
   const reader=response.body?.getReader();if(!reader)throw new Error('reply_judge_response_missing');const decoder=new TextDecoder('utf8',{fatal:true});let encoded='',bytes=0;
   try{while(true){const chunk=await reader.read();if(chunk.done)break;bytes+=chunk.value.byteLength;if(bytes>262144)throw new Error('reply_judge_response_too_large');encoded+=decoder.decode(chunk.value,{stream:true});}encoded+=decoder.decode();}finally{await reader.cancel();}
@@ -56,7 +65,15 @@ export function createReplyJudgeClient(input:unknown,routes:ModelBudgetRoute[],o
   const choice=Array.isArray(data.choices)&&data.choices.length===1?data.choices[0]:undefined,message=choice?.message;
   if(config.response_model_ids.includes(data.model)&&choice?.finish_reason==='stop'&&message?.role==='assistant'&&!message.refusal&&!message.tool_calls&&!message.function_call&&typeof message.content==='string'&&Buffer.byteLength(message.content,'utf8')<=65536){try{value=JSON.parse(message.content);}catch{/* A billed malformed answer is still not eligible. */}}
   return {value,usage:normalized?.usage,...(normalized?.usageEvidence?{usageEvidence:normalized.usageEvidence}:{})};
- }};
+ };
+ return Object.freeze({route:identity,preflight:(request:ReplyCheckRequest)=>{encode(request);},
+  prepare:(request:ReplyCheckRequest)=>{
+   const body=encode(request),requestSha256=createHash('sha256').update(body).digest('hex');let invoked=false;
+   return Object.freeze({route:identity,configuration_sha256:configurationSha256,request_sha256:requestSha256,
+    invoke:()=>{if(invoked)throw Error('auxiliary_prepared_call_reused');invoked=true;return send(body);}});
+  },
+  invoke:(request:ReplyCheckRequest)=>send(encode(request)),
+ });
 }
 export function loadReplyJudgeClient(env:Record<string,string|undefined>,routes:ModelBudgetRoute[],options:{readConfig?:(path:string)=>string;readSecret?:(path:string)=>string;fetch?:Fetch}={}):ReplyJudgeClient|undefined{
  const file=env.GENERAL_AGENT_TASK_REPLY_JUDGE_FILE?.trim();if(!file)return undefined;

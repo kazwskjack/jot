@@ -22620,7 +22620,8 @@
                   "emotion",
                   "web-decision",
                   "reply-verification",
-                  "memory-extraction"
+                  "memory-extraction",
+                  "memory-reasoning"
                 ]
               },
               {

@@ -1,3 +1,4 @@
+import type {PreparedReplyJudgeCall} from './reply-judge-client.ts';
 import {createHash,randomUUID} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
 import {withImmediateTransaction} from '../db/database.ts';
@@ -79,25 +80,28 @@ export class TaskReplySemanticChecks{
   if(this.db.isTransaction)return read();
   this.db.exec('BEGIN');try{const result=read();this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}
  }
- async verify(owner:string,id:string,options:{ledger:ModelBudgetLedger;route:{provider:string;model:string};guard:()=>void;preflight?:(request:ReplyCheckRequest)=>void;invoke:(request:ReplyCheckRequest)=>Promise<{value:unknown;usage:unknown}>}){
+ async verify(owner:string,id:string,options:{ledger:ModelBudgetLedger;route:{provider:string;model:string};guard:()=>void;preflight?:(request:ReplyCheckRequest)=>void;prepare?:(request:ReplyCheckRequest)=>PreparedReplyJudgeCall;invoke:(request:ReplyCheckRequest)=>Promise<{value:unknown;usage:unknown}>}){
   const draft=this.drafts.get(owner,id);
   const guard=()=>{options.guard();if(draft.mode!=='bounded_auto_reply'||!this.policies.authorize(owner,draft.run_id).allowed)throw new Error('reply_authority_revoked');};
   guard();
   const sources=this.evidence.replySources(owner,draft.task_id,draft.occurrence_id,draft.evidence);
   if(!sources.available)return {draft_id:id,payload_sha256:draft.payload_sha256,verdict:'unavailable',reason_code:sources.reason};
   const request=this.request(draft,sources.sources);
+  let preparedCall:PreparedReplyJudgeCall|undefined;
   const inputHash=hash(request),attemptId=withImmediateTransaction(this.db,()=>{
    guard();const prior=this.db.prepare('SELECT * FROM wb_task_reply_semantic_checks WHERE draft_id=? AND owner_id=?').get(id,owner) as Row|undefined;
    if(prior){if(prior.payload_sha256!==draft.payload_sha256||prior.input_sha256!==inputHash)throw new Error('reply_semantic_corrupt');return null;}
    if(this.db.prepare('SELECT 1 FROM wb_task_reply_semantic_attempts WHERE draft_id=?').get(id))throw new Error('reply_semantic_check_pending');
-   options.preflight?.(structuredClone(request));
-   const preview=options.ledger.previewCall(owner,draft.run_id,options.route);
+   if(options.prepare)preparedCall=options.prepare(structuredClone(request));
+   else options.preflight?.(structuredClone(request));
+   const preview=options.ledger.previewCall(owner,draft.run_id,preparedCall?.route??options.route);
    if(BigInt(preview.reserved.tokens)<=0n)throw new Error('reply_semantic_token_route_required');
    const attempt=randomUUID();this.db.prepare('INSERT INTO wb_task_reply_semantic_attempts VALUES(?,?,?,?,?,?)').run(id,owner,draft.payload_sha256,inputHash,attempt,new Date().toISOString());return attempt;
   });
   if(attemptId===null)return JSON.parse((this.db.prepare('SELECT receipt_json FROM wb_task_reply_semantic_checks WHERE draft_id=? AND owner_id=?').get(id,owner) as Row).receipt_json);
-  const result=await runBudgetedAuxiliaryCall({ledger:options.ledger,owner,runId:draft.run_id,route:options.route,purpose:'reply-verification',attemptId,guard,invoke:async()=>{
-   const response=await options.invoke(structuredClone(request));
+  const result=await runBudgetedAuxiliaryCall({ledger:options.ledger,owner,runId:draft.run_id,route:preparedCall?.route??options.route,purpose:'reply-verification',attemptId,
+   configurationSha256:preparedCall?.configuration_sha256,requestSha256:preparedCall?.request_sha256,guard,invoke:async()=>{
+   const response=await (preparedCall?preparedCall.invoke():options.invoke(structuredClone(request)));
    const captured=this.capture(owner,draft,inputHash,attemptId,response);
    return {value:captured.assessment,usage:captured.usage,...(captured.usageEvidence?{usageEvidence:captured.usageEvidence}:{})};
   }});

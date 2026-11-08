@@ -1,10 +1,11 @@
-import {createReplyJudgeClient,loadReplyJudgeClient,type ReplyJudgeClient} from '../persistent-tasks/reply-judge-client.ts';
+import {createReplyJudgeClient,loadReplyJudgeClient,type ReplyJudgeClient,type PreparedReplyJudgeCall} from '../persistent-tasks/reply-judge-client.ts';
 import type {ReplyCheckRequest} from '../persistent-tasks/reply-semantic.ts';
 import type {ModelBudgetRoute} from './model-budget.ts';
 import type {MemoryReasoningProviderInput} from './memory-reasoning-adapter.ts';
 
 export interface MemoryReasoningClient {
-  route:{provider:string;model:string};
+  readonly route:Readonly<{provider:string;model:string}>;
+  prepare?(request:MemoryReasoningProviderInput):PreparedReplyJudgeCall;
   preflight(request:MemoryReasoningProviderInput):void;
   invoke(request:MemoryReasoningProviderInput):Promise<{value:unknown;usage:unknown}>;
 }
@@ -26,10 +27,11 @@ function configError(error:unknown):never{
   throw new Error('memory_reasoning_config_invalid');
 }
 function wrap(client:ReplyJudgeClient):MemoryReasoningClient{
-  return {route:client.route,
-    preflight:input=>{try{client.preflight(requestFor(input));}catch{throw new Error('memory_reasoning_input_too_large');}},
-    invoke:async input=>client.invoke(requestFor(input)),
-  };
+  return Object.freeze({route:client.route,
+    ...(client.prepare?{prepare:(input:MemoryReasoningProviderInput)=>client.prepare!(requestFor(input))}:{}),
+    preflight:(input:MemoryReasoningProviderInput)=>{try{client.preflight(requestFor(input));}catch{throw new Error('memory_reasoning_input_too_large');}},
+    invoke:async (input:MemoryReasoningProviderInput)=>client.invoke(requestFor(input)),
+  });
 }
 
 /** Reuses the Gateway's existing bounded, authenticated Chat Completions client. */

@@ -849,8 +849,10 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       const providerRequest={query:prepared.query,candidates:prepared.candidates,limit:5};
       guard();memoryReasoningClient.preflight(providerRequest);
       const provider:MemoryReasoningProvider={selectCandidates:async request=>{
-        const invocation=await runBudgetedAuxiliaryCall({ledger:modelBudgets!,owner:identity.owner_id,runId:identity.run_id,route:memoryReasoningClient!.route,
-          purpose:'memory-reasoning',guard,invoke:()=>memoryReasoningClient!.invoke(request)});
+        const preparedCall=memoryReasoningClient!.prepare?.(request);
+        const invocation=await runBudgetedAuxiliaryCall({ledger:modelBudgets!,owner:identity.owner_id,runId:identity.run_id,route:preparedCall?.route??memoryReasoningClient!.route,
+          configurationSha256:preparedCall?.configuration_sha256,requestSha256:preparedCall?.request_sha256,
+          purpose:'memory-reasoning',guard,invoke:()=>preparedCall?preparedCall.invoke():memoryReasoningClient!.invoke(request)});
         return invocation.value;
       }};
       const selection=await workbench.selectMemoryReasoning(prepared,provider);
@@ -1025,7 +1027,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
         const identity=context({...input,tool_name:'jot_workspace'}),fence=createAuxiliaryRunGuard(db,workbench,tasks,identity.owner_id,identity.run_id);
         const guard=()=>{fence.guard();context({...input,tool_name:'jot_workspace'});};
         try{
-          const reply_check=await replyChecks.verify(identity.owner_id,String(draft.draft_id),{ledger:modelBudgets!,route:replyJudge.route,guard,preflight:replyJudge.preflight,invoke:replyJudge.invoke});
+          const reply_check=await replyChecks.verify(identity.owner_id,String(draft.draft_id),{ledger:modelBudgets!,route:replyJudge.route,guard,preflight:replyJudge.preflight,prepare:replyJudge.prepare,invoke:replyJudge.invoke});
           return {...result,reply_check};
         }catch(error){
           const code=error instanceof Error?error.message:'';

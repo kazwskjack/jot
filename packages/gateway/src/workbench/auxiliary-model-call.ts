@@ -6,11 +6,14 @@ import type {ModelBudgetLedger,ModelBudgetUsageEvidence} from './model-budget.ts
 export async function runBudgetedAuxiliaryCall<T>(options:{
   ledger:ModelBudgetLedger;owner:string;runId:string;
   route:{provider:string;model:string};purpose:'emotion'|'web-decision'|'reply-verification'|'memory-reasoning';attemptId?:string;
-  guard:()=>void;invoke:()=>Promise<{value:T;usage:unknown;usageEvidence?:ModelBudgetUsageEvidence}>;}) {
+  configurationSha256?:string;requestSha256?:string;guard:()=>void;invoke:()=>Promise<{value:T;usage:unknown;usageEvidence?:ModelBudgetUsageEvidence}>;}) {
   const {ledger,owner,runId}=options;
+  const route=Object.freeze({...options.route});
   const attemptId=options.attemptId??randomUUID();
   options.guard();
-  const reservation=ledger.reserve(owner,runId,{attempt_id:attemptId,provider:options.route.provider,model:options.route.model,purpose:options.purpose});
+  const reservation=ledger.reserve(owner,runId,{attempt_id:attemptId,provider:route.provider,model:route.model,purpose:options.purpose,
+    ...(options.configurationSha256===undefined?{}:{configuration_sha256:options.configurationSha256}),
+    ...(options.requestSha256===undefined?{}:{request_sha256:options.requestSha256})});
   const perCall=reservation.metering==='dispatched_call';
   let dispatched=false,settled=false;
   try {
