@@ -630,12 +630,14 @@ export type WorkbenchMemoryImportItem = {
  target_key:string;target_expected_version:number;status:"ready"|"skipped"|"conflict";reason:string|null;source_local:boolean;
 };
 export type WorkbenchMemoryImportReceipt = {
+ page?:WorkbenchMemoryImportPage;totals?:{total:number;created:number;skipped:number};
  mode?:"replace_scope";replacement?:WorkbenchMemoryReplacementReceipt;
  source_bundle?:WorkbenchMemoryImportBundle;
  import_id:string;status:"applied";version:number;target:WorkbenchMemoryImportTarget;applied_at:string;
  items:Array<(Omit<WorkbenchMemoryImportItem,"status">&{status:"skipped"})|{source_memory_id:string;source_version:number;memory_id:string;version:number;status:"created"}>;
 };
 export type WorkbenchMemoryImportPreview = {
+ page?:WorkbenchMemoryImportPage;
  mode?:"replace_scope";replacement?:WorkbenchMemoryReplacement;
  source_bundle?:WorkbenchMemoryImportBundle;
  schema_version:1;document_workspace_id:string;target:WorkbenchMemoryImportTarget;
@@ -659,3 +661,5 @@ export type WorkbenchMemoryReplacement = {scope_sha256:string;count:number;items
 export type WorkbenchMemoryReplacementReceipt = {scope_sha256:string;count:number;items:Array<{memory_id:string;from_version:number;result_version:number;status:"deleted"}>};
 
 export type WorkbenchMemoryImportReplacementSource = {import_id:string;preview_version:number;memory_id:string;version:number;sha256:string;memory:WorkbenchMemory;execution_authorized:false};
+
+export type WorkbenchMemoryImportPage = {offset:number;limit:number;total:number;next_offset:number|null};

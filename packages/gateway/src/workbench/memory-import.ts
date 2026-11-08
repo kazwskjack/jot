@@ -54,16 +54,30 @@ function normalizeSource(value:unknown,workspaceId:string):Source{
  return {...row,memory_id,workspace_id,project_id,scope:scope as Target['scope'],agent_id,content:content as string,verified:verified as boolean,version:Number(version),status:String(status),
   provenance,source_revision,expires_at,supersedes,history} as Source;
 }
-function normalizeDocument(value:unknown,maxCharacters=5_000_000):{schema_version:1;workspace_id:string;exported_at:string;items:Source[]}{
+function normalizeDocument(value:unknown,maxCharacters=5_000_000,maxItems=200):{schema_version:1;workspace_id:string;exported_at:string;items:Source[]}{
  let encoded:string|undefined;try{encoded=JSON.stringify(value);}catch{invalid();}
  if(typeof encoded!=='string'||encoded.length>maxCharacters)invalid();
  const document=object(value);exact(document,['schema_version','workspace_id','exported_at','items']);
- const rawItems=document.items;if(document.schema_version!==1||!Array.isArray(rawItems)||rawItems.length>200)invalid();
+ const rawItems=document.items;if(document.schema_version!==1||!Array.isArray(rawItems)||rawItems.length>maxItems)invalid();
  const workspace_id=label(document.workspace_id),exported_at=label(document.exported_at,64);
  if(!Number.isFinite(Date.parse(exported_at)))invalid();
  const items=rawItems.map((item:unknown)=>normalizeSource(item,workspace_id));
  if(new Set(items.map(item=>item.memory_id)).size!==items.length)invalid();
  return {schema_version:1 as const,workspace_id,exported_at,items};
+}
+type ImportPage={offset:number;limit:number};
+function pageItems<T>(items:T[],page:ImportPage){
+ if(!Number.isSafeInteger(page.offset)||page.offset<0||!Number.isSafeInteger(page.limit)||page.limit<1||page.limit>100)invalid();
+ const selected=items.slice(page.offset,page.offset+page.limit),next=page.offset+selected.length;
+ return {items:selected,page:{offset:page.offset,limit:page.limit,total:items.length,next_offset:next<items.length?next:null}};
+}
+function receiptPage(receipt:any,page?:ImportPage){
+ if(!page)return receipt;
+ return {...receipt,...pageItems(receipt.items as Input[],page),totals:{total:receipt.items.length,created:receipt.items.filter((item:Input)=>item.status==='created').length,skipped:receipt.items.filter((item:Input)=>item.status==='skipped').length}};
+}
+function viewPage(view:any,page?:ImportPage){
+ if(!page)return view;
+ return {...view,...pageItems(view.items as Input[],page),...(view.receipt?{receipt:receiptPage(view.receipt,page)}:{})};
 }
 function previewView(row:Batch){return {...JSON.parse(String(row.preview_json)),import_id:String(row.import_id),input_sha256:String(row.input_sha256),version:Number(row.version),status:String(row.status),created_at:String(row.created_at),updated_at:String(row.updated_at),
   ...(row.receipt_json===null?{}:{receipt:JSON.parse(String(row.receipt_json))})};}
@@ -139,7 +153,7 @@ export class MemoryImportService{
    ...(mode==='replace_scope'?{mode,replacement:this.replacement(owner,workspace,target)}:{}),counts:{total:items.length,ready:items.filter(item=>item.status==='ready').length,
    skipped:items.filter(item=>item.status==='skipped').length,conflict:items.filter(item=>item.status==='conflict').length},items};
  }
- preview(owner:string,workspace:string,input:Input){return withImmediateTransaction(this.db,()=>{
+ preview(owner:string,workspace:string,input:Input,page?:ImportPage){return withImmediateTransaction(this.db,()=>{
   exact(input,['import_id','document','target','mode']);const importId=label(input.import_id,128);
   const requestedTarget=normalizeTarget(input.target),target=this.ports.authorizeTarget(owner,workspace,requestedTarget);
   if(JSON.stringify(target)!==JSON.stringify(requestedTarget))throw new Error('memory_scope_forbidden');
@@ -148,24 +162,24 @@ export class MemoryImportService{
   const imported=pilotdeckMemoryImport(input.document,JSON.stringify([workspace,target.project_id]));
   if(mode&&!imported)invalid();
   if(mode&&!this.ports.remove)throw Error('memory_import_replace_unavailable');
-  const document=normalizeDocument(imported?.document??input.document,imported?12_000_000:5_000_000);
+  const document=normalizeDocument(imported?.document??input.document,imported?160_000_000:5_000_000,imported?Number.MAX_SAFE_INTEGER:200);
   const inputValue:Snapshot={document,target,...(imported?{source_bundle:imported.source}:{}),...(mode?{mode}:{})};
   const inputJson=JSON.stringify(inputValue),inputHash=digest(inputValue),now=new Date().toISOString();
   const old=this.db.prepare('SELECT * FROM wb_memory_import_batches WHERE owner_id=? AND workspace_id=? AND import_id=?').get(owner,workspace,importId) as Batch|undefined;
   if(old){
    if(old.input_sha256!==inputHash||old.input_json!==inputJson)throw new Error('memory_import_id_conflict');
-   if(old.status==='applied')return previewView(old);
+   if(old.status==='applied')return viewPage(previewView(old),page);
    const fresh=this.inspect(owner,workspace,target,document,inputValue.source_bundle,mode),freshJson=JSON.stringify(fresh);
    if(freshJson!==old.preview_json){this.db.prepare('UPDATE wb_memory_import_batches SET preview_json=?,version=version+1,updated_at=? WHERE owner_id=? AND workspace_id=? AND import_id=? AND status=\'previewed\'')
     .run(freshJson,now,owner,workspace,importId);}
-   return previewView(this.db.prepare('SELECT * FROM wb_memory_import_batches WHERE owner_id=? AND workspace_id=? AND import_id=?').get(owner,workspace,importId) as Batch);
+   return viewPage(previewView(this.db.prepare('SELECT * FROM wb_memory_import_batches WHERE owner_id=? AND workspace_id=? AND import_id=?').get(owner,workspace,importId) as Batch),page);
   }
   const preview=this.inspect(owner,workspace,target,document,inputValue.source_bundle,mode);
   this.db.prepare(`INSERT INTO wb_memory_import_batches(owner_id,workspace_id,import_id,input_sha256,input_json,preview_json,version,status,receipt_json,created_at,updated_at)
    VALUES(?,?,?,?,?,?,1,'previewed',NULL,?,?)`).run(owner,workspace,importId,inputHash,inputJson,JSON.stringify(preview),now,now);
-  return previewView(this.db.prepare('SELECT * FROM wb_memory_import_batches WHERE owner_id=? AND workspace_id=? AND import_id=?').get(owner,workspace,importId) as Batch);
+  return viewPage(previewView(this.db.prepare('SELECT * FROM wb_memory_import_batches WHERE owner_id=? AND workspace_id=? AND import_id=?').get(owner,workspace,importId) as Batch),page);
  });}
- get(owner:string,workspace:string,importId:string){
+ get(owner:string,workspace:string,importId:string,page?:ImportPage){
   const row=this.db.prepare('SELECT * FROM wb_memory_import_batches WHERE owner_id=? AND workspace_id=? AND import_id=?').get(owner,workspace,importId) as Batch|undefined;
   if(!row)throw new Error('memory_import_not_found');const snapshot=JSON.parse(String(row.input_json)) as Snapshot;
   if(digest(snapshot)!==row.input_sha256)throw Error('memory_import_digest_conflict');
@@ -173,7 +187,7 @@ export class MemoryImportService{
   const view=previewView(row);
   if(JSON.stringify(view.target)!==JSON.stringify(target)||view.mode!==snapshot.mode)throw Error('memory_import_digest_conflict');
   if(view.replacement&&(view.replacement.count!==view.replacement.items.length||digest({target,items:view.replacement.items})!==view.replacement.scope_sha256))throw Error('memory_import_digest_conflict');
-  return view;
+  return viewPage(view,page);
  }
  replacementSource(owner:string,workspace:string,importId:string,memoryId:string,expectedVersion:number){
   const view=this.get(owner,workspace,importId);
@@ -202,11 +216,11 @@ export class MemoryImportService{
   if(digest(source.bundle)!==source.summary.sha256)throw Error('memory_import_digest_conflict');
   return {import_id:importId,input_sha256:String(row.input_sha256),sha256:source.summary.sha256,bundle:source.bundle,execution_authorized:false as const};
  }
- apply(owner:string,workspace:string,input:Input){return withImmediateTransaction(this.db,()=>{
+ apply(owner:string,workspace:string,input:Input,page?:ImportPage){return withImmediateTransaction(this.db,()=>{
   exact(input,['import_id','expected_version']);const importId=label(input.import_id,128);
   if(!Number.isSafeInteger(input.expected_version)||Number(input.expected_version)<1)invalid();
   const row=this.db.prepare('SELECT * FROM wb_memory_import_batches WHERE owner_id=? AND workspace_id=? AND import_id=?').get(owner,workspace,importId) as Batch|undefined;
-  if(!row)throw new Error('memory_import_not_found');if(row.status==='applied')return JSON.parse(String(row.receipt_json));
+  if(!row)throw new Error('memory_import_not_found');if(row.status==='applied')return receiptPage(JSON.parse(String(row.receipt_json)),page);
   if(Number(input.expected_version)!==Number(row.version))throw new Error('version_conflict');
   const snapshot=JSON.parse(String(row.input_json)) as Snapshot;
   if(digest(snapshot)!==row.input_sha256)throw new Error('memory_import_digest_conflict');
@@ -243,6 +257,6 @@ export class MemoryImportService{
   const applied=this.db.prepare("UPDATE wb_memory_import_batches SET status='applied',receipt_json=?,updated_at=? WHERE owner_id=? AND workspace_id=? AND import_id=? AND status='previewed' AND version=?")
    .run(JSON.stringify(receipt),receipt.applied_at,owner,workspace,importId,Number(row.version));
   if(applied.changes!==1)throw Error('memory_import_conflict');
-  return receipt;
+  return receiptPage(receipt,page);
  });}
 }

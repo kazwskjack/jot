@@ -65,7 +65,6 @@ export function pilotdeckMemoryImport(value:unknown,namespace:string){
    if(end<file.content.length&&file.content.charCodeAt(end-1)>=0xd800&&file.content.charCodeAt(end-1)<=0xdbff)end--;
    const content=file.content.slice(offset,end);offset=end;part++;
    if(!content.trim())continue;
-   if(items.length===200)throw Error('memory_import_bundle_note_limit');
    const memoryId=`pilotdeck-${pathHash}-${part}`,status=deprecated?'superseded':'active';
    const provenance=[{kind:'pilotdeck_snapshot',reference:sourceHash},{kind:'pilotdeck_file',reference:file.path.length<=2048?file.path:`sha256:${pathHash}`},{kind:'sha256',reference:fileHash}];
    items.push({memory_id:memoryId,workspace_id:workspaceId,project_id:'current_project',scope:'project',agent_id:null,

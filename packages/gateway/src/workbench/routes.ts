@@ -56,6 +56,12 @@ function binaryFileRouteError(reply:{code:(status:number)=>{send:(body:unknown)=
   if(code==='file_lifecycle_receipt_corrupt')return reply.code(503).send({error:{code:'FILE_BINARY_IMPORT_RECEIPT_CORRUPT'}});
   throw error;
 }
+function memoryImportPage(request:FastifyRequest){
+ const input=query(request),keys=Object.keys(input);if(!keys.length)return undefined;
+ if(keys.some(key=>!['offset','limit'].includes(key))||typeof input.offset!=='string'||! /^(?:0|[1-9][0-9]{0,15})$/.test(input.offset)
+  ||typeof input.limit!=='string'||! /^(?:[1-9][0-9]?|100)$/.test(input.limit)||!Number.isSafeInteger(Number(input.offset)))throw Error('invalid_memory_import');
+ return {offset:Number(input.offset),limit:Number(input.limit)};
+}
 const agentFields = ['name', 'instructions', 'workspace_id', 'project_id', 'allowed_tools'];
 const teamFields = ['name', 'workspace_id', 'project_id', 'member_ids'];
 export function registerWorkbenchRoutes(app: FastifyInstance, service: WorkbenchService, actor: Actor,restoreCommand:(request:FastifyRequest,operation:()=>unknown)=>unknown=(_request,operation)=>operation(),checkpoints?:WorkspaceCheckpointService): void {
@@ -110,11 +116,10 @@ export function registerWorkbenchRoutes(app: FastifyInstance, service: Workbench
   app.get('/v1/workspaces/:workspaceId/memory-consolidations/:consolidationId',async request=>service.memoryConsolidations.get(actor(request),param(request,'workspaceId'),param(request,'consolidationId')));
   app.post('/v1/workspaces/:workspaceId/memory-consolidations/:consolidationId/propose',async request=>restoreCommand(request,()=>service.memoryConsolidations.propose(actor(request),param(request,'workspaceId'),param(request,'consolidationId'),body(request,['expected_version','summary','changes']))));
   for(const action of ['apply','rollback','reject'] as const)app.post(`/v1/workspaces/:workspaceId/memory-consolidations/:consolidationId/${action}`,async request=>restoreCommand(request,()=>service.memoryConsolidations[action](actor(request),param(request,'workspaceId'),param(request,'consolidationId'),version(body(request,['expected_version'])))));
-  app.post('/v1/workspaces/:workspaceId/memory/import/preview',{bodyLimit:20_100_000},async(request,reply)=>{privateReply(reply);return restoreCommand(request,()=>service.memoryImports.preview(actor(request),param(request,'workspaceId'),body(request,['import_id','document','target','mode'])));});
+  app.post('/v1/workspaces/:workspaceId/memory/import/preview',{bodyLimit:20_100_000},async(request,reply)=>{privateReply(reply);return restoreCommand(request,()=>service.memoryImports.preview(actor(request),param(request,'workspaceId'),body(request,['import_id','document','target','mode']),memoryImportPage(request)));});
   app.get('/v1/workspaces/:workspaceId/memory/import/:importId',async(request,reply)=>{
     privateReply(reply);
-    if(Object.keys(query(request)).length)throw new Error('invalid_memory_import');
-    return service.memoryImports.get(actor(request),param(request,'workspaceId'),param(request,'importId'));
+    return service.memoryImports.get(actor(request),param(request,'workspaceId'),param(request,'importId'),memoryImportPage(request));
   });
   app.get('/v1/workspaces/:workspaceId/memory/import/:importId/replacement/:memoryId',async(request,reply)=>{
     privateReply(reply);const input=query(request);
@@ -125,7 +130,7 @@ export function registerWorkbenchRoutes(app: FastifyInstance, service: Workbench
     privateReply(reply);if(Object.keys(query(request)).length)throw Error('invalid_memory_import');
     return service.memoryImports.source(actor(request),param(request,'workspaceId'),param(request,'importId'));
   });
-  app.post('/v1/workspaces/:workspaceId/memory/import/:importId/apply',async(request,reply)=>{privateReply(reply);return restoreCommand(request,()=>service.memoryImports.apply(actor(request),param(request,'workspaceId'),{...body(request,['expected_version']),import_id:param(request,'importId')}));});
+  app.post('/v1/workspaces/:workspaceId/memory/import/:importId/apply',async(request,reply)=>{privateReply(reply);return restoreCommand(request,()=>service.memoryImports.apply(actor(request),param(request,'workspaceId'),{...body(request,['expected_version']),import_id:param(request,'importId')},memoryImportPage(request)));});
   app.get('/v1/workspaces/:workspaceId/memory', async request => service.listMemory(actor(request), param(request, 'workspaceId'), query(request)));
   app.get('/v1/workspaces/:workspaceId/memory/export', async request => service.exportMemory(actor(request), param(request, 'workspaceId'), query(request)));
   app.get('/v1/workspaces/:workspaceId/memory/:memoryId/history',async request=>{

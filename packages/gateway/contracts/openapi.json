@@ -24865,7 +24865,7 @@
         "tags": [
           "workbench"
         ],
-        "description": "Create or refresh a durable owner-scoped import preview with one immutable input and target. Inspect source versions, scopes, provenance, duplicates and tombstones. This command changes no formal memory. Atomic request receipt and preview persist in one transaction.",
+        "description": "Create or refresh a durable owner-scoped import preview with one immutable input and target. Inspect source versions, scopes, provenance, duplicates and tombstones. This command changes no formal memory. Atomic request receipt and preview persist in one transaction. Optional offset and limit must be supplied together. They project item transport only. Full immutable source, conflict checks, scope replacement and batch application remain authoritative. Paged receipts include exact full-batch created/skipped totals.",
         "parameters": [
           {
             "name": "workspace_id",
@@ -24882,6 +24882,26 @@
           },
           {
             "$ref": "#/components/parameters/CsrfToken"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
           }
         ],
         "responses": {
@@ -25004,7 +25024,7 @@
         "tags": [
           "workbench"
         ],
-        "description": "Read the original owner-scoped import preview and its optional applied receipt. Recheck target access and return exact source content, versions, conflicts and target scope for review.",
+        "description": "Read the original owner-scoped import preview and its optional applied receipt. Recheck target access and return exact source content, versions, conflicts and target scope for review. Optional offset and limit must be supplied together. They project item transport only. Full immutable source, conflict checks, scope replacement and batch application remain authoritative. Paged receipts include exact full-batch created/skipped totals.",
         "parameters": [
           {
             "name": "workspace_id",
@@ -25024,6 +25044,26 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 128
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
             }
           }
         ],
@@ -25137,7 +25177,7 @@
         "tags": [
           "workbench"
         ],
-        "description": "Apply the exact reviewed preview version atomically through original memory saves. Recheck source and target states. Conflict rejects the whole batch. New notes are unverified. Deleted or superseded imports block reimport of later versions of the same source. Immutable original applied receipts recover response loss without replaying writes.",
+        "description": "Apply the exact reviewed preview version atomically through original memory saves. Recheck source and target states. Conflict rejects the whole batch. New notes are unverified. Deleted or superseded imports block reimport of later versions of the same source. Immutable original applied receipts recover response loss without replaying writes. Optional offset and limit must be supplied together. They project item transport only. Full immutable source, conflict checks, scope replacement and batch application remain authoritative. Paged receipts include exact full-batch created/skipped totals.",
         "parameters": [
           {
             "name": "workspace_id",
@@ -25164,6 +25204,26 @@
           },
           {
             "$ref": "#/components/parameters/CsrfToken"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
           }
         ],
         "responses": {
@@ -50095,7 +50155,7 @@
             ]
           }
         },
-        "description": "Accept original Jot versioned exports or pinned v4 current-project snapshots. Retain full upstream source files and metadata in the immutable original batch. Normalize at most 200 unverified note inputs, splitting long files at Unicode scalar boundaries. Global user files and non-note files stay retained source data. Original input JSON is bounded to 5000000 characters. Derived internal note documents are bounded to 12000000 characters. Optional replace_scope explicitly reviews and retires every active memory in the original selected target scope through original versioned deletion. The default append representation preserves historical input hashes.",
+        "description": "Accept original Jot versioned exports or pinned v4 current-project snapshots. Original Jot documents retain the 200-item bound. Retain every converted upstream note and full original source under the 5000000-character raw input bound. Derived internal documents are bounded to 160000000 characters. Optional offset/limit projects preview and receipt items without narrowing original batch approval or application. Explicit replace_scope reviews and retires the complete original selected target through original versioned deletion.",
         "allOf": [
           {
             "if": {
@@ -50239,7 +50299,6 @@
           },
           "items": {
             "type": "array",
-            "maxItems": 200,
             "items": {
               "anyOf": [
                 {
@@ -50307,6 +50366,35 @@
           },
           "replacement": {
             "$ref": "#/components/schemas/WorkbenchMemoryReplacementReceipt"
+          },
+          "page": {
+            "$ref": "#/components/schemas/WorkbenchMemoryImportPage"
+          },
+          "totals": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "total",
+              "created",
+              "skipped"
+            ],
+            "properties": {
+              "total": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "created": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "skipped": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            }
           }
         },
         "dependentRequired": {
@@ -50317,8 +50405,52 @@
           "replacement": [
             "mode",
             "source_bundle"
+          ],
+          "page": [
+            "totals"
+          ],
+          "totals": [
+            "page"
           ]
-        }
+        },
+        "allOf": [
+          {
+            "if": {
+              "not": {
+                "required": [
+                  "source_bundle"
+                ]
+              }
+            },
+            "then": {
+              "properties": {
+                "items": {
+                  "maxItems": 200
+                },
+                "page": {
+                  "properties": {
+                    "total": {
+                      "maximum": 200
+                    }
+                  }
+                },
+                "totals": {
+                  "properties": {
+                    "total": {
+                      "maximum": 200
+                    },
+                    "created": {
+                      "maximum": 200
+                    },
+                    "skipped": {
+                      "maximum": 200
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
       },
       "WorkbenchMemoryImportPreview": {
         "type": "object",
@@ -50361,28 +50493,27 @@
               "total": {
                 "type": "integer",
                 "minimum": 0,
-                "maximum": 200
+                "maximum": 9007199254740991
               },
               "ready": {
                 "type": "integer",
                 "minimum": 0,
-                "maximum": 200
+                "maximum": 9007199254740991
               },
               "skipped": {
                 "type": "integer",
                 "minimum": 0,
-                "maximum": 200
+                "maximum": 9007199254740991
               },
               "conflict": {
                 "type": "integer",
                 "minimum": 0,
-                "maximum": 200
+                "maximum": 9007199254740991
               }
             }
           },
           "items": {
             "type": "array",
-            "maxItems": 200,
             "items": {
               "$ref": "#/components/schemas/WorkbenchMemoryImportItem"
             }
@@ -50426,6 +50557,9 @@
           },
           "replacement": {
             "$ref": "#/components/schemas/WorkbenchMemoryReplacement"
+          },
+          "page": {
+            "$ref": "#/components/schemas/WorkbenchMemoryImportPage"
           }
         },
         "allOf": [
@@ -50441,6 +50575,45 @@
               "required": [
                 "receipt"
               ]
+            }
+          },
+          {
+            "if": {
+              "not": {
+                "required": [
+                  "source_bundle"
+                ]
+              }
+            },
+            "then": {
+              "properties": {
+                "items": {
+                  "maxItems": 200
+                },
+                "page": {
+                  "properties": {
+                    "total": {
+                      "maximum": 200
+                    }
+                  }
+                },
+                "counts": {
+                  "properties": {
+                    "total": {
+                      "maximum": 200
+                    },
+                    "ready": {
+                      "maximum": 200
+                    },
+                    "skipped": {
+                      "maximum": 200
+                    },
+                    "conflict": {
+                      "maximum": 200
+                    }
+                  }
+                }
+              }
             }
           }
         ],
@@ -50821,6 +50994,41 @@
           },
           "execution_authorized": {
             "const": false
+          }
+        }
+      },
+      "WorkbenchMemoryImportPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "offset",
+          "limit",
+          "total",
+          "next_offset"
+        ],
+        "properties": {
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "next_offset": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 9007199254740991
           }
         }
       }

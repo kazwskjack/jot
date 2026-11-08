@@ -13,7 +13,6 @@ const pageSize=25;
 function importMessage(reason:unknown){
  const code=reason instanceof Error?reason.message:'';
  if(['MEMORY_IMPORT_CONFLICT','VERSION_CONFLICT'].includes(code))return '来源、目标或预览版本已变化，整批未写入。请重新核对原文件。';
- if(code==='MEMORY_IMPORT_BUNDLE_NOTE_LIMIT')return '此源包转换后超过原批次的 200 条记忆上限，整批未写入。请按源项目记忆文件拆分批次，保留每个文件完整内容。';
  if(code==='INVALID_MEMORY_IMPORT_BUNDLE')return '请核对 clawxmemory-memory-snapshot.v4 当前项目包的格式、重复路径及目录层级。';
  if(code==='MEMORY_IMPORT_ID_CONFLICT')return '此批次已绑定另一份来源或目标。请读取原记录，或结束此批次后选择其他文件。';
  return code||'记忆导入未完成，请核对原记录';
@@ -44,10 +43,10 @@ export default function MemoryImport({workspace,selection,onChanged,onBusyChange
  });
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
  useEffect(()=>{onBusyChange(busy||mutation.pending);return()=>onBusyChange(false);},[busy,mutation.pending,onBusyChange]);
- const read=async(batchId:string)=>{
-  const value=await workbenchApi.memoryImport(workspace,batchId);
+ const read=async(batchId:string,offset=0)=>{
+  const value=await workbenchApi.memoryImport(workspace,batchId,undefined,offset);
   if(!matches(value,batchId))throw new Error('导入记录与所选目标范围不一致');
-  if(current()){setView(value);setReceipt(value.receipt??null);setMode(value.mode??'append');setConfirmed(false);setPage(0);}
+  if(current()){setView(value);setReceipt(value.receipt??null);setMode(value.mode??'append');setConfirmed(false);setPage(Math.floor((value.page?.offset??0)/pageSize));}
  };
  useEffect(()=>{
   const batchId=recovery.batch?.import_id;if(!batchId||!recovery.store)return;
@@ -56,7 +55,7 @@ export default function MemoryImport({workspace,selection,onChanged,onBusyChange
    .finally(()=>{if(current())setBusy(false);});
  },[recovery]);
  const preview=async(source:unknown,batchId:string)=>{
-  const value=await workbenchApi.previewMemoryImport(workspace,{import_id:batchId,document:source,target,...(mode==='replace_scope'?{mode}:{})},crypto.randomUUID());
+  const value=await workbenchApi.previewMemoryImport(workspace,{import_id:batchId,document:source,target,...(mode==='replace_scope'?{mode}:{})},crypto.randomUUID(),undefined,0);
   if(!matches(value,batchId))throw new Error('导入预览与所选目标范围不一致');
   if(current()){setView(value);setReceipt(value.receipt??null);setConfirmed(false);setPage(0);}
  };
@@ -80,14 +79,19 @@ export default function MemoryImport({workspace,selection,onChanged,onBusyChange
   catch(reason){if(current())setError(importMessage(reason));}
   finally{if(current())setBusy(false);}
  };
+ const loadPage=async(offset:number)=>{
+  if(!id||busy)return;setBusy(true);setError('');
+  try{await read(id,offset);}catch(reason){if(current())setError(importMessage(reason));}
+  finally{if(current())setBusy(false);}
+ };
  const apply=async()=>{
   if(busy||!recovery.store)return;
   setBusy(true);setError('');
   try{
    const pending=recovery.store.read()?.command;
    if(!pending&&(!view||!confirmed||view.status!=='previewed'||view.counts.conflict||!view.counts.total&&!view.source_bundle))return;
-   const value=await mutation.submit(pending?.path??recovery.store.path(id),'POST',pending?.body??{expected_version:view!.version}) as WorkbenchMemoryImportReceipt;
-   if(current()){setReceipt(value);setView(previous=>previous?.version===value.version?{...previous,status:'applied',receipt:value}:null);setConfirmed(false);onChanged();}
+   const value=await mutation.submit(pending?.path??recovery.store.path(id,true),'POST',pending?.body??{expected_version:view!.version}) as WorkbenchMemoryImportReceipt;
+   if(current()){setReceipt(value);setView(previous=>previous?.version===value.version&&(previous.page?.offset??0)===(value.page?.offset??0)?{...previous,status:'applied',receipt:value}:null);setConfirmed(false);onChanged();}
   }catch(reason){if(current())setError(importMessage(reason));}
   finally{if(current())setBusy(false);}
  };
@@ -98,7 +102,7 @@ export default function MemoryImport({workspace,selection,onChanged,onBusyChange
  const blocked=busy||mutation.pending||!!recovery.error;
  return <section className="wb-form" aria-label="版本化记忆导入" aria-busy={busy}>
   <h3>导入记忆 JSON</h3>
-  <p className="wb-hint">选择 Jot schema_version 1 文档或上游 clawxmemory-memory-snapshot.v4 当前项目包，文件最多 20 MB、原始 JSON 最多 5,000,000 字符。原批次最多 200 条记忆、每条 500 个历史版本。上游长文件按完整字符分段，每段最多 20,000 字符，源包保留完整原文。核对后整批导入为待核实记忆。删除标记、过期来源及冲突会由服务端重新检查。</p>
+  <p className="wb-hint">选择 Jot schema_version 1 文档或上游 clawxmemory-memory-snapshot.v4 当前项目包，文件最多 20 MB、原始 JSON 最多 5,000,000 字符。Jot 格式每批最多 200 条记忆、每条 500 个历史版本。上游文件包按完整字符分段生成全部条目，每段最多 20,000 字符，按服务端分页核对，源包保留完整原文。核对后整批导入为待核实记忆。删除标记、过期来源及冲突会由服务端重新检查。</p>
   <p>目标工作区 {workspace} · 项目 {target.project_id} · {target.scope==='private'?`角色私有 ${target.agent_id}`:'项目共享'}</p>
   {(error||recovery.error)&&<p className="wb-error" role="alert">{error||recovery.error}</p>}
   <label>导入方式<select value={mode} disabled={blocked||!!id} onChange={event=>setMode(event.target.value as 'append'|'replace_scope')}><option value="append">追加到所选范围</option><option value="replace_scope">用上游文件包替换所选范围</option></select></label>
@@ -108,15 +112,15 @@ export default function MemoryImport({workspace,selection,onChanged,onBusyChange
   {view&&<><p>来源工作区 {view.document_workspace_id} · 预览 v{view.version} · 可导入 {view.counts.ready} 条 · 跳过 {view.counts.skipped} 条 · 冲突 {view.counts.conflict} 条</p><p style={{overflowWrap:'anywhere'}}>输入 SHA-256 {view.input_sha256}</p>
    {view.source_bundle&&<MemoryImportBundle key={`${id}:${view.input_sha256}:${view.source_bundle.sha256}`} workspace={workspace} importId={id} inputHash={view.input_sha256} bundle={view.source_bundle}/>}
    {view.replacement&&<MemoryImportReplacement key={`${id}:${view.version}:${view.replacement.scope_sha256}`} workspace={workspace} importId={id} previewVersion={view.version} replacement={view.replacement}/>}
-   <div className="wb-message-list">{view.items.slice(page*pageSize,(page+1)*pageSize).map(item=><article key={item.target_key}>
+   <div className="wb-message-list">{(view.page?view.items:view.items.slice(page*pageSize,(page+1)*pageSize)).map(item=><article key={item.target_key}>
     <strong>{item.source_memory_id} · v{item.source_version} · {states[item.status]}</strong>{item.reason&&<p>{reasons[item.reason]??item.reason}</p>}
     <p>{item.source_local?'服务端已有此来源':'外部导出来源'} · 目标当前版本 {item.target_expected_version}</p>
     <details><summary>核对正文、来源与历史版本</summary><p style={{whiteSpace:'pre-wrap'}}>{item.source_content}</p><p>历史版本 {item.source_history_versions.join('、')}</p>{item.source_revision&&<p>来源版本 {item.source_revision}</p>}{item.source_expires_at&&<p>有效期 {item.source_expires_at}</p>}{item.source_provenance.map((source,index)=><p key={index}>{source.kind} · {source.reference}</p>)}</details>
    </article>)}</div>
-   {view.items.length>pageSize&&<div className="wb-actions"><button type="button" disabled={busy||page===0} onClick={()=>setPage(page-1)}>上一页</button><span>第 {page+1} 页，共 {Math.ceil(view.items.length/pageSize)} 页</span><button type="button" disabled={busy||(page+1)*pageSize>=view.items.length} onClick={()=>setPage(page+1)}>下一页</button></div>}
+   {(view.page?.total??view.items.length)>pageSize&&<div className="wb-actions"><button type="button" disabled={busy||page===0} onClick={()=>view.page?void loadPage((page-1)*pageSize):setPage(page-1)}>上一页</button><span>第 {page+1} 页，共 {Math.ceil((view.page?.total??view.items.length)/pageSize)} 页</span><button type="button" disabled={busy||(page+1)*pageSize>=(view.page?.total??view.items.length)} onClick={()=>view.page?void loadPage((page+1)*pageSize):setPage(page+1)}>下一页</button></div>}
    {view.status==='previewed'&&<label className="wb-checkbox"><input type="checkbox" checked={confirmed} disabled={blocked||!!view.counts.conflict} onChange={event=>setConfirmed(event.target.checked)}/>{view.mode==='replace_scope'?'我已核对所选范围、全部来源和受影响记忆清单，确认将当前记忆退役并导入此包。':'我已核对目标范围、全部来源与冲突，确认按此版本整批导入。'}</label>}
   </>}
   {(mutation.pending||view?.status==='previewed')&&<button type="button" disabled={busy||!!recovery.error||!mutation.pending&&(!confirmed||!view||!!view.counts.conflict||!view.counts.total&&!view.source_bundle)} onClick={()=>void apply()}>{busy?'正在处理…':mutation.pending?'重试原导入请求':view?.mode==='replace_scope'?'确认替换并导入':'确认导入'}</button>}
-  {receipt&&<div role="status"><p>批次已应用，时间 {receipt.applied_at}。创建 {receipt.items.filter(item=>item.status==='created').length} 条{receipt.replacement&&`，原记忆退役 ${receipt.replacement.count} 条`}，跳过 {receipt.items.filter(item=>item.status==='skipped').length} 条。</p>{receipt.replacement&&<details><summary>查看原记忆退役回执</summary>{receipt.replacement.items.slice(receiptPage*pageSize,(receiptPage+1)*pageSize).map(item=><p key={item.memory_id}>{item.memory_id} · v{item.from_version} → v{item.result_version} · 已退役</p>)}{receipt.replacement.items.length>pageSize&&<div className="wb-actions"><button type="button" disabled={receiptPage===0} onClick={()=>setReceiptPage(receiptPage-1)}>上一页退役回执</button><span>第 {receiptPage+1} 页，共 {Math.ceil(receipt.replacement.items.length/pageSize)} 页</span><button type="button" disabled={(receiptPage+1)*pageSize>=receipt.replacement.items.length} onClick={()=>setReceiptPage(receiptPage+1)}>下一页退役回执</button></div>}</details>}<details><summary>查看逐条回执</summary>{receipt.items.map(item=><p key={item.source_memory_id}>{item.source_memory_id} · 来源 v{item.source_version} · {item.status==='created'?`已创建 ${item.memory_id} v${item.version}`:'已跳过'}</p>)}</details></div>}
+  {receipt&&<div role="status"><p>批次已应用，时间 {receipt.applied_at}。创建 {receipt.totals?.created??receipt.items.filter(item=>item.status==='created').length} 条{receipt.replacement&&`，原记忆退役 ${receipt.replacement.count} 条`}，跳过 {receipt.totals?.skipped??receipt.items.filter(item=>item.status==='skipped').length} 条。</p>{receipt.replacement&&<details><summary>查看原记忆退役回执</summary>{receipt.replacement.items.slice(receiptPage*pageSize,(receiptPage+1)*pageSize).map(item=><p key={item.memory_id}>{item.memory_id} · v{item.from_version} → v{item.result_version} · 已退役</p>)}{receipt.replacement.items.length>pageSize&&<div className="wb-actions"><button type="button" disabled={receiptPage===0} onClick={()=>setReceiptPage(receiptPage-1)}>上一页退役回执</button><span>第 {receiptPage+1} 页，共 {Math.ceil(receipt.replacement.items.length/pageSize)} 页</span><button type="button" disabled={(receiptPage+1)*pageSize>=receipt.replacement.items.length} onClick={()=>setReceiptPage(receiptPage+1)}>下一页退役回执</button></div>}</details>}<details><summary>查看逐条回执</summary>{receipt.page&&<p>已加载 {receipt.items.length} 条，共 {receipt.page.total} 条，当前位置 {receipt.page.offset}。</p>}{receipt.items.map(item=><p key={item.source_memory_id}>{item.source_memory_id} · 来源 v{item.source_version} · {item.status==='created'?`已创建 ${item.memory_id} v${item.version}`:'已跳过'}</p>)}{receipt.page&&receipt.page.total>receipt.page.limit&&<div className="wb-actions"><button type="button" disabled={busy||receipt.page.offset===0} onClick={()=>void loadPage(Math.max(0,receipt.page!.offset-receipt.page!.limit))}>上一页导入回执</button><button type="button" disabled={busy||receipt.page.next_offset===null} onClick={()=>void loadPage(receipt.page!.next_offset!)}>下一页导入回执</button></div>}</details></div>}
  </section>;
 }

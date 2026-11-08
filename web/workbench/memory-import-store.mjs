@@ -17,14 +17,14 @@ export class MemoryImportStore {
   if(command!==null){
    const body=command?.body;
    if(!command||Object.keys(command).sort().join(',')!=='body,key,method,path'
-    ||command.path!==this.path(batch.import_id)||command.method!=='POST'
+    ||![this.path(batch.import_id),this.path(batch.import_id,true)].includes(command.path)||command.method!=='POST'
     ||typeof command.key!=='string'||command.key.length<8||command.key.length>200
     ||!body||Object.keys(body).join(',')!=='expected_version'||!Number.isSafeInteger(body.expected_version)||body.expected_version<1)
     throw new Error('记忆导入原请求无效');
   }
   return value;
  }
- path(id){return `/workspaces/${encodeURIComponent(this.workspace)}/memory/import/${encodeURIComponent(id)}/apply`;}
+ path(id,paged=false){return `/workspaces/${encodeURIComponent(this.workspace)}/memory/import/${encodeURIComponent(id)}/apply${paged?'?offset=0&limit=25':''}`;}
  saveBatch(id,mode='append'){
   if(this.read())throw new Error('请先核对已有导入记录');
   if(!['append','replace_scope'].includes(mode))throw new Error('记忆导入模式无效');
@@ -37,7 +37,7 @@ export class MemoryImportStore {
   if(value.command&&value.command.key!==command.key)throw new Error('已有待确认的记忆导入请求');
   const text=JSON.stringify({...value,command});
   // Validate before persistence without ever replacing the original pending command.
-  if(command.path!==this.path(value.batch.import_id)||command.method!=='POST'
+  if(![this.path(value.batch.import_id),this.path(value.batch.import_id,true)].includes(command.path)||command.method!=='POST'
    ||!Number.isSafeInteger(command.body?.expected_version)||command.body.expected_version<1)throw new Error('记忆导入原请求无效');
   this.storage.setItem(this.key,text);
  }
