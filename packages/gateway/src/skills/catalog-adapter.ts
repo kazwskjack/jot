@@ -55,6 +55,18 @@ export class SkillCatalogAdapterClient implements SkillCatalogHost{
   if(!response.ok)throw Error('native_command_query_audit_unavailable');
   return response.json();
  }
+ async executePlanMode(packet:Record<string,unknown>):Promise<unknown>{
+  const response=await this.#fetch(this.#origin+'/v1/commands/plan-mode',{method:'POST',redirect:'error',cache:'no-store',
+   headers:{authorization:`Bearer ${this.#token}`,'content-type':'application/json'},body:JSON.stringify(packet),signal:AbortSignal.timeout(35000)});
+  if(!response.ok)throw Error('native_command_query_response_unknown');
+  return response.json();
+ }
+ async reconcilePlanMode(packet:Record<string,unknown>):Promise<unknown>{
+  const response=await this.#fetch(this.#origin+'/v1/commands/plan-mode/reconcile',{method:'POST',redirect:'error',cache:'no-store',
+   headers:{authorization:`Bearer ${this.#token}`,'content-type':'application/json'},body:JSON.stringify(packet),signal:AbortSignal.timeout(35000)});
+  if(!response.ok)throw Error('native_command_query_audit_unavailable');
+  return response.json();
+ }
  async readResource({scope,skill_name,relative_path,list_directory,after,signal}:{scope:SkillCatalogScope;skill_name:string;relative_path:string;list_directory?:true;after?:string|null;signal?:AbortSignal}):Promise<unknown>{
   const combined=AbortSignal.any([AbortSignal.timeout(5000),...(signal?[signal]:[])]);combined.throwIfAborted();
   const response=await this.#fetch(this.#origin+'/v1/skills/resource',{method:'POST',redirect:'error',cache:'no-store',

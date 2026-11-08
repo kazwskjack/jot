@@ -112,7 +112,7 @@ import {createAuxiliaryRunGuard} from './workbench/auxiliary-run-guard.ts';
 import {registerConversationGoalRoutes,type ConversationGoalClient} from './conversations/goal-routes.ts';
 import {SkillCatalogService,type SkillCatalogHost} from './skills/catalog.ts';
 import {registerSkillCatalogRoutes} from './skills/catalog-routes.ts';
-import {registerNativeCommandQueryRoutes} from './skills/command-query-routes.ts';
+import {registerNativeCommandQueryRoutes,registerNativePlanModeRoutes} from './skills/command-query-routes.ts';
 import {AttachmentResolver} from './artifacts/resolver.ts';
 import {attachmentKindForMime} from './artifacts/pinned-manifest.ts';
 import {readAttachmentSteeringReadiness,type OrdinaryAttachmentSteeringClient} from './harness/ordinary-attachment-readiness.ts';
@@ -881,6 +881,7 @@ export async function buildServer(config: {
     const catalog=new SkillCatalogService(db,workbench,config.skillCatalogClient);
     registerSkillCatalogRoutes(app,catalog,actor,config.internalChannelToken);
     registerNativeCommandQueryRoutes(app,{db,catalog,client:config.skillCatalogClient,actor,token:config.internalChannelToken});
+    registerNativePlanModeRoutes(app,{db,catalog,client:config.skillCatalogClient,actor,token:config.internalChannelToken});
   }
   app.get('/v1/capabilities', async (request, reply) => {
     const ownerId = actor(request as any);

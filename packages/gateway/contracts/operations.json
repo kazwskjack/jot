@@ -1717,5 +1717,50 @@
     "NativeCommandQueryOperation",
     "200",
     "Read the original paired native audit through the configured Host persistence read handle. Check Session incarnation, original command/run sequence and hash, matching command/done identity and immutable end receipt before settling the original operation. Dispatch remains owned by the original first claim. Unpaired, absent, changed or incomplete audit evidence preserves unresolved state."
+  ],
+  [
+    "POST",
+    "/v1/runs/{run_id}/native-plan-mode",
+    "submitNativePlanMode",
+    "NativePlanModeRequest",
+    "NativePlanModeAccepted",
+    "202",
+    "Set the original resident Agent plan mode using the pinned native /plan or /plan off handler. The explicit boolean target, effective catalog digest and original definition ID are immutable request facts. Original owner/run/Session/role-or-work-mode scope is rechecked around a private first-claim dispatch. The native handler receives an empty attachment list and exactly the selected mode input. Existing Goal guards and permission layers apply. The durable native result may describe a queued next-step change. Recover the original operation by request ID after response loss."
+  ],
+  [
+    "GET",
+    "/v1/runs/{run_id}/native-plan-mode",
+    "listNativePlanMode",
+    null,
+    "NativePlanModePage",
+    "200",
+    "Read original owner/run plan-mode operation summaries and target intents. Default ordering uses recent updates. Opt into history=1 and the original before request ID for bounded creation-order history pages."
+  ],
+  [
+    "GET",
+    "/v1/runs/{run_id}/native-plan-mode/{request_id}",
+    "readNativePlanMode",
+    null,
+    "NativePlanModeOperation",
+    "200",
+    "Read the original requested plan-mode target, operation state and any durable native result, including after original run completion."
+  ],
+  [
+    "POST",
+    "/v1/runs/{run_id}/native-plan-mode/{request_id}/close",
+    "closeNativePlanMode",
+    "NativePlanModeClose",
+    "NativePlanModeOperation",
+    "200",
+    "Close an unclaimed original plan-mode request using a durable negative dispatch fence. Previously dispatched and known native results retain their original state."
+  ],
+  [
+    "POST",
+    "/v1/runs/{run_id}/native-plan-mode/{request_id}/reconcile",
+    "reconcileNativePlanMode",
+    "NativePlanModeReconcile",
+    "NativePlanModeOperation",
+    "200",
+    "Reconcile the original plan-mode request against its durably paired native command/run and command/done log, including exact original mode input, Session incarnation and event hashes. This read settles the original result from retained evidence."
   ]
 ]

@@ -102,5 +102,7 @@ export default function SkillCatalogPanel({runId,ownerScope,onUseSkill}:{runId:s
    runId={runId} ownerScope={ownerScope} name={directorySkill} onRead={path=>readResource(directorySkill,path)} onClose={()=>setDirectorySkill(null)}/>}
   <NativeCommandQueries key={ownerScope+':'+runId} runId={runId} ownerScope={ownerScope}
    commands={current?.value?.commands?.items??[]} catalogSha256={current?.value?.catalogSha256??''}/>
+  <NativeCommandQueries key={ownerScope+':'+runId+':plan'} runId={runId} ownerScope={ownerScope} planMode
+   commands={current?.value?.commands?.items??[]} catalogSha256={current?.value?.catalogSha256??''}/>
   <button type="button" onClick={()=>setAttempt(n=>n+1)}>刷新技能目录</button></div>;
 }

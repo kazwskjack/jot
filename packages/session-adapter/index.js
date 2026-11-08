@@ -37,6 +37,7 @@ import {createOptionalMemoryExtractionHost} from './optional-memory-extraction.j
 import { WorkbenchBridge,normalizeHostExecutionLease } from './workbench.js'
 import { createSkillContentCommand, createSkillContentReader } from './skill-content-reader.js'
 import {createNativeCommandQueryHost} from './native-command-query.js'
+import {nativePlanModePolicy} from '../skills/plan-mode-command.js'
 import { createSkillCatalogCommand, createSkillCatalogReader, createSkillResourceCommand, createSkillResourceReader } from './skill-catalog-reader.js'
 import {createNativeWorkspaceAdmissionGate} from './native-workspace-factory.js'
 import {createNativeGitHost,normalizeNativeGitHostConfig} from './native-git-host.js'
@@ -270,7 +271,7 @@ async function createOrResumeSession({controller,request,agents,sessions,session
   return value
 }
 
-export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,skillContentCommand,skillCatalogCommand,skillResourceCommand,nativeCommandQueryHost,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation=false,sessionNotFoundError,modelCatalogReader,requireOrdinaryModelPolicy=false,chatExecutionPolicy,chatModeReadiness,mcpControlRoute,pluginProfileControl,hostPolicyBootstrap,hostSettingsProductHandler,hostAdmissionGuard }) {
+export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,skillContentCommand,skillCatalogCommand,skillResourceCommand,nativeCommandQueryHost,nativePlanModeHost,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation=false,sessionNotFoundError,modelCatalogReader,requireOrdinaryModelPolicy=false,chatExecutionPolicy,chatModeReadiness,mcpControlRoute,pluginProfileControl,hostPolicyBootstrap,hostSettingsProductHandler,hostAdmissionGuard }) {
   const allowedPresets=new Set(ALLOWED_AGENT_PRESETS)
   if(chatExecutionPolicy!==undefined){normalizeChatExecutionPolicy(chatExecutionPolicy);if(!requireOrdinaryModelPolicy||!ordinaryInputAdmissionHost)throw Error('ordinary_execution_policy_config_invalid');allowedPresets.add('jot-chat')}
   const voiceHandler = voiceEnabled ? createVoiceAdapterHandler({ speechController, token }) : null
@@ -366,12 +367,13 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       if (typeof mcpControlRoute !== 'function') return json(503, { error: 'mcp_control_unavailable' })
       return mcpControlRoute({ method, url: url.pathname, body, signal })
     }
-    if(url.pathname==='/v1/commands/query'||url.pathname==='/v1/commands/query/reconcile'){
+    if(['/v1/commands/query','/v1/commands/query/reconcile','/v1/commands/plan-mode','/v1/commands/plan-mode/reconcile'].includes(url.pathname)){
       const reconcile=url.pathname.endsWith('/reconcile');
+      const host=url.pathname.startsWith('/v1/commands/plan-mode')?nativePlanModeHost:nativeCommandQueryHost;
       if(method!=='POST')return json(405,{error:'method_not_allowed'});
       if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).sort().join(',')!==(reconcile?'audit,request,scope':'grant_token,request,scope'))return json(422,{error:'native_command_query_invalid'});
-      if(!nativeCommandQueryHost)return json(503,{error:'native_command_query_unavailable'});
-      try{return json(200,await (reconcile?nativeCommandQueryHost.reconcile(body,signal):nativeCommandQueryHost.execute(body,signal)));}
+      if(!host)return json(503,{error:'native_command_query_unavailable'});
+      try{return json(200,await (reconcile?host.reconcile(body,signal):host.execute(body,signal)));}
       catch{return json(reconcile?503:422,{error:reconcile?'native_command_query_audit_unavailable':'native_command_query_invalid'});}
     }
     if (url.pathname === '/v1/skills/read') {
@@ -1126,6 +1128,8 @@ export function apply(ctx, config = {}) {
       : undefined
     const nativeCommandQueryHost=workbenchBridge?createNativeCommandQueryHost({agents:ctx.agents,sessions:ctx.sessions,persistence:ctx.sessionPersistence,bridge:workbenchBridge,ordinaryPresets}):undefined
     if(nativeCommandQueryHost)ctx.effect(()=>()=>nativeCommandQueryHost.close())
+    const nativePlanModeHost=workbenchBridge?createNativeCommandQueryHost({agents:ctx.agents,sessions:ctx.sessions,persistence:ctx.sessionPersistence,bridge:workbenchBridge,ordinaryPresets,commandPolicy:nativePlanModePolicy}):undefined
+    if(nativePlanModeHost)ctx.effect(()=>()=>nativePlanModeHost.close())
     let nativeWorkspaceAdmissionGate
     if(config.nativeWorkspaceAdmission===true){
       nativeWorkspaceAdmissionGate=createNativeWorkspaceAdmissionGate({ctx,bridge:workbenchBridge})
@@ -1216,7 +1220,7 @@ export function apply(ctx, config = {}) {
     }
     const handler = createAdapterHandler({ controller: ctx.sessionController, fileUploads: ctx.fileUploads, agents: ctx.agents,
       sessions:ctx.sessions,persistence:ctx.sessionPersistence,sessionNotFoundError:ApiSessionNotFound,
-      speechController, voiceEnabled, token, workbenchBridge, skillContentCommand, skillCatalogCommand, skillResourceCommand, nativeCommandQueryHost,
+      speechController, voiceEnabled, token, workbenchBridge, skillContentCommand, skillCatalogCommand, skillResourceCommand, nativeCommandQueryHost, nativePlanModeHost,
       budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation:config.nativeIdleObservation===true,
       chatModeReadiness,modelCatalogReader:createModelCatalogReader({llm:ctx.llm,enabled:config.ordinaryModelSelection===true,routeHealth:modelRouteHealth}),requireOrdinaryModelPolicy:config.ordinaryModelSelection===true,...(chatExecutionPolicy?{chatExecutionPolicy}:{}),mcpControlRoute,pluginProfileControl,...(hostPolicyBootstrapRuntime?.bootstrap?{hostPolicyBootstrap:hostPolicyBootstrapRuntime.bootstrap}:{}),...(hostPolicyBootstrapRuntime?.productHandler?{hostSettingsProductHandler:hostPolicyBootstrapRuntime.productHandler}:{}),...(hostAdmissionGuard?{hostAdmissionGuard}:{}) })
     const server = createServer(async (req, res) => {

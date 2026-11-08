@@ -5,15 +5,16 @@ import {validateNativeCommandQuery} from '../skills/command-query.js';
 import {validateNativeCommandAudit,validateNativeCommandRecovery} from '../skills/command-query-audit.js';
 
 /** Observe the original native log through a read handle, including retired Agents. */
-export async function readNativeCommandAudit({packet,persistence,sessions,bridge,signal}){
+export async function readNativeCommandAudit({packet,persistence,sessions,bridge,signal,commandPolicy}){
  const scope=normalizeSkillReadScope(packet.scope);
- const request=validateNativeCommandQuery(packet.request);
+ const request=(commandPolicy?.validateRequest??validateNativeCommandQuery)(packet.request);
+ const input=commandPolicy?.inputFor(request)??'';
  const audit=validateNativeCommandAudit(packet.audit);
  const original={scope,request,audit};
  const binding={runId:scope.run_id,sessionRef:scope.session_ref};
  const check=async()=>{
   signal.throwIfAborted();
-  const response=await bridge.request('native-command-query-audit',binding,original,signal);
+  const response=await bridge.request((commandPolicy?.callbackPrefix??'native-command-query')+'-audit',binding,original,signal);
   if(response?.execution_authorized!==false||!isDeepStrictEqual(response.audit,audit))throw Error('native_command_query_audit_changed');
   signal.throwIfAborted();
  };
@@ -29,7 +30,7 @@ export async function readNativeCommandAudit({packet,persistence,sessions,bridge
   const {events}=await handle.read(audit.run_event_seq,1,{signal});
   const start=events[0];
   if(events.length!==1||start.seq!==audit.run_event_seq||start.type!=='command/run'||start.data.commandId!==audit.command_id
-   ||start.data.name!==request.name||start.data.source?.kind!=='user'||start.data.args!==undefined&&start.data.args!==''
+   ||start.data.name!==request.name||start.data.source?.kind!=='user'||(start.data.args??'')!==input
    ||nativeCommandEventSha256(start)!==audit.run_event_sha256){
    throw Error('native_command_query_audit_changed');
   }

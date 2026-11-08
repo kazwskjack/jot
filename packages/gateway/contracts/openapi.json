@@ -22062,6 +22062,446 @@
           }
         }
       }
+    },
+    "/v1/runs/{run_id}/native-plan-mode": {
+      "post": {
+        "operationId": "submitNativePlanMode",
+        "tags": [
+          "skills"
+        ],
+        "description": "Set the original resident Agent plan mode using the pinned native /plan or /plan off handler. The explicit boolean target, effective catalog digest and original definition ID are immutable request facts. Original owner/run/Session/role-or-work-mode scope is rechecked around a private first-claim dispatch. The native handler receives an empty attachment list and exactly the selected mode input. Existing Goal guards and permission layers apply. The durable native result may describe a queued next-step change. Recover the original operation by request ID after response loss.",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativePlanModeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Original command query operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativePlanModeAccepted"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Owned run or original operation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Original scope or immutable request conflicts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid command query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Configured native query provider unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listNativePlanMode",
+        "tags": [
+          "skills"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "history",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            },
+            "description": "Browse original operation history in immutable creation order."
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Original request ID from the last item of the previous history page. Requires history=1 and an existing original owner/run record."
+          }
+        ],
+        "description": "Read original owner/run plan-mode operation summaries and target intents. Default ordering uses recent updates. Opt into history=1 and the original before request ID for bounded creation-order history pages.",
+        "responses": {
+          "200": {
+            "description": "Original command query operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativePlanModePage"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Owned run or original operation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Original scope or immutable request conflicts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid command query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Configured native query provider unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/runs/{run_id}/native-plan-mode/{request_id}": {
+      "get": {
+        "operationId": "readNativePlanMode",
+        "tags": [
+          "skills"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "description": "Read the original requested plan-mode target, operation state and any durable native result, including after original run completion.",
+        "responses": {
+          "200": {
+            "description": "Original command query operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativePlanModeOperation"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Owned run or original operation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Original scope or immutable request conflicts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid command query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Configured native query provider unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/runs/{run_id}/native-plan-mode/{request_id}/close": {
+      "post": {
+        "operationId": "closeNativePlanMode",
+        "tags": [
+          "skills"
+        ],
+        "description": "Close an unclaimed original plan-mode request using a durable negative dispatch fence. Previously dispatched and known native results retain their original state.",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativePlanModeClose"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Original operation state after the dispatch fence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativePlanModeOperation"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Owned run unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Original command identity conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid original request identity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/runs/{run_id}/native-plan-mode/{request_id}/reconcile": {
+      "post": {
+        "operationId": "reconcileNativePlanMode",
+        "tags": [
+          "skills"
+        ],
+        "description": "Reconcile the original plan-mode request against its durably paired native command/run and command/done log, including exact original mode input, Session incarnation and event hashes. This read settles the original result from retained evidence.",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativePlanModeReconcile"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Original operation after evidence reconciliation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativePlanModeOperation"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Owned original operation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Original audit unpaired or evidence conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid original request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Native audit provider unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -42575,6 +43015,241 @@
           "execution_authorized",
           "viewScope"
         ],
+        "additionalProperties": false
+      },
+      "NativePlanModeRequest": {
+        "type": "object",
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-4[a-fA-F0-9]{3}-[89aAbB][a-fA-F0-9]{3}-[a-fA-F0-9]{12}$"
+          },
+          "name": {
+            "const": "plan"
+          },
+          "definition_id": {
+            "const": "@deepseek-ai/dsh-plan-mode"
+          },
+          "expected_catalog_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "request_id",
+          "name",
+          "definition_id",
+          "expected_catalog_sha256",
+          "enabled"
+        ],
+        "additionalProperties": false
+      },
+      "NativePlanModeSummary": {
+        "type": "object",
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "name": {
+            "const": "plan"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "prepared",
+              "dispatched",
+              "settled",
+              "rejected",
+              "unknown"
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Original requested target. Null identifies a request closed before preparation."
+          }
+        },
+        "required": [
+          "request_id",
+          "run_id",
+          "name",
+          "state",
+          "updated_at",
+          "enabled"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "enabled": {
+                  "type": "null"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "state": {
+                  "const": "rejected"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "NativePlanModeOperation": {
+        "type": "object",
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "name": {
+            "const": "plan"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "prepared",
+              "dispatched",
+              "settled",
+              "rejected",
+              "unknown"
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "result": {
+            "$ref": "#/components/schemas/NativeCommandQueryResult"
+          },
+          "enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Original requested target. Null identifies a request closed before preparation."
+          }
+        },
+        "required": [
+          "request_id",
+          "run_id",
+          "name",
+          "state",
+          "updated_at",
+          "enabled"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "state": {
+                  "const": "settled"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "result"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "result"
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "enabled": {
+                  "type": "null"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "state": {
+                  "const": "rejected"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "NativePlanModePage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "$ref": "#/components/schemas/NativePlanModeSummary"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "NativePlanModeAccepted": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "const": true
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "run_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "accepted",
+          "request_id",
+          "run_id"
+        ],
+        "additionalProperties": false
+      },
+      "NativePlanModeClose": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "const": "plan"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "NativePlanModeReconcile": {
+        "type": "object",
+        "properties": {},
         "additionalProperties": false
       }
     },

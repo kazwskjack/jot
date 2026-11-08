@@ -491,3 +491,11 @@ export type NativeCommandQueryPage = {items:NativeCommandQuerySummary[]};
 export type NativeCommandQueryClose = {name:'permission'|'goal'};
 
 export type NativeCommandQueryReconcile = Record<string,never>;
+
+export type NativePlanModeRequest = import('../../skills/plan-mode-command.js').NativePlanMode;
+export type NativePlanModeSummary = Omit<NativeCommandQuerySummary,'name'> & {name:'plan';enabled:boolean|null};
+export type NativePlanModeOperation = NativePlanModeSummary & {result?:NativeCommandQueryResult};
+export type NativePlanModePage = {items:NativePlanModeSummary[]};
+export type NativePlanModeAccepted = NativeCommandQueryAccepted;
+export type NativePlanModeClose = {name:'plan'};
+export type NativePlanModeReconcile = Record<string,never>;

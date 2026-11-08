@@ -6,17 +6,20 @@ import {validateNativeCommandQuery,validateNativeCommandQueryResult} from '../sk
 import {observeNativeCommandStart} from './native-command-audit.js';
 import {readNativeCommandAudit} from './native-command-audit-reader.js';
 
-/** Native query handlers keep their command/run and command/done audit owner. */
-export function createNativeCommandQueryHost({agents,sessions,persistence,bridge,ordinaryPresets}){
+/** Native command handlers keep their original command/run and command/done pair. */
+export function createNativeCommandQueryHost({agents,sessions,persistence,bridge,ordinaryPresets,commandPolicy}){
+ const callbackPrefix=commandPolicy?.callbackPrefix??'native-command-query';
  const lifetime=new AbortController(),jobs=new Set();let closed=false;
  async function execute(packet,signal){
-  const scope=normalizeSkillReadScope(packet.scope),request=validateNativeCommandQuery(packet.request);
+  const scope=normalizeSkillReadScope(packet.scope),request=(commandPolicy?.validateRequest??validateNativeCommandQuery)(packet.request);
+  const input=commandPolicy?.inputFor(request)??'';
   if(typeof packet.grant_token!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(packet.grant_token))throw Error('native_command_query_invalid');
   const original={scope,request,grant_token:packet.grant_token},binding={runId:scope.run_id,sessionRef:scope.session_ref};
   const active=AbortSignal.any([lifetime.signal,AbortSignal.timeout(30000),...(signal?[signal]:[])]);
-  const settle=(state,result)=>bridge.request('native-command-query-settle',binding,{...original,state,...(result?{result}:{})});
+  const settle=(state,result)=>bridge.request(callbackPrefix+'-settle',binding,{...original,state,...(result?{result}:{})});
   let claimAttempted=false;
   try{
+   commandPolicy?.assertScope(scope);
    const source=createSkillReadBinding({scope,signal:active,agents,sessions,bridge,ordinaryPresets});
    await source.authorize();
    const commands=source.agent.ctx.get('commands',false);
@@ -28,15 +31,17 @@ export function createNativeCommandQueryHost({agents,sessions,persistence,bridge
     ||!isDeepStrictEqual(commandManifest(definition),descriptor))throw Error('native_command_query_catalog_changed');
    await source.authorize();
    claimAttempted=true;
-   const grant=await bridge.request('native-command-query-claim',binding,original,active);
+   const grant=await bridge.request(callbackPrefix+'-claim',binding,original,active);
    if(grant?.dispatch!==true)return {request_id:request.request_id,accepted:true};
    await source.authorize();
+   commandPolicy?.assertScope(scope);
    if(commands.find(source.agent,request.name)!==definition)throw Error('native_command_query_catalog_changed');
    active.throwIfAborted();
-   const execution=observeNativeCommandStart(source.agent,request.name,()=>commands.execute(source.agent,'/'+request.name,[],active));
+   const line='/'+request.name+input;
+   const execution=observeNativeCommandStart(source.agent,request.name,()=>commands.execute(source.agent,line,[],active),input);
    if(execution.audit){
     try{
-     if(await sessions.flush(source.session)===true)await bridge.request('native-command-query-bind',binding,{...original,audit:execution.audit});
+     if(await sessions.flush(source.session)===true)await bridge.request(callbackPrefix+'-bind',binding,{...original,audit:execution.audit});
     }catch{}
    }
    const result=validateNativeCommandQueryResult(await execution.running);
@@ -55,6 +60,6 @@ export function createNativeCommandQueryHost({agents,sessions,persistence,bridge
  },reconcile(packet,signal){
   if(closed)return Promise.reject(Error('native_command_query_host_closed'));
   const active=AbortSignal.any([lifetime.signal,AbortSignal.timeout(30000),...(signal?[signal]:[])]);
-  const job=readNativeCommandAudit({packet,persistence,sessions,bridge,signal:active});jobs.add(job);job.then(()=>jobs.delete(job),()=>jobs.delete(job));return job;
+  const job=readNativeCommandAudit({packet,persistence,sessions,bridge,signal:active,commandPolicy});jobs.add(job);job.then(()=>jobs.delete(job),()=>jobs.delete(job));return job;
  },async close(){closed=true;lifetime.abort(Error('native_command_query_host_closed'));await Promise.allSettled([...jobs]);}});
 }

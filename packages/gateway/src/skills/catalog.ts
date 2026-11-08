@@ -15,6 +15,8 @@ export type SkillCatalogHost=Readonly<{
  readDefinition?:(input:{scope:SkillCatalogScope;name:string;signal?:AbortSignal;include_source_manifest?:true})=>Promise<unknown>;
  executeCommandQuery?:(packet:Record<string,unknown>)=>Promise<unknown>;
  reconcileCommandQuery?:(packet:Record<string,unknown>)=>Promise<unknown>;
+ executePlanMode?:(packet:Record<string,unknown>)=>Promise<unknown>;
+ reconcilePlanMode?:(packet:Record<string,unknown>)=>Promise<unknown>;
 }>;
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 const SKILL=/^[a-z0-9]+(?:-[a-z0-9]+)*$/;

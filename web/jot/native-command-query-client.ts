@@ -10,13 +10,14 @@ function current(ownerScope:string,runId:string,signal?:AbortSignal){
  signal?.throwIfAborted();
  if(!ID.test(runId)||!/^[a-f0-9]{64}$/.test(ownerScope)||taskDraftScope()!==ownerScope)throw Error('NATIVE_QUERY_SCOPE_CHANGED');
 }
-function summary(value:unknown,runId:string):NativeCommandQuerySummary{
+export function validateNativeCommandOperationSummary<N extends string>(value:unknown,runId:string,names:readonly N[]):Omit<NativeCommandQuerySummary,'name'>&{name:N}{
  if(!object(value)||Object.keys(value).sort().join(',')!=='name,request_id,run_id,state,updated_at'
   ||typeof value.request_id!=='string'||!UUID.test(value.request_id)||value.run_id!==runId
-  ||typeof value.name!=='string'||!['permission','goal'].includes(value.name)||typeof value.state!=='string'||!states.includes(value.state)
+  ||typeof value.name!=='string'||!names.includes(value.name as N)||typeof value.state!=='string'||!states.includes(value.state)
   ||typeof value.updated_at!=='string'||!Number.isFinite(Date.parse(value.updated_at)))throw Error('NATIVE_QUERY_RESPONSE_UNKNOWN');
- return value as unknown as NativeCommandQuerySummary;
+ return value as unknown as Omit<NativeCommandQuerySummary,'name'>&{name:N};
 }
+const summary=(value:unknown,runId:string)=>validateNativeCommandOperationSummary(value,runId,['permission','goal'] as const);
 export async function listNativeCommandQueries(runId:string,ownerScope:string,signal:AbortSignal,history?:{before?:string}){
  current(ownerScope,runId,signal);
  if(history?.before!==undefined&&!UUID.test(history.before))throw Error('NATIVE_QUERY_REQUEST_INVALID');
@@ -66,18 +67,21 @@ function pending(value:unknown):PendingNativeQuery{
  try{return validateNativeCommandQueryIdentity(value);}catch{throw Error('NATIVE_QUERY_RECOVERY_INVALID');}
 }
 /** One same-tab original request identity, backed by the server operation list. */
-export class NativeCommandQueryStore{
+export class NativeCommandQueryStore<T extends {request_id:string;name:string}=PendingNativeQuery>{
  private readonly key:string;
- constructor(private readonly ownerScope:string,private readonly runId:string){this.key=`jot-native-command-query/v1/${ownerScope}/${runId}`;}
+ constructor(private readonly ownerScope:string,private readonly runId:string,private readonly policy?:{kind:'plan';validate:(value:unknown)=>T}){
+  this.key=`jot-native-command-${policy?.kind??'query'}/v1/${ownerScope}/${runId}`;
+ }
+ private validate(value:unknown):T{return this.policy?this.policy.validate(value):pending(value) as unknown as T;}
  private storage(){current(this.ownerScope,this.runId);try{return globalThis.sessionStorage;}catch{throw Error('NATIVE_QUERY_RECOVERY_UNAVAILABLE');}}
- read():PendingNativeQuery|null{
+ read():T|null{
   let raw:string|null;try{raw=this.storage().getItem(this.key);}catch{throw Error('NATIVE_QUERY_RECOVERY_UNAVAILABLE');}
   if(raw===null)return null;
   if(raw.length>512)throw Error('NATIVE_QUERY_RECOVERY_INVALID');
-  try{return pending(JSON.parse(raw));}catch{throw Error('NATIVE_QUERY_RECOVERY_INVALID');}
+  try{return this.validate(JSON.parse(raw));}catch{throw Error('NATIVE_QUERY_RECOVERY_INVALID');}
  }
- save(value:PendingNativeQuery){
-  pending(value);const old=this.read();
+ save(value:T){
+  this.validate(value);const old=this.read();
   if(old&&(old.request_id!==value.request_id||old.name!==value.name))throw Error('NATIVE_QUERY_RECOVERY_PENDING');
   try{this.storage().setItem(this.key,JSON.stringify(value));}catch{throw Error('NATIVE_QUERY_RECOVERY_UNAVAILABLE');}
   if(JSON.stringify(this.read())!==JSON.stringify(value))throw Error('NATIVE_QUERY_RECOVERY_UNAVAILABLE');
@@ -87,4 +91,14 @@ export class NativeCommandQueryStore{
   try{this.storage().removeItem(this.key);}catch{throw Error('NATIVE_QUERY_RECOVERY_UNAVAILABLE');}
   if(this.read()!==null)throw Error('NATIVE_QUERY_RECOVERY_UNAVAILABLE');
  }
+}
+export {current as assertNativeCommandScope};
+export function createNativeCommandQueryClient(runId:string,ownerScope:string){
+ return {
+  list:(signal:AbortSignal,history?:{before?:string})=>listNativeCommandQueries(runId,ownerScope,signal,history),
+  read:(id:string,signal:AbortSignal)=>readNativeCommandQuery(runId,ownerScope,id,signal),
+  submit:(input:unknown,signal:AbortSignal)=>submitNativeCommandQuery(runId,ownerScope,validateNativeCommandQuery(input),signal),
+  close:(identity:unknown,signal:AbortSignal)=>closeNativeCommandQuery(runId,ownerScope,pending(identity),signal),
+  reconcile:(id:string,signal:AbortSignal)=>reconcileNativeCommandQuery(runId,ownerScope,id,signal),
+ };
 }

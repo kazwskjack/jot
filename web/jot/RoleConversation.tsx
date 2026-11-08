@@ -224,6 +224,8 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
    </select></label>
    <NativeCommandQueries key={queryRecoveryMount.ownerScope+':'+queryRecoveryMount.runId}
     runId={queryRecoveryMount.runId} ownerScope={queryRecoveryMount.ownerScope} commands={[]} catalogSha256=""/>
+   <NativeCommandQueries key={queryRecoveryMount.ownerScope+':'+queryRecoveryMount.runId+':plan'} planMode
+    runId={queryRecoveryMount.runId} ownerScope={queryRecoveryMount.ownerScope} commands={[]} catalogSha256=""/>
   </details>}
   {diagnosticRun&&<RunDiagnostics key={diagnosticRun.run_id} run={diagnosticRun}/>}
  {state&&<CompactionActivities activities={Object.values(state.activities)} runs={state.runs}/>}
