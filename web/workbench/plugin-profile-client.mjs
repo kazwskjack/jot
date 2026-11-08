@@ -4,13 +4,30 @@ const base = '/plugin-profile/bundles';
 const fail = code => { throw new Error(code); };
 const exact = (value, keys) => object(value) && Object.keys(value).every(key => keys.includes(key));
 
+function validateEvidence(value) {
+  if (value === null) return;
+  if (!exact(value, ['protocol','snapshot_id','consistency','before','after','bundle']) || value.protocol !== 1
+    || !/^[a-f0-9]{64}$/.test(value.snapshot_id ?? '') || value.consistency !== 'sampled'
+    || value.before !== 'captured' || !['captured','unavailable'].includes(value.after)) fail('PLUGIN_PROFILE_RESPONSE_UNKNOWN');
+  if (value.bundle === null) return;
+  const bundle = value.bundle;
+  if (!exact(bundle, ['name','version','manifest_sha256','license','license_file_sha256','integrity'])
+    || typeof bundle.name !== 'string' || !bundle.name || bundle.name.length > 192
+    || typeof bundle.version !== 'string' || bundle.version.length > 128
+    || !/^[a-f0-9]{64}$/.test(bundle.manifest_sha256 ?? '')
+    || bundle.license !== null && (typeof bundle.license !== 'string' || bundle.license.length > 256)
+    || bundle.license_file_sha256 !== null && !/^[a-f0-9]{64}$/.test(bundle.license_file_sha256 ?? '')
+    || bundle.integrity !== null && (typeof bundle.integrity !== 'string' || bundle.integrity.length > 2048)) fail('PLUGIN_PROFILE_RESPONSE_UNKNOWN');
+}
+
 export function validatePluginProfileResult(value) {
-  if (!exact(value, ['application','changed','stage','bundle','version','restartReason','failedAt','error','packageResult'])
+  if (!exact(value, ['application','changed','stage','bundle','version','restartReason','failedAt','error','packageResult','evidence'])
     || !['applied','restart-required','overridden','failed','cancelled'].includes(value.application)
     || typeof value.changed !== 'boolean') fail('PLUGIN_PROFILE_RESPONSE_UNKNOWN');
   for (const key of ['stage','bundle','version','restartReason','failedAt']) {
     if (value[key] !== undefined && (typeof value[key] !== 'string' || value[key].length > 192)) fail('PLUGIN_PROFILE_RESPONSE_UNKNOWN');
   }
+  if (value.evidence !== undefined) validateEvidence(value.evidence);
   if (value.error !== undefined && (!exact(value.error, ['code']) || typeof value.error.code !== 'string'
     || !/^[A-Za-z0-9._-]{1,96}$/.test(value.error.code))) fail('PLUGIN_PROFILE_RESPONSE_UNKNOWN');
   if (value.packageResult !== undefined) {

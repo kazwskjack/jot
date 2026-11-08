@@ -40860,6 +40860,16 @@
               "exitCode"
             ],
             "additionalProperties": false
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PluginProfileEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -40949,6 +40959,98 @@
             }
           }
         ]
+      },
+      "PluginProfileEvidence": {
+        "type": "object",
+        "properties": {
+          "protocol": {
+            "const": 1
+          },
+          "snapshot_id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "consistency": {
+            "const": "sampled"
+          },
+          "before": {
+            "const": "captured"
+          },
+          "after": {
+            "enum": [
+              "captured",
+              "unavailable"
+            ]
+          },
+          "bundle": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 192
+                  },
+                  "version": {
+                    "type": "string",
+                    "maxLength": 128
+                  },
+                  "manifest_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "license": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 256
+                  },
+                  "license_file_sha256": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "integrity": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 2048
+                  }
+                },
+                "required": [
+                  "name",
+                  "version",
+                  "manifest_sha256",
+                  "license",
+                  "license_file_sha256",
+                  "integrity"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "protocol",
+          "snapshot_id",
+          "consistency",
+          "before",
+          "after",
+          "bundle"
+        ],
+        "additionalProperties": false
       }
     },
     "parameters": {

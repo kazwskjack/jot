@@ -201,7 +201,7 @@ export function createGatewayPluginProfileReceiptClient({origin, token, fetchImp
  * must be the existing Host operator authority extended with exact mutation grants;
  * this module deliberately has no grant map or request-supplied profile id.
  */
-export function createDshProfilePluginControl({binding, pluginManager, policyAuthority, gatewayReceiptExecutor} = {}) {
+export function createDshProfilePluginControl({binding, pluginManager, policyAuthority, gatewayReceiptExecutor, evidence} = {}) {
   if (!object(binding) || !OWNER_ID.test(binding.ownerId ?? '') || !OWNER_ID.test(binding.profileId ?? '')
     || typeof binding.profileDirectory !== 'string'
     || !object(policyAuthority) || typeof policyAuthority.issuePluginMutationGrant !== 'function'
@@ -243,11 +243,17 @@ export function createDshProfilePluginControl({binding, pluginManager, policyAut
     let result;
     try { result = await safePluginManager.waitForInstall(context.operationId); }
     catch { return {state: 'unknown'}; }
-    return result == null ? {state: 'unknown'} : {state: 'settled', response: result};
+    if (result == null) return {state:'unknown'};
+    if (evidence) {
+      let summary = null;
+      try {summary = await evidence.finish(context, result);} catch { /* Legacy dispatched operations may have no snapshot. */ }
+      return {state:'settled', response:{...result, evidence:summary}};
+    }
+    return {state:'settled', response:result};
   };
 
   const executeAuthorizedOperation = createDshProfilePluginOperationCaller({
-    authorizeReference, gatewayReceiptExecutor: receipts, recoverDispatched,
+    authorizeReference, gatewayReceiptExecutor: receipts, recoverDispatched, evidence,
   });
   const lifecycle = createDshProfilePluginLifecycle({
     ownerId: binding.ownerId, profileId: binding.profileId, pluginManager: safePluginManager, executeAuthorizedOperation,

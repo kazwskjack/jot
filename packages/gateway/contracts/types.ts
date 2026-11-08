@@ -450,7 +450,12 @@ export type PluginProfileBundle = {name:string; installed?:boolean; enabled?:boo
 export type PluginProfileBundlePage = {bundles:PluginProfileBundle[]};
 export type PluginProfileInstall = {spec:string; enabled:boolean};
 export type PluginProfileEnable = {enabled:boolean};
+export type PluginProfileEvidence = {
+  protocol:1; snapshot_id:string; consistency:'sampled'; before:'captured'; after:'captured'|'unavailable';
+  bundle:{name:string;version:string;manifest_sha256:string;license:string|null;license_file_sha256:string|null;integrity:string|null}|null;
+};
 export type PluginProfileResult = {
+  evidence?:PluginProfileEvidence|null;
   application:'applied'|'restart-required'|'overridden'|'failed'|'cancelled'; changed:boolean;
   stage?:string; bundle?:string; version?:string; restartReason?:string; failedAt?:string;
   error?:{code:string}; packageResult?:{exitCode:number;kind?:string;timedOut?:boolean};

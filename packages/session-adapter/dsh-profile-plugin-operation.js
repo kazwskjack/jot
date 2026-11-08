@@ -103,9 +103,10 @@ async function markUnknown(executor, context) {
  * grant another SDK dispatch. Implement these methods over the existing
  * ga_idempotency authority rather than a second receipt store.
  */
-export function createDshProfilePluginOperationCaller({authorizeReference, gatewayReceiptExecutor, recoverDispatched} = {}) {
+export function createDshProfilePluginOperationCaller({authorizeReference, gatewayReceiptExecutor, recoverDispatched, evidence} = {}) {
   if (typeof authorizeReference !== 'function') throw fail('plugin_operation_authority_unavailable');
   const executor = receiptExecutor(gatewayReceiptExecutor);
+  if (evidence !== undefined && (!record(evidence) || typeof evidence.begin !== 'function' || typeof evidence.finish !== 'function')) throw fail('plugin_operation_evidence_unavailable');
   if (recoverDispatched !== undefined && typeof recoverDispatched !== 'function') throw fail('plugin_operation_recovery_unavailable');
 
   return async function executeAuthorizedOperation(input, dispatch) {
@@ -149,6 +150,11 @@ export function createDshProfilePluginOperationCaller({authorizeReference, gatew
       throw fail('plugin_operation_unknown');
     }
 
+    try { await evidence?.begin(context); }
+    catch (cause) {
+      await markUnknown(executor, context);
+      throw fail('plugin_operation_evidence_unavailable', cause);
+    }
     let authorized;
     try {
       authorized = await authorizeReference(Object.freeze({
@@ -176,6 +182,11 @@ export function createDshProfilePluginOperationCaller({authorizeReference, gatew
       throw fail('plugin_operation_unknown', cause);
     }
 
+    if (evidence) {
+      let summary = null;
+      try { summary = await evidence.finish(context, result); } catch { /* Preserve the known native outcome. */ }
+      result = {...result, evidence:summary};
+    }
     let settled;
     try {
       settled = await executor.settle(Object.freeze({...context, result}));

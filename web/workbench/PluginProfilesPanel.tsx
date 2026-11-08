@@ -3,7 +3,7 @@ import {request, taskDraftScope} from '../jot/client';
 import {useResource} from './useResource';
 import {TaskSaveReceipt} from './task-save-receipt.mjs';
 import {PluginProfileCommandStore, createPluginProfileClient} from './plugin-profile-client.mjs';
-import type {PluginProfileBundlePage, PluginProfileResult} from '../../packages/gateway/contracts/types';
+import type {PluginProfileBundlePage, PluginProfileResult, PluginProfileEvidence} from '../../packages/gateway/contracts/types';
 
 type Command = {path:string; method:string; body:Record<string,unknown>};
 type Review = {title:string; command:Command};
@@ -40,6 +40,7 @@ export default function PluginProfilesPanel({scopeKey, onPendingChange}:{scopeKe
   const [spec, setSpec] = useState(''), [enabled, setEnabled] = useState(false);
   const [review, setReview] = useState<Review|null>(null), [feedback, setFeedback] = useState('');
   const [busy, setBusy] = useState(false);
+  const [evidence, setEvidence] = useState<PluginProfileEvidence|null|undefined>(undefined);
   const busyRef = useRef(false), dialog = useRef<HTMLDialogElement|null>(null);
   const pending = !!receipt?.pending;
   const blocked = busy || pending || !receipt || taskDraftScope() !== scopeKey;
@@ -56,11 +57,12 @@ export default function PluginProfilesPanel({scopeKey, onPendingChange}:{scopeKe
   const isCurrent = () => mounted.current && currentScope.current === scopeKey && taskDraftScope() === scopeKey;
   async function perform(command:Command|null, readOnly = false) {
     if (!receipt || busyRef.current || !isCurrent()) return;
-    busyRef.current = true; setBusy(true); setFeedback('');
+    busyRef.current = true; setBusy(true); setFeedback(''); setEvidence(undefined);
     try {
       if (readOnly) {
         const operation = await client.recover();
         if (!isCurrent()) return;
+        if (operation?.state === 'settled') setEvidence(operation.response.evidence ?? null);
         setFeedback(operation?.state === 'settled' ? resultText(operation.response) : ({
           reserved:'原操作已登记，等待 Host 处理。', dispatched:'Host 正在处理原操作。', unknown:'原操作结果未知，请保留原请求。',
         } as Record<string,string>)[operation?.state] || '当前没有待确认操作。');
@@ -71,6 +73,7 @@ export default function PluginProfilesPanel({scopeKey, onPendingChange}:{scopeKe
         const result = await client.submit(original);
         if (!isCurrent()) return;
         setFeedback(resultText(result));
+        setEvidence(result.evidence ?? null);
       }
       if (isCurrent()) resource.reload();
     } catch (error) {if (isCurrent()) setFeedback(errorText(error));}
@@ -87,6 +90,18 @@ export default function PluginProfilesPanel({scopeKey, onPendingChange}:{scopeKe
     {recovery.error && <p role="alert">{recovery.error}</p>}
     {resource.error && <p role="alert">{resource.error}</p>}
     {feedback && <p role="status">{feedback}</p>}
+    {evidence !== undefined && <details>
+      <summary>配置与许可记录</summary>
+      {evidence ? <>
+        <p>操作前后采样 · 配置快照 {evidence.after === 'captured' ? '已保存' : '后采样不可用'}</p>
+        <p>快照编号 <code>{evidence.snapshot_id}</code></p>
+        {evidence.bundle ? <>
+          <p>{evidence.bundle.name} · {evidence.bundle.version}</p>
+          <p>声明许可 {evidence.bundle.license || '未知'} · 许可文件 {evidence.bundle.license_file_sha256 ? '已存档' : '未知'}</p>
+          <p>锁文件完整性记录 {evidence.bundle.integrity || '未知'}</p>
+        </> : <p>包许可与完整性记录未知。</p>}
+      </> : <p>此操作的配置与许可记录不可用。</p>}
+    </details>}
     {pending && <div role="status">
       <p>原请求待确认 · {command?.method} {command?.path}</p>
       <button type="button" disabled={busy} onClick={() => void perform(null, true)}>读取原操作状态</button>

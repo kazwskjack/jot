@@ -42,6 +42,7 @@ import {createNativeGitHost,normalizeNativeGitHostConfig} from './native-git-hos
 import {createMcpControlHost,createMcpControlRouteHandler} from './mcp-control-host.js'
 import {createMcpDiscoveryScopeResolver} from './mcp-discovery-control.js'
 import {createGatewayPluginProfileReceiptClient,createDshProfilePluginControl} from './dsh-profile-plugin-control.js'
+import {createPluginProfileEvidence} from './plugin-profile-evidence.js'
 import {resolveOwnerBoundDshProfileContext} from './dsh-profile-binding.js'
 
 import {normalizeLeaseTakeoverRequest,settleLeaseTakeover} from './lease-takeover.js'
@@ -1020,8 +1021,15 @@ export function apply(ctx, config = {}) {
     if(config.pluginProfileEnabled===true){
       if(!workbenchBridge||workbenchToken.length<16)throw Error('plugin_profile_host_unavailable');
       try{
-        pluginProfileControl=createDshProfilePluginControl({
-          binding:resolveOwnerBoundDshProfileContext(ctx.get('profileContext')),
+        const profileContext=ctx.get('profileContext');
+        const binding=resolveOwnerBoundDshProfileContext(profileContext);
+        const nativeRequire=createRequire(profileContext.installAnchor);
+        const {resolveBundleDir}=nativeRequire('@deepseek-ai/dsh-app-boot');
+        const {parse:parseYaml}=nativeRequire('yaml');
+        const evidence=createPluginProfileEvidence({binding,parseYaml,
+          readIdentity:()=>resolveOwnerBoundDshProfileContext(ctx.get('profileContext')),
+          resolveBundleDirectory:name=>resolveBundleDir('dsh',name,profileContext.installAnchor,binding.profileDirectory)});
+        pluginProfileControl=createDshProfilePluginControl({binding,evidence,
           pluginManager:ctx.get('pluginManager'),
           policyAuthority:ctx.get('jotHostPluginMutationAuthority',false),
           gatewayReceiptExecutor:createGatewayPluginProfileReceiptClient({origin:workbenchBridge.origin,token:workbenchToken})
