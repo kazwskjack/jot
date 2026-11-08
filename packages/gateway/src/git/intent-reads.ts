@@ -2,7 +2,16 @@ import type {DatabaseSync} from 'node:sqlite';
 type Row={intent_id:string;owner_id:string;project_id:string;action:'stage'|'unstage'|'commit'|'discard'|'delete-untracked';selection_json:string;review_sha256:string;created_at:string};
 type Event={version:number;state:'prepared'|'approved'|'cancelled';created_at:string};
 /** Original immutable review projection, shared with journal-only reads. */
-export function gitMutationIntentView(row:Row,event:Event){const selection=JSON.parse(row.selection_json) as {paths:string[];message?:string;snapshot_id:string};return{intent_id:row.intent_id,project_id:row.project_id,action:row.action,paths:selection.paths,...(selection.message===undefined?{}:{message:selection.message}),snapshot_id:selection.snapshot_id,review_sha256:row.review_sha256,version:event.version,state:event.state,created_at:row.created_at,updated_at:event.created_at,execution_authorized:false as const};}
+export function gitMutationIntentView(row:Row,event:Event){
+ const selection=JSON.parse(row.selection_json) as {paths:string[];message?:string;snapshot_id:string;commit_metadata?:import('../../contracts/types.ts').GitCommitMetadata};
+ return {
+  intent_id:row.intent_id,project_id:row.project_id,action:row.action,paths:selection.paths,
+  ...(selection.message===undefined?{}:{message:selection.message}),
+  ...(row.action==='commit'&&selection.commit_metadata?{commit_metadata:selection.commit_metadata}:{}),
+  snapshot_id:selection.snapshot_id,review_sha256:row.review_sha256,version:event.version,state:event.state,
+  created_at:row.created_at,updated_at:event.created_at,execution_authorized:false as const,
+ };
+}
 export function readGitMutationIntent(db:DatabaseSync,owner:string,project:string,id:string){
  if(!db.prepare('SELECT 1 FROM ga_projects WHERE id=? AND owner_id=?').get(project,owner))throw Error('project_not_found');
  return readRecordedGitMutationIntent(db,owner,project,id);

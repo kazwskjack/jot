@@ -75,3 +75,26 @@ distinct blobs. Its five findings are the exact previously reviewed neutral
 Office template binary objects; none is a new finding from this increment.
 This is a bounded heuristic review with separate binary provenance review,
 not a claim that arbitrary secrets can be proved absent by pattern matching.
+
+
+## Fixed commit review identity
+
+A repository binding can supply `commit_identity` from operator configuration.
+Both `author` and `committer` require an exact nonblank `name` and `email`.
+For example, the additional binding field can be
+
+```json
+{"commit_identity":{"author":{"name":"Project Author","email":"author@example.invalid"},"committer":{"name":"Project Operator","email":"operator@example.invalid"}}}
+```
+
+The owner review records both identities with one server-captured UTC time at
+whole-second precision, the complete UTF-8 message and digest, staged tree and
+object format, parent, current branch or detached HEAD target, and identity-policy
+digest. Approval recomputes the source proof and the configured identity policy
+while retaining the original captured time. A changed policy requires fresh review.
+Bindings without this field retain repository inspection and index operations.
+Commit review requires the configured identity. Historical commit reviews remain
+readable and cancellable, and require a fresh metadata-bound review for approval.
+The physical repository exclusion namespace continues to derive from the original
+common Git directory. The owner review and its version are the fixed source for the subsequent
+original commit admission and effect work.

@@ -1,3 +1,5 @@
+import type {GitCommitMetadata} from '../../contracts/types.ts';
+import type {GitCommitReviewWitness} from './commit-tree.ts';
 import {createHash,randomUUID} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
 import {withImmediateTransaction} from '../db/database.ts';
@@ -11,6 +13,7 @@ type Operation='stage'|'unstage'|'commit'|'discard'|'delete-untracked';
 export type GitReviewPrepare={request_id:string;action:Operation;paths:string[];snapshot_id:string;message?:string};
 export type GitReviewControl={request_id:string;expected_version:number;action:'approve'|'cancel';review_sha256:string};
 type Prepare=GitReviewPrepare;type Control=GitReviewControl;
+type Selection=Prepare&{commit_metadata?:GitCommitMetadata};
 type State='prepared'|'approved'|'cancelled';
 type Row={intent_id:string;owner_id:string;project_id:string;request_id:string;request_sha256:string;action:Operation;selection_json:string;witness_json:string;review_sha256:string;created_at:string};
 type Event={version:number;state:State;request_id:string|null;request_sha256:string|null;created_at:string};
@@ -77,13 +80,15 @@ export class GitMutationIntents{
    ||input.action==='discard'&&selected.some(entry=>entry.index_status==='?'||entry.worktree_status===' ')
    ||input.action==='delete-untracked'&&selected.some(entry=>entry.index_status!=='?'||entry.worktree_status!=='?'))throw Error('git_selection_invalid');
   const witness=await (input.action==='commit'?this.git.freezeCommit(owner,project,input.snapshot_id,input.paths,signal):this.git.freeze(owner,project,input.snapshot_id,input.paths,signal));signal?.throwIfAborted();
+  const metadata=input.action==='commit'?this.git.commitMetadata(owner,project,witness as GitCommitReviewWitness,input.message!):undefined;
+  const selection:Selection={...input,...(metadata?{commit_metadata:metadata}:{})};
   return ()=>withImmediateTransaction(this.db,()=>{
    signal?.throwIfAborted();
    this.projects.assertOwned(project,owner);
    const existing=this.db.prepare('SELECT * FROM wb_git_mutation_intents WHERE owner_id=? AND project_id=? AND request_id=?').get(owner,project,input.request_id) as Row|undefined;
    if(existing){if(existing.request_sha256!==requestHash)throw Error('idempotency_conflict');return this.view(existing,this.db.prepare('SELECT * FROM wb_git_mutation_events WHERE intent_id=? AND version=1').get(existing.intent_id) as Event);}
-   const id='git-intent-'+randomUUID(),at=new Date().toISOString(),reviewHash=digest({action:input.action,paths:input.paths,message:input.message??null,witness});
-   this.db.prepare('INSERT INTO wb_git_mutation_intents VALUES(?,?,?,?,?,?,?,?,?,?)').run(id,owner,project,input.request_id,requestHash,input.action,JSON.stringify(input),JSON.stringify(witness),reviewHash,at);
+   const id='git-intent-'+randomUUID(),at=new Date().toISOString(),reviewHash=digest({action:input.action,paths:input.paths,message:input.message??null,witness,...(metadata?{commit_metadata:metadata}:{})});
+   this.db.prepare('INSERT INTO wb_git_mutation_intents VALUES(?,?,?,?,?,?,?,?,?,?)').run(id,owner,project,input.request_id,requestHash,input.action,JSON.stringify(selection),JSON.stringify(witness),reviewHash,at);
    this.db.prepare('INSERT INTO wb_git_mutation_events VALUES(?,?,?,?,?,?)').run(id,1,'prepared',null,null,at);
    return this.get(owner,project,id);
   });
@@ -97,6 +102,12 @@ export class GitMutationIntents{
   const assertCurrent=()=>{this.row(owner,project,id);const event=this.latest(id);if(event.version!==input.expected_version)throw Error('version_conflict');if(row.review_sha256!==input.review_sha256)throw Error('git_review_changed');if(event.state==='cancelled'||input.action==='approve'&&event.state!=='prepared')throw Error('git_intent_closed');return event;};
   assertCurrent();if(input.action==='approve'){
    const selection=JSON.parse(row.selection_json) as Prepare,witness=await (selection.action==='commit'?this.git.freezeCommit(owner,project,selection.snapshot_id,selection.paths,signal):this.git.freeze(owner,project,selection.snapshot_id,selection.paths,signal));
+   if(selection.action==='commit'){
+    const metadata=(selection as Selection).commit_metadata;
+    if(!metadata)throw Error('git_commit_review_required');
+    const current=this.git.commitMetadata(owner,project,witness as GitCommitReviewWitness,selection.message!,metadata.author.timestamp);
+    if(JSON.stringify(current)!==JSON.stringify(metadata))throw Error('git_review_changed');
+   }
    if(JSON.stringify(witness)!==row.witness_json)throw Error('git_review_changed');
   }
   signal?.throwIfAborted();return ()=>withImmediateTransaction(this.db,()=>{

@@ -1,12 +1,15 @@
+import {gitCommitOperatorPolicy,commitReviewMetadata,type GitCommitOperatorPolicy} from './commit-metadata.ts';
+import type {GitCommitReviewWitness} from './commit-tree.ts';
 import {isAbsolute,resolve,join} from 'node:path';
 import {createHash} from 'node:crypto';
 import type {ProjectRepository} from '../projects/repository.ts';
 import {GitPublicationEffects} from './publication-effects.ts';
 
-export type GitRepositoryBinding={owner_id:string;project_id:string;root:string;git_directory?:string;common_directory?:string};
+export type GitRepositoryBinding={owner_id:string;project_id:string;root:string;git_directory?:string;common_directory?:string;commit_identity?:GitCommitOperatorPolicy};
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 export class GitWorkbench{
  private readonly repositories=new Map<string,GitPublicationEffects>();
+ private readonly commitPolicies=new Map<string,GitCommitOperatorPolicy>();
  private readonly executionBindings=new Map<string,string>();
  private readonly projects:ProjectRepository;
  constructor(projects:ProjectRepository,bindings:readonly GitRepositoryBinding[]=[],executable?:string){
@@ -14,11 +17,12 @@ export class GitWorkbench{
   if(!Array.isArray(bindings)||bindings.length>100||executable!==undefined&&(typeof executable!=='string'||!isAbsolute(executable)))throw Error('git_configuration_invalid');
   const roots=new Set<string>();
   for(const raw of bindings){
-   if(!raw||typeof raw!=='object'||Array.isArray(raw)||Object.keys(raw).some(key=>!['owner_id','project_id','root','git_directory','common_directory'].includes(key))||typeof raw.owner_id!=='string'||!ID.test(raw.owner_id)||typeof raw.project_id!=='string'||!ID.test(raw.project_id)||typeof raw.root!=='string'||!isAbsolute(raw.root))throw Error('git_configuration_invalid');
+   if(!raw||typeof raw!=='object'||Array.isArray(raw)||Object.keys(raw).some(key=>!['owner_id','project_id','root','git_directory','common_directory','commit_identity'].includes(key))||typeof raw.owner_id!=='string'||!ID.test(raw.owner_id)||typeof raw.project_id!=='string'||!ID.test(raw.project_id)||typeof raw.root!=='string'||!isAbsolute(raw.root))throw Error('git_configuration_invalid');
    for(const path of [raw.git_directory,raw.common_directory])if(path!==undefined&&(typeof path!=='string'||!isAbsolute(path)))throw Error('git_configuration_invalid');
    const key=raw.owner_id+'\0'+raw.project_id,common=resolve(raw.common_directory??raw.git_directory??join(raw.root,'.git')),identity=process.platform==='win32'?common.toLowerCase():common;
    if(this.repositories.has(key)||roots.has(identity))throw Error('git_configuration_invalid');roots.add(identity);
    this.repositories.set(key,new GitPublicationEffects({root:raw.root,...(raw.git_directory?{gitDirectory:raw.git_directory}:{}),...(raw.common_directory?{commonDirectory:raw.common_directory}:{}),...(executable?{executable}:{})}));
+   if(raw.commit_identity!==undefined)this.commitPolicies.set(key,gitCommitOperatorPolicy(raw.commit_identity));
    this.executionBindings.set(key,createHash('sha256').update('git-common-binding:v1\0'+identity).digest('hex'));
   }
  }
@@ -33,11 +37,16 @@ export class GitWorkbench{
  /** Configured exclusion scope, independent of snapshot/program encodings.
   * It grants no filesystem authority and never exposes the configured path. */
  executionBinding(owner:string,project:string){this.repository(owner,project);return this.executionBindings.get(owner+'\0'+project)!;}
- async inspect(owner:string,project:string,signal?:AbortSignal){const result=await this.repository(owner,project).inspect(signal);this.projects.assertOwned(project,owner);return{project_id:project,...result};}
+ async inspect(owner:string,project:string,signal?:AbortSignal){const result=await this.repository(owner,project).inspect(signal);this.projects.assertOwned(project,owner);return{project_id:project,...result,commit_identity_ready:this.commitPolicies.has(owner+'\0'+project)};}
  async taskmasterFiles(owner:string,project:string,signal?:AbortSignal){const result=await this.repository(owner,project).taskmasterFiles(signal);this.projects.assertOwned(project,owner);return result;}
  async taskmasterPrdFiles(owner:string,project:string,after:string|undefined,signal?:AbortSignal){const result=await this.repository(owner,project).taskmasterPrdFiles(after,signal);this.projects.assertOwned(project,owner);return result;}
  async taskmasterPrdFile(owner:string,project:string,fileName:string,signal?:AbortSignal){const result=await this.repository(owner,project).taskmasterPrdFile(fileName,signal);this.projects.assertOwned(project,owner);return result;}
  async freeze(owner:string,project:string,snapshotId:string,paths:readonly string[],signal?:AbortSignal){const result=await this.repository(owner,project).freeze(snapshotId,paths,signal);this.projects.assertOwned(project,owner);return result;}
+ commitMetadata(owner:string,project:string,witness:GitCommitReviewWitness,message:string,timestamp?:string){
+  this.repository(owner,project);const policy=this.commitPolicies.get(owner+'\0'+project);
+  if(!policy)throw Error('git_commit_identity_unconfigured');
+  return commitReviewMetadata(policy,witness,message,timestamp);
+ }
  async freezeCommit(owner:string,project:string,snapshotId:string,paths:readonly string[],signal?:AbortSignal){const result=await this.repository(owner,project).freezeCommit(snapshotId,paths,signal);this.projects.assertOwned(project,owner);signal?.throwIfAborted();return result;}
  async publicationTarget(owner:string,project:string,paths:readonly string[],signal?:AbortSignal){const result=await this.repository(owner,project).publicationTarget(paths,signal);this.projects.assertOwned(project,owner);signal?.throwIfAborted();return result;}
  async diff(owner:string,project:string,input:{snapshot_id:string;path:string;stage:'working'|'staged'},signal?:AbortSignal){const result=await this.repository(owner,project).diff(input,signal);this.projects.assertOwned(project,owner);return{project_id:project,...result};}

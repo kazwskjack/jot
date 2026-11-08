@@ -1167,7 +1167,7 @@
     "GitReviewPrepare",
     "GitReviewIntent",
     "201",
-    "Original owner/project review acknowledgement; no Git execution or credential authority."
+    "Freeze original owner review and complete staged-tree proof. Commit review requires operator-configured author and committer identities. Capture one exact UTC whole-second time, complete UTF-8 message digest and byte count, tree/object format, parent and branch/unborn/detached target with the original review hash. Source repository identity, signing or executable configuration is not an identity authority."
   ],
   [
     "GET",
@@ -1176,7 +1176,7 @@
     null,
     "GitReviewIntent",
     "200",
-    "Original owner/project review acknowledgement; no Git execution or credential authority."
+    "Read the original owner-scoped immutable review and current version, including fixed commit metadata when present. Historical reviews without metadata remain readable and cancellable."
   ],
   [
     "POST",
@@ -1185,7 +1185,7 @@
     "GitReviewControl",
     "GitReviewIntent",
     "200",
-    "Original owner/project review acknowledgement; no Git execution or credential authority."
+    "Approve or cancel an exact original review/version/hash. Commit approval recomputes the original source and operator identity policy using the original captured time. Legacy commit reviews lacking metadata require fresh review. These commands do not execute index or commit effects."
   ],
   [
     "GET",

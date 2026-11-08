@@ -28,7 +28,7 @@ export type UpdateProjectLifecycle = {action:'archive'|'restore'|'delete';expect
 export type GitHead = {oid:string|null;branch:string|null;detached:boolean};
 export type GitEntry = {path:string;original_path?:string;index_status:string;worktree_status:string;conflicted:boolean;kind:'file'|'directory'|'symlink'|'missing'|'other'};
 export type GitRemote = {name:string;kind:'https'|'ssh'|'local'|'other';host?:string};
-export type GitSnapshot = {project_id:string;snapshot_id:string;repository_sha256:string;head:GitHead;entries:GitEntry[];remotes:GitRemote[];omitted_count:number;read_only:true;execution_authorized:false};
+export type GitSnapshot = {commit_identity_ready?:boolean;project_id:string;snapshot_id:string;repository_sha256:string;head:GitHead;entries:GitEntry[];remotes:GitRemote[];omitted_count:number;read_only:true;execution_authorized:false};
 export type GitDiff = {project_id:string;snapshot_id:string;path:string;stage:'working'|'staged';kind:'text'|'binary';patch:string;read_only:true;execution_authorized:false};
 export type CreateProject = { title: string };
 export type UpdateProject = { expected_version: number; title: string };
@@ -404,7 +404,7 @@ export type TaskPrdSources = {task_id:string;task_version:number;readiness:{read
 
 export type GitReviewPrepare = {request_id:string;action:"stage"|"unstage"|"commit"|"discard"|"delete-untracked";paths:string[];snapshot_id:string;message?:string};
 export type GitReviewControl = {request_id:string;expected_version:number;action:"approve"|"cancel";review_sha256:string};
-export type GitReviewIntent = {intent_id:string;project_id:string;action:GitReviewPrepare["action"];paths:string[];message?:string;snapshot_id:string;review_sha256:string;version:number;state:"prepared"|"approved"|"cancelled";created_at:string;updated_at:string;execution_authorized:false};
+export type GitReviewIntent = {intent_id:string;project_id:string;action:GitReviewPrepare["action"];paths:string[];message?:string;commit_metadata?:GitCommitMetadata;snapshot_id:string;review_sha256:string;version:number;state:"prepared"|"approved"|"cancelled";created_at:string;updated_at:string;execution_authorized:false};
 
 export type GitIndexAcceptance = {execution_id:string;project_id:string;intent_id:string;request_id:string;action:"stage"|"unstage";accepted:true;execution_authorized:false};
 export type GitIndexExecutionResult = Omit<GitIndexAcceptance,"accepted"> & {paths:string[]} & ({state:"pending"|"unknown"}|{state:"applied";before_index_sha256:string|null;index_sha256:string}|{state:"not_dispatched"|"abandoned_unknown";disposition_id:string});
@@ -688,3 +688,11 @@ export type BrainPublication = BrainPublicationSummary & {
  results:WorkbenchFile[]|null;
 };
 export type BrainPublicationPage = {items:BrainPublicationSummary[];next_before_id:string|null};
+
+
+export type GitCommitIdentity = {name:string;email:string;timestamp:string};
+export type GitCommitMetadata = {
+ protocol:1;encoding:'UTF-8';object_format:'sha1'|'sha256';tree_oid:string;parent_oid:string|null;
+ target_ref:string;head_state:'branch'|'unborn'|'detached';author:GitCommitIdentity;committer:GitCommitIdentity;
+ operator_policy_sha256:string;message_sha256:string;message_bytes:number;
+};
