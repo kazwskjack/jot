@@ -17,9 +17,8 @@ type Options={db:DatabaseSync;workbench:WorkbenchService;tasks:PersistentTaskSer
  coordinator:HarnessCoordinator;activity:ProjectActivityObserver;budgetPolicy:WorkbenchBudgetPolicy;maxAgeMs:number};
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const refused=(reason:string)=>Object.freeze({admitted:false,reason,execution_authorized:false as const});
-/** Original occurrence admission only, not an Agent/model loop. Not exposed as
- * a public/model tool and not automatically installed in Worker maintenance yet.
- * Discover-and-work waits for isolated-cycle/report/apply integration. */
+/** Admit the read-only discovery phase for either policy mode. Isolated work
+ * still requires its own accepted report, workspace and original work grant. */
 export class DiscoveryAdmissionController{
  private readonly options:Options;
  private readonly sources:DiscoverySourceCollector;
@@ -32,7 +31,7 @@ export class DiscoveryAdmissionController{
   const o=this.options,initial=o.policies.get(owner,inputScope).policy;
   if(!initial||initial.effective_state!=='active')return refused('POLICY_DISABLED');
   const scope=Object.freeze({...initial.scope});
-  if(initial.mode!=='discover_only')return refused('ISOLATED_WORK_CYCLE_REQUIRED');
+  if(!['discover_only','discover_and_work'].includes(initial.mode))return refused('POLICY_MODE_UNSUPPORTED');
   const source=this.sources.collect(owner,scope);if(!source.caught_up)return refused(source.reason??'SOURCE_PENDING');
   const prepared=await o.tasks.prepareDiscoveryModelAcceptance(owner,initial.policy_id,signal);
   const observation=await o.activity.observe({owner_id:owner,...scope},signal);
