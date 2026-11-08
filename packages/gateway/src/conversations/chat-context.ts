@@ -74,10 +74,11 @@ export function snapshotChatContext(db:DatabaseSync,id:string,owner:string,revis
    CASE WHEN m.id=f.message_id THEN 1 ELSE 0 END DESC,CASE WHEN f.run_id IS NOT NULL THEN m.rowid END DESC,m.id DESC LIMIT 12`).all(id);
  const messages:Entry[]=[];
  for(const row of rows){
-  if(covered.some(ref=>ref.message_id===row.id&&ref.updated_at===row.updated_at&&ref.source_content_sha256===chatContextHash(String(row.content_json))))continue;
   const blocks=decodeStoredContent(String(row.content_json)).blocks;
   const original=blocks.filter(block=>(block.kind??block.type)==='text'&&typeof block.text==='string').map(block=>block.text as string).join('\n\n');
   let images=blocks.filter(block=>(block.kind??block.type)==='image').length;const clean=original.replace(/data:image\/[a-z0-9.+-]+(?:;[^,\s)]*)?,[^\s)"'<>]*/gi,()=>{images++;return'[Image bytes omitted; refer to the original source.]';});
+  // A text checkpoint does not attest that image sources or recognition survived.
+  if(images===0&&covered.some(ref=>ref.message_id===row.id&&ref.updated_at===row.updated_at&&ref.source_content_sha256===chatContextHash(String(row.content_json))))continue;
   const text=prefix(clean,row.role==='user'?4000:2400);
   const sourceContentSha256=chatContextHash(String(row.content_json)),messageId=String(row.id);
   const image_source:ImageSourceRef|undefined=images?{kind:'stored_content_images',message_id:messageId,source_content_sha256:sourceContentSha256,image_count:images,recognition_text_state:'unknown'}:undefined;
