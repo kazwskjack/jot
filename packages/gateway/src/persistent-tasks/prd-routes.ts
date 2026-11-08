@@ -19,7 +19,7 @@ export function registerTaskPrdRoutes(app:FastifyInstance,service:TaskPrdService
  const task=(r:FastifyRequest)=>(r.params as {taskId:string}).taskId;
  const errorHandler=(error:FastifyError,r:FastifyRequest,reply:FastifyReply)=>{
   const code=error.validation?'invalid_workbench_request':error.message;
-  const status=code==='prd_taskmaster_unavailable'?503:code==='unauthorized'?401:['origin_forbidden','csrf_invalid'].includes(code)?403:['task_not_found','agent_not_found'].includes(code)?404:
+  const status=['prd_taskmaster_unavailable','prd_taskmaster_project_unavailable'].includes(code)?503:code==='unauthorized'?401:['origin_forbidden','csrf_invalid'].includes(code)?403:['task_not_found','agent_not_found'].includes(code)?404:
    code.startsWith('invalid_')||code==='contract_request_invalid'||code==='idempotency_key_required'||code==='prd_source_unsupported'?422:
    code.startsWith('prd_')||['version_conflict','idempotency_conflict'].includes(code)?409:500;
   const publicCode=status===500?'INTERNAL_ERROR':code.toUpperCase(),requestId=/^[A-Za-z0-9][A-Za-z0-9_:\-]{0,127}$/.test(r.id)?r.id:randomUUID();
@@ -29,6 +29,9 @@ export function registerTaskPrdRoutes(app:FastifyInstance,service:TaskPrdService
  app.get('/v1/persistent-tasks/:taskId/prd/sources',{validatorCompiler,errorHandler,schema:{params}},async r=>service.sources(actor(r),task(r)));
  app.get('/v1/persistent-tasks/:taskId/prd/taskmaster-installation',{validatorCompiler,errorHandler,schema:{params}},async(r,reply)=>{
   reply.header('cache-control','private, no-store');return service.taskmasterInstallation(actor(r),task(r));
+ });
+ app.get('/v1/persistent-tasks/:taskId/prd/taskmaster-project',{validatorCompiler,errorHandler,schema:{params}},async(r,reply)=>{
+  reply.header('cache-control','private, no-store');return service.taskmasterProject(actor(r),task(r));
  });
  app.post('/v1/persistent-tasks/:taskId/prd/preview',{validatorCompiler,errorHandler,config:{taskPrdCommand:'preview'},schema:{params,body:prdPreviewRequestSchema}},async r=>service.preview(actor(r),task(r),r.body));
  app.post('/v1/persistent-tasks/:taskId/prd/bind',{validatorCompiler,errorHandler,config:{taskPrdCommand:'bind'},schema:{params,body:prdBindRequestSchema}},async r=>service.bind(actor(r),task(r),r.body,r.headers['idempotency-key']));

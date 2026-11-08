@@ -10,6 +10,7 @@ import {canonicalJson} from '../db/canonical-json.ts';
 import {taskmasterSourceSummary} from './taskmaster-source.ts';
 import type {McpRegistryService} from '../workbench/mcp-registry.ts';
 import {validateTaskmasterInstallation,type TaskmasterInstallation,type TaskmasterInstallationClient} from './taskmaster-installation.ts';
+import type {GitWorkbench} from '../git/service.ts';
 
 type Row=Record<string,any>;
 export type PrdSelection={kind:'logical_file';path:string;version:number;sha256:string}|{kind:'upload';artifact_id:string;version:number;sha256:string};
@@ -21,7 +22,7 @@ const supported=(name:string)=>/\.(md|markdown|txt|json)$/i.test(name);
 const supportedMedia=(name:string,mediaType:string)=>mediaType.startsWith('text/')||/\.json$/i.test(name)&&mediaType.split(';',1)[0]!.trim().toLowerCase()==='application/json';
 const MAX_BYTES=65536,MAX_OBJECTIVE=12000;
 const terminal=['succeeded','partial','failed','cancelled','interrupted'];
-type PrdOptions={uploadRoot:string;mcpRegistry?:Pick<McpRegistryService,'taskmasterConnections'>;installationClient?:TaskmasterInstallationClient};
+type PrdOptions={uploadRoot:string;mcpRegistry?:Pick<McpRegistryService,'taskmasterConnections'>;installationClient?:TaskmasterInstallationClient;projectSource?:Pick<GitWorkbench,'taskmasterFiles'>};
 function object(value:unknown,keys:string[]):Row{
  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!keys.includes(key)))throw Error('invalid_prd_request');return value as Row;
 }
@@ -97,6 +98,35 @@ export class TaskPrdService {
   if(current.task.version!==task.version||current.role.agent_id!==role.agent_id||current.role.version!==role.version
    ||current.role.capability_epoch!==role.capability_epoch)throw Error('prd_taskmaster_context_changed');
   return {task_id:taskId,task_version:task.version,installation};
+ }
+ async taskmasterProject(owner:string,taskId:string){
+  const {task,role}=this.scope(owner,taskId);
+  if(!this.options.projectSource)throw Error('prd_taskmaster_project_unavailable');
+  let source:Awaited<ReturnType<GitWorkbench['taskmasterFiles']>>;
+  try{source=await this.options.projectSource.taskmasterFiles(owner,role.project_id,AbortSignal.timeout(15000));}
+  catch{throw Error('prd_taskmaster_project_unavailable');}
+  const files=source.files.map(file=>{
+   let state:'missing'|'too_large'|'invalid'|'ready'=file.kind==='file'?'invalid':file.kind;
+   let content:string|null=null,taskCount:number|null=null,tags:string[]=[];
+   if(file.content!==null){
+    try{
+     const text=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(file.content);
+     if(file.path==='.taskmaster/tasks/tasks.json'){
+      const summary=taskmasterSourceSummary(text);taskCount=summary.task_count;tags=summary.tags;content=text;
+     }else{
+      const config=JSON.parse(text.charCodeAt(0)===0xfeff?text.slice(1):text);
+      if(!config||typeof config!=='object'||Array.isArray(config))throw Error('invalid_taskmaster_config');
+     }
+     state='ready';
+    }catch{state='invalid';}
+   }
+   return {path:file.path,state,size:file.size,sha256:file.sha256,content,task_count:taskCount,tags};
+  });
+  const current=this.scope(owner,taskId);
+  if(current.task.version!==task.version||current.role.agent_id!==role.agent_id||current.role.version!==role.version
+   ||current.role.capability_epoch!==role.capability_epoch)throw Error('prd_taskmaster_context_changed');
+  return {task_id:taskId,task_version:task.version,project_id:role.project_id,repository_sha256:source.repository_sha256,
+   source_sha256:source.source_sha256,files,execution_authorized:false as const};
  }
  sources(owner:string,taskId:string){
   const {task,role}=this.scope(owner,taskId),reasons=this.reasons(owner,task,role);

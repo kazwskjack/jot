@@ -22595,6 +22595,99 @@
           }
         }
       }
+    },
+    "/v1/persistent-tasks/{task_id}/prd/taskmaster-project": {
+      "get": {
+        "operationId": "readTaskPrdTaskmasterProject",
+        "tags": [
+          "persistent-tasks"
+        ],
+        "description": "Read fixed .taskmaster project config/tasks files from the existing operator-bound owner/project Git repository. Reuse original repository/path and stable-byte witnesses. Read at most 65536 content bytes per file. Config content is withheld. Task JSON is source material only. No installation, file import, task mutation or execution authorization.",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bound project Taskmaster source observation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskPrdProject"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Original task/project source unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Original task/project source unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Original task/project source unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Original task/project source unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Original task/project source unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Original task/project source unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -43645,6 +43738,143 @@
           },
           "installation": {
             "$ref": "#/components/schemas/TaskmasterInstallation"
+          }
+        }
+      },
+      "TaskPrdProject": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "task_id",
+          "task_version",
+          "project_id",
+          "repository_sha256",
+          "source_sha256",
+          "files",
+          "execution_authorized"
+        ],
+        "properties": {
+          "task_id": {
+            "type": "string"
+          },
+          "task_version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "repository_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "source_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "files": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "path",
+                "state",
+                "size",
+                "sha256",
+                "content",
+                "task_count",
+                "tags"
+              ],
+              "properties": {
+                "path": {
+                  "enum": [
+                    ".taskmaster/config.json",
+                    ".taskmaster/tasks/tasks.json"
+                  ]
+                },
+                "state": {
+                  "enum": [
+                    "missing",
+                    "too_large",
+                    "invalid",
+                    "ready"
+                  ]
+                },
+                "size": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "sha256": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "content": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 65536
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "task_count": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "path": {
+                        "const": ".taskmaster/config.json"
+                      }
+                    }
+                  },
+                  "then": {
+                    "properties": {
+                      "content": {
+                        "type": "null"
+                      },
+                      "task_count": {
+                        "type": "null"
+                      },
+                      "tags": {
+                        "maxItems": 0
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "execution_authorized": {
+            "const": false
           }
         }
       }

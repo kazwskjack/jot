@@ -19,6 +19,7 @@ export type GitPublicationTargetFile={path:string;kind:'file'|'missing';sha256:s
 export type GitPublicationTargetWitness={protocol:1;kind:'publication_target';snapshot_id:string;repository_sha256:string;
  head:GitSnapshot['head'];index_sha256:string|null;files:GitPublicationTargetFile[];attributes:GitReviewWitness['attributes'];execution_authorized:false;target_sha256:string};
 export type GitPublicationTargetRead={witness:GitPublicationTargetWitness;contents:Map<string,Buffer>};
+export type TaskmasterProjectFile={path:'.taskmaster/config.json'|'.taskmaster/tasks/tasks.json';kind:'missing'|'too_large'|'file';size:number;sha256:string|null;content:Buffer|null};
 const hash=(value:string|Buffer)=>createHash('sha256').update(value).digest('hex');
 const same=(a:string,b:string)=>process.platform==='win32'?a.toLowerCase()===b.toLowerCase():a===b;
 const within=(root:string,path:string)=>same(root,path)||same(root+sep,path.slice(0,root.length+1));
@@ -146,6 +147,33 @@ export class GitRepositoryInspection{
  }
  protected async inspectContext(context:ReadContext,signal?:AbortSignal):Promise<GitSnapshot>{const first=await this.collect(context,signal),second=await this.collect(context,signal);if(first.value.snapshot_id!==second.value.snapshot_id)throw Error('git_snapshot_changed');return second.value;}
  async inspect(signal?:AbortSignal):Promise<GitSnapshot>{const context=await this.context(signal);try{return await this.inspectContext(context,signal);}finally{await context.dispose();}}
+ /** Fixed Taskmaster inputs from the operator-bound repository, without a Git command or write. */
+ async taskmasterFiles(signal?:AbortSignal){
+  const before=await this.anchors(signal),files:TaskmasterProjectFile[]=[];
+  const facts:GitPublicationTargetFile[]=[];
+  const paths=['.taskmaster/config.json','.taskmaster/tasks/tasks.json'] as const;
+  for(const path of paths){
+   signal?.throwIfAborted();
+   const fact=await this.publicationPath(path,signal);
+   let content:Buffer|null=null;
+   if(fact.kind==='file'&&fact.size<=65536){
+    const stat=await lstat(join(this.root,path));
+    if(hash(witness(stat))!==fact.stat_sha256)throw Error('git_snapshot_changed');
+    content=await this.bytes(join(this.root,path),65536,witness(stat));
+   }
+   if(canonicalJson(await this.publicationPath(path,signal))!==canonicalJson(fact))throw Error('git_snapshot_changed');
+   const sha256=content===null?null:hash(content);
+   facts.push({...fact,sha256});
+   files.push({path,kind:fact.kind==='missing'?'missing':content===null?'too_large':'file',size:fact.size,sha256,content});
+  }
+  for(const {sha256,...fact} of facts){
+   if(canonicalJson(await this.publicationPath(fact.path,signal))!==canonicalJson(fact))throw Error('git_snapshot_changed');
+  }
+  const after=await this.anchors(signal);
+  if(after.repository!==before.repository||after.metadata!==before.metadata)throw Error('git_snapshot_changed');
+  signal?.throwIfAborted();
+  return {repository_sha256:before.repository,source_sha256:hash(canonicalJson({repository:before.repository,metadata:before.metadata,files:facts})),files};
+ }
  private async attributeManifest(paths:readonly string[],signal?:AbortSignal):Promise<GitReviewWitness['attributes']>{
   const names=new Set<string>();for(const path of paths){const parts=path.split('/');parts.pop();while(true){names.add([...parts,'.gitattributes'].join('/'));if(names.size>this.limits.maxMetadataEntries)throw Error('git_metadata_limit');if(!parts.length)break;parts.pop();}}
   if(names.size>this.limits.maxMetadataEntries)throw Error('git_metadata_limit');const result:GitReviewWitness['attributes']=[];let size=0;

@@ -1771,5 +1771,14 @@
     "TaskPrdInstallation",
     "200",
     "Read only the original owner-bound profile package metadata and CLI entry, with native file hashes. No installation or execution authorization."
+  ],
+  [
+    "GET",
+    "/v1/persistent-tasks/{task_id}/prd/taskmaster-project",
+    "Observe original bound project Taskmaster files",
+    null,
+    "TaskPrdProject",
+    "200",
+    "Original owner/project repository file witnesses, strict bounded UTF-8 JSON and Taskmaster task-format reads. Config content withheld. Read-only; no import or execution."
   ]
 ]

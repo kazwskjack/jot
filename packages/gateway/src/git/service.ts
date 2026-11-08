@@ -34,6 +34,7 @@ export class GitWorkbench{
   * It grants no filesystem authority and never exposes the configured path. */
  executionBinding(owner:string,project:string){this.repository(owner,project);return this.executionBindings.get(owner+'\0'+project)!;}
  async inspect(owner:string,project:string,signal?:AbortSignal){const result=await this.repository(owner,project).inspect(signal);this.projects.assertOwned(project,owner);return{project_id:project,...result};}
+ async taskmasterFiles(owner:string,project:string,signal?:AbortSignal){const result=await this.repository(owner,project).taskmasterFiles(signal);this.projects.assertOwned(project,owner);return result;}
  async freeze(owner:string,project:string,snapshotId:string,paths:readonly string[],signal?:AbortSignal){const result=await this.repository(owner,project).freeze(snapshotId,paths,signal);this.projects.assertOwned(project,owner);return result;}
  async freezeCommit(owner:string,project:string,snapshotId:string,paths:readonly string[],signal?:AbortSignal){const result=await this.repository(owner,project).freezeCommit(snapshotId,paths,signal);this.projects.assertOwned(project,owner);signal?.throwIfAborted();return result;}
  async publicationTarget(owner:string,project:string,paths:readonly string[],signal?:AbortSignal){const result=await this.repository(owner,project).publicationTarget(paths,signal);this.projects.assertOwned(project,owner);signal?.throwIfAborted();return result;}

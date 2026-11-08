@@ -3,9 +3,10 @@ import type {Task} from './types';
 import {request,taskDraftScope} from '../jot/client';
 import {useResource} from './useResource';
 import {PrdFlow,PrdCommandStore,PRD_TEMPLATE,installPrdLeaveGuard,prdMessage} from './task-prd.mjs';
-import type {TaskPrdSources as PrdSources,TaskPrdInstallation as PrdInstallation} from '../../packages/gateway/contracts/types';
+import type {TaskPrdSources as PrdSources,TaskPrdInstallation as PrdInstallation,TaskPrdProject as PrdProject} from '../../packages/gateway/contracts/types';
 
 const textStyle:React.CSSProperties={whiteSpace:'pre-wrap',overflowWrap:'anywhere',wordBreak:'break-word',maxWidth:'100%'};
+const projectFileStates={missing:'未找到',too_large:'超过读取大小限制',invalid:'文件格式不支持',ready:'格式可读取'};
 
 export default function TaskPrdPanel({task,executionReady,onBound}:{task:Task;executionReady:boolean;onBound:()=>void}){
  const root=useRef<HTMLElement>(null),flowRef=useRef<PrdFlow|null>(null);
@@ -17,6 +18,7 @@ export default function TaskPrdPanel({task,executionReady,onBound}:{task:Task;ex
  const identity=`${task.task_id}:${task.version}:${task.status}:${executionReady}`;
  const resource=useResource(signal=>request<PrdSources>(`/persistent-tasks/${encodeURIComponent(task.task_id)}/prd/sources`,'GET',undefined,undefined,signal),identity);
  const installationResource=useResource(signal=>request<PrdInstallation>(`/persistent-tasks/${encodeURIComponent(task.task_id)}/prd/taskmaster-installation`,'GET',undefined,undefined,signal),identity);
+ const projectResource=useResource(signal=>request<PrdProject>(`/persistent-tasks/${encodeURIComponent(task.task_id)}/prd/taskmaster-project`,'GET',undefined,undefined,signal),identity);
  useEffect(()=>{if(resource.data&&!flow.pending&&!flow.busy){flow.setSources(resource.data);setIndex('');setConfirmed(false);draw();}},[resource.data]);
  useEffect(()=>installPrdLeaveGuard(window,()=>flow.pending,node=>node instanceof Node&&Boolean(root.current?.contains(node))),[flow]);
  const unavailable=resource.loading||!!resource.error||!!recovery.error||!flow.ready;
@@ -27,9 +29,10 @@ export default function TaskPrdPanel({task,executionReady,onBound}:{task:Task;ex
   catch(e){setError(`${prdMessage(e instanceof Error?e.message:'PRD 操作未完成')}${flow.refreshRequired?' 预览已失效，正在刷新，请重新选择来源。':''}`);if(flow.refreshRequired){setIndex('');setConfirmed(false);resource.reload();}}
   finally{draw();}
  }
- function refresh(){if(locked)return;flow.invalidate();setIndex('');setConfirmed(false);setError('');resource.reload();installationResource.reload();draw();}
+ function refresh(){if(locked)return;flow.invalidate();setIndex('');setConfirmed(false);setError('');resource.reload();installationResource.reload();projectResource.reload();draw();}
  const preview=flow.preview,binding=flow.receipt??resource.data?.binding,taskmaster=resource.data?.taskmaster;
  const installation=installationResource.data?.task_id===task.task_id&&installationResource.data.task_version===task.version?installationResource.data.installation:null;
+ const project=projectResource.data?.task_id===task.task_id&&projectResource.data.task_version===task.version?projectResource.data:null;
  return <section ref={root} className="wb-form" aria-label="PRD 绑定原任务" style={{minWidth:0,maxWidth:'100%',overflowWrap:'anywhere'}}>
   <h4>将 PRD 绑定到原任务</h4>
   <p className="wb-hint">选择当前任务所属项目中的既有文件或原始上传附件。预览仅读取；确认仅冻结来源并更新原任务目标。任务仍保持暂停，后续由原有恢复 / 立即运行入口执行。</p>
@@ -51,7 +54,20 @@ export default function TaskPrdPanel({task,executionReady,onBound}:{task:Task;ex
       {connection.server_name} · v{connection.version} · {connection.enabled?'已启用':'已禁用'} · {connection.state} · 已发现代次 {connection.active_generation} · 已批准工具 {connection.approved_tool_count}
       {connection.pending_generation!==null&&` · 待重载代次 ${connection.pending_generation}`}
      </li>)}</ul>}
-   <p className="wb-hint">CLI 安装、运行版本检查及外部项目配置文件检测继续补齐。连接状态沿用原注册表的发现结果，执行时沿用原角色权限、运行身份和预算校验。</p>
+   <h5>原项目 Taskmaster 文件</h5>
+   <p className="wb-hint">从服务器绑定到此项目的 Git 目录读取固定 Taskmaster 文件，每个文件最多读取 65,536 字节。配置文件展示格式与哈希，任务文件可展开核对原文。导入操作继续接入。</p>
+   {projectResource.loading&&<p className="wb-status" role="status">正在核对原项目 Taskmaster 文件…</p>}
+   {projectResource.error&&<p className="wb-status" role="status">{prdMessage(projectResource.error)}</p>}
+   {project&&<div style={textStyle}>
+    <dl><dt>原项目</dt><dd>{project.project_id}</dd><dt>项目文件来源 SHA-256</dt><dd>{project.source_sha256}</dd></dl>
+    <ul>{project.files.map(file=><li key={file.path}>
+     {file.path} · {projectFileStates[file.state]} · {file.size} 字节
+     {file.sha256&&<p>SHA-256 {file.sha256}</p>}
+     {file.task_count!==null&&<p>任务及子任务 {file.task_count} 条 · 标签 {JSON.stringify(file.tags)}</p>}
+     {file.content!==null&&<details><summary>任务文件原文</summary><pre style={textStyle}>{file.content}</pre></details>}
+    </li>)}</ul>
+   </div>}
+   <p className="wb-hint">CLI 安装、运行版本检查及原项目文件导入继续补齐。连接状态沿用原注册表的发现结果，执行时沿用原角色权限、运行身份和预算校验。</p>
   </details>
   {!executionReady&&<p className="wb-status" role="status">执行宿主尚未就绪；来源可查看，就绪后再预览绑定。</p>}
   {task.status!=='paused'&&<p className="wb-status" role="status">请先暂停原任务，并等待所有执行及未知结果核对完成。</p>}
