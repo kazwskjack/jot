@@ -24865,7 +24865,7 @@
         "tags": [
           "workbench"
         ],
-        "description": "Create or refresh a durable owner-scoped import preview with one immutable input and target. Inspect source versions, scopes, provenance, duplicates and tombstones. This command changes no formal memory. Atomic request receipt and preview persist in one transaction. Optional offset and limit must be supplied together. They project item transport only. Full immutable source, conflict checks, scope replacement and batch application remain authoritative. Paged receipts include exact full-batch created/skipped totals.",
+        "description": "Create or refresh a durable owner-scoped import preview with one immutable input and target. Inspect source versions, scopes, provenance, duplicates and tombstones. This command changes no formal memory. Atomic request receipt and preview persist in one transaction. Optional offset and limit must be supplied together. They project item transport only. Full immutable source, conflict checks, scope replacement and batch application remain authoritative. Paged receipts include exact full-batch created/skipped totals. Original mutation keys preserve the first returned page. Fetch further pages with GET using the same original batch identifier.",
         "parameters": [
           {
             "name": "workspace_id",
@@ -25177,7 +25177,7 @@
         "tags": [
           "workbench"
         ],
-        "description": "Apply the exact reviewed preview version atomically through original memory saves. Recheck source and target states. Conflict rejects the whole batch. New notes are unverified. Deleted or superseded imports block reimport of later versions of the same source. Immutable original applied receipts recover response loss without replaying writes. Optional offset and limit must be supplied together. They project item transport only. Full immutable source, conflict checks, scope replacement and batch application remain authoritative. Paged receipts include exact full-batch created/skipped totals.",
+        "description": "Apply the exact reviewed preview version atomically through original memory saves. Recheck source and target states. Conflict rejects the whole batch. New notes are unverified. Deleted or superseded imports block reimport of later versions of the same source. Immutable original applied receipts recover response loss without replaying writes. Optional offset and limit must be supplied together. They project item transport only. Full immutable source, conflict checks, scope replacement and batch application remain authoritative. Paged receipts include exact full-batch created/skipped totals. Original mutation keys preserve the first returned page. Fetch further pages with GET using the same original batch identifier.",
         "parameters": [
           {
             "name": "workspace_id",
