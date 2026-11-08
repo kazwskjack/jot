@@ -9,6 +9,13 @@ const usageStatuses={available:'已记录',partial:'部分记录',not_metered:'�
 function cost(value:string|null){if(value===null)return '未记录';const n=BigInt(value);return `$${n/1000000000n}.${String(n%1000000000n).padStart(9,'0')}`;}
 export function RuntimeDiagnosticFacts({view}:{view:View}){
  return <div className="jot-runtime-diagnostic-facts">
+  <section aria-label="运行依赖状态"><h4>运行依赖状态</h4>
+   {view.runtime_readiness?<>
+    <p>采集于 <time dateTime={view.runtime_readiness.collected_at}>{view.runtime_readiness.collected_at}</time>{view.runtime_readiness.stale?' · 记录已过期':''}</p>
+    <ul>{view.runtime_readiness.components.map(component=><li key={component.component}>{component.label} · {component.status}{component.reason&&<> · <code>{component.reason}</code></>}</li>)}</ul>
+    <small>记录对应本次运行的采集时刻。执行仍需通过当前权限、预算和租约检查。</small>
+   </>:<p>尚无组件就绪记录。</p>}
+  </section>
   <dl><dt>排队</dt><dd>{ms(view.queue_ms)}</dd><dt>准备</dt><dd>{ms(view.preparation_ms)}</dd><dt>已派发模型调用</dt><dd>{view.dispatched_calls}</dd><dt>重试次数</dt><dd>未确认</dd></dl>
   {view.phases.length>0&&<ul>{view.phases.map((phase:any,index:number)=><li key={index}>{phase.label}：{ms(phase.duration_ms)} · {phase.outcome}</li>)}</ul>}
   {view.calls.map((call,index:number)=><section key={index} aria-label={`模型调用 ${index+1}`}><h4>{call.ordinal===null?'待确认调用':`调用 ${call.ordinal}`} · {call.state}</h4>

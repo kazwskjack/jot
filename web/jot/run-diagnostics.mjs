@@ -4,6 +4,22 @@ const amount=value=>typeof value==='string'&&/^\d{1,40}$/.test(value)?value:null
 const phases={session_confirm:'确认会话',opening_snapshot:'读取会话',attachments:'准备附件',prompt_submit:'提交输入',input_recovery:'恢复原输入',goal_resume:'恢复目标',preparation_total:'准备合计'};
 const outcomes={succeeded:'已完成',failed:'失败',cancelled:'已取消'};
 const states={reserved:'待派发',in_flight:'进行中',settled:'已结算',released:'已释放',unknown:'结果待确认',rejected:'已拒绝'};
+const dependencyLabels={db:'数据库',schema:'数据结构',host:'Host',native:'原生运行时',consumer:'执行消费者',policy:'执行策略',storage:'存储',driver:'浏览器驱动'};
+const dependencyStates={ready:'就绪',disabled:'已停用',unknown:'待确认',failed:'故障'};
+
+function readinessView(value){
+ if(!object(value)||value.execution_authorized!==false||typeof value.collected_at!=='string'||!Number.isFinite(Date.parse(value.collected_at))
+  ||typeof value.stale!=='boolean'||value.readiness?.schema_version!==1||!Array.isArray(value.readiness.components))return null;
+ const components=Object.keys(dependencyLabels).map(component=>{
+  const rows=value.readiness.components.filter(row=>object(row)&&row.component===component);
+  const row=rows.length===1?rows[0]:null;
+  const status=row&&!value.stale&&Object.hasOwn(dependencyStates,row.status)?row.status:'unknown';
+  return{component,label:dependencyLabels[component],status:dependencyStates[status],
+   reason:value.stale?'observation_stale':typeof row?.reason==='string'&&/^[a-z][a-z0-9_]{0,63}$/.test(row.reason)?row.reason:null};
+ });
+ return{collected_at:value.collected_at,stale:value.stale,components};
+}
+
 const usageFields=['input_tokens','output_tokens','cache_read_tokens','cache_write_tokens','total_tokens'];
 
 /** UI-only allowlist of the existing DTO. Missing evidence stays missing. */
@@ -21,7 +37,7 @@ export function diagnosticView(raw,runId){
    cost:object(row.cost)&&row.cost.basis==='configured_rates'?amount(row.cost.nano_usd):null,
    manual_intervention_required:row.unknown===true||row.state==='unknown'||row.manual_intervention_required===true};
  });
- return {queue_ms:milliseconds(raw.queue_ms),preparation_ms:milliseconds(raw.preparation.total_ms),
+ return {runtime_readiness:readinessView(raw.runtime_readiness),queue_ms:milliseconds(raw.queue_ms),preparation_ms:milliseconds(raw.preparation.total_ms),
   phases:raw.preparation.phases.slice(0,128).filter(row=>object(row)&&Object.hasOwn(phases,row.phase)).map(row=>({label:phases[row.phase],duration_ms:milliseconds(row.duration_ms),outcome:Object.hasOwn(outcomes,row.outcome)?outcomes[row.outcome]:'结果未确认'})),
   calls,dispatched_calls:calls.filter(call=>call.ordinal!==null).length,
   // The current DTO's retry_index/count are dispatch ordinals, with no retry lineage.

@@ -60,7 +60,7 @@ function schemaObservation(db:DatabaseSync):RuntimeDependencyObservation{
   }
 }
 
-function normalizePortObservation(component:Exclude<RuntimeDependency,'db'|'schema'>,value:unknown,now:number):RuntimeDependencyObservation{
+function normalizePortObservation(component:RuntimeDependency,value:unknown,now:number):RuntimeDependencyObservation{
   if(!value||typeof value!=='object'||Array.isArray(value))return unknown(component,'source_invalid');
   const row=value as Record<string,unknown>;
   if(row.status==='not_started')return unknown(component,'source_not_started');
@@ -118,4 +118,43 @@ export async function collectRuntimeReadinessObservations(
     }
   }
   return aggregateRuntimeReadiness(observations);
+}
+
+export interface RecordedRuntimeReadiness {
+  collected_at:string;
+  stale:boolean;
+  execution_authorized:false;
+  readiness:RuntimeReadiness;
+}
+
+/** Read the original run's bounded diagnostic sample and apply current freshness limits. */
+export function readRecordedRuntimeReadiness(db:DatabaseSync,runId:string,now=new Date()):RecordedRuntimeReadiness|null {
+  const row=db.prepare("SELECT payload_json FROM ga_events WHERE run_id=? AND type='runtime.readiness' ORDER BY seq DESC LIMIT 1")
+    .get(runId) as {payload_json:unknown}|undefined;
+  if(typeof row?.payload_json!=='string'||Buffer.byteLength(row.payload_json,'utf8')>32768)return null;
+  let value;
+  try{value=JSON.parse(row.payload_json);}catch{return null;}
+  if(!value||value.execution_authorized!==false||typeof value.collected_at!=='string'
+    ||!ISO_TIMESTAMP.test(value.collected_at)||!Number.isFinite(Date.parse(value.collected_at))
+    ||value.readiness?.schema_version!==1||!Array.isArray(value.readiness.components)||value.readiness.components.length>8
+    ||!Array.isArray(value.readiness.errors)||value.readiness.errors.length>32
+    ||value.readiness.errors.some((error:unknown)=>typeof error!=='string'||!SAFE_REASON.test(error)))return null;
+  const instant=now.getTime(),collectedAt=Date.parse(value.collected_at);
+  const stale=!Number.isFinite(instant)||collectedAt>instant+RUNTIME_READINESS_MAX_FUTURE_SKEW_MS
+    ||instant-collectedAt>RUNTIME_READINESS_MAX_AGE_MS;
+  const observations=value.readiness.components.map((component:unknown)=>{
+    if(!component||typeof component!=='object'||Array.isArray(component))return component;
+    const item=component as Record<string,unknown>;
+    if(stale)return{component:item.component,status:'unknown',required:true,reason:'observation_stale'};
+    const {reason,...sample}=item;
+    return normalizePortObservation(item.component as RuntimeDependency,{
+      ...sample,
+      ...((item.component==='db'||item.component==='schema')?{observed_at:value.collected_at}:{}),
+      ...(reason===null?{}:{reason}),
+    },instant);
+  });
+  const readiness=aggregateRuntimeReadiness(observations);
+  readiness.errors=[...new Set([...readiness.errors,...value.readiness.errors])].sort();
+  readiness.execution_ready=readiness.execution_ready&&readiness.errors.length===0;
+  return{collected_at:value.collected_at,stale,execution_authorized:false,readiness};
 }

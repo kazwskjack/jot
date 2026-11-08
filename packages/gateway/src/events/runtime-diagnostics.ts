@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
+import {readRecordedRuntimeReadiness,type RecordedRuntimeReadiness} from './runtime-readiness-observations.ts';
 
 type RunRow = { id: string; conversation_id: string; status: string; created_at: string; updated_at: string };
 type EventRow = {
@@ -43,6 +44,7 @@ export interface RuntimeRunDiagnostics {
   run_id: string;
   status: string;
   queue_ms: number | null;
+  runtime_readiness: RecordedRuntimeReadiness | null;
   preparation: { phases: RuntimePreparationPhase[]; total_ms: number | null; outcome: string | null };
   attempts: RuntimeAttemptDiagnostics[];
   retry_count: number;
@@ -266,6 +268,7 @@ export function readRunRuntimeDiagnostics(db: DatabaseSync, runId: string): Runt
     run_id: run.id,
     status: run.status,
     queue_ms: queueMs,
+    runtime_readiness: readRecordedRuntimeReadiness(db,runId),
     preparation,
     attempts: projectedAttempts,
     retry_count: Math.max(0, dispatched.length - 1),

@@ -24868,6 +24868,98 @@
               "payload"
             ],
             "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "schema_version": {
+                "const": "1.0"
+              },
+              "event_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"
+              },
+              "conversation_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"
+              },
+              "run_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"
+              },
+              "seq": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$"
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "type": {
+                "const": "runtime.readiness"
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "schema_version",
+              "event_id",
+              "conversation_id",
+              "run_id",
+              "seq",
+              "at",
+              "type",
+              "payload"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "schema_version": {
+                "const": "1.0"
+              },
+              "event_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"
+              },
+              "conversation_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"
+              },
+              "run_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"
+              },
+              "seq": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$"
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "type": {
+                "const": "runtime.preparation_timing"
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "schema_version",
+              "event_id",
+              "conversation_id",
+              "run_id",
+              "seq",
+              "at",
+              "type",
+              "payload"
+            ],
+            "additionalProperties": false
           }
         ]
       },
@@ -25377,6 +25469,115 @@
             "items": {
               "type": "string"
             }
+          },
+          "runtime_readiness": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "collected_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "stale": {
+                    "type": "boolean"
+                  },
+                  "execution_authorized": {
+                    "const": false
+                  },
+                  "readiness": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "schema_version": {
+                        "const": 1
+                      },
+                      "execution_ready": {
+                        "type": "boolean"
+                      },
+                      "components": {
+                        "type": "array",
+                        "maxItems": 8,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "component": {
+                              "enum": [
+                                "db",
+                                "schema",
+                                "host",
+                                "native",
+                                "consumer",
+                                "policy",
+                                "storage",
+                                "driver"
+                              ]
+                            },
+                            "status": {
+                              "enum": [
+                                "ready",
+                                "disabled",
+                                "unknown",
+                                "failed"
+                              ]
+                            },
+                            "required": {
+                              "type": "boolean"
+                            },
+                            "observed_at": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "reason": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "pattern": "^[a-z][a-z0-9_]{0,63}$"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "component",
+                            "status",
+                            "required",
+                            "reason"
+                          ]
+                        }
+                      },
+                      "errors": {
+                        "type": "array",
+                        "maxItems": 32,
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+                        }
+                      }
+                    },
+                    "required": [
+                      "schema_version",
+                      "execution_ready",
+                      "components",
+                      "errors"
+                    ]
+                  }
+                },
+                "required": [
+                  "collected_at",
+                  "stale",
+                  "execution_authorized",
+                  "readiness"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [

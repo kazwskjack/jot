@@ -99,6 +99,8 @@ export function reduceEvent(state: Projection, event: AgentEvent): Projection {
     case 'goal.updated':
     case 'progress.updated':
     case 'runtime.outcome':
+    case 'runtime.readiness':
+    case 'runtime.preparation_timing':
     case 'checkpoint.upsert':
     case 'delivery.upsert':
     case 'usage.updated':

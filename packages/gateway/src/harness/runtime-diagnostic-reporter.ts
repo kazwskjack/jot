@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import {withImmediateTransaction} from '../db/database.ts';
 import type {DatabaseSync} from 'node:sqlite';
 import {EventStore} from '../events/event-store.ts';
 import {composeScopedRuntimeReadiness,type RuntimeReadinessRunScope,type RuntimeReadinessSources} from '../events/runtime-readiness-composition.ts';
@@ -90,6 +91,12 @@ export function createRunRuntimeDiagnosticReporter(
         emit({event:'jot_runtime_readiness',run_hash:runHash,observation:'discarded',reason:'run_scope_changed',execution_authorized:false});
         return;
       }
+      withImmediateTransaction(db,()=>{
+        if(!sameBinding(before,readDiagnosticBinding(db,runId)))return;
+        events.append(before.conversation_id,runId,'runtime.readiness',{
+          collected_at:readiness.collected_at,readiness:readiness.readiness,execution_authorized:false,
+        });
+      });
       emit({event:'jot_runtime_readiness',run_hash:runHash,observation:'observed',
         collected_at:readiness.collected_at,freshness:readiness.freshness,readiness:readiness.readiness,
         limitations:sourceGapCodes(readiness.source_gaps),execution_authorized:false});
