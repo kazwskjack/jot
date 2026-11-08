@@ -614,6 +614,17 @@ export function createMcpAgentRuntimeProvider({ mcpPlugin, authorizeStdio, httpF
           ...native,
           name: tool.public_name,
           output: outputWithExecutionReceipt(native.output),
+          projectContent(exec, result) {
+            if (typeof native.projectContent !== 'function') return;
+            if (!isObject(result?.value) || !Object.hasOwn(result.value, 'execution_receipt')) {
+              return native.projectContent(exec, result);
+            }
+            // The journal receipt belongs to Jot; native projection still checks
+            // its exact execution, original value and unchanged fallback content.
+            const value = { ...result.value };
+            delete value.execution_receipt;
+            return native.projectContent(exec, { ...result, value });
+          },
           execute: async (args, exec) => {
             if (credentialsInvalidating || admittedCredentialGeneration !== credentialGeneration
               || !state.active || activeByAgent.get(agent) !== state) fail('mcp_agent_generation_closed');
