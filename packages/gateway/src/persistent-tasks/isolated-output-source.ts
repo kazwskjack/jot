@@ -2,6 +2,7 @@ import {createHash} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {WorkAdmissionRecords} from '../always-on/work-admission-records.ts';
+import {WorkGrants} from '../always-on/work-grants.ts';
 import type {TaskFileSource} from './task-file-source.ts';
 import type {TaskOutputReadResult} from './output-content.ts';
 type Row=Record<string,any>;
@@ -21,12 +22,29 @@ export function isolatedFileFacts(db:DatabaseSync,runId:string,callId:string,res
   const bytes=Buffer.from(row.bytes);if(bytes.length!==value.size||sha(bytes)!==row.sha256||!bytes.equals(Buffer.from(operation.content)))throw fail();
   const binding=db.prepare(`SELECT b.kind,b.context_json,r.conversation_id FROM wb_run_bindings b JOIN ga_runs r ON r.id=b.run_id JOIN ga_conversations c ON c.id=r.conversation_id AND c.owner_id=b.owner_id WHERE b.run_id=? AND b.owner_id=? AND c.workspace_id=? AND c.project_id=?`).get(runId,identity.owner_id,identity.workspace_id,identity.project_id) as Row|undefined;
   if(!binding)throw fail();const context=JSON.parse(binding.context_json);if(context.workspace_id!==identity.workspace_id||context.project_id!==identity.project_id)throw fail();
-  let lead=runId;if(binding.kind==='native_team'){
-   const native=db.prepare('SELECT root_run_id,task_id,occurrence_id FROM wb_native_execution_runs WHERE run_id=? AND owner_id=?').get(runId,identity.owner_id) as Row|undefined;
+  let lead=runId,member:Row|undefined;if(binding.kind==='native_team'){
+   const native=db.prepare('SELECT root_run_id,task_id,occurrence_id,role_id,child_session_ref,snapshot_json FROM wb_native_execution_runs WHERE run_id=? AND owner_id=?').get(runId,identity.owner_id) as Row|undefined;
    if(!native||native.occurrence_id!==identity.occurrence_id)throw fail();lead=native.root_run_id;
+   member=JSON.parse(native.snapshot_json);
+   if(!member||typeof member!=='object'||Array.isArray(member)||member.owner_id!==identity.owner_id||member.root_run_id!==native.root_run_id||member.role_id!==native.role_id
+    ||member.child_session_ref!==native.child_session_ref||member.workspace_id!==identity.workspace_id||member.project_id!==identity.project_id
+    ||member.task_id!==native.task_id||member.occurrence_id!==native.occurrence_id||context.agent_id!==native.role_id)throw fail();
   }else if(binding.kind!=='task')throw fail();
   const records=new WorkAdmissionRecords(db),admission=live?records.guard(identity.owner_id,lead):records.byRun(identity.owner_id,lead);
   if(!admission||admission.occurrence_id!==identity.occurrence_id||admission.cycle_id!==identity.cycle_id||admission.snapshot_id!==identity.snapshot_id||admission.scope.workspace_id!==identity.workspace_id||admission.scope.project_id!==identity.project_id||admission.scope.agent_id!==identity.agent_id)throw fail();
+  if(member&&member.task_id!==admission.task_id)throw fail();
+  const grant=new WorkGrants(db).get(identity.owner_id,admission.scope,admission.grant_id);
+  if(!grant.plan_paths.includes(row.path))throw fail();
+  if(member){
+   const assignment=member.task_assignment,paths=assignment?.file_paths;
+   // Legacy historical receipts predate member path assignments. New issuance
+   // and every receipt carrying that field must attest the exact frozen scope.
+   if(live||paths!==undefined){
+    if(!assignment||assignment.task_id!==admission.task_id||assignment.occurrence_id!==admission.occurrence_id
+     ||!Array.isArray(paths)||!paths.length||paths.length>32||new Set(paths).size!==paths.length
+     ||paths.some(path=>typeof path!=='string'||!grant.plan_paths.includes(path))||!paths.includes(row.path))throw fail();
+   }
+  }
   return {...identity,task_id:admission.task_id,path:row.path,version:row.version,sha256:row.sha256,size:bytes.length,bytes,conversation_id:binding.conversation_id};
  }catch{throw fail();}
 }
