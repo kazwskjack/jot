@@ -397,7 +397,7 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
     }
     if (url.pathname === '/v1/skills/catalog' || url.pathname === '/v1/skills/resource') {
       const resource = url.pathname.endsWith('/resource')
-      const expected = resource ? ['protocol','relative_path','scope','skill_name']
+      const expected = resource ? ['protocol','relative_path','scope','skill_name',...(body?.list_directory===true?['list_directory','after']:[])]
         : ['protocol','scope',...(body?.include_commands===true?['include_commands']:[])]
       if (method !== 'POST') return json(405, { error: 'method_not_allowed' })
       if (!body || typeof body !== 'object' || Array.isArray(body)

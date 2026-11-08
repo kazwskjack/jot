@@ -1,7 +1,8 @@
 import {isDeepStrictEqual} from 'node:util';
 import {normalizeSkillReadScope as scopeOf,createSkillReadBinding} from './skill-read-scope.js';
 import {readSkillCatalogView,readSkillResourceView} from '../skills/catalog-view.js';
-import {validateSkillCatalogView,validateSkillResourceView} from '../skills/catalog-contract.js';
+import {validateSkillCatalogView,validateSkillResourceView,validateSkillDirectoryView} from '../skills/catalog-contract.js';
+import {listSkillDirectory} from '../skills/registry.js';
 const originalReaders=new WeakSet();
 const originalResourceReaders=new WeakSet();
 const exact=(value,keys)=>!!value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join(',')===[...keys].sort().join(',');
@@ -43,12 +44,13 @@ export function createSkillCatalogCommand(readCatalog){
 export function createSkillResourceReader({agents,sessions,bridge,ordinaryPresets}={}){
  if(typeof agents?.get!=='function'||typeof sessions?.get!=='function'||typeof bridge?.guard!=='function'
   ||typeof bridge?.bindingFor!=='function'||typeof bridge?.request!=='function')throw Error('skill_catalog_host_unavailable');
- const reader=async({scope:input,skill_name,relative_path,signal}={})=>{
+ const reader=async({scope:input,skill_name,relative_path,list_directory=false,after=null,signal}={})=>{
   const scope=scopeOf(input),bounded=AbortSignal.any([AbortSignal.timeout(5000),...(signal?[signal]:[])]);
   const {agent,cwd,authorize}=createSkillReadBinding({scope,signal:bounded,agents,sessions,bridge,ordinaryPresets});
   await authorize();
-  const resource=await readSkillResourceView({skills:agent.ctx?.get('skills'),fs:agent.ctx?.get('fs'),name:skill_name,
-   relativePath:relative_path,cwd,scope:agent,signal:bounded});
+  const read=list_directory?listSkillDirectory:readSkillResourceView;
+  const resource=await read({skills:agent.ctx?.get('skills'),fs:agent.ctx?.get('fs'),name:skill_name,
+   relativePath:relative_path,...(list_directory?{after}:{}),cwd,scope:agent,signal:bounded});
   await authorize();return {scope:{...scope},resource};
  };
  originalResourceReaders.add(reader);return reader;
@@ -58,13 +60,16 @@ export function createSkillResourceReader({agents,sessions,bridge,ordinaryPreset
 export function createSkillResourceCommand(readResource){
  if(typeof readResource!=='function'||!originalResourceReaders.has(readResource))throw Error('skill_catalog_host_unavailable');
  return async(request,{signal}={})=>{
-  if(!exact(request,['protocol','scope','skill_name','relative_path'])||request.protocol!==1
+  const directory=request?.list_directory===true;
+  if(!exact(request,['protocol','scope','skill_name','relative_path',...(directory?['list_directory','after']:[])])||request.protocol!==1
    ||typeof request.skill_name!=='string'||typeof request.relative_path!=='string')throw Error('skill_catalog_command_invalid');
   const scope=scopeOf(request.scope);signal?.throwIfAborted();
-  const result=await readResource({scope,skill_name:request.skill_name,relative_path:request.relative_path,...(signal?{signal}:{})});signal?.throwIfAborted();
+  const result=await readResource({scope,skill_name:request.skill_name,relative_path:request.relative_path,
+   ...(directory?{list_directory:true,after:request.after}:{}),...(signal?{signal}:{})});signal?.throwIfAborted();
   if(!exact(result,['resource','scope']))throw Error('skill_catalog_scope_changed');
   const observed=scopeOf(result.scope);if(!isDeepStrictEqual(observed,scope))throw Error('skill_catalog_scope_changed');
-  const resource=await validateSkillResourceView(result.resource);
+  const resource=directory?validateSkillDirectoryView(result.resource):await validateSkillResourceView(result.resource);
+  if(directory&&resource.after!==request.after)throw Error('skill_catalog_scope_changed');
   if(resource.name!==request.skill_name||resource.relativePath!==request.relative_path)throw Error('skill_catalog_scope_changed');
   return {scope:{...scope},resource};
  };

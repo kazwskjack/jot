@@ -55,11 +55,11 @@ export class SkillCatalogAdapterClient implements SkillCatalogHost{
   if(!response.ok)throw Error('native_command_query_audit_unavailable');
   return response.json();
  }
- async readResource({scope,skill_name,relative_path,signal}:{scope:SkillCatalogScope;skill_name:string;relative_path:string;signal?:AbortSignal}):Promise<unknown>{
+ async readResource({scope,skill_name,relative_path,list_directory,after,signal}:{scope:SkillCatalogScope;skill_name:string;relative_path:string;list_directory?:true;after?:string|null;signal?:AbortSignal}):Promise<unknown>{
   const combined=AbortSignal.any([AbortSignal.timeout(5000),...(signal?[signal]:[])]);combined.throwIfAborted();
   const response=await this.#fetch(this.#origin+'/v1/skills/resource',{method:'POST',redirect:'error',cache:'no-store',
    headers:{authorization:`Bearer ${this.#token}`,'content-type':'application/json'},
-   body:JSON.stringify({protocol:1,scope,skill_name,relative_path}),signal:combined});
+   body:JSON.stringify({protocol:1,scope,skill_name,relative_path,...(list_directory?{list_directory:true,after:after??null}:{})}),signal:combined});
   combined.throwIfAborted();
   if(response.status===404)throw Error('skill_catalog_scope_forbidden');
   if(response.status===409)throw Error('skill_catalog_scope_changed');

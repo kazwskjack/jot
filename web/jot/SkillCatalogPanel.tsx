@@ -1,5 +1,6 @@
 import React,{useEffect,useRef,useState} from 'react';
 import NativeCommandQueries from './NativeCommandQueries';
+import SkillResourceBrowser from './SkillResourceBrowser';
 import {readSkillCatalog,readSelectedSkillResource,readSelectedSkillDefinition,catalogForScope,type SkillCatalogResponse,type SkillCatalogState,type SkillResourceResponse,type SkillDefinitionResponse} from './skill-catalog-client';
 type ResourceState={loading?:boolean;value?:SkillResourceResponse;error?:string};
 type DefinitionState={loading?:boolean;value?:SkillDefinitionResponse;error?:string};
@@ -14,10 +15,11 @@ export function skillResourceErrorMessage(error:unknown){
  if(error instanceof Error&&error.name==='AbortError')return '资源读取已取消，请重试。';
  return '技能资源读取失败，请重试；如果仍失败，请刷新技能目录。';
 }
-export function SkillCatalogView({value,paths,resources,definitions={},onPathChange,onReadResource,onReadDefinition,onUseSkill}:{
+export function SkillCatalogView({value,paths,resources,definitions={},onPathChange,onReadResource,onReadDefinition,onBrowseSkill,onUseSkill}:{
  value:SkillCatalogResponse;paths:Record<string,string>;resources:Record<string,ResourceState>;
  definitions?:Record<string,DefinitionState>;onReadDefinition?:(name:string,includeSourceManifest?:boolean)=>void;
  onPathChange:(name:string,path:string)=>void;onReadResource:(name:string)=>void;onUseSkill:(name:string)=>void;
+ onBrowseSkill?:(name:string)=>void;
 }){
  return <section aria-label="当前会话技能目录"><h3>当前会话技能</h3>
   <p>工作区 {value.viewScope.workspace_id} · 项目 {value.viewScope.project_id??'未绑定'} · {'kind' in value.viewScope
@@ -31,6 +33,7 @@ export function SkillCatalogView({value,paths,resources,definitions={},onPathCha
     <label>资源相对路径 <input value={paths[item.name]??''} onChange={event=>onPathChange(item.name,event.target.value)} maxLength={512}/></label>
     <button type="button" disabled={!item.invocation.userInvocable||!paths[item.name]?.trim()||selected?.loading} onClick={()=>onReadResource(item.name)}>{selected?.loading?'正在读取…':'读取所选资源'}</button>
     <button type="button" disabled={!item.invocation.userInvocable} onClick={()=>onUseSkill(item.name)}>使用技能</button>
+    {onBrowseSkill&&<button type="button" disabled={!item.invocation.userInvocable} onClick={()=>onBrowseSkill(item.name)}>查看配套资源</button>}
     {onReadDefinition&&<button type="button" disabled={!item.invocation.userInvocable||definition?.loading} onClick={()=>onReadDefinition(item.name)}>{definition?.loading?'正在读取详情…':'读取技能详情'}</button>}
     {onReadDefinition&&<button type="button" disabled={!item.invocation.userInvocable||definition?.loading} onClick={()=>onReadDefinition(item.name,true)}>读取原始声明</button>}
     {definition?.error&&<p role="alert">{definition.error}</p>}
@@ -65,13 +68,15 @@ export function SkillCatalogView({value,paths,resources,definitions={},onPathCha
 export default function SkillCatalogPanel({runId,ownerScope,onUseSkill}:{runId:string;ownerScope:string;onUseSkill:(name:string)=>void}){
  const [state,setState]=useState<SkillCatalogState|null>(null),[attempt,setAttempt]=useState(0),[paths,setPaths]=useState<Record<string,string>>({}),[resources,setResources]=useState<Record<string,ResourceState>>({});
  const [definitions,setDefinitions]=useState<Record<string,DefinitionState>>({});
+ const [directorySkill,setDirectorySkill]=useState<string|null>(null);
  const current=catalogForScope(state,runId,ownerScope),pending=useRef(new Map<string,AbortController>());
- useEffect(()=>{const abort=new AbortController();let active=true;setState(null);setPaths({});setResources({});setDefinitions({});
+ useEffect(()=>{const abort=new AbortController();let active=true;setState(null);setPaths({});setResources({});setDefinitions({});setDirectorySkill(null);
   for(const item of pending.current.values())item.abort();pending.current.clear();
   void readSkillCatalog(runId,ownerScope,abort.signal).then(value=>{if(active)setState({runId,ownerScope,value});},()=>{if(active&&!abort.signal.aborted)setState({runId,ownerScope,error:true});});
   return()=>{active=false;abort.abort();for(const item of pending.current.values())item.abort();pending.current.clear();};
  },[runId,ownerScope,attempt]);
- const readResource=(name:string)=>{const path=paths[name]?.trim();if(!path)return;pending.current.get(name)?.abort();
+ const readResource=(name:string,selectedPath?:string)=>{const path=(selectedPath??paths[name])?.trim();if(!path)return;pending.current.get(name)?.abort();
+  if(selectedPath)setPaths(old=>({...old,[name]:path}));
   const abort=new AbortController();pending.current.set(name,abort);setResources(old=>({...old,[name]:{loading:true}}));
   void readSelectedSkillResource(runId,ownerScope,name,path,abort.signal).then(value=>{
    if(!abort.signal.aborted&&pending.current.get(name)===abort)setResources(old=>({...old,[name]:{value}}));
@@ -91,8 +96,10 @@ export default function SkillCatalogPanel({runId,ownerScope,onUseSkill}:{runId:s
   setResources(old=>{const next={...old};delete next[name];return next;});};
  return <div>{current?.error?<p role="alert">技能目录暂时不可用，请重试。</p>:current?.value?
   <SkillCatalogView value={current.value} paths={paths} resources={resources} definitions={definitions}
-   onPathChange={changePath} onReadResource={readResource} onReadDefinition={readDefinition} onUseSkill={onUseSkill}/>
+   onPathChange={changePath} onReadResource={readResource} onReadDefinition={readDefinition} onBrowseSkill={setDirectorySkill} onUseSkill={onUseSkill}/>
  :<p role="status">正在读取技能目录…</p>}
+  {directorySkill&&current?.value&&<SkillResourceBrowser key={JSON.stringify([ownerScope,runId,directorySkill])}
+   runId={runId} ownerScope={ownerScope} name={directorySkill} onRead={path=>readResource(directorySkill,path)} onClose={()=>setDirectorySkill(null)}/>}
   <NativeCommandQueries key={ownerScope+':'+runId} runId={runId} ownerScope={ownerScope}
    commands={current?.value?.commands?.items??[]} catalogSha256={current?.value?.catalogSha256??''}/>
   <button type="button" onClick={()=>setAttempt(n=>n+1)}>刷新技能目录</button></div>;

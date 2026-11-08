@@ -476,7 +476,8 @@ export type NativeCommandCatalog = import('../../skills/catalog-contract.js').Sk
 export type RunSkillCatalogObservation = import('../../skills/catalog-contract.js').SkillCatalogObservation & {viewScope:RunSkillCatalogScope};
 export type RunSkillResourceObservation = import('../../skills/catalog-contract.js').SkillResourceView & {viewScope:RunSkillCatalogScope};
 export type RunSkillDefinitionObservation = import('../../skills/catalog-contract.js').SkillDefinitionView & {viewScope:RunSkillCatalogScope};
-export type RunSkillReadResponse = RunSkillCatalogObservation | RunSkillResourceObservation | RunSkillDefinitionObservation;
+export type RunSkillDirectoryObservation = import('../../skills/catalog-contract.js').SkillDirectoryView & {viewScope:RunSkillCatalogScope};
+export type RunSkillReadResponse = RunSkillCatalogObservation | RunSkillResourceObservation | RunSkillDefinitionObservation | RunSkillDirectoryObservation;
 
 export type SkillSourceManifest = import('../../skills/catalog-contract.js').SkillSourceManifest;
 

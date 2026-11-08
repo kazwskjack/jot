@@ -13,3 +13,13 @@ export function validateSkillResourceView(value:unknown):Promise<SkillResourceVi
 export function catalogDigestInput(value:SkillCatalogObservation):string;
 export function skillDefinitionDigestInput(value:SkillDefinitionView):string;
 export function validateSkillDefinitionView(value:unknown):Promise<SkillDefinitionView>;
+export interface SkillDirectoryView{
+ protocol:1;
+ name:string;
+ relativePath:string;
+ after:string|null;
+ entries:Array<{name:string;kind:'file'|'directory';size:number|null}>;
+ next:string|null;
+ execution_authorized:false;
+}
+export function validateSkillDirectoryView(value:unknown):SkillDirectoryView;

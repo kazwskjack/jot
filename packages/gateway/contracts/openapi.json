@@ -21490,7 +21490,7 @@
         "tags": [
           "skills"
         ],
-        "description": "Read original-scope native skills and optional command descriptors. The default view contains skill metadata, while commands=1 includes effective commands.list(originalAgent) descriptors. Select name alone for one native SkillDefinition, its body hash and definition hash, plus allowlisted version/license values from native provider metadata. Null means the provider metadata supplies no usable value. Select name and path together for one inert relative resource. Query forms are exclusive. The response carries execution_authorized=false under the original run permissions. Add manifest=source to a name-only selection for the original registry-selected instruction file, read through the native filesystem boundary and checked against the selected definition body. Its top-level version/license and text SHA-256 are returned under manifest.original, with selected-skill-frontmatter provenance and coverage by definitionSha256. Ordinary active runs use the stored original owner/conversation/run/native-Session lineage, current mode and run/conversation versions. The resident Agent and exact native preset are rechecked around reads. Ordinary scopes include kind=ordinary and carry their original Session identity and versions.",
+        "description": "Read original-scope native skills and optional command descriptors. The default view contains skill metadata, while commands=1 includes effective commands.list(originalAgent) descriptors. Select name alone for one native SkillDefinition, its body hash and definition hash, plus allowlisted version/license values from native provider metadata. Null means the provider metadata supplies no usable value. Select name and path together for one inert relative resource. Query forms are exclusive. The response carries execution_authorized=false under the original run permissions. Add manifest=source to a name-only selection for the original registry-selected instruction file, read through the native filesystem boundary and checked against the selected definition body. Its top-level version/license and text SHA-256 are returned under manifest.original, with selected-skill-frontmatter provenance and coverage by definitionSha256. Ordinary active runs use the stored original owner/conversation/run/native-Session lineage, current mode and run/conversation versions. The resident Agent and exact native preset are rechecked around reads. Ordinary scopes include kind=ordinary and carry their original Session identity and versions. Select name and directory for a metadata-only native directory page. Use directory=. for its resource root and optional after for the last returned basename. Pages contain at most 128 entries, next identifies the next-page cursor, and file contents are read only through a subsequent selected path request. Listings stay within the selected native directory resource base and use original scope rechecks.",
         "parameters": [
           {
             "name": "run_id",
@@ -21537,6 +21537,26 @@
               ]
             },
             "description": "Requires name and selects the original file frontmatter observation."
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "description": "Selected relative resource directory, or . for root. Requires name and excludes other view forms."
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            },
+            "description": "Last basename of the previous directory page. Requires name and directory."
           }
         ],
         "responses": {
@@ -41957,6 +41977,9 @@
           },
           {
             "$ref": "#/components/schemas/RunSkillDefinitionObservation"
+          },
+          {
+            "$ref": "#/components/schemas/RunSkillDirectoryObservation"
           }
         ]
       },
@@ -42458,6 +42481,100 @@
       "NativeCommandQueryReconcile": {
         "type": "object",
         "properties": {},
+        "additionalProperties": false
+      },
+      "RunSkillDirectoryObservation": {
+        "type": "object",
+        "properties": {
+          "protocol": {
+            "const": 1
+          },
+          "name": {
+            "type": "string"
+          },
+          "relativePath": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "after": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255,
+                "pattern": "^[^\\\\/:\\u0000-\\u001f\\u007f]+$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "entries": {
+            "type": "array",
+            "maxItems": 128,
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^[^\\\\/:\\u0000-\\u001f\\u007f]+$"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "file",
+                    "directory"
+                  ]
+                },
+                "size": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "name",
+                "kind",
+                "size"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "next": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255,
+                "pattern": "^[^\\\\/:\\u0000-\\u001f\\u007f]+$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "execution_authorized": {
+            "const": false
+          },
+          "viewScope": {
+            "$ref": "#/components/schemas/RunSkillCatalogScope"
+          }
+        },
+        "required": [
+          "protocol",
+          "name",
+          "relativePath",
+          "after",
+          "entries",
+          "next",
+          "execution_authorized",
+          "viewScope"
+        ],
         "additionalProperties": false
       }
     },

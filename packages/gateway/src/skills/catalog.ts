@@ -11,7 +11,7 @@ function viewScope(scope:SkillCatalogScope,conversationId:string){
 }
 export type SkillCatalogHost=Readonly<{
  read:(input:{scope:SkillCatalogScope;signal?:AbortSignal;include_commands?:true})=>Promise<unknown>;
- readResource?:(input:{scope:SkillCatalogScope;skill_name:string;relative_path:string;signal?:AbortSignal})=>Promise<unknown>;
+ readResource?:(input:{scope:SkillCatalogScope;skill_name:string;relative_path:string;list_directory?:true;after?:string|null;signal?:AbortSignal})=>Promise<unknown>;
  readDefinition?:(input:{scope:SkillCatalogScope;name:string;signal?:AbortSignal;include_source_manifest?:true})=>Promise<unknown>;
  executeCommandQuery?:(packet:Record<string,unknown>)=>Promise<unknown>;
  reconcileCommandQuery?:(packet:Record<string,unknown>)=>Promise<unknown>;
@@ -21,7 +21,7 @@ const SKILL=/^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 type Row=Record<string,any>;
 async function contract(){
  const path=import.meta.url.endsWith('/dist/src/skills/catalog.js')?'../../../../skills/catalog-contract.js':'../../../skills/catalog-contract.js';
- return import(new URL(path,import.meta.url).href) as Promise<{validateSkillCatalogView:(value:unknown)=>Row;validateSkillResourceView:(value:unknown)=>Row;validateSkillDefinitionView:(value:unknown)=>Promise<Row>;catalogDigestInput:(value:unknown)=>string}>;
+ return import(new URL(path,import.meta.url).href) as Promise<{validateSkillCatalogView:(value:unknown)=>Row;validateSkillResourceView:(value:unknown)=>Row;validateSkillDirectoryView:(value:unknown)=>Row;validateSkillDefinitionView:(value:unknown)=>Promise<Row>;catalogDigestInput:(value:unknown)=>string}>;
 }
 /** Read existing bindings only. Browser values never select a physical root,
  * Host principal, new Session, registry provider or execution permission. */
@@ -99,16 +99,20 @@ export class SkillCatalogService{
    ||JSON.stringify(before)!==JSON.stringify(this.bound(owner,runId)))throw Error('skill_catalog_scope_changed');
   return {...definition,viewScope:viewScope(before.scope,before.conversation_id)};
  }
- async readResource(owner:string,runId:string,skill_name:string,relative_path:string,signal?:AbortSignal){
+ async readResource(owner:string,runId:string,skill_name:string,relative_path:string,signal?:AbortSignal,directory?:{after:string|null}){
   signal?.throwIfAborted();if(!SKILL.test(skill_name)||typeof relative_path!=='string'||relative_path.length<1||relative_path.length>512)throw Error('skill_catalog_invalid');
+  const api=await contract();
+  if(directory)api.validateSkillDirectoryView({protocol:1,name:skill_name,relativePath:relative_path,after:directory.after,entries:[],next:null,execution_authorized:false});
   const before=this.bound(owner,runId);if(typeof this.host.readResource!=='function')throw Error('skill_catalog_host_unavailable');
-  const response=await this.host.readResource({scope:before.scope,skill_name,relative_path,...(signal?{signal}:{})}) as Row;
+  const response=await this.host.readResource({scope:before.scope,skill_name,relative_path,
+   ...(directory?{list_directory:true as const,after:directory.after}:{}),...(signal?{signal}:{})}) as Row;
   signal?.throwIfAborted();const after=this.bound(owner,runId);
   if(JSON.stringify(before)!==JSON.stringify(after))throw Error('skill_catalog_scope_changed');
   if(!response||Object.keys(response).sort().join(',')!=='resource,scope'||!response.scope||typeof response.scope!=='object'||Array.isArray(response.scope)
    ||Object.keys(response.scope).length!==Object.keys(before.scope).length
    ||Object.entries(before.scope).some(([key,value])=>response.scope[key]!==value))throw Error('skill_catalog_scope_changed');
-  const api=await contract(),resource=await api.validateSkillResourceView(response.resource);
+  const resource=directory?api.validateSkillDirectoryView(response.resource):await api.validateSkillResourceView(response.resource);
+  if(directory&&resource.after!==directory.after)throw Error('skill_catalog_scope_changed');
   if(resource.name!==skill_name||resource.relativePath!==relative_path)throw Error('skill_catalog_scope_changed');
   signal?.throwIfAborted();
   if(JSON.stringify(before)!==JSON.stringify(this.bound(owner,runId)))throw Error('skill_catalog_scope_changed');

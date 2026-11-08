@@ -140,6 +140,75 @@ export async function readSkillResource(input = {}) {
   return readSkillResourceUnlocked(input)
 }
 
+/** List metadata for one selected directory through the original DSH filesystem. */
+export async function listSkillDirectory({skills, fs, name, relativePath='.', after=null, cwd, scope, signal}={}) {
+  const parts = relativePath === '.' ? [] : normalizeRelativeResource(relativePath)
+  if (parts.join('/') !== (relativePath === '.' ? '' : relativePath)) {
+    throw failure('skill_resource_path_invalid')
+  }
+  if (after !== null && (typeof after !== 'string' || normalizeRelativeResource(after).length !== 1
+    || after === '.' || after.includes('/'))) {
+    throw failure('skill_resource_path_invalid')
+  }
+  const lookup = lookupOptions({cwd, scope, signal})
+  const first = await requireSkillsService(skills).snapshot(lookup)
+  if (!first?.complete) throw failure('skill_catalog_incomplete')
+  const selected = first.skills.find(skill => skill?.name === name)
+  if (!selected) throw failure('skill_not_found')
+  if (selected.invocation?.userInvocable !== true) throw failure('skill_not_user_invocable')
+  const identity = JSON.stringify({...publicSummary(selected), resourceBase: selected.resourceBase})
+  const base = selected.resourceBase
+  if (base?.kind !== 'directory' || typeof base.path !== 'string') {
+    throw failure('skill_resource_provider_unsupported')
+  }
+  const fileSystem = requireFileSystem(fs)
+  if (typeof fileSystem.listDir !== 'function') throw failure('skill_filesystem_unavailable')
+  const parent = await fileSystemCall(() => fileSystem.resolve(base.path, {cwd, signal}), signal)
+  const target = parts.length
+    ? await fileSystemCall(() => fileSystem.resolve(relativePath, {cwd: base.path, signal}), signal)
+    : parent
+  if (fileSystem.contains(parent, target) !== true) throw failure('skill_resource_path_unsafe')
+  const before = await fileSystemCall(() => fileSystem.stat(target, signal), signal)
+  if (before?.type !== 'directory') throw failure('skill_resource_unavailable')
+  const entries = await fileSystemCall(() => fileSystem.listDir(target, signal), signal)
+  if (!Array.isArray(entries)) throw failure('skill_resource_unavailable')
+  const visible = []
+  for (const entry of entries) {
+    signal?.throwIfAborted()
+    if (typeof entry?.name !== 'string' || entry.name.length > 255
+      || normalizeRelativeResource(entry.name).length !== 1 || entry.name === '.' || entry.name.includes('/')) {
+      throw failure('skill_resource_path_unsafe')
+    }
+    if (!['file', 'directory'].includes(entry.type) || fileSystem.contains(parent, entry.target) !== true) continue
+    if (entry.size !== undefined && (!Number.isSafeInteger(entry.size) || entry.size < 0)) {
+      throw failure('skill_resource_unavailable')
+    }
+    if (after !== null && entry.name <= after) continue
+    visible.push({name: entry.name, kind: entry.type, size: entry.type === 'file' ? (entry.size ?? null) : null})
+  }
+  visible.sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0)
+  if (visible.some((entry, index) => index > 0 && entry.name === visible[index - 1].name)) {
+    throw failure('skill_resource_changed')
+  }
+  const currentInfo = await fileSystemCall(() => fileSystem.stat(target, signal), signal)
+  const last = await requireSkillsService(skills).snapshot(lookup)
+  const current = last?.skills?.find(skill => skill?.name === name)
+  if (currentInfo?.type !== 'directory' || currentInfo.version !== before.version || !last?.complete || !current
+    || JSON.stringify({...publicSummary(current), resourceBase: current.resourceBase}) !== identity) {
+    throw failure('skill_resource_changed')
+  }
+  const page = visible.slice(0, 128)
+  return {
+    protocol: 1,
+    name,
+    relativePath,
+    after,
+    entries: page,
+    next: visible.length > 128 ? page.at(-1).name : null,
+    execution_authorized: false,
+  }
+}
+
 async function readSkillResourceUnlocked({
   skills, fs, name, relativePath, cwd, scope, signal,
   maxBytes = DEFAULT_RESOURCE_BYTES,

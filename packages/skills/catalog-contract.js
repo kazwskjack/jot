@@ -88,3 +88,23 @@ export async function validateSkillResourceView(value){
  const actual=[...digest].map(byte=>byte.toString(16).padStart(2,'0')).join('');if(actual!==value.textSha256)invalid();
  return {protocol:1,name:value.name,relativePath:value.relativePath,text:value.text,textSha256:value.textSha256,execution_authorized:false};
 }
+
+/** Directory pages contain inert relative names and metadata only. */
+export function validateSkillDirectoryView(value){
+ const segment=name=>typeof name==='string'&&name.length>0&&name.length<=255&&name!=='.'&&name!=='..'
+  &&!/[\\/:\u0000-\u001f\u007f]/u.test(name);
+ if(!exact(value,['protocol','name','relativePath','after','entries','next','execution_authorized'])||value.protocol!==1
+  ||typeof value.name!=='string'||!NAME.test(value.name)||typeof value.relativePath!=='string'||value.relativePath.length>512
+  ||value.relativePath!=='.'&&!value.relativePath.split('/').every(segment)
+  ||value.after!==null&&!segment(value.after)||value.next!==null&&!segment(value.next)
+  ||!Array.isArray(value.entries)||value.entries.length>128||value.execution_authorized!==false)invalid();
+ let previous=value.after??'';
+ const entries=value.entries.map(entry=>{
+  if(!exact(entry,['name','kind','size'])||!segment(entry.name)||entry.name<=previous||!['file','directory'].includes(entry.kind)
+   ||entry.size!==null&&(!Number.isSafeInteger(entry.size)||entry.size<0)||entry.kind==='directory'&&entry.size!==null)invalid();
+  previous=entry.name;
+  return {name:entry.name,kind:entry.kind,size:entry.size};
+ });
+ if(value.next!==null&&(entries.length!==128||value.next!==previous))invalid();
+ return {protocol:1,name:value.name,relativePath:value.relativePath,after:value.after,entries,next:value.next,execution_authorized:false};
+}
