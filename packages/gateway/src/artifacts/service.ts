@@ -1162,7 +1162,15 @@ export class ArtifactService {
         ORDER BY a.created_at DESC,a.id DESC LIMIT ?`)
         .all(conversationId,ownerId,runId??null,runId??null,runId??null,boundary?.id??null,boundary?.created_at??null,boundary?.created_at??null,boundary?.id??null,limit+1) as Array<{id:string;created_at:string}>;
       const selected=rows.slice(0,limit);
-      return {conversation_id:conversationId,...(runId!==undefined?{run_id:runId}:{}),items:selected.map(row=>({created_at:row.created_at,artifact:this.get(row.id,ownerId)})),
+      const pinned=runId===undefined?undefined:this.db.prepare(`SELECT MAX(version) version FROM (
+        SELECT version FROM ga_run_artifacts WHERE artifact_id=? AND run_id=?
+        UNION ALL SELECT version FROM ga_artifact_producers WHERE artifact_id=? AND run_id=? AND owner_id=? AND conversation_id=?)`);
+      const items=selected.map(row=>{
+        const version=pinned?.get(row.id,runId!,row.id,runId!,ownerId,conversationId) as {version:number}|undefined;
+        if(pinned&&(!version||!Number.isSafeInteger(version.version)||version.version<1))throw Error('artifact_not_found');
+        return {created_at:row.created_at,artifact:this.get(row.id,ownerId,version?.version)};
+      });
+      return {conversation_id:conversationId,...(runId!==undefined?{run_id:runId}:{}),items,
         ...(rows.length>limit?{next_cursor:selected.at(-1)!.id}:{})};
     });
   }
