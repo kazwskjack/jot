@@ -7,7 +7,7 @@ import type {WorkbenchService} from '../workbench/service.ts';
 import {createHash} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
 import {readActivityHistory} from './activity-history.ts';
-import type {ActivityToolResultPage,ActivityToolResultSearchPage,ActivityToolResultMatch,ActivityToolResultFile,ActivityToolFilePage} from '../../contracts/types.js';
+import type {ActivityToolResultPage,ActivityToolResultSearchPage,ActivityToolResultMatch,ActivityToolResultFile,ActivityToolFilePage,ActivityToolFileBytes} from '../../contracts/types.js';
 
 const ID=/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/;
 const SHA=/^[a-f0-9]{64}$/;
@@ -374,15 +374,9 @@ function createListedTextPage(offset:number){
  };
 }
 
-/** Read exactly an original list member. No current head or unrecorded snapshot fallback. */
-export function readActivityToolResultFile(db:DatabaseSync,owner:string,conversationId:string,activityId:string,query:Record<string,unknown>,reader:WorkspaceFileReader):ActivityToolFilePage{
- if(!db.isTransaction)throw Error('activity_tool_result_read_transaction_required');
- const runId=query.run_id,resultSha=query.result_sha256,path=query.path,fileSha=query.sha256,version=Number(query.version),offset=Number(query.offset_chars??0),textSha=query.text_sha256;
- const paged=query.text_protocol===2||query.text_protocol==='2';
- if(!ID.test(activityId)||typeof runId!=='string'||!ID.test(runId)||typeof resultSha!=='string'||!SHA.test(resultSha)
-  ||typeof path!=='string'||!path||path.length>4096||typeof fileSha!=='string'||!SHA.test(fileSha)||!Number.isSafeInteger(version)||version<0
-  ||!Number.isSafeInteger(offset)||offset<0||offset>(paged?Number.MAX_SAFE_INTEGER:MAX_TEXT_CHARS)||query.text_protocol!==undefined&&!paged||textSha!==undefined&&(typeof textSha!=='string'||!SHA.test(textSha))
-  ||offset>0&&textSha===undefined||Object.keys(query).some(key=>!['run_id','result_sha256','path','version','sha256','offset_chars','text_sha256','text_protocol'].includes(key)))throw Error('invalid_activity_tool_result_query');
+/** Keep original list membership and source attribution identical for text and byte readers. */
+function readOriginalListedFile(db:DatabaseSync,owner:string,conversationId:string,activityId:string,query:{runId:string;resultSha:string;path:string;version:number;fileSha:string},reader:WorkspaceFileReader,consume?: (chunk:Buffer)=>void,maxSize?:number){
+ const {runId,resultSha,path,version,fileSha}=query;
  const activity=originalActivity(db,owner,conversationId,activityId,runId),call=activityCall(activity);
  if(call.name!=='jot_workspace')throw Error('activity_tool_result_not_found');
  const receipt=readWorkspaceReceipt(db,owner,runId,call.callId);
@@ -390,9 +384,7 @@ export function readActivityToolResultFile(db:DatabaseSync,owner:string,conversa
  if(receipt.resultSha!==resultSha)throw Error('activity_tool_result_source_changed');
  const facts=fileListFacts(receipt.result),file=facts.items.find(item=>item.path===path&&item.version===version&&item.sha256===fileSha);
  if(!file)throw Error('activity_tool_result_not_found');
- if(offset>file.size)throw Error('invalid_activity_tool_result_query');
- if(!paged&&file.size>MAX_TEXT_CHARS)throw Error('activity_tool_result_file_unsupported');
- const streaming=paged?createListedTextPage(offset):undefined;
+ if(maxSize!==undefined&&file.size>maxSize)throw Error('activity_tool_result_file_unsupported');
  const binding=db.prepare(`SELECT json_extract(context_json,'$.workspace_id') workspace_id,json_extract(context_json,'$.project_id') project_id
   FROM wb_run_bindings WHERE run_id=? AND owner_id=?`).get(runId,owner) as {workspace_id:unknown;project_id:unknown}|undefined;
  if(!binding||typeof binding.workspace_id!=='string'||!binding.workspace_id||typeof binding.project_id!=='string'||!binding.project_id)throw Error('activity_tool_result_source_invalid');
@@ -404,7 +396,7 @@ export function readActivityToolResultFile(db:DatabaseSync,owner:string,conversa
   if(version===0){
    const source=isolatedBaselineSource(db,owner,runId,original,path,fileSha,file.size);
    if(!source)throw Error('activity_tool_result_not_found');
-   const baseline=reader.readBinaryFile(owner,source.workspace_id,source.project_id,source.path,source.version,source.sha256,undefined,streaming?.write);
+   const baseline=reader.readBinaryFile(owner,source.workspace_id,source.project_id,source.path,source.version,source.sha256,undefined,consume);
    if(baseline.size!==file.size)throw Error('activity_tool_result_source_invalid');
    content=baseline.content;
   }else{
@@ -416,18 +408,35 @@ export function readActivityToolResultFile(db:DatabaseSync,owner:string,conversa
     .get(owner,binding.workspace_id,binding.project_id,String(original.occurrence_id),String(original.cycle_id),String(original.snapshot_id),path,version,fileSha,file.size) as IsolatedFileSource|undefined;
    if(!source)throw Error('activity_tool_result_not_found');
    content=Buffer.from(readIsolatedTaskFileVersion(db,{...source,source:'isolated',native:Boolean(source.native)}).content,'utf8');
-   streaming?.write(content);
+   consume?.(content);
   }
  }else{
-  const original=reader.readBinaryFile(owner,binding.workspace_id,binding.project_id,path,version,fileSha,undefined,streaming?.write);
+  const original=reader.readBinaryFile(owner,binding.workspace_id,binding.project_id,path,version,fileSha,undefined,consume);
   if(original.size!==file.size)throw Error('activity_tool_result_source_invalid');
   content=original.content;
  }
+ return {conversation_id:conversationId,run_id:runId,activity_id:activityId,result_sha256:resultSha,path,version,sha256:fileSha,size:file.size,
+  source:facts.isolated?'isolated' as const:'workspace' as const,content};
+}
+
+/** Read exactly an original list member. No current head or unrecorded snapshot fallback. */
+export function readActivityToolResultFile(db:DatabaseSync,owner:string,conversationId:string,activityId:string,query:Record<string,unknown>,reader:WorkspaceFileReader):ActivityToolFilePage{
+ if(!db.isTransaction)throw Error('activity_tool_result_read_transaction_required');
+ const runId=query.run_id,resultSha=query.result_sha256,path=query.path,fileSha=query.sha256,version=Number(query.version),offset=Number(query.offset_chars??0),textSha=query.text_sha256;
+ const paged=query.text_protocol===2||query.text_protocol==='2';
+ if(!ID.test(activityId)||typeof runId!=='string'||!ID.test(runId)||typeof resultSha!=='string'||!SHA.test(resultSha)
+  ||typeof path!=='string'||!path||path.length>4096||typeof fileSha!=='string'||!SHA.test(fileSha)||!Number.isSafeInteger(version)||version<0
+  ||!Number.isSafeInteger(offset)||offset<0||offset>(paged?Number.MAX_SAFE_INTEGER:MAX_TEXT_CHARS)||query.text_protocol!==undefined&&!paged||textSha!==undefined&&(typeof textSha!=='string'||!SHA.test(textSha))
+  ||offset>0&&textSha===undefined||Object.keys(query).some(key=>!['run_id','result_sha256','path','version','sha256','offset_chars','text_sha256','text_protocol'].includes(key)))throw Error('invalid_activity_tool_result_query');
+ const streaming=paged?createListedTextPage(offset):undefined;
+ const file=readOriginalListedFile(db,owner,conversationId,activityId,{runId,resultSha,path,version,fileSha},reader,streaming?.write,paged?undefined:MAX_TEXT_CHARS);
+ if(offset>file.size)throw Error('invalid_activity_tool_result_query');
+ const content=file.content;
  if(streaming){
   const page=streaming.finish(file.size,fileSha);
   if(textSha!==undefined&&textSha!==page.text_sha256)throw Error('activity_tool_result_source_changed');
   return {conversation_id:conversationId,run_id:runId,activity_id:activityId,result_sha256:resultSha,path,version,sha256:fileSha,size:file.size,
-   source:facts.isolated?'isolated':'workspace',text_protocol:2,...page,execution_authorized:false};
+   source:file.source,text_protocol:2,...page,execution_authorized:false};
  }
  if(content.length!==file.size||createHash('sha256').update(content).digest('hex')!==fileSha)throw Error('activity_tool_result_source_invalid');
  try{new TextDecoder('utf-8',{fatal:true}).decode(content);}catch{throw Error('activity_tool_result_file_unsupported');}
@@ -435,5 +444,30 @@ export function readActivityToolResultFile(db:DatabaseSync,owner:string,conversa
  if(textSha!==undefined&&textSha!==digest)throw Error('activity_tool_result_source_changed');
  const page=readRetainedArtifactTextPage(text,offset);
  return {conversation_id:conversationId,run_id:runId,activity_id:activityId,result_sha256:resultSha,path,version,sha256:fileSha,size:file.size,
-  source:facts.isolated?'isolated':'workspace',text_sha256:digest,...page,execution_authorized:false};
+  source:file.source,text_sha256:digest,...page,execution_authorized:false};
+}
+
+/** Bounded selected bytes are published only after the complete original source is proven. */
+// shortcut: each segment rescans the full source, use a verified retained download session for large files.
+export function readActivityToolResultFileBytes(db:DatabaseSync,owner:string,conversationId:string,activityId:string,query:Record<string,unknown>,reader:WorkspaceFileReader):ActivityToolFileBytes{
+ if(!db.isTransaction)throw Error('activity_tool_result_read_transaction_required');
+ const runId=query.run_id,resultSha=query.result_sha256,path=query.path,fileSha=query.sha256,version=Number(query.version);
+ const offset=Number(query.offset_bytes??0),limit=Number(query.limit_bytes??256);
+ if(!ID.test(activityId)||typeof runId!=='string'||!ID.test(runId)||typeof resultSha!=='string'||!SHA.test(resultSha)
+  ||typeof path!=='string'||!path||path.length>4096||typeof fileSha!=='string'||!SHA.test(fileSha)||!Number.isSafeInteger(version)||version<0
+  ||!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(limit)||limit<1||limit>65536
+  ||Object.keys(query).some(key=>!['run_id','result_sha256','path','version','sha256','offset_bytes','limit_bytes'].includes(key)))throw Error('invalid_activity_tool_result_query');
+ const selected=Buffer.alloc(limit),digest=createHash('sha256');let total=0,length=0;
+ const consume=(bytes:Buffer)=>{
+  digest.update(bytes);
+  const start=Math.max(0,offset-total),end=Math.min(bytes.length,offset-total+limit);
+  if(end>start){bytes.copy(selected,length,start,end);length+=end-start;}
+  total+=bytes.length;
+ };
+ const file=readOriginalListedFile(db,owner,conversationId,activityId,{runId,resultSha,path,version,fileSha},reader,consume);
+ if(total!==file.size||digest.digest('hex')!==fileSha)throw Error('activity_tool_result_source_invalid');
+ if(offset>file.size)throw Error('invalid_activity_tool_result_query');
+ const bytes=selected.subarray(0,length),{content,...metadata}=file;
+ return {...metadata,offset_bytes:offset,length_bytes:length,content_base64:bytes.toString('base64'),chunk_sha256:createHash('sha256').update(bytes).digest('hex'),
+  ...(offset+length<total?{next_offset_bytes:offset+length}:{}),execution_authorized:false};
 }

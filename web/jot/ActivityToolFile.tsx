@@ -1,3 +1,4 @@
+import ActivityToolFileBytes from './ActivityToolFileBytes';
 import React,{useEffect,useRef,useState} from 'react';
 import {ApiError,request,taskDraftScope} from './client';
 import type {ActivityToolFilePage,ActivityToolResultFile} from './types';
@@ -36,6 +37,7 @@ export default function ActivityToolFile({conversationId,runId,activityId,result
  const current=state?.identity===identity&&state.offset===offset?state:undefined,page=current?.page;
  return <section ref={region} tabIndex={-1} className="jot-activity-content" aria-label="原列表固定文件版本">
   <h4>{file.path} · 版本 {file.version}</h4>
+  <ActivityToolFileBytes key={identity} conversationId={conversationId} runId={runId} activityId={activityId} resultSha={resultSha} file={file}/>
   {(!current||!page&&!current.error)&&<p role="status">正在读取并核对原文件版本…</p>}
   {page&&<>
    <section data-chat-search-content={JSON.stringify(['listed-file',identity,page.text_sha256,offset])}><pre>{page.text}</pre></section>
