@@ -1,4 +1,4 @@
-import {gitReinitializationPreparation,gitReinitializationRefPreparation,gitReinitializationEvidence,type GitReinitializationPreparation,type GitReinitializationEvidence} from './reinitialization-evidence.ts';
+import {gitReinitializationPreparation,gitReinitializationRefPreparation,gitReinitializationEvidence,gitReinitializationReceipt,type GitReinitializationPreparation,type GitReinitializationEvidence} from './reinitialization-evidence.ts';
 import type {DatabaseSync} from 'node:sqlite';
 import {createHash} from 'node:crypto';
 import {canonicalJson} from '../db/canonical-json.ts';
@@ -82,11 +82,11 @@ export function readInitializationOutcome(db:DatabaseSync,row:Row){
  if(!outcome)return;
  try{
   const value=JSON.parse(outcome.receipt_json);
-  if(!evidence||evidence.protocol!==1||digest(value)!==outcome.receipt_sha256||!value||typeof value!=='object'||Array.isArray(value)
+  if(!evidence||digest(value)!==outcome.receipt_sha256||!value||typeof value!=='object'||Array.isArray(value)
    ||Object.keys(value).sort().join(',')!=='execution_id,protocol,publication,request_sha256,result'
    ||value.protocol!==1||value.execution_id!==row.execution_id||value.request_sha256!==row.request_sha256
    ||JSON.stringify(value.result)!==JSON.stringify(initializationAppliedResult(db,row,evidence)))throw Error();
-  const publication=gitInitializationReceipt(value.publication,evidence);
+  const publication=evidence.protocol===2?gitReinitializationReceipt(value.publication,evidence):gitInitializationReceipt(value.publication,evidence);
   return{result:value.result as GitInitializationAppliedResult,publication,sha256:outcome.receipt_sha256};
  }catch{throw Error('git_execution_outcome_corrupt');}
 }

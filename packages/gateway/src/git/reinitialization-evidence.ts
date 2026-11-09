@@ -1,6 +1,6 @@
 import {canonicalJson} from '../db/canonical-json.ts';
 import {createHash} from 'node:crypto';
-import type {GitInitializationWitness,GitInitializationFile} from '../../contracts/types.ts';
+import type {GitInitializationWitness,GitInitializationFile,GitReinitializationDirectory} from '../../contracts/types.ts';
 import {gitInitializationWitness} from './initialization-records.ts';
 import {isGitInitializationFile,initializationDirectories} from './initialization-evidence.ts';
 import {reinitializationAllocation,type GitReinitializationAllocation} from './reinitialization-allocation.ts';
@@ -19,7 +19,11 @@ export type GitReinitializationRefPreparation={
 export type GitReinitializationEvidence={
  protocol:2;preparation:GitReinitializationPreparation;ref_preparation:GitReinitializationRefPreparation|null;
  configuration:GitReinitializationRefPreparation['configuration'];config_lock:GitInitializationFile;
- ignore:GitInitializationFile|null;ignore_lock:GitInitializationFile|null;directory_modes?:Array<{path:string;mode:number}>;
+ ignore:GitInitializationFile|null;ignore_lock:GitInitializationFile|null;directory_modes?:Array<{path:string;mode:number}>;immutable_metadata_sha256?:string;
+};
+export type GitReinitializationReceipt={
+ protocol:2;plan_id:string;action:'init';evidence_sha256:string;
+ directories:Array<GitReinitializationDirectory&{path:string}>;internal_directory:GitReinitializationDirectory;execution_authorized:false;
 };
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 const shape=(value:any,keys:string[])=>value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join('\0')===[...keys].sort().join('\0');
@@ -84,7 +88,8 @@ export function gitReinitializationRefPreparation(value:unknown):GitReinitializa
 export function gitReinitializationEvidence(value:unknown):GitReinitializationEvidence{
  try{
   const evidence=value as GitReinitializationEvidence;
-  if(!shape(evidence,['protocol','preparation','ref_preparation','configuration','config_lock','ignore','ignore_lock',...(evidence?.directory_modes===undefined?[]:['directory_modes'])])||evidence.protocol!==2)throw Error();
+  if(!shape(evidence,['protocol','preparation','ref_preparation','configuration','config_lock','ignore','ignore_lock',...(evidence?.directory_modes===undefined?[]:['directory_modes']),...(evidence?.immutable_metadata_sha256===undefined?[]:['immutable_metadata_sha256'])])||evidence.protocol!==2)throw Error();
+  if(evidence.immutable_metadata_sha256!==undefined&&(typeof evidence.immutable_metadata_sha256!=='string'||!/^[a-f0-9]{64}$/.test(evidence.immutable_metadata_sha256)))throw Error();
   if(evidence.directory_modes!==undefined){
    if(!Array.isArray(evidence.directory_modes)||evidence.directory_modes.length!==initializationDirectories.length)throw Error();
    for(const [index,directory] of evidence.directory_modes.entries()){
@@ -119,4 +124,38 @@ export function gitReinitializationEvidence(value:unknown):GitReinitializationEv
   }else if(evidence.ref_preparation!==null||ignore!==null||ignoreLock!==null)throw Error();
   return structuredClone(evidence);
  }catch{throw Error('git_reinitialization_evidence_invalid');}
+}
+
+/** Original host-private observed publication proof in the original outcome row. */
+export function gitReinitializationReceipt(value:unknown,input:unknown):GitReinitializationReceipt{
+ try{
+  const evidence=gitReinitializationEvidence(input),receipt=value as GitReinitializationReceipt;
+  const {witness}=evidence.preparation.plan,{existing}=witness,layout=existing.layout!;
+  if(!evidence.directory_modes||!evidence.immutable_metadata_sha256
+   ||!shape(receipt,['protocol','plan_id','action','evidence_sha256','directories','internal_directory','execution_authorized'])
+   ||receipt.protocol!==2||receipt.action!=='init'||receipt.execution_authorized!==false||receipt.plan_id!==evidence.preparation.plan.plan_id
+   ||receipt.evidence_sha256!==hash(canonicalJson(evidence))||!Array.isArray(receipt.directories)||receipt.directories.length!==initializationDirectories.length)throw Error();
+  const directory=(value:GitReinitializationDirectory)=>typeof value.identity==='string'&&/^[0-9]+:[0-9]+$/.test(value.identity)
+   &&Number.isSafeInteger(value.mode)&&value.mode>=0&&value.mode<=0o7777
+   &&typeof value.uid==='string'&&/^[0-9]+$/.test(value.uid)&&typeof value.gid==='string'&&/^[0-9]+$/.test(value.gid);
+  const identities=new Set([witness.root_identity,existing.git_directory_identity,existing.common_directory_identity,
+   witness.internal_directory_identity,evidence.preparation.allocation.identity,evidence.ref_preparation?.allocation.identity,
+   evidence.configuration.file.identity,evidence.config_lock.identity,evidence.ignore?.identity,evidence.ignore_lock?.identity]);
+  for(const [index,item] of receipt.directories.entries()){
+   if(!shape(item,['path','identity','mode','uid','gid'])||item.path!==initializationDirectories[index]||!directory(item)
+    ||item.mode!==evidence.directory_modes[index]!.mode)throw Error();
+   const before=index===0?layout.common:layout.directories[index-1]!.before;
+   if(before){
+    if(item.identity!==before.identity||item.uid!==before.uid||item.gid!==before.gid)throw Error();
+   }else if(identities.has(item.identity)||layout.directories.some(entry=>entry.before?.identity===item.identity)
+    ||item.uid!==evidence.preparation.allocation.uid)throw Error();
+   if(index!==0&&identities.has(item.identity))throw Error();
+   identities.add(item.identity);
+  }
+  const internal=receipt.internal_directory;
+  if(!shape(internal,['identity','mode','uid','gid'])||!directory(internal))throw Error();
+  if(witness.internal_directory_identity!==null){if(internal.identity!==witness.internal_directory_identity)throw Error();}
+  else if(identities.has(internal.identity)||!evidence.ref_preparation||internal.uid!==evidence.ref_preparation.allocation.uid)throw Error();
+  return structuredClone(receipt);
+ }catch{throw Error('git_reinitialization_receipt_invalid');}
 }

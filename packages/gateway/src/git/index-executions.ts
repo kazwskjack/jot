@@ -1,4 +1,4 @@
-import {gitReinitializationPreparation,gitReinitializationRefPreparation,gitReinitializationEvidence} from './reinitialization-evidence.ts';
+import {gitReinitializationPreparation,gitReinitializationRefPreparation,gitReinitializationEvidence,gitReinitializationReceipt,type GitReinitializationEvidence} from './reinitialization-evidence.ts';
 import {validateInitializationPreparation,readInitializationPreparation,readInitializationRefPreparation,readInitializationDispatch,readInitializationOutcome,initializationAppliedResult} from './initialization-journal.ts';
 import {gitInitializationPreparation,gitInitializationEvidence,gitInitializationReceipt,type GitInitializationEvidence} from './initialization-evidence.ts';
 import {GitInitializationIntents} from './initialization-intents.ts';
@@ -113,8 +113,8 @@ export class GitIndexExecutions{
   this.db.prepare('INSERT INTO wb_git_index_outcomes VALUES(?,?,?,?)').run(row.execution_id,JSON.stringify(receipt),digest(receipt),new Date(this.now()).toISOString());
   return receipt;
  }
- private initializationOutcome(row:Row,evidence:GitInitializationEvidence,rawPublication:unknown){
-  const publication=gitInitializationReceipt(rawPublication,evidence);
+ private initializationOutcome(row:Row,evidence:GitInitializationEvidence|GitReinitializationEvidence,rawPublication:unknown){
+  const publication=evidence.protocol===2?gitReinitializationReceipt(rawPublication,evidence):gitInitializationReceipt(rawPublication,evidence);
   const result=initializationAppliedResult(this.db,row,evidence);
   const value={protocol:1,execution_id:row.execution_id,request_sha256:row.request_sha256,result,publication};
   this.db.prepare('INSERT INTO wb_git_index_outcomes VALUES(?,?,?,?)').run(row.execution_id,JSON.stringify(value),digest(value),new Date(this.now()).toISOString());
@@ -576,9 +576,14 @@ export class GitIndexExecutions{
   const kernel=this.git.indexEffects(row.owner_id,row.project_id);
   if(dispatch?.protocol===2){
    try{
+    const observed=await kernel.observeReinitialization(dispatch,signal);guard();
+    if(observed.state==='applied'){
+     if(!observed.receipt)throw Error('git_execution_outcome_corrupt');
+     applied=true;withImmediateTransaction(this.db,()=>{guard();if(!readInitializationOutcome(this.db,row))this.initializationOutcome(row,dispatch,observed.receipt);});
+    }
     await kernel.cleanupReinitializationDispatch(dispatch,guard,signal,remove=>withImmediateTransaction(this.db,()=>{guard();remove();}));
     guard();cleanup='verified';
-   }catch{signal.throwIfAborted();guard();}
+   }catch(error){signal.throwIfAborted();guard();if(applied&&!readInitializationOutcome(this.db,row))throw error;}
    return{applied,cleanup};
   }
   if(preparation)try{

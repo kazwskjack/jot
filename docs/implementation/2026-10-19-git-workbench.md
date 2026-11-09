@@ -1095,3 +1095,39 @@ checkout/deletion, reference backend coverage and all other P09 scope remain
 required. M15.14 stays in progress. Per the user's development-only instruction,
 no tests, typechecks, builds, product/native commands, maintenance commands,
 migrations, UI runtime acceptance or deployment were executed.
+
+## Reinitialization observed outcome proof, 2026-11-09
+
+Original dispatch now optionally retains immutable_metadata_sha256. Before private
+allocation the original native attempt takes an immutable source digest between
+matching complete approved-source anchor reads, then requires the same digest at
+dispatch. It includes the object store, HEAD, refs, index and other preserved
+metadata. Only the operator-bound mutable config/ignore and exact empty-lock paths,
+recorded owned namespaces, and separately proven writable directory facts are
+excluded. The existing sourceMetadata default keeps its prior object exclusion for
+older index/commit callers; reinitialization explicitly includes objects. Existing
+records without this new fact remain readable for cleanup.
+
+Strict protocol-2 private receipt decoding binds complete mode projection and
+immutable digest to the original dispatch. It checks all seven directory paths,
+projected modes, retained existing identities/UID/GID, distinct new identities and
+new directory UID ownership, plus original/internal directory identity and complete
+physical facts. Full new-group/platform inheritance remains for the actual writer.
+The original read-only observer checks bound root/Git/common and pointer facts,
+retained root/Git permissions and owners outside the mutable common directory,
+canonical config/worktree/ignore file facts, complete immutable metadata and repeat
+physical directory snapshots. Only the complete matching state supplies the strict
+receipt. Missing evidence or partial/changed effects remain unknown.
+
+Original native control can record that observed applied receipt and public result
+in the existing immutable outcome wrapper, then perform exact-owned cleanup. It
+retains original fresh lease, native family/drain and settlement authority, and
+never fabricates an original producer finish. Original outcome readers select the
+correct protocol-specific private receipt. Fresh-init proof encoding is retained.
+Canonical lock installation and actual config/ignore/directory publication remain
+to connect, with new UID/GID inheritance and linked/external/damaged/platform cases.
+Admission remains gated. Complete UI/native flow, branch checkout/deletion,
+reference backend coverage and all remaining P09 scope remain required. M15.14
+stays in progress. Per the user's source-only direction, no tests, typechecks,
+builds, product/native operations, maintenance commands, migrations, UI runtime
+acceptance or deployment were executed.

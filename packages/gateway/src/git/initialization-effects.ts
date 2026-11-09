@@ -1,5 +1,5 @@
 import {planReinitializationConfiguration} from './reinitialization-configuration.ts';
-import {gitReinitializationPlan,gitReinitializationPreparation,gitReinitializationRefPreparation,gitReinitializationEvidence,type GitReinitializationEvidence,type GitReinitializationPlan,type GitReinitializationPreparation,type GitReinitializationRefPreparation} from './reinitialization-evidence.ts';
+import {gitReinitializationPlan,gitReinitializationPreparation,gitReinitializationRefPreparation,gitReinitializationEvidence,gitReinitializationReceipt,type GitReinitializationReceipt,type GitReinitializationEvidence,type GitReinitializationPlan,type GitReinitializationPreparation,type GitReinitializationRefPreparation} from './reinitialization-evidence.ts';
 import {cleanupReinitializationAllocation,withReinitializationAllocation} from './reinitialization-allocation.ts';
 import {createHash,randomUUID} from 'node:crypto';
 import {constants,lstatSync,mkdirSync,chmodSync,linkSync,unlinkSync,renameSync,rmdirSync,readdirSync,type BigIntStats} from 'node:fs';
@@ -149,6 +149,13 @@ export class GitInitializationEffects extends GitBranchEffects{
   }
   return{directories,files};
  }
+ private reinitializationMetadata(witness:GitReinitializationPlan['witness'],preparation?:GitReinitializationPreparation,reference?:GitReinitializationRefPreparation|null){
+  const internal=join(this.root,'.pilotdeck');
+  const ignored=new Set([join(this.commonDirectory,'config'),join(this.commonDirectory,'config.lock'),join(internal,'.gitignore'),join(internal,'.gitignore.lock'),
+   ...(preparation?[join(this.commonDirectory,preparation.allocation.name)]:[]),...(reference?[join(witness.internal_directory_identity===null?this.root:internal,reference.allocation.name)]:[])]);
+  const directories=new Set([this.commonDirectory,internal,...initializationDirectories.filter(Boolean).map(path=>join(this.commonDirectory,path))]);
+  return this.sourceMetadata(ignored,directories,true);
+ }
  /** Original producer preparation owns both allocations before private work.
   * Canonical publication remains gated until its dispatch/outcome phase exists. */
  async applyReinitialization(plan:GitReinitializationPlan,authority:ReinitializationAuthority,signal?:AbortSignal):Promise<GitInitializationReceipt>{
@@ -167,6 +174,8 @@ export class GitInitializationEffects extends GitBranchEffects{
   try{
    check();const before=await this.anchors(signal);check();
    if(before.repository!==witness.repository_sha256||before.metadata!==existing.source_metadata_sha256)throw Error('git_initialization_source_changed');
+   const immutableMetadata=this.reinitializationMetadata(witness),confirmed=await this.anchors(signal);check();
+   if(confirmed.repository!==before.repository||confirmed.metadata!==before.metadata)throw Error('git_initialization_source_changed');
    let preparation:GitReinitializationPreparation|undefined;
    return await withReinitializationAllocation({parent:this.commonDirectory,parent_identity:existing.common_directory_identity,scope:'common',...(signal?{signal}:{}),
     authority:{authorize:allocation=>{if(allocation)ignored.add(join(this.commonDirectory,allocation.name));check();},prepared:allocation=>{
@@ -202,8 +211,9 @@ export class GitInitializationEffects extends GitBranchEffects{
     const dispatch=(reference:GitReinitializationRefPreparation|null,ignore:GitInitializationFile|null,ignoreLock:GitInitializationFile|null)=>{
      current();
      if(!equal(this.initializationFile(join(stage,'config.pending')).fact,file)||!equal(this.initializationFile(join(stage,'config.lock')).fact,lock))throw Error('git_initialization_source_changed');
+     if(this.reinitializationMetadata(witness,preparation!,reference)!==immutableMetadata)throw Error('git_initialization_source_changed');
      const evidence=freezeWorkAdmission(gitReinitializationEvidence({protocol:2,preparation:preparation!,ref_preparation:reference,
-      configuration,config_lock:lock,ignore,ignore_lock:ignoreLock,...(planned.directory_modes?{directory_modes:planned.directory_modes}:{})}));
+      configuration,config_lock:lock,ignore,ignore_lock:ignoreLock,immutable_metadata_sha256:immutableMetadata,...(planned.directory_modes?{directory_modes:planned.directory_modes}:{})}));
      synchronous(()=>authority.dispatch(evidence));current();
      throw Error('git_reinitialization_execution_unavailable');
     };
@@ -405,6 +415,47 @@ export class GitInitializationEffects extends GitBranchEffects{
    if(this.directorySync(this.gitDirectory)!==receipt.directories[0]!.identity)throw Error('git_repository_changed');
   };
   check();this.bindInitializedRepository(anchors.root,receipt.directories[0]!.identity,anchors.executable,anchors.program);check();
+ }
+
+ /** Original read-only observation never completes a partial publication. */
+ async observeReinitialization(raw:unknown,signal?:AbortSignal){
+  const evidence=gitReinitializationEvidence(raw),{witness}=evidence.preparation.plan,{existing}=witness;
+  const result=(state:'applied'|'unknown',receipt?:GitReinitializationReceipt)=>({state,...(receipt?{receipt}:{}),execution_authorized:false as const});
+  const anchors=await this.anchors(signal);
+  if(anchors.repository!==witness.repository_sha256)throw Error('git_repository_changed');
+  const check=()=>{
+   signal?.throwIfAborted();
+   if(this.directorySync(this.root)!==witness.root_identity||this.directorySync(this.gitDirectory)!==existing.git_directory_identity
+    ||this.directorySync(this.commonDirectory)!==existing.common_directory_identity)throw Error('git_repository_changed');
+   for(const [path,fact] of [[this.root,existing.layout!.root],[this.gitDirectory,existing.layout!.git]] as const){
+    if(path===this.commonDirectory)continue;
+    const stat=lstatSync(path,{bigint:true});
+    if(Number(stat.mode&0o7777n)!==fact.mode||String(stat.uid)!==fact.uid||String(stat.gid)!==fact.gid)throw Error('git_repository_changed');
+   }
+   if(existing.dot_file!==null&&!equal(this.initializationFile(join(this.root,'.git')).fact,existing.dot_file))throw Error('git_repository_changed');
+  };
+  const directory=(path:string)=>{
+   const stat=lstatSync(path,{bigint:true});
+   if(this.directorySync(path)!==identity(stat))throw Error('git_repository_changed');
+   return{identity:identity(stat),mode:Number(stat.mode&0o7777n),uid:String(stat.uid),gid:String(stat.gid)};
+  };
+  const snapshot=()=>{
+   check();
+   if(this.reinitializationMetadata(witness,evidence.preparation,evidence.ref_preparation)!==evidence.immutable_metadata_sha256
+    ||!equal(this.initializationFile(join(this.commonDirectory,'config')).fact,evidence.configuration.file)
+    ||!equal(this.initializationFile(join(this.gitDirectory,'config.worktree')).fact,existing.worktree_config)
+    ||!equal(this.initializationFile(join(this.root,'.pilotdeck','.gitignore')).fact,witness.ignore_after.changed?evidence.ignore:witness.internal_ignore))throw Error('git_initialization_source_changed');
+   return{directories:initializationDirectories.map(path=>({path,...directory(path?join(this.commonDirectory,path):this.commonDirectory)})),
+    internal_directory:directory(join(this.root,'.pilotdeck'))};
+  };
+  try{
+   if(!evidence.directory_modes||!evidence.immutable_metadata_sha256)return result('unknown');
+   const before=snapshot(),after=snapshot();
+   if(!equal(before,after))return result('unknown');
+   check();
+   return result('applied',gitReinitializationReceipt({protocol:2,plan_id:evidence.preparation.plan.plan_id,action:'init',
+    evidence_sha256:hash(canonicalJson(evidence)),...after,execution_authorized:false},evidence));
+  }catch{check();return result('unknown');}
  }
 
  /** Exact-owned cleanup after a recorded dispatch preserves canonical files.

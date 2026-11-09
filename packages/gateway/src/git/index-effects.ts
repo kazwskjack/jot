@@ -129,9 +129,9 @@ export class GitIndexEffects extends GitRepositoryInspection{
  /** Keep every non-object metadata file pinned. Ignore only exact owned locks
   * and newly created lock-parent directories; directory identities still hold.
   * Content-addressed object bytes are checked separately, never treated as refs. */
- protected sourceMetadata(locks:ReadonlySet<string>=new Set(),created:ReadonlySet<string>=new Set()){
+ protected sourceMetadata(locks:ReadonlySet<string>=new Set(),created:ReadonlySet<string>=new Set(),includeObjects=false){
   const facts:string[]=[];let entries=0;const objects=join(this.commonDirectory,'objects');
-  for(const root of [...new Set([this.gitDirectory,this.commonDirectory])]){const queue=[root];while(queue.length){const folder=queue.pop()!;for(const entry of readdirSync(folder,{withFileTypes:true})){if(++entries>100000)throw Error('git_metadata_limit');const path=join(folder,entry.name);if(locks.has(path)||equalPath(path,objects))continue;const s=lstatSync(path);if(s.isSymbolicLink()||!s.isFile()&&!s.isDirectory())throw Error('git_repository_changed');if(s.isDirectory()){if(!created.has(path))facts.push(path+':dir:'+id(s)+':'+s.mode);queue.push(path);}else facts.push(path+':file:'+stamp(s));}}}
+  for(const root of [...new Set([this.gitDirectory,this.commonDirectory])]){const queue=[root];while(queue.length){const folder=queue.pop()!;for(const entry of readdirSync(folder,{withFileTypes:true})){if(++entries>100000)throw Error('git_metadata_limit');const path=join(folder,entry.name);if(locks.has(path)||!includeObjects&&equalPath(path,objects))continue;const s=lstatSync(path);if(s.isSymbolicLink()||!s.isFile()&&!s.isDirectory())throw Error('git_repository_changed');if(s.isDirectory()){if(!created.has(path))facts.push(path+':dir:'+id(s)+':'+s.mode);queue.push(path);}else facts.push(path+':file:'+stamp(s));}}}
   return hash(facts.sort().join('\n'));
  }
  protected async controlled(context:GitReadContext,args:string[],input?:Buffer,signal?:AbortSignal,sourceObjects=false,readAlternates=true){
