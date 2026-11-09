@@ -75,3 +75,17 @@ export function formatDocumentPreviewContent(mediaType:unknown, content:unknown,
   else text = slidesText(content);
   return Object.freeze({ text: text.slice(0, maxChars), truncated: content.truncated === true || text.length > maxChars });
 }
+
+/** Adapt the original document.read result shape without rewriting saved evidence. */
+export function formatDocumentReadContent(mediaType:unknown,content:unknown,maxChars=8*1024*1024){
+ if(!isRecord(content)||normalizedType(content.media_type)!==normalizedType(mediaType)
+  ||content.text_reader_revision!==undefined&&content.text_reader_revision!==1)throw Error('DOCUMENT_PREVIEW_RESULT_INVALID');
+ let normalized=content;
+ if(normalizedType(mediaType)==='application/pdf'){
+  if(typeof content.page_count!=='number'||!Number.isSafeInteger(content.page_count)||content.page_count<0
+   ||!Array.isArray(content.pages)||content.pages.length!==content.page_count||content.pages.some(page=>typeof page!=='string'))throw Error('DOCUMENT_PREVIEW_RESULT_INVALID');
+  normalized={...content,pages:content.pages.map((text,index)=>({number:index+1,text}))};
+ }
+ const formatted=formatDocumentPreviewContent(mediaType,normalized,maxChars);
+ return {text:formatted.text,truncated:formatted.truncated||content.text_reader_revision!==1};
+}

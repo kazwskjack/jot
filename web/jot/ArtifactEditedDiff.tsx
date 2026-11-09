@@ -1,10 +1,10 @@
 import React,{useEffect,useRef,useState} from 'react';
 import {ApiError,request,taskDraftScope} from './client';
-import type {Artifact,ArtifactDocumentText,ArtifactEditedDiff as EditedDiff,ArtifactEditedDiffMatch} from './types';
+import type {Artifact,ArtifactDocumentTextProof,ArtifactEditedDiff as EditedDiff,ArtifactEditedDiffMatch} from './types';
 
 const id=/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/;
 const sha=/^[a-f0-9]{64}$/;
-export const validEditedDiffSource=(value:Required<ArtifactDocumentText>|undefined)=>value&&typeof value.document_job_id==='string'&&id.test(value.document_job_id)
+export const validEditedDiffSource=(value:ArtifactDocumentTextProof|undefined)=>value&&typeof value.document_job_id==='string'&&id.test(value.document_job_id)
  &&typeof value.document_result_sha256==='string'&&sha.test(value.document_result_sha256)&&typeof value.text_sha256==='string'&&sha.test(value.text_sha256)
  &&Number.isSafeInteger(value.text_total_chars)&&value.text_total_chars>=0&&value.text_total_chars<=200000&&typeof value.source_truncated==='boolean';
 

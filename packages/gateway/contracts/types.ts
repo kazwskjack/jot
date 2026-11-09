@@ -816,9 +816,10 @@ export type InteractionSearchMatch=Pick<Interaction,'interaction_id'|'run_id'|'k
 export type InteractionSearchPage={conversation_id:string;run_id?:string;q:string;items:InteractionSearchMatch[];scanned_records:number;scanned_through?:InteractionSearchBoundary;next_cursor?:string;execution_authorized:false};
 
 export type ArtifactTextCursor={artifact_id:string;version:number;part_index?:number;group_sha256?:string};
-export type ArtifactDocumentText={document_job_id?:string;document_result_sha256?:string;text_sha256?:string;text_total_chars?:number;source_truncated?:boolean};
+export type ArtifactDocumentTextProof={document_job_id:string;document_result_sha256:string;text_sha256:string;text_total_chars:number;source_truncated:boolean};
+export type ArtifactDocumentText=Partial<ArtifactDocumentTextProof>&{document_operation?:'document.read';document_read_revision?:1};
 export type ArtifactTextMatch=ArtifactTextCursor&ArtifactDocumentText&{edited_diff?:ArtifactEditedDiffMatch;sha256:string;file_name:string;size_bytes:number;created_at:string;offset_chars:number;match_offset_chars:number;match_text:string;excerpt:string};
 export type ArtifactTextSearchPage={conversation_id:string;edited_protocol?:1;run_id?:string;q:string;items:ArtifactTextMatch[];scanned_versions:number;unavailable_versions:number;skipped_versions:number;next_cursor?:ArtifactTextCursor;execution_authorized:false};
 export type ArtifactTextPage=ArtifactTextCursor&ArtifactDocumentText&{conversation_id:string;sha256:string;file_name:string;size_bytes:number;offset_chars:number;total_chars:number;text:string;next_offset_chars?:number;execution_authorized:false};
-export type ArtifactEditedDiff={artifact_id:string;conversation_id:string;run_id?:string;from_version:number;to_version:number;before_sha256:string;after_sha256:string;edit_job_id:string;edit_result_sha256:string;before:Required<ArtifactDocumentText>;after:Required<ArtifactDocumentText>;unified_diff:string;diff_sha256:string;truncated:boolean;execution_authorized:false};
+export type ArtifactEditedDiff={artifact_id:string;conversation_id:string;run_id?:string;from_version:number;to_version:number;before_sha256:string;after_sha256:string;edit_job_id:string;edit_result_sha256:string;before:ArtifactDocumentTextProof;after:ArtifactDocumentTextProof;unified_diff:string;diff_sha256:string;truncated:boolean;execution_authorized:false};
 export type ArtifactEditedDiffMatch=Omit<ArtifactEditedDiff,'unified_diff'>&{text_total_chars:number};

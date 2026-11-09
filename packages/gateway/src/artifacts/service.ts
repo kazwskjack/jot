@@ -1263,7 +1263,7 @@ export class ArtifactService {
     });
   }
 
-  private textSource(id:string,ownerId:string,conversationId:string,version:number,sha256:string,runId?:string,partIndex?:number,groupSha?:string,document?:{jobId?:string;resultSha?:string}){
+  private textSource(id:string,ownerId:string,conversationId:string,version:number,sha256:string,runId?:string,partIndex?:number,groupSha?:string,document?:{jobId?:string;resultSha?:string;includeRead?:boolean}){
     const selected=withReadTransaction(this.db,()=>{
       if(!this.db.prepare('SELECT 1 FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId))throw Error('conversation_not_found');
       const row=this.version(id,ownerId,version),group=this.get(id,ownerId,version);
@@ -1286,7 +1286,7 @@ export class ArtifactService {
       if(!Number.isSafeInteger(size)||size<0)throw Error('artifact_text_unsupported');
       if(document&&!part&&!group.part_count&&isDocumentPreviewMediaType(mime)){
         if(file.status!=='ready')throw Error('artifact_not_found');
-        const retained=retainedDocumentText(this.db,{artifactId:id,ownerId,conversationId,version,sha256,mediaType:mime},document.jobId,document.resultSha);
+        const retained=retainedDocumentText(this.db,{artifactId:id,ownerId,conversationId,version,sha256,mediaType:mime,size},document.jobId,document.resultSha,document.includeRead);
         return {file,source:{path,size,sha256},document:retained};
       }
       if(document?.jobId)throw Error('artifact_text_source_changed');
@@ -1302,21 +1302,22 @@ export class ArtifactService {
   async textPage(id:string,ownerId:string,query:Record<string,unknown>,signal?:AbortSignal){
     const identifier=/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/;
     const conversationId=query.conversation_id,runId=query.run_id,version=Number(query.version),sha256=query.sha256,offset=Number(query.offset_chars??0),partIndex=query.part_index===undefined?undefined:Number(query.part_index),groupSha=query.group_sha256;
-    if(Object.keys(query).some(key=>!['conversation_id','run_id','version','sha256','offset_chars','part_index','group_sha256','document_job_id','document_result_sha256','text_sha256'].includes(key))
+    if(Object.keys(query).some(key=>!['conversation_id','run_id','version','sha256','offset_chars','part_index','group_sha256','document_job_id','document_result_sha256','text_sha256','document_operation'].includes(key))
       ||!identifier.test(id)||typeof conversationId!=='string'||!identifier.test(conversationId)
       ||runId!==undefined&&(typeof runId!=='string'||!identifier.test(runId))
       ||typeof sha256!=='string'||!/^[a-f0-9]{64}$/.test(sha256)||!Number.isSafeInteger(version)||version<1
       ||!Number.isSafeInteger(offset)||offset<0
       ||(partIndex===undefined?groupSha!==undefined:!Number.isSafeInteger(partIndex)||partIndex<1||partIndex>50||version!==1||typeof groupSha!=='string'||!/^[a-f0-9]{64}$/.test(groupSha)))throw Error('artifact_text_query_invalid');
-    const documentJob=query.document_job_id,documentSha=query.document_result_sha256,textSha=query.text_sha256;
+    const documentJob=query.document_job_id,documentSha=query.document_result_sha256,textSha=query.text_sha256,documentOperation=query.document_operation;
     if(documentJob!==undefined&&(typeof documentJob!=='string'||!identifier.test(documentJob)||typeof documentSha!=='string'||!/^[a-f0-9]{64}$/.test(documentSha)
       ||typeof textSha!=='string'||!/^[a-f0-9]{64}$/.test(textSha)||partIndex!==undefined)
-      ||documentJob===undefined&&(documentSha!==undefined||textSha!==undefined))throw Error('artifact_text_query_invalid');
-    const document=documentJob===undefined?undefined:{jobId:documentJob as string,resultSha:documentSha as string};
+      ||documentOperation!==undefined&&documentOperation!=='document.read'
+      ||documentJob===undefined&&(documentSha!==undefined||textSha!==undefined||documentOperation!==undefined))throw Error('artifact_text_query_invalid');
+    const document=documentJob===undefined?undefined:{jobId:documentJob as string,resultSha:documentSha as string,includeRead:documentOperation==='document.read'};
     const selected=this.textSource(id,ownerId,conversationId,version,sha256,runId as string|undefined,partIndex,groupSha as string|undefined,document);
     if(selected.document){
       signal?.throwIfAborted();
-      if(selected.document.text_sha256!==textSha)throw Error('artifact_text_source_changed');
+      if(selected.document.text_sha256!==textSha||selected.document.document_operation!==documentOperation)throw Error('artifact_text_source_changed');
       const {text,...metadata}=selected.document,page=readRetainedArtifactTextPage(text,offset);
       return {conversation_id:conversationId,artifact_id:id,version,sha256,file_name:selected.file.file_name,size_bytes:selected.source.size,...metadata,...page,execution_authorized:false};
     }
@@ -1333,7 +1334,8 @@ export class ArtifactService {
     const identifier=/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/;
     const q=typeof query.q==='string'?query.q.trim():'',runId=query.run_id,cursorId=query.cursor_artifact_id,cursorVersion=Number(query.cursor_version);
     const edited=query.edited_protocol===1||query.edited_protocol==='1';
-    const documents=query.document_protocol===1||query.document_protocol==='1';
+    const readDocuments=query.document_protocol===2||query.document_protocol==='2';
+    const documents=readDocuments||query.document_protocol===1||query.document_protocol==='1';
     const parts=query.parts_protocol===1||query.parts_protocol==='1',cursorPart=query.cursor_part_index===undefined?undefined:Number(query.cursor_part_index),cursorGroup=query.cursor_group_sha256;
     if(!q||q.length>200||!identifier.test(conversationId)||Object.keys(query).some(key=>!['q','run_id','cursor_artifact_id','cursor_version','parts_protocol','cursor_part_index','cursor_group_sha256','document_protocol','edited_protocol'].includes(key))
       ||query.edited_protocol!==undefined&&!edited||edited&&(query.document_protocol!==undefined||query.parts_protocol!==undefined||cursorPart!==undefined||cursorGroup!==undefined)
@@ -1396,17 +1398,18 @@ export class ArtifactService {
             partIndex=1;groupSha=group.sha256;more||=group.items.length>1;
           }
           const part=partIndex===undefined?undefined:this.part(entry.id,ownerId,partIndex,entry.version),contentSha=part?.sha256??entry.sha256;
-          const selected=this.textSource(entry.id,ownerId,conversationId,entry.version,contentSha,runId as string|undefined,partIndex,groupSha,documents?{}:undefined);
+          const selected=this.textSource(entry.id,ownerId,conversationId,entry.version,contentSha,runId as string|undefined,partIndex,groupSha,documents?{includeRead:readDocuments}:undefined);
           const found=selected.document?searchRetainedArtifactText(selected.document.text,q):await searchVerifiedArtifactText(selected.source,q,signal);
           signal?.throwIfAborted();
           const current=this.textSource(entry.id,ownerId,conversationId,entry.version,contentSha,runId as string|undefined,partIndex,groupSha,
-            selected.document?{jobId:selected.document.document_job_id,resultSha:selected.document.document_result_sha256}:undefined);
+            selected.document?{jobId:selected.document.document_job_id,resultSha:selected.document.document_result_sha256,includeRead:selected.document.document_operation==='document.read'}:undefined);
           if(current.document?.text_sha256!==selected.document?.text_sha256)throw Error('artifact_text_source_changed');
           if(current.source.path!==selected.source.path||current.source.size!==selected.source.size)throw Error('artifact_text_source_changed');
           if(found.match)items.push({artifact_id:entry.id,version:entry.version,sha256:contentSha,file_name:current.file.file_name,
             size_bytes:current.source.size,created_at:entry.created_at,...(partIndex===undefined?{}:{part_index:partIndex,group_sha256:groupSha}),
             ...(current.document?{document_job_id:current.document.document_job_id,document_result_sha256:current.document.document_result_sha256,
-              text_sha256:current.document.text_sha256,text_total_chars:current.document.text_total_chars,source_truncated:current.document.source_truncated}:{}),...found.match});
+              text_sha256:current.document.text_sha256,text_total_chars:current.document.text_total_chars,source_truncated:current.document.source_truncated,
+              ...(current.document.document_operation?{document_operation:current.document.document_operation,...(current.document.document_read_revision===1?{document_read_revision:1 as const}:{})}:{})}:{}),...found.match});
         }
       }catch(error){
         signal?.throwIfAborted();
@@ -1609,7 +1612,7 @@ export class ArtifactService {
       const from=Number(metadata.base_version),before=this.version(id,ownerId,from);
       const beforeMeta=JSON.parse(String(before.metadata_json)) as Record<string,unknown>;
       if(!['ready','delivered'].includes(String(beforeMeta.status)))throw Error('artifact_not_found');
-      const left={artifactId:id,ownerId,conversationId,version:from,sha256:String(before.sha256),mediaType:String(before.mime_type)};
+      const left={artifactId:id,ownerId,conversationId,version:from,sha256:String(before.sha256),mediaType:String(before.mime_type),size:Number(before.size_bytes)};
       const right={artifactId:id,ownerId,conversationId,version:to,sha256:expectedSha,mediaType:String(after.mime_type),size:Number(after.size_bytes)};
       const edit=retainedDocumentEdit(this.db,left,right);
       if(pinned&&(edit.edit_job_id!==query.edit_job_id||edit.edit_result_sha256!==query.edit_result_sha256))throw Error('artifact_text_source_changed');

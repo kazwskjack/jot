@@ -13,12 +13,12 @@ export default function ArtifactTextResult({conversationId,runId,target}:{conver
  useEffect(()=>{
   const controller=new AbortController();setState({identity,offset});
   const load=async()=>{
-   const query=new URLSearchParams({conversation_id:conversationId,version:String(target.version),sha256:target.sha256,...(target.document_job_id?{document_job_id:target.document_job_id,document_result_sha256:target.document_result_sha256!,text_sha256:target.text_sha256!}:{}),offset_chars:String(offset),...(target.part_index===undefined?{}:{part_index:String(target.part_index),group_sha256:target.group_sha256!}),...(runId?{run_id:runId}:{})});
+   const query=new URLSearchParams({conversation_id:conversationId,version:String(target.version),sha256:target.sha256,...(target.document_job_id?{document_job_id:target.document_job_id,document_result_sha256:target.document_result_sha256!,text_sha256:target.text_sha256!,...(target.document_operation?{document_operation:target.document_operation}:{})}:{}),offset_chars:String(offset),...(target.part_index===undefined?{}:{part_index:String(target.part_index),group_sha256:target.group_sha256!}),...(runId?{run_id:runId}:{})});
    const page=await request<ArtifactTextPage>(`/artifacts/${encodeURIComponent(target.artifact_id)}/text?${query}`,'GET',undefined,undefined,controller.signal,120000);
    if(taskDraftScope()!==owner||!page||page.conversation_id!==conversationId||page.artifact_id!==target.artifact_id||page.version!==target.version
     ||page.sha256!==target.sha256||page.part_index!==target.part_index||page.group_sha256!==target.group_sha256||page.size_bytes!==target.size_bytes||page.execution_authorized!==false||typeof page.file_name!=='string'
     ||page.document_job_id!==target.document_job_id||page.document_result_sha256!==target.document_result_sha256
-    ||page.text_sha256!==target.text_sha256||page.text_total_chars!==target.text_total_chars||page.source_truncated!==target.source_truncated
+    ||page.text_sha256!==target.text_sha256||page.text_total_chars!==target.text_total_chars||page.source_truncated!==target.source_truncated||page.document_operation!==target.document_operation||page.document_read_revision!==target.document_read_revision
     ||page.offset_chars!==offset||!Number.isSafeInteger(page.total_chars)||page.total_chars<offset||page.total_chars>(target.text_total_chars??target.size_bytes)||target.document_job_id!==undefined&&page.total_chars!==target.text_total_chars
     ||typeof page.text!=='string'||page.text.length>16384||offset+page.text.length>page.total_chars
     ||(page.next_offset_chars===undefined?offset+page.text.length!==page.total_chars
@@ -32,13 +32,15 @@ export default function ArtifactTextResult({conversationId,runId,target}:{conver
  const current=state?.identity===identity&&state.offset===offset?state:undefined,page=current?.page;
  const at=target.match_offset_chars-offset,marked=page&&at>=0&&page.text.slice(at,at+target.match_text.length)===target.match_text;
  return <section ref={region} tabIndex={-1} className="jot-activity-content" aria-label="已选原文件正文">
-  <h4>{page?.file_name??target.file_name} · 版本 {target.version}{target.part_index===undefined?'':` · 第 ${target.part_index} 卷`}{target.document_job_id?' · 已保存文档预览':''}</h4>
+  <h4>{page?.file_name??target.file_name} · 版本 {target.version}{target.part_index===undefined?'':` · 第 ${target.part_index} 卷`}{target.document_job_id?(target.document_operation==='document.read'?' · 已保存原读取结果':' · 已保存文档预览'):''}</h4>
   {(!current||!page&&!current.error)&&<p role="status">正在读取并核对原文件…</p>}
   {page&&<>
    <section data-chat-search-content={JSON.stringify(['artifact-text',identity,offset])}>
     <pre>{marked?<>{page.text.slice(0,at)}<mark>{target.match_text}</mark>{page.text.slice(at+target.match_text.length)}</>:page.text}</pre>
    </section>
-   {page.source_truncated&&<p role="status">已保存的文档预览已截断，当前显示其留存文本。</p>}
+   {page.document_operation==='document.read'&&page.document_read_revision!==1
+    ?<p role="status">该历史读取结果未记录解析版本，其文档覆盖范围尚未确认。</p>
+    :page.source_truncated&&<p role="status">已保存文档文本含覆盖缺口或显示截断，当前显示其留存文本。</p>}
    <nav aria-label="原文件正文翻页" data-chat-search-ignore>
     <button type="button" disabled={!currentCursor.previous.length} onClick={()=>{
      const previous=currentCursor.previous.slice(0,-1),prior=currentCursor.previous.at(-1)!;

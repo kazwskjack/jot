@@ -31,7 +31,7 @@ export default function ArtifactTextSearch({conversationId,runId,query}:{convers
    await abortableDelay(300,signal);
    let boundary=before;const seen=new Set<string>();
    while(!signal.aborted){
-    const protocol:Record<string,string>=edited?{edited_protocol:'1'}:{parts_protocol:'1',document_protocol:'1'};
+    const protocol:Record<string,string>=edited?{edited_protocol:'1'}:{parts_protocol:'1',document_protocol:'2'};
     const params=new URLSearchParams({q,...protocol,...(runId?{run_id:runId}:{}),...(boundary?{cursor_artifact_id:boundary.artifact_id,cursor_version:String(boundary.version),...(boundary.part_index===undefined?{}:{cursor_part_index:String(boundary.part_index),cursor_group_sha256:boundary.group_sha256!})}:{})});
     const page=await request<ArtifactTextSearchPage>(`/conversations/${encodeURIComponent(conversationId)}/artifact-search?${params}`,'GET',undefined,undefined,signal,120000);
     if(signal.aborted)return;
@@ -54,10 +54,12 @@ export default function ArtifactTextSearch({conversationId,runId,query}:{convers
        ||typeof proof.diff_sha256!=='string'||!sha.test(proof.diff_sha256)||!validEditedDiffSource(proof.before)||!validEditedDiffSource(proof.after)
        ||typeof proof.truncated!=='boolean'||proof.execution_authorized!==false||!Number.isSafeInteger(proof.text_total_chars)||proof.text_total_chars<0||proof.text_total_chars>200000)
       ||(hit.document_job_id===undefined
-       ?hit.document_result_sha256!==undefined||hit.text_sha256!==undefined||hit.text_total_chars!==undefined||hit.source_truncated!==undefined
-       :typeof hit.document_job_id!=='string'||!id.test(hit.document_job_id)||hit.part_index!==undefined
+       ?hit.document_result_sha256!==undefined||hit.text_sha256!==undefined||hit.text_total_chars!==undefined||hit.source_truncated!==undefined||hit.document_operation!==undefined||hit.document_read_revision!==undefined
+       :hit.document_operation!==undefined&&hit.document_operation!=='document.read'
+        ||(hit.document_operation==='document.read'?hit.document_read_revision!==undefined&&hit.document_read_revision!==1:hit.document_read_revision!==undefined)
+        ||typeof hit.document_job_id!=='string'||!id.test(hit.document_job_id)||hit.part_index!==undefined
         ||typeof hit.document_result_sha256!=='string'||!sha.test(hit.document_result_sha256)||typeof hit.text_sha256!=='string'||!sha.test(hit.text_sha256)
-        ||!Number.isSafeInteger(hit.text_total_chars)||Number(hit.text_total_chars)<0||Number(hit.text_total_chars)>200000||typeof hit.source_truncated!=='boolean')
+        ||!Number.isSafeInteger(hit.text_total_chars)||Number(hit.text_total_chars)<0||Number(hit.text_total_chars)>(hit.document_operation==='document.read'?8*1024*1024:200000)||typeof hit.source_truncated!=='boolean')
       ||!Number.isSafeInteger(hit.offset_chars)||hit.offset_chars<0||hit.offset_chars>textSize
       ||!Number.isSafeInteger(hit.match_offset_chars)||hit.match_offset_chars<hit.offset_chars||hit.match_offset_chars-hit.offset_chars>61
       ||typeof hit.match_text!=='string'||!hit.match_text.length||hit.match_text.length>200||hit.match_offset_chars+hit.match_text.length>textSize
@@ -86,11 +88,11 @@ export default function ArtifactTextSearch({conversationId,runId,query}:{convers
    </div>
    <button type="button" onClick={()=>{setCursor({identity,previous:[]});setRevision(value=>value+1);}}>刷新文件搜索</button>
    <p role="status">{current?.loading?'正在读取并检索原文件':`本批命中 ${current?.items.length??0} 个文件版本/分卷`} · 本批已检查 {current?.scanned??0} 个原版本/分卷</p>
-   <small>{edited?'检索原编辑作业发布的文档预览差异，每对版本列出首处命中。差异显示范围最多200000字符，原预览截断状态在打开时说明。':'检索本地文本原版本、单卷和已有的文档预览，每个来源列出首处命中。'}成员范围只包含原运行实际引用或产生的版本。</small>
+   <small>{edited?'检索原编辑作业发布的文档预览差异，每对版本列出首处命中。差异显示范围最多200000字符，原预览截断状态在打开时说明。':'检索本地文本原版本、单卷和已有的文档预览及原读取结果，每个来源列出首处命中。'}成员范围只包含原运行实际引用或产生的版本。</small>
    {Boolean(current?.unavailable)&&<p role="status">本批有 {current!.unavailable} 个版本/分卷暂不可读取或未通过内容核对。</p>}
-   {Boolean(current?.skipped)&&<p role="status">本批有 {current!.skipped} 个版本/分卷{edited?'缺少可确认的原编辑作业或前后文档预览':'为其他格式或尚无已保存文档预览'}，未计入正文匹配。</p>}
+   {Boolean(current?.skipped)&&<p role="status">本批有 {current!.skipped} 个版本/分卷{edited?'缺少可确认的原编辑作业或前后文档预览':'为其他格式或尚无可用的已保存文档文本'}，未计入正文匹配。</p>}
    <ol>{current?.items.map(item=><li key={cursorKey(item)}>
-    <p>{item.file_name} · 版本 {item.version}{item.part_index===undefined?'':` · 第 ${item.part_index} 卷`}{item.document_job_id?' · 已保存文档预览':''}{item.edited_diff?` · 原编辑 ${item.edited_diff.from_version} → ${item.edited_diff.to_version}`:''}</p><p className="jot-history-search-excerpt">{item.excerpt}</p>
+    <p>{item.file_name} · 版本 {item.version}{item.part_index===undefined?'':` · 第 ${item.part_index} 卷`}{item.document_job_id?(item.document_operation==='document.read'?' · 已保存原读取结果':' · 已保存文档预览'):''}{item.edited_diff?` · 原编辑 ${item.edited_diff.from_version} → ${item.edited_diff.to_version}`:''}</p><p className="jot-history-search-excerpt">{item.excerpt}</p>
     <button type="button" onClick={()=>{setSelected({identity:batchIdentity,hit:item});setFileTarget(undefined);}}>查看命中文本</button>
     <button type="button" onClick={()=>{setSelected({identity:batchIdentity,hit:item});setFileTarget({kind:'file',artifactId:item.artifact_id,label:item.file_name,version:item.version,sha256:item.sha256,...(item.part_index===undefined?{}:{partIndex:item.part_index})});}}>查看文件与版本</button>
    </li>)}</ol>

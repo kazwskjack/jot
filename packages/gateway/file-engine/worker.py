@@ -266,7 +266,7 @@ def inspect(path: Path, media_type: str) -> dict:
     elif "spreadsheetml" in media_type: content = xlsx_read(path)
     elif media_type == "application/pdf": content = pdf_read(path)
     else: fail("UNSUPPORTED_FORMAT_OPERATION")
-    return {"media_type": media_type, "size_bytes": path.stat().st_size, **content}
+    return {"media_type": media_type, "size_bytes": path.stat().st_size, "text_reader_revision": 1, **content}
 
 def validate_template_fill(request: dict, input_path: Path) -> dict:
     root = Path(os.environ.get("GENERAL_AGENT_FILE_ENGINE_TEMPLATE_ROOT",
