@@ -1,3 +1,4 @@
+import {workspaceRelativePath} from '../always-on/workspace-provider.ts';
 import {checkoutMetadataPublication,checkoutLogMetadata,checkoutReferencePlan} from './checkout-metadata.ts';
 import {createHash} from 'node:crypto';
 import {canonicalJson} from '../db/canonical-json.ts';
@@ -27,6 +28,47 @@ export function readGitCheckoutIntentSource(row:GitBranchIntentRecord,validate:(
    ||witness.head.detached&&(witness.head.branch!==null||witness.head.oid===null)
    ||!witness.head.detached&&(typeof witness.head.branch!=='string'||!validGitReference('refs/heads/'+witness.head.branch)))throw Error();
   for(const change of witness.preview.index_projection?.changes??[])for(const entry of [change.before,change.after])if(entry&&!oid.test(entry.oid))throw Error();
+  const directory=witness.preview.index_projection?.directories_before,before=witness.preview.index_projection?.worktree_before;
+  if(directory?.state==='captured'){
+   if(!before)throw Error();
+   const selected=new Set(before.entries.filter(entry=>entry.kind==='directory').map(entry=>entry.path));
+   const roots=[...selected].filter(path=>{const parts=path.split('/');parts.pop();while(parts.length){if(selected.has(parts.join('/')))return false;parts.pop();}return true;}).sort();
+   if(canonicalJson(directory.roots)!==canonicalJson(roots))throw Error();
+   const rootSet=new Set(roots);
+   const original=new Map(before.entries.map(entry=>[entry.path,entry])),rows=new Map(directory.entries.map(entry=>[entry.path,entry]));
+   const problems=new Map(directory.issues.map(issue=>[issue.path+'\0'+issue.reason,issue]));
+   if(rows.size!==directory.entries.length||problems.size!==directory.issues.length||directory.complete!==(directory.issues.length===0))throw Error();
+   if(canonicalJson(directory.entries.map(entry=>entry.path))!==canonicalJson([...rows.keys()].sort())
+    ||canonicalJson(directory.issues.map(issue=>issue.path+'\0'+issue.reason))!==canonicalJson([...problems.keys()].sort()))throw Error();
+   if(roots.some(path=>rows.get(path)?.parent!==null))throw Error();
+   const children=new Map<string,string[]>();
+   for(const entry of directory.entries){
+    workspaceRelativePath(entry.path);
+    if(entry.parent===null){
+     const {parent,uid,gid,listing_sha256,...base}=entry;
+     if(!rootSet.has(entry.path)||canonicalJson(base)!==canonicalJson(original.get(entry.path)))throw Error();
+    }else{
+     const parent=rows.get(entry.parent);
+     if(parent?.kind!=='directory'||entry.path.slice(0,entry.path.lastIndexOf('/'))!==entry.parent
+      ||entry.ancestors_sha256!==checkoutDigest({parent:parent.stat_sha256,ancestors:parent.ancestors_sha256}))throw Error();
+     const names=children.get(entry.parent)??[];names.push(entry.path.slice(entry.parent.length+1));children.set(entry.parent,names);
+    }
+    if(entry.kind==='directory'){if(entry.sha256!==null||!entry.listing_sha256)throw Error();}
+    else if(entry.listing_sha256!==undefined)throw Error();
+    if(entry.kind==='other'&&!problems.has(entry.path+'\0special_node'))throw Error();
+    if(['file','symlink'].includes(entry.kind)&&entry.sha256===null&&!problems.has(entry.path+'\0content_unconfirmed'))throw Error();
+   }
+   for(const issue of directory.issues){
+    const entry=rows.get(issue.path);if(!entry)throw Error();
+    if(issue.reason==='special_node'){if(entry.kind!=='other')throw Error();}
+    else if(issue.reason==='content_unconfirmed'){if(!['file','symlink'].includes(entry.kind)||entry.sha256!==null)throw Error();}
+    else if(entry.kind!=='directory')throw Error();
+   }
+   for(const entry of directory.entries)if(entry.kind==='directory'
+    &&!['nested_repository','protected_path','path_alias'].some(reason=>problems.has(entry.path+'\0'+reason))
+    &&entry.listing_sha256!==checkoutDigest((children.get(entry.path)??[]).sort()))throw Error();
+   if(directory.sha256!==checkoutDigest({protocol:directory.protocol,roots:directory.roots,entries:directory.entries,issues:directory.issues,complete:directory.complete}))throw Error();
+  }else if(directory?.state==='not_confirmed'&&((directory.reason==='before_unconfirmed')!==(before===null)||before===undefined))throw Error();
   const source=witness.preview.reference_source;
   if(source){
    if(source.target_ref.ref!==input.target_ref||source.head_file.sha256===null||source.head_file.size===0

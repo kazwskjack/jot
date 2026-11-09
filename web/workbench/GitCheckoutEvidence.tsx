@@ -2,7 +2,7 @@ import React,{useState} from 'react';
 import type {GitBranchInventory,GitCheckoutPreview} from './types';
 
 export default function GitCheckoutEvidence({preview,target,onRetry}:{preview:GitCheckoutPreview;target:GitBranchInventory['branches'][number];onRetry?:()=>void}){
- const [page,setPage]=useState(0),[attributePage,setAttributePage]=useState(0),[layoutPage,setLayoutPage]=useState(0),worktreeBefore=preview.index_projection?.worktree_before,reference=preview.reference_source;
+ const [page,setPage]=useState(0),[attributePage,setAttributePage]=useState(0),[layoutPage,setLayoutPage]=useState(0),[directoryPage,setDirectoryPage]=useState(0),[directoryIssuePage,setDirectoryIssuePage]=useState(0),worktreeBefore=preview.index_projection?.worktree_before,reference=preview.reference_source,directories=preview.index_projection?.directories_before;
  return <>
    <dl><dt>目标引用</dt><dd><code>{preview.target_ref}</code></dd><dt>目标提交</dt><dd><code>{preview.target_oid}</code></dd>
     <dt>当前索引 SHA-256</dt><dd><code>{preview.source_index_sha256??'尚无索引文件'}</code></dd>
@@ -59,8 +59,19 @@ export default function GitCheckoutEvidence({preview,target,onRetry}:{preview:Gi
      <code>{entry.path}</code> · {{missing:'不存在',blocked:'父路径阻挡',file:'文件',directory:'目录',symlink:'符号链接',other:'特殊文件'}[entry.kind]} · 节点大小 {entry.size} 字节 · 模式 <code>{entry.mode.toString(8).padStart(4,'0')}</code>
      {entry.blocked_by&&<p>阻挡路径 <code>{entry.blocked_by}</code></p>}
      {(entry.kind==='file'||entry.kind==='symlink')&&<p>内容 SHA-256 <code>{entry.sha256??'摘要待确认'}</code></p>}
-    </li>)}</ul><p>此列表与索引变化按同一页码显示。目录内容和实际发布效果仍需完整审核。</p>
+    </li>)}</ul><p>此列表与索引变化按同一页码显示。实际发布效果仍需完整审核。</p>
    </section>}
+   {directories?.state==='captured'&&directories.roots.length>0&&<section aria-label="工作区目录内容凭证"><h4>工作区目录内容凭证</h4>
+    <p role="status">{directories.complete?'目录内容凭证已固定。':'目录内容凭证尚不完整。'}目录根 {directories.roots.length} 个 · 节点 {directories.entries.length} 个</p><p>SHA-256 <code>{directories.sha256}</code></p>
+    <ul>{directories.entries.slice(directoryPage*50,(directoryPage+1)*50).map(entry=><li key={entry.path}><code>{entry.path}</code> · {{directory:'目录',file:'文件',symlink:'符号链接',other:'特殊节点',missing:'缺失',blocked:'父路径阻挡'}[entry.kind]} · {entry.parent===null?'目录根':'子项'} · {entry.size} 字节 · 模式 <code>{entry.mode.toString(8).padStart(4,'0')}</code> · UID {entry.uid} · GID {entry.gid}
+     {entry.kind!=='directory'&&<p>内容 SHA-256 <code>{entry.sha256??'待确认'}</code></p>}{entry.listing_sha256&&<p>目录清单 SHA-256 <code>{entry.listing_sha256}</code></p>}
+    </li>)}</ul>
+    {directories.entries.length>50&&<nav className="wb-actions" aria-label="目录内容分页"><button type="button" disabled={directoryPage===0} onClick={()=>setDirectoryPage(directoryPage-1)}>上一页</button><span role="status">第 {directoryPage+1} 页，共 {Math.ceil(directories.entries.length/50)} 页</span><button type="button" disabled={(directoryPage+1)*50>=directories.entries.length} onClick={()=>setDirectoryPage(directoryPage+1)}>下一页</button></nav>}
+    {directories.issues.length>0&&<><h5>待确认内容</h5><ul>{directories.issues.slice(directoryIssuePage*50,(directoryIssuePage+1)*50).map(issue=><li key={issue.path+'\0'+issue.reason}><code>{issue.path}</code> · {{nested_repository:'嵌套仓库',protected_path:'受保护或不支持的路径',path_alias:'名称存在大小写或规范化冲突',content_unconfirmed:'内容摘要待确认',special_node:'特殊节点策略待补齐'}[issue.reason]}</li>)}</ul></>}
+    {directories.issues.length>50&&<nav className="wb-actions" aria-label="目录待确认内容分页"><button type="button" disabled={directoryIssuePage===0} onClick={()=>setDirectoryIssuePage(directoryIssuePage-1)}>上一页</button><span role="status">第 {directoryIssuePage+1} 页，共 {Math.ceil(directories.issues.length/50)} 页</span><button type="button" disabled={(directoryIssuePage+1)*50>=directories.issues.length} onClick={()=>setDirectoryIssuePage(directoryIssuePage+1)}>下一页</button></nav>}
+   </section>}
+   {!directories&&worktreeBefore?.entries.some(entry=>entry.kind==='directory')&&<p role="status">此历史预览尚无目录内容凭证。</p>}
+   {directories?.state==='not_confirmed'&&directories.reason!=='before_unconfirmed'&&<div role="status"><p>{{before_unconfirmed:'变更前工作区状态尚未确认。',deadline:'目录读取时间预算已到。',entry_limit:'目录节点超过读取范围。',path_limit:'目录路径信息超过读取范围。',read_unavailable:'目录内容暂时无法完整读取。'}[directories.reason]}</p>{onRetry&&<button type="button" onClick={onRetry}>重新读取目录内容</button>}</div>}
    {preview.index_projection?.worktree_attribute_before&&<p>工作区后备属性凭证 SHA-256 <code>{preview.index_projection.worktree_attribute_before.sha256}</code></p>}
    {onRetry&&preview.index_projection?.changes.some(change=>change.after?.worktree_content?.sha256===null)&&<button type="button" onClick={onRetry}>重新读取工作区输出摘要</button>}
    <p>blob 摘要对应 Git 原始内容，工作区输出摘要对应本次转换结果。文件发布、引用、日志和跟踪策略仍需完整审核。</p>

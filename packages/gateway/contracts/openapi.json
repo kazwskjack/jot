@@ -39876,6 +39876,7 @@
                   "null"
                 ],
                 "properties": {
+                "directories_before": {"$ref":"#/components/schemas/GitCheckoutDirectories"},
                   "sha256": {
                     "type": "string",
                     "pattern": "^[a-f0-9]{64}$"
@@ -41880,6 +41881,180 @@
           }
         ]
       },
+      "GitCheckoutDirectoryEntry": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "kind": {
+            "enum": [
+              "file",
+              "directory",
+              "symlink",
+              "other"
+            ]
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "mode": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4095
+          },
+          "stat_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "ancestors_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "parent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "uid": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "gid": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "listing_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "path",
+          "kind",
+          "size",
+          "mode",
+          "stat_sha256",
+          "sha256",
+          "ancestors_sha256",
+          "parent",
+          "uid",
+          "gid"
+        ],
+        "additionalProperties": false
+      },
+      "GitCheckoutDirectories": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "state": {
+                "const": "not_confirmed"
+              },
+              "reason": {
+                "enum": [
+                  "before_unconfirmed",
+                  "deadline",
+                  "entry_limit",
+                  "path_limit",
+                  "read_unavailable"
+                ]
+              }
+            },
+            "required": [
+              "state",
+              "reason"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "state": {
+                "const": "captured"
+              },
+              "protocol": {
+                "const": 1
+              },
+              "roots": {
+                "type": "array",
+                "maxItems": 10000,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                }
+              },
+              "entries": {
+                "type": "array",
+                "maxItems": 100000,
+                "items": {
+                  "$ref": "#/components/schemas/GitCheckoutDirectoryEntry"
+                }
+              },
+              "issues": {
+                "type": "array",
+                "maxItems": 100000,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096
+                    },
+                    "reason": {
+                      "enum": [
+                        "nested_repository",
+                        "protected_path",
+                        "path_alias",
+                        "content_unconfirmed",
+                        "special_node"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "reason"
+                  ]
+                }
+              },
+              "complete": {
+                "type": "boolean"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            },
+            "required": [
+              "state",
+              "protocol",
+              "roots",
+              "entries",
+              "issues",
+              "complete",
+              "sha256"
+            ]
+          }
+        ]
+      },
       "GitCheckoutReviewPrepare": {
         "type": "object",
         "additionalProperties": false,
@@ -42089,6 +42264,7 @@
                   "null"
                 ],
                 "properties": {
+                "directories_before": {"$ref":"#/components/schemas/GitCheckoutDirectories"},
                   "sha256": {
                     "type": "string",
                     "pattern": "^[a-f0-9]{64}$"
