@@ -15,7 +15,6 @@ export function registerIndexDispatchRoutes(app:FastifyInstance,options:Options)
    if(Object.keys(request.query as object).length)throw Error('git_execution_invalid');
    abort.signal.throwIfAborted();const before=executions.status(owner,project,id);
    if(!recovery){
-    if(before.execution.action==='create-branch')throw Error('git_branch_execution_unavailable');
     if(before.execution.state==='applied'&&before.workspace_state==='released_settled')return before;
     if(before.execution.state!=='pending'||before.producer.state!=='not_started'||before.control!==null)throw Error('git_index_reconciliation_required');
     if(!options.client)throw Error('git_index_dispatch_unavailable');

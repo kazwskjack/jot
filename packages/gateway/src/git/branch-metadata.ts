@@ -1,7 +1,7 @@
 import {createHash} from 'node:crypto';
 import type {GitCreateBranchWitness,GitBranchMetadata} from '../../contracts/types.ts';
 import {canonicalJson} from '../db/canonical-json.ts';
-import {gitCommitOperatorPolicy,type GitCommitOperatorPolicy} from './commit-metadata.ts';
+import {gitCommitOperatorPolicy,gitCommitSignature,type GitCommitOperatorPolicy} from './commit-metadata.ts';
 
 const hash=(value:unknown)=>createHash('sha256').update(canonicalJson(value)).digest('hex');
 
@@ -14,4 +14,13 @@ export function branchReviewMetadata(raw:GitCommitOperatorPolicy,witness:GitCrea
    head:witness.target_oid!==null&&(witness.reflog.enabled||witness.reflog.head.sha256!==null),
    branch:witness.target_oid!==null&&(witness.reflog.enabled||witness.reflog.branch.sha256!==null)
   },...(witness.configuration?{configuration_sha256:hash(witness.configuration),configuration_changed:witness.configuration.changed}:{})};
+}
+
+/** Exact frozen checkout/branch log suffix, independent of source identity config. */
+export function branchReflogEntry(witness:GitCreateBranchWitness,metadata:GitBranchMetadata,scope:'git'|'common'){
+ const oid=witness.target_oid;
+ if(oid===null)throw Error('git_branch_reflog_invalid');
+ const old=scope==='git'?oid:'0'.repeat(oid.length);
+ const message=scope==='git'?'checkout: moving from '+(witness.head.detached?oid:witness.head.branch)+' to '+witness.branch:'branch: Created from HEAD';
+ return Buffer.from(old+' '+oid+' '+gitCommitSignature(metadata.committer)+'\t'+message+'\n','utf8');
 }

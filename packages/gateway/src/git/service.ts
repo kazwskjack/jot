@@ -6,12 +6,13 @@ import {isAbsolute,resolve,join} from 'node:path';
 import {createHash} from 'node:crypto';
 import {canonicalJson} from '../db/canonical-json.ts';
 import type {ProjectRepository} from '../projects/repository.ts';
-import {GitCommitEffects,type GitCommitSource} from './commit-effects.ts';
+import type {GitCommitSource} from './commit-effects.ts';
+import {GitBranchEffects,type GitBranchSource} from './branch-effects.ts';
 
 export type GitRepositoryBinding={owner_id:string;project_id:string;root:string;git_directory?:string;common_directory?:string;commit_identity?:GitCommitOperatorPolicy};
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 export class GitWorkbench{
- private readonly repositories=new Map<string,GitCommitEffects>();
+ private readonly repositories=new Map<string,GitBranchEffects>();
  private readonly commitPolicies=new Map<string,GitCommitOperatorPolicy>();
  private readonly executionBindings=new Map<string,string>();
  private readonly projects:ProjectRepository;
@@ -24,7 +25,7 @@ export class GitWorkbench{
    for(const path of [raw.git_directory,raw.common_directory])if(path!==undefined&&(typeof path!=='string'||!isAbsolute(path)))throw Error('git_configuration_invalid');
    const key=raw.owner_id+'\0'+raw.project_id,common=resolve(raw.common_directory??raw.git_directory??join(raw.root,'.git')),identity=process.platform==='win32'?common.toLowerCase():common;
    if(this.repositories.has(key)||roots.has(identity))throw Error('git_configuration_invalid');roots.add(identity);
-   this.repositories.set(key,new GitCommitEffects({root:raw.root,...(raw.git_directory?{gitDirectory:raw.git_directory}:{}),...(raw.common_directory?{commonDirectory:raw.common_directory}:{}),...(executable?{executable}:{})}));
+   this.repositories.set(key,new GitBranchEffects({root:raw.root,...(raw.git_directory?{gitDirectory:raw.git_directory}:{}),...(raw.common_directory?{commonDirectory:raw.common_directory}:{}),...(executable?{executable}:{})}));
    if(raw.commit_identity!==undefined)this.commitPolicies.set(key,gitCommitOperatorPolicy(raw.commit_identity));
    this.executionBindings.set(key,createHash('sha256').update('git-common-binding:v1\0'+identity).digest('hex'));
   }
@@ -48,6 +49,16 @@ export class GitWorkbench{
   };
   authorize();
   const result=await this.repository(owner,project).prepareCommit(source,signal);
+  authorize();signal?.throwIfAborted();return result;
+ }
+ /** Original owner and configured actor policy fence the host-private plan. */
+ async prepareCreateBranch(owner:string,project:string,raw:GitBranchSource,signal?:AbortSignal){
+  const source=structuredClone(raw);
+  const authorize=()=>{
+   const current=this.branchMetadata(owner,project,source.witness,source.metadata.committer.timestamp);
+   if(canonicalJson(current)!==canonicalJson(source.metadata))throw Error('git_execution_revoked');
+  };
+  authorize();const result=await this.repository(owner,project).prepareCreateBranch(source,signal);
   authorize();signal?.throwIfAborted();return result;
  }
  /** Configured exclusion scope, independent of snapshot/program encodings.

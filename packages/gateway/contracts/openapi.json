@@ -39908,6 +39908,91 @@
           "state"
         ]
       },
+      "GitBranchAppliedResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "execution_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+          },
+          "project_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+          },
+          "intent_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+          },
+          "request_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+          },
+          "action": {
+            "const": "create-branch"
+          },
+          "execution_authorized": {
+            "const": false
+          },
+          "target_ref": {
+            "type": "string",
+            "minLength": 12,
+            "maxLength": 1024,
+            "pattern": "^refs/heads/.+$"
+          },
+          "branch": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1013
+          },
+          "target_oid": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "head": {
+            "$ref": "#/components/schemas/GitHead"
+          },
+          "paths": {
+            "type": "array",
+            "maxItems": 0,
+            "items": {
+              "type": "string"
+            }
+          },
+          "state": {
+            "const": "applied"
+          },
+          "branch_metadata": {
+            "$ref": "#/components/schemas/GitBranchMetadata"
+          },
+          "preparation_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "execution_id",
+          "project_id",
+          "intent_id",
+          "request_id",
+          "action",
+          "execution_authorized",
+          "target_ref",
+          "branch",
+          "target_oid",
+          "head",
+          "paths",
+          "state",
+          "preparation_sha256"
+        ]
+      },
       "GitBranchClosedResult": {
         "type": "object",
         "additionalProperties": false,
@@ -40261,6 +40346,9 @@
           },
           {
             "$ref": "#/components/schemas/GitBranchClosedResult"
+          },
+          {
+            "$ref": "#/components/schemas/GitBranchAppliedResult"
           }
         ]
       },
@@ -41895,6 +41983,9 @@
               },
               {
                 "$ref": "#/components/schemas/GitBranchClosedResult"
+              },
+              {
+                "$ref": "#/components/schemas/GitBranchAppliedResult"
               }
             ]
           },
@@ -42118,6 +42209,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/GitBranchClosedResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GitBranchAppliedResult"
                   }
                 ]
               },
@@ -42395,6 +42489,9 @@
               },
               {
                 "$ref": "#/components/schemas/GitBranchClosedResult"
+              },
+              {
+                "$ref": "#/components/schemas/GitBranchAppliedResult"
               }
             ]
           },
@@ -42702,6 +42799,9 @@
                           },
                           {
                             "$ref": "#/components/schemas/GitBranchClosedResult"
+                          },
+                          {
+                            "$ref": "#/components/schemas/GitBranchAppliedResult"
                           }
                         ]
                       },
@@ -42913,6 +43013,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/GitBranchClosedResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GitBranchAppliedResult"
                   }
                 ]
               },
@@ -43151,6 +43254,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/GitBranchClosedResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GitBranchAppliedResult"
                   }
                 ]
               },
@@ -43458,6 +43564,9 @@
                               },
                               {
                                 "$ref": "#/components/schemas/GitBranchClosedResult"
+                              },
+                              {
+                                "$ref": "#/components/schemas/GitBranchAppliedResult"
                               }
                             ]
                           },
@@ -43779,6 +43888,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/GitBranchClosedResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GitBranchAppliedResult"
                   }
                 ]
               },
@@ -44086,6 +44198,9 @@
                               },
                               {
                                 "$ref": "#/components/schemas/GitBranchClosedResult"
+                              },
+                              {
+                                "$ref": "#/components/schemas/GitBranchAppliedResult"
                               }
                             ]
                           },
@@ -44419,6 +44534,9 @@
                         },
                         {
                           "$ref": "#/components/schemas/GitBranchClosedResult"
+                        },
+                        {
+                          "$ref": "#/components/schemas/GitBranchAppliedResult"
                         }
                       ]
                     },
@@ -44726,6 +44844,9 @@
                                     },
                                     {
                                       "$ref": "#/components/schemas/GitBranchClosedResult"
+                                    },
+                                    {
+                                      "$ref": "#/components/schemas/GitBranchAppliedResult"
                                     }
                                   ]
                                 },

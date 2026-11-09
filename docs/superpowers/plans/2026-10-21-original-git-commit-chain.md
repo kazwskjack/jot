@@ -254,3 +254,37 @@ or maintenance commands, migrations or UI acceptance.
 Private simulation restores its original active config and removes its generated
 private ref/worktree config before the original source snapshot is read again.
 The surrounding original context disposal owns all remaining private scratch.
+
+## P09 create-branch original native phases
+
+The original GitWorkbench now owns GitBranchEffects, retaining inherited index,
+commit and publication entry points. Branch approval also prepares the exact
+private configuration/ref/HEAD/reflog material under the current configured
+committer policy. Actual execution obtains a fresh in-process one-use plan.
+Raw config and log bytes remain private.
+
+The original preparation and dispatch tables record strict branch envelopes
+under the existing protocol-6 execution. Original producer lease lineage,
+review/witness/metadata digests, root and .git identities, unchanged index,
+packed refs and source branch, exact file before/after facts and owned lock
+identities remain bound together. Preparation is durable before canonical
+locks are occupied. Exclusive hardlinks retain the recorded pending inode.
+Configuration, logs and the new branch ref publish before HEAD. No source
+objects or working/index content are written by branch creation.
+
+Original dispatch now enters the existing authenticated native host, sealed
+workspace family and Worker lease. An applied receipt and producer finish
+precede the native host's final checks and handle drain. Reservation settlement
+uses the same original journal. Interrupted recovery obtains fresh native
+custody and observes the original files, log prefix/suffix and commit OID.
+A partial file prefix remains unknown. Explicit recovery cleans only the exact
+owned pending/lock inodes and parent directories, preserving canonical files.
+Recovery does not replay the mutation or manufacture an original producer finish.
+
+Applied branch results join the shared result/status/control/history schemas.
+History shows their preparation digest. New/legacy review compatibility remains
+as described above. Initialization, switching/deleting existing branches and
+creation/recovery UI remain in M15.14. This source increment did not execute
+tests, typechecks, builds, product/native commands, migrations, deployment or
+UI acceptance. The production schema still requires its explicit offline
+branch upgrade before protocol-6 admission.

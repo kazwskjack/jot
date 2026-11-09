@@ -83,10 +83,8 @@ export class GitBranchIntents{
   assertCurrent();
   if(input.action==='approve'){
    if(!source.metadata||source.witness.protocol!==2||!source.witness.configuration)throw Error('git_branch_review_required');
-   const witness=await this.git.freezeCreateBranch(owner,project,source.input.snapshot_id,source.input.branch,signal);
-   if(JSON.stringify(witness)!==row.witness_json)throw Error('git_review_changed');
-   const metadata=this.git.branchMetadata(owner,project,witness,source.metadata.committer.timestamp);
-   if(JSON.stringify(metadata)!==JSON.stringify(source.metadata))throw Error('git_review_changed');
+   await this.git.prepareCreateBranch(owner,project,{branch:source.input.branch,witness:source.witness,
+    metadata:source.metadata,review_sha256:row.review_sha256},signal);
   }
   return()=>withImmediateTransaction(this.db,()=>{
    signal?.throwIfAborted();this.row(owner,project,id);const cached=replay();if(cached)return cached;const event=assertCurrent();
