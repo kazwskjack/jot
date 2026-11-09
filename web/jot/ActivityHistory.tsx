@@ -8,8 +8,8 @@ function sequence(value:unknown):bigint{
  return BigInt(value);
 }
 
-function validatePage(page:ActivityHistoryPage,conversationId:string,asOf:string,before:string|undefined){
- if(!page||page.conversation_id!==conversationId||page.as_of_seq!==asOf||!Array.isArray(page.items)||page.items.length>200
+function validatePage(page:ActivityHistoryPage,conversationId:string,asOf:string,before:string|undefined,runId:string|undefined){
+ if(!page||page.conversation_id!==conversationId||page.as_of_seq!==asOf||page.run_id!==runId||!Array.isArray(page.items)||page.items.length>200
   ||!page.coverage||typeof page.coverage.complete!=='boolean')throw Error('公开步骤历史结果尚未确认');
  const through=before===undefined?sequence(asOf):sequence(before)-1n;
  if(sequence(page.coverage.through_seq)!==through)throw Error('公开步骤历史区间尚未确认');
@@ -17,7 +17,7 @@ function validatePage(page:ActivityHistoryPage,conversationId:string,asOf:string
  for(const entry of page.items){
   const current=sequence(entry?.seq),activity=entry?.activity;
   if(current<1n||current>=previous||!activity||typeof activity.activity_id!=='string'||!activity.activity_id
-   ||typeof activity.run_id!=='string'||!['search','browse','file_read','file_edit','command','subagent','crawl','compaction'].includes(activity.kind))throw Error('公开步骤历史顺序或身份尚未确认');
+   ||typeof activity.run_id!=='string'||(runId!==undefined&&activity.run_id!==runId)||!['search','browse','file_read','file_edit','command','subagent','crawl','compaction'].includes(activity.kind))throw Error('公开步骤历史顺序或身份尚未确认');
   previous=current;
  }
  const next=page.next_before_seq;
@@ -27,8 +27,8 @@ function validatePage(page:ActivityHistoryPage,conversationId:string,asOf:string
  if(sequence(page.coverage.from_seq)!==from||count>expected||page.coverage.complete!==(count===expected))throw Error('公开步骤历史覆盖范围尚未确认');
 }
 
-export default function ActivityHistory({conversationId,snapshotSeq,requestVersion,onLoaded}:{
- conversationId:string;snapshotSeq?:string;requestVersion:number;onLoaded:(activities:Activity[])=>void;
+export default function ActivityHistory({conversationId,snapshotSeq,requestVersion,onLoaded,runId}:{
+ conversationId:string;snapshotSeq?:string;runId?:string;requestVersion:number;onLoaded:(activities:Activity[])=>void;
 }){
  const [enabled,setEnabled]=useState(false),[loading,setLoading]=useState(false),[error,setError]=useState('');
  const [loadedCount,setLoadedCount]=useState(0),[finished,setFinished]=useState(false),[gap,setGap]=useState(false);
@@ -37,7 +37,7 @@ export default function ActivityHistory({conversationId,snapshotSeq,requestVersi
  useEffect(()=>{
   cursor.current=undefined;states.current.clear();finishedRef.current=false;coverageComplete.current=true;
   setLoadedCount(0);setFinished(false);setGap(false);setError('');
- },[conversationId,snapshotSeq]);
+ },[conversationId,snapshotSeq,runId]);
  useEffect(()=>{if(requestVersion>0&&!finishedRef.current)setEnabled(true);},[requestVersion]);
  useEffect(()=>{
   if(!enabled||!snapshotSeq||finishedRef.current)return;
@@ -47,10 +47,10 @@ export default function ActivityHistory({conversationId,snapshotSeq,requestVersi
     sequence(snapshotSeq);
     while(!abort.signal.aborted){
      const before=cursor.current;
-     const path=`/conversations/${encodeURIComponent(conversationId)}/activities?as_of_seq=${encodeURIComponent(snapshotSeq)}&limit=200${before?`&before_seq=${encodeURIComponent(before)}`:''}`;
+     const path=`/conversations/${encodeURIComponent(conversationId)}/activities?as_of_seq=${encodeURIComponent(snapshotSeq)}&limit=200${runId?`&run_id=${encodeURIComponent(runId)}`:''}${before?`&before_seq=${encodeURIComponent(before)}`:''}`;
      const page=await request<ActivityHistoryPage>(path,'GET',undefined,undefined,abort.signal);
      if(abort.signal.aborted)return;
-     validatePage(page,conversationId,snapshotSeq,before);
+     validatePage(page,conversationId,snapshotSeq,before,runId);
      for(const entry of page.items){
       const activity=entry.activity;
       if(activity.kind!=='compaction'&&!states.current.has(activity.activity_id))states.current.set(activity.activity_id,activity);
@@ -67,7 +67,7 @@ export default function ActivityHistory({conversationId,snapshotSeq,requestVersi
    finally{if(!abort.signal.aborted)setLoading(false);}
   })();
   return()=>{abort.abort();setLoading(false);};
- },[enabled,conversationId,snapshotSeq]);
+ },[enabled,conversationId,snapshotSeq,runId]);
  const start=()=>{
   if(finishedRef.current){
    cursor.current=undefined;states.current.clear();finishedRef.current=false;coverageComplete.current=true;

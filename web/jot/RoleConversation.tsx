@@ -14,6 +14,7 @@ import ConversationGoal from './ConversationGoal';
 import VoiceInput from './VoiceInput';
 import SkillCatalogPanel from './SkillCatalogPanel';
 import NativeCommandQueries from './NativeCommandQueries';
+import NativeMemberDetails from './NativeMemberDetails';
 import {catalogMountForRun,skillGestureDraft} from './skill-catalog-mount.js';
 import CompactionActivities from './CompactionActivities';
 import ActivityTimeline from './ActivityTimeline';
@@ -117,6 +118,7 @@ function NativeMemberControls({run}:{run:Run}){
   {error&&<p role="alert">{error}</p>}
   {roster&&<><ul>{roster.members.map(value=><li key={value.child_session_ref}>{value.name} · {status(value.status)} · <code>{value.child_session_ref}</code></li>)}</ul>
    {roster.members.length===0?<p role="status">当前任务没有可控制的原生成员。</p>:<><label htmlFor={`native-member-${run.run_id}`}>成员</label><select id={`native-member-${run.run_id}`} value={selected} disabled={loading||busy||locked} onChange={event=>{setSelected(event.currentTarget.value);setError('');}}>{roster.members.map(value=><option key={value.child_session_ref} value={value.child_session_ref}>{value.name} · {status(value.status)} · {value.child_session_ref}</option>)}</select>
+    {member&&<ConversationDisplayBoundary label="原成员步骤"><NativeMemberDetails key={member.child_session_ref} rootRunId={run.run_id} childSessionRef={member.child_session_ref}/></ConversationDisplayBoundary>}
     <button type="button" disabled={!member||member.status!=='running'||busy||locked||sameMemberLocked} onClick={()=>void submit('interrupt')}>中断选中成员</button>
     <label htmlFor={`native-member-message-${run.run_id}`}>给原成员的继续内容</label><textarea id={`native-member-message-${run.run_id}`} value={text} maxLength={32768} disabled={!member||busy||locked||sameMemberLocked} onChange={event=>setText(event.currentTarget.value)}/>
     <button type="button" disabled={!member||!text.trim()||new TextEncoder().encode(text).byteLength>32768||busy||locked||sameMemberLocked} onClick={()=>void submit('wake')}>明确继续此成员</button>

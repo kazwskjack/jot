@@ -1,13 +1,14 @@
 import type {Activity,Run} from './types';
 
 export type ToolActivity=Exclude<Activity,{kind:'compaction'}>;
+export type ActivityRun={status:Run['status'];created_at?:string};
 export type ActivityReveal={activityId:string;key:string};
 export type ActivityRow={activity:ToolActivity;depth:number;children:number;issue?:string};
 export const activityKindLabels:Record<ToolActivity['kind'],string>={
  search:'搜索',browse:'网页',file_read:'读取文件',file_edit:'修改文件',command:'命令',subagent:'子任务',crawl:'批量抓取',
 };
 export const activityStatusLabels={pending:'等待执行',running:'执行中',waiting:'等待继续',succeeded:'已完成',partial:'部分完成',failed:'失败',cancelled:'已取消',unknown:'状态待确认'};
-export function activityDisplayStatus(activity:ToolActivity,run?:Run){
+export function activityDisplayStatus(activity:ToolActivity,run?:ActivityRun){
  if(['pending','running','waiting'].includes(activity.status)&&run
   &&['succeeded','failed','cancelled','interrupted','partial'].includes(run.status))return 'unknown';
  return activity.status;
@@ -104,11 +105,11 @@ export function activityForest(activities:ToolActivity[]):ActivityRow[]{
  return rows;
 }
 
-export function activityIsActive(activity:ToolActivity,run?:Run){
+export function activityIsActive(activity:ToolActivity,run?:ActivityRun){
  return ['pending','running','waiting'].includes(activityDisplayStatus(activity,run));
 }
 
-export function visibleActivityRows(rows:ActivityRow[],expanded:Record<string,boolean>,run?:Run){
+export function visibleActivityRows(rows:ActivityRow[],expanded:Record<string,boolean>,run?:ActivityRun){
  const visible:ActivityRow[]=[];
  let hiddenDepth:number|undefined;
  for(const row of rows){
@@ -119,7 +120,7 @@ export function visibleActivityRows(rows:ActivityRow[],expanded:Record<string,bo
  return visible;
 }
 
-export function activitySearchText(activity:ToolActivity,run?:Run){
+export function activitySearchText(activity:ToolActivity,run?:ActivityRun){
  const status=activityDisplayStatus(activity,run);
  return [activityKindLabels[activity.kind],activity.title,activityStatusLabels[status]??activityStatusLabels.unknown,
   ...activityDetailRows(activity).flatMap(detail=>[detail.label,detail.value])].join('\n');

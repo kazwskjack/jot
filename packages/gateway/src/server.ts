@@ -1042,7 +1042,7 @@ export async function buildServer(config: {
     db.exec('BEGIN');
     try{
       conversations.get(id,owner);
-      const value=readActivityHistory(db,id,request.query as {as_of_seq?:unknown;before_seq?:unknown;limit?:unknown});
+      const value=readActivityHistory(db,id,request.query as {as_of_seq?:unknown;before_seq?:unknown;limit?:unknown;run_id?:unknown});
       db.exec('COMMIT');return reply.header('cache-control','no-store').send(value);
     }catch(error){if(db.isTransaction)db.exec('ROLLBACK');throw error;}
   });

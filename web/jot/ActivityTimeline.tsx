@@ -1,13 +1,13 @@
 // Phase grouping and expandable nested tool history adapt PilotDeck 783499ff,
 // AgentTimeline.tsx/SubagentContainer.tsx. Adapted portions retain AGPL-3.0 terms.
 import React,{useEffect,useMemo,useRef,useState} from 'react';
-import type {Activity,Run} from './types';
-import {activityDetailRows,activityDisplayStatus,activityForest,activityIsActive as running,visibleActivityRows,activityKindLabels,activityStatusLabels,type ActivityRow,type ToolActivity,type ActivityReveal} from './activity-presentation';
+import type {Activity} from './types';
+import {activityDetailRows,activityDisplayStatus,activityForest,activityIsActive as running,visibleActivityRows,activityKindLabels,activityStatusLabels,type ActivityRow,type ToolActivity,type ActivityReveal,type ActivityRun} from './activity-presentation';
 import './activity-timeline.css';
 
 type Group={id:string;kind:ToolActivity['kind'];rows:ActivityRow[]};
 
-function ActivityGroup({group,run,onSelectRun,availableRuns,reveal}:{group:Group;run?:Run;onSelectRun:(id:string)=>void;availableRuns:Set<string>;reveal?:ActivityReveal}){
+function ActivityGroup({group,run,onSelectRun,availableRuns,reveal}:{group:Group;run?:ActivityRun;onSelectRun:(id:string)=>void;availableRuns:Set<string>;reveal?:ActivityReveal}){
  const active=group.rows.filter(row=>running(row.activity,run)).length;
  const failed=group.rows.filter(row=>activityDisplayStatus(row.activity,run)==='failed').length;
  const unconfirmed=group.rows.filter(row=>activityDisplayStatus(row.activity,run)==='unknown').length;
@@ -55,7 +55,7 @@ function ActivityGroup({group,run,onSelectRun,availableRuns,reveal}:{group:Group
  </details>;
 }
 
-export default function ActivityTimeline({activities,runs,reveal}:{activities:Activity[];runs:Record<string,Run>;reveal?:ActivityReveal}){
+export default function ActivityTimeline({activities,runs,reveal}:{activities:Activity[];runs:Record<string,ActivityRun>;reveal?:ActivityReveal}){
  const [selection,setSelection]=useState('');
  const appliedReveal=useRef('');
  const tools=useMemo(()=>activities.filter((activity):activity is ToolActivity=>activity.kind!=='compaction'),[activities]);
