@@ -1294,3 +1294,50 @@ publication/recovery/UI dispatch and all remaining M15.14/P09 scope continue.
 Work was source development, source comparison and Git delivery only.
 
 Descriptor reads, link bytes and directory iteration use the [Node filesystem API](https://nodejs.org/api/fs.html).
+
+## Projected regular-file content preview, 2026-11-09
+
+Regular-file index targets now have optional worktree_content evidence containing
+converted byte count, SHA-256, conversion attributes and an explicit unconfirmed
+reason when needed. The renderer uses the original sanitized configuration,
+projected stage-zero index, original object alternate and a protected private
+attribute worktree. A :0:path lookup loads the exact indexed blob and its path.
+Single-file filter output is counted and hashed incrementally under the existing
+read deadline and a 64 MiB aggregate output budget. Streaming children also use
+the original per-allocation guard. All confirmed content still requires verified
+raw-blob evidence. Source worktree bytes are read through the original before-state
+collector for comparison and attribute input evidence.
+
+Fallback .gitattributes files are considered where the projected index has no
+blob at that attribute path. Scheduled tracked attribute deletions are excluded.
+Relevant source facts are frozen, single-link regular attribute bytes are bounded
+to 1 MiB each/4 MiB total, and facts are checked again after conversion. A failed
+final attribute observation invalidates its output digests. The projected index
+has exact initial/final file witnesses across these reads. Input path-count and
+name-byte limits bound the fallback manifest. Special/nonblob attribute sources
+and uncertain source evidence retain an unconfirmed result.
+
+A shared cached/working attribute reader retains the original strict NUL triple,
+path/name/duplicate, size/count and sort rules. Its bounded metadata sink uses the
+native allocation guard. Native failures produce an unconfirmed attribute read.
+The renderer preserves explicit pending states for sparse checkout, any effective
+filter attribute, resource exhaustion or native failure. These cases continue to
+require their complete original policy and native implementation.
+
+The paired contracts and original preview UI show output facts, reasons, relevant
+attributes and the fallback-source fingerprint, with retry through the original
+resource/focus lifecycle. GitCheckoutBeforeState now gives the before-state helper
+an exact object-or-null return type. This corrects the previous optional indexed
+type's undefined branch under exactOptionalPropertyTypes.
+
+Complete sparse/filter/global/operator attribute policy, codecs and large native
+resource cases, directory/link/gitlink effects, immutable review/approval,
+reference/log/tracking behavior, native publication/recovery/UI dispatch and all
+M15.14/P09 scope remain required. Work was source development, source-object
+comparison and Git delivery. Runtime behavior remains unverified.
+
+Conversion and indexed path selection follow [Git cat-file](https://git-scm.com/docs/git-cat-file).
+Attribute precedence and removal ordering were read from the official
+[attribute reader](https://raw.githubusercontent.com/git/git/master/attr.c),
+[index blob reader](https://raw.githubusercontent.com/git/git/master/read-cache.c) and
+[worktree updater](https://raw.githubusercontent.com/git/git/master/unpack-trees.c).

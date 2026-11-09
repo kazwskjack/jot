@@ -39608,6 +39608,70 @@
                                 "sha256"
                               ],
                               "additionalProperties": false
+                            },
+                            "worktree_content": {
+                              "type": "object",
+                              "properties": {
+                                "size": {
+                                  "type": [
+                                    "integer",
+                                    "null"
+                                  ],
+                                  "minimum": 0,
+                                  "maximum": 67108864
+                                },
+                                "sha256": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "pattern": "^[a-f0-9]{64}$"
+                                },
+                                "attributes": {
+                                  "type": "array",
+                                  "maxItems": 6,
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "name": {
+                                        "enum": [
+                                          "text",
+                                          "eol",
+                                          "crlf",
+                                          "ident",
+                                          "filter",
+                                          "working-tree-encoding"
+                                        ]
+                                      },
+                                      "value": {
+                                        "type": "string",
+                                        "maxLength": 2097152
+                                      }
+                                    },
+                                    "required": [
+                                      "name",
+                                      "value"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "reason": {
+                                  "enum": [
+                                    "source_unconfirmed",
+                                    "attribute_source_unconfirmed",
+                                    "filter_policy_required",
+                                    "read_failed",
+                                    "output_limit",
+                                    "deadline",
+                                    "sparse_policy_required"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "size",
+                                "sha256"
+                              ],
+                              "additionalProperties": false
                             }
                           },
                           "required": [
@@ -39667,6 +39731,90 @@
                       "entries": {
                         "type": "array",
                         "maxItems": 10000,
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "path": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 4096
+                            },
+                            "kind": {
+                              "enum": [
+                                "missing",
+                                "blocked",
+                                "file",
+                                "directory",
+                                "symlink",
+                                "other"
+                              ]
+                            },
+                            "size": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "mode": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 4095
+                            },
+                            "stat_sha256": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "sha256": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "ancestors_sha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "blocked_by": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 4096
+                            }
+                          },
+                          "required": [
+                            "path",
+                            "kind",
+                            "size",
+                            "mode",
+                            "stat_sha256",
+                            "sha256",
+                            "ancestors_sha256"
+                          ],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": [
+                      "sha256",
+                      "entries"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "worktree_attribute_before": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "sha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "entries": {
+                        "type": "array",
+                        "maxItems": 100000,
                         "items": {
                           "type": "object",
                           "properties": {

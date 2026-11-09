@@ -3,7 +3,7 @@ import type {GitInitializationWitness,GitInitializationFile,GitReinitializationL
 import {planReinitializationConfiguration} from './reinitialization-configuration.ts';
 import {planCreateBranchConfiguration} from './branch-configuration.ts';
 import {validGitReference} from './references.ts';
-import type {GitCheckoutBefore,GitCheckoutPreview,GitBranchInventory,GitCreateBranchWitness,GitBranchLogFile,GitBranchLogWitness} from '../../contracts/types.ts';
+import type {GitCheckoutBefore,GitCheckoutBeforeState,GitCheckoutPreview,GitBranchInventory,GitCreateBranchWitness,GitBranchLogFile,GitBranchLogWitness} from '../../contracts/types.ts';
 import {createHash} from 'node:crypto';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {constants} from 'node:fs';
@@ -15,6 +15,8 @@ import {gitExecutable,readGit} from './process.ts';
 import {gitTreeEntries,readCommitTree,type GitCommitReviewWitness} from './commit-tree.ts';
 import {taskmasterPrdPath} from '../workbench/taskmaster-path.ts';
 import {readGitBlobDigests} from './blob-digests.ts';
+import {readGitAttributes} from './attributes.ts';
+import {readCheckoutContentDigests} from './checkout-content.ts';
 
 export type GitInspectionOptions={root:string;gitDirectory?:string;commonDirectory?:string;executable?:string;limits?:Partial<{maxOutputBytes:number;timeoutMs:number;maxEntries:number;maxMetadataEntries:number;maxDiffBytes:number}>};
 export type GitEntry={path:string;original_path?:string;index_status:string;worktree_status:string;conflicted:boolean;kind:'file'|'directory'|'symlink'|'missing'|'other'};
@@ -326,7 +328,7 @@ export class GitRepositoryInspection{
   if(read.kind!=='file'||!stat||stat.nlink!==1n||stat.size>BigInt(maxBytes))throw Error('git_path_unavailable');
   return{path,kind:'file',size:Number(stat.size),mode:Number(stat.mode&0o777n),stat_sha256:hash(witness(stat)),ancestors};
  }
- private async checkoutBefore(paths:readonly string[],signal?:AbortSignal):Promise<NonNullable<GitCheckoutPreview['index_projection']>['worktree_before']>{
+ private async checkoutBefore(paths:readonly string[],signal?:AbortSignal):Promise<GitCheckoutBeforeState|null>{
   const deadline=Date.now()+this.limits.timeoutMs;
   const check=()=>{signal?.throwIfAborted();if(Date.now()>deadline)throw Error('git_worktree_before_timeout');};
   const metadata=async(path:string)=>{
@@ -730,6 +732,7 @@ export class GitRepositoryInspection{
   const index=join(context.directory,'checkout-index');
   const projected=await run(['read-tree','--no-recurse-submodules','--index-output='+index,'-m',...trees]);
   if(projected.code!==0)throw Error('git_checkout_unavailable');
+  const indexStat=await lstat(index),indexSha=hash(await this.bytes(index,32*1024*1024,witness(indexStat)));
   const after=await run(['ls-files','--stage','-z'],undefined,index);
   if(after.code!==0)throw Error('git_checkout_unavailable');
   const original=gitTreeEntries(before.bytes,false,this.limits.maxEntries),result=gitTreeEntries(after.bytes,false,this.limits.maxEntries);
@@ -763,26 +766,47 @@ export class GitRepositoryInspection{
    if(digests)for(const digest of digests)blobs.set(digest.oid,{size:digest.size,sha256:digest.sha256});
    for(const entry of entries)entry!.blob=blobs.get(entry!.oid)!;
   }
-  const paths=new Set(changes.map(change=>change.path)),attributes:NonNullable<NonNullable<GitCheckoutPreview['index_projection']>['attributes']>=[];
-  if(paths.size){
-   const result=await run(['check-attr','--cached','--all','-z','--stdin'],Buffer.from([...paths].join('\0')+'\0','utf8'),index);
-   if(result.code!==0)throw Error('git_checkout_unavailable');
-   const raw=text(result.bytes);
-   if(raw&&!raw.endsWith('\0'))throw Error('git_checkout_unavailable');
-   const fields=raw?raw.slice(0,-1).split('\0'):[],seen=new Set<string>();
-   if(fields.length%3)throw Error('git_checkout_unavailable');
-   if(fields.length/3>Math.min(this.limits.maxMetadataEntries,100000))throw Error('git_metadata_limit');
-   for(let at=0;at<fields.length;at+=3){
-    const path=fields[at]!,name=fields[at+1]!,value=fields[at+2]!,key=path+'\0'+name;
-    if(!paths.has(path)||!name||name.length>1024||/[\x00-\x20\x7f]/.test(name)||seen.has(key))throw Error('git_checkout_unavailable');
-    if(value.length>2*1024*1024)throw Error('git_metadata_limit');
-    seen.add(key);attributes.push({path,name,value});
+  const paths=new Set(changes.map(change=>change.path));
+  const attributes=await readGitAttributes({executable:this.executable!,root:this.root,context,objects:join(this.commonDirectory,'objects'),index,paths,limits:this.limits,cached:true,...(signal?{signal}:{})});
+  const indexed=new Set(result.filter(entry=>entry.type==='blob').map(entry=>entry.path)),nonblob=new Set([...original,...result].filter(entry=>entry.type!=='blob').map(entry=>entry.path));
+  const removed=new Set(changes.filter(change=>change.before&&change.after===null).map(change=>change.path)),attributePaths=new Set<string>();let attributePathBytes=0,attributeIndexConfirmed=true;
+  for(const change of changes){
+   if(!change.after||!['100644','100755'].includes(change.after.mode))continue;
+   const parts=change.path.split('/');parts.pop();
+   while(true){
+    const path=[...parts,'.gitattributes'].join('/');
+    if(nonblob.has(path))attributeIndexConfirmed=false;
+    if(!indexed.has(path)&&!removed.has(path)&&!attributePaths.has(path)){
+     attributePaths.add(path);attributePathBytes+=Buffer.byteLength(path);
+     if(attributePaths.size>Math.min(this.limits.maxMetadataEntries,100000)||attributePathBytes>this.limits.maxOutputBytes)throw Error('git_metadata_limit');
+    }
+    if(!parts.length)break;parts.pop();
    }
-   attributes.sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:a.name<b.name?-1:a.name>b.name?1:0);
   }
+  let attributeBefore=await this.checkoutBefore([...attributePaths].sort(),signal),fallback:Map<string,Buffer>|null=attributeBefore&&attributeIndexConfirmed?new Map():null;
+  if(attributeBefore&&fallback){
+   let total=0;
+   for(const fact of attributeBefore.entries){
+    if(fact.kind==='missing'||fact.kind==='blocked')continue;
+    if(fact.kind!=='file'||!fact.sha256||fact.size>1048576||(total+=fact.size)>4*1024*1024){fallback=null;break;}
+    const path=join(this.root,fact.path),stat=await lstat(path);
+    if(worktreeStamp(stat)!==fact.stat_sha256)throw Error('git_snapshot_changed');
+    const body=await this.bytes(path,1048576,witness(stat));if(hash(body)!==fact.sha256)throw Error('git_snapshot_changed');
+    fallback!.set(fact.path,body);
+   }
+  }
+  const sparseConfig=await this.run(context,['config','--type=bool','--get','core.sparseCheckout'],signal,true);
+  const sparseValue=sparseConfig.code===1?'false':text(sparseConfig.bytes).trim();if(!['true','false'].includes(sparseValue))throw Error('git_configuration_invalid');
+  const contents=await readCheckoutContentDigests({executable:this.executable!,context,objects:join(this.commonDirectory,'objects'),index,changes,fallback,sparse:sparseValue==='true',limits:this.limits,...(signal?{signal}:{})});
+  if(attributeBefore){
+   const current=await this.checkoutBefore([...attributePaths].sort(),signal);
+   if(!current){attributeBefore=null;for(const [path,value] of contents)contents.set(path,{size:null,sha256:null,...(value.attributes?{attributes:value.attributes}:{}),reason:'attribute_source_unconfirmed'});}
+   else if(current.sha256!==attributeBefore.sha256)throw Error('git_snapshot_changed');
+  }
+  for(const change of changes)if(change.after&&contents.has(change.path))change.after.worktree_content=contents.get(change.path)!;
   const worktreeBefore=await this.checkoutBefore([...paths],signal);
-  const body=await this.bytes(index,32*1024*1024);
-  preview.working_tree_check='passed';preview.index_projection={sha256:hash(body),entries_sha256:hash(canonicalJson(result)),entry_count:result.length,changes,attributes,worktree_before:worktreeBefore};
+  const body=await this.bytes(index,32*1024*1024,witness(indexStat));if(hash(body)!==indexSha)throw Error('git_snapshot_changed');
+  preview.working_tree_check='passed';preview.index_projection={sha256:indexSha,entries_sha256:hash(canonicalJson(result)),entry_count:result.length,changes,...(attributes===null?{}:{attributes}),worktree_before:worktreeBefore,worktree_attribute_before:attributeBefore};
   signal?.throwIfAborted();return preview;
  }
  async branches(snapshotId:string,signal?:AbortSignal,targetRef?:string):Promise<Omit<GitBranchInventory,'project_id'>>{
