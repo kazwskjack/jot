@@ -35,8 +35,24 @@ export function readGitCheckoutIntentSource(row:GitBranchIntentRecord,validate:(
     ||!source.configuration.worktree_enabled&&(source.configuration.worktree.sha256!==null||source.configuration.worktree.size!==0)
     ||source.log_policy.configuration==='false'&&source.log_policy.enabled
     ||['true','always'].includes(source.log_policy.configuration)&&!source.log_policy.enabled)throw Error();
-   for(const fact of [source.head_file,source.head_log,source.target_ref.file,source.target_log,source.packed_refs,
-    source.configuration.common,source.configuration.worktree,...(source.source_ref?[source.source_ref.file]:[])])if(fact.sha256===null&&fact.size!==0)throw Error();
+   const files=[source.head_file,source.head_log,source.target_ref.file,source.target_log,source.packed_refs,
+    source.configuration.common,source.configuration.worktree,...(source.source_ref?[source.source_ref.file]:[])];
+   for(const fact of files){
+    if(fact.sha256===null&&fact.size!==0||fact.physical!==undefined&&(fact.physical===null)!==(fact.sha256===null))throw Error();
+    if(source.layout&&fact.physical===undefined)throw Error();
+   }
+   if(source.layout){
+    const names=[{scope:'git',path:'HEAD'},{scope:'git',path:'logs/HEAD'},{scope:'common',path:input.target_ref},
+     {scope:'common',path:'logs/'+input.target_ref},{scope:'common',path:'packed-refs'},{scope:'common',path:'config'},
+     ...(source.source_ref?[{scope:'common',path:source.source_ref.ref}]:[]),
+     ...(source.configuration.worktree_enabled?[{scope:'git',path:'config.worktree'}]:[])];
+    const expected=new Set<string>();
+    for(const name of names){
+     const parts=name.path.split('/');
+     for(let count=1;count<parts.length;count++)expected.add(name.scope+'\0'+parts.slice(0,count).join('/'));
+    }
+    if(canonicalJson(source.layout.parents.map(parent=>parent.scope+'\0'+parent.path))!==canonicalJson([...expected].sort()))throw Error();
+   }
   }
   if(witness.reference_plan&&canonicalJson(witness.reference_plan)!==canonicalJson(checkoutReferencePlan(witness)))throw Error();
   if(witness.log_metadata){

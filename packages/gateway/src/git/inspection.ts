@@ -4,7 +4,7 @@ import type {GitInitializationWitness,GitInitializationFile,GitReinitializationL
 import {planReinitializationConfiguration} from './reinitialization-configuration.ts';
 import {planCreateBranchConfiguration} from './branch-configuration.ts';
 import {validGitReference} from './references.ts';
-import type {GitCheckoutLogAfter,GitCheckoutReviewWitness,GitCheckoutReferenceSource,GitCheckoutBefore,GitCheckoutBeforeState,GitCheckoutPreview,GitBranchInventory,GitCreateBranchWitness,GitBranchLogFile,GitBranchLogWitness} from '../../contracts/types.ts';
+import type {GitCheckoutPhysical,GitCheckoutMetadataFile,GitCheckoutMetadataLayout,GitCheckoutLogAfter,GitCheckoutReviewWitness,GitCheckoutReferenceSource,GitCheckoutBefore,GitCheckoutBeforeState,GitCheckoutPreview,GitBranchInventory,GitCreateBranchWitness,GitBranchLogFile,GitBranchLogWitness} from '../../contracts/types.ts';
 import {createHash} from 'node:crypto';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {constants} from 'node:fs';
@@ -810,6 +810,14 @@ export class GitRepositoryInspection{
   preview.working_tree_check='passed';preview.index_projection={sha256:indexSha,entries_sha256:hash(canonicalJson(result)),entry_count:result.length,changes,...(attributes===null?{}:{attributes}),worktree_before:worktreeBefore,worktree_attribute_before:attributeBefore};
   signal?.throwIfAborted();return preview;
  }
+ private async checkoutDirectoryPhysical(path:string,signal?:AbortSignal):Promise<GitCheckoutPhysical|null>{
+   signal?.throwIfAborted();
+   try{
+    const id=await this.directory(path),before=await lstat(path),after=await lstat(path);
+    if(!before.isDirectory()||before.isSymbolicLink()||identity(before)!==id||worktreeStamp(before)!==worktreeStamp(after))throw Error('git_snapshot_changed');
+    return{identity:id,mode:Number(before.mode&0o7777n),uid:String(before.uid),gid:String(before.gid),stat_sha256:worktreeStamp(before)};
+   }catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return null;throw error;}
+ }
  /** Original read-only log after-facts, guarded by the frozen source metadata. */
  async checkoutLogAfter(raw:GitCheckoutReviewWitness,signal?:AbortSignal):Promise<GitCheckoutLogAfter>{
   const witness=structuredClone(raw),source=witness.preview.reference_source;
@@ -817,12 +825,17 @@ export class GitRepositoryInspection{
   const guard=async()=>{
    signal?.throwIfAborted();const anchors=await this.anchors(signal);
    if(anchors.repository!==witness.repository_sha256||anchors.metadata!==source.source_metadata_sha256)throw Error('git_snapshot_changed');
+   if(source.layout){
+    const paths=[{path:this.root,before:source.layout.root},{path:this.gitDirectory,before:source.layout.git},{path:this.commonDirectory,before:source.layout.common},
+     ...source.layout.parents.map(parent=>({path:join(parent.scope==='git'?this.gitDirectory:this.commonDirectory,parent.path),before:parent.before}))];
+    for(const entry of paths)if(canonicalJson(await this.checkoutDirectoryPhysical(entry.path,signal))!==canonicalJson(entry.before))throw Error('git_snapshot_changed');
+   }
   };
   await guard();
   try{
    const plan=checkoutReferencePlan(witness);
    if(plan.state!=='planned')return{state:'not_confirmed',reason:'reference_policy_required'};
-   if(!plan.head_log.append)return{state:'retained',...source.head_log};
+   if(!plan.head_log.append)return{state:'retained',sha256:source.head_log.sha256,size:source.head_log.size};
    const metadata=witness.log_metadata;
    if(!metadata)return{state:'not_confirmed',reason:'identity_unconfigured'};
    const actor={name:metadata.committer.name,email:metadata.committer.email};
@@ -832,6 +845,7 @@ export class GitRepositoryInspection{
     const path=join(this.gitDirectory,'logs','HEAD');await this.directory(dirname(path));before=await this.bytes(path,32*1024*1024);
    }catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
    if((before===null?null:hash(before))!==source.head_log.sha256||(before?.length??0)!==source.head_log.size)throw Error('git_snapshot_changed');
+   if(before!==null&&source.head_log.physical&&worktreeStamp(await lstat(join(this.gitDirectory,'logs','HEAD')))!==source.head_log.physical.stat_sha256)throw Error('git_snapshot_changed');
    if(before?.length&&before[before.length-1]!==10)return{state:'not_confirmed',reason:'log_format_required'};
    const entry=checkoutReflogEntry(plan,metadata.committer),size=(before?.length??0)+entry.length;
    if(size>32*1024*1024)return{state:'not_confirmed',reason:'output_limit'};
@@ -841,30 +855,48 @@ export class GitRepositoryInspection{
  }
  /** Fixed before-state metadata for the original checkout review and later publication. */
  protected async checkoutReferenceSource(context:ReadContext,snapshot:GitSnapshot,targetRef:string,signal?:AbortSignal):Promise<GitCheckoutReferenceSource>{
-  const file=async(path:string,max:number):Promise<GitBranchLogFile>=>{
-   signal?.throwIfAborted();
+  const directory=(path:string)=>this.checkoutDirectoryPhysical(path,signal);
+  const roots={root:await directory(this.root),git:await directory(this.gitDirectory),common:await directory(this.commonDirectory)};
+  if(!roots.root||!roots.git||!roots.common)throw Error('git_snapshot_changed');
+  const parents=new Map<string,GitCheckoutMetadataLayout['parents'][number]>();
+  const file=async(scope:'git'|'common',name:string,max:number):Promise<GitCheckoutMetadataFile>=>{
+   signal?.throwIfAborted();const root=scope==='git'?this.gitDirectory:this.commonDirectory,parts=name.split('/');
+   for(let count=1;count<parts.length;count++){
+    const path=parts.slice(0,count).join('/'),key=scope+'\0'+path;
+    if(!parents.has(key))parents.set(key,{scope,path,before:await directory(join(root,path))});
+   }
+   if(parents.size>4096)throw Error('git_metadata_limit');
+   const path=join(root,name);
    try{
-    await this.directory(dirname(path));const body=await this.bytes(path,max);
-    return{sha256:hash(body),size:body.length};
-   }catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return{sha256:null,size:0};throw error;}
+    await this.directory(dirname(path));const before=await lstat(path),body=await this.bytes(path,max,witness(before)),after=await lstat(path);
+    if(worktreeStamp(before)!==worktreeStamp(after))throw Error('git_snapshot_changed');
+    return{sha256:hash(body),size:body.length,physical:{identity:identity(before),stat_sha256:worktreeStamp(before),mode:Number(before.mode&0o7777n),uid:String(before.uid),gid:String(before.gid)}};
+   }catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return{sha256:null,size:0,physical:null};throw error;}
   };
   const sourceRef=snapshot.head.detached?null:'refs/heads/'+snapshot.head.branch;
   if(!validGitReference(targetRef)||sourceRef!==null&&!validGitReference(sourceRef)||!context.branchLogPolicy)throw Error('git_checkout_evidence_invalid');
-  const headFile=await file(join(this.gitDirectory,'HEAD'),32*1024*1024);
+  const headFile=await file('git','HEAD',32*1024*1024);
   if(headFile.sha256===null)throw Error('git_snapshot_changed');
   const source={
    protocol:1 as const,source_metadata_sha256:context.metadata,head_file:headFile,
-   head_log:await file(join(this.gitDirectory,'logs','HEAD'),32*1024*1024),
-   source_ref:sourceRef===null?null:{ref:sourceRef,file:await file(join(this.commonDirectory,sourceRef),32*1024*1024)},
-   target_ref:{ref:targetRef,file:await file(join(this.commonDirectory,targetRef),32*1024*1024)},
-   target_log:await file(join(this.commonDirectory,'logs',targetRef),32*1024*1024),
-   packed_refs:await file(join(this.commonDirectory,'packed-refs'),32*1024*1024),
-   configuration:{common:await file(join(this.commonDirectory,'config'),1024*1024),
-    worktree:context.worktreeConfigEnabled?await file(join(this.gitDirectory,'config.worktree'),1024*1024):{sha256:null,size:0},
+   head_log:await file('git','logs/HEAD',32*1024*1024),
+   source_ref:sourceRef===null?null:{ref:sourceRef,file:await file('common',sourceRef,32*1024*1024)},
+   target_ref:{ref:targetRef,file:await file('common',targetRef,32*1024*1024)},
+   target_log:await file('common','logs/'+targetRef,32*1024*1024),
+   packed_refs:await file('common','packed-refs',32*1024*1024),
+   configuration:{common:await file('common','config',1024*1024),
+    worktree:context.worktreeConfigEnabled?await file('git','config.worktree',1024*1024):{sha256:null,size:0,physical:null},
     worktree_enabled:context.worktreeConfigEnabled===true},
    log_policy:{...context.branchLogPolicy}
   };
-  signal?.throwIfAborted();return source;
+  for(const key of parents.keys()){
+   const entry=parents.get(key)!,root=entry.scope==='git'?this.gitDirectory:this.commonDirectory;
+   if(canonicalJson(await directory(join(root,entry.path)))!==canonicalJson(entry.before))throw Error('git_snapshot_changed');
+  }
+  if(canonicalJson(await directory(this.root))!==canonicalJson(roots.root)||canonicalJson(await directory(this.gitDirectory))!==canonicalJson(roots.git)
+   ||canonicalJson(await directory(this.commonDirectory))!==canonicalJson(roots.common))throw Error('git_snapshot_changed');
+  const layout:GitCheckoutMetadataLayout={root:roots.root,git:roots.git,common:roots.common,parents:[...parents.keys()].sort().map(key=>parents.get(key)!)};
+  signal?.throwIfAborted();return{...source,layout};
  }
  async branches(snapshotId:string,signal?:AbortSignal,targetRef?:string):Promise<Omit<GitBranchInventory,'project_id'>>{
   if(typeof snapshotId!=='string'||!/^[a-f0-9]{64}$/.test(snapshotId)||targetRef!==undefined&&(!validGitReference(targetRef)||!/^refs\/(?:heads|remotes)\//.test(targetRef)))throw Error('git_branches_invalid');

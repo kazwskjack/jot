@@ -2,7 +2,7 @@ import React,{useState} from 'react';
 import type {GitBranchInventory,GitCheckoutPreview} from './types';
 
 export default function GitCheckoutEvidence({preview,target,onRetry}:{preview:GitCheckoutPreview;target:GitBranchInventory['branches'][number];onRetry?:()=>void}){
- const [page,setPage]=useState(0),[attributePage,setAttributePage]=useState(0),worktreeBefore=preview.index_projection?.worktree_before,reference=preview.reference_source;
+ const [page,setPage]=useState(0),[attributePage,setAttributePage]=useState(0),[layoutPage,setLayoutPage]=useState(0),worktreeBefore=preview.index_projection?.worktree_before,reference=preview.reference_source;
  return <>
    <dl><dt>目标引用</dt><dd><code>{preview.target_ref}</code></dd><dt>目标提交</dt><dd><code>{preview.target_oid}</code></dd>
     <dt>当前索引 SHA-256</dt><dd><code>{preview.source_index_sha256??'尚无索引文件'}</code></dd>
@@ -17,7 +17,12 @@ export default function GitCheckoutEvidence({preview,target,onRetry}:{preview:Gi
      {name:'目标松散引用文件',fact:reference.target_ref.file},{name:'目标引用日志',fact:reference.target_log},
      {name:'打包引用文件',fact:reference.packed_refs},{name:'公共配置文件',fact:reference.configuration.common},
      ...(reference.configuration.worktree_enabled?[{name:'工作区配置文件',fact:reference.configuration.worktree}]:[])
-    ].map(({name,fact})=><React.Fragment key={name}><dt>{name}</dt><dd>{fact.sha256===null?'文件尚不存在':<>{fact.size} 字节 · SHA-256 <code>{fact.sha256}</code></>}</dd></React.Fragment>)}</dl>
+    ].map(({name,fact})=><React.Fragment key={name}><dt>{name}</dt><dd>{fact.sha256===null?'文件尚不存在':<>{fact.size} 字节 · SHA-256 <code>{fact.sha256}</code></>}{fact.physical&&<div>节点 <code>{fact.physical.identity}</code> · 模式 <code>{fact.physical.mode.toString(8).padStart(4,'0')}</code> · UID {fact.physical.uid} · GID {fact.physical.gid}</div>}</dd></React.Fragment>)}</dl>
+    {reference.layout?<section aria-label="元数据目录凭证"><h5>元数据目录凭证</h5>
+     <ul>{[{name:'项目根目录',fact:reference.layout.root},{name:'当前 Git 目录',fact:reference.layout.git},{name:'公共 Git 目录',fact:reference.layout.common}].map(({name,fact})=><li key={name}>{name} · 节点 <code>{fact.identity}</code> · 模式 <code>{fact.mode.toString(8).padStart(4,'0')}</code> · UID {fact.uid} · GID {fact.gid}<div>状态 SHA-256 <code>{fact.stat_sha256}</code></div></li>)}</ul>
+     <ul aria-label="元数据父目录">{reference.layout.parents.slice(layoutPage*50,(layoutPage+1)*50).map(parent=><li key={parent.scope+'\0'+parent.path}>{parent.scope==='git'?'当前 Git 目录':'公共 Git 目录'} · <code>{parent.path}</code>{parent.before?<span> · 节点 <code>{parent.before.identity}</code> · 模式 <code>{parent.before.mode.toString(8).padStart(4,'0')}</code> · UID {parent.before.uid} · GID {parent.before.gid}</span>:<span> · 目录尚不存在</span>}</li>)}</ul>
+     {reference.layout.parents.length>50&&<nav className="wb-actions" aria-label="元数据父目录分页"><button type="button" disabled={layoutPage===0} onClick={()=>setLayoutPage(layoutPage-1)}>上一页</button><span role="status">第 {layoutPage+1} 页，共 {Math.ceil(reference.layout.parents.length/50)} 页</span><button type="button" disabled={(layoutPage+1)*50>=reference.layout.parents.length} onClick={()=>setLayoutPage(layoutPage+1)}>下一页</button></nav>}
+    </section>:<p role="status">此历史预览尚无物理权限与目录凭证。</p>}
     <p>日志配置 {{default:'默认',true:'启用',false:'关闭',always:'全部启用'}[reference.log_policy.configuration]} · 有效策略{reference.log_policy.enabled?'启用':'关闭'}。工作区独立配置{reference.configuration.worktree_enabled?'启用':'关闭'}。</p>
     <p>松散引用文件缺失时，逻辑引用仍可能来自打包存储。日志及跟踪写入方案仍需完整审核。</p>
    </section>:<p role="status">此历史预览尚无引用与配置原状态凭证。</p>}

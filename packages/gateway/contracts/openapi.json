@@ -40760,6 +40760,16 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 33554432
+              },
+              "physical": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/GitCheckoutPhysical"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             },
             "required": [
@@ -40782,6 +40792,16 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 33554432
+              },
+              "physical": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/GitCheckoutPhysical"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             },
             "required": [
@@ -40816,6 +40836,16 @@
                         "type": "integer",
                         "minimum": 0,
                         "maximum": 33554432
+                      },
+                      "physical": {
+                        "anyOf": [
+                          {
+                            "$ref": "#/components/schemas/GitCheckoutPhysical"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
                       }
                     },
                     "required": [
@@ -40859,6 +40889,16 @@
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 33554432
+                  },
+                  "physical": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/GitCheckoutPhysical"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "required": [
@@ -40887,6 +40927,16 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 33554432
+              },
+              "physical": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/GitCheckoutPhysical"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             },
             "required": [
@@ -40909,6 +40959,16 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 33554432
+              },
+              "physical": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/GitCheckoutPhysical"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             },
             "required": [
@@ -40935,6 +40995,16 @@
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 1048576
+                  },
+                  "physical": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/GitCheckoutPhysical"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "required": [
@@ -40957,6 +41027,16 @@
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 1048576
+                  },
+                  "physical": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/GitCheckoutPhysical"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "required": [
@@ -40994,6 +41074,9 @@
               "configuration",
               "enabled"
             ]
+          },
+          "layout": {
+            "$ref": "#/components/schemas/GitCheckoutMetadataLayout"
           }
         },
         "required": [
@@ -41238,6 +41321,97 @@
               "reason"
             ]
           }
+        ]
+      },
+      "GitCheckoutPhysical": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "identity": {
+            "type": "string",
+            "pattern": "^[0-9]+:[0-9]+$"
+          },
+          "mode": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4095
+          },
+          "uid": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "gid": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "stat_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "identity",
+          "mode",
+          "uid",
+          "gid",
+          "stat_sha256"
+        ]
+      },
+      "GitCheckoutMetadataLayout": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "root": {
+            "$ref": "#/components/schemas/GitCheckoutPhysical"
+          },
+          "git": {
+            "$ref": "#/components/schemas/GitCheckoutPhysical"
+          },
+          "common": {
+            "$ref": "#/components/schemas/GitCheckoutPhysical"
+          },
+          "parents": {
+            "type": "array",
+            "maxItems": 4096,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "scope": {
+                  "enum": [
+                    "git",
+                    "common"
+                  ]
+                },
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "before": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/GitCheckoutPhysical"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "scope",
+                "path",
+                "before"
+              ]
+            }
+          }
+        },
+        "required": [
+          "root",
+          "git",
+          "common",
+          "parents"
         ]
       },
       "GitCheckoutReviewPrepare": {
