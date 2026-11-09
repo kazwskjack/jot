@@ -39672,6 +39672,9 @@
           },
           "execution_authorized": {
             "const": false
+          },
+          "branch_metadata": {
+            "$ref": "#/components/schemas/GitBranchMetadata"
           }
         },
         "required": [
@@ -39690,6 +39693,49 @@
           "created_at",
           "updated_at",
           "execution_authorized"
+        ]
+      },
+      "GitBranchMetadata": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "protocol": {
+            "const": 1
+          },
+          "committer": {
+            "$ref": "#/components/schemas/GitCommitIdentity"
+          },
+          "operator_policy_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "log_policy_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "logs": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "head": {
+                "type": "boolean"
+              },
+              "branch": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "head",
+              "branch"
+            ]
+          }
+        },
+        "required": [
+          "protocol",
+          "committer",
+          "operator_policy_sha256",
+          "log_policy_sha256",
+          "logs"
         ]
       },
       "GitBranchAcceptance": {
@@ -39745,6 +39791,9 @@
           },
           "head": {
             "$ref": "#/components/schemas/GitHead"
+          },
+          "branch_metadata": {
+            "$ref": "#/components/schemas/GitBranchMetadata"
           }
         },
         "required": [
@@ -39824,6 +39873,9 @@
               "pending",
               "unknown"
             ]
+          },
+          "branch_metadata": {
+            "$ref": "#/components/schemas/GitBranchMetadata"
           }
         },
         "required": [
@@ -39908,6 +39960,9 @@
           "disposition_id": {
             "type": "string",
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+          },
+          "branch_metadata": {
+            "$ref": "#/components/schemas/GitBranchMetadata"
           }
         },
         "required": [

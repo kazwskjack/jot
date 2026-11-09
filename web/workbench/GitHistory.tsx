@@ -7,7 +7,7 @@ const outcome=(state:string)=>({pending:'等待执行',unknown:'结果待确认'
 function scoped(status:GitIndexStatus,acceptance:GitIndexAcceptance,project:string){
  const e=status.execution;
  if(acceptance.action==='commit'&&(e.action!=='commit'||e.target_ref!==acceptance.target_ref||e.expected_old_oid!==acceptance.expected_old_oid))throw Error('GIT_HISTORY_SCOPE_CHANGED');
- if(acceptance.action==='create-branch'&&(e.action!=='create-branch'||e.branch!==acceptance.branch||e.target_ref!==acceptance.target_ref||e.target_oid!==acceptance.target_oid||e.head.oid!==acceptance.head.oid||e.head.branch!==acceptance.head.branch||e.head.detached!==acceptance.head.detached))throw Error('GIT_HISTORY_SCOPE_CHANGED');
+ if(acceptance.action==='create-branch'&&(e.action!=='create-branch'||e.branch!==acceptance.branch||e.target_ref!==acceptance.target_ref||e.target_oid!==acceptance.target_oid||e.head.oid!==acceptance.head.oid||e.head.branch!==acceptance.head.branch||e.head.detached!==acceptance.head.detached||JSON.stringify(e.branch_metadata??null)!==JSON.stringify(acceptance.branch_metadata??null)))throw Error('GIT_HISTORY_SCOPE_CHANGED');
  if(acceptance.project_id!==project||e.project_id!==project||e.execution_id!==acceptance.execution_id||e.intent_id!==acceptance.intent_id||e.request_id!==acceptance.request_id||e.action!==acceptance.action||status.producer.execution_id!==e.execution_id||status.execution_authorized!==false||e.execution_authorized!==false||status.producer.execution_authorized!==false)throw Error('GIT_HISTORY_SCOPE_CHANGED');
  return status;
 }
@@ -29,6 +29,7 @@ export default function GitHistory({project,locked=false,allowDispatch=false,all
    <p role="status">{status.execution.state==='not_dispatched'?'操作未执行。':status.execution.state==='applied'?'变更已应用。':status.execution.state==='abandoned_unknown'?'操作已结束，实际效果仍未确认。':'操作结果尚未确认。'}</p>
    <p>{status.workspace_state==='reserved'?'工作区仍被占用，原执行尚未完成收尾。':status.workspace_state==='released_settled'||status.workspace_state==='released_unstarted'||status.execution.state==='not_dispatched'?'工作区已释放。':'尚未占用工作区。'}</p>
    {status.execution.action==='create-branch'&&<p style={{overflowWrap:'anywhere'}}>新分支 <code>{status.execution.target_ref}</code>，起点 <code>{status.execution.target_oid??'尚无提交'}</code>，原 HEAD <code>{status.execution.head.branch??'分离 HEAD'}</code>。创建分支的原生执行入口正在接入。</p>}
+   {status.execution.action==='create-branch'&&status.execution.branch_metadata&&<p style={{overflowWrap:'anywhere'}}>日志身份 {status.execution.branch_metadata.committer.name} &lt;{status.execution.branch_metadata.committer.email}&gt; · {status.execution.branch_metadata.committer.timestamp}。HEAD 日志{status.execution.branch_metadata.logs.head?'追加':'本次跳过'}，分支日志{status.execution.branch_metadata.logs.branch?'追加':'本次跳过'}。</p>}
    {status.execution.action==='commit'&&<p style={{overflowWrap:'anywhere'}}>目标 <code>{status.execution.target_ref}</code>，父提交 <code>{status.execution.expected_old_oid??'首个提交'}</code>。{status.execution.state==='applied'&&<>提交 <code>{status.execution.commit_oid}</code>，暂存树 <code>{status.execution.tree_oid}</code>。</>}</p>}
    {status.control_receipt?.state==='completed'&&status.control_receipt.cleanup==='unverified'&&<p role="status">锁文件清理尚未确认，请核对原仓库状态。</p>}
    <ul>{status.execution.paths.map(path=><li key={path} style={{overflowWrap:'anywhere'}}><code>{path}</code></li>)}</ul>

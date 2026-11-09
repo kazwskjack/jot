@@ -377,3 +377,34 @@ original native custody and implement HEAD/ref/reflog publication plus recovery.
 Legacy reviews/admissions must remain readable and cancellable when richer
 execution metadata is introduced. Source review only, with no test/build/native
 or maintenance command execution in this increment.
+
+## Frozen branch reflog metadata
+
+New create-branch reviews use witness protocol 2. The original read context
+captures effective common/worktree log configuration and bounded hashes/sizes
+of the original HEAD and target branch logs, then rechecks source metadata.
+Git parses configured boolean values, including valueless and numeric forms.
+Worktree configuration enablement also uses Git's canonical boolean parser.
+
+The operator-bound commit identity configuration supplies the branch committer.
+The review freezes one UTC whole-second timestamp, committer-policy digest,
+log-witness digest and explicit HEAD/branch append decisions. Approval and new
+admission compare the current configured committer using the original time.
+Journal-only readers validate frozen facts without loading current identity
+configuration. Original protocol-1 reviews and admissions retain their original
+hash and receipt bytes. They remain readable/cancellable, while new approval
+or admission requires a fresh metadata-bearing review.
+
+Existing log files participate in append decisions even with automatic log
+creation disabled. Dangling unborn symbolic targets skip log appends. These
+rules follow Git's documented log behavior and files-backend symbolic target
+handling. [Git update-ref](https://git-scm.com/docs/git-update-ref),
+[Git configuration](https://git-scm.com/docs/git-config#Documentation/git-config.txt-corelogAllRefUpdates),
+[Git files backend](https://github.com/git/git/blob/master/refs/files-backend.c).
+
+Optional metadata is carried through original review, acceptance and pending/
+closed result contracts and shown in read-only history. Branch name validation
+maps an isolated check-ref-format rejection to the explicit invalid-branch error.
+Native creation/ref/HEAD/reflog effects and recovery remain required. This
+increment used source review and contract-object comparison. Tests, builds,
+SDK/native/product commands, migrations and UI acceptance were not executed.

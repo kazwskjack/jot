@@ -5,8 +5,8 @@ import {readGitCreateBranchExecutionSource} from './branch-records.ts';
 
 export function branchExecutionFacts(db:DatabaseSync,row:Row):GitBranchExecutionFacts{
  if(row.action!=='create-branch'||row.protocol!==6)throw Error('git_execution_evidence_corrupt');
- const {branch,witness}=readGitCreateBranchExecutionSource(db,row);
- return{action:'create-branch',branch,target_ref:witness.target_ref,target_oid:witness.target_oid,head:witness.head};
+ const {branch,witness,metadata}=readGitCreateBranchExecutionSource(db,row);
+ return{action:'create-branch',branch,target_ref:witness.target_ref,target_oid:witness.target_oid,head:witness.head,...(metadata?{branch_metadata:metadata}:{})};
 }
 export function branchClosedResult(db:DatabaseSync,row:Row,disposition:Disposition):GitBranchClosedResult{
  return{execution_id:row.execution_id,project_id:row.project_id,intent_id:row.intent_id,request_id:row.request_id,

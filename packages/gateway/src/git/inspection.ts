@@ -1,5 +1,5 @@
 import {validGitReference} from './references.ts';
-import type {GitBranchInventory,GitCreateBranchWitness} from '../../contracts/types.ts';
+import type {GitBranchInventory,GitCreateBranchWitness,GitBranchLogFile,GitBranchLogWitness} from '../../contracts/types.ts';
 import {createHash} from 'node:crypto';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {constants} from 'node:fs';
@@ -33,7 +33,7 @@ const lstat=(path:string)=>nativeLstat(path,{bigint:true});
 const identity=(s:Awaited<ReturnType<typeof lstat>>)=>[String(s.dev),String(s.ino)].join(':');
 const witness=(s:Awaited<ReturnType<typeof lstat>>)=>[identity(s),String(s.size),String(s.mtimeNs),String(s.ctimeNs),String(s.nlink)].join(':');
 const safe=(path:string)=>{if(path.startsWith('-'))throw Error('git_path_unavailable');return workspaceRelativePath(path);};
-export type GitReadContext={directory:string;metadata:string;index:string|null;remotes:GitRemote[];dispose():Promise<void>};
+export type GitReadContext={directory:string;metadata:string;index:string|null;remotes:GitRemote[];branchLogPolicy?:Pick<GitBranchLogWitness,'configuration'|'enabled'>;dispose():Promise<void>};
 type ReadContext=GitReadContext;
 
 /** Operator-bound, read-only physical repository. No caller-controlled root,
@@ -89,22 +89,41 @@ export class GitRepositoryInspection{
  }
  /** Private disposable read-copy, never an execution target or another Git
   * authority. Source config/hooks/filters are not loaded by Git operations. */
- protected async context(signal?:AbortSignal):Promise<ReadContext>{
+ protected async context(signal?:AbortSignal,branchLogs=false):Promise<ReadContext>{
   const before=await this.anchors(signal),scratchBase=resolve(tmpdir()),directory=await mkdtemp(join(scratchBase,'jot-git-read-'));
   const context:ReadContext={directory,metadata:before.metadata,index:null,remotes:[],dispose:async()=>{if(!within(scratchBase,directory)||same(scratchBase,directory)||(await lstat(directory)).isSymbolicLink())throw Error('git_cleanup_unavailable');await rm(directory,{recursive:true,force:true,maxRetries:5,retryDelay:20});}};
   try{
    await mkdir(join(directory,'objects'));await mkdir(join(directory,'refs'));await writeFile(join(directory,'HEAD'),'ref: refs/heads/main\n');await writeFile(join(directory,'config'),'[core]\n repositoryformatversion = 0\n bare = false\n');
-   const settings=new Map<string,string>();
+   const settings=new Map<string,string>(),branchSources=new Map<string,string>();let worktreeConfig=false;
    for(const path of [join(this.commonDirectory,'config'),join(this.gitDirectory,'config.worktree')]){
-    if(path.endsWith('config.worktree')&&!['true','yes','on','1'].includes(settings.get('extensions.worktreeconfig')??''))continue;
+    if(path.endsWith('config.worktree')&&!worktreeConfig)continue;
     signal?.throwIfAborted();try{await this.bytes(path,1024*1024);}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')continue;throw error;}
     const configured=await this.run(context,['config','--file',path,'--no-includes','--null','--list'],signal);
     for(const item of text(configured.bytes).split('\0')){
-     const at=item.indexOf('\n');if(at<0)continue;
-     const key=item.slice(0,at),value=item.slice(at+1);
+     const at=item.indexOf('\n'),key=at<0?item:item.slice(0,at);
+     if(branchLogs&&['core.logallrefupdates','core.bare'].includes(key))branchSources.set(key,path);
+     if(at<0){
+      if(key==='extensions.refstorage')throw Error('git_reference_backend_unsupported');
+      if(key==='extensions.worktreeconfig'||branchLogs&&['core.logallrefupdates','core.bare'].includes(key))settings.set(key,'true');continue;
+     }
+     const value=item.slice(at+1);
      if(key==='extensions.refstorage'&&value!=='files')throw Error('git_reference_backend_unsupported');
      settings.set(key,value);
     }
+    if(path===join(this.commonDirectory,'config')&&settings.has('extensions.worktreeconfig')){
+     const value=text((await this.run(context,['config','--file',path,'--no-includes','--type=bool','--get','extensions.worktreeconfig'],signal)).bytes).trim();
+     if(value!=='true'&&value!=='false')throw Error('git_configuration_invalid');worktreeConfig=value==='true';
+    }
+   }
+   if(branchLogs){
+    const boolean=async(key:string,fallback:boolean)=>{
+     const path=branchSources.get(key);if(!path)return fallback;
+     const value=text((await this.run(context,['config','--file',path,'--no-includes','--type=bool','--get',key],signal)).bytes).trim();
+     if(value!=='true'&&value!=='false')throw Error('git_branch_log_policy_invalid');return value==='true';
+    };
+    const explicit=branchSources.has('core.logallrefupdates'),always=settings.get('core.logallrefupdates')?.toLowerCase()==='always';
+    const enabled=always||await boolean('core.logallrefupdates',!await boolean('core.bare',false));
+    context.branchLogPolicy={configuration:explicit?(always?'always':enabled?'true':'false'):'default',enabled};
    }
    let config='[core]\n repositoryformatversion = 0\n bare = false\n';
    for(const key of ['filemode','ignorecase','symlinks','sparsecheckout','sparsecheckoutcone','safecrlf']){const value=settings.get('core.'+key)?.toLowerCase();if(value!==undefined){if(!['true','false','yes','no','on','off','1','0','warn'].includes(value))throw Error('git_configuration_invalid');config+=' '+key+' = '+value+'\n';}}
@@ -336,15 +355,22 @@ export class GitRepositoryInspection{
    const ref=entry.ref.normalize('NFC').toLowerCase();
    if(ref===folded||ref.startsWith(folded+'/')||folded.startsWith(ref+'/'))throw Error('git_branch_exists');
   }
-  const context=await this.context(signal);let result:GitCreateBranchWitness;
+  const context=await this.context(signal,true);let result:GitCreateBranchWitness;
   try{
-   const checked=await this.run(context,['check-ref-format','--branch',branch],signal,true);
+   const checked=await readGit(this.executable!,this.root,context.directory,['check-ref-format','--branch',branch],this.limits,signal,join(this.commonDirectory,'objects'));
    if(checked.code!==0)throw Error('git_branch_invalid');
    const snapshot=await this.inspectContext(context,signal);
    if(snapshot.snapshot_id!==snapshotId)throw Error('git_snapshot_changed');
-   result={protocol:1,kind:'create_branch',snapshot_id:snapshotId,repository_sha256:snapshot.repository_sha256,
+   const log=async(path:string):Promise<GitBranchLogFile>=>{
+    try{await this.directory(dirname(path));const bytes=await this.bytes(path,32*1024*1024);return{sha256:hash(bytes),size:bytes.length};}
+    catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return{sha256:null,size:0};throw error;}
+   };
+   const headLog=await log(join(this.gitDirectory,'logs','HEAD')),branchLog=await log(join(this.commonDirectory,'logs',target));
+   if(!context.branchLogPolicy)throw Error('git_branch_log_policy_invalid');
+   if((await this.inspectContext(context,signal)).snapshot_id!==snapshotId)throw Error('git_snapshot_changed');
+   result={protocol:2,kind:'create_branch',snapshot_id:snapshotId,repository_sha256:snapshot.repository_sha256,
     source_metadata_sha256:context.metadata,index_sha256:context.index,object_format:inventory.object_format,
-    head:snapshot.head,branch,target_ref:target,target_oid:snapshot.head.oid,execution_authorized:false};
+    head:snapshot.head,branch,target_ref:target,target_oid:snapshot.head.oid,reflog:{...context.branchLogPolicy,head:headLog,branch:branchLog},execution_authorized:false};
   }finally{await context.dispose();}
   const after=await this.anchors(signal);
   if(after.repository!==result.repository_sha256||after.metadata!==result.source_metadata_sha256)throw Error('git_snapshot_changed');

@@ -16,7 +16,7 @@ export function registerGitBranchReviewRoutes(app:FastifyInstance,options:Option
   }catch(error){
    const code=error instanceof Error?error.message:'',known:Record<string,number>={
     project_not_found:404,git_intent_not_found:404,git_repository_unconfigured:503,git_intent_invalid:400,
-    git_branch_invalid:400,git_branch_exists:409,git_branch_evidence_invalid:503,git_reference_backend_unsupported:503,
+    git_branch_invalid:400,git_branch_exists:409,git_branch_evidence_invalid:503,git_branch_review_required:409,git_branch_identity_unconfigured:503,git_branch_metadata_invalid:400,git_branch_log_policy_invalid:503,git_reference_backend_unsupported:503,
     git_snapshot_changed:409,git_repository_changed:409,git_review_changed:409,git_intent_closed:409,
     version_conflict:409,idempotency_conflict:409,idempotency_in_progress:409,git_cancelled:409,
     git_output_limit:413,git_entry_limit:413,git_metadata_limit:413,git_read_timeout:504

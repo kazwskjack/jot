@@ -216,3 +216,20 @@ branch storage. This remains partial M15.14 development. Reflog actor/time/polic
 freezing, native custody, HEAD/ref/reflog effects and interruption recovery,
 creation UI, initialization and existing-branch operations remain required.
 No tests, builds, migrations or native/product commands were executed.
+
+## P09 frozen branch reflog actor and policy
+
+Create-branch witness protocol 2 freezes effective common/worktree log policy
+and original HEAD/branch log hashes and sizes. Configured operator committer
+identity, one UTC whole-second time, exact log-policy digest and append decisions
+join the original review hash. Approval/admission recheck configured identity
+at the captured time. Historical protocol-1 review/admission reads and explicit
+cancellation retain their original request/hash/receipt encoding.
+
+The shared contracts and read-only history include optional frozen metadata.
+Boolean configuration and worktree enablement use Git's original canonical
+parser. Valueless reference-storage extensions are rejected by the existing
+unsupported-backend guard. Fixed isolated branch-name rejection returns the
+invalid-branch error. Native branch creation, exact-owned HEAD/ref/reflog phase
+publication and interrupted recovery remain in M15.14. This is source development
+only, with no test/build/native/maintenance/migration/runtime execution.

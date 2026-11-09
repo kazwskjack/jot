@@ -27,9 +27,9 @@ export class GitBranchIntents{
   if(!event)throw Error('git_intent_unavailable');return event;
  }
  private view(row:Row,event:Event):GitBranchReviewIntent{
-  const {input,witness}=readGitBranchIntentSource(row);
+  const {input,witness,metadata}=readGitBranchIntentSource(row);
   return{intent_id:row.intent_id,project_id:row.project_id,action:input.action,branch:input.branch,
-   target_ref:witness.target_ref,target_oid:witness.target_oid,head:witness.head,object_format:witness.object_format,
+   target_ref:witness.target_ref,target_oid:witness.target_oid,head:witness.head,...(metadata?{branch_metadata:metadata}:{}),object_format:witness.object_format,
    snapshot_id:input.snapshot_id,review_sha256:row.review_sha256,version:event.version,state:event.state,
    created_at:row.created_at,updated_at:event.created_at,execution_authorized:false};
  }
@@ -37,7 +37,11 @@ export class GitBranchIntents{
  executionSource(owner:string,project:string,id:string,version:number,review:string){
   const row=this.row(owner,project,id),event=this.latest(id);
   if(event.state!=='approved'||event.version!==version||row.review_sha256!==review)throw Error('git_execution_revoked');
-  return readGitCreateBranchReviewSource(this.db,owner,project,id,version,review);
+  const source=readGitCreateBranchReviewSource(this.db,owner,project,id,version,review);
+  if(!source.metadata||source.witness.protocol!==2)throw Error('git_branch_review_required');
+  const metadata=this.git.branchMetadata(owner,project,source.witness,source.metadata.committer.timestamp);
+  if(JSON.stringify(metadata)!==JSON.stringify(source.metadata))throw Error('git_execution_revoked');
+  return{...source,metadata:source.metadata};
  }
  async prepareChange(owner:string,project:string,value:GitBranchReviewPrepare,signal?:AbortSignal){
   this.projects.assertOwned(project,owner);const input=normalizeGitBranchReview(value),requestHash=digest(input);
@@ -48,12 +52,13 @@ export class GitBranchIntents{
   };
   if(prior){replay(prior);return()=>{signal?.throwIfAborted();return replay(this.row(owner,project,prior.intent_id));};}
   const witness=await this.git.freezeCreateBranch(owner,project,input.snapshot_id,input.branch,signal);
+  const metadata=this.git.branchMetadata(owner,project,witness);
   return()=>withImmediateTransaction(this.db,()=>{
    signal?.throwIfAborted();this.projects.assertOwned(project,owner);
    const existing=this.db.prepare('SELECT * FROM wb_git_mutation_intents WHERE owner_id=? AND project_id=? AND request_id=?').get(owner,project,input.request_id) as Row|undefined;
    if(existing)return replay(existing);
-   const id='git-intent-'+randomUUID(),at=new Date().toISOString(),review=digest({action:input.action,branch:input.branch,witness});
-   this.db.prepare('INSERT INTO wb_git_mutation_intents VALUES(?,?,?,?,?,?,?,?,?,?)').run(id,owner,project,input.request_id,requestHash,input.action,JSON.stringify(input),JSON.stringify(witness),review,at);
+   const id='git-intent-'+randomUUID(),at=new Date().toISOString(),review=digest({action:input.action,branch:input.branch,witness,branch_metadata:metadata});
+   this.db.prepare('INSERT INTO wb_git_mutation_intents VALUES(?,?,?,?,?,?,?,?,?,?)').run(id,owner,project,input.request_id,requestHash,input.action,JSON.stringify({...input,branch_metadata:metadata}),JSON.stringify(witness),review,at);
    this.db.prepare('INSERT INTO wb_git_mutation_events VALUES(?,?,?,?,?,?)').run(id,1,'prepared',null,null,at);
    return this.get(owner,project,id);
   });
@@ -77,8 +82,11 @@ export class GitBranchIntents{
   const cached=replay();if(cached)return()=>{signal?.throwIfAborted();this.row(owner,project,id);return cached;};
   assertCurrent();
   if(input.action==='approve'){
+   if(!source.metadata||source.witness.protocol!==2)throw Error('git_branch_review_required');
    const witness=await this.git.freezeCreateBranch(owner,project,source.input.snapshot_id,source.input.branch,signal);
    if(JSON.stringify(witness)!==row.witness_json)throw Error('git_review_changed');
+   const metadata=this.git.branchMetadata(owner,project,witness,source.metadata.committer.timestamp);
+   if(JSON.stringify(metadata)!==JSON.stringify(source.metadata))throw Error('git_review_changed');
   }
   return()=>withImmediateTransaction(this.db,()=>{
    signal?.throwIfAborted();this.row(owner,project,id);const cached=replay();if(cached)return cached;const event=assertCurrent();
