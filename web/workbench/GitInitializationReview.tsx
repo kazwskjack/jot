@@ -6,10 +6,10 @@ import GitIndexOperation from './GitIndexOperation';
 import {mutationRejected} from './task-save-receipt.mjs';
 
 type Command={path:string;body:Record<string,unknown>};
-export default function GitInitializationReview({project,snapshotId,onClose,onBusy,allowExecution=false,initialReview,onInitialized,blocked=false}:{
- project:string;snapshotId:string;onClose:()=>void;onBusy:(busy:boolean)=>void;allowExecution?:boolean;initialReview?:GitInitializationReviewIntent;onInitialized?:()=>void;blocked?:boolean;
+export default function GitInitializationReview({project,snapshotId,onClose,onBusy,allowExecution=false,allowReinitializationExecution=false,reinitializing=false,initialBranch='',initialObjectFormat='',initialReview,onInitialized,blocked=false}:{
+ project:string;snapshotId:string;onClose:()=>void;onBusy:(busy:boolean)=>void;allowExecution?:boolean;allowReinitializationExecution?:boolean;reinitializing?:boolean;initialBranch?:string;initialObjectFormat?:''|'sha1'|'sha256';initialReview?:GitInitializationReviewIntent;onInitialized?:()=>void;blocked?:boolean;
 }){
- const mutation=useGitMutationReceipt(project),[name,setName]=useState(initialReview?.initial_branch??''),[format,setFormat]=useState<''|'sha1'|'sha256'>(initialReview?.object_format??''),[review,setReview]=useState<GitInitializationReviewIntent|null>(initialReview??null);
+ const mutation=useGitMutationReceipt(project),[name,setName]=useState(initialReview?.initial_branch??initialBranch),[format,setFormat]=useState<''|'sha1'|'sha256'>(initialReview?.object_format??initialObjectFormat),[review,setReview]=useState<GitInitializationReviewIntent|null>(initialReview??null);
  const [busy,setBusy]=useState(false),[executionBusy,setExecutionBusy]=useState(false),[verified,setVerified]=useState(!!initialReview),[stale,setStale]=useState(false),[error,setError]=useState('');
  const alive=useRef(true),inflight=useRef(false),active=useRef<AbortController|null>(null),command=useRef<Command|null>(null),input=useRef<HTMLInputElement>(null),decision=useRef<HTMLButtonElement>(null);
  const report=useRef(onBusy);report.current=onBusy;
@@ -56,9 +56,9 @@ export default function GitInitializationReview({project,snapshotId,onClose,onBu
  };
  const refresh=async()=>{if(!review)return;const control=begin();if(!control)return;try{await read(review.intent_id,control.signal)}catch{if(alive.current&&!control.signal.aborted){setVerified(false);setError('当前审核状态尚未确认，请重试读取。')}}finally{end()}};
  return <section className="wb-form wb-git-review" aria-label="初始化 Git 仓库审核">
-  <div className="wb-toolbar"><h3>{review?.reinitialization?'重新初始化仓库':'初始化仓库'}</h3><button type="button" disabled={locked||blocked} onClick={onClose}>关闭初始化审核</button></div>
+  <div className="wb-toolbar"><h3>{review?.reinitialization||reinitializing?'重新初始化仓库':'初始化仓库'}</h3><button type="button" disabled={locked||blocked} onClick={onClose}>关闭初始化审核</button></div>
   {!review?<>
-   <label>初始分支名称<input ref={input} aria-label="初始分支名称" maxLength={1013} value={name} disabled={locked||blocked} onChange={event=>setName(event.target.value)}/></label>
+   <label>{reinitializing?'初始分支请求参数（保留原 HEAD）':'初始分支名称'}<input ref={input} aria-label={reinitializing?'重初始化的初始分支请求参数':'初始分支名称'} maxLength={1013} value={name} disabled={locked||blocked} onChange={event=>setName(event.target.value)}/></label>
    <label>对象格式<select aria-label="初始化对象格式" value={format} disabled={locked||blocked} onChange={event=>setFormat(event.target.value as ''|'sha1'|'sha256')}><option value="">请选择对象格式</option><option value="sha1">SHA-1</option><option value="sha256">SHA-256</option></select></label>
    <button type="button" disabled={locked||blocked||!branch||!objectFormat} onClick={()=>void send('prepare')}>生成初始化审核</button>
   </>:<>
@@ -86,9 +86,9 @@ export default function GitInitializationReview({project,snapshotId,onClose,onBu
     {review.state!=='cancelled'&&<button ref={review.state==='prepared'?undefined:decision} type="button" disabled={locked||blocked||!verified} onClick={()=>void send('cancel')}>取消初始化审核</button>}
     <button ref={review.state==='cancelled'?decision:undefined} type="button" disabled={locked||blocked} onClick={()=>void refresh()}>刷新初始化审核状态</button></div>
   </>}
-  {review&&verified&&<GitIndexOperation key={review.intent_id} project={project} review={review} allowDispatch={false} allowInitializationDispatch={allowExecution&&!stale&&!blocked&&!review.reinitialization} onInitializationReviewChange={setReview} onBusy={setExecutionBusy} onInitializationConfirmed={onInitialized}/>}
-  {review?.reinitialization&&<p role="status">本次审核固定原 HEAD、配置与内部忽略规则。重初始化的原生发布与恢复继续接入中。</p>}
-  {!allowExecution&&<p role="status">初始化派发需要匹配的原生连接和初始化存储版本。</p>}
+  {review&&verified&&<GitIndexOperation key={review.intent_id} project={project} review={review} allowDispatch={false} allowInitializationDispatch={allowExecution&&!stale&&!blocked} allowReinitializationDispatch={allowReinitializationExecution&&!stale&&!blocked} onInitializationReviewChange={setReview} onBusy={setExecutionBusy} onInitializationConfirmed={onInitialized}/>}
+  {review?.reinitialization&&<p role="status">本次审核固定原 HEAD、配置与内部忽略规则。批准后可受理，再单独派发重初始化。</p>}
+  {!(review?.reinitialization||reinitializing?allowReinitializationExecution:allowExecution)&&<p role="status">当前初始化操作需要匹配的原生连接和存储版本。</p>}
   {error&&<p role="alert" className="wb-error">{error}</p>}
   {mutation.pending&&<button type="button" disabled={busy||executionBusy} onClick={()=>void send('retry')}>重试原初始化审核请求</button>}
  </section>;

@@ -1234,3 +1234,39 @@ backend coverage and all other P09 requirements. M15.14 stays in progress and
 original protocol-8 admission remains gated. Per the user's source-only direction,
 no tests, typechecks, builds, product/native operations, maintenance commands,
 migrations, UI runtime acceptance or deployment were executed.
+
+## Reinitialization admission and original UI flow, 2026-11-09
+
+Original initialization admission now selects protocol 8 only for a complete
+approved witness 2 and explicitly installed reinitialization schema. Witness 1
+keeps protocol 7. Older schema still returns the original upgrade-required result.
+Original current-owner/review/version/binding/idempotency/pending exclusion and
+native reservation/custody/lease/producer/drain/settlement paths stay in place.
+There is no new execution table, host or authority channel.
+
+The original capability adds optional reinitialization_projects only with native
+configuration and explicit reinitialization storage. It uses current-owned bound
+projects and preserves the default-false sixth service parameter. Fresh-init
+initialization_projects keeps its original direct .git requirement. The paired
+JSON/YAML capability source objects match, and other OpenAPI objects are retained.
+No maintenance command or migration was executed.
+
+GitPanel now exposes an existing-repository review using its actual normal snapshot.
+It seeds the branch request from current HEAD when available, and object format
+from the supported current HEAD OID length when available. Unknown values stay
+explicit form choices. Review labels make the retained HEAD clear. Original review
+prepare/approve/cancel and draft-key handling are reused. Native admission and
+actual dispatch remain separate explicit actions. Pending requests and history
+propagate separate fresh-init/reinitialization capabilities. GitIndexOperation
+selects the capability from the re-read original review facts, and preserves its
+existing no-automatic-init-dispatch rule. Applied/settled reinitialization refresh
+uses the original completed fast path and retains normal repository binding.
+Focus restoration and original unknown/control behavior are reused.
+
+This opens the completed source chain under explicit protocol-8 storage capability.
+Special-mode/filesystem/group/platform and linked/external/damaged cases still need
+completion through their actual call paths, as do local/remote branch checkout,
+merged-safe deletion, reference backend coverage and all other P09 requirements.
+M15.14 stays in progress. Per the user's source-only direction, no tests, typechecks,
+builds, product/native operations, UI rendering/runtime acceptance, maintenance
+commands, migrations or deployment were executed.

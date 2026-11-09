@@ -27,6 +27,7 @@ export default function GitPanel({caps}:{caps:Caps}){
  const commitAllowed=caps.git_workbench?.read_only===false&&caps.git_workbench.commit_projects?.includes(project)===true;
  const branchAllowed=caps.git_workbench?.read_only===false&&caps.git_workbench.branch_projects?.includes(project)===true;
  const initializationAllowed=caps.git_workbench?.read_only===false&&caps.git_workbench.initialization_projects?.includes(project)===true;
+ const reinitializationAllowed=caps.git_workbench?.read_only===false&&caps.git_workbench.reinitialization_projects?.includes(project)===true;
  const initialization=useResource(async signal=>{
   const value=await workbenchApi.gitInitialization(project,signal);
   if(value.project_id!==project||value.read_only!==true||value.execution_authorized!==false)throw Error('GIT_INITIALIZATION_SCOPE_CHANGED');
@@ -45,8 +46,8 @@ export default function GitPanel({caps}:{caps:Caps}){
   <h2 tabIndex={-1}>Git 工作台</h2><p className="wb-page-intro">查看项目的分支与文件变化。<span className="wb-badge">{commitAllowed?'可审核提交':caps.git_workbench?.read_only===false?'可审核暂存':'只读'}</span></p>
   {!configured.length?<p role="status">尚未绑定项目仓库，请先完成服务端配置。</p>:<>
    <ResourceStatus {...projects} onRetry={projects.reload}/><div className="wb-toolbar"><label>项目仓库<select aria-label="项目仓库" disabled={locked} value={project} onChange={event=>{setDraft(null);setInitializing(false);setSelection(undefined);setSelected(event.target.value);}}>{available.map(value=><option key={value.project_id} value={value.project_id}>{value.title}</option>)}</select></label><button type="button" disabled={locked||!project||initialization.loading||snapshot.loading} onClick={refresh}>刷新仓库</button></div>
-   {project&&<GitPendingRequests key={'pending:'+project} project={project} allowDispatch={caps.git_workbench?.read_only===false} allowCommitDispatch={commitAllowed} allowBranchDispatch={branchAllowed} allowInitializationDispatch={initializationAllowed} onInitialized={initialized} onPending={setRecoveryPending}/>}
-   {project&&<GitHistory key={project} project={project} locked={reviewBusy} allowDispatch={caps.git_workbench?.read_only===false} allowCommitDispatch={commitAllowed} allowBranchDispatch={branchAllowed} allowInitializationDispatch={initializationAllowed} onInitialized={initialized} onBusy={setReviewBusy}/>}
+   {project&&<GitPendingRequests key={'pending:'+project} project={project} allowDispatch={caps.git_workbench?.read_only===false} allowCommitDispatch={commitAllowed} allowBranchDispatch={branchAllowed} allowInitializationDispatch={initializationAllowed} allowReinitializationDispatch={reinitializationAllowed} onInitialized={initialized} onPending={setRecoveryPending}/>}
+   {project&&<GitHistory key={project} project={project} locked={reviewBusy} allowDispatch={caps.git_workbench?.read_only===false} allowCommitDispatch={commitAllowed} allowBranchDispatch={branchAllowed} allowInitializationDispatch={initializationAllowed} allowReinitializationDispatch={reinitializationAllowed} onInitialized={initialized} onBusy={setReviewBusy}/>}
    <ResourceStatus loading={initialization.loading} error={message(initialization.error)} onRetry={refresh}/>
    {presence?.git_present===false&&<section aria-label="尚未初始化的仓库"><p role="status">此项目尚无 Git 元数据，请选择初始分支与对象格式后生成初始化审核。</p>
     {!initializing?<button data-review-opener="initialization" type="button" disabled={locked} onClick={()=>setInitializing(true)}>审核初始化仓库</button>:<GitInitializationReview key={project+':'+presence.snapshot_id} project={project} snapshotId={presence.snapshot_id} blocked={pending||recoveryPending} allowExecution={initializationAllowed} onBusy={setReviewBusy} onInitialized={initialized} onClose={()=>{reviewOpener.current='initialization';setRestoreReviewFocus(true);setInitializing(false)}}/>}
@@ -54,6 +55,9 @@ export default function GitPanel({caps}:{caps:Caps}){
    {presence?.git_present===true&&<ResourceStatus loading={snapshot.loading} error={message(snapshot.error)} onRetry={refresh}/>}
    {state&&<>
     <div className="wb-git-head"><strong>{state.head.branch??(state.head.detached?'分离 HEAD':'未命名分支')}</strong><code>{state.head.oid?.slice(0,12)??'尚无提交'}</code></div>
+    <section aria-label="已有仓库重新初始化">
+     {!initializing?<button data-review-opener="initialization" type="button" disabled={locked} onClick={()=>{reviewOpener.current='initialization';setInitializing(true)}}>审核重新初始化仓库</button>:<GitInitializationReview key={project+':reinit:'+state.snapshot_id} project={project} snapshotId={state.snapshot_id} reinitializing initialBranch={state.head.branch??''} initialObjectFormat={state.head.oid?.length===64?'sha256':state.head.oid?.length===40?'sha1':''} blocked={pending||recoveryPending} allowExecution={initializationAllowed} allowReinitializationExecution={reinitializationAllowed} onBusy={setReviewBusy} onInitialized={initialized} onClose={()=>{reviewOpener.current='initialization';setRestoreReviewFocus(true);setInitializing(false)}}/>}
+    </section>
     <GitBranches key={project+':'+state.snapshot_id} project={project} snapshotId={state.snapshot_id} locked={locked} onRefresh={refresh} onBusy={setReviewBusy} allowCreate={branchAllowed} identityReady={state.commit_identity_ready===true}/>
     {state.remotes.length>0&&<p className="wb-hint">{state.remotes.map(remote=>remote.name+' · '+(remote.host??(remote.kind==='local'?'本地':'其他远端'))).join(' / ')}</p>}
     {!state.entries.length&&<p role="status">工作区没有可展示的变更。</p>}{state.omitted_count>0&&<p className="wb-hint">{state.omitted_count} 个受保护路径未展示。</p>}
