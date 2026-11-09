@@ -26,10 +26,10 @@ const finished=(s:GitIndexStatus)=>s.execution.state==='applied'&&s.workspace_st
 
 /** Same original admission/receipt authority. Native response loss triggers
  * read-only reconciliation, never an automatic replay of physical effects. */
-export default function GitIndexOperation({project,review,acceptance,allowDispatch,allowCommitDispatch=false,allowBranchDispatch=false,onBusy,onReviewChange,onBranchReviewChange,onChanged,refreshToken=0}:{project:string;review?:Review;acceptance?:GitIndexAcceptance;allowDispatch:boolean;allowCommitDispatch?:boolean;allowBranchDispatch?:boolean;onBusy?:(value:boolean)=>void;onReviewChange?:(review:GitReviewIntent)=>void;onBranchReviewChange?:(review:GitBranchReviewIntent)=>void;onChanged?:(status:GitIndexStatus)=>void;refreshToken?:number}){
+export default function GitIndexOperation({project,review,acceptance,allowDispatch,allowCommitDispatch=false,allowBranchDispatch=false,allowInitializationDispatch=false,onBusy,onReviewChange,onBranchReviewChange,onInitializationReviewChange,onInitializationConfirmed,onChanged,refreshToken=0}:{project:string;review?:Review;acceptance?:GitIndexAcceptance;allowDispatch:boolean;allowCommitDispatch?:boolean;allowBranchDispatch?:boolean;allowInitializationDispatch?:boolean;onInitializationReviewChange?:(review:GitInitializationReviewIntent)=>void;onInitializationConfirmed?:()=>void;onBusy?:(value:boolean)=>void;onReviewChange?:(review:GitReviewIntent)=>void;onBranchReviewChange?:(review:GitBranchReviewIntent)=>void;onChanged?:(status:GitIndexStatus)=>void;refreshToken?:number}){
  const mutation=useGitMutationReceipt(project),[accepted,setAccepted]=useState<GitIndexAcceptance|null>(acceptance??null),[status,setStatus]=useState<GitIndexStatus|null>(null),[currentReview,setCurrentReview]=useState<Review|null>(review??null),[verified,setVerified]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[ack,setAck]=useState(false),[attempted,setAttempted]=useState(false);
- const command=useRef<Pending|null>(null),alive=useRef(true),inflight=useRef(false),active=useRef<AbortController|null>(null),report=useRef(onBusy),changed=useRef(onChanged),reviewChanged=useRef(onReviewChange),branchReviewChanged=useRef(onBranchReviewChange),reviewSnapshot=useRef<Review|null>(review??null);report.current=onBusy;changed.current=onChanged;reviewChanged.current=onReviewChange;branchReviewChanged.current=onBranchReviewChange;
- const kind=accepted?.action??review?.action,commit=kind==='commit',branch=kind==='create-branch',initialization=kind==='init',allowed=initialization?false:branch?allowBranchDispatch:commit?allowCommitDispatch:allowDispatch;
+ const command=useRef<Pending|null>(null),alive=useRef(true),inflight=useRef(false),active=useRef<AbortController|null>(null),report=useRef(onBusy),changed=useRef(onChanged),reviewChanged=useRef(onReviewChange),branchReviewChanged=useRef(onBranchReviewChange),initializationReviewChanged=useRef(onInitializationReviewChange),initialized=useRef(onInitializationConfirmed),reviewSnapshot=useRef<Review|null>(review??null);initializationReviewChanged.current=onInitializationReviewChange;initialized.current=onInitializationConfirmed;report.current=onBusy;changed.current=onChanged;reviewChanged.current=onReviewChange;branchReviewChanged.current=onBranchReviewChange;
+ const kind=accepted?.action??review?.action,commit=kind==='commit',branch=kind==='create-branch',initialization=kind==='init',allowed=initialization?allowInitializationDispatch:branch?allowBranchDispatch:commit?allowCommitDispatch:allowDispatch;
  const intent=acceptance?.intent_id??review?.intent_id??'',base=`/projects/${pathId(project)}/git`,isClosed=!!status&&finished(status);
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;active.current?.abort();report.current?.(false)}},[project,intent]);
  useEffect(()=>{report.current?.(busy||mutation.pending)},[busy,mutation.pending]);
@@ -49,7 +49,7 @@ export default function GitIndexOperation({project,review,acceptance,allowDispat
    if(!metadata||metadata.target_ref!==a.target_ref||metadata.parent_oid!==a.expected_old_oid||e.action!=='commit'
     ||e.state==='applied'&&e.tree_oid!==metadata.tree_oid)throw Error('GIT_INDEX_SCOPE_CHANGED');
   }
-  reviewSnapshot.current=r;setAccepted(a);setStatus(s);setCurrentReview(r);setVerified(true);setAck(false);if(r.action==='create-branch')branchReviewChanged.current?.(r);else if(r.action!=='init')reviewChanged.current?.(r);changed.current?.(s);return s;
+  reviewSnapshot.current=r;setAccepted(a);setStatus(s);setCurrentReview(r);setVerified(true);setAck(false);if(r.action==='init')initializationReviewChanged.current?.(r);else if(r.action==='create-branch')branchReviewChanged.current?.(r);else reviewChanged.current?.(r);changed.current?.(s);return s;
  };
  const submitCommand=async()=>{
   const pending=command.current;
@@ -62,20 +62,28 @@ export default function GitIndexOperation({project,review,acceptance,allowDispat
  const fail=()=>{if(alive.current){setVerified(false);setError('结果尚未确认，请读取原操作状态。不会自动重新执行。')}};
  const refresh=async()=>{if(!accepted)return;const c=begin();if(!c)return;try{await read(accepted,c.signal)}catch{fail()}finally{end()}};
  useEffect(()=>{if(!acceptance)return;const c=new AbortController();read(acceptance,c.signal).catch(()=>{if(!c.signal.aborted)fail()});return()=>c.abort()},[project,acceptance?.execution_id,refreshToken]);
+ const notifyInitialization=(s:GitIndexStatus)=>{if(s.execution.action==='init'&&s.execution.state==='applied'&&s.workspace_state==='released_settled')initialized.current?.()};
+ const confirmInitialization=async()=>{
+  if(!accepted||accepted.action!=='init'||!status||!verified||!finished(status)||status.execution.state!=='applied')return;
+  const c=begin();if(!c)return;
+  try{await workbenchApi.gitDispatch(project,accepted.execution_id,crypto.randomUUID(),c.signal);check(c.signal);notifyInitialization(await read(accepted,c.signal))}
+  catch{if(alive.current&&!c.signal.aborted)setError('仓库绑定尚未确认，请核对原仓库后重试确认。')}
+  finally{end()}
+ };
  const dispatch=async(a:GitIndexAcceptance,c:AbortController)=>{
   setAttempted(true);setVerified(false);
-  try{await workbenchApi.gitDispatch(project,a.execution_id,crypto.randomUUID(),c.signal);check(c.signal);await read(a,c.signal)}
+  try{await workbenchApi.gitDispatch(project,a.execution_id,crypto.randomUUID(),c.signal);check(c.signal);notifyInitialization(await read(a,c.signal))}
   catch{fail();if(!c.signal.aborted&&alive.current)try{const s=await read(a,c.signal);if(finished(s))setError('')}catch{}}
  };
  const admit=async(retry=false)=>{
   const c=begin();if(!c)return;
   try{
-   if(!command.current){if(!allowed||!review||review.state!=='approved'||!['stage','unstage','commit','create-branch'].includes(review.action))throw Error('GIT_INDEX_SCOPE_CHANGED');command.current={kind:'admit',path:base+'/intents/'+pathId(intent)+'/admissions',body:{request_id:crypto.randomUUID(),expected_version:review.version,review_sha256:review.review_sha256}}}
+   if(!command.current){if(!allowed||!review||review.state!=='approved'||!['stage','unstage','commit','create-branch','init'].includes(review.action))throw Error('GIT_INDEX_SCOPE_CHANGED');command.current={kind:'admit',path:base+'/intents/'+pathId(intent)+'/admissions',body:{request_id:crypto.randomUUID(),expected_version:review.version,review_sha256:review.review_sha256}}}
    if(command.current.kind!=='admit')throw Error('GIT_INDEX_SCOPE_CHANGED');
    const a=checkAcceptance(await submitCommand() as GitIndexAcceptance,project,intent);check(c.signal);command.current=null;setAccepted(a);const s=await read(a,c.signal);
    // Recovering an atomic admission response does not replay the subsequent I/O.
    const approval=reviewSnapshot.current;
-   if(!retry&&a.action!=='commit'&&a.action!=='create-branch'&&ready(s)&&approval?.state==='approved'&&approval.review_sha256===review?.review_sha256&&approval.version===review?.version)await dispatch(a,c);
+   if(!retry&&a.action!=='init'&&a.action!=='commit'&&a.action!=='create-branch'&&ready(s)&&approval?.state==='approved'&&approval.review_sha256===review?.review_sha256&&approval.version===review?.version)await dispatch(a,c);
   }catch{fail()}finally{end()}
  };
  const execute=async()=>{if(!accepted){await admit();return}if(!status||!verified||!ready(status)||attempted||!allowed||currentReview?.state!=='approved')return;const c=begin();if(!c)return;try{await dispatch(accepted,c)}finally{end()}};
@@ -88,7 +96,7 @@ export default function GitIndexOperation({project,review,acceptance,allowDispat
    else{if(!status||!verified||!ack||finished(status))throw Error('GIT_INDEX_SCOPE_CHANGED');input={request_id:crypto.randomUUID(),expected_state_sha256:status.state_sha256,acknowledge_unknown:true};command.current={kind:'control',path:base+'/executions/'+pathId(accepted.execution_id)+'/controls',body:input}}
    if(command.current){const value=await submitCommand() as {execution_id:string;project_id:string;request_id:string;expected_state_sha256:string;accepted:boolean;execution_authorized:boolean};check(c.signal);if(value.execution_id!==accepted.execution_id||value.project_id!==project||value.request_id!==input.request_id||value.expected_state_sha256!==input.expected_state_sha256||value.accepted!==true||value.execution_authorized!==false)throw Error('GIT_INDEX_SCOPE_CHANGED');command.current=null;await read(accepted,c.signal)}
    if(retry)return;
-   setVerified(false);await workbenchApi.gitResolve(project,accepted.execution_id,input,crypto.randomUUID(),c.signal);check(c.signal);await read(accepted,c.signal);
+   setVerified(false);await workbenchApi.gitResolve(project,accepted.execution_id,input,crypto.randomUUID(),c.signal);check(c.signal);notifyInitialization(await read(accepted,c.signal));
   }catch{fail();if(!mutation.pending&&!c.signal.aborted&&alive.current)try{const s=await read(accepted,c.signal);if(finished(s))setError('')}catch{}}
   finally{end()}
  };
@@ -101,7 +109,7 @@ export default function GitIndexOperation({project,review,acceptance,allowDispat
  };
  const branchReady=!branch||currentReview?.action==='create-branch'&&!!currentReview.branch_metadata?.configuration_sha256;
  const locked=busy||mutation.pending,canExecute=allowed&&branchReady&&!attempted&&(accepted?verified&&!!status&&ready(status)&&currentReview?.state==='approved':review?.state==='approved');
- return <section className="wb-form" aria-label={initialization?'初始化执行':branch?'创建分支执行':commit?'提交执行':'选定文件执行'}><p role="status">{!accepted?(initialization?'初始化审核已记录，正在接入原生执行阶段。':branch?'批准审核后，先受理创建分支，再单独派发。':commit?'审核批准后，先受理此提交，再派发已审核的暂存树。':'只执行本次批准的选定文件，不提交或丢弃工作区内容。'):!verified?'当前执行状态尚未确认。':status?.execution.state==='applied'&&status.workspace_state==='released_settled'?'变更已应用，工作区已释放。':isClosed&&status?.execution.state==='not_dispatched'?'操作未执行，工作区已释放。':isClosed?'操作已结束，实际效果仍未确认。':status?.workspace_state==='reserved'?'原操作仍占用工作区，尚未完成收尾。':'操作已受理，尚未执行。'}</p>
+ return <section className="wb-form" aria-label={initialization?'初始化执行':branch?'创建分支执行':commit?'提交执行':'选定文件执行'}><p role="status">{!accepted?(initialization?'批准审核后，先受理初始化，再单独派发。':branch?'批准审核后，先受理创建分支，再单独派发。':commit?'审核批准后，先受理此提交，再派发已审核的暂存树。':'只执行本次批准的选定文件，不提交或丢弃工作区内容。'):!verified?'当前执行状态尚未确认。':status?.execution.state==='applied'&&status.workspace_state==='released_settled'?'变更已应用，工作区已释放。':isClosed&&status?.execution.state==='not_dispatched'?'操作未执行，工作区已释放。':isClosed?'操作已结束，实际效果仍未确认。':status?.workspace_state==='reserved'?'原操作仍占用工作区，尚未完成收尾。':'操作已受理，尚未执行。'}</p>
   {accepted?.action==='init'&&<>
    <p style={{overflowWrap:'anywhere'}}>初始化受理已记录。初始分支 <code>{accepted.initial_branch}</code> · {accepted.object_format}。</p>
    <p style={{overflowWrap:'anywhere'}}>内部忽略规则 <code>{accepted.internal_ignore.path}</code>，审核后 SHA-256 <code>{accepted.internal_ignore.after_sha256}</code>。</p>
@@ -117,7 +125,8 @@ export default function GitIndexOperation({project,review,acceptance,allowDispat
   {status?.execution.action==='commit'&&status.execution.state==='applied'&&<p style={{overflowWrap:'anywhere'}}>提交 <code>{status.execution.commit_oid}</code>，暂存树 <code>{status.execution.tree_oid}</code>。</p>}
   {status?.control_receipt?.state==='completed'&&status.control_receipt.cleanup==='unverified'&&<p role="status">锁文件清理尚未确认，请核对原仓库状态。</p>}
   {accepted&&<p style={{overflowWrap:'anywhere'}}><code>{accepted.execution_id}</code></p>}{status&&<ul>{status.execution.paths.map(path=><li key={path} style={{overflowWrap:'anywhere'}}><code>{path}</code></li>)}</ul>}
-  {!isClosed&&canExecute&&<button type="button" disabled={locked} onClick={()=>void execute()}>{branch?(accepted?'创建并切换分支':'受理已批准的分支创建'):commit?(accepted?'提交已审核暂存树':'受理已批准的提交'):'执行选定变更'}</button>}
+  {!isClosed&&canExecute&&<button type="button" disabled={locked} onClick={()=>void execute()}>{initialization?(accepted?'初始化已审核仓库':'受理已批准的初始化'):branch?(accepted?'创建并切换分支':'受理已批准的分支创建'):commit?(accepted?'提交已审核暂存树':'受理已批准的提交'):'执行选定变更'}</button>}
+  {initialization&&verified&&status?.execution.state==='applied'&&status.workspace_state==='released_settled'&&<button type="button" disabled={locked} onClick={()=>void confirmInitialization()}>确认初始化仓库绑定并刷新</button>}
   {accepted&&<button type="button" disabled={locked} onClick={()=>void refresh()}>刷新执行状态</button>}
   {accepted&&verified&&!isClosed&&currentReview?.state==='approved'&&<button type="button" disabled={locked} onClick={()=>void cancelReview()}>取消原审核</button>}
   {accepted&&verified&&status&&!isClosed&&!mutation.pending&&<div>{!status.control&&<label><input type="checkbox" checked={ack} disabled={busy} onChange={event=>setAck(event.target.checked)}/>我已核对当前结果，确认结束原操作；这不会回滚未知变更。</label>}<button type="button" disabled={busy||!status.control&&!ack} onClick={()=>void recover()}>{status.control?'完成原操作收尾':'核对并结束原操作'}</button></div>}

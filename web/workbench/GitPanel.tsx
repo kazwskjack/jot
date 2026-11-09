@@ -6,6 +6,7 @@ import {ResourceStatus} from './PanelStatus';
 import GitReview,{type GitReviewDraft} from './GitReview';
 import GitHistory from './GitHistory';
 import GitBranches from './GitBranches';
+import GitInitializationReview from './GitInitializationReview';
 import GitPendingRequests from './GitPendingRequests';
 import {MutationPendingState} from './useMutationReceipt';
 
@@ -18,27 +19,39 @@ const label=(value:string)=>({M:'修改',A:'新增',D:'删除',R:'重命名',C:'
 export default function GitPanel({caps}:{caps:Caps}){
  const configured=caps.git_workbench?.configured_projects??[],projects=useResource(workbenchApi.projects,'git-projects',configured.length>0);
  const [selected,setSelected]=useState(''),[selection,setSelection]=useState<{project:string;snapshot:string;path:string;stage:'working'|'staged'}>();
- const [draft,setDraft]=useState<GitReviewDraft|null>(null),[reviewBusy,setReviewBusy]=useState(false),[recoveryPending,setRecoveryPending]=useState(false),pending=useContext(MutationPendingState),locked=pending||reviewBusy||recoveryPending;
- const reviewPanel=useRef<HTMLElement|null>(null),reviewOpener=useRef<'change'|'commit'|null>(null),[restoreReviewFocus,setRestoreReviewFocus]=useState(false);
- useLayoutEffect(()=>{if(!draft&&restoreReviewFocus){reviewPanel.current?.querySelector<HTMLButtonElement>(`[data-review-opener="${reviewOpener.current}"]`)?.focus();setRestoreReviewFocus(false);}},[draft,restoreReviewFocus]);
+ const [draft,setDraft]=useState<GitReviewDraft|null>(null),[initializing,setInitializing]=useState(false),[reviewBusy,setReviewBusy]=useState(false),[recoveryPending,setRecoveryPending]=useState(false),pending=useContext(MutationPendingState),locked=pending||reviewBusy||recoveryPending;
+ const reviewPanel=useRef<HTMLElement|null>(null),reviewOpener=useRef<'change'|'commit'|'initialization'|null>(null),[restoreReviewFocus,setRestoreReviewFocus]=useState(false);
+ useLayoutEffect(()=>{if(!draft&&!initializing&&restoreReviewFocus){(reviewPanel.current?.querySelector<HTMLElement>(`[data-review-opener="${reviewOpener.current}"]`)??reviewPanel.current?.querySelector<HTMLElement>('h2'))?.focus();setRestoreReviewFocus(false);}},[draft,initializing,restoreReviewFocus]);
  const closeReview=()=>{setRestoreReviewFocus(true);setDraft(null);};
  const available=projects.data?.items.filter(project=>configured.includes(project.project_id))??[],project=available.some(value=>value.project_id===selected)?selected:available[0]?.project_id??'';
  const commitAllowed=caps.git_workbench?.read_only===false&&caps.git_workbench.commit_projects?.includes(project)===true;
  const branchAllowed=caps.git_workbench?.read_only===false&&caps.git_workbench.branch_projects?.includes(project)===true;
- const snapshot=useResource(signal=>workbenchApi.git(project,signal),'git-snapshot:'+project,Boolean(project)),state=!snapshot.error&&!snapshot.loading&&snapshot.data?.project_id===project?snapshot.data:null;
+ const initializationAllowed=caps.git_workbench?.read_only===false&&caps.git_workbench.initialization_projects?.includes(project)===true;
+ const initialization=useResource(async signal=>{
+  const value=await workbenchApi.gitInitialization(project,signal);
+  if(value.project_id!==project||value.read_only!==true||value.execution_authorized!==false)throw Error('GIT_INITIALIZATION_SCOPE_CHANGED');
+  return value;
+ },'git-initialization:'+project,Boolean(project));
+ const presence=!initialization.error&&!initialization.loading&&initialization.data?.project_id===project?initialization.data:null;
+ const snapshot=useResource(signal=>workbenchApi.git(project,signal),'git-snapshot:'+project,Boolean(project)&&presence?.git_present===true),state=presence?.git_present===true&&!snapshot.error&&!snapshot.loading&&snapshot.data?.project_id===project?snapshot.data:null;
  const active=selection?.project===project&&state?.snapshot_id===selection.snapshot?selection:undefined;
  const diff=useResource(signal=>workbenchApi.gitDiff(active!.project,active!.snapshot,active!.path,active!.stage,signal),'git-diff:'+JSON.stringify(active??null),Boolean(active));
  const patch=!diff.error&&!diff.loading&&active&&diff.data?.project_id===project&&diff.data.snapshot_id===active.snapshot&&diff.data.path===active.path&&diff.data.stage===active.stage?diff.data:null;
- const refresh=()=>{setDraft(null);setSelection(undefined);snapshot.reload();};
+ const refresh=()=>{setDraft(null);setInitializing(false);setSelection(undefined);initialization.reload();snapshot.reload();};
+ const initialized=()=>{reviewOpener.current='initialization';setRestoreReviewFocus(true);refresh();};
  const rows=(stage:'working'|'staged')=>(state?.entries??[]).filter(entry=>stage==='staged'?entry.index_status!==' '&&entry.index_status!=='?':entry.worktree_status!==' ');
  const row=(entry:GitEntry,stage:'working'|'staged')=><li key={entry.path}><button type="button" disabled={locked||!['file','missing'].includes(entry.kind)} aria-label={`查看${stage==='staged'?'暂存区':'工作区'}差异：${entry.path}`} aria-pressed={active?.path===entry.path&&active.stage===stage} onClick={()=>{setDraft(null);setSelection({project,snapshot:state!.snapshot_id,path:entry.path,stage});}}><code>{entry.original_path?entry.original_path+' → ':''}{entry.path}</code><span className="wb-badge">{entry.conflicted?'冲突':label(stage==='staged'?entry.index_status:entry.worktree_status)}</span></button></li>;
  return <section ref={reviewPanel} className="wb-git" aria-label="Git 工作台">
-  <h2>Git 工作台</h2><p className="wb-page-intro">查看项目的分支与文件变化。<span className="wb-badge">{commitAllowed?'可审核提交':caps.git_workbench?.read_only===false?'可审核暂存':'只读'}</span></p>
+  <h2 tabIndex={-1}>Git 工作台</h2><p className="wb-page-intro">查看项目的分支与文件变化。<span className="wb-badge">{commitAllowed?'可审核提交':caps.git_workbench?.read_only===false?'可审核暂存':'只读'}</span></p>
   {!configured.length?<p role="status">尚未绑定项目仓库，请先完成服务端配置。</p>:<>
-   <ResourceStatus {...projects} onRetry={projects.reload}/><div className="wb-toolbar"><label>项目仓库<select aria-label="项目仓库" disabled={locked} value={project} onChange={event=>{setDraft(null);setSelection(undefined);setSelected(event.target.value);}}>{available.map(value=><option key={value.project_id} value={value.project_id}>{value.title}</option>)}</select></label><button type="button" disabled={locked||!project||snapshot.loading} onClick={refresh}>刷新仓库</button></div>
-   {project&&<GitPendingRequests key={'pending:'+project} project={project} allowDispatch={caps.git_workbench?.read_only===false} allowCommitDispatch={commitAllowed} allowBranchDispatch={branchAllowed} onPending={setRecoveryPending}/>}
-   {project&&<GitHistory key={project} project={project} locked={reviewBusy} allowDispatch={caps.git_workbench?.read_only===false} allowCommitDispatch={commitAllowed} allowBranchDispatch={branchAllowed} onBusy={setReviewBusy}/>}
-   <ResourceStatus loading={snapshot.loading} error={message(snapshot.error)} onRetry={refresh}/>
+   <ResourceStatus {...projects} onRetry={projects.reload}/><div className="wb-toolbar"><label>项目仓库<select aria-label="项目仓库" disabled={locked} value={project} onChange={event=>{setDraft(null);setInitializing(false);setSelection(undefined);setSelected(event.target.value);}}>{available.map(value=><option key={value.project_id} value={value.project_id}>{value.title}</option>)}</select></label><button type="button" disabled={locked||!project||initialization.loading||snapshot.loading} onClick={refresh}>刷新仓库</button></div>
+   {project&&<GitPendingRequests key={'pending:'+project} project={project} allowDispatch={caps.git_workbench?.read_only===false} allowCommitDispatch={commitAllowed} allowBranchDispatch={branchAllowed} allowInitializationDispatch={initializationAllowed} onInitialized={initialized} onPending={setRecoveryPending}/>}
+   {project&&<GitHistory key={project} project={project} locked={reviewBusy} allowDispatch={caps.git_workbench?.read_only===false} allowCommitDispatch={commitAllowed} allowBranchDispatch={branchAllowed} allowInitializationDispatch={initializationAllowed} onInitialized={initialized} onBusy={setReviewBusy}/>}
+   <ResourceStatus loading={initialization.loading} error={message(initialization.error)} onRetry={refresh}/>
+   {presence?.git_present===false&&<section aria-label="尚未初始化的仓库"><p role="status">此项目尚无 Git 元数据，请选择初始分支与对象格式后生成初始化审核。</p>
+    {!initializing?<button data-review-opener="initialization" type="button" disabled={locked} onClick={()=>setInitializing(true)}>审核初始化仓库</button>:<GitInitializationReview key={project+':'+presence.snapshot_id} project={project} snapshotId={presence.snapshot_id} blocked={pending||recoveryPending} allowExecution={initializationAllowed} onBusy={setReviewBusy} onInitialized={initialized} onClose={()=>{reviewOpener.current='initialization';setRestoreReviewFocus(true);setInitializing(false)}}/>}
+   </section>}
+   {presence?.git_present===true&&<ResourceStatus loading={snapshot.loading} error={message(snapshot.error)} onRetry={refresh}/>}
    {state&&<>
     <div className="wb-git-head"><strong>{state.head.branch??(state.head.detached?'分离 HEAD':'未命名分支')}</strong><code>{state.head.oid?.slice(0,12)??'尚无提交'}</code></div>
     <GitBranches key={project+':'+state.snapshot_id} project={project} snapshotId={state.snapshot_id} locked={locked} onRefresh={refresh} onBusy={setReviewBusy} allowCreate={branchAllowed} identityReady={state.commit_identity_ready===true}/>

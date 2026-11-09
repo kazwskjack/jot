@@ -31,13 +31,14 @@ export class GitWorkbench{
    this.executionBindings.set(key,createHash('sha256').update('git-common-binding:v1\0'+identity).digest('hex'));
   }
  }
- capability(owner:string,nativeIndexConfigured=false,commitSchemaConfigured=false,branchSchemaConfigured=false){
+ capability(owner:string,nativeIndexConfigured=false,commitSchemaConfigured=false,branchSchemaConfigured=false,initializationSchemaConfigured=false){
   const configured_projects:string[]=[];for(const key of this.repositories.keys()){const [candidate,project]=key.split('\0');if(candidate!==owner)continue;try{this.projects.assertOwned(project!,owner);configured_projects.push(project!);}catch{}}
   configured_projects.sort();
   if(!nativeIndexConfigured||!configured_projects.length)return {configured_projects,read_only:true as const};
   const commit_projects=commitSchemaConfigured?configured_projects.filter(project=>this.commitPolicies.has(owner+'\0'+project)):[];
   const branch_projects=branchSchemaConfigured?configured_projects.filter(project=>this.commitPolicies.has(owner+'\0'+project)):[];
-  return {configured_projects,read_only:false as const,index_actions:['stage','unstage'] as ['stage','unstage'],...(commit_projects.length?{commit_projects}:{}),...(branch_projects.length?{branch_projects}:{})};
+  const initialization_projects=initializationSchemaConfigured?configured_projects.filter(project=>this.repositories.get(owner+'\0'+project)!.initializationConfigured()):[];
+  return {configured_projects,read_only:false as const,index_actions:['stage','unstage'] as ['stage','unstage'],...(commit_projects.length?{commit_projects}:{}),...(branch_projects.length?{branch_projects}:{}),...(initialization_projects.length?{initialization_projects}:{})};
  }
  private repository(owner:string,project:string){this.projects.assertOwned(project,owner);const repository=this.repositories.get(owner+'\0'+project);if(!repository)throw Error('git_repository_unconfigured');return repository;}
  /** Trusted execution service only; not a route, tool or permission grant. */

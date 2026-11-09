@@ -355,11 +355,12 @@ export class GitRepositoryInspection{
    return{...witness,commit_tree};
   }finally{await context.dispose();}
  }
+ initializationConfigured(){const dot=join(this.root,'.git');return same(this.gitDirectory,dot)&&same(this.commonDirectory,dot);}
  /** Original initialization binding also works during recovery after .git
   * publication. No metadata presence, stored plan or caller path grants access. */
  protected async initializationAnchors(signal?:AbortSignal){
-  signal?.throwIfAborted();const root=await this.directory(this.root),dot=join(this.root,'.git');
-  if(!same(this.gitDirectory,dot)||!same(this.commonDirectory,dot))throw Error('git_initialization_binding_invalid');
+  signal?.throwIfAborted();const root=await this.directory(this.root);
+  if(!this.initializationConfigured())throw Error('git_initialization_binding_invalid');
   const executable=await gitExecutable(this.configuredExecutable),program=await lstat(executable);
   if(within(this.root,executable)||!program.isFile()||program.isSymbolicLink())throw Error('git_configuration_invalid');
   const stamp=witness(program);

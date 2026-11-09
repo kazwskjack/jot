@@ -521,3 +521,42 @@ the next increment. Existing metadata/reinitialization, linked/external bindings
 local/remote checkout, merged-safe deletion and reference backend coverage remain
 in full M15.14 scope. This increment is source development under the user's
 no-test/no-build instruction, with runtime behavior and deployment unexecuted.
+
+## Initialization creation UI and request recovery source increment
+
+Original capabilities now expose initialization_projects for current-owner
+configured direct .git bindings with the existing native connection and explicit
+initialization storage flavor. The fifth capability parameter defaults to false,
+preserving existing callers. Initialization binding checks share the same pure
+configuration predicate used by the kernel. JSON/YAML capability source objects
+are paired, and the read-only variant excludes the new writable project list.
+
+GitPanel reads the original initialization status before enabling the existing
+repository snapshot. Missing metadata presents an initialization review entry.
+The form requires an explicit initial branch and SHA-1/SHA-256 selection, displays
+reviewed internal-ignore before/after hashes and byte size, and uses the original
+prepare/read/approve/cancel receipts. Focus returns to the opener or workbench
+heading after closing or completing the form.
+
+GitIndexOperation now admits initialization through the original atomic endpoint
+and keeps native dispatch as a separate explicit action. It checks original
+review/acceptance/status branch, object format and ignore facts. Initialization
+review changes return to the parent form. Existing scoped request persistence
+accepts strict initialization prepare and approve/cancel commands, retaining the
+original request/body/key for response-loss retry and reload reconciliation.
+GitPendingRequests reopens the original current initialization review or accepted
+operation. History and original recovery consume the same execution component.
+
+After confirmed dispatch or recovery, the panel reloads initialization presence
+and repository snapshot. A distinct binding-confirmation button is available for
+applied and settled initialization records, including read-only history. It calls
+the original settled dispatch fast path, which verifies the original outcome and
+physical binding before refreshing. Response-loss reconciliation retains this
+explicit confirmation path. Native writes still require original admission,
+current authority, physical binding, custody and storage checks.
+
+Existing metadata/reinitialization, linked/external bindings, local/remote branch
+checkout, merged-safe deletion and reference backend coverage remain in full
+M15.14 scope. This source increment followed the user's development-only direction.
+Runtime UI rendering, tests, typechecks, builds, migrations and deployment remain
+unexecuted.

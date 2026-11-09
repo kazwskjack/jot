@@ -945,7 +945,7 @@ export async function buildServer(config: {
     }
     return {
       api_version: '1.0', event_schema_version: '1.0', adapter_version: '0.1.0',
-      git_workbench:gitWorkbench.capability(ownerId,config.nativeGitClient!==undefined,['commit','branch','initialization'].includes(gitCommitExecutionSchema(db)),['branch','initialization'].includes(gitCommitExecutionSchema(db))),
+      git_workbench:gitWorkbench.capability(ownerId,config.nativeGitClient!==undefined,['commit','branch','initialization'].includes(gitCommitExecutionSchema(db)),['branch','initialization'].includes(gitCommitExecutionSchema(db)),gitCommitExecutionSchema(db)==='initialization'),
       capabilities: { search: true, fetch: true, browser_interaction: false, file_read: true,
         file_edit: true, command_execution: true, questions: true, approvals: true,
         artifact_download: true, resume_checkpoint: true },
