@@ -1,9 +1,9 @@
 import {createHash} from 'node:crypto';
 import {nativeToolResultObservation,sessionToolCallId} from './native-tool-result.js';
-import {nativeChildLogJson as json} from './native-child-closure.js';
+import {nativeChildLogJson as json,updateNativeChildLogHash} from './native-child-closure.js';
 
 async function sendNativeChildActivity({binding,event,bridge,metadata,signal}){
- const sha=createHash('sha256').update(json(event)).digest('hex');
+ const sha=updateNativeChildLogHash(createHash('sha256'),event).digest('hex');
  const observation=event.type==='tool/result'?nativeToolResultObservation(event):{event};
  const evidence=event.type==='tool/result'?{event_format:'public-result-v1',source_event_sha256:sha}:{};
  const transportSha=event.type==='tool/result'?createHash('sha256').update(json(observation)).digest('hex'):sha;
@@ -31,11 +31,11 @@ export async function replayNativeChildActivities({binding,bridge,persistence,si
  signal?.throwIfAborted();const handle=await persistence.open(binding.sessionRef,'read',{signal});
  try{
   if(handle.id!==binding.sessionRef||handle.access!=='read'||handle.header?.parentSession!==source.parent_session_ref)throw Error('native_activity_prefix_changed');
-  const hash=createHash('sha256').update(json({...handle.header,delegationDepth:handle.header?.delegationDepth??0})+'\n');
+  const hash=updateNativeChildLogHash(createHash('sha256'),{...handle.header,delegationDepth:handle.header?.delegationDepth??0}).update('\n');
   for(let seq=0;seq<source.source_end;seq++){
    signal?.throwIfAborted();const result=await handle.read(seq,1,{signal}),event=result?.events?.[0];
    if(result?.events?.length!==1||event?.seq!==seq)throw Error('native_activity_prefix_changed');
-   hash.update(json(event)+'\n');
+   updateNativeChildLogHash(hash,event).update('\n');
   }
   if(hash.digest('hex')!==source.log_sha256)throw Error('native_activity_prefix_changed');
   let last=source.last_event_seq;

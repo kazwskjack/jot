@@ -5,6 +5,64 @@ const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 const json=value=>JSON.stringify(value,(_key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item);
 const headerJson=header=>json({...header,delegationDepth:header?.delegationDepth??0});
 export const nativeChildLogJson=json;
+
+/** Feed canonical persisted JSON into a digest without copying the whole frame. */
+export function updateNativeChildLogHash(hash, value) {
+ const active = new Set();
+ const prepare = (item, key) => {
+  if (item !== null && (typeof item === 'object' || typeof item === 'bigint') && typeof item.toJSON === 'function') {
+   return item.toJSON(key);
+  }
+  return item;
+ };
+ const omitted = item => item === undefined || typeof item === 'function' || typeof item === 'symbol';
+ const string = text => {
+  hash.update('"');
+  for (let start = 0; start < text.length;) {
+   let end = Math.min(start + 4096, text.length);
+   // Keep a UTF-16 pair together so JSON escaping matches a whole-string write.
+   const last = text.charCodeAt(end - 1);
+   if (end < text.length && last >= 0xd800 && last <= 0xdbff) end--;
+   hash.update(JSON.stringify(text.slice(start, end)).slice(1, -1));
+   start = end;
+  }
+  hash.update('"');
+ };
+ const write = item => {
+  if (typeof item === 'string') { string(item); return; }
+  if (item === null || typeof item !== 'object') { hash.update(JSON.stringify(item)); return; }
+  if (active.has(item)) throw new TypeError('native_child_log_circular');
+  active.add(item);
+  if (Array.isArray(item)) {
+   hash.update('[');
+   const length = item.length;
+   for (let index = 0; index < length; index++) {
+    if (index) hash.update(',');
+    const child = prepare(item[index], String(index));
+    write(omitted(child) ? null : child);
+   }
+   hash.update(']');
+  } else {
+   hash.update('{');
+   // JSON orders integer keys first even after the canonical lexical sort.
+   const keys = Object.keys(Object.fromEntries(Object.keys(item).sort().map(key => [key, null])));
+   let first = true;
+   for (const key of keys) {
+    const child = prepare(item[key], key);
+    if (omitted(child)) continue;
+    if (!first) hash.update(',');
+    first = false;
+    string(key); hash.update(':'); write(child);
+   }
+   hash.update('}');
+  }
+  active.delete(item);
+ };
+ const root = prepare(value, '');
+ if (omitted(root)) throw new TypeError('native_child_log_invalid');
+ write(root);
+ return hash;
+}
 function settledWebOperation(proof,sessionRef,callId){
  if(proof?.session_ref!==sessionRef||proof.request_id!==callId||!/^web-[A-Za-z0-9-]{8,128}$/.test(proof.operation_id)
    ||!Number.isSafeInteger(proof.revision)||proof.revision<1||!['succeeded','partial','failed','cancelled'].includes(proof.status)
@@ -71,7 +129,7 @@ export async function verifyNativeChildPrefix({agent,parentSessionRef,persistenc
   if(handle.id!==agent.id||handle.access!=='read'||headerJson(handle.header)!==headerJson(session.header))throw new Error('native_child_prefix_changed');
   for(let offset=0;offset<count;){const length=Math.min(256,count-offset),result=await handle.read(offset,length,{signal});
    if(result?.events?.length!==length)throw new Error('native_child_prefix_changed');
-   for(const event of result.events){if(event.seq!==offset||json(event)!==json(session.eventAt(offset)))throw new Error('native_child_prefix_changed');hash.update(json(event)+'\n');if(event.type==='tool/call'){const batch=batchWebCall(event.data);if(batch){const callId=event.data?.callId;if(typeof callId!=='string'||!ID.test(callId)||remoteCalls.has(callId))throw Error('native_child_prefix_remote_unresolved');remoteCalls.set(callId,batch.name);}}offset++;}
+   for(const event of result.events){if(event.seq!==offset||json(event)!==json(session.eventAt(offset)))throw new Error('native_child_prefix_changed');updateNativeChildLogHash(hash,event).update('\n');if(event.type==='tool/call'){const batch=batchWebCall(event.data);if(batch){const callId=event.data?.callId;if(typeof callId!=='string'||!ID.test(callId)||remoteCalls.has(callId))throw Error('native_child_prefix_remote_unresolved');remoteCalls.set(callId,batch.name);}}offset++;}
   }
   if(hash.digest('hex')!==proof.log_sha256||session.eventAt(proof.turn_end_seq)?.type!=='turn/end')throw new Error('native_child_prefix_changed');
   const operations=proof.remote_operations??[];
@@ -101,7 +159,7 @@ export async function verifyOfflineNativeClosure({parentSessionRef,proof,registr
    const hash=createHash('sha256').update(headerJson(handle.header)+'\n'),tools=new Set(),remoteCalls=new Map(),inbox={'next-turn':[],'next-step':[]},events=[];let openTurn=false,lastEnd=-1;
    for(let offset=0;offset<count;){const length=Math.min(256,count-offset),result=await handle.read(offset,length,{signal});check();if(result?.events?.length!==length)fail();
     events.push(...result.events);
-    for(const event of result.events){if(event?.seq!==offset||typeof event.type!=='string')fail();hash.update(json(event)+'\n');offset++;
+    for(const event of result.events){if(event?.seq!==offset||typeof event.type!=='string')fail();updateNativeChildLogHash(hash,event).update('\n');offset++;
      if(event.type==='turn/start'){if(openTurn)fail();openTurn=true;}
      if(event.type==='turn/end'){if(!openTurn)fail();openTurn=false;lastEnd=event.seq;}
      if(event.type==='agent/inbox/spliced'){
@@ -157,7 +215,7 @@ async function captureNativeQuiescence({agent,parentSessionRef,registry,persiste
    if(result?.events?.length!==length)throw new Error('native_child_storage_changed');
    for(const event of result.events){
     if(event.seq!==offset||json(event)!==json(session.eventAt(offset)))throw new Error('native_child_storage_changed');
-    hash.update(json(event)+'\n');
+    updateNativeChildLogHash(hash,event).update('\n');
     if(event.type.startsWith('turn/')||event.type.startsWith('tool/')||event.type.startsWith('llm/'))executionSeen=true;
     if(event.type==='turn/start')openTurn=true;
     if(event.type==='turn/end'){openTurn=false;lastEnd=event.seq;}
@@ -241,7 +299,7 @@ export async function withColdWorkspaceSession(input,operation){
    check();const result=await handle.read(events.length,256,{signal});check();if(!Array.isArray(result?.events)||result.events.length>256)throw Error('native_workspace_log_unconfirmed');
    if(!result.events.length)break;
    for(const event of result.events){
-    if(event?.seq!==events.length||typeof event.type!=='string')throw Error('native_workspace_log_unconfirmed');events.push(event);hash.update(json(event)+'\n');
+    if(event?.seq!==events.length||typeof event.type!=='string')throw Error('native_workspace_log_unconfirmed');events.push(event);updateNativeChildLogHash(hash,event).update('\n');
     if(event.type.startsWith('turn/')||event.type.startsWith('step/')||event.type.startsWith('llm/')||event.type.startsWith('tool/'))executionSeen=true;
     if(event.type==='turn/start'){if(openTurn)throw Error('native_workspace_log_unconfirmed');openTurn=true;}
     if(event.type==='turn/end'){if(!openTurn)throw Error('native_workspace_log_unconfirmed');openTurn=false;lastEnd=event.seq;}
