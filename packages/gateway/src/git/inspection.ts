@@ -3,7 +3,7 @@ import type {GitInitializationWitness,GitInitializationFile,GitReinitializationL
 import {planReinitializationConfiguration} from './reinitialization-configuration.ts';
 import {planCreateBranchConfiguration} from './branch-configuration.ts';
 import {validGitReference} from './references.ts';
-import type {GitBranchInventory,GitCreateBranchWitness,GitBranchLogFile,GitBranchLogWitness} from '../../contracts/types.ts';
+import type {GitCheckoutPreview,GitBranchInventory,GitCreateBranchWitness,GitBranchLogFile,GitBranchLogWitness} from '../../contracts/types.ts';
 import {createHash} from 'node:crypto';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {constants} from 'node:fs';
@@ -12,7 +12,7 @@ import {isAbsolute,resolve,join,dirname,relative,sep,basename} from 'node:path';
 import {tmpdir} from 'node:os';
 import {workspaceRelativePath} from '../always-on/workspace-provider.ts';
 import {gitExecutable,readGit} from './process.ts';
-import {readCommitTree,type GitCommitReviewWitness} from './commit-tree.ts';
+import {gitTreeEntries,readCommitTree,type GitCommitReviewWitness} from './commit-tree.ts';
 import {taskmasterPrdPath} from '../workbench/taskmaster-path.ts';
 
 export type GitInspectionOptions={root:string;gitDirectory?:string;commonDirectory?:string;executable?:string;limits?:Partial<{maxOutputBytes:number;timeoutMs:number;maxEntries:number;maxMetadataEntries:number;maxDiffBytes:number}>};
@@ -146,14 +146,14 @@ export class GitRepositoryInspection{
     try{const parsed=new URL(url);if(['https:','http:','ssh:'].includes(parsed.protocol)&&/^[A-Za-z0-9.:[\]-]{1,255}$/.test(parsed.hostname))remote={name,kind:parsed.protocol==='ssh:'?'ssh':'https',host:parsed.hostname};else if(parsed.protocol==='file:')remote={name,kind:'local'};}catch{const ssh=/^(?:[^@\s]+@)?([A-Za-z0-9.-]+):[^\s]+$/.exec(url);remote=ssh?{name,kind:'ssh',host:ssh[1]!}:{name,kind:'local'};}if(context.remotes.length>=100)throw Error('git_entry_limit');context.remotes.push(remote);
    }
    let total=0;const copy=async(source:string,target:string,optional=false)=>{signal?.throwIfAborted();let bytes;try{bytes=await this.bytes(source,32*1024*1024);}catch(error){if(optional&&(error as NodeJS.ErrnoException).code==='ENOENT')return;throw error;}const original=await lstat(source);total+=bytes.length;if(total>64*1024*1024)throw Error('git_metadata_limit');await mkdir(dirname(target),{recursive:true});await writeFile(target,bytes,{mode:0o600});
-    // Git uses the index mtime to rehash racily clean stat-cache entries. Giving
-    // a copy a newer timestamp can silently hide same-size/same-second edits.
-    if(source===join(this.gitDirectory,'index')||/^sharedindex\.[a-f0-9]+$/.test(basename(source))){const seconds=(ns:bigint)=>Number(ns/1000000000n)+Number(ns%1000000000n)/1e9;await utimes(target,seconds(original.atimeNs),seconds(original.mtimeNs));}
+    // An earlier whole-second mtime preserves racy-clean rehashing without
+    // rounding nanoseconds upward through JavaScript's fractional timestamps.
+    if(source===join(this.gitDirectory,'index')||/^sharedindex\.[a-f0-9]+$/.test(basename(source))){const seconds=(ns:bigint)=>Number(ns/1000000000n)+Number(ns%1000000000n)/1e9;await utimes(target,seconds(original.atimeNs),Number(original.mtimeNs/1000000000n)-1);}
     if(source===join(this.gitDirectory,'index'))context.index=hash(bytes);};
    await copy(join(this.gitDirectory,'HEAD'),join(directory,'HEAD'));
    await copy(join(this.gitDirectory,'index'),join(directory,'index'),true);
    await copy(join(this.commonDirectory,'packed-refs'),join(directory,'packed-refs'),true);
-   for(const name of ['exclude','attributes','sparse-checkout'])await copy(join(this.commonDirectory,'info',name),join(directory,'info',name),true);
+   for(const name of ['exclude','attributes','sparse-checkout'])await copy(join(name==='sparse-checkout'?this.gitDirectory:this.commonDirectory,'info',name),join(directory,'info',name),true);
    for(const root of [...new Set([this.commonDirectory,this.gitDirectory])]){
     const queue=[join(root,'refs')];while(queue.length){const folder=queue.pop()!;let entries;try{entries=await readdir(folder,{withFileTypes:true});}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')continue;throw error;}for(const entry of entries){const path=join(folder,entry.name);if(entry.isDirectory())queue.push(path);else await copy(path,join(directory,relative(root,path)));}}
     for(const entry of await readdir(root))if(/^sharedindex\.[a-f0-9]+$/.test(entry))await copy(join(root,entry),join(directory,entry));
@@ -635,8 +635,57 @@ export class GitRepositoryInspection{
   }
   for(const branch of branches)if(branch.kind==='local')branch.worktree_uses=(uses.get(branch.ref)??[]).sort((a,b)=>(a.worktree+'-'+a.reason).localeCompare(b.worktree+'-'+b.reason));
  }
- async branches(snapshotId:string,signal?:AbortSignal):Promise<Omit<GitBranchInventory,'project_id'>>{
-  if(typeof snapshotId!=='string'||!/^[a-f0-9]{64}$/.test(snapshotId))throw Error('git_branches_invalid');
+ /** Two-tree merge checks read the bound worktree. Only private metadata and objects are written. */
+ protected async checkoutPreview(context:ReadContext,snapshot:GitSnapshot,target:GitBranchInventory['branches'][number],format:'sha1'|'sha256',signal?:AbortSignal):Promise<GitCheckoutPreview>{
+  if(!target.checkout_oid)throw Error('git_checkout_target_unavailable');
+  const preview:GitCheckoutPreview={target_ref:target.ref,target_oid:target.checkout_oid,source_index_sha256:context.index,
+   working_tree_check:'not_confirmed',index_projection:null,execution_authorized:false};
+  const sourceIndex=join(context.directory,'checkout-source-index');
+  if(context.index!==null){
+   const source=join(context.directory,'index'),stat=await lstat(source),body=await this.bytes(source,32*1024*1024,witness(stat));
+   if(hash(body)!==context.index)throw Error('git_checkout_unavailable');
+   await writeFile(sourceIndex,body,{mode:0o600,flag:'wx'});
+   // Preserve the original racy-clean timestamp before Git refreshes its private index.
+   const seconds=(ns:bigint)=>Number(ns/1000000000n)+Number(ns%1000000000n)/1e9;
+   await utimes(sourceIndex,seconds(stat.atimeNs),seconds(stat.mtimeNs));
+  }
+  const run=(args:string[],input?:Buffer,index=sourceIndex)=>readGit(this.executable!,this.root,context.directory,args,this.limits,signal,
+   join(context.directory,'objects'),input,join(this.commonDirectory,'objects'),index);
+  if(context.index!==null){
+   const refreshed=await run(['update-index','-q','--refresh']);
+   if(refreshed.code!==0&&refreshed.code!==1)throw Error('git_checkout_unavailable');
+  }
+  let old=snapshot.head.oid;
+  if(old===null){
+   const empty=await run(['hash-object','-w','-t','tree','--stdin'],Buffer.alloc(0));
+   old=text(empty.bytes).trim();
+   if(empty.code!==0||old!==createHash(format).update('tree 0\0').digest('hex'))throw Error('git_checkout_unavailable');
+  }
+  const trees=[old,target.checkout_oid];
+  const checked=await run(['read-tree','--dry-run','--no-recurse-submodules','-m','-u',...trees]);
+  if(checked.code!==0)return preview;
+  const before=await run(['ls-files','--stage','-z']);
+  if(before.code!==0)throw Error('git_checkout_unavailable');
+  const index=join(context.directory,'checkout-index');
+  const projected=await run(['read-tree','--no-recurse-submodules','--index-output='+index,'-m',...trees]);
+  if(projected.code!==0)throw Error('git_checkout_unavailable');
+  const after=await run(['ls-files','--stage','-z'],undefined,index);
+  if(after.code!==0)throw Error('git_checkout_unavailable');
+  const original=gitTreeEntries(before.bytes,false,this.limits.maxEntries),result=gitTreeEntries(after.bytes,false,this.limits.maxEntries);
+  if([...original,...result].some(entry=>entry.oid.length!==(format==='sha1'?40:64)))throw Error('git_checkout_unavailable');
+  const previous=new Map(original.map(entry=>[entry.path,entry])),next=new Map(result.map(entry=>[entry.path,entry]));
+  const changes:NonNullable<GitCheckoutPreview['index_projection']>['changes']=[];
+  for(const path of [...new Set([...previous.keys(),...next.keys()])].sort()){
+   const before=previous.get(path),after=next.get(path);
+   if(before?.mode===after?.mode&&before?.oid===after?.oid)continue;
+   changes.push({path,before:before?{mode:before.mode,oid:before.oid}:null,after:after?{mode:after.mode,oid:after.oid}:null});
+  }
+  const body=await this.bytes(index,32*1024*1024);
+  preview.working_tree_check='passed';preview.index_projection={sha256:hash(body),entries_sha256:hash(canonicalJson(result)),entry_count:result.length,changes};
+  signal?.throwIfAborted();return preview;
+ }
+ async branches(snapshotId:string,signal?:AbortSignal,targetRef?:string):Promise<Omit<GitBranchInventory,'project_id'>>{
+  if(typeof snapshotId!=='string'||!/^[a-f0-9]{64}$/.test(snapshotId)||targetRef!==undefined&&(!validGitReference(targetRef)||!/^refs\/(?:heads|remotes)\//.test(targetRef)))throw Error('git_branches_invalid');
   const context=await this.context(signal);
   try{
    const snapshot=await this.inspectContext(context,signal);
@@ -682,10 +731,15 @@ export class GitRepositoryInspection{
     }
    }
    await this.branchWorktreeUses(context,branches,oidPattern,signal);
+   let preview:GitCheckoutPreview|undefined;
+   if(targetRef!==undefined){
+    const target=branches.find(branch=>branch.ref===targetRef);if(!target)throw Error('git_checkout_target_unavailable');
+    preview=await this.checkoutPreview(context,snapshot,target,format,signal);
+   }
    if((await this.inspectContext(context,signal)).snapshot_id!==snapshotId)throw Error('git_snapshot_changed');
    if((await this.anchors(signal)).metadata!==context.metadata)throw Error('git_snapshot_changed');
    signal?.throwIfAborted();
-   return {snapshot_id:snapshotId,repository_sha256:snapshot.repository_sha256,head:snapshot.head,object_format:format,branches,read_only:true,execution_authorized:false};
+   return {snapshot_id:snapshotId,repository_sha256:snapshot.repository_sha256,head:snapshot.head,object_format:format,branches,...(preview?{checkout_preview:preview}:{}),read_only:true,execution_authorized:false};
   }finally{await context.dispose();}
  }
  async diff(input:{snapshot_id:string;path:string;stage:'working'|'staged'},signal?:AbortSignal):Promise<GitDiff>{

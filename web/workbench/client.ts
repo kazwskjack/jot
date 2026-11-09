@@ -55,7 +55,7 @@ export const workbenchApi={
  git:(project:string,signal?:AbortSignal)=>request<GitSnapshot>(`/projects/${pathId(project)}/git`,'GET',undefined,undefined,signal),
  gitInitialization:(project:string,signal?:AbortSignal)=>request<GitInitializationStatus>(`/projects/${pathId(project)}/git/initialization`,'GET',undefined,undefined,signal),
  gitInitializationReview:(project:string,intent:string,signal?:AbortSignal)=>request<GitInitializationReviewIntent>(`/projects/${pathId(project)}/git/initialization-intents/${pathId(intent)}`,'GET',undefined,undefined,signal),
- gitBranches:(project:string,snapshot:string,signal?:AbortSignal)=>request<GitBranchInventory>(`/projects/${pathId(project)}/git/branches?${new URLSearchParams({snapshot_id:snapshot})}`,'GET',undefined,undefined,signal),
+ gitBranches:(project:string,snapshot:string,signal?:AbortSignal,targetRef?:string)=>request<GitBranchInventory>(`/projects/${pathId(project)}/git/branches?${new URLSearchParams({snapshot_id:snapshot,...(targetRef===undefined?{}:{target_ref:targetRef})})}`,'GET',undefined,undefined,signal),
  gitDiff:(project:string,snapshot:string,file:string,stage:'working'|'staged',signal?:AbortSignal)=>request<GitDiff>(`/projects/${pathId(project)}/git/diff?snapshot_id=${pathId(snapshot)}&path=${pathId(file)}&stage=${stage}`,'GET',undefined,undefined,signal),
  gitBranchReview:(project:string,intent:string,signal?:AbortSignal)=>request<GitBranchReviewIntent>(`/projects/${pathId(project)}/git/branch-intents/${pathId(intent)}`,'GET',undefined,undefined,signal),
  gitReview:(project:string,intent:string,signal?:AbortSignal)=>request<GitReviewIntent>(`/projects/${pathId(project)}/git/intents/${pathId(intent)}`,'GET',undefined,undefined,signal),

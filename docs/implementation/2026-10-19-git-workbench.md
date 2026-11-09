@@ -1333,3 +1333,45 @@ Occupancy semantics were read from the official Git sources for
 [worktree registration](https://raw.githubusercontent.com/git/git/master/worktree.c),
 [operation state](https://raw.githubusercontent.com/git/git/master/wt-status.c) and
 [update-ref records](https://raw.githubusercontent.com/git/git/master/sequencer.c).
+
+## Branch checkout index preview, 2026-11-09
+
+The existing owner/snapshot-scoped branch GET accepts an optional target_ref.
+It resolves that exact listed local/remote reference to the already proven commit
+and returns an optional checkout_preview. The default branch inventory retains
+its previous response shape. The service repeats ownership and cancellation checks.
+
+The preview copies the original private index again, preserves its conservative
+mtime and refreshes that planning index with fixed Git arguments. GIT_INDEX_FILE
+is an internal transport parameter. Its only new caller supplies a fixed private
+path. Existing transport callers keep their previous environment. A two-tree
+read-tree dry-run checks the actual bound worktree, including staged, unstaged
+and untracked state. Recursive submodule updates are explicitly disabled.
+A failed check returns not_confirmed and a null projection. Successful checks
+produce a separate private index through --index-output, with a bounded digest,
+entry count and exact before/after object/mode changes. The existing entry parser
+is shared with commit-tree inspection. An unborn HEAD uses a verified empty tree
+written only into the private object store. Private object writes read original
+objects through the existing alternate binding. Original snapshot/full metadata
+checks, process limits, cancellation and context cleanup finish the read.
+
+The common read-copy now obtains info/sparse-checkout from the current worktree,
+matching Git's worktree-specific path rules. Private index/shared-index mtimes
+use an earlier whole second so fractional timestamp rounding cannot move a copy
+past the original racy-clean boundary. Index contents retain their original hash.
+
+The branch list opens an owner/snapshot/target-scoped preview, shows fresh target
+ownership reasons and index changes, cancels reads on close and restores the
+invoking button's focus. Paired JSON/YAML branch contracts include the optional
+query and result. The operations manifest updates its existing description.
+
+This delivers preview source. Complete worktree content/attribute publication,
+tracking/detached policy, reference/reflog evidence, original immutable review,
+approval, native execution/recovery and UI dispatch remain required. All M15.14
+and remaining P09 scope stays open. Work was limited to source development,
+source-object comparison and Git delivery. Historical test results stay historical.
+
+Primary behavior is documented by [Git read-tree](https://git-scm.com/docs/git-read-tree),
+[Git update-index](https://git-scm.com/docs/git-update-index),
+[checkout setup](https://raw.githubusercontent.com/git/git/master/builtin/checkout.c)
+and [worktree-specific paths](https://raw.githubusercontent.com/git/git/master/path.c).

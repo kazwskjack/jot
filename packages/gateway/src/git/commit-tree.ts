@@ -12,7 +12,7 @@ function unavailable():never{throw Error('git_commit_tree_unavailable')}
 const text=(bytes:Buffer)=>{try{return new TextDecoder('utf-8',{fatal:true}).decode(bytes)}catch{return unavailable()}};
 const hash=(bytes:string|Buffer)=>createHash('sha256').update(bytes).digest('hex');
 const OID=/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
-function entries(bytes:Buffer,tree:boolean,max:number):Entry[]{
+export function gitTreeEntries(bytes:Buffer,tree:boolean,max:number):Entry[]{
  const value=text(bytes);if(value&&!value.endsWith('\0'))unavailable();const rows=value.split('\0').filter(Boolean);if(rows.length>max)unavailable();
  const seen=new Set<string>();return rows.map((row):Entry=>{
   const match=tree?/^(100644|100755|120000|160000) (blob|commit) ([a-f0-9]+)\t([\s\S]+)$/.exec(row):/^(100644|100755|120000|160000) ([a-f0-9]+) 0\t([\s\S]+)$/.exec(row);if(!match)unavailable();
@@ -50,9 +50,9 @@ export async function readCommitTree(executable:string,root:string,context:GitRe
   const result=await readGit(executable,root,context.directory,args,{...limits,maxOutputBytes:output},signal,privateOutput?join(context.directory,'objects'):objects,input,privateOutput?objects:undefined);if(result.code!==0)unavailable();return result.bytes;
  };
  const format=text(await run(['rev-parse','--show-object-format'])).trim();if(format!=='sha1'&&format!=='sha256')unavailable();
- const staged=entries(await run(['ls-files','--stage','-z']),false,limits.maxEntries);if(staged.some(entry=>entry.oid.length!==(format==='sha1'?40:64)))unavailable();
+ const staged=gitTreeEntries(await run(['ls-files','--stage','-z']),false,limits.maxEntries);if(staged.some(entry=>entry.oid.length!==(format==='sha1'?40:64)))unavailable();
  const tree=text(await run(['write-tree'],limits.maxOutputBytes,undefined,true)).trim();if(!OID.test(tree)||tree.length!==(format==='sha1'?40:64))unavailable();
- const rendered=entries(await run(['ls-tree','-r','--full-tree','-z',tree],limits.maxOutputBytes,undefined,true),true,limits.maxEntries);if(canonicalJson(staged)!==canonicalJson(rendered))unavailable();
+ const rendered=gitTreeEntries(await run(['ls-tree','-r','--full-tree','-z',tree],limits.maxOutputBytes,undefined,true),true,limits.maxEntries);if(canonicalJson(staged)!==canonicalJson(rendered))unavailable();
  const oids=[...new Set(staged.filter(entry=>entry.type==='blob').map(entry=>entry.oid))].sort(),blobs:Array<{oid:string;sha256:string;size:number}>=[];
  if(oids.length){
   const bytes=await run(['cat-file','--batch'],64*1024*1024,Buffer.from(oids.join('\n')+'\n'));

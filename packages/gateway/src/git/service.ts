@@ -99,6 +99,6 @@ export class GitWorkbench{
   const result=await this.repository(owner,project).freezeInitialization(snapshotId,initialBranch,objectFormat,signal);
   this.projects.assertOwned(project,owner);signal?.throwIfAborted();return result;
  }
- async branches(owner:string,project:string,snapshotId:string,signal?:AbortSignal){const result=await this.repository(owner,project).branches(snapshotId,signal);this.projects.assertOwned(project,owner);signal?.throwIfAborted();return {project_id:project,...result};}
+ async branches(owner:string,project:string,snapshotId:string,signal?:AbortSignal,targetRef?:string){const result=await this.repository(owner,project).branches(snapshotId,signal,targetRef);this.projects.assertOwned(project,owner);signal?.throwIfAborted();return {project_id:project,...result};}
  async diff(owner:string,project:string,input:{snapshot_id:string;path:string;stage:'working'|'staged'},signal?:AbortSignal){const result=await this.repository(owner,project).diff(input,signal);this.projects.assertOwned(project,owner);return{project_id:project,...result};}
 }

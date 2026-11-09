@@ -1167,7 +1167,7 @@
     null,
     "GitBranchInventory",
     "200",
-    "Owned snapshot-bound local and remote references; no execution authority."
+    "Owned snapshot-bound local and remote references. Optional target_ref adds a bounded private two-tree index projection and working-tree compatibility check. Approval and native execution require their separate original review chain."
   ],
   [
     "POST",

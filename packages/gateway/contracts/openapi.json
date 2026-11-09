@@ -14506,6 +14506,17 @@
               "type": "string",
               "pattern": "^[a-f0-9]{64}$"
             }
+          },
+          {
+            "name": "target_ref",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024,
+              "pattern": "^refs/(?:heads|remotes)/"
+            }
           }
         ],
         "responses": {
@@ -39454,6 +39465,144 @@
           },
           "execution_authorized": {
             "const": false
+          },
+          "checkout_preview": {
+            "type": "object",
+            "properties": {
+              "target_ref": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024,
+                "pattern": "^refs/(?:heads|remotes)/"
+              },
+              "target_oid": {
+                "type": "string",
+                "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$"
+              },
+              "source_index_sha256": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "working_tree_check": {
+                "enum": [
+                  "passed",
+                  "not_confirmed"
+                ]
+              },
+              "index_projection": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "entries_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "entry_count": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 5000
+                  },
+                  "changes": {
+                    "type": "array",
+                    "maxItems": 10000,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096
+                        },
+                        "before": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "mode": {
+                              "enum": [
+                                "100644",
+                                "100755",
+                                "120000",
+                                "160000"
+                              ]
+                            },
+                            "oid": {
+                              "type": "string",
+                              "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$"
+                            }
+                          },
+                          "required": [
+                            "mode",
+                            "oid"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "after": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "mode": {
+                              "enum": [
+                                "100644",
+                                "100755",
+                                "120000",
+                                "160000"
+                              ]
+                            },
+                            "oid": {
+                              "type": "string",
+                              "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$"
+                            }
+                          },
+                          "required": [
+                            "mode",
+                            "oid"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "path",
+                        "before",
+                        "after"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "sha256",
+                  "entries_sha256",
+                  "entry_count",
+                  "changes"
+                ],
+                "additionalProperties": false
+              },
+              "execution_authorized": {
+                "const": false
+              }
+            },
+            "required": [
+              "target_ref",
+              "target_oid",
+              "source_index_sha256",
+              "working_tree_check",
+              "index_projection",
+              "execution_authorized"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
