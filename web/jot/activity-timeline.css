@@ -12,3 +12,7 @@
 .jot-display-recovery{border:1px solid currentColor;border-radius:8px;padding:10px;margin-block:8px}
 .jot-activity-history{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-block:12px}
 .jot-activity-history p{width:100%;margin-block:4px;overflow-wrap:anywhere}
+
+.jot-activity-content pre{max-height:26rem;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}
+.jot-activity-content img{max-width:100%;max-height:32rem;object-fit:contain}
+.jot-activity-content a{display:inline-block;margin-inline-end:1rem}

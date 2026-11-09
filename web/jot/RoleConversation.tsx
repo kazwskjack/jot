@@ -239,8 +239,8 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
   const identity=()=>{if(signal.aborted)throw new DOMException('Aborted','AbortError');};
   const value=await request<Preview>(`/artifacts/${encodeURIComponent(file.artifact_id)}/preview?version=${file.version}`,'GET',undefined,undefined,signal);identity();
   if(value.artifact_id!==file.artifact_id||value.version!==file.version)throw new Error('文件预览未确认');
-  if(value.kind==='text'){const verified=await fetchVerifiedArtifactPreviewBytes(file,'text'),text=new TextDecoder().decode(verified.bytes);identity();setPreview({name:file.relative_path||file.file_name,text:text.slice(0,200000),truncated:text.length>200000});}
-  else if(value.kind==='image'){const verified=await fetchVerifiedArtifactPreviewBytes(file,'image'),blob=new Blob([verified.bytes],{type:verified.media_type});identity();setPreview({name:file.relative_path||file.file_name,url:URL.createObjectURL(blob)});}
+  if(value.kind==='text'){const verified=await fetchVerifiedArtifactPreviewBytes(file,'text',signal),text=new TextDecoder().decode(verified.bytes);identity();setPreview({name:file.relative_path||file.file_name,text:text.slice(0,200000),truncated:text.length>200000});}
+  else if(value.kind==='image'){const verified=await fetchVerifiedArtifactPreviewBytes(file,'image',signal),blob=new Blob([verified.bytes],{type:verified.media_type});identity();setPreview({name:file.relative_path||file.file_name,url:URL.createObjectURL(blob)});}
   else if(isDocumentPreviewMediaType(file.media_type)){
    setPreview({name:file.relative_path||file.file_name,loading:true});
    const job=await request<Record<string,any>>(`/artifacts/${encodeURIComponent(file.artifact_id)}/file-operations`,'POST',{
@@ -285,7 +285,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  {state&&<>
   <ConversationDisplayBoundary label="上下文整理状态"><CompactionActivities activities={activityValues} runs={state.runs}/></ConversationDisplayBoundary>
   <ConversationDisplayBoundary label="公开步骤历史"><ActivityHistory conversationId={id} {...(state.snapshotSeq?{snapshotSeq:state.snapshotSeq}:{})} requestVersion={activityHistoryRequest} onLoaded={retainActivityHistory}/></ConversationDisplayBoundary>
-  <ConversationDisplayBoundary label="工具时间线"><ActivityTimeline activities={activityValues} runs={state.runs} onOpenMember={setSelectedNativeMember} {...(activityReveal?{reveal:activityReveal}:{})}/></ConversationDisplayBoundary>
+  <ConversationDisplayBoundary label="工具时间线"><ActivityTimeline conversationId={id} activities={activityValues} runs={state.runs} onOpenMember={setSelectedNativeMember} {...(activityReveal?{reveal:activityReveal}:{})}/></ConversationDisplayBoundary>
  </>}
   {selectedNativeMember&&<section ref={nativeMemberPanel} tabIndex={-1} aria-label="父步骤关联的原成员执行">
    <button type="button" onClick={()=>setSelectedNativeMember(undefined)}>关闭成员详情</button>

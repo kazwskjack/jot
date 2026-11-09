@@ -1,0 +1,69 @@
+import React,{useEffect,useRef,useState} from 'react';
+import {base,request} from './client';
+import {artifactPreviewErrorMessage,fetchVerifiedArtifactPreviewBytes} from './artifact-preview-bytes.mjs';
+import type {ActivityArtifactTarget} from './activity-presentation';
+import type {Artifact,Diff} from './types';
+
+const id=/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/;
+const version=(value:unknown)=>Number.isSafeInteger(value)&&Number(value)>0;
+type Content={file:Artifact;before?:Artifact;text?:string;image?:string;truncated?:boolean};
+
+export default function ActivityArtifactDetails({conversationId,target}:{conversationId:string;target:ActivityArtifactTarget}){
+ const identity=JSON.stringify([conversationId,target]);
+ const region=useRef<HTMLDivElement>(null);
+ useEffect(()=>{region.current?.focus();region.current?.scrollIntoView({block:'nearest'});},[identity]);
+ const [state,setState]=useState<{identity:string;content?:Content;error?:string}>(),[revision,setRevision]=useState(0);
+ useEffect(()=>{
+  const controller=new AbortController(),signal=controller.signal;let image='';
+  setState({identity});
+  const metadata=async(expectedVersion?:number,expectedSha?:string)=>{
+   if(!id.test(target.artifactId)||expectedVersion!==undefined&&!version(expectedVersion))throw Error('文件引用尚未确认');
+   const file=await request<Artifact>(`/artifacts/${encodeURIComponent(target.artifactId)}${expectedVersion!==undefined?`?version=${expectedVersion}`:''}`,'GET',undefined,undefined,signal);
+   if(!file||file.artifact_id!==target.artifactId||file.conversation_id!==conversationId||!version(file.version)
+    ||expectedVersion!==undefined&&file.version!==expectedVersion||expectedSha!==undefined&&file.sha256!==expectedSha
+    ||!Number.isSafeInteger(file.size_bytes)||file.size_bytes<0||typeof file.sha256!=='string'||!/^[a-f0-9]{64}$/.test(file.sha256)
+    ||typeof file.file_name!=='string'||typeof file.media_type!=='string'||file.status!=='ready')throw Error('文件版本或来源尚未确认');
+   return file;
+  };
+  const load=async():Promise<Content>=>{
+   if(target.kind==='diff'){
+    const before=await metadata(target.fromVersion,target.beforeSha256),file=await metadata(target.toVersion,target.afterSha256);
+    if(before.size_bytes>20*1024*1024||file.size_bytes>20*1024*1024)throw Error('artifact_preview_too_large');
+    const diff=await request<Diff>(`/artifacts/${encodeURIComponent(target.artifactId)}/diff?from_version=${target.fromVersion}&to_version=${target.toVersion}`,'GET',undefined,undefined,signal);
+    if(!diff||diff.artifact_id!==target.artifactId||diff.from_version!==target.fromVersion||diff.to_version!==target.toVersion
+     ||typeof diff.unified_diff!=='string'||diff.unified_diff.length>200000||typeof diff.truncated!=='boolean')throw Error('文件差异来源尚未确认');
+    return {file,before,text:diff.unified_diff,truncated:diff.truncated};
+   }
+   const file=await metadata(target.version,target.sha256);
+   if(file.preview_kind!=='text'&&file.preview_kind!=='image')return {file};
+   const verified=await fetchVerifiedArtifactPreviewBytes(file,file.preview_kind,signal);
+   signal.throwIfAborted();
+   if(file.preview_kind==='text'){
+    const text=new TextDecoder().decode(verified.bytes);
+    return {file,text:text.slice(0,200000),truncated:text.length>200000};
+   }
+   image=URL.createObjectURL(new Blob([verified.bytes],{type:verified.media_type}));
+   return {file,image};
+  };
+  void load().then(content=>{if(!signal.aborted)setState({identity,content});}).catch(error=>{
+   if(!signal.aborted)setState({identity,error:artifactPreviewErrorMessage(error)});
+  });
+  return()=>{controller.abort();if(image)URL.revokeObjectURL(image);};
+ },[identity,revision]);
+ const current=state?.identity===identity?state:undefined,content=current?.content;
+ return <div ref={region} tabIndex={-1} className="jot-activity-content" aria-label="步骤文件内容" data-chat-search-ignore>
+  {(!current||!content&&!current.error)&&<p role="status">正在读取步骤文件…</p>}
+  {content&&<>
+   <h4>{content.file.relative_path||content.file.file_name}</h4>
+   <p>{content.before?`版本 ${content.before.version} → ${content.file.version}`:`版本 ${content.file.version}`}
+    {target.kind==='file'&&target.version===undefined?' · 当前可读文件版本':''}</p>
+   <a href={`${base}/v1/artifacts/${encodeURIComponent(content.file.artifact_id)}/download?version=${content.file.version}`} download rel="noreferrer">下载版本 {content.file.version}</a>
+   {content.before&&<a href={`${base}/v1/artifacts/${encodeURIComponent(content.before.artifact_id)}/download?version=${content.before.version}`} download rel="noreferrer">下载版本 {content.before.version}</a>}
+   {content.text!==undefined&&<pre>{content.text}</pre>}
+   {content.image&&<img src={content.image} alt={content.file.file_name}/>}
+   {content.truncated&&<p role="status">已显示前200000个字符，可下载对应版本查看全文。</p>}
+   {content.text===undefined&&!content.image&&<p role="status">此格式可下载查看。</p>}
+  </>}
+  {current?.error&&<p role="alert">{current.error} <button type="button" onClick={()=>setRevision(value=>value+1)}>重试读取</button></p>}
+ </div>;
+}

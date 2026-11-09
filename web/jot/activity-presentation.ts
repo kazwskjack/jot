@@ -71,6 +71,38 @@ export function activityDetailRows(activity:ToolActivity):Array<{label:string;va
  return rows;
 }
 
+export type ActivityArtifactTarget=
+ |{kind:'file';artifactId:string;label:string;version?:number;sha256?:string}
+ |{kind:'diff';artifactId:string;label:string;fromVersion:number;toVersion:number;beforeSha256?:string;afterSha256?:string};
+
+/** Versioned references come directly from the public step, never inferred from a path. */
+export function activityArtifactTargets(activity:ToolActivity):ActivityArtifactTarget[]{
+ const targets:ActivityArtifactTarget[]=[];
+ if(activity.kind==='file_read'&&activity.detail.artifact_id){
+  targets.push({kind:'file',artifactId:activity.detail.artifact_id,label:'查看文件',
+   ...(activity.detail.version!==undefined?{version:activity.detail.version}:{})});
+ }
+ if(activity.kind==='file_edit'){
+  const detail=activity.detail;
+  if(detail.artifact_id){
+   targets.push({kind:'file',artifactId:detail.artifact_id,label:'查看修改后文件',
+    ...(detail.after_version!==undefined?{version:detail.after_version}:{}),...(detail.after_sha256?{sha256:detail.after_sha256}:{})});
+   if(detail.before_version!==undefined&&detail.before_version>0){
+    targets.push({kind:'file',artifactId:detail.artifact_id,label:'查看修改前文件',version:detail.before_version,
+     ...(detail.before_sha256?{sha256:detail.before_sha256}:{})});
+   }
+   if(detail.before_version!==undefined&&detail.before_version>0&&detail.after_version!==undefined&&detail.after_version>0&&detail.before_version!==detail.after_version){
+    targets.push({kind:'diff',artifactId:detail.artifact_id,label:'查看版本差异',fromVersion:detail.before_version,toVersion:detail.after_version,
+     ...(detail.before_sha256?{beforeSha256:detail.before_sha256}:{}),...(detail.after_sha256?{afterSha256:detail.after_sha256}:{})});
+   }
+  }
+  if(detail.diff_artifact_id)targets.push({kind:'file',artifactId:detail.diff_artifact_id,label:'查看差异文件'});
+ }
+ if(activity.kind==='command'&&activity.detail.output_artifact_id)targets.push({kind:'file',artifactId:activity.detail.output_artifact_id,label:'查看命令输出'});
+ if(activity.kind==='browse'&&activity.detail.screenshot_artifact_id)targets.push({kind:'file',artifactId:activity.detail.screenshot_artifact_id,label:'查看截图'});
+ return targets;
+}
+
 /** Iterative forest traversal keeps missing parents, cycles and deep traces visible. */
 export function activityForest(activities:ToolActivity[]):ActivityRow[]{
  const values=[...activities].sort((a,b)=>a.started_at.localeCompare(b.started_at)||a.activity_id.localeCompare(b.activity_id));

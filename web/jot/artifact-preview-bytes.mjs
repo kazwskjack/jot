@@ -37,7 +37,9 @@ export function artifactPreviewErrorMessage(error) {
     ?? (/^[A-Z][A-Z0-9_]{2,95}$/.test(error.message) ? '暂时无法完成文件预览，请下载查看' : error.message);
 }
 
-export async function fetchVerifiedArtifactPreviewBytes(file, kind) {
+/** @param {AbortSignal} [signal] */
+export async function fetchVerifiedArtifactPreviewBytes(file, kind, signal = undefined) {
+  signal?.throwIfAborted();
   const mediaType = normalizedType(file?.media_type);
   if (!file || !ARTIFACT_ID.test(file.artifact_id) || !Number.isSafeInteger(file.version) || file.version < 1
     || !Number.isSafeInteger(file.size_bytes) || file.size_bytes < 0
@@ -52,7 +54,7 @@ export async function fetchVerifiedArtifactPreviewBytes(file, kind) {
   if (file.size_bytes > PREVIEW_LIMIT) throw failure('artifact_preview_too_large');
 
   const url = `/workbench-api/v1/artifacts/${encodeURIComponent(file.artifact_id)}/download?version=${file.version}`;
-  const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store', redirect: 'error' });
+  const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store', redirect: 'error', signal });
   if (!response.ok) {
     await response.body?.cancel().catch(() => {});
     throw failure('artifact_preview_unavailable');
@@ -81,6 +83,7 @@ export async function fetchVerifiedArtifactPreviewBytes(file, kind) {
     reader.releaseLock();
   }
 
+  signal?.throwIfAborted();
   const bytes = new Uint8Array(length);
   let offset = 0;
   for (const chunk of chunks) {
@@ -89,6 +92,7 @@ export async function fetchVerifiedArtifactPreviewBytes(file, kind) {
   }
   const sha256 = [...new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', bytes))]
     .map(byte => byte.toString(16).padStart(2, '0')).join('');
+  signal?.throwIfAborted();
   if (bytes.byteLength !== file.size_bytes || sha256 !== file.sha256) {
     throw failure('artifact_preview_integrity_failed');
   }

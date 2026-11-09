@@ -83,7 +83,7 @@ function MemberTimeline({view}:{view:View}){
    renderedRevision={activities} ready/></ConversationDisplayBoundary>
   <ConversationDisplayBoundary label="成员步骤历史"><ActivityHistory conversationId={view.source.child_conversation_id}
    runId={view.source.child_run_id} snapshotSeq={view.source.child_as_of_seq} requestVersion={historyRequest} onLoaded={retainHistory}/></ConversationDisplayBoundary>
-  <ConversationDisplayBoundary label="成员时间线"><ActivityTimeline activities={activities} runs={runs} {...(activityReveal?{reveal:activityReveal}:{})}/></ConversationDisplayBoundary>
+  <ConversationDisplayBoundary label="成员时间线"><ActivityTimeline conversationId={view.source.child_conversation_id} activities={activities} runs={runs} {...(activityReveal?{reveal:activityReveal}:{})}/></ConversationDisplayBoundary>
   {history!==null&&!activities.length&&<p role="status">此子运行暂未记录公开工具步骤。</p>}
  </section>;
 }

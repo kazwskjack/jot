@@ -3,13 +3,15 @@
 import React,{useEffect,useMemo,useRef,useState} from 'react';
 import type {Activity} from './types';
 import type {NativeMemberTarget} from './native-member-execution';
-import {activityDetailRows,activityDisplayStatus,activityForest,activityIsActive as running,visibleActivityRows,activityKindLabels,activityStatusLabels,type ActivityRow,type ToolActivity,type ActivityReveal,type ActivityRun} from './activity-presentation';
+import {activityArtifactTargets,type ActivityArtifactTarget,activityDetailRows,activityDisplayStatus,activityForest,activityIsActive as running,visibleActivityRows,activityKindLabels,activityStatusLabels,type ActivityRow,type ToolActivity,type ActivityReveal,type ActivityRun} from './activity-presentation';
+import ActivityArtifactDetails from './ActivityArtifactDetails';
 import './activity-timeline.css';
 
 type Group={id:string;kind:ToolActivity['kind'];rows:ActivityRow[]};
+type ArtifactAction={onOpenArtifact:(activity:ToolActivity,target:ActivityArtifactTarget)=>void};
 type MemberDetailsAction={onOpenMember?:(target:NativeMemberTarget)=>void};
 
-function ActivityGroup({group,run,onSelectRun,availableRuns,reveal,onOpenMember}:{group:Group;run?:ActivityRun;onSelectRun:(id:string)=>void;availableRuns:Set<string>;reveal?:ActivityReveal}&MemberDetailsAction){
+function ActivityGroup({group,run,onSelectRun,availableRuns,reveal,onOpenMember,onOpenArtifact}:{group:Group;run?:ActivityRun;onSelectRun:(id:string)=>void;availableRuns:Set<string>;reveal?:ActivityReveal}&MemberDetailsAction&ArtifactAction){
  const active=group.rows.filter(row=>running(row.activity,run)).length;
  const failed=group.rows.filter(row=>activityDisplayStatus(row.activity,run)==='failed').length;
  const unconfirmed=group.rows.filter(row=>activityDisplayStatus(row.activity,run)==='unknown').length;
@@ -52,6 +54,7 @@ function ActivityGroup({group,run,onSelectRun,availableRuns,reveal,onOpenMember}
      {isExpanded&&<>
       {status==='unknown'&&activity.status!=='unknown'&&<p role="status" data-chat-search-ignore>所属运行已结束，此步骤尚无终态回执。</p>}
       <dl>{activityDetailRows(activity).map((detail,index)=><React.Fragment key={index}><dt>{detail.label}</dt><dd>{detail.value}</dd></React.Fragment>)}</dl>
+      {activityArtifactTargets(activity).map(target=><button type="button" key={JSON.stringify(target)} data-chat-search-ignore onClick={()=>onOpenArtifact(activity,target)}>{target.label}</button>)}
       {native&&onOpenMember&&<button type="button" data-chat-search-ignore onClick={()=>onOpenMember(native)}>查看原成员执行步骤</button>}
       {child&&child!==activity.run_id&&availableRuns.has(child)&&<button type="button" data-chat-search-ignore onClick={()=>onSelectRun(child)}>查看子运行步骤</button>}
      </>}
@@ -62,15 +65,17 @@ function ActivityGroup({group,run,onSelectRun,availableRuns,reveal,onOpenMember}
  </details>;
 }
 
-export default function ActivityTimeline({activities,runs,reveal,onOpenMember}:{activities:Activity[];runs:Record<string,ActivityRun>;reveal?:ActivityReveal}&MemberDetailsAction){
+export default function ActivityTimeline({conversationId,activities,runs,reveal,onOpenMember}:{conversationId:string;activities:Activity[];runs:Record<string,ActivityRun>;reveal?:ActivityReveal}&MemberDetailsAction){
  const [selection,setSelection]=useState('');
+ const [artifact,setArtifact]=useState<{conversationId:string;runId:string;activityId:string;target:ActivityArtifactTarget}>();
+ const selectRun=(id:string)=>{setSelection(id);setArtifact(undefined);};
  const appliedReveal=useRef('');
  const tools=useMemo(()=>activities.filter((activity):activity is ToolActivity=>activity.kind!=='compaction'),[activities]);
  const runIds=useMemo(()=>[...new Set(tools.slice().sort((a,b)=>b.started_at.localeCompare(a.started_at)).map(activity=>activity.run_id))],[tools]);
  useEffect(()=>{
   if(!reveal||appliedReveal.current===reveal.key)return;
   const target=tools.find(activity=>activity.activity_id===reveal.activityId);
-  if(target){setSelection(target.run_id);appliedReveal.current=reveal.key;}
+  if(target){setSelection(target.run_id);setArtifact(undefined);appliedReveal.current=reveal.key;}
  },[reveal,tools]);
  const selected=runIds.includes(selection)?selection:runIds[0];
  const groups=useMemo(()=>{
@@ -88,8 +93,12 @@ export default function ActivityTimeline({activities,runs,reveal,onOpenMember}:{
  const availableRuns=new Set(runIds),run=selected?runs[selected]:undefined;
  return <section className="jot-activity-timeline" aria-label="工具与子任务时间线">
   <h3>工具与子任务</h3>
-  <label>运行记录 <select value={selected} onChange={event=>setSelection(event.currentTarget.value)}>{runIds.map(id=><option key={id} value={id}>{runs[id]?.created_at??id} · {runs[id]?.status??'历史运行'}</option>)}</select></label>
+  <label>运行记录 <select value={selected} onChange={event=>selectRun(event.currentTarget.value)}>{runIds.map(id=><option key={id} value={id}>{runs[id]?.created_at??id} · {runs[id]?.status??'历史运行'}</option>)}</select></label>
   <small>当前已加载的公开步骤。父步骤缺失或终态未确认时会保留提示。</small>
-  {groups.map(group=><ActivityGroup key={`${selected}:${group.id}`} group={group} {...(run?{run}:{})} onSelectRun={setSelection} availableRuns={availableRuns} {...(onOpenMember?{onOpenMember}:{})} {...(reveal?{reveal}:{})}/>)}
+  {groups.map(group=><ActivityGroup key={`${selected}:${group.id}`} group={group} {...(run?{run}:{})} onSelectRun={selectRun} onOpenArtifact={(activity,target)=>setArtifact({conversationId,runId:activity.run_id,activityId:activity.activity_id,target})} availableRuns={availableRuns} {...(onOpenMember?{onOpenMember}:{})} {...(reveal?{reveal}:{})}/>)}
+  {artifact&&artifact.conversationId===conversationId&&artifact.runId===selected&&<section aria-label="已选步骤文件" data-chat-search-ignore>
+   <button type="button" onClick={()=>setArtifact(undefined)}>关闭步骤文件</button>
+   <ActivityArtifactDetails key={JSON.stringify(artifact)} conversationId={conversationId} target={artifact.target}/>
+  </section>}
  </section>;
 }
