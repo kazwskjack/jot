@@ -157,3 +157,5 @@ export type NativeMemberParentPage = {conversation_id: string; items: NativeMemb
 export type InteractionHistoryPage={conversation_id:string;run_id?:string;items:Interaction[];next_cursor?:string;execution_authorized:false};
 
 export type ActivityResultArtifact={artifact_id:string;version:number;sha256:string};
+
+export type ActivityToolResultPage={conversation_id:string;run_id:string;activity_id:string;tool_name:string;source:'mcp';result_sha256:string;text_sha256:string;offset_chars:number;total_chars:number;text:string;has_other_content:boolean;next_offset_chars?:number;execution_authorized:false};

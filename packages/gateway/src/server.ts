@@ -1,3 +1,4 @@
+import {readActivityToolResult} from './events/activity-tool-result.ts';
 import {readActivityHistory} from './events/activity-history.ts';
 import {registerPluginProfileRoutes,type PluginProfileClient} from './workbench/plugin-profile-routes.ts';
 import {createPluginProfileReceiptExecutor,PLUGIN_PROFILE_RECEIPT_PROTOCOL} from './workbench/plugin-profile-receipts.ts';
@@ -652,6 +653,10 @@ export async function buildServer(config: {
     if(code==='model_metadata_changed')return reply.code(409).send({error:{code:'MODEL_METADATA_CHANGED'}});
     if(['model_metadata_invalid','model_metadata_unavailable'].includes(code))return reply.code(503).send({error:{code:'MODEL_METADATA_UNAVAILABLE'}});
     if(code==='chat_mode_unavailable')return reply.code(503).send({error:{code:'CHAT_MODE_UNAVAILABLE'}});
+    if(code==='invalid_activity_tool_result_query')return reply.code(400).send({error:{code:'ACTIVITY_TOOL_RESULT_QUERY_INVALID'}});
+    if(code==='activity_tool_result_not_found')return reply.code(404).send({error:{code:'ACTIVITY_TOOL_RESULT_NOT_FOUND'}});
+    if(['activity_tool_result_pending','activity_tool_result_source_changed'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
+    if(code==='activity_tool_result_source_invalid')return reply.code(503).send({error:{code:'ACTIVITY_TOOL_RESULT_SOURCE_INVALID'}});
     if(code==='invalid_activity_history_query')return reply.code(400).send({error:{code:'ACTIVITY_HISTORY_QUERY_INVALID'}});
     if(code==='activity_history_cursor_future')return reply.code(409).send({error:{code:'ACTIVITY_HISTORY_CURSOR_FUTURE'}});
     if(code==='activity_history_source_invalid')return reply.code(503).send({error:{code:'ACTIVITY_HISTORY_SOURCE_INVALID'}});
@@ -1068,6 +1073,15 @@ export async function buildServer(config: {
     const id=(request.params as {conversationId:string}).conversationId,owner=actor(request as any),input=request.body as Record<string,unknown>;
     if(input.mode===undefined)return conversations.update(id,owner,input);
     const commit=await conversationModes.prepareUpdate(id,owner,input);return atomicCommand(request,200,commit);
+  });
+  app.get('/v1/conversations/:conversationId/activities/:activityId/tool-result', async (request,reply) => {
+    const {conversationId,activityId}=request.params as {conversationId:string;activityId:string},owner=actor(request as any);
+    db.exec('BEGIN');
+    try{
+      conversations.get(conversationId,owner);
+      const value=readActivityToolResult(db,owner,conversationId,activityId,request.query as Record<string,unknown>);
+      db.exec('COMMIT');return reply.header('cache-control','private, no-store').send(value);
+    }catch(error){if(db.isTransaction)db.exec('ROLLBACK');throw error;}
   });
   app.get('/v1/conversations/:conversationId/activities', async (request,reply) => {
     const id=(request.params as {conversationId:string}).conversationId,owner=actor(request as any);
