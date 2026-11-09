@@ -1081,3 +1081,32 @@ merged-safe deletion, reference backend coverage and all other P09 requirements.
 M15.14 stays in progress. Per the user's source-only direction, no tests, typechecks,
 builds, product/native operations, UI rendering/runtime acceptance, maintenance
 commands, migrations or deployment were executed.
+
+## Existing branch checkout target commits, 2026-11-09
+
+Original branch inventory now resolves local and remote branch object IDs to their
+commit targets with one bounded private cat-file batch-check. Inputs are validated
+full object IDs plus the fixed commit-peeling suffix. It reuses the original
+sanitized read context, object-store binding, output/time/cancellation limits and
+context disposal. Exact output row count, termination, object format and commit
+type are validated. A direct commit must retain its original object ID. A noncommit
+object that cannot peel to a commit is recorded as null. No per-branch child process
+or caller-provided command is introduced. Original snapshot and full source
+metadata are checked again after target resolution.
+
+The shared inventory contract adds optional nullable checkout_oid. Paired JSON/YAML
+source objects match and all other OpenAPI objects are retained. Existing raw ref,
+OID, object type, symbolic target, ordering and current-branch facts stay present.
+The original branch list shows a distinct peeled commit where needed and an
+unresolvable target state. Older payloads omitting checkout_oid retain their prior
+display. This supplies the target proof required by existing-branch checkout.
+
+Actual checkout review, worktree/index/dirty-content projection, local/remote
+tracking and detached behavior, native publication, original recovery and UI
+execution remain to connect. Checked-out worktree exclusions, conflicts, unborn
+semantics, safe deletion, reference backend and full initialization/platform scope
+remain required in M15.14. All remaining P09 scope is retained. Per the user's
+source-only direction, no tests, typechecks, builds, product/native operations,
+UI runtime acceptance, maintenance, migrations or deployment were executed.
+
+Batch output behavior was read from the [Git cat-file documentation](https://git-scm.com/docs/git-cat-file).

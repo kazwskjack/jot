@@ -23,6 +23,8 @@ export default function GitBranches({project,snapshotId,locked,onRefresh,onBusy,
     <code>{branch.ref}</code><code>{branch.oid}</code>
     {branch.symbolic_target&&<span>指向 <code>{branch.symbolic_target}</code></span>}
     {branch.object_type!=='commit'&&<span>对象类型 {branch.object_type}</span>}
+    {branch.checkout_oid===null&&<span>目标无法解析为提交</span>}
+    {branch.checkout_oid&&branch.checkout_oid!==branch.oid&&<span>切换目标提交 <code>{branch.checkout_oid}</code></span>}
    </li>)}</ul>}</>}
    {state&&creating&&<GitBranchReview project={project} snapshotId={snapshotId} allowExecution={allowCreate} onBusy={onBusy} onChanged={status=>{if(status.execution.state==='applied'&&status.workspace_state==='released_settled')onRefresh()}} onClose={()=>{setCreating(false);setRestoreFocus(true)}}/>}
   </>}

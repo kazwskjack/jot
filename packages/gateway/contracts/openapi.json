@@ -39400,6 +39400,13 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 1024
+                },
+                "checkout_oid": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$"
                 }
               },
               "required": [

@@ -563,7 +563,29 @@ export class GitRepositoryInspection{
     branches.push({ref,name:ref.slice(kind==='local'?'refs/heads/'.length:'refs/remotes/'.length),kind,oid,object_type:objectType as 'commit'|'tag'|'tree'|'blob',
      current:kind==='local'&&!snapshot.head.detached&&ref==='refs/heads/'+snapshot.head.branch,...(symbolic?{symbolic_target:symbolic}:{})});
    }
+   if(branches.length){
+    const expressions=branches.map(branch=>branch.oid+'^{commit}');
+    const result=await readGit(this.executable!,this.root,context.directory,['cat-file','--batch-check=%(objectname) %(objecttype)'],
+     this.limits,signal,join(this.commonDirectory,'objects'),Buffer.from(expressions.join('\n')+'\n','utf8'));
+    if(result.code!==0)throw Error('git_branches_unavailable');
+    const output=text(result.bytes);
+    if(!output.endsWith('\n'))throw Error('git_branches_unavailable');
+    const rows=output.slice(0,-1).split('\n');
+    if(rows.length!==branches.length)throw Error('git_branches_unavailable');
+    for(const [index,branch] of branches.entries()){
+     const row=rows[index]!;
+     if(row===expressions[index]+' missing'){
+      if(branch.object_type==='commit')throw Error('git_branches_unavailable');
+      branch.checkout_oid=null;continue;
+     }
+     const fields=row.split(' ');
+     if(fields.length!==2||!oidPattern.test(fields[0]!)||fields[1]!=='commit'
+      ||branch.object_type==='commit'&&fields[0]!==branch.oid)throw Error('git_branches_unavailable');
+     branch.checkout_oid=fields[0]!;
+    }
+   }
    if((await this.inspectContext(context,signal)).snapshot_id!==snapshotId)throw Error('git_snapshot_changed');
+   if((await this.anchors(signal)).metadata!==context.metadata)throw Error('git_snapshot_changed');
    signal?.throwIfAborted();
    return {snapshot_id:snapshotId,repository_sha256:snapshot.repository_sha256,head:snapshot.head,object_format:format,branches,read_only:true,execution_authorized:false};
   }finally{await context.dispose();}
