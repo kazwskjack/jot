@@ -29,7 +29,7 @@ const mode=(value:unknown,maximum=0o777)=>typeof value==='number'&&Number.isSafe
 const identity=(value:unknown)=>typeof value==='string'&&IDENTITY.test(value);
 export function isGitInitializationFile(value:GitInitializationFile){
  return shape(value,['identity','sha256','size','mode'])&&identity(value.identity)&&typeof value.sha256==='string'&&SHA.test(value.sha256)
-  &&Number.isSafeInteger(value.size)&&value.size>=0&&value.size<=1024*1024&&mode(value.mode);
+  &&Number.isSafeInteger(value.size)&&value.size>=0&&value.size<=1024*1024&&mode(value.mode,0o7777);
 }
 /** Serialized facts are read/recovery input. Only the in-process plan identity
  * retained by the original kernel can enter a writable attempt. */

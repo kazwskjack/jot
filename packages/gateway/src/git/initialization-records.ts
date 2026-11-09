@@ -44,7 +44,7 @@ export function gitInitializationWitness(value:unknown):GitInitializationWitness
   const file=witness.internal_ignore;
   if(file!==null&&(!shape(file,['identity','sha256','size','mode'])||typeof file.identity!=='string'||!IDENTITY.test(file.identity)
    ||typeof file.sha256!=='string'||!SHA.test(file.sha256)||!Number.isSafeInteger(file.size)||file.size<0||file.size>1024*1024
-   ||!Number.isSafeInteger(file.mode)||file.mode<0||file.mode>0o777||witness.internal_directory_identity===null))throw Error();
+   ||!Number.isSafeInteger(file.mode)||file.mode<0||file.mode>0o7777||witness.internal_directory_identity===null))throw Error();
   const after=witness.ignore_after;
   if(!shape(after,['sha256','size','changed'])||typeof after.sha256!=='string'||!SHA.test(after.sha256)||!Number.isSafeInteger(after.size)||after.size<1||after.size>1024*1024
    ||typeof after.changed!=='boolean'||after.changed!==((file?.sha256??null)!==after.sha256)||!after.changed&&after.size!==file?.size
@@ -59,7 +59,7 @@ export function gitInitializationWitness(value:unknown):GitInitializationWitness
    for(const entry of [existing.dot_file,existing.common_config,existing.worktree_config])if(entry!==null){
     if(!shape(entry,['identity','sha256','size','mode'])||typeof entry.identity!=='string'||!IDENTITY.test(entry.identity)
      ||typeof entry.sha256!=='string'||!SHA.test(entry.sha256)||!Number.isSafeInteger(entry.size)||entry.size<0||entry.size>1024*1024
-     ||!Number.isSafeInteger(entry.mode)||entry.mode<0||entry.mode>0o777)throw Error();
+     ||!Number.isSafeInteger(entry.mode)||entry.mode<0||entry.mode>0o7777)throw Error();
    }
    const layout=existing.layout;
    if(layout!==undefined){

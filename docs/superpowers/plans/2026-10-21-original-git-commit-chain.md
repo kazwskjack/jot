@@ -977,3 +977,37 @@ reference backend coverage and all other P09 features remain required. M15.14
 stays in progress. Per the user's development-only direction, no tests,
 typechecks, builds, product/native operations, maintenance commands, migrations,
 UI runtime acceptance or deployment were executed.
+
+## Reinitialization file groups and complete mode facts, 2026-11-09
+
+Original initialization source/kernel file facts and strict readers now retain
+mode bits through 07777, matching Git's complete-mode copy in its config rewrite
+source. Existing lower-mode records remain readable. Fresh/reinitialization source
+comparisons use complete current bits. The original pending-file descriptor helper
+can set a target group on its own newly created file before final chmod/fsync,
+validating numeric conversion, descriptor identity, unchanged UID and resulting
+GID. The existing original fresh-init callers omit this option.
+
+Native reinitialization chooses config GID from the projected final common setgid
+mode and original common group, or the actual common allocation's inherited group.
+It sets that group before the original second preparation. Changed ignore retains
+the original file's group when it exists, and otherwise uses the actual internal
+allocation group. Source facts are checked around that existing-ignore ownership
+read. Optional typed dispatch file_groups strictly binds config/ignore group
+strings and the projected config-parent rule. Pending files, live canonical phases
+and original publication/observation snapshots check the recorded groups. Older
+dispatch without group proof remains readable under its existing semantics.
+
+A different-owned existing ignore is currently rejected before canonical effects,
+so that this atomic replacement path cannot silently change its UID. Full support
+for that original in-place-write ownership case remains required, alongside
+special filesystem/group/platform inheritance and full native/UI admission.
+Original protocol-8 admission remains gated. No foreign UID is assigned to a
+private namespace that its existing bounded ownership cleaner cannot safely reclaim.
+M15.14 and all other P09 scope remain in progress. Per the user's source-only
+direction, no tests, typechecks, builds, product/native operations, maintenance
+commands, migrations, UI runtime acceptance or deployment were executed.
+
+Primary source behavior was read from Git config.c and setup.c. This implementation
+uses original project helpers and fixed commands.
+[Git config.c](https://github.com/git/git/blob/master/config.c), [Git setup.c](https://github.com/git/git/blob/master/setup.c)

@@ -53,7 +53,7 @@ export class GitInitializationEffects extends GitBranchEffects{
   try{before=lstatSync(path,{bigint:true});}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return{fact:null,body:null};throw error;}
   const body=this.raw(path,1024*1024,links),after=lstatSync(path,{bigint:true});
   if(body===null||stamp(before)!==stamp(after)||before.mode!==after.mode)throw Error('git_initialization_source_changed');
-  return{body,fact:{identity:identity(before),sha256:hash(body),size:body.length,mode:Number(before.mode&0o777n)}};
+  return{body,fact:{identity:identity(before),sha256:hash(body),size:body.length,mode:Number(before.mode&0o7777n)}};
  }
  private initializationLinks(pending:string,file:GitInitializationFile):number{
   let stat;
@@ -129,9 +129,19 @@ export class GitInitializationEffects extends GitBranchEffects{
    source_sha256:hash(JSON.stringify(witness)),review_sha256:raw.review_sha256,execution_authorized:false}));
   this.initializationPlans.set(plan,{anchors,ignore:ignore.body,state:'ready'});return plan;
  }
- private async initializationPendingFile(path:string,body:Buffer,mode:number,created?:(identity:string)=>void){
+ private async initializationPendingFile(path:string,body:Buffer,mode:number,created?:(identity:string)=>void,group?:string){
   const handle=await open(path,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|(constants.O_NOFOLLOW??0),mode);
-  try{created?.(identity(await handle.stat({bigint:true})));await handle.writeFile(body);await handle.chmod(mode);await handle.sync();}finally{await handle.close();}
+  try{
+   const before=await handle.stat({bigint:true});created?.(identity(before));await handle.writeFile(body);
+   if(group!==undefined&&String(before.gid)!==group){
+    const uid=Number(before.uid),gid=Number(group);
+    if(!Number.isSafeInteger(uid)||uid<0||!Number.isSafeInteger(gid)||gid<0||String(gid)!==group)throw Error('git_initialization_source_changed');
+    await handle.chown(uid,gid);
+   }
+   await handle.chmod(mode);await handle.sync();
+   const after=await handle.stat({bigint:true});
+   if(identity(after)!==identity(before)||after.uid!==before.uid||group!==undefined&&String(after.gid)!==group)throw Error('git_initialization_source_changed');
+  }finally{await handle.close();}
   return this.initializationFile(path).fact!;
  }
  private metadataFiles(root:string,links:(path:string)=>number){
@@ -208,16 +218,17 @@ export class GitInitializationEffects extends GitBranchEffects{
     const after=await this.anchors(signal,ignored);current();
     if(after.repository!==before.repository||after.metadata!==before.metadata)throw Error('git_initialization_source_changed');
     const body=planned.observed_filemode?planned.filemode_true:planned.filemode_false;
-    const file=await this.initializationPendingFile(join(stage,'config.pending'),body,existing.common_config?.mode??(0o666&~process.umask()));current();
+    const configGroup=(planned.directory_modes![0]!.mode&0o2000)?existing.layout!.common.gid:preparation!.allocation.gid;
+    const file=await this.initializationPendingFile(join(stage,'config.pending'),body,existing.common_config?.mode??(0o666&~process.umask()),undefined,configGroup);current();
     const lock=await this.initializationPendingFile(join(stage,'config.lock'),Buffer.alloc(0),0o600);current();
     const configuration={filemode:planned.observed_filemode,file};
     if(file.sha256!==(configuration.filemode?existing.configuration!.filemode_true_sha256:existing.configuration!.filemode_false_sha256))throw Error('git_initialization_review_changed');
-    const dispatch=(reference:GitReinitializationRefPreparation|null,ignore:GitInitializationFile|null,ignoreLock:GitInitializationFile|null)=>{
+    const dispatch=(reference:GitReinitializationRefPreparation|null,ignore:GitInitializationFile|null,ignoreLock:GitInitializationFile|null,ignoreGroup:string|null)=>{
      current();
      if(!equal(this.initializationFile(join(stage,'config.pending')).fact,file)||!equal(this.initializationFile(join(stage,'config.lock')).fact,lock))throw Error('git_initialization_source_changed');
      if(this.reinitializationMetadata(witness,preparation!,reference)!==immutableMetadata)throw Error('git_initialization_source_changed');
      const evidence=freezeWorkAdmission(gitReinitializationEvidence({protocol:2,preparation:preparation!,ref_preparation:reference,
-      configuration,config_lock:lock,ignore,ignore_lock:ignoreLock,immutable_metadata_sha256:immutableMetadata,...(planned.directory_modes?{directory_modes:planned.directory_modes}:{})}));
+      configuration,config_lock:lock,ignore,ignore_lock:ignoreLock,immutable_metadata_sha256:immutableMetadata,file_groups:{configuration:configGroup,ignore:ignoreGroup},...(planned.directory_modes?{directory_modes:planned.directory_modes}:{})}));
      synchronous(()=>authority.dispatch(evidence));current();
      const receipt=this.publishReinitialization(evidence,authority,stored.anchors,signal);published={evidence,receipt};current();return receipt;
     };
@@ -230,13 +241,21 @@ export class GitInitializationEffects extends GitBranchEffects{
        synchronous(()=>authority.refPrepared(reference!));
       },cleanup:authority.cleanup}},async(internal,assertInternal)=>{
       const checkInternal=()=>{assertInternal();current();};
-      checkInternal();const ignore=await this.initializationPendingFile(join(internal,'ignore.pending'),stored.ignore,witness.internal_ignore?.mode??0o644);checkInternal();
+      checkInternal();
+      let ignoreGroup=reference!.allocation.gid;
+      if(witness.internal_ignore){
+       const path=join(this.root,'.pilotdeck','.gitignore'),before=lstatSync(path,{bigint:true});
+       if(!equal(this.initializationFile(path).fact,witness.internal_ignore)||stamp(lstatSync(path,{bigint:true}))!==stamp(before))throw Error('git_initialization_source_changed');
+       if(String(before.uid)!==reference!.allocation.uid)throw Error('git_reinitialization_ownership_unavailable');
+       ignoreGroup=String(before.gid);
+      }
+      const ignore=await this.initializationPendingFile(join(internal,'ignore.pending'),stored.ignore,witness.internal_ignore?.mode??0o644,undefined,ignoreGroup);checkInternal();
       const ignoreLock=await this.initializationPendingFile(join(internal,'ignore.lock'),Buffer.alloc(0),0o600);checkInternal();
       if(!equal(this.initializationFile(join(internal,'ignore.pending')).fact,ignore)||!equal(this.initializationFile(join(internal,'ignore.lock')).fact,ignoreLock))throw Error('git_initialization_source_changed');
-      return dispatch(reference!,ignore,ignoreLock);
+      return dispatch(reference!,ignore,ignoreLock,ignoreGroup);
      });
     }
-    return dispatch(null,null,null);
+    return dispatch(null,null,null,null);
    });
   }finally{this.initializationPlans.delete(plan);}
  }
@@ -455,6 +474,8 @@ export class GitInitializationEffects extends GitBranchEffects{
     ||!equal(this.initializationFile(join(this.gitDirectory,'config.worktree')).fact,existing.worktree_config)
     ||!equal(this.initializationFile(join(internal,'.gitignore')).fact,ignorePublished?evidence.ignore:witness.internal_ignore)
     ||this.reinitializationMetadata(witness,preparation,reference)!==evidence.immutable_metadata_sha256)throw Error('git_initialization_source_changed');
+   if(evidence.file_groups&&(configPublished&&String(lstatSync(join(this.commonDirectory,'config'),{bigint:true}).gid)!==evidence.file_groups.configuration
+    ||ignorePublished&&String(lstatSync(join(internal,'.gitignore'),{bigint:true}).gid)!==evidence.file_groups.ignore))throw Error('git_initialization_source_changed');
    if(configLocked&&!equal(this.initializationFile(join(this.commonDirectory,'config.lock'),2).fact,evidence.config_lock)
     ||ignoreLocked&&!equal(this.initializationFile(join(internal,'.gitignore.lock'),2).fact,evidence.ignore_lock))throw Error('git_initialization_lock_unverified');
   };
@@ -484,9 +505,11 @@ export class GitInitializationEffects extends GitBranchEffects{
    }
    check();
    if(!equal(this.initializationFile(join(stage,'config.pending')).fact,evidence.configuration.file))throw Error('git_initialization_source_changed');
+   if(evidence.file_groups&&String(lstatSync(join(stage,'config.pending'),{bigint:true}).gid)!==evidence.file_groups.configuration)throw Error('git_initialization_source_changed');
    renameSync(join(stage,'config.pending'),join(this.commonDirectory,'config'));configPublished=true;check();
    if(witness.ignore_after.changed){
     if(!equal(this.initializationFile(join(internalStage!,'ignore.pending')).fact,evidence.ignore))throw Error('git_initialization_source_changed');
+    if(evidence.file_groups&&String(lstatSync(join(internalStage!,'ignore.pending'),{bigint:true}).gid)!==evidence.file_groups.ignore)throw Error('git_initialization_source_changed');
     check();renameSync(join(internalStage!,'ignore.pending'),join(internal,'.gitignore'));ignorePublished=true;check();
    }
    return actual=freezeWorkAdmission(this.reinitializationPublication(evidence));
@@ -518,6 +541,8 @@ export class GitInitializationEffects extends GitBranchEffects{
    ||!equal(this.initializationFile(join(this.commonDirectory,'config')).fact,evidence.configuration.file)
    ||!equal(this.initializationFile(join(this.gitDirectory,'config.worktree')).fact,existing.worktree_config)
    ||!equal(this.initializationFile(join(this.root,'.pilotdeck','.gitignore')).fact,witness.ignore_after.changed?evidence.ignore:witness.internal_ignore))throw Error('git_initialization_source_changed');
+  if(evidence.file_groups&&(String(lstatSync(join(this.commonDirectory,'config'),{bigint:true}).gid)!==evidence.file_groups.configuration
+   ||witness.ignore_after.changed&&String(lstatSync(join(this.root,'.pilotdeck','.gitignore'),{bigint:true}).gid)!==evidence.file_groups.ignore))throw Error('git_initialization_source_changed');
   return gitReinitializationReceipt({protocol:2,plan_id:evidence.preparation.plan.plan_id,action:'init',evidence_sha256:hash(canonicalJson(evidence)),
    directories:initializationDirectories.map(path=>({path,...this.reinitializationDirectory(path?join(this.commonDirectory,path):this.commonDirectory)})),
    internal_directory:this.reinitializationDirectory(join(this.root,'.pilotdeck')),execution_authorized:false},evidence);

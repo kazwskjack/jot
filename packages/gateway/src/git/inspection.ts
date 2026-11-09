@@ -394,7 +394,7 @@ export class GitRepositoryInspection{
   if(internalIdentity!==null)try{
    const before=await lstat(ignorePath);body=await this.bytes(ignorePath,1024*1024);const after=await lstat(ignorePath);
    if(witness(before)!==witness(after)||before.mode!==after.mode)throw Error('git_snapshot_changed');
-   ignore={identity:identity(before),sha256:hash(body),size:body.length,mode:Number(before.mode&0o777n)};
+   ignore={identity:identity(before),sha256:hash(body),size:body.length,mode:Number(before.mode&0o7777n)};
   }catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;body=null;ignore=null;}
   signal?.throwIfAborted();
   if(await this.directory(this.root)!==root||await directory()!==internalIdentity||await present()
@@ -414,7 +414,7 @@ export class GitRepositoryInspection{
   try{
    const parent=await this.directory(dirname(path)),before=await lstat(path),body=await this.bytes(path,1024*1024),after=await lstat(path);
    if(witness(before)!==witness(after)||before.mode!==after.mode||await this.directory(dirname(path))!==parent)throw Error('git_snapshot_changed');
-   return{body,fact:{identity:identity(before),sha256:hash(body),size:body.length,mode:Number(before.mode&0o777n)}};
+   return{body,fact:{identity:identity(before),sha256:hash(body),size:body.length,mode:Number(before.mode&0o7777n)}};
   }catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return{body:null,fact:null};throw error;}
  }
  /** Directory modes and missing children are part of the original reinit

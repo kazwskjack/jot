@@ -19,7 +19,7 @@ export type GitReinitializationRefPreparation={
 export type GitReinitializationEvidence={
  protocol:2;preparation:GitReinitializationPreparation;ref_preparation:GitReinitializationRefPreparation|null;
  configuration:GitReinitializationRefPreparation['configuration'];config_lock:GitInitializationFile;
- ignore:GitInitializationFile|null;ignore_lock:GitInitializationFile|null;directory_modes?:Array<{path:string;mode:number}>;immutable_metadata_sha256?:string;
+ ignore:GitInitializationFile|null;ignore_lock:GitInitializationFile|null;directory_modes?:Array<{path:string;mode:number}>;immutable_metadata_sha256?:string;file_groups?:{configuration:string;ignore:string|null};
 };
 export type GitReinitializationReceipt={
  protocol:2;plan_id:string;action:'init';evidence_sha256:string;
@@ -88,7 +88,7 @@ export function gitReinitializationRefPreparation(value:unknown):GitReinitializa
 export function gitReinitializationEvidence(value:unknown):GitReinitializationEvidence{
  try{
   const evidence=value as GitReinitializationEvidence;
-  if(!shape(evidence,['protocol','preparation','ref_preparation','configuration','config_lock','ignore','ignore_lock',...(evidence?.directory_modes===undefined?[]:['directory_modes']),...(evidence?.immutable_metadata_sha256===undefined?[]:['immutable_metadata_sha256'])])||evidence.protocol!==2)throw Error();
+  if(!shape(evidence,['protocol','preparation','ref_preparation','configuration','config_lock','ignore','ignore_lock',...(evidence?.directory_modes===undefined?[]:['directory_modes']),...(evidence?.immutable_metadata_sha256===undefined?[]:['immutable_metadata_sha256']),...(evidence?.file_groups===undefined?[]:['file_groups'])])||evidence.protocol!==2)throw Error();
   if(evidence.immutable_metadata_sha256!==undefined&&(typeof evidence.immutable_metadata_sha256!=='string'||!/^[a-f0-9]{64}$/.test(evidence.immutable_metadata_sha256)))throw Error();
   if(evidence.directory_modes!==undefined){
    if(!Array.isArray(evidence.directory_modes)||evidence.directory_modes.length!==initializationDirectories.length)throw Error();
@@ -99,6 +99,13 @@ export function gitReinitializationEvidence(value:unknown):GitReinitializationEv
   }
   const preparation=gitReinitializationPreparation(evidence.preparation),{witness}=preparation.plan,{existing}=witness;
   const {configuration,config_lock:lock,ignore,ignore_lock:ignoreLock}=evidence;
+  if(evidence.file_groups!==undefined){
+   const group=(value:unknown)=>typeof value==='string'&&/^[0-9]+$/.test(value)&&Number.isSafeInteger(Number(value))&&String(Number(value))===value;
+   if(!shape(evidence.file_groups,['configuration','ignore'])||!group(evidence.file_groups.configuration)
+    ||(witness.ignore_after.changed?!group(evidence.file_groups.ignore):evidence.file_groups.ignore!==null))throw Error();
+   const mode=evidence.directory_modes?.[0]?.mode;
+   if(mode===undefined||evidence.file_groups.configuration!==((mode&0o2000)?existing.layout!.common.gid:preparation.allocation.gid))throw Error();
+  }
   if(!shape(configuration,['filemode','file'])||typeof configuration.filemode!=='boolean'||!isGitInitializationFile(configuration.file)
    ||configuration.file.size<1||configuration.file.sha256!==(configuration.filemode?existing.configuration!.filemode_true_sha256:existing.configuration!.filemode_false_sha256)
    ||!isGitInitializationFile(lock)||lock.sha256!==hash('')||lock.size!==0)throw Error();
