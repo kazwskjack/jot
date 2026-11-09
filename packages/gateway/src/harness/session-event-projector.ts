@@ -50,10 +50,14 @@ function safeId(value: unknown, fallback: string): string {
 
 export {safeId as sessionProjectionId}
 
-function presentation(nameValue: unknown): ToolPresentation {
+function presentation(nameValue: unknown, priorBrowse = false): ToolPresentation {
   const name = String(nameValue ?? '').toLowerCase()
   if (/(search|research|query)/.test(name)) return {
     kind: 'search', runningTitle: '正在搜索资料', completedTitle: '资料搜索完成', failedTitle: '资料搜索失败',
+  }
+  const fileRead = /(?:^|[._-])(?:read(?:_(?:text|binary))?_file|file_read)(?:$|[._-])/.test(name)
+  if (fileRead && !priorBrowse) return {
+    kind: 'file_read', runningTitle: '正在读取文件', completedTitle: '文件读取完成', failedTitle: '文件读取失败',
   }
   if (/(read|fetch|browse|scrape|crawl|web|url|navigate|click)/.test(name)) return {
     kind: 'browse', runningTitle: '正在读取网页', completedTitle: '网页读取完成', failedTitle: '网页读取失败',
@@ -88,7 +92,8 @@ export function projectNativeToolEvent(event: Record<string, unknown>, context: 
   const detail = record(priorCall?.detail)
   const knownTools = new Map<string, ToolPresentation>()
   if (callId && detail && typeof priorCall?.started_at === 'string') {
-    const tool = presentation(detail.tool_name)
+    // Persisted calls keep their original validated projection vocabulary.
+    const tool = presentation(detail.tool_name, priorCall.kind === 'browse')
     if (tool.kind !== priorCall.kind) throw Error('native_activity_call_source_invalid')
     tool.publicDetail = { ...detail }
     tool.startedAt = priorCall.started_at
