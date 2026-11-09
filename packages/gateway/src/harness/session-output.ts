@@ -25,27 +25,7 @@ export function assistantBlocks(event: Record<string, unknown>): Array<{ kind: '
   })
 }
 
-export function collectArtifactRefs(value: unknown, output: Set<string>): void {
-  if (typeof value === 'string') {
-    const text = value.trim()
-    if (!text || (!text.startsWith('{') && !text.startsWith('['))) return
-    try { collectArtifactRefs(JSON.parse(text), output) } catch { /* Tool prose is not a structured artifact declaration. */ }
-    return
-  }
-  if (Array.isArray(value)) { for (const item of value) collectArtifactRefs(item, output); return }
-  const valueRow = row(value)
-  if (!valueRow) return
-  const completedJob = valueRow.status === 'completed'
-    && Number.isInteger(Number(valueRow.output_version)) && Number(valueRow.output_version) > 0
-  const immutableReceipt = Number.isInteger(Number(valueRow.version)) && Number(valueRow.version) > 0
-    && typeof valueRow.sha256 === 'string' && typeof valueRow.media_type === 'string'
-    && Number.isFinite(Number(valueRow.size_bytes)) && Number(valueRow.size_bytes) >= 0
-  if ((completedJob || immutableReceipt) && typeof valueRow.artifact_ref === 'string'
-    && /^artifact-[A-Za-z0-9-]+$/.test(valueRow.artifact_ref)) {
-    output.add(valueRow.artifact_ref)
-  }
-  for (const child of Object.values(valueRow)) collectArtifactRefs(child, output)
-}
+export {collectArtifactRefs} from './native-tool-result.js'
 
 export function presentedFiles(event: Record<string, unknown>): Array<{ path: string; description?: string }> {
   if (event.type !== 'deliverables/presented') return []

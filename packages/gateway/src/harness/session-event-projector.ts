@@ -1,4 +1,4 @@
-import {publicNativeToolResult,publicNativeToolCall,sessionToolCallId,type PublicNativeToolResult,type PublicNativeToolCall} from './native-tool-result.js'
+import {publicNativeToolResult,publicNativeToolCall,sessionToolCallId,type PublicNativeToolResult,type PublicNativeToolCall,type NativeArtifactReceipt} from './native-tool-result.js'
 import {createHash} from 'node:crypto'
 import {
   safeWebOperationCounts, safeWebOperationId, safeWebOperationItems, safeWebOperationUrl,
@@ -8,6 +8,7 @@ import {
 export {sessionToolCallId} from './native-tool-result.js'
 
 export interface JotProjection {
+  artifactReceipts?: NativeArtifactReceipt[]
   type: 'assistant.delta' | 'assistant.settled' | 'activity.upsert'
   payload: Record<string, unknown>
 }
@@ -161,7 +162,7 @@ function toolActivity(data: Record<string, unknown>, context: ProjectionContext,
   const defaultStatus = completed ? (failed ? 'failed' : 'succeeded') : 'running'
   const status = completed && tool.publicStatus ? tool.publicStatus : defaultStatus
   const defaultTitle = completed ? (failed ? tool.failedTitle : tool.completedTitle) : tool.runningTitle
-  return { type: 'activity.upsert', payload: {
+  return { type: 'activity.upsert', ...(result?.artifact_receipts?.length ? {artifactReceipts:result.artifact_receipts} : {}), payload: {
     activity_id: callId,
     run_id: context.runId,
     tool_call_id: callId,

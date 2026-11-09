@@ -118,15 +118,34 @@ export function publicNativeToolResult(data, includeBrowse = true) {
   const message = record(data?.message)
   const resultBlock = Array.isArray(message?.content)
     ? message.content.find(block => record(block)?.type === 'tool-result') : undefined
+  const receipts = new Map()
+  collectArtifactRefs(data, undefined, receipts)
+  const artifacts = [...receipts.values()].sort((left, right) =>
+    left.artifact_id < right.artifact_id ? -1 : left.artifact_id > right.artifact_id ? 1 : left.version - right.version
+      || (left.sha256 < right.sha256 ? -1 : left.sha256 > right.sha256 ? 1 : 0))
   return { failed: Boolean(data?.error || resultBlock?.isError || structuredToolFailure(data, resultBlock)),
-    evidence: includeBrowse ? browseResultEvidence(data, resultBlock) : null }
+    evidence: includeBrowse ? browseResultEvidence(data, resultBlock) : null,
+    ...(artifacts.length ? {artifact_receipts: artifacts} : {}) }
 }
 
-/** Strict public vocabulary also bounds authenticated observation input. */
+/** Strict public vocabulary for authenticated result observations. */
 export function parsePublicNativeToolResult(value) {
   const result = record(value)
-  if (!result || Object.keys(result).sort().join(',') !== 'evidence,failed' || typeof result.failed !== 'boolean') {
+  if (!result || Object.keys(result).sort().join(',') !== (result.artifact_receipts === undefined ? 'evidence,failed' : 'artifact_receipts,evidence,failed') || typeof result.failed !== 'boolean') {
     throw Error('native_activity_public_result_invalid')
+  }
+  if (result.artifact_receipts !== undefined) {
+    if (!Array.isArray(result.artifact_receipts)) throw Error('native_activity_public_result_invalid')
+    const seen = new Set()
+    for (const receipt of result.artifact_receipts) {
+      if (!record(receipt) || Object.keys(receipt).sort().join(',') !== 'artifact_id,sha256,version'
+        || typeof receipt.artifact_id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/.test(receipt.artifact_id)
+        || !Number.isSafeInteger(receipt.version) || receipt.version < 1
+        || typeof receipt.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(receipt.sha256)) throw Error('native_activity_public_result_invalid')
+      const key = JSON.stringify([receipt.artifact_id, receipt.version, receipt.sha256])
+      if (seen.has(key)) throw Error('native_activity_public_result_invalid')
+      seen.add(key)
+    }
   }
   const evidence = result.evidence
   if (evidence === null) return result
@@ -256,3 +275,35 @@ export function nativeToolCallObservation(event) {
   return {event: {type: event.type, seq: event.seq, time: event.time, data: {callId: sessionToolCallId(data), name}},
     public_call: publicNativeToolCall(data)}
 }
+
+export function collectArtifactRefs(value, output, receipts) {
+  if (typeof value === 'string') {
+    const text = value.trim()
+    if (!text || (!text.startsWith('{') && !text.startsWith('['))) return
+    try { collectArtifactRefs(JSON.parse(text), output, receipts) } catch { /* Tool prose is not a structured artifact declaration. */ }
+    return
+  }
+  if (Array.isArray(value)) { for (const item of value) collectArtifactRefs(item, output, receipts); return }
+  const valueRow = record(value)
+  if (!valueRow) return
+  const completedJob = valueRow.status === 'completed'
+    && Number.isInteger(Number(valueRow.output_version)) && Number(valueRow.output_version) > 0
+  const immutableReceipt = Number.isInteger(Number(valueRow.version)) && Number(valueRow.version) > 0
+    && typeof valueRow.sha256 === 'string' && typeof valueRow.media_type === 'string'
+    && Number.isFinite(Number(valueRow.size_bytes)) && Number(valueRow.size_bytes) >= 0
+  if ((completedJob || immutableReceipt) && typeof valueRow.artifact_ref === 'string'
+    && /^artifact-[A-Za-z0-9-]+$/.test(valueRow.artifact_ref)) {
+    output?.add(valueRow.artifact_ref)
+  }
+  if (receipts) {
+    const artifactId = valueRow.artifact_ref ?? valueRow.artifact_id, version = Number(valueRow.version);
+    const sha256 = valueRow.sha256;
+    if (typeof artifactId === 'string' && /^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/.test(artifactId)
+      && (typeof valueRow.version === 'number' || typeof valueRow.version === 'string')
+      && Number.isSafeInteger(version) && version > 0 && typeof sha256 === 'string' && /^[a-f0-9]{64}$/.test(sha256)) {
+      receipts.set(JSON.stringify([artifactId, version, sha256]), {artifact_id: artifactId, version, sha256});
+    }
+  }
+  for (const child of Object.values(valueRow)) collectArtifactRefs(child, output, receipts)
+}
+

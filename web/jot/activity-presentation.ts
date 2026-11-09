@@ -66,6 +66,7 @@ export function activityDetailRows(activity:ToolActivity):Array<{label:string;va
    for(const error of activity.detail.errors??[])add(`失败条目 ${error.input_index+1}`,[error.error_code,error.url]);
    break;
  }
+ if(detail.result_artifacts?.length)add('结果引用文件',detail.result_artifacts.map(artifact=>`${artifact.artifact_id} · 版本 ${artifact.version} · ${artifact.sha256}`));
  add('开始时间',activity.started_at);add('结束时间',activity.ended_at);add('错误编号',activity.error_code);
  add('父步骤',activity.parent_activity_id);add('步骤编号',activity.activity_id);add('工具调用',activity.tool_call_id);add('尝试编号',activity.attempt_id);
  return rows;
@@ -100,6 +101,9 @@ export function activityArtifactTargets(activity:ToolActivity):ActivityArtifactT
  }
  if(activity.kind==='command'&&activity.detail.output_artifact_id)targets.push({kind:'file',artifactId:activity.detail.output_artifact_id,label:'查看命令输出'});
  if(activity.kind==='browse'&&activity.detail.screenshot_artifact_id)targets.push({kind:'file',artifactId:activity.detail.screenshot_artifact_id,label:'查看截图'});
+ for(const [index,artifact] of (activity.detail.result_artifacts??[]).entries()){
+  targets.push({kind:'file',artifactId:artifact.artifact_id,version:artifact.version,sha256:artifact.sha256,label:`查看结果引用文件 ${index+1}`});
+ }
  return targets;
 }
 

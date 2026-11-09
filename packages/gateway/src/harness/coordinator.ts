@@ -1,3 +1,4 @@
+import {bindToolArtifactReceipts} from './tool-artifact-receipts.ts';
 import {bindNativeDelegationActivity} from '../workbench/native-delegation-activity.ts';
 import {hostSettingsAdmissionIsClosed} from '../host-admin/settings-admission-fence.ts';
 import type { DatabaseSync } from 'node:sqlite';
@@ -256,7 +257,8 @@ export class HarnessCoordinator {
     withImmediateTransaction(this.db, () => {
       this.assertLease(lease);
       const payload=projection.type==='activity.upsert'
-        ?bindNativeDelegationActivity(this.db,lease.conversation_id,lease.run_id,projection.payload):projection.payload;
+        ?bindToolArtifactReceipts(this.db,lease.conversation_id,lease.run_id,
+          bindNativeDelegationActivity(this.db,lease.conversation_id,lease.run_id,projection.payload),projection.artifactReceipts):projection.payload;
       this.events.append(lease.conversation_id, lease.run_id, projection.type, payload);
     });
   }

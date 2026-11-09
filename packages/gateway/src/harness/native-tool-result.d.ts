@@ -1,4 +1,7 @@
+export type NativeArtifactReceipt=import('../../contracts/types.js').ActivityResultArtifact;
+export function collectArtifactRefs(value: unknown, output?: Set<string>, receipts?: Map<string,NativeArtifactReceipt>): void;
 export interface PublicNativeToolResult {
+  artifact_receipts?: NativeArtifactReceipt[];
   failed: boolean;
   evidence: null | {
     browse_outcome: 'success' | 'pause' | 'failure' | 'unknown';

@@ -11,7 +11,7 @@ async function sendNativeChildActivity({binding,event,bridge,metadata,signal}){
  const encoded=format?json(observation):undefined;
  const transportSha=format?createHash('sha256').update(encoded).digest('hex'):sha;
  let receipt;
- if(call&&encoded.length>65_536){
+ if(format&&encoded.length>65_536){
   const count=Math.ceil(encoded.length/65_536);
   for(let index=0;index<count;index++){
    signal?.throwIfAborted();
@@ -19,7 +19,7 @@ async function sendNativeChildActivity({binding,event,bridge,metadata,signal}){
    const chunkSha=createHash('sha256').update(json(chunk)).digest('hex');
    receipt=await bridge.request('native-child-activities',binding,{...metadata,
     action:metadata.action==='live-append'?'live-append-chunk':'append-chunk',
-    event_seq:event.seq,source_event_sha256:sha,event_sha256:transportSha,
+    observation_format:format,event_seq:event.seq,source_event_sha256:sha,event_sha256:transportSha,
     chunk_index:index,chunk_count:count,chunk_data:chunk,chunk_sha256:chunkSha},signal);
    if(receipt?.accepted===true)break;
    if(!receipt||receipt.accepted!==false||receipt.staged!==true||receipt.execution_authorized!==false

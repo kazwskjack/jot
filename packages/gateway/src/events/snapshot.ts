@@ -91,7 +91,7 @@ export function buildSnapshot(db: DatabaseSync, conversationId: string, ownerId:
         return { artifact_id: row.id, conversation_id: row.conversation_id,
           ...(row.artifact_run_id ? { run_id: row.artifact_run_id } : {}), file_name: metadata.file_name || row.id,
           media_type: row.mime_type, size_bytes: Number(row.size_bytes), sha256: row.sha256,
-          version: Number(row.version), status: metadata.status || 'ready', created_at: row.created_at,
+          version: Number(row.version), status: metadata.status==='delivered'?'ready':metadata.status || 'ready', created_at: row.created_at,
           preview_kind: metadata.preview_kind || (String(row.mime_type).startsWith('image/') ? 'image' : 'unsupported'),
           origin, local_state: row.local_state || 'present', backup_status: row.backup_status || 'pending',
           ...(row.remote_path ? { remote_path: row.remote_path } : {}), restorable: Boolean(row.remote_path) }

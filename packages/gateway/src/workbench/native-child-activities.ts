@@ -1,3 +1,4 @@
+import {bindToolArtifactReceipts} from '../harness/tool-artifact-receipts.ts';
 import {createHash} from 'node:crypto';
 import {constants as bufferConstants} from 'node:buffer';
 import type {DatabaseSync} from 'node:sqlite';
@@ -67,11 +68,12 @@ export class NativeChildActivities {
  liveSource(owner:string,runId:string,sessionRef:string,input:Input){
   return withReadTransaction(this.db,()=>this.liveSourceInside(owner,runId,sessionRef,input));
  }
- /** Stage bounded public-call frames, then publish through the original receipt transaction. */
+ /** Stage bounded public observations, then publish through the original receipt transaction. */
  appendChunk(owner:string,runId:string,sessionRef:string,input:Input){
+  const format=input.observation_format===undefined?'public-call-v1':input.observation_format;
   const seq=input.event_seq,index=input.chunk_index,count=input.chunk_count,data=input.chunk_data;
   const sourceSha=input.source_event_sha256,transportSha=input.event_sha256,chunkSha=input.chunk_sha256;
-  if(!Number.isSafeInteger(seq)||Number(seq)<0||!Number.isSafeInteger(index)||Number(index)<0
+  if(typeof format!=='string'||!['public-call-v1','public-result-v1'].includes(format)||!Number.isSafeInteger(seq)||Number(seq)<0||!Number.isSafeInteger(index)||Number(index)<0
    ||!Number.isSafeInteger(count)||Number(count)<1||Number(count)>Math.ceil(bufferConstants.MAX_STRING_LENGTH/65_536)
    ||Number(index)>=Number(count)||typeof data!=='string'||data.length<1||data.length>65_536
    ||Number(index)<Number(count)-1&&data.length!==65_536
@@ -86,14 +88,16 @@ export class NativeChildActivities {
    }else if(!('log_sha256' in source)||input.source_log_sha256!==source.log_sha256||Number(seq)>=source.source_end){
     throw Error('native_activity_source_changed');
    }
-   const prior=this.db.prepare('SELECT source_sha256,projection_json FROM wb_native_activity_receipts WHERE run_id=? AND source_seq=?')
-    .get(runId,Number(seq)) as {source_sha256:string;projection_json:string|null}|undefined;
+   const prior=this.db.prepare('SELECT source_sha256,projection_json,event_type FROM wb_native_activity_receipts WHERE run_id=? AND source_seq=?')
+    .get(runId,Number(seq)) as {source_sha256:string;projection_json:string|null;event_type:string}|undefined;
    if(prior){
-    if(prior.source_sha256!==sourceSha)throw Error('native_activity_receipt_conflict');
+    if(prior.source_sha256!==sourceSha||prior.event_type!==(format==='public-call-v1'?'tool/call':'tool/result'))throw Error('native_activity_receipt_conflict');
+   }
+   if(prior&&(format==='public-call-v1'||live)){
     this.db.prepare('DELETE FROM wb_native_activity_chunks WHERE run_id=? AND source_seq=?').run(runId,Number(seq));
     return this.receipt(runId,sessionRef,Number(seq),sourceSha,prior.projection_json);
    }
-   if(source.complete||source.last_event_seq!==null&&Number(seq)<=source.last_event_seq)throw Error('native_activity_event_order');
+   if(!prior&&(source.complete||source.last_event_seq!==null&&Number(seq)<=source.last_event_seq))throw Error('native_activity_event_order');
    const identity=this.db.prepare('SELECT source_sha256 FROM wb_native_activity_chunks WHERE run_id=? AND source_seq=? LIMIT 1')
     .get(runId,Number(seq)) as {source_sha256:string}|undefined;
    if(identity&&identity.source_sha256!==sourceSha)throw Error('native_activity_receipt_conflict');
@@ -131,9 +135,9 @@ export class NativeChildActivities {
    const observation=JSON.parse(encoded) as Input;
    const event=observation?.event as Input|undefined;
    if(!observation||typeof observation!=='object'||Array.isArray(observation)
-    ||Object.keys(observation).sort().join(',')!=='event,public_call'||event?.seq!==seq)throw Error('native_activity_chunk_invalid');
+    ||Object.keys(observation).sort().join(',')!==(format==='public-call-v1'?'event,public_call':'event,public_result')||event?.seq!==seq)throw Error('native_activity_chunk_invalid');
    const receipt=this.append(owner,runId,sessionRef,{...input,action:live?'live-append':'append',
-    event_format:'public-call-v1',event,public_call:observation.public_call});
+    event_format:format,event,...(format==='public-call-v1'?{public_call:observation.public_call}:{public_result:observation.public_result})});
    return receipt;
   });
  }
@@ -201,7 +205,8 @@ export class NativeChildActivities {
    const callProjection=call?JSON.parse(call.projection_json):undefined;
    const projection=projectNativeToolEvent(event,context,callProjection,publicResult,publicCall);
    if(!projection||projection.type!=='activity.upsert')throw Error('native_activity_event_invalid');
-   let observed=event.type==='tool/result'?this.settledWebProjection(runId,sessionRef,callId,context,projection.payload):projection.payload;
+   const linked=bindToolArtifactReceipts(this.db,source.conversation_id,runId,projection.payload,projection.artifactReceipts);
+   let observed=event.type==='tool/result'?this.settledWebProjection(runId,sessionRef,callId,context,linked):linked;
    if(live&&event.type==='tool/result'&&callProjection?.native_batch_web&&observed.status!=='failed'){
     observed={...observed,status:'unknown',title:'网页任务结果待核对'};
     delete observed.ended_at;
@@ -238,7 +243,9 @@ export class NativeChildActivities {
   const snapshot=projectWebOperationSnapshot(callId,operation.tool_name,{...operation,
    kind:String(operation.tool_name).replace(/^universe_/,''),counts},{...context,at:settled.created_at});
   if(!snapshot)throw Error('native_activity_web_source_invalid');
-  return {...snapshot.payload,tool_call_id:payload.tool_call_id,started_at:payload.started_at};
+  return {...snapshot.payload,tool_call_id:payload.tool_call_id,started_at:payload.started_at,
+   ...(payload.detail&&typeof payload.detail==='object'&&!Array.isArray(payload.detail)&&'result_artifacts' in payload.detail
+    ?{detail:{...(snapshot.payload.detail as Input),result_artifacts:payload.detail.result_artifacts}}:{})};
  }
  private liveSourceInside(owner:string,runId:string,sessionRef:string,input:Input){
   if(input.run_id!==runId||input.session_ref!==sessionRef)throw Error('workbench_identity_forbidden');

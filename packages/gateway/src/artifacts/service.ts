@@ -1073,7 +1073,7 @@ export class ArtifactService {
     return { artifact_id: id, conversation_id: row.conversation_id, file_name: meta.file_name,
       ...(typeof meta.relative_path==='string'?{relative_path:meta.relative_path}:{}),
       media_type: row.mime_type, size_bytes: Number(row.size_bytes), sha256: row.sha256,
-      version: Number(row.version), status: meta.status, created_at: row.created_at,
+      version: Number(row.version), status: meta.status==='delivered'?'ready':meta.status, created_at: row.created_at,
       preview_kind: meta.preview_kind, origin: meta.origin,
       local_state: archive?.local_state ?? 'present', backup_status: archive?.backup_status ?? 'pending',
       ...(archive?.remote_path ? { remote_path: archive.remote_path } : {}),

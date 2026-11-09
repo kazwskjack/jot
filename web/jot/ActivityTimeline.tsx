@@ -16,6 +16,7 @@ function ActivityGroup({group,run,onSelectRun,availableRuns,reveal,onOpenMember,
  const failed=group.rows.filter(row=>activityDisplayStatus(row.activity,run)==='failed').length;
  const unconfirmed=group.rows.filter(row=>activityDisplayStatus(row.activity,run)==='unknown').length;
  const [open,setOpen]=useState(active>0),[expanded,setExpanded]=useState<Record<string,boolean>>({}),[page,setPage]=useState(0);
+ const [artifactPages,setArtifactPages]=useState(()=>new Map<string,number>());
  const expandedRef=useRef(expanded),appliedReveal=useRef('');
  expandedRef.current=expanded;
  useEffect(()=>{
@@ -40,6 +41,8 @@ function ActivityGroup({group,run,onSelectRun,availableRuns,reveal,onOpenMember,
   {open&&<>
    <ol start={currentPage*50+1}>{visible.slice(currentPage*50,currentPage*50+50).map(row=>{
     const activity=row.activity,status=activityDisplayStatus(activity,run),isExpanded=expanded[activity.activity_id]??running(activity,run);
+    const targets=isExpanded?activityArtifactTargets(activity):[],targetPageCount=Math.max(1,Math.ceil(targets.length/10));
+    const targetPage=Math.min(artifactPages.get(activity.activity_id)??0,targetPageCount-1);
     const child=activity.kind==='subagent'?activity.detail.child_run_id:undefined;
     const native=activity.kind==='subagent'&&activity.detail.native_request_id&&activity.detail.reservation_id
      &&activity.detail.child_conversation_id&&activity.detail.child_session_ref&&activity.detail.role_ref
@@ -54,7 +57,12 @@ function ActivityGroup({group,run,onSelectRun,availableRuns,reveal,onOpenMember,
      {isExpanded&&<>
       {status==='unknown'&&activity.status!=='unknown'&&<p role="status" data-chat-search-ignore>所属运行已结束，此步骤尚无终态回执。</p>}
       <dl>{activityDetailRows(activity).map((detail,index)=><React.Fragment key={index}><dt>{detail.label}</dt><dd>{detail.value}</dd></React.Fragment>)}</dl>
-      {activityArtifactTargets(activity).map(target=><button type="button" key={JSON.stringify(target)} data-chat-search-ignore onClick={()=>onOpenArtifact(activity,target)}>{target.label}</button>)}
+      {targets.slice(targetPage*10,targetPage*10+10).map(target=><button type="button" key={JSON.stringify(target)} data-chat-search-ignore onClick={()=>onOpenArtifact(activity,target)}>{target.label}</button>)}
+      {targetPageCount>1&&<nav aria-label="结果引用文件翻页" data-chat-search-ignore>
+       <button type="button" disabled={targetPage===0} onClick={()=>setArtifactPages(values=>new Map(values).set(activity.activity_id,targetPage-1))}>上一页文件</button>
+       <span>{targetPage+1} / {targetPageCount}</span>
+       <button type="button" disabled={targetPage+1===targetPageCount} onClick={()=>setArtifactPages(values=>new Map(values).set(activity.activity_id,targetPage+1))}>下一页文件</button>
+      </nav>}
       {native&&onOpenMember&&<button type="button" data-chat-search-ignore onClick={()=>onOpenMember(native)}>查看原成员执行步骤</button>}
       {child&&child!==activity.run_id&&availableRuns.has(child)&&<button type="button" data-chat-search-ignore onClick={()=>onSelectRun(child)}>查看子运行步骤</button>}
      </>}

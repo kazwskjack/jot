@@ -28590,6 +28590,12 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 50
+              },
+              "result_artifacts": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ActivityResultArtifact"
+                }
               }
             },
             "required": [
@@ -28909,6 +28915,12 @@
                     "fill"
                   ]
                 }
+              },
+              "result_artifacts": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ActivityResultArtifact"
+                }
               }
             },
             "required": [
@@ -29044,6 +29056,12 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "result_artifacts": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ActivityResultArtifact"
+                }
               }
             },
             "required": [
@@ -29146,6 +29164,12 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "result_artifacts": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ActivityResultArtifact"
+                }
               }
             },
             "required": [
@@ -29244,6 +29268,12 @@
                 "type": "array",
                 "items": {
                   "type": "string"
+                }
+              },
+              "result_artifacts": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ActivityResultArtifact"
                 }
               }
             },
@@ -29361,6 +29391,12 @@
               "reservation_id": {
                 "type": "string",
                 "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+              },
+              "result_artifacts": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ActivityResultArtifact"
+                }
               }
             },
             "required": [
@@ -29458,6 +29494,12 @@
               },
               "failed_count": {
                 "type": "integer"
+              },
+              "result_artifacts": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ActivityResultArtifact"
+                }
               }
             },
             "required": [
@@ -56548,6 +56590,29 @@
           "conversation_id",
           "items",
           "execution_authorized"
+        ]
+      },
+      "ActivityResultArtifact": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "artifact_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "version",
+          "sha256"
         ]
       }
     },
