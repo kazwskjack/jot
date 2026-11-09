@@ -350,3 +350,30 @@ This delivers storage preparation source. Branch admission, typed effect readers
 native creation/ref/HEAD/reflog publication and interrupted recovery remain in
 M15.14. Development used source review only. Maintenance commands, migrations,
 tests, builds and runtime acceptance have not been executed.
+
+## Original create-branch admission and read-only state
+
+The existing Git admission endpoint accepts an approved create-branch review on
+the explicit branch schema. The original immutable execution/admission tables
+retain owner, project, intent, request, review version/hash, source witness hash
+and repository binding. A branch receipt fixes its complete new ref, target OID
+and previous HEAD. Current review authority is required for a new admission.
+Historical reads retain exact approved original facts after review cancellation.
+
+The original status, inspection, history and control receipt contracts include
+branch pending and closed results. The workbench history checks exact branch
+facts and presents them as read-only. The original never-started confirmation
+can close only an admission with no reservation, producer or effect records.
+Existing branch admissions also participate in original pending-work exclusion.
+
+Branch effects still require native kernel work. Public dispatch and direct
+host execution reject create-branch before reservation, producer or lease start.
+A preparation, dispatch, ref-publication or outcome record outside the supported
+branch reader phase remains unavailable. Source review parsing is shared with
+journal-only readers and preserves its original hash encoding.
+
+The next increment must freeze configured reflog actor/time/log policy, connect
+original native custody and implement HEAD/ref/reflog publication plus recovery.
+Legacy reviews/admissions must remain readable and cancellable when richer
+execution metadata is introduced. Source review only, with no test/build/native
+or maintenance command execution in this increment.

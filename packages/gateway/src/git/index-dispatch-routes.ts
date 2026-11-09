@@ -15,6 +15,7 @@ export function registerIndexDispatchRoutes(app:FastifyInstance,options:Options)
    if(Object.keys(request.query as object).length)throw Error('git_execution_invalid');
    abort.signal.throwIfAborted();const before=executions.status(owner,project,id);
    if(!recovery){
+    if(before.execution.action==='create-branch')throw Error('git_branch_execution_unavailable');
     if(before.execution.state==='applied'&&before.workspace_state==='released_settled')return before;
     if(before.execution.state!=='pending'||before.producer.state!=='not_started'||before.control!==null)throw Error('git_index_reconciliation_required');
     if(!options.client)throw Error('git_index_dispatch_unavailable');
@@ -44,7 +45,7 @@ export function registerIndexDispatchRoutes(app:FastifyInstance,options:Options)
   }catch(error){
    const code=error instanceof Error?error.message:'',known:Record<string,number>={unauthorized:401,project_not_found:404,git_execution_not_found:404,git_admission_not_found:404,git_execution_control_not_found:404,
     git_execution_invalid:400,git_execution_control_invalid:400,idempotency_conflict:409,idempotency_in_progress:409,git_index_reconciliation_required:409,
-    git_repository_unconfigured:503,git_commit_execution_unavailable:503,git_index_dispatch_unavailable:503,git_index_dispatch_unconfirmed:503};
+    git_repository_unconfigured:503,git_commit_execution_unavailable:503,git_branch_execution_unavailable:503,git_branch_native_recovery_required:409,git_index_dispatch_unavailable:503,git_index_dispatch_unconfirmed:503};
    return reply.code(Object.hasOwn(known,code)?known[code]!:503).send({error:{code:Object.hasOwn(known,code)?code.toUpperCase():'GIT_INDEX_DISPATCH_UNAVAILABLE'}});
   }finally{request.raw.removeListener('aborted',cancel);reply.raw.removeListener('close',cancel)}
  };

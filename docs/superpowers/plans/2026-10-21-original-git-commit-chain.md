@@ -199,3 +199,20 @@ historical records. Existing apply-commit preserves an installed branch schema.
 This is partial M15.14 source development. Actual branch admission, native
 creation, HEAD/ref/reflog effects, recovery and UI remain required. Commands,
 migrations, tests, builds and runtime acceptance have not been executed.
+
+## P09 original branch admission and pending history
+
+Approved create-branch reviews now enter original protocol-6 execution and
+admission tables. Their typed receipts/status/history retain new branch ref/OID
+and original HEAD, exact original request/review/witness identity and configured
+binding. The original never-started confirmed control closes only records with
+no reservation, producer or effects. Existing pending-work exclusion applies.
+
+The workbench history reads and checks branch facts. Physical branch dispatch,
+host execution and generic index recovery remain guarded until typed branch
+native phases are implemented. Shared immutable review source readers preserve
+the original reviewed request/hash bytes. Branch admission requires explicit
+branch storage. This remains partial M15.14 development. Reflog actor/time/policy
+freezing, native custody, HEAD/ref/reflog effects and interruption recovery,
+creation UI, initialization and existing-branch operations remain required.
+No tests, builds, migrations or native/product commands were executed.

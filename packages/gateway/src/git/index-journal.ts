@@ -1,3 +1,5 @@
+import {branchExecutionFacts,branchClosedResult,readBranchPendingResult} from './branch-journal.ts';
+import {readGitCreateBranchExecutionSource} from './branch-records.ts';
 import {readCommitRecordedResult} from './commit-journal.ts';
 import {readCommitExecutionSource} from './commit-records.ts';
 import {createHash} from 'node:crypto';
@@ -8,7 +10,7 @@ import {readRecordedGitMutationIntent} from './intent-reads.ts';
 
 /** Original journal readers shared by execution and settlement. No constructor,
  * installer, lease, filesystem action, migration or new authority lives here. */
-export type Row={execution_id:string;owner_id:string;project_id:string;intent_id:string;request_id:string;request_sha256:string;review_version:number;review_sha256:string;action:'stage'|'unstage'|'commit';witness_sha256:string;repository_sha256:string;created_at:string;protocol:number;binding_sha256:string|null};
+export type Row={execution_id:string;owner_id:string;project_id:string;intent_id:string;request_id:string;request_sha256:string;review_version:number;review_sha256:string;action:'stage'|'unstage'|'commit'|'create-branch';witness_sha256:string;repository_sha256:string;created_at:string;protocol:number;binding_sha256:string|null};
 export type Dispatch={evidence_json:string;evidence_sha256:string};
 export type Outcome={receipt_json:string;receipt_sha256:string};
 export type Acceptance=GitIndexAcceptance;
@@ -24,25 +26,25 @@ const SHA=/^[a-f0-9]{64}$/;
 
 export function readIndexExecutionRow(db:DatabaseSync,owner:string,project:string,id:string):Row{if(!db.prepare('SELECT 1 FROM ga_projects WHERE id=? AND owner_id=?').get(project,owner))throw Error('project_not_found');return readIndexExecutionRecord(db,owner,project,id);}
 /** Original immutable record identity, not current-owner read/effect authority. */
-export function readIndexExecutionRecord(db:DatabaseSync,owner:string,project:string,id:string):Row{const row=db.prepare('SELECT * FROM wb_git_index_executions WHERE execution_id=? AND owner_id=? AND project_id=?').get(id,owner,project) as Row|undefined;if(!row)throw Error('git_execution_not_found');if(![1,2,3,4,5].includes(row.protocol)||!['stage','unstage','commit'].includes(row.action)||(row.action==='commit')!==(row.protocol===5)||row.protocol>=3&&(typeof row.binding_sha256!=='string'||!SHA.test(row.binding_sha256))||row.protocol<3&&row.binding_sha256!==null)throw Error('git_execution_evidence_corrupt');if(row.action==='commit')readCommitExecutionSource(db,row);return row;}
+export function readIndexExecutionRecord(db:DatabaseSync,owner:string,project:string,id:string):Row{const row=db.prepare('SELECT * FROM wb_git_index_executions WHERE execution_id=? AND owner_id=? AND project_id=?').get(id,owner,project) as Row|undefined;if(!row)throw Error('git_execution_not_found');if(![1,2,3,4,5,6].includes(row.protocol)||!['stage','unstage','commit','create-branch'].includes(row.action)||(row.action==='commit')!==(row.protocol===5)||(row.action==='create-branch')!==(row.protocol===6)||row.protocol>=3&&(typeof row.binding_sha256!=='string'||!SHA.test(row.binding_sha256))||row.protocol<3&&row.binding_sha256!==null)throw Error('git_execution_evidence_corrupt');if(row.action==='commit')readCommitExecutionSource(db,row);if(row.action==='create-branch')readGitCreateBranchExecutionSource(db,row);return row;}
 
 export function readIndexPreparation(db:DatabaseSync,row:Row):GitIndexPreparation|undefined{
   const record=db.prepare('SELECT * FROM wb_git_index_preparations WHERE execution_id=?').get(row.execution_id) as Dispatch|undefined;if(!record)return;
-  if(row.action==='commit')throw Error('git_execution_evidence_corrupt');const value=JSON.parse(record.evidence_json);if(digest(value)!==record.evidence_sha256)throw Error('git_execution_evidence_corrupt');const preparation=indexPreparation(value);validateIndexEvidence(db,row,preparation.evidence);return preparation;
+  if(row.action==='commit'||row.action==='create-branch')throw Error('git_execution_evidence_corrupt');const value=JSON.parse(record.evidence_json);if(digest(value)!==record.evidence_sha256)throw Error('git_execution_evidence_corrupt');const preparation=indexPreparation(value);validateIndexEvidence(db,row,preparation.evidence);return preparation;
  }
 
 export function validateIndexEvidence(db:DatabaseSync,row:Row,evidence:GitIndexEvidence){
-  if(row.action==='commit')throw Error('git_execution_evidence_corrupt');
+  if(row.action==='commit'||row.action==='create-branch')throw Error('git_execution_evidence_corrupt');
   const review=readRecordedGitMutationIntent(db,row.owner_id,row.project_id,row.intent_id);
   if(evidence.source_sha256!==row.witness_sha256||evidence.plan.repository_sha256!==row.repository_sha256||evidence.plan.action!==row.action||JSON.stringify(evidence.plan.paths)!==JSON.stringify(review.paths))throw Error('git_execution_evidence_corrupt');
  }
 
 export function readIndexDispatch(db:DatabaseSync,row:Row):GitIndexEvidence|undefined{
   const record=db.prepare('SELECT * FROM wb_git_index_dispatches WHERE execution_id=?').get(row.execution_id) as Dispatch|undefined;if(!record)return;
-  if(row.action==='commit')throw Error('git_execution_evidence_corrupt');const value=JSON.parse(record.evidence_json);if(digest(value)!==record.evidence_sha256)throw Error('git_execution_evidence_corrupt');const evidence=indexEvidence(value);validateIndexEvidence(db,row,evidence);if(row.protocol>=2&&JSON.stringify(readIndexPreparation(db,row)?.evidence)!==JSON.stringify(evidence))throw Error('git_execution_evidence_corrupt');return evidence;
+  if(row.action==='commit'||row.action==='create-branch')throw Error('git_execution_evidence_corrupt');const value=JSON.parse(record.evidence_json);if(digest(value)!==record.evidence_sha256)throw Error('git_execution_evidence_corrupt');const evidence=indexEvidence(value);validateIndexEvidence(db,row,evidence);if(row.protocol>=2&&JSON.stringify(readIndexPreparation(db,row)?.evidence)!==JSON.stringify(evidence))throw Error('git_execution_evidence_corrupt');return evidence;
  }
 
-export function indexAppliedResult(db:DatabaseSync,row:Row,evidence:GitIndexEvidence){if(row.action==='commit')throw Error('git_execution_evidence_corrupt');return{execution_id:row.execution_id,project_id:row.project_id,intent_id:row.intent_id,request_id:row.request_id,action:row.action,paths:[...evidence.plan.paths],state:'applied' as const,before_index_sha256:evidence.plan.before_index_sha256,index_sha256:evidence.plan.index_sha256,execution_authorized:false as const};}
+export function indexAppliedResult(db:DatabaseSync,row:Row,evidence:GitIndexEvidence){if(row.action==='commit'||row.action==='create-branch')throw Error('git_execution_evidence_corrupt');return{execution_id:row.execution_id,project_id:row.project_id,intent_id:row.intent_id,request_id:row.request_id,action:row.action,paths:[...evidence.plan.paths],state:'applied' as const,before_index_sha256:evidence.plan.before_index_sha256,index_sha256:evidence.plan.index_sha256,execution_authorized:false as const};}
 
 export function readIndexDisposition(db:DatabaseSync,row:Row):Disposition|undefined{
   const d=db.prepare('SELECT * FROM wb_git_index_dispositions WHERE execution_id=?').get(row.execution_id) as Disposition|undefined;if(!d)return;
@@ -52,13 +54,14 @@ export function readIndexDisposition(db:DatabaseSync,row:Row):Disposition|undefi
   if(digest(receipt)!==saved.receipt_sha256||!['verified','unverified','not_recorded','not_attempted'].includes(receipt.cleanup)||JSON.stringify(receipt)!==JSON.stringify(indexControlReceipt(db,control,indexClosedResult(db,row,d),receipt.cleanup)))throw Error('git_execution_outcome_corrupt');return d;
  }
 
-export function indexClosedResult(db:DatabaseSync,row:Row,d:Disposition):ClosedResult{const review=readRecordedGitMutationIntent(db,row.owner_id,row.project_id,row.intent_id);if(row.action==='commit'){const {metadata}=readCommitExecutionSource(db,row);return{execution_id:row.execution_id,project_id:row.project_id,intent_id:row.intent_id,request_id:row.request_id,action:'commit',paths:review.paths,target_ref:metadata.target_ref,expected_old_oid:metadata.parent_oid,state:d.kind,disposition_id:d.control_id,execution_authorized:false};}return{execution_id:row.execution_id,project_id:row.project_id,intent_id:row.intent_id,request_id:row.request_id,action:row.action,paths:review.paths,state:d.kind,disposition_id:d.control_id,execution_authorized:false};}
+export function indexClosedResult(db:DatabaseSync,row:Row,d:Disposition):ClosedResult{if(row.action==='create-branch')return branchClosedResult(db,row,d);const review=readRecordedGitMutationIntent(db,row.owner_id,row.project_id,row.intent_id);if(row.action==='commit'){const {metadata}=readCommitExecutionSource(db,row);return{execution_id:row.execution_id,project_id:row.project_id,intent_id:row.intent_id,request_id:row.request_id,action:'commit',paths:review.paths,target_ref:metadata.target_ref,expected_old_oid:metadata.parent_oid,state:d.kind,disposition_id:d.control_id,execution_authorized:false};}return{execution_id:row.execution_id,project_id:row.project_id,intent_id:row.intent_id,request_id:row.request_id,action:row.action,paths:review.paths,state:d.kind,disposition_id:d.control_id,execution_authorized:false};}
 
 export function readIndexExecutionResult(db:DatabaseSync,owner:string,project:string,id:string):ExecutionResult{return readIndexRecordedResult(db,readIndexExecutionRow(db,owner,project,id));}
 
 /** Shared original result validation on an already selected immutable record.
  * No current-owner capability is created by inspecting historical drain facts. */
 export function readIndexRecordedResult(db:DatabaseSync,row:Row):ExecutionResult{
+  if(row.action==='create-branch'){const pending=readBranchPendingResult(db,row),disposition=readIndexDisposition(db,row);return disposition?branchClosedResult(db,row,disposition):pending;}
   if(row.action==='commit'){
    const result=readCommitRecordedResult(db,row),disposition=readIndexDisposition(db,row);
    if(disposition&&result.state==='applied')throw Error('git_execution_outcome_corrupt');
@@ -72,7 +75,7 @@ export function readIndexRecordedResult(db:DatabaseSync,row:Row):ExecutionResult
   return{execution_id:row.execution_id,project_id:row.project_id,intent_id:row.intent_id,request_id:row.request_id,action:row.action,paths:review.paths,state:evidence||readIndexPreparation(db,row)||row.protocol===1?'unknown' as const:'pending' as const,execution_authorized:false as const};
  }
 
-export function indexAcceptance(db:DatabaseSync,row:Row):Acceptance{if(row.action==='commit'){const {metadata}=readCommitExecutionSource(db,row);return{execution_id:row.execution_id,project_id:row.project_id,intent_id:row.intent_id,request_id:row.request_id,action:'commit',target_ref:metadata.target_ref,expected_old_oid:metadata.parent_oid,accepted:true,execution_authorized:false};}return{execution_id:row.execution_id,project_id:row.project_id,intent_id:row.intent_id,request_id:row.request_id,action:row.action,accepted:true,execution_authorized:false};}
+export function indexAcceptance(db:DatabaseSync,row:Row):Acceptance{if(row.action==='create-branch')return{execution_id:row.execution_id,project_id:row.project_id,intent_id:row.intent_id,request_id:row.request_id,...branchExecutionFacts(db,row),accepted:true,execution_authorized:false};if(row.action==='commit'){const {metadata}=readCommitExecutionSource(db,row);return{execution_id:row.execution_id,project_id:row.project_id,intent_id:row.intent_id,request_id:row.request_id,action:'commit',target_ref:metadata.target_ref,expected_old_oid:metadata.parent_oid,accepted:true,execution_authorized:false};}return{execution_id:row.execution_id,project_id:row.project_id,intent_id:row.intent_id,request_id:row.request_id,action:row.action,accepted:true,execution_authorized:false};}
 
 export function readIndexAdmission(db:DatabaseSync,row:Row):Acceptance{
   const saved=db.prepare('SELECT * FROM wb_git_index_admissions WHERE execution_id=?').get(row.execution_id) as Outcome|undefined;if(!saved)throw Error('git_admission_not_found');const value=JSON.parse(saved.receipt_json);
