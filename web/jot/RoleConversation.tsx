@@ -45,7 +45,7 @@ import type {Artifact,Run,Capabilities,Preview,Conversation,ModelSelection,Messa
 const active=(run:Run)=>['queued','starting','running','waiting_user','waiting_approval','cancelling'].includes(run.status);
 type ConversationProps={ordinary?:boolean;id:string;onClose:()=>void;onTaskSource?:(source:TaskSourceSelection)=>void;onForkConversation?:(conversationId:string,receipt:unknown)=>void};
 export default function RoleConversation(props:ConversationProps){
- return <ConversationContent key={`${props.id}:${Boolean(props.ordinary)}`} {...props}/>;
+ return <ConversationContent key={`${taskDraftScope()}:${props.id}:${Boolean(props.ordinary)}`} {...props}/>;
 }
 type NativeMemberActionState='submitting'|'pending'|'unknown'|'accepted'|'superseded'|'resolved';
 type NativeMemberAction={runId:string;requestId:string;operation:'interrupt'|'wake';member:NativeMember;state:NativeMemberActionState};
@@ -141,6 +141,7 @@ function ConversationMessageBody({message}:{message:Message}){
   {message.blocks.filter(block=>block.kind==='text').map(block=><TwemojiMarkdown key={block.block_id}>{block.text}</TwemojiMarkdown>)}
  </div>;
 }
+type ComposerDraft={text:string;replyQuotes:AssistantReplyQuote[];textReferences:FileTextReference[];goalMode:boolean};
 function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinary=false}:ConversationProps){
  const [,render]=useState(0),[draft,setDraft]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false),[expanded,setExpanded]=useState<Record<string,boolean>>({}),[maxBytes,setMaxBytes]=useState<number>(),[preview,setPreview]=useState<{name:string;text?:string;url?:string;unsupported?:boolean;truncated?:boolean;loading?:boolean}>(),[forkStates,setForkStates]=useState<Record<string,{state:string;retryable:boolean;error:string}>>({});
  const [voice,setVoice]=useState<Capabilities['voice']>(),[voiceBusy,setVoiceBusy]=useState(false),draftRef=useRef(draft),conversationRegion=useRef<HTMLElement>(null),previewRequest=useRef<AbortController|undefined>(undefined);
@@ -173,22 +174,42 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  const appendTranscript=useCallback((text:string)=>editDraft(appendVoiceText(draftRef.current,text)),[editDraft]);
  const [models,setModels]=useState<Capabilities['models']>([]),[conversation,setConversation]=useState<Conversation>(),fileInput=useRef<HTMLInputElement>(null),folderInput=useRef<HTMLInputElement>(null);
  const controller=useMemo(()=>new RoleChatController(id,{request,follow,snapshot:async(conversationId:string,signal?:AbortSignal)=>{const value=await snapshot(conversationId,signal);if(!signal?.aborted)rememberConversation(value.conversation);return value;}},()=>render(n=>n+1),{recoveryRequired:true,currentScope:taskDraftScope}),[id,rememberConversation,fileOwner]);
- const messageLocked=controller.pendingMessage||controller.recoveryBlocked;
+ const [draftRecoveryVersion,setDraftRecoveryVersion]=useState(-1),[draftRecoveryController,setDraftRecoveryController]=useState<RoleChatController>();
+ const [draftBackupState,setDraftBackupState]=useState<{owner:string;conversationId:string;value:ComposerDraft}>();
+ const draftBackup=draftBackupState?.owner===fileOwner&&draftBackupState.conversationId===id?draftBackupState.value:undefined;
+ const setDraftBackup=(value:ComposerDraft|undefined)=>setDraftBackupState(value?{owner:fileOwner,conversationId:id,value}:undefined);
+ const messageLocked=controller.pendingMessage||controller.recoveryBlocked||!!draftBackup;
  const [messageRecoveryRevision,setMessageRecoveryRevision]=useState(0),[messageRecoveryError,setMessageRecoveryError]=useState('');
  const [goalMode,setGoalMode]=useState(false),[goalPending,setGoalPending]=useState(false);
  const [recoveryRunId,setRecoveryRunId]=useState('');
  useEffect(()=>{setGoalMode(false);},[id,ordinary]);
+ const composerDraft:ComposerDraft={text:draft,replyQuotes,textReferences:fileReferences.filter((value):value is FileTextReference=>!isFileRegion(value)),goalMode};
+ const draftSnapshot=JSON.stringify(composerDraft);
+ const applyComposerDraft=(value:ComposerDraft)=>{
+  draftRef.current=value.text;setDraft(value.text);setReplyQuotes(value.replyQuotes);setGoalMode(value.goalMode);
+  setFileReferenceState(previous=>({owner:fileOwner,conversationId:id,values:[...value.textReferences,...(previous.owner===fileOwner&&previous.conversationId===id?previous.values.filter(isFileRegion):[])]}));
+  setDraftRecoveryController(controller);setDraftRecoveryVersion(controller.draftGeneration);
+ };
+ useEffect(()=>{
+  if(draftRecoveryController!==controller||draftRecoveryVersion!==controller.draftGeneration||controller.recoveryBlocked||controller.pendingMessage||controller.sending||draftBackup)return;
+  void controller.saveDraft(JSON.parse(draftSnapshot)).catch(reason=>setError(reason instanceof Error?reason.message:'草稿暂时无法保存'));
+ },[controller,draftSnapshot,draftRecoveryController,draftRecoveryVersion,controller.draftGeneration,controller.recoveryBlocked,controller.pendingMessage,draftBackup]);
+
  const uploads=useMemo(()=>new UploadController(id,{request},()=>render(n=>n+1),{recoveryRequired:true,currentScope:taskDraftScope}),[id]);
  const [uploadRecoveryRevision,setUploadRecoveryRevision]=useState(0),[uploadRecoveryError,setUploadRecoveryError]=useState('');
  useEffect(()=>{
   let mounted=true,store:MessageIntentRecoveryStore|undefined;const abort=new AbortController();
+  const local=draftRecoveryController===controller&&draftRecoveryVersion===controller.draftGeneration&&(controller.draftDirty||draftSnapshot!==JSON.stringify(controller.draft))?JSON.parse(draftSnapshot) as ComposerDraft:undefined;
   controller.recoveryReady=false;controller.changed();
   void request('/capabilities','GET',undefined,undefined,abort.signal).then(async()=>{
    if(!mounted)return;
    store=await MessageIntentRecoveryStore.open(window.indexedDB,taskDraftScope(),id);
    if(!mounted){store.close();return;}
    await controller.configureRecovery(store);
-   if(mounted)setMessageRecoveryError('');
+   if(mounted){
+    if(local&&!draftBackup&&JSON.stringify(local)!==JSON.stringify(controller.draft))setDraftBackup(local);
+    applyComposerDraft(controller.draft);setMessageRecoveryError('');
+   }
   }).catch(reason=>{store?.close();if(mounted){controller.recoveryReady=false;setMessageRecoveryError(reason instanceof Error?reason.message:'message_recovery_unavailable');controller.changed();}});
   return()=>{mounted=false;abort.abort();controller.disposeRecovery();};
  },[controller,id,messageRecoveryRevision]);
@@ -219,7 +240,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  useEffect(()=>{folderInput.current?.setAttribute('webkitdirectory','');},[]);
  useEffect(()=>()=>{if(preview?.url)URL.revokeObjectURL(preview.url);},[preview]);
  useEffect(()=>()=>previewRequest.current?.abort(),[]);
- useEffect(()=>{const warn=(event:BeforeUnloadEvent)=>{if(quoteCount||uploads.entries.length||controller.pendingMessage||goalPending||voiceBusy||modeWriter.pending||cancelWriter.pending){event.preventDefault();event.returnValue='';}};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);},[uploads,controller,goalPending,voiceBusy,modeWriter.pending,cancelWriter.pending,quoteCount]);
+ useEffect(()=>{const warn=(event:BeforeUnloadEvent)=>{if(draft.trim()||draftBackup||controller.draftDirty||controller.draftSavePromise||quoteCount||uploads.entries.length||controller.pendingMessage||goalPending||voiceBusy||modeWriter.pending||cancelWriter.pending){event.preventDefault();event.returnValue='';}};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);},[uploads,controller,draft,draftBackup,goalPending,voiceBusy,modeWriter.pending,cancelWriter.pending,quoteCount]);
  const state=controller.state,run=state?(Object.values(state.runs) as Run[]).find(active):undefined;
  const activityValues=useMemo(()=>{
   const merged=new Map(historicalActivities.map(activity=>[activity.activity_id,activity]));
@@ -251,19 +272,19 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  const canToggle=ordinary&&!!conversation&&controller.connection==='connected'&&!busy&&!run&&!messageLocked&&!uploads.entries.length&&!voiceBusy&&!goalPending&&!modelMutation.pending&&!modeWriter.pending&&!cancelWriter.pending&&modes.aware&&(chatMode||modes.chatReady);
  const action=async(fn:()=>Promise<unknown>)=>{if(busy)return;setBusy(true);setError('');try{await fn();}catch(e){if(!(e instanceof DOMException&&e.name==='AbortError'))setError(artifactPreviewErrorMessage(e));if((e as {status?:number}).status===409&&!controller.pendingMessage&&!controller.recoveryBlocked)await controller.refresh().catch(()=>{});}finally{setBusy(false);}};
  const send=()=>{
-  if(controller.recoveryBlocked||voiceBusy||modeWriter.pending||cancelWriter.pending||chatUnavailable&&!controller.pendingMessage)return;
+  if(controller.recoveryBlocked||draftBackup&&!controller.pendingMessage||voiceBusy||modeWriter.pending||cancelWriter.pending||chatUnavailable&&!controller.pendingMessage)return;
   if(!controller.pendingMessage&&fileReferences.length&&taskDraftScope()!==fileOwner){setError('文件引用所属账户已变化，请重新打开会话');return;}
   void action(async()=>{
    const retry=controller.pendingMessage;
    const message=retry?'':replyQuoteMessage(fileReferenceMessage(draft,fileReferences,imageArtifact),replyQuotes);
    if(!retry&&quoteCount&&goalPrompt(message,ordinary&&!chatMode&&!run&&goalMode).length>100000)throw Error('引用与消息过长，请减少引用或缩短消息后发送');
    const references=retry?controller.pendingAttachments:uploads.references();
-   if(!retry)await uploads.markGeneratedSending(fileReferences.filter(isFileRegion).map(value=>value.uploadEntryId));
+   if(!retry){await controller.saveDraft(JSON.parse(draftSnapshot));await uploads.markGeneratedSending(fileReferences.filter(isFileRegion).map(value=>value.uploadEntryId));}
    const receipt=await controller.send(message,references,{goalMode:ordinary&&!chatMode&&!run&&goalMode,originalTask:ordinary,steeringConfigured:modeCaps?.conversation_commands?.protocol===1&&modeCaps.conversation_commands.ordinary_steer?.configured===true,attachmentSteeringConfigured:modeCaps?.conversation_commands?.protocol===1&&modeCaps.conversation_commands.ordinary_steer?.attachments===true});
    let cleanupError='';
    try{await uploads.clearSent(references,true);await controller.acknowledgeSent();}
    catch{cleanupError='消息已发送，本地发送或附件回执清理尚未保存。请重读回执后重试原消息，核对原会话。';}
-   setReplyQuotes([]);setFileReferences([]);editDraft('');
+   setReplyQuotes([]);setFileReferences([]);editDraft('');setDraftRecoveryVersion(controller.draftGeneration);
    if(cleanupError)setError(cleanupError);else if(receipt.command_id)setError('补充已保留给原任务，正在等待接收');
    await controller.refresh();
   });
@@ -398,7 +419,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
   }else setPreview({name:file.relative_path||file.file_name,unsupported:true});
  });
  const download=(file:Artifact)=>void action(async()=>{const response=await fetch(`${base}/v1/artifacts/${encodeURIComponent(file.artifact_id)}/download?version=${file.version}`,{credentials:'same-origin'});if(!response.ok)throw new Error('文件暂不可下载');const url=URL.createObjectURL(await response.blob());const link=document.createElement('a');link.href=url;link.download=file.file_name;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
- return <FileTextReferenceContext.Provider value={{owner:fileOwner,conversationId:id,disabled:quoteLocked,regionDisabled,onAdd:addFileReference,onAddRegion:addRegionReference}}><section ref={conversationRegion} data-chat-search-scope tabIndex={-1} className="workbench-conversation jot-goal-stop-focus-target" aria-label={ordinary?"Ordinary conversation":"Role conversation"}><button disabled={busy||goalPending||controller.pendingMessage||quoteCount>0||uploads.entries.length>0||modelMutation.pending||modeWriter.pending||cancelWriter.pending} onClick={onClose}>返回工作台</button><h2>{ordinary?'我的对话':'角色对话'}</h2>{ordinary&&conversation&&<button type="button" className="jot-conversation-mode" style={{fontStyle:'italic',fontWeight:700,background:'transparent',border:0,color:'inherit'}} aria-label={`切换到 ${chatMode?'work':'chat'}`} disabled={!canToggle} onClick={()=>void saveMode()}>{chatMode?'chat':'work'}</button>}<p role="status">{controller.connection==='connected'?'已连接':controller.connection==='reconnecting'?'正在重新连接':'正在连接'}{run?` · ${run.status}`:''}</p>{controller.error&&<p role="alert">{controller.error}</p>}
+ return <FileTextReferenceContext.Provider value={{owner:fileOwner,conversationId:id,disabled:quoteLocked,regionDisabled,onAdd:addFileReference,onAddRegion:addRegionReference}}><section ref={conversationRegion} data-chat-search-scope tabIndex={-1} className="workbench-conversation jot-goal-stop-focus-target" aria-label={ordinary?"Ordinary conversation":"Role conversation"}><button disabled={busy||goalPending||controller.pendingMessage||!!draftBackup||controller.draftDirty||!!controller.draftSavePromise||draftSnapshot!==JSON.stringify(controller.draft)||quoteCount>0||uploads.entries.length>0||modelMutation.pending||modeWriter.pending||cancelWriter.pending} onClick={onClose}>返回工作台</button><h2>{ordinary?'我的对话':'角色对话'}</h2>{ordinary&&conversation&&<button type="button" className="jot-conversation-mode" style={{fontStyle:'italic',fontWeight:700,background:'transparent',border:0,color:'inherit'}} aria-label={`切换到 ${chatMode?'work':'chat'}`} disabled={!canToggle} onClick={()=>void saveMode()}>{chatMode?'chat':'work'}</button>}<p role="status">{controller.connection==='connected'?'已连接':controller.connection==='reconnecting'?'正在重新连接':'正在连接'}{run?` · ${run.status}`:''}</p>{controller.error&&<p role="alert">{controller.error}</p>}
  <ConversationDisplayBoundary label="会话搜索"><ConversationHistorySearch root={conversationRegion} conversationId={id} messages={displayedMessages} activities={activityValues} runs={state?.runs??{}} onRevealActivity={revealActivity} onLoadActivityHistory={loadActivityHistory} {...(state?.snapshotSeq?{activityHistorySeq:state.snapshotSeq}:{})} {...(state?.seq?{resultSearchSeq:state.seq}:{})} renderedRevision={renderedMessages} revealedMessageId={historySelection} ready={Boolean(state)} onReveal={revealHistoryMessage} {...(state?.historyComplete!==undefined?{historyComplete:state.historyComplete}:{})} {...(state?.nextHistoryCursor?{historyCursor:state.nextHistoryCursor}:{})} onHistoryLoaded={retainHistory}/></ConversationDisplayBoundary>
  {!ordinary&&run&&['starting','running'].includes(run.status)&&<NativeMemberControls key={`native-member-controls:${run.run_id}`} run={run}/>}
  {ordinary&&conversation&&!chatMode&&<div inert={cancelWriter.pending||messageLocked}><ConversationGoal key={id} id={id} running={run?.status==='running'} runStatus={run?.status} controlRun={state?latestGoalRun(Object.values(state.runs),id):undefined} onResumeAccepted={()=>{void controller.refresh().catch(()=>{});}} onStopCompleted={focusConversationAfterStop} onPendingChange={setGoalPending}/></div>}
@@ -464,8 +485,15 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
   <pre>{controller.pending.kind==='steer'?controller.pending.body.text:controller.pending.body.content.filter((part:any)=>part.type==='text').map((part:any)=>part.text).join('\n')}</pre>
   {controller.pendingAttachments.length>0&&<p>原附件标识 · {controller.pendingAttachments.join('、')}</p>}
  </details>}
- {(messageRecoveryError||controller.recoveryError)&&<p role="alert">原发送请求存储尚未确认，消息操作已暂停。<button type="button" disabled={busy||controller.sending||controller.recovering} onClick={()=>setMessageRecoveryRevision(value=>value+1)}>重读原发送回执</button></p>}
+ {(messageRecoveryError||controller.recoveryError)&&<p role="alert">原发送请求存储尚未确认，消息操作已暂停。<button type="button" disabled={busy||controller.recoveryBusy||voiceBusy} onClick={()=>setMessageRecoveryRevision(value=>value+1)}>重读原发送回执</button></p>}
  {!controller.recoveryReady&&!messageRecoveryError&&<p role="status">正在读取原发送请求…</p>}
+ {draftBackup&&<section aria-label="本页未保存草稿"><p role="alert">重读前本页草稿与已保存记录不同。请核对后选择要使用的草稿。</p>
+  <details><summary>查看本页未保存草稿</summary><pre>{JSON.stringify(draftBackup,null,2)}</pre></details>
+  <button type="button" disabled={busy||controller.recoveryBlocked||controller.pendingMessage} onClick={()=>{applyComposerDraft(draftBackup);setDraftBackup(undefined);}}>恢复本页草稿</button>
+  <button type="button" disabled={busy||controller.recoveryBlocked||controller.pendingMessage} onClick={()=>setDraftBackup(undefined)}>保留已保存草稿并清除本页备份</button>
+ </section>}
+ {controller.recoveryReady&&!controller.pendingMessage&&<p role="status">{controller.draftSavePromise?'草稿正在保存，请等待保存完成后离开。':controller.draftDirty||draftSnapshot!==JSON.stringify(controller.draft)?'草稿尚未保存，请查看提示并保留当前页面。':'文字、回复引用和PDF文字引用已随当前账户与会话保存。'}</p>}
+
  {modelMutation.pending&&<p role="status">模型设置结果尚未确认。<button type="button" disabled={busy} onClick={()=>{if(conversation)changeModel(conversation.model);}}>重试原模型设置</button></p>}
  {messageArtifact&&messageArtifact.owner===taskDraftScope()&&<section aria-label="消息关联成果详情">
   <button type="button" onClick={()=>setMessageArtifact(undefined)}>关闭成果详情</button>
@@ -480,12 +508,12 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  {ordinary&&!chatMode&&goalMode&&<p role="status">目标模式</p>}
  <AssistantReplyQuoteAction root={conversationRegion} conversationId={id} disabled={quoteLocked} onAdd={addReplyQuote}/>
  <PromptComposer className={chatMode?'jot-prompt-chat':''} value={draft} onChange={editDraft} onSubmit={send} placeholder={ordinary&&!chatMode&&goalMode?'描述你的目标…':'输入消息…'} ariaLabel={ordinary?'对话消息':'角色消息'}
-  disabled={!state||busy||goalPending||modelMutation.pending||modeWriter.pending||cancelWriter.pending||controller.recoveryBlocked||chatUnavailable&&!controller.pendingMessage} inputDisabled={messageLocked||modeWriter.pending||cancelWriter.pending} submitDisabled={controller.recoveryBlocked||voiceBusy||!controller.pendingMessage&&(!regionsReady||uploads.entries.length>0&&uploads.blocked||uploads.entries.some((entry:any)=>entry.status!=='ready')||ordinary&&goalMode&&!draft.trim()&&!quoteCount)} submitLabel={controller.pendingMessage?'重试原消息':run?(ordinary?'补充当前任务':'加入队列'):'发送'}
+  disabled={!state||busy||goalPending||modelMutation.pending||modeWriter.pending||cancelWriter.pending||controller.recoveryBlocked||!!draftBackup&&!controller.pendingMessage||chatUnavailable&&!controller.pendingMessage} inputDisabled={messageLocked||modeWriter.pending||cancelWriter.pending} submitDisabled={controller.recoveryBlocked||!!draftBackup&&!controller.pendingMessage||voiceBusy||!controller.pendingMessage&&(!regionsReady||uploads.entries.length>0&&uploads.blocked||uploads.entries.some((entry:any)=>entry.status!=='ready')||ordinary&&goalMode&&!draft.trim()&&!quoteCount)} submitLabel={controller.pendingMessage?'重试原消息':run?(ordinary?'补充当前任务':'加入队列'):'发送'}
   selection={chatMode?undefined:conversation?.model} modelOptions={chatMode?[]:models} onSelectionChange={ordinary&&!chatMode&&!modeWriter.pending&&!cancelWriter.pending&&!run&&!messageLocked&&!uploads.entries.length&&!voiceBusy&&!goalPending&&!modelMutation.pending?changeModel:undefined}
   onAttach={()=>fileInput.current?.click()} attachDisabled={!state||busy||cancelWriter.pending||goalPending||messageLocked||uploads.blocked||uploads.unresolved||!maxBytes} uploadMenu={<button type="button" role="menuitem" disabled={!state||busy||cancelWriter.pending||goalPending||messageLocked||uploads.blocked||uploads.unresolved||!maxBytes} onClick={()=>folderInput.current?.click()}>添加文件夹</button>} onDropFiles={selectFiles} onDropError={error=>setError(error instanceof Error?error.message:'无法读取所选文件夹')}
    hasAttachments={controller.pendingMessage||uploads.entries.length>0||quoteCount>0} attachments={<><FileTextReferences references={fileReferences} disabled={quoteLocked} onChange={editFileReferences} imageFile={imageFile} resolveImage={imageArtifact}/><AssistantReplyQuotes quotes={replyQuotes} disabled={quoteLocked} onChange={setReplyQuotes}/><UploadAttachments uploads={uploads} busy={busy} locked={uploads.blocked||cancelWriter.pending||goalPending||messageLocked||modeWriter.pending} onAction={operation=>void action(operation)} onUpload={uploadEntry} onCancel={cancelUpload} onCancelBatch={cancelUploadBatch}/></>}
   keepVoiceVisible voiceActive={voiceBusy} voiceControl={<VoiceInput id={id} voice={voice} disabled={!state||busy||goalPending||messageLocked||modelMutation.pending||modeWriter.pending||cancelWriter.pending||chatUnavailable} onText={appendTranscript} onBusyChange={setVoiceBusy}/>}
-  goalMenu={ordinary&&!chatMode?<button type="button" role="menuitemcheckbox" aria-checked={goalMode} onClick={()=>setGoalMode(value=>!value)}>目标模式{goalMode?' ✓':''}</button>:undefined}
+  goalMenu={ordinary&&!chatMode?<button type="button" role="menuitemcheckbox" disabled={messageLocked} aria-checked={goalMode} onClick={()=>setGoalMode(value=>!value)}>目标模式{goalMode?' ✓':''}</button>:undefined}
   responding={Boolean(run)} stopDisabled={busy||cancelWriter.pending||messageLocked||run?.status==='cancelling'} onStop={run?()=>cancelTask():undefined}/>
  </section></FileTextReferenceContext.Provider>;
 }

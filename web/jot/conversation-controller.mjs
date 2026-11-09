@@ -1,41 +1,75 @@
 import {fromSnapshot,reduceEvent} from './projection.ts';
 import {goalPrompt} from './goal-controller.mjs';
 import {messageIntentAttachments,validateMessageReceipt,validateMessageIntent} from './message-intent-recovery.mjs';
+import {emptyComposerDraft,validateComposerDraft} from './composer-draft-recovery.mjs';
 const ID=/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/;
 export class RoleChatController {
  constructor(id,api,onChange=()=>{},options={}){
   this.recoveryRequired=options.recoveryRequired===true;this.recoveryReady=!this.recoveryRequired;this.currentScope=options.currentScope;
-  this.recoveryEpoch=0;this.recovering=false;this.recoveryError='';
+  this.recoveryEpoch=0;this.recovering=false;this.recoveryError='';this.persistence=Promise.resolve();
+  this.draft=emptyComposerDraft();this.draftGeneration=0;this.draftSerial=0;this.savedDraftSerial=0;
   this.id=id;this.api=api;this.onChange=onChange;this.state=null;this.pending=null;this.connection='connecting';this.error='';this.abort=null;this.sending=false;
  }
+ get draftDirty(){return this.draftSerial!==this.savedDraftSerial;}
+ get recoveryBusy(){return this.sending||this.recovering||!!this.draftSavePromise;}
  get pendingMessage(){return Boolean(this.pending);}
  get pendingAttachments(){return messageIntentAttachments(this.pending);}
  get recoveryBlocked(){return this.recovering||!this.recoveryReady||!!this.recoveryError||!!this.recoveryStore&&this.currentScope?.()!==this.recoveryStore.scope;}
  assertRecovery(){if(this.recoveryBlocked)throw Error(this.recoveryError||'message_recovery_unavailable');}
  async configureRecovery(store){
-  if(this.sending||this.recovering)throw Error('message_recovery_busy');
+  if(this.recoveryBusy)throw Error('message_recovery_busy');
   this.recovering=true;const epoch=this.recoveryEpoch;
   const current=()=>{if(epoch!==this.recoveryEpoch||this.currentScope?.()!==store.scope||store.conversation!==this.id)throw Error('message_recovery_scope_changed');};
   try{
-   this.changed();current();const snapshot=await store.load();current();
+   this.changed();await this.persistence;current();const snapshot=await store.load();current();
    this.recoveryStore?.close();this.recoveryStore=store;this.pending=snapshot?.pending??null;
+   this.draft=structuredClone(snapshot?.draft??emptyComposerDraft());this.draftGeneration+=1;this.draftSerial=0;this.savedDraftSerial=0;
    this.recoveryReady=true;this.recoveryError='';
   }finally{if(epoch===this.recoveryEpoch)this.recovering=false;this.changed();}
  }
  disposeRecovery(){this.recoveryReady=!this.recoveryRequired;this.recoveryEpoch+=1;this.recovering=false;this.recoveryStore?.close();}
- async persistIntent(pending=this.pending){
-  this.assertRecovery();if(!this.recoveryStore)return;
-  const store=this.recoveryStore,epoch=this.recoveryEpoch;
-  try{
-   await store.save({pending:structuredClone(pending)});
+ persistIntent(pending=this.pending,draft=this.draft){
+  this.assertRecovery();if(!this.recoveryStore)return Promise.resolve();
+  const store=this.recoveryStore,epoch=this.recoveryEpoch,snapshot=structuredClone({pending,draft});
+  const operation=this.persistence.then(async()=>{
    this.assertRecovery();if(epoch!==this.recoveryEpoch)throw Error('message_recovery_scope_changed');
-  }catch(error){if(epoch===this.recoveryEpoch){this.recoveryError=error instanceof Error?error.message:'message_recovery_unavailable';this.changed();}throw error;}
+   await store.save(snapshot);
+   this.assertRecovery();if(epoch!==this.recoveryEpoch)throw Error('message_recovery_scope_changed');
+  });
+  this.persistence=operation.catch(()=>{});
+  return operation.catch(error=>{if(epoch===this.recoveryEpoch){this.recoveryError=error instanceof Error?error.message:'message_recovery_unavailable';this.changed();}throw error;});
+ }
+ async saveDraft(value){
+  this.assertRecovery();if(this.pending||this.sending)throw Error('message_in_flight');
+  const draft=structuredClone(validateComposerDraft(value,this.id,this.recoveryStore?.scope)),epoch=this.recoveryEpoch;
+  const changed=JSON.stringify(draft)!==JSON.stringify(this.draft);
+  if(!changed&&!this.draftDirty)return this.draftSavePromise??Promise.resolve();
+  if(changed){this.draft=draft;this.draftSerial+=1;}
+  if(this.draftSavePromise){
+   await this.draftSavePromise;this.assertRecovery();
+   if(epoch!==this.recoveryEpoch)throw Error('message_recovery_scope_changed');
+   if(this.draftDirty&&!this.pending&&!this.sending)return this.saveDraft(this.draft);
+   return;
+  }
+  const operation=Promise.resolve().then(async()=>{
+   let saved;
+   do{
+    saved=this.draftSerial;await this.persistIntent();
+    if(epoch!==this.recoveryEpoch)throw Error('message_recovery_scope_changed');
+    this.savedDraftSerial=saved;
+   }while(saved!==this.draftSerial&&!this.pending&&!this.sending);
+  }).finally(()=>{if(this.draftSavePromise===operation){this.draftSavePromise=undefined;this.changed();}});
+  this.draftSavePromise=operation;this.changed();return operation;
  }
  async acknowledgeSent(){
   if(!this.recoveryStore)return;
   this.assertRecovery();if(this.sending||!this.pending?.receipt)throw Error('message_receipt_unconfirmed');
   this.sending=true;this.changed();
-  try{await this.persistIntent(null);this.pending=null;}
+  try{
+   const draft={...emptyComposerDraft(),goalMode:this.draft.goalMode};
+   await this.persistIntent(null,draft);this.pending=null;this.draft=draft;
+   this.draftGeneration+=1;this.draftSerial=0;this.savedDraftSerial=0;
+  }
   finally{this.sending=false;this.changed();}
  }
  changed(){this.onChange(this);}

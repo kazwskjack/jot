@@ -51,6 +51,6 @@ export function FileTextReferences({references,disabled,onChange,imageFile,resol
    <ReferenceDetails value={value} {...(isFileRegion(value)&&imageFile(value.uploadEntryId)?{file:imageFile(value.uploadEntryId)!}:{})} ready={!isFileRegion(value)||!!resolveRegionArtifact(value,resolveImage)}/>
    <button type="button" disabled={disabled} onClick={()=>onChange(references.filter(item=>item.reference.id!==value.reference.id))}>移除此原文件引用</button>
   </div>)}
-  <small>文字引用保留在当前页面。区域截图及其引用保存后可通过上传恢复流程读取，发送确认后清空。</small>
+  <small>文字引用随草稿保存。区域截图及其引用保存后可通过上传恢复流程读取，发送确认后清空。</small>
  </section>;
 }

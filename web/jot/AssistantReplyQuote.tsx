@@ -93,6 +93,6 @@ export function AssistantReplyQuotes({quotes,disabled,onChange}:{quotes:Assistan
    </details>
    <button type="button" disabled={disabled} aria-label={`移除引用 ${index+1}`} onClick={()=>onChange(quotes.filter(value=>value.id!==quote.id))}>移除</button>
   </div>)}
-  <small>引用保留在当前页面，发送确认后清空。刷新页面会丢失待发送内容。</small>
+  <small>引用随当前账户与会话的草稿保存，确认发送后清空。离开前请确认草稿保存完成。</small>
  </section>;
 }

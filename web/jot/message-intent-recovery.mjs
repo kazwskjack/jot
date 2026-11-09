@@ -1,4 +1,5 @@
 import {UploadRecoveryStore} from './upload-recovery.mjs';
+import {validateComposerDraft} from './composer-draft-recovery.mjs';
 
 const id=value=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/.test(value);
 const exact=(value,required,optional=[])=>!!value&&typeof value==='object'&&!Array.isArray(value)
@@ -18,8 +19,9 @@ export function messageIntentAttachments(pending){
  return pending?.kind==='steer'?[...(pending.body.attachments??[])]:pending?.body.content.filter(part=>part.type==='file').map(part=>part.artifact_id)??[];
 }
 
-export function validateMessageIntent(snapshot,conversation){
- if(!exact(snapshot,['pending']))throw invalid();
+export function validateMessageIntent(snapshot,conversation,scope){
+ if(!exact(snapshot,['pending'],['draft']))throw invalid();
+ if(Object.hasOwn(snapshot,'draft'))validateComposerDraft(snapshot.draft,conversation,scope);
  const pending=snapshot.pending;
  if(pending===null)return snapshot;
  if(!exact(pending,['kind','path','key','body'],['runId','receipt'])||!['message','steer'].includes(pending.kind)
@@ -57,5 +59,5 @@ export class MessageIntentRecoveryStore extends UploadRecoveryStore {
   store.key=`message-intent:${scope}/${conversation}`;
   return store;
  }
- validateSnapshot(snapshot){return validateMessageIntent(snapshot,this.conversation);}
+ validateSnapshot(snapshot){return validateMessageIntent(snapshot,this.conversation,this.scope);}
 }
