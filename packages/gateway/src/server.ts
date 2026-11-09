@@ -1375,11 +1375,13 @@ export async function buildServer(config: {
       if (body) stream.write(body);
       const flush = () => {
         if(stopped||stream.destroyed||stream.writableNeedDrain)return;
-        for (const event of events.replay(id, cursor, 1000)) {
-          const writable=stream.write(`id: ${event.seq}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
-          cursor = Number(event.seq);
-          if(!writable)break;
-        }
+        try{
+          for (const event of events.replay(id, cursor, 1000)) {
+            const writable=stream.write(`id: ${event.seq}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+            cursor = Number(event.seq);
+            if(!writable)break;
+          }
+        }catch(error){app.log.error(error);cleanup();}
       };
       const unsubscribe = events.subscribe(id, flush);
       // Worker and BFF are separate processes. The local EventEmitter is only a
