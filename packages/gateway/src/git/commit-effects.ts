@@ -1,5 +1,5 @@
 import {createHash,randomUUID} from 'node:crypto';
-import {constants,lstatSync,linkSync,unlinkSync,rmdirSync} from 'node:fs';
+import {constants,lstatSync,linkSync,unlinkSync,rmdirSync,renameSync} from 'node:fs';
 import {open} from 'node:fs/promises';
 import {join,dirname,relative,sep} from 'node:path';
 import type {GitCommitMetadata} from '../../contracts/types.ts';
@@ -13,9 +13,11 @@ import type {GitReadContext} from './inspection.ts';
 import {freezeWorkAdmission} from '../always-on/work-admission-records.ts';
 import {gitCommitEvidence,gitCommitPreparation,type GitCommitPlan,type GitCommitEvidence,type GitCommitPreparation} from './commit-evidence.ts';
 import {readGit} from './process.ts';
+import {gitCommitRefPreparation,type GitCommitRefPreparation,type GitCommitRefFile,type GitCommitRefReceipt} from './commit-ref-evidence.ts';
 
 export type GitCommitSource={paths:readonly string[];message:string;review_sha256:string;witness:GitCommitReviewWitness;metadata:GitCommitMetadata};
 type GitCommitMaterial={
+ message:string;
  witness:GitCommitReviewWitness;
  metadata:GitCommitMetadata;
  review_sha256:string;
@@ -34,6 +36,12 @@ type CommitAuthority={
  cleanup:(remove:()=>void)=>void;
 };
 type OwnedLock={path:string;identity:string};
+type Held={source:GitSourceWitness;locks:OwnedLock[];created:Map<string,string>};
+type RefAuthority=CommitAuthority&{
+ refPrepared:(preparation:GitCommitRefPreparation)=>void;
+ refAcquire:(preparation:GitCommitRefPreparation,install:()=>void)=>void;
+ refPublish:(preparation:GitCommitRefPreparation,publish:()=>GitCommitRefReceipt)=>GitCommitRefReceipt;
+};
 const identity=(stat:{dev:bigint;ino:bigint})=>stat.dev+':'+stat.ino;
 const same=(a:string,b:string)=>process.platform==='win32'?a.toLowerCase()===b.toLowerCase():a===b;
 function synchronous<T>(operation:()=>T):T{
@@ -106,7 +114,7 @@ export class GitCommitEffects extends GitPublicationEffects{
    signal?.throwIfAborted();
    if(this.sourceMetadata()!==retainedSource.metadata||this.dotWitness()!==retainedSource.dot)throw Error('git_commit_review_changed');
    for(const [path,expected] of directories)if(this.directorySync(path)!==expected)throw Error('git_repository_changed');
-   const material:GitCommitMaterial={witness,metadata,review_sha256:source.review_sha256,source_sha256:hash(JSON.stringify(witness)),paths,
+   const material:GitCommitMaterial={witness,metadata,message,review_sha256:source.review_sha256,source_sha256:hash(JSON.stringify(witness)),paths,
     tree_objects,commit_object:{oid,body,sha256:hash(body)},execution_authorized:false};
    const plan:GitCommitPlan=freezeWorkAdmission({protocol:1,plan_id:'git-commit-'+randomUUID(),action:'commit',paths:[...paths],
     repository_sha256:witness.repository_sha256,source_sha256:material.source_sha256,review_sha256:source.review_sha256,metadata_sha256:hash(canonicalJson(metadata)),
@@ -118,7 +126,7 @@ export class GitCommitEffects extends GitPublicationEffects{
  }
  /** Original coordinator only. Durable preparation precedes canonical locks,
   * and the publication callback stays inside the same locks/native custody. */
- async withCommitObjects<T>(plan:GitCommitPlan,authority:CommitAuthority,publish:(evidence:GitCommitEvidence,guard:()=>void)=>T|Promise<T>,signal?:AbortSignal):Promise<T>{
+ private async withCommitObjects<T>(plan:GitCommitPlan,authority:CommitAuthority,publish:(evidence:GitCommitEvidence,guard:()=>void,held:Held)=>T|Promise<T>,signal?:AbortSignal):Promise<T>{
   const stored=this.commitPlans.get(plan);
   if(!stored)throw Error('git_commit_plan_invalid');
   if(stored.state!=='ready')throw Error('git_commit_plan_consumed');
@@ -180,7 +188,7 @@ export class GitCommitEffects extends GitPublicationEffects{
     const actual=await this.controlled(context,['cat-file',object.type,object.oid],undefined,signal,true);
     if(!actual.equals(object.body))throw Error('git_commit_object_mismatch');
    }
-   guard();return await publish(evidence,guard);
+   guard();return await publish(evidence,guard,{source:stored.source,locks,created});
   }catch(error){failure=error;throw error;}finally{
    // A single attempt owns this plan even if it stopped before object writes.
    stored.state='consumed';
@@ -207,6 +215,210 @@ export class GitCommitEffects extends GitPublicationEffects{
    if(cleanupFailure)throw Error('git_commit_cleanup_unknown',{cause:failure??cleanupFailure});
   }
  }
+ private refFile(path:string){
+  const body=this.raw(path);
+  if(body===null)return {body,before:null};
+  const stat=lstatSync(path,{bigint:true});
+  const fact={identity:identity(stat),sha256:hash(body),stat_sha256:hash([identity(stat),stat.size,stat.mtimeNs,stat.ctimeNs,stat.nlink,stat.mode].join(':')),size:body.length,mode:Number(stat.mode&0o777n)};
+  return {body,before:fact};
+ }
+ async applyCommit(plan:GitCommitPlan,authority:RefAuthority,signal?:AbortSignal):Promise<GitCommitRefReceipt>{
+  if(!authority||!['refPrepared','refAcquire','refPublish'].every(key=>typeof authority[key as keyof RefAuthority]==='function'&&authority[key as keyof RefAuthority].constructor.name!=='AsyncFunction'))throw Error('git_execution_authority_missing');
+  const stored=this.commitPlans.get(plan);
+  if(!stored)throw Error('git_commit_plan_invalid');
+  return this.withCommitObjects(plan,authority,(evidence,guard,held)=>this.publishCommitRef(evidence,stored.material,authority,guard,held,signal),signal);
+ }
+ private async publishCommitRef(evidence:GitCommitEvidence,material:GitCommitMaterial,authority:RefAuthority,originalGuard:()=>void,held:Held,signal?:AbortSignal):Promise<GitCommitRefReceipt>{
+  const {plan}=evidence;
+  const root=(scope:'git'|'common')=>scope==='git'?this.gitDirectory:this.commonDirectory;
+  const targetScope=plan.target_ref==='HEAD'?'git' as const:'common' as const;
+  const target=join(root(targetScope),plan.target_ref);
+  originalGuard();
+  const head=this.raw(join(this.gitDirectory,'HEAD'))?.toString('utf8').trim();
+  const loose=this.raw(target)?.toString('utf8').trim();
+  if(plan.target_ref==='HEAD'?(head!==plan.parent_oid):(head!=='ref: '+plan.target_ref||loose!==undefined&&loose!==plan.parent_oid))throw Error('git_commit_ref_conflict');
+  const sourceReview=held.source.witness as GitCommitReviewWitness;
+  if(sourceReview.head.oid!==plan.parent_oid)throw Error('git_commit_ref_conflict');
+  const committer=material.metadata.committer;
+  const subject=material.message.split(/\r\n|\r|\n/,1)[0]!.replace(/[\x00-\x1f\x7f]/g,' ');
+  const entry=Buffer.from((plan.parent_oid??'0'.repeat(plan.commit_oid.length))+' '+plan.commit_oid+' '+signature(committer)+'\tcommit'+(plan.parent_oid===null?' (initial)':'')+': '+subject+'\n','utf8');
+  const paths=[{scope:'git' as const,path:'logs/HEAD'},...(evidence.refs.ref?[{scope:'common' as const,path:'logs/'+evidence.refs.ref}]:[])];
+  const files:Array<{fact:GitCommitRefFile;body:Buffer;path:string;pending:string;published:boolean}>=[];
+  for(const item of [...paths,{scope:targetScope,path:plan.target_ref}]){
+   const path=join(root(item.scope),item.path),before=this.refFile(path);
+   if(item.path.startsWith('logs/')&&before.body?.length&&before.body[before.body.length-1]!==10)throw Error('git_commit_reflog_invalid');
+   const body=item.path.startsWith('logs/')?Buffer.concat([before.body??Buffer.alloc(0),entry]):Buffer.from(plan.commit_oid+'\n');
+   if(body.length>32*1024*1024)throw Error('git_commit_reflog_limit');
+   const pendingName='jot-commit-ref-'+randomUUID()+'.pending';
+   files.push({fact:{...item,before:before.before,pending:pendingName,identity:'',sha256:hash(body),size:body.length,mode:before.before?.mode??0o600},body,path,pending:join(root(item.scope),pendingName),published:false});
+  }
+  const logLocks=paths.map(item=>({scope:item.scope,path:item.path+'.lock',pending:'jot-commit-ref-'+randomUUID()+'.pending',identity:'',sha256:hash(''),installed:false}));
+  const created=new Map<string,string>(),createdScopes=new Map<string,'git'|'common'>(),owned=new Map<string,{identity:string;sha256:string;ready:boolean}>();
+  const expected=new Map(files.map(file=>[file.path,file.fact.before]));
+  const ignored=new Set([...files.flatMap(file=>[file.path,file.pending]),...logLocks.flatMap(lock=>[join(root(lock.scope),lock.path),join(root(lock.scope),lock.pending)])]);
+  originalGuard();
+  held.source.metadata=this.sourceMetadata(new Set([...held.locks.map(lock=>lock.path),...ignored]),new Set(held.created.keys()));
+  const guard=()=>{
+   signal?.throwIfAborted();synchronous(()=>authority.authorize());
+   this.assertSource(held.source,held.locks,new Map([...held.created,...created]),join(this.gitDirectory,'index.lock'),ignored);
+   for(const [path,before] of expected)if(canonicalJson(this.refFile(path).before)!==canonicalJson(before))throw Error('git_commit_ref_conflict');
+   for(const lock of logLocks)if(!lock.installed&&this.raw(join(root(lock.scope),lock.path))!==null)throw Error('git_repository_busy');
+   for(const [path,file] of owned){
+    const bytes=this.raw(path);
+    if(bytes===null){if(files.some(item=>item.pending===path&&item.published)||logLocks.some(item=>join(root(item.scope),item.pending)===path&&item.installed))continue;throw Error('git_commit_ref_unverified');}
+    if(identity(lstatSync(path,{bigint:true}))!==file.identity||file.ready&&hash(bytes)!==file.sha256)throw Error('git_commit_ref_unverified');
+   }
+  };
+  let preparation:GitCommitRefPreparation|undefined,failure:unknown;
+  try{
+   guard();
+   for(const item of paths){
+    guard();await this.parent(dirname(join(root(item.scope),item.path)),created,root(item.scope));
+    for(const path of created.keys())if(!createdScopes.has(path))createdScopes.set(path,item.scope);
+    guard();
+   }
+   for(const file of files){
+    guard();const handle=await open(file.pending,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|(constants.O_NOFOLLOW??0),file.fact.mode);
+    try{
+     file.fact.identity=identity(await handle.stat({bigint:true}));owned.set(file.pending,{identity:file.fact.identity,sha256:file.fact.sha256,ready:false});
+     await handle.writeFile(file.body);await handle.chmod(file.fact.mode);await handle.sync();
+     file.fact.mode=Number((await handle.stat({bigint:true})).mode&0o777n);owned.get(file.pending)!.ready=true;
+    }finally{await handle.close();}
+   }
+   for(const lock of logLocks){
+    guard();const path=join(root(lock.scope),lock.pending),handle=await open(path,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|(constants.O_NOFOLLOW??0),0o600);
+    try{lock.identity=identity(await handle.stat({bigint:true}));owned.set(path,{identity:lock.identity,sha256:lock.sha256,ready:true});await handle.sync();}finally{await handle.close();}
+   }
+   guard();
+   preparation=freezeWorkAdmission(gitCommitRefPreparation({protocol:1,evidence,files:files.map(file=>file.fact),locks:logLocks.map(({installed,...lock})=>lock),parents:[...created].map(([path,id])=>{
+    const scope=createdScopes.get(path)!;
+    return {scope,path:relative(root(scope),path).split(sep).join('/'),identity:id};
+   }),metadata_sha256:held.source.metadata}));
+   synchronous(()=>authority.refPrepared(preparation!));guard();
+   let active=true,installed=false;
+   const install=()=>{
+    if(!active||installed)throw Error('git_commit_plan_consumed');installed=true;guard();
+    for(const lock of logLocks){
+     guard();const path=join(root(lock.scope),lock.path),pending=join(root(lock.scope),lock.pending);
+     try{linkSync(pending,path);}catch(error){if((error as NodeJS.ErrnoException).code==='EEXIST')throw Error('git_repository_busy');throw error;}
+     held.locks.push({path,identity:lock.identity});lock.installed=true;unlinkSync(pending);
+    }
+   };
+   try{synchronous(()=>authority.refAcquire(preparation!,install));}finally{active=false;}
+   if(!installed)throw Error('git_execution_authority_missing');
+   guard();let publishing=true,published=false,receipt:GitCommitRefReceipt|undefined;
+   const publish=()=>{
+    if(!publishing||published)throw Error('git_commit_plan_consumed');published=true;guard();
+    for(const file of files){
+     guard();renameSync(file.pending,file.path);file.published=true;
+     const actual=this.refFile(file.path).before;
+     if(!actual||actual.identity!==file.fact.identity||actual.sha256!==file.fact.sha256||actual.size!==file.fact.size||actual.mode!==file.fact.mode)throw Error('git_commit_ref_unverified');
+     expected.set(file.path,actual);if(held.source.rawRefs.has(file.path))held.source.rawRefs.set(file.path,actual.sha256);
+    }
+    guard();
+    return receipt=freezeWorkAdmission({protocol:1,plan_id:plan.plan_id,action:'commit',target_ref:plan.target_ref,old_oid:plan.parent_oid,new_oid:plan.commit_oid,tree_oid:plan.tree_oid,
+     preparation_sha256:hash(canonicalJson(preparation)),logs:files.slice(0,-1).map(file=>({scope:file.fact.scope,path:file.fact.path,before_sha256:file.fact.before?.sha256??null,sha256:file.fact.sha256})),execution_authorized:false});
+   };
+   let result:GitCommitRefReceipt;
+   try{result=synchronous(()=>authority.refPublish(preparation!,publish));}finally{publishing=false;}
+   if(!published||!receipt||canonicalJson(result)!==canonicalJson(receipt))throw Error('git_commit_ref_unverified');
+   return result;
+  }catch(error){failure=error;throw error;}finally{
+   try{
+    if(preparation)await this.cleanupCommitRefPreparation(preparation,()=>synchronous(()=>authority.authorize()),undefined,remove=>synchronous(()=>authority.cleanup(remove)));
+    else this.cleanupAtomically(()=>{
+     const check=()=>{
+      for(const [directory,id] of held.source.directories)if(this.directorySync(directory)!==id)throw Error('git_repository_changed');
+      if(this.dotWitness()!==held.source.dot)throw Error('git_repository_changed');
+     };
+     check();
+     for(const [path,file] of owned){
+      check();let stat;try{stat=lstatSync(path,{bigint:true});}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')continue;throw error;}
+      if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1n||identity(stat)!==file.identity)throw Error('git_commit_ref_unverified');
+      unlinkSync(path);
+     }
+     for(const [path,id] of [...created].reverse())try{check();if(this.directorySync(path)!==id)throw Error('git_commit_ref_unverified');rmdirSync(path);}catch(error){if(!['ENOENT','ENOTEMPTY','EEXIST'].includes((error as NodeJS.ErrnoException).code??''))throw error;}
+    },remove=>synchronous(()=>authority.cleanup(remove)));
+   }catch(error){throw Error('git_commit_ref_cleanup_unknown',{cause:failure??error});}
+  }
+ }
+
+ /** Read-only effect observation. Original producer/native drain and owner
+  * fences remain the execution coordinator's responsibility. */
+ async observeCommitRef(input:unknown,witness:GitCommitReviewWitness,signal?:AbortSignal){
+  const preparation=gitCommitRefPreparation(input),{evidence}=preparation,{plan}=evidence;
+  if(hash(JSON.stringify(witness))!==plan.source_sha256||witness.repository_sha256!==plan.repository_sha256
+   ||witness.index_sha256!==plan.index_sha256||witness.commit_tree.tree_oid!==plan.tree_oid||witness.commit_tree.object_format!==plan.object_format
+   ||witness.head.oid!==plan.parent_oid||plan.target_ref!==(witness.head.detached?'HEAD':'refs/heads/'+witness.head.branch))throw Error('git_execution_evidence_corrupt');
+  const root=(scope:'git'|'common')=>scope==='git'?this.gitDirectory:this.commonDirectory;
+  const ignored=new Set([
+   ...evidence.locks.map(lock=>join(root(lock.scope),lock.path)),
+   ...preparation.files.flatMap(file=>[join(root(file.scope),file.path),join(root(file.scope),file.pending)]),
+   ...preparation.locks.flatMap(lock=>[join(root(lock.scope),lock.path),join(root(lock.scope),lock.pending)]),
+  ]);
+  const parents=new Set([...evidence.parents.map(parent=>join(this.commonDirectory,parent.path)),...preparation.parents.map(parent=>join(root(parent.scope),parent.path))]);
+  const current=()=>{
+   signal?.throwIfAborted();
+   for(const [path,id] of [[this.root,evidence.directories.root],[this.gitDirectory,evidence.directories.git],[this.commonDirectory,evidence.directories.common],[join(this.commonDirectory,'objects'),evidence.directories.objects]])if(this.directorySync(path!)!==id)throw Error('git_repository_changed');
+   if(this.dotWitness()!==evidence.dot_witness)throw Error('git_repository_changed');
+   if(this.sourceMetadata(ignored,parents)!==preparation.metadata_sha256)return 'unknown' as const;
+   const index=this.raw(join(this.gitDirectory,'index'));
+   if(index===null||hash(index)!==plan.index_sha256)return 'unknown' as const;
+   const facts=preparation.files.map(file=>this.refFile(join(root(file.scope),file.path)).before);
+   if(facts.every((fact,index)=>canonicalJson(fact)===canonicalJson(preparation.files[index]!.before)))return 'not_observed' as const;
+   if(facts.every((fact,index)=>{
+    const file=preparation.files[index]!;
+    return fact!==null&&fact.identity===file.identity&&fact.sha256===file.sha256&&fact.size===file.size&&fact.mode===file.mode;
+   }))return 'applied' as const;
+   return 'unknown' as const;
+  };
+  const result=(state:'applied'|'not_observed'|'unknown')=>({state,target_ref:plan.target_ref,expected_old_oid:plan.parent_oid,new_oid:plan.commit_oid,execution_authorized:false as const});
+  if((await this.anchors(signal)).repository!==plan.repository_sha256)throw Error('git_repository_changed');
+  const before=current();if(before!=='applied')return result(before);
+  const context=await this.context(signal);
+  try{
+   const body=await this.controlled(context,['cat-file','commit',plan.commit_oid],undefined,signal,true);
+   if(body.length!==plan.commit_size||hash(body)!==plan.commit_sha256
+    ||createHash(plan.object_format).update('commit '+body.length+'\0').update(body).digest('hex')!==plan.commit_oid)return result('unknown');
+   const trees=await readCommitTreeObjects(this.executable!,this.root,context,join(this.commonDirectory,'objects'),this.limits,witness.commit_tree,signal);
+   const facts=trees.map(tree=>({oid:tree.oid,sha256:hash(tree.body),size:tree.body.length}));
+   if(canonicalJson(facts)!==canonicalJson(plan.tree_objects))return result('unknown');
+   return result(current()==='applied'?'applied':'unknown');
+  }finally{await context.dispose();}
+ }
+
+ async cleanupCommitRefPreparation(input:unknown,guard:()=>void,signal?:AbortSignal,atomic?:((remove:()=>void)=>void)){
+  const preparation=gitCommitRefPreparation(input),evidence=preparation.evidence;
+  if(typeof guard!=='function'||guard.constructor.name==='AsyncFunction')throw Error('git_execution_authority_missing');
+  const root=(scope:'git'|'common')=>scope==='git'?this.gitDirectory:this.commonDirectory;
+  const check=()=>{
+   signal?.throwIfAborted();synchronous(guard);
+   for(const [path,id] of [[this.root,evidence.directories.root],[this.gitDirectory,evidence.directories.git],[this.commonDirectory,evidence.directories.common],[join(this.commonDirectory,'objects'),evidence.directories.objects]])if(this.directorySync(path!)!==id)throw Error('git_repository_changed');
+   if(this.dotWitness()!==evidence.dot_witness)throw Error('git_repository_changed');
+  };
+  check();if((await this.anchors(signal)).repository!==evidence.plan.repository_sha256)throw Error('git_repository_changed');check();
+  const groups=[...preparation.files.map(file=>({paths:[join(root(file.scope),file.pending)],identity:file.identity,sha256:file.sha256})),
+   ...preparation.locks.map(lock=>({paths:[join(root(lock.scope),lock.pending),join(root(lock.scope),lock.path)],identity:lock.identity,sha256:lock.sha256}))];
+  const verify=(group:typeof groups[number])=>{
+   const present:string[]=[];
+   for(const path of group.paths){
+    let stat;try{stat=lstatSync(path,{bigint:true});}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')continue;throw error;}
+    if(!stat.isFile()||stat.isSymbolicLink()||identity(stat)!==group.identity)throw Error('git_commit_ref_unverified');
+    present.push(path);
+   }
+   for(const path of present){const bytes=this.raw(path,32*1024*1024,present.length);if(bytes===null||hash(bytes)!==group.sha256)throw Error('git_commit_ref_unverified');}
+   return present;
+  };
+  this.cleanupAtomically(()=>{
+   for(const group of groups){check();verify(group);}
+   for(const group of groups.reverse())for(const path of verify(group)){check();if(verify(group).includes(path))unlinkSync(path);}
+   for(const parent of [...preparation.parents].reverse()){
+    check();const path=join(root(parent.scope),parent.path);
+    try{if(this.directorySync(path)!==parent.identity)throw Error('git_commit_ref_unverified');rmdirSync(path);}catch(error){if(!['ENOENT','ENOTEMPTY','EEXIST'].includes((error as NodeJS.ErrnoException).code??''))throw error;}
+   }
+  },atomic);
+ }
+
  async cleanupCommitPreparation(input:unknown,guard:()=>void,signal?:AbortSignal,atomic?:((remove:()=>void)=>void)){
   return this.cleanupGitPreparation(gitCommitPreparation(input),guard,signal,atomic);
  }

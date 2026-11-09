@@ -195,20 +195,20 @@ export class GitIndexEffects extends GitRepositoryInspection{
    this.plans.set(plan,{witness,index,blobs,ref,metadata,directories,dot,rawRefs,attributes,mode,state:'ready'});return plan;
   }finally{await context.dispose();}
  }
- protected assertSource(stored:GitSourceWitness,locks:Lock[],created:Map<string,string>,indexPath=join(this.gitDirectory,'index.lock')){
+ protected assertSource(stored:GitSourceWitness,locks:Lock[],created:Map<string,string>,indexPath=join(this.gitDirectory,'index.lock'),ignored:ReadonlySet<string>=new Set()){
   for(const [path,identity] of stored.directories)if(this.directorySync(path)!==identity)throw Error('git_repository_changed');if(this.dotWitness()!==stored.dot)throw Error('git_repository_changed');
   for(const [path,identity] of created)if(this.directorySync(path)!==identity)throw Error('git_repository_changed');
   for(const lock of locks){const s=lstatSync(lock.path);if(!s.isFile()||s.isSymbolicLink()||s.nlink!==1n||id(s)!==lock.identity)throw Error('git_repository_changed');const bytes=this.raw(lock.path);if(bytes===null||hash(bytes)!==(equalPath(lock.path,indexPath)?hash(stored.index):hash(Buffer.alloc(0))))throw Error('git_review_changed');}
   const lockedIndex=this.raw(indexPath);if(lockedIndex===null||hash(lockedIndex)!==hash(stored.index))throw Error('git_review_changed');
-  if(this.sourceMetadata(new Set(locks.map(lock=>lock.path)),new Set(created.keys()))!==stored.metadata)throw Error('git_review_changed');
+  if(this.sourceMetadata(new Set([...locks.map(lock=>lock.path),...ignored]),new Set(created.keys()))!==stored.metadata)throw Error('git_review_changed');
   for(const [path,expected] of stored.rawRefs){const value=this.raw(path);if((value===null?null:hash(value))!==expected)throw Error('git_review_changed');}
   for(const [path,expected] of stored.attributes){const value=this.raw(path,1024*1024);if((value===null?null:hash(value))!==expected)throw Error('git_review_changed');}
   const index=this.raw(join(this.gitDirectory,'index'));if((index===null?null:hash(index))!==stored.witness.index_sha256)throw Error('git_review_changed');
   const alternates=this.raw(join(this.commonDirectory,'objects','info','alternates'),1024*1024);if(alternates?.length)throw Error('git_repository_changed');
   for(const selected of stored.witness.files){const value=this.raw(join(this.root,selected.path));if(selected.kind==='missing'){if(value!==null)throw Error('git_review_changed');}else if(value===null||hash(value)!==selected.sha256||Number(lstatSync(join(this.root,selected.path)).mode&0o777n)!==selected.mode)throw Error('git_review_changed');}
  }
- protected async parent(path:string,created:Map<string,string>){
-  const base=this.commonDirectory,rel=relative(base,path);if(rel.startsWith('..')||resolve(base,rel)!==path)throw Error('git_repository_changed');let current=base;
+ protected async parent(path:string,created:Map<string,string>,base=this.commonDirectory){
+  const rel=relative(base,path);if(rel.startsWith('..')||resolve(base,rel)!==path)throw Error('git_repository_changed');let current=base;
   for(const part of rel.split(sep).filter(Boolean)){current=join(current,part);try{await this.directory(current);}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;try{await mkdir(current,{mode:0o700});created.set(current,await this.directory(current));}catch(next){if((next as NodeJS.ErrnoException).code!=='EEXIST')throw next;await this.directory(current);}}}
  }
  private evidence(plan:GitIndexPlan,stored:Stored):GitIndexEvidence{

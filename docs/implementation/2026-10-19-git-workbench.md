@@ -196,7 +196,44 @@ store. Cancellation, proof changes or cleanup uncertainty consume the in-process
 plan. Owned pending/canonical pairs are checked before removal. Foreign files,
 unknown links and replaced roots are retained for explicit recovery.
 
-A host-only publication continuation runs inside those locks. Ref CAS, reflog facts,
-original execution-service journal consumers and Worker/native recovery still
-require integration. Commit dispatch remains unavailable. No runtime command,
+A host-only publication continuation runs inside those locks. The configured
+kernel now supplies ref CAS, reflog facts and read-only observation as described
+below. Original execution-service journal consumers and Worker/native recovery
+still require integration. Commit dispatch remains unavailable. No runtime command,
 test, build, migration or production operation was executed for this increment.
+
+
+## Original ref and reflog publication
+
+The host-only `applyCommit` path keeps the existing index, HEAD, packed-ref and
+branch locks through object writes and the following publication. It verifies the
+reviewed old target and rejects a changed HEAD or unsupported symbolic branch.
+The reviewed committer identity and UTC time supply deterministic HEAD/branch
+reflog entries. Original log bytes are retained as an exact prefix.
+
+Separate pending files hold the new reflog bodies and new ref OID. Publication
+preparation records their exact inodes, hashes, sizes and modes, all old file
+facts, the reviewed old/new OIDs and the remaining metadata digest. Synchronous
+original coordinator callbacks persist preparation before canonical reflog locks
+are installed and wrap publication in the original effect/outcome transaction.
+Each staged file is fsynced and each canonical reflog lock uses an exclusive hard
+link. Reflogs publish first and the original branch or detached HEAD publishes last.
+The unchanged conventional ref/HEAD locks remain held throughout.
+
+Source guards exclude only these exact managed paths from the metadata digest.
+Their identities, bytes and stats are checked separately before each rename. The
+kernel updates expected facts only after verifying the newly installed owned inode.
+A partial publication remains an unknown effect. Cleanup removes only exact owned
+pending/lock files, preserving published refs/logs and original content-addressed
+objects. Ref-log cleanup precedes original index/ref lock cleanup.
+
+Read-only observation checks the original physical roots, program binding, remaining
+metadata, index and every old/new ref/log fact. A complete new state also requires
+the actual commit object and full reviewed staged-tree/blob evidence to match.
+Partial states remain unknown. This observation grants no producer/lease authority
+and reconstructs no writable plan.
+
+Original execution-service journal storage, typed applied receipts, Worker/native
+custody consumers and explicit settlement still require integration. Commit dispatch
+remains unavailable. This increment has source and Git-delivery evidence only.
+Tests, typechecks, builds, native commands, migrations and deployment were not run.
