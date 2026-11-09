@@ -1260,50 +1260,65 @@ export class ArtifactService {
     });
   }
 
-  private textSource(id:string,ownerId:string,conversationId:string,version:number,sha256:string,runId?:string){
-    if(!this.db.prepare('SELECT 1 FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId))throw Error('conversation_not_found');
-    const row=this.version(id,ownerId,version),file=this.get(id,ownerId,version);
-    if(row.conversation_id!==conversationId)throw Error('artifact_not_found');
-    if(row.sha256!==sha256)throw Error('artifact_text_source_changed');
-    if(runId!==undefined&&!this.db.prepare(`SELECT 1 FROM ga_runs r JOIN ga_conversations c ON c.id=r.conversation_id
-      WHERE r.id=? AND r.conversation_id=? AND c.owner_id=? AND (
-       EXISTS(SELECT 1 FROM ga_run_artifacts a WHERE a.run_id=r.id AND a.artifact_id=? AND a.version=?)
-       OR EXISTS(SELECT 1 FROM ga_artifact_producers p WHERE p.run_id=r.id AND p.artifact_id=? AND p.version=? AND p.owner_id=c.owner_id AND p.conversation_id=c.id))`)
-      .get(runId,conversationId,ownerId,id,version,id,version))throw Error('artifact_not_found');
-    const mime=String(row.mime_type).toLowerCase().split(';',1)[0]!.trim(),size=Number(row.size_bytes);
-    if(file.part_count||file.preview_kind!=='text'||(!mime.startsWith('text/')&&!['application/json','application/xml'].includes(mime))
-      ||!Number.isSafeInteger(size)||size<0)throw Error('artifact_text_unsupported');
-    if(file.status!=='ready')throw Error('artifact_not_found');
-    if(file.local_state!=='present')throw Error('artifact_restore_required');
-    rejectTaskOutputSymlinks(String(row.server_path));this.markContentRead(id,ownerId);
-    return {file,source:{path:String(row.server_path),size,sha256}};
+  private textSource(id:string,ownerId:string,conversationId:string,version:number,sha256:string,runId?:string,partIndex?:number,groupSha?:string){
+    const selected=withReadTransaction(this.db,()=>{
+      if(!this.db.prepare('SELECT 1 FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId))throw Error('conversation_not_found');
+      const row=this.version(id,ownerId,version),group=this.get(id,ownerId,version);
+      if(row.conversation_id!==conversationId)throw Error('artifact_not_found');
+      if(runId!==undefined&&!this.db.prepare(`SELECT 1 FROM ga_runs r JOIN ga_conversations c ON c.id=r.conversation_id
+        WHERE r.id=? AND r.conversation_id=? AND c.owner_id=? AND (
+         EXISTS(SELECT 1 FROM ga_run_artifacts a WHERE a.run_id=r.id AND a.artifact_id=? AND a.version=?)
+         OR EXISTS(SELECT 1 FROM ga_artifact_producers p WHERE p.run_id=r.id AND p.artifact_id=? AND p.version=? AND p.owner_id=c.owner_id AND p.conversation_id=c.id))`)
+        .get(runId,conversationId,ownerId,id,version,id,version))throw Error('artifact_not_found');
+      const part=partIndex===undefined?undefined:this.part(id,ownerId,partIndex,version),file=part??group;
+      if(row.sha256!==(part?groupSha:sha256)||part&&part.sha256!==sha256)throw Error('artifact_text_source_changed');
+      let path=String(row.server_path);
+      if(part){
+        const partRow=this.db.prepare('SELECT server_path FROM ga_artifact_parts WHERE artifact_id=? AND part_index=?').get(id,partIndex!) as {server_path:string};
+        path=partRow.server_path;
+        const root=resolve(this.generatedRoot),target=resolve(path);
+        if(target===root||!target.startsWith(root+sep))throw Error('artifact_part_path_escape');
+      }
+      const mime=String(file.media_type).toLowerCase().split(';',1)[0]!.trim(),size=Number(file.size_bytes);
+      if((!part&&group.part_count)||file.preview_kind!=='text'||(!mime.startsWith('text/')&&!['application/json','application/xml'].includes(mime))
+        ||!Number.isSafeInteger(size)||size<0)throw Error('artifact_text_unsupported');
+      if(file.status!=='ready')throw Error('artifact_not_found');
+      if(file.local_state!=='present')throw Error('artifact_restore_required');
+      rejectTaskOutputSymlinks(path);
+      return {file,source:{path,size,sha256}};
+    });
+    this.markContentRead(id,ownerId);return selected;
   }
 
   async textPage(id:string,ownerId:string,query:Record<string,unknown>,signal?:AbortSignal){
     const identifier=/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/;
-    const conversationId=query.conversation_id,runId=query.run_id,version=Number(query.version),sha256=query.sha256,offset=Number(query.offset_chars??0);
-    if(Object.keys(query).some(key=>!['conversation_id','run_id','version','sha256','offset_chars'].includes(key))
+    const conversationId=query.conversation_id,runId=query.run_id,version=Number(query.version),sha256=query.sha256,offset=Number(query.offset_chars??0),partIndex=query.part_index===undefined?undefined:Number(query.part_index),groupSha=query.group_sha256;
+    if(Object.keys(query).some(key=>!['conversation_id','run_id','version','sha256','offset_chars','part_index','group_sha256'].includes(key))
       ||!identifier.test(id)||typeof conversationId!=='string'||!identifier.test(conversationId)
       ||runId!==undefined&&(typeof runId!=='string'||!identifier.test(runId))
       ||typeof sha256!=='string'||!/^[a-f0-9]{64}$/.test(sha256)||!Number.isSafeInteger(version)||version<1
-      ||!Number.isSafeInteger(offset)||offset<0)throw Error('artifact_text_query_invalid');
-    const selected=this.textSource(id,ownerId,conversationId,version,sha256,runId as string|undefined);
+      ||!Number.isSafeInteger(offset)||offset<0
+      ||(partIndex===undefined?groupSha!==undefined:!Number.isSafeInteger(partIndex)||partIndex<1||partIndex>50||version!==1||typeof groupSha!=='string'||!/^[a-f0-9]{64}$/.test(groupSha)))throw Error('artifact_text_query_invalid');
+    const selected=this.textSource(id,ownerId,conversationId,version,sha256,runId as string|undefined,partIndex,groupSha as string|undefined);
     if(offset>selected.source.size)throw Error('artifact_text_query_invalid');
     const page=await readVerifiedArtifactTextPage(selected.source,offset,signal);
     signal?.throwIfAborted();
-    const current=this.textSource(id,ownerId,conversationId,version,sha256,runId as string|undefined);
+    const current=this.textSource(id,ownerId,conversationId,version,sha256,runId as string|undefined,partIndex,groupSha as string|undefined);
     if(current.source.path!==selected.source.path||current.source.size!==selected.source.size)throw Error('artifact_text_source_changed');
-    return {conversation_id:conversationId,artifact_id:id,version,sha256,file_name:current.file.file_name,size_bytes:current.source.size,...page,execution_authorized:false};
+    return {conversation_id:conversationId,artifact_id:id,version,sha256,file_name:current.file.file_name,size_bytes:current.source.size,...(partIndex===undefined?{}:{part_index:partIndex,group_sha256:groupSha}),...page,execution_authorized:false};
   }
 
   async searchTextHistory(conversationId:string,ownerId:string,query:Record<string,unknown>,signal?:AbortSignal){
     signal?.throwIfAborted();
     const identifier=/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/;
     const q=typeof query.q==='string'?query.q.trim():'',runId=query.run_id,cursorId=query.cursor_artifact_id,cursorVersion=Number(query.cursor_version);
-    if(!q||q.length>200||!identifier.test(conversationId)||Object.keys(query).some(key=>!['q','run_id','cursor_artifact_id','cursor_version'].includes(key))
-      ||runId!==undefined&&(typeof runId!=='string'||!identifier.test(runId))
+    const parts=query.parts_protocol===1||query.parts_protocol==='1',cursorPart=query.cursor_part_index===undefined?undefined:Number(query.cursor_part_index),cursorGroup=query.cursor_group_sha256;
+    if(!q||q.length>200||!identifier.test(conversationId)||Object.keys(query).some(key=>!['q','run_id','cursor_artifact_id','cursor_version','parts_protocol','cursor_part_index','cursor_group_sha256'].includes(key))
+      ||query.parts_protocol!==undefined&&!parts||runId!==undefined&&(typeof runId!=='string'||!identifier.test(runId))
       ||(cursorId===undefined)!==(query.cursor_version===undefined)
-      ||cursorId!==undefined&&(typeof cursorId!=='string'||!identifier.test(cursorId)||!Number.isSafeInteger(cursorVersion)||cursorVersion<1))throw Error('artifact_text_query_invalid');
+      ||cursorId!==undefined&&(typeof cursorId!=='string'||!identifier.test(cursorId)||!Number.isSafeInteger(cursorVersion)||cursorVersion<1)
+      ||(cursorPart===undefined?cursorGroup!==undefined:!parts||cursorId===undefined||!Number.isSafeInteger(cursorPart)||cursorPart<1||cursorPart>50||typeof cursorGroup!=='string'||!/^[a-f0-9]{64}$/.test(cursorGroup)))throw Error('artifact_text_query_invalid');
+    type Entry={id:string;created_at:string;kind:string;version:number;sha256:string};
     const page=withReadTransaction(this.db,()=>{
       if(!this.db.prepare('SELECT 1 FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId))throw Error('conversation_not_found');
       if(runId!==undefined&&!this.db.prepare('SELECT 1 FROM ga_runs WHERE id=? AND conversation_id=?').get(runId as string,conversationId))throw Error('run_not_found');
@@ -1311,36 +1326,59 @@ export class ArtifactService {
        OR EXISTS(SELECT 1 FROM ga_run_artifacts ra WHERE ra.artifact_id=a.id AND ra.version=v.version AND ra.run_id=?)
        OR EXISTS(SELECT 1 FROM ga_artifact_producers p WHERE p.artifact_id=a.id AND p.version=v.version AND p.run_id=? AND p.owner_id=a.owner_id AND p.conversation_id=a.conversation_id))`;
       const args=[conversationId,ownerId,runId??null,runId??null,runId??null];
-      const boundary=cursorId===undefined?undefined:this.db.prepare(`SELECT a.created_at FROM ga_artifacts a JOIN ga_artifact_versions v ON v.artifact_id=a.id
-       WHERE ${scope} AND a.id=? AND v.version=?`).get(...args,cursorId as string,cursorVersion) as {created_at:string}|undefined;
+      const boundary=cursorId===undefined?undefined:this.db.prepare(`SELECT a.id,a.created_at,a.kind,v.version,v.sha256 FROM ga_artifacts a JOIN ga_artifact_versions v ON v.artifact_id=a.id
+       WHERE ${scope} AND a.id=? AND v.version=?`).get(...args,cursorId as string,cursorVersion) as Entry|undefined;
       if(cursorId!==undefined&&!boundary)throw Error('artifact_text_query_invalid');
-      return this.db.prepare(`SELECT a.id,a.created_at,v.version,v.sha256 FROM ga_artifacts a JOIN ga_artifact_versions v ON v.artifact_id=a.id
+      const rows=this.db.prepare(`SELECT a.id,a.created_at,a.kind,v.version,v.sha256 FROM ga_artifacts a JOIN ga_artifact_versions v ON v.artifact_id=a.id
        WHERE ${scope} ${boundary?'AND (a.created_at<? OR (a.created_at=? AND (a.id<? OR (a.id=? AND v.version<?))))':''}
        ORDER BY a.created_at DESC,a.id DESC,v.version DESC LIMIT 2`)
-       .all(...args,...(boundary?[boundary.created_at,boundary.created_at,cursorId as string,cursorId as string,cursorVersion]:[])) as Array<{id:string;created_at:string;version:number;sha256:string}>;
+       .all(...args,...(boundary?[boundary.created_at,boundary.created_at,cursorId as string,cursorId as string,cursorVersion]:[])) as Entry[];
+      return {rows,boundary};
     });
-    const entry=page[0],items=[];let unavailable=0,skipped=0;
+    let entry=page.rows[0],more=page.rows.length>1,partIndex:number|undefined,groupSha:string|undefined;
+    if(cursorPart!==undefined){
+      const original=page.boundary!;
+      if(original.kind!=='generated_document_group'||original.version!==1||original.sha256!==cursorGroup)throw Error('artifact_text_source_changed');
+      let group:ReturnType<ArtifactService['parts']>;
+      try{group=this.parts(original.id,ownerId,original.version);}catch(error){
+        if(error instanceof Error&&['artifact_parts_invalid','artifact_not_found','invalid_artifact_part_request'].includes(error.message))throw Error('artifact_text_source_changed');
+        throw error;
+      }
+      if(group.sha256!==cursorGroup)throw Error('artifact_text_source_changed');
+      if(cursorPart>group.items.length)throw Error('artifact_text_query_invalid');
+      if(cursorPart<group.items.length){
+        entry=original;partIndex=cursorPart+1;groupSha=group.sha256;
+        more=partIndex<group.items.length||page.rows.length>0;
+      }
+    }
+    const items=[];let unavailable=0,skipped=0;
     if(entry){
       try{
-        const selected=this.textSource(entry.id,ownerId,conversationId,entry.version,entry.sha256,runId as string|undefined);
+        if(parts&&partIndex===undefined&&entry.kind==='generated_document_group'&&entry.version===1){
+          const group=this.parts(entry.id,ownerId,entry.version);
+          if(group.sha256!==entry.sha256)throw Error('artifact_text_source_changed');
+          partIndex=1;groupSha=group.sha256;more||=group.items.length>1;
+        }
+        const part=partIndex===undefined?undefined:this.part(entry.id,ownerId,partIndex,entry.version),contentSha=part?.sha256??entry.sha256;
+        const selected=this.textSource(entry.id,ownerId,conversationId,entry.version,contentSha,runId as string|undefined,partIndex,groupSha);
         const found=await searchVerifiedArtifactText(selected.source,q,signal);
         signal?.throwIfAborted();
-        const current=this.textSource(entry.id,ownerId,conversationId,entry.version,entry.sha256,runId as string|undefined);
+        const current=this.textSource(entry.id,ownerId,conversationId,entry.version,contentSha,runId as string|undefined,partIndex,groupSha);
         if(current.source.path!==selected.source.path||current.source.size!==selected.source.size)throw Error('artifact_text_source_changed');
-        if(found.match)items.push({artifact_id:entry.id,version:entry.version,sha256:entry.sha256,file_name:current.file.file_name,
-          size_bytes:current.source.size,created_at:entry.created_at,...found.match});
+        if(found.match)items.push({artifact_id:entry.id,version:entry.version,sha256:contentSha,file_name:current.file.file_name,
+          size_bytes:current.source.size,created_at:entry.created_at,...(partIndex===undefined?{}:{part_index:partIndex,group_sha256:groupSha}),...found.match});
       }catch(error){
         signal?.throwIfAborted();
         const code=error instanceof Error?error.message:'',io=(error as NodeJS.ErrnoException)?.code;
         if(code==='artifact_text_unsupported')skipped++;
-        else if(['artifact_not_found','artifact_restore_required','artifact_content_mismatch','artifact_text_source_changed','task_output_path_unsafe'].includes(code)||['ENOENT','EACCES','EPERM','ELOOP'].includes(String(io)))unavailable++;
+        else if(['artifact_not_found','artifact_restore_required','artifact_content_mismatch','artifact_text_source_changed','task_output_path_unsafe','artifact_parts_invalid','artifact_part_path_escape'].includes(code)||['ENOENT','EACCES','EPERM','ELOOP'].includes(String(io)))unavailable++;
         else throw error;
       }
     }
     if(!this.db.prepare('SELECT 1 FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId))throw Error('conversation_not_found');
     return {conversation_id:conversationId,...(runId===undefined?{}:{run_id:runId}),q,items,scanned_versions:entry?1:0,
       unavailable_versions:unavailable,skipped_versions:skipped,
-      ...(page.length>1?{next_cursor:{artifact_id:entry!.id,version:entry!.version}}:{}),execution_authorized:false};
+      ...(more?{next_cursor:{artifact_id:entry!.id,version:entry!.version,...(partIndex===undefined?{}:{part_index:partIndex,group_sha256:groupSha})}}:{}),execution_authorized:false};
   }
 
   versions(id: string, ownerId: string, query: {limit?: unknown; before_version?: unknown} = {}) {
