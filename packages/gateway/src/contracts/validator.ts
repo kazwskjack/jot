@@ -5,6 +5,7 @@ import * as AddFormatsModule from 'ajv-formats';
 
 const Ajv2020 = (Ajv2020Module as unknown as { default: new (options?: Record<string, unknown>) => {
   addSchema(schema: unknown, key: string): void; compile(schema: unknown): ValidateFunction;
+  getSchema(key: string): ValidateFunction | undefined;
 } }).default;
 const addFormats = (AddFormatsModule as unknown as { default: (ajv: unknown) => void }).default;
 
@@ -22,6 +23,7 @@ export class ContractValidator {
   private readonly operations = new Map<string, OperationValidators>();
   private readonly routes = new Map<string, string>();
   readonly compilationErrors: string[] = [];
+  private readonly componentValidator: (name: string) => ValidateFunction | undefined;
 
   constructor(spec: Record<string, any> = JSON.parse(readFileSync(
     new URL('../../contracts/openapi.json', import.meta.url), 'utf8',
@@ -31,6 +33,7 @@ export class ContractValidator {
     for (const [name, schema] of Object.entries(spec.components?.schemas ?? {})) {
       ajv.addSchema(schema, `#/components/schemas/${name}`);
     }
+    this.componentValidator = name => ajv.getSchema(`#/components/schemas/${name}`);
     for (const [path, item] of Object.entries(spec.paths ?? {}) as Array<[string, Record<string, any>]>) {
       for (const method of ['get', 'post', 'put', 'patch', 'delete']) {
         const operation = item[method];
@@ -68,6 +71,12 @@ export class ContractValidator {
     const operation = this.get(operationId);
     const validator = operation.responses.get(status);
     if (!validator) return { valid: true, errors: [] };
+    return this.run(validator, value);
+  }
+
+  validateComponent(name: string, value: unknown): ValidationResult {
+    const validator = this.componentValidator(name);
+    if (!validator) throw new Error('contract_component_unknown');
     return this.run(validator, value);
   }
 

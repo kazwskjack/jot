@@ -1,0 +1,32 @@
+import {createHash} from 'node:crypto';
+import {canonicalJson} from '../db/canonical-json.ts';
+import {validGitReference} from './references.ts';
+import type {GitCheckoutReviewPrepare,GitCheckoutReviewWitness} from '../../contracts/types.ts';
+import type {GitBranchIntentRecord} from './branch-records.ts';
+
+const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/,SHA=/^[a-f0-9]{64}$/;
+export const checkoutDigest=(value:unknown)=>createHash('sha256').update(canonicalJson(value)).digest('hex');
+export function normalizeGitCheckoutReview(value:unknown):GitCheckoutReviewPrepare{
+ const input=value as GitCheckoutReviewPrepare;
+ if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).sort().join(',')!=='action,request_id,snapshot_id,target_ref'
+  ||typeof input.request_id!=='string'||!ID.test(input.request_id)||input.action!=='checkout-branch'
+  ||typeof input.snapshot_id!=='string'||!SHA.test(input.snapshot_id)||!validGitReference(input.target_ref)||!/^refs\/(?:heads|remotes)\//.test(input.target_ref))throw Error('git_checkout_invalid');
+ return{request_id:input.request_id,action:input.action,snapshot_id:input.snapshot_id,target_ref:input.target_ref};
+}
+/** Decode original immutable source with the shared contract and semantic bindings. */
+export function readGitCheckoutIntentSource(row:GitBranchIntentRecord,validate:(value:unknown)=>boolean){
+ try{
+  const input=normalizeGitCheckoutReview(JSON.parse(row.selection_json)),witness=JSON.parse(row.witness_json) as GitCheckoutReviewWitness;
+  if(!validate(witness)||row.action!==input.action||row.request_id!==input.request_id||checkoutDigest(input)!==row.request_sha256
+   ||witness.project_id!==row.project_id||witness.snapshot_id!==input.snapshot_id||witness.target.ref!==input.target_ref
+   ||witness.preview.target_ref!==input.target_ref||witness.preview.target_oid!==witness.target.checkout_oid
+   ||(witness.target.kind==='local')!==input.target_ref.startsWith('refs/heads/'))throw Error();
+  const oid=new RegExp('^[a-f0-9]{'+(witness.object_format==='sha1'?40:64)+'}$');
+  if(!oid.test(witness.target.oid)||!oid.test(witness.target.checkout_oid)||witness.head.oid!==null&&!oid.test(witness.head.oid)
+   ||witness.head.detached&&(witness.head.branch!==null||witness.head.oid===null)
+   ||!witness.head.detached&&(typeof witness.head.branch!=='string'||!validGitReference('refs/heads/'+witness.head.branch)))throw Error();
+  for(const change of witness.preview.index_projection?.changes??[])for(const entry of [change.before,change.after])if(entry&&!oid.test(entry.oid))throw Error();
+  if(checkoutDigest({action:input.action,target_ref:input.target_ref,witness})!==row.review_sha256)throw Error();
+  return{input,witness};
+ }catch{throw Error('git_checkout_evidence_invalid');}
+}

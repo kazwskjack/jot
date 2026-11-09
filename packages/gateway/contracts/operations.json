@@ -2137,5 +2137,32 @@
     "GitInitializationReviewIntent",
     "200",
     "Approve or cancel the exact original initialization review/version/hash. Approval repeats the original source snapshot, repository/program and internal-ignore facts. Existing-repository review repeats its fixed HEAD/configuration/metadata evidence; native reinitialization remains a separate development phase."
+  ],
+  [
+    "POST",
+    "/v1/projects/{projectId}/git/checkout-intents",
+    "Owner-scoped checkout review prepare",
+    "GitCheckoutReviewPrepare",
+    "GitCheckoutReviewIntent",
+    "201",
+    "Freeze, read or cancel the original immutable checkout source review. Approval, execution admission and native checkout require subsequent complete policy evidence. execution_authorized remains false."
+  ],
+  [
+    "GET",
+    "/v1/projects/{projectId}/git/checkout-intents/{intentId}",
+    "Owner-scoped checkout review get",
+    null,
+    "GitCheckoutReviewIntent",
+    "200",
+    "Freeze, read or cancel the original immutable checkout source review. Approval, execution admission and native checkout require subsequent complete policy evidence. execution_authorized remains false."
+  ],
+  [
+    "POST",
+    "/v1/projects/{projectId}/git/checkout-intents/{intentId}/control",
+    "Owner-scoped checkout review control",
+    "GitCheckoutReviewControl",
+    "GitCheckoutReviewIntent",
+    "200",
+    "Freeze, read or cancel the original immutable checkout source review. Approval, execution admission and native checkout require subsequent complete policy evidence. execution_authorized remains false."
   ]
 ]

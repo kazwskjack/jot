@@ -31,7 +31,7 @@ export default function GitBranches({project,snapshotId,locked,onRefresh,onBusy,
     {branch.checkout_oid&&branch.checkout_oid!==branch.oid&&<span>切换目标提交 <code>{branch.checkout_oid}</code></span>}
     <button type="button" disabled={locked||!branch.checkout_oid} onClick={event=>{previewOpener.current=event.currentTarget;setPreview({project,snapshot:snapshotId,ref:branch.ref})}} aria-label={'查看分支切换影响 '+branch.ref}>查看切换影响</button>
    </li>)}</ul>}</>}
-   {previewRef&&<GitCheckoutPreview key={JSON.stringify([project,snapshotId,previewRef])} project={project} snapshotId={snapshotId} targetRef={previewRef} onClose={()=>{setPreview(null);previewOpener.current?.focus()}}/>}
+   {previewRef&&<GitCheckoutPreview key={JSON.stringify([project,snapshotId,previewRef])} project={project} snapshotId={snapshotId} targetRef={previewRef} onBusy={onBusy} onClose={()=>{setPreview(null);previewOpener.current?.focus()}}/>}
    {state&&creating&&<GitBranchReview project={project} snapshotId={snapshotId} allowExecution={allowCreate} onBusy={onBusy} onChanged={status=>{if(status.execution.state==='applied'&&status.workspace_state==='released_settled')onRefresh()}} onClose={()=>{setCreating(false);setRestoreFocus(true)}}/>}
   </>}
  </section>;

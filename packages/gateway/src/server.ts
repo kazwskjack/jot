@@ -33,6 +33,8 @@ import {registerGitRoutes} from './git/routes.ts';
 import {GitMutationIntents} from './git/intents.ts';
 import {registerGitReviewRoutes} from './git/review-routes.ts';
 import {GitBranchIntents} from './git/branch-intents.ts';
+import {GitCheckoutIntents} from './git/checkout-intents.ts';
+import {registerGitCheckoutReviewRoutes} from './git/checkout-review-routes.ts';
 import {registerGitBranchReviewRoutes} from './git/branch-review-routes.ts';
 import {GitInitializationIntents} from './git/initialization-intents.ts';
 import {registerGitInitializationReviewRoutes} from './git/initialization-review-routes.ts';
@@ -340,7 +342,7 @@ export async function buildServer(config: {
   const isRunCommandRoute=(request:any)=>request.method==='POST'&&['/v1/runs/:runId/steer','/v1/runs/:runId/cancel'].includes(request.routeOptions.url);
   const isWorkspaceSelectionRoute=(request:any)=>request.method==='POST'&&request.routeOptions.url==='/v1/workspaces/selection';
   const isProjectMutationRoute=(request:any)=>request.method==='POST'&&['/v1/projects','/v1/projects/:projectId/lifecycle'].includes(request.routeOptions.url)||request.method==='PATCH'&&request.routeOptions.url==='/v1/projects/:projectId';
-  const isGitReviewRoute=(request:any)=>request.method==='POST'&&['/v1/projects/:projectId/git/intents','/v1/projects/:projectId/git/intents/:intentId/control','/v1/projects/:projectId/git/branch-intents','/v1/projects/:projectId/git/branch-intents/:intentId/control','/v1/projects/:projectId/git/initialization-intents','/v1/projects/:projectId/git/initialization-intents/:intentId/control'].includes(request.routeOptions.url);
+  const isGitReviewRoute=(request:any)=>request.method==='POST'&&['/v1/projects/:projectId/git/intents','/v1/projects/:projectId/git/intents/:intentId/control','/v1/projects/:projectId/git/branch-intents','/v1/projects/:projectId/git/branch-intents/:intentId/control','/v1/projects/:projectId/git/initialization-intents','/v1/projects/:projectId/git/initialization-intents/:intentId/control','/v1/projects/:projectId/git/checkout-intents','/v1/projects/:projectId/git/checkout-intents/:intentId/control'].includes(request.routeOptions.url);
   const isIndexAdmissionRoute=(request:any)=>request.method==='POST'&&request.routeOptions.url==='/v1/projects/:projectId/git/intents/:intentId/admissions';
   const isIndexTransportRoute=(request:any)=>request.method==='POST'&&['/v1/projects/:projectId/git/executions/:executionId/dispatch','/v1/projects/:projectId/git/executions/:executionId/resolve'].includes(request.routeOptions.url);
   const isIndexControlAdmissionRoute=(request:any)=>request.method==='POST'&&request.routeOptions.url==='/v1/projects/:projectId/git/executions/:executionId/controls';
@@ -982,6 +984,8 @@ export async function buildServer(config: {
   registerGitReviewRoutes(app,{intents:gitReviewIntents,actor,atomic:atomicCommand});
   registerGitBranchReviewRoutes(app,{intents:gitBranchIntents,actor,atomic:atomicCommand});
   registerGitInitializationReviewRoutes(app,{intents:gitInitializationIntents,actor,atomic:atomicCommand});
+  const gitCheckoutIntents=new GitCheckoutIntents(db,projects,gitWorkbench,value=>contracts.validateComponent('GitCheckoutReviewWitness',value).valid);
+  registerGitCheckoutReviewRoutes(app,{intents:gitCheckoutIntents,actor,atomic:atomicCommand});
   const gitIndexExecutions=new GitIndexExecutions(db,projects,gitWorkbench,gitReviewIntents);
   registerGitExecutionHistoryRoutes(app,gitIndexExecutions,actor,atomicCommand);
   registerIndexDispatchRoutes(app,{executions:gitIndexExecutions,client:config.nativeGitClient,actor});

@@ -7,12 +7,12 @@ const storageValue=value=>typeof value==='function'?value():value;
 const prefix=(scope,project)=>{if(typeof scope!=='string'||!SHA.test(scope))invalid();id(project);return 'jot-git-request:v1:'+scope+':'+encodeURIComponent(project)+':'};
 const changed=()=>{if(globalThis.window?.dispatchEvent)window.dispatchEvent(new window.Event(EVENT))};
 export const gitCommandDraftEvent=EVENT;
-/** @typedef {{kind:'review-prepare'}|{kind:'branch-review-prepare'}|{kind:'branch-review-control',intent_id:string}|{kind:'initialization-review-prepare'}|{kind:'initialization-review-control',intent_id:string}|{kind:'admit',intent_id:string}|{kind:'review-control',intent_id:string}|{kind:'control',execution_id:string}} CommandHint */
+/** @typedef {{kind:'checkout-review-prepare'}|{kind:'checkout-review-control',intent_id:string}|{kind:'review-prepare'}|{kind:'branch-review-prepare'}|{kind:'branch-review-control',intent_id:string}|{kind:'initialization-review-prepare'}|{kind:'initialization-review-control',intent_id:string}|{kind:'admit',intent_id:string}|{kind:'review-control',intent_id:string}|{kind:'control',execution_id:string}} CommandHint */
 /** @returns {CommandHint} */
 function command(value,project){
  object(value,['path','method','body','key']);if(value.method!=='POST'||typeof value.path!=='string'||value.path.length>4096)invalid();id(value.key);
- const parts=/^\/projects\/([^/]+)\/git\/(intents|branch-intents|initialization-intents|executions)(?:\/([^/]+)\/(admissions|control|controls))?$/.exec(value.path);if(!parts||encoded(parts[1])!==project)invalid();
- const body=value.body;object(body,['request_id','action','branch','initial_branch','object_format','paths','snapshot_id','message','expected_version','review_sha256','expected_state_sha256','acknowledge_unknown']);id(body.request_id);
+ const parts=/^\/projects\/([^/]+)\/git\/(intents|branch-intents|checkout-intents|initialization-intents|executions)(?:\/([^/]+)\/(admissions|control|controls))?$/.exec(value.path);if(!parts||encoded(parts[1])!==project)invalid();
+ const body=value.body;object(body,['request_id','action','branch','target_ref','initial_branch','object_format','paths','snapshot_id','message','expected_version','review_sha256','expected_state_sha256','acknowledge_unknown']);id(body.request_id);
  const exact=keys=>{if(Object.keys(body).length!==keys.length||Object.keys(body).some(key=>!keys.includes(key)))invalid()};
  const version=()=>{if(!Number.isSafeInteger(body.expected_version)||body.expected_version<1||typeof body.review_sha256!=='string'||!SHA.test(body.review_sha256))invalid()};
  if(parts[2]==='initialization-intents'&&!parts[3]){
@@ -20,6 +20,12 @@ function command(value,project){
   if(body.action!=='init'||typeof body.initial_branch!=='string'||!body.initial_branch||body.initial_branch.length>1013
    ||!['sha1','sha256'].includes(body.object_format)||typeof body.snapshot_id!=='string'||!SHA.test(body.snapshot_id))invalid();
   return{kind:'initialization-review-prepare'};
+ }
+ if(parts[2]==='checkout-intents'&&!parts[3]){
+  exact(['request_id','action','snapshot_id','target_ref']);
+  if(body.action!=='checkout-branch'||typeof body.target_ref!=='string'||body.target_ref.length>1024||!/^refs\/(?:heads|remotes)\/.+/.test(body.target_ref)
+   ||typeof body.snapshot_id!=='string'||!SHA.test(body.snapshot_id))invalid();
+  return{kind:'checkout-review-prepare'};
  }
  if(parts[2]==='branch-intents'&&!parts[3]){
   exact(['request_id','action','branch','snapshot_id']);
@@ -37,6 +43,7 @@ function command(value,project){
  if(!parts[3])invalid();const target=encoded(parts[3]);
  if(parts[2]==='intents'&&parts[4]==='admissions'){exact(['request_id','expected_version','review_sha256']);version();return{kind:'admit',intent_id:target}}
  if(parts[2]==='intents'&&parts[4]==='control'){exact(['request_id','expected_version','review_sha256','action']);version();if(!['approve','cancel'].includes(body.action))invalid();return{kind:'review-control',intent_id:target}}
+ if(parts[2]==='checkout-intents'&&parts[4]==='control'){exact(['request_id','expected_version','review_sha256','action']);version();if(body.action!=='cancel')invalid();return{kind:'checkout-review-control',intent_id:target}}
  if(parts[2]==='branch-intents'&&parts[4]==='control'){exact(['request_id','expected_version','review_sha256','action']);version();if(!['approve','cancel'].includes(body.action))invalid();return{kind:'branch-review-control',intent_id:target}}
  if(parts[2]==='initialization-intents'&&parts[4]==='control'){exact(['request_id','expected_version','review_sha256','action']);version();if(!['approve','cancel'].includes(body.action))invalid();return{kind:'initialization-review-control',intent_id:target}}
  if(parts[2]==='executions'&&parts[4]==='controls'){exact(['request_id','expected_state_sha256','acknowledge_unknown']);if(typeof body.expected_state_sha256!=='string'||!SHA.test(body.expected_state_sha256)||body.acknowledge_unknown!==true)invalid();return{kind:'control',execution_id:target}}
