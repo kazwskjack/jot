@@ -1,3 +1,5 @@
+import PdfFileNavigation from './PdfFileNavigation';
+import {renderPdfSearchHighlights,type PdfSearchMatch} from './vendor/pilotdeck-pdf-search';
 import React,{useCallback,useEffect,useRef,useState} from 'react';
 import * as pdfjs from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
@@ -12,8 +14,10 @@ const assets=new URL('pdfjs/6.1.200/',new URL(workerUrl,document.baseURI)).href;
 type Zoom=number|'width'|'page';
 const clampZoom=(value:number)=>Math.max(0.1,Math.min(4,value));
 
-function PdfPage({document,pageNumber,zoom,rotation,width,onScale}:{document:pdfjs.PDFDocumentProxy;pageNumber:number;zoom:Zoom;rotation:number;width:number;onScale:(scale:number)=>void}){
+function PdfPage({document,pageNumber,zoom,rotation,width,onScale,matches,selected}:{document:pdfjs.PDFDocumentProxy;pageNumber:number;zoom:Zoom;rotation:number;width:number;onScale:(scale:number)=>void;matches:PdfSearchMatch[];selected:string|null}){
  const canvas=useRef<HTMLCanvasElement>(null),text=useRef<HTMLDivElement>(null);
+ const mapping=useRef<{divs:HTMLElement[];items:string[]}|undefined>(undefined);
+ const [textRevision,setTextRevision]=useState(0);
  const [size,setSize]=useState({width:0,height:0,scale:1}),[error,setError]=useState(''),[busy,setBusy]=useState(true);
  useEffect(()=>{
   let cancelled=false,page:pdfjs.PDFPageProxy|undefined,render:pdfjs.RenderTask|undefined,layer:pdfjs.TextLayer|undefined;
@@ -32,14 +36,20 @@ function PdfPage({document,pageNumber,zoom,rotation,width,onScale}:{document:pdf
    render=page.render({canvas:target,viewport,transform:[ratio,0,0,ratio,0,0]});await render.promise;if(cancelled)return;
    const content=await page.getTextContent();if(cancelled)return;
    textTarget.replaceChildren();layer=new pdfjs.TextLayer({textContentSource:content,container:textTarget,viewport});
-   await layer.render();if(!cancelled)setBusy(false);
+   await layer.render();
+   if(!cancelled){mapping.current={divs:layer.textDivs,items:layer.textContentItemsStr};setTextRevision(value=>value+1);setBusy(false);}
   };
   void draw().catch(error=>{if(!cancelled){setError(error instanceof Error?error.message:'PDF页面绘制失败');setBusy(false);}}).finally(()=>{if(cancelled){try{page?.cleanup();}catch{}}});
   return()=>{
-   cancelled=true;render?.cancel();layer?.cancel();target.width=0;target.height=0;textTarget.replaceChildren();
+   cancelled=true;mapping.current=undefined;render?.cancel();layer?.cancel();target.width=0;target.height=0;textTarget.replaceChildren();
    void Promise.resolve(render?.promise).catch(()=>{}).then(()=>{try{page?.cleanup();}catch{}});
   };
  },[document,pageNumber,zoom,rotation,width,onScale]);
+ useEffect(()=>{
+  if(!mapping.current)return;
+  const element=renderPdfSearchHighlights(mapping.current.divs,mapping.current.items,matches,selected);
+  element?.scrollIntoView({block:'center',inline:'nearest'});
+ },[matches,selected,textRevision]);
  return <>
   {busy&&<p role="status">正在绘制第 {pageNumber} 页…</p>}
   {error&&<p role="alert">{error}</p>}
@@ -58,6 +68,7 @@ export default function ActivityToolFilePdf(props:ListedFilePreviewSource){
  const currentView=view.identity===identity?view:{identity,page:1,zoom:'width' as Zoom,rotation:0};
  const [width,setWidth]=useState(800),[password,setPassword]=useState(''),[challenge,setChallenge]=useState<{identity:string;update:(password:string)=>void;invalid:boolean}>();
  const [actionError,setActionError]=useState('');
+ const [searchResult,setSearchResult]=useState<{document:pdfjs.PDFDocumentProxy;matches:PdfSearchMatch[];selected:string|null}>();
  const reportScale=useCallback((value:number)=>{scale.current=value;},[]);
  useEffect(()=>{root.current?.focus();root.current?.scrollIntoView({block:'nearest'});},[identity]);
  useEffect(()=>{
@@ -80,12 +91,24 @@ export default function ActivityToolFilePdf(props:ListedFilePreviewSource){
  },[identity,revision]);
  const current=state?.identity===identity?state:undefined,document=current?.document;
  const page=document?Math.min(currentView.page,document.numPages):1;
- const change=(patch:Partial<typeof currentView>)=>setView({...currentView,...patch,identity});
+ const change=useCallback((patch:Partial<typeof currentView>)=>{
+  setView(previous=>{
+   const current=previous.identity===identity?previous:{identity,page:1,zoom:'width' as Zoom,rotation:0};
+   return {...current,...patch,identity};
+  });
+ },[identity]);
+ const navigate=useCallback((page:number)=>change({page}),[change]);
+ const reportMatches=useCallback((matches:PdfSearchMatch[],selected:string|null)=>{if(document)setSearchResult({document,matches,selected});},[document]);
+ const activeSearch=searchResult?.document===document?searchResult:undefined;
  const fullscreen=async()=>{
   try{if(window.document.fullscreenElement===root.current)await window.document.exitFullscreen();else await root.current?.requestFullscreen();}
   catch(error){setActionError(error instanceof Error?error.message:'暂时无法切换全屏');}
  };
- return <section ref={root} tabIndex={-1} className="jot-activity-content" aria-label="原列表固定PDF版本" style={{background:'var(--jot-background,white)',overflow:'auto'}}>
+ return <section ref={root} tabIndex={-1} className="jot-activity-content" aria-label="原列表固定PDF版本" data-chat-search-scope="" style={{background:'var(--jot-background,white)',overflow:'auto'}} onKeyDown={event=>{
+   if(document&&!event.defaultPrevented&&!event.nativeEvent.isComposing&&event.keyCode!==229&&(event.ctrlKey||event.metaKey)&&!event.altKey&&event.key.toLowerCase()==='f'){
+    event.preventDefault();event.stopPropagation();const input=root.current?.querySelector<HTMLInputElement>('[data-pdf-file-search]');input?.focus();input?.select();
+   }
+  }}>
   <h4>{file.path} · 版本 {file.version}</h4>
   <ActivityToolFileBytes key={identity} conversationId={conversationId} runId={runId} activityId={activityId} resultSha={resultSha} file={file}/>
   {challenge?.identity===identity&&<form onSubmit={event=>{event.preventDefault();challenge.update(password);setPassword('');setChallenge(undefined);}}>
@@ -106,8 +129,9 @@ export default function ActivityToolFilePdf(props:ListedFilePreviewSource){
    <button type="button" onClick={()=>change({rotation:(currentView.rotation+90)%360})}>顺时针旋转</button>
    <button type="button" onClick={()=>void fullscreen()}>切换PDF全屏</button>
   </nav>}
+  {document&&<PdfFileNavigation key={identity+revision} document={document} page={page} onNavigate={navigate} onMatches={reportMatches}/>}
   <div ref={viewport} style={{width:'100%',minWidth:0,overflow:'auto',maxHeight:'80vh'}}>
-   {document&&<PdfPage key={JSON.stringify([identity,revision,page,currentView.zoom,currentView.rotation,width])} document={document} pageNumber={page} zoom={currentView.zoom} rotation={currentView.rotation} width={width} onScale={reportScale}/>}
+   {document&&<PdfPage key={JSON.stringify([identity,revision,page,currentView.zoom,currentView.rotation,width])} document={document} pageNumber={page} zoom={currentView.zoom} rotation={currentView.rotation} width={width} onScale={reportScale} matches={activeSearch?.matches.filter(match=>match.pageNumber===page)??[]} selected={activeSearch?.selected??null}/>}
   </div>
   {current?.error&&<p role="alert">{current.error} <button type="button" onClick={()=>setRevision(value=>value+1)}>重试PDF</button></p>}
   {actionError&&<p role="alert">{actionError}</p>}

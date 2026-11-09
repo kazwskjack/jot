@@ -110,3 +110,13 @@ The original fixed-file PDF viewer uses Mozilla PDF.js through the pinned
 license is preserved at `licenses/PDFJS-APACHE-2.0.txt`. The worker, CMaps,
 standard fonts and WebAssembly assets are distributed with their package
 notices. Optional native canvas packages retain their own package licenses.
+
+## PilotDeck PDF outline and search
+
+`web/jot/vendor/pilotdeck-pdf-outline.ts` and
+`web/jot/vendor/pilotdeck-pdf-search.ts` adapt
+`ui/src/components/code-editor/utils/pdfOutline.ts` and `pdfSearch.ts` from
+PilotDeck revision `783499ffdb2d501bf590b2e035acd027a882df10`.
+These files retain the upstream GNU Affero General Public License v3.0 terms.
+The complete license is retained at
+`packages/session-adapter/runtime-patches/PILOTDECK-AGPL-3.0.txt`.
