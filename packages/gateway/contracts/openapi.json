@@ -39539,6 +39539,28 @@
                             "oid": {
                               "type": "string",
                               "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$"
+                            },
+                            "blob": {
+                              "type": "object",
+                              "properties": {
+                                "size": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "sha256": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "pattern": "^[a-f0-9]{64}$"
+                                }
+                              },
+                              "required": [
+                                "size",
+                                "sha256"
+                              ],
+                              "additionalProperties": false
                             }
                           },
                           "required": [
@@ -39564,6 +39586,28 @@
                             "oid": {
                               "type": "string",
                               "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$"
+                            },
+                            "blob": {
+                              "type": "object",
+                              "properties": {
+                                "size": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "sha256": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "pattern": "^[a-f0-9]{64}$"
+                                }
+                              },
+                              "required": [
+                                "size",
+                                "sha256"
+                              ],
+                              "additionalProperties": false
                             }
                           },
                           "required": [
@@ -39577,6 +39621,35 @@
                         "path",
                         "before",
                         "after"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "attributes": {
+                    "type": "array",
+                    "maxItems": 100000,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096
+                        },
+                        "name": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1024
+                        },
+                        "value": {
+                          "type": "string",
+                          "maxLength": 2097152
+                        }
+                      },
+                      "required": [
+                        "path",
+                        "name",
+                        "value"
                       ],
                       "additionalProperties": false
                     }

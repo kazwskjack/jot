@@ -12,7 +12,7 @@ import {isAbsolute,resolve,join,dirname,relative,sep,basename} from 'node:path';
 import {tmpdir} from 'node:os';
 import {workspaceRelativePath} from '../always-on/workspace-provider.ts';
 import {gitExecutable,readGit} from './process.ts';
-import {gitTreeEntries,readCommitTree,type GitCommitReviewWitness} from './commit-tree.ts';
+import {gitObjectBatch,gitTreeEntries,readCommitTree,type GitCommitReviewWitness} from './commit-tree.ts';
 import {taskmasterPrdPath} from '../workbench/taskmaster-path.ts';
 
 export type GitInspectionOptions={root:string;gitDirectory?:string;commonDirectory?:string;executable?:string;limits?:Partial<{maxOutputBytes:number;timeoutMs:number;maxEntries:number;maxMetadataEntries:number;maxDiffBytes:number}>};
@@ -649,7 +649,7 @@ export class GitRepositoryInspection{
    const seconds=(ns:bigint)=>Number(ns/1000000000n)+Number(ns%1000000000n)/1e9;
    await utimes(sourceIndex,seconds(stat.atimeNs),seconds(stat.mtimeNs));
   }
-  const run=(args:string[],input?:Buffer,index=sourceIndex)=>readGit(this.executable!,this.root,context.directory,args,this.limits,signal,
+  const run=(args:string[],input?:Buffer,index=sourceIndex,output=this.limits.maxOutputBytes)=>readGit(this.executable!,this.root,context.directory,args,{...this.limits,maxOutputBytes:output},signal,
    join(context.directory,'objects'),input,join(this.commonDirectory,'objects'),index);
   if(context.index!==null){
    const refreshed=await run(['update-index','-q','--refresh']);
@@ -680,8 +680,55 @@ export class GitRepositoryInspection{
    if(before?.mode===after?.mode&&before?.oid===after?.oid)continue;
    changes.push({path,before:before?{mode:before.mode,oid:before.oid}:null,after:after?{mode:after.mode,oid:after.oid}:null});
   }
+  const blobs=new Map<string,{size:number;sha256:string|null}>();
+  const entries=changes.flatMap(change=>[change.before,change.after]).filter(entry=>entry!==null&&entry.mode!=='160000');
+  const oids=[...new Set(entries.map(entry=>entry!.oid))].sort();
+  if(oids.length){
+   const input=Buffer.from(oids.join('\n')+'\n','utf8');
+   const sizes=await run(['cat-file','--batch-check=%(objectname) %(objecttype) %(objectsize)'],input);
+   if(sizes.code!==0)throw Error('git_checkout_unavailable');
+   const raw=text(sizes.bytes);
+   if(!raw.endsWith('\n'))throw Error('git_checkout_unavailable');
+   const rows=raw.slice(0,-1).split('\n');
+   if(rows.length!==oids.length)throw Error('git_checkout_unavailable');
+   let total=0,readBodies=true;
+   for(const [index,row] of rows.entries()){
+    const fields=/^([a-f0-9]+) blob (0|[1-9][0-9]*)$/.exec(row);
+    if(!fields||fields[1]!==oids[index])throw Error('git_checkout_unavailable');
+    const size=Number(fields[2]);if(!Number.isSafeInteger(size))throw Error('git_checkout_unavailable');
+    blobs.set(oids[index]!,{size,sha256:null});total+=size;
+    if(size>32*1024*1024||!Number.isSafeInteger(total)||total>64*1024*1024)readBodies=false;
+   }
+   if(readBodies){
+    // Body limits exclude the bounded object headers and their separators.
+    const result=await run(['cat-file','--batch'],input,index,64*1024*1024+oids.length*128);
+    if(result.code!==0)throw Error('git_checkout_unavailable');
+    for(const object of gitObjectBatch(result.bytes,oids,'blob',format,32*1024*1024,64*1024*1024)){
+     const fact=blobs.get(object.oid)!;if(fact.size!==object.body.length)throw Error('git_checkout_unavailable');
+     fact.sha256=hash(object.body);
+    }
+   }
+   for(const entry of entries)entry!.blob=blobs.get(entry!.oid)!;
+  }
+  const paths=new Set(changes.map(change=>change.path)),attributes:NonNullable<NonNullable<GitCheckoutPreview['index_projection']>['attributes']>=[];
+  if(paths.size){
+   const result=await run(['check-attr','--cached','--all','-z','--stdin'],Buffer.from([...paths].join('\0')+'\0','utf8'),index);
+   if(result.code!==0)throw Error('git_checkout_unavailable');
+   const raw=text(result.bytes);
+   if(raw&&!raw.endsWith('\0'))throw Error('git_checkout_unavailable');
+   const fields=raw?raw.slice(0,-1).split('\0'):[],seen=new Set<string>();
+   if(fields.length%3)throw Error('git_checkout_unavailable');
+   if(fields.length/3>Math.min(this.limits.maxMetadataEntries,100000))throw Error('git_metadata_limit');
+   for(let at=0;at<fields.length;at+=3){
+    const path=fields[at]!,name=fields[at+1]!,value=fields[at+2]!,key=path+'\0'+name;
+    if(!paths.has(path)||!name||name.length>1024||/[\x00-\x20\x7f]/.test(name)||seen.has(key))throw Error('git_checkout_unavailable');
+    if(value.length>2*1024*1024)throw Error('git_metadata_limit');
+    seen.add(key);attributes.push({path,name,value});
+   }
+   attributes.sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:a.name<b.name?-1:a.name>b.name?1:0);
+  }
   const body=await this.bytes(index,32*1024*1024);
-  preview.working_tree_check='passed';preview.index_projection={sha256:hash(body),entries_sha256:hash(canonicalJson(result)),entry_count:result.length,changes};
+  preview.working_tree_check='passed';preview.index_projection={sha256:hash(body),entries_sha256:hash(canonicalJson(result)),entry_count:result.length,changes,attributes};
   signal?.throwIfAborted();return preview;
  }
  async branches(snapshotId:string,signal?:AbortSignal,targetRef?:string):Promise<Omit<GitBranchInventory,'project_id'>>{

@@ -21,7 +21,7 @@ export function gitTreeEntries(bytes:Buffer,tree:boolean,max:number):Entry[]{
 }
 export type GitCommitTreeObject={oid:string;body:Buffer};
 
-function objectBatch(bytes:Buffer,oids:readonly string[],type:'blob'|'tree',format:'sha1'|'sha256',maxSize:number,maxTotal:number):GitCommitTreeObject[]{
+export function gitObjectBatch(bytes:Buffer,oids:readonly string[],type:'blob'|'tree',format:'sha1'|'sha256',maxSize:number,maxTotal:number):GitCommitTreeObject[]{
  let offset=0,total=0;
  const objects=oids.map(oid=>{
   const end=bytes.indexOf(10,offset);
@@ -56,7 +56,7 @@ export async function readCommitTree(executable:string,root:string,context:GitRe
  const oids=[...new Set(staged.filter(entry=>entry.type==='blob').map(entry=>entry.oid))].sort(),blobs:Array<{oid:string;sha256:string;size:number}>=[];
  if(oids.length){
   const bytes=await run(['cat-file','--batch'],64*1024*1024,Buffer.from(oids.join('\n')+'\n'));
-  for(const object of objectBatch(bytes,oids,'blob',format,32*1024*1024,64*1024*1024)){
+  for(const object of gitObjectBatch(bytes,oids,'blob',format,32*1024*1024,64*1024*1024)){
    blobs.push({oid:object.oid,sha256:hash(object.body),size:object.body.length});
   }
  }
@@ -90,5 +90,5 @@ export async function readCommitTreeObjects(executable:string,root:string,contex
  const oids=[...treeOids].sort();
  const bytes=await run(['cat-file','--batch'],Buffer.from(oids.join('\n')+'\n'));
  signal?.throwIfAborted();
- return objectBatch(bytes,oids,'tree',evidence.object_format,8*1024*1024,16*1024*1024);
+ return gitObjectBatch(bytes,oids,'tree',evidence.object_format,8*1024*1024,16*1024*1024);
 }

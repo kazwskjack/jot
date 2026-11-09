@@ -1186,3 +1186,36 @@ Primary behavior is documented by [Git read-tree](https://git-scm.com/docs/git-r
 [Git update-index](https://git-scm.com/docs/git-update-index),
 [checkout setup](https://raw.githubusercontent.com/git/git/master/builtin/checkout.c)
 and [worktree-specific paths](https://raw.githubusercontent.com/git/git/master/path.c).
+
+## Checkout raw content and target-index attributes, 2026-11-09
+
+The existing checkout preview now reads distinct blob IDs from both sides of
+its exact index changes. A single fixed batch-check validates each expected ID,
+blob type and canonical safe size before any body read. When all distinct bodies
+fit the existing 32 MiB per-object and 64 MiB total content budget, one bounded
+batch read reuses the original object parser to verify framing, type, algorithm,
+object identity and exact size, then attaches SHA-256 facts. Beyond that budget,
+all index changes retain their known blob sizes and explicit null digests. Gitlink
+entries retain their commit IDs. Original object bodies stay outside the response.
+
+A fixed cached check-attr command uses the projected private index and NUL input
+paths. Exact NUL triples, requested paths, unique names, counts and output limits
+are checked before sorted target-index attributes are returned. Original context,
+source-owner, snapshot/metadata and cancellation/cleanup guards remain. The
+paired contract adds optional blob and attribute facts, preserving older payloads.
+
+The original preview UI shows raw blob sizes/digests and target-index attributes.
+Index changes and attributes each render in 50-row pages, with all rows reachable
+and independent page controls. Retry resets the pages. Original scope checks,
+loading, cancellation and focus behavior are retained.
+
+Raw content and attribute evidence now feed the source preview. Bounded final
+worktree conversion, sparse/symlink/gitlink/directory effects, physical file
+before-states, complete original immutable review and approval, reference/log/
+tracking policy, native publication/recovery/UI and safe deletion remain required.
+M15.14 and all remaining P09 scope stay in progress. Work was source development,
+source-object comparison and Git delivery only. Historical test results remain
+historical.
+
+The batch protocol is documented in [Git cat-file](https://git-scm.com/docs/git-cat-file).
+Cached attribute selection and NUL triples follow [Git check-attr](https://git-scm.com/docs/git-check-attr).
