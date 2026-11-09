@@ -305,6 +305,11 @@ export function registerWorkbenchRoutes(app: FastifyInstance, service: Workbench
   app.get('/v1/workspaces/:workspaceId/checkpoints/:checkpointId/restore-requests/:commandKey',async(request,reply)=>{
     privateReply(reply);return checkpointService().restoreRequestStatus(actor(request),param(request,'workspaceId'),param(request,'checkpointId'),param(request,'commandKey'),query(request));
   });
+  app.post('/v1/workspaces/:workspaceId/checkpoints/:checkpointId/restore-requests/:commandKey/close',async(request,reply)=>{
+    privateReply(reply);const key=param(request,'commandKey');
+    if(String(request.headers['idempotency-key']??'')!==key)throw new Error('workspace_checkpoint_restore_status_invalid');
+    return checkpointService().closeRestoreRequest(actor(request),param(request,'workspaceId'),param(request,'checkpointId'),key,body(request,['project_id','path','review_id','review_sha256']));
+  });
   app.get('/v1/workspaces/:workspaceId/checkpoint-restores/:operationId',async(request,reply)=>{
     privateReply(reply);const input=query(request);
     if(Object.keys(input).some(key=>key!=='project_id')||typeof input.project_id!=='string')throw new Error('workspace_checkpoint_restore_status_invalid');

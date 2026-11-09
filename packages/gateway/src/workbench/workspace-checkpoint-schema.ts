@@ -1,6 +1,10 @@
 import type {DatabaseSync} from 'node:sqlite';
 
 const tables=[
+ `CREATE TABLE IF NOT EXISTS wb_workspace_checkpoint_restore_closures(
+  owner_id TEXT NOT NULL,workspace_id TEXT NOT NULL,project_id TEXT NOT NULL,command_key TEXT NOT NULL,
+  checkpoint_id TEXT NOT NULL,request_json TEXT NOT NULL,request_sha256 TEXT NOT NULL,created_at TEXT NOT NULL,
+  PRIMARY KEY(owner_id,workspace_id,project_id,command_key))`,
  `CREATE TABLE IF NOT EXISTS wb_workspace_checkpoint_command_closures(
   owner_id TEXT NOT NULL,workspace_id TEXT NOT NULL,project_id TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN('create','review')),
   command_key TEXT NOT NULL,request_json TEXT NOT NULL,request_sha256 TEXT NOT NULL,created_at TEXT NOT NULL,
@@ -63,6 +67,7 @@ const tables=[
 ];
 const immutable:ReadonlyArray<Readonly<{table:string;conflict:string}>>=[
  {table:'wb_workspace_checkpoint_command_closures',conflict:'owner_id=NEW.owner_id AND workspace_id=NEW.workspace_id AND project_id=NEW.project_id AND kind=NEW.kind AND command_key=NEW.command_key'},
+ {table:'wb_workspace_checkpoint_restore_closures',conflict:'owner_id=NEW.owner_id AND workspace_id=NEW.workspace_id AND project_id=NEW.project_id AND command_key=NEW.command_key'},
  {table:'wb_workspace_checkpoint_restore_rejections',conflict:'owner_id=NEW.owner_id AND workspace_id=NEW.workspace_id AND project_id=NEW.project_id AND command_key=NEW.command_key'},
  {table:'wb_workspace_checkpoint_intents',conflict:'checkpoint_id=NEW.checkpoint_id OR(owner_id=NEW.owner_id AND workspace_id=NEW.workspace_id AND project_id=NEW.project_id AND command_key=NEW.command_key)'},
  {table:'wb_workspace_checkpoint_artifacts',conflict:'snapshot_id=NEW.snapshot_id OR checkpoint_id=NEW.checkpoint_id'},
@@ -83,6 +88,16 @@ export function installWorkspaceCheckpointSchema(db:DatabaseSync){
  db.exec('SAVEPOINT wb_workspace_checkpoints_install');
  try{
   for(const sql of tables)db.exec(sql+';');
+  db.exec(`CREATE TRIGGER IF NOT EXISTS wb_restore_closed_before_journal BEFORE INSERT ON wb_workspace_checkpoint_path_journal
+   WHEN EXISTS(SELECT 1 FROM wb_workspace_checkpoint_restore_closures c WHERE c.owner_id=NEW.owner_id AND c.workspace_id=NEW.workspace_id AND c.project_id=NEW.project_id AND c.command_key=NEW.command_key)
+   BEGIN SELECT RAISE(ABORT,'workspace_checkpoint_restore_closed'); END;
+   CREATE TRIGGER IF NOT EXISTS wb_restore_registered_before_close BEFORE INSERT ON wb_workspace_checkpoint_restore_closures
+   WHEN EXISTS(SELECT 1 FROM wb_workspace_checkpoint_path_journal j WHERE j.owner_id=NEW.owner_id AND j.workspace_id=NEW.workspace_id AND j.project_id=NEW.project_id AND j.command_key=NEW.command_key)
+    OR EXISTS(SELECT 1 FROM wb_workspace_checkpoint_restore_rejections r WHERE r.owner_id=NEW.owner_id AND r.workspace_id=NEW.workspace_id AND r.project_id=NEW.project_id AND r.command_key=NEW.command_key)
+   BEGIN SELECT RAISE(ABORT,'workspace_checkpoint_restore_closed'); END;
+   CREATE TRIGGER IF NOT EXISTS wb_restore_closed_before_rejection BEFORE INSERT ON wb_workspace_checkpoint_restore_rejections
+   WHEN EXISTS(SELECT 1 FROM wb_workspace_checkpoint_restore_closures c WHERE c.owner_id=NEW.owner_id AND c.workspace_id=NEW.workspace_id AND c.project_id=NEW.project_id AND c.command_key=NEW.command_key)
+   BEGIN SELECT RAISE(ABORT,'workspace_checkpoint_restore_closed'); END;`);
   db.exec(`CREATE TRIGGER IF NOT EXISTS wb_restore_rejected_before_journal BEFORE INSERT ON wb_workspace_checkpoint_path_journal
    WHEN EXISTS(SELECT 1 FROM wb_workspace_checkpoint_restore_rejections r WHERE r.owner_id=NEW.owner_id AND r.workspace_id=NEW.workspace_id AND r.project_id=NEW.project_id AND r.command_key=NEW.command_key)
    BEGIN SELECT RAISE(ABORT,'workspace_checkpoint_restore_closed'); END;

@@ -543,7 +543,7 @@ export type GitIndexHistory = {project_id:string;items:GitIndexHistoryItem[];nex
 
 export type ChannelId = 'api-server'|'bluebubbles'|'cli'|'dingtalk'|'discord'|'email'|'feishu'|'homeassistant'|'matrix'|'mattermost'|'qq'|'signal'|'slack'|'sms'|'telegram'|'tui'|'webhook'|'wecom'|'wecom-callback'|'weixin'|'whatsapp';
 
-export type WorkspaceCheckpointRestoreRequestStatus = {command_key:string;request_sha256:string;command_sha256:string;execution_authorized:false;restore_authorized:false}&({state:'unobserved'}|{state:'recorded_pending';operation_id:string}|{state:'settled';operation_id:string;receipt:WorkspaceCheckpointRestoreReceipt}|{state:'terminal_rejected';no_effect:true;reason:'workspace_checkpoint_review_changed'});
+export type WorkspaceCheckpointRestoreRequestStatus = {command_key:string;request_sha256:string;command_sha256:string;execution_authorized:false;restore_authorized:false}&({state:'unobserved'}|{state:'recorded_pending';operation_id:string}|{state:'settled';operation_id:string;receipt:WorkspaceCheckpointRestoreReceipt}|{state:'terminal_rejected';no_effect:true;reason:'workspace_checkpoint_review_changed'|'workspace_checkpoint_request_closed'});
 export type ForkConversationInput = { expected_version: number; through_message_id: string };
 export type ConversationForkReceipt = { conversation_id: string; fork_id: string; source: { conversation_id: string; through_message_id: string; head_sha256: string }; state: "ready" };
 
@@ -797,3 +797,5 @@ export type NativeMemberParentPage = {conversation_id: string; items: NativeMemb
 export type InteractionHistoryPage={conversation_id:string;run_id?:string;items:Interaction[];next_cursor?:string;execution_authorized:false};
 
 export type ActivityResultArtifact={artifact_id:string;version:number;sha256:string};
+
+export type CloseWorkspaceCheckpointRestoreRequestStatus = Exclude<WorkspaceCheckpointRestoreRequestStatus,{state:'unobserved'}>;

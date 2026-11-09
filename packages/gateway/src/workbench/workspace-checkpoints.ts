@@ -442,6 +442,8 @@ export class WorkspaceCheckpointService{
   if(workspaceCheckpointCoordinationSchema(this.db)!=='checkpoint')throw failure('workspace_checkpoint_upgrade_required');const project=String(input.project_id??''),checkpointId=String(input.checkpoint_id??''),path=boundedPath(String(input.path??'')),reviewId=String(input.review_id??''),reviewSha=String(input.review_sha256??''),commandKey=input.command_key;
   if(!ID.test(reviewId)||!validDigest(reviewSha)||typeof commandKey!=='string'||!COMMAND.test(commandKey))throw failure('workspace_checkpoint_restore_invalid');this.signal(input);this.validateScope(owner,workspaceId,project);
   const request={owner_id:owner,workspace_id:workspaceId,project_id:project,checkpoint_id:checkpointId,path,review_id:reviewId,review_sha256:reviewSha},requestSha=sha(request),prior=this.db.prepare('SELECT operation_id,request_sha256 FROM wb_workspace_checkpoint_path_journal WHERE owner_id=? AND workspace_id=? AND project_id=? AND command_key=?').get(owner,workspaceId,project,commandKey) as Row|undefined;
+  const closed=this.db.prepare('SELECT request_sha256 FROM wb_workspace_checkpoint_restore_closures WHERE owner_id=? AND workspace_id=? AND project_id=? AND command_key=?').get(owner,workspaceId,project,commandKey) as Row|undefined;
+  if(closed){if(closed.request_sha256!==requestSha)throw failure('idempotency_conflict');throw failure('workspace_checkpoint_restore_closed');}
   const rejection=this.db.prepare('SELECT request_sha256 FROM wb_workspace_checkpoint_restore_rejections WHERE owner_id=? AND workspace_id=? AND project_id=? AND command_key=?').get(owner,workspaceId,project,commandKey) as Row|undefined;
   if(rejection){if(rejection.request_sha256!==requestSha)throw failure('idempotency_conflict');throw failure('workspace_checkpoint_review_changed');}
   if(prior){if(prior.request_sha256!==requestSha)throw failure('idempotency_conflict');const operationId=String(prior.operation_id),outcome=this.hasOutcome(operationId);if(outcome)return ()=>outcome;const current=this.db.prepare('SELECT expires_at FROM ga_worker_leases WHERE resource_id=?').get(this.leaseResource(operationId));if(current&&Number(current.expires_at)>this.now())throw failure('workspace_checkpoint_restore_busy');return ()=>this.reconcileRestore(owner,workspaceId,project,operationId,input);}
@@ -488,16 +490,29 @@ export class WorkspaceCheckpointService{
   }catch(error){try{this.retainUnknown(row);}catch{}throw error;}
  }
  restoreRequestStatus(owner:string,workspaceId:string,checkpointId:string,commandKey:string,input:Record<string,unknown>){
-  if(!exact(input,['project_id','path','review_id','review_sha256'])||!ID.test(String(input.review_id))||!validDigest(input.review_sha256)||!COMMAND.test(commandKey)||!ID.test(checkpointId))throw failure('workspace_checkpoint_restore_status_invalid');
+  return this.restoreRequestDisposition(owner,workspaceId,checkpointId,commandKey,input,false);
+ }
+ closeRestoreRequest(owner:string,workspaceId:string,checkpointId:string,commandKey:string,input:Record<string,unknown>){
+  return this.restoreRequestDisposition(owner,workspaceId,checkpointId,commandKey,input,true);
+ }
+ private restoreRequestDisposition(owner:string,workspaceId:string,checkpointId:string,commandKey:string,input:Record<string,unknown>,close:boolean){
+  if(!exact(input,['project_id','path','review_id','review_sha256'])||typeof input.project_id!=='string'||typeof input.path!=='string'||typeof input.review_id!=='string'||!ID.test(input.review_id)||!validDigest(input.review_sha256)||typeof commandKey!=='string'||!COMMAND.test(commandKey)||typeof checkpointId!=='string'||!ID.test(checkpointId))throw failure('workspace_checkpoint_restore_status_invalid');
   const project=String(input.project_id),request={owner_id:owner,workspace_id:workspaceId,project_id:project,checkpoint_id:checkpointId,path:boundedPath(String(input.path)),review_id:String(input.review_id),review_sha256:String(input.review_sha256)},digest=sha(request),commandDigest=sha({workspace_id:workspaceId,checkpoint_id:checkpointId,command_key:commandKey,project_id:project,path:request.path,review_id:request.review_id,review_sha256:request.review_sha256});
   this.validateScope(owner,workspaceId,project);
   return withImmediateTransaction(this.db,()=>{
+   this.validateScope(owner,workspaceId,project);
+   const closed=this.db.prepare('SELECT * FROM wb_workspace_checkpoint_restore_closures WHERE owner_id=? AND workspace_id=? AND project_id=? AND command_key=?').get(owner,workspaceId,project,commandKey) as Row|undefined;
    const rejected=this.db.prepare('SELECT * FROM wb_workspace_checkpoint_restore_rejections WHERE owner_id=? AND workspace_id=? AND project_id=? AND command_key=?').get(owner,workspaceId,project,commandKey) as Row|undefined;
    const journal=this.db.prepare('SELECT operation_id,request_sha256,checkpoint_id FROM wb_workspace_checkpoint_path_journal WHERE owner_id=? AND workspace_id=? AND project_id=? AND command_key=?').get(owner,workspaceId,project,commandKey) as Row|undefined;
-   if(rejected&&journal)throw failure('workspace_checkpoint_journal_corrupt');
-   if((rejected??journal)?.request_sha256!==undefined&&(rejected??journal)!.request_sha256!==digest)throw failure('idempotency_conflict');
+   if(rejected&&journal||closed&&(rejected||journal))throw failure('workspace_checkpoint_journal_corrupt');
+   if((closed??rejected??journal)?.request_sha256!==undefined&&(closed??rejected??journal)!.request_sha256!==digest)throw failure('idempotency_conflict');
+   if(closed){if(sha(String(closed.request_json))!==digest||closed.request_json!==canonicalJson(request)||closed.checkpoint_id!==checkpointId)throw failure('workspace_checkpoint_journal_corrupt');return Object.freeze({state:'terminal_rejected',command_key:commandKey,request_sha256:digest,command_sha256:commandDigest,no_effect:true,reason:'workspace_checkpoint_request_closed',execution_authorized:false,restore_authorized:false});}
    if(rejected){if(sha(String(rejected.request_json))!==digest||rejected.request_json!==canonicalJson(request)||rejected.checkpoint_id!==checkpointId||rejected.reason!=='workspace_checkpoint_review_changed')throw failure('workspace_checkpoint_journal_corrupt');return Object.freeze({state:'terminal_rejected',command_key:commandKey,request_sha256:digest,command_sha256:commandDigest,no_effect:true,reason:rejected.reason,execution_authorized:false,restore_authorized:false});}
    if(journal){const stored=this.journal(String(journal.operation_id));if(stored.checkpoint_id!==checkpointId||stored.path!==request.path||stored.review_id!==request.review_id||stored.review_sha256!==request.review_sha256)throw failure('workspace_checkpoint_journal_corrupt');const receipt=this.hasOutcome(String(journal.operation_id));if(receipt&&(receipt.protocol!==1||receipt.operation_id!==stored.operation_id||receipt.checkpoint_id!==checkpointId||receipt.path!==request.path||receipt.target_state_sha256!==stored.target_state_sha256||!['applied','not_applied'].includes(receipt.outcome)))throw failure('workspace_checkpoint_outcome_corrupt');return Object.freeze({state:receipt?'settled':'recorded_pending',command_key:commandKey,request_sha256:digest,command_sha256:commandDigest,operation_id:String(journal.operation_id),...(receipt?{receipt}:{}),execution_authorized:false,restore_authorized:false});}
+   if(close){
+    this.db.prepare('INSERT INTO wb_workspace_checkpoint_restore_closures VALUES(?,?,?,?,?,?,?,?)').run(owner,workspaceId,project,commandKey,checkpointId,canonicalJson(request),digest,new Date(this.now()).toISOString());
+    return Object.freeze({state:'terminal_rejected',command_key:commandKey,request_sha256:digest,command_sha256:commandDigest,no_effect:true,reason:'workspace_checkpoint_request_closed',execution_authorized:false,restore_authorized:false});
+   }
    return Object.freeze({state:'unobserved',command_key:commandKey,request_sha256:digest,command_sha256:commandDigest,execution_authorized:false,restore_authorized:false});
   });
  }

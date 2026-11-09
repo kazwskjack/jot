@@ -1,7 +1,7 @@
 import React,{useEffect,useMemo,useState,useRef} from 'react';
 import {useDurableFileRecovery} from './useDurableFileRecovery';
 import type {DurableFileRecoveryStore} from './durable-file-recovery.mjs';
-import {CheckpointRestoreDraftStore,readCheckpointRestoreCommand} from './checkpoint-restore-draft.mjs';
+import {CheckpointRestoreDraftStore,readCheckpointRestoreCommand,closeCheckpointRestoreCommand} from './checkpoint-restore-draft.mjs';
 import {request,taskDraftScope} from '../jot/client';
 import {workbenchApi} from './client';
 import type {WorkspaceCheckpointRestoreReview,WorkspaceCheckpointRestoreReceipt} from './types';
@@ -105,16 +105,40 @@ function RestoreRecovery({workspace,project,review,canWrite,onClose,onPending,on
   return()=>controller.abort();
  },[review,workspace,project,scope]);
  const focusReturn=()=>{const target=openerRef.current?.isConnected?openerRef.current:null,fallback=fallbackRef.current;if(target)target.focus();else if(fallback?.isConnected){fallback.tabIndex=-1;fallback.focus();}};
- const finish=async(result:any,original:any)=>{if(!current()||!store)return;await store.acknowledge(original);if(!current())return;returnAfterFinish.current=true;store.complete(original);setCommand(null);setPendingOperation(null);if(result.state==='settled'&&result.receipt.outcome==='applied'&&original.body.project_id===project)onApplied(result.receipt);onClose();setMessage(result.state==='terminal_rejected'?'原恢复已确认未执行，请重新检查恢复内容。':'已读取原恢复回执。');};
- const inspect=async(original:any)=>{
-  setPendingOperation(null);
-  const result=await readCheckpointRestoreCommand(original,workspace,request);
+ const finish=async(result:any,original:any)=>{
+  if(!current()||!store)return;
+  await store.acknowledge(original);
   if(!current())return;
+  returnAfterFinish.current=true;store.complete(original);setCommand(null);setPendingOperation(null);
+  if(result.state==='settled'&&result.receipt.outcome==='applied'&&original.body.project_id===project)onApplied(result.receipt);
+  onClose();
+  let message='已读取原恢复回执。';
+  if(result.state==='terminal_rejected'){
+   message='原恢复已确认未执行，请重新检查恢复内容。';
+   if(result.reason==='workspace_checkpoint_request_closed')message='原恢复请求已结束，可以重新审阅路径。';
+  }
+  setMessage(message);
+ };
+
+ const showStatus=async(result:any,original:any)=>{
+  if(!current())return;
+  setPendingOperation(null);
   if(result.state==='terminal_rejected'||result.state==='settled')await finish(result,original);
   else {
    if(result.state==='recorded_pending')setPendingOperation({commandKey:original.key,operationId:result.operation_id});
    setMessage(result.state==='unobserved'?'尚未观察到原请求终态；保留原命令。':'原恢复仍未结算；保留原命令。');
   }
+ };
+ const inspect=async(original:any)=>{await showStatus(await readCheckpointRestoreCommand(original,workspace,request),original);};
+ const closeOriginal=async()=>{
+  if(!command||busy||!canWrite||!current()||!store||store.issue)return;
+  const original=command;setBusy(true);
+  try{
+   store.requestClose();await store.persist(original);
+   if(!current())return;
+   await showStatus(await closeCheckpointRestoreCommand(original,workspace,request,current),original);
+  }catch(error){if(current())setMessage(error instanceof Error?error.message:'结束原恢复请求的回执待确认，请重试原请求。');}
+  finally{if(current())setBusy(false);}
  };
  const reconcile=async()=>{
   if(!command||!pendingOperation||pendingOperation.commandKey!==command.key||busy||!canWrite||!current()||!store||store.issue)return;
@@ -133,7 +157,7 @@ function RestoreRecovery({workspace,project,review,canWrite,onClose,onPending,on
    if(current())setMessage(error instanceof Error?error.message:'原恢复调和结果待确认，请继续读取原回执。');
   } finally {if(current())setBusy(false);}
  };
- const check=async()=>{if(!command||busy||!current())return;setBusy(true);try{await inspect(command);}catch(e){setMessage(e instanceof Error?e.message:'原回执读取失败');}finally{setBusy(false);}};
+ const check=async()=>{if(!command||busy||!current())return;setBusy(true);try{await inspect(command);}catch(e){if(current())setMessage(e instanceof Error?e.message:'原回执读取失败');}finally{if(current())setBusy(false);}};
  const submit=async()=>{
   if(!review||!diffReady||command||busy||!canWrite||!current()||!store||store.issue)return;
   setBusy(true);
@@ -180,7 +204,7 @@ function RestoreRecovery({workspace,project,review,canWrite,onClose,onPending,on
   {!dialogOpen&&<button type="button" disabled={busy||recoveryLoading} onClick={onReloadRecovery}>重读待确认物理恢复请求</button>}
   {store?.issue&&<p role="alert">{store.issue}；原恢复记录保留。</p>}
   {message&&<p role="status">{message}</p>}
-  {command?<><p>原恢复命令待确认：{command.body.project_id} / {command.body.path}</p><button ref={receiptRef} disabled={busy||!current()} onClick={()=>void check()}>读取原恢复回执</button>{pendingOperation?.commandKey===command.key&&<button disabled={busy||!canWrite||!current()||!store||!!store.issue} onClick={()=>void reconcile()}>核对并结算原恢复</button>}<button disabled={!current()} onClick={dismissPending}>稍后检查</button></>:review&&<>
+  {command?<><p>原恢复命令待确认：{command.body.project_id} / {command.body.path}</p><button ref={receiptRef} disabled={busy||!current()} onClick={()=>void check()}>读取原恢复回执</button>{pendingOperation?.commandKey===command.key&&<button disabled={busy||!canWrite||!current()||!store||!!store.issue} onClick={()=>void reconcile()}>核对并结算原恢复</button>}<button disabled={busy||!canWrite||!current()||!store||!!store.issue} onClick={()=>void closeOriginal()}>{store?.closing?'重试确认结束原恢复':'结束尚未登记的原恢复'}</button><p>已登记的恢复可继续读取或结算原回执。</p><button disabled={!current()} onClick={dismissPending}>稍后检查</button></>:review&&<>
    <p id="checkpoint-restore-description">当前状态：{reviewStateLabel(review.before)}。检查点目标：{reviewStateLabel(review.target)}。确认仅恢复 {review.path}。</p>
    <p>恢复范围为所选共同文件路径。外部操作保留各自的回执与处理流程。</p>
    <section aria-label="恢复差异预览">

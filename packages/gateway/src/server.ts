@@ -491,6 +491,7 @@ export async function buildServer(config: {
       '/v1/workspaces/:workspaceId/checkpoint-commands/:commandKey/close',
       '/v1/workspaces/:workspaceId/checkpoints/:checkpointId/restore-review',
       '/v1/workspaces/:workspaceId/checkpoints/:checkpointId/restore',
+      '/v1/workspaces/:workspaceId/checkpoints/:checkpointId/restore-requests/:commandKey/close',
       '/v1/workspaces/:workspaceId/checkpoint-restores/:operationId/reconcile',
     ].includes(request.routeOptions.url??'')){
       reply.header('cache-control','private, no-store');return;
