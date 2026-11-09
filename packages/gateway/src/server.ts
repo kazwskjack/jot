@@ -372,6 +372,10 @@ export async function buildServer(config: {
     if(!receipt||typeof receipt.publication_id!=='string')throw Error('brain_publication_receipt_invalid');
     return workbench.memoryBrain.get(owner,String(request.params.workspaceId),receipt.publication_id);
   };
+  const assertGitReceiptOwner=(request:any,owner:string)=>{
+    const route=request.routeOptions.url;
+    if(typeof route==='string'&&route.startsWith('/v1/projects/:projectId/git/'))projects.get(String(request.params.projectId),owner);
+  };
   // Receipt protocol is reserved with the original request. Legacy pending rows
   // have no proof of an atomic business boundary and must not be re-executed.
   const atomicCommand=<T>(request:any,status:number,operation:()=>T):T=>{
@@ -380,7 +384,7 @@ export async function buildServer(config: {
       if(pending){
         const cached=db.prepare('SELECT response_status,response_json,receipt_protocol FROM ga_idempotency WHERE owner_id=? AND operation=? AND idempotency_key=?').get(pending.owner,pending.operation,pending.key) as Record<string,unknown>|undefined;
         if(!protocol||!cached||cached.receipt_protocol!==protocol)throw new Error('idempotency_in_progress');
-        if(cached.response_status!==null){if(cached.response_status!==status)throw new Error('idempotency_conflict');const saved=JSON.parse(String(cached.response_json));return (isMemoryBrainRoute(request)?readBrainReceipt(request,pending.owner,saved):saved) as T;}
+        if(cached.response_status!==null){assertGitReceiptOwner(request,pending.owner);if(cached.response_status!==status)throw new Error('idempotency_conflict');const saved=JSON.parse(String(cached.response_json));return (isMemoryBrainRoute(request)?readBrainReceipt(request,pending.owner,saved):saved) as T;}
       }
       const registeredRoute=request.routeOptions.url;
       if(typeof registeredRoute!=='string')throw new Error('contract_response_invalid');
@@ -555,6 +559,7 @@ export async function buildServer(config: {
         throw new Error('idempotency_in_progress');
       }
       const responseBody = existing.response_json === null ? null : JSON.parse(String(existing.response_json));
+      assertGitReceiptOwner(request,owner);
       verifyCachedFork(responseBody);
       if(isMemoryBrainRoute(request)){reply.header('cache-control','private, no-store');return reply.code(Number(existing.response_status)).send(readBrainReceipt(request,owner,responseBody));}
       if(existing.receipt_protocol==='upload-atomic-v1'){

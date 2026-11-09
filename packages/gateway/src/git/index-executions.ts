@@ -80,7 +80,7 @@ export class GitIndexExecutions{
   this.assertResolutionFence(row);
   if(this.db.prepare('SELECT 1 FROM wb_git_index_dispositions WHERE execution_id=?').get(row.execution_id))throw Error('git_execution_closed');
   if(row.binding_sha256&&this.git.executionBinding(row.owner_id,row.project_id)!==row.binding_sha256)throw Error('git_repository_changed');
-  const original=this.intents.executionSource(row.owner_id,row.project_id,row.intent_id,row.review_version,row.review_sha256);
+  const original=this.reviewSource(row.owner_id,row.project_id,row.intent_id,row.review_version,row.review_sha256);
   if(original.action!==row.action||digest(original.witness)!==row.witness_sha256||original.witness.repository_sha256!==row.repository_sha256)throw Error('git_execution_source_invalid');
  }
  private claim(row:Row,custody?:object):ExecutionLease{
@@ -93,11 +93,17 @@ export class GitIndexExecutions{
  private release(row:Row,lease:ExecutionLease){this.db.prepare('DELETE FROM ga_worker_leases WHERE resource_id=? AND owner=? AND generation=?').run(this.resource(row),lease.owner,lease.generation);}
  private cleanupTransaction(row:Row,lease:ExecutionLease,remove:()=>void){withImmediateTransaction(this.db,()=>{this.row(row.owner_id,row.project_id,row.execution_id);assertExecutionLease(this.db,this.resource(row),lease,this.now);remove();});}
  private outcome(row:Row,evidence:GitIndexEvidence){const receipt=this.result(row,evidence);this.db.prepare('INSERT INTO wb_git_index_outcomes VALUES(?,?,?,?)').run(row.execution_id,JSON.stringify(receipt),digest(receipt),new Date(this.now()).toISOString());return receipt;}
- private registerExecution(owner:string,project:string,intent:string,input:Input,requestHash:string,source:ReturnType<GitMutationIntents['executionSource']>):Row{
+ private reviewSource(owner:string,project:string,intent:string,version:number,review:string){
+  return this.intents.get(owner,project,intent).action==='commit'
+   ?this.intents.commitExecutionSource(owner,project,intent,version,review)
+   :this.intents.executionSource(owner,project,intent,version,review);
+ }
+ private registerExecution(owner:string,project:string,intent:string,input:Input,requestHash:string,source:ReturnType<GitIndexExecutions['reviewSource']>):Row{
+  if(source.action==='commit'&&gitCommitExecutionSchema(this.db)!=='commit')throw Error('git_commit_upgrade_required');
   const binding=this.git.executionBinding(owner,project),existing=this.db.prepare('SELECT * FROM wb_git_index_executions WHERE intent_id=?').get(intent) as Row|undefined;
   if(existing&&(existing.owner_id!==owner||existing.project_id!==project||existing.request_sha256!==requestHash))throw Error('git_intent_execution_exists');
   if(this.db.prepare('SELECT 1 FROM wb_git_index_executions e LEFT JOIN wb_git_index_outcomes o ON o.execution_id=e.execution_id LEFT JOIN wb_git_index_dispositions d ON d.execution_id=e.execution_id WHERE e.execution_id<>? AND o.execution_id IS NULL AND d.execution_id IS NULL AND (e.binding_sha256 IS NULL OR e.binding_sha256=? OR (e.owner_id=? AND e.project_id=?))').get(existing?.execution_id??'',binding,owner,project))throw Error('git_execution_reconciliation_required');
-  const row:Row=existing??{execution_id:'git-execution-'+randomUUID(),owner_id:owner,project_id:project,intent_id:intent,request_id:input.request_id,request_sha256:requestHash,review_version:input.expected_version,review_sha256:input.review_sha256,action:source.action,witness_sha256:digest(source.witness),repository_sha256:source.witness.repository_sha256,created_at:new Date(this.now()).toISOString(),protocol:4,binding_sha256:binding};
+  const row:Row=existing??{execution_id:'git-execution-'+randomUUID(),owner_id:owner,project_id:project,intent_id:intent,request_id:input.request_id,request_sha256:requestHash,review_version:input.expected_version,review_sha256:input.review_sha256,action:source.action,witness_sha256:digest(source.witness),repository_sha256:source.witness.repository_sha256,created_at:new Date(this.now()).toISOString(),protocol:source.action==='commit'?5:4,binding_sha256:binding};
   if(!existing)this.db.prepare('INSERT INTO wb_git_index_executions(execution_id,owner_id,project_id,intent_id,request_id,request_sha256,review_version,review_sha256,action,witness_sha256,repository_sha256,created_at,protocol,binding_sha256) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(row.execution_id,owner,project,intent,input.request_id,requestHash,row.review_version,row.review_sha256,row.action,row.witness_sha256,row.repository_sha256,row.created_at,row.protocol,row.binding_sha256);return row;
  }
  private acceptance(row:Row):Acceptance{return indexAcceptance(this.db,row);}
@@ -108,7 +114,7 @@ export class GitIndexExecutions{
   if(!this.db.isTransaction)throw Error('git_admission_transaction_required');signal?.throwIfAborted();this.projects.assertOwned(project,owner);if(typeof intent!=='string'||!ID.test(intent))throw Error('git_execution_invalid');const input=this.input(value),requestHash=digest({intent_id:intent,...input});
   const prior=this.db.prepare('SELECT * FROM wb_git_index_executions WHERE owner_id=? AND project_id=? AND request_id=?').get(owner,project,input.request_id) as Row|undefined;
   if(prior){if(prior.intent_id!==intent||prior.request_sha256!==requestHash)throw Error('idempotency_conflict');const row=this.row(owner,project,prior.execution_id);if(!this.db.prepare('SELECT 1 FROM wb_git_index_admissions WHERE execution_id=?').get(row.execution_id))throw Error('git_execution_origin_conflict');return this.admission(row);}
-  const source=this.intents.executionSource(owner,project,intent,input.expected_version,input.review_sha256),row=this.registerExecution(owner,project,intent,input,requestHash,source),receipt=this.acceptance(row);
+  const source=this.reviewSource(owner,project,intent,input.expected_version,input.review_sha256),row=this.registerExecution(owner,project,intent,input,requestHash,source),receipt=this.acceptance(row);
   this.db.prepare('INSERT INTO wb_git_index_admissions VALUES(?,?,?,?)').run(row.execution_id,JSON.stringify(receipt),digest(receipt),new Date(this.now()).toISOString());return receipt;
  }
  getAdmission(owner:string,project:string,request:string):Acceptance{
@@ -124,11 +130,12 @@ export class GitIndexExecutions{
  reserveWorkspace(owner:string,project:string,id:string){
   return withImmediateTransaction(this.db,()=>{
    const row=this.row(owner,project,id);this.admission(row);
+   if(row.action==='commit')throw Error('git_commit_execution_unavailable');
    if(this.get(owner,project,id).state!=='pending')throw Error('workspace_reservation_source_closed');
    this.assertResolutionFence(row);
    this.producers.assertStartable(row,this.resource(row));
-   this.intents.executionSource(owner,project,row.intent_id,row.review_version,row.review_sha256);
-   if(row.protocol!==4||row.binding_sha256!==this.git.executionBinding(owner,project))throw Error('workspace_reservation_source_changed');
+   this.reviewSource(owner,project,row.intent_id,row.review_version,row.review_sha256);
+   if(![4,5].includes(row.protocol)||row.binding_sha256!==this.git.executionBinding(owner,project))throw Error('workspace_reservation_source_changed');
    const source={owner_id:owner,project_id:project,operation_kind:'git_index' as const,operation_id:id,binding_sha256:row.binding_sha256};
    const reserved=reserveWorkspaceOperation(this.db,source);sealWorkspaceFamily(this.db,source);return reserved;
   });
@@ -138,7 +145,7 @@ export class GitIndexExecutions{
    const row=this.row(owner,project,id);this.admission(row);
    for(const table of ['wb_git_index_producers','wb_git_index_preparations','wb_git_index_dispatches','wb_git_index_outcomes'])
     if(this.db.prepare('SELECT 1 FROM '+table+' WHERE execution_id=?').get(id))throw Error('workspace_reservation_producer_unsettled');
-   if(row.protocol!==4||row.binding_sha256!==this.git.executionBinding(owner,project))throw Error('workspace_reservation_source_changed');
+   if(![4,5].includes(row.protocol)||row.binding_sha256!==this.git.executionBinding(owner,project))throw Error('workspace_reservation_source_changed');
    return releaseUnstartedWorkspaceOperation(this.db,{owner_id:owner,project_id:project,operation_kind:'git_index',operation_id:id,binding_sha256:row.binding_sha256});
   });
  }
@@ -150,8 +157,8 @@ export class GitIndexExecutions{
  workspaceFamily(owner:string,project:string,id:string){
   return withImmediateTransaction(this.db,()=>{
    const row=this.row(owner,project,id);this.admission(row);
-   this.intents.executionSource(owner,project,row.intent_id,row.review_version,row.review_sha256);
-   if(row.protocol!==4||row.binding_sha256!==this.git.executionBinding(owner,project))throw Error('workspace_reservation_source_changed');
+   this.reviewSource(owner,project,row.intent_id,row.review_version,row.review_sha256);
+   if(![4,5].includes(row.protocol)||row.binding_sha256!==this.git.executionBinding(owner,project))throw Error('workspace_reservation_source_changed');
    return readReservedWorkspaceFamily(this.db,{owner_id:owner,project_id:project,operation_kind:'git_index',operation_id:id,binding_sha256:row.binding_sha256});
   });
  }
@@ -162,7 +169,7 @@ export class GitIndexExecutions{
   try{
    const row=this.admittedRow(owner,project,id),control=this.getResolutionAdmission(owner,project,id,request);
    this.get(owner,project,id);
-   if(row.protocol!==4||row.binding_sha256!==this.git.executionBinding(owner,project))throw Error('workspace_reservation_source_changed');
+   if(![4,5].includes(row.protocol)||row.binding_sha256!==this.git.executionBinding(owner,project))throw Error('workspace_reservation_source_changed');
    const family=readReservedWorkspaceFamily(this.db,{owner_id:owner,project_id:project,operation_kind:'git_index',operation_id:id,binding_sha256:row.binding_sha256});
    const value={reservation_id:family.reservation_id,owner_id:family.owner_id,project_id:family.project_id,binding_sha256:family.binding_sha256,members:family.members.map(({session_ref,scopes})=>({session_ref,scopes}))};
    const seal=this.db.prepare('SELECT family_json,record_sha256 FROM wb_workspace_reservation_families WHERE reservation_id=?').get(family.reservation_id);
@@ -174,6 +181,7 @@ export class GitIndexExecutions{
   * must not be automatically scheduled until workspace coordination is ready. */
  async perform(owner:string,project:string,id:string,signal?:AbortSignal){
   if(this.db.isTransaction)throw Error('git_execution_transaction_invalid');signal?.throwIfAborted();const row=this.row(owner,project,id);this.admission(row);
+  if(row.action==='commit'){const current=this.get(owner,project,id);if(current.state!=='pending')return current;throw Error('git_commit_execution_unavailable');}
   return this.execute(owner,project,row.intent_id,{request_id:row.request_id,expected_version:row.review_version,review_sha256:row.review_sha256},signal);
  }
  /** Original-host composition only. No browser/native body may supply a host,
@@ -181,6 +189,7 @@ export class GitIndexExecutions{
  async performReserved(owner:string,project:string,id:string,signal?:AbortSignal){
   if(this.db.isTransaction)throw Error('git_execution_transaction_invalid');signal?.throwIfAborted();const row=this.row(owner,project,id);this.admission(row);
   const prior=this.get(owner,project,id);if(prior.state!=='pending')return prior;
+  if(row.action==='commit')throw Error('git_commit_execution_unavailable');
   const host=this.nativeWorkspaceHost;if(!host)throw Error('git_native_workspace_host_unavailable');
   this.reserveWorkspace(owner,project,id);const family=this.workspaceFamily(owner,project,id);
   const placementScope={owner_id:owner,project_id:project,operation_kind:'git_index' as const,operation_id:id,binding_sha256:family.binding_sha256},placements=readReservedNativePlacements(this.db,placementScope);
@@ -293,7 +302,7 @@ export class GitIndexExecutions{
   if(this.db.prepare('SELECT 1 FROM wb_git_index_controls WHERE execution_id=? LIMIT 1').get(id))throw Error('git_execution_control_exists');
   const current=this.get(owner,project,id);
   if(current.state==='applied'){
-   if(row.protocol!==4||!row.binding_sha256||!this.producers.record(row)||readWorkspaceOperation(this.db,{owner_id:owner,project_id:project,operation_kind:'git_index',operation_id:id,binding_sha256:row.binding_sha256})?.state!=='reserved')throw Error('git_execution_closed');
+   if(![4,5].includes(row.protocol)||!row.binding_sha256||!this.producers.record(row)||readWorkspaceOperation(this.db,{owner_id:owner,project_id:project,operation_kind:'git_index',operation_id:id,binding_sha256:row.binding_sha256})?.state!=='reserved')throw Error('git_execution_closed');
   }else if(current.state!=='pending'&&current.state!=='unknown')throw Error('git_execution_closed');
   if(this.stateHash(row)!==input.expected_state_sha256)throw Error('version_conflict');
   return this.resolutionAcceptance(row,this.insertControl(row,input));
@@ -370,7 +379,7 @@ export class GitIndexExecutions{
   const unstarted=()=>{
    signal?.throwIfAborted();const row=this.admittedRow(owner,project,id),accepted=this.getResolutionAdmission(owner,project,id,input.request_id);
    if(accepted.expected_state_sha256!==input.expected_state_sha256)throw Error('idempotency_conflict');
-   if(row.protocol!==4||!row.binding_sha256)return;
+   if(![4,5].includes(row.protocol)||!row.binding_sha256)return;
    if(this.db.prepare("SELECT 1 FROM wb_workspace_reservations WHERE operation_kind='git_index' AND operation_id=?").get(id))return;
    for(const table of ['wb_git_index_producers','wb_git_index_producer_finishes','wb_git_index_preparations','wb_git_index_dispatches','wb_git_index_outcomes'])if(this.db.prepare('SELECT 1 FROM '+table+' WHERE execution_id=?').get(id))return;
    const control=this.db.prepare('SELECT * FROM wb_git_index_controls WHERE control_id=?').get(accepted.control_id) as Control;
@@ -398,7 +407,7 @@ export class GitIndexExecutions{
   if(this.db.isTransaction)throw Error('git_execution_transaction_invalid');
   const row=this.admittedRow(owner,project,id),input=this.controlInput(value),accepted=this.getResolutionAdmission(owner,project,id,input.request_id);
   if(accepted.expected_state_sha256!==input.expected_state_sha256)throw Error('idempotency_conflict');
-  if(row.protocol!==4||!row.binding_sha256)throw Error('workspace_reservation_source_changed');
+  if(![4,5].includes(row.protocol)||!row.binding_sha256)throw Error('workspace_reservation_source_changed');
   const unstarted=this.resolveUnstarted(owner,project,id,input,signal);if(unstarted)return unstarted;
   const originalScope={owner_id:owner,project_id:project,operation_kind:'git_index' as const,operation_id:id,binding_sha256:row.binding_sha256};
   if(readWorkspaceOperation(this.db,originalScope)?.state==='released_settled'){

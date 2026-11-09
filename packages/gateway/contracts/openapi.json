@@ -16810,7 +16810,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Accept the exact approved original review in the original execution journal and atomic HTTP receipt. Commit acceptance uses protocol 5, the configured operator metadata, target and parent. It requires the typed original table schema. Acceptance grants no physical commit effects. Original index receipts retain their encoding."
       }
     },
     "/v1/projects/{projectId}/git/executions/{executionId}/controls": {
@@ -17493,7 +17494,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Read original owner-scoped execution, producer, reservation and control facts. Typed commit records expose their frozen target and parent while native commit effects remain unavailable during integration."
       }
     },
     "/v1/projects/{projectId}/git/executions/{executionId}/dispatch": {
@@ -17887,7 +17889,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Read bounded original owner-scoped admission and status history, including typed commit acceptances with exact original target and parent. History reads do not dispatch physical effects."
       }
     },
     "/v1/workspaces/{workspace_id}/files/rename-preview": {
@@ -25865,6 +25868,9 @@
       }
     },
     "schemas": {
+      "GitCommitAcceptance": {"type":"object","additionalProperties":false,"properties":{"execution_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"project_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"intent_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"request_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"action":{"const":"commit"},"execution_authorized":{"const":false},"accepted":{"const":true},"target_ref":{"type":"string","minLength":1,"maxLength":1024,"pattern":"^(?:HEAD|refs/heads/.+)$"},"expected_old_oid":{"anyOf":[{"type":"string","pattern":"^(?:[a-f0-9]{40}|[a-f0-9]{64})$"},{"type":"null"}]}},"required":["execution_id","project_id","intent_id","request_id","action","execution_authorized","accepted","target_ref","expected_old_oid"]},
+      "GitCommitPendingResult": {"type":"object","additionalProperties":false,"properties":{"execution_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"project_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"intent_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"request_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"action":{"const":"commit"},"execution_authorized":{"const":false},"paths":{"type":"array","minItems":1,"maxItems":100,"uniqueItems":true,"items":{"type":"string","minLength":1,"maxLength":4096,"pattern":"^(?!/|[A-Za-z]:|.*\\\\|(?:.*?/)?\\.\\.(?:/|$)).+$"}},"state":{"enum":["pending","unknown"]},"target_ref":{"type":"string","minLength":1,"maxLength":1024,"pattern":"^(?:HEAD|refs/heads/.+)$"},"expected_old_oid":{"anyOf":[{"type":"string","pattern":"^(?:[a-f0-9]{40}|[a-f0-9]{64})$"},{"type":"null"}]}},"required":["execution_id","project_id","intent_id","request_id","action","execution_authorized","paths","state","target_ref","expected_old_oid"]},
+      "GitCommitClosedResult": {"type":"object","additionalProperties":false,"properties":{"execution_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"project_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"intent_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"request_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"action":{"const":"commit"},"execution_authorized":{"const":false},"paths":{"type":"array","minItems":1,"maxItems":100,"uniqueItems":true,"items":{"type":"string","minLength":1,"maxLength":4096,"pattern":"^(?!/|[A-Za-z]:|.*\\\\|(?:.*?/)?\\.\\.(?:/|$)).+$"}},"state":{"enum":["not_dispatched","abandoned_unknown"]},"disposition_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"target_ref":{"type":"string","minLength":1,"maxLength":1024,"pattern":"^(?:HEAD|refs/heads/.+)$"},"expected_old_oid":{"anyOf":[{"type":"string","pattern":"^(?:[a-f0-9]{40}|[a-f0-9]{64})$"},{"type":"null"}]}},"required":["execution_id","project_id","intent_id","request_id","action","execution_authorized","paths","state","disposition_id","target_ref","expected_old_oid"]},
       "GitCommitIdentity": {"type":"object","properties":{"name":{"type":"string","minLength":1,"maxLength":255},"email":{"type":"string","minLength":1,"maxLength":255},"timestamp":{"type":"string","format":"date-time"}},"required":["name","email","timestamp"],"additionalProperties":false},
       "GitCommitMetadata": {"type":"object","properties":{"protocol":{"const":1},"encoding":{"const":"UTF-8"},"object_format":{"enum":["sha1","sha256"]},"tree_oid":{"type":"string","pattern":"^(?:[a-f0-9]{40}|[a-f0-9]{64})$"},"parent_oid":{"anyOf":[{"type":"string","pattern":"^(?:[a-f0-9]{40}|[a-f0-9]{64})$"},{"type":"null"}]},"target_ref":{"type":"string","minLength":1,"maxLength":1024,"pattern":"^(?:HEAD|refs/heads/.+)$"},"head_state":{"enum":["branch","unborn","detached"]},"author":{"$ref":"#/components/schemas/GitCommitIdentity"},"committer":{"$ref":"#/components/schemas/GitCommitIdentity"},"operator_policy_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"message_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"message_bytes":{"type":"integer","minimum":1,"maximum":16384}},"required":["protocol","encoding","object_format","tree_oid","parent_oid","target_ref","head_state","author","committer","operator_policy_sha256","message_sha256","message_bytes"],"additionalProperties":false},
       "BrainPublicationInput": {"type":"object","properties":{"project_id":{"type":"string","minLength":1,"maxLength":128},"page_id":{"type":"string","minLength":1,"maxLength":80,"pattern":"^[a-z0-9][a-z0-9-]*$"},"title":{"type":"string","minLength":1,"maxLength":200,"pattern":"^(?!--)[^\\r\\n]+$"},"summary":{"type":"string","minLength":1,"maxLength":1000,"pattern":"^(?!--)[\\s\\S]+$"},"memory_ids":{"type":"array","minItems":1,"maxItems":10,"uniqueItems":true,"items":{"type":"string","minLength":1,"maxLength":128}}},"required":["project_id","page_id","title","summary","memory_ids"],"additionalProperties":false},
@@ -39028,46 +39034,53 @@
         ]
       },
       "GitIndexAcceptance": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "execution_id": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
-          },
-          "project_id": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
-          },
-          "intent_id": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
-          },
-          "request_id": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
-          },
-          "action": {
-            "enum": [
-              "stage",
-              "unstage"
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "execution_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+              },
+              "project_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+              },
+              "intent_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+              },
+              "request_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+              },
+              "action": {
+                "enum": [
+                  "stage",
+                  "unstage"
+                ]
+              },
+              "execution_authorized": {
+                "const": false
+              },
+              "accepted": {
+                "const": true
+              }
+            },
+            "required": [
+              "execution_id",
+              "project_id",
+              "intent_id",
+              "request_id",
+              "action",
+              "execution_authorized",
+              "accepted"
             ]
           },
-          "execution_authorized": {
-            "const": false
-          },
-          "accepted": {
-            "const": true
+          {
+            "$ref": "#/components/schemas/GitCommitAcceptance"
           }
-        },
-        "required": [
-          "execution_id",
-          "project_id",
-          "intent_id",
-          "request_id",
-          "action",
-          "execution_authorized",
-          "accepted"
         ]
       },
       "GitIndexExecutionResult": {
@@ -39267,6 +39280,12 @@
               "state",
               "disposition_id"
             ]
+          },
+          {
+            "$ref": "#/components/schemas/GitCommitPendingResult"
+          },
+          {
+            "$ref": "#/components/schemas/GitCommitClosedResult"
           }
         ]
       },
@@ -40886,6 +40905,12 @@
                   "state",
                   "disposition_id"
                 ]
+              },
+              {
+                "$ref": "#/components/schemas/GitCommitPendingResult"
+              },
+              {
+                "$ref": "#/components/schemas/GitCommitClosedResult"
               }
             ]
           },
@@ -41100,6 +41125,9 @@
                       "state",
                       "disposition_id"
                     ]
+                  },
+                  {
+                    "$ref": "#/components/schemas/GitCommitClosedResult"
                   }
                 ]
               },
@@ -41362,6 +41390,12 @@
                   "state",
                   "disposition_id"
                 ]
+              },
+              {
+                "$ref": "#/components/schemas/GitCommitPendingResult"
+              },
+              {
+                "$ref": "#/components/schemas/GitCommitClosedResult"
               }
             ]
           },
@@ -41660,6 +41694,9 @@
                               "state",
                               "disposition_id"
                             ]
+                          },
+                          {
+                            "$ref": "#/components/schemas/GitCommitClosedResult"
                           }
                         ]
                       },
@@ -41862,6 +41899,9 @@
                       "state",
                       "disposition_id"
                     ]
+                  },
+                  {
+                    "$ref": "#/components/schemas/GitCommitClosedResult"
                   }
                 ]
               },
@@ -42085,6 +42125,12 @@
                       "state",
                       "disposition_id"
                     ]
+                  },
+                  {
+                    "$ref": "#/components/schemas/GitCommitPendingResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GitCommitClosedResult"
                   }
                 ]
               },
@@ -42383,6 +42429,9 @@
                                   "state",
                                   "disposition_id"
                                 ]
+                              },
+                              {
+                                "$ref": "#/components/schemas/GitCommitClosedResult"
                               }
                             ]
                           },
@@ -42436,46 +42485,53 @@
             "format": "date-time"
           },
           "acceptance": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-              "execution_id": {
-                "type": "string",
-                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
-              },
-              "project_id": {
-                "type": "string",
-                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
-              },
-              "intent_id": {
-                "type": "string",
-                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
-              },
-              "request_id": {
-                "type": "string",
-                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
-              },
-              "action": {
-                "enum": [
-                  "stage",
-                  "unstage"
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "execution_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                  },
+                  "project_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                  },
+                  "intent_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                  },
+                  "request_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                  },
+                  "action": {
+                    "enum": [
+                      "stage",
+                      "unstage"
+                    ]
+                  },
+                  "execution_authorized": {
+                    "const": false
+                  },
+                  "accepted": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "execution_id",
+                  "project_id",
+                  "intent_id",
+                  "request_id",
+                  "action",
+                  "execution_authorized",
+                  "accepted"
                 ]
               },
-              "execution_authorized": {
-                "const": false
-              },
-              "accepted": {
-                "const": true
+              {
+                "$ref": "#/components/schemas/GitCommitAcceptance"
               }
-            },
-            "required": [
-              "execution_id",
-              "project_id",
-              "intent_id",
-              "request_id",
-              "action",
-              "execution_authorized",
-              "accepted"
             ]
           },
           "status": {
@@ -42679,6 +42735,12 @@
                       "state",
                       "disposition_id"
                     ]
+                  },
+                  {
+                    "$ref": "#/components/schemas/GitCommitPendingResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GitCommitClosedResult"
                   }
                 ]
               },
@@ -42977,6 +43039,9 @@
                                   "state",
                                   "disposition_id"
                                 ]
+                              },
+                              {
+                                "$ref": "#/components/schemas/GitCommitClosedResult"
                               }
                             ]
                           },
@@ -43042,46 +43107,53 @@
                   "format": "date-time"
                 },
                 "acceptance": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "execution_id": {
-                      "type": "string",
-                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
-                    },
-                    "project_id": {
-                      "type": "string",
-                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
-                    },
-                    "intent_id": {
-                      "type": "string",
-                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
-                    },
-                    "request_id": {
-                      "type": "string",
-                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
-                    },
-                    "action": {
-                      "enum": [
-                        "stage",
-                        "unstage"
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "execution_id": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                        },
+                        "project_id": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                        },
+                        "intent_id": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                        },
+                        "request_id": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+                        },
+                        "action": {
+                          "enum": [
+                            "stage",
+                            "unstage"
+                          ]
+                        },
+                        "execution_authorized": {
+                          "const": false
+                        },
+                        "accepted": {
+                          "const": true
+                        }
+                      },
+                      "required": [
+                        "execution_id",
+                        "project_id",
+                        "intent_id",
+                        "request_id",
+                        "action",
+                        "execution_authorized",
+                        "accepted"
                       ]
                     },
-                    "execution_authorized": {
-                      "const": false
-                    },
-                    "accepted": {
-                      "const": true
+                    {
+                      "$ref": "#/components/schemas/GitCommitAcceptance"
                     }
-                  },
-                  "required": [
-                    "execution_id",
-                    "project_id",
-                    "intent_id",
-                    "request_id",
-                    "action",
-                    "execution_authorized",
-                    "accepted"
                   ]
                 },
                 "status": {
@@ -43285,6 +43357,12 @@
                             "state",
                             "disposition_id"
                           ]
+                        },
+                        {
+                          "$ref": "#/components/schemas/GitCommitPendingResult"
+                        },
+                        {
+                          "$ref": "#/components/schemas/GitCommitClosedResult"
                         }
                       ]
                     },
@@ -43583,6 +43661,9 @@
                                         "state",
                                         "disposition_id"
                                       ]
+                                    },
+                                    {
+                                      "$ref": "#/components/schemas/GitCommitClosedResult"
                                     }
                                   ]
                                 },

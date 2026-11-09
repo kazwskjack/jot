@@ -6,6 +6,7 @@ import GitIndexOperation from './GitIndexOperation';
 const outcome=(state:string)=>({pending:'等待执行',unknown:'结果待确认',applied:'已应用',not_dispatched:'未执行',abandoned_unknown:'已结束，效果未确认'} as Record<string,string>)[state]??'状态待核对';
 function scoped(status:GitIndexStatus,acceptance:GitIndexAcceptance,project:string){
  const e=status.execution;
+ if(acceptance.action==='commit'&&(e.action!=='commit'||e.target_ref!==acceptance.target_ref||e.expected_old_oid!==acceptance.expected_old_oid))throw Error('GIT_HISTORY_SCOPE_CHANGED');
  if(acceptance.project_id!==project||e.project_id!==project||e.execution_id!==acceptance.execution_id||e.intent_id!==acceptance.intent_id||e.request_id!==acceptance.request_id||e.action!==acceptance.action||status.producer.execution_id!==e.execution_id||status.execution_authorized!==false||e.execution_authorized!==false||status.producer.execution_authorized!==false)throw Error('GIT_HISTORY_SCOPE_CHANGED');
  return status;
 }
@@ -20,7 +21,7 @@ export default function GitHistory({project,locked=false,allowDispatch=false,onB
   <p className="wb-hint">读取原始操作及当前状态，不会重新执行。</p><ResourceStatus loading={history.loading} error={history.error?'操作记录暂时无法确认，请重新读取。':''} onRetry={history.reload}/>
   <button type="button" disabled={locked||history.loading} onClick={()=>{history.reload();detail.reload();setDetailVersion(v=>v+1)}}>刷新操作记录</button>
   {before&&<button type="button" disabled={locked||history.loading} onClick={()=>setBefore(undefined)}>最新记录</button>}
-  {page&&<>{!page.items.length?<p>没有操作记录。</p>:<ul>{page.items.map(row=><li key={row.acceptance.execution_id}><button type="button" disabled={locked} aria-pressed={selected?.execution_id===row.acceptance.execution_id} onClick={()=>{setSelected(row.acceptance);detail.reload();setDetailVersion(v=>v+1)}}>{row.acceptance.action==='stage'?'暂存选定文件':'取消选定文件的暂存'} · {outcome(row.status.execution.state)}</button><time>{row.created_at}</time></li>)}</ul>}{page.next_cursor&&<button type="button" disabled={locked} onClick={()=>setBefore(page.next_cursor!)}>更早记录</button>}</>}
+  {page&&<>{!page.items.length?<p>没有操作记录。</p>:<ul>{page.items.map(row=><li key={row.acceptance.execution_id}><button type="button" disabled={locked} aria-pressed={selected?.execution_id===row.acceptance.execution_id} onClick={()=>{setSelected(row.acceptance);detail.reload();setDetailVersion(v=>v+1)}}>{row.acceptance.action==='commit'?'提交已审核暂存树':row.acceptance.action==='stage'?'暂存选定文件':'取消选定文件的暂存'} · {outcome(row.status.execution.state)}</button><time>{row.created_at}</time></li>)}</ul>}{page.next_cursor&&<button type="button" disabled={locked} onClick={()=>setBefore(page.next_cursor!)}>更早记录</button>}</>}
   {selected&&<section aria-label="Git 操作状态">{interactive?<GitIndexOperation key={selected.execution_id} project={project} acceptance={selected} allowDispatch={allowDispatch} onBusy={onBusy} onChanged={history.reload} refreshToken={detailVersion}/>:<><ResourceStatus loading={detail.loading} error={detail.error?'当前操作状态尚未确认，请重新读取。':''} onRetry={detail.reload}/>{status&&<>
    <p style={{overflowWrap:'anywhere'}}><code>{status.execution.execution_id}</code></p>
    <p role="status">{status.execution.state==='not_dispatched'?'操作未执行。':status.execution.state==='applied'?'变更已应用。':status.execution.state==='abandoned_unknown'?'操作已结束，实际效果仍未确认。':'操作结果尚未确认。'}</p>

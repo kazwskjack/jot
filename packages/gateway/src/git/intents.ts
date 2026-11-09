@@ -1,3 +1,4 @@
+import {readCommitReviewSource} from './commit-records.ts';
 import type {GitCommitMetadata} from '../../contracts/types.ts';
 import type {GitCommitReviewWitness} from './commit-tree.ts';
 import {createHash,randomUUID} from 'node:crypto';
@@ -58,6 +59,16 @@ export class GitMutationIntents{
   const selection=JSON.parse(row.selection_json) as Prepare,witness=JSON.parse(row.witness_json) as GitReviewWitness;
   if(witness.protocol!==2||!Array.isArray(witness.attributes)||selection.action!==row.action||digest({action:selection.action,paths:selection.paths,message:selection.message??null,witness})!==review)throw Error('git_execution_source_invalid');
   return{action:row.action as 'stage'|'unstage',paths:selection.paths,witness};
+ }
+ /** Current original approval and operator policy, without filesystem effects. */
+ commitExecutionSource(owner:string,project:string,id:string,version:number,review:string){
+  const row=this.row(owner,project,id),event=this.latest(id);
+  if(event.state!=='approved'||event.version!==version||row.review_sha256!==review)throw Error('git_execution_revoked');
+  if(!(JSON.parse(row.selection_json) as Selection).commit_metadata)throw Error('git_commit_review_required');
+  const source=readCommitReviewSource(this.db,owner,project,id,version,review);
+  const current=this.git.commitMetadata(owner,project,source.witness,source.message,source.metadata.author.timestamp);
+  if(JSON.stringify(current)!==JSON.stringify(source.metadata))throw Error('git_execution_revoked');
+  return source;
  }
  private normalize(input:Prepare):Prepare{
   if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(key=>!['request_id','action','paths','snapshot_id','message'].includes(key))||typeof input.request_id!=='string'||!ID.test(input.request_id)||!['stage','unstage','commit','discard','delete-untracked'].includes(input.action)||typeof input.snapshot_id!=='string'||!SHA.test(input.snapshot_id)||!Array.isArray(input.paths)||!input.paths.length||input.paths.length>100||new Set(input.paths).size!==input.paths.length)throw Error('git_intent_invalid');

@@ -406,8 +406,11 @@ export type GitReviewPrepare = {request_id:string;action:"stage"|"unstage"|"comm
 export type GitReviewControl = {request_id:string;expected_version:number;action:"approve"|"cancel";review_sha256:string};
 export type GitReviewIntent = {intent_id:string;project_id:string;action:GitReviewPrepare["action"];paths:string[];message?:string;commit_metadata?:GitCommitMetadata;snapshot_id:string;review_sha256:string;version:number;state:"prepared"|"approved"|"cancelled";created_at:string;updated_at:string;execution_authorized:false};
 
-export type GitIndexAcceptance = {execution_id:string;project_id:string;intent_id:string;request_id:string;action:"stage"|"unstage";accepted:true;execution_authorized:false};
-export type GitIndexExecutionResult = Omit<GitIndexAcceptance,"accepted"> & {paths:string[]} & ({state:"pending"|"unknown"}|{state:"applied";before_index_sha256:string|null;index_sha256:string}|{state:"not_dispatched"|"abandoned_unknown";disposition_id:string});
+export type GitIndexAcceptanceBase = {execution_id:string;project_id:string;intent_id:string;request_id:string;accepted:true;execution_authorized:false};
+export type GitIndexAcceptance = GitIndexAcceptanceBase & ({action:"stage"|"unstage"}|{action:"commit";target_ref:string;expected_old_oid:string|null});
+export type GitIndexExecutionResult =
+ | (Omit<GitIndexAcceptanceBase,"accepted"> & {action:"stage"|"unstage";paths:string[]} & ({state:"pending"|"unknown"}|{state:"applied";before_index_sha256:string|null;index_sha256:string}|{state:"not_dispatched"|"abandoned_unknown";disposition_id:string}))
+ | (Omit<GitIndexAcceptanceBase,"accepted"> & {action:"commit";paths:string[];target_ref:string;expected_old_oid:string|null} & ({state:"pending"|"unknown"}|{state:"not_dispatched"|"abandoned_unknown";disposition_id:string}));
 
 export type WorkPublicationPrepare = {request_id:string;source_run_id:string;source_sha256:string;paths:string[]};
 export type WorkPublicationControl = GitReviewControl;

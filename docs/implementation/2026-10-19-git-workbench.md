@@ -106,7 +106,8 @@ The original index execution table can hold typed commit rows under protocol 5.
 New stores create that schema. Existing canonical index stores retain their current
 schema until explicit offline maintenance. Inspection reports `commit_execution_schema`.
 The original project/family reservation and common-directory Worker namespace own
-subsequent commit admission. Index consumers continue to handle protocols 1–4.
+subsequent commit admission. Original journal readers handle protocols 1–5, with
+commit rows bound to protocol 5 and the exact immutable metadata-approved review.
 
 Stop Gateway, Worker and native pools before applying this table change. The
 maintenance command checks the original physical WAL database, foreign keys,
@@ -126,6 +127,25 @@ publication-maintenance-main rollback-commit ABSOLUTE_DATABASE EXPECTED_DATABASE
 
 The expected database digest comes from inspection. Rollback requires no commit
 rows and no protocol-5-or-newer rows, including completed history. Original receipts
-and rows are retained. The source implementation currently provides storage and
-maintenance groundwork. Typed admission, native commit effects and settlement
-remain the following P08 integration work.
+and rows are retained.
+
+## Typed commit admission and pending history
+
+The original admission endpoint now accepts metadata-approved commit reviews on
+the typed schema. Its immutable receipt fixes the original target ref and expected
+parent OID. Journal, status, history and browser readers retain these facts and
+check the original review hash, witness hash, repository binding and approved
+version. Current operator policy is checked again for a new admission. Historical
+reads retain the frozen policy facts after configuration changes. Cached Git API
+receipts recheck current project ownership before returning the original bytes.
+
+A never-started commit admission can be explicitly ended through the existing
+versioned control and not-dispatched receipt transaction. That path requires no
+producer, native preparation, dispatch, outcome or workspace reservation. Original
+index evidence cannot be interpreted as a commit receipt. Native commit preparation,
+writing and unknown-effect settlement remain open P08 work. Pending commit dispatch
+returns unavailable before native transport or workspace reservation. The browser
+shows retained commit admissions and their pending/closed state.
+
+This increment was developed by source inspection only. No test, build, migration,
+native command, UI acceptance or deployment was executed.

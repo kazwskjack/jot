@@ -1320,7 +1320,7 @@
     "GitIndexAdmissionInput",
     "GitIndexAcceptance",
     "202",
-    "Original owner, CSRF and atomic receipt boundaries; no effect dispatch."
+    "Accept the exact approved original review in the original execution journal and atomic HTTP receipt. Commit acceptance uses protocol 5, the configured operator metadata, target and parent. It requires the typed original table schema. Acceptance grants no physical commit effects. Original index receipts retain their encoding."
   ],
   [
     "POST",
@@ -1365,7 +1365,7 @@
     null,
     "GitIndexStatus",
     "200",
-    "Original ownership, review, native custody and database drain proof; no automatic retry."
+    "Read original owner-scoped execution, producer, reservation and control facts. Typed commit records expose their frozen target and parent while native commit effects remain unavailable during integration."
   ],
   [
     "POST",
@@ -1392,7 +1392,7 @@
     null,
     "GitIndexHistory",
     "200",
-    "Original owned UI journal and bounded cursor reads; no effect dispatch."
+    "Read bounded original owner-scoped admission and status history, including typed commit acceptances with exact original target and parent. History reads do not dispatch physical effects."
   ],
   [
     "GET",
