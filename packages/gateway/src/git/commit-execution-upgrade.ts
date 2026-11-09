@@ -7,18 +7,21 @@ import {assertWorkspacePublicationMaintenance,assertOriginalWorkspaceQuiescence,
 const original='wb_git_index_executions',replacement=original+'_commit_upgrade';
 const quote=(name:string)=>'"'+name.replaceAll('"','""')+'"';
 const fail=(reason:string):never=>{throw Error('git_commit_upgrade_'+reason);};
-export type GitCommitExecutionSchema='absent'|'legacy'|'commit'|'unsupported';
+export type GitCommitExecutionSchema='absent'|'legacy'|'commit'|'branch'|'unsupported';
 
 /** The original execution table owns commit rows under protocol 5. The original
- * index journal interprets protocols 1–4. */
-export function gitCommitExecutionDefinition(table:string,commit:boolean,ifMissing=false){
- if(![original,replacement].includes(table))fail('definition_invalid');
+ * index journal interprets protocols 1–4. Branch creation uses protocol 6. */
+export function gitCommitExecutionDefinition(table:string,commit:boolean|'branch',ifMissing=false){
+ if(![original,replacement].includes(table)||![true,false,'branch'].includes(commit))fail('definition_invalid');
+ const actions=["'stage'","'unstage'"];
+ if(commit)actions.push("'commit'");
+ if(commit==='branch')actions.push("'create-branch'");
  return `CREATE TABLE ${ifMissing?'IF NOT EXISTS ':''}${quote(table)}(
   execution_id TEXT PRIMARY KEY,owner_id TEXT NOT NULL,project_id TEXT NOT NULL,
   intent_id TEXT NOT NULL UNIQUE REFERENCES wb_git_mutation_intents(intent_id),request_id TEXT NOT NULL,request_sha256 TEXT NOT NULL,
-  review_version INTEGER NOT NULL,review_sha256 TEXT NOT NULL,action TEXT NOT NULL CHECK(action IN(${commit?"'stage','unstage','commit'":"'stage','unstage'"})),
+  review_version INTEGER NOT NULL,review_sha256 TEXT NOT NULL,action TEXT NOT NULL CHECK(action IN(${actions.join(',')})),
   witness_sha256 TEXT NOT NULL,repository_sha256 TEXT NOT NULL,created_at TEXT NOT NULL,protocol INTEGER NOT NULL DEFAULT 1,binding_sha256 TEXT,
-  UNIQUE(owner_id,project_id,request_id)${commit?",CHECK(action!='commit' OR protocol=5)":''})`;
+  UNIQUE(owner_id,project_id,request_id)${commit?",CHECK(action!='commit' OR protocol=5)":''}${commit==='branch'?",CHECK(action!='create-branch' OR protocol=6)":''})`;
 }
 function normalized(sql:string){
  const source=sql.replace(/^CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+/i,'CREATE TABLE ').replaceAll(quote(original),original).replace(/;$/,'');
@@ -35,6 +38,7 @@ export function gitCommitExecutionSchema(db:DatabaseSync):GitCommitExecutionSche
  if(row.type!=='table'||typeof row.sql!=='string')return 'unsupported';
  if(normalized(row.sql)===normalized(gitCommitExecutionDefinition(original,false)))return 'legacy';
  if(normalized(row.sql)===normalized(gitCommitExecutionDefinition(original,true)))return 'commit';
+ if(normalized(row.sql)===normalized(gitCommitExecutionDefinition(original,'branch')))return 'branch';
  return 'unsupported';
 }
 function executionRowids(db:DatabaseSync){
@@ -44,9 +48,9 @@ function executionRowids(db:DatabaseSync){
  }
  return {count,sha256:hash.digest('hex')};
 }
-function changeSchema(db:DatabaseSync,commit:boolean){
+function changeSchema(db:DatabaseSync,target:'legacy'|'commit'|'branch'){
  if(db.isTransaction)fail('transaction_active');
- const identity=retainOriginalGitDatabase(db),initial=gitCommitExecutionSchema(db),target=commit?'commit':'legacy';
+ const identity=retainOriginalGitDatabase(db),initial=gitCommitExecutionSchema(db);
  if(initial==='absent'||initial==='unsupported')fail('schema_unsupported');
  assertWorkspacePublicationMaintenance(db);
  const foreignKeys=Number(db.prepare('PRAGMA foreign_keys').get()!.foreign_keys);
@@ -56,12 +60,13 @@ function changeSchema(db:DatabaseSync,commit:boolean){
   db.exec('PRAGMA foreign_keys=OFF; PRAGMA legacy_alter_table=ON;');
   db.exec('BEGIN IMMEDIATE');identity.assertCurrent();assertOriginalWorkspaceQuiescence(db);
   if(gitCommitExecutionSchema(db)!==initial)fail('schema_changed');
-  if(!commit&&db.prepare("SELECT 1 FROM wb_git_index_executions WHERE action='commit' OR protocol>=5 LIMIT 1").get())fail('rollback_requires_commit_reader');
+  if(target==='legacy'&&db.prepare("SELECT 1 FROM wb_git_index_executions WHERE action='commit' OR protocol>=5 LIMIT 1").get())fail('rollback_requires_commit_reader');
+  if(target!=='branch'&&db.prepare("SELECT 1 FROM wb_git_index_executions WHERE action='create-branch' OR protocol>=6 LIMIT 1").get())fail('rollback_requires_branch_reader');
   const before=originalWorkspaceMaintenanceSnapshot(db),rowids=executionRowids(db);
   if(initial!==target){
    for(const object of before.schema.filter(object=>object.type==='trigger'))db.exec('DROP TRIGGER '+quote(String(object.name)));
    for(const object of before.schema.filter(object=>object.type==='view'))db.exec('DROP VIEW '+quote(String(object.name)));
-   db.exec(gitCommitExecutionDefinition(replacement,commit));
+   db.exec(gitCommitExecutionDefinition(replacement,target==='branch'?'branch':target==='commit'));
    const columns=db.prepare('SELECT name FROM pragma_table_info(?) ORDER BY cid').all(original).map(column=>quote(String(column.name))).join(',');
    db.exec('INSERT INTO '+quote(replacement)+'(rowid,'+columns+') SELECT rowid,'+columns+' FROM '+quote(original));
    db.exec('DROP TABLE '+quote(original));db.exec('ALTER TABLE '+quote(replacement)+' RENAME TO '+quote(original));
@@ -86,5 +91,10 @@ function changeSchema(db:DatabaseSync,commit:boolean){
  }catch(error){if(db.isTransaction)db.exec('ROLLBACK');throw error;}
  finally{db.exec('PRAGMA legacy_alter_table='+legacy+'; PRAGMA foreign_keys='+foreignKeys+';');}
 }
-export function upgradeGitCommitExecutionSchema(db:DatabaseSync){return changeSchema(db,true);}
-export function rollbackGitCommitExecutionSchema(db:DatabaseSync){return changeSchema(db,false);}
+export function upgradeGitCommitExecutionSchema(db:DatabaseSync){return changeSchema(db,gitCommitExecutionSchema(db)==='branch'?'branch':'commit');}
+export function rollbackGitCommitExecutionSchema(db:DatabaseSync){return changeSchema(db,'legacy');}
+export function upgradeGitBranchExecutionSchema(db:DatabaseSync){return changeSchema(db,'branch');}
+export function rollbackGitBranchExecutionSchema(db:DatabaseSync){
+ if(gitCommitExecutionSchema(db)==='legacy')fail('branch_schema_required');
+ return changeSchema(db,'commit');
+}

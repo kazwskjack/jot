@@ -181,3 +181,21 @@ HEAD/reflog publication, native workspace custody and interrupted recovery remai
 required before execution is exposed. UI entry/recovery, initialization and
 existing-branch checkout/deletion also remain in M15.14. This source increment
 has not run product commands, tests, typechecks, builds or UI acceptance.
+
+## P09 original branch execution schema preparation
+
+Branch protocol 6 extends the original execution table through the existing
+offline maintenance transaction, preserving original rows/rowids, receipts,
+application inventories, triggers, views, indexes and foreign-key integrity.
+Creation is the first branch action represented by this schema. Existing
+commit readers/capabilities accept the branch schema while retaining protocol-5
+commit semantics. Existing constructors keep the installed table constraints.
+
+The original CLI now routes apply-branch and rollback-branch through the same
+physical database identity and explicit offline-confirmation boundary. Downgrade
+to the commit schema requires absence of branch/protocol-6 rows, including
+historical records. Existing apply-commit preserves an installed branch schema.
+
+This is partial M15.14 source development. Actual branch admission, native
+creation, HEAD/ref/reflog effects, recovery and UI remain required. Commands,
+migrations, tests, builds and runtime acceptance have not been executed.

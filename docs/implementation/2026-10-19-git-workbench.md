@@ -301,7 +301,7 @@ Legacy metadata-less reviews remain cancellable.
 Review text describes approval state separately from execution status. Completed
 control receipts with unverified lock cleanup keep that fact visible. Long branch,
 identity and hash values wrap in the existing mobile layout. Commit selection
-uses the original complete staged selection and 100-path review limit.
+uses the original complete staged selection and 5000-path review limit.
 
 ## Recovery source audit
 
@@ -325,3 +325,28 @@ P08 source development is connected through React, BFF, Gateway, original local
 transport and the installed SDK Host composition. This delivery includes source
 inspection, paired contract-object comparison and Git publication. Tests, builds,
 SDK execution, UI rendering, migration and production acceptance were not run.
+
+## Original branch execution storage preparation
+
+The original wb_git_index_executions table has an explicit branch schema flavor.
+It retains existing stage/unstage/commit rows and adds create-branch under
+protocol 6. Commit remains protocol 5. Existing stores retain their current
+constraints during normal Gateway or SDK construction. Explicit maintenance
+uses the original physical database digest and offline confirmation.
+
+```text
+publication-maintenance-main apply-branch ABSOLUTE_DATABASE EXPECTED_DATABASE_SHA --confirm-offline
+publication-maintenance-main rollback-branch ABSOLUTE_DATABASE EXPECTED_DATABASE_SHA --confirm-offline
+```
+
+The original migration preserves rowids, all application row inventories,
+indexes, views, triggers and foreign keys in the same transaction. Branch
+rollback targets the commit schema and refuses any create-branch or protocol-6
+history. The existing commit-upgrade command preserves an already upgraded
+branch schema. Legacy rollback retains its original commit/history restrictions.
+Commit capability and commit admission recognize both commit and branch schemas.
+
+This delivers storage preparation source. Branch admission, typed effect readers,
+native creation/ref/HEAD/reflog publication and interrupted recovery remain in
+M15.14. Development used source review only. Maintenance commands, migrations,
+tests, builds and runtime acceptance have not been executed.
