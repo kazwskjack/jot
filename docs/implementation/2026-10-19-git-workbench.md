@@ -991,3 +991,40 @@ This increment supplies the retained native preparation boundary only. M15.14 an
 all other P09 requirements remain in progress. Per the user's development-only
 direction, tests, typechecks, builds, product/native commands, maintenance/migrations,
 UI runtime acceptance and deployment were not executed.
+
+## Reinitialization same-volume private preparation, 2026-11-09
+
+The original native execution branch now supplies protocol-2 preparation callbacks
+to the retained reinitialization attempt. It validates one-use WeakMap custody,
+source binding/full metadata, program/root/layout/configuration/ignore facts and
+busy locks before allocating. The common-volume allocation persists its original
+preparation under the held original producer lease before child or process work.
+Its minimal private Git metadata retains source HEAD bytes, SHA1/SHA256 base format
+and tracked physical directory identities. Existing config preparation repeats
+inside this same-volume context under original authorize/atomic-cleanup callbacks.
+Its actual observed filemode selects an approved full candidate, and both review
+candidate proofs must still match. The selected pending config is synced with the
+original file mode (or normal umask for a new config), plus a private empty lock.
+
+If ignore changes, a second allocation is made on the internal-ignore parent volume.
+Its original ref-preparation transaction records exact first preparation, chosen
+configuration/empty-lock facts and second namespace before ignore/lock creation.
+Both records retain original producer lease identity. The allocator exposes its
+already-validated live ownership record to its synchronous authorize callback,
+allowing only its own newly created namespace to be excluded before the preparation
+callback. Original source metadata guards skip these known roots, and a full
+original metadata read before/after the private probe uses the same exclusions.
+Existing readers use empty exclusions and keep their prior encoding. Private
+context directory identities are checked around asynchronous work. Nested helper
+and outer cleanup use original atomic authority and bounded exact-owned removal.
+
+This increment connects actual private preparation and original preparation writers.
+It still stops at the pre-publication boundary with reinitialization unavailable.
+Original admission remains gated. Typed protocol-8 dispatch/outcome, canonical
+locks/configuration/ignore/required-directory publication and post-dispatch recovery
+remain to implement before enabling effects. Permissions/platform and linked,
+external/damaged cases, branch checkout/deletion, reference backend coverage and all
+remaining P09 features remain required. M15.14 stays in progress. Source-only work
+followed the user's instruction. No tests, typechecks, builds, product/native
+operations, maintenance commands, migrations, UI runtime acceptance or deployment
+were executed.

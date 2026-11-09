@@ -21,17 +21,19 @@ const equal=(left:unknown,right:unknown)=>JSON.stringify(left)===JSON.stringify(
 export async function planReinitializationConfiguration(options:{
  executable:string;root:string;context:Pick<GitReadContext,'directory'>;commonConfig:Buffer|null;worktreeConfig:Buffer|null;
  worktreeConfigEnabled:boolean;objectFormat:'sha1'|'sha256';limits:GitProcessLimits;signal?:AbortSignal;
+ authority?:{authorize:()=>void;cleanup:(remove:()=>void)=>void};
 }){
  const {executable,root,context:sourceContext,commonConfig,worktreeConfig,worktreeConfigEnabled,objectFormat,limits,signal}=options;
+ const authority=options.authority??{authorize:()=>{},cleanup:(remove:()=>void)=>remove()};
  const originalDirectory=await lstat(sourceContext.directory,{bigint:true});
  if(!originalDirectory.isDirectory()||originalDirectory.isSymbolicLink())throw Error('git_repository_changed');
  const context={directory:await realpath(sourceContext.directory)};
  const parent=await lstat(context.directory,{bigint:true}),parentIdentity=parent.dev+':'+parent.ino;
  if(parentIdentity!==originalDirectory.dev+':'+originalDirectory.ino)throw Error('git_repository_changed');
  return withReinitializationAllocation({parent:context.directory,parent_identity:parentIdentity,scope:'private',
-  authority:{authorize:()=>{signal?.throwIfAborted()},prepared:record=>{
+  authority:{authorize:authority.authorize,prepared:record=>{
    if(record.scope!=='private'||record.parent_identity!==parentIdentity)throw Error('git_reinitialization_allocation_invalid');
-  },cleanup:remove=>remove()},...(signal?{signal}:{})},async(allocation,assertCurrent)=>{
+  },cleanup:authority.cleanup},...(signal?{signal}:{})},async(allocation,assertCurrent)=>{
   const active=join(context.directory,'config'),activeWorktree=join(context.directory,'config.worktree');
   const common=join(allocation,'common.config'),worktree=join(allocation,'worktree.config');
   const targets=[join(allocation,'false.config'),join(allocation,'true.config')],templates=join(allocation,'templates');

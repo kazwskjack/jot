@@ -55,10 +55,10 @@ export class GitRepositoryInspection{
   let current=path;while(true){const value=await lstat(current);if(!value.isDirectory()||value.isSymbolicLink())throw Error('git_repository_changed');const parent=dirname(current);if(parent===current)break;current=parent;}
   if(!same(await realpath(path),path))throw Error('git_repository_changed');return identity(await lstat(path));
  }
- private async metadata(signal?:AbortSignal){
+ private async metadata(signal?:AbortSignal,ignored:ReadonlySet<string>=new Set()){
   const facts:string[]=[];let count=0;
   for(const root of [...new Set([this.gitDirectory,this.commonDirectory])]){const queue=[root];while(queue.length){signal?.throwIfAborted();const directory=queue.pop()!;
-   for(const item of await readdir(directory,{withFileTypes:true})){signal?.throwIfAborted();if(++count>this.limits.maxMetadataEntries)throw Error('git_metadata_limit');const path=join(directory,item.name),s=await lstat(path);
+   for(const item of await readdir(directory,{withFileTypes:true})){signal?.throwIfAborted();const path=join(directory,item.name);if(ignored.has(path))continue;if(++count>this.limits.maxMetadataEntries)throw Error('git_metadata_limit');const s=await lstat(path);
     if(s.isSymbolicLink()||!s.isDirectory()&&!s.isFile())throw Error('git_repository_changed');
     if(s.isDirectory())queue.push(path);else if(path===join(this.commonDirectory,'objects','info','alternates')&&s.size)throw Error('git_metadata_unavailable');
     facts.push(path+':'+witness(s));
@@ -71,7 +71,8 @@ export class GitRepositoryInspection{
   this.binding=hash(JSON.stringify({root:this.root,git:this.gitDirectory,common:this.commonDirectory,
    directories:[root,git,git],executable,program}));this.executable=executable;
  }
- protected async anchors(signal?:AbortSignal){
+ // Writable kernels may exclude only their identity-checked owned scratch roots.
+ protected async anchors(signal?:AbortSignal,ignored:ReadonlySet<string>=new Set()){
   signal?.throwIfAborted();const directories=await Promise.all([this.directory(this.root),this.directory(this.gitDirectory),this.directory(this.commonDirectory)]);
   const dot=join(this.root,'.git'),entry=await lstat(dot);if(entry.isSymbolicLink())throw Error('git_repository_changed');
   if(entry.isFile()){
@@ -81,7 +82,7 @@ export class GitRepositoryInspection{
   const executable=this.executable??await gitExecutable(this.configuredExecutable);if(within(this.root,executable))throw Error('git_configuration_invalid');
   const facts=hash(JSON.stringify({root:this.root,git:this.gitDirectory,common:this.commonDirectory,directories,executable,program:witness(await lstat(executable))}));
   if(this.binding!==undefined&&facts!==this.binding)throw Error('git_repository_changed');this.binding=facts;this.executable=executable;
-  return{repository:hash(facts),metadata:await this.metadata(signal)};
+  return{repository:hash(facts),metadata:await this.metadata(signal,ignored)};
  }
  protected async bytes(path:string,max:number,expected?:string){
   const before=await lstat(path);if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1n||before.size>max||expected!==undefined&&witness(before)!==expected)throw Error('git_path_unavailable');

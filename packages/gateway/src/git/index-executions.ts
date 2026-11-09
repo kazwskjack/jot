@@ -1,3 +1,4 @@
+import {gitReinitializationPreparation,gitReinitializationRefPreparation} from './reinitialization-evidence.ts';
 import {validateInitializationPreparation,readInitializationPreparation,readInitializationRefPreparation,readInitializationDispatch,readInitializationOutcome,initializationAppliedResult} from './initialization-journal.ts';
 import {gitInitializationPreparation,gitInitializationEvidence,gitInitializationReceipt,type GitInitializationEvidence} from './initialization-evidence.ts';
 import {GitInitializationIntents} from './initialization-intents.ts';
@@ -288,6 +289,23 @@ export class GitIndexExecutions{
    if(source.action==='init'){
     const kernel=this.git.indexEffects(owner,project),plan=await this.git.prepareInitialization(owner,project,{...source,review_sha256:row.review_sha256},abort.signal);
     authorize();
+    if(plan.protocol===2){
+     await kernel.applyReinitialization(plan,{
+      authorize,
+      prepared:raw=>withImmediateTransaction(this.db,()=>{
+       authorize();const preparation=gitReinitializationPreparation(raw);validateInitializationPreparation(this.db,row,preparation);
+       this.db.prepare('INSERT INTO wb_git_index_preparations VALUES(?,?,?,?,?,?)').run(row.execution_id,JSON.stringify(preparation),digest(preparation),lease.owner,lease.generation,new Date(this.now()).toISOString());
+      }),
+      refPrepared:raw=>withImmediateTransaction(this.db,()=>{
+       authorize();const reference=gitReinitializationRefPreparation(raw);
+       if(row.protocol!==8||canonicalJson(reference.preparation)!==canonicalJson(readInitializationPreparation(this.db,row)))throw Error('git_execution_evidence_corrupt');
+       validateInitializationPreparation(this.db,row,reference.preparation);
+       this.db.prepare('INSERT INTO wb_git_index_ref_preparations VALUES(?,?,?,?,?,?)').run(row.execution_id,JSON.stringify(reference),digest(reference),lease.owner,lease.generation,new Date(this.now()).toISOString());
+      }),
+      cleanup:remove=>this.cleanupTransaction(row,lease,remove),
+     },abort.signal);
+     return this.get(owner,project,row.execution_id);
+    }
     await kernel.applyInitialization(plan,{
      authorize,
      prepared:raw=>withImmediateTransaction(this.db,()=>{

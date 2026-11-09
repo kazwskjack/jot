@@ -5,7 +5,7 @@ import {join,dirname,resolve,isAbsolute} from 'node:path';
 import {freezeWorkAdmission} from '../always-on/work-admission-records.ts';
 
 export type GitReinitializationAllocation={protocol:1;scope:'private'|'common'|'git'|'internal';name:string;parent_identity:string;identity:string;mode:number;uid:string;gid:string;execution_authorized:false};
-type Authority={authorize:()=>void;prepared:(record:GitReinitializationAllocation)=>void;cleanup:(remove:()=>void)=>void};
+type Authority={authorize:(record?:GitReinitializationAllocation)=>void;prepared:(record:GitReinitializationAllocation)=>void;cleanup:(remove:()=>void)=>void};
 const hash=(value:Buffer)=>createHash('sha256').update(value).digest('hex');
 const identity=(value:{dev:bigint;ino:bigint})=>value.dev+':'+value.ino;
 const samePath=(left:string,right:string)=>process.platform==='win32'?left.toLowerCase()===right.toLowerCase():left===right;
@@ -127,7 +127,7 @@ export async function withReinitializationAllocation<T>(options:{parent:string;p
  const name='.git.jot-init-'+randomUUID()+'.pending',path=join(parent,name);
  let record:GitReinitializationAllocation|undefined,failure:unknown;
  const check=()=>{
-  signal?.throwIfAborted();synchronous(()=>authority.authorize());
+  signal?.throwIfAborted();synchronous(()=>authority.authorize(record));
   if(identity(directory(parent))!==parent_identity)throw Error('git_repository_changed');
   if(record){
    const stat=directory(path);
