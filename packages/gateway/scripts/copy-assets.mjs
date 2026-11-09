@@ -16,3 +16,6 @@ cpSync(new URL('../file-engine/templates/', import.meta.url), new URL('../dist/f
 
 mkdirSync(new URL('../dist/src/artifacts/', import.meta.url), { recursive: true });
 cpSync(new URL('../src/artifacts/archive-windows-job.ps1', import.meta.url), new URL('../dist/src/artifacts/archive-windows-job.ps1', import.meta.url));
+
+mkdirSync(new URL('../dist/src/messages/', import.meta.url), { recursive: true });
+cpSync(new URL('../src/messages/content-reference.js', import.meta.url), new URL('../dist/src/messages/content-reference.js', import.meta.url));

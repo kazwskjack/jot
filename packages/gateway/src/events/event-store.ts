@@ -1,3 +1,4 @@
+import {captureMessageReferenceSnapshots} from '../messages/reference-snapshots.ts';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { DatabaseSync } from 'node:sqlite';
@@ -38,6 +39,7 @@ export class EventStore {
     payload: Record<string, unknown>,
   ): StoredAgentEvent {
     if (!this.db.isTransaction) throw new Error('event_append_requires_transaction');
+    if(type==='message.created'&&payload.role==='user'&&payload.status==='complete'&&typeof payload.message_id==='string')captureMessageReferenceSnapshots(this.db,conversationId,payload.message_id);
     const sequence = this.db.prepare(
       'UPDATE ga_conversations SET next_seq=next_seq+1,updated_at=? WHERE id=? RETURNING next_seq-1 AS seq',
     ).get(new Date().toISOString(), conversationId) as { seq: number } | undefined;

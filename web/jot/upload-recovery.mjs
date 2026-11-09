@@ -1,3 +1,4 @@
+import {validateRegionCaptureSource} from '../../packages/gateway/src/messages/content-reference.js';
 const exact=(value,required,optional=[])=>!!value&&typeof value==='object'&&!Array.isArray(value)
  &&required.every(key=>Object.hasOwn(value,key))&&Object.keys(value).every(key=>required.includes(key)||optional.includes(key));
 const identifier=value=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(value);
@@ -7,24 +8,10 @@ const positive=value=>Number.isSafeInteger(value)&&value>0;
 const equal=(left,right)=>JSON.stringify(left)===JSON.stringify(right);
 const invalid=()=>Error('upload_recovery_invalid');
 
-const relative=value=>typeof value==='string'&&value.length>0&&value.length<=4096&&!/[\\:\u0000-\u001f\u007f]/.test(value)&&value.split('/').every(part=>part&&part!=='.'&&part!=='..');
 export function validateRegionCapture(capture,conversation,scope){
- if(!exact(capture,['owner','conversationId','runId','activityId','resultSha','file','reference','imageBytes','rotation'])
-  ||!sha(capture.owner)||scope!==undefined&&capture.owner!==scope||capture.conversationId!==conversation||!identifier(capture.runId)||!identifier(capture.activityId)||!sha(capture.resultSha)
-  ||!positive(capture.imageBytes)||![0,90,180,270].includes(capture.rotation))throw invalid();
- const source=capture.file,ref=capture.reference;
- if(!exact(source,['path','version','sha256','size'])||!relative(source.path)||!Number.isSafeInteger(source.version)||source.version<0||!sha(source.sha256)||!Number.isSafeInteger(source.size)||source.size<0
-  ||!exact(ref,['schemaVersion','kind','id','selectionMode','source','renderer','locator','image','createdAt'],['nearbyText'])
-  ||ref.schemaVersion!==1||ref.kind!=='content-reference'||ref.selectionMode!=='region'||!identifier(ref.id)||typeof ref.createdAt!=='string'||!Number.isFinite(Date.parse(ref.createdAt))
-  ||ref.nearbyText!==undefined&&(typeof ref.nearbyText!=='string'||ref.nearbyText.length>100000))throw invalid();
- const file=ref.source,renderer=ref.renderer,locator=ref.locator,image=ref.image;
- if(!exact(file,['relativePath','fileName','mimeType','revision'])||file.relativePath!==source.path||file.fileName!==source.path.split('/').at(-1)||file.mimeType!=='application/pdf'
-  ||!exact(file.revision,['id','size','sha256'])||file.revision.id!==String(source.version)||file.revision.size!==source.size||file.revision.sha256!==source.sha256
-  ||!exact(renderer,['id','backend','locatorQuality'])||renderer.id!=='pdf'||renderer.backend!=='builtin'||renderer.locatorQuality!=='visual'
-  ||!exact(locator,['surface','pageNumber','rect'])||locator.surface!=='page'||!positive(locator.pageNumber)
-  ||!exact(locator.rect,['x','y','width','height'])||Object.values(locator.rect).some(number=>typeof number!=='number'||!Number.isFinite(number)||number<0||number>1)
-  ||!locator.rect.width||!locator.rect.height||locator.rect.x+locator.rect.width>1+1e-9||locator.rect.y+locator.rect.height>1+1e-9
-  ||!exact(image,['name','mimeType','width','height','sha256'])||typeof image.name!=='string'||!image.name||image.name.length>255||/[\\/\u0000-\u001f\u007f]/.test(image.name)||image.mimeType!=='image/png'||!positive(image.width)||!positive(image.height)||!sha(image.sha256))throw invalid();
+ if(!capture||!sha(capture.owner)||scope!==undefined&&capture.owner!==scope)throw invalid();
+ const {owner,...source}=capture;
+ try{validateRegionCaptureSource(source,conversation);}catch{throw invalid();}
  return capture;
 }
 

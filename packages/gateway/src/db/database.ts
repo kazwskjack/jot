@@ -1,3 +1,4 @@
+import {installMessageReferenceSnapshots} from '../messages/reference-snapshots.ts';
 import {installChatCheckpoints} from '../conversations/chat-checkpoint-store.ts';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
@@ -22,6 +23,7 @@ export function openProductDatabase(path: string): DatabaseSync {
   try {
     db.exec('PRAGMA busy_timeout=75; PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;');
     db.exec(readFileSync(schemaUrl, 'utf8'));
+    installMessageReferenceSnapshots(db);
     installOrdinarySteeringReconciliations(db);
     installOrdinarySteeringCustody(db);
     installOrdinaryFinalPublications(db);

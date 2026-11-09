@@ -1,3 +1,4 @@
+import {captureMessageReferenceSnapshots} from '../messages/reference-snapshots.ts';
 import {createHash,randomUUID} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
 import {withImmediateTransaction} from '../db/database.ts';
@@ -118,6 +119,7 @@ export class ConversationForks{
     const original=decodeStoredContent(String(row.content_json)),content=refs.length?JSON.stringify({...original,attachments:refs.map(pin=>pin.artifact_id)}):String(row.content_json);
     this.db.prepare('INSERT INTO ga_messages(id,conversation_id,run_id,role,status,content_json,created_at,updated_at) VALUES(?,?,NULL,?,?,?,?,?)').run(newId,target,String(row.role),'complete',content,String(row.created_at),String(row.updated_at));
     this.db.prepare('INSERT INTO ga_conversation_fork_messages VALUES(?,?,?,?,?,?)').run(newId,forkId,String(row.id),position,createHash('sha256').update(content).digest('hex'),JSON.stringify(refs));
+    captureMessageReferenceSnapshots(this.db,target,newId);
    }
    signal?.throwIfAborted();return receipt;
   });
