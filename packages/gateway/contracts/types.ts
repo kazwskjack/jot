@@ -32,7 +32,14 @@ export type GitSnapshot = {commit_identity_ready?:boolean;project_id:string;snap
 export type GitCheckoutContent={size:number|null;sha256:string|null;attributes?:Array<{name:string;value:string}>;reason?:'source_unconfirmed'|'attribute_source_unconfirmed'|'filter_policy_required'|'read_failed'|'output_limit'|'deadline'|'sparse_policy_required'};
 export type GitCheckoutBefore={path:string;kind:'missing'|'blocked'|'file'|'directory'|'symlink'|'other';size:number;mode:number;stat_sha256:string|null;sha256:string|null;ancestors_sha256:string;blocked_by?:string};
 export type GitCheckoutBeforeState={sha256:string;entries:GitCheckoutBefore[]};
-export type GitCheckoutPreview={target_ref:string;target_oid:string;source_index_sha256:string|null;working_tree_check:'passed'|'not_confirmed';index_projection:{sha256:string;entries_sha256:string;entry_count:number;worktree_before?:GitCheckoutBeforeState|null;worktree_attribute_before?:GitCheckoutBeforeState|null;attributes?:Array<{path:string;name:string;value:string}>;changes:Array<{path:string;before:{mode:string;oid:string;blob?:{size:number;sha256:string|null}}|null;after:{mode:string;oid:string;blob?:{size:number;sha256:string|null};worktree_content?:GitCheckoutContent}|null}>}|null;execution_authorized:false};
+export type GitCheckoutReferenceSource={
+ protocol:1;source_metadata_sha256:string;head_file:GitBranchLogFile;head_log:GitBranchLogFile;
+ source_ref:{ref:string;file:GitBranchLogFile}|null;target_ref:{ref:string;file:GitBranchLogFile};
+ target_log:GitBranchLogFile;packed_refs:GitBranchLogFile;
+ configuration:{common:GitBranchLogFile;worktree:GitBranchLogFile;worktree_enabled:boolean};
+ log_policy:Pick<GitBranchLogWitness,'configuration'|'enabled'>;
+};
+export type GitCheckoutPreview={reference_source?:GitCheckoutReferenceSource;target_ref:string;target_oid:string;source_index_sha256:string|null;working_tree_check:'passed'|'not_confirmed';index_projection:{sha256:string;entries_sha256:string;entry_count:number;worktree_before?:GitCheckoutBeforeState|null;worktree_attribute_before?:GitCheckoutBeforeState|null;attributes?:Array<{path:string;name:string;value:string}>;changes:Array<{path:string;before:{mode:string;oid:string;blob?:{size:number;sha256:string|null}}|null;after:{mode:string;oid:string;blob?:{size:number;sha256:string|null};worktree_content?:GitCheckoutContent}|null}>}|null;execution_authorized:false};
 export type GitBranchInventory={project_id:string;snapshot_id:string;repository_sha256:string;head:GitHead;object_format:'sha1'|'sha256';branches:Array<{ref:string;name:string;kind:'local'|'remote';oid:string;object_type:'commit'|'tag'|'tree'|'blob';current:boolean;symbolic_target?:string;checkout_oid?:string|null;worktree_uses?:Array<{worktree:'current'|'other';reason:'head'|'rebase'|'bisect'|'update_refs'}>}>;checkout_preview?:GitCheckoutPreview;read_only:true;execution_authorized:false};
 export type GitCheckoutReviewPrepare={request_id:string;action:'checkout-branch';snapshot_id:string;target_ref:string};
 export type GitCheckoutReviewControl={request_id:string;expected_version:number;action:'cancel';review_sha256:string};

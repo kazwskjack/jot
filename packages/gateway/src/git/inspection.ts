@@ -3,7 +3,7 @@ import type {GitInitializationWitness,GitInitializationFile,GitReinitializationL
 import {planReinitializationConfiguration} from './reinitialization-configuration.ts';
 import {planCreateBranchConfiguration} from './branch-configuration.ts';
 import {validGitReference} from './references.ts';
-import type {GitCheckoutBefore,GitCheckoutBeforeState,GitCheckoutPreview,GitBranchInventory,GitCreateBranchWitness,GitBranchLogFile,GitBranchLogWitness} from '../../contracts/types.ts';
+import type {GitCheckoutReferenceSource,GitCheckoutBefore,GitCheckoutBeforeState,GitCheckoutPreview,GitBranchInventory,GitCreateBranchWitness,GitBranchLogFile,GitBranchLogWitness} from '../../contracts/types.ts';
 import {createHash} from 'node:crypto';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {constants} from 'node:fs';
@@ -809,9 +809,36 @@ export class GitRepositoryInspection{
   preview.working_tree_check='passed';preview.index_projection={sha256:indexSha,entries_sha256:hash(canonicalJson(result)),entry_count:result.length,changes,...(attributes===null?{}:{attributes}),worktree_before:worktreeBefore,worktree_attribute_before:attributeBefore};
   signal?.throwIfAborted();return preview;
  }
+ /** Fixed before-state metadata for the original checkout review and later publication. */
+ protected async checkoutReferenceSource(context:ReadContext,snapshot:GitSnapshot,targetRef:string,signal?:AbortSignal):Promise<GitCheckoutReferenceSource>{
+  const file=async(path:string,max:number):Promise<GitBranchLogFile>=>{
+   signal?.throwIfAborted();
+   try{
+    await this.directory(dirname(path));const body=await this.bytes(path,max);
+    return{sha256:hash(body),size:body.length};
+   }catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return{sha256:null,size:0};throw error;}
+  };
+  const sourceRef=snapshot.head.detached?null:'refs/heads/'+snapshot.head.branch;
+  if(!validGitReference(targetRef)||sourceRef!==null&&!validGitReference(sourceRef)||!context.branchLogPolicy)throw Error('git_checkout_evidence_invalid');
+  const headFile=await file(join(this.gitDirectory,'HEAD'),32*1024*1024);
+  if(headFile.sha256===null)throw Error('git_snapshot_changed');
+  const source={
+   protocol:1 as const,source_metadata_sha256:context.metadata,head_file:headFile,
+   head_log:await file(join(this.gitDirectory,'logs','HEAD'),32*1024*1024),
+   source_ref:sourceRef===null?null:{ref:sourceRef,file:await file(join(this.commonDirectory,sourceRef),32*1024*1024)},
+   target_ref:{ref:targetRef,file:await file(join(this.commonDirectory,targetRef),32*1024*1024)},
+   target_log:await file(join(this.commonDirectory,'logs',targetRef),32*1024*1024),
+   packed_refs:await file(join(this.commonDirectory,'packed-refs'),32*1024*1024),
+   configuration:{common:await file(join(this.commonDirectory,'config'),1024*1024),
+    worktree:context.worktreeConfigEnabled?await file(join(this.gitDirectory,'config.worktree'),1024*1024):{sha256:null,size:0},
+    worktree_enabled:context.worktreeConfigEnabled===true},
+   log_policy:{...context.branchLogPolicy}
+  };
+  signal?.throwIfAborted();return source;
+ }
  async branches(snapshotId:string,signal?:AbortSignal,targetRef?:string):Promise<Omit<GitBranchInventory,'project_id'>>{
   if(typeof snapshotId!=='string'||!/^[a-f0-9]{64}$/.test(snapshotId)||targetRef!==undefined&&(!validGitReference(targetRef)||!/^refs\/(?:heads|remotes)\//.test(targetRef)))throw Error('git_branches_invalid');
-  const context=await this.context(signal);
+  const context=await this.context(signal,targetRef!==undefined);
   try{
    const snapshot=await this.inspectContext(context,signal);
    if(snapshot.snapshot_id!==snapshotId)throw Error('git_snapshot_changed');
@@ -860,6 +887,7 @@ export class GitRepositoryInspection{
    if(targetRef!==undefined){
     const target=branches.find(branch=>branch.ref===targetRef);if(!target)throw Error('git_checkout_target_unavailable');
     preview=await this.checkoutPreview(context,snapshot,target,format,signal);
+    preview.reference_source=await this.checkoutReferenceSource(context,snapshot,targetRef,signal);
    }
    if((await this.inspectContext(context,signal)).snapshot_id!==snapshotId)throw Error('git_snapshot_changed');
    if((await this.anchors(signal)).metadata!==context.metadata)throw Error('git_snapshot_changed');

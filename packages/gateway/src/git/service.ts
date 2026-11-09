@@ -102,6 +102,7 @@ export class GitWorkbench{
  async freezeCheckout(owner:string,project:string,snapshotId:string,targetRef:string,signal?:AbortSignal):Promise<GitCheckoutReviewWitness>{
   const value=await this.branches(owner,project,snapshotId,signal,targetRef),target=value.branches.find(branch=>branch.ref===targetRef);
   if(!target?.checkout_oid||!value.checkout_preview)throw Error('git_checkout_target_unavailable');
+  if(!value.checkout_preview.reference_source)throw Error('git_checkout_evidence_invalid');
   this.projects.assertOwned(project,owner);signal?.throwIfAborted();
   return{protocol:1,kind:'checkout_branch',project_id:project,snapshot_id:snapshotId,repository_sha256:value.repository_sha256,
    head:value.head,object_format:value.object_format,target:{...target,checkout_oid:target.checkout_oid},preview:value.checkout_preview,execution_authorized:false};

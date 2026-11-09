@@ -2,12 +2,25 @@ import React,{useState} from 'react';
 import type {GitBranchInventory,GitCheckoutPreview} from './types';
 
 export default function GitCheckoutEvidence({preview,target,onRetry}:{preview:GitCheckoutPreview;target:GitBranchInventory['branches'][number];onRetry?:()=>void}){
- const [page,setPage]=useState(0),[attributePage,setAttributePage]=useState(0),worktreeBefore=preview.index_projection?.worktree_before;
+ const [page,setPage]=useState(0),[attributePage,setAttributePage]=useState(0),worktreeBefore=preview.index_projection?.worktree_before,reference=preview.reference_source;
  return <>
    <dl><dt>目标引用</dt><dd><code>{preview.target_ref}</code></dd><dt>目标提交</dt><dd><code>{preview.target_oid}</code></dd>
     <dt>当前索引 SHA-256</dt><dd><code>{preview.source_index_sha256??'尚无索引文件'}</code></dd>
     {preview.index_projection&&<><dt>预览索引 SHA-256</dt><dd><code>{preview.index_projection.sha256}</code></dd><dt>预览索引条目</dt><dd>{preview.index_projection.entry_count}</dd></>}
    </dl>
+   {reference?<section aria-label="引用与配置原状态"><h4>引用与配置原状态</h4>
+    <p>元数据凭证 SHA-256 <code>{reference.source_metadata_sha256}</code></p>
+    <p>原 HEAD 引用 <code>{reference.source_ref?.ref??'分离 HEAD'}</code> · 目标引用 <code>{reference.target_ref.ref}</code></p>
+    <dl>{[
+     {name:'HEAD 文件',fact:reference.head_file},{name:'HEAD 日志',fact:reference.head_log},
+     ...(reference.source_ref?[{name:'原分支松散引用文件',fact:reference.source_ref.file}]:[]),
+     {name:'目标松散引用文件',fact:reference.target_ref.file},{name:'目标引用日志',fact:reference.target_log},
+     {name:'打包引用文件',fact:reference.packed_refs},{name:'公共配置文件',fact:reference.configuration.common},
+     ...(reference.configuration.worktree_enabled?[{name:'工作区配置文件',fact:reference.configuration.worktree}]:[])
+    ].map(({name,fact})=><React.Fragment key={name}><dt>{name}</dt><dd>{fact.sha256===null?'文件尚不存在':<>{fact.size} 字节 · SHA-256 <code>{fact.sha256}</code></>}</dd></React.Fragment>)}</dl>
+    <p>日志配置 {{default:'默认',true:'启用',false:'关闭',always:'全部启用'}[reference.log_policy.configuration]} · 有效策略{reference.log_policy.enabled?'启用':'关闭'}。工作区独立配置{reference.configuration.worktree_enabled?'启用':'关闭'}。</p>
+    <p>松散引用文件缺失时，逻辑引用仍可能来自打包存储。日志及跟踪写入方案仍需完整审核。</p>
+   </section>:<p role="status">此历史预览尚无引用与配置原状态凭证。</p>}
    {target?.worktree_uses?.map(use=><p key={use.worktree+'-'+use.reason} role="status">{use.worktree==='current'?'当前工作区':'其他工作区'}占用 · {{head:'HEAD',rebase:'变基',bisect:'二分查找',update_refs:'待更新引用'}[use.reason]}</p>)}
    <p role="status">{preview.working_tree_check==='passed'?'工作区兼容检查已通过。':'工作区兼容性尚未确认，请核对暂存、未暂存及未跟踪文件和仓库状态。'}</p>
    {preview.index_projection&&<>{preview.index_projection.changes.length?<ul aria-label="切换索引变化">{preview.index_projection.changes.slice(page*50,(page+1)*50).map(change=><li key={change.path}>

@@ -14,7 +14,7 @@ export function registerGitCheckoutReviewRoutes(app:FastifyInstance,options:Opti
    const status=kind==='prepare'?201:200;return reply.code(status).send(options.atomic(request,status,commit));
   }catch(error){
    const code=error instanceof Error?error.message:'',known:Record<string,number>={project_not_found:404,git_intent_not_found:404,git_repository_unconfigured:503,
-    git_checkout_invalid:400,git_checkout_evidence_invalid:503,git_checkout_target_unavailable:409,git_checkout_unavailable:503,git_branches_invalid:400,
+    git_checkout_invalid:400,git_checkout_evidence_invalid:503,git_checkout_target_unavailable:409,git_checkout_unavailable:503,git_branch_log_policy_invalid:503,git_branches_invalid:400,
     git_snapshot_changed:409,git_repository_changed:409,git_path_unavailable:400,workspace_path_unsafe:400,workspace_private_path:400,
     git_review_changed:409,git_intent_closed:409,version_conflict:409,idempotency_conflict:409,idempotency_in_progress:409,
     git_reference_backend_unsupported:503,git_output_limit:413,git_entry_limit:413,git_metadata_limit:413,git_read_timeout:504,git_cancelled:409};

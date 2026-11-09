@@ -39846,6 +39846,7 @@
           "checkout_preview": {
             "type": "object",
             "properties": {
+            "reference_source": {"$ref":"#/components/schemas/GitCheckoutReferenceSource"},
               "target_ref": {
                 "type": "string",
                 "minLength": 1,
@@ -40733,6 +40734,281 @@
       },
       "GitReinitializationReviewFacts": {"type":"object","additionalProperties":false,"properties":{"head":{"$ref":"#/components/schemas/GitHead"},"source_metadata_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"common_config_sha256":{"anyOf":[{"type":"string","pattern":"^[a-f0-9]{64}$"},{"type":"null"}]},"worktree_config_sha256":{"anyOf":[{"type":"string","pattern":"^[a-f0-9]{64}$"},{"type":"null"}]},"worktree_config_enabled":{"type":"boolean"},"configuration":{"$ref":"#/components/schemas/GitReinitializationConfiguration"},"layout_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"}},"required":["head","source_metadata_sha256","common_config_sha256","worktree_config_sha256","worktree_config_enabled"]},
       "GitReinitializationConfiguration": {"type":"object","additionalProperties":false,"properties":{"protocol":{"const":1},"before_sha256":{"anyOf":[{"type":"string","pattern":"^[a-f0-9]{64}$"},{"type":"null"}]},"filemode_false_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"filemode_true_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"worktree_sha256":{"anyOf":[{"type":"string","pattern":"^[a-f0-9]{64}$"},{"type":"null"}]}},"required":["protocol","before_sha256","filemode_false_sha256","filemode_true_sha256","worktree_sha256"]},
+      "GitCheckoutReferenceSource": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "protocol": {
+            "const": 1
+          },
+          "source_metadata_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "head_file": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "sha256": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 33554432
+              }
+            },
+            "required": [
+              "sha256",
+              "size"
+            ]
+          },
+          "head_log": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "sha256": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 33554432
+              }
+            },
+            "required": [
+              "sha256",
+              "size"
+            ]
+          },
+          "source_ref": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "ref": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024,
+                    "pattern": "^refs/heads/"
+                  },
+                  "file": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "sha256": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "size": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 33554432
+                      }
+                    },
+                    "required": [
+                      "sha256",
+                      "size"
+                    ]
+                  }
+                },
+                "required": [
+                  "ref",
+                  "file"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "target_ref": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "ref": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024,
+                "pattern": "^refs/(?:heads|remotes)/"
+              },
+              "file": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "sha256": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "size": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 33554432
+                  }
+                },
+                "required": [
+                  "sha256",
+                  "size"
+                ]
+              }
+            },
+            "required": [
+              "ref",
+              "file"
+            ]
+          },
+          "target_log": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "sha256": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 33554432
+              }
+            },
+            "required": [
+              "sha256",
+              "size"
+            ]
+          },
+          "packed_refs": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "sha256": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 33554432
+              }
+            },
+            "required": [
+              "sha256",
+              "size"
+            ]
+          },
+          "configuration": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "common": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "sha256": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "size": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1048576
+                  }
+                },
+                "required": [
+                  "sha256",
+                  "size"
+                ]
+              },
+              "worktree": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "sha256": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "size": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1048576
+                  }
+                },
+                "required": [
+                  "sha256",
+                  "size"
+                ]
+              },
+              "worktree_enabled": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "common",
+              "worktree",
+              "worktree_enabled"
+            ]
+          },
+          "log_policy": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "configuration": {
+                "enum": [
+                  "default",
+                  "true",
+                  "false",
+                  "always"
+                ]
+              },
+              "enabled": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "configuration",
+              "enabled"
+            ]
+          }
+        },
+        "required": [
+          "protocol",
+          "source_metadata_sha256",
+          "head_file",
+          "head_log",
+          "source_ref",
+          "target_ref",
+          "target_log",
+          "packed_refs",
+          "configuration",
+          "log_policy"
+        ]
+      },
       "GitCheckoutReviewPrepare": {
         "type": "object",
         "additionalProperties": false,
@@ -40908,6 +41184,7 @@
           "preview": {
             "type": "object",
             "properties": {
+            "reference_source": {"$ref":"#/components/schemas/GitCheckoutReferenceSource"},
               "target_ref": {
                 "type": "string",
                 "minLength": 1,

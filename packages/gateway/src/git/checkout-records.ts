@@ -26,6 +26,17 @@ export function readGitCheckoutIntentSource(row:GitBranchIntentRecord,validate:(
    ||witness.head.detached&&(witness.head.branch!==null||witness.head.oid===null)
    ||!witness.head.detached&&(typeof witness.head.branch!=='string'||!validGitReference('refs/heads/'+witness.head.branch)))throw Error();
   for(const change of witness.preview.index_projection?.changes??[])for(const entry of [change.before,change.after])if(entry&&!oid.test(entry.oid))throw Error();
+  const source=witness.preview.reference_source;
+  if(source){
+   if(source.target_ref.ref!==input.target_ref||source.head_file.sha256===null||source.head_file.size===0
+    ||(source.source_ref===null)!==witness.head.detached
+    ||source.source_ref&&source.source_ref.ref!=='refs/heads/'+witness.head.branch
+    ||!source.configuration.worktree_enabled&&(source.configuration.worktree.sha256!==null||source.configuration.worktree.size!==0)
+    ||source.log_policy.configuration==='false'&&source.log_policy.enabled
+    ||['true','always'].includes(source.log_policy.configuration)&&!source.log_policy.enabled)throw Error();
+   for(const fact of [source.head_file,source.head_log,source.target_ref.file,source.target_log,source.packed_refs,
+    source.configuration.common,source.configuration.worktree,...(source.source_ref?[source.source_ref.file]:[])])if(fact.sha256===null&&fact.size!==0)throw Error();
+  }
   if(checkoutDigest({action:input.action,target_ref:input.target_ref,witness})!==row.review_sha256)throw Error();
   return{input,witness};
  }catch{throw Error('git_checkout_evidence_invalid');}
