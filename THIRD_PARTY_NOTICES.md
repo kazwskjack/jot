@@ -69,3 +69,14 @@ upstream GNU Affero General Public License v3.0 terms. The complete upstream
 license is retained at
 `packages/session-adapter/runtime-patches/PILOTDECK-AGPL-3.0.txt`.
 Jot preserves the original byte prefix and caps the resulting file at 1 MiB.
+
+## PilotDeck assistant reply selection
+
+`web/jot/AssistantReplyQuote.tsx` adapts selection capture and quote context
+behavior from `ui/src/components/chat-v2/AssistantReplyQuoteAction.tsx` and
+`ui/src/types/assistantReplyReference.ts` at PilotDeck revision
+`783499ffdb2d501bf590b2e035acd027a882df10`. Adapted portions retain upstream
+GNU Affero General Public License v3.0 terms. The complete upstream license
+is retained at `packages/session-adapter/runtime-patches/PILOTDECK-AGPL-3.0.txt`.
+Jot binds snapshots to its original conversation/message identities and text
+submission receipts, with local quote preview and removal.

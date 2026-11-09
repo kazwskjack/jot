@@ -1,0 +1,6 @@
+.jot-assistant-quote-action{position:fixed;z-index:10050;box-sizing:border-box;width:220px;max-width:calc(100vw - 16px);min-height:36px;padding:6px 12px;border:1px solid currentColor;border-radius:10px;background:var(--panel,#20242c);color:var(--text,#fff);font:inherit;cursor:pointer}
+.jot-assistant-quote-action:focus-visible{outline:3px solid currentColor;outline-offset:3px}
+.jot-assistant-quotes{min-width:0;width:100%;font-size:14px}
+.jot-assistant-quotes>div{padding:6px 0;border-bottom:1px solid currentColor}
+.jot-assistant-quotes summary{cursor:pointer;overflow-wrap:anywhere}
+.jot-assistant-quotes blockquote,.jot-assistant-quotes pre{max-height:200px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0;padding:8px;border-inline-start:2px solid currentColor}
