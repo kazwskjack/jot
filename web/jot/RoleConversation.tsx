@@ -21,8 +21,10 @@ import type {NativeMemberTarget} from './native-member-execution';
 import {catalogMountForRun,skillGestureDraft} from './skill-catalog-mount.js';
 import CompactionActivities from './CompactionActivities';
 import ActivityTimeline from './ActivityTimeline';
+import ConversationArtifacts from './ConversationArtifacts';
+import ActivityArtifactDetails from './ActivityArtifactDetails';
 import ActivityHistory from './ActivityHistory';
-import type {ActivityReveal} from './activity-presentation';
+import type {ActivityReveal,ActivityArtifactTarget} from './activity-presentation';
 import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 import RunDiagnostics from './RunDiagnostics';
 import {RunCancelWriter} from './run-cancel.mjs';
@@ -145,6 +147,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  const loadActivityHistory=useCallback(()=>setActivityHistoryRequest(version=>version+1),[]);
  const [activityReveal,setActivityReveal]=useState<ActivityReveal>();
  const [selectedNativeMember,setSelectedNativeMember]=useState<NativeMemberTarget>();
+ const [messageArtifact,setMessageArtifact]=useState<{owner:string;target:ActivityArtifactTarget}>();
  const nativeMemberPanel=useRef<HTMLElement>(null);
  useEffect(()=>{if(selectedNativeMember)nativeMemberPanel.current?.focus();},[selectedNativeMember]);
  const revealActivity=useCallback((request:ActivityReveal)=>setActivityReveal(prior=>prior?.key===request.key&&prior.activityId===request.activityId?prior:request),[]);
@@ -286,6 +289,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  {state&&<>
   <ConversationDisplayBoundary label="上下文整理状态"><CompactionActivities activities={activityValues} runs={state.runs}/></ConversationDisplayBoundary>
   <ConversationDisplayBoundary label="公开步骤历史"><ActivityHistory conversationId={id} {...(state.snapshotSeq?{snapshotSeq:state.snapshotSeq}:{})} requestVersion={activityHistoryRequest} onLoaded={retainActivityHistory}/></ConversationDisplayBoundary>
+  <ConversationDisplayBoundary label="会话成果目录"><ConversationArtifacts key={JSON.stringify([taskDraftScope(),id])} conversationId={id} runs={Object.values(state.runs)}/></ConversationDisplayBoundary>
   <ConversationDisplayBoundary label="问题与确认历史"><InteractionHistory key={id} conversationId={id}/></ConversationDisplayBoundary>
   <ConversationDisplayBoundary label="工具时间线"><ActivityTimeline conversationId={id} activities={activityValues} runs={state.runs} onOpenMember={setSelectedNativeMember} {...(activityReveal?{reveal:activityReveal}:{})}/></ConversationDisplayBoundary>
  </>}
@@ -317,7 +321,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
     {pendingForkForMessage&&!forkState?.error&&<p role="status">副本请求结果尚未确认；重试会复用原命令。</p>}
     {forkState?.error&&<p role="status">{forkState.error}</p>}
     <ConversationDisplayBoundary label="消息正文"><ConversationMessageBody message={message}/></ConversationDisplayBoundary>
-    <div className={`jot-message-files ${message.role==='user'?'uploaded':''}`}>{(message.role==='user'||open?files:files.slice(0,3)).map(file=><React.Fragment key={`${file.artifact_id}:${file.version}`}>{message.role==='user'&&<button type="button" onClick={()=>showPreview(file)} disabled={busy}>预览 {file.relative_path||file.file_name}</button>}<button type="button" onClick={()=>download(file)} disabled={busy}>下载 {file.relative_path||file.file_name}</button></React.Fragment>)}</div>
+    <div className={`jot-message-files ${message.role==='user'?'uploaded':''}`}>{(message.role==='user'||open?files:files.slice(0,3)).map(file=><React.Fragment key={`${file.artifact_id}:${file.version}`}>{message.role==='user'&&<button type="button" onClick={()=>showPreview(file)} disabled={busy}>预览 {file.relative_path||file.file_name}</button>}<button type="button" onClick={()=>file.part_count?setMessageArtifact({owner:taskDraftScope(),target:{kind:'file',artifactId:file.artifact_id,label:file.file_name,version:file.version,sha256:file.sha256}}):download(file)} disabled={busy}>{file.part_count?'查看各卷':'下载'} {file.relative_path||file.file_name}</button></React.Fragment>)}</div>
     {message.role==='user'&&Object.hasOwn(message,'attachment_refs')&&(message.attachments?.length??0)>files.length&&<p role="status">原附件版本暂不可用，请重新添加文件。</p>}
     {message.role==='assistant'&&files.length>3&&<button onClick={()=>setExpanded(value=>({...value,[message.message_id]:!open}))}>{open?'收起':`展开其余 ${files.length-3} 个文件`}</button>}
    </article>;
@@ -328,6 +332,10 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  {modeWriter.pending&&<p role="status">模式设置结果尚未确认。<button type="button" disabled={busy} onClick={()=>void saveMode(true)}>重试原模式设置</button></p>}
  {error&&<p role="alert">{error}</p>}{controller.pendingMessage&&<p role="status">发送结果尚未确认；重试会保留原消息。</p>}
  {modelMutation.pending&&<p role="status">模型设置结果尚未确认。<button type="button" disabled={busy} onClick={()=>{if(conversation)changeModel(conversation.model);}}>重试原模型设置</button></p>}
+ {messageArtifact&&messageArtifact.owner===taskDraftScope()&&<section aria-label="消息关联成果详情">
+  <button type="button" onClick={()=>setMessageArtifact(undefined)}>关闭成果详情</button>
+  <ConversationDisplayBoundary label="消息成果详情"><ActivityArtifactDetails key={JSON.stringify([messageArtifact.owner,id,messageArtifact.target.artifactId])} conversationId={id} target={messageArtifact.target} onOpen={target=>setMessageArtifact({owner:taskDraftScope(),target})}/></ConversationDisplayBoundary>
+ </section>}
  {preview&&<section role="region" aria-label="附件预览" className="jot-file-preview"><h3>{preview.name}</h3><button onClick={()=>{previewRequest.current?.abort();previewRequest.current=undefined;setPreview(undefined);}}>关闭预览</button>{preview.loading&&<p role="status">正在读取文件内容…</p>}{preview.url&&<img src={preview.url} alt={preview.name}/>} {preview.text!==undefined&&<pre>{preview.text}</pre>}{preview.truncated&&<p>预览内容已截短</p>}{preview.unsupported&&<p>此文件暂不支持在线预览</p>}</section>}
  <input ref={fileInput} type="file" aria-label="添加文件" multiple hidden disabled={!state||busy||cancelWriter.pending||goalPending||controller.pendingMessage||uploads.unresolved||!maxBytes} onChange={select}/>
  {ordinary&&!chatMode&&conversation&&<aside className="jot-model-routing-status" aria-label="模型路由状态"><p role="status">{routingStatus.primary}</p><p>{routingStatus.fallbacks}</p></aside>}

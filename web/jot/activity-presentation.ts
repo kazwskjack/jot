@@ -73,7 +73,7 @@ export function activityDetailRows(activity:ToolActivity):Array<{label:string;va
 }
 
 export type ActivityArtifactTarget=
- |{kind:'file';artifactId:string;label:string;version?:number;sha256?:string}
+ |{kind:'file';artifactId:string;label:string;version?:number;sha256?:string;partIndex?:number}
  |{kind:'diff';artifactId:string;label:string;fromVersion:number;toVersion:number;beforeSha256?:string;afterSha256?:string};
 
 /** Versioned references come directly from the public step, never inferred from a path. */

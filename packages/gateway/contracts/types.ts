@@ -155,7 +155,7 @@ export type InteractionReceipt = { accepted: true; interaction_id: string; run_i
 
 export type ArtifactBackupStatus = "pending" | "retry" | "verified" | "failed";
 
-export type Artifact = { artifact_id: string; conversation_id: string; run_id?: string; file_name: string; relative_path?: string; media_type: string; size_bytes: number; sha256: string; version: number; status: "quarantined" | "ready" | "rejected" | "deleted"; created_at: string; preview_kind: "text" | "image" | "unsupported"; origin: "upload" | "generated" | "edited"; local_state?: "present" | "deleted" | "restoring"; backup_status?: ArtifactBackupStatus; remote_path?: string; restorable?: boolean };
+export type Artifact = { artifact_id: string; conversation_id: string; run_id?: string; file_name: string; relative_path?: string; media_type: string; size_bytes: number; sha256: string; version: number; status: "quarantined" | "ready" | "rejected" | "deleted"; created_at: string; preview_kind: "text" | "image" | "unsupported"; part_count?: number; part_index?: number; origin: "upload" | "generated" | "edited"; local_state?: "present" | "deleted" | "restoring"; backup_status?: ArtifactBackupStatus; remote_path?: string; restorable?: boolean };
 
 export type RunArtifact = { run_id: string; conversation_id: string; artifact_id: string; version: number; file_name: string; media_type: string; size_bytes: number; sha256: string; status: string; local_state?: "present" | "deleted" | "restoring"; backup_status?: ArtifactBackupStatus; created_at: string; download_url: string };
 
@@ -164,6 +164,11 @@ export type RunArtifactPage = { items: Array<RunArtifact> };
 export type ArtifactBackup = { artifact_id: string; backup_status: ArtifactBackupStatus; local_state: "present" | "deleted" | "restoring"; remote_path?: string; remote_size?: number; verified_at?: string; restorable: boolean; version?: number; restore_protocol?: 2; all_versions_archived?: boolean; last_error?: string };
 
 export type ArtifactRestoreReceipt = { accepted: true; artifact_id: string; status: "ready" | "restoring"; version?: number; restore_protocol?: 2 };
+
+export type ArtifactHistoryEntry = {created_at: string; artifact: Artifact};
+export type ArtifactHistoryPage = { conversation_id: string; run_id?: string; items: ArtifactHistoryEntry[]; next_cursor?: string };
+export type ArtifactPart = Artifact & {version: 1; part_index: number};
+export type ArtifactPartsPage = {artifact_id: string; conversation_id: string; version: 1; sha256: string; items: ArtifactPart[]};
 
 export type ArtifactVersionPage = { artifact_id: string; conversation_id: string; current_version: number; items: Artifact[]; next_before_version?: number };
 

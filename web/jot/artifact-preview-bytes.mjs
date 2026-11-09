@@ -42,6 +42,7 @@ export async function fetchVerifiedArtifactPreviewBytes(file, kind, signal = und
   signal?.throwIfAborted();
   const mediaType = normalizedType(file?.media_type);
   if (!file || !ARTIFACT_ID.test(file.artifact_id) || !Number.isSafeInteger(file.version) || file.version < 1
+    || file.part_index !== undefined && (!Number.isSafeInteger(file.part_index) || file.part_index < 1 || file.part_index > 50)
     || !Number.isSafeInteger(file.size_bytes) || file.size_bytes < 0
     || typeof file.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(file.sha256)) {
     throw failure('artifact_preview_metadata_invalid');
@@ -53,7 +54,7 @@ export async function fetchVerifiedArtifactPreviewBytes(file, kind, signal = und
   }
   if (file.size_bytes > PREVIEW_LIMIT) throw failure('artifact_preview_too_large');
 
-  const url = `/workbench-api/v1/artifacts/${encodeURIComponent(file.artifact_id)}/download?version=${file.version}`;
+  const url = `/workbench-api/v1/artifacts/${encodeURIComponent(file.artifact_id)}${file.part_index === undefined ? '' : `/parts/${file.part_index}`}/download?version=${file.version}`;
   const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store', redirect: 'error', signal });
   if (!response.ok) {
     await response.body?.cancel().catch(() => {});

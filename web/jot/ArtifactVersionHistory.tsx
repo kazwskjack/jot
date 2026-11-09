@@ -39,7 +39,7 @@ export default function ArtifactVersionHistory({conversationId,artifactId,onOpen
      <span>版本 {file.version} · {file.file_name} · {file.created_at} · {file.size_bytes} 字节</span>
      {file.status==='ready'?<>
       <button type="button" onClick={()=>onOpen({kind:'file',artifactId,label:file.file_name,version:file.version,sha256:file.sha256})}>查看版本 {file.version}</button>
-      {file.media_type.startsWith('text/')&&<>
+      {!file.part_count&&file.media_type.startsWith('text/')&&<>
        <button type="button" aria-pressed={before?.version===file.version} onClick={()=>setBefore(file)}>选为比较起点</button>
        <button type="button" aria-pressed={after?.version===file.version} onClick={()=>setAfter(file)}>选为比较终点</button>
       </>}

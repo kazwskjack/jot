@@ -7,6 +7,7 @@ import { withImmediateTransaction, withReadTransaction } from '../db/database.ts
 import { canonicalJson } from '../db/canonical-json.ts';
 import { detectContentType } from './content-type.ts';
 import {artifactArchiveReferences,artifactArchiveManifest} from './archive-references.ts';
+import {currentFileHashes} from './file-integrity.ts';
 import {sameTaskFileLocation} from '../persistent-tasks/output-content.ts';
 import {readIsolatedTaskFileVersion} from '../persistent-tasks/isolated-output-source.ts';
 import {taskFileSource,type TaskFileScope,type TaskFileLocation} from '../persistent-tasks/task-file-source.ts';
@@ -82,7 +83,8 @@ export class ArtifactService {
       join(root, 'sessions'), join(root, 'restore-cache'), join(root, 'quarantine')]) {
       mkdirSync(directory, { recursive: true });
     }
-    db.exec(`CREATE TRIGGER IF NOT EXISTS ga_task_output_no_identity_update BEFORE UPDATE ON ga_artifacts
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_ga_artifact_history ON ga_artifacts(conversation_id,created_at,id);
+      CREATE TRIGGER IF NOT EXISTS ga_task_output_no_identity_update BEFORE UPDATE ON ga_artifacts
       WHEN OLD.kind='task_output_file' AND (NEW.id!=OLD.id OR NEW.owner_id!=OLD.owner_id OR NEW.conversation_id!=OLD.conversation_id OR NEW.kind!=OLD.kind OR NEW.current_version!=OLD.current_version)
       BEGIN SELECT RAISE(ABORT,'task_output_artifact_immutable'); END;
       CREATE TRIGGER IF NOT EXISTS ga_task_output_no_content_update BEFORE UPDATE ON ga_artifact_versions
@@ -1074,14 +1076,95 @@ export class ArtifactService {
     const available=existsSync(String(row.server_path))
       && (!archive || archive.local_state==='present' || Number(row.version)<Number(row.current_version));
     const localState=available ? 'present' : archive?.local_state==='restoring' ? 'restoring' : 'deleted';
+    const partCount=row.artifact_kind==='generated_document_group'&&Number(row.version)===1
+      ? Number((this.db.prepare('SELECT COUNT(*) count FROM ga_artifact_parts WHERE artifact_id=?').get(id) as {count:number}).count) : 0;
     return { artifact_id: id, conversation_id: row.conversation_id, file_name: meta.file_name,
       ...(typeof meta.relative_path==='string'?{relative_path:meta.relative_path}:{}),
       media_type: row.mime_type, size_bytes: Number(row.size_bytes), sha256: row.sha256,
       version: Number(row.version), status: meta.status==='delivered'?'ready':meta.status, created_at: row.created_at,
-      preview_kind: meta.preview_kind, origin: meta.origin === 'file_engine' ? 'edited' : ['runtime','trusted_template'].includes(meta.origin) ? 'generated' : meta.origin,
+      ...(partCount>0?{part_count:partCount}:{}),
+      preview_kind: partCount>0?'unsupported':meta.preview_kind??'unsupported', origin: meta.origin === 'file_engine' ? 'edited' : ['runtime','trusted_template'].includes(meta.origin) ? 'generated' : meta.origin,
       local_state: localState, backup_status: archive?.backup_status ?? 'pending',
       ...(archive?.remote_path ? { remote_path: archive.remote_path } : {}),
       restorable: Boolean(archive?.remote_path) };
+  }
+
+  parts(id:string,ownerId:string,version=1) {
+    if(version!==1)throw Error('invalid_artifact_part_request');
+    return withReadTransaction(this.db,()=>{
+      const group=this.version(id,ownerId,version),meta=JSON.parse(String(group.metadata_json));
+      if(group.artifact_kind!=='generated_document_group'||!['ready','delivered'].includes(meta.status))throw Error('artifact_not_found');
+      const rows=this.db.prepare(`SELECT * FROM ga_artifact_parts WHERE artifact_id=? ORDER BY part_index`)
+        .all(id) as Array<Record<string,unknown>>;
+      if(!rows.length||rows.length>50||meta.part_count!==rows.length)throw Error('artifact_parts_invalid');
+      const manifest=rows.map((row,index)=>{
+        if(Number(row.part_index)!==index+1||typeof row.display_name!=='string'||typeof row.mime_type!=='string'
+          ||!Number.isSafeInteger(row.size_bytes)||Number(row.size_bytes)<1||Number(row.size_bytes)>19*1024*1024
+          ||typeof row.sha256!=='string'||!/^[a-f0-9]{64}$/.test(row.sha256)
+          ||!['ready','delivered'].includes(JSON.parse(String(row.metadata_json)).status))throw Error('artifact_parts_invalid');
+        return {part_index:Number(row.part_index),sha256:row.sha256,size_bytes:Number(row.size_bytes)};
+      });
+      if(manifest.reduce((sum,part)=>sum+part.size_bytes,0)!==Number(group.size_bytes)
+        ||createHash('sha256').update(JSON.stringify(manifest.map(part=>[part.part_index,part.sha256,part.size_bytes]))).digest('hex')!==group.sha256)throw Error('artifact_parts_invalid');
+      const archive=this.db.prepare('SELECT local_state FROM ga_artifact_archives WHERE artifact_id=?').get(id) as {local_state?:string}|undefined;
+      return {artifact_id:id,conversation_id:group.conversation_id,version,sha256:String(group.sha256),items:rows.map(row=>{
+        const mime=String(row.mime_type);
+        return {artifact_id:id,conversation_id:group.conversation_id,version,part_index:Number(row.part_index),file_name:String(row.display_name),
+          media_type:mime,size_bytes:Number(row.size_bytes),sha256:String(row.sha256),status:'ready',created_at:String(row.created_at),origin:'generated',
+          preview_kind:mime.startsWith('text/')||['application/json','application/xml'].includes(mime)?'text':mime.startsWith('image/')?'image':'unsupported',
+          local_state:existsSync(String(row.server_path))?'present':archive?.local_state==='restoring'?'restoring':'deleted'};
+      })};
+    });
+  }
+
+  part(id:string,ownerId:string,index:number,version=1) {
+    if(!Number.isSafeInteger(index)||index<1||index>50)throw Error('invalid_artifact_part_request');
+    const group=this.parts(id,ownerId,version),part=group.items.find(item=>item.part_index===index);
+    if(!part)throw Error('artifact_not_found');
+    return part;
+  }
+
+  downloadPart(id:string,ownerId:string,index:number,version=1) {
+    const source=withReadTransaction(this.db,()=>{
+      const part=this.part(id,ownerId,index,version);
+      const row=this.db.prepare('SELECT server_path FROM ga_artifact_parts WHERE artifact_id=? AND part_index=?')
+        .get(id,index) as {server_path:string};
+      return {part,path:row.server_path};
+    });
+    const boundary=resolve(this.generatedRoot),path=resolve(source.path);
+    if(path===boundary||!path.startsWith(boundary+sep))throw Error('artifact_part_path_escape');
+    rejectTaskOutputSymlinks(source.path);
+    if(!existsSync(source.path))throw Error('artifact_restore_required');
+    const hash=currentFileHashes(source.path);
+    if(!hash||hash.size!==source.part.size_bytes||hash.sha256!==source.part.sha256)throw Error('artifact_part_content_mismatch');
+    return {server_path:source.path,mime_type:source.part.media_type,metadata_json:JSON.stringify({file_name:source.part.file_name})};
+  }
+
+  history(conversationId:string,ownerId:string,query:{cursor?:unknown;run_id?:unknown;limit?:unknown}={}) {
+    const identifier=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
+    const cursor=query.cursor,runId=query.run_id,limit=query.limit===undefined?20:Number(query.limit);
+    if(Object.keys(query).some(key=>!['cursor','run_id','limit'].includes(key))
+      ||cursor!==undefined&&(typeof cursor!=='string'||!identifier.test(cursor))
+      ||runId!==undefined&&(typeof runId!=='string'||!identifier.test(runId))
+      ||query.limit!==undefined&&typeof query.limit!=='string'&&typeof query.limit!=='number'
+      ||!Number.isSafeInteger(limit)||limit<1||limit>50)throw Error('invalid_artifact_history_query');
+    return withReadTransaction(this.db,()=>{
+      if(!this.db.prepare('SELECT 1 FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId))throw Error('conversation_not_found');
+      if(runId!==undefined&&!this.db.prepare('SELECT 1 FROM ga_runs WHERE id=? AND conversation_id=?').get(runId,conversationId))throw Error('run_not_found');
+      const belongsToRun=`(? IS NULL OR EXISTS(SELECT 1 FROM ga_run_artifacts ra WHERE ra.artifact_id=a.id AND ra.run_id=?)
+        OR EXISTS(SELECT 1 FROM ga_artifact_producers p WHERE p.artifact_id=a.id AND p.run_id=? AND p.owner_id=a.owner_id AND p.conversation_id=a.conversation_id))`;
+      const boundary=cursor===undefined?undefined:this.db.prepare(`SELECT a.id,a.created_at FROM ga_artifacts a
+        WHERE a.id=? AND a.conversation_id=? AND a.owner_id=? AND ${belongsToRun}`)
+        .get(cursor,conversationId,ownerId,runId??null,runId??null,runId??null) as {id:string;created_at:string}|undefined;
+      if(cursor!==undefined&&!boundary)throw Error('invalid_artifact_history_query');
+      const rows=this.db.prepare(`SELECT a.id,a.created_at FROM ga_artifacts a WHERE a.conversation_id=? AND a.owner_id=? AND ${belongsToRun}
+        AND (? IS NULL OR a.created_at<? OR (a.created_at=? AND a.id<?))
+        ORDER BY a.created_at DESC,a.id DESC LIMIT ?`)
+        .all(conversationId,ownerId,runId??null,runId??null,runId??null,boundary?.id??null,boundary?.created_at??null,boundary?.created_at??null,boundary?.id??null,limit+1) as Array<{id:string;created_at:string}>;
+      const selected=rows.slice(0,limit);
+      return {conversation_id:conversationId,...(runId!==undefined?{run_id:runId}:{}),items:selected.map(row=>({created_at:row.created_at,artifact:this.get(row.id,ownerId)})),
+        ...(rows.length>limit?{next_cursor:selected.at(-1)!.id}:{})};
+    });
   }
 
   versions(id: string, ownerId: string, query: {limit?: unknown; before_version?: unknown} = {}) {
@@ -1143,6 +1226,7 @@ export class ArtifactService {
 
   download(id: string, ownerId: string, version?: number) {
     const row=this.version(id,ownerId,version);
+    if(row.artifact_kind==='generated_document_group'&&Number(row.version)===1)throw Error('invalid_artifact_part_selection');
     const archive=this.db.prepare('SELECT local_state FROM ga_artifact_archives WHERE artifact_id=?').get(id) as {local_state?:string}|undefined;
     const currentUnavailable=archive?.local_state && archive.local_state!=='present' && Number(row.version)>=Number(row.current_version);
     if (!existsSync(String(row.server_path)) || currentUnavailable) throw new Error('artifact_restore_required');
@@ -1157,6 +1241,8 @@ export class ArtifactService {
   }
 
   preview(id: string, ownerId: string, version?: number) {
+    const source=this.version(id,ownerId,version);
+    if(source.artifact_kind==='generated_document_group'&&Number(source.version)===1)return {artifact_id:id,version:1,kind:'unsupported',truncated:false};
     const row = this.download(id,ownerId,version); const meta = JSON.parse(String(row.metadata_json));
     if (meta.preview_kind === 'text') {
       const content = row.verified_content instanceof Buffer?row.verified_content.toString('utf8'):readFileSync(String(row.server_path), 'utf8');
@@ -1198,7 +1284,7 @@ export class ArtifactService {
     if(batch?.status==='expired')throw new Error('upload_expired');
   }
   private version(id: string, ownerId: string, version?: number) {
-    const row = this.db.prepare(`SELECT v.*,a.conversation_id,a.current_version FROM ga_artifacts a JOIN ga_artifact_versions v ON v.artifact_id=a.id
+    const row = this.db.prepare(`SELECT v.*,a.conversation_id,a.current_version,a.kind artifact_kind FROM ga_artifacts a JOIN ga_artifact_versions v ON v.artifact_id=a.id
       WHERE a.id=? AND a.owner_id=? AND v.version=COALESCE(?,a.current_version)`).get(id, ownerId, version ?? null) as Record<string, unknown> | undefined;
     if (!row) throw new Error('artifact_not_found'); return row;
   }

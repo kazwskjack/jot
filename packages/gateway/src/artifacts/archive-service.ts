@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto'
-import { createReadStream, existsSync, mkdirSync, mkdtempSync, rmSync, statSync,lstatSync,openSync,closeSync,readSync,fstatSync,renameSync,type Stats } from 'node:fs'
+import { createReadStream, existsSync, mkdirSync, mkdtempSync, rmSync, statSync,lstatSync,renameSync } from 'node:fs'
 import { dirname, join, resolve, sep } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import {withImmediateTransaction,withReadTransaction} from '../db/database.ts'
 import {artifactArchiveReferences,artifactArchiveManifest} from './archive-references.ts'
+import {signature,currentFileHashes} from './file-integrity.ts'
 
 export interface RemoteFileMeta { size: number; md5: string }
 export interface ArtifactArchiveClient {
@@ -26,18 +27,6 @@ async function fileHash(path: string,algorithm='md5'): Promise<string> {
   return digest.digest('hex')
 }
 const md5=(path:string)=>fileHash(path)
-const signature=(value:Stats)=>({dev:value.dev,ino:value.ino,size:value.size,mtimeMs:value.mtimeMs,ctimeMs:value.ctimeMs})
-function currentFileHashes(path:string){
- const fd=openSync(path,'r');try{
-  const before=fstatSync(fd);if(!before.isFile())return null
-  const sha=createHash('sha256'),legacy=createHash('md5'),buffer=Buffer.alloc(64*1024)
-  for(;;){const count=readSync(fd,buffer,0,buffer.length,null);if(!count)break;sha.update(buffer.subarray(0,count));legacy.update(buffer.subarray(0,count))}
-  const after=fstatSync(fd),named=lstatSync(path)
-  if(!named.isFile()||named.isSymbolicLink()||JSON.stringify(signature(before))!==JSON.stringify(signature(after))
-   ||JSON.stringify(signature(named))!==JSON.stringify(signature(after)))return null
-  return {size:after.size,sha256:sha.digest('hex'),md5:legacy.digest('hex'),signature:signature(after)}
- }finally{closeSync(fd)}
-}
 function assertArchivePath(path:string,root:string):void{
  const absolute=resolve(path),boundary=resolve(root);
  if(absolute===boundary||!absolute.startsWith(boundary+sep))throw new Error('archive_path_denied')

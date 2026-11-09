@@ -1237,6 +1237,10 @@ export async function buildServer(config: {
     const query = request.query as { version?: string };
     return artifacts.get((request.params as { artifactId: string }).artifactId, actor(request as any), query.version ? Number(query.version) : undefined);
   });
+  app.get('/v1/conversations/:conversationId/artifacts', async (request,reply) => {
+    reply.header('cache-control','private, no-store');
+    return artifacts.history((request.params as {conversationId:string}).conversationId,actor(request as any),request.query as {cursor?:unknown;run_id?:unknown;limit?:unknown});
+  });
   app.get('/v1/artifacts/:artifactId/versions', async (request, reply) => {
     reply.header('cache-control','private, no-store');
     return artifacts.versions((request.params as {artifactId:string}).artifactId, actor(request as any), request.query as {limit?:unknown;before_version?:unknown});
@@ -1260,13 +1264,30 @@ export async function buildServer(config: {
     const query = request.query as { from_version: string; to_version: string };
     return artifacts.diff((request.params as { artifactId: string }).artifactId, actor(request as any), Number(query.from_version), Number(query.to_version));
   });
+  const sendArtifactDownload=(reply:any,row:Record<string,unknown>)=>{
+    const meta=JSON.parse(String(row.metadata_json));
+    const asciiName=String(meta.file_name).replace(/[^A-Za-z0-9._-]/g,'_');
+    return reply.header('content-type',String(row.mime_type)).header('x-content-type-options','nosniff')
+      .header('content-disposition',`attachment; filename="${asciiName}"`).send(row.verified_content instanceof Buffer?row.verified_content:createReadStream(String(row.server_path)));
+  };
+  app.get('/v1/artifacts/:artifactId/parts',async(request,reply)=>{
+    reply.header('cache-control','private, no-store');
+    const query=request.query as {version?:string};
+    return artifacts.parts((request.params as {artifactId:string}).artifactId,actor(request as any),query.version===undefined?1:Number(query.version));
+  });
+  app.get('/v1/artifacts/:artifactId/parts/:partIndex',async(request,reply)=>{
+    reply.header('cache-control','private, no-store');
+    const params=request.params as {artifactId:string;partIndex:string},query=request.query as {version?:string};
+    return artifacts.part(params.artifactId,actor(request as any),Number(params.partIndex),query.version===undefined?1:Number(query.version));
+  });
+  app.get('/v1/artifacts/:artifactId/parts/:partIndex/download',async(request,reply)=>{
+    const params=request.params as {artifactId:string;partIndex:string},query=request.query as {version?:string};
+    return sendArtifactDownload(reply,artifacts.downloadPart(params.artifactId,actor(request as any),Number(params.partIndex),query.version===undefined?1:Number(query.version)));
+  });
   app.get('/v1/artifacts/:artifactId/download', async (request, reply) => {
     const query = request.query as { version?: string };
     const row = artifacts.download((request.params as { artifactId: string }).artifactId, actor(request as any), query.version ? Number(query.version) : undefined);
-    const meta = JSON.parse(String(row.metadata_json));
-    const asciiName = String(meta.file_name).replace(/[^A-Za-z0-9._-]/g, '_');
-    return reply.header('content-type', String(row.mime_type)).header('x-content-type-options', 'nosniff')
-      .header('content-disposition', `attachment; filename="${asciiName}"`).send(row.verified_content instanceof Buffer?row.verified_content:createReadStream(String(row.server_path)));
+    return sendArtifactDownload(reply,row);
   });
   app.get('/v1/sources/:sourceId', async request =>
     sources.get((request.params as { sourceId: string }).sourceId, actor(request as any)));

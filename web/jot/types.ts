@@ -91,7 +91,12 @@ export type ApprovalDecision = { expected_version: number; action_digest: string
 
 export type InteractionReceipt = { accepted: true; interaction_id: string; run_id: string; status: "answered" | "denied"; version: number };
 
-export type Artifact = { artifact_id: string; conversation_id: string; run_id?: string; file_name: string; relative_path?: string; media_type: string; size_bytes: number; sha256: string; version: number; status: "quarantined" | "ready" | "rejected" | "deleted"; created_at: string; preview_kind: "text" | "image" | "unsupported"; origin: "upload" | "generated" | "edited"; local_state?: "present" | "deleted" | "restoring"; backup_status?: "pending" | "retry" | "verified" | "failed"; remote_path?: string; restorable?: boolean };
+export type Artifact = { artifact_id: string; conversation_id: string; run_id?: string; file_name: string; relative_path?: string; media_type: string; size_bytes: number; sha256: string; version: number; status: "quarantined" | "ready" | "rejected" | "deleted"; created_at: string; preview_kind: "text" | "image" | "unsupported"; part_count?: number; part_index?: number; origin: "upload" | "generated" | "edited"; local_state?: "present" | "deleted" | "restoring"; backup_status?: "pending" | "retry" | "verified" | "failed"; remote_path?: string; restorable?: boolean };
+
+export type ArtifactHistoryEntry = {created_at: string; artifact: Artifact};
+export type ArtifactHistoryPage = { conversation_id: string; run_id?: string; items: ArtifactHistoryEntry[]; next_cursor?: string };
+export type ArtifactPart = Artifact & {version: 1; part_index: number};
+export type ArtifactPartsPage = {artifact_id: string; conversation_id: string; version: 1; sha256: string; items: ArtifactPart[]};
 
 export type ArtifactVersionPage = { artifact_id: string; conversation_id: string; current_version: number; items: Artifact[]; next_before_version?: number };
 
