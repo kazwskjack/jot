@@ -17,6 +17,7 @@ import NativeCommandQueries from './NativeCommandQueries';
 import {catalogMountForRun,skillGestureDraft} from './skill-catalog-mount.js';
 import CompactionActivities from './CompactionActivities';
 import ActivityTimeline from './ActivityTimeline';
+import type {ActivityReveal} from './activity-presentation';
 import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 import RunDiagnostics from './RunDiagnostics';
 import {RunCancelWriter} from './run-cancel.mjs';
@@ -133,6 +134,8 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  const [voice,setVoice]=useState<Capabilities['voice']>(),[voiceBusy,setVoiceBusy]=useState(false),draftRef=useRef(draft),conversationRegion=useRef<HTMLElement>(null),previewRequest=useRef<AbortController|undefined>(undefined);
  const [replyQuotes,setReplyQuotes]=useState<AssistantReplyQuote[]>([]);
  const [olderMessages,setOlderMessages]=useState<Message[]>([]),[historySelection,setHistorySelection]=useState('');
+ const [activityReveal,setActivityReveal]=useState<ActivityReveal>();
+ const revealActivity=useCallback((request:ActivityReveal)=>setActivityReveal(prior=>prior?.key===request.key&&prior.activityId===request.activityId?prior:request),[]);
  const revealHistoryMessage=useCallback((messageId:string)=>setHistorySelection(messageId),[]);
  const retainHistory=useCallback((messages:Message[])=>setOlderMessages(messages),[]);
  const focusConversationAfterStop=useCallback(()=>conversationRegion.current?.focus(),[]);
@@ -249,7 +252,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  });
  const download=(file:Artifact)=>void action(async()=>{const response=await fetch(`${base}/v1/artifacts/${encodeURIComponent(file.artifact_id)}/download?version=${file.version}`,{credentials:'same-origin'});if(!response.ok)throw new Error('文件暂不可下载');const url=URL.createObjectURL(await response.blob());const link=document.createElement('a');link.href=url;link.download=file.file_name;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
  return <section ref={conversationRegion} tabIndex={-1} className="workbench-conversation jot-goal-stop-focus-target" aria-label={ordinary?"Ordinary conversation":"Role conversation"}><button disabled={busy||goalPending||controller.pendingMessage||replyQuotes.length>0||uploads.entries.length>0||modelMutation.pending||modeWriter.pending||cancelWriter.pending} onClick={onClose}>返回工作台</button><h2>{ordinary?'我的对话':'角色对话'}</h2>{ordinary&&conversation&&<button type="button" className="jot-conversation-mode" style={{fontStyle:'italic',fontWeight:700,background:'transparent',border:0,color:'inherit'}} aria-label={`切换到 ${chatMode?'work':'chat'}`} disabled={!canToggle} onClick={()=>void saveMode()}>{chatMode?'chat':'work'}</button>}<p role="status">{controller.connection==='connected'?'已连接':controller.connection==='reconnecting'?'正在重新连接':'正在连接'}{run?` · ${run.status}`:''}</p>{controller.error&&<p role="alert">{controller.error}</p>}
- <ConversationDisplayBoundary label="会话搜索"><ConversationHistorySearch root={conversationRegion} conversationId={id} messages={displayedMessages} renderedRevision={renderedMessages} revealedMessageId={historySelection} ready={Boolean(state)} onReveal={revealHistoryMessage} {...(state?.historyComplete!==undefined?{historyComplete:state.historyComplete}:{})} {...(state?.nextHistoryCursor?{historyCursor:state.nextHistoryCursor}:{})} onHistoryLoaded={retainHistory}/></ConversationDisplayBoundary>
+ <ConversationDisplayBoundary label="会话搜索"><ConversationHistorySearch root={conversationRegion} conversationId={id} messages={displayedMessages} activities={activityValues} runs={state?.runs??{}} onRevealActivity={revealActivity} renderedRevision={renderedMessages} revealedMessageId={historySelection} ready={Boolean(state)} onReveal={revealHistoryMessage} {...(state?.historyComplete!==undefined?{historyComplete:state.historyComplete}:{})} {...(state?.nextHistoryCursor?{historyCursor:state.nextHistoryCursor}:{})} onHistoryLoaded={retainHistory}/></ConversationDisplayBoundary>
  {!ordinary&&run&&['starting','running'].includes(run.status)&&<NativeMemberControls key={`native-member-controls:${run.run_id}`} run={run}/>}
  {ordinary&&conversation&&!chatMode&&<div inert={cancelWriter.pending||controller.pendingMessage}><ConversationGoal key={id} id={id} running={run?.status==='running'} runStatus={run?.status} controlRun={state?latestGoalRun(Object.values(state.runs),id):undefined} onResumeAccepted={()=>{void controller.refresh().catch(()=>{});}} onStopCompleted={focusConversationAfterStop} onPendingChange={setGoalPending}/></div>}
   {catalogMount&&<SkillCatalogPanel runId={catalogMount.runId} ownerScope={catalogMount.ownerScope} onUseSkill={name=>editDraft(skillGestureDraft(draftRef.current,name))}/>}
@@ -265,7 +268,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
   {diagnosticRun&&<ConversationDisplayBoundary label="运行诊断"><RunDiagnostics key={diagnosticRun.run_id} run={diagnosticRun}/></ConversationDisplayBoundary>}
  {state&&<>
   <ConversationDisplayBoundary label="上下文整理状态"><CompactionActivities activities={activityValues} runs={state.runs}/></ConversationDisplayBoundary>
-  <ConversationDisplayBoundary label="工具时间线"><ActivityTimeline activities={activityValues} runs={state.runs}/></ConversationDisplayBoundary>
+  <ConversationDisplayBoundary label="工具时间线"><ActivityTimeline activities={activityValues} runs={state.runs} {...(activityReveal?{reveal:activityReveal}:{})}/></ConversationDisplayBoundary>
  </>}
   {displayedMessages.length>200&&<nav aria-label="消息历史翻页">
    <span>{historyStart+1}–{Math.min(historyStart+200,displayedMessages.length)} / {displayedMessages.length} 条已加载消息</span>

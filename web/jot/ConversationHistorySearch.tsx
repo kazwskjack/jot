@@ -2,7 +2,8 @@
 // ChatHistorySearchBar.tsx/useChatHistorySearch.ts. Adapted portions are AGPL-3.0.
 import React,{useEffect,useId,useMemo,useRef,useState,type RefObject} from 'react';
 import {request} from './client';
-import type {Message,MessagePage} from './types';
+import type {Message,MessagePage,Activity,Run} from './types';
+import {activitySearchText,type ActivityReveal,type ToolActivity} from './activity-presentation';
 import './conversation-history-search.css';
 
 type SearchDocument={element:HTMLElement;text:string;nodes:Array<{node:Text;start:number;end:number}>};
@@ -10,6 +11,9 @@ type Props={
  root:RefObject<HTMLElement|null>;
  conversationId:string;
  messages:Message[];
+ activities:Activity[];
+ runs:Record<string,Run>;
+ onRevealActivity:(request:ActivityReveal)=>void;
  renderedRevision:unknown;
  revealedMessageId:string;
  ready:boolean;
@@ -24,8 +28,8 @@ function readSearchDocument(element:HTMLElement):SearchDocument{
  let text='',previousBlock:Element|null=null;
  while(walker.nextNode()){
   const node=walker.currentNode as Text;
-  if(node.parentElement?.closest('script,style,[aria-hidden="true"]'))continue;
-  const block=node.parentElement?.closest('p,pre,li,h1,h2,h3,h4,h5,h6,td,th')??null;
+  if(node.parentElement?.closest('script,style,[aria-hidden="true"],[data-chat-search-ignore]'))continue;
+  const block=node.parentElement?.closest('p,pre,li,h1,h2,h3,h4,h5,h6,td,th,dt,dd')??null;
   if(nodes.length&&block!==previousBlock)text+='\n';
   previousBlock=block;
   const start=text.length;
@@ -37,9 +41,9 @@ function readSearchDocument(element:HTMLElement):SearchDocument{
 
 function searchPattern(query:string){return new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'giu');}
 
-export default function ConversationHistorySearch({root,conversationId,messages,renderedRevision,revealedMessageId,ready,onReveal,historyComplete,historyCursor,onHistoryLoaded}:Props){
+export default function ConversationHistorySearch({root,conversationId,messages,activities,runs,onRevealActivity,renderedRevision,revealedMessageId,ready,onReveal,historyComplete,historyCursor,onHistoryLoaded}:Props){
  const [open,setOpen]=useState(false),[draft,setDraft]=useState(''),[query,setQuery]=useState('');
- const [index,setIndex]=useState(0);
+ const [index,setIndex]=useState(0),[navigationVersion,setNavigationVersion]=useState(0);
  const [loading,setLoading]=useState(false),[error,setError]=useState(''),[retry,setRetry]=useState(0);
  const input=useRef<HTMLInputElement>(null),opener=useRef<HTMLButtonElement>(null);
  const composing=useRef(false),compositionEnded=useRef(0),cursor=useRef<string>(),complete=useRef(false);
@@ -90,14 +94,20 @@ export default function ConversationHistorySearch({root,conversationId,messages,
  const results=useMemo(()=>{
   if(!needle)return [];
   const pattern=searchPattern(needle);
-  return messages.map(message=>{
-   const text=message.blocks.filter(block=>block.kind==='text').map(block=>block.text).join('\n');
+  const sources:Array<{kind:'message'|'activity';id:string;text:string}>=[
+   ...activities.filter((activity):activity is ToolActivity=>activity.kind!=='compaction')
+    .sort((a,b)=>a.started_at.localeCompare(b.started_at)||a.activity_id.localeCompare(b.activity_id))
+    .map(activity=>({kind:'activity' as const,id:activity.activity_id,text:activitySearchText(activity,runs[activity.run_id])})),
+   ...messages.map(message=>({kind:'message' as const,id:message.message_id,
+    text:message.blocks.filter(block=>block.kind==='text').map(block=>block.text).join('\n')})),
+  ];
+  return sources.map(source=>{
    pattern.lastIndex=0;
    let count=0;
-   while(pattern.exec(text))count++;
-   return {messageId:message.message_id,text,count};
+   while(pattern.exec(source.text))count++;
+   return {...source,count};
   }).filter(result=>result.count>0);
- },[messages,needle]);
+ },[messages,activities,runs,needle]);
  const total=results.reduce((sum,result)=>sum+result.count,0),activeIndex=Math.min(index,Math.max(0,total-1));
  const active=useMemo(()=>{
   let remaining=activeIndex;
@@ -111,48 +121,75 @@ export default function ConversationHistorySearch({root,conversationId,messages,
   return null;
  },[results,activeIndex,needle]);
 
- useEffect(()=>{if(open&&active&&!loading)onReveal(active.source.messageId);},[open,active,loading,onReveal]);
+ const activeKind=active?.source.kind,activeId=active?.source.id;
+ const revealKey=active?JSON.stringify([highlightName,navigationVersion,activeKind,activeId,query,active.offset]):'';
+ useEffect(()=>{
+  if(!open||!activeId)return;
+  if(activeKind==='activity')onRevealActivity({activityId:activeId,key:revealKey});
+  else if(!loading)onReveal(activeId);
+ },[open,activeKind,activeId,revealKey,loading,onReveal,onRevealActivity]);
  useEffect(()=>{
   if(!open||!active)return;
-  const element=Array.from(root.current?.querySelectorAll<HTMLElement>('[data-chat-search-message]')??[])
-   .find(node=>node.dataset.chatSearchMessage===active.source.messageId);
-  if(!element)return;
-  const source=readSearchDocument(element),pattern=searchPattern(needle);
-  let visibleMatch:RegExpExecArray|null=null;
-  for(let occurrence=0;occurrence<=active.occurrence;occurrence++){
-   visibleMatch=pattern.exec(source.text);
-   if(!visibleMatch)break;
-  }
-  let range:Range|undefined;
-  if(visibleMatch){
-   const offset=visibleMatch.index,endOffset=offset+visibleMatch[0].length;
-   const start=source.nodes.find(entry=>entry.end>offset),end=source.nodes.find(entry=>entry.end>=endOffset);
-   if(start&&end){
-    range=document.createRange();
-    range.setStart(start.node,Math.max(0,Math.min(start.node.length,offset-start.start)));
-    range.setEnd(end.node,Math.max(0,Math.min(end.node.length,endOffset-end.start)));
-   }
-  }
+  let frame:number|undefined,marked:HTMLElement|undefined;
   const registry=(globalThis as unknown as {CSS?:{highlights?:Map<string,unknown>}}).CSS?.highlights;
   const HighlightClass=(globalThis as unknown as {Highlight?:new(...ranges:Range[])=>unknown}).Highlight;
-  if(range&&registry&&HighlightClass)registry.set(highlightName,new HighlightClass(range));
-  element.setAttribute('data-chat-search-active','true');
-  const key=JSON.stringify([active.source.messageId,query,active.offset]);
-  if(!loading&&revealedMessageId===active.source.messageId&&lastReveal.current!==key){
-   lastReveal.current=key;
-   const rect=range?.getBoundingClientRect()??element.getBoundingClientRect();
-   let container:HTMLElement|null=element.parentElement;
-   while(container&&!(container.scrollHeight>container.clientHeight&&/(auto|scroll)/.test(getComputedStyle(container).overflowY)))container=container.parentElement;
-   const behavior=window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth';
-   if(container){const bounds=container.getBoundingClientRect();container.scrollBy({top:rect.top-bounds.top-container.clientHeight/2,behavior});}
-   else window.scrollBy({top:rect.top-window.innerHeight/2,behavior});
-  }
-  return()=>{registry?.delete(highlightName);element.removeAttribute('data-chat-search-active');};
- },[open,active,query,needle,root,highlightName,loading,renderedRevision,revealedMessageId]);
+  const clear=()=>{registry?.delete(highlightName);marked?.removeAttribute('data-chat-search-active');marked=undefined;};
+  const refresh=()=>{
+   frame=undefined;clear();
+   const selector=active.source.kind==='activity'?'[data-chat-search-activity]':'[data-chat-search-message]';
+   const element=Array.from(root.current?.querySelectorAll<HTMLElement>(selector)??[])
+    .find(node=>(active.source.kind==='activity'?node.dataset.chatSearchActivity:node.dataset.chatSearchMessage)===active.source.id);
+   if(!element||element.dataset.chatSearchReady==='false'||!element.getClientRects().length)return;
+   const source=readSearchDocument(element),pattern=searchPattern(needle);
+   let visibleMatch:RegExpExecArray|null=null;
+   for(let occurrence=0;occurrence<=active.occurrence;occurrence++){
+    visibleMatch=pattern.exec(source.text);
+    if(!visibleMatch)break;
+   }
+   let range:Range|undefined;
+   if(visibleMatch){
+    const offset=visibleMatch.index,endOffset=offset+visibleMatch[0].length;
+    const start=source.nodes.find(entry=>entry.end>offset),end=source.nodes.find(entry=>entry.end>=endOffset);
+    if(start&&end){
+     range=document.createRange();
+     range.setStart(start.node,Math.max(0,Math.min(start.node.length,offset-start.start)));
+     range.setEnd(end.node,Math.max(0,Math.min(end.node.length,endOffset-end.start)));
+    }
+   }
+   if(range&&registry&&HighlightClass)registry.set(highlightName,new HighlightClass(range));
+   element.setAttribute('data-chat-search-active','true');marked=element;
+   const ready=active.source.kind==='activity'||(!loading&&revealedMessageId===active.source.id);
+   if(ready&&lastReveal.current!==revealKey){
+    lastReveal.current=revealKey;
+    const targetRect=()=>{
+     const rect=range?.getBoundingClientRect();
+     return rect&&(rect.width||rect.height)?rect:element.getBoundingClientRect();
+    };
+    const rangeNode=range?.startContainer;
+    let container:HTMLElement|null=rangeNode instanceof HTMLElement?rangeNode:rangeNode?.parentElement??element;
+    while(container){
+     if(container.scrollHeight>container.clientHeight&&/(auto|scroll)/.test(getComputedStyle(container).overflowY)){
+      const bounds=container.getBoundingClientRect(),rect=targetRect();
+      container.scrollBy({top:rect.top-bounds.top-container.clientHeight/2,behavior:'auto'});
+     }
+     container=container.parentElement;
+    }
+    const rect=targetRect();
+    const behavior=window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth';
+    window.scrollBy({top:rect.top-window.innerHeight/2,behavior});
+   }
+  };
+  const schedule=()=>{if(frame===undefined)frame=requestAnimationFrame(refresh);};
+  const observer=new MutationObserver(schedule),container=root.current;
+  if(container)observer.observe(container,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['open','data-chat-search-ready']});
+  schedule();
+  return()=>{observer.disconnect();if(frame!==undefined)cancelAnimationFrame(frame);clear();};
+ },[open,active,needle,root,highlightName,loading,renderedRevision,revealedMessageId,revealKey]);
 
- const close=()=>{setOpen(false);setDraft('');setQuery('');setIndex(0);lastReveal.current='';opener.current?.focus();};
- const navigate=(direction:number)=>{if(total)setIndex((activeIndex+direction+total)%total);};
- const openSearch=()=>{if(!ready)return;setOpen(true);if(open){input.current?.focus();input.current?.select();}};
+ const changeQuery=(value:string)=>{setQuery(value);setIndex(0);setNavigationVersion(version=>version+1);};
+ const close=()=>{setOpen(false);setDraft('');changeQuery('');lastReveal.current='';opener.current?.focus();};
+ const navigate=(direction:number)=>{if(total){setIndex((activeIndex+direction+total)%total);setNavigationVersion(version=>version+1);}};
+ const openSearch=()=>{if(!ready)return;setOpen(true);if(open){input.current?.focus();input.current?.select();}else setNavigationVersion(version=>version+1);};
  useEffect(()=>{if(open)input.current?.focus();},[open]);
  useEffect(()=>{
   const container=root.current;
@@ -174,9 +211,9 @@ export default function ConversationHistorySearch({root,conversationId,messages,
   <button ref={opener} type="button" aria-expanded={open} disabled={!ready} onClick={openSearch}>搜索当前会话</button>
   {open&&<div role="search" aria-label="会话历史搜索">
    <input ref={input} type="search" aria-label="搜索会话内容" placeholder="搜索会话内容…" value={draft} autoComplete="off" spellCheck={false}
-    onChange={event=>{setDraft(event.currentTarget.value);if(!composing.current){setQuery(event.currentTarget.value);setIndex(0);}}}
+    onChange={event=>{setDraft(event.currentTarget.value);if(!composing.current){changeQuery(event.currentTarget.value);}}}
     onCompositionStart={()=>{composing.current=true;compositionEnded.current=0;}}
-    onCompositionEnd={event=>{composing.current=false;compositionEnded.current=Date.now();setDraft(event.currentTarget.value);setQuery(event.currentTarget.value);setIndex(0);}}
+    onCompositionEnd={event=>{composing.current=false;compositionEnded.current=Date.now();setDraft(event.currentTarget.value);changeQuery(event.currentTarget.value);}}
     onKeyDown={event=>{
      if(composing.current||event.nativeEvent.isComposing||event.keyCode===229)return;
      if(event.key==='Enter'&&Date.now()-compositionEnded.current>=150){event.preventDefault();navigate(event.shiftKey?-1:1);}
@@ -186,7 +223,8 @@ export default function ConversationHistorySearch({root,conversationId,messages,
    <button type="button" disabled={!total} onClick={()=>navigate(-1)}>上一个结果</button>
    <button type="button" disabled={!total} onClick={()=>navigate(1)}>下一个结果</button>
    <button type="button" onClick={close}>关闭搜索</button>
-   {active&&<p className="jot-history-search-excerpt">{active.source.text.slice(Math.max(0,active.offset-60),active.offset+active.length+60)}</p>}
+   {active&&<p className="jot-history-search-excerpt">{active.source.kind==='activity'?'工具步骤 · ':'消息正文 · '}{active.source.text.slice(Math.max(0,active.offset-60),active.offset+active.length+60)}</p>}
+   <small>工具结果来自当前已加载的公开步骤。</small>
    {error&&<p role="alert">完整历史尚未加载，当前结果来自已加载消息。{error} <button type="button" disabled={loading} onClick={()=>setRetry(value=>value+1)}>继续加载历史</button></p>}
   </div>}
  </div>;

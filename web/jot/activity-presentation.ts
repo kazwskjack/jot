@@ -1,6 +1,7 @@
 import type {Activity,Run} from './types';
 
 export type ToolActivity=Exclude<Activity,{kind:'compaction'}>;
+export type ActivityReveal={activityId:string;key:string};
 export type ActivityRow={activity:ToolActivity;depth:number;children:number;issue?:string};
 export const activityKindLabels:Record<ToolActivity['kind'],string>={
  search:'搜索',browse:'网页',file_read:'读取文件',file_edit:'修改文件',command:'命令',subagent:'子任务',crawl:'批量抓取',
@@ -63,7 +64,7 @@ export function activityDetailRows(activity:ToolActivity):Array<{label:string;va
    break;
  }
  add('开始时间',activity.started_at);add('结束时间',activity.ended_at);add('错误编号',activity.error_code);
- add('步骤编号',activity.activity_id);add('工具调用',activity.tool_call_id);add('尝试编号',activity.attempt_id);
+ add('父步骤',activity.parent_activity_id);add('步骤编号',activity.activity_id);add('工具调用',activity.tool_call_id);add('尝试编号',activity.attempt_id);
  return rows;
 }
 
@@ -101,4 +102,25 @@ export function activityForest(activities:ToolActivity[]):ActivityRow[]{
   for(let index=nested.length-1;index>=0;index--)stack.push({activity:nested[index]!,depth:entry.depth+1});
  }
  return rows;
+}
+
+export function activityIsActive(activity:ToolActivity,run?:Run){
+ return ['pending','running','waiting'].includes(activityDisplayStatus(activity,run));
+}
+
+export function visibleActivityRows(rows:ActivityRow[],expanded:Record<string,boolean>,run?:Run){
+ const visible:ActivityRow[]=[];
+ let hiddenDepth:number|undefined;
+ for(const row of rows){
+  if(hiddenDepth!==undefined&&row.depth>hiddenDepth)continue;
+  hiddenDepth=undefined;visible.push(row);
+  if(!(expanded[row.activity.activity_id]??activityIsActive(row.activity,run)))hiddenDepth=row.depth;
+ }
+ return visible;
+}
+
+export function activitySearchText(activity:ToolActivity,run?:Run){
+ const status=activityDisplayStatus(activity,run);
+ return [activityKindLabels[activity.kind],activity.title,activityStatusLabels[status]??activityStatusLabels.unknown,
+  ...activityDetailRows(activity).flatMap(detail=>[detail.label,detail.value])].join('\n');
 }
