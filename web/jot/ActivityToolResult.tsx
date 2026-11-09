@@ -1,6 +1,7 @@
+import ActivityToolFile from './ActivityToolFile';
 import React,{useEffect,useRef,useState} from 'react';
 import {ApiError,request,taskDraftScope} from './client';
-import type {ActivityToolResultPage} from './types';
+import type {ActivityToolResultPage,ActivityToolResultFile} from './types';
 
 type Target={runId:string;activityId:string;toolName:string;offset?:number;resultSha?:string;textSha?:string;match?:{offset:number;text:string}};
 const sha=/^[a-f0-9]{64}$/;
@@ -11,6 +12,7 @@ export default function ActivityToolResult({conversationId,target}:{conversation
  const [cursor,setCursor]=useState<{identity:string;offset:number;previous:number[];sha?:string;textSha?:string}>({identity,offset:target.offset??0,previous:[],sha:target.resultSha,textSha:target.textSha});
  const [state,setState]=useState<{identity:string;offset:number;page?:ActivityToolResultPage;error?:string}>();
  const [revision,setRevision]=useState(0);
+ const [selected,setSelected]=useState<{identity:string;resultSha:string;file:ActivityToolResultFile}>();
  const currentCursor:typeof cursor=cursor.identity===identity?cursor:{identity,offset:target.offset??0,previous:[],sha:target.resultSha,textSha:target.textSha};
  const {offset,sha:expected,textSha:expectedText}=currentCursor;
  useEffect(()=>{region.current?.focus();region.current?.scrollIntoView({block:'nearest'});},[identity]);
@@ -32,6 +34,12 @@ export default function ActivityToolResult({conversationId,target}:{conversation
     ||typeof page.text!=='string'||page.text.length>16384||offset+page.text.length>page.total_chars||typeof page.has_other_content!=='boolean'
     ||(page.next_offset_chars===undefined?offset+page.text.length!==page.total_chars
      :!page.text.length||page.next_offset_chars!==offset+page.text.length||page.next_offset_chars>=page.total_chars))throw Error('工具结果来源或分页尚未确认');
+   if(page.operation==='files.list'){
+    if(!Array.isArray(page.file_links)||page.file_links.length>256||page.file_links.some((file,index,files)=>!file||typeof file.path!=='string'||!file.path||file.path.length>4096
+     ||!Number.isSafeInteger(file.version)||file.version<0||!Number.isSafeInteger(file.size)||file.size<0||typeof file.sha256!=='string'||!sha.test(file.sha256)
+     ||!Number.isSafeInteger(file.offset_chars)||file.offset_chars<0||!Number.isSafeInteger(file.end_offset_chars)||file.end_offset_chars<=file.offset_chars||file.end_offset_chars>page.total_chars
+     ||file.end_offset_chars<=offset||file.offset_chars>=offset+page.text.length||index>0&&file.offset_chars<files[index-1]!.end_offset_chars))throw Error('原文件列表来源尚未确认');
+   }else if(page.file_links!==undefined)throw Error('原文件列表来源尚未确认');
    if(target.match&&offset===(target.offset??0)
     &&(target.match.offset<offset||page.text.slice(target.match.offset-offset,target.match.offset-offset+target.match.text.length)!==target.match.text))throw Error('原结果命中位置尚未确认');
    if(!controller.signal.aborted)setState({identity,offset,page});
@@ -56,6 +64,10 @@ export default function ActivityToolResult({conversationId,target}:{conversation
     <pre>{match?<>{page.text.slice(0,match.offset-offset)}<mark>{match.text}</mark>{page.text.slice(match.offset-offset+match.text.length)}</>:page.text}</pre>
    </section>
    {page.file_diff_state&&page.file_diff_state!=='available'&&<p role="status">{{base_unrecorded:'该文件变更缺少原版本正文，当前显示已确认的操作信息。',preview_limit:'差异来源超过单文件 1 MiB 的文本比较范围。',content_unavailable:'固定版本内容暂不可用，当前显示已确认的操作信息。',non_text:'差异来源包含非 UTF-8 文本内容。'}[page.file_diff_state]}</p>}
+   {page.file_links&&page.file_links.length>0&&<div role="group" aria-label="原列表固定版本文件" data-chat-search-ignore style={{display:'flex',flexWrap:'wrap',gap:'0.25rem',maxHeight:'12rem',overflow:'auto'}}>
+    {page.file_links.map(file=><button type="button" key={JSON.stringify([file.path,file.version,file.sha256])} title={file.path} aria-label={`${file.path}，版本 ${file.version}`}
+     onClick={()=>setSelected({identity,resultSha:page.result_sha256,file})}>{file.path.split('/').at(-1)} · 版本 {file.version}</button>)}
+   </div>}
    {page.source_truncated&&<p role="status">{page.operation==='files.list'?'原文件列表含后续页面或超出显示范围，当前展示已确认的留存部分。':'原工具回执中的正文已截断，当前显示回执保存的全部文本。'}</p>}
    {page.total_chars===0&&<p role="status">原结果未包含文本内容。</p>}
    {page.has_other_content&&<p role="status">原结果还包含图片或其他非文本内容。</p>}
@@ -72,5 +84,9 @@ export default function ActivityToolResult({conversationId,target}:{conversation
    </nav>
   </>}
   {current?.error&&<p role="alert">{current.error} <button type="button" onClick={()=>setRevision(value=>value+1)}>重试读取</button></p>}
+  {selected?.identity===identity&&<>
+   <button type="button" data-chat-search-ignore onClick={()=>setSelected(undefined)}>关闭原列表文件</button>
+   <ActivityToolFile key={JSON.stringify(selected)} conversationId={conversationId} runId={target.runId} activityId={target.activityId} resultSha={selected.resultSha} file={selected.file}/>
+  </>}
  </div>;
 }

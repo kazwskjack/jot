@@ -1,4 +1,4 @@
-import {readActivityToolResult,searchActivityToolResults} from './events/activity-tool-result.ts';
+import {readActivityToolResult,searchActivityToolResults,readActivityToolResultFile} from './events/activity-tool-result.ts';
 import {readActivityHistory} from './events/activity-history.ts';
 import {registerPluginProfileRoutes,type PluginProfileClient} from './workbench/plugin-profile-routes.ts';
 import {createPluginProfileReceiptExecutor,PLUGIN_PROFILE_RECEIPT_PROTOCOL} from './workbench/plugin-profile-receipts.ts';
@@ -655,6 +655,7 @@ export async function buildServer(config: {
     if(code==='chat_mode_unavailable')return reply.code(503).send({error:{code:'CHAT_MODE_UNAVAILABLE'}});
     if(code==='invalid_activity_tool_result_query')return reply.code(400).send({error:{code:'ACTIVITY_TOOL_RESULT_QUERY_INVALID'}});
     if(code==='activity_tool_result_not_found')return reply.code(404).send({error:{code:'ACTIVITY_TOOL_RESULT_NOT_FOUND'}});
+    if(code==='activity_tool_result_file_unsupported')return reply.code(422).send({error:{code:'ACTIVITY_TOOL_RESULT_FILE_UNSUPPORTED'}});
     if(['activity_tool_result_pending','activity_tool_result_source_changed'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
     if(code==='activity_tool_result_source_invalid')return reply.code(503).send({error:{code:'ACTIVITY_TOOL_RESULT_SOURCE_INVALID'}});
     if(code==='invalid_activity_history_query')return reply.code(400).send({error:{code:'ACTIVITY_HISTORY_QUERY_INVALID'}});
@@ -1084,6 +1085,15 @@ export async function buildServer(config: {
     try{
       conversations.get(conversationId,owner);
       const value=searchActivityToolResults(db,owner,conversationId,request.query as Record<string,unknown>,workbench);
+      db.exec('COMMIT');return reply.header('cache-control','private, no-store').send(value);
+    }catch(error){if(db.isTransaction)db.exec('ROLLBACK');throw error;}
+  });
+  app.get('/v1/conversations/:conversationId/activities/:activityId/tool-result/file', async (request,reply) => {
+    const {conversationId,activityId}=request.params as {conversationId:string;activityId:string},owner=actor(request as any);
+    db.exec('BEGIN');
+    try{
+      conversations.get(conversationId,owner);
+      const value=readActivityToolResultFile(db,owner,conversationId,activityId,request.query as Record<string,unknown>,workbench);
       db.exec('COMMIT');return reply.header('cache-control','private, no-store').send(value);
     }catch(error){if(db.isTransaction)db.exec('ROLLBACK');throw error;}
   });

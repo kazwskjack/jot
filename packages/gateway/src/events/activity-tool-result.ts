@@ -1,3 +1,4 @@
+import {readRetainedArtifactTextPage} from '../artifacts/text-content.ts';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {readIsolatedTaskFileVersion,readIsolatedTaskFileDeletion} from '../persistent-tasks/isolated-output-source.ts';
 import type {TaskFileSource} from '../persistent-tasks/task-file-source.ts';
@@ -6,7 +7,7 @@ import type {WorkbenchService} from '../workbench/service.ts';
 import {createHash} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
 import {readActivityHistory} from './activity-history.ts';
-import type {ActivityToolResultPage,ActivityToolResultSearchPage,ActivityToolResultMatch} from '../../contracts/types.js';
+import type {ActivityToolResultPage,ActivityToolResultSearchPage,ActivityToolResultMatch,ActivityToolResultFile,ActivityToolFilePage} from '../../contracts/types.js';
 
 const ID=/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/;
 const SHA=/^[a-f0-9]{64}$/;
@@ -19,7 +20,7 @@ const MAX_RESULT_TEXT_CHARS=6*1048576;
 type IsolatedFileSource=Extract<TaskFileSource,{source:'isolated'}>;
 type IsolatedMutationSource=Omit<IsolatedFileSource,'source'|'native'|'sha256'>&{sha256:string|null};
 type WorkspaceFileReader=Pick<WorkbenchService,'readBinaryFile'>;
-type TextSource=Pick<ActivityToolResultPage,'source'|'text'|'result_sha256'|'has_other_content'|'operation'|'source_truncated'|'file_diff_state'>;
+type TextSource=Pick<ActivityToolResultPage,'source'|'text'|'result_sha256'|'has_other_content'|'operation'|'source_truncated'|'file_diff_state'|'file_links'>;
 const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
 function object(value:unknown):Record<string,unknown>|undefined{
  return value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:undefined;
@@ -182,44 +183,54 @@ function writeSummary(db:DatabaseSync,owner:string,runId:string,receiptId:string
  return {text:lines.join('\n')+'\n\n原始写入差异\n'+diff,file_diff_state:'available' as const};
 }
 
-/** Select declared logical file facts from the original saved list page. */
-function fileListSummary(result:Record<string,unknown>){
+/** Select only the declared logical file facts from the original saved page. */
+function fileListFacts(result:Record<string,unknown>){
  const isolated=result.source==='isolated';
  if(result.source!==undefined&&result.source!=='workspace'&&!isolated)throw Error('activity_tool_result_not_found');
  const files=isolated?result.files:result.items,deleted=isolated?(result.deleted_files??[]):[];
  if(!Array.isArray(files)||files.length>100000||!Array.isArray(deleted)||deleted.length>100000
   ||!isolated&&result.next_cursor!==undefined&&result.next_cursor!==null&&(typeof result.next_cursor!=='string'||!result.next_cursor||result.next_cursor.length>2048))throw Error('activity_tool_result_source_invalid');
- const lines=[isolated?'原隔离工作区文件列表':'原工作区文件列表',`已留存文件数 ${files.length}`,`已留存删除记录数 ${deleted.length}`];
- const paths=new Set<string>();let length=lines.join('\n').length,clipped=false;
+ const paths=new Set<string>();
  const path=(value:unknown)=>{
   if(typeof value!=='string'||!value||value.length>(isolated?4096:400)||value.startsWith('/')||/[\\:\x00-\x1f\x7f]/.test(value)
    ||value.split('/').some(part=>!part||part==='.'||part==='..')||paths.has(value))throw Error('activity_tool_result_source_invalid');
   paths.add(value);return value;
  };
+ const items=files.map(item=>{
+  const file=object(item);
+  if(!file||!Number.isSafeInteger(file.version)||Number(file.version)<(isolated?0:1)||!Number.isSafeInteger(file.size)||Number(file.size)<0
+   ||typeof file.sha256!=='string'||!SHA.test(file.sha256))throw Error('activity_tool_result_source_invalid');
+  return {path:path(file.path),version:Number(file.version),size:Number(file.size),sha256:file.sha256};
+ });
+ const removed=deleted.map(item=>{
+  const file=object(item);
+  if(!file||!Number.isSafeInteger(file.version)||Number(file.version)<1)throw Error('activity_tool_result_source_invalid');
+  return {path:path(file.path),version:Number(file.version)};
+ });
+ return {isolated,items,removed,more:!isolated&&typeof result.next_cursor==='string'};
+}
+function fileListSummary(result:Record<string,unknown>){
+ const facts=fileListFacts(result);
+ const lines=[facts.isolated?'原隔离工作区文件列表':'原工作区文件列表',`已留存文件数 ${facts.items.length}`,`已留存删除记录数 ${facts.removed.length}`];
+ const links:ActivityToolResultFile[]=[];let length=lines.join('\n').length,clipped=false;
  // shortcut: list text uses the existing 6 MiB range, extend source paging for larger original receipts.
  const append=(text:string)=>{
   if(clipped)return;
   if(length+text.length+1>MAX_RESULT_TEXT_CHARS){clipped=true;return;}
-  lines.push(text);length+=text.length+1;
+  const offset=length+1;lines.push(text);length+=text.length+1;
+  return {offset_chars:offset,end_offset_chars:length};
  };
- for(const item of files){
-  const file=object(item);
-  if(!file||!Number.isSafeInteger(file.version)||Number(file.version)<(isolated?0:1)||!Number.isSafeInteger(file.size)||Number(file.size)<0
-   ||typeof file.sha256!=='string'||!SHA.test(file.sha256))throw Error('activity_tool_result_source_invalid');
-  const name=path(file.path);
-  append(`${name}\n版本 ${file.version}${isolated&&file.version===0?'（原快照内容）':''} · 字节数 ${file.size}\nSHA-256 ${file.sha256}`);
+ for(const file of facts.items){
+  const range=append(`${file.path}\n版本 ${file.version}${facts.isolated&&file.version===0?'（原快照内容）':''} · 字节数 ${file.size}\nSHA-256 ${file.sha256}`);
+  if(range)links.push({...file,...range});
  }
- for(const item of deleted){
-  const file=object(item);
-  if(!file||!Number.isSafeInteger(file.version)||Number(file.version)<1)throw Error('activity_tool_result_source_invalid');
-  append(`${path(file.path)}\n删除版本 ${file.version}`);
- }
- const truncated=clipped||!isolated&&typeof result.next_cursor==='string';
+ for(const file of facts.removed)append(`${file.path}\n删除版本 ${file.version}`);
+ const truncated=clipped||facts.more;
  if(truncated)append('原列表含后续页面或超出当前显示范围。');
- return {text:lines.join('\n'),truncated};
+ return {text:lines.join('\n'),truncated,links};
 }
 
-function readWorkspaceText(db:DatabaseSync,owner:string,runId:string,callId:string,reader?:WorkspaceFileReader):TextSource{
+function readWorkspaceReceipt(db:DatabaseSync,owner:string,runId:string,callId:string):{operation:NonNullable<ActivityToolResultPage['operation']>;receiptId:string;resultSha:string;result:Record<string,unknown>}{
  if(!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_tool_receipts'").get())throw Error('activity_tool_result_not_found');
  const rows=db.prepare(`SELECT e.operation,e.receipt_id,e.result_hash,
   CASE WHEN length(CAST(w.response_json AS BLOB))<=? THEN w.response_json END response_json
@@ -238,26 +249,47 @@ function readWorkspaceText(db:DatabaseSync,owner:string,runId:string,callId:stri
  if(!receipt||Object.keys(receipt).some(key=>!['kind','reference','hash'].includes(key))
   ||receipt.kind!=='tool_receipt'||receipt.reference!==source.receipt_id||receipt.hash!==source.result_hash
   ||hash(JSON.stringify(result))!==source.result_hash)throw Error('activity_tool_result_source_invalid');
- if(source.operation==='files.delete'&&result.source!=='isolated')throw Error('activity_tool_result_not_found');
- const write=source.operation==='files.delete'?isolatedMutationSummary(db,owner,runId,source.receipt_id!,result,'files.delete')
-  :source.operation==='files.write'?writeSummary(db,owner,runId,source.receipt_id!,result,reader):undefined;
- const listing=source.operation==='files.list'?fileListSummary(result):undefined;
- const text=write?.text??listing?.text??(source.operation==='files.read'?result.content:result.text);
+ return {operation:source.operation,receiptId:source.receipt_id!,resultSha:source.result_hash,result};
+}
+function readWorkspaceText(db:DatabaseSync,owner:string,runId:string,callId:string,reader?:WorkspaceFileReader):TextSource{
+ const {operation,receiptId,resultSha,result}=readWorkspaceReceipt(db,owner,runId,callId);
+ if(operation==='files.delete'&&result.source!=='isolated')throw Error('activity_tool_result_not_found');
+ const write=operation==='files.delete'?isolatedMutationSummary(db,owner,runId,receiptId,result,'files.delete')
+  :operation==='files.write'?writeSummary(db,owner,runId,receiptId,result,reader):undefined;
+ const listing=operation==='files.list'?fileListSummary(result):undefined;
+ const text=write?.text??listing?.text??(operation==='files.read'?result.content:result.text);
  if(typeof text!=='string'||text.length>(write||listing?MAX_RESULT_TEXT_CHARS:MAX_TEXT_CHARS)
-  ||source.operation==='web.read'&&(result.mode!=='public_http'||result.trusted!==false||typeof result.truncated!=='boolean'))throw Error('activity_tool_result_source_invalid');
- return {source:'workspace',operation:source.operation,result_sha256:source.result_hash,text,has_other_content:false,
-  source_truncated:listing?listing.truncated:source.operation==='web.read'&&result.truncated===true,...(write?{file_diff_state:write.file_diff_state}:{})};
+  ||operation==='web.read'&&(result.mode!=='public_http'||result.trusted!==false||typeof result.truncated!=='boolean'))throw Error('activity_tool_result_source_invalid');
+ return {source:'workspace',operation:operation,result_sha256:resultSha,text,has_other_content:false,
+  source_truncated:listing?listing.truncated:operation==='web.read'&&result.truncated===true,...(write?{file_diff_state:write.file_diff_state}:{}),...(listing?{file_links:listing.links}:{})};
 }
 
-function activityText(db:DatabaseSync,owner:string,activity:Record<string,unknown>,reader?:WorkspaceFileReader){
+function activityCall(activity:Record<string,unknown>){
  const detail=object(activity.detail),name=detail?.tool_name,callId=activity.tool_call_id,runId=activity.run_id;
  if(typeof runId!=='string'||!ID.test(runId)||typeof callId!=='string'||!ID.test(callId)
   ||typeof name!=='string'||(name!=='jot_workspace'&&!/^jot_mcp_[a-z0-9_]{1,50}$/.test(name)))throw Error('activity_tool_result_not_found');
+ return {name,runId,callId};
+}
+function activityText(db:DatabaseSync,owner:string,activity:Record<string,unknown>,reader?:WorkspaceFileReader){
+ const {name,runId,callId}=activityCall(activity);
  return {name,...(name==='jot_workspace'?readWorkspaceText(db,owner,runId,callId,reader):readMcpText(db,owner,runId,name,callId))};
 }
 
 function textBoundary(text:string,offset:number){
  return offset>0&&/[\uD800-\uDBFF]/.test(text[offset-1]!)&&/[\uDC00-\uDFFF]/.test(text[offset]!)?offset-1:offset;
+}
+
+function originalActivity(db:DatabaseSync,owner:string,conversationId:string,activityId:string,runId:string){
+ const event=db.prepare(`SELECT e.payload_json FROM ga_events e
+  JOIN ga_runs r ON r.id=e.run_id AND r.conversation_id=e.conversation_id
+  JOIN ga_conversations c ON c.id=r.conversation_id AND c.owner_id=?
+  WHERE e.conversation_id=? AND e.run_id=? AND e.type='activity.upsert'
+   AND json_extract(e.payload_json,'$.activity_id')=? ORDER BY e.seq DESC LIMIT 1`)
+  .get(owner,conversationId,runId,activityId) as {payload_json:string}|undefined;
+ if(!event)throw Error('activity_tool_result_not_found');
+ const activity=parsedObject(event.payload_json);
+ if(!activity||activity.activity_id!==activityId||activity.run_id!==runId)throw Error('activity_tool_result_not_found');
+ return activity;
 }
 
 /** The caller authorizes the conversation and holds the original read transaction. */
@@ -271,18 +303,10 @@ export function readActivityToolResult(db:DatabaseSync,owner:string,conversation
   ||expectedText!==undefined&&(typeof expectedText!=='string'||!SHA.test(expectedText)))throw Error('invalid_activity_tool_result_query');
  const offset=Number(offsetValue);
  if(offset>MAX_RESULT_TEXT_CHARS||offset>0&&expected===undefined)throw Error('invalid_activity_tool_result_query');
- const event=db.prepare(`SELECT e.payload_json FROM ga_events e
-  JOIN ga_runs r ON r.id=e.run_id AND r.conversation_id=e.conversation_id
-  JOIN ga_conversations c ON c.id=r.conversation_id AND c.owner_id=?
-  WHERE e.conversation_id=? AND e.run_id=? AND e.type='activity.upsert'
-   AND json_extract(e.payload_json,'$.activity_id')=? ORDER BY e.seq DESC LIMIT 1`)
-  .get(owner,conversationId,runId,activityId) as {payload_json:string}|undefined;
- if(!event)throw Error('activity_tool_result_not_found');
- const activity=parsedObject(event.payload_json);
- if(!activity||activity.activity_id!==activityId||activity.run_id!==runId)throw Error('activity_tool_result_not_found');
+ const activity=originalActivity(db,owner,conversationId,activityId,runId);
  const {name,...source}=activityText(db,owner,activity,reader);
  if(expected!==undefined&&expected!==source.result_sha256)throw Error('activity_tool_result_source_changed');
- const {text,...metadata}=source,textSha=hash(source.text);
+ const {text,file_links,...metadata}=source,textSha=hash(source.text);
  if(expectedText!==undefined&&expectedText!==textSha)throw Error('activity_tool_result_source_changed');
  if(['files.write','files.delete','files.list'].includes(source.operation??'')&&offset>0&&expectedText===undefined)throw Error('invalid_activity_tool_result_query');
  if(offset>text.length||offset>0&&/[\uD800-\uDBFF]/.test(text[offset-1]!)&&/[\uDC00-\uDFFF]/.test(text[offset]!))throw Error('invalid_activity_tool_result_query');
@@ -290,6 +314,7 @@ export function readActivityToolResult(db:DatabaseSync,owner:string,conversation
  if(end<text.length&&/[\uD800-\uDBFF]/.test(text[end-1]!)&&/[\uDC00-\uDFFF]/.test(text[end]!))end--;
  return {conversation_id:conversationId,run_id:runId,activity_id:activityId,tool_name:name,...metadata,
   text_sha256:textSha,offset_chars:offset,total_chars:text.length,text:text.slice(offset,end),
+  ...(file_links?{file_links:file_links.filter(file=>file.end_offset_chars>offset&&file.offset_chars<end)}:{}),
   execution_authorized:false,...(end<text.length?{next_offset_chars:end}:{})};
 }
 
@@ -329,4 +354,51 @@ export function searchActivityToolResults(db:DatabaseSync,owner:string,conversat
  return {conversation_id:conversationId,as_of_seq:page.as_of_seq,q,items,scanned_upserts:page.items.length,
   unavailable_results:unavailable,unsearched_results:unsearched,coverage:page.coverage,execution_authorized:false,
   ...(page.run_id?{run_id:page.run_id}:{}),...(page.next_before_seq?{next_before_seq:page.next_before_seq}:{})};
+}
+
+/** Read exactly an original list member. No current head or unrecorded snapshot fallback. */
+export function readActivityToolResultFile(db:DatabaseSync,owner:string,conversationId:string,activityId:string,query:Record<string,unknown>,reader:WorkspaceFileReader):ActivityToolFilePage{
+ if(!db.isTransaction)throw Error('activity_tool_result_read_transaction_required');
+ const runId=query.run_id,resultSha=query.result_sha256,path=query.path,fileSha=query.sha256,version=Number(query.version),offset=Number(query.offset_chars??0),textSha=query.text_sha256;
+ if(!ID.test(activityId)||typeof runId!=='string'||!ID.test(runId)||typeof resultSha!=='string'||!SHA.test(resultSha)
+  ||typeof path!=='string'||!path||path.length>4096||typeof fileSha!=='string'||!SHA.test(fileSha)||!Number.isSafeInteger(version)||version<0
+  ||!Number.isSafeInteger(offset)||offset<0||offset>MAX_TEXT_CHARS||textSha!==undefined&&(typeof textSha!=='string'||!SHA.test(textSha))
+  ||offset>0&&textSha===undefined||Object.keys(query).some(key=>!['run_id','result_sha256','path','version','sha256','offset_chars','text_sha256'].includes(key)))throw Error('invalid_activity_tool_result_query');
+ const activity=originalActivity(db,owner,conversationId,activityId,runId),call=activityCall(activity);
+ if(call.name!=='jot_workspace')throw Error('activity_tool_result_not_found');
+ const receipt=readWorkspaceReceipt(db,owner,runId,call.callId);
+ if(receipt.operation!=='files.list')throw Error('activity_tool_result_not_found');
+ if(receipt.resultSha!==resultSha)throw Error('activity_tool_result_source_changed');
+ const facts=fileListFacts(receipt.result),file=facts.items.find(item=>item.path===path&&item.version===version&&item.sha256===fileSha);
+ if(!file)throw Error('activity_tool_result_not_found');
+ if(facts.isolated&&version===0)throw Error('activity_tool_result_not_found');
+ if(file.size>MAX_TEXT_CHARS)throw Error('activity_tool_result_file_unsupported');
+ const binding=db.prepare(`SELECT json_extract(context_json,'$.workspace_id') workspace_id,json_extract(context_json,'$.project_id') project_id
+  FROM wb_run_bindings WHERE run_id=? AND owner_id=?`).get(runId,owner) as {workspace_id:unknown;project_id:unknown}|undefined;
+ if(!binding||typeof binding.workspace_id!=='string'||!binding.workspace_id||typeof binding.project_id!=='string'||!binding.project_id)throw Error('activity_tool_result_source_invalid');
+ let content:Buffer;
+ if(facts.isolated){
+  const original=receipt.result;
+  if(original.owner_id!==owner||original.workspace_id!==binding.workspace_id||original.project_id!==binding.project_id
+   ||['occurrence_id','cycle_id','snapshot_id'].some(key=>typeof original[key]!=='string'||!original[key]))throw Error('activity_tool_result_source_invalid');
+  const source=db.prepare(`SELECT e.*,r.conversation_id,b.kind='native_team' AS native FROM wb_task_isolated_file_execution_receipts e
+   JOIN wb_run_bindings b ON b.run_id=e.run_id AND b.owner_id=e.owner_id
+   JOIN ga_runs r ON r.id=e.run_id JOIN ga_conversations c ON c.id=r.conversation_id AND c.owner_id=e.owner_id
+   WHERE e.owner_id=? AND e.workspace_id=? AND e.project_id=? AND e.occurrence_id=? AND e.cycle_id=? AND e.snapshot_id=?
+    AND e.path=? AND e.version=? AND e.sha256=? AND e.size=?`)
+   .get(owner,binding.workspace_id,binding.project_id,String(original.occurrence_id),String(original.cycle_id),String(original.snapshot_id),path,version,fileSha,file.size) as IsolatedFileSource|undefined;
+  if(!source)throw Error('activity_tool_result_not_found');
+  content=Buffer.from(readIsolatedTaskFileVersion(db,{...source,source:'isolated',native:Boolean(source.native)}).content,'utf8');
+ }else{
+  const original=reader.readBinaryFile(owner,binding.workspace_id,binding.project_id,path,version,fileSha);
+  if(original.size!==file.size)throw Error('activity_tool_result_source_invalid');
+  content=original.content;
+ }
+ if(content.length!==file.size||createHash('sha256').update(content).digest('hex')!==fileSha)throw Error('activity_tool_result_source_invalid');
+ try{new TextDecoder('utf-8',{fatal:true}).decode(content);}catch{throw Error('activity_tool_result_file_unsupported');}
+ const text=content.toString('utf8'),digest=hash(text);
+ if(textSha!==undefined&&textSha!==digest)throw Error('activity_tool_result_source_changed');
+ const page=readRetainedArtifactTextPage(text,offset);
+ return {conversation_id:conversationId,run_id:runId,activity_id:activityId,result_sha256:resultSha,path,version,sha256:fileSha,size:file.size,
+  source:facts.isolated?'isolated':'workspace',text_sha256:digest,...page,execution_authorized:false};
 }
