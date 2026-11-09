@@ -12,7 +12,11 @@ export default function GitCheckoutReview({project,snapshotId,targetRef,onClose,
  const [busy,setBusy]=useState(false),[verified,setVerified]=useState(!!initialReview),[error,setError]=useState('');
  const alive=useRef(true),inflight=useRef(false),active=useRef<AbortController|null>(null),command=useRef<Command|null>(null),decision=useRef<HTMLButtonElement>(null);
  const report=useRef(onBusy);report.current=onBusy;
- const locked=busy||mutation.pending,referencePlan=review?.witness.reference_plan,logMetadata=review?.witness.log_metadata,logAfter=review?.witness.log_after;
+ const locked=busy||mutation.pending;
+ const referencePlan=review?.witness.reference_plan;
+ const logMetadata=review?.witness.log_metadata;
+ const logAfter=review?.witness.log_after;
+ const publication=review?.witness.metadata_publication;
  const base=`/projects/${pathId(project)}/git/checkout-intents`;
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;active.current?.abort();report.current(false)}},[project,snapshotId,targetRef]);
  useEffect(()=>{report.current(locked)},[locked]);
@@ -72,6 +76,13 @@ export default function GitCheckoutReview({project,snapshotId,targetRef,onClose,
    {logAfter?.state==='appended'||logAfter?.state==='retained'?<section aria-label="HEAD 日志文件预期"><h4>HEAD 日志文件预期</h4>
     <p>{logAfter.state==='appended'?'追加后':'保留原文件'} · {logAfter.size} 字节 · SHA-256 <code>{logAfter.sha256??'原文件缺失'}</code></p>
    </section>:<p role="status">{logAfter?.state==='not_confirmed'?{reference_policy_required:'引用策略仍待补齐，完整日志预期尚未确认。',identity_unconfigured:'需要配置操作者身份以固定完整日志预期。',log_format_required:'原日志末尾格式需要处理策略，完整日志预期尚未确认。',output_limit:'追加后的日志超过当前文件上限，完整日志预期尚未确认。'}[logAfter.reason]:'此历史审核尚无完整日志文件预期。'}</p>}
+   {publication?.state==='planned'?<section aria-label="元数据写入清单"><h4>元数据写入清单</h4>
+    <ul>{publication.files.map(file=><li key={file.scope+'\0'+file.path}><code>{file.path}</code> · {file.operation==='append'?'追加':'替换'} · {file.after.size} 字节 · SHA-256 <code>{file.after.sha256}</code>
+     {file.permissions.state==='preserve'?<p>保留模式 <code>{file.permissions.mode.toString(8).padStart(4,'0')}</code> · UID {file.permissions.uid} · GID {file.permissions.gid}</p>:<p role="status">新建文件的权限与所属策略仍待补齐。</p>}
+    </li>)}</ul>
+    <h5>所需锁</h5><ul>{publication.locks.map(lock=><li key={lock.scope+'\0'+lock.path}>{lock.scope==='git'?'当前 Git 目录':'公共 Git 目录'} · <code>{lock.path}</code></li>)}</ul>
+    <p>完整工作区发布、锁获取与恢复继续接入原生执行流程。</p>
+   </section>:<p role="status">{publication?.state==='not_confirmed'?{layout_required:'物理来源凭证尚未完整，元数据写入清单待确认。',reference_policy_required:'引用或 HEAD 来源策略仍待补齐，元数据写入清单待确认。',log_after_required:'完整日志预期尚未确认，元数据写入清单待确认。'}[publication.reason]:'此历史审核尚无元数据写入清单。'}</p>}
    <p role="status">{!verified?'当前审核状态尚未确认。':review.state==='prepared'?'切换依据已固定，等待完整执行策略。':'审核已取消。'}</p>
    <div className="wb-actions">{review.state==='prepared'&&<button ref={decision} type="button" disabled={locked||!verified} onClick={()=>void send('cancel')}>取消切换审核</button>}
     <button ref={review.state==='cancelled'?decision:undefined} type="button" disabled={locked} onClick={()=>void refresh()}>刷新切换审核状态</button></div>

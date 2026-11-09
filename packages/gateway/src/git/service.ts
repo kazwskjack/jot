@@ -1,4 +1,4 @@
-import {checkoutLogMetadata,checkoutReferencePlan} from './checkout-metadata.ts';
+import {checkoutMetadataPublication,checkoutLogMetadata,checkoutReferencePlan} from './checkout-metadata.ts';
 import {branchReviewMetadata} from './branch-metadata.ts';
 import type {GitCheckoutReviewWitness,GitCreateBranchWitness} from '../../contracts/types.ts';
 import {gitCommitOperatorPolicy,commitReviewMetadata,type GitCommitOperatorPolicy} from './commit-metadata.ts';
@@ -111,6 +111,7 @@ export class GitWorkbench{
   const policy=this.commitPolicies.get(owner+'\0'+project);
   if(policy&&witness.reference_plan.state==='planned'&&witness.reference_plan.head_log.append)witness.log_metadata=checkoutLogMetadata(policy,witness);
   witness.log_after=await this.repository(owner,project).checkoutLogAfter(witness,signal);
+  witness.metadata_publication=checkoutMetadataPublication(witness);
   this.projects.assertOwned(project,owner);signal?.throwIfAborted();return witness;
  }
  async branches(owner:string,project:string,snapshotId:string,signal?:AbortSignal,targetRef?:string){const result=await this.repository(owner,project).branches(snapshotId,signal,targetRef);this.projects.assertOwned(project,owner);signal?.throwIfAborted();return {project_id:project,...result};}

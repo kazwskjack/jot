@@ -1,4 +1,4 @@
-import {checkoutLogMetadata,checkoutReferencePlan} from './checkout-metadata.ts';
+import {checkoutMetadataPublication,checkoutLogMetadata,checkoutReferencePlan} from './checkout-metadata.ts';
 import {createHash} from 'node:crypto';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {validGitReference} from './references.ts';
@@ -76,6 +76,7 @@ export function readGitCheckoutIntentSource(row:GitBranchIntentRecord,validate:(
      ||after.reason==='output_limit'&&source.head_log.size+metadata.entry_size<=32*1024*1024)throw Error();
    }
   }
+  if(witness.metadata_publication&&canonicalJson(witness.metadata_publication)!==canonicalJson(checkoutMetadataPublication(witness)))throw Error();
   if(checkoutDigest({action:input.action,target_ref:input.target_ref,witness})!==row.review_sha256)throw Error();
   return{input,witness};
  }catch{throw Error('git_checkout_evidence_invalid');}

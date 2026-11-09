@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import type {GitCheckoutLogMetadata,GitCheckoutReferencePlan,GitCheckoutReviewWitness} from '../../contracts/types.ts';
+import type {GitCheckoutMetadataPublication,GitCheckoutLogMetadata,GitCheckoutReferencePlan,GitCheckoutReviewWitness} from '../../contracts/types.ts';
 import {validGitReference} from './references.ts';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {gitCommitOperatorPolicy,gitCommitSignature,type GitCommitOperatorPolicy} from './commit-metadata.ts';
@@ -39,4 +39,30 @@ export function checkoutLogMetadata(raw:GitCommitOperatorPolicy,witness:GitCheck
 /** Shared exact suffix for source hashing and subsequent original publication. */
 export function checkoutReflogEntry(plan:Extract<GitCheckoutReferencePlan,{state:'planned'}>,committer:GitCheckoutLogMetadata['committer']){
  return Buffer.from(plan.head_log.old_oid+' '+plan.head_log.new_oid+' '+gitCommitSignature(committer)+'\t'+plan.head_log.message+'\n','utf8');
+}
+
+/** Fixed original metadata file/lock namespace. Per-file permissions remain review facts. */
+export function checkoutMetadataPublication(witness:GitCheckoutReviewWitness):GitCheckoutMetadataPublication{
+ const source=witness.preview.reference_source,plan=witness.reference_plan,log=witness.log_after;
+ if(!source?.layout||!source.head_file.physical)return{state:'not_confirmed',reason:'layout_required'};
+ if(!plan||plan.state!=='planned')return{state:'not_confirmed',reason:'reference_policy_required'};
+ if(witness.target.symbolic_target)return{state:'not_confirmed',reason:'reference_policy_required'};
+ const oldHead=Buffer.from('ref: refs/heads/'+witness.head.branch+'\n','utf8');
+ if(!witness.head.detached&&createHash('sha256').update(oldHead).digest('hex')!==source.head_file.sha256)return{state:'not_confirmed',reason:'reference_policy_required'};
+ if(!log||log.state==='not_confirmed')return{state:'not_confirmed',reason:'log_after_required'};
+ type File=Extract<GitCheckoutMetadataPublication,{state:'planned'}>['files'][number];
+ const permissions=(file:File['before']):File['permissions']=>file.physical
+  ?{state:'preserve',mode:file.physical.mode,uid:file.physical.uid,gid:file.physical.gid}:{state:'creation_policy_required'};
+ const files:File[]=[];
+ if(log.state==='appended')files.push({scope:'git',path:'logs/HEAD',operation:'append',before:source.head_log,
+  after:{sha256:log.sha256,size:log.size},permissions:permissions(source.head_log)});
+ files.push({scope:'git',path:'HEAD',operation:'replace',before:source.head_file,after:{...plan.head_file},permissions:permissions(source.head_file)});
+ const locks:Extract<GitCheckoutMetadataPublication,{state:'planned'}>['locks']=[
+  {scope:'git',path:'index.lock'},{scope:'common',path:'packed-refs.lock'},{scope:'common',path:'config.lock'},
+  ...(source.configuration.worktree_enabled?[{scope:'git' as const,path:'config.worktree.lock'}]:[]),
+  ...(source.source_ref?[{scope:'common' as const,path:source.source_ref.ref+'.lock'}]:[]),
+  {scope:'common',path:witness.target.ref+'.lock'},...files.map(file=>({scope:file.scope,path:file.path+'.lock'}))
+ ];
+ const unique=new Map(locks.map(lock=>[lock.scope+'\0'+lock.path,lock]));
+ return{state:'planned',protocol:1,execution_authorized:false,files,locks:[...unique.values()]};
 }
