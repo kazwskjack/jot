@@ -40,6 +40,7 @@ export function gitInitializationPlan(value:unknown):GitInitializationPlan{
    ||plan.execution_authorized!==false||typeof plan.plan_id!=='string'
    ||!/^git-init-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(plan.plan_id))throw Error();
   const witness=gitInitializationWitness(plan.witness);
+  if(witness.protocol!==1)throw Error();
   if(plan.source_sha256!==hash(JSON.stringify(witness))||plan.review_sha256!==hash(JSON.stringify({action:'init',witness})))throw Error();
   return structuredClone(plan);
  }catch{throw Error('git_initialization_plan_invalid');}

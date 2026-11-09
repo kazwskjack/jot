@@ -408,10 +408,57 @@ export class GitRepositoryInspection{
    internal_ignore:{path:'.pilotdeck/.gitignore' as const,sha256:source.source.internal_ignore?.sha256??null,size:source.source.internal_ignore?.size??0},
    read_only:true as const,execution_authorized:false as const};
  }
+ private async initializationFileSource(path:string):Promise<{body:Buffer|null;fact:GitInitializationFile|null}>{
+  try{
+   const parent=await this.directory(dirname(path)),before=await lstat(path),body=await this.bytes(path,1024*1024),after=await lstat(path);
+   if(witness(before)!==witness(after)||before.mode!==after.mode||await this.directory(dirname(path))!==parent)throw Error('git_snapshot_changed');
+   return{body,fact:{identity:identity(before),sha256:hash(body),size:body.length,mode:Number(before.mode&0o777n)}};
+  }catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return{body:null,fact:null};throw error;}
+ }
+ /** Freeze existing repository facts through the original sanitized read
+  * context. Native reinitialization consumes this distinct protocol later. */
+ private async freezeReinitialization(snapshotId:string,initialBranch:string,objectFormat:'sha1'|'sha256',signal?:AbortSignal):Promise<GitInitializationWitness>{
+  const context=await this.context(signal,true),internal=join(this.root,'.pilotdeck');
+  const internalDirectory=async()=>{
+   try{return await this.directory(internal);}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return null;throw error;}
+  };
+  let result:Extract<GitInitializationWitness,{protocol:2}>;
+  try{
+   const snapshot=await this.inspectContext(context,signal);
+   if(snapshot.snapshot_id!==snapshotId)throw Error('git_snapshot_changed');
+   const branch=await readGit(this.executable!,this.root,context.directory,['check-ref-format','refs/heads/'+initialBranch],this.limits,signal);
+   if(branch.code!==0)throw Error('git_initialization_branch_invalid');
+   const format=await readGit(this.executable!,this.root,context.directory,['rev-parse','--show-object-format'],this.limits,signal);
+   if(format.code!==0||text(format.bytes).trim()!==objectFormat)throw Error('git_reinitialization_object_format_changed');
+   const root=await this.directory(this.root),git=await this.directory(this.gitDirectory),common=await this.directory(this.commonDirectory);
+   const internalIdentity=await internalDirectory(),ignore=await this.initializationFileSource(join(internal,'.gitignore'));
+   if(internalIdentity===null&&ignore.fact!==null)throw Error('git_snapshot_changed');
+   const dot=join(this.root,'.git'),dotFile=(await lstat(dot)).isFile()?(await this.initializationFileSource(dot)).fact:null;
+   const config=await this.initializationFileSource(join(this.commonDirectory,'config'));
+   const worktree=await this.initializationFileSource(join(this.gitDirectory,'config.worktree'));
+   const planned=initializationInternalIgnore(ignore.body);
+   if((await this.inspectContext(context,signal)).snapshot_id!==snapshotId||await internalDirectory()!==internalIdentity)throw Error('git_snapshot_changed');
+   result={protocol:2,kind:'initialize_repository',snapshot_id:snapshotId,repository_sha256:snapshot.repository_sha256,
+    root_identity:root,internal_directory_identity:internalIdentity,internal_ignore:ignore.fact,initial_branch:initialBranch,object_format:objectFormat,
+    ignore_after:{sha256:hash(planned.body),size:planned.body.length,changed:planned.changed},
+    existing:{source_metadata_sha256:context.metadata,git_directory_identity:git,common_directory_identity:common,dot_file:dotFile,
+     head:snapshot.head,common_config:config.fact,worktree_config:worktree.fact,worktree_config_enabled:context.worktreeConfigEnabled===true},execution_authorized:false};
+  }finally{await context.dispose();}
+  const anchors=await this.anchors(signal),ignore=await this.initializationFileSource(join(internal,'.gitignore'));
+  if(anchors.repository!==result.repository_sha256||anchors.metadata!==result.existing.source_metadata_sha256
+   ||await this.directory(this.root)!==result.root_identity||await this.directory(this.gitDirectory)!==result.existing.git_directory_identity
+   ||await this.directory(this.commonDirectory)!==result.existing.common_directory_identity||await internalDirectory()!==result.internal_directory_identity
+   ||canonicalJson(ignore.fact)!==canonicalJson(result.internal_ignore))throw Error('git_snapshot_changed');
+  const dot=join(this.root,'.git'),dotFile=(await lstat(dot)).isFile()?(await this.initializationFileSource(dot)).fact:null;
+  if(canonicalJson(dotFile)!==canonicalJson(result.existing.dot_file))throw Error('git_snapshot_changed');
+  const final=await this.anchors(signal);
+  if(final.repository!==result.repository_sha256||final.metadata!==result.existing.source_metadata_sha256)throw Error('git_snapshot_changed');
+  signal?.throwIfAborted();return result;
+ }
  async freezeInitialization(snapshotId:string,initialBranch:string,objectFormat:'sha1'|'sha256',signal?:AbortSignal):Promise<GitInitializationWitness>{
   normalizeGitInitializationReview({request_id:'initialization-source',action:'init',snapshot_id:snapshotId,initial_branch:initialBranch,object_format:objectFormat});
   const before=await this.initializationSource(signal);
-  if(before.initialized)throw Error('git_initialization_metadata_present');
+  if(before.initialized)return this.freezeReinitialization(snapshotId,initialBranch,objectFormat,signal);
   if(before.snapshot_id!==snapshotId)throw Error('git_snapshot_changed');
   const checked=await readGit(this.executable!,this.root,this.gitDirectory,['check-ref-format','refs/heads/'+initialBranch],this.limits,signal);
   if(checked.code!==0)throw Error('git_initialization_branch_invalid');

@@ -150,6 +150,7 @@ export class GitIndexExecutions{
  private registerExecution(owner:string,project:string,intent:string,input:Input,requestHash:string,source:ReturnType<GitIndexExecutions['reviewSource']>):Row{
   if(source.action==='create-branch'&&!['branch','initialization'].includes(gitCommitExecutionSchema(this.db)))throw Error('git_branch_upgrade_required');
   if(source.action==='commit'&&!['commit','branch','initialization'].includes(gitCommitExecutionSchema(this.db)))throw Error('git_commit_upgrade_required');
+  if(source.action==='init'&&source.witness.protocol!==1)throw Error('git_reinitialization_execution_unavailable');
   if(source.action==='init'&&gitCommitExecutionSchema(this.db)!=='initialization')throw Error('git_initialization_upgrade_required');
   const binding=this.git.executionBinding(owner,project),existing=this.db.prepare('SELECT * FROM wb_git_index_executions WHERE intent_id=?').get(intent) as Row|undefined;
   if(existing&&(existing.owner_id!==owner||existing.project_id!==project||existing.request_sha256!==requestHash))throw Error('git_intent_execution_exists');

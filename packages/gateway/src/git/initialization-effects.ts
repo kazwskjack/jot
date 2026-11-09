@@ -67,6 +67,7 @@ export class GitInitializationEffects extends GitBranchEffects{
  }
  async prepareInitialization(raw:GitInitializationSource,signal?:AbortSignal):Promise<GitInitializationPlan>{
   const witness=gitInitializationWitness(raw?.witness);
+  if(witness.protocol!==1)throw Error('git_reinitialization_execution_unavailable');
   if(raw.review_sha256!==hash(JSON.stringify({action:'init',witness})))throw Error('git_initialization_review_changed');
   if(!equal(await this.freezeInitialization(witness.snapshot_id,witness.initial_branch,witness.object_format,signal),witness))throw Error('git_initialization_review_changed');
   const anchors=await this.initializationAnchors(signal);

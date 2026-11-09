@@ -34,6 +34,7 @@ export class GitInitializationIntents{
    initial_branch:input.initial_branch,object_format:input.object_format,
    internal_ignore:{path:'.pilotdeck/.gitignore',before_sha256:witness.internal_ignore?.sha256??null,
     after_sha256:witness.ignore_after.sha256,size:witness.ignore_after.size,changed:witness.ignore_after.changed},
+   ...(witness.protocol===2?{reinitialization:{head:witness.existing.head,source_metadata_sha256:witness.existing.source_metadata_sha256,common_config_sha256:witness.existing.common_config?.sha256??null,worktree_config_sha256:witness.existing.worktree_config?.sha256??null,worktree_config_enabled:witness.existing.worktree_config_enabled}}:{}),
    review_sha256:row.review_sha256,version:event.version,state:event.state,created_at:row.created_at,updated_at:event.created_at,execution_authorized:false};
  }
  get(owner:string,project:string,id:string){const row=this.row(owner,project,id);return this.view(row,this.latest(id));}
@@ -84,7 +85,10 @@ export class GitInitializationIntents{
   if(cached)return()=>{signal?.throwIfAborted();this.row(owner,project,id);return cached;};
   assertCurrent();
   if(input.action==='approve'){
-   await this.git.prepareInitialization(owner,project,{witness:source.witness,review_sha256:row.review_sha256},signal);
+   if(source.witness.protocol===2){
+    const witness=await this.git.freezeInitialization(owner,project,source.input.snapshot_id,source.input.initial_branch,source.input.object_format,signal);
+    if(JSON.stringify(witness)!==row.witness_json)throw Error('git_initialization_review_changed');
+   }else await this.git.prepareInitialization(owner,project,{witness:source.witness,review_sha256:row.review_sha256},signal);
   }
   return()=>withImmediateTransaction(this.db,()=>{
    signal?.throwIfAborted();this.row(owner,project,id);

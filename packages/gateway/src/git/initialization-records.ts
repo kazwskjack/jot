@@ -36,8 +36,8 @@ export function initializationSnapshotId(source:Pick<GitInitializationWitness,'r
 export function gitInitializationWitness(value:unknown):GitInitializationWitness{
  try{
   const witness=value as GitInitializationWitness;
-  if(!shape(witness,['protocol','kind','snapshot_id','repository_sha256','root_identity','internal_directory_identity','internal_ignore','initial_branch','object_format','ignore_after','execution_authorized'])
-   ||witness.protocol!==1||witness.kind!=='initialize_repository'||witness.execution_authorized!==false
+  if(!shape(witness,['protocol','kind','snapshot_id','repository_sha256','root_identity','internal_directory_identity','internal_ignore','initial_branch','object_format','ignore_after','execution_authorized',...(witness?.protocol===2?['existing']:[])])
+   ||![1,2].includes(witness.protocol)||witness.kind!=='initialize_repository'||witness.execution_authorized!==false
    ||typeof witness.repository_sha256!=='string'||!SHA.test(witness.repository_sha256)||typeof witness.root_identity!=='string'||!IDENTITY.test(witness.root_identity)
    ||witness.internal_directory_identity!==null&&(typeof witness.internal_directory_identity!=='string'||!IDENTITY.test(witness.internal_directory_identity)))throw Error();
   normalizeGitInitializationReview({request_id:'initialization-witness',action:'init',snapshot_id:witness.snapshot_id,initial_branch:witness.initial_branch,object_format:witness.object_format});
@@ -48,7 +48,23 @@ export function gitInitializationWitness(value:unknown):GitInitializationWitness
   const after=witness.ignore_after;
   if(!shape(after,['sha256','size','changed'])||typeof after.sha256!=='string'||!SHA.test(after.sha256)||!Number.isSafeInteger(after.size)||after.size<1||after.size>1024*1024
    ||typeof after.changed!=='boolean'||after.changed!==((file?.sha256??null)!==after.sha256)||!after.changed&&after.size!==file?.size
-   ||initializationSnapshotId(witness)!==witness.snapshot_id)throw Error();
+   ||witness.protocol===1&&initializationSnapshotId(witness)!==witness.snapshot_id)throw Error();
+  if(witness.protocol===2){
+   const existing=witness.existing,oid=(value:unknown)=>typeof value==='string'&&new RegExp('^[a-f0-9]{'+(witness.object_format==='sha1'?40:64)+'}$').test(value);
+   if(!shape(existing,['source_metadata_sha256','git_directory_identity','common_directory_identity','dot_file','head','common_config','worktree_config','worktree_config_enabled'])
+    ||typeof existing.source_metadata_sha256!=='string'||!SHA.test(existing.source_metadata_sha256)
+    ||typeof existing.git_directory_identity!=='string'||!IDENTITY.test(existing.git_directory_identity)
+    ||typeof existing.common_directory_identity!=='string'||!IDENTITY.test(existing.common_directory_identity)
+    ||typeof existing.worktree_config_enabled!=='boolean')throw Error();
+   for(const entry of [existing.dot_file,existing.common_config,existing.worktree_config])if(entry!==null){
+    if(!shape(entry,['identity','sha256','size','mode'])||typeof entry.identity!=='string'||!IDENTITY.test(entry.identity)
+     ||typeof entry.sha256!=='string'||!SHA.test(entry.sha256)||!Number.isSafeInteger(entry.size)||entry.size<0||entry.size>1024*1024
+     ||!Number.isSafeInteger(entry.mode)||entry.mode<0||entry.mode>0o777)throw Error();
+   }
+   const head=existing.head;
+   if(!shape(head,['oid','branch','detached'])||head.oid!==null&&!oid(head.oid)||typeof head.detached!=='boolean'
+    ||(head.detached?(head.branch!==null||head.oid===null):typeof head.branch!=='string'||!validGitReference('refs/heads/'+head.branch)))throw Error();
+  }
   return structuredClone(witness);
  }catch{throw Error('git_initialization_evidence_invalid');}
 }
@@ -73,6 +89,6 @@ export function readGitInitializationReviewSource(db:DatabaseSync,owner:string,p
 }
 export function readGitInitializationExecutionSource(db:DatabaseSync,row:{owner_id:string;project_id:string;intent_id:string;review_version:number;review_sha256:string;witness_sha256:string;repository_sha256:string}){
  const source=readGitInitializationReviewSource(db,row.owner_id,row.project_id,row.intent_id,row.review_version,row.review_sha256);
- if(hash(JSON.stringify(source.witness))!==row.witness_sha256||source.witness.repository_sha256!==row.repository_sha256)throw Error('git_initialization_evidence_invalid');
+ if(source.witness.protocol!==1||hash(JSON.stringify(source.witness))!==row.witness_sha256||source.witness.repository_sha256!==row.repository_sha256)throw Error('git_initialization_evidence_invalid');
  return source;
 }

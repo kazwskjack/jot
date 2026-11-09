@@ -2120,7 +2120,7 @@
     "GitInitializationReviewPrepare",
     "GitInitializationReviewIntent",
     "201",
-    "Freeze original absent Git metadata, root/program identity, explicit initial branch/object format and internal-ignore before/after facts in the original owner review/event ledger. No initialization or native dispatch is performed."
+    "Freeze original initialization source, explicit initial branch/object format and internal-ignore facts in the owner review/event ledger. Existing metadata uses the original repository snapshot and records the retained HEAD, configuration fingerprints and physical metadata identities."
   ],  [
     "GET",
     "/v1/projects/{projectId}/git/initialization-intents/{intentId}",
@@ -2136,6 +2136,6 @@
     "GitReviewControl",
     "GitInitializationReviewIntent",
     "200",
-    "Approve or cancel the exact original initialization review/version/hash. Approval repeats original absence, root/program and internal-ignore facts. Native initialization and interrupted recovery remain separate execution phases."
+    "Approve or cancel the exact original initialization review/version/hash. Approval repeats the original source snapshot, repository/program and internal-ignore facts. Existing-repository review repeats its fixed HEAD/configuration/metadata evidence; native reinitialization remains a separate development phase."
   ]
 ]

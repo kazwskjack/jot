@@ -749,3 +749,47 @@ checkout, merged-safe deletion and reference backend coverage remain in full
 M15.14 scope. This source increment followed the user's development-only direction.
 Runtime UI rendering, tests, typechecks, builds, migrations and deployment remain
 unexecuted.
+
+## Existing repository initialization review source increment
+
+The pinned upstream repositoryOperation init path runs Git init and then ensures
+the project-internal ignore rules. The official Git initialization semantics keep
+existing repository data during reinitialization. The current source increment
+adds the original immutable review foundation for that existing-metadata path.
+[Git init documentation](https://git-scm.com/docs/git-init)
+
+freezeInitialization now distinguishes absent metadata from an existing bound
+repository. Existing metadata uses the original normal repository snapshot and
+sanitized read context. It verifies the requested object format against the
+existing format and freezes the original HEAD, metadata digest, physical Git and
+common-directory identities, .git file fact when present, common/worktree config
+file facts and worktree-config enablement. Internal ignore before/after byte
+facts use the existing upstream-adapted implementation. Source anchors, metadata,
+directories, .git file and internal-ignore facts are repeated after private read
+context disposal.
+
+Protocol-2 initialization witnesses carry these existing-repository facts through
+the same owner review/event records. Strict decoding validates exact shape,
+format-sized HEAD OID and ref grammar, physical identities and bounded file facts.
+Approval refreezes the exact original snapshot and compares the original witness
+encoding. Existing protocol-1 preparation/review hash and serialized order remain
+intact. The public optional reinitialization facts expose retained HEAD and config/
+metadata digests. Paired request/review/facts schemas describe the snapshot source.
+Original prepare/control route and operation descriptions cover both review modes.
+Recovered reviews display the existing HEAD and configuration evidence.
+
+The original existing-repository read context already handles operator-bound .git
+files, Git/common directory relationships and worktree configuration. That same
+context supplies reinitialization review facts for linked/common bindings. Full
+native reinitialization remains to be connected, including same-volume generated
+configuration, preserving original files and metadata, exact-owned publication,
+original typed phases and interrupted recovery. Original admission, private plan
+and execution-source readers explicitly enforce their current protocol-1 native
+support until those phases exist. The creation UI keeps reinitialization at the
+review stage during this increment. Damaged metadata and reference backend scope,
+local/remote branch checkout and merged-safe deletion remain part of M15.14.
+
+This increment is source development under the user's instruction. Source-object
+comparison covered three paired schemas and two route/operation descriptions.
+Runtime verification, tests, typechecks, builds, migrations and deployment remain
+unexecuted.
