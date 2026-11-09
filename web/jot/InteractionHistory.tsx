@@ -16,8 +16,8 @@ function SavedAnswer({answer,labels}:{answer:QuestionAnswer;labels:Map<string,st
  </div>;
 }
 
-function InteractionRecord({value}:{value:Interaction}){
- return <article className="jot-interaction-record">
+function InteractionRecord({value,searchId}:{value:Interaction;searchId:string}){
+ return <article className="jot-interaction-record" data-chat-search-content={searchId}>
   <h4>{value.kind==='question'?'问题记录':'确认记录'} · {value.kind==='approval'&&value.status==='answered'?'已决定':statusLabels[value.status]}</h4>
   <p>创建时间 {value.created_at} · 版本 {value.version}</p>
   {value.kind==='question'?<>
@@ -78,14 +78,14 @@ export default function InteractionHistory({conversationId,runId}:{conversationI
   if(!current?.next_cursor||!last)return;
   setCursors(values=>[...values.slice(0,page),{id:last.interaction_id,createdAt:last.created_at}]);setPage(value=>value+1);
  };
- return <details className="jot-interaction-history" open={open} onToggle={event=>setOpen(event.currentTarget.open)} data-chat-search-ignore>
+ return <details className="jot-interaction-history" open={open} onToggle={event=>setOpen(event.currentTarget.open)}>
   <summary>问题与确认历史</summary>
   {open&&<>
    <p>原请求及当前已保存的公开回答。</p>
    <button type="button" disabled={resource.loading} onClick={refresh}>刷新交互历史</button>
    {resource.loading&&<p role="status">正在读取交互历史…</p>}
    {resource.error&&<p role="alert">{resource.error}</p>}
-   {current?.items.map(item=><ConversationDisplayBoundary key={`${item.interaction_id}:${item.version}`} label="交互历史记录"><InteractionRecord value={item}/></ConversationDisplayBoundary>)}
+   {current?.items.map(item=><ConversationDisplayBoundary key={`${item.interaction_id}:${item.version}`} label="交互历史记录"><InteractionRecord value={item} searchId={JSON.stringify(['interaction',conversationId,item.run_id,item.interaction_id,item.version])}/></ConversationDisplayBoundary>)}
    {current&&!current.items.length&&<p role="status">此范围暂无交互记录。</p>}
    <nav aria-label="交互历史翻页"><button type="button" disabled={resource.loading||page===0} onClick={()=>setPage(value=>value-1)}>较新交互</button>
     <span>第 {page+1} 页</span><button type="button" disabled={resource.loading||!current?.next_cursor} onClick={older}>更早交互</button></nav>

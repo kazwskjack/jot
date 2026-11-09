@@ -6,6 +6,9 @@ import type {Message,MessagePage,Activity} from './types';
 import {activitySearchText,type ActivityReveal,type ActivityRun,type ToolActivity} from './activity-presentation';
 import './conversation-history-search.css';
 
+type ContentDocument={kind:'content';id:string;text:string};
+const sourceLabels={activity:'工具步骤',message:'消息正文',content:'已加载内容'};
+const searchAttributes={activity:'data-chat-search-activity',message:'data-chat-search-message',content:'data-chat-search-content'};
 type SearchDocument={element:HTMLElement;text:string;nodes:Array<{node:Text;start:number;end:number}>};
 type SharedProps={
  root:RefObject<HTMLElement|null>;
@@ -29,12 +32,20 @@ type Props=SharedProps&({
 }|{scope:'activities'});
 const EMPTY_MESSAGES:Message[]=[];
 
-function readSearchDocument(element:HTMLElement):SearchDocument{
+function readSearchDocument(element:HTMLElement,visibleOnly=false):SearchDocument{
  const nodes:SearchDocument['nodes']=[],walker=document.createTreeWalker(element,NodeFilter.SHOW_TEXT);
  let text='',previousBlock:Element|null=null;
  while(walker.nextNode()){
   const node=walker.currentNode as Text;
   if(node.parentElement?.closest('script,style,[aria-hidden="true"],[data-chat-search-ignore]'))continue;
+  if(visibleOnly){
+   let parent:Element|null=node.parentElement;let hidden=false;
+   while(parent){
+    if(parent.tagName==='DETAILS'&&!parent.hasAttribute('open')&&!parent.querySelector(':scope > summary')?.contains(node)){hidden=true;break;}
+    parent=parent.parentElement;
+   }
+   if(hidden)continue;
+  }
   const block=node.parentElement?.closest('p,pre,li,h1,h2,h3,h4,h5,h6,td,th,dt,dd')??null;
   if(nodes.length&&block!==previousBlock)text+='\n';
   previousBlock=block;
@@ -56,6 +67,7 @@ export default function ConversationHistorySearch(props:Props){
  const activityOnly=props.scope==='activities';
  const [open,setOpen]=useState(false),[draft,setDraft]=useState(''),[query,setQuery]=useState('');
  const [index,setIndex]=useState(0),[navigationVersion,setNavigationVersion]=useState(0);
+ const [contentDocuments,setContentDocuments]=useState<ContentDocument[]>([]);
  const [loading,setLoading]=useState(false),[error,setError]=useState(''),[retry,setRetry]=useState(0);
  const input=useRef<HTMLInputElement>(null),opener=useRef<HTMLButtonElement>(null);
  const composing=useRef(false),compositionEnded=useRef(0),cursor=useRef<string>(),complete=useRef(false);
@@ -104,13 +116,34 @@ export default function ConversationHistorySearch(props:Props){
   return()=>{abort.abort();setLoading(false);};
  },[open,ready,conversationId,retry,historyCursor,historyComplete]);
 
+ useEffect(()=>{
+  if(!open||!ready){setContentDocuments([]);return;}
+  let frame:number|undefined;
+  const collect=()=>{
+   frame=undefined;const container=root.current,documents:ContentDocument[]=[];
+   for(const element of container?.querySelectorAll<HTMLElement>('[data-chat-search-content]')??[]){
+    const scope=element.closest('[data-chat-search-scope]'),id=element.getAttribute('data-chat-search-content');
+    if(!id||scope&&scope!==container||element.closest('[data-chat-search-ignore]')||!element.getClientRects().length)continue;
+    documents.push({kind:'content',id,text:readSearchDocument(element,true).text});
+   }
+   setContentDocuments(previous=>previous.length===documents.length&&previous.every((value,index)=>value.id===documents[index]!.id&&value.text===documents[index]!.text)?previous:documents);
+  };
+  const schedule=()=>{if(frame===undefined)frame=requestAnimationFrame(collect);};
+  const observer=new MutationObserver(schedule),container=root.current;
+  if(container)observer.observe(container,{subtree:true,childList:true,characterData:true,attributes:true,
+   attributeFilter:['open','hidden','data-chat-search-content','data-chat-search-ready']});
+  schedule();
+  return()=>{observer.disconnect();if(frame!==undefined)cancelAnimationFrame(frame);};
+ },[open,ready,root]);
+
  const results=useMemo(()=>{
   if(!needle)return [];
   const pattern=searchPattern(needle);
-  const sources:Array<{kind:'message'|'activity';id:string;text:string}>=[
+  const sources:Array<{kind:'message'|'activity'|'content';id:string;text:string}>=[
    ...activities.filter((activity):activity is ToolActivity=>activity.kind!=='compaction')
     .sort((a,b)=>a.started_at.localeCompare(b.started_at)||a.activity_id.localeCompare(b.activity_id))
     .map(activity=>({kind:'activity' as const,id:activity.activity_id,text:activitySearchText(activity,runs[activity.run_id])})),
+   ...contentDocuments,
    ...messages.map(message=>({kind:'message' as const,id:message.message_id,
     text:message.blocks.filter(block=>block.kind==='text').map(block=>block.text).join('\n')})),
   ];
@@ -120,7 +153,7 @@ export default function ConversationHistorySearch(props:Props){
    while(pattern.exec(source.text))count++;
    return {...source,count};
   }).filter(result=>result.count>0);
- },[messages,activities,runs,needle]);
+ },[messages,activities,runs,contentDocuments,needle]);
  const total=results.reduce((sum,result)=>sum+result.count,0),activeIndex=Math.min(index,Math.max(0,total-1));
  const active=useMemo(()=>{
   let remaining=activeIndex;
@@ -139,7 +172,7 @@ export default function ConversationHistorySearch(props:Props){
  useEffect(()=>{
   if(!open||!activeId)return;
   if(activeKind==='activity')onRevealActivity({activityId:activeId,key:revealKey});
-  else if(!loading)onReveal?.(activeId);
+  else if(activeKind==='message'&&!loading)onReveal?.(activeId);
  },[open,activeKind,activeId,revealKey,loading,onReveal,onRevealActivity]);
  useEffect(()=>{
   if(!open||!active)return;
@@ -149,14 +182,14 @@ export default function ConversationHistorySearch(props:Props){
   const clear=()=>{registry?.delete(highlightName);marked?.removeAttribute('data-chat-search-active');marked=undefined;};
   const refresh=()=>{
    frame=undefined;clear();
-   const selector=active.source.kind==='activity'?'[data-chat-search-activity]':'[data-chat-search-message]';
+   const attribute=searchAttributes[active.source.kind],selector=`[${attribute}]`;
    const element=Array.from(root.current?.querySelectorAll<HTMLElement>(selector)??[])
     .find(node=>{
      const scope=node.closest('[data-chat-search-scope]');
-     return (!scope||scope===root.current)&&(active.source.kind==='activity'?node.dataset.chatSearchActivity:node.dataset.chatSearchMessage)===active.source.id;
+     return (!scope||scope===root.current)&&node.getAttribute(attribute)===active.source.id;
     });
    if(!element||element.dataset.chatSearchReady==='false'||!element.getClientRects().length)return;
-   const source=readSearchDocument(element),pattern=searchPattern(needle);
+   const source=readSearchDocument(element,active.source.kind==='content'),pattern=searchPattern(needle);
    let visibleMatch:RegExpExecArray|null=null;
    for(let occurrence=0;occurrence<=active.occurrence;occurrence++){
     visibleMatch=pattern.exec(source.text);
@@ -174,7 +207,7 @@ export default function ConversationHistorySearch(props:Props){
    }
    if(range&&registry&&HighlightClass)registry.set(highlightName,new HighlightClass(range));
    element.setAttribute('data-chat-search-active','true');marked=element;
-   const ready=active.source.kind==='activity'||(!loading&&revealedMessageId===active.source.id);
+   const ready=active.source.kind!=='message'||(!loading&&revealedMessageId===active.source.id);
    if(ready&&lastReveal.current!==revealKey){
     lastReveal.current=revealKey;
     const targetRect=()=>{
@@ -228,9 +261,9 @@ export default function ConversationHistorySearch(props:Props){
 
  return <div className="jot-history-search">
   <style>{`::highlight(${highlightName}){background:#f4cd54;color:#151515}`}</style>
-  <button ref={opener} type="button" aria-expanded={open} disabled={!ready} onClick={openSearch}>{activityOnly?'搜索公开步骤':'搜索当前会话'}</button>
-  {open&&<div role="search" aria-label={activityOnly?'公开步骤搜索':'会话历史搜索'}>
-   <input ref={input} type="search" aria-label={activityOnly?'搜索公开步骤':'搜索会话内容'} placeholder={activityOnly?'搜索公开步骤…':'搜索会话内容…'} value={draft} autoComplete="off" spellCheck={false}
+  <button ref={opener} type="button" aria-expanded={open} disabled={!ready} onClick={openSearch}>{activityOnly?'搜索公开记录':'搜索当前会话'}</button>
+  {open&&<div role="search" aria-label={activityOnly?'公开记录搜索':'会话历史搜索'}>
+   <input ref={input} type="search" aria-label={activityOnly?'搜索公开记录':'搜索会话内容'} placeholder={activityOnly?'搜索公开记录…':'搜索会话内容…'} value={draft} autoComplete="off" spellCheck={false}
     onChange={event=>{setDraft(event.currentTarget.value);if(!composing.current){changeQuery(event.currentTarget.value);}}}
     onCompositionStart={()=>{composing.current=true;compositionEnded.current=0;}}
     onCompositionEnd={event=>{composing.current=false;compositionEnded.current=Date.now();setDraft(event.currentTarget.value);changeQuery(event.currentTarget.value);}}
@@ -243,9 +276,9 @@ export default function ConversationHistorySearch(props:Props){
    <button type="button" disabled={!total} onClick={()=>navigate(-1)}>上一个结果</button>
    <button type="button" disabled={!total} onClick={()=>navigate(1)}>下一个结果</button>
    <button type="button" onClick={close}>关闭搜索</button>
-   {active&&<p className="jot-history-search-excerpt">{active.source.kind==='activity'?'工具步骤 · ':'消息正文 · '}{active.source.text.slice(Math.max(0,active.offset-60),active.offset+active.length+60)}</p>}
-   <small>{activityOnly?'搜索范围为已加载的公开步骤。历史加载进度和保留缺口显示在时间线上方。':'公开步骤历史的加载进度和保留缺口显示在时间线上方。'}</small>
-   {error&&<p role="alert">完整历史尚未加载，当前结果来自已加载消息。{error} <button type="button" disabled={loading} onClick={()=>setRetry(value=>value+1)}>继续加载历史</button></p>}
+   {active&&<p className="jot-history-search-excerpt">{sourceLabels[active.source.kind]} · {active.source.text.slice(Math.max(0,active.offset-60),active.offset+active.length+60)}</p>}
+   <small>{activityOnly?'搜索范围为已加载的公开记录。步骤历史的加载进度和保留缺口显示在时间线上方。':'公开步骤历史的加载进度和保留缺口显示在时间线上方。'} 文件与交互正文包含已打开的文件预览和当前交互历史页。</small>
+   {error&&<p role="alert">完整历史尚未加载，当前结果来自已加载的公开记录。{error} <button type="button" disabled={loading} onClick={()=>setRetry(value=>value+1)}>继续加载历史</button></p>}
   </div>}
  </div>;
 }

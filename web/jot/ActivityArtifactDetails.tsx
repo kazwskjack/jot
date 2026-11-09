@@ -6,7 +6,7 @@ import type {Artifact,Diff} from './types';
 
 const id=/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/;
 const version=(value:unknown)=>Number.isSafeInteger(value)&&Number(value)>0;
-type Content={file:Artifact;before?:Artifact;text?:string;image?:string;truncated?:boolean};
+type Content={file:Artifact;before?:Artifact;text?:string;image?:string;truncated?:boolean;notice?:string};
 
 export default function ActivityArtifactDetails({conversationId,target}:{conversationId:string;target:ActivityArtifactTarget}){
  const identity=JSON.stringify([conversationId,target]);
@@ -28,7 +28,8 @@ export default function ActivityArtifactDetails({conversationId,target}:{convers
   const load=async():Promise<Content>=>{
    if(target.kind==='diff'){
     const before=await metadata(target.fromVersion,target.beforeSha256),file=await metadata(target.toVersion,target.afterSha256);
-    if(before.size_bytes>20*1024*1024||file.size_bytes>20*1024*1024)throw Error('artifact_preview_too_large');
+    if(before.size_bytes>20*1024*1024||file.size_bytes>20*1024*1024)return {file,before,notice:'文件超过20 MiB差异预览范围，可下载两个固定版本核对。'};
+    if(!before.media_type.startsWith('text/')||!file.media_type.startsWith('text/'))return {file,before,notice:'此格式可下载两个固定版本核对。'};
     const diff=await request<Diff>(`/artifacts/${encodeURIComponent(target.artifactId)}/diff?from_version=${target.fromVersion}&to_version=${target.toVersion}`,'GET',undefined,undefined,signal);
     if(!diff||diff.artifact_id!==target.artifactId||diff.from_version!==target.fromVersion||diff.to_version!==target.toVersion
      ||typeof diff.unified_diff!=='string'||diff.unified_diff.length>200000||typeof diff.truncated!=='boolean')throw Error('文件差异来源尚未确认');
@@ -36,7 +37,13 @@ export default function ActivityArtifactDetails({conversationId,target}:{convers
    }
    const file=await metadata(target.version,target.sha256);
    if(file.preview_kind!=='text'&&file.preview_kind!=='image')return {file};
-   const verified=await fetchVerifiedArtifactPreviewBytes(file,file.preview_kind,signal);
+   if(file.size_bytes>20*1024*1024)return {file,notice:'文件超过20 MiB预览范围，可下载固定版本查看。'};
+   let verified;
+   try{verified=await fetchVerifiedArtifactPreviewBytes(file,file.preview_kind,signal);}
+   catch(error){
+    if(error instanceof Error&&error.message==='artifact_preview_format_unsupported')return {file,notice:artifactPreviewErrorMessage(error)};
+    throw error;
+   }
    signal.throwIfAborted();
    if(file.preview_kind==='text'){
     const text=new TextDecoder().decode(verified.bytes);
@@ -51,9 +58,9 @@ export default function ActivityArtifactDetails({conversationId,target}:{convers
   return()=>{controller.abort();if(image)URL.revokeObjectURL(image);};
  },[identity,revision]);
  const current=state?.identity===identity?state:undefined,content=current?.content;
- return <div ref={region} tabIndex={-1} className="jot-activity-content" aria-label="步骤文件内容" data-chat-search-ignore>
+ return <div ref={region} tabIndex={-1} className="jot-activity-content" aria-label="步骤文件内容">
   {(!current||!content&&!current.error)&&<p role="status">正在读取步骤文件…</p>}
-  {content&&<>
+  {content&&<section data-chat-search-content={JSON.stringify(['artifact',identity,content.file.version,content.before?.version??null])}>
    <h4>{content.file.relative_path||content.file.file_name}</h4>
    <p>{content.before?`版本 ${content.before.version} → ${content.file.version}`:`版本 ${content.file.version}`}
     {target.kind==='file'&&target.version===undefined?' · 当前可读文件版本':''}</p>
@@ -62,8 +69,9 @@ export default function ActivityArtifactDetails({conversationId,target}:{convers
    {content.text!==undefined&&<pre>{content.text}</pre>}
    {content.image&&<img src={content.image} alt={content.file.file_name}/>}
    {content.truncated&&<p role="status">已显示前200000个字符，可下载对应版本查看全文。</p>}
-   {content.text===undefined&&!content.image&&<p role="status">此格式可下载查看。</p>}
-  </>}
+   {content.notice&&<p role="status" data-chat-search-ignore>{content.notice}</p>}
+   {!content.notice&&content.text===undefined&&!content.image&&<p role="status" data-chat-search-ignore>此格式可下载查看。</p>}
+  </section>}
   {current?.error&&<p role="alert">{current.error} <button type="button" onClick={()=>setRevision(value=>value+1)}>重试读取</button></p>}
  </div>;
 }

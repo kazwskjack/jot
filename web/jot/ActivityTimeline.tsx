@@ -96,8 +96,8 @@ export default function ActivityTimeline({conversationId,activities,runs,reveal,
   <label>运行记录 <select value={selected} onChange={event=>selectRun(event.currentTarget.value)}>{runIds.map(id=><option key={id} value={id}>{runs[id]?.created_at??id} · {runs[id]?.status??'历史运行'}</option>)}</select></label>
   <small>当前已加载的公开步骤。父步骤缺失或终态未确认时会保留提示。</small>
   {groups.map(group=><ActivityGroup key={`${selected}:${group.id}`} group={group} {...(run?{run}:{})} onSelectRun={selectRun} onOpenArtifact={(activity,target)=>setArtifact({conversationId,runId:activity.run_id,activityId:activity.activity_id,target})} availableRuns={availableRuns} {...(onOpenMember?{onOpenMember}:{})} {...(reveal?{reveal}:{})}/>)}
-  {artifact&&artifact.conversationId===conversationId&&artifact.runId===selected&&<section aria-label="已选步骤文件" data-chat-search-ignore>
-   <button type="button" onClick={()=>setArtifact(undefined)}>关闭步骤文件</button>
+  {artifact&&artifact.conversationId===conversationId&&artifact.runId===selected&&<section aria-label="已选步骤文件">
+   <button type="button" data-chat-search-ignore onClick={()=>setArtifact(undefined)}>关闭步骤文件</button>
    <ActivityArtifactDetails key={JSON.stringify(artifact)} conversationId={conversationId} target={artifact.target}/>
   </section>}
  </section>;
