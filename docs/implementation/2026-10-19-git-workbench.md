@@ -166,8 +166,37 @@ object directory. It has no source alternates for that write. All private contex
 cleanup runs in finally, and current project ownership and identity policy are
 checked before and after preparation in the host service.
 
-This supplies object material for the following original native-custody, write-lock,
-preparation journal and ref-publication work. The Worker does not consume this
-material yet. Original repository objects, index and refs are untouched by this
+The material is retained in the kernel. Host callers receive a frozen one-attempt
+plan, and persisted JSON cannot reconstruct writable plan identity. The Worker
+does not consume the new commit path yet. Original repository objects, index and refs are untouched by this
 preparation path, and commit dispatch remains unavailable. This source increment
 has no runtime, test, build or native-command execution evidence.
+
+
+## Commit object lock protocol
+
+The commit kernel now retains the original source index bytes, selected files and
+attributes, raw HEAD/branch/packed-ref facts, metadata and physical directory
+identities throughout object writes. It reuses the existing index kernel's source
+checks, parent creation, isolated command transport and owned-lock cleanup core.
+Existing index preparation/evidence decoders still validate their original format.
+
+Commit-specific evidence binds the reviewed metadata and source digests, exact
+commit/tree object IDs, body digests and sizes, target ref, parent, physical roots,
+lock identities and created ref parents. The kernel creates private pending lock
+files, requires synchronous durable preparation before canonical lock installation,
+and installs each canonical lock with an exclusive hard link preserving its
+journaled inode. The original coordinator supplies the acquisition transaction,
+dispatch journal, owner/lease/native-custody checks and cleanup transaction.
+
+The index lock contains the unchanged original index bytes. HEAD, packed refs and
+the original branch remain locked while reviewed tree/commit objects are written
+through the isolated metadata configuration and read back from the original object
+store. Cancellation, proof changes or cleanup uncertainty consume the in-process
+plan. Owned pending/canonical pairs are checked before removal. Foreign files,
+unknown links and replaced roots are retained for explicit recovery.
+
+A host-only publication continuation runs inside those locks. Ref CAS, reflog facts,
+original execution-service journal consumers and Worker/native recovery still
+require integration. Commit dispatch remains unavailable. No runtime command,
+test, build, migration or production operation was executed for this increment.
