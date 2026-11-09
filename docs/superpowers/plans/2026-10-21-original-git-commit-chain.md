@@ -648,3 +648,30 @@ operations, UI runtime acceptance, migrations and deployment unexecuted.
 
 Installed-Git initialization behavior follows the
 [official setup implementation](https://github.com/git/git/blob/master/setup.c).
+
+## Reinitialization original directory layout source increment
+
+Existing-repository review now freezes original root, Git and common-directory
+physical identities, permission modes and UID/GID facts. It also records existing
+or missing objects, objects/info, objects/pack, refs, refs/heads and refs/tags under
+the actual configured common directory. The original directory reader retains
+its canonical-path and symlink checks. Root/Git/common facts and child layout are
+repeated around private configuration preparation and after read-context disposal.
+
+Review source checks the canonical HEAD, index, config, packed-ref, root init and
+internal-ignore locks. Existing locks report the original repository busy error.
+The protocol-2 decoder checks exact layout shape, root/Git/common identity linkage,
+mode/UID/GID types, fixed child paths, distinct child identities and missing-parent
+consistency. New approval requires both full configuration and layout proof, while
+older protocol-2 source retains read/cancel compatibility. The public review carries
+only the layout digest and recovery UI displays it. JSON/YAML review-facts source
+objects are paired.
+
+This fixes the directory mode/group baseline needed before same-volume native
+allocation, probing, required-directory additions and publication. Native
+reinitialization allocation/locks, typed preparation/dispatch/outcome and original
+native recovery/settlement remain the next work. Linked/external and damaged
+metadata, checkout/deletion and reference backend coverage remain in M15.14.
+This increment follows the user's source-development-only instruction. Tests,
+typechecks, builds, native/product operations, UI runtime acceptance, migrations
+and deployment remain unexecuted.

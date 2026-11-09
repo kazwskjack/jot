@@ -51,7 +51,7 @@ export function gitInitializationWitness(value:unknown):GitInitializationWitness
    ||witness.protocol===1&&initializationSnapshotId(witness)!==witness.snapshot_id)throw Error();
   if(witness.protocol===2){
    const existing=witness.existing,oid=(value:unknown)=>typeof value==='string'&&new RegExp('^[a-f0-9]{'+(witness.object_format==='sha1'?40:64)+'}$').test(value);
-   if(!shape(existing,['source_metadata_sha256','git_directory_identity','common_directory_identity','dot_file','head','common_config','worktree_config','worktree_config_enabled',...(existing?.configuration===undefined?[]:['configuration'])])
+   if(!shape(existing,['source_metadata_sha256','git_directory_identity','common_directory_identity','dot_file','head','common_config','worktree_config','worktree_config_enabled',...(existing?.configuration===undefined?[]:['configuration']),...(existing?.layout===undefined?[]:['layout'])])
     ||typeof existing.source_metadata_sha256!=='string'||!SHA.test(existing.source_metadata_sha256)
     ||typeof existing.git_directory_identity!=='string'||!IDENTITY.test(existing.git_directory_identity)
     ||typeof existing.common_directory_identity!=='string'||!IDENTITY.test(existing.common_directory_identity)
@@ -60,6 +60,27 @@ export function gitInitializationWitness(value:unknown):GitInitializationWitness
     if(!shape(entry,['identity','sha256','size','mode'])||typeof entry.identity!=='string'||!IDENTITY.test(entry.identity)
      ||typeof entry.sha256!=='string'||!SHA.test(entry.sha256)||!Number.isSafeInteger(entry.size)||entry.size<0||entry.size>1024*1024
      ||!Number.isSafeInteger(entry.mode)||entry.mode<0||entry.mode>0o777)throw Error();
+   }
+   const layout=existing.layout;
+   if(layout!==undefined){
+    const directory=(value:any)=>shape(value,['identity','mode','uid','gid'])&&typeof value.identity==='string'&&IDENTITY.test(value.identity)
+     &&typeof value.uid==='string'&&/^[0-9]+$/.test(value.uid)&&typeof value.gid==='string'&&/^[0-9]+$/.test(value.gid)
+     &&Number.isSafeInteger(value.mode)&&value.mode>=0&&value.mode<=0o7777;
+    if(!shape(layout,['protocol','root','git','common','directories'])||layout.protocol!==1
+     ||!directory(layout.root)||layout.root.identity!==witness.root_identity
+     ||!directory(layout.git)||layout.git.identity!==existing.git_directory_identity
+     ||!directory(layout.common)||layout.common.identity!==existing.common_directory_identity
+     ||!Array.isArray(layout.directories)||layout.directories.length!==6)throw Error();
+    const paths=['objects','objects/info','objects/pack','refs','refs/heads','refs/tags'];
+    const identities=new Set([layout.root.identity,layout.git.identity,layout.common.identity]);
+    for(const [index,item] of layout.directories.entries()){
+     if(!shape(item,['path','before'])||item.path!==paths[index])throw Error();
+     if(item.before!==null){
+      if(!directory(item.before)||identities.has(item.before.identity))throw Error();identities.add(item.before.identity);
+      const parent=item.path.split('/')[0];
+      if(item.path.includes('/')&&layout.directories.find(value=>value.path===parent)!.before===null)throw Error();
+     }
+    }
    }
    const configuration=existing.configuration;
    if(configuration!==undefined){

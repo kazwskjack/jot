@@ -1,5 +1,5 @@
 import {initializationInternalIgnore,initializationSnapshotId,normalizeGitInitializationReview} from './initialization-records.ts';
-import type {GitInitializationWitness,GitInitializationFile} from '../../contracts/types.ts';
+import type {GitInitializationWitness,GitInitializationFile,GitReinitializationLayout} from '../../contracts/types.ts';
 import {planReinitializationConfiguration} from './reinitialization-configuration.ts';
 import {planCreateBranchConfiguration} from './branch-configuration.ts';
 import {validGitReference} from './references.ts';
@@ -416,6 +416,29 @@ export class GitRepositoryInspection{
    return{body,fact:{identity:identity(before),sha256:hash(body),size:body.length,mode:Number(before.mode&0o777n)}};
   }catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return{body:null,fact:null};throw error;}
  }
+ /** Directory modes and missing children are part of the original reinit
+  * source, including common metadata on another configured volume. */
+ private async reinitializationLayout(signal?:AbortSignal):Promise<GitReinitializationLayout>{
+  const directory=async(path:string)=>{
+   signal?.throwIfAborted();const id=await this.directory(path),before=await lstat(path);
+   if(identity(before)!==id)throw Error('git_snapshot_changed');
+   const after=await lstat(path);
+   if(identity(after)!==id||before.mode!==after.mode||before.uid!==after.uid||before.gid!==after.gid)throw Error('git_snapshot_changed');
+   return{identity:id,mode:Number(after.mode&0o7777n),uid:String(after.uid),gid:String(after.gid)};
+  };
+  const root=await directory(this.root),git=await directory(this.gitDirectory),common=await directory(this.commonDirectory);
+  for(const path of [join(this.gitDirectory,'HEAD.lock'),join(this.gitDirectory,'index.lock'),join(this.commonDirectory,'config.lock'),
+   join(this.commonDirectory,'packed-refs.lock'),join(this.root,'.git.jot-init.lock'),join(this.root,'.pilotdeck','.gitignore.lock')]){
+   signal?.throwIfAborted();
+   try{await lstat(path);throw Error('git_repository_busy');}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
+  }
+  const directories:GitReinitializationLayout['directories']=[];
+  for(const path of ['objects','objects/info','objects/pack','refs','refs/heads','refs/tags']){
+   try{directories.push({path,before:await directory(join(this.commonDirectory,path))});}
+   catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;directories.push({path,before:null});}
+  }
+  signal?.throwIfAborted();return{protocol:1,root,git,common,directories};
+ }
  /** Freeze existing repository facts through the original sanitized read
   * context. Native reinitialization consumes this distinct protocol later. */
  private async freezeReinitialization(snapshotId:string,initialBranch:string,objectFormat:'sha1'|'sha256',signal?:AbortSignal):Promise<GitInitializationWitness>{
@@ -437,15 +460,16 @@ export class GitRepositoryInspection{
    const dot=join(this.root,'.git'),dotFile=(await lstat(dot)).isFile()?(await this.initializationFileSource(dot)).fact:null;
    const config=await this.initializationFileSource(join(this.commonDirectory,'config'));
    const worktree=await this.initializationFileSource(join(this.gitDirectory,'config.worktree'));
-   const planned=initializationInternalIgnore(ignore.body);
+   const planned=initializationInternalIgnore(ignore.body),layout=await this.reinitializationLayout(signal);
    const configuration=await planReinitializationConfiguration({executable:this.executable!,root:this.root,context,commonConfig:config.body,worktreeConfig:worktree.body,
     worktreeConfigEnabled:context.worktreeConfigEnabled===true,objectFormat,limits:this.limits,...(signal?{signal}:{})});
-   if((await this.inspectContext(context,signal)).snapshot_id!==snapshotId||await internalDirectory()!==internalIdentity)throw Error('git_snapshot_changed');
+   if((await this.inspectContext(context,signal)).snapshot_id!==snapshotId||await internalDirectory()!==internalIdentity
+    ||canonicalJson(await this.reinitializationLayout(signal))!==canonicalJson(layout))throw Error('git_snapshot_changed');
    result={protocol:2,kind:'initialize_repository',snapshot_id:snapshotId,repository_sha256:snapshot.repository_sha256,
     root_identity:root,internal_directory_identity:internalIdentity,internal_ignore:ignore.fact,initial_branch:initialBranch,object_format:objectFormat,
     ignore_after:{sha256:hash(planned.body),size:planned.body.length,changed:planned.changed},
     existing:{source_metadata_sha256:context.metadata,git_directory_identity:git,common_directory_identity:common,dot_file:dotFile,
-     head:snapshot.head,common_config:config.fact,worktree_config:worktree.fact,worktree_config_enabled:context.worktreeConfigEnabled===true,configuration:configuration.review},execution_authorized:false};
+     head:snapshot.head,common_config:config.fact,worktree_config:worktree.fact,worktree_config_enabled:context.worktreeConfigEnabled===true,configuration:configuration.review,layout},execution_authorized:false};
   }finally{await context.dispose();}
   const anchors=await this.anchors(signal),ignore=await this.initializationFileSource(join(internal,'.gitignore'));
   if(anchors.repository!==result.repository_sha256||anchors.metadata!==result.existing.source_metadata_sha256
@@ -454,6 +478,7 @@ export class GitRepositoryInspection{
    ||canonicalJson(ignore.fact)!==canonicalJson(result.internal_ignore))throw Error('git_snapshot_changed');
   const dot=join(this.root,'.git'),dotFile=(await lstat(dot)).isFile()?(await this.initializationFileSource(dot)).fact:null;
   if(canonicalJson(dotFile)!==canonicalJson(result.existing.dot_file))throw Error('git_snapshot_changed');
+  if(canonicalJson(await this.reinitializationLayout(signal))!==canonicalJson(result.existing.layout))throw Error('git_snapshot_changed');
   const final=await this.anchors(signal);
   if(final.repository!==result.repository_sha256||final.metadata!==result.existing.source_metadata_sha256)throw Error('git_snapshot_changed');
   signal?.throwIfAborted();return result;

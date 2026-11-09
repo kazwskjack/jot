@@ -46,6 +46,7 @@ export default function GitInitializationReview({project,snapshotId,onClose,onBu
    else if(['GIT_SNAPSHOT_CHANGED','GIT_REPOSITORY_CHANGED','GIT_REVIEW_CHANGED','GIT_INITIALIZATION_REVIEW_CHANGED','GIT_INITIALIZATION_SOURCE_CHANGED','GIT_INITIALIZATION_METADATA_PRESENT','GIT_REINITIALIZATION_REVIEW_REQUIRED','GIT_REINITIALIZATION_METADATA_CHANGED'].includes(code)){
     setStale(true);setError('初始化依据已变化，请取消审核并刷新项目仓库。');
    }else if(code==='GIT_INITIALIZATION_BRANCH_INVALID'||code==='GIT_INITIALIZATION_INVALID')setError('初始化参数无效，请核对初始分支名称与对象格式。');
+   else if(code==='GIT_REPOSITORY_BUSY')setError('原仓库存在 Git 锁，请等待当前操作完成后重新核对审核。');
    else if(code==='GIT_REINITIALIZATION_OBJECT_FORMAT_CHANGED')setError('已有仓库的对象格式与请求不一致，请保留原格式重新生成审核。');
    else if(code==='GIT_INITIALIZATION_BINDING_INVALID')setError('当前仓库绑定需要先核对服务端初始化配置。');
    else if(code==='VERSION_CONFLICT'){setVerified(false);setError('审核状态已变化，请刷新审核状态。')}
@@ -69,6 +70,7 @@ export default function GitInitializationReview({project,snapshotId,onClose,onBu
     <dt>规则审核后 SHA-256</dt><dd><code>{review.internal_ignore.after_sha256}</code> · {review.internal_ignore.size} 字节</dd>
     {review.reinitialization&&<>
      <dt>保留原 HEAD</dt><dd><code>{review.reinitialization.head.branch??'分离 HEAD'}</code> · <code>{review.reinitialization.head.oid??'尚无提交'}</code></dd>
+     {review.reinitialization.layout_sha256&&<><dt>原目录布局 SHA-256</dt><dd><code>{review.reinitialization.layout_sha256}</code></dd></>}
      <dt>原仓库元数据 SHA-256</dt><dd><code>{review.reinitialization.source_metadata_sha256}</code></dd>
      {review.reinitialization.configuration&&<>
       <dt>文件模式探测为 false 的配置 SHA-256</dt><dd><code>{review.reinitialization.configuration.filemode_false_sha256}</code></dd>
