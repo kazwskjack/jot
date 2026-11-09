@@ -23,7 +23,7 @@ export default function ActivityToolResult({conversationId,target}:{conversation
    if(taskDraftScope()!==owner||!page||page.conversation_id!==conversationId||page.run_id!==target.runId||page.activity_id!==target.activityId
     ||page.tool_name!==target.toolName||page.execution_authorized!==false
     ||(target.toolName==='jot_workspace'
-     ?page.source!=='workspace'||!['files.read','web.read','files.write','files.delete'].includes(page.operation??'')||typeof page.source_truncated!=='boolean'
+     ?page.source!=='workspace'||!['files.read','web.read','files.write','files.delete','files.list'].includes(page.operation??'')||typeof page.source_truncated!=='boolean'
      :page.source!=='mcp'||page.operation!==undefined||page.source_truncated!==undefined)
     ||((page.operation==='files.write'||page.operation==='files.delete')? !['available','base_unrecorded','preview_limit','content_unavailable','non_text'].includes(page.file_diff_state??''):page.file_diff_state!==undefined)
     ||typeof page.result_sha256!=='string'||!sha.test(page.result_sha256)||expected!==undefined&&page.result_sha256!==expected
@@ -56,7 +56,7 @@ export default function ActivityToolResult({conversationId,target}:{conversation
     <pre>{match?<>{page.text.slice(0,match.offset-offset)}<mark>{match.text}</mark>{page.text.slice(match.offset-offset+match.text.length)}</>:page.text}</pre>
    </section>
    {page.file_diff_state&&page.file_diff_state!=='available'&&<p role="status">{{base_unrecorded:'该文件变更缺少原版本正文，当前显示已确认的操作信息。',preview_limit:'差异来源超过单文件 1 MiB 的文本比较范围。',content_unavailable:'固定版本内容暂不可用，当前显示已确认的操作信息。',non_text:'差异来源包含非 UTF-8 文本内容。'}[page.file_diff_state]}</p>}
-   {page.source_truncated&&<p role="status">原工具回执中的正文已截断，当前显示回执保存的全部文本。</p>}
+   {page.source_truncated&&<p role="status">{page.operation==='files.list'?'原文件列表含后续页面或超出显示范围，当前展示已确认的留存部分。':'原工具回执中的正文已截断，当前显示回执保存的全部文本。'}</p>}
    {page.total_chars===0&&<p role="status">原结果未包含文本内容。</p>}
    {page.has_other_content&&<p role="status">原结果还包含图片或其他非文本内容。</p>}
    {offset>0&&<button type="button" data-chat-search-ignore onClick={()=>setCursor({identity,offset:0,previous:[],sha:page.result_sha256,textSha:page.text_sha256})}>从正文开头阅读</button>}

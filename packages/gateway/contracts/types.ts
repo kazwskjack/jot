@@ -805,7 +805,7 @@ export type ActivityResultArtifact={artifact_id:string;version:number;sha256:str
 
 export type CloseWorkspaceCheckpointRestoreRequestStatus = Exclude<WorkspaceCheckpointRestoreRequestStatus,{state:'unobserved'}>;
 
-export type ActivityToolResultPage={conversation_id:string;run_id:string;activity_id:string;tool_name:string;source:'mcp'|'workspace';operation?:'files.read'|'web.read'|'files.write'|'files.delete';source_truncated?:boolean;file_diff_state?:'available'|'base_unrecorded'|'preview_limit'|'content_unavailable'|'non_text';result_sha256:string;text_sha256:string;offset_chars:number;total_chars:number;text:string;has_other_content:boolean;next_offset_chars?:number;execution_authorized:false};
+export type ActivityToolResultPage={conversation_id:string;run_id:string;activity_id:string;tool_name:string;source:'mcp'|'workspace';operation?:'files.read'|'web.read'|'files.write'|'files.delete'|'files.list';source_truncated?:boolean;file_diff_state?:'available'|'base_unrecorded'|'preview_limit'|'content_unavailable'|'non_text';result_sha256:string;text_sha256:string;offset_chars:number;total_chars:number;text:string;has_other_content:boolean;next_offset_chars?:number;execution_authorized:false};
 
 export type ActivityToolResultMatch={run_id:string;activity_id:string;tool_name:string;title:string;result_sha256:string;text_sha256?:string;offset_chars:number;match_offset_chars:number;match_text:string;excerpt:string};
 export type ActivityToolResultSearchPage={conversation_id:string;run_id?:string;as_of_seq:string;q:string;items:ActivityToolResultMatch[];scanned_upserts:number;unavailable_results:number;unsearched_results?:number;coverage:ActivityHistoryCoverage;next_before_seq?:string;execution_authorized:false};

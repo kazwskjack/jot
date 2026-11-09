@@ -980,7 +980,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       const mutating = ['messages.send', 'memory.save', 'memory.stage', 'memory.propose', 'memory.capture.propose', 'files.write','tasks.prd.plan','tasks.upsert','tasks.evidence','tasks.assess','tasks.delegate','tasks.reply_draft','discovery.plan','discovery.report'].includes(operation);
       const attested = operation==='tasks.prd.read'||operation==='tasks.work.plan.read' || (!!identity.task_binding||(identity.kind==='native_team'&&!!identity.task_assignment)) && !operation.startsWith('tasks.')&&(!operation.startsWith('discovery.')||operation==='discovery.source');
       const callId = input.call_id;
-      const displayRead=operation==='files.read'&&validCallId(callId);
+      const displayRead=['files.read','files.list'].includes(operation)&&validCallId(callId);
       const receipted = mutating || attested || isDream || displayRead;
       if (receipted && !validCallId(callId)) throw new Error('invalid_call_id');
       const digest = createHash('sha256').update(canonical({operation, args})).digest('hex');

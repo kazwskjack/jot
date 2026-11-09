@@ -182,6 +182,43 @@ function writeSummary(db:DatabaseSync,owner:string,runId:string,receiptId:string
  return {text:lines.join('\n')+'\n\n原始写入差异\n'+diff,file_diff_state:'available' as const};
 }
 
+/** Select declared logical file facts from the original saved list page. */
+function fileListSummary(result:Record<string,unknown>){
+ const isolated=result.source==='isolated';
+ if(result.source!==undefined&&result.source!=='workspace'&&!isolated)throw Error('activity_tool_result_not_found');
+ const files=isolated?result.files:result.items,deleted=isolated?(result.deleted_files??[]):[];
+ if(!Array.isArray(files)||files.length>100000||!Array.isArray(deleted)||deleted.length>100000
+  ||!isolated&&result.next_cursor!==undefined&&result.next_cursor!==null&&(typeof result.next_cursor!=='string'||!result.next_cursor||result.next_cursor.length>2048))throw Error('activity_tool_result_source_invalid');
+ const lines=[isolated?'原隔离工作区文件列表':'原工作区文件列表',`已留存文件数 ${files.length}`,`已留存删除记录数 ${deleted.length}`];
+ const paths=new Set<string>();let length=lines.join('\n').length,clipped=false;
+ const path=(value:unknown)=>{
+  if(typeof value!=='string'||!value||value.length>(isolated?4096:400)||value.startsWith('/')||/[\\:\x00-\x1f\x7f]/.test(value)
+   ||value.split('/').some(part=>!part||part==='.'||part==='..')||paths.has(value))throw Error('activity_tool_result_source_invalid');
+  paths.add(value);return value;
+ };
+ // shortcut: list text uses the existing 6 MiB range, extend source paging for larger original receipts.
+ const append=(text:string)=>{
+  if(clipped)return;
+  if(length+text.length+1>MAX_RESULT_TEXT_CHARS){clipped=true;return;}
+  lines.push(text);length+=text.length+1;
+ };
+ for(const item of files){
+  const file=object(item);
+  if(!file||!Number.isSafeInteger(file.version)||Number(file.version)<(isolated?0:1)||!Number.isSafeInteger(file.size)||Number(file.size)<0
+   ||typeof file.sha256!=='string'||!SHA.test(file.sha256))throw Error('activity_tool_result_source_invalid');
+  const name=path(file.path);
+  append(`${name}\n版本 ${file.version}${isolated&&file.version===0?'（原快照内容）':''} · 字节数 ${file.size}\nSHA-256 ${file.sha256}`);
+ }
+ for(const item of deleted){
+  const file=object(item);
+  if(!file||!Number.isSafeInteger(file.version)||Number(file.version)<1)throw Error('activity_tool_result_source_invalid');
+  append(`${path(file.path)}\n删除版本 ${file.version}`);
+ }
+ const truncated=clipped||!isolated&&typeof result.next_cursor==='string';
+ if(truncated)append('原列表含后续页面或超出当前显示范围。');
+ return {text:lines.join('\n'),truncated};
+}
+
 function readWorkspaceText(db:DatabaseSync,owner:string,runId:string,callId:string,reader?:WorkspaceFileReader):TextSource{
  if(!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_tool_receipts'").get())throw Error('activity_tool_result_not_found');
  const rows=db.prepare(`SELECT e.operation,e.receipt_id,e.result_hash,
@@ -193,7 +230,7 @@ function readWorkspaceText(db:DatabaseSync,owner:string,runId:string,callId:stri
  if(rows.length===0)throw Error('activity_tool_result_not_found');
  if(rows.length!==1)throw Error('activity_tool_result_source_invalid');
  const source=rows[0]!;
- if(source.operation!=='files.read'&&source.operation!=='web.read'&&source.operation!=='files.write'&&source.operation!=='files.delete')throw Error('activity_tool_result_not_found');
+ if(source.operation!=='files.read'&&source.operation!=='web.read'&&source.operation!=='files.write'&&source.operation!=='files.delete'&&source.operation!=='files.list')throw Error('activity_tool_result_not_found');
  if(!source.response_json||!source.result_hash||!SHA.test(source.result_hash))throw Error('activity_tool_result_source_invalid');
  const response=parsedObject(source.response_json);
  if(!response)throw Error('activity_tool_result_source_invalid');
@@ -204,11 +241,12 @@ function readWorkspaceText(db:DatabaseSync,owner:string,runId:string,callId:stri
  if(source.operation==='files.delete'&&result.source!=='isolated')throw Error('activity_tool_result_not_found');
  const write=source.operation==='files.delete'?isolatedMutationSummary(db,owner,runId,source.receipt_id!,result,'files.delete')
   :source.operation==='files.write'?writeSummary(db,owner,runId,source.receipt_id!,result,reader):undefined;
- const text=write?.text??(source.operation==='files.read'?result.content:result.text);
- if(typeof text!=='string'||text.length>(write?MAX_RESULT_TEXT_CHARS:MAX_TEXT_CHARS)
+ const listing=source.operation==='files.list'?fileListSummary(result):undefined;
+ const text=write?.text??listing?.text??(source.operation==='files.read'?result.content:result.text);
+ if(typeof text!=='string'||text.length>(write||listing?MAX_RESULT_TEXT_CHARS:MAX_TEXT_CHARS)
   ||source.operation==='web.read'&&(result.mode!=='public_http'||result.trusted!==false||typeof result.truncated!=='boolean'))throw Error('activity_tool_result_source_invalid');
  return {source:'workspace',operation:source.operation,result_sha256:source.result_hash,text,has_other_content:false,
-  source_truncated:source.operation==='web.read'&&result.truncated===true,...(write?{file_diff_state:write.file_diff_state}:{})};
+  source_truncated:listing?listing.truncated:source.operation==='web.read'&&result.truncated===true,...(write?{file_diff_state:write.file_diff_state}:{})};
 }
 
 function activityText(db:DatabaseSync,owner:string,activity:Record<string,unknown>,reader?:WorkspaceFileReader){
@@ -246,7 +284,7 @@ export function readActivityToolResult(db:DatabaseSync,owner:string,conversation
  if(expected!==undefined&&expected!==source.result_sha256)throw Error('activity_tool_result_source_changed');
  const {text,...metadata}=source,textSha=hash(source.text);
  if(expectedText!==undefined&&expectedText!==textSha)throw Error('activity_tool_result_source_changed');
- if((source.operation==='files.write'||source.operation==='files.delete')&&offset>0&&expectedText===undefined)throw Error('invalid_activity_tool_result_query');
+ if(['files.write','files.delete','files.list'].includes(source.operation??'')&&offset>0&&expectedText===undefined)throw Error('invalid_activity_tool_result_query');
  if(offset>text.length||offset>0&&/[\uD800-\uDBFF]/.test(text[offset-1]!)&&/[\uDC00-\uDFFF]/.test(text[offset]!))throw Error('invalid_activity_tool_result_query');
  let end=Math.min(offset+PAGE_SIZE,text.length);
  if(end<text.length&&/[\uD800-\uDBFF]/.test(text[end-1]!)&&/[\uDC00-\uDFFF]/.test(text[end]!))end--;
@@ -279,7 +317,7 @@ export function searchActivityToolResults(db:DatabaseSync,owner:string,conversat
    if(!(error instanceof Error)||!['activity_tool_result_not_found','activity_tool_result_pending','activity_tool_result_source_invalid'].includes(error.message))throw error;
    unavailable++;continue;
   }
-  if(source.file_diff_state!==undefined&&source.file_diff_state!=='available')unsearched++;
+  if(source.file_diff_state!==undefined&&source.file_diff_state!=='available'||source.operation==='files.list'&&source.source_truncated)unsearched++;
   const match=pattern.exec(source.text);
   if(!match)continue;
   const offset=textBoundary(source.text,Math.max(0,match.index-60));

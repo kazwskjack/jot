@@ -83,9 +83,9 @@ export default function ToolResultSearch({conversationId,runId,asOfSeq:latestSeq
    <h4>原工具结果正文</h4>
    <button type="button" onClick={()=>{setSnapshot({scopeIdentity,seq:latestSeq});setCursor({identity,previous:[]});setRevision(value=>value+1);}}>刷新正文搜索</button>
    <p role="status">{current?.loading?'正在搜索原结果正文':`本批命中 ${current?.items.length??0} 条工具正文`} · 本批已检查 {current?.scanned??0} 条步骤记录</p>
-   <small>搜索固定历史边界内已留存的 MCP 文本及文件、网页读取回执和来源可确认的文件变更差异。每条正文列出首处命中，可打开原结果继续查看。</small>
+   <small>搜索固定历史边界内已留存的 MCP 文本、原文件列表及文件、网页读取回执和来源可确认的文件变更差异。每条正文列出首处命中，可打开原结果继续查看。</small>
    {Boolean(current?.unavailable)&&<p role="status">本批有 {current!.unavailable} 条步骤暂无可确认的结果正文。</p>}
-   {Boolean(current?.unsearched)&&<p role="status">本批有 {current!.unsearched} 条文件变更的原始差异暂未纳入检索。</p>}
+   {Boolean(current?.unsearched)&&<p role="status">本批有 {current!.unsearched} 条结果含尚未纳入搜索的文件内容或后续列表记录。</p>}
    {current?.gap&&<p role="status">原事件历史存在保留缺口，搜索覆盖当前可读取的记录。</p>}
    <ol>{current?.items.map(item=><li key={JSON.stringify([item.run_id,item.activity_id])}>
     <p>{item.title} · {item.tool_name}</p><p className="jot-history-search-excerpt">{item.excerpt}</p>
