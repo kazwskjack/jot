@@ -1,4 +1,4 @@
-import {gitReinitializationPreparation,gitReinitializationRefPreparation} from './reinitialization-evidence.ts';
+import {gitReinitializationPreparation,gitReinitializationRefPreparation,gitReinitializationEvidence} from './reinitialization-evidence.ts';
 import {validateInitializationPreparation,readInitializationPreparation,readInitializationRefPreparation,readInitializationDispatch,readInitializationOutcome,initializationAppliedResult} from './initialization-journal.ts';
 import {gitInitializationPreparation,gitInitializationEvidence,gitInitializationReceipt,type GitInitializationEvidence} from './initialization-evidence.ts';
 import {GitInitializationIntents} from './initialization-intents.ts';
@@ -124,7 +124,7 @@ export class GitIndexExecutions{
   * reservation settlement, including its existing producer/native drain proof. */
  async adoptInitializationResult(owner:string,project:string,id:string,signal?:AbortSignal){
   const row=this.row(owner,project,id);
-  if(row.action!=='init')return;
+  if(row.action!=='init'||row.protocol!==7)return;
   this.admission(row);if(this.get(owner,project,id).state!=='applied')return;
   const outcome=readInitializationOutcome(this.db,row),evidence=readInitializationDispatch(this.db,row);
   if(!outcome||!evidence||!row.binding_sha256)throw Error('git_execution_outcome_corrupt');
@@ -302,6 +302,12 @@ export class GitIndexExecutions{
        validateInitializationPreparation(this.db,row,reference.preparation);
        this.db.prepare('INSERT INTO wb_git_index_ref_preparations VALUES(?,?,?,?,?,?)').run(row.execution_id,JSON.stringify(reference),digest(reference),lease.owner,lease.generation,new Date(this.now()).toISOString());
       }),
+      dispatch:raw=>withImmediateTransaction(this.db,()=>{
+       authorize();const evidence=gitReinitializationEvidence(raw);validateInitializationPreparation(this.db,row,evidence.preparation);
+       if(canonicalJson(evidence.preparation)!==canonicalJson(readInitializationPreparation(this.db,row))
+        ||canonicalJson(evidence.ref_preparation)!==canonicalJson(readInitializationRefPreparation(this.db,row)??null))throw Error('git_execution_evidence_corrupt');
+       this.db.prepare('INSERT INTO wb_git_index_dispatches VALUES(?,?,?,?,?,?)').run(row.execution_id,JSON.stringify(evidence),digest(evidence),lease.owner,lease.generation,new Date(this.now()).toISOString());
+      }),
       cleanup:remove=>this.cleanupTransaction(row,lease,remove),
      },abort.signal);
      return this.get(owner,project,row.execution_id);
@@ -322,7 +328,7 @@ export class GitIndexExecutions{
      }),
      publish:(raw,publish)=>withImmediateTransaction(this.db,()=>{
       authorize();const evidence=readInitializationDispatch(this.db,row);
-      if(!evidence||canonicalJson(evidence)!==canonicalJson(gitInitializationEvidence(raw)))throw Error('git_execution_evidence_corrupt');
+      if(!evidence||evidence.protocol!==1||canonicalJson(evidence)!==canonicalJson(gitInitializationEvidence(raw)))throw Error('git_execution_evidence_corrupt');
       const receipt=publish();this.initializationOutcome(row,evidence,receipt);return receipt;
      }),
      cleanup:remove=>this.cleanupTransaction(row,lease,remove),
@@ -568,6 +574,13 @@ export class GitIndexExecutions{
   const preparation=readInitializationPreparation(this.db,row),dispatch=readInitializationDispatch(this.db,row);
   let applied=false,cleanup:Cleanup=preparation||dispatch?'unverified':'not_recorded';
   const kernel=this.git.indexEffects(row.owner_id,row.project_id);
+  if(dispatch?.protocol===2){
+   try{
+    await kernel.cleanupReinitializationDispatch(dispatch,guard,signal,remove=>withImmediateTransaction(this.db,()=>{guard();remove();}));
+    guard();cleanup='verified';
+   }catch{signal.throwIfAborted();guard();}
+   return{applied,cleanup};
+  }
   if(preparation)try{
    if(dispatch){
     const observed=await kernel.observeInitialization(dispatch,signal);guard();
@@ -683,7 +696,7 @@ export class GitIndexExecutions{
      timer=setInterval(()=>{try{withImmediateTransaction(this.db,()=>{checkReservation();this.db.prepare('UPDATE ga_worker_leases SET expires_at=?,updated_at=? WHERE resource_id=? AND owner=? AND generation=?').run(String(this.now()+this.leaseMs),new Date(this.now()).toISOString(),this.resource(row),lease!.owner,lease!.generation);});}catch(error){abort.abort(error)}},Math.floor(this.leaseMs/3));timer.unref();
      const control=this.db.prepare('SELECT * FROM wb_git_index_controls WHERE control_id=?').get(accepted.control_id) as Control;this.validateControl(row,control);
      const receipt=await this.completeControl(row,control,input,lease,nativeSignal,guard,true);
-     if(row.action==='init'&&receipt.result.state==='applied'){
+     if(row.action==='init'&&row.protocol===7&&receipt.result.state==='applied'){
       const evidence=readInitializationDispatch(this.db,row),outcome=readInitializationOutcome(this.db,row);
       if(!evidence||!outcome)throw Error('git_execution_outcome_corrupt');
       await this.git.indexEffects(owner,project).confirmInitializationBinding(evidence,outcome.publication,guard,nativeSignal);guard();

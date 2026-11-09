@@ -1,3 +1,4 @@
+import {canonicalJson} from '../db/canonical-json.ts';
 import {createHash} from 'node:crypto';
 import type {GitInitializationWitness,GitInitializationFile} from '../../contracts/types.ts';
 import {gitInitializationWitness} from './initialization-records.ts';
@@ -14,6 +15,11 @@ export type GitReinitializationPreparation={
 export type GitReinitializationRefPreparation={
  protocol:2;preparation:GitReinitializationPreparation;allocation:GitReinitializationAllocation;
  configuration:{filemode:boolean;file:GitInitializationFile};config_lock:GitInitializationFile;
+};
+export type GitReinitializationEvidence={
+ protocol:2;preparation:GitReinitializationPreparation;ref_preparation:GitReinitializationRefPreparation|null;
+ configuration:GitReinitializationRefPreparation['configuration'];config_lock:GitInitializationFile;
+ ignore:GitInitializationFile|null;ignore_lock:GitInitializationFile|null;
 };
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 const shape=(value:any,keys:string[])=>value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join('\0')===[...keys].sort().join('\0');
@@ -71,4 +77,39 @@ export function gitReinitializationRefPreparation(value:unknown):GitReinitializa
   }
   return structuredClone(reference);
  }catch{throw Error('git_reinitialization_ref_preparation_invalid');}
+}
+
+/** Dispatch is durable before canonical locks or publication. It binds both
+ * original allocations and the approved pending file contents and identities. */
+export function gitReinitializationEvidence(value:unknown):GitReinitializationEvidence{
+ try{
+  const evidence=value as GitReinitializationEvidence;
+  if(!shape(evidence,['protocol','preparation','ref_preparation','configuration','config_lock','ignore','ignore_lock'])||evidence.protocol!==2)throw Error();
+  const preparation=gitReinitializationPreparation(evidence.preparation),{witness}=preparation.plan,{existing}=witness;
+  const {configuration,config_lock:lock,ignore,ignore_lock:ignoreLock}=evidence;
+  if(!shape(configuration,['filemode','file'])||typeof configuration.filemode!=='boolean'||!isGitInitializationFile(configuration.file)
+   ||configuration.file.size<1||configuration.file.sha256!==(configuration.filemode?existing.configuration!.filemode_true_sha256:existing.configuration!.filemode_false_sha256)
+   ||!isGitInitializationFile(lock)||lock.sha256!==hash('')||lock.size!==0)throw Error();
+  const identities=new Set([witness.root_identity,existing.git_directory_identity,existing.common_directory_identity,
+   witness.internal_directory_identity,preparation.allocation.identity,witness.internal_ignore?.identity,
+   existing.dot_file?.identity,existing.common_config?.identity,existing.worktree_config?.identity,
+   ...existing.layout!.directories.map(directory=>directory.before?.identity)]);
+  for(const file of [configuration.file,lock]){
+   if(identities.has(file.identity)||file.identity.split(':')[0]!==preparation.allocation.identity.split(':')[0])throw Error();
+   identities.add(file.identity);
+  }
+  if(witness.ignore_after.changed){
+   const reference=gitReinitializationRefPreparation(evidence.ref_preparation);
+   if(canonicalJson(reference.preparation)!==canonicalJson(preparation)||canonicalJson(reference.configuration)!==canonicalJson(configuration)
+    ||canonicalJson(reference.config_lock)!==canonicalJson(lock)||identities.has(reference.allocation.identity))throw Error();
+   identities.add(reference.allocation.identity);
+   if(ignore===null||ignoreLock===null||!isGitInitializationFile(ignore)||!isGitInitializationFile(ignoreLock)
+    ||ignore.sha256!==witness.ignore_after.sha256||ignore.size!==witness.ignore_after.size||ignoreLock.sha256!==hash('')||ignoreLock.size!==0)throw Error();
+   for(const file of [ignore,ignoreLock]){
+    if(identities.has(file.identity)||file.identity.split(':')[0]!==reference.allocation.identity.split(':')[0])throw Error();
+    identities.add(file.identity);
+   }
+  }else if(evidence.ref_preparation!==null||ignore!==null||ignoreLock!==null)throw Error();
+  return structuredClone(evidence);
+ }catch{throw Error('git_reinitialization_evidence_invalid');}
 }

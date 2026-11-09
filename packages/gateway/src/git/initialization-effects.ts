@@ -1,5 +1,5 @@
 import {planReinitializationConfiguration} from './reinitialization-configuration.ts';
-import {gitReinitializationPlan,gitReinitializationPreparation,gitReinitializationRefPreparation,type GitReinitializationPlan,type GitReinitializationPreparation,type GitReinitializationRefPreparation} from './reinitialization-evidence.ts';
+import {gitReinitializationPlan,gitReinitializationPreparation,gitReinitializationRefPreparation,gitReinitializationEvidence,type GitReinitializationEvidence,type GitReinitializationPlan,type GitReinitializationPreparation,type GitReinitializationRefPreparation} from './reinitialization-evidence.ts';
 import {cleanupReinitializationAllocation,withReinitializationAllocation} from './reinitialization-allocation.ts';
 import {createHash,randomUUID} from 'node:crypto';
 import {constants,lstatSync,mkdirSync,chmodSync,linkSync,unlinkSync,renameSync,rmdirSync,readdirSync,type BigIntStats} from 'node:fs';
@@ -27,7 +27,7 @@ type Authority={
 };
 type ReinitializationAuthority={
  authorize:()=>void;prepared:(preparation:GitReinitializationPreparation)=>void;
- refPrepared:(preparation:GitReinitializationRefPreparation)=>void;cleanup:(remove:()=>void)=>void;
+ refPrepared:(preparation:GitReinitializationRefPreparation)=>void;dispatch:(evidence:GitReinitializationEvidence)=>void;cleanup:(remove:()=>void)=>void;
 };
 type Stored={anchors:Anchors;ignore:Buffer;state:'ready'|'consumed'};
 const hash=(value:string|Buffer)=>createHash('sha256').update(value).digest('hex');
@@ -154,7 +154,7 @@ export class GitInitializationEffects extends GitBranchEffects{
  async applyReinitialization(plan:GitReinitializationPlan,authority:ReinitializationAuthority,signal?:AbortSignal):Promise<GitInitializationReceipt>{
   const stored=this.initializationPlans.get(plan);
   if(!stored||stored.state!=='ready')throw Error('git_initialization_plan_consumed');
-  for(const name of ['authorize','prepared','refPrepared','cleanup'] as const){
+  for(const name of ['authorize','prepared','refPrepared','dispatch','cleanup'] as const){
    if(typeof authority?.[name]!=='function'||authority[name].constructor.name==='AsyncFunction')throw Error('git_execution_authority_missing');
   }
   gitReinitializationPlan(plan);stored.state='consumed';
@@ -199,20 +199,30 @@ export class GitInitializationEffects extends GitBranchEffects{
     const lock=await this.initializationPendingFile(join(stage,'config.lock'),Buffer.alloc(0),0o600);current();
     const configuration={filemode:planned.observed_filemode,file};
     if(file.sha256!==(configuration.filemode?existing.configuration!.filemode_true_sha256:existing.configuration!.filemode_false_sha256))throw Error('git_initialization_review_changed');
+    const dispatch=(reference:GitReinitializationRefPreparation|null,ignore:GitInitializationFile|null,ignoreLock:GitInitializationFile|null)=>{
+     current();
+     if(!equal(this.initializationFile(join(stage,'config.pending')).fact,file)||!equal(this.initializationFile(join(stage,'config.lock')).fact,lock))throw Error('git_initialization_source_changed');
+     const evidence=freezeWorkAdmission(gitReinitializationEvidence({protocol:2,preparation:preparation!,ref_preparation:reference,
+      configuration,config_lock:lock,ignore,ignore_lock:ignoreLock}));
+     synchronous(()=>authority.dispatch(evidence));current();
+     throw Error('git_reinitialization_execution_unavailable');
+    };
     if(witness.ignore_after.changed){
      const parent=witness.internal_directory_identity===null?this.root:join(this.root,'.pilotdeck');
+     let reference:GitReinitializationRefPreparation|undefined;
      return withReinitializationAllocation({parent,parent_identity:witness.internal_directory_identity??witness.root_identity,scope:'internal',...(signal?{signal}:{}),
       authority:{authorize:allocation=>{if(allocation)ignored.add(join(parent,allocation.name));current();},prepared:allocation=>{
-       const reference=freezeWorkAdmission(gitReinitializationRefPreparation({protocol:2,preparation:preparation!,allocation,configuration,config_lock:lock}));
-       synchronous(()=>authority.refPrepared(reference));
+       reference=freezeWorkAdmission(gitReinitializationRefPreparation({protocol:2,preparation:preparation!,allocation,configuration,config_lock:lock}));
+       synchronous(()=>authority.refPrepared(reference!));
       },cleanup:authority.cleanup}},async(internal,assertInternal)=>{
       const checkInternal=()=>{assertInternal();current();};
-      checkInternal();await this.initializationPendingFile(join(internal,'ignore.pending'),stored.ignore,witness.internal_ignore?.mode??0o644);checkInternal();
-      await this.initializationPendingFile(join(internal,'ignore.lock'),Buffer.alloc(0),0o600);checkInternal();
-      throw Error('git_reinitialization_execution_unavailable');
+      checkInternal();const ignore=await this.initializationPendingFile(join(internal,'ignore.pending'),stored.ignore,witness.internal_ignore?.mode??0o644);checkInternal();
+      const ignoreLock=await this.initializationPendingFile(join(internal,'ignore.lock'),Buffer.alloc(0),0o600);checkInternal();
+      if(!equal(this.initializationFile(join(internal,'ignore.pending')).fact,ignore)||!equal(this.initializationFile(join(internal,'ignore.lock')).fact,ignoreLock))throw Error('git_initialization_source_changed');
+      return dispatch(reference!,ignore,ignoreLock);
      });
     }
-    throw Error('git_reinitialization_execution_unavailable');
+    return dispatch(null,null,null);
    });
   }finally{this.initializationPlans.delete(plan);}
  }
@@ -395,6 +405,48 @@ export class GitInitializationEffects extends GitBranchEffects{
    if(this.directorySync(this.gitDirectory)!==receipt.directories[0]!.identity)throw Error('git_repository_changed');
   };
   check();this.bindInitializedRepository(anchors.root,receipt.directories[0]!.identity,anchors.executable,anchors.program);check();
+ }
+
+ /** Exact-owned cleanup after a recorded dispatch preserves canonical files.
+  * It never replays publication or infers an applied outcome from cleanup. */
+ async cleanupReinitializationDispatch(raw:unknown,guard:()=>void,signal:AbortSignal|undefined,atomic:(remove:()=>void)=>void){
+  const evidence=gitReinitializationEvidence(raw),{preparation,ref_preparation:reference}=evidence,{witness}=preparation.plan;
+  if(typeof guard!=='function'||guard.constructor.name==='AsyncFunction'
+   ||typeof atomic!=='function'||atomic.constructor.name==='AsyncFunction')throw Error('git_execution_authority_missing');
+  signal?.throwIfAborted();synchronous(guard);
+  const anchors=await this.anchors(signal),{existing}=witness;
+  if(anchors.repository!==witness.repository_sha256)throw Error('git_repository_changed');
+  const internal=join(this.root,'.pilotdeck'),internalIdentity=this.initializationDirectory(internal);
+  if(witness.internal_directory_identity!==null&&internalIdentity!==witness.internal_directory_identity)throw Error('git_repository_changed');
+  const common=join(this.commonDirectory,preparation.allocation.name);
+  const internalParent=witness.internal_directory_identity===null?this.root:internal;
+  const check=()=>{
+   signal?.throwIfAborted();synchronous(guard);
+   if(this.directorySync(this.root)!==witness.root_identity||this.directorySync(this.gitDirectory)!==existing.git_directory_identity
+    ||this.directorySync(this.commonDirectory)!==existing.common_directory_identity||this.initializationDirectory(internal)!==internalIdentity)throw Error('git_repository_changed');
+   if(existing.dot_file!==null&&!equal(this.initializationFile(join(this.root,'.git')).fact,existing.dot_file))throw Error('git_repository_changed');
+  };
+  const locks=[{target:join(this.commonDirectory,'config.lock'),pending:join(common,'config.lock'),fact:evidence.config_lock},
+   ...(reference&&evidence.ignore_lock?[{target:join(internal,'.gitignore.lock'),pending:join(internalParent,reference.allocation.name,'ignore.lock'),fact:evidence.ignore_lock}]:[])];
+  const present=(path:string)=>{
+   try{return lstatSync(path,{bigint:true});}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return null;throw error;}
+  };
+  const lockFact=(lock:typeof locks[number])=>{
+   const target=present(lock.target);if(target===null)return null;
+   const pending=present(lock.pending),links=1+(pending&&identity(pending)===lock.fact.identity?1:0);
+   if(!target.isFile()||target.isSymbolicLink()||!equal(this.initializationFile(lock.target,links).fact,lock.fact))throw Error('git_initialization_lock_unverified');
+   return target;
+  };
+  check();
+  this.cleanupAtomically(()=>{
+   check();for(const lock of locks){check();lockFact(lock);}
+   for(const lock of locks){check();if(lockFact(lock))unlinkSync(lock.target);}
+   if(reference){
+    check();cleanupReinitializationAllocation(internalParent,reference.allocation,remove=>{check();remove();check();});
+   }
+   check();cleanupReinitializationAllocation(this.commonDirectory,preparation.allocation,remove=>{check();remove();check();});
+   check();
+  },atomic);
  }
 
  /** Original pre-dispatch recovery removes recorded allocations only. No

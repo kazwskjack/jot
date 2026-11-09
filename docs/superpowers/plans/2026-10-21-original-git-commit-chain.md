@@ -839,3 +839,40 @@ remaining P09 features remain required. M15.14 stays in progress. Source-only wo
 followed the user's instruction. No tests, typechecks, builds, product/native
 operations, maintenance commands, migrations, UI runtime acceptance or deployment
 were executed.
+
+## Reinitialization dispatch evidence and owned cleanup, 2026-11-09
+
+Original protocol-8 dispatch now binds the first preparation and optional exact
+second ref-preparation, selected approved configuration candidate, pending config
+and empty config-lock identities, and changed ignore/empty-ignore-lock facts.
+Strict decoding checks shapes, candidate and ignore hashes/sizes, matching nested
+records, distinct identities and each file's own allocation volume. Unchanged
+ignore requires no second record or ignore file/lock. Original dispatch insertion
+validates both original records under the same producer lease before any canonical
+lock or file publication. Private files are re-read before dispatch. The original
+reader requires the exact original preparation/ref-preparation and producer lease,
+so history/control state and original producer finish distinguish dispatched work.
+
+Original native control now connects post-dispatch exact-owned cleanup. It verifies
+physical repository binding and root/Git/common/internal identities, preflights all
+canonical empty-lock identities/content/modes/link counts, and removes only those
+proven locks. It then invokes the existing bounded owned-namespace cleaner inside
+original atomic authority. Missing already-cleaned namespaces are idempotent. A
+foreign lock, link, namespace or directory change remains unverified. Canonical
+repository/ignore files and directories are preserved. Cleanup does not establish
+an applied result or replay publication. The original fresh recovery lease/native
+family/drain and settlement authority remains responsible for closure.
+
+Fresh-init outcome publication explicitly narrows protocol 1. Repository cache
+adoption remains specific to protocol-7 fresh initialization, since reinitialization
+keeps its normal existing repository binding. The current protocol-8 private
+attempt still stops before canonical publication. Outcome decoding deliberately
+requires the existing fresh-init proof until the reinitialization publisher and
+observer supply their own evidence. Original reinitialization admission remains
+gated. Required directory/permission projection, canonical config/ignore locking
+and publication, protocol-8 observed outcomes and complete UI/native execution
+remain to connect. Linked/external/damaged and platform cases, branch checkout/
+deletion, reference backend coverage and all remaining P09 scope remain required.
+M15.14 stays in progress. Per the user's source-only direction, no tests,
+typechecks, builds, product/native commands, maintenance commands, migrations,
+UI runtime acceptance or deployment were executed.

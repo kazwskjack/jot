@@ -1,4 +1,4 @@
-import {gitReinitializationPreparation,gitReinitializationRefPreparation,type GitReinitializationPreparation} from './reinitialization-evidence.ts';
+import {gitReinitializationPreparation,gitReinitializationRefPreparation,gitReinitializationEvidence,type GitReinitializationPreparation,type GitReinitializationEvidence} from './reinitialization-evidence.ts';
 import type {DatabaseSync} from 'node:sqlite';
 import {createHash} from 'node:crypto';
 import {canonicalJson} from '../db/canonical-json.ts';
@@ -62,13 +62,13 @@ export function readInitializationRefPreparation(db:DatabaseSync,row:Row){
 export function readInitializationDispatch(db:DatabaseSync,row:Row){
  const value=recordedInitializationEvidence(db,row,'wb_git_index_dispatches');
  if(value===undefined)return;
- if(row.protocol!==7)throw Error('git_execution_evidence_corrupt');
- const evidence=gitInitializationEvidence(value);
+ const evidence=row.protocol===8?gitReinitializationEvidence(value):gitInitializationEvidence(value);
  validateInitializationPreparation(db,row,evidence.preparation);
  if(canonicalJson(evidence.preparation)!==canonicalJson(readInitializationPreparation(db,row)))throw Error('git_execution_evidence_corrupt');
+ if(evidence.protocol===2&&canonicalJson(evidence.ref_preparation)!==canonicalJson(readInitializationRefPreparation(db,row)??null))throw Error('git_execution_evidence_corrupt');
  return evidence;
 }
-export function initializationAppliedResult(db:DatabaseSync,row:Row,evidence:GitInitializationEvidence):GitInitializationAppliedResult{
+export function initializationAppliedResult(db:DatabaseSync,row:Row,evidence:GitInitializationEvidence|GitReinitializationEvidence):GitInitializationAppliedResult{
  validateInitializationPreparation(db,row,evidence.preparation);
  return{execution_id:row.execution_id,project_id:row.project_id,intent_id:row.intent_id,request_id:row.request_id,
   ...initializationExecutionFacts(db,row),paths:[],state:'applied',evidence_sha256:hash(canonicalJson(evidence)),execution_authorized:false};
@@ -82,7 +82,7 @@ export function readInitializationOutcome(db:DatabaseSync,row:Row){
  if(!outcome)return;
  try{
   const value=JSON.parse(outcome.receipt_json);
-  if(!evidence||digest(value)!==outcome.receipt_sha256||!value||typeof value!=='object'||Array.isArray(value)
+  if(!evidence||evidence.protocol!==1||digest(value)!==outcome.receipt_sha256||!value||typeof value!=='object'||Array.isArray(value)
    ||Object.keys(value).sort().join(',')!=='execution_id,protocol,publication,request_sha256,result'
    ||value.protocol!==1||value.execution_id!==row.execution_id||value.request_sha256!==row.request_sha256
    ||JSON.stringify(value.result)!==JSON.stringify(initializationAppliedResult(db,row,evidence)))throw Error();
