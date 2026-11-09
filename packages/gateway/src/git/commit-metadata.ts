@@ -29,7 +29,7 @@ export function commitReviewMetadata(policy:GitCommitOperatorPolicy,witness:GitC
  const {head,commit_tree:tree}=witness;
  const oid=(value:unknown)=>typeof value==='string'&&new RegExp('^[a-f0-9]{'+(tree?.object_format==='sha1'?40:64)+'}$').test(value);
  if(!tree||!['sha1','sha256'].includes(tree.object_format)||!oid(tree.tree_oid)||!head||head.oid!==null&&!oid(head.oid)
-  ||typeof message!=='string'||!message.trim()||message.length>4096||message.includes('\0')||!utf8(message)
+  ||typeof message!=='string'||!message.trim()||message.length>20000||message.includes('\0')||!utf8(message)
   ||!Number.isFinite(Date.parse(at))||new Date(at).toISOString()!==at||!at.endsWith('.000Z'))throw Error('git_commit_metadata_invalid');
  let target:string,state:GitCommitMetadata['head_state'];
  if(head.detached){
@@ -51,7 +51,7 @@ export const gitCommitSignature=(value:GitCommitMetadata['author'])=>value.name+
 
 /** Derive the exact reviewed object bytes without a clock or source config. */
 export function gitCommitObject(metadata:GitCommitMetadata,message:string){
- if(typeof message!=='string'||!utf8(message)||message.includes('\0')||message.length>4096
+ if(typeof message!=='string'||!utf8(message)||message.includes('\0')||message.length>20000
   ||hash(message)!==metadata.message_sha256||Buffer.byteLength(message,'utf8')!==metadata.message_bytes)throw Error('git_commit_metadata_invalid');
  const headers=['tree '+metadata.tree_oid,...(metadata.parent_oid===null?[]:['parent '+metadata.parent_oid]),
   'author '+gitCommitSignature(metadata.author),'committer '+gitCommitSignature(metadata.committer)];

@@ -60,7 +60,7 @@ export class GitCommitEffects extends GitPublicationEffects{
  private readonly commitPlans=new WeakMap<GitCommitPlan,Stored>();
  async prepareCommit(raw:GitCommitSource,signal?:AbortSignal):Promise<GitCommitPlan>{
   signal?.throwIfAborted();
-  if(!raw||!Array.isArray(raw.paths)||!raw.paths.length||raw.paths.length>100
+  if(!raw||!Array.isArray(raw.paths)||!raw.paths.length||raw.paths.length>5000
    ||new Set(raw.paths).size!==raw.paths.length||!/^([a-f0-9]{64})$/.test(raw.review_sha256)
    ||raw.paths.some(path=>typeof path!=='string'||path.startsWith('-')||workspaceRelativePath(path)!==path))throw Error('git_commit_plan_invalid');
   const source=structuredClone(raw),{witness,metadata,message,paths}=source;

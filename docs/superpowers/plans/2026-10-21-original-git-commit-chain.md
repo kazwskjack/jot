@@ -124,3 +124,21 @@ prerequisite only. P09 also retains discard/delete, revert, remote fetch/pull,
 push/publish and original staged/file recovery scope. The upstream 5000-path and
 20000-character commit input capacities remain to be reconciled with Jot's
 current 100-path and 4096-character review limits.
+
+## P09 staged-operation input capacity
+
+The original stage/unstage/commit review now accepts up to 5000 selected paths.
+Commit messages accept up to 20000 JavaScript UTF-16 code units, matching the
+pinned upstream operation input bound. This expansion reaches original review
+normalization and freezing, persisted commit review readers, host-private commit
+preparation, index/commit evidence readers, browser recovery drafts and controls.
+The Git contracts include nested execution, inspection, resolution and history
+results. Message byte metadata allows up to 60000 UTF-8 bytes, the maximum for
+20000 valid UTF-16 code units. Existing exact message hashing/body derivation,
+identity policy, source/native custody and original receipt encodings remain in
+use. Existing smaller persisted requests retain their original bytes and keys.
+
+File path length, total content/object/output bounds, timeouts and publication
+input limits continue to be enforced by their original consumers. M15.19 remains
+in progress until all original staged/file interruption recovery implementation
+is covered. This capacity increment is source development only.

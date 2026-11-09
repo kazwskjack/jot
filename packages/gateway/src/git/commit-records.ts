@@ -17,7 +17,7 @@ export function readCommitReviewSource(db:DatabaseSync,owner:string,project:stri
   if(!row||!approval||row.action!=='commit'||row.review_sha256!==review)throw Error();
   const selection=JSON.parse(String(row.selection_json)) as Selection,witness=JSON.parse(String(row.witness_json)) as GitCommitReviewWitness;
   const metadata=selection.commit_metadata;
-  if(selection.action!=='commit'||!metadata||!Array.isArray(selection.paths)||!selection.paths.length||selection.paths.length>100
+  if(selection.action!=='commit'||!metadata||!Array.isArray(selection.paths)||!selection.paths.length||selection.paths.length>5000
    ||new Set(selection.paths).size!==selection.paths.length||selection.paths.some(path=>typeof path!=='string'||path.startsWith('-')||workspaceRelativePath(path)!==path)
    ||selection.snapshot_id!==witness.snapshot_id||witness.protocol!==2||!Array.isArray(witness.attributes))throw Error();
   const policy=gitCommitOperatorPolicy({author:{name:metadata.author.name,email:metadata.author.email},committer:{name:metadata.committer.name,email:metadata.committer.email}});

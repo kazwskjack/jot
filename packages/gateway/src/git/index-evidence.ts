@@ -20,7 +20,7 @@ export function indexEvidence(value:unknown):GitIndexEvidence{
    ||!shape(p,['plan_id','action','paths','repository_sha256','before_index_sha256','index_sha256','execution_authorized'])
    ||typeof p.plan_id!=='string'||!/^git-index-[a-f0-9-]{36}$/.test(p.plan_id)||!['stage','unstage'].includes(p.action)||p.execution_authorized!==false
    ||!SHA.test(p.repository_sha256)||!SHA.test(p.index_sha256)||!nullableHash(p.before_index_sha256)||!SHA.test(e.source_sha256)||!IDENTITY.test(e.index_lock_identity)
-   ||!Array.isArray(p.paths)||!p.paths.length||p.paths.length>100||new Set(p.paths).size!==p.paths.length)throw Error();
+   ||!Array.isArray(p.paths)||!p.paths.length||p.paths.length>5000||new Set(p.paths).size!==p.paths.length)throw Error();
   for(const path of p.paths)if(typeof path!=='string'||path.startsWith('-')||workspaceRelativePath(path)!==path)throw Error();
   if(!shape(e.directories,['root','git','common','objects'])||Object.values(e.directories).some(id=>typeof id!=='string'||!IDENTITY.test(id))
    ||typeof e.dot_witness!=='string'||!/^directory:[0-9]+:[0-9]+$|^file:[a-f0-9]{64}$/.test(e.dot_witness)
@@ -32,7 +32,7 @@ export function indexEvidence(value:unknown):GitIndexEvidence{
   if(seenLocks.sort().join('\0')!==expected.join('\0'))throw Error();
   if(!Array.isArray(e.parents)||e.parents.length>256||new Set(e.parents.map(parent=>parent.path)).size!==e.parents.length)throw Error();
   for(const parent of e.parents)if(!shape(parent,['path','identity'])||typeof parent.path!=='string'||workspaceRelativePath(parent.path)!==parent.path||!parent.path.startsWith('refs')||!e.refs.ref?.startsWith(parent.path+'/')||!IDENTITY.test(parent.identity))throw Error();
-  if(!Array.isArray(e.blobs)||e.blobs.length>100)throw Error();let size=0;const seen=new Set<string>();
+  if(!Array.isArray(e.blobs)||e.blobs.length>5000)throw Error();let size=0;const seen=new Set<string>();
   for(const blob of e.blobs){if(!shape(blob,['oid','sha256','size'])||typeof blob.oid!=='string'||!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(blob.oid)||!SHA.test(blob.sha256)||!Number.isSafeInteger(blob.size)||blob.size<0||blob.size>32*1024*1024||seen.has(blob.oid))throw Error();seen.add(blob.oid);size+=blob.size;}
   if(size>64*1024*1024)throw Error();return structuredClone(e);
  }catch{throw Error('git_index_evidence_invalid');}

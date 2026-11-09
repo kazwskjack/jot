@@ -39,7 +39,7 @@ export function gitCommitEvidence(value:unknown):GitCommitEvidence{
    ||typeof p.target_ref!=='string'||p.target_ref.length>1024)throw Error();
   if(p.target_ref!=='HEAD'&&(!p.target_ref.startsWith('refs/heads/')||workspaceRelativePath(p.target_ref)!==p.target_ref||!validGitReference(p.target_ref)))throw Error();
   if(p.target_ref==='HEAD'&&p.parent_oid===null)throw Error();
-  if(!Array.isArray(p.paths)||!p.paths.length||p.paths.length>100||new Set(p.paths).size!==p.paths.length)throw Error();
+  if(!Array.isArray(p.paths)||!p.paths.length||p.paths.length>5000||new Set(p.paths).size!==p.paths.length)throw Error();
   for(const path of p.paths)if(typeof path!=='string'||path.startsWith('-')||workspaceRelativePath(path)!==path)throw Error();
   if(!Array.isArray(p.tree_objects)||!p.tree_objects.length||p.tree_objects.length>100001)throw Error();
   const seenObjects=new Set<string>();let size=0;

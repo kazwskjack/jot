@@ -17,9 +17,9 @@ function command(value,project){
  const version=()=>{if(!Number.isSafeInteger(body.expected_version)||body.expected_version<1||typeof body.review_sha256!=='string'||!SHA.test(body.review_sha256))invalid()};
  if(parts[2]==='intents'&&!parts[3]){
   if(!['stage','unstage','commit','discard','delete-untracked'].includes(body.action))invalid();exact(['request_id','action','paths','snapshot_id',...(body.action==='commit'?['message']:[])]);
-  if(typeof body.snapshot_id!=='string'||!SHA.test(body.snapshot_id)||!Array.isArray(body.paths)||!body.paths.length||body.paths.length>100||new Set(body.paths).size!==body.paths.length)invalid();
+  if(typeof body.snapshot_id!=='string'||!SHA.test(body.snapshot_id)||!Array.isArray(body.paths)||!body.paths.length||body.paths.length>5000||new Set(body.paths).size!==body.paths.length)invalid();
   for(const path of body.paths)if(typeof path!=='string'||!path||path.length>4096||path.startsWith('/')||path.startsWith('-')||/^[A-Za-z]:/.test(path)||/[\\\0]/.test(path)||path.split('/').some(part=>!part||part==='.'||part==='..'))invalid();
-  if(body.action==='commit'&&(typeof body.message!=='string'||!body.message.trim()||body.message.length>4096||body.message.includes('\0')))invalid();
+  if(body.action==='commit'&&(typeof body.message!=='string'||!body.message.trim()||body.message.length>20000||body.message.includes('\0')))invalid();
   return{kind:'review-prepare'};
  }
  if(!parts[3])invalid();const target=encoded(parts[3]);

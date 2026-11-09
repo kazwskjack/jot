@@ -71,9 +71,9 @@ export class GitMutationIntents{
   return source;
  }
  private normalize(input:Prepare):Prepare{
-  if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(key=>!['request_id','action','paths','snapshot_id','message'].includes(key))||typeof input.request_id!=='string'||!ID.test(input.request_id)||!['stage','unstage','commit','discard','delete-untracked'].includes(input.action)||typeof input.snapshot_id!=='string'||!SHA.test(input.snapshot_id)||!Array.isArray(input.paths)||!input.paths.length||input.paths.length>100||new Set(input.paths).size!==input.paths.length)throw Error('git_intent_invalid');
+  if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(key=>!['request_id','action','paths','snapshot_id','message'].includes(key))||typeof input.request_id!=='string'||!ID.test(input.request_id)||!['stage','unstage','commit','discard','delete-untracked'].includes(input.action)||typeof input.snapshot_id!=='string'||!SHA.test(input.snapshot_id)||!Array.isArray(input.paths)||!input.paths.length||input.paths.length>5000||new Set(input.paths).size!==input.paths.length)throw Error('git_intent_invalid');
   const paths=input.paths.map(path=>{if(typeof path!=='string'||path.startsWith('-'))throw Error('git_intent_invalid');return workspaceRelativePath(path);}).sort();
-  if(input.action==='commit'?(typeof input.message!=='string'||!input.message.trim()||input.message.length>4096||input.message.includes('\0')):input.message!==undefined)throw Error('git_intent_invalid');
+  if(input.action==='commit'?(typeof input.message!=='string'||!input.message.trim()||input.message.length>20000||input.message.includes('\0')):input.message!==undefined)throw Error('git_intent_invalid');
   return{request_id:input.request_id,action:input.action,paths,snapshot_id:input.snapshot_id,...(input.message===undefined?{}:{message:input.message})};
  }
  async prepare(owner:string,project:string,value:Prepare,signal?:AbortSignal){return (await this.prepareChange(owner,project,value,signal))();}

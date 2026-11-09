@@ -300,7 +300,7 @@ export class GitRepositoryInspection{
  }
  /** Exact-byte review only. Never writes source files, index, refs or objects. */
  async freeze(snapshotId:string,paths:readonly string[],signal?:AbortSignal):Promise<GitReviewWitness>{
-  if(!/^[a-f0-9]{64}$/.test(snapshotId)||!Array.isArray(paths)||!paths.length||paths.length>100||new Set(paths).size!==paths.length)throw Error('git_intent_invalid');
+  if(!/^[a-f0-9]{64}$/.test(snapshotId)||!Array.isArray(paths)||!paths.length||paths.length>5000||new Set(paths).size!==paths.length)throw Error('git_intent_invalid');
   for(const path of paths){if(typeof path!=='string')throw Error('git_intent_invalid');safe(path);}
   const context=await this.context(signal);try{
    const before=await this.inspectContext(context,signal);if(before.snapshot_id!==snapshotId)throw Error('git_snapshot_changed');
