@@ -37,11 +37,14 @@ def safe_zip(path: Path, max_expanded: int = 512 * 1024 * 1024,
         if item.file_size > max_entry: fail("FILE_CONTAINER_LIMIT")
     return archive
 
-def preview_xml(data: bytes) -> ET.Element:
-    if len(data) > DOCUMENT_PREVIEW_MAX_ZIP_ENTRY_BYTES or re.search(rb"<!\s*(?:DOCTYPE|ENTITY)\b", data, re.I):
+def safe_xml(data: bytes, max_bytes: int) -> ET.Element:
+    if len(data) > max_bytes or re.search(rb"<!\s*(?:DOCTYPE|ENTITY)\b", data, re.I):
         fail("DOCUMENT_PREVIEW_XML_UNSAFE")
     try: return ET.fromstring(data)
     except Exception: fail("DOCUMENT_PREVIEW_XML_INVALID")
+
+def preview_xml(data: bytes) -> ET.Element:
+    return safe_xml(data, DOCUMENT_PREVIEW_MAX_ZIP_ENTRY_BYTES)
 
 def take_preview_text(value: str, remaining: int) -> tuple[str, int, bool]:
     if remaining <= 0: return "", 0, bool(value)
@@ -102,47 +105,80 @@ def pdf_preview(path: Path) -> dict:
         if 'stream' in locals(): stream.close()
     return {"page_count": page_count, "pages": pages, "truncated": truncated or page_count > len(pages)}
 
-def xlsx_preview(path: Path) -> dict:
-    shared, sheets, total_cells = [], [], 0
-    remaining, truncated = DOCUMENT_PREVIEW_MAX_CHARS, False
+def xlsx_member(relation: ET.Element, names: set, prefix: str) -> str:
+    if relation.attrib.get("TargetMode", "").lower() == "external": fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
+    target = relation.attrib.get("Target", "")
+    resolved = target.lstrip("/") if target.startswith("/") else posixpath.normpath(posixpath.join("xl", target))
+    if not resolved.startswith(prefix) or ".." in resolved.split("/") or resolved not in names:
+        fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
+    return resolved
+
+
+def xlsx_structure(archive: zipfile.ZipFile, parse_xml) -> tuple:
+    names = set(archive.namelist())
+    if "xl/workbook.xml" not in names or "xl/_rels/workbook.xml.rels" not in names: fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
+    workbook = parse_xml(archive.read("xl/workbook.xml"))
+    relationships = parse_xml(archive.read("xl/_rels/workbook.xml.rels"))
     ns_rel = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
     ns_package_rel = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+    if workbook.tag != S + "workbook" or relationships.tag != ns_package_rel + "Relationships": fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
+    targets, shared_member = {}, None
+    for relation in relationships.findall(ns_package_rel + "Relationship"):
+        identity = relation.attrib.get("Id", "")
+        if not identity or identity in targets: fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
+        targets[identity] = relation
+        if relation.attrib.get("Type", "").rsplit("/", 1)[-1] == "sharedStrings":
+            if shared_member is not None: fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
+            shared_member = xlsx_member(relation, names, "xl/")
+    shared = []
+    if shared_member is None and "xl/sharedStrings.xml" in names: shared_member = "xl/sharedStrings.xml"
+    if shared_member is not None:
+        root = parse_xml(archive.read(shared_member))
+        if root.tag != S + "sst": fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
+        shared = ["".join(node.text or "" for node in item.iter(S + "t")) for item in root.findall(S + "si")]
+    sheets = []
+    for node in workbook.iter(S + "sheet"):
+        relation = targets.get(node.attrib.get(ns_rel + "id", ""))
+        if relation is None: fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
+        kind = relation.attrib.get("Type", "").rsplit("/", 1)[-1]
+        # Only worksheet text is decoded. Other sheet types keep an explicit coverage gap.
+        member = xlsx_member(relation, names, "xl/worksheets/") if kind in {"", "worksheet"} else None
+        sheets.append((node.attrib.get("name", ""), member))
+    return shared, sheets
+
+
+def xlsx_cell(cell: ET.Element, shared: list) -> dict:
+    address = cell.attrib.get("r", "")
+    if not re.fullmatch(r"[A-Z]{1,3}[1-9][0-9]{0,6}", address): fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
+    value, formula = cell.find(S + "v"), cell.find(S + "f")
+    raw = (value.text or "") if value is not None else ""
+    if cell.attrib.get("t") == "s":
+        if not raw.isdigit() or int(raw) >= len(shared): fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
+        raw = shared[int(raw)]
+    elif cell.attrib.get("t") == "inlineStr":
+        inline = cell.find(S + "is")
+        raw = "".join(item.text or "" for item in inline.iter(S + "t")) if inline is not None else ""
+    return {"value": raw, "formula": formula.text if formula is not None else None}
+
+
+def xlsx_preview(path: Path) -> dict:
+    sheets, total_cells = [], 0
+    remaining, truncated = DOCUMENT_PREVIEW_MAX_CHARS, False
     with safe_zip(path, DOCUMENT_PREVIEW_MAX_ZIP_BYTES, DOCUMENT_PREVIEW_MAX_ZIP_ENTRY_BYTES) as archive:
-        names = set(archive.namelist())
-        if "xl/workbook.xml" not in names or "xl/_rels/workbook.xml.rels" not in names: fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
-        workbook = preview_xml(archive.read("xl/workbook.xml"))
-        relationships = preview_xml(archive.read("xl/_rels/workbook.xml.rels"))
-        targets = {}
-        for relation in relationships.findall(ns_package_rel + "Relationship"):
-            if relation.attrib.get("TargetMode", "").lower() == "external": fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
-            target = relation.attrib.get("Target", "")
-            resolved = target.lstrip("/") if target.startswith("/") else posixpath.normpath(posixpath.join("xl", target))
-            if not resolved.startswith("xl/worksheets/") or ".." in resolved.split("/"):
-                fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
-            targets[relation.attrib.get("Id", "")] = resolved
-        if "xl/sharedStrings.xml" in names:
-            shared_root = preview_xml(archive.read("xl/sharedStrings.xml"))
-            shared = ["".join(node.text or "" for node in item.iter(S + "t")) for item in shared_root.findall(S + "si")]
-        sheet_nodes = list(workbook.iter(S + "sheet"))
-        if len(sheet_nodes) > 100: fail("DOCUMENT_PREVIEW_CONTAINER_LIMIT")
-        for node in sheet_nodes:
-            member = targets.get(node.attrib.get(ns_rel + "id", ""))
-            if not member or member not in names: fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
+        shared, entries = xlsx_structure(archive, preview_xml)
+        if len(entries) > 100: fail("DOCUMENT_PREVIEW_CONTAINER_LIMIT")
+        for name, member in entries:
+            if member is None:
+                truncated = True; continue
             root = preview_xml(archive.read(member)); cells = {}
+            if root.tag != S + "worksheet": fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
             for cell in root.iter(S + "c"):
                 address = cell.attrib.get("r", "")
-                if not re.fullmatch(r"[A-Z]{1,3}[1-9][0-9]{0,6}", address): fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
-                value = cell.find(S + "v"); formula = cell.find(S + "f")
-                raw = value.text if value is not None else ""
-                if cell.attrib.get("t") == "s":
-                    if not raw.isdigit() or int(raw) >= len(shared): fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
-                    raw = shared[int(raw)]
-                elif cell.attrib.get("t") == "inlineStr":
-                    inline = cell.find(S + "is")
-                    raw = "".join(item.text or "" for item in inline.iter(S + "t")) if inline is not None else ""
-                elif cell.attrib.get("t") == "b": raw = "TRUE" if raw == "1" else "FALSE" if raw == "0" else raw
+                if address in cells: fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
+                decoded = xlsx_cell(cell, shared); raw = decoded["value"]
+                if cell.attrib.get("t") == "b": raw = "TRUE" if raw == "1" else "FALSE" if raw == "0" else raw
                 raw, remaining, cut = take_preview_text(raw, remaining)
-                formula_text = formula.text if formula is not None else None
+                formula_text = decoded["formula"]
                 if formula_text is not None:
                     formula_text, remaining, formula_cut = take_preview_text(formula_text, remaining)
                     cut = cut or formula_cut
@@ -150,9 +186,10 @@ def xlsx_preview(path: Path) -> dict:
                 total_cells += 1; truncated = truncated or cut
                 if total_cells >= 5_000 or remaining <= 0:
                     truncated = True; break
-            sheets.append({"name": node.attrib.get("name", ""), "cells": cells})
+            sheets.append({"name": name, "cells": cells})
             if total_cells >= 5_000 or remaining <= 0: break
     return {"sheets": sheets, "truncated": truncated}
+
 
 def pptx_preview(path: Path) -> dict:
     slides, remaining, truncated = [], DOCUMENT_PREVIEW_MAX_CHARS, False
@@ -195,25 +232,22 @@ def docx_read(path: Path) -> dict:
     return {"paragraphs": paragraphs, "tables": tables}
 
 def xlsx_read(path: Path) -> dict:
-    with safe_zip(path) as z:
-        shared = []
-        if "xl/sharedStrings.xml" in z.namelist():
-            root = ET.fromstring(z.read("xl/sharedStrings.xml"))
-            shared = ["".join(n.text or "" for n in item.iter(S + "t")) for item in root.findall(S + "si")]
-        workbook = ET.fromstring(z.read("xl/workbook.xml"))
-        names = [node.attrib.get("name", "") for node in workbook.iter(S + "sheet")]
-        sheets = []
-        for index, name in enumerate(names, 1):
-            entry = f"xl/worksheets/sheet{index}.xml"
-            if entry not in z.namelist(): continue
-            root = ET.fromstring(z.read(entry)); cells = {}
+    sheets, skipped = [], False
+    parse_xml = lambda data: safe_xml(data, 512 * 1024 * 1024)
+    with safe_zip(path) as archive:
+        shared, entries = xlsx_structure(archive, parse_xml)
+        for name, member in entries:
+            if member is None:
+                skipped = True; continue
+            root = parse_xml(archive.read(member)); cells = {}
+            if root.tag != S + "worksheet": fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
             for cell in root.iter(S + "c"):
-                ref = cell.attrib.get("r", ""); value = cell.find(S + "v"); formula = cell.find(S + "f")
-                raw = value.text if value is not None else ""
-                if cell.attrib.get("t") == "s" and raw.isdigit() and int(raw) < len(shared): raw = shared[int(raw)]
-                cells[ref] = {"value": raw, "formula": formula.text if formula is not None else None}
+                address = cell.attrib.get("r", "")
+                if address in cells: fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
+                cells[address] = xlsx_cell(cell, shared)
             sheets.append({"name": name, "cells": cells})
-    return {"sheets": sheets}
+    return {"sheets": sheets, **({"truncated": True} if skipped else {})}
+
 
 def pdf_read(path: Path) -> dict:
     try: from pypdf import PdfReader
