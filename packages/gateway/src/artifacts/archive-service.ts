@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto'
-import { createReadStream, existsSync, mkdirSync, mkdtempSync, rmSync, statSync,lstatSync,openSync,closeSync,readSync,fstatSync,type Stats } from 'node:fs'
+import { createReadStream, existsSync, mkdirSync, mkdtempSync, rmSync, statSync,lstatSync,openSync,closeSync,readSync,fstatSync,renameSync,type Stats } from 'node:fs'
 import { dirname, join, resolve, sep } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
-import {withImmediateTransaction} from '../db/database.ts'
+import {withImmediateTransaction,withReadTransaction} from '../db/database.ts'
 
 export interface RemoteFileMeta { size: number; md5: string }
 export interface ArtifactArchiveClient {
@@ -63,6 +63,10 @@ export class ArtifactArchiveService {
     let verified = 0; let failed = 0
     for (const row of rows) {
       const artifactId = String(row.artifact_id)
+      const source = this.archiveSource(artifactId)
+      if (!source || source.record.local_state !== 'present' || !['pending','retry'].includes(String(source.record.backup_status))
+        || source.record.next_retry_at && String(source.record.next_retry_at) > now.toISOString()) continue
+      const identity = JSON.stringify(source)
       try {
         const date = new Date(String(row.created_at)); const remoteDirectory = `/jot_file/${date.getUTCFullYear()}/${String(date.getUTCMonth()+1).padStart(2,'0')}/${String(date.getUTCDate()).padStart(2,'0')}/${artifactId}`
         const files = await this.files(artifactId)
@@ -80,18 +84,28 @@ export class ArtifactArchiveService {
           await this.verifyRemote(file, remotePath, remote)
           manifest.push({ remote_name: file.remoteName, local_path: file.localPath, size: file.size, md5: file.md5 })
         }
+        const encoded = JSON.stringify(manifest)
+        const proof = this.verifiedCleanupPaths(artifactId, encoded)
+        if (!proof) throw new Error('archive_local_content_mismatch')
         const total = files.reduce((sum, file) => sum + file.size, 0); const stamp = now.toISOString()
-        this.db.prepare(`UPDATE ga_artifact_archives SET backup_status='verified',remote_path=?,remote_size=?,remote_md5=?,
-          verified_at=?,attempts=attempts+1,last_error=NULL,next_retry_at=NULL,updated_at=? WHERE artifact_id=?`)
-          .run(remoteDirectory, total, JSON.stringify(manifest), stamp, stamp, artifactId)
-        verified += 1
+        const saved = withImmediateTransaction(this.db, () => {
+          if (JSON.stringify(this.archiveSource(artifactId)) !== identity || !this.sameFiles(proof.files)) return false
+          this.db.prepare(`UPDATE ga_artifact_archives SET backup_status='verified',remote_path=?,remote_size=?,remote_md5=?,
+            verified_at=?,attempts=attempts+1,last_error=NULL,next_retry_at=NULL,updated_at=? WHERE artifact_id=?`)
+            .run(remoteDirectory, total, encoded, stamp, stamp, artifactId)
+          return true
+        })
+        if (saved) verified += 1
       } catch (error) {
-        const current = this.db.prepare('SELECT attempts FROM ga_artifact_archives WHERE artifact_id=?').get(artifactId) as { attempts: number }
-        const attempts = Number(current.attempts) + 1; const minutes = Math.min(360, 2 ** Math.min(attempts, 8))
-        this.db.prepare(`UPDATE ga_artifact_archives SET backup_status='retry',attempts=?,last_error=?,next_retry_at=?,updated_at=? WHERE artifact_id=?`)
-          .run(attempts, String(error instanceof Error ? error.message : error).slice(0, 240),
-            new Date(now.getTime()+minutes*60_000).toISOString(), now.toISOString(), artifactId)
-        failed += 1
+        const saved = withImmediateTransaction(this.db, () => {
+          if (JSON.stringify(this.archiveSource(artifactId)) !== identity) return false
+          const attempts = Number(source.record.attempts) + 1; const minutes = Math.min(360, 2 ** Math.min(attempts, 8))
+          this.db.prepare(`UPDATE ga_artifact_archives SET backup_status='retry',attempts=?,last_error=?,next_retry_at=?,updated_at=? WHERE artifact_id=?`)
+            .run(attempts, String(error instanceof Error ? error.message : error).slice(0, 240),
+              new Date(now.getTime()+minutes*60_000).toISOString(), now.toISOString(), artifactId)
+          return true
+        })
+        if (saved) failed += 1
       }
     }
     return { attempted: rows.length, verified, failed }
@@ -161,36 +175,93 @@ export class ArtifactArchiveService {
   }
 
   async restorePending(now = new Date()): Promise<{ attempted: number; restored: number; failed: number }> {
-    const rows = this.db.prepare(`SELECT artifact_id,remote_path,remote_md5 FROM ga_artifact_archives
+    const rows = this.db.prepare(`SELECT artifact_id FROM ga_artifact_archives
       WHERE backup_status='verified' AND local_state='restoring' ORDER BY updated_at LIMIT 50`)
       .all() as Array<Record<string, unknown>>
     let restored = 0; let failed = 0
     for (const row of rows) {
+      const artifactId = String(row.artifact_id), source = this.archiveSource(artifactId)
+      if (!source || source.record.backup_status !== 'verified' || source.record.local_state !== 'restoring') continue
+      const identity = JSON.stringify(source)
+      let stage = ''
       try {
-        const directory = String(row.remote_path || ''); const manifest = JSON.parse(String(row.remote_md5 || '[]')) as
-          Array<{ remote_name: string; local_path: string; size: number; md5: string }>
-        if (!directory.startsWith('/jot_file/') || !manifest.length) throw new Error('archive_restore_manifest_invalid')
-        for (const item of manifest) {
-          const localPath = resolve(item.local_path); const root = resolve(this.root)
-          if (localPath === root || !localPath.startsWith(root + sep)) throw new Error('archive_restore_path_denied')
+        const directory = String(source.record.remote_path || '')
+        const manifest = JSON.parse(String(source.record.remote_md5 || '[]'))
+        if (!directory.startsWith('/jot_file/') || !Array.isArray(manifest) || !manifest.length || manifest.length !== source.files.length) throw new Error('archive_restore_manifest_invalid')
+        const references = new Map<string,Record<string,unknown>>(source.files.map(file => [resolve(String(file.server_path)),file]))
+        const seen = new Set<string>()
+        const stagingRoot = join(this.root,'sessions','archive-restore')
+        assertArchivePath(stagingRoot,this.root)
+        mkdirSync(stagingRoot,{recursive:true,mode:0o700})
+        stage = mkdtempSync(join(stagingRoot,'restore-'))
+        const installs: Array<{path:string;staged:string;stagedSignature:ReturnType<typeof signature>;existing:ReturnType<typeof signature>|null;replace:boolean}> = []
+        for (const [index,item] of manifest.entries()) {
+          if (!item || typeof item.local_path !== 'string' || typeof item.remote_name !== 'string'
+            || !item.remote_name || /[\\/\u0000-\u001f\u007f]/.test(item.remote_name) || ['.','..'].includes(item.remote_name)
+            || !Number.isSafeInteger(item.size) || item.size < 0 || typeof item.md5 !== 'string' || !/^[a-f0-9]{32}$/i.test(item.md5)) throw new Error('archive_restore_manifest_invalid')
+          const localPath = resolve(item.local_path), reference = references.get(localPath)
           assertArchivePath(localPath,this.root)
-          if(!item.remote_name||item.remote_name.includes('/')||item.remote_name.includes('\\')||['.','..'].includes(item.remote_name))throw new Error('archive_restore_manifest_invalid')
-          mkdirSync(dirname(localPath), { recursive: true, mode: 0o700 })
-          assertArchivePath(localPath,this.root)
-          await this.client.download(`${directory}/${item.remote_name}`, localPath)
-          if (!existsSync(localPath) || statSync(localPath).size !== item.size || await md5(localPath) !== item.md5) {
-            throw new Error('archive_restore_verification_failed')
-          }
+          if (!reference || seen.has(localPath) || Number(reference.size_bytes) !== item.size || !/^[a-f0-9]{64}$/.test(String(reference.sha256))) throw new Error('archive_restore_manifest_invalid')
+          seen.add(localPath)
+          const staged = join(stage,String(index))
+          await this.client.download(`${directory}/${item.remote_name}`,staged)
+          assertArchivePath(staged,this.root)
+          const hash = currentFileHashes(staged)
+          if (!hash || hash.size !== item.size || hash.md5 !== item.md5.toLowerCase() || hash.sha256 !== reference.sha256) throw new Error('archive_restore_verification_failed')
+          const existing = existsSync(localPath) ? currentFileHashes(localPath) : null
+          if (existsSync(localPath) && !existing) throw new Error('archive_restore_destination_conflict')
+          installs.push({path:localPath,staged,stagedSignature:hash.signature,existing:existing?.signature ?? null,replace:!existing || existing.size !== item.size || existing.sha256 !== reference.sha256})
         }
-        const stamp = now.toISOString(); this.db.prepare(`UPDATE ga_artifact_archives SET local_state='present',restored_at=?,
-          last_used_at=?,last_error=NULL,updated_at=? WHERE artifact_id=? AND local_state='restoring'`)
-          .run(stamp, stamp, stamp, String(row.artifact_id)); restored += 1
+        const saved = withImmediateTransaction(this.db, () => {
+          if (JSON.stringify(this.archiveSource(artifactId)) !== identity) return false
+          for (const item of installs) {
+            assertArchivePath(item.path,this.root)
+            if (item.existing) {
+              if (!this.sameFiles([{path:item.path,signature:item.existing}])) throw new Error('archive_restore_destination_conflict')
+            } else if (existsSync(item.path)) throw new Error('archive_restore_destination_conflict')
+            if (item.replace) {
+              if (!this.sameFiles([{path:item.staged,signature:item.stagedSignature}])) throw new Error('archive_restore_verification_failed')
+              mkdirSync(dirname(item.path),{recursive:true,mode:0o700})
+              assertArchivePath(item.path,this.root)
+              renameSync(item.staged,item.path)
+            }
+          }
+          const stamp = now.toISOString()
+          this.db.prepare(`UPDATE ga_artifact_archives SET local_state='present',restored_at=?,last_used_at=?,last_error=NULL,updated_at=? WHERE artifact_id=?`)
+            .run(stamp,stamp,stamp,artifactId)
+          return true
+        })
+        if (saved) restored += 1
       } catch (error) {
-        this.db.prepare(`UPDATE ga_artifact_archives SET local_state='deleted',last_error=?,updated_at=? WHERE artifact_id=?`)
-          .run(String(error instanceof Error ? error.message : error).slice(0,240), now.toISOString(), String(row.artifact_id)); failed += 1
+        const saved = withImmediateTransaction(this.db, () => {
+          if (JSON.stringify(this.archiveSource(artifactId)) !== identity) return false
+          this.db.prepare(`UPDATE ga_artifact_archives SET local_state='deleted',last_error=?,updated_at=? WHERE artifact_id=?`)
+            .run(String(error instanceof Error ? error.message : error).slice(0,240),now.toISOString(),artifactId)
+          return true
+        })
+        if (saved) failed += 1
+      } finally {
+        if (stage) {assertArchivePath(stage,this.root);rmSync(stage,{recursive:true,force:true})}
       }
     }
     return { attempted: rows.length, restored, failed }
+  }
+
+  private archiveSource(artifactId:string) {
+    return withReadTransaction(this.db, () => {
+      const record = this.db.prepare(`SELECT ar.*,a.current_version FROM ga_artifact_archives ar
+        JOIN ga_artifacts a ON a.id=ar.artifact_id WHERE ar.artifact_id=?`).get(artifactId) as Record<string,unknown>|undefined
+      return record ? {record,files:this.fileRows(artifactId)} : undefined
+    })
+  }
+
+  private sameFiles(files:Array<{path:string;signature:ReturnType<typeof signature>}>):boolean {
+    return files.every(file => {
+      assertArchivePath(file.path,this.root)
+      if (!existsSync(file.path)) return false
+      const current = lstatSync(file.path)
+      return current.isFile() && !current.isSymbolicLink() && JSON.stringify(signature(current)) === JSON.stringify(file.signature)
+    })
   }
 
   private fileRows(artifactId:string):Array<Record<string,unknown>>{
@@ -235,7 +306,7 @@ export class ArtifactArchiveService {
       if (localPath === root || !localPath.startsWith(root + sep) || !existsSync(localPath)) throw new Error('archive_local_file_missing')
       assertArchivePath(localPath,this.root)
       if(statSync(localPath).size!==Number(row.size_bytes)||await fileHash(localPath,'sha256')!==row.sha256)throw new Error('archive_local_content_mismatch')
-      let remoteName = safeName(String(row.display_name || `part-${index+1}`))
+      let remoteName = `${String(row.sha256)}-${safeName(String(row.display_name || `part-${index+1}`))}`
       if (names.has(remoteName)) remoteName = `${String(index+1).padStart(3,'0')}-${remoteName}`
       names.add(remoteName)
       result.push({ localPath, remoteName, size: Number(row.size_bytes), md5: await md5(localPath) })
