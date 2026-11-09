@@ -18,7 +18,7 @@ function runId(request:{params:unknown}){
 function failure(reply:{code(status:number):{send(value:unknown):unknown}},error:unknown){
  const code=(error as Error)?.message;
  if(code==='unauthorized')return reply.code(401).send({error:{code:'UNAUTHORIZED'}});
- if(code==='invalid_native_member_message'||code==='invalid_native_member_interrupt')return reply.code(400).send({error:{code:'NATIVE_MEMBER_INPUT_INVALID'}});
+ if(code==='invalid_native_member_message'||code==='invalid_native_member_interrupt'||code==='invalid_native_member_history')return reply.code(400).send({error:{code:'NATIVE_MEMBER_INPUT_INVALID'}});
  if(code==='run_not_found'||code==='native_member_not_found')return reply.code(404).send({error:{code:'NATIVE_MEMBER_NOT_FOUND'}});
  if(code==='run_state_conflict'||code==='run_version_conflict'||code==='idempotency_conflict')return reply.code(409).send({error:{code:'RUN_CONFLICT'}});
  if(code==='native_member_roster_invalid'||code==='native_member_interrupt_receipt_invalid'||code==='native_member_execution_invalid')return reply.code(502).send({error:{code:'NATIVE_MEMBER_RESPONSE_INVALID'}});
@@ -26,9 +26,14 @@ function failure(reply:{code(status:number):{send(value:unknown):unknown}},error
 }
 
 export function registerNativeMemberRoutes(app:FastifyInstance,controls:NativeMemberOwnerControls,client?:NativeMemberControlClient){
+ app.get('/v1/runs/:runId/native-member-executions',async(request,reply)=>{
+  reply.header('cache-control','no-store');
+  try{return controls.executionHistory(actor(request),runId(request),request.query as {cursor?:unknown;limit?:unknown});}
+  catch(error){return failure(reply,error);}
+ });
  app.get('/v1/runs/:runId/native-members/:childSessionRef/execution',async(request,reply)=>{
   reply.header('cache-control','no-store');
-  try{const scope=params(request);return controls.execution(actor(request),scope.runId,scope.childSessionRef);}
+  try{const scope=params(request),query=request.query as {child_run_id?:string};return controls.execution(actor(request),scope.runId,scope.childSessionRef,query.child_run_id);}
   catch(error){return failure(reply,error);}
  });
  app.get('/v1/runs/:runId/native-members',async(request,reply)=>{

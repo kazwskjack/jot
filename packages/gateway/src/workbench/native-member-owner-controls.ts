@@ -54,34 +54,61 @@ export class NativeMemberOwnerControls {
  }
 
  /** Read immutable ownership/publication bindings, including closed executions. */
- execution(ownerId:string,runId:string,childSessionRef:string){
-  if(!ID.test(ownerId)||!ID.test(runId)||!ID.test(childSessionRef))throw Error('invalid_native_member_message');
+ execution(ownerId:string,runId:string,childSessionRef:string,childRunId?:string){
+  if(!ID.test(ownerId)||!ID.test(runId)||!ID.test(childSessionRef)||(childRunId!==undefined&&(typeof childRunId!=='string'||!ID.test(childRunId))))throw Error('invalid_native_member_message');
   return withReadTransaction(this.db,()=>{
    const parent=this.parent(ownerId,runId);
-   const child=this.db.prepare(`SELECT n.run_id,n.role_id,n.snapshot_json,p.publication_json,
-    r.conversation_id,r.status,r.version,CAST(c.next_seq-1 AS TEXT) child_as_of_seq,c.workspace_id,c.project_id
-    FROM wb_native_execution_runs n
-    JOIN wb_run_bindings b ON b.run_id=n.run_id AND b.owner_id=n.owner_id AND b.kind='native_team' AND b.agent_id=n.role_id
-    JOIN wb_native_spawn_publications p ON p.reservation_id=n.reservation_id
-    JOIN ga_runs r ON r.id=n.run_id JOIN ga_conversations c ON c.id=r.conversation_id AND c.owner_id=n.owner_id
-    JOIN ga_harness_session_bindings h ON h.conversation_id=c.id AND h.owner_id=c.owner_id AND h.session_id=n.child_session_ref
-    JOIN ga_runs root ON root.id=n.root_run_id JOIN ga_conversations pc ON pc.id=root.conversation_id AND pc.owner_id=c.owner_id
-     AND pc.workspace_id=c.workspace_id AND pc.project_id=c.project_id
-    WHERE n.owner_id=? AND n.root_run_id=? AND n.child_session_ref=?
-     AND NOT EXISTS(SELECT 1 FROM wb_native_child_activations a WHERE a.previous_run_id=n.run_id AND a.owner_id=n.owner_id AND a.root_run_id=n.root_run_id)
-    ORDER BY n.created_at DESC,n.run_id DESC LIMIT 1`).get(ownerId,runId,childSessionRef) as
-    {run_id:string;role_id:string;snapshot_json:string;publication_json:string;conversation_id:string;status:string;version:number;child_as_of_seq:string;workspace_id:string;project_id:string}|undefined;
-   if(!child)throw Error('native_member_not_found');
-   let saved:NativeReservation,publication:Input;
-   try{saved=JSON.parse(child.snapshot_json);publication=JSON.parse(child.publication_json);}catch{throw Error('native_member_execution_invalid');}
-   const member=publication?.member as Input|undefined;
-   if(!saved||saved.owner_id!==ownerId||saved.root_run_id!==runId||saved.parent_session_ref!==parent.session_id
-    ||saved.child_session_ref!==childSessionRef||saved.role_id!==child.role_id
-    ||saved.workspace_id!==child.workspace_id||saved.project_id!==child.project_id
-    ||!member||member.id!==childSessionRef||member.role!=='teammate')throw Error('native_member_execution_invalid');
-   return {root_run_id:runId,child_session_ref:childSessionRef,child_run_id:child.run_id,
-    child_conversation_id:child.conversation_id,role_ref:child.role_id,child_status:child.status,child_version:child.version,child_as_of_seq:child.child_as_of_seq,execution_authorized:false as const};
+   return this.executionInside(ownerId,runId,childSessionRef,parent.session_id,childRunId);
   });
+ }
+
+ executionHistory(ownerId:string,runId:string,query:{cursor?:unknown;limit?:unknown}={}){
+  if(!ID.test(ownerId)||!ID.test(runId))throw Error('invalid_native_member_message');
+  const cursor=query.cursor;
+  if(cursor!==undefined&&(typeof cursor!=='string'||!ID.test(cursor))
+   ||query.limit!==undefined&&typeof query.limit!=='string'&&typeof query.limit!=='number')throw Error('invalid_native_member_history');
+  const limit=query.limit===undefined?25:Number(query.limit);
+  if(!Number.isSafeInteger(limit)||limit<1||limit>50)throw Error('invalid_native_member_history');
+  return withReadTransaction(this.db,()=>{
+   const parent=this.parent(ownerId,runId);
+   if(cursor!==undefined&&!this.db.prepare(`SELECT 1 FROM wb_native_execution_runs n
+    JOIN wb_native_spawn_publications p ON p.reservation_id=n.reservation_id
+    WHERE n.owner_id=? AND n.root_run_id=? AND n.run_id=?`).get(ownerId,runId,cursor as string))throw Error('invalid_native_member_history');
+   const rows=this.db.prepare(`SELECT n.run_id,n.child_session_ref FROM wb_native_execution_runs n
+    JOIN wb_native_spawn_publications p ON p.reservation_id=n.reservation_id
+    WHERE n.owner_id=? AND n.root_run_id=? ${cursor===undefined?'':'AND n.run_id>?'}
+    ORDER BY n.run_id LIMIT ?`).all(ownerId,runId,...(cursor===undefined?[]:[cursor as string]),limit+1) as Array<{run_id:string;child_session_ref:string}>;
+   const selected=rows.slice(0,limit),last=selected.at(-1);
+   return {root_run_id:runId,execution_authorized:false as const,
+    items:selected.map(row=>this.executionInside(ownerId,runId,row.child_session_ref,parent.session_id,row.run_id)),
+    ...(rows.length>limit&&last?{next_cursor:last.run_id}:{})};
+  });
+ }
+
+ private executionInside(ownerId:string,runId:string,childSessionRef:string,parentSessionRef:string,childRunId?:string){
+  const child=this.db.prepare(`SELECT n.run_id,n.role_id,n.snapshot_json,p.publication_json,
+   r.conversation_id,r.status,r.version,CAST(c.next_seq-1 AS TEXT) child_as_of_seq,c.workspace_id,c.project_id
+   FROM wb_native_execution_runs n
+   JOIN wb_run_bindings b ON b.run_id=n.run_id AND b.owner_id=n.owner_id AND b.kind='native_team' AND b.agent_id=n.role_id
+   JOIN wb_native_spawn_publications p ON p.reservation_id=n.reservation_id
+   JOIN ga_runs r ON r.id=n.run_id JOIN ga_conversations c ON c.id=r.conversation_id AND c.owner_id=n.owner_id
+   JOIN ga_harness_session_bindings h ON h.conversation_id=c.id AND h.owner_id=c.owner_id AND h.session_id=n.child_session_ref
+   JOIN ga_runs root ON root.id=n.root_run_id JOIN ga_conversations pc ON pc.id=root.conversation_id AND pc.owner_id=c.owner_id
+    AND pc.workspace_id=c.workspace_id AND pc.project_id=c.project_id
+   WHERE n.owner_id=? AND n.root_run_id=? AND n.child_session_ref=?
+    ${childRunId===undefined?'AND NOT EXISTS(SELECT 1 FROM wb_native_child_activations a WHERE a.previous_run_id=n.run_id AND a.owner_id=n.owner_id AND a.root_run_id=n.root_run_id)':'AND n.run_id=?'}
+   ORDER BY n.created_at DESC,n.run_id DESC LIMIT 1`).get(ownerId,runId,childSessionRef,...(childRunId===undefined?[]:[childRunId])) as
+   {run_id:string;role_id:string;snapshot_json:string;publication_json:string;conversation_id:string;status:string;version:number;child_as_of_seq:string;workspace_id:string;project_id:string}|undefined;
+  if(!child)throw Error('native_member_not_found');
+  let saved:NativeReservation,publication:Input;
+  try{saved=JSON.parse(child.snapshot_json);publication=JSON.parse(child.publication_json);}catch{throw Error('native_member_execution_invalid');}
+  const member=publication?.member as Input|undefined;
+  if(!saved||saved.owner_id!==ownerId||saved.root_run_id!==runId||saved.parent_session_ref!==parentSessionRef
+   ||saved.child_session_ref!==childSessionRef||saved.role_id!==child.role_id
+   ||saved.workspace_id!==child.workspace_id||saved.project_id!==child.project_id
+   ||!member||member.id!==childSessionRef||member.role!=='teammate')throw Error('native_member_execution_invalid');
+  return {root_run_id:runId,child_session_ref:childSessionRef,child_run_id:child.run_id,
+   child_conversation_id:child.conversation_id,role_ref:child.role_id,child_status:child.status,child_version:child.version,child_as_of_seq:child.child_as_of_seq,execution_authorized:false as const};
  }
 
  async interrupt(ownerId:string,runId:string,childSessionRef:string,input:Input,idempotencyKey:string,client:NativeMemberControlClient|undefined){

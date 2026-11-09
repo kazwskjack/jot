@@ -1,6 +1,7 @@
 import React,{useCallback,useMemo,useState} from 'react';
 import {useResource} from '../workbench/useResource';
 import {request} from './client';
+import {parseNativeMemberExecution} from './native-member-execution';
 import ActivityHistory from './ActivityHistory';
 import ActivityTimeline from './ActivityTimeline';
 import ConversationDisplayBoundary from './ConversationDisplayBoundary';
@@ -22,17 +23,14 @@ function MemberTimeline({view}:{view:View}){
  </section>;
 }
 
-export default function NativeMemberDetails({rootRunId,childSessionRef}:{rootRunId:string;childSessionRef:string}){
- const [open,setOpen]=useState(false);
+export default function NativeMemberDetails({rootRunId,childSessionRef,childRunId,initialOpen=false}:{rootRunId:string;childSessionRef:string;childRunId?:string;initialOpen?:boolean}){
+ const [open,setOpen]=useState(initialOpen);
  const resource=useResource<View>(async signal=>{
-  const source=await request<NativeMemberExecution>(`/runs/${encodeURIComponent(rootRunId)}/native-members/${encodeURIComponent(childSessionRef)}/execution`,'GET',undefined,undefined,signal);
-  const id=(value:unknown)=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(value);
-  if(!source||source.root_run_id!==rootRunId||source.child_session_ref!==childSessionRef||source.execution_authorized!==false
-   ||!id(source.child_run_id)||source.child_run_id===rootRunId||!id(source.child_conversation_id)||!id(source.role_ref)
-   ||!Number.isSafeInteger(source.child_version)||source.child_version<1
-   ||typeof source.child_as_of_seq!=='string'||!/^(0|[1-9]\d{0,18})$/.test(source.child_as_of_seq)||BigInt(source.child_as_of_seq)>9223372036854775807n)throw Error('原成员执行身份尚未确认');
+  const source=await request<NativeMemberExecution>(`/runs/${encodeURIComponent(rootRunId)}/native-members/${encodeURIComponent(childSessionRef)}/execution${childRunId?`?child_run_id=${encodeURIComponent(childRunId)}`:''}`,'GET',undefined,undefined,signal);
+  parseNativeMemberExecution(source);
+  if(source.root_run_id!==rootRunId||source.child_session_ref!==childSessionRef||(childRunId!==undefined&&source.child_run_id!==childRunId))throw Error('原成员执行身份尚未确认');
   return {source};
- },`${rootRunId}:${childSessionRef}`,open);
+ },JSON.stringify([rootRunId,childSessionRef,childRunId??null]),open);
  return <section className="jot-native-member-details" aria-label="原成员执行记录">
   <button type="button" aria-expanded={open} onClick={()=>setOpen(value=>!value)}>{open?'收起原成员步骤':'查看原成员步骤'}</button>
   {open&&<>

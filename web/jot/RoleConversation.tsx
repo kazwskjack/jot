@@ -15,6 +15,7 @@ import VoiceInput from './VoiceInput';
 import SkillCatalogPanel from './SkillCatalogPanel';
 import NativeCommandQueries from './NativeCommandQueries';
 import NativeMemberDetails from './NativeMemberDetails';
+import NativeMemberHistory from './NativeMemberHistory';
 import {catalogMountForRun,skillGestureDraft} from './skill-catalog-mount.js';
 import CompactionActivities from './CompactionActivities';
 import ActivityTimeline from './ActivityTimeline';
@@ -275,6 +276,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
    <NativeCommandQueries key={queryRecoveryMount.ownerScope+':'+queryRecoveryMount.runId+':plan'} planMode
     runId={queryRecoveryMount.runId} ownerScope={queryRecoveryMount.ownerScope} commands={[]} catalogSha256=""/>
   </details>}
+  {!ordinary&&conversationRuns.length>0&&<ConversationDisplayBoundary label="成员执行历史"><NativeMemberHistory runs={conversationRuns}/></ConversationDisplayBoundary>}
   {diagnosticRun&&<ConversationDisplayBoundary label="运行诊断"><RunDiagnostics key={diagnosticRun.run_id} run={diagnosticRun}/></ConversationDisplayBoundary>}
  {state&&<>
   <ConversationDisplayBoundary label="上下文整理状态"><CompactionActivities activities={activityValues} runs={state.runs}/></ConversationDisplayBoundary>

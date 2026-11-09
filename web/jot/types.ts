@@ -73,6 +73,7 @@ export type ActivityHistoryEntry={seq:string;activity:Activity};
 export type ActivityHistoryCoverage={from_seq:string;through_seq:string;event_count:string;complete:boolean};
 export type ActivityHistoryPage={conversation_id:string;run_id?:string;as_of_seq:string;items:ActivityHistoryEntry[];coverage:ActivityHistoryCoverage;next_before_seq?:string};
 export type NativeMemberExecution={root_run_id:string;child_session_ref:string;child_run_id:string;child_conversation_id:string;role_ref:string;child_status:Run['status'];child_version:number;child_as_of_seq:string;execution_authorized:false};
+export type NativeMemberExecutionPage={root_run_id:string;items:NativeMemberExecution[];next_cursor?:string;execution_authorized:false};
 
 export type Question = { question_id: string; prompt: string; description?: string; options: Array<{ option_id: string; label: string; description?: string }>; multiple: boolean; allow_custom: boolean };
 
