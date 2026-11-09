@@ -51,13 +51,14 @@ export default function PdfFileRegionReference({root,source,page,rotation}:{root
   if(captureInFlight){setError('上一张截图仍在编码，请稍后重试。');return;}
   captureInFlight=true;
   const job=++sequence.current,expected=identity;capturing.current=true;setBusy(true);setError('');
-  const crop=window.document.createElement('canvas');
+  let allocated:HTMLCanvasElement|undefined;
   const check=()=>{
    const current=latest.current;
    if(sequence.current!==job||sourceIdentity.current!==expected||taskDraftScope()!==owner||!current
     ||current.disabled||current.regionDisabled||current.owner!==owner||current.conversationId!==source.conversationId)throw new DOMException('选区已变化','AbortError');
   };
   try{
+   const crop=window.document.createElement('canvas');allocated=crop;
    check();const canvas=target.canvas,current=canvas.getBoundingClientRect();
    if(!canvas.isConnected||canvas.dataset.pdfCaptureReady!=='true'||!canvas.width||!canvas.height||Math.abs(current.left-target.bounds.left)>0.5||Math.abs(current.top-target.bounds.top)>0.5||Math.abs(current.width-target.bounds.width)>0.5||Math.abs(current.height-target.bounds.height)>0.5)throw Error('PDF页面已变化，请重新选择区域。');
    const selected=clamp(rect,current);
@@ -82,7 +83,7 @@ export default function PdfFileRegionReference({root,source,page,rotation}:{root
    const accepted=latest.current!.onAddRegion({owner,conversationId:source.conversationId,runId:source.runId,activityId:source.activityId,resultSha:source.resultSha,file:{path:original.path,version:original.version,sha256:original.sha256,size:original.size},reference,imageBytes:file.size,rotation},file);
    if(accepted)cancel();else setError('截图引用未被接收，请查看当前对话的提示。');
   }catch(error){if(sequence.current===job&&(error as DOMException)?.name!=='AbortError')setError(error instanceof Error?error.message:'区域截图失败');}
-  finally{captureInFlight=false;crop.width=0;crop.height=0;if(sequence.current===job){capturing.current=false;setBusy(false);}}
+  finally{captureInFlight=false;if(allocated){allocated.width=0;allocated.height=0;}if(sequence.current===job){capturing.current=false;setBusy(false);}}
  };
  const norm=target&&rect?normalized(rect,target.bounds):undefined;
  const adjust=(field:keyof NormalizedRect,value:number)=>{
