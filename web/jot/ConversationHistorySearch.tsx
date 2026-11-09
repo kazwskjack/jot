@@ -14,6 +14,8 @@ type Props={
  activities:Activity[];
  runs:Record<string,Run>;
  onRevealActivity:(request:ActivityReveal)=>void;
+ onLoadActivityHistory:()=>void;
+ activityHistorySeq?:string;
  renderedRevision:unknown;
  revealedMessageId:string;
  ready:boolean;
@@ -41,7 +43,7 @@ function readSearchDocument(element:HTMLElement):SearchDocument{
 
 function searchPattern(query:string){return new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'giu');}
 
-export default function ConversationHistorySearch({root,conversationId,messages,activities,runs,onRevealActivity,renderedRevision,revealedMessageId,ready,onReveal,historyComplete,historyCursor,onHistoryLoaded}:Props){
+export default function ConversationHistorySearch({root,conversationId,messages,activities,runs,onRevealActivity,onLoadActivityHistory,activityHistorySeq,renderedRevision,revealedMessageId,ready,onReveal,historyComplete,historyCursor,onHistoryLoaded}:Props){
  const [open,setOpen]=useState(false),[draft,setDraft]=useState(''),[query,setQuery]=useState('');
  const [index,setIndex]=useState(0),[navigationVersion,setNavigationVersion]=useState(0);
  const [loading,setLoading]=useState(false),[error,setError]=useState(''),[retry,setRetry]=useState(0);
@@ -52,6 +54,7 @@ export default function ConversationHistorySearch({root,conversationId,messages,
  pageCallback.current=onHistoryLoaded;
  const highlightName=`jot-chat-search-${useId().replace(/[^a-z0-9-]/gi,'')}`;
  const needle=query.trim();
+ useEffect(()=>{if(open)onLoadActivityHistory();},[open,activityHistorySeq,onLoadActivityHistory]);
  useEffect(()=>{
   cursor.current=historyCursor;
   complete.current=historyComplete===true;
@@ -224,7 +227,7 @@ export default function ConversationHistorySearch({root,conversationId,messages,
    <button type="button" disabled={!total} onClick={()=>navigate(1)}>下一个结果</button>
    <button type="button" onClick={close}>关闭搜索</button>
    {active&&<p className="jot-history-search-excerpt">{active.source.kind==='activity'?'工具步骤 · ':'消息正文 · '}{active.source.text.slice(Math.max(0,active.offset-60),active.offset+active.length+60)}</p>}
-   <small>工具结果来自当前已加载的公开步骤。</small>
+   <small>公开步骤历史的加载进度和保留缺口显示在时间线上方。</small>
    {error&&<p role="alert">完整历史尚未加载，当前结果来自已加载消息。{error} <button type="button" disabled={loading} onClick={()=>setRetry(value=>value+1)}>继续加载历史</button></p>}
   </div>}
  </div>;

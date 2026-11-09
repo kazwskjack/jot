@@ -10,3 +10,5 @@
 .jot-activity-group dd{white-space:pre-wrap;overflow-wrap:anywhere;max-height:200px;overflow:auto;margin-inline-start:12px}
 .jot-activity-group nav{display:flex;align-items:center;gap:8px}
 .jot-display-recovery{border:1px solid currentColor;border-radius:8px;padding:10px;margin-block:8px}
+.jot-activity-history{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-block:12px}
+.jot-activity-history p{width:100%;margin-block:4px;overflow-wrap:anywhere}

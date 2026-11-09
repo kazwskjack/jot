@@ -131,6 +131,10 @@ export type Activity_compaction = { activity_id:string; run_id:string; attempt_i
 
 export type Activity = (Activity_search) | (Activity_browse) | (Activity_file_edit) | (Activity_file_read) | (Activity_command) | (Activity_subagent) | (Activity_crawl) | (Activity_compaction);
 
+export type ActivityHistoryEntry={seq:string;activity:Activity};
+export type ActivityHistoryCoverage={from_seq:string;through_seq:string;event_count:string;complete:boolean};
+export type ActivityHistoryPage={conversation_id:string;as_of_seq:string;items:ActivityHistoryEntry[];coverage:ActivityHistoryCoverage;next_before_seq?:string};
+
 export type Question = { question_id: string; prompt: string; description?: string; options: Array<{ option_id: string; label: string; description?: string }>; multiple: boolean; allow_custom: boolean };
 
 export type QuestionAnswer = { question_id: string; selected_option_ids: Array<string>; custom_text?: string };

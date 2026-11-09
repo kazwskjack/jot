@@ -6,6 +6,7 @@ import type {AgentEvent, Snapshot, Message, Run, Activity, Source, Interaction, 
 export interface Projection {
   conversationId: string;
   seq: string;
+  snapshotSeq?: string;
   historyComplete?: boolean;
   nextHistoryCursor?: string;
   messages: Record<string, Message>;
@@ -26,7 +27,7 @@ export function fromSnapshot(s: Snapshot): Projection {
   const v = JSON.parse(JSON.stringify(s)) as Snapshot;
   const finalRuns=new Set(v.messages.filter(m=>m.role==='assistant'&&m.status==='complete'&&!m.message_id.startsWith('stream-')).map(m=>m.run_id));
   v.messages=v.messages.filter(m=>!(m.role==='assistant'&&m.message_id.startsWith('stream-')&&finalRuns.has(m.run_id)));
-  return {conversationId:v.conversation.conversation_id, seq:v.as_of_seq,historyComplete:v.history_complete,
+  return {conversationId:v.conversation.conversation_id, seq:v.as_of_seq,snapshotSeq:v.as_of_seq,historyComplete:v.history_complete,
     ...(v.next_history_cursor?{nextHistoryCursor:v.next_history_cursor}:{}),
     messages:indexBy(v.messages,x=>x.message_id),runs:indexBy(v.runs,x=>x.run_id),
     activities:indexBy(v.activities,x=>x.activity_id),sources:indexBy(v.sources,x=>x.source_id),

@@ -11,7 +11,7 @@ export function buildSnapshot(db: DatabaseSync, conversationId: string, ownerId:
   db.exec('BEGIN');
   try {
     const conversation = new ConversationRepository(db).get(conversationId, ownerId);
-    const asOf = db.prepare('SELECT next_seq-1 AS seq FROM ga_conversations WHERE id=?').get(conversationId) as { seq: number };
+    const asOf = db.prepare('SELECT CAST(next_seq-1 AS TEXT) AS seq FROM ga_conversations WHERE id=?').get(conversationId) as { seq: string };
     const history = storedConversationMessagePage(db,conversationId,200);
     const messages = history.rows
       .map((row: any) => {

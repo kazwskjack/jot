@@ -1,3 +1,4 @@
+import {readActivityHistory} from './events/activity-history.ts';
 import {registerPluginProfileRoutes,type PluginProfileClient} from './workbench/plugin-profile-routes.ts';
 import {createPluginProfileReceiptExecutor,PLUGIN_PROFILE_RECEIPT_PROTOCOL} from './workbench/plugin-profile-receipts.ts';
 import {registerHostSettingsInternalRoutes} from './host-admin/settings-internal-routes.ts';
@@ -624,6 +625,9 @@ export async function buildServer(config: {
     if(code==='model_metadata_changed')return reply.code(409).send({error:{code:'MODEL_METADATA_CHANGED'}});
     if(['model_metadata_invalid','model_metadata_unavailable'].includes(code))return reply.code(503).send({error:{code:'MODEL_METADATA_UNAVAILABLE'}});
     if(code==='chat_mode_unavailable')return reply.code(503).send({error:{code:'CHAT_MODE_UNAVAILABLE'}});
+    if(code==='invalid_activity_history_query')return reply.code(400).send({error:{code:'ACTIVITY_HISTORY_QUERY_INVALID'}});
+    if(code==='activity_history_cursor_future')return reply.code(409).send({error:{code:'ACTIVITY_HISTORY_CURSOR_FUTURE'}});
+    if(code==='activity_history_source_invalid')return reply.code(503).send({error:{code:'ACTIVITY_HISTORY_SOURCE_INVALID'}});
     if(code==='conversation_mode_invalid')return reply.code(400).send({error:{code:'CONVERSATION_MODE_INVALID'}});
     if(['invalid_file_range','invalid_file_history_query','invalid_file_history_cursor'].includes(code))return reply.code(400).send({error:{code:code.toUpperCase()}});
     if(['memory_import_id_conflict','memory_import_conflict','memory_import_digest_conflict','memory_import_write_conflict'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
@@ -1032,6 +1036,15 @@ export async function buildServer(config: {
     const id=(request.params as {conversationId:string}).conversationId,owner=actor(request as any),input=request.body as Record<string,unknown>;
     if(input.mode===undefined)return conversations.update(id,owner,input);
     const commit=await conversationModes.prepareUpdate(id,owner,input);return atomicCommand(request,200,commit);
+  });
+  app.get('/v1/conversations/:conversationId/activities', async (request,reply) => {
+    const id=(request.params as {conversationId:string}).conversationId,owner=actor(request as any);
+    db.exec('BEGIN');
+    try{
+      conversations.get(id,owner);
+      const value=readActivityHistory(db,id,request.query as {as_of_seq?:unknown;before_seq?:unknown;limit?:unknown});
+      db.exec('COMMIT');return reply.header('cache-control','no-store').send(value);
+    }catch(error){if(db.isTransaction)db.exec('ROLLBACK');throw error;}
   });
   app.get('/v1/conversations/:conversationId/messages', async request => {
     const query = request.query as { limit?: string;cursor?:string };
