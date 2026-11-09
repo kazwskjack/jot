@@ -1,4 +1,4 @@
-import { closeSync, openSync, readFileSync, readSync, statSync } from 'node:fs';
+import { closeSync, openSync, readSync, statSync } from 'node:fs';
 
 export type ArtifactContentKind = 'image' | 'text' | 'document' | 'file';
 export interface DetectedContentType {
@@ -19,13 +19,24 @@ function looksText(value: Buffer): boolean {
   } catch { return false; }
 }
 
+function readRange(path:string,position:number,length:number):Buffer {
+  const buffer=Buffer.alloc(length),handle=openSync(path,'r');
+  try {
+    let offset=0;
+    while(offset<length){
+      const count=readSync(handle,buffer,offset,length-offset,position+offset);
+      if(!count)break;
+      offset+=count;
+    }
+    return buffer.subarray(0,offset);
+  } finally {closeSync(handle);}
+}
+
 function zipEntryNames(path: string): Set<string> | null {
   const size = statSync(path).size;
   const tailSize = Math.min(size, 65_557);
-  const tail = Buffer.alloc(tailSize);
-  const handle = openSync(path, 'r');
-  try { readSync(handle, tail, 0, tail.length, size - tailSize); }
-  finally { closeSync(handle); }
+  const tail=readRange(path,size-tailSize,tailSize);
+  if(tail.length!==tailSize)return null;
   let end = -1;
   for (let index = tail.length - 22; index >= 0; index -= 1) {
     if (tail.readUInt32LE(index) === 0x06054b50) { end = index; break; }
@@ -35,10 +46,8 @@ function zipEntryNames(path: string): Set<string> | null {
   const centralSize = tail.readUInt32LE(end + 12);
   const centralOffset = tail.readUInt32LE(end + 16);
   if (entries > 10_000 || centralSize > 8 * 1024 * 1024 || centralOffset + centralSize > size) return null;
-  const directory = Buffer.alloc(centralSize);
-  const directoryHandle = openSync(path, 'r');
-  try { readSync(directoryHandle, directory, 0, directory.length, centralOffset); }
-  finally { closeSync(directoryHandle); }
+  const directory=readRange(path,centralOffset,centralSize);
+  if(directory.length!==centralSize)return null;
   const names = new Set<string>(); let cursor = 0;
   while (cursor + 46 <= directory.length && names.size < entries) {
     if (directory.readUInt32LE(cursor) !== 0x02014b50) return null;
@@ -73,7 +82,7 @@ function detectZipDocument(path: string): DetectedContentType | null {
 }
 
 export function detectContentType(path: string, declared = 'application/octet-stream'): DetectedContentType {
-  const head = readFileSync(path).subarray(0, 8192);
+  const head=readRange(path,0,8192);
   if (starts(head, [0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a])) return { mediaType: 'image/png', previewKind: 'image', kind: 'image' };
   if (starts(head, [0xff,0xd8,0xff])) return { mediaType: 'image/jpeg', previewKind: 'image', kind: 'image' };
   if (head.subarray(0, 6).toString('ascii') === 'GIF87a' || head.subarray(0, 6).toString('ascii') === 'GIF89a') return { mediaType: 'image/gif', previewKind: 'image', kind: 'image' };

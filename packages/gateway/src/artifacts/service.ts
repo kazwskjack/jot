@@ -7,7 +7,7 @@ import { withImmediateTransaction, withReadTransaction } from '../db/database.ts
 import { canonicalJson } from '../db/canonical-json.ts';
 import { detectContentType } from './content-type.ts';
 import {artifactArchiveReferences,artifactArchiveManifest} from './archive-references.ts';
-import {currentFileHashes} from './file-integrity.ts';
+import {currentFileHashes,signature} from './file-integrity.ts';
 import {sameTaskFileLocation} from '../persistent-tasks/output-content.ts';
 import {readIsolatedTaskFileVersion} from '../persistent-tasks/isolated-output-source.ts';
 import {taskFileSource,type TaskFileScope,type TaskFileLocation} from '../persistent-tasks/task-file-source.ts';
@@ -169,7 +169,7 @@ export class ArtifactService {
       if(!same(path,finalPath)&&!same(dirname(path),this.incomingRoot))throw Error('channel_attachment_stage_path_invalid');
       rejectTaskOutputSymlinks(path);const stat=lstatSync(path);
       if(!stat.isFile()||stat.size!==part.size_bytes||row.received_size!==part.size_bytes||row.actual_sha256!==part.sha256)throw Error('upload_content_mismatch');
-      const bytes=readFileSync(path);if(bytes.length!==part.size_bytes||createHash('sha256').update(bytes).digest('hex')!==part.sha256)throw Error('upload_content_mismatch');
+      const proof=currentFileHashes(path);if(!proof||proof.size!==part.size_bytes||proof.sha256!==part.sha256)throw Error('upload_content_mismatch');
       if(detectContentType(path,part.media_type).mediaType!==part.media_type)throw Error('channel_attachment_media_mismatch');
     }
     signal?.throwIfAborted();return stage;
@@ -610,11 +610,45 @@ export class ArtifactService {
   }
 
   cleanupCancelledUpload(uploadId:string,ownerId:string):void {
-    const row=this.upload(uploadId,ownerId);
-    if(row.status!=='cancelled'||row.writer_token||this.activeUploadWriters.has(uploadId))return;
-    const path=resolve(String(row.server_path));
-    if(dirname(path)!==resolve(this.incomingRoot))throw new Error('upload_state_conflict');
-    try{unlinkSync(path);}catch(error){if(!['ENOENT','EBUSY','EPERM','EACCES'].includes((error as NodeJS.ErrnoException).code??''))throw error;}
+    this.cleanupTerminalUpload(this.upload(uploadId,ownerId),'cancelled');
+  }
+
+  private cleanupTerminalUpload(row:Record<string,unknown>,status:'cancelled'|'expired'):void {
+    const uploadId=String(row.id),ownerId=String(row.owner_id);
+    if(row.status!==status||row.writer_token||this.activeUploadWriters.has(uploadId))return;
+    const incoming=resolve(String(row.server_path));
+    if(dirname(incoming)!==resolve(this.incomingRoot))throw Error('upload_state_conflict');
+    const artifactId=uploadArtifactId(uploadId),ready=resolve(this.uploadRoot,artifactId);
+    let proof:ReturnType<typeof currentFileHashes>|undefined;
+    if(!row.channel_stage_key&&row.actual_sha256===row.declared_sha256&&row.received_size===row.declared_size&&existsSync(ready)
+      &&!this.db.prepare('SELECT 1 FROM ga_artifacts WHERE id=?').get(artifactId)){
+      rejectTaskOutputSymlinks(ready);
+      try{
+        const checked=currentFileHashes(ready);
+        if(checked&&checked.size===Number(row.declared_size)&&checked.sha256===row.declared_sha256)proof=checked;
+      }catch(error){if(!['ENOENT','EBUSY','EPERM','EACCES'].includes((error as NodeJS.ErrnoException).code??''))throw error;}
+    }
+    if(!proof&&!existsSync(incoming))return;
+    const remove=(path:string)=>{try{unlinkSync(path);}catch(error){if(!['ENOENT','EBUSY','EPERM','EACCES'].includes((error as NodeJS.ErrnoException).code??''))throw error;}};
+    withImmediateTransaction(this.db,()=>{
+      // A nested savepoint alone does not upgrade an outer deferred read transaction.
+      if(this.db.prepare('UPDATE ga_uploads SET status=status WHERE id=? AND owner_id=? AND status=? AND writer_token IS NULL')
+        .run(uploadId,ownerId,status).changes!==1)return;
+      const current=this.upload(uploadId,ownerId),fields=Object.keys(row);
+      if(current.status!==status||current.writer_token||this.activeUploadWriters.has(uploadId)
+        ||fields.length!==Object.keys(current).length||fields.some(field=>current[field]!==row[field]))return;
+      rejectTaskOutputSymlinks(incoming);remove(incoming);
+      if(!proof||this.db.prepare('SELECT 1 FROM ga_artifacts WHERE id=?').get(artifactId)||!existsSync(ready))return;
+      // Conservatively preserve case/Unicode-equivalent registered paths.
+      const readyKey=ready.normalize('NFC').toLowerCase();
+      for(const reference of this.db.prepare('SELECT server_path FROM ga_artifact_versions UNION ALL SELECT server_path FROM ga_artifact_parts').iterate()){
+        if(typeof reference.server_path!=='string'||resolve(reference.server_path).normalize('NFC').toLowerCase()===readyKey)return;
+      }
+      rejectTaskOutputSymlinks(ready);
+      const named=lstatSync(ready);
+      if(!named.isFile()||named.isSymbolicLink()||JSON.stringify(signature(named))!==JSON.stringify(proof.signature))return;
+      remove(ready);
+    });
   }
 
   cancelUploadBatch(batchId:string,ownerId:string):void {
@@ -677,11 +711,8 @@ export class ArtifactService {
   assertUploadReceiptLive(uploadId:string,ownerId:string):void { this.assertUploadLive(this.upload(uploadId,ownerId)); }
 
   private cleanupExpiredUpload(uploadId:string,ownerId:string):void {
-    const row=this.db.prepare('SELECT status,writer_token,server_path FROM ga_uploads WHERE id=? AND owner_id=?').get(uploadId,ownerId) as Record<string,unknown>|undefined;
-    if(row?.status!=='expired'||row.writer_token||this.activeUploadWriters.has(uploadId))return;
-    const path=resolve(String(row.server_path));
-    if(dirname(path)!==resolve(this.incomingRoot))throw new Error('upload_state_conflict');
-    try{unlinkSync(path);}catch(error){if(!['ENOENT','EBUSY','EPERM','EACCES'].includes((error as NodeJS.ErrnoException).code??''))throw error;}
+    const row=this.db.prepare('SELECT * FROM ga_uploads WHERE id=? AND owner_id=?').get(uploadId,ownerId) as Record<string,unknown>|undefined;
+    if(row)this.cleanupTerminalUpload(row,'expired');
   }
 
   private cleanupOrphanedUploadGenerations(now:Date):void {
@@ -781,14 +812,28 @@ export class ArtifactService {
     rejectTaskOutputSymlinks(sourcePath);rejectTaskOutputSymlinks(finalPath);
     const sourceStat=lstatSync(sourcePath);
     if(!sourceStat.isFile()||sourceStat.size!==receivedSize||sourceStat.size>this.maxBytes)throw new Error('upload_content_mismatch');
-    const sourceBytes=readFileSync(sourcePath);
-    if(sourceBytes.length!==receivedSize||createHash('sha256').update(sourceBytes).digest('hex')!==requested)throw new Error('upload_content_mismatch');
+    const proof=currentFileHashes(sourcePath);
+    if(!proof||proof.size!==receivedSize||proof.sha256!==requested)throw Error('upload_content_mismatch');
     const detected = detectContentType(sourcePath, String(row.mime_type));
     const mediaType = detected.mediaType;
     const previewKind = detected.previewKind;
-    if(sourcePath!==finalPath)renameSync(sourcePath, finalPath);
     const metadata = { file_name: row.filename, relative_path: row.relative_path, status: 'ready', preview_kind: previewKind, origin: 'upload' };
-    withImmediateTransaction(this.db, () => {
+    return withImmediateTransaction(this.db, () => {
+      // Acquire the writer before filesystem publication, including nested deferred callers.
+      if(this.db.prepare('UPDATE ga_uploads SET status=status WHERE id=? AND owner_id=?').run(uploadId,ownerId).changes!==1)throw Error('upload_not_found');
+      const current=this.upload(uploadId,ownerId);
+      if(current.channel_stage_key&&!this.channelFinalizing.has(uploadId))throw Error('channel_attachment_batch_finalization_required');
+      this.assertUploadLive(current);
+      if(current.status==='completed')return this.completedUploadArtifact(current,ownerId);
+      if(!this.db.prepare('SELECT 1 FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId))throw Error('conversation_not_found');
+      const fields=Object.keys(row);
+      if(current.status!=='uploaded'||fields.length!==Object.keys(current).length||fields.some(field=>current[field]!==row[field])
+        ||this.db.prepare('SELECT 1 FROM ga_artifacts WHERE id=?').get(artifactId))throw Error('upload_state_conflict');
+      rejectTaskOutputSymlinks(sourcePath);rejectTaskOutputSymlinks(finalPath);
+      if(!existsSync(sourcePath)||sourcePath!==finalPath&&existsSync(finalPath))throw Error('upload_state_conflict');
+      const named=lstatSync(sourcePath);
+      if(!named.isFile()||named.isSymbolicLink()||JSON.stringify(signature(named))!==JSON.stringify(proof.signature))throw Error('upload_content_mismatch');
+      if(sourcePath!==finalPath)renameSync(sourcePath,finalPath);
       this.db.prepare('INSERT INTO ga_artifacts(id,conversation_id,owner_id,kind,current_version,created_at,updated_at) VALUES(?,?,?,?,?,?,?)')
         .run(artifactId, conversationId, ownerId, 'upload', 1, now, now);
       this.db.prepare('INSERT INTO ga_artifact_versions(artifact_id,version,server_path,sha256,size_bytes,mime_type,metadata_json,created_at) VALUES(?,?,?,?,?,?,?,?)')
@@ -798,8 +843,8 @@ export class ArtifactService {
       ) VALUES(?,?,?,?,?,?)`).run(artifactId, 'pending', 'present', now, now, now);
       this.db.prepare("UPDATE ga_uploads SET status='completed',completed_at=? WHERE id=?").run(now, uploadId);
       this.settleUploadBatch(String(row.batch_id));
+      return this.get(artifactId,ownerId,1);
     });
-    return this.get(artifactId, ownerId, 1);
   }
 
   registerGenerated(runId: string, runtimeRef: string,
