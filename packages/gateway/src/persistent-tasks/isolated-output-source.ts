@@ -1,3 +1,5 @@
+import {WorkCycleSources} from '../always-on/work-cycle-sources.ts';
+import {WorkspaceJournal} from '../always-on/workspace-journal.ts';
 import {createHash} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
 import {canonicalJson} from '../db/canonical-json.ts';
@@ -8,6 +10,25 @@ import type {TaskOutputReadResult} from './output-content.ts';
 type Row=Record<string,any>;
 const sha=(v:string|Uint8Array)=>createHash('sha256').update(v).digest('hex');
 const fail=()=>Error('file_execution_output_unverified');
+/** Original run/admission binding shared by execution proof and historical reads. */
+function isolatedRunScope(db:DatabaseSync,runId:string,identity:Row,live:boolean){
+ if(identity.run_id!==runId)throw fail();
+ const binding=db.prepare(`SELECT b.kind,b.context_json,r.conversation_id FROM wb_run_bindings b JOIN ga_runs r ON r.id=b.run_id JOIN ga_conversations c ON c.id=r.conversation_id AND c.owner_id=b.owner_id WHERE b.run_id=? AND b.owner_id=? AND c.workspace_id=? AND c.project_id=?`).get(runId,identity.owner_id,identity.workspace_id,identity.project_id) as Row|undefined;
+ if(!binding)throw fail();const context=JSON.parse(binding.context_json);if(context.workspace_id!==identity.workspace_id||context.project_id!==identity.project_id)throw fail();
+ let lead=runId,member:Row|undefined;if(binding.kind==='native_team'){
+  const native=db.prepare('SELECT root_run_id,task_id,occurrence_id,role_id,child_session_ref,snapshot_json FROM wb_native_execution_runs WHERE run_id=? AND owner_id=?').get(runId,identity.owner_id) as Row|undefined;
+  if(!native||native.occurrence_id!==identity.occurrence_id)throw fail();lead=native.root_run_id;
+  member=JSON.parse(native.snapshot_json);
+  if(!member||typeof member!=='object'||Array.isArray(member)||member.owner_id!==identity.owner_id||member.root_run_id!==native.root_run_id||member.role_id!==native.role_id
+   ||member.child_session_ref!==native.child_session_ref||member.workspace_id!==identity.workspace_id||member.project_id!==identity.project_id
+   ||member.task_id!==native.task_id||member.occurrence_id!==native.occurrence_id||context.agent_id!==native.role_id)throw fail();
+ }else if(binding.kind!=='task')throw fail();
+ const records=new WorkAdmissionRecords(db),admission=live?records.guard(identity.owner_id,lead):records.byRun(identity.owner_id,lead);
+ if(!admission||admission.occurrence_id!==identity.occurrence_id||admission.cycle_id!==identity.cycle_id||admission.snapshot_id!==identity.snapshot_id||admission.scope.workspace_id!==identity.workspace_id||admission.scope.project_id!==identity.project_id||admission.scope.agent_id!==identity.agent_id)throw fail();
+ if(member&&member.task_id!==admission.task_id)throw fail();
+ const grant=new WorkGrants(db).get(identity.owner_id,admission.scope,admission.grant_id);
+ return {binding,admission,grant,member};
+}
 /** Validate original immutable IO journal and admission. Live authority is checked
  * only when issuing the original proof, never when reading historical output. */
 function isolatedMutationFacts(db:DatabaseSync,runId:string,callId:string,result:unknown,kind:'files.write'|'files.delete',live:boolean):Row{
@@ -34,20 +55,7 @@ function isolatedMutationFacts(db:DatabaseSync,runId:string,callId:string,result
     ||value.deleted!==true||value.sha256!==null||value.size!==0||row.bytes!==null||value.previous_sha256!==initial.sha256||value.previous_size!==initial.size
     ||typeof value.updated_at!=='string'||new Date(value.updated_at).toISOString()!==value.updated_at)throw fail();
   }
-  const binding=db.prepare(`SELECT b.kind,b.context_json,r.conversation_id FROM wb_run_bindings b JOIN ga_runs r ON r.id=b.run_id JOIN ga_conversations c ON c.id=r.conversation_id AND c.owner_id=b.owner_id WHERE b.run_id=? AND b.owner_id=? AND c.workspace_id=? AND c.project_id=?`).get(runId,identity.owner_id,identity.workspace_id,identity.project_id) as Row|undefined;
-  if(!binding)throw fail();const context=JSON.parse(binding.context_json);if(context.workspace_id!==identity.workspace_id||context.project_id!==identity.project_id)throw fail();
-  let lead=runId,member:Row|undefined;if(binding.kind==='native_team'){
-   const native=db.prepare('SELECT root_run_id,task_id,occurrence_id,role_id,child_session_ref,snapshot_json FROM wb_native_execution_runs WHERE run_id=? AND owner_id=?').get(runId,identity.owner_id) as Row|undefined;
-   if(!native||native.occurrence_id!==identity.occurrence_id)throw fail();lead=native.root_run_id;
-   member=JSON.parse(native.snapshot_json);
-   if(!member||typeof member!=='object'||Array.isArray(member)||member.owner_id!==identity.owner_id||member.root_run_id!==native.root_run_id||member.role_id!==native.role_id
-    ||member.child_session_ref!==native.child_session_ref||member.workspace_id!==identity.workspace_id||member.project_id!==identity.project_id
-    ||member.task_id!==native.task_id||member.occurrence_id!==native.occurrence_id||context.agent_id!==native.role_id)throw fail();
-  }else if(binding.kind!=='task')throw fail();
-  const records=new WorkAdmissionRecords(db),admission=live?records.guard(identity.owner_id,lead):records.byRun(identity.owner_id,lead);
-  if(!admission||admission.occurrence_id!==identity.occurrence_id||admission.cycle_id!==identity.cycle_id||admission.snapshot_id!==identity.snapshot_id||admission.scope.workspace_id!==identity.workspace_id||admission.scope.project_id!==identity.project_id||admission.scope.agent_id!==identity.agent_id)throw fail();
-  if(member&&member.task_id!==admission.task_id)throw fail();
-  const grant=new WorkGrants(db).get(identity.owner_id,admission.scope,admission.grant_id);
+  const {binding,admission,grant,member}=isolatedRunScope(db,runId,identity,live);
   if(!grant.plan_paths.includes(row.path))throw fail();
   if(member){
    const assignment=member.task_assignment,paths=assignment?.file_paths;
@@ -106,5 +114,30 @@ export function readIsolatedTaskFileDeletion(db:DatabaseSync,owner:string,isolat
    workspace_id:facts.workspace_id,project_id:facts.project_id,task_id:facts.task_id,occurrence_id:facts.occurrence_id,
    cycle_id:facts.cycle_id,snapshot_id:facts.snapshot_id,path:facts.path,version:facts.version,conversation_id:facts.conversation_id,
    previous_sha256:facts.previous_sha256,previous_size:facts.previous_size};
+ }catch{throw fail();}
+}
+
+/** Resolve the original backing version for an already verified isolated list member. */
+export function isolatedBaselineSource(db:DatabaseSync,owner:string,runId:string,result:Record<string,unknown>,path:string,sha256:string,size:number){
+ if(!db.isTransaction)throw Error('isolated_baseline_read_transaction_required');
+ try{
+  if(result.source!=='isolated'||result.owner_id!==owner)throw fail();
+  const {admission,grant,member}=isolatedRunScope(db,runId,result,false);
+  // Historical readonly context predates member path assignments. Recorded assignments retain their original scope checks.
+  if(member&&member.task_assignment?.file_paths!==undefined){
+   const assignment=member.task_assignment,paths=assignment.file_paths;
+   if(!assignment||assignment.task_id!==admission.task_id||assignment.occurrence_id!==admission.occurrence_id
+    ||!Array.isArray(paths)||!paths.length||paths.length>32||new Set(paths).size!==paths.length
+    ||paths.some(path=>typeof path!=='string'||!grant.plan_paths.includes(path)))throw fail();
+  }
+  const source=new WorkCycleSources(db).historical(owner,admission.scope,admission.cycle_id);
+  const snapshot=new WorkspaceJournal(db).historical(owner,admission.scope,admission.cycle_id,admission.snapshot_id,grant.cycle_version);
+  if(!source||!snapshot)return undefined;
+  if(source.sha256!==grant.source_sha256||sha(canonicalJson(source))!==grant.source_record_sha256
+   ||sha(canonicalJson(snapshot.record))!==grant.snapshot_record_sha256||snapshot.intent.root_binding_sha256!==grant.root_binding_sha256
+   ||snapshot.intent.selection_sha256!==grant.selection_sha256)throw fail();
+  const original=source.files.find(file=>file.path===path),entry=snapshot.record.manifest.entries.find(entry=>entry.path===path);
+  if(!original||!entry||entry.kind!=='file'||original.sha256!==sha256||original.size!==size||entry.sha256!==sha256||entry.bytes!==size)throw fail();
+  return {workspace_id:admission.scope.workspace_id,project_id:admission.scope.project_id,path,version:original.version,sha256,size};
  }catch{throw fail();}
 }

@@ -44,6 +44,11 @@ export class WorkCycleSources{
   const read=()=>{this.cycles.guard(owner,scope,cycleId);return this.row(owner,scope,cycleId);};
   if(this.db.isTransaction)return read();this.db.exec('BEGIN DEFERRED');try{return read();}finally{this.db.exec('ROLLBACK');}
  }
+ /** Original source metadata only. Historical lookup grants no execution authority. */
+ historical(owner:string,scope:WorkCycleScope,cycleId:string):PrivateSourceRecord|undefined{
+  const read=()=>{this.cycles.get(owner,scope,cycleId);return this.row(owner,scope,cycleId);};
+  if(this.db.isTransaction)return read();this.db.exec('BEGIN DEFERRED');try{return read();}finally{this.db.exec('ROLLBACK');}
+ }
  pin(owner:string,scope:WorkCycleScope,cycleId:string,record:PrivateSourceRecord):PrivateSourceRecord{
   return withImmediateTransaction(this.db,()=>{this.cycles.guard(owner,scope,cycleId);const valid=this.validate(owner,scope,cycleId,record,'work_cycle_source_invalid'),prior=this.row(owner,scope,cycleId);
    if(prior){if(canonicalJson(prior)!==canonicalJson(valid))throw Error('work_cycle_source_conflict');return prior;}

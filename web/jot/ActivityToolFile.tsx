@@ -26,7 +26,7 @@ export default function ActivityToolFile({conversationId,runId,activityId,result
   };
   void load().catch(error=>{
    if(controller.signal.aborted)return;
-   const message=error instanceof ApiError&&error.status===404?(file.version===0?'该原快照版本的正文读取入口尚未接通。':'此固定版本的原文件内容暂不可用。')
+   const message=error instanceof ApiError&&error.status===404?(file.version===0?'该原快照版本的已固定源文件暂不可用。':'此固定版本的原文件内容暂不可用。')
     :error instanceof ApiError&&error.status===422?'此固定版本超出 1 MiB 文本预览范围，或包含非 UTF-8 内容。'
     :error instanceof ApiError&&error.status===409?'原列表或文件来源已变化，请重新打开原列表。':error instanceof Error?error.message:'原文件读取失败';
    setState({identity,offset,error:message});

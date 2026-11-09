@@ -57,6 +57,14 @@ export class WorkspaceJournal{
    this.db.prepare('INSERT INTO wb_discovery_workspace_records VALUES(?,?,?,?,?)').run(cycleId,intent.snapshot_id,json,hash(json),new Date().toISOString());
   });
  }
+ /** Bind original intent version after cycle closure, with the original metadata checks. */
+ historical(owner:string,scope:WorkCycleScope,cycleId:string,snapshotId:string,cycleVersion:number){return this.read(()=>{
+  const current=this.cycles.get(owner,scope,cycleId);
+  if(!Number.isSafeInteger(cycleVersion)||cycleVersion<1||cycleVersion>current.version)fail('workspace_journal_conflict');
+  const intent=this.load(owner,scope,{...current,version:cycleVersion});
+  if(!intent)return undefined;if(intent.snapshot_id!==snapshotId)fail('workspace_journal_conflict');
+  const record=this.stored(cycleId,intent);return record?{intent,record}:undefined;
+ });}
  record(owner:string,scope:WorkCycleScope,cycleId:string,snapshotId:string):SnapshotRecoveryRecord|undefined{return this.read(()=>{
   const cycle=this.cycles.guard(owner,scope,cycleId),intent=this.load(owner,scope,cycle);if(!intent)return undefined;if(snapshotId!==intent.snapshot_id)fail('workspace_journal_conflict');return this.stored(cycleId,intent);
  });}

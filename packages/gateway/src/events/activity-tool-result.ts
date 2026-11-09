@@ -1,6 +1,6 @@
 import {readRetainedArtifactTextPage} from '../artifacts/text-content.ts';
 import {canonicalJson} from '../db/canonical-json.ts';
-import {readIsolatedTaskFileVersion,readIsolatedTaskFileDeletion} from '../persistent-tasks/isolated-output-source.ts';
+import {readIsolatedTaskFileVersion,readIsolatedTaskFileDeletion,isolatedBaselineSource} from '../persistent-tasks/isolated-output-source.ts';
 import type {TaskFileSource} from '../persistent-tasks/task-file-source.ts';
 import {formatTextDiff} from '../artifacts/text-diff.ts';
 import type {WorkbenchService} from '../workbench/service.ts';
@@ -371,7 +371,6 @@ export function readActivityToolResultFile(db:DatabaseSync,owner:string,conversa
  if(receipt.resultSha!==resultSha)throw Error('activity_tool_result_source_changed');
  const facts=fileListFacts(receipt.result),file=facts.items.find(item=>item.path===path&&item.version===version&&item.sha256===fileSha);
  if(!file)throw Error('activity_tool_result_not_found');
- if(facts.isolated&&version===0)throw Error('activity_tool_result_not_found');
  if(file.size>MAX_TEXT_CHARS)throw Error('activity_tool_result_file_unsupported');
  const binding=db.prepare(`SELECT json_extract(context_json,'$.workspace_id') workspace_id,json_extract(context_json,'$.project_id') project_id
   FROM wb_run_bindings WHERE run_id=? AND owner_id=?`).get(runId,owner) as {workspace_id:unknown;project_id:unknown}|undefined;
@@ -381,14 +380,22 @@ export function readActivityToolResultFile(db:DatabaseSync,owner:string,conversa
   const original=receipt.result;
   if(original.owner_id!==owner||original.workspace_id!==binding.workspace_id||original.project_id!==binding.project_id
    ||['occurrence_id','cycle_id','snapshot_id'].some(key=>typeof original[key]!=='string'||!original[key]))throw Error('activity_tool_result_source_invalid');
-  const source=db.prepare(`SELECT e.*,r.conversation_id,b.kind='native_team' AS native FROM wb_task_isolated_file_execution_receipts e
-   JOIN wb_run_bindings b ON b.run_id=e.run_id AND b.owner_id=e.owner_id
-   JOIN ga_runs r ON r.id=e.run_id JOIN ga_conversations c ON c.id=r.conversation_id AND c.owner_id=e.owner_id
-   WHERE e.owner_id=? AND e.workspace_id=? AND e.project_id=? AND e.occurrence_id=? AND e.cycle_id=? AND e.snapshot_id=?
-    AND e.path=? AND e.version=? AND e.sha256=? AND e.size=?`)
-   .get(owner,binding.workspace_id,binding.project_id,String(original.occurrence_id),String(original.cycle_id),String(original.snapshot_id),path,version,fileSha,file.size) as IsolatedFileSource|undefined;
-  if(!source)throw Error('activity_tool_result_not_found');
-  content=Buffer.from(readIsolatedTaskFileVersion(db,{...source,source:'isolated',native:Boolean(source.native)}).content,'utf8');
+  if(version===0){
+   const source=isolatedBaselineSource(db,owner,runId,original,path,fileSha,file.size);
+   if(!source)throw Error('activity_tool_result_not_found');
+   const baseline=reader.readBinaryFile(owner,source.workspace_id,source.project_id,source.path,source.version,source.sha256);
+   if(baseline.size!==file.size)throw Error('activity_tool_result_source_invalid');
+   content=baseline.content;
+  }else{
+   const source=db.prepare(`SELECT e.*,r.conversation_id,b.kind='native_team' AS native FROM wb_task_isolated_file_execution_receipts e
+    JOIN wb_run_bindings b ON b.run_id=e.run_id AND b.owner_id=e.owner_id
+    JOIN ga_runs r ON r.id=e.run_id JOIN ga_conversations c ON c.id=r.conversation_id AND c.owner_id=e.owner_id
+    WHERE e.owner_id=? AND e.workspace_id=? AND e.project_id=? AND e.occurrence_id=? AND e.cycle_id=? AND e.snapshot_id=?
+     AND e.path=? AND e.version=? AND e.sha256=? AND e.size=?`)
+    .get(owner,binding.workspace_id,binding.project_id,String(original.occurrence_id),String(original.cycle_id),String(original.snapshot_id),path,version,fileSha,file.size) as IsolatedFileSource|undefined;
+   if(!source)throw Error('activity_tool_result_not_found');
+   content=Buffer.from(readIsolatedTaskFileVersion(db,{...source,source:'isolated',native:Boolean(source.native)}).content,'utf8');
+  }
  }else{
   const original=reader.readBinaryFile(owner,binding.workspace_id,binding.project_id,path,version,fileSha);
   if(original.size!==file.size)throw Error('activity_tool_result_source_invalid');
