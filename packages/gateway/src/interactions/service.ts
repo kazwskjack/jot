@@ -1,3 +1,4 @@
+import {interactionTextFields} from './public-text.ts';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { withImmediateTransaction,withReadTransaction } from '../db/database.ts';
@@ -49,6 +50,53 @@ export class InteractionService {
     });
   }
 
+
+  historyRecord(conversationId:string,ownerId:string,interactionId:string,query:Record<string,unknown>){
+    const id=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
+    const runId=query.run_id,version=Number(query.expected_version);
+    if(!id.test(conversationId)||!id.test(interactionId)||Object.keys(query).some(key=>!['run_id','expected_version'].includes(key))
+      ||runId!==undefined&&(typeof runId!=='string'||!id.test(runId))
+      ||typeof query.expected_version!=='string'&&typeof query.expected_version!=='number'
+      ||!Number.isSafeInteger(version)||version<1)throw Error('interaction_history_query_invalid');
+    return withReadTransaction(this.db,()=>{
+      const row=this.db.prepare(`SELECT i.* FROM ga_interactions i JOIN ga_conversations c ON c.id=i.conversation_id
+        JOIN ga_runs r ON r.id=i.run_id AND r.conversation_id=i.conversation_id
+        WHERE i.id=? AND i.conversation_id=? AND c.owner_id=?`).get(interactionId,conversationId,ownerId) as Record<string,unknown>|undefined;
+      if(!row||runId!==undefined&&row.run_id!==runId)throw Error('interaction_not_found');
+      if(Number(row.version)!==version)throw Error('interaction_version_conflict');
+      return {conversation_id:conversationId,item:{...this.value(row),interaction_id:String(row.id),run_id:String(row.run_id),created_at:String(row.created_at)},execution_authorized:false};
+    });
+  }
+
+  searchHistory(conversationId:string,ownerId:string,query:Record<string,unknown>){
+    const q=typeof query.q==='string'?query.q.trim():'';
+    if(!q||q.length>200||Object.keys(query).some(key=>!['q','cursor','run_id'].includes(key)))throw Error('interaction_history_query_invalid');
+    return withReadTransaction(this.db,()=>{
+      const page=this.history(conversationId,ownerId,{cursor:query.cursor,run_id:query.run_id,limit:10});
+      const pattern=new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'iu');
+      const items=[];
+      for(const item of page.items){
+        const value:Record<string,unknown>=item;
+        if(!this.db.prepare('SELECT 1 FROM ga_runs WHERE id=? AND conversation_id=?').get(item.run_id,conversationId))throw Error('interaction_history_source_invalid');
+        if(!['question','approval'].includes(String(value.kind))||!['pending','answered','denied','cancelled','expired'].includes(String(value.status))
+          ||!Number.isSafeInteger(value.version)||Number(value.version)<1)throw Error('interaction_history_source_invalid');
+        for(const text of interactionTextFields(value)){
+          const match=pattern.exec(text);
+          if(!match)continue;
+          let start=Math.max(0,match.index-60),end=Math.min(text.length,match.index+match[0].length+60);
+          if(start>0&&/[\uD800-\uDBFF]/.test(text[start-1]!)&&/[\uDC00-\uDFFF]/.test(text[start]!))start--;
+          if(end<text.length&&/[\uD800-\uDBFF]/.test(text[end-1]!)&&/[\uDC00-\uDFFF]/.test(text[end]!))end--;
+          items.push({interaction_id:item.interaction_id,run_id:item.run_id,kind:value.kind,status:value.status,
+            version:value.version,created_at:item.created_at,match_text:match[0],excerpt:text.slice(start,end)});
+          break;
+        }
+      }
+      const last=page.items.at(-1);
+      return {conversation_id:conversationId,...(page.run_id?{run_id:page.run_id}:{}),q,items,scanned_records:page.items.length,
+        ...(last?{scanned_through:{interaction_id:last.interaction_id,created_at:last.created_at}}:{}),
+        ...(page.next_cursor?{next_cursor:page.next_cursor}:{}),execution_authorized:false};
+    });
+  }
 
   list(conversationId: string, ownerId: string, status = 'pending') {
     const owner = this.db.prepare('SELECT 1 FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId, ownerId);

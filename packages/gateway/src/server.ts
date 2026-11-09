@@ -659,6 +659,7 @@ export async function buildServer(config: {
     if(code==='activity_tool_result_source_invalid')return reply.code(503).send({error:{code:'ACTIVITY_TOOL_RESULT_SOURCE_INVALID'}});
     if(code==='invalid_activity_history_query')return reply.code(400).send({error:{code:'ACTIVITY_HISTORY_QUERY_INVALID'}});
     if(code==='activity_history_cursor_future')return reply.code(409).send({error:{code:'ACTIVITY_HISTORY_CURSOR_FUTURE'}});
+    if(code==='interaction_history_source_invalid')return reply.code(503).send({error:{code:'INTERACTION_HISTORY_SOURCE_INVALID'}});
     if(code==='activity_history_source_invalid')return reply.code(503).send({error:{code:'ACTIVITY_HISTORY_SOURCE_INVALID'}});
     if(code==='conversation_mode_invalid')return reply.code(400).send({error:{code:'CONVERSATION_MODE_INVALID'}});
     if(['invalid_file_range','invalid_file_history_query','invalid_file_history_cursor'].includes(code))return reply.code(400).send({error:{code:code.toUpperCase()}});
@@ -1215,6 +1216,15 @@ export async function buildServer(config: {
   });
   app.get('/v1/conversations/:conversationId/snapshot', async request =>
     buildSnapshot(db, (request.params as { conversationId: string }).conversationId, actor(request as any)));
+  app.get('/v1/conversations/:conversationId/interaction-history/:interactionId', async (request,reply) => {
+    const {conversationId,interactionId}=request.params as {conversationId:string;interactionId:string};
+    reply.header('cache-control','private, no-store');
+    return interactions.historyRecord(conversationId,actor(request as any),interactionId,request.query as Record<string,unknown>);
+  });
+  app.get('/v1/conversations/:conversationId/interaction-search', async (request,reply) => {
+    reply.header('cache-control','private, no-store');
+    return interactions.searchHistory((request.params as {conversationId:string}).conversationId,actor(request as any),request.query as Record<string,unknown>);
+  });
   app.get('/v1/conversations/:conversationId/interaction-history', async (request,reply) => {
     reply.header('cache-control','no-store');
     return interactions.history((request.params as {conversationId:string}).conversationId,actor(request as any),request.query as {cursor?:unknown;run_id?:unknown;limit?:unknown});

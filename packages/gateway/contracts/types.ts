@@ -809,3 +809,8 @@ export type ActivityToolResultPage={conversation_id:string;run_id:string;activit
 
 export type ActivityToolResultMatch={run_id:string;activity_id:string;tool_name:string;title:string;result_sha256:string;offset_chars:number;match_offset_chars:number;match_text:string;excerpt:string};
 export type ActivityToolResultSearchPage={conversation_id:string;run_id?:string;as_of_seq:string;q:string;items:ActivityToolResultMatch[];scanned_upserts:number;unavailable_results:number;coverage:ActivityHistoryCoverage;next_before_seq?:string;execution_authorized:false};
+
+export type InteractionHistoryRecord={conversation_id:string;item:Interaction;execution_authorized:false};
+export type InteractionSearchBoundary={interaction_id:string;created_at:string};
+export type InteractionSearchMatch=Pick<Interaction,'interaction_id'|'run_id'|'kind'|'status'|'version'|'created_at'>&{match_text:string;excerpt:string};
+export type InteractionSearchPage={conversation_id:string;run_id?:string;q:string;items:InteractionSearchMatch[];scanned_records:number;scanned_through?:InteractionSearchBoundary;next_cursor?:string;execution_authorized:false};

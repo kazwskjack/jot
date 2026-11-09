@@ -1,22 +1,28 @@
-import React,{useState} from 'react';
+import React,{useEffect,useRef,useState} from 'react';
 import {useResource} from '../workbench/useResource';
-import {request} from './client';
+import {ApiError,request,taskDraftScope} from './client';
 import ConversationDisplayBoundary from './ConversationDisplayBoundary';
-import type {Interaction,InteractionHistoryPage,QuestionAnswer} from './types';
+import type {Interaction,InteractionHistoryPage,InteractionHistoryRecord,QuestionAnswer} from './types';
 
 const id=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 const statusLabels={pending:'待处理',answered:'已回答',denied:'已拒绝',cancelled:'已取消',expired:'已过期'};
 type Cursor={id:string;createdAt:string};
 
-function SavedAnswer({answer,labels}:{answer:QuestionAnswer;labels:Map<string,string>}){
+function MarkedText({text,query}:{text:string;query?:string}){
+ if(!query)return <>{text}</>;
+ const match=new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'iu').exec(text);
+ return match?<>{text.slice(0,match.index)}<mark>{match[0]}</mark>{text.slice(match.index+match[0].length)}</>:<>{text}</>;
+}
+
+function SavedAnswer({answer,labels,highlight}:{answer:QuestionAnswer;labels:Map<string,string>;highlight?:string}){
  return <div><p>已保存的回答</p>
-  {answer.selected_option_ids.length>0&&<ul>{answer.selected_option_ids.map((option,index)=><li key={index}>{labels.get(option)??`原选项 ${option}`}</li>)}</ul>}
-  {answer.custom_text&&<p style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{answer.custom_text}</p>}
+  {answer.selected_option_ids.length>0&&<ul>{answer.selected_option_ids.map((option,index)=><li key={index}><MarkedText text={labels.get(option)??`原选项 ${option}`} query={highlight}/></li>)}</ul>}
+  {answer.custom_text&&<p style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}><MarkedText text={answer.custom_text} query={highlight}/></p>}
   {!answer.selected_option_ids.length&&!answer.custom_text&&<p>该回答内容为空。</p>}
  </div>;
 }
 
-function InteractionRecord({value,searchId}:{value:Interaction;searchId:string}){
+function InteractionRecord({value,searchId,highlight}:{value:Interaction;searchId:string;highlight?:string}){
  return <article className="jot-interaction-record" data-chat-search-content={searchId}>
   <h4>{value.kind==='question'?'问题记录':'确认记录'} · {value.kind==='approval'&&value.status==='answered'?'已决定':statusLabels[value.status]}</h4>
   <p>创建时间 {value.created_at} · 版本 {value.version}</p>
@@ -24,19 +30,19 @@ function InteractionRecord({value,searchId}:{value:Interaction;searchId:string})
    {value.questions.map(question=>{
     const answers=(value.answers??[]).filter(answer=>answer.question_id===question.question_id);
     const labels=new Map(question.options.map(option=>[option.option_id,option.label]));
-    return <section key={question.question_id}><h5>{question.prompt}</h5><p>{question.multiple?'可多选':'单选'}{question.allow_custom?' · 可填写补充内容':''}</p>
-     {question.description&&<p style={{whiteSpace:'pre-wrap'}}>{question.description}</p>}
-     {question.options.length>0&&<ul>{question.options.map(option=><li key={option.option_id}>{option.label}{option.description&&<p>{option.description}</p>}</li>)}</ul>}
-     {answers.map((answer,index)=><SavedAnswer key={index} answer={answer} labels={labels}/>)}
+    return <section key={question.question_id}><h5><MarkedText text={question.prompt} query={highlight}/></h5><p>{question.multiple?'可多选':'单选'}{question.allow_custom?' · 可填写补充内容':''}</p>
+     {question.description&&<p style={{whiteSpace:'pre-wrap'}}><MarkedText text={question.description} query={highlight}/></p>}
+     {question.options.length>0&&<ul>{question.options.map(option=><li key={option.option_id}><MarkedText text={option.label} query={highlight}/>{option.description&&<p><MarkedText text={option.description} query={highlight}/></p>}</li>)}</ul>}
+     {answers.map((answer,index)=><SavedAnswer key={index} answer={answer} labels={labels} highlight={highlight}/>)}
      {!answers.length&&<p>尚无公开回答记录。</p>}
     </section>;
    })}
    {(value.answers??[]).filter(answer=>!value.questions.some(question=>question.question_id===answer.question_id)).map((answer,index)=><section key={index}>
-    <h5>原问题 {answer.question_id}</h5><SavedAnswer answer={answer} labels={new Map()}/>
+    <h5>原问题 {answer.question_id}</h5><SavedAnswer answer={answer} labels={new Map()} highlight={highlight}/>
    </section>)}
   </>:<>
-   <p style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{value.action_summary}</p><p>风险 {value.risk}</p>
-   {value.decision&&<p>已保存的决定 · {value.decision==='approve'?'批准':'拒绝'}</p>}
+   <p style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}><MarkedText text={value.action_summary} query={highlight}/></p><p>风险 <MarkedText text={value.risk} query={highlight}/></p>
+   {value.decision&&<p>已保存的决定 · <MarkedText text={value.decision==='approve'?'批准':'拒绝'} query={highlight}/></p>}
   </>}
   <details><summary>原记录信息</summary><dl>
    <dt>交互编号</dt><dd>{value.interaction_id}</dd><dt>运行编号</dt><dd>{value.run_id}</dd>
@@ -44,6 +50,36 @@ function InteractionRecord({value,searchId}:{value:Interaction;searchId:string})
    {value.purpose&&<><dt>用途</dt><dd>{value.purpose}</dd></>}
   </dl></details>
  </article>;
+}
+
+export function InteractionHistorySelection({conversationId,interactionId,runId,version,highlight}:{conversationId:string;interactionId:string;runId:string;version:number;highlight:string}){
+ const owner=taskDraftScope(),identity=JSON.stringify([owner,conversationId,interactionId,runId,version]);
+ const region=useRef<HTMLElement>(null);
+ const resource=useResource(async signal=>{
+  const query=new URLSearchParams({run_id:runId,expected_version:String(version)});
+  let result:InteractionHistoryRecord;
+  try{result=await request<InteractionHistoryRecord>(`/conversations/${encodeURIComponent(conversationId)}/interaction-history/${encodeURIComponent(interactionId)}?${query}`,'GET',undefined,undefined,signal);}
+  catch(error){if(error instanceof ApiError&&error.status===409)throw Error('记录已更新，请刷新搜索后重新打开。');throw error;}
+  const item=result?.item;
+  if(taskDraftScope()!==owner||!result||result.conversation_id!==conversationId||result.execution_authorized!==false
+   ||!item||item.interaction_id!==interactionId||item.run_id!==runId||item.version!==version
+   ||!['question','approval'].includes(item.kind)||!Object.hasOwn(statusLabels,item.status))throw Error('原交互记录的身份或版本尚未确认');
+  return {identity,item};
+ },identity);
+ const item=!resource.loading&&!resource.error&&resource.data?.identity===identity?resource.data.item:undefined;
+ useEffect(()=>{
+  region.current?.focus();
+  (region.current?.querySelector('mark')??region.current)?.scrollIntoView({block:'nearest'});
+ },[identity,item]);
+ return <section ref={region} tabIndex={-1} className="jot-activity-content" aria-label="已选交互历史记录">
+  {resource.loading&&<p role="status">正在核对原交互记录…</p>}
+  {resource.error&&<p role="alert">{resource.error} <button type="button" onClick={resource.reload}>重试读取</button></p>}
+  {item&&<>
+   <p>当前显示检索时的公开版本 {version}。</p>
+   <ConversationDisplayBoundary label="搜索命中交互"><InteractionRecord value={item} highlight={highlight}
+    searchId={JSON.stringify(['interaction',owner,conversationId,runId,interactionId,version])}/></ConversationDisplayBoundary>
+  </>}
+ </section>;
 }
 
 export default function InteractionHistory({conversationId,runId}:{conversationId:string;runId?:string}){
