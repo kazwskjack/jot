@@ -4,7 +4,7 @@ import {renderPdfSearchHighlights,type PdfSearchMatch} from './vendor/pilotdeck-
 export type Zoom=number|'width'|'page';
 export const clampZoom=(value:number)=>Math.max(0.1,Math.min(4,value));
 
-export default function PdfFilePage({document,pageNumber,zoom,rotation,width,onScale,matches,selected,onSize}:{document:pdfjs.PDFDocumentProxy;pageNumber:number;zoom:Zoom;rotation:number;width:number;onScale:(scale:number)=>void;matches:PdfSearchMatch[];selected:string|null;onSize?:(height:number)=>void}){
+export default function PdfFilePage({document,pageNumber,zoom,rotation,width,onScale,matches,selected,onSize,onReady}:{document:pdfjs.PDFDocumentProxy;pageNumber:number;zoom:Zoom;rotation:number;width:number;onScale:(scale:number)=>void;matches:PdfSearchMatch[];selected:string|null;onSize?:(height:number)=>void;onReady?:(page:number)=>void}){
  const canvas=useRef<HTMLCanvasElement>(null),text=useRef<HTMLDivElement>(null);
  const mapping=useRef<{divs:HTMLElement[];items:string[]}|undefined>(undefined);
  const [textRevision,setTextRevision]=useState(0);
@@ -27,14 +27,14 @@ export default function PdfFilePage({document,pageNumber,zoom,rotation,width,onS
    const content=await page.getTextContent();if(cancelled)return;
    textTarget.replaceChildren();layer=new pdfjs.TextLayer({textContentSource:content,container:textTarget,viewport});
    await layer.render();
-   if(!cancelled){mapping.current={divs:layer.textDivs,items:layer.textContentItemsStr};setTextRevision(value=>value+1);setBusy(false);}
+   if(!cancelled){mapping.current={divs:layer.textDivs,items:layer.textContentItemsStr};setTextRevision(value=>value+1);setBusy(false);onReady?.(pageNumber);}
   };
   void draw().catch(error=>{if(!cancelled){setError(error instanceof Error?error.message:'PDF页面绘制失败');setBusy(false);}}).finally(()=>{if(cancelled){try{page?.cleanup();}catch{}}});
   return()=>{
    cancelled=true;mapping.current=undefined;render?.cancel();layer?.cancel();target.width=0;target.height=0;textTarget.replaceChildren();
    void Promise.resolve(render?.promise).catch(()=>{}).then(()=>{try{page?.cleanup();}catch{}});
   };
- },[document,pageNumber,zoom,rotation,width,onScale,onSize]);
+ },[document,pageNumber,zoom,rotation,width,onScale,onSize,onReady]);
  useEffect(()=>{
   if(!mapping.current)return;
   const element=renderPdfSearchHighlights(mapping.current.divs,mapping.current.items,matches,selected);
@@ -43,7 +43,7 @@ export default function PdfFilePage({document,pageNumber,zoom,rotation,width,onS
  return <>
   {busy&&<p role="status">正在绘制第 {pageNumber} 页…</p>}
   {error&&<p role="alert">{error}</p>}
-  <div style={{position:'relative',width:size.width,height:size.height,'--scale-factor':size.scale,'--total-scale-factor':size.scale} as React.CSSProperties}>
+  <div data-pdf-page-anchor={pageNumber} style={{position:'relative',width:size.width,height:size.height,'--scale-factor':size.scale,'--total-scale-factor':size.scale} as React.CSSProperties}>
    <canvas ref={canvas} aria-hidden="true"/>
    <div ref={text} className="textLayer" aria-label={`PDF第 ${pageNumber} 页文字`} style={{position:'absolute',inset:0}}/>
   </div>
