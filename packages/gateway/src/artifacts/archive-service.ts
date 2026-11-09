@@ -177,27 +177,28 @@ export class ArtifactArchiveService {
 
   async restorePending(now = new Date()): Promise<{ attempted: number; restored: number; failed: number }> {
     const rows = this.db.prepare(`SELECT artifact_id FROM ga_artifact_archives
-      WHERE backup_status='verified' AND local_state='restoring' ORDER BY updated_at LIMIT 50`)
+      WHERE (backup_status='verified' OR verified_at IS NOT NULL) AND remote_path IS NOT NULL
+      AND local_state='restoring' ORDER BY updated_at LIMIT 50`)
       .all() as Array<Record<string, unknown>>
     let restored = 0; let failed = 0
     for (const row of rows) {
       const artifactId = String(row.artifact_id), source = this.archiveSource(artifactId)
-      if (!source || source.record.backup_status !== 'verified' || source.record.local_state !== 'restoring') continue
+      if (!source || (source.record.backup_status !== 'verified' && !source.record.verified_at) || source.record.local_state !== 'restoring') continue
       const identity = JSON.stringify(source)
-      let stage = ''
+      const stages:string[]=[]
       try {
         const directory = String(source.record.remote_path || '')
-        const manifest = artifactArchiveManifest(source.files,String(source.record.remote_md5 || '[]'),source.required)
+        const manifest = artifactArchiveManifest(source.files,String(source.record.remote_md5 || '[]'),[])
         if (!directory.startsWith('/jot_file/') || !manifest) throw new Error('archive_restore_manifest_invalid')
-        const stagingRoot = join(this.root,'sessions','archive-restore')
-        assertArchivePath(stagingRoot,this.root)
-        mkdirSync(stagingRoot,{recursive:true,mode:0o700})
-        stage = mkdtempSync(join(stagingRoot,'restore-'))
         const installs: Array<{path:string;staged:string;stagedSignature:ReturnType<typeof signature>;existing:ReturnType<typeof signature>|null;replace:boolean}> = []
-        for (const [index,item] of manifest.entries()) {
+        for (const item of manifest) {
           const localPath = item.local_path
           assertArchivePath(localPath,this.root)
-          const staged = join(stage,String(index))
+          mkdirSync(dirname(localPath),{recursive:true,mode:0o700})
+          assertArchivePath(localPath,this.root)
+          const stage=mkdtempSync(join(dirname(localPath),'.jot-restore-'))
+          stages.push(stage);assertArchivePath(stage,this.root)
+          const staged = join(stage,'content')
           await this.client.download(`${directory}/${item.remote_name}`,staged)
           assertArchivePath(staged,this.root)
           const hash = currentFileHashes(staged)
@@ -221,7 +222,7 @@ export class ArtifactArchiveService {
             }
           }
           const stamp = now.toISOString()
-          this.db.prepare(`UPDATE ga_artifact_archives SET local_state='present',restored_at=?,last_used_at=?,last_error=NULL,updated_at=? WHERE artifact_id=?`)
+          this.db.prepare(`UPDATE ga_artifact_archives SET local_state='present',restored_at=?,last_used_at=?,last_error=NULL,next_retry_at=NULL,updated_at=? WHERE artifact_id=?`)
             .run(stamp,stamp,stamp,artifactId)
           return true
         })
@@ -235,7 +236,7 @@ export class ArtifactArchiveService {
         })
         if (saved) failed += 1
       } finally {
-        if (stage) {assertArchivePath(stage,this.root);rmSync(stage,{recursive:true,force:true})}
+        for(const stage of stages){assertArchivePath(stage,this.root);rmSync(stage,{recursive:true,force:true})}
       }
     }
     return { attempted: rows.length, restored, failed }
@@ -245,7 +246,7 @@ export class ArtifactArchiveService {
     return withReadTransaction(this.db, () => {
       const record = this.db.prepare(`SELECT ar.*,a.current_version FROM ga_artifact_archives ar
         JOIN ga_artifacts a ON a.id=ar.artifact_id WHERE ar.artifact_id=?`).get(artifactId) as Record<string,unknown>|undefined
-      return record ? {record,files:this.fileRows(artifactId),required:artifactArchiveReferences(this.db,artifactId,'current')} : undefined
+      return record ? {record,files:this.fileRows(artifactId)} : undefined
     })
   }
 

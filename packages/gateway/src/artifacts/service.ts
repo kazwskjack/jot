@@ -1073,8 +1073,7 @@ export class ArtifactService {
     const meta = JSON.parse(String(row.metadata_json));
     const archive = this.db.prepare('SELECT backup_status,local_state,remote_path FROM ga_artifact_archives WHERE artifact_id=?')
       .get(id) as Record<string, unknown> | undefined;
-    const available=existsSync(String(row.server_path))
-      && (!archive || archive.local_state==='present' || Number(row.version)<Number(row.current_version));
+    const available=existsSync(String(row.server_path));
     const localState=available ? 'present' : archive?.local_state==='restoring' ? 'restoring' : 'deleted';
     const partCount=row.artifact_kind==='generated_document_group'&&Number(row.version)===1
       ? Number((this.db.prepare('SELECT COUNT(*) count FROM ga_artifact_parts WHERE artifact_id=?').get(id) as {count:number}).count) : 0;
@@ -1198,60 +1197,104 @@ export class ArtifactService {
     });
   }
 
-  backupStatus(id: string, ownerId: string) {
+  private restoreTarget(id:string,ownerId:string,query:{version?:unknown;sha256?:unknown;part_index?:unknown}={}) {
+    const version=query.version===undefined?undefined:Number(query.version),partIndex=query.part_index===undefined?undefined:Number(query.part_index);
+    if([query.version,query.part_index].some(value=>value!==undefined&&(typeof value!=='number'&&typeof value!=='string'||typeof value==='string'&&!/^[1-9][0-9]*$/.test(value)))
+      ||Object.keys(query).some(key=>!['version','sha256','part_index'].includes(key))
+      ||version!==undefined&&(!Number.isSafeInteger(version)||version<1)
+      ||partIndex!==undefined&&(!Number.isSafeInteger(partIndex)||partIndex<1||partIndex>50||version!==1)
+      ||query.sha256!==undefined&&(typeof query.sha256!=='string'||!/^[a-f0-9]{64}$/.test(query.sha256)))throw Error('invalid_artifact_restore_query');
+    const file=partIndex===undefined?this.get(id,ownerId,version):this.part(id,ownerId,partIndex,version);
+    const source=this.version(id,ownerId,Number(file.version));
+    if(Number(source.version)>Number(source.current_version))throw Error('artifact_not_found');
+    if(query.sha256!==undefined&&query.sha256!==file.sha256)throw Error('version_conflict');
+    let paths:string[];
+    if(partIndex!==undefined){
+      const row=this.db.prepare('SELECT server_path FROM ga_artifact_parts WHERE artifact_id=? AND part_index=?').get(id,partIndex) as {server_path:string};
+      paths=[resolve(row.server_path)];
+    }else if(source.artifact_kind==='generated_document_group'&&Number(source.version)===1){
+      this.parts(id,ownerId,1);
+      paths=(this.db.prepare('SELECT server_path FROM ga_artifact_parts WHERE artifact_id=? ORDER BY part_index').all(id) as Array<{server_path:string}>).map(row=>resolve(row.server_path));
+    }else paths=[resolve(String(source.server_path))];
+    const all=artifactArchiveReferences(this.db,id),selected=new Set(paths),references=all.filter(file=>selected.has(file.server_path));
+    if(!references.length||references.length!==selected.size)throw Error('artifact_not_found');
+    return {file,all,references,partIndex};
+  }
+
+  backupStatus(id: string, ownerId: string,query:{version?:unknown;sha256?:unknown;part_index?:unknown;restore_protocol?:unknown}={}) {
+    const {restore_protocol,...selected}=query;
+    const protocol=restore_protocol===undefined?2:Number(restore_protocol);
+    if(restore_protocol!==undefined&&typeof restore_protocol!=='string'&&typeof restore_protocol!=='number'||![2,3].includes(protocol)
+      ||protocol===2&&Object.keys(selected).length)throw Error('invalid_artifact_restore_query');
     return withReadTransaction(this.db, () => {
-      const artifact = this.get(id, ownerId)
-      const archive = this.db.prepare(`SELECT backup_status,local_state,remote_path,remote_size,verified_at,last_error,remote_md5
-        FROM ga_artifact_archives WHERE artifact_id=?`).get(id) as Record<string, unknown> | undefined
-      const references=artifactArchiveReferences(this.db,id);
-      const verified=archive?.backup_status==='verified'&&Boolean(archive.remote_path);
-      const allVersions=verified&&Boolean(artifactArchiveManifest(references,String(archive?.remote_md5)));
-      const restorable=verified&&Boolean(artifactArchiveManifest(references,String(archive?.remote_md5),artifactArchiveReferences(this.db,id,'current')));
-      return { artifact_id: id, version: artifact.version, restore_protocol: 2, all_versions_archived: allVersions, backup_status: archive?.backup_status ?? 'pending',
-        local_state: archive?.local_state ?? 'present', ...(archive?.remote_path ? { remote_path: archive.remote_path } : {}),
-        ...(archive?.remote_size !== null && archive?.remote_size !== undefined ? { remote_size: Number(archive.remote_size) } : {}),
-        ...(archive?.verified_at ? { verified_at: archive.verified_at } : {}), restorable,
-        ...(archive?.last_error ? { last_error: String(archive.last_error) } : {}) }
+      const head=this.get(id,ownerId),target=this.restoreTarget(id,ownerId,selected);
+      const archive=this.db.prepare(`SELECT backup_status,local_state,remote_path,remote_size,verified_at,last_error,remote_md5
+        FROM ga_artifact_archives WHERE artifact_id=?`).get(id) as Record<string,unknown>|undefined;
+      const verified=typeof archive?.remote_path==='string'&&archive.remote_path.startsWith('/jot_file/')
+        &&(archive.backup_status==='verified'||protocol===3&&Boolean(archive.verified_at));
+      const allVersions=verified&&Boolean(artifactArchiveManifest(target.all,String(archive?.remote_md5)));
+      const manifest=verified?artifactArchiveManifest(target.all,String(archive?.remote_md5),[]):null;
+      const covered=new Set(manifest?.map(file=>file.local_path)??[]);
+      const required=protocol===2?artifactArchiveReferences(this.db,id,'current'):target.references;
+      const missing=required.filter(file=>!existsSync(file.server_path));
+      const restorable=Boolean(manifest)&&required.every(file=>covered.has(file.server_path));
+      const localState=archive?.local_state==='restoring'?'restoring':missing.length?'deleted':'present';
+      return {artifact_id:id,version:head.version,restore_protocol:protocol,all_versions_archived:allVersions,
+        ...(protocol===3?{requested_version:target.file.version,requested_sha256:target.file.sha256,
+          ...(target.partIndex!==undefined?{part_index:target.partIndex}:{}),archive_local_state:archive?.local_state??'present',
+          selected_file_count:target.references.length,missing_file_count:missing.length,
+          unarchived_file_count:target.references.filter(file=>!covered.has(file.server_path)).length}:{}),
+        backup_status:archive?.backup_status??'pending',local_state:localState,
+        ...(archive?.remote_path?{remote_path:archive.remote_path}:{}),
+        ...(archive?.remote_size!==null&&archive?.remote_size!==undefined?{remote_size:Number(archive.remote_size)}:{}),
+        ...(archive?.verified_at?{verified_at:archive.verified_at}:{}),restorable,
+        ...(archive?.last_error?{last_error:'archive_operation_failed'}:{})};
     });
   }
 
-  requestRestore(id: string, ownerId: string, expectedVersion?: number) {
-    if (expectedVersion !== undefined && (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1)) throw new Error('invalid_artifact_restore');
+  requestRestore(id: string, ownerId: string, expectedVersion?: number,selection?:{version:unknown;sha256:unknown;part_index?:unknown}) {
+    if(expectedVersion!==undefined&&(!Number.isSafeInteger(expectedVersion)||expectedVersion<1)
+      ||selection!==undefined&&(expectedVersion===undefined||selection.version===undefined||selection.sha256===undefined))throw Error('invalid_artifact_restore');
     return withImmediateTransaction(this.db, () => {
-      const artifact = this.get(id, ownerId);
-      if (expectedVersion !== undefined && artifact.version !== expectedVersion) throw new Error('version_conflict');
-      const row = this.db.prepare('SELECT backup_status,local_state,remote_path,remote_md5 FROM ga_artifact_archives WHERE artifact_id=?')
-        .get(id) as Record<string, unknown> | undefined;
-      if (!row || row.backup_status !== 'verified' || !row.remote_path
-        || !artifactArchiveManifest(artifactArchiveReferences(this.db,id),String(row.remote_md5),artifactArchiveReferences(this.db,id,'current'))) throw new Error('artifact_not_restorable');
-      const status = row.local_state === 'present' ? 'ready' : 'restoring';
-      if (row.local_state === 'deleted') this.db.prepare("UPDATE ga_artifact_archives SET local_state='restoring',last_error=NULL,updated_at=? WHERE artifact_id=?")
-        .run(new Date().toISOString(), id);
-      return {accepted: true, artifact_id: id, status,
-        ...(expectedVersion !== undefined ? {version: artifact.version, restore_protocol: 2} : {})};
+      const head=this.get(id,ownerId);
+      if(expectedVersion!==undefined&&head.version!==expectedVersion)throw Error('version_conflict');
+      const target=this.restoreTarget(id,ownerId,selection??{});
+      const row=this.db.prepare('SELECT backup_status,local_state,remote_path,remote_md5,verified_at FROM ga_artifact_archives WHERE artifact_id=?')
+        .get(id) as Record<string,unknown>|undefined;
+      const verified=row&&(row.backup_status==='verified'||selection!==undefined&&Boolean(row.verified_at));
+      const required=selection===undefined?artifactArchiveReferences(this.db,id,'current'):target.references;
+      if(!verified||typeof row?.remote_path!=='string'||!row.remote_path.startsWith('/jot_file/')||!artifactArchiveManifest(target.all,String(row.remote_md5),required))throw Error('artifact_not_restorable');
+      const needsRestore=selection!==undefined||row.local_state!=='present'||required.some(file=>!existsSync(file.server_path));
+      const status=needsRestore?'restoring':'ready';
+      if(needsRestore&&row.local_state!=='restoring')this.db.prepare("UPDATE ga_artifact_archives SET local_state='restoring',last_error=NULL,updated_at=? WHERE artifact_id=?")
+        .run(new Date().toISOString(),id);
+      return {accepted:true,artifact_id:id,status,
+        ...(selection!==undefined?{version:head.version,restore_protocol:3,requested_version:target.file.version,requested_sha256:target.file.sha256,
+          ...(target.partIndex!==undefined?{part_index:target.partIndex}:{})}:expectedVersion!==undefined?{version:head.version,restore_protocol:2}:{})};
     });
   }
 
   download(id: string, ownerId: string, version?: number) {
     const row=this.version(id,ownerId,version);
     if(row.artifact_kind==='generated_document_group'&&Number(row.version)===1)throw Error('invalid_artifact_part_selection');
-    const archive=this.db.prepare('SELECT local_state FROM ga_artifact_archives WHERE artifact_id=?').get(id) as {local_state?:string}|undefined;
-    const currentUnavailable=archive?.local_state && archive.local_state!=='present' && Number(row.version)>=Number(row.current_version);
-    if (!existsSync(String(row.server_path)) || currentUnavailable) throw new Error('artifact_restore_required');
+    rejectTaskOutputSymlinks(String(row.server_path));
+    if (!existsSync(String(row.server_path))) throw new Error('artifact_restore_required');
     const artifact=this.db.prepare('SELECT kind FROM ga_artifacts WHERE id=?').get(id) as {kind:string};
     if(artifact.kind==='task_output_file'){
-      rejectTaskOutputSymlinks(String(row.server_path));
       const content=readFileSync(String(row.server_path));
       if(content.length!==Number(row.size_bytes)||createHash('sha256').update(content).digest('hex')!==row.sha256)throw new Error('task_output_content_mismatch');
       return {...row,verified_content:content};
     }
+    const hash=currentFileHashes(String(row.server_path));
+    if(!hash||hash.size!==Number(row.size_bytes)||hash.sha256!==row.sha256)throw Error('artifact_content_mismatch');
     return row;
   }
 
   preview(id: string, ownerId: string, version?: number) {
     const source=this.version(id,ownerId,version);
-    if(source.artifact_kind==='generated_document_group'&&Number(source.version)===1)return {artifact_id:id,version:1,kind:'unsupported',truncated:false};
-    const row = this.download(id,ownerId,version); const meta = JSON.parse(String(row.metadata_json));
+    const meta=JSON.parse(String(source.metadata_json));
+    if((source.artifact_kind==='generated_document_group'&&Number(source.version)===1)||!['text','image'].includes(meta.preview_kind))return {artifact_id:id,version:Number(source.version),kind:'unsupported',truncated:false};
+    const row = this.download(id,ownerId,version);
     if (meta.preview_kind === 'text') {
       const content = row.verified_content instanceof Buffer?row.verified_content.toString('utf8'):readFileSync(String(row.server_path), 'utf8');
       return { artifact_id: id, version: Number(row.version), kind: 'text', text: content.slice(0, 200000), truncated: content.length > 200000 };

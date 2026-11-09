@@ -1247,14 +1247,17 @@ export async function buildServer(config: {
   });
   app.get('/v1/artifacts/:artifactId/backup-status', async (request, reply) => {
     reply.header('cache-control','private, no-store');
-    return artifacts.backupStatus((request.params as {artifactId:string}).artifactId, actor(request as any));
+    return artifacts.backupStatus((request.params as {artifactId:string}).artifactId, actor(request as any),request.query as {version?:unknown;sha256?:unknown;part_index?:unknown;restore_protocol?:unknown});
   });
   app.post('/v1/artifacts/:artifactId/restore', async (request, reply) => {
     const input = request.body ?? {};
     if (!input || typeof input !== 'object' || Array.isArray(input)
-      || Object.keys(input).some(key => key !== 'expected_version')) throw new Error('invalid_artifact_restore');
+      || Object.keys(input).some(key => !['expected_version','restore_version','restore_sha256','part_index'].includes(key))) throw new Error('invalid_artifact_restore');
+    const body=input as {expected_version?:number;restore_version?:unknown;restore_sha256?:unknown;part_index?:unknown};
+    const selected=Object.hasOwn(body,'restore_version')||Object.hasOwn(body,'restore_sha256')||Object.hasOwn(body,'part_index');
     return reply.code(202).send(atomicCommand(request,202,()=>artifacts.requestRestore(
-      (request.params as {artifactId:string}).artifactId, actor(request as any), (input as {expected_version?:number}).expected_version)));
+      (request.params as {artifactId:string}).artifactId,actor(request as any),body.expected_version,
+      selected?{version:body.restore_version,sha256:body.restore_sha256,...(body.part_index!==undefined?{part_index:body.part_index}:{})}:undefined)));
   });
   app.get('/v1/artifacts/:artifactId/preview', async request => {
     const query = request.query as { version?: string };

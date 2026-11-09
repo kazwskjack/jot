@@ -34,7 +34,10 @@ export class BaiduPcsClient implements ArtifactArchiveClient {
     try {
       const result = await this.run(['download', '--saveto', stage, remotePath], 24 * 3600_000); if (result.code !== 0) throw new Error('baidu_download_failed')
       const downloaded = join(stage, basename(remotePath)); if (!existsSync(downloaded)) throw new Error('baidu_download_missing')
-      rmSync(localPath, { force: true }); renameSync(downloaded, localPath)
+      try { renameSync(downloaded, localPath) } catch (error) {
+        if ((error as {code?:string}).code !== 'EXDEV') throw error
+        copyFileSync(downloaded, localPath)
+      }
     } finally { rmSync(stage, { recursive: true, force: true }) }
   }
   private async run(args: string[], timeoutMs: number): Promise<CommandResult> {
@@ -42,9 +45,21 @@ export class BaiduPcsClient implements ArtifactArchiveClient {
     return await new Promise((resolve, reject) => {
       const child = spawn(this.executable, args, { env, stdio: ['ignore','pipe','pipe'] }); const stdout: Buffer[] = []; const stderr: Buffer[] = []
       const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs)
-      child.stdout.on('data', chunk => { if (Buffer.concat(stdout).length < 1024*1024) stdout.push(Buffer.from(chunk)) })
-      child.stderr.on('data', chunk => { if (Buffer.concat(stderr).length < 256*1024) stderr.push(Buffer.from(chunk)) })
-      child.once('error', reject); child.once('close', code => { clearTimeout(timer); resolve({ code: code ?? -1,
+      timer.unref()
+      let stdoutBytes=0,stderrBytes=0
+      child.stdout.on('data', chunk => {
+        const remaining=1024*1024-stdoutBytes
+        if(remaining<=0)return
+        const part=Buffer.from(chunk).subarray(0,remaining)
+        stdout.push(part);stdoutBytes+=part.length
+      })
+      child.stderr.on('data', chunk => {
+        const remaining=256*1024-stderrBytes
+        if(remaining<=0)return
+        const part=Buffer.from(chunk).subarray(0,remaining)
+        stderr.push(part);stderrBytes+=part.length
+      })
+      child.once('error', error => {clearTimeout(timer);reject(error)}); child.once('close', code => { clearTimeout(timer); resolve({ code: code ?? -1,
         stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') }) })
     })
   }
