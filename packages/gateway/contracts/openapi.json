@@ -28434,6 +28434,9 @@
             "items": {
               "$ref": "#/components/schemas/MessageAttachmentRef"
             }
+          },
+          "reference_snapshots": {
+            "$ref": "#/components/schemas/MessageReferenceSnapshots"
           }
         },
         "required": [
@@ -56679,7 +56682,532 @@
       "ArtifactHistoryPage": {"type":"object","properties":{"conversation_id":{"type":"string"},"run_id":{"type":"string"},"items":{"type":"array","maxItems":50,"items":{"$ref":"#/components/schemas/ArtifactHistoryEntry"}},"next_cursor":{"type":"string"}},"required":["conversation_id","items"],"additionalProperties":false},
     "ArtifactPart": {"allOf":[{"$ref":"#/components/schemas/Artifact"},{"type":"object","properties":{"version":{"const":1}},"required":["part_index"]}]},
       "ArtifactPartsPage": {"type":"object","properties":{"artifact_id":{"type":"string"},"conversation_id":{"type":"string"},"version":{"const":1},"sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"items":{"type":"array","minItems":1,"maxItems":50,"items":{"$ref":"#/components/schemas/ArtifactPart"}}},"required":["artifact_id","conversation_id","version","sha256","items"],"additionalProperties":false},
-      "ArtifactArchiveExecutorStatus": {"type":"object","properties":{"mode":{"type":"string","enum":["managed","external"]},"state":{"type":"string","enum":["unmanaged","starting","idle","restoring","archiving","cleaning","failed","stopped"]},"cleanup_enabled":{"type":"boolean"},"last_started_at":{"type":"string","format":"date-time"},"last_completed_at":{"type":"string","format":"date-time"},"restart_required":{"type":"boolean"}},"required":["mode","state"],"additionalProperties":false,"allOf":[{"if":{"properties":{"mode":{"const":"external"}}},"then":{"properties":{"state":{"const":"unmanaged"}}}},{"if":{"properties":{"mode":{"const":"managed"}}},"then":{"properties":{"state":{"enum":["starting","idle","restoring","archiving","cleaning","failed","stopped"]}},"required":["cleanup_enabled"]}}]}
+      "ArtifactArchiveExecutorStatus": {"type":"object","properties":{"mode":{"type":"string","enum":["managed","external"]},"state":{"type":"string","enum":["unmanaged","starting","idle","restoring","archiving","cleaning","failed","stopped"]},"cleanup_enabled":{"type":"boolean"},"last_started_at":{"type":"string","format":"date-time"},"last_completed_at":{"type":"string","format":"date-time"},"restart_required":{"type":"boolean"}},"required":["mode","state"],"additionalProperties":false,"allOf":[{"if":{"properties":{"mode":{"const":"external"}}},"then":{"properties":{"state":{"const":"unmanaged"}}}},{"if":{"properties":{"mode":{"const":"managed"}}},"then":{"properties":{"state":{"enum":["starting","idle","restoring","archiving","cleaning","failed","stopped"]}},"required":["cleanup_enabled"]}}]},
+      "FileReferenceRect": {
+        "type": "object",
+        "properties": {
+          "x": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "y": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "width": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "height": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "width",
+          "height"
+        ],
+        "additionalProperties": false
+      },
+      "FileReferenceFile": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "path",
+          "version",
+          "sha256",
+          "size"
+        ],
+        "additionalProperties": false
+      },
+      "FileReferenceSource": {
+        "type": "object",
+        "properties": {
+          "relativePath": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "fileName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "mimeType": {
+            "const": "application/pdf"
+          },
+          "revision": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "id",
+              "sha256",
+              "size"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "relativePath",
+          "fileName",
+          "mimeType",
+          "revision"
+        ],
+        "additionalProperties": false
+      },
+      "TextSelectionReference": {
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "const": 1
+          },
+          "kind": {
+            "const": "content-reference"
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+          },
+          "selectionMode": {
+            "const": "text"
+          },
+          "source": {
+            "$ref": "#/components/schemas/FileReferenceSource"
+          },
+          "renderer": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "const": "pdf"
+              },
+              "backend": {
+                "const": "builtin"
+              },
+              "locatorQuality": {
+                "const": "semantic"
+              }
+            },
+            "required": [
+              "id",
+              "backend",
+              "locatorQuality"
+            ],
+            "additionalProperties": false
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "locator": {
+            "type": "object",
+            "properties": {
+              "surface": {
+                "const": "page"
+              },
+              "pageNumbers": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                }
+              },
+              "quote": {
+                "type": "object",
+                "properties": {
+                  "exact": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100000
+                  },
+                  "prefix": {
+                    "type": "string",
+                    "maxLength": 500
+                  },
+                  "suffix": {
+                    "type": "string",
+                    "maxLength": 500
+                  }
+                },
+                "required": [
+                  "exact"
+                ],
+                "additionalProperties": false
+              },
+              "rects": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/components/schemas/FileReferenceRect"
+                }
+              }
+            },
+            "required": [
+              "surface",
+              "pageNumbers",
+              "quote",
+              "rects"
+            ],
+            "additionalProperties": false
+          },
+          "selectedText": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100000
+          },
+          "surroundingText": {
+            "type": "string",
+            "maxLength": 101000
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "kind",
+          "id",
+          "selectionMode",
+          "source",
+          "renderer",
+          "createdAt",
+          "locator",
+          "selectedText"
+        ],
+        "additionalProperties": false
+      },
+      "RegionSelectionReference": {
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "const": 1
+          },
+          "kind": {
+            "const": "content-reference"
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+          },
+          "selectionMode": {
+            "const": "region"
+          },
+          "source": {
+            "$ref": "#/components/schemas/FileReferenceSource"
+          },
+          "renderer": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "const": "pdf"
+              },
+              "backend": {
+                "const": "builtin"
+              },
+              "locatorQuality": {
+                "const": "visual"
+              }
+            },
+            "required": [
+              "id",
+              "backend",
+              "locatorQuality"
+            ],
+            "additionalProperties": false
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "locator": {
+            "type": "object",
+            "properties": {
+              "surface": {
+                "const": "page"
+              },
+              "pageNumber": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "rect": {
+                "$ref": "#/components/schemas/FileReferenceRect"
+              }
+            },
+            "required": [
+              "surface",
+              "pageNumber",
+              "rect"
+            ],
+            "additionalProperties": false
+          },
+          "image": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "mimeType": {
+                "const": "image/png"
+              },
+              "width": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "height": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            },
+            "required": [
+              "name",
+              "mimeType",
+              "width",
+              "height",
+              "sha256"
+            ],
+            "additionalProperties": false
+          },
+          "nearbyText": {
+            "type": "string",
+            "maxLength": 100000
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "kind",
+          "id",
+          "selectionMode",
+          "source",
+          "renderer",
+          "createdAt",
+          "locator",
+          "image"
+        ],
+        "additionalProperties": false
+      },
+      "ContentReferenceSnapshot": {
+        "type": "object",
+        "properties": {
+          "conversationId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$"
+          },
+          "runId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+          },
+          "activityId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+          },
+          "resultSha": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "file": {
+            "$ref": "#/components/schemas/FileReferenceFile"
+          },
+          "reference": {
+            "type": "object"
+          },
+          "execution_authorized": {
+            "const": false
+          },
+          "rotation": {
+            "type": "integer",
+            "enum": [
+              0,
+              90,
+              180,
+              270
+            ]
+          },
+          "imageBytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "image_artifact": {
+            "type": "object",
+            "properties": {
+              "artifact_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$"
+              },
+              "version": {
+                "const": 1
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "size_bytes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "artifact_id",
+              "version",
+              "sha256",
+              "size_bytes"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "conversationId",
+          "runId",
+          "activityId",
+          "resultSha",
+          "file",
+          "reference",
+          "execution_authorized"
+        ],
+        "additionalProperties": false,
+        "oneOf": [
+          {
+            "properties": {
+              "reference": {
+                "$ref": "#/components/schemas/TextSelectionReference"
+              }
+            },
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "imageBytes"
+                  ]
+                },
+                {
+                  "required": [
+                    "image_artifact"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "properties": {
+              "reference": {
+                "$ref": "#/components/schemas/RegionSelectionReference"
+              }
+            },
+            "required": [
+              "rotation",
+              "imageBytes",
+              "image_artifact"
+            ]
+          }
+        ]
+      },
+      "MessageReferenceSnapshots": {
+        "type": "object",
+        "properties": {
+          "protocol": {
+            "const": 1
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "unavailable"
+            ]
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 10000,
+            "items": {
+              "$ref": "#/components/schemas/ContentReferenceSnapshot"
+            }
+          }
+        },
+        "required": [
+          "protocol",
+          "state",
+          "items"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "state": {
+                  "const": "ready"
+                }
+              },
+              "required": [
+                "state"
+              ]
+            },
+            "then": {
+              "properties": {
+                "items": {
+                  "minItems": 1,
+                  "type": "array"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "items": {
+                  "maxItems": 0,
+                  "type": "array"
+                }
+              }
+            }
+          }
+        ]
+      }
     },
     "parameters": {
       "IdempotencyKey": {

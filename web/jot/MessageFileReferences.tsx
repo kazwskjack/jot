@@ -7,6 +7,7 @@ import type {Message} from './types';
 export default function MessageFileReferences({message,onOpen}:{message:Message;onOpen:(value:FileSourceReference)=>void}){
  const owner=taskDraftScope(),references=useMemo(()=>messageFileReferences(message,owner),[message,owner]);
  const [page,setPage]=useState(0),start=Math.min(page*20,Math.max(0,Math.floor((references.length-1)/20)*20));
+ if(message.role==='user'&&message.status==='complete'&&Object.hasOwn(message,'reference_snapshots')&&!references.length)return <p role="status">原文件引用记录暂未能核对，可查看原消息正文。</p>;
  if(!references.length)return null;
  return <section className="jot-assistant-quotes" aria-label="消息中的原文件引用快照">
   <p>原文件引用 · {references.length}</p>

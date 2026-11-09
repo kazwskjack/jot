@@ -47,7 +47,7 @@ export type ContentBlock = { block_id: string; kind: "text" | "reasoning" | "sum
 
 export type MessageAttachmentRef = { artifact_id: string; version: number; sha256: string; size_bytes: number; media_type: string; file_name: string };
 
-export type Message = { message_id: string; run_id: string | null; role: "user" | "assistant"; status: "streaming" | "complete" | "partial" | "failed"; blocks: Array<ContentBlock>; attachments?: Array<string>; attachment_refs?: Array<MessageAttachmentRef>; created_at: string };
+export type Message = { message_id: string; run_id: string | null; role: "user" | "assistant"; status: "streaming" | "complete" | "partial" | "failed"; blocks: Array<ContentBlock>; attachments?: Array<string>; attachment_refs?: Array<MessageAttachmentRef>; reference_snapshots?:{protocol:1;state:'ready'|'unavailable';items:Array<Record<string,unknown>>}; created_at: string };
 
 export type Source = { source_id: string; activity_id: string; url: string; title: string; host: string; access: "discovered" | "snippet" | "fetched" | "read" | "failed"; retrieved_at: string; excerpt?: string; error_code?: string };
 

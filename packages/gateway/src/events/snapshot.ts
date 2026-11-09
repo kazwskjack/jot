@@ -1,3 +1,4 @@
+import {messageReferenceProjection} from '../messages/reference-snapshots.ts';
 import type { DatabaseSync } from 'node:sqlite';
 import { ConversationRepository } from '../conversations/repository.ts';
 import { RunRepository } from '../runs/repository.ts';
@@ -17,7 +18,7 @@ export function buildSnapshot(db: DatabaseSync, conversationId: string, ownerId:
       .map((row: any) => {
         const content = decodeStoredContent(row.content_json);
         return { message_id: row.id, run_id: row.run_id, role: row.role, status: row.status,
-          blocks: content.blocks, ...(content.attachments.length ? { attachments: content.attachments } : {}), ...messageAttachmentProjection(db,row), created_at: row.created_at };
+          blocks: content.blocks, ...(content.attachments.length ? { attachments: content.attachments } : {}), ...messageAttachmentProjection(db,row), ...messageReferenceProjection(db,row,ownerId), created_at: row.created_at };
       });
     const runs = new RunRepository(db, new EventStore(db)).list(conversationId, ownerId);
     const projectionRows = db.prepare(`SELECT e.type,e.payload_json,r.status

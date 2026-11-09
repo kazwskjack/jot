@@ -1,3 +1,4 @@
+import {messageReferenceProjection} from '../messages/reference-snapshots.ts';
 import {hostSettingsAdmissionIsClosed} from '../host-admin/settings-admission-fence.ts';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
@@ -229,7 +230,7 @@ export class RunRepository {
     const row = this.db.prepare('SELECT * FROM ga_messages WHERE id=?').get(id) as Record<string, unknown>;
     const content = decodeStoredContent(String(row.content_json));
     return { message_id: row.id, run_id: row.run_id, role: row.role, status: row.status,
-      blocks: content.blocks, ...(content.attachments.length ? { attachments: content.attachments } : {}), ...messageAttachmentProjection(this.db,row), created_at: row.created_at };
+      blocks: content.blocks, ...(content.attachments.length ? { attachments: content.attachments } : {}), ...messageAttachmentProjection(this.db,row), ...messageReferenceProjection(this.db,row), created_at: row.created_at };
   }
   private getById(id: string) { return this.runValue(this.db.prepare('SELECT * FROM ga_runs WHERE id=?').get(id) as Record<string, unknown>); }
   private runValue(row: Record<string, unknown>) {

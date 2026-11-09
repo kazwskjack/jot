@@ -1,4 +1,5 @@
-import {captureMessageReferenceSnapshots} from '../messages/reference-snapshots.ts';
+import {captureMessageReferenceSnapshots,messageReferenceProjection} from '../messages/reference-snapshots.ts';
+import {decodeStoredContent} from '../messages/content.ts';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { DatabaseSync } from 'node:sqlite';
@@ -39,7 +40,20 @@ export class EventStore {
     payload: Record<string, unknown>,
   ): StoredAgentEvent {
     if (!this.db.isTransaction) throw new Error('event_append_requires_transaction');
-    if(type==='message.created'&&payload.role==='user'&&payload.status==='complete'&&typeof payload.message_id==='string')captureMessageReferenceSnapshots(this.db,conversationId,payload.message_id);
+    // Only the original stored-message projection publishes structured reference metadata.
+    if(type==='message.created'&&Object.hasOwn(payload,'reference_snapshots')){payload={...payload};delete payload.reference_snapshots;}
+    if(type==='message.created'&&payload.role==='user'&&payload.status==='complete'&&typeof payload.message_id==='string'){
+      const captured=captureMessageReferenceSnapshots(this.db,conversationId,payload.message_id);
+      const message=captured?this.db.prepare('SELECT * FROM ga_messages WHERE id=? AND conversation_id=?').get(payload.message_id,conversationId):undefined;
+      if(message){
+        const projection=messageReferenceProjection(this.db,message);
+        if(projection.reference_snapshots){
+          const content=decodeStoredContent(message.content_json);
+          if(payload.run_id===message.run_id&&JSON.stringify(payload.blocks)===JSON.stringify(content.blocks)
+            &&JSON.stringify(payload.attachments??[])===JSON.stringify(content.attachments))payload={...payload,...projection};
+        }
+      }
+    }
     const sequence = this.db.prepare(
       'UPDATE ga_conversations SET next_seq=next_seq+1,updated_at=? WHERE id=? RETURNING next_seq-1 AS seq',
     ).get(new Date().toISOString(), conversationId) as { seq: number } | undefined;
