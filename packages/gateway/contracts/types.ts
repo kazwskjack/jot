@@ -410,7 +410,7 @@ export type GitIndexAcceptanceBase = {execution_id:string;project_id:string;inte
 export type GitIndexAcceptance = GitIndexAcceptanceBase & ({action:"stage"|"unstage"}|{action:"commit";target_ref:string;expected_old_oid:string|null});
 export type GitIndexExecutionResult =
  | (Omit<GitIndexAcceptanceBase,"accepted"> & {action:"stage"|"unstage";paths:string[]} & ({state:"pending"|"unknown"}|{state:"applied";before_index_sha256:string|null;index_sha256:string}|{state:"not_dispatched"|"abandoned_unknown";disposition_id:string}))
- | (Omit<GitIndexAcceptanceBase,"accepted"> & {action:"commit";paths:string[];target_ref:string;expected_old_oid:string|null} & ({state:"pending"|"unknown"}|{state:"not_dispatched"|"abandoned_unknown";disposition_id:string}));
+ | (Omit<GitIndexAcceptanceBase,"accepted"> & {action:"commit";paths:string[];target_ref:string;expected_old_oid:string|null} & ({state:"pending"|"unknown"}|{state:"applied";commit_oid:string;tree_oid:string}|{state:"not_dispatched"|"abandoned_unknown";disposition_id:string}));
 
 export type WorkPublicationPrepare = {request_id:string;source_run_id:string;source_sha256:string;paths:string[]};
 export type WorkPublicationControl = GitReviewControl;

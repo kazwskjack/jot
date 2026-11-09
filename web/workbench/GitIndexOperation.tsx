@@ -20,7 +20,11 @@ export default function GitIndexOperation({project,review,acceptance,allowDispat
  const read=async(a:GitIndexAcceptance,signal:AbortSignal)=>{
   checkAcceptance(a,project,intent);const [s,r]=await Promise.all([workbenchApi.gitStatus(project,a.execution_id,signal),workbenchApi.gitReview(project,intent,signal)]);check(signal);checkedStatus(s,a);
   if(r.intent_id!==intent||r.project_id!==project||r.action!==a.action||r.execution_authorized!==false)throw Error('GIT_INDEX_SCOPE_CHANGED');
-  if(a.action==='commit'&&(!r.commit_metadata||r.commit_metadata.target_ref!==a.target_ref||r.commit_metadata.parent_oid!==a.expected_old_oid))throw Error('GIT_INDEX_SCOPE_CHANGED');
+  if(a.action==='commit'){
+   const metadata=r.commit_metadata,e=s.execution;
+   if(!metadata||metadata.target_ref!==a.target_ref||metadata.parent_oid!==a.expected_old_oid||e.action!=='commit'
+    ||e.state==='applied'&&e.tree_oid!==metadata.tree_oid)throw Error('GIT_INDEX_SCOPE_CHANGED');
+  }
   reviewSnapshot.current=r;setAccepted(a);setStatus(s);setCurrentReview(r);setVerified(true);setAck(false);reviewChanged.current?.(r);changed.current?.();return s;
  };
  const begin=()=>{if(inflight.current)return null;inflight.current=true;const c=new AbortController();active.current=c;setBusy(true);setError('');return c};
@@ -67,7 +71,8 @@ export default function GitIndexOperation({project,review,acceptance,allowDispat
  };
  const locked=busy||mutation.pending,canExecute=allowDispatch&&(accepted?.action??review?.action)!=='commit'&&!attempted&&(accepted?verified&&!!status&&ready(status)&&currentReview?.state==='approved':review?.state==='approved');
  return <section className="wb-form" aria-label="选定文件执行"><p role="status">{!accepted?'只执行本次批准的选定文件，不提交或丢弃工作区内容。':!verified?'当前执行状态尚未确认。':status?.execution.state==='applied'&&status.workspace_state==='released_settled'?'变更已应用，工作区已释放。':isClosed&&status?.execution.state==='not_dispatched'?'操作未执行，工作区已释放。':isClosed?'操作已结束，实际效果仍未确认。':status?.workspace_state==='reserved'?'原操作仍占用工作区，尚未完成收尾。':'操作已受理，尚未执行。'}</p>
-  {accepted?.action==='commit'&&<p>提交受理已固定目标 <code>{accepted.target_ref}</code> 与父提交 <code>{accepted.expected_old_oid??'首个提交'}</code>。原生提交写入链仍在接入，可以读取或结束此待处理受理。</p>}
+  {accepted?.action==='commit'&&<p>提交受理已固定目标 <code>{accepted.target_ref}</code> 与父提交 <code>{accepted.expected_old_oid??'首个提交'}</code>。</p>}
+  {status?.execution.action==='commit'&&status.execution.state==='applied'&&<p style={{overflowWrap:'anywhere'}}>提交 <code>{status.execution.commit_oid}</code>，暂存树 <code>{status.execution.tree_oid}</code>。</p>}
   {accepted&&<p style={{overflowWrap:'anywhere'}}><code>{accepted.execution_id}</code></p>}{status&&<ul>{status.execution.paths.map(path=><li key={path} style={{overflowWrap:'anywhere'}}><code>{path}</code></li>)}</ul>}
   {!isClosed&&canExecute&&<button type="button" disabled={locked} onClick={()=>void execute()}>执行选定变更</button>}
   {accepted&&<button type="button" disabled={locked} onClick={()=>void refresh()}>刷新执行状态</button>}

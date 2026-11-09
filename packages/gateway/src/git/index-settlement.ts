@@ -6,7 +6,7 @@ import {readIndexProducerRecord} from './index-producers.ts';
 function original(db:DatabaseSync,source:WorkspaceOperationSource,recorded=false){
  if(source.operation_kind!=='git_index')throw Error('workspace_reservation_producer_unsettled');
  const row=recorded?readIndexExecutionRecord(db,source.owner_id,source.project_id,source.operation_id):readIndexExecutionRow(db,source.owner_id,source.project_id,source.operation_id);
- if(row.protocol!==4||row.binding_sha256!==source.binding_sha256)throw Error('workspace_reservation_producer_unsettled');
+ if(![4,5].includes(row.protocol)||row.binding_sha256!==source.binding_sha256)throw Error('workspace_reservation_producer_unsettled');
  readIndexAdmission(db,row);return row;
 }
 /** Original applied settlement uses the same journal/producer validation as

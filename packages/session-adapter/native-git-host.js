@@ -8,13 +8,27 @@ import {createNativeWorkspaceSourceHost,inspectNativeWorkspaceSource,assertNativ
 import {createNativeInvariantReplay} from './native-invariant-replay.js';
 
 export function normalizeNativeGitHostConfig(config){
- if(!config||typeof config!=='object'||Array.isArray(config)||Object.keys(config).sort().join(',')!=='databasePath,repositories,socket,tokenEnv'
+ if(!config||typeof config!=='object'||Array.isArray(config)||Object.keys(config).some(key=>!['databasePath','repositories','socket','tokenEnv','gitExecutable'].includes(key))||['databasePath','repositories','socket','tokenEnv'].some(key=>!Object.hasOwn(config,key))
   ||typeof config.databasePath!=='string'||!isAbsolute(config.databasePath)||typeof config.socket!=='string'
-  ||typeof config.tokenEnv!=='string'||!/^JOT_[A-Z0-9_]{1,80}$/.test(config.tokenEnv)||!Array.isArray(config.repositories)||!config.repositories.length||config.repositories.length>256)throw Error('native_git_host_config_invalid');
+  ||typeof config.tokenEnv!=='string'||!/^JOT_[A-Z0-9_]{1,80}$/.test(config.tokenEnv)||config.gitExecutable!==undefined&&(typeof config.gitExecutable!=='string'||!isAbsolute(config.gitExecutable))||!Array.isArray(config.repositories)||!config.repositories.length||config.repositories.length>256)throw Error('native_git_host_config_invalid');
  const seen=new Set(),repositories=config.repositories.map(row=>{
-  if(!row||typeof row!=='object'||Array.isArray(row)||Object.keys(row).sort().join(',')!=='owner_id,project_id,root'
-   ||!['owner_id','project_id'].every(k=>typeof row[k]==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(row[k]))||typeof row.root!=='string'||!isAbsolute(row.root))throw Error('native_git_host_config_invalid');
-  const key=row.owner_id+'\0'+row.project_id;if(seen.has(key))throw Error('native_git_host_config_invalid');seen.add(key);return Object.freeze({...row});
+  if(!row||typeof row!=='object'||Array.isArray(row)||Object.keys(row).some(key=>!['owner_id','project_id','root','git_directory','common_directory','commit_identity'].includes(key))||['owner_id','project_id','root'].some(key=>!Object.hasOwn(row,key))
+   ||!['owner_id','project_id'].every(k=>typeof row[k]==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(row[k]))||typeof row.root!=='string'||!isAbsolute(row.root)
+   ||[row.git_directory,row.common_directory].some(path=>path!==undefined&&(typeof path!=='string'||!isAbsolute(path))))throw Error('native_git_host_config_invalid');
+  let commit_identity;
+  if(row.commit_identity!==undefined){
+   const policy=row.commit_identity;
+   if(!policy||typeof policy!=='object'||Array.isArray(policy)||Object.keys(policy).sort().join(',')!=='author,committer')throw Error('native_git_host_config_invalid');
+   const identity=input=>{
+    if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).sort().join(',')!=='email,name'
+     ||typeof input.name!=='string'||!input.name.trim()||input.name.length>255||Buffer.from(input.name,'utf8').toString('utf8')!==input.name||/[<>\x00-\x1f\x7f]/.test(input.name)
+     ||typeof input.email!=='string'||!input.email||input.email.length>255||Buffer.from(input.email,'utf8').toString('utf8')!==input.email||/[<>\s\x00-\x1f\x7f]/.test(input.email))throw Error('native_git_host_config_invalid');
+    return Object.freeze({name:input.name,email:input.email});
+   };
+   commit_identity=Object.freeze({author:identity(policy.author),committer:identity(policy.committer)});
+  }
+  const key=row.owner_id+'\0'+row.project_id;if(seen.has(key))throw Error('native_git_host_config_invalid');seen.add(key);
+  return Object.freeze({...row,...(commit_identity?{commit_identity}:{})});
  });return Object.freeze({...config,repositories:Object.freeze(repositories)});
 }
 
@@ -63,7 +77,7 @@ export async function createNativeGitHost({ctx,bridge,admissionGate,allowedPrese
   db.exec('BEGIN IMMEDIATE');
   try{
    const before=db.prepare('PRAGMA schema_version').get().schema_version,changes=db.prepare('SELECT total_changes() AS n').get().n;
-   const projects=new ProjectRepository(db),git=new GitWorkbench(projects,settings.repositories),intents=new GitMutationIntents(db,projects,git);
+   const projects=new ProjectRepository(db),git=new GitWorkbench(projects,settings.repositories,settings.gitExecutable),intents=new GitMutationIntents(db,projects,git);
    executions=new GitIndexExecutions(db,projects,git,intents,{nativeWorkspaceHost});
    publication=new WorkPublicationExecutions(db,git,new WorkPublicationIntents(db,git),{nativeWorkspaceHost});
    if(db.prepare('PRAGMA schema_version').get().schema_version!==before||db.prepare('SELECT total_changes() AS n').get().n!==changes)throw Error('native_git_database_changed');

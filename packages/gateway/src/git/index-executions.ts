@@ -1,3 +1,8 @@
+import {validateCommitEvidence,readCommitObjectPreparation,readCommitObjectDispatch,readCommitRefPreparation,commitAppliedResult} from './commit-journal.ts';
+import {readCommitExecutionSource} from './commit-records.ts';
+import {gitCommitPreparation,gitCommitEvidence} from './commit-evidence.ts';
+import {gitCommitRefPreparation,type GitCommitRefPreparation} from './commit-ref-evidence.ts';
+import {canonicalJson} from '../db/canonical-json.ts';
 import {gitCommitExecutionDefinition,gitCommitExecutionSchema} from './commit-execution-upgrade.ts';
 import {readIndexExecutionRow,readIndexPreparation,validateIndexEvidence,readIndexDispatch,indexAppliedResult,readIndexDisposition,indexClosedResult,readIndexExecutionResult,indexAcceptance,readIndexAdmission,indexControlReceipt,validateIndexControl,readIndexControlReceipt,type Row,type Dispatch,type Outcome,type Acceptance,type ExecutionResult,type AppliedResult,type ClosedResult,type Control,type Disposition,type Cleanup,type ControlReceipt} from './index-journal.ts';
 import {createHash,randomUUID} from 'node:crypto';
@@ -40,6 +45,7 @@ export class GitIndexExecutions{
   db.exec(gitCommitExecutionDefinition('wb_git_index_executions',true,true));
   db.exec(`   CREATE TABLE IF NOT EXISTS wb_git_index_dispatches(execution_id TEXT PRIMARY KEY REFERENCES wb_git_index_executions(execution_id),evidence_json TEXT NOT NULL,evidence_sha256 TEXT NOT NULL,lease_owner TEXT NOT NULL,lease_generation INTEGER NOT NULL,created_at TEXT NOT NULL);
    CREATE TABLE IF NOT EXISTS wb_git_index_preparations(execution_id TEXT PRIMARY KEY REFERENCES wb_git_index_executions(execution_id),evidence_json TEXT NOT NULL,evidence_sha256 TEXT NOT NULL,lease_owner TEXT NOT NULL,lease_generation INTEGER NOT NULL,created_at TEXT NOT NULL);
+   CREATE TABLE IF NOT EXISTS wb_git_index_ref_preparations(execution_id TEXT PRIMARY KEY REFERENCES wb_git_index_executions(execution_id),evidence_json TEXT NOT NULL,evidence_sha256 TEXT NOT NULL,lease_owner TEXT NOT NULL,lease_generation INTEGER NOT NULL,created_at TEXT NOT NULL);
    CREATE TABLE IF NOT EXISTS wb_git_index_admissions(execution_id TEXT PRIMARY KEY REFERENCES wb_git_index_executions(execution_id),receipt_json TEXT NOT NULL,receipt_sha256 TEXT NOT NULL,created_at TEXT NOT NULL);
    CREATE TABLE IF NOT EXISTS wb_git_index_controls(control_id TEXT PRIMARY KEY,execution_id TEXT NOT NULL REFERENCES wb_git_index_executions(execution_id),owner_id TEXT NOT NULL,project_id TEXT NOT NULL,request_id TEXT NOT NULL,request_sha256 TEXT NOT NULL,expected_state_sha256 TEXT NOT NULL,created_at TEXT NOT NULL,UNIQUE(owner_id,project_id,request_id));
    CREATE TABLE IF NOT EXISTS wb_git_index_dispositions(execution_id TEXT PRIMARY KEY REFERENCES wb_git_index_executions(execution_id),control_id TEXT NOT NULL UNIQUE REFERENCES wb_git_index_controls(control_id),kind TEXT NOT NULL CHECK(kind IN('not_dispatched','abandoned_unknown')),snapshot_sha256 TEXT NOT NULL,created_at TEXT NOT NULL);
@@ -51,9 +57,10 @@ export class GitIndexExecutions{
   if(!db.prepare('PRAGMA table_info(wb_git_index_executions)').all().some(column=>column.name==='protocol'))db.exec('ALTER TABLE wb_git_index_executions ADD COLUMN protocol INTEGER NOT NULL DEFAULT 1');
   if(!db.prepare('PRAGMA table_info(wb_git_index_executions)').all().some(column=>column.name==='binding_sha256'))db.exec('ALTER TABLE wb_git_index_executions ADD COLUMN binding_sha256 TEXT');
   if(!['legacy','commit'].includes(gitCommitExecutionSchema(db)))throw Error('git_execution_storage_unavailable');
-  for(const table of ['wb_git_index_executions','wb_git_index_preparations','wb_git_index_dispatches','wb_git_index_outcomes','wb_git_index_admissions','wb_git_index_controls','wb_git_index_dispositions','wb_git_index_control_receipts'])for(const kind of ['UPDATE','DELETE'])db.exec(`CREATE TRIGGER IF NOT EXISTS ${table}_no_${kind.toLowerCase()} BEFORE ${kind} ON ${table} BEGIN SELECT RAISE(ABORT,'git_execution_immutable'); END;`);
-  for(const table of ['wb_git_index_preparations','wb_git_index_dispatches','wb_git_index_outcomes'])db.exec(`CREATE TRIGGER IF NOT EXISTS ${table}_no_disposed BEFORE INSERT ON ${table} WHEN EXISTS(SELECT 1 FROM wb_git_index_dispositions WHERE execution_id=NEW.execution_id) BEGIN SELECT RAISE(ABORT,'git_execution_closed'); END;`);
-  for(const table of ['wb_git_index_preparations','wb_git_index_dispatches','wb_git_index_dispositions'])db.exec(`CREATE TRIGGER IF NOT EXISTS ${table}_no_applied BEFORE INSERT ON ${table} WHEN EXISTS(SELECT 1 FROM wb_git_index_outcomes WHERE execution_id=NEW.execution_id) BEGIN SELECT RAISE(ABORT,'git_execution_closed'); END;`);
+  for(const table of ['wb_git_index_executions','wb_git_index_preparations','wb_git_index_dispatches','wb_git_index_ref_preparations','wb_git_index_outcomes','wb_git_index_admissions','wb_git_index_controls','wb_git_index_dispositions','wb_git_index_control_receipts'])for(const kind of ['UPDATE','DELETE'])db.exec(`CREATE TRIGGER IF NOT EXISTS ${table}_no_${kind.toLowerCase()} BEFORE ${kind} ON ${table} BEGIN SELECT RAISE(ABORT,'git_execution_immutable'); END;`);
+  for(const table of ['wb_git_index_preparations','wb_git_index_dispatches','wb_git_index_ref_preparations','wb_git_index_outcomes'])db.exec(`CREATE TRIGGER IF NOT EXISTS ${table}_no_disposed BEFORE INSERT ON ${table} WHEN EXISTS(SELECT 1 FROM wb_git_index_dispositions WHERE execution_id=NEW.execution_id) BEGIN SELECT RAISE(ABORT,'git_execution_closed'); END;`);
+  for(const table of ['wb_git_index_preparations','wb_git_index_dispatches','wb_git_index_ref_preparations','wb_git_index_dispositions'])db.exec(`CREATE TRIGGER IF NOT EXISTS ${table}_no_applied BEFORE INSERT ON ${table} WHEN EXISTS(SELECT 1 FROM wb_git_index_outcomes WHERE execution_id=NEW.execution_id) BEGIN SELECT RAISE(ABORT,'git_execution_closed'); END;`);
+  db.exec("CREATE TRIGGER IF NOT EXISTS wb_git_index_ref_preparations_commit_only BEFORE INSERT ON wb_git_index_ref_preparations WHEN NOT EXISTS(SELECT 1 FROM wb_git_index_executions WHERE execution_id=NEW.execution_id AND action='commit' AND protocol=5) BEGIN SELECT RAISE(ABORT,'git_execution_evidence_corrupt'); END;");
   this.producers=new GitIndexProducers(db,this.now);
  }
  private input(value:Input):Input{
@@ -93,6 +100,11 @@ export class GitIndexExecutions{
  private release(row:Row,lease:ExecutionLease){this.db.prepare('DELETE FROM ga_worker_leases WHERE resource_id=? AND owner=? AND generation=?').run(this.resource(row),lease.owner,lease.generation);}
  private cleanupTransaction(row:Row,lease:ExecutionLease,remove:()=>void){withImmediateTransaction(this.db,()=>{this.row(row.owner_id,row.project_id,row.execution_id);assertExecutionLease(this.db,this.resource(row),lease,this.now);remove();});}
  private outcome(row:Row,evidence:GitIndexEvidence){const receipt=this.result(row,evidence);this.db.prepare('INSERT INTO wb_git_index_outcomes VALUES(?,?,?,?)').run(row.execution_id,JSON.stringify(receipt),digest(receipt),new Date(this.now()).toISOString());return receipt;}
+ private commitOutcome(row:Row,preparation:GitCommitRefPreparation){
+  const receipt=commitAppliedResult(this.db,row,preparation);
+  this.db.prepare('INSERT INTO wb_git_index_outcomes VALUES(?,?,?,?)').run(row.execution_id,JSON.stringify(receipt),digest(receipt),new Date(this.now()).toISOString());
+  return receipt;
+ }
  private reviewSource(owner:string,project:string,intent:string,version:number,review:string){
   return this.intents.get(owner,project,intent).action==='commit'
    ?this.intents.commitExecutionSource(owner,project,intent,version,review)
@@ -130,7 +142,6 @@ export class GitIndexExecutions{
  reserveWorkspace(owner:string,project:string,id:string){
   return withImmediateTransaction(this.db,()=>{
    const row=this.row(owner,project,id);this.admission(row);
-   if(row.action==='commit')throw Error('git_commit_execution_unavailable');
    if(this.get(owner,project,id).state!=='pending')throw Error('workspace_reservation_source_closed');
    this.assertResolutionFence(row);
    this.producers.assertStartable(row,this.resource(row));
@@ -143,7 +154,7 @@ export class GitIndexExecutions{
  releaseUnstartedWorkspace(owner:string,project:string,id:string){
   return withImmediateTransaction(this.db,()=>{
    const row=this.row(owner,project,id);this.admission(row);
-   for(const table of ['wb_git_index_producers','wb_git_index_preparations','wb_git_index_dispatches','wb_git_index_outcomes'])
+   for(const table of ['wb_git_index_producers','wb_git_index_preparations','wb_git_index_dispatches','wb_git_index_ref_preparations','wb_git_index_outcomes'])
     if(this.db.prepare('SELECT 1 FROM '+table+' WHERE execution_id=?').get(id))throw Error('workspace_reservation_producer_unsettled');
    if(![4,5].includes(row.protocol)||row.binding_sha256!==this.git.executionBinding(owner,project))throw Error('workspace_reservation_source_changed');
    return releaseUnstartedWorkspaceOperation(this.db,{owner_id:owner,project_id:project,operation_kind:'git_index',operation_id:id,binding_sha256:row.binding_sha256});
@@ -189,7 +200,6 @@ export class GitIndexExecutions{
  async performReserved(owner:string,project:string,id:string,signal?:AbortSignal){
   if(this.db.isTransaction)throw Error('git_execution_transaction_invalid');signal?.throwIfAborted();const row=this.row(owner,project,id);this.admission(row);
   const prior=this.get(owner,project,id);if(prior.state!=='pending')return prior;
-  if(row.action==='commit')throw Error('git_commit_execution_unavailable');
   const host=this.nativeWorkspaceHost;if(!host)throw Error('git_native_workspace_host_unavailable');
   this.reserveWorkspace(owner,project,id);const family=this.workspaceFamily(owner,project,id);
   const placementScope={owner_id:owner,project_id:project,operation_kind:'git_index' as const,operation_id:id,binding_sha256:family.binding_sha256},placements=readReservedNativePlacements(this.db,placementScope);
@@ -224,15 +234,68 @@ export class GitIndexExecutions{
   if(this.db.isTransaction)throw Error('git_execution_transaction_invalid');this.projects.assertOwned(project,owner);if(typeof intent!=='string'||!ID.test(intent))throw Error('git_execution_invalid');const input=this.input(value),requestHash=digest({intent_id:intent,...input});
   const prior=this.db.prepare('SELECT * FROM wb_git_index_executions WHERE owner_id=? AND project_id=? AND request_id=?').get(owner,project,input.request_id) as Row|undefined;
   if(prior){if(prior.intent_id!==intent||prior.request_sha256!==requestHash)throw Error('idempotency_conflict');const current=this.get(owner,project,prior.execution_id);if(current.state!=='pending')return current;const row=this.row(owner,project,prior.execution_id);this.assertResolutionFence(row);this.producers.assertStartable(row,this.resource(prior));}
-  signal?.throwIfAborted();const source=this.intents.executionSource(owner,project,intent,input.expected_version,input.review_sha256);
+  signal?.throwIfAborted();const source=this.reviewSource(owner,project,intent,input.expected_version,input.review_sha256);
+  if(source.action==='commit'){if(!custody||!prior)throw Error('git_native_workspace_custody_invalid');this.admission(this.row(owner,project,prior.execution_id));}
   const admitted=withImmediateTransaction(this.db,()=>{
-   signal?.throwIfAborted();this.intents.executionSource(owner,project,intent,input.expected_version,input.review_sha256);
+   signal?.throwIfAborted();this.reviewSource(owner,project,intent,input.expected_version,input.review_sha256);
    const row=this.registerExecution(owner,project,intent,input,requestHash,source);this.producers.assertStartable(row,this.resource(row));const lease=this.claim(row,custody);this.authority(row,lease,custody);this.producers.start(row,this.resource(row),lease);return{row,lease};
   });
   const {row,lease}=admitted,abort=new AbortController(),cancel=()=>abort.abort(signal?.reason);signal?.addEventListener('abort',cancel,{once:true});if(signal?.aborted)cancel();
   const authorize=()=>this.authority(row,lease,custody);
   const timer=setInterval(()=>{try{withImmediateTransaction(this.db,()=>{authorize();this.db.prepare('UPDATE ga_worker_leases SET expires_at=?,updated_at=? WHERE resource_id=? AND owner=? AND generation=?').run(String(this.now()+this.leaseMs),new Date(this.now()).toISOString(),this.resource(row),lease.owner,lease.generation);});}catch(error){abort.abort(error);}},Math.floor(this.leaseMs/3));timer.unref();
   try{
+   if(source.action==='commit'){
+    const kernel=this.git.indexEffects(owner,project);
+    const plan=await this.git.prepareCommit(owner,project,{...source,review_sha256:row.review_sha256},abort.signal);
+    authorize();
+    await kernel.applyCommit(plan,{
+     authorize,
+     prepared:raw=>withImmediateTransaction(this.db,()=>{
+      authorize();const preparation=gitCommitPreparation(raw);
+      validateCommitEvidence(this.db,row,preparation.evidence);
+      this.db.prepare('INSERT INTO wb_git_index_preparations VALUES(?,?,?,?,?,?)')
+       .run(row.execution_id,JSON.stringify(preparation),digest(preparation),lease.owner,lease.generation,new Date(this.now()).toISOString());
+     }),
+     acquire:(raw,install)=>withImmediateTransaction(this.db,()=>{
+      authorize();
+      if(JSON.stringify(readCommitObjectPreparation(this.db,row))!==JSON.stringify(gitCommitPreparation(raw)))throw Error('git_execution_evidence_corrupt');
+      install();
+     }),
+     cleanup:remove=>this.cleanupTransaction(row,lease,remove),
+     dispatch:raw=>withImmediateTransaction(this.db,()=>{
+      authorize();const evidence=gitCommitEvidence(raw);
+      validateCommitEvidence(this.db,row,evidence);
+      if(JSON.stringify(readCommitObjectPreparation(this.db,row)?.evidence)!==JSON.stringify(evidence))throw Error('git_execution_evidence_corrupt');
+      this.db.prepare('INSERT INTO wb_git_index_dispatches VALUES(?,?,?,?,?,?)')
+       .run(row.execution_id,JSON.stringify(evidence),digest(evidence),lease.owner,lease.generation,new Date(this.now()).toISOString());
+     }),
+     refPrepared:raw=>withImmediateTransaction(this.db,()=>{
+      authorize();const preparation=gitCommitRefPreparation(raw);
+      if(JSON.stringify(readCommitObjectDispatch(this.db,row))!==JSON.stringify(preparation.evidence))throw Error('git_execution_evidence_corrupt');
+      this.db.prepare('INSERT INTO wb_git_index_ref_preparations VALUES(?,?,?,?,?,?)')
+       .run(row.execution_id,JSON.stringify(preparation),digest(preparation),lease.owner,lease.generation,new Date(this.now()).toISOString());
+     }),
+     refAcquire:(raw,install)=>withImmediateTransaction(this.db,()=>{
+      authorize();
+      if(JSON.stringify(readCommitRefPreparation(this.db,row))!==JSON.stringify(gitCommitRefPreparation(raw)))throw Error('git_execution_evidence_corrupt');
+      install();
+     }),
+     refPublish:(raw,publish)=>withImmediateTransaction(this.db,()=>{
+      authorize();const preparation=readCommitRefPreparation(this.db,row);
+      if(!preparation||JSON.stringify(preparation)!==JSON.stringify(gitCommitRefPreparation(raw)))throw Error('git_execution_evidence_corrupt');
+      const receipt=publish();
+      const expected={
+       protocol:1,plan_id:plan.plan_id,action:'commit',target_ref:plan.target_ref,old_oid:plan.parent_oid,new_oid:plan.commit_oid,tree_oid:plan.tree_oid,
+       preparation_sha256:createHash('sha256').update(canonicalJson(preparation)).digest('hex'),
+       logs:preparation.files.slice(0,-1).map(file=>({scope:file.scope,path:file.path,before_sha256:file.before?.sha256??null,sha256:file.sha256})),
+       execution_authorized:false,
+      };
+      if(JSON.stringify(receipt)!==JSON.stringify(expected))throw Error('git_execution_outcome_corrupt');
+      this.commitOutcome(row,preparation);return receipt;
+     })
+    },abort.signal);
+    return this.get(owner,project,row.execution_id);
+   }
    const kernel=this.git.indexEffects(owner,project),plan=await kernel.prepareIndex(source.witness,source.action,abort.signal);authorize();
    await kernel.applyIndex(plan,{
     authorize,
@@ -244,7 +307,7 @@ export class GitIndexExecutions{
    },abort.signal);return this.get(owner,project,row.execution_id);
   }finally{
    clearInterval(timer);signal?.removeEventListener('abort',cancel);
-   try{withImmediateTransaction(this.db,()=>{this.row(owner,project,row.execution_id);const applied=this.get(owner,project,row.execution_id).state==='applied',state=applied?'applied':this.evidence(row)?'unknown':this.preparation(row)?'prepared':abort.signal.aborted?'cancelled_before_preparation':'failed_before_preparation';this.producers.finish(row,this.resource(row),lease,state);});}
+   try{withImmediateTransaction(this.db,()=>{this.row(owner,project,row.execution_id);const applied=this.get(owner,project,row.execution_id).state==='applied',dispatched=row.action==='commit'?readCommitObjectDispatch(this.db,row):this.evidence(row),prepared=row.action==='commit'?readCommitObjectPreparation(this.db,row):this.preparation(row),state=applied?'applied':dispatched?'unknown':prepared?'prepared':abort.signal.aborted?'cancelled_before_preparation':'failed_before_preparation';this.producers.finish(row,this.resource(row),lease,state);});}
    finally{withImmediateTransaction(this.db,()=>this.release(row,lease));}
   }
  }
@@ -255,7 +318,7 @@ export class GitIndexExecutions{
  private stateHash(row:Row){
   this.get(row.owner_id,row.project_id,row.execution_id);
   const record=(table:string)=>this.db.prepare('SELECT * FROM '+table+' WHERE execution_id=?').get(row.execution_id)??null;
-  this.producers.record(row);return digest({protocol:1,execution:row,preparation:record('wb_git_index_preparations'),dispatch:record('wb_git_index_dispatches'),outcome:record('wb_git_index_outcomes'),producer:record('wb_git_index_producers'),producer_finish:record('wb_git_index_producer_finishes'),disposition:record('wb_git_index_dispositions')});
+  this.producers.record(row);const publication=row.action==='commit'?record('wb_git_index_ref_preparations'):null;return digest({protocol:1,execution:row,preparation:record('wb_git_index_preparations'),dispatch:record('wb_git_index_dispatches'),outcome:record('wb_git_index_outcomes'),producer:record('wb_git_index_producers'),producer_finish:record('wb_git_index_producer_finishes'),disposition:record('wb_git_index_dispositions'),...(publication?{ref_preparation:publication}:{})});
  }
  inspect(owner:string,project:string,id:string){const row=this.row(owner,project,id),execution=this.get(owner,project,id);return{execution,state_sha256:this.stateHash(row),requires_unknown_acknowledgement:execution.state==='pending'||execution.state==='unknown',execution_authorized:false as const};}
  /** Original UI evidence in one read snapshot. A physical result/control is
@@ -326,6 +389,7 @@ export class GitIndexExecutions{
   * unknown execution is not rolled back or authorized to execute again. */
  async abandon(owner:string,project:string,id:string,value:ControlInput,signal?:AbortSignal):Promise<ControlReceipt>{
   if(this.db.isTransaction)throw Error('git_execution_transaction_invalid');const row=this.row(owner,project,id),input=this.controlInput(value),requestHash=digest({execution_id:id,...input});
+  if(row.action==='commit')throw Error('git_commit_native_recovery_required');
   const admitted=withImmediateTransaction(this.db,()=>{
    signal?.throwIfAborted();this.row(owner,project,id);
    let control=this.db.prepare('SELECT * FROM wb_git_index_controls WHERE owner_id=? AND project_id=? AND request_id=?').get(owner,project,input.request_id) as Control|undefined;
@@ -350,7 +414,8 @@ export class GitIndexExecutions{
   * mode never creates a new command, writable plan or producer finish. */
  private async completeControl(row:Row,control:Control,input:ControlInput,lease:ExecutionLease,signal:AbortSignal,guard:()=>void,acceptedControl=false):Promise<ControlReceipt>{
   guard();const cached=this.savedControlReceipt(row,control);if(cached)return cached;
-   guard();const evidence=this.evidence(row),preparation=this.preparation(row);let applied=false,cleanup:Cleanup='not_recorded';
+   guard();const evidence=row.action==='commit'?undefined:this.evidence(row),preparation=row.action==='commit'?undefined:this.preparation(row);let applied=false,cleanup:Cleanup='not_recorded';
+   if(row.action==='commit'){const facts=await this.completeCommitEffects(row,signal,guard);applied=facts.applied;cleanup=facts.cleanup;}
    if(evidence||preparation){
     cleanup='unverified';
     try{
@@ -367,10 +432,25 @@ export class GitIndexExecutions{
     if(applied||current.state==='applied')return this.storeControlReceipt(control,current as AppliedResult,cleanup);
     if(current.state!=='pending'&&current.state!=='unknown')return this.storeControlReceipt(control,current as ClosedResult,cleanup);
     if(!acceptedControl&&this.stateHash(row)!==input.expected_state_sha256)throw Error('version_conflict');
-    const disposition:Disposition={execution_id:row.execution_id,control_id:control.control_id,kind:row.protocol>=2&&!evidence?'not_dispatched':'abandoned_unknown',snapshot_sha256:input.expected_state_sha256,created_at:new Date(this.now()).toISOString()};
+    const disposition:Disposition={execution_id:row.execution_id,control_id:control.control_id,kind:row.protocol>=2&&!(row.action==='commit'?readCommitObjectDispatch(this.db,row):evidence)?'not_dispatched':'abandoned_unknown',snapshot_sha256:input.expected_state_sha256,created_at:new Date(this.now()).toISOString()};
     this.db.prepare('INSERT INTO wb_git_index_dispositions VALUES(?,?,?,?,?)').run(row.execution_id,control.control_id,disposition.kind,disposition.snapshot_sha256,disposition.created_at);
     return this.storeControlReceipt(control,this.closedResult(row,disposition),cleanup);
    });
+ }
+ private async completeCommitEffects(row:Row,signal:AbortSignal,guard:()=>void){
+  const preparation=readCommitObjectPreparation(this.db,row),dispatch=readCommitObjectDispatch(this.db,row),publication=readCommitRefPreparation(this.db,row);
+  let applied=false,cleanup:Cleanup=preparation||dispatch||publication?'unverified':'not_recorded';
+  if(preparation||dispatch||publication)try{
+   const kernel=this.git.indexEffects(row.owner_id,row.project_id);
+   if(publication){
+    const observed=await kernel.observeCommitRef(publication,readCommitExecutionSource(this.db,row).witness,signal);guard();
+    if(observed.state==='applied'){applied=true;withImmediateTransaction(this.db,()=>{guard();if(!this.db.prepare('SELECT 1 FROM wb_git_index_outcomes WHERE execution_id=?').get(row.execution_id))this.commitOutcome(row,publication);});}
+    await kernel.cleanupCommitRefPreparation(publication,guard,signal,remove=>withImmediateTransaction(this.db,()=>{guard();remove();}));
+   }
+   if(preparation)await kernel.cleanupCommitPreparation(preparation,guard,signal,remove=>withImmediateTransaction(this.db,()=>{guard();remove();}));
+   guard();cleanup='verified';
+  }catch(error){signal.throwIfAborted();guard();if(applied&&!this.db.prepare('SELECT 1 FROM wb_git_index_outcomes WHERE execution_id=?').get(row.execution_id))throw error;}
+  return {applied,cleanup};
  }
  /** A never-started original acceptance has no native handles to drain. Its
   * admitted control fences producer start in the same original transaction.
@@ -381,7 +461,7 @@ export class GitIndexExecutions{
    if(accepted.expected_state_sha256!==input.expected_state_sha256)throw Error('idempotency_conflict');
    if(![4,5].includes(row.protocol)||!row.binding_sha256)return;
    if(this.db.prepare("SELECT 1 FROM wb_workspace_reservations WHERE operation_kind='git_index' AND operation_id=?").get(id))return;
-   for(const table of ['wb_git_index_producers','wb_git_index_producer_finishes','wb_git_index_preparations','wb_git_index_dispatches','wb_git_index_outcomes'])if(this.db.prepare('SELECT 1 FROM '+table+' WHERE execution_id=?').get(id))return;
+   for(const table of ['wb_git_index_producers','wb_git_index_producer_finishes','wb_git_index_preparations','wb_git_index_dispatches','wb_git_index_ref_preparations','wb_git_index_outcomes'])if(this.db.prepare('SELECT 1 FROM '+table+' WHERE execution_id=?').get(id))return;
    const control=this.db.prepare('SELECT * FROM wb_git_index_controls WHERE control_id=?').get(accepted.control_id) as Control;
    return{row,control};
   };
@@ -446,7 +526,7 @@ export class GitIndexExecutions{
   }finally{if(timer)clearInterval(timer);if(lease)withImmediateTransaction(this.db,()=>this.release(row,lease!));}
  }
  async reconcile(owner:string,project:string,id:string,signal?:AbortSignal){
-  if(this.db.isTransaction)throw Error('git_execution_transaction_invalid');const row=this.row(owner,project,id),current=this.get(owner,project,id);if(current.state==='not_dispatched'||current.state==='abandoned_unknown')return current;const evidence=this.evidence(row),preparation=this.preparation(row);if(!evidence&&!preparation)throw Error(row.protocol>=2?'git_execution_not_dispatched':'git_execution_legacy_unknown');
+  if(this.db.isTransaction)throw Error('git_execution_transaction_invalid');const row=this.row(owner,project,id),current=this.get(owner,project,id);if(row.action==='commit')throw Error('git_commit_native_recovery_required');if(current.state==='not_dispatched'||current.state==='abandoned_unknown')return current;const evidence=this.evidence(row),preparation=this.preparation(row);if(!evidence&&!preparation)throw Error(row.protocol>=2?'git_execution_not_dispatched':'git_execution_legacy_unknown');
   signal?.throwIfAborted();const lease=withImmediateTransaction(this.db,()=>{this.row(owner,project,id);return this.claim(row);});
   try{
    if(!evidence){await this.git.indexEffects(owner,project).cleanupPreparation(preparation,()=>{this.row(owner,project,id);assertExecutionLease(this.db,this.resource(row),lease,this.now);},signal,remove=>this.cleanupTransaction(row,lease,remove));return{...this.get(owner,project,id),observation:'not_dispatched' as const};}

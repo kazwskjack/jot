@@ -5,7 +5,7 @@ import type {GitCommitMetadata} from '../../contracts/types.ts';
 
 type Identity={name:string;email:string};
 export type GitCommitOperatorPolicy=Readonly<{author:Readonly<Identity>;committer:Readonly<Identity>}>;
-const hash=(value:string)=>createHash('sha256').update(value,'utf8').digest('hex');
+const hash=(value:string|Buffer)=>createHash('sha256').update(value).digest('hex');
 const utf8=(value:string)=>Buffer.from(value,'utf8').toString('utf8')===value;
 
 /** Operator configuration only. Source repository config and browser fields
@@ -45,4 +45,17 @@ export function commitReviewMetadata(policy:GitCommitOperatorPolicy,witness:GitC
   author:{...policy.author,timestamp:at},committer:{...policy.committer,timestamp:at},
   operator_policy_sha256:hash(canonicalJson(policy)),message_sha256:hash(message),message_bytes:Buffer.byteLength(message,'utf8'),
  };
+}
+
+export const gitCommitSignature=(value:GitCommitMetadata['author'])=>value.name+' <'+value.email+'> '+Date.parse(value.timestamp)/1000+' +0000';
+
+/** Derive the exact reviewed object bytes without a clock or source config. */
+export function gitCommitObject(metadata:GitCommitMetadata,message:string){
+ if(typeof message!=='string'||!utf8(message)||message.includes('\0')||message.length>4096
+  ||hash(message)!==metadata.message_sha256||Buffer.byteLength(message,'utf8')!==metadata.message_bytes)throw Error('git_commit_metadata_invalid');
+ const headers=['tree '+metadata.tree_oid,...(metadata.parent_oid===null?[]:['parent '+metadata.parent_oid]),
+  'author '+gitCommitSignature(metadata.author),'committer '+gitCommitSignature(metadata.committer)];
+ const body=Buffer.concat([Buffer.from(headers.join('\n')+'\n\n','utf8'),Buffer.from(message,'utf8')]);
+ const oid=createHash(metadata.object_format).update('commit '+body.length+'\0').update(body).digest('hex');
+ return {oid,body,sha256:hash(body)};
 }

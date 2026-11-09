@@ -1365,7 +1365,7 @@
     null,
     "GitIndexStatus",
     "200",
-    "Read original owner-scoped execution, producer, reservation and control facts. Typed commit records expose their frozen target and parent while native commit effects remain unavailable during integration."
+    "Read original owner-scoped execution, producer, reservation and control facts. Typed commit records retain the frozen target and parent, validate original object/ref preparation and immutable outcome facts, and expose the applied commit and tree OIDs. Native custody and explicit settlement remain separate from reading history."
   ],
   [
     "POST",

@@ -5,7 +5,7 @@ import {join,dirname,relative,sep} from 'node:path';
 import type {GitCommitMetadata} from '../../contracts/types.ts';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {workspaceRelativePath} from '../always-on/workspace-provider.ts';
-import {commitReviewMetadata,gitCommitOperatorPolicy} from './commit-metadata.ts';
+import {commitReviewMetadata,gitCommitOperatorPolicy,gitCommitObject,gitCommitSignature} from './commit-metadata.ts';
 import {readCommitTreeObjects,type GitCommitReviewWitness,type GitCommitTreeObject} from './commit-tree.ts';
 import {GitPublicationEffects} from './publication-effects.ts';
 import type {GitSourceWitness} from './index-effects.ts';
@@ -53,7 +53,6 @@ function synchronous<T>(operation:()=>T):T{
  return value;
 }
 const hash=(bytes:string|Buffer)=>createHash('sha256').update(bytes).digest('hex');
-const signature=(value:GitCommitMetadata['author'])=>value.name+' <'+value.email+'> '+Date.parse(value.timestamp)/1000+' +0000';
 
 /** Original host-private commit kernel. Serialized proof is never a writable
  * plan. Owner, Worker and native custody belong to the original coordinator. */
@@ -96,15 +95,7 @@ export class GitCommitEffects extends GitPublicationEffects{
   try{
    if(context.index!==witness.index_sha256||(await this.inspectContext(context,signal)).snapshot_id!==witness.snapshot_id)throw Error('git_commit_review_changed');
    const tree_objects=await readCommitTreeObjects(this.executable!,this.root,context,join(this.commonDirectory,'objects'),this.limits,witness.commit_tree,signal);
-   const headers=[
-    'tree '+metadata.tree_oid,
-    ...(metadata.parent_oid===null?[]:['parent '+metadata.parent_oid]),
-    'author '+signature(metadata.author),
-    'committer '+signature(metadata.committer),
-   ];
-   // The reviewed message is appended byte-for-byte, including its original end.
-   const body=Buffer.concat([Buffer.from(headers.join('\n')+'\n\n','utf8'),Buffer.from(message,'utf8')]);
-   const oid=createHash(metadata.object_format).update('commit '+body.length+'\0').update(body).digest('hex');
+   const commit=gitCommitObject(metadata,message),{body,oid}=commit;
    const written=await readGit(this.executable!,this.root,context.directory,['hash-object','-t','commit','-w','--stdin'],{...this.limits,maxOutputBytes:4096},signal,join(context.directory,'objects'),body);
    if(written.code!==0||written.bytes.toString('ascii').trim()!==oid)throw Error('git_commit_object_mismatch');
    const retained=await readGit(this.executable!,this.root,context.directory,['cat-file','commit',oid],{...this.limits,maxOutputBytes:64*1024},signal,join(context.directory,'objects'));
@@ -115,7 +106,7 @@ export class GitCommitEffects extends GitPublicationEffects{
    if(this.sourceMetadata()!==retainedSource.metadata||this.dotWitness()!==retainedSource.dot)throw Error('git_commit_review_changed');
    for(const [path,expected] of directories)if(this.directorySync(path)!==expected)throw Error('git_repository_changed');
    const material:GitCommitMaterial={witness,metadata,message,review_sha256:source.review_sha256,source_sha256:hash(JSON.stringify(witness)),paths,
-    tree_objects,commit_object:{oid,body,sha256:hash(body)},execution_authorized:false};
+    tree_objects,commit_object:commit,execution_authorized:false};
    const plan:GitCommitPlan=freezeWorkAdmission({protocol:1,plan_id:'git-commit-'+randomUUID(),action:'commit',paths:[...paths],
     repository_sha256:witness.repository_sha256,source_sha256:material.source_sha256,review_sha256:source.review_sha256,metadata_sha256:hash(canonicalJson(metadata)),
     object_format:metadata.object_format,tree_oid:metadata.tree_oid,parent_oid:metadata.parent_oid,target_ref:metadata.target_ref,index_sha256:hash(index),
@@ -241,7 +232,7 @@ export class GitCommitEffects extends GitPublicationEffects{
   if(sourceReview.head.oid!==plan.parent_oid)throw Error('git_commit_ref_conflict');
   const committer=material.metadata.committer;
   const subject=material.message.split(/\r\n|\r|\n/,1)[0]!.replace(/[\x00-\x1f\x7f]/g,' ');
-  const entry=Buffer.from((plan.parent_oid??'0'.repeat(plan.commit_oid.length))+' '+plan.commit_oid+' '+signature(committer)+'\tcommit'+(plan.parent_oid===null?' (initial)':'')+': '+subject+'\n','utf8');
+  const entry=Buffer.from((plan.parent_oid??'0'.repeat(plan.commit_oid.length))+' '+plan.commit_oid+' '+gitCommitSignature(committer)+'\tcommit'+(plan.parent_oid===null?' (initial)':'')+': '+subject+'\n','utf8');
   const paths=[{scope:'git' as const,path:'logs/HEAD'},...(evidence.refs.ref?[{scope:'common' as const,path:'logs/'+evidence.refs.ref}]:[])];
   const files:Array<{fact:GitCommitRefFile;body:Buffer;path:string;pending:string;published:boolean}>=[];
   for(const item of [...paths,{scope:targetScope,path:plan.target_ref}]){

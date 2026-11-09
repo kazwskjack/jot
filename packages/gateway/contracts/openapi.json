@@ -17495,7 +17495,7 @@
             }
           }
         },
-        "description": "Read original owner-scoped execution, producer, reservation and control facts. Typed commit records expose their frozen target and parent while native commit effects remain unavailable during integration."
+        "description": "Read original owner-scoped execution, producer, reservation and control facts. Typed commit records retain the frozen target and parent, validate original object/ref preparation and immutable outcome facts, and expose the applied commit and tree OIDs. Native custody and explicit settlement remain separate from reading history."
       }
     },
     "/v1/projects/{projectId}/git/executions/{executionId}/dispatch": {
@@ -25868,6 +25868,7 @@
       }
     },
     "schemas": {
+      "GitCommitAppliedResult": {"type":"object","additionalProperties":false,"properties":{"execution_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"project_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"intent_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"request_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"action":{"const":"commit"},"execution_authorized":{"const":false},"paths":{"type":"array","minItems":1,"maxItems":100,"uniqueItems":true,"items":{"type":"string","minLength":1,"maxLength":4096,"pattern":"^(?!/|[A-Za-z]:|.*\\\\|(?:.*?/)?\\.\\.(?:/|$)).+$"}},"state":{"const":"applied"},"target_ref":{"type":"string","minLength":1,"maxLength":1024,"pattern":"^(?:HEAD|refs/heads/.+)$"},"expected_old_oid":{"anyOf":[{"type":"string","pattern":"^(?:[a-f0-9]{40}|[a-f0-9]{64})$"},{"type":"null"}]},"commit_oid":{"type":"string","pattern":"^(?:[a-f0-9]{40}|[a-f0-9]{64})$"},"tree_oid":{"type":"string","pattern":"^(?:[a-f0-9]{40}|[a-f0-9]{64})$"}},"required":["execution_id","project_id","intent_id","request_id","action","execution_authorized","paths","state","target_ref","expected_old_oid","commit_oid","tree_oid"]},
       "GitCommitAcceptance": {"type":"object","additionalProperties":false,"properties":{"execution_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"project_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"intent_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"request_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"action":{"const":"commit"},"execution_authorized":{"const":false},"accepted":{"const":true},"target_ref":{"type":"string","minLength":1,"maxLength":1024,"pattern":"^(?:HEAD|refs/heads/.+)$"},"expected_old_oid":{"anyOf":[{"type":"string","pattern":"^(?:[a-f0-9]{40}|[a-f0-9]{64})$"},{"type":"null"}]}},"required":["execution_id","project_id","intent_id","request_id","action","execution_authorized","accepted","target_ref","expected_old_oid"]},
       "GitCommitPendingResult": {"type":"object","additionalProperties":false,"properties":{"execution_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"project_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"intent_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"request_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"action":{"const":"commit"},"execution_authorized":{"const":false},"paths":{"type":"array","minItems":1,"maxItems":100,"uniqueItems":true,"items":{"type":"string","minLength":1,"maxLength":4096,"pattern":"^(?!/|[A-Za-z]:|.*\\\\|(?:.*?/)?\\.\\.(?:/|$)).+$"}},"state":{"enum":["pending","unknown"]},"target_ref":{"type":"string","minLength":1,"maxLength":1024,"pattern":"^(?:HEAD|refs/heads/.+)$"},"expected_old_oid":{"anyOf":[{"type":"string","pattern":"^(?:[a-f0-9]{40}|[a-f0-9]{64})$"},{"type":"null"}]}},"required":["execution_id","project_id","intent_id","request_id","action","execution_authorized","paths","state","target_ref","expected_old_oid"]},
       "GitCommitClosedResult": {"type":"object","additionalProperties":false,"properties":{"execution_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"project_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"intent_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"request_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"action":{"const":"commit"},"execution_authorized":{"const":false},"paths":{"type":"array","minItems":1,"maxItems":100,"uniqueItems":true,"items":{"type":"string","minLength":1,"maxLength":4096,"pattern":"^(?!/|[A-Za-z]:|.*\\\\|(?:.*?/)?\\.\\.(?:/|$)).+$"}},"state":{"enum":["not_dispatched","abandoned_unknown"]},"disposition_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"target_ref":{"type":"string","minLength":1,"maxLength":1024,"pattern":"^(?:HEAD|refs/heads/.+)$"},"expected_old_oid":{"anyOf":[{"type":"string","pattern":"^(?:[a-f0-9]{40}|[a-f0-9]{64})$"},{"type":"null"}]}},"required":["execution_id","project_id","intent_id","request_id","action","execution_authorized","paths","state","disposition_id","target_ref","expected_old_oid"]},
@@ -39286,6 +39287,9 @@
           },
           {
             "$ref": "#/components/schemas/GitCommitClosedResult"
+          },
+          {
+            "$ref": "#/components/schemas/GitCommitAppliedResult"
           }
         ]
       },
@@ -40911,6 +40915,9 @@
               },
               {
                 "$ref": "#/components/schemas/GitCommitClosedResult"
+              },
+              {
+                "$ref": "#/components/schemas/GitCommitAppliedResult"
               }
             ]
           },
@@ -41128,6 +41135,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/GitCommitClosedResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GitCommitAppliedResult"
                   }
                 ]
               },
@@ -41396,6 +41406,9 @@
               },
               {
                 "$ref": "#/components/schemas/GitCommitClosedResult"
+              },
+              {
+                "$ref": "#/components/schemas/GitCommitAppliedResult"
               }
             ]
           },
@@ -41697,6 +41710,9 @@
                           },
                           {
                             "$ref": "#/components/schemas/GitCommitClosedResult"
+                          },
+                          {
+                            "$ref": "#/components/schemas/GitCommitAppliedResult"
                           }
                         ]
                       },
@@ -41902,6 +41918,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/GitCommitClosedResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GitCommitAppliedResult"
                   }
                 ]
               },
@@ -42131,6 +42150,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/GitCommitClosedResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GitCommitAppliedResult"
                   }
                 ]
               },
@@ -42432,6 +42454,9 @@
                               },
                               {
                                 "$ref": "#/components/schemas/GitCommitClosedResult"
+                              },
+                              {
+                                "$ref": "#/components/schemas/GitCommitAppliedResult"
                               }
                             ]
                           },
@@ -42741,6 +42766,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/GitCommitClosedResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GitCommitAppliedResult"
                   }
                 ]
               },
@@ -43042,6 +43070,9 @@
                               },
                               {
                                 "$ref": "#/components/schemas/GitCommitClosedResult"
+                              },
+                              {
+                                "$ref": "#/components/schemas/GitCommitAppliedResult"
                               }
                             ]
                           },
@@ -43363,6 +43394,9 @@
                         },
                         {
                           "$ref": "#/components/schemas/GitCommitClosedResult"
+                        },
+                        {
+                          "$ref": "#/components/schemas/GitCommitAppliedResult"
                         }
                       ]
                     },
@@ -43664,6 +43698,9 @@
                                     },
                                     {
                                       "$ref": "#/components/schemas/GitCommitClosedResult"
+                                    },
+                                    {
+                                      "$ref": "#/components/schemas/GitCommitAppliedResult"
                                     }
                                   ]
                                 },

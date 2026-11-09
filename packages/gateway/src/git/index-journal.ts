@@ -1,3 +1,4 @@
+import {readCommitRecordedResult} from './commit-journal.ts';
 import {readCommitExecutionSource} from './commit-records.ts';
 import {createHash} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
@@ -58,15 +59,16 @@ export function readIndexExecutionResult(db:DatabaseSync,owner:string,project:st
 /** Shared original result validation on an already selected immutable record.
  * No current-owner capability is created by inspecting historical drain facts. */
 export function readIndexRecordedResult(db:DatabaseSync,row:Row):ExecutionResult{
+  if(row.action==='commit'){
+   const result=readCommitRecordedResult(db,row),disposition=readIndexDisposition(db,row);
+   if(disposition&&result.state==='applied')throw Error('git_execution_outcome_corrupt');
+   return disposition?indexClosedResult(db,row,disposition):result;
+  }
   const evidence=readIndexDispatch(db,row),outcome=db.prepare('SELECT * FROM wb_git_index_outcomes WHERE execution_id=?').get(row.execution_id) as Outcome|undefined,disposition=readIndexDisposition(db,row);
   if(outcome&&disposition)throw Error('git_execution_outcome_corrupt');
   if(outcome){const result=JSON.parse(outcome.receipt_json);if(!evidence||digest(result)!==outcome.receipt_sha256||JSON.stringify(result)!==JSON.stringify(indexAppliedResult(db,row,evidence)))throw Error('git_execution_outcome_corrupt');return result as ReturnType<typeof indexAppliedResult>;}
   if(disposition)return indexClosedResult(db,row,disposition);
   const review=readRecordedGitMutationIntent(db,row.owner_id,row.project_id,row.intent_id);
-  if(row.action==='commit'){
-   const {metadata}=readCommitExecutionSource(db,row);
-   return{execution_id:row.execution_id,project_id:row.project_id,intent_id:row.intent_id,request_id:row.request_id,action:'commit',paths:review.paths,target_ref:metadata.target_ref,expected_old_oid:metadata.parent_oid,state:'pending',execution_authorized:false};
-  }
   return{execution_id:row.execution_id,project_id:row.project_id,intent_id:row.intent_id,request_id:row.request_id,action:row.action,paths:review.paths,state:evidence||readIndexPreparation(db,row)||row.protocol===1?'unknown' as const:'pending' as const,execution_authorized:false as const};
  }
 

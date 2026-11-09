@@ -142,10 +142,10 @@ receipts recheck current project ownership before returning the original bytes.
 A never-started commit admission can be explicitly ended through the existing
 versioned control and not-dispatched receipt transaction. That path requires no
 producer, native preparation, dispatch, outcome or workspace reservation. Original
-index evidence cannot be interpreted as a commit receipt. Native commit preparation,
-writing and unknown-effect settlement remain open P08 work. Pending commit dispatch
-returns unavailable before native transport or workspace reservation. The browser
-shows retained commit admissions and their pending/closed state.
+index evidence cannot be interpreted as a commit receipt. Native commit preparation, writing and explicit unknown-effect settlement now use
+the original execution service as described below. Public HTTP/browser commit
+dispatch remains gated. The browser shows retained commit admissions and their
+pending, closed or typed applied state.
 
 This increment was developed by source inspection only. No test, build, migration,
 native command, UI acceptance or deployment was executed.
@@ -167,9 +167,9 @@ cleanup runs in finally, and current project ownership and identity policy are
 checked before and after preparation in the host service.
 
 The material is retained in the kernel. Host callers receive a frozen one-attempt
-plan, and persisted JSON cannot reconstruct writable plan identity. The Worker
-does not consume the new commit path yet. Original repository objects, index and refs are untouched by this
-preparation path, and commit dispatch remains unavailable. This source increment
+plan, and persisted JSON cannot reconstruct writable plan identity. The original native Host and execution service consume the plan without exporting
+its private buffers. Original repository objects, index and refs are untouched by this
+preparation path. Public HTTP/browser commit dispatch remains gated. This source increment
 has no runtime, test, build or native-command execution evidence.
 
 
@@ -198,8 +198,8 @@ unknown links and replaced roots are retained for explicit recovery.
 
 A host-only publication continuation runs inside those locks. The configured
 kernel now supplies ref CAS, reflog facts and read-only observation as described
-below. Original execution-service journal consumers and Worker/native recovery
-still require integration. Commit dispatch remains unavailable. No runtime command,
+below. Original execution-service journal consumers and native recovery now use this
+proof. Public HTTP/browser commit dispatch remains gated. No runtime command,
 test, build, migration or production operation was executed for this increment.
 
 
@@ -233,7 +233,48 @@ the actual commit object and full reviewed staged-tree/blob evidence to match.
 Partial states remain unknown. This observation grants no producer/lease authority
 and reconstructs no writable plan.
 
-Original execution-service journal storage, typed applied receipts, Worker/native
-custody consumers and explicit settlement still require integration. Commit dispatch
-remains unavailable. This increment has source and Git-delivery evidence only.
+The original execution-service journal, typed applied receipts, native custody
+consumers and explicit settlement are connected as described below. Public
+HTTP/browser commit dispatch remains gated. This increment has source and Git-delivery evidence only.
 Tests, typechecks, builds, native commands, migrations and deployment were not run.
+
+
+## Original execution and native consumers
+
+Commit effects now run from the original `performReserved` path in operation kind
+`git_index`, protocol 5, physical database and common-directory Worker namespace.
+The original reservation/family source, native admission, root association, producer
+start/finish and lease heartbeat remain in force. A commit requires an existing
+immutable admission and live host-private native custody before producer start.
+Plain execute/reconcile/abandon entry points cannot grant commit write/recovery rights.
+
+Object preparation and dispatch use the existing original journal tables. The
+append-only `wb_git_index_ref_preparations` phase table references the original
+execution ID and records ref/reflog preparation before publication. It has original
+immutable, no-disposed, no-applied and typed-commit-only guards. It provides no new
+operation registry or scheduling authority. Native Host startup still refuses any
+schema or application-row installation during its readiness transaction.
+
+Readers bind every commit phase to the original producer lease, exact immutable
+approved review/version, metadata digest and deterministically derived commit
+bytes. Applied results expose the original target/parent and exact commit/tree OIDs.
+Original stage/unstage receipt bytes and state-hash encoding remain intact. Commit
+histories without the optional ref phase retain their previous state-hash encoding.
+The original contracts include the commit applied branch in status/history/control
+results, and the BFF retains private/no-store for Git responses.
+
+The original native control path observes ref/log/object facts with fresh custody,
+records only the original outcome, cleans the ref phase before object locks, and
+settles the original reservation after the native Host's final check and drain.
+It never creates another commit or a replacement producer finish. Transfer/revocation
+and changed-root handling remain constrained by the original owner/native fences.
+The remaining P08 work includes the complete recovery-scope audit and public commit
+review/admission/dispatch UI with same-request recovery.
+
+Native operator repository bindings accept `git_directory`, `common_directory` and
+exact `commit_identity` fields under the same policy rules as Gateway. Optional
+`gitExecutable` selects the same absolute Git program. Both processes must use
+matching bindings and identity policy for the original reviewed witness.
+
+This is development-only source delivery. No test, typecheck, build, SDK/native
+command, migration, UI acceptance or deployment was run.
