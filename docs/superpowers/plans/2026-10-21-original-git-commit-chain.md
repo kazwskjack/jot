@@ -1110,3 +1110,37 @@ source-only direction, no tests, typechecks, builds, product/native operations,
 UI runtime acceptance, maintenance, migrations or deployment were executed.
 
 Batch output behavior was read from the [Git cat-file documentation](https://git-scm.com/docs/git-cat-file).
+
+## Registered worktree branch-use facts, 2026-11-09
+
+The original branch inventory now reads registered common and linked worktree
+metadata and attaches optional worktree_uses facts to local branches. Facts name
+only current/other and HEAD/rebase/bisect/update_refs. Other checkout paths and
+registration identifiers stay private. The original UI displays each reason.
+HEAD resolution follows bounded symbolic references, including worktree-scoped
+refs. Detached rebase and bisect branches and rebase update-ref records are read
+from their original metadata. Missing/empty linked registration files are skipped.
+A linked current worktree is identified by physical directory identity. Main
+worktree bare configuration is read with fixed no-includes config arguments.
+
+Metadata file reads retain original no-follow, single-link, bounded descriptor
+checks. The new reads have an aggregate 8 MiB bound, worktree/reference counts
+are limited, operation-state directories are physically checked, and the original
+snapshot and full source metadata are checked again before inventory returns.
+Malformed operation records fail the read instead of yielding an empty use list.
+The optional contract field keeps prior payloads readable. Existing branch facts
+and execution_authorized=false remain in the original contract.
+
+This is inventory source development. Checkout review must bind these facts to
+its own fresh witness and recheck them through native publication. Checkout's
+complete worktree/index/dirty-content projection, tracking/detached behavior,
+writer, recovery and UI dispatch remain open. Safe deletion, reference backend,
+initialization platform scope and all remaining P09 features are retained.
+No tests, typechecks, builds, native product operations, UI runtime acceptance,
+maintenance, migrations or deployment were performed.
+
+Occupancy semantics were read from the official Git sources for
+[branch ownership](https://raw.githubusercontent.com/git/git/master/branch.c),
+[worktree registration](https://raw.githubusercontent.com/git/git/master/worktree.c),
+[operation state](https://raw.githubusercontent.com/git/git/master/wt-status.c) and
+[update-ref records](https://raw.githubusercontent.com/git/git/master/sequencer.c).

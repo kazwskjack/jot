@@ -538,6 +538,103 @@ export class GitRepositoryInspection{
   if(after.repository!==result.repository_sha256||after.metadata!==result.source_metadata_sha256)throw Error('git_snapshot_changed');
   signal?.throwIfAborted();return result;
  }
+ /** Read registered metadata without opening another worktree's checkout path. */
+ protected async branchWorktreeUses(context:ReadContext,branches:GitBranchInventory['branches'],oidPattern:RegExp,signal?:AbortSignal){
+  type Use=NonNullable<GitBranchInventory['branches'][number]['worktree_uses']>[number];
+  const uses=new Map<string,Use[]>(),listed=new Set(branches.filter(branch=>branch.kind==='local').map(branch=>branch.ref));let total=0;
+  const optional=async(path:string,max=4096)=>{
+   signal?.throwIfAborted();try{const body=await this.bytes(path,max);total+=body.length;if(total>8*1024*1024)throw Error('git_metadata_limit');return body;}
+   catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return null;throw error;}
+  };
+  const present=async(path:string,directory=false)=>{
+   signal?.throwIfAborted();try{
+    const fact=await lstat(path);
+    if(fact.isSymbolicLink()||(directory?!fact.isDirectory():!fact.isFile()||fact.nlink!==1n))throw Error('git_branches_unavailable');
+    if(directory)await this.directory(path);return true;
+   }catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return false;throw error;}
+  };
+  const symbolicTarget=(value:string)=>{
+   const match=/^ref:\s*(refs\/[^\s]+)\s*$/.exec(value);
+   if(!match||!validGitReference(match[1]))throw Error('git_branches_unavailable');return match[1]!;
+  };
+  const resolveHead=async(value:string,directory:string)=>{
+   if(oidPattern.test(value.trim().toLowerCase()))return null;
+   let ref=symbolicTarget(value);const seen=new Set<string>();
+   for(let depth=0;depth<5;depth++){
+    if(seen.has(ref))throw Error('git_branches_unavailable');seen.add(ref);
+    const root=/^refs\/(?:bisect|worktree|rewritten)\//.test(ref)?directory:this.commonDirectory;
+    const body=await optional(join(root,ref));
+    if(body===null)return ref;
+    const raw=text(body);
+    if(oidPattern.test(raw.trim().toLowerCase()))return ref;
+    ref=symbolicTarget(raw);
+   }
+   throw Error('git_branches_unavailable');
+  };
+  const record=(ref:string,worktree:Use['worktree'],reason:Use['reason'])=>{
+   if(!validGitReference(ref))throw Error('git_branches_unavailable');
+   if(!listed.has(ref))return;
+   const list=uses.get(ref)??[];
+   if(!list.some(item=>item.worktree===worktree&&item.reason===reason))list.push({worktree,reason});
+   uses.set(ref,list);
+  };
+  const branchName=(body:Buffer|null)=>{
+   if(body===null)return null;
+   const value=text(body).replace(/\n+$/,'');
+   if(!value||value==='detached HEAD'||oidPattern.test(value.toLowerCase()))return null;
+   return value.startsWith('refs/heads/')?value:'refs/heads/'+value;
+  };
+  const current=await this.directory(this.gitDirectory);
+  const collect=async(directory:string)=>{
+   const identity=await this.directory(directory),worktree:Use['worktree']=identity===current?'current':'other';
+   const head=await optional(join(directory,'HEAD'));
+   if(head===null)throw Error('git_branches_unavailable');
+   const ref=await resolveHead(text(head),directory);if(ref)record(ref,worktree,'head');
+   let rebase:string|null=null;
+   if(await present(join(directory,'rebase-apply'),true)){
+    if(!await present(join(directory,'rebase-apply','applying')))rebase='rebase-apply';
+   }else if(await present(join(directory,'rebase-merge'),true))rebase='rebase-merge';
+   if(rebase){const branch=branchName(await optional(join(directory,rebase,'head-name')));if(branch)record(branch,worktree,'rebase');}
+   if(await present(join(directory,'BISECT_LOG'))){const branch=branchName(await optional(join(directory,'BISECT_START')));if(branch)record(branch,worktree,'bisect');}
+   if(await present(join(directory,'rebase-merge'),true)){
+    const body=await optional(join(directory,'rebase-merge','update-refs'),1024*1024);
+    if(body?.length){
+     const rows=text(body).replace(/\n$/,'').split('\n').map(row=>row.replace(/\r$/,''));
+     if(rows.length%3||rows.length/3>this.limits.maxEntries)throw Error('git_branches_unavailable');
+     for(let index=0;index<rows.length;index+=3){
+      if(!oidPattern.test(rows[index+1]!.toLowerCase())||!oidPattern.test(rows[index+2]!.toLowerCase()))throw Error('git_branches_unavailable');
+      record(rows[index]!,worktree,'update_refs');
+     }
+    }
+   }
+   if(await this.directory(directory)!==identity)throw Error('git_snapshot_changed');
+  };
+  const common=await this.directory(this.commonDirectory);
+  const configuredBare=async(path:string)=>{
+   if(await optional(path,1024*1024)===null)return undefined;
+   const result=await this.run(context,['config','--file',path,'--no-includes','--type=bool','--get','core.bare'],signal,true);
+   if(result.code===1)return undefined;
+   const value=text(result.bytes).trim();if(value!=='true'&&value!=='false')throw Error('git_configuration_invalid');return value==='true';
+  };
+  const commonBare=await configuredBare(join(this.commonDirectory,'config'));
+  const currentBare=context.worktreeConfigEnabled?await configuredBare(join(this.gitDirectory,'config.worktree')):undefined;
+  // Git also checks the main worktree's own bare flag when reading from a linked worktree.
+  const mainBare=common!==current?await configuredBare(join(this.commonDirectory,'config.worktree')):undefined;
+  if(!(currentBare??commonBare??false)&&mainBare!==true)await collect(this.commonDirectory);
+  const registry=join(this.commonDirectory,'worktrees');
+  if(await present(registry,true)){
+   let count=0;
+   for await(const entry of await opendir(registry)){
+    signal?.throwIfAborted();if(++count>this.limits.maxEntries)throw Error('git_entry_limit');
+    if(!entry.isDirectory())continue;
+    const directory=join(registry,entry.name);await this.directory(directory);
+    const registered=await optional(join(directory,'gitdir'));
+    if(registered===null||registered.length===0)continue;
+    await collect(directory);
+   }
+  }
+  for(const branch of branches)if(branch.kind==='local')branch.worktree_uses=(uses.get(branch.ref)??[]).sort((a,b)=>(a.worktree+'-'+a.reason).localeCompare(b.worktree+'-'+b.reason));
+ }
  async branches(snapshotId:string,signal?:AbortSignal):Promise<Omit<GitBranchInventory,'project_id'>>{
   if(typeof snapshotId!=='string'||!/^[a-f0-9]{64}$/.test(snapshotId))throw Error('git_branches_invalid');
   const context=await this.context(signal);
@@ -584,6 +681,7 @@ export class GitRepositoryInspection{
      branch.checkout_oid=fields[0]!;
     }
    }
+   await this.branchWorktreeUses(context,branches,oidPattern,signal);
    if((await this.inspectContext(context,signal)).snapshot_id!==snapshotId)throw Error('git_snapshot_changed');
    if((await this.anchors(signal)).metadata!==context.metadata)throw Error('git_snapshot_changed');
    signal?.throwIfAborted();

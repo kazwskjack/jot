@@ -23,6 +23,7 @@ export default function GitBranches({project,snapshotId,locked,onRefresh,onBusy,
     <code>{branch.ref}</code><code>{branch.oid}</code>
     {branch.symbolic_target&&<span>指向 <code>{branch.symbolic_target}</code></span>}
     {branch.object_type!=='commit'&&<span>对象类型 {branch.object_type}</span>}
+    {branch.worktree_uses?.map(use=><span key={use.worktree+'-'+use.reason}>{use.worktree==='current'?'当前工作区':'其他工作区'}占用 · {{head:'HEAD',rebase:'变基',bisect:'二分查找',update_refs:'待更新引用'}[use.reason]}</span>)}
     {branch.checkout_oid===null&&<span>目标无法解析为提交</span>}
     {branch.checkout_oid&&branch.checkout_oid!==branch.oid&&<span>切换目标提交 <code>{branch.checkout_oid}</code></span>}
    </li>)}</ul>}</>}

@@ -39407,6 +39407,35 @@
                     "null"
                   ],
                   "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$"
+                },
+                "worktree_uses": {
+                  "type": "array",
+                  "maxItems": 8,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "worktree": {
+                        "enum": [
+                          "current",
+                          "other"
+                        ]
+                      },
+                      "reason": {
+                        "enum": [
+                          "head",
+                          "rebase",
+                          "bisect",
+                          "update_refs"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "worktree",
+                      "reason"
+                    ],
+                    "additionalProperties": false
+                  }
                 }
               },
               "required": [
