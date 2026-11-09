@@ -4,7 +4,7 @@ import {initializationInternalIgnore,initializationSnapshotId,normalizeGitInitia
 import type {GitInitializationWitness,GitInitializationFile,GitReinitializationLayout} from '../../contracts/types.ts';
 import {planReinitializationConfiguration} from './reinitialization-configuration.ts';
 import {planCreateBranchConfiguration} from './branch-configuration.ts';
-import {validGitReference} from './references.ts';
+import {gitReferenceScope,validGitReference} from './references.ts';
 import type {GitCheckoutReferenceChain,GitCheckoutPhysical,GitCheckoutMetadataFile,GitCheckoutMetadataLayout,GitCheckoutLogAfter,GitCheckoutReviewWitness,GitCheckoutReferenceSource,GitCheckoutBefore,GitCheckoutBeforeState,GitCheckoutPreview,GitBranchInventory,GitCreateBranchWitness,GitBranchLogFile,GitBranchLogWitness} from '../../contracts/types.ts';
 import {createHash} from 'node:crypto';
 import {canonicalJson} from '../db/canonical-json.ts';
@@ -135,6 +135,8 @@ export class GitRepositoryInspection{
     }
    }
    context.worktreeConfigEnabled=worktreeConfig;
+   // Without per-worktree config, common core.bare applies only to the main worktree.
+   if(branchLogs&&!worktreeConfig&&!same(this.gitDirectory,this.commonDirectory))branchSources.delete('core.bare');
    if(branchLogs){
     const boolean=async(key:string,fallback:boolean)=>{
      const path=branchSources.get(key);if(!path)return fallback;
@@ -162,8 +164,19 @@ export class GitRepositoryInspection{
    await copy(join(this.gitDirectory,'index'),join(directory,'index'),true);
    await copy(join(this.commonDirectory,'packed-refs'),join(directory,'packed-refs'),true);
    for(const name of ['exclude','attributes','sparse-checkout'])await copy(join(name==='sparse-checkout'?this.gitDirectory:this.commonDirectory,'info',name),join(directory,'info',name),true);
-   for(const root of [...new Set([this.commonDirectory,this.gitDirectory])]){
-    const queue=[join(root,'refs')];while(queue.length){const folder=queue.pop()!;let entries;try{entries=await readdir(folder,{withFileTypes:true});}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')continue;throw error;}for(const entry of entries){const path=join(folder,entry.name);if(entry.isDirectory())queue.push(path);else await copy(path,join(directory,relative(root,path)));}}
+   const roots=same(this.commonDirectory,this.gitDirectory)?[this.gitDirectory]:[this.commonDirectory,this.gitDirectory];
+   for(const root of roots){
+    const queue=[join(root,'refs')];
+    while(queue.length){
+     const folder=queue.pop()!;let entries;
+     try{entries=await readdir(folder,{withFileTypes:true});}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')continue;throw error;}
+     for(const entry of entries){
+      const path=join(folder,entry.name),ref=relative(root,path).split(sep).join('/');
+      const scope=gitReferenceScope(ref+(entry.isDirectory()?'/':'')),source=scope==='git'?this.gitDirectory:this.commonDirectory;
+      if(!same(root,source))continue;
+      if(entry.isDirectory())queue.push(path);else await copy(path,join(directory,ref));
+     }
+    }
     for(const entry of await readdir(root))if(/^sharedindex\.[a-f0-9]+$/.test(entry))await copy(join(root,entry),join(directory,entry));
    }
    if((await this.anchors(signal)).metadata!==before.metadata)throw Error('git_snapshot_changed');return context;
@@ -628,7 +641,7 @@ export class GitRepositoryInspection{
    let ref=symbolicTarget(value);const seen=new Set<string>();
    for(let depth=0;depth<5;depth++){
     if(seen.has(ref))throw Error('git_branches_unavailable');seen.add(ref);
-    const root=/^refs\/(?:bisect|worktree|rewritten)\//.test(ref)?directory:this.commonDirectory;
+    const root=gitReferenceScope(ref)==='git'?directory:this.commonDirectory;
     const body=await optional(join(root,ref));
     if(body===null)return ref;
     const raw=text(body);
@@ -881,13 +894,13 @@ export class GitRepositoryInspection{
   const trace=async(start:string,expected:string|null)=>{
    const rows:Array<{path:string;symbolic_target:string|null}>=[],seen=new Set<string>();let path=start;
    for(let depth=0;depth<8;depth++){
-    if(path!=='HEAD'&&!/^refs\/(?:heads|remotes)\//.test(path))return null;
+    if(path!=='HEAD'&&!validGitReference(path))return null;
     if(seen.has(path))throw Error('git_checkout_evidence_invalid');seen.add(path);
     const result=await readGit(this.executable!,this.root,context.directory,['symbolic-ref','--quiet','--no-recurse',path],this.limits,signal,join(this.commonDirectory,'objects'));
     if(result.code===129)return null;
     if(result.code!==0&&result.code!==1)throw Error('git_read_unavailable');
     const next:string|null=result.code===1?null:text(result.bytes).trim();
-    if(next!==null&&!validGitReference(next))throw Error('git_checkout_evidence_invalid');
+    if(next!==null&&!validGitReference(next))return null;
     rows.push({path,symbolic_target:next});
     if(next===null){
      const resolved=await this.run(context,['rev-parse','--verify','--quiet',start],signal,true);
@@ -904,7 +917,7 @@ export class GitRepositoryInspection{
   const capture=async(rows:NonNullable<typeof headRows>,oid:string|null):Promise<GitCheckoutReferenceChain>=>{
    const nodes:GitCheckoutReferenceChain['nodes']=[];
    for(const row of rows){
-    const scope=row.path==='HEAD'?'git':'common';
+    const scope=gitReferenceScope(row.path);
     const fact=await file(scope,row.path,32*1024*1024);
     if(row.symbolic_target!==null&&fact.sha256===null)throw Error('git_snapshot_changed');
     nodes.push({scope,path:row.path,file:fact,symbolic_target:row.symbolic_target});

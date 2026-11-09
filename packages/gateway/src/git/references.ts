@@ -5,3 +5,8 @@ export function validGitReference(value:unknown):value is string{
   &&!value.includes('..')&&!value.includes('@{')
   &&value.split('/').every(part=>!!part&&!part.startsWith('.')&&!part.endsWith('.')&&!part.endsWith('.lock'));
 }
+
+/** Git's per-worktree ref exceptions share the same rule in copies and source proofs. */
+export function gitReferenceScope(ref:string):'git'|'common'{
+ return ref==='HEAD'||/^refs\/(?:bisect|worktree|rewritten)\//.test(ref)?'git':'common';
+}

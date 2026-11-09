@@ -41702,7 +41702,7 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 1024,
-                  "pattern": "^(?:HEAD$|refs/(?:heads|remotes)/)"
+                  "pattern": "^(?:HEAD$|refs/)"
                 },
                 "file": {
                   "type": "object",
@@ -41743,7 +41743,7 @@
                   ],
                   "minLength": 1,
                   "maxLength": 1024,
-                  "pattern": "^refs/(?:heads|remotes)/"
+                  "pattern": "^refs/"
                 }
               },
               "required": [

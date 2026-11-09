@@ -1,7 +1,7 @@
 import {checkoutMetadataPublication,checkoutLogMetadata,checkoutReferencePlan} from './checkout-metadata.ts';
 import {createHash} from 'node:crypto';
 import {canonicalJson} from '../db/canonical-json.ts';
-import {validGitReference} from './references.ts';
+import {gitReferenceScope,validGitReference} from './references.ts';
 import type {GitCheckoutReviewPrepare,GitCheckoutReviewWitness} from '../../contracts/types.ts';
 import type {GitBranchIntentRecord} from './branch-records.ts';
 
@@ -50,8 +50,8 @@ export function readGitCheckoutIntentSource(row:GitBranchIntentRecord,validate:(
      const seen=new Set<string>();let expected=start;
      if(chain.oid!==expectedOid)throw Error();
      for(const [index,node] of chain.nodes.entries()){
-      if(node.path!==expected||seen.has(node.path)||node.scope!==(node.path==='HEAD'?'git':'common')
-       ||node.path!=='HEAD'&&(!validGitReference(node.path)||!/^refs\/(?:heads|remotes)\//.test(node.path)))throw Error();
+      if(node.path!==expected||seen.has(node.path)||node.scope!==gitReferenceScope(node.path)
+       ||node.path!=='HEAD'&&!validGitReference(node.path))throw Error();
       seen.add(node.path);
       if(index===chain.nodes.length-1){if(node.symbolic_target!==null)throw Error();}
       else{if(!node.symbolic_target||node.file.sha256===null)throw Error();expected=node.symbolic_target;}
