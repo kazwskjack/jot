@@ -31,8 +31,8 @@ export function readIndexExecutionRow(db:DatabaseSync,owner:string,project:strin
 export function readIndexExecutionRecord(db:DatabaseSync,owner:string,project:string,id:string):Row{
  const row=db.prepare('SELECT * FROM wb_git_index_executions WHERE execution_id=? AND owner_id=? AND project_id=?').get(id,owner,project) as Row|undefined;
  if(!row)throw Error('git_execution_not_found');
- if(![1,2,3,4,5,6,7].includes(row.protocol)||!['stage','unstage','commit','create-branch','init'].includes(row.action)
-  ||(row.action==='commit')!==(row.protocol===5)||(row.action==='create-branch')!==(row.protocol===6)||(row.action==='init')!==(row.protocol===7)
+ if(![1,2,3,4,5,6,7,8].includes(row.protocol)||!['stage','unstage','commit','create-branch','init'].includes(row.action)
+  ||(row.action==='commit')!==(row.protocol===5)||(row.action==='create-branch')!==(row.protocol===6)||(row.action==='init')!==[7,8].includes(row.protocol)
   ||row.protocol>=3&&(typeof row.binding_sha256!=='string'||!SHA.test(row.binding_sha256))
   ||row.protocol<3&&row.binding_sha256!==null)throw Error('git_execution_evidence_corrupt');
  if(row.action==='commit')readCommitExecutionSource(db,row);

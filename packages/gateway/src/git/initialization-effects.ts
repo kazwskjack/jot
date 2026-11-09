@@ -1,3 +1,5 @@
+import {gitReinitializationPreparation,gitReinitializationRefPreparation} from './reinitialization-evidence.ts';
+import {cleanupReinitializationAllocation} from './reinitialization-allocation.ts';
 import {createHash,randomUUID} from 'node:crypto';
 import {constants,lstatSync,mkdirSync,chmodSync,linkSync,unlinkSync,renameSync,rmdirSync,readdirSync,type BigIntStats} from 'node:fs';
 import {open} from 'node:fs/promises';
@@ -280,6 +282,37 @@ export class GitInitializationEffects extends GitBranchEffects{
    if(this.directorySync(this.gitDirectory)!==receipt.directories[0]!.identity)throw Error('git_repository_changed');
   };
   check();this.bindInitializedRepository(anchors.root,receipt.directories[0]!.identity,anchors.executable,anchors.program);check();
+ }
+
+ /** Original pre-dispatch recovery removes recorded allocations only. No
+  * canonical file or lock can have been published in these two phases. */
+ async cleanupReinitializationPreparation(raw:unknown,rawReference:unknown|undefined,guard:()=>void,signal:AbortSignal|undefined,atomic:(remove:()=>void)=>void){
+  const preparation=gitReinitializationPreparation(raw);
+  const reference=rawReference===undefined?undefined:gitReinitializationRefPreparation(rawReference);
+  if(reference&&!equal(reference.preparation,preparation))throw Error('git_execution_evidence_corrupt');
+  if(typeof guard!=='function'||guard.constructor.name==='AsyncFunction'
+   ||typeof atomic!=='function'||atomic.constructor.name==='AsyncFunction')throw Error('git_execution_authority_missing');
+  signal?.throwIfAborted();synchronous(guard);
+  const {witness}=preparation.plan,{existing}=witness,anchors=await this.anchors(signal);
+  if(anchors.repository!==witness.repository_sha256)throw Error('git_repository_changed');
+  const internal=join(this.root,'.pilotdeck'),layout=existing.layout!;
+  const check=()=>{
+   signal?.throwIfAborted();synchronous(guard);
+   for(const [path,fact] of [[this.root,layout.root],[this.gitDirectory,layout.git],[this.commonDirectory,layout.common]] as const){
+    const stat=lstatSync(path,{bigint:true});
+    if(this.directorySync(path)!==fact.identity||identity(stat)!==fact.identity||Number(stat.mode&0o7777n)!==fact.mode
+     ||String(stat.uid)!==fact.uid||String(stat.gid)!==fact.gid)throw Error('git_repository_changed');
+   }
+   if(this.initializationDirectory(internal)!==witness.internal_directory_identity)throw Error('git_repository_changed');
+   if(existing.dot_file!==null&&!equal(this.initializationFile(join(this.root,'.git')).fact,existing.dot_file))throw Error('git_repository_changed');
+  };
+  const remove=(parent:string,allocation:typeof preparation.allocation)=>{
+   check();cleanupReinitializationAllocation(parent,allocation,operation=>this.cleanupAtomically(()=>{check();operation();check();},atomic));check();
+  };
+  check();
+  if(reference)remove(witness.internal_directory_identity===null?this.root:internal,reference.allocation);
+  remove(this.commonDirectory,preparation.allocation);
+  check();
  }
 
  /** Caller retains original native drain and lease authority. Only the durably

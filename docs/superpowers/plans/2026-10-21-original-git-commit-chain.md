@@ -742,3 +742,40 @@ coverage and the remaining P09 features stay in scope. M15.14 remains in progres
 Per the user's development-only direction, no tests, typechecks, builds, native or
 product operations, maintenance commands, migrations, UI runtime acceptance or
 deployment were executed for this increment. Historical test results are retained.
+
+## Reinitialization durable pre-dispatch recovery, 2026-11-09
+
+Protocol-8 execution reads now require the original approved witness-2 source with
+complete configuration/layout proof and exact source/repository/review hashes.
+Fresh-init protocol-7 source pairing remains strict. The original journal decodes a
+protocol-2 reinitialization plan and common-volume preparation, retaining the exact
+owned allocation before child/process work. The original ref-preparation slot
+decodes the second internal-ignore-volume allocation, exact first preparation,
+selected approved configuration hash and empty common-volume config-lock facts.
+The second allocation is needed when ignore changes. Both preparations retain the
+original producer lease identity. Decoders reject wrong scopes, parents, aliases,
+volumes, malformed facts and mismatched approved candidates.
+
+Original row, producer and settlement readers recognize protocol 8. History stays
+pending before preparation and unknown after preparation, and validates a second
+record even before dispatch. Its contents join the original control-state hash.
+Original resolution uses its existing reservation, sealed family, actual native
+custody and fresh lease through native final checks/drain, then original settlement.
+Pre-dispatch reinitialization cleanup validates physical binding and recorded
+root/Git/common/internal identities and modes/owners, then removes only the recorded
+internal-volume and common-volume namespaces through the original atomic authority
+and bounded owned-allocation cleaner. Canonical repository files and locks are
+outside this cleanup phase. No synthetic original producer finish is introduced.
+Missing producer/first-preparation facts cannot legitimize a second record.
+
+The original fresh-init file-fact validation is shared without changing its rules.
+Witness-2 execution admission and the native initialization plan remain gated.
+Protocol-8 dispatch/outcome publication is still unavailable, and an unexpected
+protocol-8 dispatch is rejected. The next connection is the original one-use native
+plan, common-volume private probe/configuration preparation and second-allocation
+persistence, followed by typed dispatch, canonical locks/publication and observed
+outcome recovery. Permissions/platform and linked/external/damaged cases, checkout,
+safe deletion, reference backend coverage and all remaining P09 scope stay required.
+M15.14 remains in progress. Per the user's development-only direction, no tests,
+typechecks, builds, product/native operations, maintenance commands, migrations,
+UI runtime acceptance or deployment were executed.

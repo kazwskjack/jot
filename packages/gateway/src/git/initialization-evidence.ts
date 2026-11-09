@@ -27,7 +27,7 @@ const shape=(value:any,keys:string[])=>value&&typeof value==='object'&&!Array.is
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 const mode=(value:unknown,maximum=0o777)=>typeof value==='number'&&Number.isSafeInteger(value)&&value>=0&&value<=maximum;
 const identity=(value:unknown)=>typeof value==='string'&&IDENTITY.test(value);
-function file(value:GitInitializationFile){
+export function isGitInitializationFile(value:GitInitializationFile){
  return shape(value,['identity','sha256','size','mode'])&&identity(value.identity)&&typeof value.sha256==='string'&&SHA.test(value.sha256)
   &&Number.isSafeInteger(value.size)&&value.size>=0&&value.size<=1024*1024&&mode(value.mode);
 }
@@ -52,8 +52,8 @@ export function gitInitializationPreparation(value:unknown):GitInitializationPre
   const plan=gitInitializationPlan(preparation.plan),{allocation,root_lock:root,ignore_lock:ignore}=preparation;
   if(!shape(allocation,['name','identity'])||typeof allocation.name!=='string'
    ||!/^\.git\.jot-init-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.pending$/.test(allocation.name)
-   ||!identity(allocation.identity)||!file(root)||root.sha256!==hash('')||root.size!==0)throw Error();
-  if(plan.witness.ignore_after.changed?(ignore===null||!file(ignore)||ignore.sha256!==hash('')||ignore.size!==0||ignore.identity===root.identity):ignore!==null)throw Error();
+   ||!identity(allocation.identity)||!isGitInitializationFile(root)||root.sha256!==hash('')||root.size!==0)throw Error();
+  if(plan.witness.ignore_after.changed?(ignore===null||!isGitInitializationFile(ignore)||ignore.sha256!==hash('')||ignore.size!==0||ignore.identity===root.identity):ignore!==null)throw Error();
   return structuredClone(preparation);
  }catch{throw Error('git_initialization_preparation_invalid');}
 }
@@ -71,12 +71,12 @@ export function gitInitializationEvidence(value:unknown):GitInitializationEviden
   for(const [index,item] of evidence.files.entries()){
    if(!shape(item,['path','identity','sha256','size','mode'])||item.path!==['config','HEAD'][index])throw Error();
    const {path,...fact}=item;
-   if(!file(fact)||identities.has(fact.identity)||fact.size<1)throw Error();
+   if(!isGitInitializationFile(fact)||identities.has(fact.identity)||fact.size<1)throw Error();
    identities.add(fact.identity);
    if(path==='HEAD'&&(fact.sha256!==hash('ref: refs/heads/'+witness.initial_branch+'\n')||fact.size!==Buffer.byteLength('ref: refs/heads/'+witness.initial_branch+'\n','utf8')))throw Error();
   }
   const ignore=evidence.ignore;
-  if(witness.ignore_after.changed?(ignore===null||!file(ignore)||ignore.sha256!==witness.ignore_after.sha256||ignore.size!==witness.ignore_after.size||identities.has(ignore.identity)):ignore!==null)throw Error();
+  if(witness.ignore_after.changed?(ignore===null||!isGitInitializationFile(ignore)||ignore.sha256!==witness.ignore_after.sha256||ignore.size!==witness.ignore_after.size||identities.has(ignore.identity)):ignore!==null)throw Error();
   return structuredClone(evidence);
  }catch{throw Error('git_initialization_evidence_invalid');}
 }

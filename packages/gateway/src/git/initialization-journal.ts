@@ -1,3 +1,4 @@
+import {gitReinitializationPreparation,gitReinitializationRefPreparation,type GitReinitializationPreparation} from './reinitialization-evidence.ts';
 import type {DatabaseSync} from 'node:sqlite';
 import {createHash} from 'node:crypto';
 import {canonicalJson} from '../db/canonical-json.ts';
@@ -8,7 +9,7 @@ import type {Row,Disposition} from './index-journal.ts';
 import {readGitInitializationExecutionSource} from './initialization-records.ts';
 
 export function initializationExecutionFacts(db:DatabaseSync,row:Row):GitInitializationExecutionFacts{
- if(row.action!=='init'||row.protocol!==7)throw Error('git_execution_evidence_corrupt');
+ if(row.action!=='init'||![7,8].includes(row.protocol))throw Error('git_execution_evidence_corrupt');
  const {witness}=readGitInitializationExecutionSource(db,row);
  return{action:'init',initial_branch:witness.initial_branch,object_format:witness.object_format,
   internal_ignore:{path:'.pilotdeck/.gitignore',before_sha256:witness.internal_ignore?.sha256??null,after_sha256:witness.ignore_after.sha256,
@@ -21,14 +22,15 @@ export function initializationClosedResult(db:DatabaseSync,row:Row,disposition:D
 const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 
-export function validateInitializationPreparation(db:DatabaseSync,row:Row,preparation:GitInitializationPreparation){
- if(row.action!=='init'||row.protocol!==7)throw Error('git_execution_evidence_corrupt');
+export function validateInitializationPreparation(db:DatabaseSync,row:Row,preparation:GitInitializationPreparation|GitReinitializationPreparation){
+ if(row.action!=='init'||![7,8].includes(row.protocol))throw Error('git_execution_evidence_corrupt');
  const {witness}=readGitInitializationExecutionSource(db,row),{plan}=preparation;
+ if((preparation.protocol===2)!==(row.protocol===8))throw Error('git_execution_evidence_corrupt');
  if(plan.source_sha256!==row.witness_sha256||plan.review_sha256!==row.review_sha256
   ||plan.witness.repository_sha256!==row.repository_sha256||canonicalJson(plan.witness)!==canonicalJson(witness))throw Error('git_execution_evidence_corrupt');
 }
-function recordedInitializationEvidence(db:DatabaseSync,row:Row,table:'wb_git_index_preparations'|'wb_git_index_dispatches'){
- if(row.action!=='init'||row.protocol!==7)throw Error('git_execution_evidence_corrupt');
+function recordedInitializationEvidence(db:DatabaseSync,row:Row,table:'wb_git_index_preparations'|'wb_git_index_dispatches'|'wb_git_index_ref_preparations'){
+ if(row.action!=='init'||![7,8].includes(row.protocol))throw Error('git_execution_evidence_corrupt');
  const record=db.prepare('SELECT evidence_json,evidence_sha256,lease_owner,lease_generation FROM '+table+' WHERE execution_id=?').get(row.execution_id) as
   {evidence_json:string;evidence_sha256:string;lease_owner:string;lease_generation:number}|undefined;
  if(!record)return;
@@ -42,12 +44,25 @@ function recordedInitializationEvidence(db:DatabaseSync,row:Row,table:'wb_git_in
 export function readInitializationPreparation(db:DatabaseSync,row:Row){
  const value=recordedInitializationEvidence(db,row,'wb_git_index_preparations');
  if(value===undefined)return;
- const preparation=gitInitializationPreparation(value);
+ const preparation=row.protocol===8?gitReinitializationPreparation(value):gitInitializationPreparation(value);
  validateInitializationPreparation(db,row,preparation);return preparation;
+}
+/** The second allocation retains the exact original first preparation and
+ * producer lease. It is read-only input for interrupted pre-dispatch cleanup. */
+export function readInitializationRefPreparation(db:DatabaseSync,row:Row){
+ if(!db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='wb_git_index_ref_preparations'").get())return;
+ const value=recordedInitializationEvidence(db,row,'wb_git_index_ref_preparations');
+ if(value===undefined)return;
+ if(row.protocol!==8)throw Error('git_execution_evidence_corrupt');
+ const reference=gitReinitializationRefPreparation(value);
+ validateInitializationPreparation(db,row,reference.preparation);
+ if(canonicalJson(reference.preparation)!==canonicalJson(readInitializationPreparation(db,row)))throw Error('git_execution_evidence_corrupt');
+ return reference;
 }
 export function readInitializationDispatch(db:DatabaseSync,row:Row){
  const value=recordedInitializationEvidence(db,row,'wb_git_index_dispatches');
  if(value===undefined)return;
+ if(row.protocol!==7)throw Error('git_execution_evidence_corrupt');
  const evidence=gitInitializationEvidence(value);
  validateInitializationPreparation(db,row,evidence.preparation);
  if(canonicalJson(evidence.preparation)!==canonicalJson(readInitializationPreparation(db,row)))throw Error('git_execution_evidence_corrupt');
@@ -77,8 +92,7 @@ export function readInitializationOutcome(db:DatabaseSync,row:Row){
 }
 export function readInitializationRecordedResult(db:DatabaseSync,row:Row):GitInitializationPendingResult|GitInitializationAppliedResult{
  const facts=initializationExecutionFacts(db,row),preparation=readInitializationPreparation(db,row),dispatch=readInitializationDispatch(db,row);
- if(db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='wb_git_index_ref_preparations'").get()
-  &&db.prepare('SELECT 1 FROM wb_git_index_ref_preparations WHERE execution_id=?').get(row.execution_id))throw Error('git_execution_evidence_corrupt');
+ readInitializationRefPreparation(db,row);
  const outcome=readInitializationOutcome(db,row);
  if(outcome)return outcome.result;
  return{execution_id:row.execution_id,project_id:row.project_id,intent_id:row.intent_id,request_id:row.request_id,

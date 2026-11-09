@@ -1,4 +1,4 @@
-import {validateInitializationPreparation,readInitializationPreparation,readInitializationDispatch,readInitializationOutcome,initializationAppliedResult} from './initialization-journal.ts';
+import {validateInitializationPreparation,readInitializationPreparation,readInitializationRefPreparation,readInitializationDispatch,readInitializationOutcome,initializationAppliedResult} from './initialization-journal.ts';
 import {gitInitializationPreparation,gitInitializationEvidence,gitInitializationReceipt,type GitInitializationEvidence} from './initialization-evidence.ts';
 import {GitInitializationIntents} from './initialization-intents.ts';
 import {validateBranchPreparation,readBranchPreparation,readBranchDispatch,branchAppliedResult} from './branch-journal.ts';
@@ -186,7 +186,7 @@ export class GitIndexExecutions{
    this.assertResolutionFence(row);
    this.producers.assertStartable(row,this.resource(row));
    this.reviewSource(owner,project,row.intent_id,row.review_version,row.review_sha256);
-   if(![4,5,6,7].includes(row.protocol)||row.binding_sha256!==this.git.executionBinding(owner,project))throw Error('workspace_reservation_source_changed');
+   if(![4,5,6,7,8].includes(row.protocol)||row.binding_sha256!==this.git.executionBinding(owner,project))throw Error('workspace_reservation_source_changed');
    const source={owner_id:owner,project_id:project,operation_kind:'git_index' as const,operation_id:id,binding_sha256:row.binding_sha256};
    const reserved=reserveWorkspaceOperation(this.db,source);sealWorkspaceFamily(this.db,source);return reserved;
   });
@@ -196,7 +196,7 @@ export class GitIndexExecutions{
    const row=this.row(owner,project,id);this.admission(row);
    for(const table of ['wb_git_index_producers','wb_git_index_preparations','wb_git_index_dispatches','wb_git_index_ref_preparations','wb_git_index_outcomes'])
     if(this.db.prepare('SELECT 1 FROM '+table+' WHERE execution_id=?').get(id))throw Error('workspace_reservation_producer_unsettled');
-   if(![4,5,6,7].includes(row.protocol)||row.binding_sha256!==this.git.executionBinding(owner,project))throw Error('workspace_reservation_source_changed');
+   if(![4,5,6,7,8].includes(row.protocol)||row.binding_sha256!==this.git.executionBinding(owner,project))throw Error('workspace_reservation_source_changed');
    return releaseUnstartedWorkspaceOperation(this.db,{owner_id:owner,project_id:project,operation_kind:'git_index',operation_id:id,binding_sha256:row.binding_sha256});
   });
  }
@@ -209,7 +209,7 @@ export class GitIndexExecutions{
   return withImmediateTransaction(this.db,()=>{
    const row=this.row(owner,project,id);this.admission(row);
    this.reviewSource(owner,project,row.intent_id,row.review_version,row.review_sha256);
-   if(![4,5,6,7].includes(row.protocol)||row.binding_sha256!==this.git.executionBinding(owner,project))throw Error('workspace_reservation_source_changed');
+   if(![4,5,6,7,8].includes(row.protocol)||row.binding_sha256!==this.git.executionBinding(owner,project))throw Error('workspace_reservation_source_changed');
    return readReservedWorkspaceFamily(this.db,{owner_id:owner,project_id:project,operation_kind:'git_index',operation_id:id,binding_sha256:row.binding_sha256});
   });
  }
@@ -220,7 +220,7 @@ export class GitIndexExecutions{
   try{
    const row=this.admittedRow(owner,project,id),control=this.getResolutionAdmission(owner,project,id,request);
    this.get(owner,project,id);
-   if(![4,5,6,7].includes(row.protocol)||row.binding_sha256!==this.git.executionBinding(owner,project))throw Error('workspace_reservation_source_changed');
+   if(![4,5,6,7,8].includes(row.protocol)||row.binding_sha256!==this.git.executionBinding(owner,project))throw Error('workspace_reservation_source_changed');
    const family=readReservedWorkspaceFamily(this.db,{owner_id:owner,project_id:project,operation_kind:'git_index',operation_id:id,binding_sha256:row.binding_sha256});
    const value={reservation_id:family.reservation_id,owner_id:family.owner_id,project_id:family.project_id,binding_sha256:family.binding_sha256,members:family.members.map(({session_ref,scopes})=>({session_ref,scopes}))};
    const seal=this.db.prepare('SELECT family_json,record_sha256 FROM wb_workspace_reservation_families WHERE reservation_id=?').get(family.reservation_id);
@@ -425,7 +425,7 @@ export class GitIndexExecutions{
  private stateHash(row:Row){
   this.get(row.owner_id,row.project_id,row.execution_id);
   const record=(table:string)=>this.db.prepare('SELECT * FROM '+table+' WHERE execution_id=?').get(row.execution_id)??null;
-  this.producers.record(row);const publication=row.action==='commit'?record('wb_git_index_ref_preparations'):null;return digest({protocol:1,execution:row,preparation:record('wb_git_index_preparations'),dispatch:record('wb_git_index_dispatches'),outcome:record('wb_git_index_outcomes'),producer:record('wb_git_index_producers'),producer_finish:record('wb_git_index_producer_finishes'),disposition:record('wb_git_index_dispositions'),...(publication?{ref_preparation:publication}:{})});
+  this.producers.record(row);const publication=row.action==='commit'||row.protocol===8?record('wb_git_index_ref_preparations'):null;return digest({protocol:1,execution:row,preparation:record('wb_git_index_preparations'),dispatch:record('wb_git_index_dispatches'),outcome:record('wb_git_index_outcomes'),producer:record('wb_git_index_producers'),producer_finish:record('wb_git_index_producer_finishes'),disposition:record('wb_git_index_dispositions'),...(publication?{ref_preparation:publication}:{})});
  }
  inspect(owner:string,project:string,id:string){const row=this.row(owner,project,id),execution=this.get(owner,project,id);return{execution,state_sha256:this.stateHash(row),requires_unknown_acknowledgement:execution.state==='pending'||execution.state==='unknown',execution_authorized:false as const};}
  /** Original UI evidence in one read snapshot. A physical result/control is
@@ -472,7 +472,7 @@ export class GitIndexExecutions{
   if(this.db.prepare('SELECT 1 FROM wb_git_index_controls WHERE execution_id=? LIMIT 1').get(id))throw Error('git_execution_control_exists');
   const current=this.get(owner,project,id);
   if(current.state==='applied'){
-   if(![4,5,6,7].includes(row.protocol)||!row.binding_sha256||!this.producers.record(row)||readWorkspaceOperation(this.db,{owner_id:owner,project_id:project,operation_kind:'git_index',operation_id:id,binding_sha256:row.binding_sha256})?.state!=='reserved')throw Error('git_execution_closed');
+   if(![4,5,6,7,8].includes(row.protocol)||!row.binding_sha256||!this.producers.record(row)||readWorkspaceOperation(this.db,{owner_id:owner,project_id:project,operation_kind:'git_index',operation_id:id,binding_sha256:row.binding_sha256})?.state!=='reserved')throw Error('git_execution_closed');
   }else if(current.state!=='pending'&&current.state!=='unknown')throw Error('git_execution_closed');
   if(this.stateHash(row)!==input.expected_state_sha256)throw Error('version_conflict');
   return this.resolutionAcceptance(row,this.insertControl(row,input));
@@ -558,7 +558,11 @@ export class GitIndexExecutions{
      applied=true;withImmediateTransaction(this.db,()=>{guard();if(!readInitializationOutcome(this.db,row))this.initializationOutcome(row,dispatch,observed.receipt);});
     }
    }
-   await kernel.cleanupInitializationPreparation(preparation,dispatch,guard,signal,remove=>withImmediateTransaction(this.db,()=>{guard();remove();}));
+   const atomic=(remove:()=>void)=>withImmediateTransaction(this.db,()=>{guard();remove();});
+   if(preparation.protocol===2){
+    if(dispatch)throw Error('git_execution_evidence_corrupt');
+    await kernel.cleanupReinitializationPreparation(preparation,readInitializationRefPreparation(this.db,row),guard,signal,atomic);
+   }else await kernel.cleanupInitializationPreparation(preparation,dispatch,guard,signal,atomic);
    guard();cleanup='verified';
   }catch(error){signal.throwIfAborted();guard();if(applied&&!readInitializationOutcome(this.db,row))throw error;}
   return{applied,cleanup};
@@ -603,7 +607,7 @@ export class GitIndexExecutions{
   const unstarted=()=>{
    signal?.throwIfAborted();const row=this.admittedRow(owner,project,id),accepted=this.getResolutionAdmission(owner,project,id,input.request_id);
    if(accepted.expected_state_sha256!==input.expected_state_sha256)throw Error('idempotency_conflict');
-   if(![4,5,6,7].includes(row.protocol)||!row.binding_sha256)return;
+   if(![4,5,6,7,8].includes(row.protocol)||!row.binding_sha256)return;
    if(this.db.prepare("SELECT 1 FROM wb_workspace_reservations WHERE operation_kind='git_index' AND operation_id=?").get(id))return;
    for(const table of ['wb_git_index_producers','wb_git_index_producer_finishes','wb_git_index_preparations','wb_git_index_dispatches','wb_git_index_ref_preparations','wb_git_index_outcomes'])if(this.db.prepare('SELECT 1 FROM '+table+' WHERE execution_id=?').get(id))return;
    const control=this.db.prepare('SELECT * FROM wb_git_index_controls WHERE control_id=?').get(accepted.control_id) as Control;
@@ -631,7 +635,7 @@ export class GitIndexExecutions{
   if(this.db.isTransaction)throw Error('git_execution_transaction_invalid');
   const row=this.admittedRow(owner,project,id),input=this.controlInput(value),accepted=this.getResolutionAdmission(owner,project,id,input.request_id);
   if(accepted.expected_state_sha256!==input.expected_state_sha256)throw Error('idempotency_conflict');
-  if(![4,5,6,7].includes(row.protocol)||!row.binding_sha256)throw Error('workspace_reservation_source_changed');
+  if(![4,5,6,7,8].includes(row.protocol)||!row.binding_sha256)throw Error('workspace_reservation_source_changed');
   const unstarted=this.resolveUnstarted(owner,project,id,input,signal);if(unstarted)return unstarted;
   const originalScope={owner_id:owner,project_id:project,operation_kind:'git_index' as const,operation_id:id,binding_sha256:row.binding_sha256};
   if(readWorkspaceOperation(this.db,originalScope)?.state==='released_settled'){

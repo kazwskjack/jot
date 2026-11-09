@@ -116,8 +116,9 @@ export function readGitInitializationReviewSource(db:DatabaseSync,owner:string,p
  const {input,witness}=readGitInitializationIntentSource(row);
  return{action:input.action,witness};
 }
-export function readGitInitializationExecutionSource(db:DatabaseSync,row:{owner_id:string;project_id:string;intent_id:string;review_version:number;review_sha256:string;witness_sha256:string;repository_sha256:string}){
+export function readGitInitializationExecutionSource(db:DatabaseSync,row:{owner_id:string;project_id:string;intent_id:string;review_version:number;review_sha256:string;witness_sha256:string;repository_sha256:string;protocol:number}){
  const source=readGitInitializationReviewSource(db,row.owner_id,row.project_id,row.intent_id,row.review_version,row.review_sha256);
- if(source.witness.protocol!==1||hash(JSON.stringify(source.witness))!==row.witness_sha256||source.witness.repository_sha256!==row.repository_sha256)throw Error('git_initialization_evidence_invalid');
+ if(![7,8].includes(row.protocol)||(source.witness.protocol===2)!==(row.protocol===8)
+  ||source.witness.protocol===2&&(!source.witness.existing.configuration||!source.witness.existing.layout)||hash(JSON.stringify(source.witness))!==row.witness_sha256||source.witness.repository_sha256!==row.repository_sha256)throw Error('git_initialization_evidence_invalid');
  return source;
 }
