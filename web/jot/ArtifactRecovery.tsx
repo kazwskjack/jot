@@ -70,6 +70,7 @@ function Recovery({artifactId,version,sha256,partIndex,onRestored,owner,store}:P
    const executor=backup.executor;
    if(!executor||!['managed','external'].includes(executor.mode)
     ||!['unmanaged','starting','idle','restoring','archiving','cleaning','failed','stopped'].includes(executor.state)
+    ||executor.restart_required!==undefined&&typeof executor.restart_required!=='boolean'
     ||executor.mode==='external'&&executor.state!=='unmanaged'||executor.mode==='managed'&&(executor.state==='unmanaged'||typeof executor.cleanup_enabled!=='boolean'))throw Error('归档执行器状态尚未确认');
    for(const time of [executor.last_started_at,executor.last_completed_at]){
     if(time!==undefined&&(typeof time!=='string'||time.length>40||!Number.isFinite(Date.parse(time))))throw Error('归档执行器时间尚未确认');
@@ -136,7 +137,7 @@ function Recovery({artifactId,version,sha256,partIndex,onRestored,owner,store}:P
  return <section aria-label="文件归档与恢复" data-chat-search-ignore>
   {backup&&<p>{statuses[backup.backup_status]} · {local[backup.local_state]}</p>}
   {backup?.executor?.mode==='managed'&&<p role="status">托管归档进程 · {phases[backup.executor.state]}{backup.executor.last_completed_at?` · 上次处理 ${backup.executor.last_completed_at}`:''}</p>}
-  {backup?.executor?.mode==='managed'&&backup.executor.state==='failed'&&<p role="status">归档进程遇到错误，请刷新状态后重试原请求。</p>}
+  {backup?.executor?.mode==='managed'&&backup.executor.state==='failed'&&<p role="status">{backup.executor.restart_required?'归档进程回收尚未确认，自动重启已停止。需处理残留进程后重启网关。':'归档进程遇到错误，可刷新状态查看后续处理。'}</p>}
   {backup?.restore_protocol===3&&<p>版本 {backup.requested_version}{backup.part_index===undefined?'':` · 第 ${backup.part_index} 卷`} · {backup.selected_file_count} 个文件 · 缺失 {backup.missing_file_count} 个</p>}
   {backup?.all_versions_archived===false&&<p role="status">归档清单尚未覆盖全部文件版本。</p>}
   {Number(backup?.unarchived_file_count)>0&&<p role="status">所选版本有 {backup?.unarchived_file_count} 个文件尚无可验证归档。</p>}

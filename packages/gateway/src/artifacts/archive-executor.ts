@@ -28,6 +28,8 @@ class ManagedArtifactArchiveExecutor implements ArtifactArchiveExecutor {
  private attempts=0;
  private startedAt=0;
  private closing:Promise<void>|undefined;
+ private exitFailure:Error|undefined;
+ private readonly drainedChildren=new WeakSet<ChildProcess>();
  private readonly executable:string;
  private readonly cleanup:boolean;
  private readonly env:NodeJS.ProcessEnv;
@@ -36,13 +38,13 @@ class ManagedArtifactArchiveExecutor implements ArtifactArchiveExecutor {
   this.binding=Object.freeze({databasePath:resolve(databasePath),fileRoot:resolve(fileRoot)});
   this.executable=executable;this.cleanup=cleanup;this.env={...env};
  }
- status():ArtifactArchiveExecutorStatus{return {...this.observed,mode:'managed',cleanup_enabled:this.cleanup};}
+ status():ArtifactArchiveExecutorStatus{return {...this.observed,mode:'managed',cleanup_enabled:this.cleanup,restart_required:!!this.exitFailure};}
  start():void {
-  if(!this.stopping||this.closing)return;
+  if(!this.stopping||this.closing||this.exitFailure)return;
   this.stopping=false;this.launch();
  }
  private launch():void {
-  if(this.stopping||this.child)return;
+  if(this.stopping||this.child||this.exitFailure)return;
   this.observed={...this.observed,state:'starting'};this.startedAt=Date.now();
   try{
    const extension=import.meta.url.endsWith('.ts')?'ts':'js';
@@ -54,7 +56,9 @@ class ManagedArtifactArchiveExecutor implements ArtifactArchiveExecutor {
    });
    this.child=child;
    child.on('message',value=>{
-    if(this.child!==child||this.stopping||!value||typeof value!=='object')return;
+    if(this.child!==child||!value||typeof value!=='object')return;
+    if((value as {protocol?:unknown}).protocol===1&&(value as {type?:unknown}).type==='artifact-archive-drained'){this.drainedChildren.add(child);return;}
+    if(this.stopping)return;
     const state=value as {protocol?:unknown;type?:unknown;state?:unknown;last_started_at?:unknown;last_completed_at?:unknown};
     if(state.protocol!==1||state.type!=='artifact-archive-state'||typeof state.state!=='string'
      ||!['idle','restoring','archiving','cleaning','failed'].includes(state.state))return;
@@ -69,9 +73,14 @@ class ManagedArtifactArchiveExecutor implements ArtifactArchiveExecutor {
    child.once('close',()=>{
     if(this.child!==child)return;
     this.child=undefined;
-    if(!this.stopping&&process.platform!=='win32'&&child.pid){
-     try{process.kill(-child.pid,'SIGKILL');}catch(error){if((error as {code?:string}).code!=='ESRCH')this.observed={...this.observed,state:'failed'};}
+    if(!this.stopping){
+     if(process.platform==='win32'&&child.pid&&!this.drainedChildren.has(child))this.exitFailure=Error('artifact_archive_process_tree_unconfirmed');
+     if(process.platform!=='win32'&&child.pid){
+      try{process.kill(-child.pid,'SIGKILL');}
+      catch(error){if((error as {code?:string}).code!=='ESRCH')this.exitFailure=Error('artifact_archive_process_tree_stop_failed');}
+     }
     }
+    if(this.exitFailure){this.observed={...this.observed,state:'failed'};return;}
     if(this.stopping){this.observed={...this.observed,state:'stopped'};return;}
     if(Date.now()-this.startedAt>=60000)this.attempts=0;
     this.observed={...this.observed,state:'failed'};this.restart();
@@ -79,7 +88,7 @@ class ManagedArtifactArchiveExecutor implements ArtifactArchiveExecutor {
   }catch{this.observed={...this.observed,state:'failed'};this.restart();}
  }
  private restart():void {
-  if(this.stopping)return;
+  if(this.stopping||this.exitFailure)return;
   const delay=Math.min(300000,1000*2**Math.min(this.attempts,9));this.attempts+=1;
   this.timer=setTimeout(()=>{this.timer=undefined;this.launch();},delay);this.timer.unref();
  }
@@ -87,11 +96,24 @@ class ManagedArtifactArchiveExecutor implements ArtifactArchiveExecutor {
   if(this.closing)return this.closing;
   this.stopping=true;if(this.timer)clearTimeout(this.timer);this.timer=undefined;
   const child=this.child;
-  if(!child){this.observed={...this.observed,state:'stopped'};this.closing=Promise.resolve();return this.closing;}
+  if(!child){this.observed={...this.observed,state:this.exitFailure?'failed':'stopped'};this.closing=this.exitFailure?Promise.reject(this.exitFailure):Promise.resolve();return this.closing;}
   this.closing=new Promise<void>((resolveClose,rejectClose)=>{
-   let killer:ChildProcess|undefined,workerClosed=false,killerClosed=true,failure:Error|undefined;
-   const finalDeadline=setTimeout(()=>{failure=Error('artifact_archive_shutdown_timeout');this.observed={...this.observed,state:'failed'};rejectClose(failure);},40000);
-   const finish=()=>{if(!workerClosed||!killerClosed)return;clearTimeout(finalDeadline);this.observed={...this.observed,state:'stopped'};if(failure)rejectClose(failure);else resolveClose();};
+   let killer:ChildProcess|undefined,workerClosed=false,killerClosed=true,treeStopped=false,failure:Error|undefined;
+   const finalDeadline=setTimeout(()=>{failure=Error('artifact_archive_shutdown_timeout');this.exitFailure=failure;this.observed={...this.observed,state:'failed'};rejectClose(failure);},40000);
+   const finish=()=>{
+    if(!workerClosed||!killerClosed)return;
+    clearTimeout(finalDeadline);
+    if(child.pid&&!this.drainedChildren.has(child)&&!treeStopped&&!failure){
+     if(process.platform==='win32')failure=Error('artifact_archive_process_tree_unconfirmed');
+     else{
+      try{process.kill(-child.pid,'SIGKILL');}
+      catch(error){if((error as {code?:string}).code!=='ESRCH')failure=Error('artifact_archive_process_tree_stop_failed');}
+     }
+    }
+    if(failure)this.exitFailure=failure;
+    this.observed={...this.observed,state:this.exitFailure?'failed':'stopped'};
+    if(this.exitFailure)rejectClose(this.exitFailure);else resolveClose();
+   };
    const deadline=setTimeout(()=>{
     if(this.child!==child||child.exitCode!==null||child.signalCode!==null)return;
     if(process.platform==='win32'){
@@ -99,9 +121,9 @@ class ManagedArtifactArchiveExecutor implements ArtifactArchiveExecutor {
      killer=spawn(join(process.env.SystemRoot||'C:\\Windows','System32','taskkill.exe'),['/PID',String(child.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});
      const killerDeadline=setTimeout(()=>{failure=Error('artifact_archive_process_tree_stop_failed');killer?.kill('SIGKILL');},10000);
      killer.once('error',()=>{failure=Error('artifact_archive_process_tree_stop_failed');});
-     killer.once('close',code=>{clearTimeout(killerDeadline);killerClosed=true;if(code!==0&&!workerClosed)failure=Error('artifact_archive_process_tree_stop_failed');finish();});
+     killer.once('close',code=>{clearTimeout(killerDeadline);killerClosed=true;treeStopped=code===0;if(code!==0&&!this.drainedChildren.has(child))failure=Error('artifact_archive_process_tree_stop_failed');finish();});
     }else{
-     try{if(child.pid)process.kill(-child.pid,'SIGKILL');}
+     try{if(child.pid)process.kill(-child.pid,'SIGKILL');treeStopped=true;}
      catch(error){if((error as {code?:string}).code!=='ESRCH')failure=Error('artifact_archive_process_tree_stop_failed');}
     }
    },30000);

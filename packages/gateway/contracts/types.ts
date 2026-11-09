@@ -161,7 +161,7 @@ export type RunArtifact = { run_id: string; conversation_id: string; artifact_id
 
 export type RunArtifactPage = { items: Array<RunArtifact> };
 
-export type ArtifactArchiveExecutorStatus = { mode: "managed" | "external"; state: "unmanaged" | "starting" | "idle" | "restoring" | "archiving" | "cleaning" | "failed" | "stopped"; cleanup_enabled?: boolean; last_started_at?: string; last_completed_at?: string };
+export type ArtifactArchiveExecutorStatus = { mode: "managed" | "external"; state: "unmanaged" | "starting" | "idle" | "restoring" | "archiving" | "cleaning" | "failed" | "stopped"; cleanup_enabled?: boolean; restart_required?: boolean; last_started_at?: string; last_completed_at?: string };
 
 export type ArtifactArchiveRequest = {expected_version: number; expected_sha256: string};
 export type ArtifactArchiveReceipt = {accepted: true; artifact_id: string; version: number; sha256: string; status: "queued"; archive_protocol: 1; after_attempt: number};

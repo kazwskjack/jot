@@ -50,5 +50,8 @@ try{
  }
 }finally{
  db.close();
- if(process.connected)process.disconnect();
+ if(process.connected){
+  await new Promise<void>(resolveDrained=>process.send?.({protocol:1,type:'artifact-archive-drained'},()=>resolveDrained()));
+  if(process.connected)process.disconnect();
+ }
 }
