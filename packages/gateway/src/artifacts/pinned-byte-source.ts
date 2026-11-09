@@ -1,10 +1,11 @@
+import {writeSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {mkdir,mkdtemp,lstat,open,unlink,rmdir} from 'node:fs/promises';
 import {isAbsolute,join} from 'node:path';
 import type {FileHandle} from 'node:fs/promises';
 
 export type PinnedByteSource=Readonly<{sha256:string;sizeBytes:number;stream(signal?:AbortSignal):AsyncGenerator<Buffer>}>;
-type Writer={source:PinnedByteSource;append(bytes:Buffer):Promise<void>;seal():Promise<void>;dispose():Promise<void>};
+type Writer={source:PinnedByteSource;append(bytes:Buffer):Promise<void>;appendSync(bytes:Buffer):void;seal():Promise<void>;dispose():Promise<void>};
 
 /** Operator-private spool only. Files are unlinked while the descriptor is open:
  * no model workspace path, persistent copy, receipt or execution authority. */
@@ -26,7 +27,12 @@ export function createPinnedByteStore(root:string){
      assertOpen();signal?.throwIfAborted();if(hash.digest('hex')!==sha256)throw Error('attachment_source_integrity_failed');
     }finally{reading=false;}
    }});
-   const writer:Writer={source,async append(bytes){assertOpen();if(sealed||written+bytes.length>sizeBytes)throw Error('attachment_source_integrity_failed');signal?.throwIfAborted();let offset=0;while(offset<bytes.length){const result=await handle.write(bytes,offset,bytes.length-offset,written+offset);if(result.bytesWritten<1)throw Error('attachment_source_integrity_failed');offset+=result.bytesWritten;}written+=bytes.length;checksum.update(bytes);},async seal(){assertOpen();signal?.throwIfAborted();if(sealed||written!==sizeBytes||checksum.digest('hex')!==sha256)throw Error('attachment_source_integrity_failed');await handle.sync();if((await handle.stat()).size!==sizeBytes)throw Error('attachment_source_integrity_failed');sealed=true;},async dispose(){if(closed)return;closed=true;await handle.close();}};
+   const writer:Writer={source,appendSync(bytes){
+    assertOpen();if(sealed||written+bytes.length>sizeBytes)throw Error('attachment_source_integrity_failed');signal?.throwIfAborted();
+    let offset=0;
+    while(offset<bytes.length){const count=writeSync(handle.fd,bytes,offset,bytes.length-offset,written+offset);if(count<1)throw Error('attachment_source_integrity_failed');offset+=count;}
+    written+=bytes.length;checksum.update(bytes);
+   },async append(bytes){assertOpen();if(sealed||written+bytes.length>sizeBytes)throw Error('attachment_source_integrity_failed');signal?.throwIfAborted();let offset=0;while(offset<bytes.length){const result=await handle.write(bytes,offset,bytes.length-offset,written+offset);if(result.bytesWritten<1)throw Error('attachment_source_integrity_failed');offset+=result.bytesWritten;}written+=bytes.length;checksum.update(bytes);},async seal(){assertOpen();signal?.throwIfAborted();if(sealed||written!==sizeBytes||checksum.digest('hex')!==sha256)throw Error('attachment_source_integrity_failed');await handle.sync();if((await handle.stat()).size!==sizeBytes)throw Error('attachment_source_integrity_failed');sealed=true;},async dispose(){if(closed)return;closed=true;await handle.close();}};
    writers.push(writer);signal?.throwIfAborted();return writer;
   },
   sources:()=>Object.freeze(writers.map(writer=>writer.source)),

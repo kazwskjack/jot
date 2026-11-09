@@ -1,4 +1,5 @@
-import {readActivityToolResult,searchActivityToolResults,readActivityToolResultFile,readActivityToolResultFileBytes} from './events/activity-tool-result.ts';
+import {createPinnedByteStore} from './artifacts/pinned-byte-source.ts';
+import {readActivityToolResult,searchActivityToolResults,readActivityToolResultFile,readActivityToolResultFileBytes,parseActivityFileDownloadQuery,readActivityToolResultFileDownload} from './events/activity-tool-result.ts';
 import {readActivityHistory} from './events/activity-history.ts';
 import {registerPluginProfileRoutes,type PluginProfileClient} from './workbench/plugin-profile-routes.ts';
 import {createPluginProfileReceiptExecutor,PLUGIN_PROFILE_RECEIPT_PROTOCOL} from './workbench/plugin-profile-receipts.ts';
@@ -1105,6 +1106,52 @@ export async function buildServer(config: {
       const value=readActivityToolResultFileBytes(db,owner,conversationId,activityId,request.query as Record<string,unknown>,workbench);
       db.exec('COMMIT');return reply.header('cache-control','private, no-store').send(value);
     }catch(error){if(db.isTransaction)db.exec('ROLLBACK');throw error;}
+  });
+  app.get('/v1/conversations/:conversationId/activities/:activityId/tool-result/file/download', async (request,reply) => {
+    const {conversationId,activityId}=request.params as {conversationId:string;activityId:string},owner=actor(request as any);
+    const input=parseActivityFileDownloadQuery(request.query as Record<string,unknown>);
+    conversations.get(conversationId,owner);
+    const controller=new AbortController(),store=createPinnedByteStore(join(dirname(resolve(config.databasePath)),'.jot-downloads'));
+    let responseStream:Readable|undefined;
+    const abort=()=>{controller.abort();responseStream?.destroy();};
+    request.raw.once('aborted',abort);reply.raw.once('close',abort);
+    if(request.raw.aborted||reply.raw.destroyed)abort();
+    let cleanupPromise:Promise<void>|undefined;
+    const cleanup=()=>cleanupPromise??=(async()=>{request.raw.off('aborted',abort);reply.raw.off('close',abort);await store.dispose();})();
+    try{
+      const writer=await store.begin(input.fileSha,input.size,controller.signal);
+      controller.signal.throwIfAborted();
+      db.exec('BEGIN');
+      let file:ReturnType<typeof readActivityToolResultFileDownload>;
+      try{
+        file=readActivityToolResultFileDownload(db,owner,conversationId,activityId,input,workbench,writer.appendSync);
+        db.exec('COMMIT');
+      }catch(error){if(db.isTransaction)db.exec('ROLLBACK');throw error;}
+      await writer.seal();controller.signal.throwIfAborted();
+      async function* content(){
+        try{
+          let offset=0;
+          for await(const bytes of writer.source.stream(controller.signal)){
+            if(input.framed)yield JSON.stringify({offset_bytes:offset,content_base64:bytes.toString('base64'),chunk_sha256:createHash('sha256').update(bytes).digest('hex')})+'\n';
+            else yield bytes;
+            offset+=bytes.length;
+          }
+          if(input.framed)yield JSON.stringify({complete:true,size_bytes:file.size,sha256:file.sha256})+'\n';
+        }finally{await cleanup();}
+      }
+      const stream=Readable.from(content());responseStream=stream;
+      stream.once('close',()=>{void cleanup().catch(error=>app.log.error({err:error},'Original file download cleanup failed'));});
+      reply.header('cache-control','private, no-store').header('x-content-type-options','nosniff')
+        .header('x-activity-file-sha256',file.sha256).header('x-activity-file-size',String(file.size))
+        .header('x-activity-file-version',String(file.version)).header('x-activity-tool-result-sha256',file.result_sha256);
+      if(input.framed)reply.type('application/x-ndjson');
+      else{
+        const originalName=file.path.split('/').at(-1)!,name=originalName.replace(/[^A-Za-z0-9._-]/g,'_').slice(0,255)||'listed-file';
+        const encodedName=encodeURIComponent(Buffer.from(originalName,'utf8').toString('utf8')).replace(/['()*]/g,value=>'%'+value.charCodeAt(0).toString(16).toUpperCase());
+        reply.type('application/octet-stream').header('content-length',String(file.size)).header('content-disposition',`attachment; filename="${name}"; filename*=UTF-8''${encodedName}`);
+      }
+      return reply.send(stream);
+    }catch(error){await cleanup();throw error;}
   });
   app.get('/v1/conversations/:conversationId/activities/:activityId/tool-result', async (request,reply) => {
     const {conversationId,activityId}=request.params as {conversationId:string;activityId:string},owner=actor(request as any);
