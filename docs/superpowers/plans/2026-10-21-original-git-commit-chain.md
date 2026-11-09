@@ -604,3 +604,47 @@ This increment is source development under the user's instruction. Source-object
 comparison covered three paired schemas and two route/operation descriptions.
 Runtime verification, tests, typechecks, builds, migrations and deployment remain
 unexecuted.
+
+## Reinitialization configuration preparation source increment
+
+Original existing-repository review now derives configuration candidates using a
+fixed Git init invocation inside its disposable read context. Only initialization
+core/extension inputs enter the private active config. The empty template and
+existing HEAD retain the reinitialization path. Existing common/worktree config
+entries are read from independent original-byte copies with includes disabled.
+The shared Git configuration renderer is reused by branch tracking and this path.
+
+Private init supplies installed-Git format, bare, logging, shared-repository and
+extension changes. The disposable-directory worktree setting is excluded from
+publication candidates so the original bound worktree configuration is retained.
+The active read config is restored before editing independent original-byte
+copies. Candidates apply the selected initialization key changes and compare all
+other parsed entries with the original, preserving duplicate and valueless data.
+Raw output stays within the existing one-MiB configuration bound.
+
+Filemode is sensitive to the target volume. Review freezes both false/true config
+body hashes, the original common config hash and unchanged worktree config hash.
+The native path will repeat preparation in its original same-volume allocation
+and choose the candidate matching the actual probe. The disposable-context probe
+result supplies neither publication authority nor an assumption about that volume.
+Private HEAD/index/packed-ref/shallow/loose-ref/shared-index bodies are compared
+before and after preparation. The active context and helper files are restored/
+removed before original source snapshot/anchor checks continue.
+
+Protocol-2 existing facts carry the optional configuration proof. Strict source
+decoding links its original hashes and distinct candidate hashes. New approval
+requires complete configuration proof and refreezes it. Older protocol-2 review
+records retain read/cancel support and require a new review for approval. Public
+review facts and recovery display the two candidate digests. Two paired JSON/YAML
+schema source objects cover the configuration proof and original review facts.
+
+Next work connects the same-volume original allocation, exact-owned preparation/
+lock/publication and typed journal/native lifecycle for reinitialization, followed
+by interrupted observation/cleanup and complete execution UI. Existing linked/
+external and damaged metadata, local/remote checkout, merged-safe deletion and
+reference backend coverage remain in M15.14. This increment is source development
+under the user's instruction, with tests, typechecks, builds, native/product
+operations, UI runtime acceptance, migrations and deployment unexecuted.
+
+Installed-Git initialization behavior follows the
+[official setup implementation](https://github.com/git/git/blob/master/setup.c).

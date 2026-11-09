@@ -1,5 +1,6 @@
 import {initializationInternalIgnore,initializationSnapshotId,normalizeGitInitializationReview} from './initialization-records.ts';
 import type {GitInitializationWitness,GitInitializationFile} from '../../contracts/types.ts';
+import {planReinitializationConfiguration} from './reinitialization-configuration.ts';
 import {planCreateBranchConfiguration} from './branch-configuration.ts';
 import {validGitReference} from './references.ts';
 import type {GitBranchInventory,GitCreateBranchWitness,GitBranchLogFile,GitBranchLogWitness} from '../../contracts/types.ts';
@@ -437,12 +438,14 @@ export class GitRepositoryInspection{
    const config=await this.initializationFileSource(join(this.commonDirectory,'config'));
    const worktree=await this.initializationFileSource(join(this.gitDirectory,'config.worktree'));
    const planned=initializationInternalIgnore(ignore.body);
+   const configuration=await planReinitializationConfiguration({executable:this.executable!,root:this.root,context,commonConfig:config.body,worktreeConfig:worktree.body,
+    worktreeConfigEnabled:context.worktreeConfigEnabled===true,objectFormat,limits:this.limits,...(signal?{signal}:{})});
    if((await this.inspectContext(context,signal)).snapshot_id!==snapshotId||await internalDirectory()!==internalIdentity)throw Error('git_snapshot_changed');
    result={protocol:2,kind:'initialize_repository',snapshot_id:snapshotId,repository_sha256:snapshot.repository_sha256,
     root_identity:root,internal_directory_identity:internalIdentity,internal_ignore:ignore.fact,initial_branch:initialBranch,object_format:objectFormat,
     ignore_after:{sha256:hash(planned.body),size:planned.body.length,changed:planned.changed},
     existing:{source_metadata_sha256:context.metadata,git_directory_identity:git,common_directory_identity:common,dot_file:dotFile,
-     head:snapshot.head,common_config:config.fact,worktree_config:worktree.fact,worktree_config_enabled:context.worktreeConfigEnabled===true},execution_authorized:false};
+     head:snapshot.head,common_config:config.fact,worktree_config:worktree.fact,worktree_config_enabled:context.worktreeConfigEnabled===true,configuration:configuration.review},execution_authorized:false};
   }finally{await context.dispose();}
   const anchors=await this.anchors(signal),ignore=await this.initializationFileSource(join(internal,'.gitignore'));
   if(anchors.repository!==result.repository_sha256||anchors.metadata!==result.existing.source_metadata_sha256

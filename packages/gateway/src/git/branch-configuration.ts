@@ -4,14 +4,15 @@ import {join} from 'node:path';
 import type {GitReadContext} from './inspection.ts';
 import {readGit,type GitProcessLimits} from './process.ts';
 
-type Entry={key:string;value:string|null};
+export type GitConfigurationEntry={key:string;value:string|null};
+type Entry=GitConfigurationEntry;
 const text=(value:Buffer)=>new TextDecoder('utf-8',{fatal:true}).decode(value);
 const hash=(value:Buffer)=>createHash('sha256').update(value).digest('hex');
 const relevant=(key:string)=>['branch.autosetupmerge','branch.autosetuprebase'].includes(key)
  ||key.startsWith('branch.')&&/\.(remote|merge|rebase)$/.test(key)
  ||key.startsWith('remote.')&&key.endsWith('.fetch');
 const quoted=(value:string)=>'"'+value.replaceAll('\\','\\\\').replaceAll('"','\\"').replaceAll('\n','\\n').replaceAll('\t','\\t').replaceAll('\b','\\b')+'"';
-function render(entries:readonly Entry[]){
+export function renderGitConfiguration(entries:readonly GitConfigurationEntry[]){
  return entries.map(({key,value})=>{
   const first=key.indexOf('.'),last=key.lastIndexOf('.'),section=key.slice(0,first),name=key.slice(last+1);
   const subsection=first===last?'':' '+quoted(key.slice(first+1,last));
@@ -46,14 +47,14 @@ export async function planCreateBranchConfiguration(options:{
  const active=join(context.directory,'config'),base=await readFile(active),refPath=join(context.directory,'refs','heads',branch);
  let privateWorktreeCreated=false,refCreated=false;
  try{
-  await writeFile(active,Buffer.concat([base,Buffer.from('\n'+render(commonEntries),'utf8')]));
+  await writeFile(active,Buffer.concat([base,Buffer.from('\n'+renderGitConfiguration(commonEntries),'utf8')]));
   if(JSON.stringify((await list(active)).filter(entry=>relevant(entry.key)))!==JSON.stringify(commonEntries))throw Error('git_branch_configuration_invalid');
   if(worktreeConfig!==null){
    const worktree=join(context.directory,'jot-branch-worktree-source.config');
    await writeFile(worktree,worktreeConfig,{flag:'wx',mode:0o600});
    const entries=(await list(worktree)).filter(entry=>relevant(entry.key));
    const privateWorktree=join(context.directory,'config.worktree');
-   await writeFile(privateWorktree,render(entries),{flag:'wx',mode:0o600});privateWorktreeCreated=true;
+   await writeFile(privateWorktree,renderGitConfiguration(entries),{flag:'wx',mode:0o600});privateWorktreeCreated=true;
    if(JSON.stringify(await list(privateWorktree))!==JSON.stringify(entries))throw Error('git_branch_configuration_invalid');
    await run(['config','--file',active,'--no-includes','--add','extensions.worktreeconfig','true']);
   }

@@ -43,7 +43,7 @@ export default function GitInitializationReview({project,snapshotId,onClose,onBu
    if(mutationRejected(value))command.current=null;
    const code=value instanceof Error?value.message:'',status=(value as {status?:number})?.status;
    if(received){setVerified(false);setError('审核回执已收到，当前状态尚未确认，请刷新审核状态。')}
-   else if(['GIT_SNAPSHOT_CHANGED','GIT_REPOSITORY_CHANGED','GIT_REVIEW_CHANGED','GIT_INITIALIZATION_REVIEW_CHANGED','GIT_INITIALIZATION_SOURCE_CHANGED','GIT_INITIALIZATION_METADATA_PRESENT'].includes(code)){
+   else if(['GIT_SNAPSHOT_CHANGED','GIT_REPOSITORY_CHANGED','GIT_REVIEW_CHANGED','GIT_INITIALIZATION_REVIEW_CHANGED','GIT_INITIALIZATION_SOURCE_CHANGED','GIT_INITIALIZATION_METADATA_PRESENT','GIT_REINITIALIZATION_REVIEW_REQUIRED','GIT_REINITIALIZATION_METADATA_CHANGED'].includes(code)){
     setStale(true);setError('初始化依据已变化，请取消审核并刷新项目仓库。');
    }else if(code==='GIT_INITIALIZATION_BRANCH_INVALID'||code==='GIT_INITIALIZATION_INVALID')setError('初始化参数无效，请核对初始分支名称与对象格式。');
    else if(code==='GIT_REINITIALIZATION_OBJECT_FORMAT_CHANGED')setError('已有仓库的对象格式与请求不一致，请保留原格式重新生成审核。');
@@ -70,6 +70,10 @@ export default function GitInitializationReview({project,snapshotId,onClose,onBu
     {review.reinitialization&&<>
      <dt>保留原 HEAD</dt><dd><code>{review.reinitialization.head.branch??'分离 HEAD'}</code> · <code>{review.reinitialization.head.oid??'尚无提交'}</code></dd>
      <dt>原仓库元数据 SHA-256</dt><dd><code>{review.reinitialization.source_metadata_sha256}</code></dd>
+     {review.reinitialization.configuration&&<>
+      <dt>文件模式探测为 false 的配置 SHA-256</dt><dd><code>{review.reinitialization.configuration.filemode_false_sha256}</code></dd>
+      <dt>文件模式探测为 true 的配置 SHA-256</dt><dd><code>{review.reinitialization.configuration.filemode_true_sha256}</code></dd>
+     </>}
      <dt>原公共配置 SHA-256</dt><dd><code>{review.reinitialization.common_config_sha256??'文件尚不存在'}</code></dd>
      <dt>原工作树配置 SHA-256</dt><dd><code>{review.reinitialization.worktree_config_sha256??'文件尚不存在'}</code> · {review.reinitialization.worktree_config_enabled?'已启用':'未启用'}</dd>
     </>}
