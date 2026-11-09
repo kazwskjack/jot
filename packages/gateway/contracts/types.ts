@@ -816,6 +816,7 @@ export type InteractionSearchMatch=Pick<Interaction,'interaction_id'|'run_id'|'k
 export type InteractionSearchPage={conversation_id:string;run_id?:string;q:string;items:InteractionSearchMatch[];scanned_records:number;scanned_through?:InteractionSearchBoundary;next_cursor?:string;execution_authorized:false};
 
 export type ArtifactTextCursor={artifact_id:string;version:number;part_index?:number;group_sha256?:string};
-export type ArtifactTextMatch=ArtifactTextCursor&{sha256:string;file_name:string;size_bytes:number;created_at:string;offset_chars:number;match_offset_chars:number;match_text:string;excerpt:string};
+export type ArtifactDocumentText={document_job_id?:string;document_result_sha256?:string;text_sha256?:string;text_total_chars?:number;source_truncated?:boolean};
+export type ArtifactTextMatch=ArtifactTextCursor&ArtifactDocumentText&{sha256:string;file_name:string;size_bytes:number;created_at:string;offset_chars:number;match_offset_chars:number;match_text:string;excerpt:string};
 export type ArtifactTextSearchPage={conversation_id:string;run_id?:string;q:string;items:ArtifactTextMatch[];scanned_versions:number;unavailable_versions:number;skipped_versions:number;next_cursor?:ArtifactTextCursor;execution_authorized:false};
-export type ArtifactTextPage=ArtifactTextCursor&{conversation_id:string;sha256:string;file_name:string;size_bytes:number;offset_chars:number;total_chars:number;text:string;next_offset_chars?:number;execution_authorized:false};
+export type ArtifactTextPage=ArtifactTextCursor&ArtifactDocumentText&{conversation_id:string;sha256:string;file_name:string;size_bytes:number;offset_chars:number;total_chars:number;text:string;next_offset_chars?:number;execution_authorized:false};

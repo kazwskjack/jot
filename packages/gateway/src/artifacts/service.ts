@@ -1,5 +1,7 @@
+import {retainedDocumentText} from './document-text.ts';
+import {isDocumentPreviewMediaType} from './document-preview-content.ts';
 import {formatTextDiff} from './text-diff.ts';
-import {searchVerifiedArtifactText,readVerifiedArtifactTextPage} from './text-content.ts';
+import {searchVerifiedArtifactText,readVerifiedArtifactTextPage,searchRetainedArtifactText,readRetainedArtifactTextPage} from './text-content.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { basename, join,dirname,resolve,sep } from 'node:path';
 import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync,writeFileSync,lstatSync,opendirSync } from 'node:fs';
@@ -1261,7 +1263,7 @@ export class ArtifactService {
     });
   }
 
-  private textSource(id:string,ownerId:string,conversationId:string,version:number,sha256:string,runId?:string,partIndex?:number,groupSha?:string){
+  private textSource(id:string,ownerId:string,conversationId:string,version:number,sha256:string,runId?:string,partIndex?:number,groupSha?:string,document?:{jobId?:string;resultSha?:string}){
     const selected=withReadTransaction(this.db,()=>{
       if(!this.db.prepare('SELECT 1 FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId))throw Error('conversation_not_found');
       const row=this.version(id,ownerId,version),group=this.get(id,ownerId,version);
@@ -1281,12 +1283,18 @@ export class ArtifactService {
         if(target===root||!target.startsWith(root+sep))throw Error('artifact_part_path_escape');
       }
       const mime=String(file.media_type).toLowerCase().split(';',1)[0]!.trim(),size=Number(file.size_bytes);
-      if((!part&&group.part_count)||file.preview_kind!=='text'||(!mime.startsWith('text/')&&!['application/json','application/xml'].includes(mime))
-        ||!Number.isSafeInteger(size)||size<0)throw Error('artifact_text_unsupported');
+      if(!Number.isSafeInteger(size)||size<0)throw Error('artifact_text_unsupported');
+      if(document&&!part&&!group.part_count&&isDocumentPreviewMediaType(mime)){
+        if(file.status!=='ready')throw Error('artifact_not_found');
+        const retained=retainedDocumentText(this.db,{artifactId:id,ownerId,conversationId,version,sha256,mediaType:mime},document.jobId,document.resultSha);
+        return {file,source:{path,size,sha256},document:retained};
+      }
+      if(document?.jobId)throw Error('artifact_text_source_changed');
+      if((!part&&group.part_count)||file.preview_kind!=='text'||(!mime.startsWith('text/')&&!['application/json','application/xml'].includes(mime)))throw Error('artifact_text_unsupported');
       if(file.status!=='ready')throw Error('artifact_not_found');
       if(file.local_state!=='present')throw Error('artifact_restore_required');
       rejectTaskOutputSymlinks(path);
-      return {file,source:{path,size,sha256}};
+      return {file,source:{path,size,sha256},document:undefined};
     });
     this.markContentRead(id,ownerId);return selected;
   }
@@ -1294,13 +1302,24 @@ export class ArtifactService {
   async textPage(id:string,ownerId:string,query:Record<string,unknown>,signal?:AbortSignal){
     const identifier=/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/;
     const conversationId=query.conversation_id,runId=query.run_id,version=Number(query.version),sha256=query.sha256,offset=Number(query.offset_chars??0),partIndex=query.part_index===undefined?undefined:Number(query.part_index),groupSha=query.group_sha256;
-    if(Object.keys(query).some(key=>!['conversation_id','run_id','version','sha256','offset_chars','part_index','group_sha256'].includes(key))
+    if(Object.keys(query).some(key=>!['conversation_id','run_id','version','sha256','offset_chars','part_index','group_sha256','document_job_id','document_result_sha256','text_sha256'].includes(key))
       ||!identifier.test(id)||typeof conversationId!=='string'||!identifier.test(conversationId)
       ||runId!==undefined&&(typeof runId!=='string'||!identifier.test(runId))
       ||typeof sha256!=='string'||!/^[a-f0-9]{64}$/.test(sha256)||!Number.isSafeInteger(version)||version<1
       ||!Number.isSafeInteger(offset)||offset<0
       ||(partIndex===undefined?groupSha!==undefined:!Number.isSafeInteger(partIndex)||partIndex<1||partIndex>50||version!==1||typeof groupSha!=='string'||!/^[a-f0-9]{64}$/.test(groupSha)))throw Error('artifact_text_query_invalid');
-    const selected=this.textSource(id,ownerId,conversationId,version,sha256,runId as string|undefined,partIndex,groupSha as string|undefined);
+    const documentJob=query.document_job_id,documentSha=query.document_result_sha256,textSha=query.text_sha256;
+    if(documentJob!==undefined&&(typeof documentJob!=='string'||!identifier.test(documentJob)||typeof documentSha!=='string'||!/^[a-f0-9]{64}$/.test(documentSha)
+      ||typeof textSha!=='string'||!/^[a-f0-9]{64}$/.test(textSha)||partIndex!==undefined)
+      ||documentJob===undefined&&(documentSha!==undefined||textSha!==undefined))throw Error('artifact_text_query_invalid');
+    const document=documentJob===undefined?undefined:{jobId:documentJob as string,resultSha:documentSha as string};
+    const selected=this.textSource(id,ownerId,conversationId,version,sha256,runId as string|undefined,partIndex,groupSha as string|undefined,document);
+    if(selected.document){
+      signal?.throwIfAborted();
+      if(selected.document.text_sha256!==textSha)throw Error('artifact_text_source_changed');
+      const {text,...metadata}=selected.document,page=readRetainedArtifactTextPage(text,offset);
+      return {conversation_id:conversationId,artifact_id:id,version,sha256,file_name:selected.file.file_name,size_bytes:selected.source.size,...metadata,...page,execution_authorized:false};
+    }
     if(offset>selected.source.size)throw Error('artifact_text_query_invalid');
     const page=await readVerifiedArtifactTextPage(selected.source,offset,signal);
     signal?.throwIfAborted();
@@ -1313,9 +1332,10 @@ export class ArtifactService {
     signal?.throwIfAborted();
     const identifier=/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/;
     const q=typeof query.q==='string'?query.q.trim():'',runId=query.run_id,cursorId=query.cursor_artifact_id,cursorVersion=Number(query.cursor_version);
+    const documents=query.document_protocol===1||query.document_protocol==='1';
     const parts=query.parts_protocol===1||query.parts_protocol==='1',cursorPart=query.cursor_part_index===undefined?undefined:Number(query.cursor_part_index),cursorGroup=query.cursor_group_sha256;
-    if(!q||q.length>200||!identifier.test(conversationId)||Object.keys(query).some(key=>!['q','run_id','cursor_artifact_id','cursor_version','parts_protocol','cursor_part_index','cursor_group_sha256'].includes(key))
-      ||query.parts_protocol!==undefined&&!parts||runId!==undefined&&(typeof runId!=='string'||!identifier.test(runId))
+    if(!q||q.length>200||!identifier.test(conversationId)||Object.keys(query).some(key=>!['q','run_id','cursor_artifact_id','cursor_version','parts_protocol','cursor_part_index','cursor_group_sha256','document_protocol'].includes(key))
+      ||query.document_protocol!==undefined&&!documents||query.parts_protocol!==undefined&&!parts||runId!==undefined&&(typeof runId!=='string'||!identifier.test(runId))
       ||(cursorId===undefined)!==(query.cursor_version===undefined)
       ||cursorId!==undefined&&(typeof cursorId!=='string'||!identifier.test(cursorId)||!Number.isSafeInteger(cursorVersion)||cursorVersion<1)
       ||(cursorPart===undefined?cursorGroup!==undefined:!parts||cursorId===undefined||!Number.isSafeInteger(cursorPart)||cursorPart<1||cursorPart>50||typeof cursorGroup!=='string'||!/^[a-f0-9]{64}$/.test(cursorGroup)))throw Error('artifact_text_query_invalid');
@@ -1361,13 +1381,17 @@ export class ArtifactService {
           partIndex=1;groupSha=group.sha256;more||=group.items.length>1;
         }
         const part=partIndex===undefined?undefined:this.part(entry.id,ownerId,partIndex,entry.version),contentSha=part?.sha256??entry.sha256;
-        const selected=this.textSource(entry.id,ownerId,conversationId,entry.version,contentSha,runId as string|undefined,partIndex,groupSha);
-        const found=await searchVerifiedArtifactText(selected.source,q,signal);
+        const selected=this.textSource(entry.id,ownerId,conversationId,entry.version,contentSha,runId as string|undefined,partIndex,groupSha,documents?{}:undefined);
+        const found=selected.document?searchRetainedArtifactText(selected.document.text,q):await searchVerifiedArtifactText(selected.source,q,signal);
         signal?.throwIfAborted();
-        const current=this.textSource(entry.id,ownerId,conversationId,entry.version,contentSha,runId as string|undefined,partIndex,groupSha);
+        const current=this.textSource(entry.id,ownerId,conversationId,entry.version,contentSha,runId as string|undefined,partIndex,groupSha,
+          selected.document?{jobId:selected.document.document_job_id,resultSha:selected.document.document_result_sha256}:undefined);
+        if(current.document?.text_sha256!==selected.document?.text_sha256)throw Error('artifact_text_source_changed');
         if(current.source.path!==selected.source.path||current.source.size!==selected.source.size)throw Error('artifact_text_source_changed');
         if(found.match)items.push({artifact_id:entry.id,version:entry.version,sha256:contentSha,file_name:current.file.file_name,
-          size_bytes:current.source.size,created_at:entry.created_at,...(partIndex===undefined?{}:{part_index:partIndex,group_sha256:groupSha}),...found.match});
+          size_bytes:current.source.size,created_at:entry.created_at,...(partIndex===undefined?{}:{part_index:partIndex,group_sha256:groupSha}),
+          ...(current.document?{document_job_id:current.document.document_job_id,document_result_sha256:current.document.document_result_sha256,
+            text_sha256:current.document.text_sha256,text_total_chars:current.document.text_total_chars,source_truncated:current.document.source_truncated}:{}),...found.match});
       }catch(error){
         signal?.throwIfAborted();
         const code=error instanceof Error?error.message:'',io=(error as NodeJS.ErrnoException)?.code;

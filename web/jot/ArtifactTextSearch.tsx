@@ -29,7 +29,7 @@ export default function ArtifactTextSearch({conversationId,runId,query}:{convers
    await abortableDelay(300,signal);
    let boundary=before;const seen=new Set<string>();
    while(!signal.aborted){
-    const params=new URLSearchParams({q,parts_protocol:'1',...(runId?{run_id:runId}:{}),...(boundary?{cursor_artifact_id:boundary.artifact_id,cursor_version:String(boundary.version),...(boundary.part_index===undefined?{}:{cursor_part_index:String(boundary.part_index),cursor_group_sha256:boundary.group_sha256!})}:{})});
+    const params=new URLSearchParams({q,parts_protocol:'1',document_protocol:'1',...(runId?{run_id:runId}:{}),...(boundary?{cursor_artifact_id:boundary.artifact_id,cursor_version:String(boundary.version),...(boundary.part_index===undefined?{}:{cursor_part_index:String(boundary.part_index),cursor_group_sha256:boundary.group_sha256!})}:{})});
     const page=await request<ArtifactTextSearchPage>(`/conversations/${encodeURIComponent(conversationId)}/artifact-search?${params}`,'GET',undefined,undefined,signal,120000);
     if(signal.aborted)return;
     if(taskDraftScope()!==owner||!page||page.conversation_id!==conversationId||page.run_id!==runId||page.q!==q||page.execution_authorized!==false
@@ -39,11 +39,17 @@ export default function ArtifactTextSearch({conversationId,runId,query}:{convers
      ||page.next_cursor!==undefined&&(!validCursor(page.next_cursor)||page.scanned_versions!==1||seen.has(cursorKey(page.next_cursor))
       ||boundary!==undefined&&cursorKey(page.next_cursor)===cursorKey(boundary)))throw Error('原文件搜索分页或范围尚未确认');
     for(const hit of page.items){
+     const textSize=hit.document_job_id===undefined?hit.size_bytes:hit.text_total_chars!;
      if(!validCursor(hit)||typeof hit.sha256!=='string'||!sha.test(hit.sha256)||typeof hit.file_name!=='string'
       ||!Number.isSafeInteger(hit.size_bytes)||hit.size_bytes<0||typeof hit.created_at!=='string'||!Number.isFinite(Date.parse(hit.created_at))
-      ||!Number.isSafeInteger(hit.offset_chars)||hit.offset_chars<0||hit.offset_chars>hit.size_bytes
+      ||(hit.document_job_id===undefined
+       ?hit.document_result_sha256!==undefined||hit.text_sha256!==undefined||hit.text_total_chars!==undefined||hit.source_truncated!==undefined
+       :typeof hit.document_job_id!=='string'||!id.test(hit.document_job_id)||hit.part_index!==undefined
+        ||typeof hit.document_result_sha256!=='string'||!sha.test(hit.document_result_sha256)||typeof hit.text_sha256!=='string'||!sha.test(hit.text_sha256)
+        ||!Number.isSafeInteger(hit.text_total_chars)||Number(hit.text_total_chars)<0||Number(hit.text_total_chars)>200000||typeof hit.source_truncated!=='boolean')
+      ||!Number.isSafeInteger(hit.offset_chars)||hit.offset_chars<0||hit.offset_chars>textSize
       ||!Number.isSafeInteger(hit.match_offset_chars)||hit.match_offset_chars<hit.offset_chars||hit.match_offset_chars-hit.offset_chars>61
-      ||typeof hit.match_text!=='string'||!hit.match_text.length||hit.match_text.length>200||hit.match_offset_chars+hit.match_text.length>hit.size_bytes
+      ||typeof hit.match_text!=='string'||!hit.match_text.length||hit.match_text.length>200||hit.match_offset_chars+hit.match_text.length>textSize
       ||typeof hit.excerpt!=='string'||hit.excerpt.length>400
       ||hit.excerpt.slice(hit.match_offset_chars-hit.offset_chars,hit.match_offset_chars-hit.offset_chars+hit.match_text.length)!==hit.match_text
       ||value.items.some(item=>cursorKey(item)===cursorKey(hit)))throw Error('原文件搜索命中来源尚未确认');
@@ -65,11 +71,11 @@ export default function ArtifactTextSearch({conversationId,runId,query}:{convers
    <h4>原文件版本正文</h4>
    <button type="button" onClick={()=>{setCursor({identity,previous:[]});setRevision(value=>value+1);}}>刷新文件搜索</button>
    <p role="status">{current?.loading?'正在读取并检索原文件':`本批命中 ${current?.items.length??0} 个文件版本/分卷`} · 本批已检查 {current?.scanned??0} 个原版本/分卷</p>
-   <small>检索本地可用的文本文件原版本及单卷，每个来源列出首处命中。成员范围只包含原运行实际引用或产生的版本。</small>
+   <small>检索本地文本原版本、单卷和已有的文档预览，每个来源列出首处命中。成员范围只包含原运行实际引用或产生的版本。</small>
    {Boolean(current?.unavailable)&&<p role="status">本批有 {current!.unavailable} 个版本/分卷暂不可读取或未通过内容核对。</p>}
-   {Boolean(current?.skipped)&&<p role="status">本批有 {current!.skipped} 个版本/分卷为其他格式，未计入正文匹配。</p>}
+   {Boolean(current?.skipped)&&<p role="status">本批有 {current!.skipped} 个版本/分卷为其他格式或尚无已保存文档预览，未计入正文匹配。</p>}
    <ol>{current?.items.map(item=><li key={cursorKey(item)}>
-    <p>{item.file_name} · 版本 {item.version}{item.part_index===undefined?'':` · 第 ${item.part_index} 卷`}</p><p className="jot-history-search-excerpt">{item.excerpt}</p>
+    <p>{item.file_name} · 版本 {item.version}{item.part_index===undefined?'':` · 第 ${item.part_index} 卷`}{item.document_job_id?' · 已保存文档预览':''}</p><p className="jot-history-search-excerpt">{item.excerpt}</p>
     <button type="button" onClick={()=>{setSelected({identity:batchIdentity,hit:item});setFileTarget(undefined);}}>查看命中文本</button>
     <button type="button" onClick={()=>{setSelected({identity:batchIdentity,hit:item});setFileTarget({kind:'file',artifactId:item.artifact_id,label:item.file_name,version:item.version,sha256:item.sha256,...(item.part_index===undefined?{}:{partIndex:item.part_index})});}}>查看文件与版本</button>
    </li>)}</ol>

@@ -68,3 +68,16 @@ export async function readVerifiedArtifactTextPage(source:Source,offset:number,s
  return {offset_chars:offset,total_chars:total,text:window.slice(offset-start,end-start),
   ...(end<total?{next_offset_chars:end}:{})};
 }
+
+/** Same literal matching and UTF-16 boundaries for already-proven retained text. */
+export function searchRetainedArtifactText(text:string,q:string){
+ const pattern=new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'iu'),found=pattern.exec(text);
+ if(!found)return {total_chars:text.length};
+ const offset=boundary(text,Math.max(0,found.index-60)),end=boundary(text,Math.min(text.length,found.index+found[0].length+60));
+ return {total_chars:text.length,match:{offset_chars:offset,match_offset_chars:found.index,match_text:found[0],excerpt:text.slice(offset,end)}};
+}
+export function readRetainedArtifactTextPage(text:string,offset:number){
+ if(offset>text.length||boundary(text,offset)!==offset)throw Error('artifact_text_query_invalid');
+ const end=boundary(text,Math.min(offset+PAGE_SIZE,text.length));
+ return {offset_chars:offset,total_chars:text.length,text:text.slice(offset,end),...(end<text.length?{next_offset_chars:end}:{})};
+}
