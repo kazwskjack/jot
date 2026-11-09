@@ -15,7 +15,9 @@ export function checkoutReferencePlan(witness:GitCheckoutReviewWitness):GitCheck
  const local=target.kind==='local',prefix=local?'refs/heads/':'refs/remotes/';
  if(!target.ref.startsWith(prefix)||target.name!==target.ref.slice(prefix.length))throw Error('git_checkout_evidence_invalid');
  if(local&&(target.object_type!=='commit'||target.oid!==target.checkout_oid))return{state:'policy_required',reason:'local_non_commit_target'};
- const after={oid:target.checkout_oid,branch:local?target.name:null,detached:!local};
+ const terminal=source.chains?.target.nodes.at(-1)?.path;
+ const branch=terminal?.startsWith('refs/heads/')?terminal.slice('refs/heads/'.length):target.name;
+ const after={oid:target.checkout_oid,branch:local?branch:null,detached:!local};
  const body=Buffer.from(local?'ref: '+target.ref+'\n':target.checkout_oid+'\n','utf8');
  const from=head.detached?head.oid:head.branch,to=local?target.name:target.ref;
  return{state:'planned',protocol:1,mode:local?'branch':'detached',head:after,
@@ -46,9 +48,11 @@ export function checkoutMetadataPublication(witness:GitCheckoutReviewWitness):Gi
  const source=witness.preview.reference_source,plan=witness.reference_plan,log=witness.log_after;
  if(!source?.layout||!source.head_file.physical)return{state:'not_confirmed',reason:'layout_required'};
  if(!plan||plan.state!=='planned')return{state:'not_confirmed',reason:'reference_policy_required'};
- if(witness.target.symbolic_target)return{state:'not_confirmed',reason:'reference_policy_required'};
- const oldHead=Buffer.from('ref: refs/heads/'+witness.head.branch+'\n','utf8');
- if(!witness.head.detached&&createHash('sha256').update(oldHead).digest('hex')!==source.head_file.sha256)return{state:'not_confirmed',reason:'reference_policy_required'};
+ if(!source.chains){
+  if(witness.target.symbolic_target)return{state:'not_confirmed',reason:'reference_policy_required'};
+  const oldHead=Buffer.from('ref: refs/heads/'+witness.head.branch+'\n','utf8');
+  if(!witness.head.detached&&createHash('sha256').update(oldHead).digest('hex')!==source.head_file.sha256)return{state:'not_confirmed',reason:'reference_policy_required'};
+ }
  if(!log||log.state==='not_confirmed')return{state:'not_confirmed',reason:'log_after_required'};
  type File=Extract<GitCheckoutMetadataPublication,{state:'planned'}>['files'][number];
  const permissions=(file:File['before']):File['permissions']=>file.physical
@@ -61,7 +65,9 @@ export function checkoutMetadataPublication(witness:GitCheckoutReviewWitness):Gi
   {scope:'git',path:'index.lock'},{scope:'common',path:'packed-refs.lock'},{scope:'common',path:'config.lock'},
   ...(source.configuration.worktree_enabled?[{scope:'git' as const,path:'config.worktree.lock'}]:[]),
   ...(source.source_ref?[{scope:'common' as const,path:source.source_ref.ref+'.lock'}]:[]),
-  {scope:'common',path:witness.target.ref+'.lock'},...files.map(file=>({scope:file.scope,path:file.path+'.lock'}))
+  {scope:'common',path:witness.target.ref+'.lock'},
+  ...(source.chains?[...source.chains.head.nodes,...source.chains.target.nodes].filter(node=>node.path!=='HEAD').map(node=>({scope:node.scope,path:node.path+'.lock'})):[]),
+  ...files.map(file=>({scope:file.scope,path:file.path+'.lock'}))
  ];
  const unique=new Map(locks.map(lock=>[lock.scope+'\0'+lock.path,lock]));
  return{state:'planned',protocol:1,execution_authorized:false,files,locks:[...unique.values()]};

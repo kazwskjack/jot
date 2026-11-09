@@ -4,7 +4,7 @@ import type {GitInitializationWitness,GitInitializationFile,GitReinitializationL
 import {planReinitializationConfiguration} from './reinitialization-configuration.ts';
 import {planCreateBranchConfiguration} from './branch-configuration.ts';
 import {validGitReference} from './references.ts';
-import type {GitCheckoutPhysical,GitCheckoutMetadataFile,GitCheckoutMetadataLayout,GitCheckoutLogAfter,GitCheckoutReviewWitness,GitCheckoutReferenceSource,GitCheckoutBefore,GitCheckoutBeforeState,GitCheckoutPreview,GitBranchInventory,GitCreateBranchWitness,GitBranchLogFile,GitBranchLogWitness} from '../../contracts/types.ts';
+import type {GitCheckoutReferenceChain,GitCheckoutPhysical,GitCheckoutMetadataFile,GitCheckoutMetadataLayout,GitCheckoutLogAfter,GitCheckoutReviewWitness,GitCheckoutReferenceSource,GitCheckoutBefore,GitCheckoutBeforeState,GitCheckoutPreview,GitBranchInventory,GitCreateBranchWitness,GitBranchLogFile,GitBranchLogWitness} from '../../contracts/types.ts';
 import {createHash} from 'node:crypto';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {constants} from 'node:fs';
@@ -854,7 +854,7 @@ export class GitRepositoryInspection{
   }finally{await guard();}
  }
  /** Fixed before-state metadata for the original checkout review and later publication. */
- protected async checkoutReferenceSource(context:ReadContext,snapshot:GitSnapshot,targetRef:string,signal?:AbortSignal):Promise<GitCheckoutReferenceSource>{
+ protected async checkoutReferenceSource(context:ReadContext,snapshot:GitSnapshot,targetRef:string,targetOid:string,signal?:AbortSignal):Promise<GitCheckoutReferenceSource>{
   const directory=(path:string)=>this.checkoutDirectoryPhysical(path,signal);
   const roots={root:await directory(this.root),git:await directory(this.gitDirectory),common:await directory(this.commonDirectory)};
   if(!roots.root||!roots.git||!roots.common)throw Error('git_snapshot_changed');
@@ -865,7 +865,7 @@ export class GitRepositoryInspection{
     const path=parts.slice(0,count).join('/'),key=scope+'\0'+path;
     if(!parents.has(key))parents.set(key,{scope,path,before:await directory(join(root,path))});
    }
-   if(parents.size>4096)throw Error('git_metadata_limit');
+   if(parents.size>16384)throw Error('git_metadata_limit');
    const path=join(root,name);
    try{
     await this.directory(dirname(path));const before=await lstat(path),body=await this.bytes(path,max,witness(before)),after=await lstat(path);
@@ -875,10 +875,44 @@ export class GitRepositoryInspection{
   };
   const sourceRef=snapshot.head.detached?null:'refs/heads/'+snapshot.head.branch;
   if(!validGitReference(targetRef)||sourceRef!==null&&!validGitReference(sourceRef)||!context.branchLogPolicy)throw Error('git_checkout_evidence_invalid');
+  const trace=async(start:string,expected:string|null)=>{
+   const rows:Array<{path:string;symbolic_target:string|null}>=[],seen=new Set<string>();let path=start;
+   for(let depth=0;depth<8;depth++){
+    if(path!=='HEAD'&&!/^refs\/(?:heads|remotes)\//.test(path))return null;
+    if(seen.has(path))throw Error('git_checkout_evidence_invalid');seen.add(path);
+    const result=await readGit(this.executable!,this.root,context.directory,['symbolic-ref','--quiet','--no-recurse',path],this.limits,signal,join(this.commonDirectory,'objects'));
+    if(result.code===129)return null;
+    if(result.code!==0&&result.code!==1)throw Error('git_read_unavailable');
+    const next:string|null=result.code===1?null:text(result.bytes).trim();
+    if(next!==null&&!validGitReference(next))throw Error('git_checkout_evidence_invalid');
+    rows.push({path,symbolic_target:next});
+    if(next===null){
+     const resolved=await this.run(context,['rev-parse','--verify','--quiet',start],signal,true);
+     const oid=resolved.code===1?null:text(resolved.bytes).trim();
+     if(oid!==expected)throw Error('git_snapshot_changed');return rows;
+    }
+    path=next;
+   }
+   throw Error('git_checkout_evidence_invalid');
+  };
+  const headRows=await trace('HEAD',snapshot.head.oid),targetRows=await trace(targetRef,targetOid);
+  const complete=headRows!==null&&targetRows!==null&&(snapshot.head.detached?headRows.length===1:headRows.at(-1)?.path===sourceRef)
+   &&(!targetRef.startsWith('refs/heads/')||targetRows.at(-1)?.path.startsWith('refs/heads/'));
+  const capture=async(rows:NonNullable<typeof headRows>,oid:string|null):Promise<GitCheckoutReferenceChain>=>{
+   const nodes:GitCheckoutReferenceChain['nodes']=[];
+   for(const row of rows){
+    const scope=row.path==='HEAD'?'git':'common';
+    const fact=await file(scope,row.path,32*1024*1024);
+    if(row.symbolic_target!==null&&fact.sha256===null)throw Error('git_snapshot_changed');
+    nodes.push({scope,path:row.path,file:fact,symbolic_target:row.symbolic_target});
+   }
+   return{nodes,oid};
+  };
+  const chains=complete?{head:await capture(headRows!,snapshot.head.oid),target:await capture(targetRows!,targetOid)}:null;
   const headFile=await file('git','HEAD',32*1024*1024);
   if(headFile.sha256===null)throw Error('git_snapshot_changed');
   const source={
-   protocol:1 as const,source_metadata_sha256:context.metadata,head_file:headFile,
+   protocol:1 as const,source_metadata_sha256:context.metadata,chains,head_file:headFile,
    head_log:await file('git','logs/HEAD',32*1024*1024),
    source_ref:sourceRef===null?null:{ref:sourceRef,file:await file('common',sourceRef,32*1024*1024)},
    target_ref:{ref:targetRef,file:await file('common',targetRef,32*1024*1024)},
@@ -949,7 +983,7 @@ export class GitRepositoryInspection{
    if(targetRef!==undefined){
     const target=branches.find(branch=>branch.ref===targetRef);if(!target)throw Error('git_checkout_target_unavailable');
     preview=await this.checkoutPreview(context,snapshot,target,format,signal);
-    preview.reference_source=await this.checkoutReferenceSource(context,snapshot,targetRef,signal);
+    preview.reference_source=await this.checkoutReferenceSource(context,snapshot,targetRef,target.oid,signal);
    }
    if((await this.inspectContext(context,signal)).snapshot_id!==snapshotId)throw Error('git_snapshot_changed');
    if((await this.anchors(signal)).metadata!==context.metadata)throw Error('git_snapshot_changed');

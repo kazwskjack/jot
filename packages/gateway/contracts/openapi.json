@@ -41077,6 +41077,29 @@
           },
           "layout": {
             "$ref": "#/components/schemas/GitCheckoutMetadataLayout"
+          },
+          "chains": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "head": {
+                    "$ref": "#/components/schemas/GitCheckoutReferenceChain"
+                  },
+                  "target": {
+                    "$ref": "#/components/schemas/GitCheckoutReferenceChain"
+                  }
+                },
+                "required": [
+                  "head",
+                  "target"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -41372,7 +41395,7 @@
           },
           "parents": {
             "type": "array",
-            "maxItems": 4096,
+            "maxItems": 16384,
             "items": {
               "type": "object",
               "additionalProperties": false,
@@ -41581,7 +41604,7 @@
               "locks": {
                 "type": "array",
                 "minItems": 1,
-                "maxItems": 8,
+                "maxItems": 24,
                 "items": {
                   "type": "object",
                   "additionalProperties": false,
@@ -41613,6 +41636,93 @@
               "locks"
             ]
           }
+        ]
+      },
+      "GitCheckoutReferenceChain": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "nodes": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "scope": {
+                  "enum": [
+                    "git",
+                    "common"
+                  ]
+                },
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1024,
+                  "pattern": "^(?:HEAD$|refs/(?:heads|remotes)/)"
+                },
+                "file": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "sha256": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "size": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 33554432
+                    },
+                    "physical": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/GitCheckoutPhysical"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "sha256",
+                    "size"
+                  ]
+                },
+                "symbolic_target": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1,
+                  "maxLength": 1024,
+                  "pattern": "^refs/(?:heads|remotes)/"
+                }
+              },
+              "required": [
+                "scope",
+                "path",
+                "file",
+                "symbolic_target"
+              ]
+            }
+          },
+          "oid": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$"
+          }
+        },
+        "required": [
+          "nodes",
+          "oid"
         ]
       },
       "GitCheckoutReviewPrepare": {

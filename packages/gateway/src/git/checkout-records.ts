@@ -35,8 +35,31 @@ export function readGitCheckoutIntentSource(row:GitBranchIntentRecord,validate:(
     ||!source.configuration.worktree_enabled&&(source.configuration.worktree.sha256!==null||source.configuration.worktree.size!==0)
     ||source.log_policy.configuration==='false'&&source.log_policy.enabled
     ||['true','always'].includes(source.log_policy.configuration)&&!source.log_policy.enabled)throw Error();
+   if(source.chains){
+    const validateChain=(chain:NonNullable<typeof source.chains>['head'],start:string,expectedOid:string|null)=>{
+     const seen=new Set<string>();let expected=start;
+     if(chain.oid!==expectedOid)throw Error();
+     for(const [index,node] of chain.nodes.entries()){
+      if(node.path!==expected||seen.has(node.path)||node.scope!==(node.path==='HEAD'?'git':'common')
+       ||node.path!=='HEAD'&&(!validGitReference(node.path)||!/^refs\/(?:heads|remotes)\//.test(node.path)))throw Error();
+      seen.add(node.path);
+      if(index===chain.nodes.length-1){if(node.symbolic_target!==null)throw Error();}
+      else{if(!node.symbolic_target||node.file.sha256===null)throw Error();expected=node.symbolic_target;}
+     }
+    };
+    validateChain(source.chains.head,'HEAD',witness.head.oid);validateChain(source.chains.target,input.target_ref,witness.target.oid);
+    const headFirst=source.chains.head.nodes[0]!,headLast=source.chains.head.nodes.at(-1)!,targetFirst=source.chains.target.nodes[0]!;
+    if(canonicalJson(headFirst.file)!==canonicalJson(source.head_file)||canonicalJson(targetFirst.file)!==canonicalJson(source.target_ref.file)
+     ||witness.head.detached&&source.chains.head.nodes.length!==1
+     ||source.source_ref&&(headLast.path!==source.source_ref.ref||canonicalJson(headLast.file)!==canonicalJson(source.source_ref.file))
+     ||witness.head.oid===null&&headLast.file.sha256!==null
+     ||witness.target.kind==='local'&&!source.chains.target.nodes.at(-1)!.path.startsWith('refs/heads/')
+     ||!!witness.target.symbolic_target!==(targetFirst.symbolic_target!==null)
+     ||witness.target.symbolic_target&&!source.chains.target.nodes.slice(1).some(node=>node.path===witness.target.symbolic_target))throw Error();
+   }
    const files=[source.head_file,source.head_log,source.target_ref.file,source.target_log,source.packed_refs,
-    source.configuration.common,source.configuration.worktree,...(source.source_ref?[source.source_ref.file]:[])];
+    source.configuration.common,source.configuration.worktree,...(source.source_ref?[source.source_ref.file]:[]),
+    ...(source.chains?[...source.chains.head.nodes,...source.chains.target.nodes].map(node=>node.file):[])];
    for(const fact of files){
     if(fact.sha256===null&&fact.size!==0||fact.physical!==undefined&&(fact.physical===null)!==(fact.sha256===null))throw Error();
     if(source.layout&&fact.physical===undefined)throw Error();
@@ -45,7 +68,8 @@ export function readGitCheckoutIntentSource(row:GitBranchIntentRecord,validate:(
     const names=[{scope:'git',path:'HEAD'},{scope:'git',path:'logs/HEAD'},{scope:'common',path:input.target_ref},
      {scope:'common',path:'logs/'+input.target_ref},{scope:'common',path:'packed-refs'},{scope:'common',path:'config'},
      ...(source.source_ref?[{scope:'common',path:source.source_ref.ref}]:[]),
-     ...(source.configuration.worktree_enabled?[{scope:'git',path:'config.worktree'}]:[])];
+     ...(source.configuration.worktree_enabled?[{scope:'git',path:'config.worktree'}]:[]),
+     ...(source.chains?[...source.chains.head.nodes,...source.chains.target.nodes].map(node=>({scope:node.scope,path:node.path})):[])];
     const expected=new Set<string>();
     for(const name of names){
      const parts=name.path.split('/');

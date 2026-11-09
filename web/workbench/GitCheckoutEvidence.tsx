@@ -23,6 +23,9 @@ export default function GitCheckoutEvidence({preview,target,onRetry}:{preview:Gi
      <ul aria-label="元数据父目录">{reference.layout.parents.slice(layoutPage*50,(layoutPage+1)*50).map(parent=><li key={parent.scope+'\0'+parent.path}>{parent.scope==='git'?'当前 Git 目录':'公共 Git 目录'} · <code>{parent.path}</code>{parent.before?<span> · 节点 <code>{parent.before.identity}</code> · 模式 <code>{parent.before.mode.toString(8).padStart(4,'0')}</code> · UID {parent.before.uid} · GID {parent.before.gid}</span>:<span> · 目录尚不存在</span>}</li>)}</ul>
      {reference.layout.parents.length>50&&<nav className="wb-actions" aria-label="元数据父目录分页"><button type="button" disabled={layoutPage===0} onClick={()=>setLayoutPage(layoutPage-1)}>上一页</button><span role="status">第 {layoutPage+1} 页，共 {Math.ceil(reference.layout.parents.length/50)} 页</span><button type="button" disabled={(layoutPage+1)*50>=reference.layout.parents.length} onClick={()=>setLayoutPage(layoutPage+1)}>下一页</button></nav>}
     </section>:<p role="status">此历史预览尚无物理权限与目录凭证。</p>}
+    {reference.chains?<section aria-label="引用链凭证"><h5>引用链凭证</h5>
+     {[{name:'原 HEAD',chain:reference.chains.head},{name:'切换目标',chain:reference.chains.target}].map(({name,chain})=><div key={name}><h6>{name}</h6><ol>{chain.nodes.map(node=><li key={node.scope+'\0'+node.path}><code>{node.path}</code> → <code>{node.symbolic_target??chain.oid??'未出生分支'}</code><span> · {node.file.sha256===null?'无松散引用文件':'文件 SHA-256 '}</span>{node.file.sha256&&<code>{node.file.sha256}</code>}</li>)}</ol></div>)}
+    </section>:<p role="status">{reference.chains===null?'引用链尚未完整确认，保留待补策略状态。':'此历史预览尚无引用链凭证。'}</p>}
     <p>日志配置 {{default:'默认',true:'启用',false:'关闭',always:'全部启用'}[reference.log_policy.configuration]} · 有效策略{reference.log_policy.enabled?'启用':'关闭'}。工作区独立配置{reference.configuration.worktree_enabled?'启用':'关闭'}。</p>
     <p>松散引用文件缺失时，逻辑引用仍可能来自打包存储。日志及跟踪写入方案仍需完整审核。</p>
    </section>:<p role="status">此历史预览尚无引用与配置原状态凭证。</p>}

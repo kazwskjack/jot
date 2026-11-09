@@ -35,8 +35,9 @@ export type GitCheckoutBeforeState={sha256:string;entries:GitCheckoutBefore[]};
 export type GitCheckoutPhysical=GitReinitializationDirectory&{stat_sha256:string};
 export type GitCheckoutMetadataFile=GitBranchLogFile&{physical?:GitCheckoutPhysical|null};
 export type GitCheckoutMetadataLayout={root:GitCheckoutPhysical;git:GitCheckoutPhysical;common:GitCheckoutPhysical;parents:Array<{scope:'git'|'common';path:string;before:GitCheckoutPhysical|null}>};
+export type GitCheckoutReferenceChain={nodes:Array<{scope:'git'|'common';path:string;file:GitCheckoutMetadataFile;symbolic_target:string|null}>;oid:string|null};
 export type GitCheckoutReferenceSource={
- layout?:GitCheckoutMetadataLayout;protocol:1;source_metadata_sha256:string;head_file:GitCheckoutMetadataFile;head_log:GitCheckoutMetadataFile;
+ chains?:{head:GitCheckoutReferenceChain;target:GitCheckoutReferenceChain}|null;layout?:GitCheckoutMetadataLayout;protocol:1;source_metadata_sha256:string;head_file:GitCheckoutMetadataFile;head_log:GitCheckoutMetadataFile;
  source_ref:{ref:string;file:GitCheckoutMetadataFile}|null;target_ref:{ref:string;file:GitCheckoutMetadataFile};
  target_log:GitCheckoutMetadataFile;packed_refs:GitCheckoutMetadataFile;
  configuration:{common:GitCheckoutMetadataFile;worktree:GitCheckoutMetadataFile;worktree_enabled:boolean};
