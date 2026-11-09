@@ -448,3 +448,37 @@ source development only under the user's no-test/no-build instruction.
 Git initialization argument and generated configuration behavior follows the
 [official init documentation](https://git-scm.com/docs/git-init) and
 [Git setup implementation](https://github.com/git/git/blob/master/setup.c).
+
+## Initialization typed journal source increment
+
+The original preparation table now has a strict initialization reader for the
+allocated private namespace. The original dispatch table reader validates the
+full generated-file evidence against that exact preparation, immutable approved
+source, execution/review digests and original producer lease owner/generation.
+Protocol-7 producer records use the existing producer and finish namespaces.
+
+Initialization outcomes retain an exact host-private wrapper in the original
+outcome row. It binds the execution/request, public applied receipt and original
+publication proof. The publication decoder checks evidence digest, fixed directory
+paths/modes, unique physical identities and the original internal directory when
+one existed. The public receipt contains the reviewed initialization facts and
+evidence SHA-256. Physical root and directory identities stay in the private proof.
+
+Original status/history readers now distinguish pending, unknown after preparation
+or dispatch, and a strictly proven applied outcome. Applied and acknowledged closed
+outcomes cannot coexist. Shared applied/resolution settlement readers recognize the
+original protocol-7 record and use initialization-specific preparation/dispatch
+facts. Reading them still requires the original native drain path before release.
+
+The applied contract is paired in JSON/YAML and nested result, inspection, control,
+status, resolution and history schemas. The original history/operation UI shows the
+applied evidence digest. Existing index/commit/branch receipt layouts are retained.
+Source-object comparison covered eight changed schema definitions.
+
+The original native writer and effect-bearing recovery still require connection,
+including outcome insertion, original custody/family/lease/producer lifecycle,
+interrupted observation/cleanup, settlement and trusted physical binding handover.
+Public initialization dispatch remains gated. Initialization creation UI and full
+reinitialization/linked/external/checkout/deletion/reference-backend scope continue.
+This increment followed the user's development-only instruction without runtime
+verification, tests, typechecks, builds, migrations or deployment.

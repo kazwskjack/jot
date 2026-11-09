@@ -111,6 +111,7 @@ export default function GitIndexOperation({project,review,acceptance,allowDispat
    {accepted.branch_metadata&&<p style={{overflowWrap:'anywhere'}}>日志身份 {accepted.branch_metadata.committer.name} &lt;{accepted.branch_metadata.committer.email}&gt; · {accepted.branch_metadata.committer.timestamp}。HEAD 日志{accepted.branch_metadata.logs.head?'追加':'跳过'}，分支日志{accepted.branch_metadata.logs.branch?'追加':'跳过'}。</p>}
    {accepted.branch_metadata?.configuration_sha256&&<p style={{overflowWrap:'anywhere'}}>自动 tracking 配置审核 SHA-256 <code>{accepted.branch_metadata.configuration_sha256}</code>。{accepted.branch_metadata.configuration_changed&&'计划写入新分支 tracking 配置。'}</p>}
   </>}
+  {status?.execution.action==='init'&&status.execution.state==='applied'&&<p style={{overflowWrap:'anywhere'}}>初始化写入证据 SHA-256 <code>{status.execution.evidence_sha256}</code>。</p>}
   {status?.execution.action==='create-branch'&&status.execution.state==='applied'&&<p style={{overflowWrap:'anywhere'}}>写入记录 SHA-256 <code>{status.execution.preparation_sha256}</code>。</p>}
   {accepted?.action==='commit'&&<p>提交受理已固定目标 <code>{accepted.target_ref}</code> 与父提交 <code>{accepted.expected_old_oid??'首个提交'}</code>。</p>}
   {status?.execution.action==='commit'&&status.execution.state==='applied'&&<p style={{overflowWrap:'anywhere'}}>提交 <code>{status.execution.commit_oid}</code>，暂存树 <code>{status.execution.tree_oid}</code>。</p>}

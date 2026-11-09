@@ -1,3 +1,4 @@
+import {readInitializationPreparation,readInitializationDispatch} from './initialization-journal.ts';
 import {readBranchPreparation,readBranchDispatch} from './branch-journal.ts';
 import {readCommitObjectPreparation,readCommitObjectDispatch} from './commit-journal.ts';
 import type {DatabaseSync} from 'node:sqlite';
@@ -8,7 +9,7 @@ import {readIndexProducerRecord} from './index-producers.ts';
 function original(db:DatabaseSync,source:WorkspaceOperationSource,recorded=false){
  if(source.operation_kind!=='git_index')throw Error('workspace_reservation_producer_unsettled');
  const row=recorded?readIndexExecutionRecord(db,source.owner_id,source.project_id,source.operation_id):readIndexExecutionRow(db,source.owner_id,source.project_id,source.operation_id);
- if(![4,5,6].includes(row.protocol)||row.binding_sha256!==source.binding_sha256)throw Error('workspace_reservation_producer_unsettled');
+ if(![4,5,6,7].includes(row.protocol)||row.binding_sha256!==source.binding_sha256)throw Error('workspace_reservation_producer_unsettled');
  readIndexAdmission(db,row);return row;
 }
 /** Original applied settlement uses the same journal/producer validation as
@@ -32,7 +33,7 @@ function resolutionEvidence(db:DatabaseSync,source:WorkspaceOperationSource,requ
   const row=original(db,source,recorded),control=db.prepare('SELECT * FROM wb_git_index_controls WHERE execution_id=? AND owner_id=? AND project_id=? AND request_id=?').get(row.execution_id,row.owner_id,row.project_id,request) as Control|undefined;if(!control)throw Error();
   const receipt=readIndexControlReceipt(db,row,control);if(!receipt)throw Error();
   const producer=readIndexProducerRecord(db,row),finish=db.prepare('SELECT record_sha256 FROM wb_git_index_producer_finishes WHERE execution_id=?').get(row.execution_id),saved=db.prepare('SELECT receipt_sha256 FROM wb_git_index_control_receipts WHERE control_id=?').get(control.control_id);
-  if(!saved||!producer&&(receipt.result.state!=='not_dispatched'||(row.action==='create-branch'?readBranchPreparation(db,row)||readBranchDispatch(db,row):row.action==='commit'?readCommitObjectPreparation(db,row)||readCommitObjectDispatch(db,row):readIndexPreparation(db,row)||readIndexDispatch(db,row))))throw Error();
+  if(!saved||!producer&&(receipt.result.state!=='not_dispatched'||(row.action==='init'?readInitializationPreparation(db,row)||readInitializationDispatch(db,row):row.action==='create-branch'?readBranchPreparation(db,row)||readBranchDispatch(db,row):row.action==='commit'?readCommitObjectPreparation(db,row)||readCommitObjectDispatch(db,row):readIndexPreparation(db,row)||readIndexDispatch(db,row))))throw Error();
   return{control_id:control.control_id,control_request_id:control.request_id,control_sha256:control.request_sha256,receipt_sha256:String(saved.receipt_sha256),producer_sha256:producer?.sha256??null,finish_sha256:finish?String(finish.record_sha256):null,result_state:receipt.result.state,cleanup:receipt.cleanup};
  }catch{throw Error('workspace_reservation_producer_unsettled')}
 }

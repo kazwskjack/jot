@@ -1,4 +1,4 @@
-import {initializationExecutionFacts,initializationClosedResult,readInitializationPendingResult} from './initialization-journal.ts';
+import {initializationExecutionFacts,initializationClosedResult,readInitializationRecordedResult} from './initialization-journal.ts';
 import {readGitInitializationExecutionSource} from './initialization-records.ts';
 import {branchExecutionFacts,branchClosedResult,readBranchRecordedResult} from './branch-journal.ts';
 import {readGitCreateBranchExecutionSource} from './branch-records.ts';
@@ -74,7 +74,11 @@ export function readIndexExecutionResult(db:DatabaseSync,owner:string,project:st
 /** Shared original result validation on an already selected immutable record.
  * No current-owner capability is created by inspecting historical drain facts. */
 export function readIndexRecordedResult(db:DatabaseSync,row:Row):ExecutionResult{
-  if(row.action==='init'){const pending=readInitializationPendingResult(db,row),disposition=readIndexDisposition(db,row);return disposition?initializationClosedResult(db,row,disposition):pending;}
+  if(row.action==='init'){
+   const result=readInitializationRecordedResult(db,row),disposition=readIndexDisposition(db,row);
+   if(disposition&&result.state==='applied')throw Error('git_execution_outcome_corrupt');
+   return disposition?initializationClosedResult(db,row,disposition):result;
+  }
   if(row.action==='create-branch'){
    const result=readBranchRecordedResult(db,row),disposition=readIndexDisposition(db,row);
    if(disposition&&result.state==='applied')throw Error('git_execution_outcome_corrupt');

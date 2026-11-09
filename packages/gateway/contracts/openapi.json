@@ -40212,6 +40212,7 @@
           "internal_ignore"
         ]
       },
+      "GitInitializationAppliedResult": {"type":"object","additionalProperties":false,"properties":{"execution_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"project_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"intent_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"request_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"action":{"const":"init"},"execution_authorized":{"const":false},"paths":{"type":"array","maxItems":0,"items":{"type":"string"}},"state":{"const":"applied"},"initial_branch":{"type":"string","minLength":1,"maxLength":1013},"object_format":{"enum":["sha1","sha256"]},"internal_ignore":{"type":"object","additionalProperties":false,"properties":{"path":{"const":".pilotdeck/.gitignore"},"before_sha256":{"anyOf":[{"type":"string","pattern":"^[a-f0-9]{64}$"},{"type":"null"}]},"after_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"size":{"type":"integer","minimum":1,"maximum":1048576},"changed":{"type":"boolean"}},"required":["path","before_sha256","after_sha256","size","changed"]},"evidence_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"}},"required":["execution_id","project_id","intent_id","request_id","action","execution_authorized","paths","state","initial_branch","object_format","internal_ignore","evidence_sha256"]},
       "GitInitializationClosedResult": {
         "type": "object",
         "additionalProperties": false,
@@ -40926,6 +40927,9 @@
           },
           {
             "$ref": "#/components/schemas/GitInitializationClosedResult"
+          },
+          {
+            "$ref": "#/components/schemas/GitInitializationAppliedResult"
           }
         ]
       },
@@ -42569,6 +42573,9 @@
               },
               {
                 "$ref": "#/components/schemas/GitInitializationClosedResult"
+              },
+              {
+                "$ref": "#/components/schemas/GitInitializationAppliedResult"
               }
             ]
           },
@@ -42798,6 +42805,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/GitInitializationClosedResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GitInitializationAppliedResult"
                   }
                 ]
               },
@@ -43084,6 +43094,9 @@
               },
               {
                 "$ref": "#/components/schemas/GitInitializationClosedResult"
+              },
+              {
+                "$ref": "#/components/schemas/GitInitializationAppliedResult"
               }
             ]
           },
@@ -43397,6 +43410,9 @@
                           },
                           {
                             "$ref": "#/components/schemas/GitInitializationClosedResult"
+                          },
+                          {
+                            "$ref": "#/components/schemas/GitInitializationAppliedResult"
                           }
                         ]
                       },
@@ -43614,6 +43630,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/GitInitializationClosedResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GitInitializationAppliedResult"
                   }
                 ]
               },
@@ -43861,6 +43880,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/GitInitializationClosedResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GitInitializationAppliedResult"
                   }
                 ]
               },
@@ -44174,6 +44196,9 @@
                               },
                               {
                                 "$ref": "#/components/schemas/GitInitializationClosedResult"
+                              },
+                              {
+                                "$ref": "#/components/schemas/GitInitializationAppliedResult"
                               }
                             ]
                           },
@@ -44507,6 +44532,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/GitInitializationClosedResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GitInitializationAppliedResult"
                   }
                 ]
               },
@@ -44820,6 +44848,9 @@
                               },
                               {
                                 "$ref": "#/components/schemas/GitInitializationClosedResult"
+                              },
+                              {
+                                "$ref": "#/components/schemas/GitInitializationAppliedResult"
                               }
                             ]
                           },
@@ -45165,6 +45196,9 @@
                         },
                         {
                           "$ref": "#/components/schemas/GitInitializationClosedResult"
+                        },
+                        {
+                          "$ref": "#/components/schemas/GitInitializationAppliedResult"
                         }
                       ]
                     },
@@ -45478,6 +45512,9 @@
                                     },
                                     {
                                       "$ref": "#/components/schemas/GitInitializationClosedResult"
+                                    },
+                                    {
+                                      "$ref": "#/components/schemas/GitInitializationAppliedResult"
                                     }
                                   ]
                                 },

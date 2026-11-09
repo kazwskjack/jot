@@ -7,12 +7,12 @@ import {canonicalJson} from '../db/canonical-json.ts';
 import {freezeWorkAdmission} from '../always-on/work-admission-records.ts';
 import {GitBranchEffects} from './branch-effects.ts';
 import {gitInitializationWitness,initializationInternalIgnore} from './initialization-records.ts';
-import {gitInitializationPlan,gitInitializationPreparation,gitInitializationEvidence,initializationDirectories,initializationRootLock,
- type GitInitializationPlan,type GitInitializationPreparation,type GitInitializationEvidence} from './initialization-evidence.ts';
+import {gitInitializationPlan,gitInitializationPreparation,gitInitializationEvidence,gitInitializationReceipt,initializationDirectories,initializationRootLock,
+ type GitInitializationPlan,type GitInitializationPreparation,type GitInitializationEvidence,type GitInitializationReceipt} from './initialization-evidence.ts';
 import {readGit} from './process.ts';
 
 export type GitInitializationSource={witness:GitInitializationWitness;review_sha256:string};
-export type GitInitializationReceipt={protocol:1;plan_id:string;action:'init';evidence_sha256:string;directories:Array<{path:string;identity:string;mode:number}>;internal_directory_identity:string;execution_authorized:false};
+export type {GitInitializationReceipt} from './initialization-evidence.ts';
 type Anchors={root:string;executable:string;program:string;repository:string};
 type Authority={
  authorize:()=>void;
@@ -209,8 +209,8 @@ export class GitInitializationEffects extends GitBranchEffects{
     const head=evidence!.files[1]!;
     check();linkSync(join(metadata,head.path),join(this.gitDirectory,head.path));installed.add(head.path);unlinkSync(join(metadata,head.path));check();
     if(internalIdentity===null)throw Error('git_initialization_source_changed');
-    return receipt=freezeWorkAdmission<GitInitializationReceipt>({protocol:1,plan_id:plan.plan_id,action:'init',evidence_sha256:hash(canonicalJson(evidence)),
-     directories:evidence!.directories.map(directory=>({...directory,identity:canonical.get(directory.path)!})),internal_directory_identity:internalIdentity,execution_authorized:false});
+    return receipt=freezeWorkAdmission(gitInitializationReceipt({protocol:1,plan_id:plan.plan_id,action:'init',evidence_sha256:hash(canonicalJson(evidence)),
+     directories:evidence!.directories.map(directory=>({...directory,identity:canonical.get(directory.path)!})),internal_directory_identity:internalIdentity,execution_authorized:false},evidence));
    };
    let result:GitInitializationReceipt;
    try{result=synchronous(()=>authority.publish(evidence!,publish));}finally{publishing=false;}
@@ -260,8 +260,8 @@ export class GitInitializationEffects extends GitBranchEffects{
    const after=this.metadataFiles(this.gitDirectory,path=>this.initializationLinks(join(metadata,path),evidence.files.find(file=>file.path===path)!));
    if(!equal(after,snapshot)||!equal(this.initializationFile(join(internal,'.gitignore')).fact,expectedIgnore))return result('unknown');
    check();
-   return result('applied',{protocol:1,plan_id:plan.plan_id,action:'init',evidence_sha256:hash(canonicalJson(evidence)),
-    directories:snapshot.directories,internal_directory_identity:internalIdentity,execution_authorized:false});
+   return result('applied',gitInitializationReceipt({protocol:1,plan_id:plan.plan_id,action:'init',evidence_sha256:hash(canonicalJson(evidence)),
+    directories:snapshot.directories,internal_directory_identity:internalIdentity,execution_authorized:false},evidence));
   }catch(error){check();return result('unknown');}
  }
 

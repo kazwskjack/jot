@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import {canonicalJson} from '../db/canonical-json.ts';
 import type {GitInitializationWitness,GitInitializationFile} from '../../contracts/types.ts';
 import {gitInitializationWitness} from './initialization-records.ts';
 
@@ -14,6 +15,10 @@ export type GitInitializationEvidence={
  directories:Array<{path:string;identity:string;mode:number}>;
  files:Array<GitInitializationFile&{path:'config'|'HEAD'}>;
  ignore:GitInitializationFile|null;
+};
+export type GitInitializationReceipt={
+ protocol:1;plan_id:string;action:'init';evidence_sha256:string;
+ directories:Array<{path:string;identity:string;mode:number}>;internal_directory_identity:string;execution_authorized:false;
 };
 export const initializationDirectories=['','objects','objects/info','objects/pack','refs','refs/heads','refs/tags'] as const;
 export const initializationRootLock='.git.jot-init.lock';
@@ -73,4 +78,28 @@ export function gitInitializationEvidence(value:unknown):GitInitializationEviden
   if(witness.ignore_after.changed?(ignore===null||!file(ignore)||ignore.sha256!==witness.ignore_after.sha256||ignore.size!==witness.ignore_after.size||identities.has(ignore.identity)):ignore!==null)throw Error();
   return structuredClone(evidence);
  }catch{throw Error('git_initialization_evidence_invalid');}
+}
+
+/** Host-private publication proof stays in the original outcome record. */
+export function gitInitializationReceipt(value:unknown,input:unknown):GitInitializationReceipt{
+ try{
+  const evidence=gitInitializationEvidence(input),receipt=value as GitInitializationReceipt;
+  const {witness}=evidence.preparation.plan;
+  if(!shape(receipt,['protocol','plan_id','action','evidence_sha256','directories','internal_directory_identity','execution_authorized'])
+   ||receipt.protocol!==1||receipt.action!=='init'||receipt.execution_authorized!==false
+   ||receipt.plan_id!==evidence.preparation.plan.plan_id||receipt.evidence_sha256!==hash(canonicalJson(evidence))
+   ||!identity(receipt.internal_directory_identity)||witness.internal_directory_identity!==null&&receipt.internal_directory_identity!==witness.internal_directory_identity
+   ||!Array.isArray(receipt.directories)||receipt.directories.length!==initializationDirectories.length)throw Error();
+  const identities=new Set([witness.root_identity,evidence.preparation.allocation.identity,...evidence.directories.map(directory=>directory.identity),
+   evidence.preparation.root_lock.identity,...(evidence.preparation.ignore_lock?[evidence.preparation.ignore_lock.identity]:[]),
+   ...evidence.files.map(file=>file.identity),...(evidence.ignore?[evidence.ignore.identity]:[])]);
+  if(identities.has(receipt.internal_directory_identity))throw Error();
+  identities.add(receipt.internal_directory_identity);
+  for(const [index,directory] of receipt.directories.entries()){
+   if(!shape(directory,['path','identity','mode'])||directory.path!==initializationDirectories[index]||!identity(directory.identity)
+    ||directory.mode!==evidence.directories[index]!.mode||identities.has(directory.identity))throw Error();
+   identities.add(directory.identity);
+  }
+  return structuredClone(receipt);
+ }catch{throw Error('git_initialization_receipt_invalid');}
 }
