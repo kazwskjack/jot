@@ -408,3 +408,38 @@ maps an isolated check-ref-format rejection to the explicit invalid-branch error
 Native creation/ref/HEAD/reflog effects and recovery remain required. This
 increment used source review and contract-object comparison. Tests, builds,
 SDK/native/product commands, migrations and UI acceptance were not executed.
+
+## Private automatic tracking configuration plan
+
+Branch review now derives automatic tracking configuration in the original
+private Git context. It copies relevant branch/remote-fetch data with duplicate
+and valueless entries, including enabled worktree configuration. Git performs
+the private branch operation at the exact HEAD. The original commit body is
+read and verified with its object-format hash, and the private resulting ref
+must contain that exact OID. Unborn HEAD produces its separate zero-ref case.
+
+Only generated new-branch remote/merge/rebase changes are applied to a standalone
+copy of the original common config. The planner rejects changes to other active
+configuration entries and limits the resulting config to the existing 1 MiB
+read bound. Exact common-config before/after hashes and change state join the
+original witness and metadata. Raw config and source URL values stay private.
+The active private config receives relevant tracking data through quoted data
+sections. Full source config is used only by the fixed no-includes config parser.
+The operation uses the existing isolated transport and source object alternates.
+
+The new optional configuration witness preserves historical protocol-1/2 record
+reads and cancellation. A new approval/admission requires the configuration
+proof. Source metadata is rechecked after private planning and disposal. History
+shows the configuration review digest and planned tracking updates. Git's branch
+implementation sets automatic remote/merge/rebase configuration from its existing
+tracking policy. [Git branch source](https://github.com/git/git/blob/master/branch.c),
+[Git remote mapping source](https://github.com/git/git/blob/master/remote.c).
+
+Actual source config/ref/HEAD/reflog publication, original native custody and
+interruption recovery remain in M15.14. This increment used source review and
+contract-object comparison, with no tests, builds, SDK/native/product commands,
+maintenance commands, migrations or UI acceptance executed.
+
+Private simulation restores its original active config and removes its generated
+private ref/worktree config before the original source snapshot is read again.
+The surrounding original context disposal owns all remaining private scratch.

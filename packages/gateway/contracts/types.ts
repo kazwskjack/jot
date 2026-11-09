@@ -405,8 +405,9 @@ export type TaskPrdSources = {task_id:string;task_version:number;readiness:{read
 
 export type GitBranchLogFile={sha256:string|null;size:number};
 export type GitBranchLogWitness={configuration:'default'|'true'|'false'|'always';enabled:boolean;head:GitBranchLogFile;branch:GitBranchLogFile};
-export type GitCreateBranchWitness={kind:'create_branch';snapshot_id:string;repository_sha256:string;source_metadata_sha256:string;index_sha256:string|null;object_format:'sha1'|'sha256';head:GitHead;branch:string;target_ref:string;target_oid:string|null;execution_authorized:false} & ({protocol:1}|{protocol:2;reflog:GitBranchLogWitness});
-export type GitBranchMetadata={protocol:1;committer:GitCommitMetadata['committer'];operator_policy_sha256:string;log_policy_sha256:string;logs:{head:boolean;branch:boolean}};
+export type GitBranchConfigurationWitness={before_sha256:string|null;after_sha256:string|null;changed:boolean};
+export type GitCreateBranchWitness={kind:'create_branch';snapshot_id:string;repository_sha256:string;source_metadata_sha256:string;index_sha256:string|null;object_format:'sha1'|'sha256';head:GitHead;branch:string;target_ref:string;target_oid:string|null;execution_authorized:false} & ({protocol:1}|{protocol:2;reflog:GitBranchLogWitness;configuration?:GitBranchConfigurationWitness});
+export type GitBranchMetadata={protocol:1;committer:GitCommitMetadata['committer'];operator_policy_sha256:string;log_policy_sha256:string;logs:{head:boolean;branch:boolean};configuration_sha256?:string;configuration_changed?:boolean};
 export type GitBranchReviewPrepare={request_id:string;action:'create-branch';branch:string;snapshot_id:string};
 export type GitBranchReviewIntent={intent_id:string;project_id:string;action:'create-branch';branch:string;target_ref:string;target_oid:string|null;head:GitHead;branch_metadata?:GitBranchMetadata;object_format:'sha1'|'sha256';snapshot_id:string;review_sha256:string;version:number;state:'prepared'|'approved'|'cancelled';created_at:string;updated_at:string;execution_authorized:false};
 export type GitReviewPrepare = {request_id:string;action:"stage"|"unstage"|"commit"|"discard"|"delete-untracked";paths:string[];snapshot_id:string;message?:string};

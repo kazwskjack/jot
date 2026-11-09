@@ -233,3 +233,24 @@ unsupported-backend guard. Fixed isolated branch-name rejection returns the
 invalid-branch error. Native branch creation, exact-owned HEAD/ref/reflog phase
 publication and interrupted recovery remain in M15.14. This is source development
 only, with no test/build/native/maintenance/migration/runtime execution.
+
+## P09 private automatic tracking config derivation
+
+The original branch review calls a fixed private configuration planner. It
+retains duplicate/valueless common and worktree tracking data, verifies the
+original commit object, derives Git's new-branch remote/merge/rebase settings,
+and verifies the private ref's exact expected OID. The original common config
+copy receives only those generated key changes. Other active private entries
+are checked before/after, and source/raw configuration stays behind the original
+read boundary. Frozen before/after config hashes and a config review digest join
+the original review and history. Earlier witness/metadata records remain
+readable/cancellable and require a fresh full review for new approval/admission.
+
+The private planner is connected to the actual review entry point. Native source
+publication, exact-owned config/HEAD/ref/reflog phases and interruption recovery
+remain required. This increment did not execute tests, builds, SDK/native/product
+or maintenance commands, migrations or UI acceptance.
+
+Private simulation restores its original active config and removes its generated
+private ref/worktree config before the original source snapshot is read again.
+The surrounding original context disposal owns all remaining private scratch.

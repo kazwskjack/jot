@@ -13,5 +13,5 @@ export function branchReviewMetadata(raw:GitCommitOperatorPolicy,witness:GitCrea
   log_policy_sha256:hash(witness.reflog),logs:{
    head:witness.target_oid!==null&&(witness.reflog.enabled||witness.reflog.head.sha256!==null),
    branch:witness.target_oid!==null&&(witness.reflog.enabled||witness.reflog.branch.sha256!==null)
-  }};
+  },...(witness.configuration?{configuration_sha256:hash(witness.configuration),configuration_changed:witness.configuration.changed}:{})};
 }

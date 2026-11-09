@@ -38,7 +38,7 @@ export class GitBranchIntents{
   const row=this.row(owner,project,id),event=this.latest(id);
   if(event.state!=='approved'||event.version!==version||row.review_sha256!==review)throw Error('git_execution_revoked');
   const source=readGitCreateBranchReviewSource(this.db,owner,project,id,version,review);
-  if(!source.metadata||source.witness.protocol!==2)throw Error('git_branch_review_required');
+  if(!source.metadata||source.witness.protocol!==2||!source.witness.configuration)throw Error('git_branch_review_required');
   const metadata=this.git.branchMetadata(owner,project,source.witness,source.metadata.committer.timestamp);
   if(JSON.stringify(metadata)!==JSON.stringify(source.metadata))throw Error('git_execution_revoked');
   return{...source,metadata:source.metadata};
@@ -82,7 +82,7 @@ export class GitBranchIntents{
   const cached=replay();if(cached)return()=>{signal?.throwIfAborted();this.row(owner,project,id);return cached;};
   assertCurrent();
   if(input.action==='approve'){
-   if(!source.metadata||source.witness.protocol!==2)throw Error('git_branch_review_required');
+   if(!source.metadata||source.witness.protocol!==2||!source.witness.configuration)throw Error('git_branch_review_required');
    const witness=await this.git.freezeCreateBranch(owner,project,source.input.snapshot_id,source.input.branch,signal);
    if(JSON.stringify(witness)!==row.witness_json)throw Error('git_review_changed');
    const metadata=this.git.branchMetadata(owner,project,witness,source.metadata.committer.timestamp);

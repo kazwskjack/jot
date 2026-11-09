@@ -1,3 +1,4 @@
+import {planCreateBranchConfiguration} from './branch-configuration.ts';
 import {validGitReference} from './references.ts';
 import type {GitBranchInventory,GitCreateBranchWitness,GitBranchLogFile,GitBranchLogWitness} from '../../contracts/types.ts';
 import {createHash} from 'node:crypto';
@@ -33,7 +34,7 @@ const lstat=(path:string)=>nativeLstat(path,{bigint:true});
 const identity=(s:Awaited<ReturnType<typeof lstat>>)=>[String(s.dev),String(s.ino)].join(':');
 const witness=(s:Awaited<ReturnType<typeof lstat>>)=>[identity(s),String(s.size),String(s.mtimeNs),String(s.ctimeNs),String(s.nlink)].join(':');
 const safe=(path:string)=>{if(path.startsWith('-'))throw Error('git_path_unavailable');return workspaceRelativePath(path);};
-export type GitReadContext={directory:string;metadata:string;index:string|null;remotes:GitRemote[];branchLogPolicy?:Pick<GitBranchLogWitness,'configuration'|'enabled'>;dispose():Promise<void>};
+export type GitReadContext={directory:string;metadata:string;index:string|null;remotes:GitRemote[];branchLogPolicy?:Pick<GitBranchLogWitness,'configuration'|'enabled'>;worktreeConfigEnabled?:boolean;dispose():Promise<void>};
 type ReadContext=GitReadContext;
 
 /** Operator-bound, read-only physical repository. No caller-controlled root,
@@ -115,6 +116,7 @@ export class GitRepositoryInspection{
      if(value!=='true'&&value!=='false')throw Error('git_configuration_invalid');worktreeConfig=value==='true';
     }
    }
+   context.worktreeConfigEnabled=worktreeConfig;
    if(branchLogs){
     const boolean=async(key:string,fallback:boolean)=>{
      const path=branchSources.get(key);if(!path)return fallback;
@@ -367,10 +369,19 @@ export class GitRepositoryInspection{
    };
    const headLog=await log(join(this.gitDirectory,'logs','HEAD')),branchLog=await log(join(this.commonDirectory,'logs',target));
    if(!context.branchLogPolicy)throw Error('git_branch_log_policy_invalid');
+   const configuration=async(path:string)=>{
+    try{await this.directory(dirname(path));return await this.bytes(path,1024*1024);}
+    catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return null;throw error;}
+   };
+   const commonConfig=await configuration(join(this.commonDirectory,'config'));
+   const worktreeConfig=context.worktreeConfigEnabled?await configuration(join(this.gitDirectory,'config.worktree')):null;
+   const planned=await planCreateBranchConfiguration({executable:this.executable!,context,sourceObjects:join(this.commonDirectory,'objects'),
+    branch,targetOid:snapshot.head.oid,commonConfig,worktreeConfig,limits:this.limits,...(signal?{signal}:{})});
    if((await this.inspectContext(context,signal)).snapshot_id!==snapshotId)throw Error('git_snapshot_changed');
    result={protocol:2,kind:'create_branch',snapshot_id:snapshotId,repository_sha256:snapshot.repository_sha256,
     source_metadata_sha256:context.metadata,index_sha256:context.index,object_format:inventory.object_format,
-    head:snapshot.head,branch,target_ref:target,target_oid:snapshot.head.oid,reflog:{...context.branchLogPolicy,head:headLog,branch:branchLog},execution_authorized:false};
+    head:snapshot.head,branch,target_ref:target,target_oid:snapshot.head.oid,reflog:{...context.branchLogPolicy,head:headLog,branch:branchLog},
+    configuration:{before_sha256:planned.before===null?null:hash(planned.before),after_sha256:planned.after===null?null:hash(planned.after),changed:planned.changed},execution_authorized:false};
   }finally{await context.dispose();}
   const after=await this.anchors(signal);
   if(after.repository!==result.repository_sha256||after.metadata!==result.source_metadata_sha256)throw Error('git_snapshot_changed');

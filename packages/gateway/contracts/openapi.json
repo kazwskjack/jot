@@ -39728,6 +39728,13 @@
               "head",
               "branch"
             ]
+          },
+          "configuration_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "configuration_changed": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -39736,7 +39743,15 @@
           "operator_policy_sha256",
           "log_policy_sha256",
           "logs"
-        ]
+        ],
+        "dependentRequired": {
+          "configuration_sha256": [
+            "configuration_changed"
+          ],
+          "configuration_changed": [
+            "configuration_sha256"
+          ]
+        }
       },
       "GitBranchAcceptance": {
         "type": "object",

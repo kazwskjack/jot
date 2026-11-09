@@ -19,7 +19,7 @@ export function readGitBranchIntentSource(row:GitBranchIntentRecord){
  try{
   const selection=JSON.parse(row.selection_json) as GitBranchReviewPrepare&{branch_metadata?:GitBranchMetadata};
   const {branch_metadata:metadata,...request}=selection,input=normalizeGitBranchReview(request),witness=JSON.parse(row.witness_json) as GitCreateBranchWitness;
-  const keys=['branch','execution_authorized','head','index_sha256','kind','object_format','protocol','repository_sha256','snapshot_id','source_metadata_sha256','target_oid','target_ref',...(witness.protocol===2?['reflog']:[])].sort().join(',');
+  const keys=['branch','execution_authorized','head','index_sha256','kind','object_format','protocol','repository_sha256','snapshot_id','source_metadata_sha256','target_oid','target_ref',...(witness.protocol===2?['reflog',...(witness.configuration===undefined?[]:['configuration'])]:[])].sort().join(',');
   const oid=(value:unknown)=>typeof value==='string'&&new RegExp('^[a-f0-9]{'+(witness.object_format==='sha1'?40:64)+'}$').test(value);
   if(row.action!==input.action||input.request_id!==row.request_id||digest(input)!==row.request_sha256
    ||Object.keys(witness).sort().join(',')!==keys
@@ -38,6 +38,12 @@ export function readGitBranchIntentSource(row:GitBranchIntentRecord){
     if(!file||Object.keys(file).sort().join(',')!=='sha256,size'||file.sha256!==null&&(typeof file.sha256!=='string'||!SHA.test(file.sha256))
      ||!Number.isSafeInteger(file.size)||file.size<0||file.size>32*1024*1024||file.sha256===null&&file.size!==0)throw Error('git_branch_evidence_invalid');
    }
+  }
+  if(witness.protocol===2&&witness.configuration!==undefined){
+   const configuration=witness.configuration;
+   if(!configuration||Object.keys(configuration).sort().join(',')!=='after_sha256,before_sha256,changed'
+    ||typeof configuration.changed!=='boolean'||configuration.changed!==(configuration.before_sha256!==configuration.after_sha256))throw Error('git_branch_evidence_invalid');
+   for(const value of [configuration.before_sha256,configuration.after_sha256])if(value!==null&&(typeof value!=='string'||!SHA.test(value)))throw Error('git_branch_evidence_invalid');
   }
   if(metadata!==undefined){
    const identity={name:metadata.committer.name,email:metadata.committer.email};
