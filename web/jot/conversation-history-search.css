@@ -1,0 +1,5 @@
+.jot-history-search{position:sticky;top:0;z-index:20;margin-block:8px;min-width:0;background:var(--panel,#20242c);color:var(--text,inherit)}
+.jot-history-search [role=search]{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px;border:1px solid currentColor;border-radius:10px}
+.jot-history-search input{min-width:0;flex:1 1 160px;font:inherit;color:inherit;background:transparent;border:1px solid currentColor;border-radius:6px;padding:6px}
+.jot-history-search-excerpt{width:100%;white-space:pre-wrap;overflow-wrap:anywhere;margin:0}
+[data-chat-search-active=true]{outline:2px solid #be8c20;outline-offset:4px}

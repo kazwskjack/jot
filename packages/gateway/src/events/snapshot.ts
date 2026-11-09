@@ -4,7 +4,7 @@ import { RunRepository } from '../runs/repository.ts';
 import { EventStore } from './event-store.ts';
 import { decodeStoredContent } from '../messages/content.ts';
 import {messageAttachmentProjection} from '../messages/pinned-attachments.ts';
-import {storedConversationMessageRows,recoveredMessageTimes} from '../messages/order.ts';
+import {storedConversationMessagePage,recoveredMessageTimes} from '../messages/order.ts';
 import {publicInteractionValue} from '../interactions/service.ts';
 
 export function buildSnapshot(db: DatabaseSync, conversationId: string, ownerId: string) {
@@ -12,7 +12,8 @@ export function buildSnapshot(db: DatabaseSync, conversationId: string, ownerId:
   try {
     const conversation = new ConversationRepository(db).get(conversationId, ownerId);
     const asOf = db.prepare('SELECT next_seq-1 AS seq FROM ga_conversations WHERE id=?').get(conversationId) as { seq: number };
-    const messages = storedConversationMessageRows(db,conversationId,200)
+    const history = storedConversationMessagePage(db,conversationId,200);
+    const messages = history.rows
       .map((row: any) => {
         const content = decodeStoredContent(row.content_json);
         return { message_id: row.id, run_id: row.run_id, role: row.role, status: row.status,
@@ -113,7 +114,8 @@ export function buildSnapshot(db: DatabaseSync, conversationId: string, ownerId:
       .all(conversationId).map(row=>publicInteractionValue(row));
     const value = { conversation, as_of_seq: String(asOf.seq), messages, runs,
       activities: [...activitiesById.values()].reverse(), sources, interactions, artifacts, crawl_batches,
-      stream_cursors: [...cursorByBlock.values()], history_complete: messages.length < 200 };
+      stream_cursors: [...cursorByBlock.values()], history_complete: history.next_cursor===undefined,
+      ...(history.next_cursor?{next_history_cursor:history.next_cursor}:{}) };
     db.exec('COMMIT');
     return value;
   } catch (error) { if (db.isTransaction) db.exec('ROLLBACK'); throw error; }

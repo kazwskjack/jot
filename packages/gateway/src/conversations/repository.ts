@@ -1,4 +1,4 @@
-import {storedConversationMessageRows} from '../messages/order.ts';
+import {storedConversationMessagePage} from '../messages/order.ts';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { decodeStoredContent } from '../messages/content.ts';
@@ -100,10 +100,10 @@ export class ConversationRepository {
     return this.get(id, ownerId);
   }
 
-  messages(id: string, ownerId: string, limit = 50) {
+  messages(id: string, ownerId: string, limit = 50,cursor?:string) {
     this.get(id, ownerId);
-    const rows = storedConversationMessageRows(this.db,id,limit);
-    return { items: rows.map(row => {
+    const page = storedConversationMessagePage(this.db,id,limit,cursor);
+    return { ...(page.next_cursor?{next_cursor:page.next_cursor}:{}),items: page.rows.map(row => {
       const content = decodeStoredContent(String(row.content_json));
       return { message_id: row.id, run_id: row.run_id, role: row.role,
         status: row.status, blocks: content.blocks,

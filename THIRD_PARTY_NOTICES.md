@@ -80,3 +80,14 @@ GNU Affero General Public License v3.0 terms. The complete upstream license
 is retained at `packages/session-adapter/runtime-patches/PILOTDECK-AGPL-3.0.txt`.
 Jot binds snapshots to its original conversation/message identities and text
 submission receipts, with local quote preview and removal.
+
+## PilotDeck conversation history search
+
+`web/jot/ConversationHistorySearch.tsx` adapts search navigation and IME event
+handling from `ui/src/components/chat-v2/ChatHistorySearchBar.tsx` and
+`ui/src/components/chat-v2/useChatHistorySearch.ts` at PilotDeck revision
+`783499ffdb2d501bf590b2e035acd027a882df10`. Adapted portions retain upstream
+GNU Affero General Public License v3.0 terms. The complete upstream license
+is retained at `packages/session-adapter/runtime-patches/PILOTDECK-AGPL-3.0.txt`.
+Jot binds history loading to its original authorized message pagination and
+uses non-mutating browser range highlights with visible message/snippet fallback.

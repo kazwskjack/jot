@@ -1034,9 +1034,9 @@ export async function buildServer(config: {
     const commit=await conversationModes.prepareUpdate(id,owner,input);return atomicCommand(request,200,commit);
   });
   app.get('/v1/conversations/:conversationId/messages', async request => {
-    const query = request.query as { limit?: string };
+    const query = request.query as { limit?: string;cursor?:string };
     return conversations.messages((request.params as { conversationId: string }).conversationId,
-      actor(request as any), Number(query.limit ?? 50));
+      actor(request as any), Number(query.limit ?? 50),query.cursor);
   });
   app.post('/v1/conversations/:conversationId/messages', async (request, reply) => {
     const id = (request.params as { conversationId: string }).conversationId;
