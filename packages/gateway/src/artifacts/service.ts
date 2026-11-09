@@ -1332,9 +1332,11 @@ export class ArtifactService {
     signal?.throwIfAborted();
     const identifier=/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/;
     const q=typeof query.q==='string'?query.q.trim():'',runId=query.run_id,cursorId=query.cursor_artifact_id,cursorVersion=Number(query.cursor_version);
+    const edited=query.edited_protocol===1||query.edited_protocol==='1';
     const documents=query.document_protocol===1||query.document_protocol==='1';
     const parts=query.parts_protocol===1||query.parts_protocol==='1',cursorPart=query.cursor_part_index===undefined?undefined:Number(query.cursor_part_index),cursorGroup=query.cursor_group_sha256;
-    if(!q||q.length>200||!identifier.test(conversationId)||Object.keys(query).some(key=>!['q','run_id','cursor_artifact_id','cursor_version','parts_protocol','cursor_part_index','cursor_group_sha256','document_protocol'].includes(key))
+    if(!q||q.length>200||!identifier.test(conversationId)||Object.keys(query).some(key=>!['q','run_id','cursor_artifact_id','cursor_version','parts_protocol','cursor_part_index','cursor_group_sha256','document_protocol','edited_protocol'].includes(key))
+      ||query.edited_protocol!==undefined&&!edited||edited&&(query.document_protocol!==undefined||query.parts_protocol!==undefined||cursorPart!==undefined||cursorGroup!==undefined)
       ||query.document_protocol!==undefined&&!documents||query.parts_protocol!==undefined&&!parts||runId!==undefined&&(typeof runId!=='string'||!identifier.test(runId))
       ||(cursorId===undefined)!==(query.cursor_version===undefined)
       ||cursorId!==undefined&&(typeof cursorId!=='string'||!identifier.test(cursorId)||!Number.isSafeInteger(cursorVersion)||cursorVersion<1)
@@ -1343,7 +1345,7 @@ export class ArtifactService {
     const page=withReadTransaction(this.db,()=>{
       if(!this.db.prepare('SELECT 1 FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId))throw Error('conversation_not_found');
       if(runId!==undefined&&!this.db.prepare('SELECT 1 FROM ga_runs WHERE id=? AND conversation_id=?').get(runId as string,conversationId))throw Error('run_not_found');
-      const scope=`a.conversation_id=? AND a.owner_id=? AND v.version<=a.current_version AND (? IS NULL
+      const scope=`a.conversation_id=? AND a.owner_id=? AND v.version<=a.current_version ${edited?"AND v.version>1 AND json_extract(v.metadata_json,'$.origin')='file_engine'":''} AND (? IS NULL
        OR EXISTS(SELECT 1 FROM ga_run_artifacts ra WHERE ra.artifact_id=a.id AND ra.version=v.version AND ra.run_id=?)
        OR EXISTS(SELECT 1 FROM ga_artifact_producers p WHERE p.artifact_id=a.id AND p.version=v.version AND p.run_id=? AND p.owner_id=a.owner_id AND p.conversation_id=a.conversation_id))`;
       const args=[conversationId,ownerId,runId??null,runId??null,runId??null];
@@ -1375,23 +1377,37 @@ export class ArtifactService {
     const items=[];let unavailable=0,skipped=0;
     if(entry){
       try{
-        if(parts&&partIndex===undefined&&entry.kind==='generated_document_group'&&entry.version===1){
-          const group=this.parts(entry.id,ownerId,entry.version);
-          if(group.sha256!==entry.sha256)throw Error('artifact_text_source_changed');
-          partIndex=1;groupSha=group.sha256;more||=group.items.length>1;
+        if(edited){
+          const selected=withReadTransaction(this.db,()=>{
+            const diff=this.editedDocumentDiff(entry!.id,ownerId,{conversation_id:conversationId,version:entry!.version,sha256:entry!.sha256,...(runId===undefined?{}:{run_id:runId})});
+            const file=this.get(entry!.id,ownerId,entry!.version);
+            return {diff,file};
+          });
+          const found=searchRetainedArtifactText(selected.diff.unified_diff,q);
+          if(found.match){
+            const {unified_diff,...proof}=selected.diff;
+            items.push({artifact_id:entry.id,version:entry.version,sha256:entry.sha256,file_name:selected.file.file_name,
+              size_bytes:selected.file.size_bytes,created_at:entry.created_at,edited_diff:{...proof,text_total_chars:unified_diff.length},...found.match});
+          }
+        }else{
+          if(parts&&partIndex===undefined&&entry.kind==='generated_document_group'&&entry.version===1){
+            const group=this.parts(entry.id,ownerId,entry.version);
+            if(group.sha256!==entry.sha256)throw Error('artifact_text_source_changed');
+            partIndex=1;groupSha=group.sha256;more||=group.items.length>1;
+          }
+          const part=partIndex===undefined?undefined:this.part(entry.id,ownerId,partIndex,entry.version),contentSha=part?.sha256??entry.sha256;
+          const selected=this.textSource(entry.id,ownerId,conversationId,entry.version,contentSha,runId as string|undefined,partIndex,groupSha,documents?{}:undefined);
+          const found=selected.document?searchRetainedArtifactText(selected.document.text,q):await searchVerifiedArtifactText(selected.source,q,signal);
+          signal?.throwIfAborted();
+          const current=this.textSource(entry.id,ownerId,conversationId,entry.version,contentSha,runId as string|undefined,partIndex,groupSha,
+            selected.document?{jobId:selected.document.document_job_id,resultSha:selected.document.document_result_sha256}:undefined);
+          if(current.document?.text_sha256!==selected.document?.text_sha256)throw Error('artifact_text_source_changed');
+          if(current.source.path!==selected.source.path||current.source.size!==selected.source.size)throw Error('artifact_text_source_changed');
+          if(found.match)items.push({artifact_id:entry.id,version:entry.version,sha256:contentSha,file_name:current.file.file_name,
+            size_bytes:current.source.size,created_at:entry.created_at,...(partIndex===undefined?{}:{part_index:partIndex,group_sha256:groupSha}),
+            ...(current.document?{document_job_id:current.document.document_job_id,document_result_sha256:current.document.document_result_sha256,
+              text_sha256:current.document.text_sha256,text_total_chars:current.document.text_total_chars,source_truncated:current.document.source_truncated}:{}),...found.match});
         }
-        const part=partIndex===undefined?undefined:this.part(entry.id,ownerId,partIndex,entry.version),contentSha=part?.sha256??entry.sha256;
-        const selected=this.textSource(entry.id,ownerId,conversationId,entry.version,contentSha,runId as string|undefined,partIndex,groupSha,documents?{}:undefined);
-        const found=selected.document?searchRetainedArtifactText(selected.document.text,q):await searchVerifiedArtifactText(selected.source,q,signal);
-        signal?.throwIfAborted();
-        const current=this.textSource(entry.id,ownerId,conversationId,entry.version,contentSha,runId as string|undefined,partIndex,groupSha,
-          selected.document?{jobId:selected.document.document_job_id,resultSha:selected.document.document_result_sha256}:undefined);
-        if(current.document?.text_sha256!==selected.document?.text_sha256)throw Error('artifact_text_source_changed');
-        if(current.source.path!==selected.source.path||current.source.size!==selected.source.size)throw Error('artifact_text_source_changed');
-        if(found.match)items.push({artifact_id:entry.id,version:entry.version,sha256:contentSha,file_name:current.file.file_name,
-          size_bytes:current.source.size,created_at:entry.created_at,...(partIndex===undefined?{}:{part_index:partIndex,group_sha256:groupSha}),
-          ...(current.document?{document_job_id:current.document.document_job_id,document_result_sha256:current.document.document_result_sha256,
-            text_sha256:current.document.text_sha256,text_total_chars:current.document.text_total_chars,source_truncated:current.document.source_truncated}:{}),...found.match});
       }catch(error){
         signal?.throwIfAborted();
         const code=error instanceof Error?error.message:'',io=(error as NodeJS.ErrnoException)?.code;
@@ -1401,7 +1417,7 @@ export class ArtifactService {
       }
     }
     if(!this.db.prepare('SELECT 1 FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId))throw Error('conversation_not_found');
-    return {conversation_id:conversationId,...(runId===undefined?{}:{run_id:runId}),q,items,scanned_versions:entry?1:0,
+    return {conversation_id:conversationId,...(runId===undefined?{}:{run_id:runId}),...(edited?{edited_protocol:1 as const}:{}),q,items,scanned_versions:entry?1:0,
       unavailable_versions:unavailable,skipped_versions:skipped,
       ...(more?{next_cursor:{artifact_id:entry!.id,version:entry!.version,...(partIndex===undefined?{}:{part_index:partIndex,group_sha256:groupSha})}}:{}),execution_authorized:false};
   }
@@ -1570,15 +1586,24 @@ export class ArtifactService {
 
   editedDocumentDiff(id:string,ownerId:string,query:Record<string,unknown>){
     const identifier=/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/;
-    const conversationId=query.conversation_id,to=Number(query.version),expectedSha=query.sha256;
-    if(Object.keys(query).some(key=>!['conversation_id','version','sha256'].includes(key))||!identifier.test(id)
+    const conversationId=query.conversation_id,to=Number(query.version),expectedSha=query.sha256,runId=query.run_id;
+    const pins=['edit_job_id','edit_result_sha256','diff_sha256','before_document_job_id','before_document_result_sha256','after_document_job_id','after_document_result_sha256'];
+    const pinned=pins.some(key=>query[key]!==undefined);
+    if(Object.keys(query).some(key=>!['conversation_id','version','sha256','run_id',...pins].includes(key))||!identifier.test(id)
       ||typeof conversationId!=='string'||!identifier.test(conversationId)||!Number.isSafeInteger(to)||to<2
-      ||typeof expectedSha!=='string'||!/^[a-f0-9]{64}$/.test(expectedSha))throw Error('artifact_text_query_invalid');
+      ||typeof expectedSha!=='string'||!/^[a-f0-9]{64}$/.test(expectedSha)
+      ||runId!==undefined&&(typeof runId!=='string'||!identifier.test(runId))
+      ||pinned&&pins.some(key=>typeof query[key]!=='string'||!(key.endsWith('_id')?identifier:/^[a-f0-9]{64}$/).test(query[key] as string)))throw Error('artifact_text_query_invalid');
     return withReadTransaction(this.db,()=>{
       if(!this.db.prepare('SELECT 1 FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId))throw Error('conversation_not_found');
       const after=this.version(id,ownerId,to),metadata=JSON.parse(String(after.metadata_json)) as Record<string,unknown>;
       if(after.conversation_id!==conversationId)throw Error('artifact_not_found');
       if(after.sha256!==expectedSha)throw Error('artifact_text_source_changed');
+      if(runId!==undefined&&!this.db.prepare(`SELECT 1 FROM ga_runs r JOIN ga_conversations c ON c.id=r.conversation_id
+        WHERE r.id=? AND r.conversation_id=? AND c.owner_id=? AND (
+         EXISTS(SELECT 1 FROM ga_run_artifacts a WHERE a.run_id=r.id AND a.artifact_id=? AND a.version=?)
+         OR EXISTS(SELECT 1 FROM ga_artifact_producers p WHERE p.run_id=r.id AND p.artifact_id=? AND p.version=? AND p.owner_id=c.owner_id AND p.conversation_id=c.id))`)
+        .get(runId as string,conversationId,ownerId,id,to,id,to))throw Error('artifact_not_found');
       if(metadata.origin!=='file_engine'||!Number.isSafeInteger(metadata.base_version)||Number(metadata.base_version)<1
         ||!['ready','delivered'].includes(String(metadata.status)))throw Error('artifact_text_unsupported');
       const from=Number(metadata.base_version),before=this.version(id,ownerId,from);
@@ -1586,11 +1611,16 @@ export class ArtifactService {
       if(!['ready','delivered'].includes(String(beforeMeta.status)))throw Error('artifact_not_found');
       const left={artifactId:id,ownerId,conversationId,version:from,sha256:String(before.sha256),mediaType:String(before.mime_type)};
       const right={artifactId:id,ownerId,conversationId,version:to,sha256:expectedSha,mediaType:String(after.mime_type),size:Number(after.size_bytes)};
-      const edit=retainedDocumentEdit(this.db,left,right),originalBefore=retainedDocumentText(this.db,left),originalAfter=retainedDocumentText(this.db,right);
+      const edit=retainedDocumentEdit(this.db,left,right);
+      if(pinned&&(edit.edit_job_id!==query.edit_job_id||edit.edit_result_sha256!==query.edit_result_sha256))throw Error('artifact_text_source_changed');
+      const originalBefore=retainedDocumentText(this.db,left,query.before_document_job_id as string|undefined,query.before_document_result_sha256 as string|undefined);
+      const originalAfter=retainedDocumentText(this.db,right,query.after_document_job_id as string|undefined,query.after_document_result_sha256 as string|undefined);
       const full=formatTextDiff(originalBefore.text,originalAfter.text,`version-${from}`,`version-${to}`),text=full.slice(0,200000);
+      const digest=createHash('sha256').update(text).digest('hex');
+      if(pinned&&digest!==query.diff_sha256)throw Error('artifact_text_source_changed');
       const {text:beforeText,...beforeSource}=originalBefore,{text:afterText,...afterSource}=originalAfter;
-      return {artifact_id:id,conversation_id:conversationId,from_version:from,to_version:to,before_sha256:left.sha256,after_sha256:right.sha256,
-        ...edit,before:beforeSource,after:afterSource,unified_diff:text,diff_sha256:createHash('sha256').update(text).digest('hex'),
+      return {artifact_id:id,conversation_id:conversationId,...(runId===undefined?{}:{run_id:runId as string}),from_version:from,to_version:to,before_sha256:left.sha256,after_sha256:right.sha256,
+        ...edit,before:beforeSource,after:afterSource,unified_diff:text,diff_sha256:digest,
         truncated:full.length>text.length,execution_authorized:false};
     });
   }
