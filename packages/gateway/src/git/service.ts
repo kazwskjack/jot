@@ -82,6 +82,14 @@ export class GitWorkbench{
   if(!policy)throw Error('git_branch_identity_unconfigured');return branchReviewMetadata(policy,witness,timestamp);
  }
  async freezeCreateBranch(owner:string,project:string,snapshotId:string,branch:string,signal?:AbortSignal){const result=await this.repository(owner,project).freezeCreateBranch(snapshotId,branch,signal);this.projects.assertOwned(project,owner);signal?.throwIfAborted();return result;}
+ async initialization(owner:string,project:string,signal?:AbortSignal){
+  const result=await this.repository(owner,project).initialization(signal);
+  this.projects.assertOwned(project,owner);signal?.throwIfAborted();return{project_id:project,...result};
+ }
+ async freezeInitialization(owner:string,project:string,snapshotId:string,initialBranch:string,objectFormat:'sha1'|'sha256',signal?:AbortSignal){
+  const result=await this.repository(owner,project).freezeInitialization(snapshotId,initialBranch,objectFormat,signal);
+  this.projects.assertOwned(project,owner);signal?.throwIfAborted();return result;
+ }
  async branches(owner:string,project:string,snapshotId:string,signal?:AbortSignal){const result=await this.repository(owner,project).branches(snapshotId,signal);this.projects.assertOwned(project,owner);signal?.throwIfAborted();return {project_id:project,...result};}
  async diff(owner:string,project:string,input:{snapshot_id:string;path:string;stage:'working'|'staged'},signal?:AbortSignal){const result=await this.repository(owner,project).diff(input,signal);this.projects.assertOwned(project,owner);return{project_id:project,...result};}
 }

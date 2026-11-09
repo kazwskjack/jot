@@ -34,6 +34,8 @@ import {GitMutationIntents} from './git/intents.ts';
 import {registerGitReviewRoutes} from './git/review-routes.ts';
 import {GitBranchIntents} from './git/branch-intents.ts';
 import {registerGitBranchReviewRoutes} from './git/branch-review-routes.ts';
+import {GitInitializationIntents} from './git/initialization-intents.ts';
+import {registerGitInitializationReviewRoutes} from './git/initialization-review-routes.ts';
 import {GitIndexExecutions} from './git/index-executions.ts';
 import {gitCommitExecutionSchema} from './git/commit-execution-upgrade.ts';
 import {registerGitExecutionHistoryRoutes} from './git/execution-history-routes.ts';
@@ -255,6 +257,7 @@ export async function buildServer(config: {
   const gitWorkbench=new GitWorkbench(projects,config.gitRepositories??[],config.gitExecutable);
   const gitReviewIntents=new GitMutationIntents(db,projects,gitWorkbench);
   const gitBranchIntents=new GitBranchIntents(db,projects,gitWorkbench);
+  const gitInitializationIntents=new GitInitializationIntents(db,projects,gitWorkbench);
   const conversations = new ConversationRepository(db, projects);
   let conversationForks:ConversationForks|undefined;
   if(config.conversationForkSourceClient){
@@ -337,7 +340,7 @@ export async function buildServer(config: {
   const isRunCommandRoute=(request:any)=>request.method==='POST'&&['/v1/runs/:runId/steer','/v1/runs/:runId/cancel'].includes(request.routeOptions.url);
   const isWorkspaceSelectionRoute=(request:any)=>request.method==='POST'&&request.routeOptions.url==='/v1/workspaces/selection';
   const isProjectMutationRoute=(request:any)=>request.method==='POST'&&['/v1/projects','/v1/projects/:projectId/lifecycle'].includes(request.routeOptions.url)||request.method==='PATCH'&&request.routeOptions.url==='/v1/projects/:projectId';
-  const isGitReviewRoute=(request:any)=>request.method==='POST'&&['/v1/projects/:projectId/git/intents','/v1/projects/:projectId/git/intents/:intentId/control','/v1/projects/:projectId/git/branch-intents','/v1/projects/:projectId/git/branch-intents/:intentId/control'].includes(request.routeOptions.url);
+  const isGitReviewRoute=(request:any)=>request.method==='POST'&&['/v1/projects/:projectId/git/intents','/v1/projects/:projectId/git/intents/:intentId/control','/v1/projects/:projectId/git/branch-intents','/v1/projects/:projectId/git/branch-intents/:intentId/control','/v1/projects/:projectId/git/initialization-intents','/v1/projects/:projectId/git/initialization-intents/:intentId/control'].includes(request.routeOptions.url);
   const isIndexAdmissionRoute=(request:any)=>request.method==='POST'&&request.routeOptions.url==='/v1/projects/:projectId/git/intents/:intentId/admissions';
   const isIndexTransportRoute=(request:any)=>request.method==='POST'&&['/v1/projects/:projectId/git/executions/:executionId/dispatch','/v1/projects/:projectId/git/executions/:executionId/resolve'].includes(request.routeOptions.url);
   const isIndexControlAdmissionRoute=(request:any)=>request.method==='POST'&&request.routeOptions.url==='/v1/projects/:projectId/git/executions/:executionId/controls';
@@ -978,6 +981,7 @@ export async function buildServer(config: {
   registerGitRoutes(app,gitWorkbench,actor);
   registerGitReviewRoutes(app,{intents:gitReviewIntents,actor,atomic:atomicCommand});
   registerGitBranchReviewRoutes(app,{intents:gitBranchIntents,actor,atomic:atomicCommand});
+  registerGitInitializationReviewRoutes(app,{intents:gitInitializationIntents,actor,atomic:atomicCommand});
   const gitIndexExecutions=new GitIndexExecutions(db,projects,gitWorkbench,gitReviewIntents);
   registerGitExecutionHistoryRoutes(app,gitIndexExecutions,actor,atomicCommand);
   registerIndexDispatchRoutes(app,{executions:gitIndexExecutions,client:config.nativeGitClient,actor});

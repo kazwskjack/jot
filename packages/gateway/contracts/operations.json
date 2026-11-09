@@ -2104,5 +2104,38 @@
     "BrainPublication",
     "200",
     "Reject a proposed Brain publication by exact version without changing original memory or project files."
+  ],
+  [
+    "GET",
+    "/v1/projects/{projectId}/git/initialization",
+    "getProjectGitInitialization",
+    null,
+    "GitInitializationStatus",
+    "200",
+    "Read original bound-root Git metadata presence and an uninitialized-root snapshot without ancestor repository discovery. Existing metadata presence does not assert repository health."
+  ],  [
+    "POST",
+    "/v1/projects/{projectId}/git/initialization-intents",
+    "prepareProjectGitInitializationReview",
+    "GitInitializationReviewPrepare",
+    "GitInitializationReviewIntent",
+    "201",
+    "Freeze original absent Git metadata, root/program identity, explicit initial branch/object format and internal-ignore before/after facts in the original owner review/event ledger. No initialization or native dispatch is performed."
+  ],  [
+    "GET",
+    "/v1/projects/{projectId}/git/initialization-intents/{intentId}",
+    "getProjectGitInitializationReview",
+    null,
+    "GitInitializationReviewIntent",
+    "200",
+    "Read the original owner-scoped initialization review and current decision version. Review acknowledgements carry execution_authorized=false."
+  ],  [
+    "POST",
+    "/v1/projects/{projectId}/git/initialization-intents/{intentId}/control",
+    "controlProjectGitInitializationReview",
+    "GitReviewControl",
+    "GitInitializationReviewIntent",
+    "200",
+    "Approve or cancel the exact original initialization review/version/hash. Approval repeats original absence, root/program and internal-ignore facts. Native initialization and interrupted recovery remain separate execution phases."
   ]
 ]

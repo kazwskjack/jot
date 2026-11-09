@@ -58,3 +58,14 @@ Affero General Public License v3.0. The complete upstream license is retained
 at `packages/session-adapter/runtime-patches/PILOTDECK-AGPL-3.0.txt`.
 The corresponding Adapter package notice identifies the source directories and
 Jot adaptations. These files retain the separately applicable upstream terms.
+
+## PilotDeck project-internal Git ignore rule
+
+`initializationInternalIgnore` in
+`packages/gateway/src/git/initialization-records.ts` adapts the internal-ignore
+rule from `src/pilot/paths.ts` at PilotDeck revision
+`783499ffdb2d501bf590b2e035acd027a882df10`. Those adapted portions retain
+upstream GNU Affero General Public License v3.0 terms. The complete upstream
+license is retained at
+`packages/session-adapter/runtime-patches/PILOTDECK-AGPL-3.0.txt`.
+Jot preserves the original byte prefix and caps the resulting file at 1 MiB.

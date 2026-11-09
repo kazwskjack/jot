@@ -116,6 +116,7 @@ export class GitIndexExecutions{
  }
  private reviewSource(owner:string,project:string,intent:string,version:number,review:string){
   const kind=this.db.prepare('SELECT action FROM wb_git_mutation_intents WHERE owner_id=? AND project_id=? AND intent_id=?').get(owner,project,intent);
+  if(kind?.action==='init')throw Error('git_initialization_execution_unavailable');
   if(kind?.action==='create-branch')return this.branchIntents.executionSource(owner,project,intent,version,review);
   return this.intents.get(owner,project,intent).action==='commit'
    ?this.intents.commitExecutionSource(owner,project,intent,version,review)

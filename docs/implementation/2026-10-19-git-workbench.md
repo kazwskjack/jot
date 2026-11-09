@@ -512,3 +512,43 @@ Initialization, existing-branch checkout/deletion and remaining P09 operations
 continue under M15.14 and their original IDs. This increment is source development
 only. Tests, typechecks, builds, native/product execution, UI rendering,
 migrations and deployment were not executed.
+
+## Initialization source review
+
+The original repository inspection now reads initialization state without
+requiring an existing .git directory or discovering an ancestor repository.
+The public git_present flag reports metadata presence. It carries no repository
+health or effect assertion. An absent-metadata snapshot binds the configured
+root, physical root identity, canonical Git executable/program facts and the
+existing .pilotdeck directory/internal-ignore file facts. Symlinks, hardlinked
+ignore files, root/program changes and unsafe initial branch paths are rejected.
+
+New initialization review requests explicitly choose initial_branch and
+object_format. The source freeze repeats the original absent-metadata snapshot
+around fixed check-ref-format validation and computes the internal-ignore
+before/after digest and size. The upstream final-effective-rule behavior is
+preserved while retaining original bytes. Attribution and the existing upstream
+license are recorded in THIRD_PARTY_NOTICES.md.
+
+GitInitializationIntents uses the original immutable Git review/event tables.
+Its prepare/approve/cancel routes join the same owner-scoped HTTP atomic receipt
+protocol, cancellation and no-store handling. Approval repeats the full original
+source witness. Current-owner checks also cover cached receipts. Legacy file
+and branch readers keep their existing action scopes. Initialization admission
+returns an explicit unavailable result until its original native effect phase
+is implemented.
+
+The status, prepare and review contracts have paired JSON/YAML definitions and
+operation records. Existing workbench read clients expose the new status and
+review read paths. Native initialization, exact-owned Git-directory and internal
+ignore publication, interruption recovery and initialization UI remain required.
+Existing metadata/reinitialization and linked/external binding semantics remain
+in full M15.14 scope, followed by existing-branch checkout and safe deletion.
+No test, typecheck, build, SDK/native/product operation, migration, deployment or
+UI acceptance was executed for this source increment.
+
+Git's initialization interface provides explicit initial-branch and object-format
+options. Its native setup probes filesystem/configuration behavior, which must
+be retained by the following actual-target-volume preparation phase.
+[Git init documentation](https://git-scm.com/docs/git-init),
+[Git native setup source](https://github.com/git/git/blob/master/setup.c).

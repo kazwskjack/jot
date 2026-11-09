@@ -1,3 +1,4 @@
+import type {GitInitializationStatus,GitInitializationReviewIntent} from './types';
 import type {BrainPublication,BrainPublicationPage} from '../../packages/gateway/contracts/types';
 import type {WorkbenchMemoryImportTarget,WorkbenchMemoryImportPreview,WorkbenchMemoryImportBundleSource,WorkbenchMemoryImportHistorySection,WorkbenchMemoryImportSourceHistory,WorkbenchMemoryImportReplacementSource} from '../../packages/gateway/contracts/types';
 import {createHostAdminClient} from './host-admin-client.mjs';
@@ -52,6 +53,8 @@ export const workbenchApi={
  createProject:(input:CreateProject,key:string)=>request<Project>('/projects','POST',input,key),
  renameProject:(projectId:string,input:UpdateProject,key:string)=>request<Project>(`/projects/${pathId(projectId)}`,'PATCH',input,key),
  git:(project:string,signal?:AbortSignal)=>request<GitSnapshot>(`/projects/${pathId(project)}/git`,'GET',undefined,undefined,signal),
+ gitInitialization:(project:string,signal?:AbortSignal)=>request<GitInitializationStatus>(`/projects/${pathId(project)}/git/initialization`,'GET',undefined,undefined,signal),
+ gitInitializationReview:(project:string,intent:string,signal?:AbortSignal)=>request<GitInitializationReviewIntent>(`/projects/${pathId(project)}/git/initialization-intents/${pathId(intent)}`,'GET',undefined,undefined,signal),
  gitBranches:(project:string,snapshot:string,signal?:AbortSignal)=>request<GitBranchInventory>(`/projects/${pathId(project)}/git/branches?${new URLSearchParams({snapshot_id:snapshot})}`,'GET',undefined,undefined,signal),
  gitDiff:(project:string,snapshot:string,file:string,stage:'working'|'staged',signal?:AbortSignal)=>request<GitDiff>(`/projects/${pathId(project)}/git/diff?snapshot_id=${pathId(snapshot)}&path=${pathId(file)}&stage=${stage}`,'GET',undefined,undefined,signal),
  gitBranchReview:(project:string,intent:string,signal?:AbortSignal)=>request<GitBranchReviewIntent>(`/projects/${pathId(project)}/git/branch-intents/${pathId(intent)}`,'GET',undefined,undefined,signal),

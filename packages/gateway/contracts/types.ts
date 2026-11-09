@@ -403,6 +403,11 @@ export type TaskmasterMcpStatus = {connection_id:string;server_name:string;versi
 export type TaskPrdTaskmasterStatus = {registry_available:boolean;connections:TaskmasterMcpStatus[]};
 export type TaskPrdSources = {task_id:string;task_version:number;readiness:{ready:boolean;reasons:string[]};sources:TaskPrdSource[];truncated:boolean;binding:TaskPrdReceipt|null;taskmaster?:TaskPrdTaskmasterStatus};
 
+export type GitInitializationFile={identity:string;sha256:string;size:number;mode:number};
+export type GitInitializationWitness={protocol:1;kind:'initialize_repository';snapshot_id:string;repository_sha256:string;root_identity:string;internal_directory_identity:string|null;internal_ignore:GitInitializationFile|null;initial_branch:string;object_format:'sha1'|'sha256';ignore_after:{sha256:string;size:number;changed:boolean};execution_authorized:false};
+export type GitInitializationStatus={project_id:string;read_only:true;execution_authorized:false}&({git_present:true}|{git_present:false;snapshot_id:string;repository_sha256:string;internal_ignore:{path:'.pilotdeck/.gitignore';sha256:string|null;size:number}});
+export type GitInitializationReviewPrepare={request_id:string;action:'init';snapshot_id:string;initial_branch:string;object_format:'sha1'|'sha256'};
+export type GitInitializationReviewIntent={intent_id:string;project_id:string;action:'init';snapshot_id:string;initial_branch:string;object_format:'sha1'|'sha256';internal_ignore:{path:'.pilotdeck/.gitignore';before_sha256:string|null;after_sha256:string;size:number;changed:boolean};review_sha256:string;version:number;state:'prepared'|'approved'|'cancelled';created_at:string;updated_at:string;execution_authorized:false};
 export type GitBranchLogFile={sha256:string|null;size:number};
 export type GitBranchLogWitness={configuration:'default'|'true'|'false'|'always';enabled:boolean;head:GitBranchLogFile;branch:GitBranchLogFile};
 export type GitBranchConfigurationWitness={before_sha256:string|null;after_sha256:string|null;changed:boolean};
