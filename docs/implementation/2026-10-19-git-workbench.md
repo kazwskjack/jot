@@ -1408,3 +1408,39 @@ historical.
 
 The batch protocol is documented in [Git cat-file](https://git-scm.com/docs/git-cat-file).
 Cached attribute selection and NUL triples follow [Git check-attr](https://git-scm.com/docs/git-check-attr).
+
+## Streaming checkout blob digests, 2026-11-09
+
+Checkout preview now sends its exact preflighted ID/size sequence to an incremental
+batch verifier. Expected header bytes, body byte counts, separators, object hashes
+and content SHA-256 are checked across arbitrary stdout chunk boundaries. Empty
+objects, multiple frames per chunk, split headers and truncated/extra output have
+explicit completion checks. Digests become available after every frame and the
+native process exit are confirmed. The transport byte budget equals the exact
+safe-integer wire size calculated with BigInt. The original timeout still applies.
+
+The original fixed-command transport accepts a synchronous internal stdout sink.
+This path hashes each chunk as it arrives, with a header and two hash states for
+the active object plus bounded per-object metadata. A sink error kills the child,
+retains the failure and waits for close. Cancellation and byte/time limits retain
+the original process lifecycle. New preview reads no longer accumulate complete
+blob bodies or use the earlier 32/64 MiB gateway body-buffer skip condition.
+
+Git can fall back to an in-core object reader. Streaming child calls therefore
+set GIT_ALLOC_LIMIT to 64 MiB per allocation. This controls individual guarded Git
+allocations. Native-process total memory remains a platform/runtime concern.
+A nonzero native body-read exit preserves preflighted sizes with unconfirmed null
+digests. Invalid frames, hash mismatches and incomplete successful streams fail
+validation. Original source snapshot/metadata and owner checks still finish the
+preview. Existing optional/nullable response fields support this outcome.
+
+Final worktree conversion, native resource/platform coverage, physical file
+before-states, sparse/symlink/gitlink/directory effects, original complete review/
+approval/publication/recovery/UI and safe deletion remain required. M15.14 and
+all remaining P09 scope continue. Work was source development, source comparison
+and Git delivery only. Historical test results remain historical.
+
+The native blob output path is visible in [Git cat-file](https://raw.githubusercontent.com/git/git/master/builtin/cat-file.c).
+Git's in-core fallback and guarded allocation limit are defined in
+[object streaming](https://raw.githubusercontent.com/git/git/master/odb/streaming.c)
+and [allocation wrappers](https://raw.githubusercontent.com/git/git/master/wrapper.c).

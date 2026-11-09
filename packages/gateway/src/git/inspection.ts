@@ -12,8 +12,9 @@ import {isAbsolute,resolve,join,dirname,relative,sep,basename} from 'node:path';
 import {tmpdir} from 'node:os';
 import {workspaceRelativePath} from '../always-on/workspace-provider.ts';
 import {gitExecutable,readGit} from './process.ts';
-import {gitObjectBatch,gitTreeEntries,readCommitTree,type GitCommitReviewWitness} from './commit-tree.ts';
+import {gitTreeEntries,readCommitTree,type GitCommitReviewWitness} from './commit-tree.ts';
 import {taskmasterPrdPath} from '../workbench/taskmaster-path.ts';
+import {readGitBlobDigests} from './blob-digests.ts';
 
 export type GitInspectionOptions={root:string;gitDirectory?:string;commonDirectory?:string;executable?:string;limits?:Partial<{maxOutputBytes:number;timeoutMs:number;maxEntries:number;maxMetadataEntries:number;maxDiffBytes:number}>};
 export type GitEntry={path:string;original_path?:string;index_status:string;worktree_status:string;conflicted:boolean;kind:'file'|'directory'|'symlink'|'missing'|'other'};
@@ -649,7 +650,7 @@ export class GitRepositoryInspection{
    const seconds=(ns:bigint)=>Number(ns/1000000000n)+Number(ns%1000000000n)/1e9;
    await utimes(sourceIndex,seconds(stat.atimeNs),seconds(stat.mtimeNs));
   }
-  const run=(args:string[],input?:Buffer,index=sourceIndex,output=this.limits.maxOutputBytes)=>readGit(this.executable!,this.root,context.directory,args,{...this.limits,maxOutputBytes:output},signal,
+  const run=(args:string[],input?:Buffer,index=sourceIndex)=>readGit(this.executable!,this.root,context.directory,args,this.limits,signal,
    join(context.directory,'objects'),input,join(this.commonDirectory,'objects'),index);
   if(context.index!==null){
    const refreshed=await run(['update-index','-q','--refresh']);
@@ -691,23 +692,15 @@ export class GitRepositoryInspection{
    if(!raw.endsWith('\n'))throw Error('git_checkout_unavailable');
    const rows=raw.slice(0,-1).split('\n');
    if(rows.length!==oids.length)throw Error('git_checkout_unavailable');
-   let total=0,readBodies=true;
+   const expected:Array<{oid:string;size:number}>=[];
    for(const [index,row] of rows.entries()){
     const fields=/^([a-f0-9]+) blob (0|[1-9][0-9]*)$/.exec(row);
     if(!fields||fields[1]!==oids[index])throw Error('git_checkout_unavailable');
     const size=Number(fields[2]);if(!Number.isSafeInteger(size))throw Error('git_checkout_unavailable');
-    blobs.set(oids[index]!,{size,sha256:null});total+=size;
-    if(size>32*1024*1024||!Number.isSafeInteger(total)||total>64*1024*1024)readBodies=false;
+    blobs.set(oids[index]!,{size,sha256:null});expected.push({oid:oids[index]!,size});
    }
-   if(readBodies){
-    // Body limits exclude the bounded object headers and their separators.
-    const result=await run(['cat-file','--batch'],input,index,64*1024*1024+oids.length*128);
-    if(result.code!==0)throw Error('git_checkout_unavailable');
-    for(const object of gitObjectBatch(result.bytes,oids,'blob',format,32*1024*1024,64*1024*1024)){
-     const fact=blobs.get(object.oid)!;if(fact.size!==object.body.length)throw Error('git_checkout_unavailable');
-     fact.sha256=hash(object.body);
-    }
-   }
+   const digests=await readGitBlobDigests(this.executable!,this.root,context,join(this.commonDirectory,'objects'),format,expected,this.limits,signal);
+   if(digests)for(const digest of digests)blobs.set(digest.oid,{size:digest.size,sha256:digest.sha256});
    for(const entry of entries)entry!.blob=blobs.get(entry!.oid)!;
   }
   const paths=new Set(changes.map(change=>change.path)),attributes:NonNullable<NonNullable<GitCheckoutPreview['index_projection']>['attributes']>=[];

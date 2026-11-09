@@ -9,27 +9,35 @@ export async function gitExecutable(configured?:string):Promise<string>{
 }
 
 export type GitProcessLimits={maxOutputBytes:number;timeoutMs:number};
-/** Internal fixed-command transport. Never expose its argument array as an API. */
-export async function readGit(executable:string,root:string,gitDirectory:string,args:readonly string[],limits:GitProcessLimits,signal?:AbortSignal,objectDirectory?:string,input?:Buffer,alternateObjectDirectory?:string,indexFile?:string):Promise<{code:number;bytes:Buffer}>{
+/** Internal fixed-command transport. A synchronous stdout sink consumes chunks
+ * before release. Never expose its arguments or sink as an API. */
+export async function readGit(executable:string,root:string,gitDirectory:string,args:readonly string[],limits:GitProcessLimits,signal?:AbortSignal,objectDirectory?:string,input?:Buffer,alternateObjectDirectory?:string,indexFile?:string,onStdout?:(chunk:Buffer)=>void):Promise<{code:number;bytes:Buffer}>{
  signal?.throwIfAborted();
  const env:NodeJS.ProcessEnv={};for(const key of ['PATH','SystemRoot','WINDIR','COMSPEC','PATHEXT','TEMP','TMP'])if(process.env[key])env[key]=process.env[key];
  Object.assign(env,{LC_ALL:'C',LANG:'C',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:process.platform==='win32'?'NUL':'/dev/null',GIT_OPTIONAL_LOCKS:'0',GIT_TERMINAL_PROMPT:'0',GCM_INTERACTIVE:'Never',GIT_NO_LAZY_FETCH:'1',GIT_ATTR_NOSYSTEM:'1'});
  if(objectDirectory)env.GIT_OBJECT_DIRECTORY=objectDirectory;
  if(alternateObjectDirectory)env.GIT_ALTERNATE_OBJECT_DIRECTORIES=alternateObjectDirectory;
  if(indexFile)env.GIT_INDEX_FILE=indexFile;
+ // Bound individual Git allocations when its streaming reader falls back to in-core objects.
+ if(onStdout)env.GIT_ALLOC_LIMIT=String(64*1024*1024);
  return new Promise((resolve,reject)=>{
   const child=spawn(executable,['--no-pager','--no-optional-locks','--literal-pathspecs','--git-dir='+gitDirectory,'--work-tree='+root,
    '-c','core.fsmonitor=false','-c','core.untrackedCache=false','-c','gc.auto=0','-c','maintenance.auto=false','-c','protocol.allow=never',...args],{cwd:root,env,windowsHide:true,stdio:[input===undefined?'ignore':'pipe','pipe','pipe']});
-  let size=0,settled=false,failure:string|undefined;const chunks:Buffer[]=[];
-  const kill=(code:string)=>{failure??=code;child.kill('SIGKILL');};
+  let size=0,settled=false,failure:Error|undefined;const chunks:Buffer[]=[];
+  const kill=(cause:string|Error)=>{failure??=typeof cause==='string'?Error(cause):cause;child.kill('SIGKILL');};
   const aborted=()=>kill('git_cancelled');signal?.addEventListener('abort',aborted,{once:true});
   const timer=setTimeout(()=>kill('git_read_timeout'),limits.timeoutMs);timer.unref();
   const finish=(error?:Error,code=0)=>{if(settled)return;settled=true;clearTimeout(timer);signal?.removeEventListener('abort',aborted);if(error)reject(error);else resolve({code,bytes:Buffer.concat(chunks)});};
-  child.stdout!.on('data',(chunk:Buffer)=>{size+=chunk.length;if(size>limits.maxOutputBytes){kill('git_output_limit');return;}chunks.push(chunk);});
+  child.stdout!.on('data',(chunk:Buffer)=>{
+   if(failure)return;
+   size+=chunk.length;if(size>limits.maxOutputBytes){kill('git_output_limit');return;}
+   if(onStdout){try{onStdout(chunk);}catch(error){kill(error instanceof Error?error:Error('git_read_unavailable'));}}
+   else chunks.push(chunk);
+  });
   child.stderr!.resume();
   if(input!==undefined){child.stdin!.on('error',()=>{});child.stdin!.end(input);}
   child.once('error',()=>finish(Error('git_read_unavailable')));
-  child.once('close',code=>finish(failure?Error(failure):code===null?Error('git_read_unavailable'):undefined,code??-1));
+  child.once('close',code=>finish(failure??(code===null?Error('git_read_unavailable'):undefined),code??-1));
   if(signal?.aborted)aborted();
  });
 }
