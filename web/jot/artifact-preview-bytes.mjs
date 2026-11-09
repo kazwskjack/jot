@@ -65,6 +65,23 @@ export async function fetchVerifiedArtifactPreviewBytes(file, kind, signal = und
     throw failure('artifact_preview_integrity_failed');
   }
 
+  const bytes = await readVerifiedPreviewBytes(response, file, signal);
+  return Object.freeze({ bytes, media_type: mediaType });
+}
+
+/** Callers bind the response status, identity and content type before reading.
+ * @param {AbortSignal} [signal]
+ */
+export async function readVerifiedPreviewBytes(response, file, signal = undefined) {
+  if (!file || !Number.isSafeInteger(file.size_bytes) || file.size_bytes < 0
+    || typeof file.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(file.sha256) || !response.body) {
+    await response.body?.cancel().catch(() => {});
+    throw failure('artifact_preview_metadata_invalid');
+  }
+  if (file.size_bytes > PREVIEW_LIMIT) {
+    await response.body.cancel().catch(() => {});
+    throw failure('artifact_preview_too_large');
+  }
   const reader = response.body.getReader();
   const chunks = [];
   let length = 0;
@@ -97,5 +114,5 @@ export async function fetchVerifiedArtifactPreviewBytes(file, kind, signal = und
   if (bytes.byteLength !== file.size_bytes || sha256 !== file.sha256) {
     throw failure('artifact_preview_integrity_failed');
   }
-  return Object.freeze({ bytes, media_type: mediaType });
+  return bytes;
 }

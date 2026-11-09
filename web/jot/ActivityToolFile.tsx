@@ -1,10 +1,11 @@
+import ActivityToolFileImage,{listedFileImageType} from './ActivityToolFileImage';
 import ActivityToolFileBytes from './ActivityToolFileBytes';
 import React,{useEffect,useRef,useState} from 'react';
 import {ApiError,request,taskDraftScope} from './client';
 import type {ActivityToolFilePage,ActivityToolResultFile} from './types';
 
 const sha=/^[a-f0-9]{64}$/;
-export default function ActivityToolFile({conversationId,runId,activityId,resultSha,file}:{conversationId:string;runId:string;activityId:string;resultSha:string;file:ActivityToolResultFile}){
+function ActivityToolFileText({conversationId,runId,activityId,resultSha,file}:{conversationId:string;runId:string;activityId:string;resultSha:string;file:ActivityToolResultFile}){
  const owner=taskDraftScope(),identity=JSON.stringify([owner,conversationId,runId,activityId,resultSha,file]);
  const region=useRef<HTMLElement>(null);
  const [cursor,setCursor]=useState<{identity:string;offset:number;previous:number[];textSha?:string}>({identity,offset:0,previous:[]});
@@ -49,4 +50,16 @@ export default function ActivityToolFile({conversationId,runId,activityId,result
   </>}
   {current?.error&&<p role="alert">{current.error} <button type="button" onClick={()=>setRevision(value=>value+1)}>重试读取</button></p>}
  </section>;
+}
+
+export default function ActivityToolFile(props:React.ComponentProps<typeof ActivityToolFileText>){
+ const identity=JSON.stringify([taskDraftScope(),props]),[textView,setTextView]=useState<string>();
+ if(!listedFileImageType(props.file.path))return <ActivityToolFileText {...props}/>;
+ return <>
+  <nav aria-label="原列表文件查看方式" data-chat-search-ignore>
+   <button type="button" disabled={textView!==identity} onClick={()=>setTextView(undefined)}>查看图片</button>
+   <button type="button" disabled={textView===identity} onClick={()=>setTextView(identity)}>查看正文</button>
+  </nav>
+  {textView===identity?<ActivityToolFileText {...props}/>:<ActivityToolFileImage {...props}/>}
+ </>;
 }
