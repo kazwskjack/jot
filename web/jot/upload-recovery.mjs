@@ -8,14 +8,10 @@ const equal=(left,right)=>JSON.stringify(left)===JSON.stringify(right);
 const invalid=()=>Error('upload_recovery_invalid');
 
 const relative=value=>typeof value==='string'&&value.length>0&&value.length<=4096&&!/[\\:\u0000-\u001f\u007f]/.test(value)&&value.split('/').every(part=>part&&part!=='.'&&part!=='..');
-function validateGenerated(entry,conversation,scope){
- const value=entry.generated;
- if(!exact(value,['schema','scope','capture','blob','delivery'])||value.schema!==1||!['draft','sending'].includes(value.delivery)||value.delivery==='sending'&&!entry.artifact||!sha(value.scope)||scope!==undefined&&value.scope!==scope
-  ||typeof Blob!=='function'||!(value.blob instanceof Blob)||value.blob.type!=='image/png'||value.blob.size!==entry.file.size)throw invalid();
- const capture=value.capture;
+export function validateRegionCapture(capture,conversation,scope){
  if(!exact(capture,['owner','conversationId','runId','activityId','resultSha','file','reference','imageBytes','rotation'])
-  ||capture.owner!==value.scope||capture.conversationId!==conversation||!identifier(capture.runId)||!identifier(capture.activityId)||!sha(capture.resultSha)
-  ||!positive(capture.imageBytes)||capture.imageBytes!==entry.file.size||![0,90,180,270].includes(capture.rotation))throw invalid();
+  ||!sha(capture.owner)||scope!==undefined&&capture.owner!==scope||capture.conversationId!==conversation||!identifier(capture.runId)||!identifier(capture.activityId)||!sha(capture.resultSha)
+  ||!positive(capture.imageBytes)||![0,90,180,270].includes(capture.rotation))throw invalid();
  const source=capture.file,ref=capture.reference;
  if(!exact(source,['path','version','sha256','size'])||!relative(source.path)||!Number.isSafeInteger(source.version)||source.version<0||!sha(source.sha256)||!Number.isSafeInteger(source.size)||source.size<0
   ||!exact(ref,['schemaVersion','kind','id','selectionMode','source','renderer','locator','image','createdAt'],['nearbyText'])
@@ -28,8 +24,16 @@ function validateGenerated(entry,conversation,scope){
   ||!exact(locator,['surface','pageNumber','rect'])||locator.surface!=='page'||!positive(locator.pageNumber)
   ||!exact(locator.rect,['x','y','width','height'])||Object.values(locator.rect).some(number=>typeof number!=='number'||!Number.isFinite(number)||number<0||number>1)
   ||!locator.rect.width||!locator.rect.height||locator.rect.x+locator.rect.width>1+1e-9||locator.rect.y+locator.rect.height>1+1e-9
-  ||!exact(image,['name','mimeType','width','height','sha256'])||image.name!==entry.file.name||image.mimeType!=='image/png'||!positive(image.width)||!positive(image.height)||!sha(image.sha256)
-  ||entry.sha!==undefined&&entry.sha!==image.sha256||entry.file.type!=='image/png')throw invalid();
+  ||!exact(image,['name','mimeType','width','height','sha256'])||typeof image.name!=='string'||!image.name||image.name.length>255||/[\\/\u0000-\u001f\u007f]/.test(image.name)||image.mimeType!=='image/png'||!positive(image.width)||!positive(image.height)||!sha(image.sha256))throw invalid();
+ return capture;
+}
+
+function validateGenerated(entry,conversation,scope){
+ const value=entry.generated;
+ if(!exact(value,['schema','scope','capture','blob','delivery'])||value.schema!==1||!['draft','sending'].includes(value.delivery)||value.delivery==='sending'&&!entry.artifact||!sha(value.scope)||scope!==undefined&&value.scope!==scope
+  ||typeof Blob!=='function'||!(value.blob instanceof Blob)||value.blob.type!=='image/png'||value.blob.size!==entry.file.size)throw invalid();
+ const capture=validateRegionCapture(value.capture,conversation,value.scope),image=capture.reference.image;
+ if(capture.imageBytes!==entry.file.size||image.name!==entry.file.name||entry.file.type!=='image/png'||entry.sha!==undefined&&entry.sha!==image.sha256)throw invalid();
  return value;
 }
 

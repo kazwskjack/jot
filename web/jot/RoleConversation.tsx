@@ -1,5 +1,6 @@
-import {FileTextReferenceContext,FileTextReferences,fileReferenceMessage,isFileRegion,resolveRegionArtifact,type FileReference,type FileRegionDraft,type FileTextReference} from './FileTextReferences';
+import {FileTextReferenceContext,FileTextReferences,fileReferenceMessage,isFileRegion,resolveRegionArtifact,type FileReference,type FileSourceReference,type FileRegionDraft,type FileTextReference} from './FileTextReferences';
 import FileReferenceSource from './FileReferenceSource';
+import MessageFileReferences from './MessageFileReferences';
 import type {TaskSourceSelection} from '../workbench/types';
 import {useMutationReceipt} from '../workbench/useMutationReceipt';
 import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react';
@@ -137,9 +138,10 @@ function NativeMemberControls({run}:{run:Run}){
   {Object.values(actionStates).map(action=><p role="status" key={action.requestId}>{action.member.name} · {actionMessage(action)} {action.operation==='interrupt'&&action.state==='unknown'&&<><button type="button" disabled={busy} onClick={()=>void inspectAction(action)}>检查原中断回执</button><button type="button" disabled={loading||busy} onClick={()=>void refresh()}>检查成员状态</button></>} {action.operation==='wake'&&['pending','unknown'].includes(action.state)&&<button type="button" disabled={busy} onClick={()=>void inspectAction(action)}>检查原请求状态</button>}</p>)}
  </section>;
 }
-function ConversationMessageBody({message}:{message:Message}){
+function ConversationMessageBody({message,onOpenReference}:{message:Message;onOpenReference:(value:FileSourceReference)=>void}){
  return <div data-chat-search-message={message.message_id} {...(message.role==='assistant'?{'data-assistant-quote-source':'','data-assistant-quote-message-id':message.message_id}:{})}>
   {message.blocks.filter(block=>block.kind==='text').map(block=><TwemojiMarkdown key={block.block_id}>{block.text}</TwemojiMarkdown>)}
+  <MessageFileReferences message={message} onOpen={onOpenReference}/>
  </div>;
 }
 type ComposerDraft={text:string;replyQuotes:AssistantReplyQuote[];textReferences:FileTextReference[];goalMode:boolean};
@@ -151,10 +153,10 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  const [fileReferenceState,setFileReferenceState]=useState<{owner:string;conversationId:string;values:FileReference[]}>({owner:fileOwner,conversationId:id,values:[]});
  const fileReferences=fileReferenceState.owner===fileOwner&&fileReferenceState.conversationId===id?fileReferenceState.values:[];
  const setFileReferences=(values:FileReference[])=>{if(taskDraftScope()===fileOwner)setFileReferenceState({owner:fileOwner,conversationId:id,values});};
- const [referenceSource,setReferenceSource]=useState<{owner:string;conversationId:string;value:FileReference;requestId:string}>();
+ const [referenceSource,setReferenceSource]=useState<{owner:string;conversationId:string;value:FileSourceReference;requestId:string}>();
  const referenceReturnFocus=useRef<HTMLElement|null>(null);
- const openReferenceSource=(value:FileReference)=>{
-  if(value.owner!==fileOwner||taskDraftScope()!==fileOwner||value.conversationId!==id){setError('原文件引用所属账户或会话已变化');return;}
+ const openReferenceSource=(value:FileSourceReference)=>{
+  if(value.owner!==fileOwner||taskDraftScope()!==fileOwner){setError('原文件引用所属账户已变化');return;}
   referenceReturnFocus.current=document.activeElement instanceof HTMLElement?document.activeElement:null;
   setReferenceSource({owner:fileOwner,conversationId:id,value:structuredClone(value),requestId:crypto.randomUUID()});
  };
@@ -481,7 +483,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
      onNoEffect={()=>controller.refresh()}/>}
     {pendingForkForMessage&&!forkState?.error&&<p role="status">副本请求结果尚未确认；重试会复用原命令。</p>}
     {forkState?.error&&<p role="status">{forkState.error}</p>}
-    <ConversationDisplayBoundary label="消息正文"><ConversationMessageBody message={message}/></ConversationDisplayBoundary>
+    <ConversationDisplayBoundary label="消息正文"><ConversationMessageBody message={message} onOpenReference={openReferenceSource}/></ConversationDisplayBoundary>
     <div className={`jot-message-files ${message.role==='user'?'uploaded':''}`}>{(message.role==='user'||open?files:files.slice(0,3)).map(file=><React.Fragment key={`${file.artifact_id}:${file.version}`}>{message.role==='user'&&<button type="button" onClick={()=>showPreview(file)} disabled={busy}>预览 {file.relative_path||file.file_name}</button>}<button type="button" onClick={()=>file.part_count?setMessageArtifact({owner:taskDraftScope(),target:{kind:'file',artifactId:file.artifact_id,label:file.file_name,version:file.version,sha256:file.sha256}}):download(file)} disabled={busy}>{file.part_count?'查看各卷':'下载'} {file.relative_path||file.file_name}</button></React.Fragment>)}</div>
     {message.role==='user'&&Object.hasOwn(message,'attachment_refs')&&(message.attachments?.length??0)>files.length&&<p role="status">原附件版本暂不可用，请重新添加文件。</p>}
     {message.role==='assistant'&&files.length>3&&<button onClick={()=>setExpanded(value=>({...value,[message.message_id]:!open}))}>{open?'收起':`展开其余 ${files.length-3} 个文件`}</button>}

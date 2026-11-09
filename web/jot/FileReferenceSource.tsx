@@ -1,10 +1,10 @@
 import React,{useEffect,useMemo,useRef} from 'react';
 import ActivityToolFile from './ActivityToolFile';
-import {isFileRegion,type FileReference} from './FileTextReferences';
+import {isFileRegion,type FileSourceReference} from './FileTextReferences';
 import {taskDraftScope} from './client';
 import type {PdfReferenceFocus} from './pdf-file-view-state';
 
-export default function FileReferenceSource({value,requestId,onClose}:{value:FileReference;requestId:string;onClose:()=>void}){
+export default function FileReferenceSource({value,requestId,onClose}:{value:FileSourceReference;requestId:string;onClose:()=>void}){
  const root=useRef<HTMLElement>(null),owner=taskDraftScope();
  const focus=useMemo<PdfReferenceFocus>(()=>({
   key:requestId,

@@ -10,7 +10,8 @@ export type FileTextReference={rotation?:number;owner:string;conversationId:stri
 export type FileRegionDraft=Omit<FileTextReference,'reference'>&{reference:ImageRegionContentReference;imageBytes:number;rotation:number};
 export type FileRegionReference=FileRegionDraft&{uploadEntryId:string};
 export type FileReference=FileTextReference|FileRegionReference;
-export const isFileRegion=(value:FileReference):value is FileRegionReference=>value.reference.selectionMode==='region';
+export type FileSourceReference=FileTextReference|FileRegionDraft;
+export function isFileRegion<T extends FileSourceReference>(value:T):value is Extract<T,FileRegionDraft>{return value.reference.selectionMode==='region';}
 export const FileTextReferenceContext=createContext<{owner:string;conversationId:string;disabled:boolean;regionDisabled:boolean;onAdd:(reference:FileTextReference)=>boolean;onAddRegion:(reference:FileRegionDraft,file:File)=>Promise<boolean>}|null>(null);
 export function resolveRegionArtifact(value:FileRegionReference,resolve:(entryId:string)=>Artifact|undefined){
  const artifact=resolve(value.uploadEntryId);
@@ -33,13 +34,13 @@ function RegionPreview({file}:{file:File}){
  useEffect(()=>{const href=URL.createObjectURL(file);setUrl(href);return()=>URL.revokeObjectURL(href);},[file]);
  return url?<img src={url} alt="原PDF选中区域截图" style={{maxWidth:'100%',maxHeight:320}}/>:null;
 }
-function ReferenceDetails({value,file,ready}:{value:FileReference;file?:File;ready:boolean}){
+export function FileReferenceDetails({value,file,ready}:{value:FileSourceReference;file?:File;ready?:boolean}){
  const [open,setOpen]=useState(false);
  return <details onToggle={event=>setOpen(event.currentTarget.open)}><summary>{value.file.path} · 第 {isFileRegion(value)?value.reference.locator.pageNumber:value.reference.locator.pageNumbers?.join('、')} 页</summary>
   <p>原版本 {value.file.version} · SHA-256 <code>{value.file.sha256}</code></p>
   {isFileRegion(value)?<>
    <p>图片区域 · {value.reference.image.name} · {value.reference.image.width} × {value.reference.image.height} · 图片摘要 <code>{value.reference.image.sha256}</code></p>
-   {open&&file&&<RegionPreview file={file}/>}{!ready&&<p role="status">截图附件尚未完成核对，请在附件区处理，或移除此引用。</p>}
+   {open&&file&&<RegionPreview file={file}/>}{ready===false&&<p role="status">截图附件尚未完成核对，请在附件区处理，或移除此引用。</p>}
   </>:<pre>{value.reference.selectedText}</pre>}
  </details>;
 }
@@ -48,7 +49,7 @@ export function FileTextReferences({references,disabled,onChange,imageFile,resol
  return <section className="jot-assistant-quotes" aria-label="待发送的原文件引用">
   <div>原文件引用 · {references.length} <button type="button" disabled={disabled} onClick={()=>onChange([])}>清空原文件引用</button></div>
   {references.map(value=><div key={value.reference.id}>
-   <ReferenceDetails value={value} {...(isFileRegion(value)&&imageFile(value.uploadEntryId)?{file:imageFile(value.uploadEntryId)!}:{})} ready={!isFileRegion(value)||!!resolveRegionArtifact(value,resolveImage)}/>
+   <FileReferenceDetails value={value} {...(isFileRegion(value)&&imageFile(value.uploadEntryId)?{file:imageFile(value.uploadEntryId)!}:{})} ready={!isFileRegion(value)||!!resolveRegionArtifact(value,resolveImage)}/>
    <button type="button" onClick={()=>onOpen(value)}>打开原文件并定位引用</button>
    <button type="button" disabled={disabled} onClick={()=>onChange(references.filter(item=>item.reference.id!==value.reference.id))}>移除此原文件引用</button>
   </div>)}
