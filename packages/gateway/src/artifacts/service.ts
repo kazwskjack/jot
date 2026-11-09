@@ -1229,7 +1229,7 @@ export class ArtifactService {
       ||protocol===2&&Object.keys(selected).length)throw Error('invalid_artifact_restore_query');
     return withReadTransaction(this.db, () => {
       const head=this.get(id,ownerId),target=this.restoreTarget(id,ownerId,selected);
-      const archive=this.db.prepare(`SELECT backup_status,local_state,remote_path,remote_size,verified_at,last_error,remote_md5
+      const archive=this.db.prepare(`SELECT backup_status,local_state,remote_path,remote_size,verified_at,last_error,remote_md5,attempts
         FROM ga_artifact_archives WHERE artifact_id=?`).get(id) as Record<string,unknown>|undefined;
       const verified=typeof archive?.remote_path==='string'&&archive.remote_path.startsWith('/jot_file/')
         &&(archive.backup_status==='verified'||protocol===3&&Boolean(archive.verified_at));
@@ -1241,6 +1241,8 @@ export class ArtifactService {
       const restorable=Boolean(manifest)&&required.every(file=>covered.has(file.server_path));
       const localState=archive?.local_state==='restoring'?'restoring':missing.length?'deleted':'present';
       return {artifact_id:id,version:head.version,restore_protocol:protocol,all_versions_archived:allVersions,
+        ...(protocol===3?{archive_protocol:1,head_sha256:head.sha256,archive_attempts:Number(archive?.attempts??0),
+          archive_ready:head.status==='ready'&&archive?.local_state!=='restoring'&&target.all.every(file=>existsSync(file.server_path))}:{}),
         ...(protocol===3?{requested_version:target.file.version,requested_sha256:target.file.sha256,
           ...(target.partIndex!==undefined?{part_index:target.partIndex}:{}),archive_local_state:archive?.local_state??'present',
           selected_file_count:target.references.length,missing_file_count:missing.length,
@@ -1250,6 +1252,30 @@ export class ArtifactService {
         ...(archive?.remote_size!==null&&archive?.remote_size!==undefined?{remote_size:Number(archive.remote_size)}:{}),
         ...(archive?.verified_at?{verified_at:archive.verified_at}:{}),restorable,
         ...(archive?.last_error?{last_error:'archive_operation_failed'}:{})};
+    });
+  }
+
+  requestArchive(id:string,ownerId:string,input:Record<string,unknown>) {
+    if(!input||Object.keys(input).sort().join(',')!=='expected_sha256,expected_version'
+      ||!Number.isSafeInteger(input.expected_version)||Number(input.expected_version)<1
+      ||typeof input.expected_sha256!=='string'||!/^[a-f0-9]{64}$/.test(input.expected_sha256))throw Error('invalid_artifact_archive_request');
+    return withImmediateTransaction(this.db,()=>{
+      const head=this.get(id,ownerId);
+      if(head.status!=='ready')throw Error('artifact_not_found');
+      if(head.version!==input.expected_version||head.sha256!==input.expected_sha256)throw Error('version_conflict');
+      const references=artifactArchiveReferences(this.db,id);
+      if(!references.length||references.some(file=>!existsSync(file.server_path)))throw Error('artifact_restore_required');
+      const now=new Date().toISOString();
+      this.db.prepare(`INSERT OR IGNORE INTO ga_artifact_archives(artifact_id,backup_status,local_state,last_used_at,created_at,updated_at)
+        VALUES(?,'pending','present',?,?,?)`).run(id,now,now,now);
+      const row=this.db.prepare('SELECT backup_status,local_state,attempts,next_retry_at,last_error FROM ga_artifact_archives WHERE artifact_id=?')
+        .get(id) as {backup_status:string;local_state:string;attempts:number;next_retry_at:string|null;last_error:string|null};
+      if(row.local_state==='restoring'||!Number.isSafeInteger(row.attempts)||row.attempts<0)throw Error('artifact_archive_state_conflict');
+      const pending=row.backup_status==='pending'&&row.local_state==='present'&&row.next_retry_at===null&&!row.last_error;
+      if(pending)this.db.prepare("UPDATE ga_artifact_archives SET last_used_at=MAX(COALESCE(last_used_at,''),?) WHERE artifact_id=?").run(now,id);
+      else this.db.prepare(`UPDATE ga_artifact_archives SET backup_status='pending',local_state='present',next_retry_at=NULL,last_error=NULL,
+        last_used_at=MAX(COALESCE(last_used_at,''),?),updated_at=? WHERE artifact_id=?`).run(now,now,id);
+      return {accepted:true,artifact_id:id,version:head.version,sha256:head.sha256,status:'queued',archive_protocol:1,after_attempt:row.attempts};
     });
   }
 

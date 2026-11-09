@@ -102,7 +102,7 @@ export type ArtifactArchiveExecutorStatus = import("../../packages/gateway/contr
 
 export type ArtifactVersionPage = { artifact_id: string; conversation_id: string; current_version: number; items: Artifact[]; next_before_version?: number };
 
-export type {ArtifactBackup, ArtifactRestoreReceipt} from "../../packages/gateway/contracts/types";
+export type {ArtifactBackup, ArtifactRestoreReceipt, ArtifactArchiveReceipt} from "../../packages/gateway/contracts/types";
 
 export type UploadInit = { file_name: string; media_type: string; size_bytes: number; sha256: string };
 export type RunArtifact = {run_id:string;conversation_id:string;artifact_id:string;version:number;file_name:string;media_type:string;size_bytes:number;sha256:string;status:string;created_at:string;download_url:string;local_state?:Artifact['local_state'];backup_status?:Artifact['backup_status']};

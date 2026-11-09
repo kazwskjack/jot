@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash,randomUUID } from 'node:crypto'
 import { createReadStream, existsSync, mkdirSync, mkdtempSync, rmSync, statSync,lstatSync,renameSync } from 'node:fs'
 import { dirname, join, resolve, sep } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
@@ -76,19 +76,31 @@ export class ArtifactArchiveService {
         const date = new Date(String(row.created_at)); const remoteDirectory = `/jot_file/${date.getUTCFullYear()}/${String(date.getUTCMonth()+1).padStart(2,'0')}/${String(date.getUTCDate()).padStart(2,'0')}/${artifactId}`
         const files = await this.files(artifactId,signal)
         await this.client.mkdir(remoteDirectory,signal)
+        const previous=source.record.remote_path===remoteDirectory
+          ?artifactArchiveManifest(source.files,String(source.record.remote_md5||'[]'),[]):null
+        const prior=new Map(previous?.map(file=>[file.local_path,file])??[])
         const manifest = []
         for (const file of files) {
           signal?.throwIfAborted()
-          const remotePath = `${remoteDirectory}/${file.remoteName}`
+          const saved=prior.get(file.localPath)
+          let remoteName=saved?.sha256===file.sha256&&saved.md5===file.md5?saved.remote_name:file.remoteName
+          const remotePath = `${remoteDirectory}/${remoteName}`
           let remote = await this.client.meta(remotePath,signal)
           // A retry may already have uploaded the correct bytes. Verify that
           // object first instead of producing another provider-side copy.
-          if (!remote || remote.size !== file.size) {
-            await this.client.upload(file.localPath, remoteDirectory, file.remoteName,signal)
+          if (!remote) {
+            await this.client.upload(file.localPath, remoteDirectory, remoteName,signal)
             remote = await this.client.meta(remotePath,signal)
           }
-          await this.verifyRemote(file, remotePath, remote,signal)
-          manifest.push({ remote_name: file.remoteName, local_path: file.localPath, size: file.size, md5: file.md5, sha256: file.sha256 })
+          try{await this.verifyRemote(file, remotePath, remote,signal)}catch(error){
+            if(signal?.aborted||!remote||!(error instanceof Error)||error.message!=='archive_remote_verification_failed')throw error
+            // A fresh name repairs a bad object without deleting or overwriting it.
+            remoteName=`${randomUUID()}-${file.remoteName}`
+            await this.client.upload(file.localPath,remoteDirectory,remoteName,signal)
+            const replacement=`${remoteDirectory}/${remoteName}`
+            await this.verifyRemote(file,replacement,await this.client.meta(replacement,signal),signal)
+          }
+          manifest.push({ remote_name: remoteName, local_path: file.localPath, size: file.size, md5: file.md5, sha256: file.sha256 })
         }
         signal?.throwIfAborted()
         const encoded = JSON.stringify(manifest)

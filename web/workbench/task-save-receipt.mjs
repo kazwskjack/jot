@@ -68,14 +68,18 @@ export class WorkspaceSelectionStore {
 export class ArtifactRecoveryStore {
  constructor(storage,scope,artifactId){
   if(!/^[a-f0-9]{64}$/.test(scope)||!/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/.test(artifactId))throw new Error('文件恢复范围尚未确认');
-  this.storage=storage;this.key=`jot-artifact-recovery/v1/${scope}/${artifactId}`;this.path=`/artifacts/${encodeURIComponent(artifactId)}/restore`;
+  this.storage=storage;this.key=`jot-artifact-recovery/v1/${scope}/${artifactId}`;this.path=`/artifacts/${encodeURIComponent(artifactId)}/restore`;this.archivePath=`/artifacts/${encodeURIComponent(artifactId)}/archive`;
  }
  validate(command){
   if(!command||typeof command!=='object'||Array.isArray(command)||Object.keys(command).sort().join(',')!=='body,key,method,path'
-   ||command.path!==this.path||command.method!=='POST'||typeof command.key!=='string'||!/^[!-~]{8,128}$/.test(command.key)
+   ||command.path!==this.path&&command.path!==this.archivePath||command.method!=='POST'||typeof command.key!=='string'||!/^[!-~]{8,128}$/.test(command.key)
    ||!command.body||typeof command.body!=='object'||Array.isArray(command.body)
    ||!Number.isSafeInteger(command.body.expected_version)||command.body.expected_version<1)throw new Error('文件恢复回执无法读取');
   const body=command.body,keys=Object.keys(body).sort().join(',');
+  if(command.path===this.archivePath){
+   if(keys!=='expected_sha256,expected_version'||typeof body.expected_sha256!=='string'||!/^[a-f0-9]{64}$/.test(body.expected_sha256))throw new Error('文件归档回执无法读取');
+   return;
+  }
   if(keys==='expected_version')return;
   if(!['expected_version,restore_sha256,restore_version','expected_version,part_index,restore_sha256,restore_version'].includes(keys)
    ||!Number.isSafeInteger(body.restore_version)||body.restore_version<1||body.restore_version>body.expected_version

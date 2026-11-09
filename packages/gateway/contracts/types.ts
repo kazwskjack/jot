@@ -163,7 +163,10 @@ export type RunArtifactPage = { items: Array<RunArtifact> };
 
 export type ArtifactArchiveExecutorStatus = { mode: "managed" | "external"; state: "unmanaged" | "starting" | "idle" | "restoring" | "archiving" | "cleaning" | "failed" | "stopped"; cleanup_enabled?: boolean; last_started_at?: string; last_completed_at?: string };
 
-export type ArtifactBackup = { executor?: ArtifactArchiveExecutorStatus; artifact_id: string; backup_status: ArtifactBackupStatus; local_state: "present" | "deleted" | "restoring"; remote_path?: string; remote_size?: number; verified_at?: string; restorable: boolean; version?: number; restore_protocol?: 2 | 3; requested_version?: number; requested_sha256?: string; part_index?: number; archive_local_state?: "present" | "deleted" | "restoring"; selected_file_count?: number; missing_file_count?: number; unarchived_file_count?: number; all_versions_archived?: boolean; last_error?: string };
+export type ArtifactArchiveRequest = {expected_version: number; expected_sha256: string};
+export type ArtifactArchiveReceipt = {accepted: true; artifact_id: string; version: number; sha256: string; status: "queued"; archive_protocol: 1; after_attempt: number};
+
+export type ArtifactBackup = { archive_protocol?: 1; head_sha256?: string; archive_ready?: boolean; archive_attempts?: number; executor?: ArtifactArchiveExecutorStatus; artifact_id: string; backup_status: ArtifactBackupStatus; local_state: "present" | "deleted" | "restoring"; remote_path?: string; remote_size?: number; verified_at?: string; restorable: boolean; version?: number; restore_protocol?: 2 | 3; requested_version?: number; requested_sha256?: string; part_index?: number; archive_local_state?: "present" | "deleted" | "restoring"; selected_file_count?: number; missing_file_count?: number; unarchived_file_count?: number; all_versions_archived?: boolean; last_error?: string };
 
 export type ArtifactRestoreReceipt = { accepted: true; artifact_id: string; status: "ready" | "restoring"; version?: number; restore_protocol?: 2 | 3; requested_version?: number; requested_sha256?: string; part_index?: number };
 

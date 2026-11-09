@@ -3,7 +3,7 @@ import {request,taskDraftScope} from './client';
 import {useResource} from '../workbench/useResource';
 import {useMutationReceipt} from '../workbench/useMutationReceipt';
 import {ArtifactRecoveryStore} from '../workbench/task-save-receipt.mjs';
-import type {ArtifactBackup,ArtifactRestoreReceipt} from './types';
+import type {ArtifactBackup,ArtifactArchiveReceipt,ArtifactRestoreReceipt} from './types';
 
 type Props={artifactId:string;version?:number|undefined;sha256?:string|undefined;partIndex?:number|undefined;onRestored:()=>void};
 export default function ArtifactRecovery(props:Props){
@@ -22,25 +22,36 @@ function Recovery({artifactId,version,sha256,partIndex,onRestored,owner,store}:P
  const identity=JSON.stringify([owner,artifactId,version??null,sha256??null,partIndex??null]);
  const alive=useRef(true),previousState=useRef(''),pollAttempt=useRef(0);
  const [busy,setBusy]=useState(false),[error,setError]=useState('');
+ const [archiveAfterAttempt,setArchiveAfterAttempt]=useState<number|null>(null);
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
  useEffect(()=>{previousState.current='';pollAttempt.current=0;setError('');},[identity]);
  const current=()=>alive.current&&taskDraftScope()===owner;
  const receipt=useMutationReceipt(store,undefined,async(path,method,body,key)=>{
   if(!current())throw Error('文件恢复账户范围已变化');
-  const command=body as {expected_version:number;restore_version?:number;restore_sha256?:string;part_index?:number};
-  const selected=command.restore_version!==undefined;
-  let result:ArtifactRestoreReceipt;
-  try{result=await request<ArtifactRestoreReceipt>(path,method,body,key);}
+  const command=body as {expected_version:number;expected_sha256?:string;restore_version?:number;restore_sha256?:string;part_index?:number};
+  const selected=command.restore_version!==undefined,archiving=path===`/artifacts/${encodeURIComponent(artifactId)}/archive`;
+  let result:ArtifactRestoreReceipt|ArtifactArchiveReceipt;
+  try{result=await request<ArtifactRestoreReceipt|ArtifactArchiveReceipt>(path,method,body,key);}
   catch(reason){
    const failure=reason as {status?:number;message?:string};
+   if(archiving&&(failure.status===404||[400,422].includes(failure.status??0)
+    &&['CONTRACT_REQUEST_INVALID','INVALID_ARTIFACT_ARCHIVE_REQUEST'].includes(failure.message??'')))throw Error('归档请求尚未确认，请保留回执并在归档入口可用后重试。');
    if(selected&&[400,422].includes(failure.status??0)
     &&['CONTRACT_REQUEST_INVALID','INVALID_ARTIFACT_RESTORE','INVALID_ARTIFACT_RESTORE_QUERY'].includes(failure.message??''))throw Error('服务器尚未支持原恢复请求，请保留回执并在恢复入口可用后重试。');
    throw reason;
   }
-  if(!current()||!result||result.accepted!==true||result.artifact_id!==artifactId||result.restore_protocol!==(selected?3:2)
-   ||result.version!==command.expected_version||!['ready','restoring'].includes(result.status)
-   ||selected&&(result.requested_version!==command.restore_version||result.requested_sha256!==command.restore_sha256||result.part_index!==command.part_index))throw Error('文件恢复回执尚未确认，请重试原请求。');
-  return result;
+  if(archiving){
+   const archived=result as ArtifactArchiveReceipt;
+   if(!current()||!archived||archived.accepted!==true||archived.artifact_id!==artifactId||archived.archive_protocol!==1
+    ||archived.version!==command.expected_version||archived.sha256!==command.expected_sha256||archived.status!=='queued'
+    ||!Number.isSafeInteger(archived.after_attempt)||archived.after_attempt<0)throw Error('文件归档回执尚未确认，请重试原请求。');
+   return archived;
+  }
+  const restored=result as ArtifactRestoreReceipt;
+  if(!current()||!restored||restored.accepted!==true||restored.artifact_id!==artifactId||restored.restore_protocol!==(selected?3:2)
+   ||restored.version!==command.expected_version||!['ready','restoring'].includes(restored.status)
+   ||selected&&(restored.requested_version!==command.restore_version||restored.requested_sha256!==command.restore_sha256||restored.part_index!==command.part_index))throw Error('文件恢复回执尚未确认，请重试原请求。');
+  return restored;
  });
  const resource=useResource(async signal=>{
   const query=new URLSearchParams({restore_protocol:'3'});
@@ -53,6 +64,8 @@ function Recovery({artifactId,version,sha256,partIndex,onRestored,owner,store}:P
    ||backup.all_versions_archived!==undefined&&typeof backup.all_versions_archived!=='boolean'
    ||backup.restore_protocol!==undefined&&![2,3].includes(backup.restore_protocol)
    ||backup.version!==undefined&&(!Number.isSafeInteger(backup.version)||backup.version<1))throw Error('文件归档状态来源尚未确认');
+  if(backup.archive_protocol!==undefined&&(backup.archive_protocol!==1||typeof backup.head_sha256!=='string'||!/^[a-f0-9]{64}$/.test(backup.head_sha256)
+   ||typeof backup.archive_ready!=='boolean'||!Number.isSafeInteger(backup.archive_attempts)||Number(backup.archive_attempts)<0))throw Error('文件归档请求来源尚未确认');
   if(backup.executor!==undefined){
    const executor=backup.executor;
    if(!executor||!['managed','external'].includes(executor.mode)
@@ -78,26 +91,43 @@ function Recovery({artifactId,version,sha256,partIndex,onRestored,owner,store}:P
   if(!backup||resource.loading||resource.error)return;
   if(previousState.current==='restoring'&&backup.local_state==='present')onRestored();
   previousState.current=backup.local_state;
-  if(backup.local_state!=='restoring')return;
+  if(archiveAfterAttempt!==null&&Number(backup.archive_attempts)>archiveAfterAttempt
+   &&(backup.backup_status==='verified'&&backup.all_versions_archived===true||backup.backup_status==='retry'||backup.backup_status==='failed'||!!backup.last_error)){
+   setArchiveAfterAttempt(null);return;
+  }
+  if(backup.local_state!=='restoring'&&archiveAfterAttempt===null)return;
   const delay=Math.min(30000,2000*2**Math.min(pollAttempt.current,4));pollAttempt.current+=1;
   const timer=setTimeout(resource.reload,delay);return()=>clearTimeout(timer);
- },[backup,resource.loading,resource.error,resource.reload,onRestored]);
+ },[backup,resource.loading,resource.error,resource.reload,onRestored,archiveAfterAttempt]);
  const legacyCurrent=backup?.restore_protocol===2&&partIndex===undefined&&(version===undefined||version===backup.version);
  const canRestore=!!store&&backup?.version!==undefined&&backup.restorable
   &&(backup.restore_protocol===3&&backup.local_state!=='restoring'||legacyCurrent&&backup.backup_status==='verified'&&backup.local_state==='deleted');
- const restore=async()=>{
-  if(busy||!store||!current()||!receipt.pending&&!canRestore)return;
+ const canArchive=!!store&&backup?.archive_protocol===1&&backup.archive_ready&&backup.version!==undefined;
+ const submit=async(path:string,body:unknown)=>{
+  if(busy||!store||!current())return;
   setBusy(true);setError('');
+  try{
+   const result=await receipt.submit(path,'POST',body) as ArtifactRestoreReceipt|ArtifactArchiveReceipt;
+   if(current()){
+    if('archive_protocol' in result)setArchiveAfterAttempt(result.after_attempt);
+    else{
+     if(result.status==='restoring')previousState.current='restoring';
+     if(result.status==='ready')onRestored();
+    }
+    pollAttempt.current=0;resource.reload();
+   }
+  }catch(reason){if(current()){setError(reason instanceof Error?reason.message:'文件归档或恢复尚未确认');resource.reload();}}
+  finally{if(current())setBusy(false);}
+ };
+ const restore=async()=>{
+  if(!receipt.pending&&!canRestore)return;
   const body=backup?.restore_protocol===3?{expected_version:backup.version,restore_version:backup.requested_version,restore_sha256:backup.requested_sha256,
    ...(backup.part_index!==undefined?{part_index:backup.part_index}:{})}:{expected_version:backup?.version};
-  try{
-   const result=await receipt.submit(`/artifacts/${encodeURIComponent(artifactId)}/restore`,'POST',body) as ArtifactRestoreReceipt;
-   if(current()){
-    if(result.status==='restoring')previousState.current='restoring';
-    pollAttempt.current=0;resource.reload();if(result.status==='ready')onRestored();
-   }
-  }catch(reason){if(current()){setError(reason instanceof Error?reason.message:'文件恢复尚未确认');resource.reload();}}
-  finally{if(current())setBusy(false);}
+  await submit(`/artifacts/${encodeURIComponent(artifactId)}/restore`,body);
+ };
+ const archive=async()=>{
+  if(receipt.pending||!canArchive)return;
+  await submit(`/artifacts/${encodeURIComponent(artifactId)}/archive`,{expected_version:backup?.version,expected_sha256:backup?.head_sha256});
  };
  const refresh=()=>{pollAttempt.current=0;resource.reload();};
  const statuses={pending:'待归档',retry:'归档重试中',verified:'归档已验证',failed:'归档失败'};
@@ -116,7 +146,10 @@ function Recovery({artifactId,version,sha256,partIndex,onRestored,owner,store}:P
   {resource.error&&<p role="alert">归档状态读取失败，可重新读取。</p>}
   <button type="button" disabled={busy||resource.loading} onClick={refresh}>刷新归档状态</button>
   {canRestore&&<button type="button" disabled={busy||resource.loading||!!resource.error||receipt.pending} onClick={()=>void restore()}>{backup?.local_state==='present'?'从归档重新恢复此版本':'恢复所选文件'}</button>}
-  {receipt.pending&&<p role="status">原恢复请求的回执尚未确认，请先确认原请求。<button type="button" disabled={busy} onClick={()=>void restore()}>重试原恢复请求</button></p>}
+  {canArchive&&<button type="button" disabled={busy||resource.loading||!!resource.error||receipt.pending||archiveAfterAttempt!==null} onClick={()=>void archive()}>{backup?.last_error||backup?.backup_status==='retry'||backup?.backup_status==='failed'?'重试归档全部版本':'归档全部版本'}</button>}
+  {backup?.archive_protocol===1&&!backup.archive_ready&&<p role="status">归档全部版本需要本地文件齐全，且当前没有恢复操作。</p>}
+  {archiveAfterAttempt!==null&&<p role="status">全部版本归档请求已登记，等待归档进程完成并验证文件。</p>}
+  {receipt.pending&&<p role="status">原归档或恢复请求的回执尚未确认，请先确认原请求。<button type="button" disabled={busy} onClick={()=>void restore()}>重试原请求</button></p>}
   {backup?.local_state==='restoring'&&<p role="status">{backup.executor?.mode==='managed'?'已登记到托管归档进程，完成后会重新读取文件。':'恢复由单独配置的外部归档进程处理，完成后会重新读取文件。'}</p>}
   {backup?.restore_protocol===2&&!legacyCurrent&&<p role="status">此服务器提供当前版本恢复，所选历史版本需通过新版恢复入口处理。</p>}
   {error&&<p role="alert">{error}</p>}
