@@ -1,5 +1,7 @@
 import React,{useEffect,useMemo,useRef,useState} from 'react';
 import {request,taskDraftScope} from '../jot/client';
+import {useDurableFileRecovery} from './useDurableFileRecovery';
+import type {DurableFileRecoveryStore} from './durable-file-recovery.mjs';
 import {useMutationReceipt} from './useMutationReceipt';
 import {CheckpointCommandStore,checkpointCommandTransport} from './checkpoint-command-store.mjs';
 import {useResource} from './useResource';
@@ -8,17 +10,12 @@ import type {WorkspaceCheckpoint,WorkspaceCheckpointPage,WorkspaceCheckpointRest
 
 type Props={workspace:string;project:string;canWrite:boolean;onPending:(value:boolean)=>void;onChanged:()=>void};
 export default function WorkspaceCheckpointPanel(props:Props){
- const scope=taskDraftScope(),[storageRevision,setStorageRevision]=useState(0);
- const recovery=useMemo(()=>{
-  try{const store=new CheckpointCommandStore(window.sessionStorage,scope,props.workspace,props.project);store.read();return {store,error:''};}
-  catch{return {store:null,error:'检查点原请求存储不可用，创建和审阅已暂停。'};}
- },[scope,props.workspace,props.project,storageRevision]);
- return <>
-  {recovery.error&&<p role="alert">{recovery.error} <button onClick={()=>setStorageRevision(value=>value+1)}>重读检查点原请求</button></p>}
-  <CheckpointPanel key={JSON.stringify([scope,props.workspace,props.project,storageRevision])} {...props} scope={scope} store={recovery.store}/>
- </>;
+ const scope=taskDraftScope();
+ const createStore=useMemo(()=>(storage:Storage)=>new CheckpointCommandStore(storage,scope,props.workspace,props.project),[scope,props.workspace,props.project]);
+ const recovery=useDurableFileRecovery(JSON.stringify(['checkpoint',scope,props.workspace,props.project]),createStore,!!scope&&!!props.workspace&&!!props.project);
+ return <CheckpointPanel key={recovery.key} {...props} scope={scope} store={recovery.store} recoveryLoading={recovery.loading} recoveryError={recovery.error} onReloadRecovery={recovery.reload}/>;
 }
-function CheckpointPanel({workspace,project,canWrite,onPending,onChanged,scope,store}:Props&{scope:string;store:CheckpointCommandStore|null}){
+function CheckpointPanel({workspace,project,canWrite,onPending,onChanged,scope,store,recoveryLoading,recoveryError,onReloadRecovery}:Props&{scope:string;store:DurableFileRecoveryStore|null;recoveryLoading:boolean;recoveryError:string;onReloadRecovery:()=>void}){
  const alive=useRef(true);
  const current=()=>alive.current&&!!scope&&taskDraftScope()===scope;
  const mutation=useMutationReceipt(store,undefined,checkpointCommandTransport(store,request,current));
@@ -28,7 +25,7 @@ function CheckpointPanel({workspace,project,canWrite,onPending,onChanged,scope,s
  const cursor=cursors.at(-1),prefix=`/workspaces/${encodeURIComponent(workspace)}/checkpoints`;
  const identity=JSON.stringify([scope,workspace,project,cursor]);
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
- useEffect(()=>{onPending(restorePending||mutation.pending||busy);},[restorePending,mutation.pending,busy,onPending]);
+ useEffect(()=>{onPending(restorePending||mutation.pending||busy||recoveryLoading);},[restorePending,mutation.pending,busy,recoveryLoading,onPending]);
  const resource=useResource(async signal=>{
   const query=new URLSearchParams({project_id:project,limit:'25'});if(cursor!==undefined)query.set('before_checkpoint_id',cursor);
   const page=await request<WorkspaceCheckpointPage>(`${prefix}?${query}`,'GET',undefined,undefined,signal);
@@ -62,6 +59,9 @@ function CheckpointPanel({workspace,project,canWrite,onPending,onChanged,scope,s
  const pagingLocked=busy||mutation.pending||restorePending||resource.loading;
  return <section aria-label="项目文件检查点" className="wb-form">
   <h3>项目文件检查点</h3><p className="wb-hint">选择要保存的路径。恢复时先审阅当前与目标版本，每次恢复一个路径。</p>
+  {recoveryLoading&&<p role="status">正在读取文件操作持久回执…</p>}
+  {recoveryError&&<p role="alert">{recoveryError}</p>}
+  <button disabled={busy||restorePending||recoveryLoading} onClick={onReloadRecovery}>重读待确认检查点请求</button>
   {error&&<p role="alert">{error}</p>}
   {notice&&<p role="status">{notice}</p>}
   <label>相对路径（逗号或换行分隔）<textarea value={paths} disabled={!canWrite||!store||busy||mutation.pending||restorePending} onChange={event=>setPaths(event.target.value)}/></label>

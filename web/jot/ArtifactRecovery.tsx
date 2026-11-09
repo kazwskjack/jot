@@ -2,23 +2,20 @@ import React,{useEffect,useMemo,useRef,useState} from 'react';
 import {request,taskDraftScope} from './client';
 import {useResource} from '../workbench/useResource';
 import {useMutationReceipt} from '../workbench/useMutationReceipt';
+import {useDurableFileRecovery} from '../workbench/useDurableFileRecovery';
+import type {DurableFileRecoveryStore} from '../workbench/durable-file-recovery.mjs';
 import {ArtifactRecoveryStore} from '../workbench/task-save-receipt.mjs';
 import type {ArtifactBackup,ArtifactArchiveReceipt,ArtifactRestoreReceipt} from './types';
 
 type Props={artifactId:string;version?:number|undefined;sha256?:string|undefined;partIndex?:number|undefined;onRestored:()=>void};
 export default function ArtifactRecovery(props:Props){
- const owner=taskDraftScope(),[storageRevision,setStorageRevision]=useState(0);
- const recovery=useMemo(()=>{
-  try{const store=new ArtifactRecoveryStore(window.sessionStorage,owner,props.artifactId);store.read();return {store,error:''};}
-  catch{return {store:null,error:'恢复回执存储不可用，请先重新读取回执。'};}
- },[owner,props.artifactId,storageRevision]);
- return <>
-  {recovery.error&&<p role="alert">{recovery.error} <button type="button" onClick={()=>setStorageRevision(value=>value+1)}>重读恢复回执</button></p>}
-  <Recovery key={JSON.stringify([owner,props.artifactId,storageRevision])} {...props} owner={owner} store={recovery.store}/>
- </>;
+ const owner=taskDraftScope();
+ const createStore=useMemo(()=>(storage:Storage)=>new ArtifactRecoveryStore(storage,owner,props.artifactId),[owner,props.artifactId]);
+ const recovery=useDurableFileRecovery(JSON.stringify(['artifact',owner,props.artifactId]),createStore,!!owner&&!!props.artifactId);
+ return <Recovery key={recovery.key} {...props} owner={owner} store={recovery.store} recoveryLoading={recovery.loading} recoveryError={recovery.error} onReloadRecovery={recovery.reload}/>;
 }
 
-function Recovery({artifactId,version,sha256,partIndex,onRestored,owner,store}:Props&{owner:string;store:ArtifactRecoveryStore|null}){
+function Recovery({artifactId,version,sha256,partIndex,onRestored,owner,store,recoveryLoading,recoveryError,onReloadRecovery}:Props&{owner:string;store:DurableFileRecoveryStore|null;recoveryLoading:boolean;recoveryError:string;onReloadRecovery:()=>void}){
  const identity=JSON.stringify([owner,artifactId,version??null,sha256??null,partIndex??null]);
  const alive=useRef(true),previousState=useRef(''),pollAttempt=useRef(0);
  const [busy,setBusy]=useState(false),[error,setError]=useState('');
@@ -27,6 +24,9 @@ function Recovery({artifactId,version,sha256,partIndex,onRestored,owner,store}:P
  useEffect(()=>{previousState.current='';pollAttempt.current=0;setError('');},[identity]);
  const current=()=>alive.current&&taskDraftScope()===owner;
  const receipt=useMutationReceipt(store,undefined,async(path,method,body,key)=>{
+  if(!current()||!store)throw Error('文件恢复账户或回执范围尚未确认');
+  const frozen={path,method,body,key};
+  await store.persist(frozen);
   if(!current())throw Error('文件恢复账户范围已变化');
   const command=body as {expected_version:number;expected_sha256?:string;restore_version?:number;restore_sha256?:string;part_index?:number};
   const selected=command.restore_version!==undefined,archiving=path===`/artifacts/${encodeURIComponent(artifactId)}/archive`;
@@ -38,19 +38,25 @@ function Recovery({artifactId,version,sha256,partIndex,onRestored,owner,store}:P
     &&['CONTRACT_REQUEST_INVALID','INVALID_ARTIFACT_ARCHIVE_REQUEST'].includes(failure.message??'')))throw Error('归档请求尚未确认，请保留回执并在归档入口可用后重试。');
    if(selected&&[400,422].includes(failure.status??0)
     &&['CONTRACT_REQUEST_INVALID','INVALID_ARTIFACT_RESTORE','INVALID_ARTIFACT_RESTORE_QUERY'].includes(failure.message??''))throw Error('服务器尚未支持原恢复请求，请保留回执并在恢复入口可用后重试。');
-   throw reason;
+   if(!current())throw Error('文件恢复账户范围已变化');
+   // A rejected retry can follow a previously committed original request.
+   throw new Error(reason instanceof Error?reason.message:'文件归档或恢复结果待确认',{cause:reason});
   }
   if(archiving){
    const archived=result as ArtifactArchiveReceipt;
    if(!current()||!archived||archived.accepted!==true||archived.artifact_id!==artifactId||archived.archive_protocol!==1
     ||archived.version!==command.expected_version||archived.sha256!==command.expected_sha256||archived.status!=='queued'
     ||!Number.isSafeInteger(archived.after_attempt)||archived.after_attempt<0)throw Error('文件归档回执尚未确认，请重试原请求。');
+   await store.acknowledge(frozen);
+   if(!current())throw Error('文件恢复账户范围已变化');
    return archived;
   }
   const restored=result as ArtifactRestoreReceipt;
   if(!current()||!restored||restored.accepted!==true||restored.artifact_id!==artifactId||restored.restore_protocol!==(selected?3:2)
    ||restored.version!==command.expected_version||!['ready','restoring'].includes(restored.status)
    ||selected&&(restored.requested_version!==command.restore_version||restored.requested_sha256!==command.restore_sha256||restored.part_index!==command.part_index))throw Error('文件恢复回执尚未确认，请重试原请求。');
+  await store.acknowledge(frozen);
+  if(!current())throw Error('文件恢复账户范围已变化');
   return restored;
  });
  const resource=useResource(async signal=>{
@@ -135,6 +141,9 @@ function Recovery({artifactId,version,sha256,partIndex,onRestored,owner,store}:P
  const phases={unmanaged:'外部进程',starting:'正在启动',idle:'空闲',restoring:'正在恢复',archiving:'正在归档',cleaning:'正在清理已验证备份的本地缓存',failed:'处理失败',stopped:'已停止'};
  const local={present:'所选文件在本地',deleted:'所选文件缺失',restoring:'恢复请求已登记'};
  return <section aria-label="文件归档与恢复" data-chat-search-ignore>
+  {recoveryLoading&&<p role="status">正在读取文件操作持久回执…</p>}
+  {recoveryError&&<p role="alert">{recoveryError}</p>}
+  <button type="button" disabled={busy||recoveryLoading} onClick={onReloadRecovery}>重读待确认归档或恢复请求</button>
   {backup&&<p>{statuses[backup.backup_status]} · {local[backup.local_state]}</p>}
   {backup?.executor?.mode==='managed'&&<p role="status">托管归档进程 · {phases[backup.executor.state]}{backup.executor.last_completed_at?` · 上次处理 ${backup.executor.last_completed_at}`:''}</p>}
   {backup?.executor?.mode==='managed'&&backup.executor.state==='failed'&&<p role="status">{backup.executor.restart_required?'归档进程回收尚未确认，自动重启已停止。需处理残留进程后重启网关。':'归档进程遇到错误，可刷新状态查看后续处理。'}</p>}

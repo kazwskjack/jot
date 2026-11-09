@@ -85,21 +85,24 @@ export class CheckpointCommandStore {
 export function checkpointCommandTransport(store, send, current) {
  return async (path, method, body, key) => {
   if (!store || !current()) invalid();
+  const sourceStore = store.sync ?? store;
   const command = {path, method, body, key};
-  const descriptor = store.validate(command);
-  if (JSON.stringify(store.read()?.command) !== JSON.stringify(command)) invalid();
-  const closing = store.readRecord()?.closing;
+  const descriptor = sourceStore.validate(command);
+  if (JSON.stringify(sourceStore.read()?.command) !== JSON.stringify(command)) invalid();
+  const closing = sourceStore.readRecord()?.closing;
   let value;
   try {
+   if (typeof store.persist === 'function') await store.persist(command);
+   if (!current()) invalid();
    if (closing) {
     const original = descriptor.kind === 'create'
-     ? {project_id: store.project, paths: [...body.paths].sort()}
-     : {project_id: store.project, checkpoint_id: descriptor.checkpoint, path: body.path};
-    const publicCommand = {workspace_id: store.workspace, command_key: key, kind: descriptor.kind, ...original};
+     ? {project_id: sourceStore.project, paths: [...body.paths].sort()}
+     : {project_id: sourceStore.project, checkpoint_id: descriptor.checkpoint, path: body.path};
+    const publicCommand = {workspace_id: sourceStore.workspace, command_key: key, kind: descriptor.kind, ...original};
     const canonical = JSON.stringify(Object.fromEntries(Object.entries(publicCommand).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)));
     const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical))), byte => byte.toString(16).padStart(2, '0')).join('');
     if (!current()) invalid();
-    const result = await send(`/workspaces/${encodeURIComponent(store.workspace)}/checkpoint-commands/${encodeURIComponent(key)}/close`, 'POST', {kind: descriptor.kind, ...original}, key);
+    const result = await send(`/workspaces/${encodeURIComponent(sourceStore.workspace)}/checkpoint-commands/${encodeURIComponent(key)}/close`, 'POST', {kind: descriptor.kind, ...original}, key);
     const fields = ['protocol', 'state', 'kind', 'command_key', 'request_sha256', 'command_sha256', 'execution_authorized', 'restore_authorized'];
     if (!current() || !result || !['closed', 'settled'].includes(result.state)
      || !exact(result, [...fields, result.state === 'closed' ? 'published' : 'result'])
@@ -107,6 +110,8 @@ export function checkpointCommandTransport(store, send, current) {
      || !SHA.test(result.request_sha256) || result.command_sha256 !== digest || !noAuthority(result)) invalid();
     if (result.state === 'closed') {
      if (result.published !== false) invalid();
+     if (typeof store.acknowledge === 'function') await store.acknowledge(command);
+     if (!current()) invalid();
      return {kind: 'closed', value: result};
     }
     value = result.result;
@@ -118,7 +123,7 @@ export function checkpointCommandTransport(store, send, current) {
    // A recorded intent can survive a rejected or lost reply. Preserve its key.
    throw new Error(error instanceof Error ? error.message : '检查点原请求结果待确认', {cause: error});
   }
-  if (!current() || !noAuthority(value) || value.project_id !== store.project || value.workspace_id !== store.workspace) invalid();
+  if (!current() || !noAuthority(value) || value.project_id !== sourceStore.project || value.workspace_id !== sourceStore.workspace) invalid();
   if (descriptor.kind === 'create') {
    const receipt = value.receipt;
    const paths = [...body.paths].sort();
@@ -128,8 +133,8 @@ export function checkpointCommandTransport(store, send, current) {
     || value.manifest?.protocol !== 2 || value.manifest.provider !== 'snapshot-copy'
     || JSON.stringify(value.manifest.paths) !== JSON.stringify(paths) || !Array.isArray(value.manifest.entries)
     || !noAuthority(receipt) || receipt.protocol !== 1 || receipt.status !== 'ready'
-    || receipt.checkpoint_id !== value.checkpoint_id || receipt.project_id !== store.project
-    || receipt.workspace_id !== store.workspace || receipt.source_revision !== value.source_revision
+    || receipt.checkpoint_id !== value.checkpoint_id || receipt.project_id !== sourceStore.project
+    || receipt.workspace_id !== sourceStore.workspace || receipt.source_revision !== value.source_revision
     || receipt.manifest_sha256 !== value.manifest_sha256 || !identifier(receipt.snapshot_id)
     || typeof receipt.created_at !== 'string' || !Number.isFinite(Date.parse(receipt.created_at))) invalid();
   } else {
@@ -141,6 +146,8 @@ export function checkpointCommandTransport(store, send, current) {
     || !state(value.before) || !state(value.target)
     || typeof value.created_at !== 'string' || !Number.isFinite(Date.parse(value.created_at))) invalid();
   }
+  if (typeof store.acknowledge === 'function') await store.acknowledge(command);
+  if (!current()) invalid();
   return {kind: descriptor.kind, value};
  };
 }

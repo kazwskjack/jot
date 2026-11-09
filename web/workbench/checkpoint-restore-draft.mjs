@@ -19,6 +19,7 @@ function checked(command,workspace){
  * workspace. Metadata only; loading never sends or authorizes an operation. */
 export class CheckpointRestoreDraftStore{
  constructor(storage,scope,workspace){this.storage=storage;this.scope=scope;this.workspace=workspace;this.original=null;this.issue=''}
+ validate(command){return checked(command,this.workspace)}
  backend(){return typeof this.storage==='function'?this.storage():this.storage}
  name(){if(!SHA.test(this.scope)||typeof this.workspace!=='string'||!this.workspace||this.workspace.length>128)throw Error('CHECKPOINT_RESTORE_SCOPE_UNAVAILABLE');return 'jot-checkpoint-restore:v1:'+this.scope+':'+encodeURIComponent(this.workspace)}
  read(){
