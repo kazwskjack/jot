@@ -1161,6 +1161,15 @@
     "Owned bounded read-only Git state; no host paths or execution authority."
   ],
   [
+    "GET",
+    "/v1/projects/{projectId}/git/branches",
+    "getProjectGitBranches",
+    null,
+    "GitBranchInventory",
+    "200",
+    "Owned snapshot-bound local and remote references; no execution authority."
+  ],
+  [
     "POST",
     "/v1/projects/{projectId}/git/intents",
     "prepareProjectGitReview",

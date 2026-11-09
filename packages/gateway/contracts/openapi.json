@@ -14478,6 +14478,46 @@
         }
       }
     },
+    "/v1/projects/{projectId}/git/branches": {
+      "get": {
+        "operationId": "getProjectGitBranches",
+        "summary": "Read owned project Git branch references",
+        "tags": [
+          "projects"
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "snapshot_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bounded read-only state; no execution authorization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitBranchInventory"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/projects/{projectId}/git/intents": {
       "post": {
         "operationId": "prepareProjectGitReview",
@@ -38867,6 +38907,102 @@
           "stage",
           "kind",
           "patch"
+        ],
+        "additionalProperties": false
+      },
+      "GitBranchInventory": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "snapshot_id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "repository_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "head": {
+            "$ref": "#/components/schemas/GitHead"
+          },
+          "object_format": {
+            "enum": [
+              "sha1",
+              "sha256"
+            ]
+          },
+          "branches": {
+            "type": "array",
+            "maxItems": 5000,
+            "items": {
+              "type": "object",
+              "properties": {
+                "ref": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1024
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1024
+                },
+                "kind": {
+                  "enum": [
+                    "local",
+                    "remote"
+                  ]
+                },
+                "oid": {
+                  "type": "string",
+                  "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$"
+                },
+                "object_type": {
+                  "enum": [
+                    "commit",
+                    "tag",
+                    "tree",
+                    "blob"
+                  ]
+                },
+                "current": {
+                  "type": "boolean"
+                },
+                "symbolic_target": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1024
+                }
+              },
+              "required": [
+                "ref",
+                "name",
+                "kind",
+                "oid",
+                "object_type",
+                "current"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "read_only": {
+            "const": true
+          },
+          "execution_authorized": {
+            "const": false
+          }
+        },
+        "required": [
+          "project_id",
+          "snapshot_id",
+          "repository_sha256",
+          "head",
+          "object_format",
+          "branches",
+          "read_only",
+          "execution_authorized"
         ],
         "additionalProperties": false
       },

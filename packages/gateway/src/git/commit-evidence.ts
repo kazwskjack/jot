@@ -1,3 +1,4 @@
+import {validGitReference} from './references.ts';
 import {createHash} from 'node:crypto';
 import {workspaceRelativePath} from '../always-on/workspace-provider.ts';
 
@@ -36,9 +37,7 @@ export function gitCommitEvidence(value:unknown):GitCommitEvidence{
   if(!oid(p.tree_oid)||!oid(p.commit_oid)||p.parent_oid!==null&&!oid(p.parent_oid)
    ||!Number.isSafeInteger(p.commit_size)||p.commit_size<1||p.commit_size>64*1024
    ||typeof p.target_ref!=='string'||p.target_ref.length>1024)throw Error();
-  if(p.target_ref!=='HEAD'&&(!p.target_ref.startsWith('refs/heads/')||workspaceRelativePath(p.target_ref)!==p.target_ref
-   ||/[\x00-\x20\x7f~^:?*\[\\]/.test(p.target_ref)||p.target_ref.includes('..')||p.target_ref.includes('@{')
-   ||p.target_ref.split('/').some(part=>!part||part.startsWith('.')||part.endsWith('.')||part.endsWith('.lock'))))throw Error();
+  if(p.target_ref!=='HEAD'&&(!p.target_ref.startsWith('refs/heads/')||workspaceRelativePath(p.target_ref)!==p.target_ref||!validGitReference(p.target_ref)))throw Error();
   if(p.target_ref==='HEAD'&&p.parent_oid===null)throw Error();
   if(!Array.isArray(p.paths)||!p.paths.length||p.paths.length>100||new Set(p.paths).size!==p.paths.length)throw Error();
   for(const path of p.paths)if(typeof path!=='string'||path.startsWith('-')||workspaceRelativePath(path)!==path)throw Error();

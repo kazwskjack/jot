@@ -29,6 +29,7 @@ export type GitHead = {oid:string|null;branch:string|null;detached:boolean};
 export type GitEntry = {path:string;original_path?:string;index_status:string;worktree_status:string;conflicted:boolean;kind:'file'|'directory'|'symlink'|'missing'|'other'};
 export type GitRemote = {name:string;kind:'https'|'ssh'|'local'|'other';host?:string};
 export type GitSnapshot = {commit_identity_ready?:boolean;project_id:string;snapshot_id:string;repository_sha256:string;head:GitHead;entries:GitEntry[];remotes:GitRemote[];omitted_count:number;read_only:true;execution_authorized:false};
+export type GitBranchInventory={project_id:string;snapshot_id:string;repository_sha256:string;head:GitHead;object_format:'sha1'|'sha256';branches:Array<{ref:string;name:string;kind:'local'|'remote';oid:string;object_type:'commit'|'tag'|'tree'|'blob';current:boolean;symbolic_target?:string}>;read_only:true;execution_authorized:false};
 export type GitDiff = {project_id:string;snapshot_id:string;path:string;stage:'working'|'staged';kind:'text'|'binary';patch:string;read_only:true;execution_authorized:false};
 export type CreateProject = { title: string };
 export type UpdateProject = { expected_version: number; title: string };

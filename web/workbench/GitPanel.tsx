@@ -5,11 +5,12 @@ import {useResource} from './useResource';
 import {ResourceStatus} from './PanelStatus';
 import GitReview,{type GitReviewDraft} from './GitReview';
 import GitHistory from './GitHistory';
+import GitBranches from './GitBranches';
 import GitPendingRequests from './GitPendingRequests';
 import {MutationPendingState} from './useMutationReceipt';
 
 function message(code:string){
- const messages:Record<string,string>={GIT_SNAPSHOT_CHANGED:'文件已变化，请刷新仓库。',GIT_REPOSITORY_CHANGED:'仓库位置已变化，请重新核对绑定。',GIT_REPOSITORY_UNCONFIGURED:'此项目尚未绑定仓库。',GIT_PATH_UNAVAILABLE:'此文件无法预览。',GIT_OUTPUT_LIMIT:'差异超过读取范围，请缩小变更后重试。',GIT_ENTRY_LIMIT:'变更文件过多，暂时无法完整展示。',GIT_METADATA_LIMIT:'仓库超过当前读取范围。',GIT_READ_TIMEOUT:'读取超时，请重试。',PROJECT_NOT_FOUND:'项目已不可用，请刷新页面。'};
+ const messages:Record<string,string>={GIT_SNAPSHOT_CHANGED:'文件已变化，请刷新仓库。',GIT_REPOSITORY_CHANGED:'仓库位置已变化，请重新核对绑定。',GIT_REPOSITORY_UNCONFIGURED:'此项目尚未绑定仓库。',GIT_PATH_UNAVAILABLE:'此文件无法预览。',GIT_OUTPUT_LIMIT:'差异超过读取范围，请缩小变更后重试。',GIT_ENTRY_LIMIT:'变更文件过多，暂时无法完整展示。',GIT_METADATA_LIMIT:'仓库超过当前读取范围。',GIT_REFERENCE_BACKEND_UNSUPPORTED:'仓库引用存储格式暂不支持，请核对仓库配置。',GIT_READ_TIMEOUT:'读取超时，请重试。',PROJECT_NOT_FOUND:'项目已不可用，请刷新页面。'};
  return code?Object.hasOwn(messages,code)?messages[code]!:'暂时无法读取仓库，请检查配置后重试。':'';
 }
 const label=(value:string)=>({M:'修改',A:'新增',D:'删除',R:'重命名',C:'复制',U:'冲突','?':'未跟踪',T:'类型变化'} as Record<string,string>)[value]??value;
@@ -39,6 +40,7 @@ export default function GitPanel({caps}:{caps:Caps}){
    <ResourceStatus loading={snapshot.loading} error={message(snapshot.error)} onRetry={refresh}/>
    {state&&<>
     <div className="wb-git-head"><strong>{state.head.branch??(state.head.detached?'分离 HEAD':'未命名分支')}</strong><code>{state.head.oid?.slice(0,12)??'尚无提交'}</code></div>
+    <GitBranches key={project+':'+state.snapshot_id} project={project} snapshotId={state.snapshot_id} locked={locked} onRefresh={refresh}/>
     {state.remotes.length>0&&<p className="wb-hint">{state.remotes.map(remote=>remote.name+' · '+(remote.host??(remote.kind==='local'?'本地':'其他远端'))).join(' / ')}</p>}
     {!state.entries.length&&<p role="status">工作区没有可展示的变更。</p>}{state.omitted_count>0&&<p className="wb-hint">{state.omitted_count} 个受保护路径未展示。</p>}
     <div className="wb-git-files"><div><h3>暂存区</h3>{rows('staged').length?<ul>{rows('staged').map(entry=>row(entry,'staged'))}</ul>:<p className="wb-hint">没有暂存变更。</p>}</div><div><h3>工作区</h3>{rows('working').length?<ul>{rows('working').map(entry=>row(entry,'working'))}</ul>:<p className="wb-hint">没有未暂存变更。</p>}</div></div>

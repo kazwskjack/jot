@@ -1,3 +1,4 @@
+import {validGitReference} from './references.ts';
 import {createHash} from 'node:crypto';
 import {canonicalJson} from '../db/canonical-json.ts';
 import type {GitCommitReviewWitness} from './commit-tree.ts';
@@ -37,8 +38,7 @@ export function commitReviewMetadata(policy:GitCommitOperatorPolicy,witness:GitC
  }else{
   if(typeof head.branch!=='string'||!head.branch)throw Error('git_commit_metadata_invalid');
   target='refs/heads/'+head.branch;state=head.oid===null?'unborn':'branch';
-  if(target.length>1024||/[\x00-\x20\x7f~^:?*\[\\]/.test(target)||!utf8(target)||target.includes('..')||target.includes('@{')
-   ||target.split('/').some(part=>!part||part.startsWith('.')||part.endsWith('.')||part.endsWith('.lock')))throw Error('git_commit_metadata_invalid');
+  if(!validGitReference(target))throw Error('git_commit_metadata_invalid');
  }
  return {
   protocol:1,encoding:'UTF-8',object_format:tree.object_format,tree_oid:tree.tree_oid,parent_oid:head.oid,target_ref:target,head_state:state,

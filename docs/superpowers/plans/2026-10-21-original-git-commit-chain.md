@@ -101,3 +101,26 @@ The completed Task1 historical verification records above remain historical. Tas
 2–4 are tracked as source-development completion. This increment did not run tests,
 typechecks, builds, SDK/native commands, migrations, UI acceptance or deployment.
 The full absorption objective continues through the remaining implementation batches.
+
+## P09 branch inventory groundwork
+
+M15.14 is in progress. The original owner-bound Git reader now exposes a
+snapshot-bound local/remote branch inventory through Gateway, the private BFF,
+shared contracts and the existing workbench. Each entry retains its full ref,
+remote prefix, exact object identity and symbolic target. The reader uses the
+existing isolated config/object context, cancellation and bounded output, then
+rechecks the original repository snapshot before returning. The workbench reads
+this inventory on demand and refreshes the repository after stale-snapshot errors.
+
+The existing loose/packed-reference reader now rejects non-files ref storage
+before creating a misleading snapshot. Reftable support remains outstanding.
+Reference syntax is shared with original commit review/evidence consumers while
+retaining their target restrictions and frozen metadata encoding.
+
+Repository initialization and branch create/checkout/delete remain required.
+They must use reviewed original operation identities, native workspace custody,
+conflict handling and interrupted-effect recovery. This increment adds the read
+prerequisite only. P09 also retains discard/delete, revert, remote fetch/pull,
+push/publish and original staged/file recovery scope. The upstream 5000-path and
+20000-character commit input capacities remain to be reconciled with Jot's
+current 100-path and 4096-character review limits.

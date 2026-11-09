@@ -1,3 +1,5 @@
+import {validGitReference} from './references.ts';
+import type {GitBranchInventory} from '../../contracts/types.ts';
 import {createHash} from 'node:crypto';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {constants} from 'node:fs';
@@ -97,7 +99,12 @@ export class GitRepositoryInspection{
     if(path.endsWith('config.worktree')&&!['true','yes','on','1'].includes(settings.get('extensions.worktreeconfig')??''))continue;
     signal?.throwIfAborted();try{await this.bytes(path,1024*1024);}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')continue;throw error;}
     const configured=await this.run(context,['config','--file',path,'--no-includes','--null','--list'],signal);
-    for(const item of text(configured.bytes).split('\0')){const at=item.indexOf('\n');if(at<0)continue;settings.set(item.slice(0,at),item.slice(at+1));}
+    for(const item of text(configured.bytes).split('\0')){
+     const at=item.indexOf('\n');if(at<0)continue;
+     const key=item.slice(0,at),value=item.slice(at+1);
+     if(key==='extensions.refstorage'&&value!=='files')throw Error('git_reference_backend_unsupported');
+     settings.set(key,value);
+    }
    }
    let config='[core]\n repositoryformatversion = 0\n bare = false\n';
    for(const key of ['filemode','ignorecase','symlinks','sparsecheckout','sparsecheckoutcone','safecrlf']){const value=settings.get('core.'+key)?.toLowerCase();if(value!==undefined){if(!['true','false','yes','no','on','off','1','0','warn'].includes(value))throw Error('git_configuration_invalid');config+=' '+key+' = '+value+'\n';}}
@@ -317,6 +324,36 @@ export class GitRepositoryInspection{
    const commit_tree=await readCommitTree(this.executable!,this.root,context,join(this.commonDirectory,'objects'),this.limits,signal);
    if((await this.inspectContext(context,signal)).snapshot_id!==snapshotId||(await this.anchors(signal)).metadata!==context.metadata)throw Error('git_snapshot_changed');signal?.throwIfAborted();
    return{...witness,commit_tree};
+  }finally{await context.dispose();}
+ }
+ async branches(snapshotId:string,signal?:AbortSignal):Promise<Omit<GitBranchInventory,'project_id'>>{
+  if(typeof snapshotId!=='string'||!/^[a-f0-9]{64}$/.test(snapshotId))throw Error('git_branches_invalid');
+  const context=await this.context(signal);
+  try{
+   const snapshot=await this.inspectContext(context,signal);
+   if(snapshot.snapshot_id!==snapshotId)throw Error('git_snapshot_changed');
+   const format=text((await this.run(context,['rev-parse','--show-object-format'],signal)).bytes).trim();
+   if(format!=='sha1'&&format!=='sha256')throw Error('git_branches_unavailable');
+   const raw=text((await this.run(context,['for-each-ref','--sort=refname','--count='+String(this.limits.maxEntries+1),
+    '--format=%(refname)%00%(objectname)%00%(objecttype)%00%(symref)%00','refs/heads/','refs/remotes/'],signal)).bytes);
+   const branches:GitBranchInventory['branches']=[],seen=new Set<string>(),oidPattern=new RegExp('^[a-f0-9]{'+(format==='sha1'?40:64)+'}$');
+   for(const row of raw.split('\n')){
+    if(!row)continue;
+    const parts=row.split('\0');
+    if(parts.length!==5||parts[4]!=='')throw Error('git_branches_unavailable');
+    const ref=parts[0]!,oid=parts[1]!,objectType=parts[2]!,symbolic=parts[3]!;
+    if(!validGitReference(ref)||seen.has(ref)||!oidPattern.test(oid)
+     ||!['commit','tag','tree','blob'].includes(objectType)||symbolic!==''&&!validGitReference(symbolic))throw Error('git_branches_unavailable');
+    const kind=ref.startsWith('refs/heads/')?'local':ref.startsWith('refs/remotes/')?'remote':undefined;
+    if(!kind)throw Error('git_branches_unavailable');
+    if(branches.length>=this.limits.maxEntries)throw Error('git_entry_limit');
+    seen.add(ref);
+    branches.push({ref,name:ref.slice(kind==='local'?'refs/heads/'.length:'refs/remotes/'.length),kind,oid,object_type:objectType as 'commit'|'tag'|'tree'|'blob',
+     current:kind==='local'&&!snapshot.head.detached&&ref==='refs/heads/'+snapshot.head.branch,...(symbolic?{symbolic_target:symbolic}:{})});
+   }
+   if((await this.inspectContext(context,signal)).snapshot_id!==snapshotId)throw Error('git_snapshot_changed');
+   signal?.throwIfAborted();
+   return {snapshot_id:snapshotId,repository_sha256:snapshot.repository_sha256,head:snapshot.head,object_format:format,branches,read_only:true,execution_authorized:false};
   }finally{await context.dispose();}
  }
  async diff(input:{snapshot_id:string;path:string;stage:'working'|'staged'},signal?:AbortSignal):Promise<GitDiff>{
