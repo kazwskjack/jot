@@ -1,6 +1,7 @@
+import {readListedFilePreviewBytes} from './activity-file-preview-client';
 import React,{useEffect,useRef,useState} from 'react';
-import {base,taskDraftScope} from './client';
-import {artifactPreviewErrorMessage,readVerifiedPreviewBytes} from './artifact-preview-bytes.mjs';
+import {taskDraftScope} from './client';
+import {artifactPreviewErrorMessage} from './artifact-preview-bytes.mjs';
 import ActivityToolFileBytes from './ActivityToolFileBytes';
 
 const imageTypes:Record<string,string>={png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',gif:'image/gif',webp:'image/webp',svg:'image/svg+xml',bmp:'image/bmp',ico:'image/vnd.microsoft.icon',tiff:'image/tiff',tif:'image/tiff',avif:'image/avif'};
@@ -19,17 +20,7 @@ export default function ActivityToolFileImage({conversationId,runId,activityId,r
   const check=()=>{controller.signal.throwIfAborted();if(taskDraftScope()!==owner)throw Error('文件所属账户已变化');};
   const load=async()=>{
    if(!type)throw Error('此文件的图片格式尚未确认');
-   // shortcut: preview uses the existing 20 MiB in-memory byte verifier, add larger retained image viewing later.
-   if(file.size>20*1024*1024)throw Error('图片超过20 MiB预览范围，可下载固定版本查看。');
-   const params=new URLSearchParams({run_id:runId,result_sha256:resultSha,path:file.path,version:String(file.version),sha256:file.sha256,size_bytes:String(file.size)});
-   const response=await fetch(`${base}/v1/conversations/${encodeURIComponent(conversationId)}/activities/${encodeURIComponent(activityId)}/tool-result/file/download?${params}`,{credentials:'same-origin',cache:'no-store',redirect:'error',signal:controller.signal});
-   check();
-   if(!response.ok||!response.body||response.headers.get('content-type')?.split(';')[0]!=='application/octet-stream'
-    ||response.headers.get('x-activity-file-sha256')!==file.sha256||response.headers.get('x-activity-file-size')!==String(file.size)
-    ||response.headers.get('x-activity-file-version')!==String(file.version)||response.headers.get('x-activity-tool-result-sha256')!==resultSha){
-    await response.body?.cancel();throw Error('原列表图片的固定版本未能核对');
-   }
-   const bytes=await readVerifiedPreviewBytes(response,{size_bytes:file.size,sha256:file.sha256},controller.signal);check();
+   const bytes=await readListedFilePreviewBytes({conversationId,runId,activityId,resultSha,file},owner,controller.signal);check();
    url=URL.createObjectURL(new Blob([bytes],{type}));setState({identity,url});
   };
   void load().catch(error=>{if(!controller.signal.aborted&&taskDraftScope()===owner)setState({identity,error:artifactPreviewErrorMessage(error)});});

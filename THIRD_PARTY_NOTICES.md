@@ -102,3 +102,11 @@ upstream GNU Affero General Public License v3.0 terms. The complete upstream
 license is retained at `packages/session-adapter/runtime-patches/PILOTDECK-AGPL-3.0.txt`.
 Jot uses its original public activity/run identities and typed detail fields,
 with missing/cyclic-parent handling and bounded step pages.
+
+## PDF.js
+
+The original fixed-file PDF viewer uses Mozilla PDF.js through the pinned
+`pdfjs-dist` 6.1.200 package. PDF.js is Apache-2.0 licensed. Its upstream
+license is preserved at `licenses/PDFJS-APACHE-2.0.txt`. The worker, CMaps,
+standard fonts and WebAssembly assets are distributed with their package
+notices. Optional native canvas packages retain their own package licenses.

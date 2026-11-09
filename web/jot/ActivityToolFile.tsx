@@ -1,9 +1,11 @@
+import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 import ActivityToolFileImage,{listedFileImageType} from './ActivityToolFileImage';
 import ActivityToolFileBytes from './ActivityToolFileBytes';
-import React,{useEffect,useRef,useState} from 'react';
+import React,{useEffect,useRef,useState,lazy,Suspense} from 'react';
 import {ApiError,request,taskDraftScope} from './client';
 import type {ActivityToolFilePage,ActivityToolResultFile} from './types';
 
+const ActivityToolFilePdf=lazy(()=>import('./ActivityToolFilePdf'));
 const sha=/^[a-f0-9]{64}$/;
 function ActivityToolFileText({conversationId,runId,activityId,resultSha,file}:{conversationId:string;runId:string;activityId:string;resultSha:string;file:ActivityToolResultFile}){
  const owner=taskDraftScope(),identity=JSON.stringify([owner,conversationId,runId,activityId,resultSha,file]);
@@ -54,12 +56,13 @@ function ActivityToolFileText({conversationId,runId,activityId,resultSha,file}:{
 
 export default function ActivityToolFile(props:React.ComponentProps<typeof ActivityToolFileText>){
  const identity=JSON.stringify([taskDraftScope(),props]),[textView,setTextView]=useState<string>();
- if(!listedFileImageType(props.file.path))return <ActivityToolFileText {...props}/>;
+ const pdf=props.file.path.toLowerCase().endsWith('.pdf');
+ if(!pdf&&!listedFileImageType(props.file.path))return <ActivityToolFileText {...props}/>;
  return <>
   <nav aria-label="原列表文件查看方式" data-chat-search-ignore>
-   <button type="button" disabled={textView!==identity} onClick={()=>setTextView(undefined)}>查看图片</button>
+   <button type="button" disabled={textView!==identity} onClick={()=>setTextView(undefined)}>{pdf?'查看PDF':'查看图片'}</button>
    <button type="button" disabled={textView===identity} onClick={()=>setTextView(identity)}>查看正文</button>
   </nav>
-  {textView===identity?<ActivityToolFileText {...props}/>:<ActivityToolFileImage {...props}/>}
+  {textView===identity?<ActivityToolFileText {...props}/>:pdf?<ConversationDisplayBoundary key={identity} label="PDF查看器"><Suspense fallback={<p role="status">正在载入PDF查看器…</p>}><ActivityToolFilePdf {...props}/></Suspense></ConversationDisplayBoundary>:<ActivityToolFileImage {...props}/>}
  </>;
 }
