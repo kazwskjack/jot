@@ -79,8 +79,8 @@ function MemberTimeline({view}:{view:View}){
   <small>历史读取边界 {view.source.child_as_of_seq}，更新固定到所选子运行。</small>
   <button type="button" aria-pressed={following} onClick={()=>setFollowing(value=>!value)}>{following?'暂停实时更新':'继续实时更新'}</button>
   {streamIssue&&<p role="status">{streamIssue}</p>}
-  <ConversationDisplayBoundary label="成员步骤搜索"><ConversationHistorySearch scope="activities" root={region} activities={activities}
-   runs={runs} onRevealActivity={revealActivity} onLoadActivityHistory={loadHistory} activityHistorySeq={view.source.child_as_of_seq}
+  <ConversationDisplayBoundary label="成员步骤搜索"><ConversationHistorySearch scope="activities" conversationId={view.source.child_conversation_id} runId={view.source.child_run_id} root={region} activities={activities}
+   runs={runs} onRevealActivity={revealActivity} onLoadActivityHistory={loadHistory} activityHistorySeq={view.source.child_as_of_seq} resultSearchSeq={cursor.current}
    renderedRevision={activities} ready/></ConversationDisplayBoundary>
   <ConversationDisplayBoundary label="成员步骤历史"><ActivityHistory conversationId={view.source.child_conversation_id}
    runId={view.source.child_run_id} snapshotSeq={view.source.child_as_of_seq} requestVersion={historyRequest} onLoaded={retainHistory}/></ConversationDisplayBoundary>

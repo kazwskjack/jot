@@ -159,3 +159,6 @@ export type InteractionHistoryPage={conversation_id:string;run_id?:string;items:
 export type ActivityResultArtifact={artifact_id:string;version:number;sha256:string};
 
 export type ActivityToolResultPage={conversation_id:string;run_id:string;activity_id:string;tool_name:string;source:'mcp'|'workspace';operation?:'files.read'|'web.read';source_truncated?:boolean;result_sha256:string;text_sha256:string;offset_chars:number;total_chars:number;text:string;has_other_content:boolean;next_offset_chars?:number;execution_authorized:false};
+
+export type ActivityToolResultMatch={run_id:string;activity_id:string;tool_name:string;title:string;result_sha256:string;offset_chars:number;match_offset_chars:number;match_text:string;excerpt:string};
+export type ActivityToolResultSearchPage={conversation_id:string;run_id?:string;as_of_seq:string;q:string;items:ActivityToolResultMatch[];scanned_upserts:number;unavailable_results:number;coverage:ActivityHistoryCoverage;next_before_seq?:string;execution_authorized:false};

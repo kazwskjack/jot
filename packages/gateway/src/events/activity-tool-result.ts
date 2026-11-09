@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
-import type {ActivityToolResultPage} from '../../contracts/types.js';
+import {readActivityHistory} from './activity-history.ts';
+import type {ActivityToolResultPage,ActivityToolResultSearchPage,ActivityToolResultMatch} from '../../contracts/types.js';
 
 const ID=/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/;
 const SHA=/^[a-f0-9]{64}$/;
@@ -71,6 +72,17 @@ function readWorkspaceText(db:DatabaseSync,owner:string,runId:string,callId:stri
   source_truncated:source.operation==='web.read'&&result.truncated===true};
 }
 
+function activityText(db:DatabaseSync,owner:string,activity:Record<string,unknown>){
+ const detail=object(activity.detail),name=detail?.tool_name,callId=activity.tool_call_id,runId=activity.run_id;
+ if(typeof runId!=='string'||!ID.test(runId)||typeof callId!=='string'||!ID.test(callId)
+  ||typeof name!=='string'||(name!=='jot_workspace'&&!/^jot_mcp_[a-z0-9_]{1,50}$/.test(name)))throw Error('activity_tool_result_not_found');
+ return {name,...(name==='jot_workspace'?readWorkspaceText(db,owner,runId,callId):readMcpText(db,owner,runId,name,callId))};
+}
+
+function textBoundary(text:string,offset:number){
+ return offset>0&&/[\uD800-\uDBFF]/.test(text[offset-1]!)&&/[\uDC00-\uDFFF]/.test(text[offset]!)?offset-1:offset;
+}
+
 /** The caller authorizes the conversation and holds the original read transaction. */
 export function readActivityToolResult(db:DatabaseSync,owner:string,conversationId:string,activityId:string,query:Record<string,unknown>):ActivityToolResultPage{
  if(!db.isTransaction)throw Error('activity_tool_result_read_transaction_required');
@@ -88,11 +100,9 @@ export function readActivityToolResult(db:DatabaseSync,owner:string,conversation
    AND json_extract(e.payload_json,'$.activity_id')=? ORDER BY e.seq DESC LIMIT 1`)
   .get(owner,conversationId,runId,activityId) as {payload_json:string}|undefined;
  if(!event)throw Error('activity_tool_result_not_found');
- const activity=parsedObject(event.payload_json),detail=object(activity?.detail);
- const name=detail?.tool_name,callId=activity?.tool_call_id;
- if(!activity||activity.activity_id!==activityId||activity.run_id!==runId||typeof callId!=='string'||!ID.test(callId)
-  ||typeof name!=='string'||(name!=='jot_workspace'&&!/^jot_mcp_[a-z0-9_]{1,50}$/.test(name)))throw Error('activity_tool_result_not_found');
- const source=name==='jot_workspace'?readWorkspaceText(db,owner,runId,callId):readMcpText(db,owner,runId,name,callId);
+ const activity=parsedObject(event.payload_json);
+ if(!activity||activity.activity_id!==activityId||activity.run_id!==runId)throw Error('activity_tool_result_not_found');
+ const {name,...source}=activityText(db,owner,activity);
  if(expected!==undefined&&expected!==source.result_sha256)throw Error('activity_tool_result_source_changed');
  const {text,...metadata}=source;
  if(offset>text.length||offset>0&&/[\uD800-\uDBFF]/.test(text[offset-1]!)&&/[\uDC00-\uDFFF]/.test(text[offset]!))throw Error('invalid_activity_tool_result_query');
@@ -101,4 +111,41 @@ export function readActivityToolResult(db:DatabaseSync,owner:string,conversation
  return {conversation_id:conversationId,run_id:runId,activity_id:activityId,tool_name:name,...metadata,
   text_sha256:hash(text),offset_chars:offset,total_chars:text.length,text:text.slice(offset,end),
   execution_authorized:false,...(end<text.length?{next_offset_chars:end}:{})};
+}
+
+/** Search retained original results through the same public history boundary and source checks. */
+export function searchActivityToolResults(db:DatabaseSync,owner:string,conversationId:string,query:Record<string,unknown>):ActivityToolResultSearchPage{
+ if(!db.isTransaction)throw Error('activity_tool_result_read_transaction_required');
+ const q=typeof query.q==='string'?query.q.trim():'';
+ if(!q||q.length>200||Object.keys(query).some(key=>!['q','as_of_seq','before_seq','run_id'].includes(key)))throw Error('invalid_activity_tool_result_query');
+ const page=readActivityHistory(db,conversationId,{as_of_seq:query.as_of_seq,before_seq:query.before_seq,run_id:query.run_id,limit:8});
+ const pattern=new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'iu');
+ const items:ActivityToolResultMatch[]=[];
+ let unavailable=0;
+ for(const entry of page.items){
+  const activity=entry.activity;
+  const newer=db.prepare(`SELECT 1 FROM ga_events WHERE conversation_id=? AND run_id=? AND type='activity.upsert'
+   AND seq>? AND seq<=? AND json_extract(payload_json,'$.activity_id')=? LIMIT 1`)
+   .get(conversationId,String(activity.run_id),entry.seq,page.as_of_seq,String(activity.activity_id));
+  if(newer||activity.kind==='compaction')continue;
+  if(!ID.test(String(activity.activity_id))){unavailable++;continue;}
+  const name=object(activity.detail)?.tool_name;
+  if(typeof name!=='string'||(name!=='jot_workspace'&&!/^jot_mcp_[a-z0-9_]{1,50}$/.test(name)))continue;
+  if(typeof activity.ended_at!=='string'||!['succeeded','failed','cancelled','unknown'].includes(String(activity.status))){unavailable++;continue;}
+  let source:ReturnType<typeof activityText>;
+  try{source=activityText(db,owner,activity);}catch(error){
+   if(!(error instanceof Error)||!['activity_tool_result_not_found','activity_tool_result_pending','activity_tool_result_source_invalid'].includes(error.message))throw error;
+   unavailable++;continue;
+  }
+  const match=pattern.exec(source.text);
+  if(!match)continue;
+  const offset=textBoundary(source.text,Math.max(0,match.index-60));
+  const end=textBoundary(source.text,Math.min(source.text.length,match.index+match[0].length+60));
+  items.push({run_id:String(activity.run_id),activity_id:String(activity.activity_id),tool_name:source.name,
+   title:typeof activity.title==='string'?activity.title.slice(0,256):source.name,result_sha256:source.result_sha256,
+   offset_chars:offset,match_offset_chars:match.index,match_text:match[0],excerpt:source.text.slice(offset,end)});
+ }
+ return {conversation_id:conversationId,as_of_seq:page.as_of_seq,q,items,scanned_upserts:page.items.length,
+  unavailable_results:unavailable,coverage:page.coverage,execution_authorized:false,
+  ...(page.run_id?{run_id:page.run_id}:{}),...(page.next_before_seq?{next_before_seq:page.next_before_seq}:{})};
 }

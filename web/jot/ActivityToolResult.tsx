@@ -2,16 +2,16 @@ import React,{useEffect,useRef,useState} from 'react';
 import {ApiError,request,taskDraftScope} from './client';
 import type {ActivityToolResultPage} from './types';
 
-type Target={runId:string;activityId:string;toolName:string};
+type Target={runId:string;activityId:string;toolName:string;offset?:number;resultSha?:string;match?:{offset:number;text:string}};
 const sha=/^[a-f0-9]{64}$/;
 
 export default function ActivityToolResult({conversationId,target}:{conversationId:string;target:Target}){
  const owner=taskDraftScope(),identity=JSON.stringify([owner,conversationId,target]);
  const region=useRef<HTMLDivElement>(null);
- const [cursor,setCursor]=useState<{identity:string;offset:number;previous:number[];sha?:string}>({identity,offset:0,previous:[]});
+ const [cursor,setCursor]=useState<{identity:string;offset:number;previous:number[];sha?:string}>({identity,offset:target.offset??0,previous:[],sha:target.resultSha});
  const [state,setState]=useState<{identity:string;offset:number;page?:ActivityToolResultPage;error?:string}>();
  const [revision,setRevision]=useState(0);
- const currentCursor:typeof cursor=cursor.identity===identity?cursor:{identity,offset:0,previous:[]};
+ const currentCursor:typeof cursor=cursor.identity===identity?cursor:{identity,offset:target.offset??0,previous:[],sha:target.resultSha};
  const {offset,sha:expected}=currentCursor;
  useEffect(()=>{region.current?.focus();region.current?.scrollIntoView({block:'nearest'});},[identity]);
  useEffect(()=>{
@@ -31,6 +31,8 @@ export default function ActivityToolResult({conversationId,target}:{conversation
     ||typeof page.text!=='string'||page.text.length>16384||offset+page.text.length>page.total_chars||typeof page.has_other_content!=='boolean'
     ||(page.next_offset_chars===undefined?offset+page.text.length!==page.total_chars
      :!page.text.length||page.next_offset_chars!==offset+page.text.length||page.next_offset_chars>=page.total_chars))throw Error('工具结果来源或分页尚未确认');
+   if(target.match&&offset===(target.offset??0)
+    &&(target.match.offset<offset||page.text.slice(target.match.offset-offset,target.match.offset-offset+target.match.text.length)!==target.match.text))throw Error('原结果命中位置尚未确认');
    if(!controller.signal.aborted)setState({identity,offset,page});
   };
   void load().catch(error=>{
@@ -42,16 +44,19 @@ export default function ActivityToolResult({conversationId,target}:{conversation
   return()=>controller.abort();
  },[identity,offset,expected,revision]);
  const current=state?.identity===identity&&state.offset===offset?state:undefined,page=current?.page;
+ const match=page&&target.match&&target.match.offset>=offset&&target.match.offset+target.match.text.length<=offset+page.text.length
+  &&page.text.slice(target.match.offset-offset,target.match.offset-offset+target.match.text.length)===target.match.text?target.match:undefined;
  return <div ref={region} tabIndex={-1} className="jot-activity-content" aria-label="工具结果正文">
   <h4>工具结果正文</h4>
   {(!current||!page&&!current.error)&&<p role="status">正在读取原工具结果…</p>}
   {page&&<>
    <section data-chat-search-content={JSON.stringify(['tool-result',identity,page.result_sha256,offset])}>
-    <pre>{page.text}</pre>
+    <pre>{match?<>{page.text.slice(0,match.offset-offset)}<mark>{match.text}</mark>{page.text.slice(match.offset-offset+match.text.length)}</>:page.text}</pre>
    </section>
    {page.source_truncated&&<p role="status">原工具回执中的正文已截断，当前显示回执保存的全部文本。</p>}
    {page.total_chars===0&&<p role="status">原结果未包含文本内容。</p>}
    {page.has_other_content&&<p role="status">原结果还包含图片或其他非文本内容。</p>}
+   {offset>0&&<button type="button" data-chat-search-ignore onClick={()=>setCursor({identity,offset:0,previous:[],sha:page.result_sha256})}>从正文开头阅读</button>}
    <nav aria-label="工具结果正文翻页" data-chat-search-ignore>
     <button type="button" disabled={!currentCursor.previous.length} onClick={()=>{
      const previous=currentCursor.previous.slice(0,-1),prior=currentCursor.previous.at(-1)!;

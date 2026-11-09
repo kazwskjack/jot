@@ -4,6 +4,7 @@ import React,{useEffect,useId,useMemo,useRef,useState,type RefObject} from 'reac
 import {request} from './client';
 import type {Message,MessagePage,Activity} from './types';
 import {activitySearchText,type ActivityReveal,type ActivityRun,type ToolActivity} from './activity-presentation';
+import ToolResultSearch from './ToolResultSearch';
 import './conversation-history-search.css';
 
 type ContentDocument={kind:'content';id:string;text:string};
@@ -17,6 +18,7 @@ type SharedProps={
  onRevealActivity:(request:ActivityReveal)=>void;
  onLoadActivityHistory:()=>void;
  activityHistorySeq?:string;
+ resultSearchSeq?:string;
  renderedRevision:unknown;
  ready:boolean;
 };
@@ -29,7 +31,7 @@ type Props=SharedProps&({
  historyComplete?:boolean;
  historyCursor?:string;
  onHistoryLoaded:(messages:Message[])=>void;
-}|{scope:'activities'});
+}|{scope:'activities';conversationId:string;runId:string});
 const EMPTY_MESSAGES:Message[]=[];
 
 function readSearchDocument(element:HTMLElement,visibleOnly=false):SearchDocument{
@@ -278,6 +280,8 @@ export default function ConversationHistorySearch(props:Props){
    <button type="button" onClick={close}>关闭搜索</button>
    {active&&<p className="jot-history-search-excerpt">{sourceLabels[active.source.kind]} · {active.source.text.slice(Math.max(0,active.offset-60),active.offset+active.length+60)}</p>}
    <small>{activityOnly?'搜索范围为已加载的公开记录。步骤历史的加载进度和保留缺口显示在时间线上方。':'公开步骤历史的加载进度和保留缺口显示在时间线上方。'} 文件与交互正文包含已打开的文件预览和当前交互历史页。</small>
+   {(props.resultSearchSeq??activityHistorySeq)&&ready&&needle&&<ToolResultSearch conversationId={props.conversationId} asOfSeq={(props.resultSearchSeq??activityHistorySeq)!}
+    {...(props.scope==='activities'?{runId:props.runId}:{})} query={needle} onRevealActivity={onRevealActivity}/>}
    {error&&<p role="alert">完整历史尚未加载，当前结果来自已加载的公开记录。{error} <button type="button" disabled={loading} onClick={()=>setRetry(value=>value+1)}>继续加载历史</button></p>}
   </div>}
  </div>;

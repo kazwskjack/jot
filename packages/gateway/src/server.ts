@@ -1,4 +1,4 @@
-import {readActivityToolResult} from './events/activity-tool-result.ts';
+import {readActivityToolResult,searchActivityToolResults} from './events/activity-tool-result.ts';
 import {readActivityHistory} from './events/activity-history.ts';
 import {registerPluginProfileRoutes,type PluginProfileClient} from './workbench/plugin-profile-routes.ts';
 import {createPluginProfileReceiptExecutor,PLUGIN_PROFILE_RECEIPT_PROTOCOL} from './workbench/plugin-profile-receipts.ts';
@@ -1073,6 +1073,15 @@ export async function buildServer(config: {
     const id=(request.params as {conversationId:string}).conversationId,owner=actor(request as any),input=request.body as Record<string,unknown>;
     if(input.mode===undefined)return conversations.update(id,owner,input);
     const commit=await conversationModes.prepareUpdate(id,owner,input);return atomicCommand(request,200,commit);
+  });
+  app.get('/v1/conversations/:conversationId/tool-result-search', async (request,reply) => {
+    const {conversationId}=request.params as {conversationId:string},owner=actor(request as any);
+    db.exec('BEGIN');
+    try{
+      conversations.get(conversationId,owner);
+      const value=searchActivityToolResults(db,owner,conversationId,request.query as Record<string,unknown>);
+      db.exec('COMMIT');return reply.header('cache-control','private, no-store').send(value);
+    }catch(error){if(db.isTransaction)db.exec('ROLLBACK');throw error;}
   });
   app.get('/v1/conversations/:conversationId/activities/:activityId/tool-result', async (request,reply) => {
     const {conversationId,activityId}=request.params as {conversationId:string;activityId:string},owner=actor(request as any);

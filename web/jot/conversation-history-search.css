@@ -3,3 +3,7 @@
 .jot-history-search input{min-width:0;flex:1 1 160px;font:inherit;color:inherit;background:transparent;border:1px solid currentColor;border-radius:6px;padding:6px}
 .jot-history-search-excerpt{width:100%;white-space:pre-wrap;overflow-wrap:anywhere;margin:0}
 [data-chat-search-active=true]{outline:2px solid #be8c20;outline-offset:4px}
+
+.jot-tool-result-search{flex:1 1 100%;min-width:0}
+.jot-tool-result-search li{margin-block:8px;overflow-wrap:anywhere}
+.jot-tool-result-search nav{display:flex;flex-wrap:wrap;gap:8px}
