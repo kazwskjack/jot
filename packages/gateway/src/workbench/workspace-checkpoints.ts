@@ -25,6 +25,7 @@ type PublicPathState=PublicFileState|PublicAbsentState;
 type PinnedSource=Readonly<{owner_id:string;workspace_id:string;project_id:string;revision:number;root:RootIdentity|null;paths:readonly string[];facts:readonly SourceFact[];manifest:WorkspaceManifest}>;
 type CheckpointOptions={storageRoot:string;limits?:Readonly<{max_entries?:number;max_total_bytes?:number;max_file_bytes?:number;max_depth?:number}>;leaseMs?:number;now?:()=>number;onPhase?:(phase:string,identity?:Readonly<Record<string,string>>)=>void;verifyBackupProof?:(proof:unknown,expected:Readonly<{checkpoint_id:string;manifest_sha256:string;snapshot_id:string}>)=>boolean|Promise<boolean>};
 type Controls={guard?:WorkspaceGuard;signal?:AbortSignal};
+type CreateLease=Readonly<{owner:string;generation:number}>;
 type CheckpointReceipt=Readonly<{protocol:1;checkpoint_id:string;project_id:string;workspace_id:string;source_revision:number;snapshot_id:string;manifest_sha256:string;created_at:string;status:'ready';execution_authorized:false;restore_authorized:false}>;
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 const COMMAND=/^[\x21-\x7e]{8,128}$/;
@@ -120,17 +121,24 @@ export class WorkspaceCheckpointService{
   this.validateScope(pin.owner_id,pin.workspace_id,pin.project_id);const before=this.sourceRevision(pin.owner_id,pin.workspace_id,pin.project_id),rootPath=this.workbench.projectSourceRoot(pin.owner_id,pin.workspace_id,pin.project_id),root=await rootIdentity(rootPath),facts=this.selectedRows(pin.owner_id,pin.workspace_id,pin.project_id,pin.paths),afterRoot=await rootIdentity(this.workbench.projectSourceRoot(pin.owner_id,pin.workspace_id,pin.project_id)),after=this.sourceRevision(pin.owner_id,pin.workspace_id,pin.project_id);
   if(before!==pin.revision||after!==before||rootJson(root)!==rootJson(pin.root)||rootJson(afterRoot)!==rootJson(pin.root)||canonicalJson(facts)!==canonicalJson(pin.facts))throw failure('workspace_checkpoint_source_changed');
  }
+ private assertIntentSource(intent:Row){
+  const owner=String(intent.owner_id),workspace=String(intent.workspace_id),project=String(intent.project_id);
+  this.validateScope(owner,workspace,project);
+  if(this.sourceRevision(owner,workspace,project)!==intent.source_revision
+   ||rootJson(syncRootIdentity(this.workbench.projectSourceRoot(owner,workspace,project)))!==intent.root_identity_json
+   ||canonicalJson(this.selectedRows(owner,workspace,project,JSON.parse(String(intent.paths_json))))!==intent.source_facts_json)throw failure('workspace_checkpoint_source_changed');
+ }
  private intent(checkpointId:string):Row{
   const row=this.db.prepare('SELECT * FROM wb_workspace_checkpoint_intents WHERE checkpoint_id=?').get(checkpointId) as Row|undefined;if(!row)throw failure('workspace_checkpoint_not_found');
   for(const [field,code] of [['paths_json','workspace_checkpoint_corrupt'],['source_facts_json','workspace_checkpoint_corrupt'],['manifest_json','workspace_checkpoint_corrupt'],['root_identity_json','workspace_checkpoint_corrupt']] as const)parseCanonical(String(row[field]),code);
   if(!validDigest(row.request_sha256)||!validDigest(row.manifest_sha256)||sha(String(row.manifest_json))!==row.manifest_sha256)throw failure('workspace_checkpoint_corrupt');
   try{validateWorkspaceManifest(JSON.parse(String(row.manifest_json)));}catch{throw failure('workspace_checkpoint_corrupt');}return row;
  }
- private recoveryStore(checkpointId?:string){
+ private recoveryStore(checkpointId?:string,lease?:CreateLease){
   return {
    commit:async(record:SnapshotRecoveryRecord)=>{
     if(!checkpointId)throw failure('workspace_checkpoint_store_scope_invalid');const json=canonicalJson(record),digest=sha(json);
-    withImmediateTransaction(this.db,()=>{const intent=this.intent(checkpointId);if(record.receipt.manifest_sha256!==intent.manifest_sha256||canonicalJson(record.manifest)!==intent.manifest_json||record.manifest.protocol!==2)throw failure('workspace_checkpoint_artifact_conflict');
+    withImmediateTransaction(this.db,()=>{if(!lease)throw failure('workspace_checkpoint_lease_revoked');this.touchCreateLease(checkpointId,lease);const intent=this.intent(checkpointId);this.assertIntentSource(intent);if(record.receipt.manifest_sha256!==intent.manifest_sha256||canonicalJson(record.manifest)!==intent.manifest_json||record.manifest.protocol!==2)throw failure('workspace_checkpoint_artifact_conflict');
      const prior=this.db.prepare('SELECT record_json,record_sha256 FROM wb_workspace_checkpoint_artifacts WHERE snapshot_id=? OR checkpoint_id=?').get(record.snapshot_id,checkpointId) as Row|undefined;
      if(prior){if(prior.record_json!==json||prior.record_sha256!==digest)throw failure('workspace_checkpoint_artifact_conflict');return;}
      this.db.prepare('INSERT INTO wb_workspace_checkpoint_artifacts VALUES(?,?,?,?,?)').run(record.snapshot_id,checkpointId,json,digest,new Date(this.now()).toISOString());
@@ -144,7 +152,7 @@ export class WorkspaceCheckpointService{
   if(typeof row.record_json!=='string'||!validDigest(row.record_sha256)||sha(String(row.record_json))!==row.record_sha256)throw failure('workspace_checkpoint_artifact_corrupt');
   try{return validateWorkspaceRecoveryRecord(JSON.parse(row.record_json),snapshotId);}catch{throw failure('workspace_checkpoint_artifact_corrupt');}
  }
- private provider(checkpointId?:string){return new SnapshotCopyWorkspaceProvider({recoveryStore:this.recoveryStore(checkpointId)});}
+ private provider(checkpointId?:string,lease?:CreateLease){return new SnapshotCopyWorkspaceProvider({recoveryStore:this.recoveryStore(checkpointId,lease)});}
  private receipt(row:Row){const receipt=parseCanonical(String(row.receipt_json),'workspace_checkpoint_corrupt');if(!validDigest(row.receipt_sha256)||sha(String(row.receipt_json))!==row.receipt_sha256||receipt.protocol!==1||receipt.checkpoint_id!==row.checkpoint_id||receipt.snapshot_id!==row.snapshot_id||receipt.manifest_sha256!==row.manifest_sha256||receipt.execution_authorized!==false||receipt.restore_authorized!==false)throw failure('workspace_checkpoint_corrupt');return receipt as CheckpointReceipt;}
  private view(row:Row):Row{
   const manifest=validateWorkspaceManifest(JSON.parse(String(row.manifest_json))),receipt=this.receipt(row);
@@ -157,9 +165,9 @@ export class WorkspaceCheckpointService{
     WHERE i.checkpoint_id=? AND i.owner_id=? AND i.workspace_id=? AND i.project_id=?`).get(checkpointId,owner,workspace,project) as Row|undefined;
   if(!row)throw failure('workspace_checkpoint_not_found');this.receipt(row);return row;
  }
- private insertReady(checkpointId:string,snapshot:WorkspaceSnapshot,sourceRevision:number){
+ private insertReady(checkpointId:string,snapshot:WorkspaceSnapshot,sourceRevision:number,lease:CreateLease){
   const intent=this.intent(checkpointId),receipt:CheckpointReceipt=Object.freeze({protocol:1,checkpoint_id:checkpointId,project_id:String(intent.project_id),workspace_id:String(intent.workspace_id),source_revision:sourceRevision,snapshot_id:snapshot.receipt.snapshot_id,manifest_sha256:snapshot.receipt.manifest_sha256,created_at:snapshot.receipt.created_at,status:'ready',execution_authorized:false,restore_authorized:false}),json=canonicalJson(receipt);
-  withImmediateTransaction(this.db,()=>{const prior=this.db.prepare('SELECT receipt_json FROM wb_workspace_checkpoint_ready WHERE checkpoint_id=?').get(checkpointId);if(prior){if(prior.receipt_json!==json)throw failure('workspace_checkpoint_ready_conflict');return;}
+  withImmediateTransaction(this.db,()=>{this.touchCreateLease(checkpointId,lease);this.assertIntentSource(intent);const prior=this.db.prepare('SELECT receipt_json FROM wb_workspace_checkpoint_ready WHERE checkpoint_id=?').get(checkpointId);if(prior){if(prior.receipt_json!==json)throw failure('workspace_checkpoint_ready_conflict');return;}
    const artifact=this.db.prepare('SELECT snapshot_id,record_json,record_sha256 FROM wb_workspace_checkpoint_artifacts WHERE checkpoint_id=?').get(checkpointId) as Row|undefined;
    if(!artifact||artifact.snapshot_id!==snapshot.receipt.snapshot_id||!validDigest(artifact.record_sha256)||sha(String(artifact.record_json))!==artifact.record_sha256)throw failure('workspace_checkpoint_artifact_unconfirmed');
    this.db.prepare('INSERT INTO wb_workspace_checkpoint_ready VALUES(?,?,?,?,?)').run(checkpointId,snapshot.receipt.snapshot_id,json,sha(json),new Date(this.now()).toISOString());this.notify('checkpoint_ready_before_commit',{checkpoint_id:checkpointId,snapshot_id:snapshot.receipt.snapshot_id});
@@ -181,26 +189,66 @@ export class WorkspaceCheckpointService{
     .run(intent.checkpoint_id,intent.owner_id,intent.workspace_id,intent.project_id,intent.command_key,intent.request_sha256,intent.source_revision,intent.root_identity_json,intent.paths_json,intent.source_facts_json,intent.manifest_json,intent.manifest_sha256,intent.created_at);});
   if(reused){const ready=this.db.prepare('SELECT 1 FROM wb_workspace_checkpoint_ready WHERE checkpoint_id=?').get(checkpointId);if(ready)return this.get(owner,workspaceId,project,checkpointId);return this.resumeCreate(owner,workspaceId,project,checkpointId,input);}
   this.notify('checkpoint_intent_committed',{checkpoint_id:checkpointId});
-  const guard=this.guard(owner,workspaceId,project,input),signal=this.signal(input),byPath=new Map(pin.facts.filter((fact):fact is FileFact=>fact.kind==='file').map(fact=>[fact.path,fact]));
-  try{
-  const snapshot=await this.provider(checkpointId).materialize({storageRoot:this.storageRoot,manifest:pin.manifest,selection:paths.map(path=>({path,kind:pin.facts.find(fact=>fact.path===path)!.kind})),...(this.limits?{limits:this.limits}:{}),guard,signal,
-    assertCurrent:()=>this.assertSource(pin),read:path=>{const fact=byPath.get(path);if(!fact||!pin.root)throw failure('workspace_checkpoint_source_changed');return readBlob(pin.root,fact,()=>this.assertSource(pin));}});
-   await this.assertSource(pin);this.insertReady(checkpointId,snapshot,pin.revision);return this.get(owner,workspaceId,project,checkpointId);
-  }catch(error){const artifact=this.db.prepare('SELECT 1 FROM wb_workspace_checkpoint_artifacts WHERE checkpoint_id=?').get(checkpointId);if(artifact)throw failure('workspace_checkpoint_prepare_unknown');throw failure(error instanceof Error&&/^workspace_checkpoint_[a-z_]+$/.test(error.message)?error.message:error instanceof Error&&/^workspace_/.test(error.message)?error.message:'workspace_checkpoint_prepare_failed');}
+  return this.resumeCreate(owner,workspaceId,project,checkpointId,input);
  }
+ private claimCreateLease(checkpointId:string):CreateLease{
+  return withImmediateTransaction(this.db,()=>{
+   const resource='workspace-checkpoint-create:'+checkpointId,now=this.now();
+   const prior=this.db.prepare('SELECT owner,generation,expires_at FROM ga_worker_leases WHERE resource_id=?').get(resource);
+   if(prior&&(!Number.isSafeInteger(Number(prior.generation))||Number(prior.generation)<1||!Number.isSafeInteger(Number(prior.expires_at))||Number(prior.expires_at)>now))throw failure('workspace_checkpoint_prepare_busy');
+   const generation=Number(prior?.generation??0)+1,owner='workspace-checkpoint-create-'+randomUUID();
+   if(!Number.isSafeInteger(generation))throw failure('workspace_checkpoint_prepare_busy');
+   this.db.prepare('INSERT INTO ga_worker_leases(resource_id,owner,generation,expires_at,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(resource_id) DO UPDATE SET owner=excluded.owner,generation=excluded.generation,expires_at=excluded.expires_at,updated_at=excluded.updated_at').run(resource,owner,generation,String(now+this.leaseMs),new Date(now).toISOString());
+   return {owner,generation};
+  });
+ }
+ private touchCreateLease(checkpointId:string,lease:CreateLease){
+  const now=this.now();
+  const result=this.db.prepare('UPDATE ga_worker_leases SET expires_at=?,updated_at=? WHERE resource_id=? AND owner=? AND generation=? AND CAST(expires_at AS INTEGER)>?').run(String(now+this.leaseMs),new Date(now).toISOString(),'workspace-checkpoint-create:'+checkpointId,lease.owner,lease.generation,now);
+  if(result.changes!==1)throw failure('workspace_checkpoint_lease_revoked');
+ }
+ private releaseCreateLease(checkpointId:string,lease:CreateLease){
+  // Keep the generation anchor so an expired worker cannot reacquire its epoch.
+  this.db.prepare('UPDATE ga_worker_leases SET expires_at=?,updated_at=? WHERE resource_id=? AND owner=? AND generation=?').run('0',new Date(this.now()).toISOString(),'workspace-checkpoint-create:'+checkpointId,lease.owner,lease.generation);
+ }
+
  private async resumeCreate(owner:string,workspaceId:string,project:string,checkpointId:string,controls:Controls){
-  const result=await this.reconcileCreate(owner,workspaceId,project,checkpointId,controls);
-  if(result.state==='unresolved')throw failure('workspace_checkpoint_prepare_unknown');
-  return result;
+  try{
+   const result=await this.reconcileCreate(owner,workspaceId,project,checkpointId,controls);
+   if(result.state==='unresolved')throw failure('workspace_checkpoint_prepare_unknown');
+   return result;
+  }catch(error){
+   const artifact=this.db.prepare('SELECT 1 FROM wb_workspace_checkpoint_artifacts WHERE checkpoint_id=?').get(checkpointId);
+   if(artifact)throw failure('workspace_checkpoint_prepare_unknown');
+   throw failure(error instanceof Error&&/^workspace_[a-z_]+$/.test(error.message)?error.message:'workspace_checkpoint_prepare_failed');
+  }
  }
+
  async reconcileCreate(owner:string,workspaceId:string,project:string,checkpointId:string,controls:Controls={}){
-  this.signal(controls);this.validateScope(owner,workspaceId,project);const intent=this.intent(checkpointId);if(intent.owner_id!==owner||intent.workspace_id!==workspaceId||intent.project_id!==project)throw failure('workspace_checkpoint_not_found');
+  const signal=this.signal(controls);this.validateScope(owner,workspaceId,project);const intent=this.intent(checkpointId);if(intent.owner_id!==owner||intent.workspace_id!==workspaceId||intent.project_id!==project)throw failure('workspace_checkpoint_not_found');
   const ready=this.db.prepare('SELECT 1 FROM wb_workspace_checkpoint_ready WHERE checkpoint_id=?').get(checkpointId);if(ready)return this.get(owner,workspaceId,project,checkpointId);
-  const artifact=this.db.prepare('SELECT snapshot_id FROM wb_workspace_checkpoint_artifacts WHERE checkpoint_id=?').get(checkpointId) as Row|undefined;if(!artifact)return Object.freeze({checkpoint_id:checkpointId,state:'unresolved',execution_authorized:false,restore_authorized:false});
   const paths=JSON.parse(String(intent.paths_json)) as string[],facts=JSON.parse(String(intent.source_facts_json)) as SourceFact[],root=JSON.parse(String(intent.root_identity_json)) as RootIdentity|null,pin:PinnedSource={owner_id:owner,workspace_id:workspaceId,project_id:project,revision:Number(intent.source_revision),root,paths,facts,manifest:validateWorkspaceManifest(JSON.parse(String(intent.manifest_json)))};
-  try{await this.assertSource(pin);}catch{return Object.freeze({checkpoint_id:checkpointId,state:'unresolved',reason:'source_changed',execution_authorized:false,restore_authorized:false});}
-  const snapshot=await this.provider().recover({snapshot_id:String(artifact.snapshot_id),storageRoot:this.storageRoot,guard:this.guard(owner,workspaceId,project,controls),signal:this.signal(controls)});await this.assertSource(pin);this.insertReady(checkpointId,snapshot,pin.revision);return this.get(owner,workspaceId,project,checkpointId);
+  const lease=this.claimCreateLease(checkpointId);
+  const ownerGuard=this.guard(owner,workspaceId,project,controls);
+  const guard:WorkspaceGuard=async context=>{await ownerGuard(context);this.touchCreateLease(checkpointId,lease);};
+  try{
+   if(signal.aborted)throw failure('workspace_checkpoint_cancelled');
+   try{await this.assertSource(pin);}catch{return Object.freeze({checkpoint_id:checkpointId,state:'unresolved',reason:'source_changed',execution_authorized:false,restore_authorized:false});}
+   const artifact=this.db.prepare('SELECT snapshot_id FROM wb_workspace_checkpoint_artifacts WHERE checkpoint_id=?').get(checkpointId) as Row|undefined;
+   let snapshot:WorkspaceSnapshot;
+   if(artifact){
+    snapshot=await this.provider().recover({snapshot_id:String(artifact.snapshot_id),storageRoot:this.storageRoot,guard,signal});
+   }else{
+    const storage=await rootIdentity(this.storageRoot);if(!storage)throw failure('workspace_checkpoint_storage_missing');if(pin.root&&rootsOverlap(pin.root.canonical,storage.canonical))throw failure('workspace_checkpoint_roots_overlap');
+    const byPath=new Map(facts.map(fact=>[fact.path,fact]));
+    snapshot=await this.provider(checkpointId,lease).materialize({storageRoot:this.storageRoot,manifest:pin.manifest,selection:paths.map(path=>({path,kind:byPath.get(path)!.kind})),...(this.limits?{limits:this.limits}:{}),guard,signal,
+     assertCurrent:()=>this.assertSource(pin),read:path=>{const fact=byPath.get(path);if(!fact||fact.kind!=='file'||!pin.root)throw failure('workspace_checkpoint_source_changed');return readBlob(pin.root,fact,()=>this.assertSource(pin));}});
+   }
+   await this.assertSource(pin);if(signal.aborted)throw failure('workspace_checkpoint_cancelled');
+   this.insertReady(checkpointId,snapshot,pin.revision,lease);return this.get(owner,workspaceId,project,checkpointId);
+  }finally{this.releaseCreateLease(checkpointId,lease);}
  }
+
  async get(owner:string,workspaceId:string,project:string,checkpointId:string){
   this.validateScope(owner,workspaceId,project);const row=this.readyRow(owner,workspaceId,project,checkpointId);if(this.pruned(checkpointId))return this.view(row);const provider=this.provider(),snapshot=await provider.recover({snapshot_id:String(row.snapshot_id),storageRoot:this.storageRoot,guard:this.guard(owner,workspaceId,project,{}),signal:new AbortController().signal});
   if(workspaceManifestHash(snapshot.manifest)!==row.manifest_sha256)throw failure('workspace_checkpoint_artifact_corrupt');return this.view(row);
