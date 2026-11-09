@@ -5,12 +5,18 @@ export const maxBatchFiles=500;const maxBatchBytes=2*1024*1024*1024;
 export class UploadController {
  constructor(conversationId,api,onChange=()=>{},options={}){
   this.conversationId=conversationId;this.onChange=onChange;this.entries=[];
-  this.recoveryReady=!options.recoveryRequired;this.currentScope=options.currentScope;this.recoveryError='';this.persistence=Promise.resolve();this.disposed=false;this.recoveryEpoch=0;
-  this.api={...api,request:async(...args)=>{this.assertRecoveryScope();if(!this.store)return api.request(...args);const epoch=this.recoveryEpoch;await this.persist();this.assertRecoveryScope();if(epoch!==this.recoveryEpoch)throw Error('upload_recovery_scope_changed');return api.request(...args);}};
+  this.recoveryReady=!options.recoveryRequired;this.currentScope=options.currentScope;this.recoveryError='';this.persistence=Promise.resolve();this.disposed=false;this.recoveryEpoch=0;this.statusSupported=false;
+  this.api={...api,request:async(...args)=>{
+   this.assertRecoveryScope();if(!this.store)return api.request(...args);
+   const epoch=this.recoveryEpoch;if(args[1]!=='GET')await this.persist();
+   this.assertRecoveryScope();if(epoch!==this.recoveryEpoch)throw Error('upload_recovery_scope_changed');
+   const value=await api.request(...args);
+   this.assertRecoveryScope();if(epoch!==this.recoveryEpoch)throw Error('upload_recovery_scope_changed');return value;
+  }};
  }
  get blocked(){return this.disposed||!this.recoveryReady||!!this.recoveryError||!!this.store&&this.currentScope?.()!==this.store.scope;}
  assertRecoveryScope(){if(this.blocked)throw new Error(this.recoveryError||'upload_recovery_unavailable');}
- get recoveryBusy(){return this.entries.some(entry=>entry.running||entry.cancelRequested||entry.batch?.running||entry.batch?.cancelRunning);}
+ get recoveryBusy(){return this.entries.some(entry=>entry.running||entry.reconciling||entry.cancelRequested||entry.batch?.running||entry.batch?.cancelRunning);}
  async configureRecovery(store){
   if(this.recoveryBusy)throw Error('upload_recovery_busy');
   const epoch=this.recoveryEpoch;await this.persistence;
@@ -20,7 +26,7 @@ export class UploadController {
   this.entries=snapshot?restoreUploadRecovery(snapshot,this.conversationId):[];
   this.store?.close();this.store=store;this.recoveryReady=true;this.recoveryError='';this.onChange();
  }
- dispose(){this.disposed=true;this.recoveryEpoch+=1;for(const entry of this.entries)entry.contentAbort?.abort();this.store?.close();}
+ dispose(){this.disposed=true;this.recoveryEpoch+=1;for(const entry of this.entries){entry.contentAbort?.abort();entry.reconcileAbort?.abort();}this.store?.close();}
  persist(){
   if(!this.store)return Promise.resolve();
   this.assertRecoveryScope();const store=this.store,epoch=this.recoveryEpoch,snapshot=uploadRecoverySnapshot(this.entries);
@@ -30,7 +36,7 @@ export class UploadController {
  }
  async reselect(id,file){
   this.assertRecoveryScope();const entry=this.entries.find(value=>value.id===id);
-  if(!entry||!entry.needsFile||entry.running||!(file instanceof File)||file.name!==entry.file.name||file.size!==entry.file.size
+  if(!entry||!entry.needsFile||entry.running||entry.reconciling||!(file instanceof File)||file.name!==entry.file.name||file.size!==entry.file.size
    ||file.webkitRelativePath&&file.webkitRelativePath!==entry.relativePath)throw Error('upload_recovery_file_mismatch');
   const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await file.arrayBuffer())),byte=>byte.toString(16).padStart(2,'0')).join('');
   this.assertRecoveryScope();
@@ -81,7 +87,7 @@ export class UploadController {
      await this.persist();throw Object.assign(Error('UPLOAD_EXPIRED'),{status:410});
     }
     await this.persist();return group;
-   }catch(error){group.stage='batch-init';for(const entry of group.entries){entry.status=error?.status>=400&&error.status<500&&error.status!==409&&error.status!==408?'rejected':'uncertain';entry.stage='batch-init';entry.error=error instanceof Error?error.message:'upload_unconfirmed';}throw error;}
+   }catch(error){group.stage='batch-init';for(const entry of group.entries){if(error?.status===410&&error.message==='UPLOAD_EXPIRED')entry.expired=true;entry.status=error?.status>=400&&error.status<500&&error.status!==409&&error.status!==408?'rejected':'uncertain';entry.stage='batch-init';entry.error=error instanceof Error?error.message:'upload_unconfirmed';}throw error;}
   })();
   group.running=running;try{return await running;}finally{if(group.running===running)group.running=null;this.onChange();}
  }
@@ -94,14 +100,50 @@ export class UploadController {
   const entry=this.entries.find(value=>value.id===id);if(!entry)throw new Error('upload_not_found');
   if(entry.stage==='cancel')throw new Error('upload_cancel_required');
   if(entry.stage==='batch-cancel')return this.cancelBatch(entry.batch?.batchId||entry.batch?.key);
-  if(entry.running||['uploading','cancelling','cancelled'].includes(entry.status))throw new Error('upload_busy');if(['ready','recovered'].includes(entry.status))return Promise.resolve(entry.artifact);
+  if(entry.running||entry.reconciling||['uploading','cancelling','cancelled'].includes(entry.status))throw new Error('upload_busy');if(['ready','recovered'].includes(entry.status))return Promise.resolve(entry.artifact);
   const run=async()=>{if(entry.stage==='batch-init'&&entry.batch){if(!entry.batch.requestBody)await this.prepareBatch(entry.batch.entries.map(value=>value.id));else await this.initializeBatch(entry.batch);}return this.performUpload(entry);};
   const running=run().finally(()=>{if(entry.running===running)entry.running=null;});entry.running=running;return running;
  }
  async completeUpload(entry){
   const value=await this.api.request(`/uploads/${encodeURIComponent(entry.receipt.upload_id)}/complete`,'POST',{sha256:entry.sha},entry.keys.complete);
+  this.recordCompleted(entry,value,entry.restored);await this.persist();return value;
+ }
+ recordCompleted(entry,value,recovered){
   if(!value||typeof value.artifact_id!=='string'||!value.artifact_id||value.conversation_id!==this.conversationId||value.sha256!==entry.sha||value.size_bytes!==entry.file.size||value.version!==1||value.status!=='ready'||value.origin!=='upload')throw new Error('upload_receipt_invalid');
-  entry.artifact=value;entry.stage='done';entry.status=entry.restored?'recovered':'ready';await this.persist();return value;
+  entry.artifact=value;entry.stage='done';entry.status=recovered?'recovered':'ready';
+ }
+ async reconcile(id){
+  this.assertRecoveryScope();const entry=this.entries.find(value=>value.id===id);
+  if(!this.statusSupported||!entry?.receipt?.upload_id)throw Error('upload_status_unavailable');
+  if(entry.running||entry.reconciling||entry.cancelRequested||entry.batch?.running||entry.batch?.cancelRunning)throw Error('upload_busy');
+  const abort=new AbortController();entry.reconcileAbort=abort;entry.reconciling=true;this.onChange();
+  try{
+   const value=await this.api.request(`/uploads/${encodeURIComponent(entry.receipt.upload_id)}`,'GET',undefined,undefined,abort.signal);
+   if(!value||value.protocol!==1||value.upload_id!==entry.receipt.upload_id||value.conversation_id!==this.conversationId
+    ||value.sha256!==entry.sha||value.size_bytes!==entry.file.size||value.expires_at!==entry.receipt.expires_at
+    ||!['created','uploading','uploaded','completed','cancelled','expired'].includes(value.status)
+    ||entry.batch?.batchId&&value.batch_id!==entry.batch.batchId)throw Error('upload_status_invalid');
+   const ownCancel=entry.cancelPending||entry.cancelObserved===true;
+   if(entry.batch?.cancelPending)entry.batch.cancelObserved=true;
+   if(value.status==='completed'){
+    this.recordCompleted(entry,value.artifact,true);entry.cancelPending=false;entry.cancelObserved=false;entry.expired=false;
+   }else if(value.status==='cancelled'){
+    entry.status='cancelled';entry.stage='cancelled';entry.cancelPending=false;entry.cancelObserved=ownCancel;entry.expired=false;
+   }else if(value.status==='expired'){
+    entry.status='rejected';entry.expired=true;entry.cancelPending=false;entry.cancelObserved=false;
+   }else{
+    entry.expired=false;
+    if(!entry.cancelPending&&!entry.batch?.cancelPending&&['content','batch-init'].includes(entry.stage)){
+     entry.stage=value.status==='uploaded'?'complete':'content';entry.status='uncertain';
+    }
+   }
+   entry.observedStatus=value.status;entry.error='';
+   const group=entry.batch;
+   if(group?.cancelPending&&group.entries.every(member=>['ready','recovered','cancelled'].includes(member.status)||member.expired)){
+    group.cancelPending=false;group.stage='content';
+   }
+   await this.persist();return value;
+  }finally{if(entry.reconcileAbort===abort)entry.reconcileAbort=null;entry.reconciling=false;this.onChange();}
  }
  async performUpload(entry){
   entry.status='uploading';entry.error='';this.onChange();
@@ -138,13 +180,15 @@ export class UploadController {
   if(entry.stage==='batch-cancel')return this.cancelBatch(entry.batch?.batchId||entry.batch?.key);
   if(entry.status==='selected'&&!entry.receipt){entry.status='cancelled';entry.stage='cancelled';await this.persist();this.onChange();return;}
   if(['ready','recovered'].includes(entry.status)){await this.remove(id);return;}
+  if(entry.reconciling)throw Error('upload_cancel_busy');
+  if(entry.status==='cancelled'&&entry.cancelObserved){entry.stage='cancel';entry.status='uncertain';}
   if(!entry.receipt?.upload_id||!['content','cancel'].includes(entry.stage))throw new Error('upload_cancel_unavailable');
-  if(entry.cancelRequested)throw new Error('upload_cancel_busy');
+  if(entry.cancelRequested||entry.reconciling)throw new Error('upload_cancel_busy');
   const running=entry.running;entry.cancelPending=true;entry.cancelRequested=true;entry.status='cancelling';entry.error='';entry.contentAbort?.abort();this.onChange();
   try{
    await this.api.request(`/uploads/${encodeURIComponent(entry.receipt.upload_id)}`,'DELETE',{},entry.keys.cancel);
    await running?.catch(()=>{});
-   entry.status='cancelled';entry.stage='cancelled';entry.error='';entry.cancelPending=false;await this.persist();
+   entry.status='cancelled';entry.stage='cancelled';entry.error='';entry.cancelPending=false;entry.cancelObserved=false;await this.persist();
   }catch(error){
    await running?.catch(()=>{});
    entry.status='uncertain';entry.stage='cancel';entry.error=error instanceof Error?error.message:'upload_cancel_unconfirmed';throw error;
@@ -154,9 +198,10 @@ export class UploadController {
   this.assertRecoveryScope();
   const group=this.entries.find(entry=>entry.batch&&(entry.batch.batchId===id||entry.batch.key===id))?.batch;if(!group)throw new Error('upload_batch_not_found');
   if(group.cancelRunning)return group.cancelRunning;
+  if(group.entries.some(entry=>entry.reconciling))throw Error('upload_busy');
   const cancel=async()=>{
    if(!group.batchId){if(group.requestBody)await this.initializeBatch(group);else{for(const entry of group.entries){entry.status='cancelled';entry.stage='cancelled';}await this.persist();return;}}
-   const pending=group.entries.filter(entry=>!['ready','recovered','cancelled'].includes(entry.status));if(!pending.length)return;
+   const pending=group.entries.filter(entry=>!['ready','recovered','cancelled'].includes(entry.status));if(!pending.length&&!group.cancelObserved)return;
    for(const entry of pending){entry.cancelRequested=true;entry.status='cancelling';entry.error='';entry.contentAbort?.abort();}this.onChange();
    try{
     group.cancelPending=true;
@@ -169,7 +214,7 @@ export class UploadController {
       catch(error){if(error?.status===409){entry.status='cancelled';entry.stage='cancelled';entry.error='';continue;}throw error;}
      }else{entry.status='cancelled';entry.stage='cancelled';entry.error='';}
     }
-    group.stage='cancelled';group.cancelPending=false;await this.persist();
+    group.stage='cancelled';group.cancelPending=false;group.cancelObserved=false;await this.persist();
    }catch(error){
     await Promise.all(pending.map(entry=>entry.running?.catch(()=>{})));
     for(const entry of pending){if(['ready','recovered','cancelled'].includes(entry.status))continue;entry.status='uncertain';if(entry.stage!=='complete')entry.stage='batch-cancel';entry.error=error instanceof Error?error.message:'upload_cancel_unconfirmed';}throw error;

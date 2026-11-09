@@ -21372,6 +21372,7 @@
       }
     },
     "/v1/uploads/{upload_id}": {
+      "get": {"operationId":"getUploadStatus","summary":"只读核对原上传状态及固定版本完成回执","description":"无version时取当前版本；下载引用应固定version避免拿到变动后的文件。","tags":["uploads"],"parameters":[{"name":"upload_id","in":"path","required":true,"schema":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"}}],"responses":{"200":{"description":"成功","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UploadStatus"}}}},"400":{"description":"参数无效","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}},"401":{"description":"未登录或会话失效","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}},"403":{"description":"无权限/CSRF 校验失败","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}},"404":{"description":"资源不存在或不允许披露","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}},"409":{"description":"版本/运行状态/幂等冲突","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}},"410":{"description":"交互、上传或事件游标已过期","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}},"413":{"description":"请求/文件超过限制","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}},"422":{"description":"能力不支持或业务参数不可执行","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}},"429":{"description":"并发、速率或预算限制","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}},"503":{"description":"Worker 不可用","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}}}},
       "delete": {
         "operationId": "cancelUpload",
         "summary": "取消未完成的上传",
@@ -27334,7 +27335,7 @@
       },
       "Capabilities": {
         "type": "object",
-        "properties": {
+        "properties": {"upload_recovery":{"type":"object","properties":{"protocol":{"const":1},"status":{"const":true}},"required":["protocol","status"],"additionalProperties":false},
           "conversation_forks": {
             "type": "object",
             "required": [
@@ -30159,6 +30160,7 @@
         ],
         "additionalProperties": false
       },
+      "UploadStatus": {"type":"object","properties":{"protocol":{"const":1},"upload_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"},"conversation_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"},"status":{"type":"string","enum":["created","uploading","uploaded","completed","cancelled","expired"]},"size_bytes":{"type":"integer","minimum":1,"maximum":9007199254740991},"sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"expires_at":{"type":"string","format":"date-time"},"batch_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"},"artifact":{"$ref":"#/components/schemas/Artifact"}},"required":["protocol","upload_id","conversation_id","status","size_bytes","sha256","expires_at"],"additionalProperties":false,"allOf":[{"if":{"properties":{"status":{"const":"completed"}},"required":["status"]},"then":{"required":["artifact"]},"else":{"not":{"required":["artifact"]}}}]},
       "UploadReceipt": {
         "type": "object",
         "properties": {

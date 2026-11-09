@@ -177,7 +177,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
   uploads.disposed=false;uploads.onChange=()=>{if(mounted)render(n=>n+1);};
   void request<Capabilities>('/capabilities','GET',undefined,undefined,abort.signal).then(async value=>{
    if(!mounted)return;
-   setMaxBytes(value.limits.max_upload_bytes);setVoice(value.voice);setModels(value.models??[]);setModeCaps(value);
+   setMaxBytes(value.limits.max_upload_bytes);setVoice(value.voice);setModels(value.models??[]);setModeCaps(value);uploads.statusSupported=value.upload_recovery?.protocol===1&&value.upload_recovery.status===true;
    store=await UploadRecoveryStore.open(window.indexedDB,taskDraftScope(),id);
    if(!mounted){store.close();return;}
    await uploads.configureRecovery(store);

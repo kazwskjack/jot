@@ -35,6 +35,9 @@ function isRecord(value: unknown): value is Record<string, any> {
 
 const UPLOAD_RETENTION_MS=24*60*60*1000,UPLOAD_WRITER_LEASE_MS=300000,UPLOAD_BATCH_MAX_FILES=500,UPLOAD_BATCH_MAX_BYTES=2*1024*1024*1024,UPLOAD_BATCH_MAX_ACTIVE=3;
 
+function uploadArtifactId(id:string):string {
+  return `artifact-${createHash('sha256').update(`upload:${id}`).digest('hex').slice(0,32)}`;
+}
 type UploadBatchFile={client_file_id:string;file_name:string;relative_path:string;media_type:string;size_bytes:number;sha256:string};
 
 function uploadBatchFiles(input:Record<string,unknown>,maxBytes:number):{files:UploadBatchFile[];total:number}{
@@ -587,8 +590,8 @@ export class ArtifactService {
 
   cancelUpload(uploadId:string,ownerId:string):void {
     const row=this.upload(uploadId,ownerId);
-    this.assertUploadLive(row);
     if(row.status==='cancelled')return;
+    this.assertUploadLive(row);
     if(!['created','uploading','uploaded'].includes(String(row.status)))throw new Error('upload_state_conflict');
     const outerTransaction=this.db.isTransaction;
     withImmediateTransaction(this.db,()=>{
@@ -660,6 +663,17 @@ export class ArtifactService {
     }
   }
 
+  assertUploadCancellationLive(uploadId:string,ownerId:string):void {
+    const row=this.upload(uploadId,ownerId);
+    if(row.status!=='cancelled')this.assertUploadLive(row);
+  }
+
+  assertUploadBatchCancellationLive(batchId:string,ownerId:string):void {
+    const batch=this.db.prepare('SELECT status FROM ga_upload_batches WHERE id=? AND owner_id=?').get(batchId,ownerId) as {status:string}|undefined;
+    if(!batch)throw Error('upload_batch_not_found');
+    if(!['cancelled','settled'].includes(batch.status))this.assertUploadBatchInitReceiptLive(batchId,ownerId);
+  }
+
   assertUploadReceiptLive(uploadId:string,ownerId:string):void { this.assertUploadLive(this.upload(uploadId,ownerId)); }
 
   private cleanupExpiredUpload(uploadId:string,ownerId:string):void {
@@ -717,6 +731,37 @@ export class ArtifactService {
       .run(now,batchId,batchId);
   }
 
+  uploadStatus(uploadId:string,ownerId:string){
+    return withReadTransaction(this.db,()=>{
+      const row=this.upload(uploadId,ownerId);
+      if(row.channel_stage_key||typeof row.conversation_id!=='string'
+        ||!this.db.prepare('SELECT 1 FROM ga_conversations WHERE id=? AND owner_id=?').get(row.conversation_id,ownerId))throw Error('upload_not_found');
+      if(row.batch_id!==null&&row.batch_id!==undefined&&(typeof row.batch_id!=='string'
+        ||!this.db.prepare('SELECT 1 FROM ga_upload_batches WHERE id=? AND owner_id=? AND conversation_id=?')
+          .get(row.batch_id,ownerId,row.conversation_id)))throw Error('upload_state_conflict');
+      const status=String(row.status),expires=String(row.expires_at??'');
+      if(!['created','uploading','uploaded','completed','cancelled','expired'].includes(status)
+        ||!Number.isFinite(Date.parse(expires))||!Number.isSafeInteger(row.declared_size)||Number(row.declared_size)<1
+        ||typeof row.declared_sha256!=='string'||!/^[a-f0-9]{64}$/.test(row.declared_sha256))throw Error('upload_state_conflict');
+      return {protocol:1,upload_id:uploadId,conversation_id:row.conversation_id,
+        status:['created','uploading','uploaded'].includes(status)&&Date.parse(expires)<=Date.now()?'expired':status,
+        size_bytes:Number(row.declared_size),sha256:row.declared_sha256,expires_at:expires,
+        ...(typeof row.batch_id==='string'?{batch_id:row.batch_id}:{}),
+        ...(status==='completed'?{artifact:this.completedUploadArtifact(row,ownerId)}:{})};
+    });
+  }
+
+  private completedUploadArtifact(row:Record<string,unknown>,ownerId:string){
+    if(row.status!=='completed'||row.actual_sha256!==row.declared_sha256||row.received_size!==row.declared_size)throw Error('upload_content_mismatch');
+    const artifactId=uploadArtifactId(String(row.id));
+    const prior=this.db.prepare('SELECT id FROM ga_artifacts WHERE id=? AND owner_id=? AND conversation_id=? AND kind=?')
+      .get(artifactId,ownerId,String(row.conversation_id),'upload');
+    if(!prior)throw Error('upload_state_conflict');
+    const artifact=this.get(artifactId,ownerId,1);
+    if(artifact.sha256!==row.declared_sha256||artifact.size_bytes!==Number(row.declared_size))throw Error('upload_content_mismatch');
+    return artifact;
+  }
+
   complete(uploadId: string, ownerId: string, input: Record<string, unknown>) {
     const row = this.upload(uploadId, ownerId);
     if(row.channel_stage_key&&!this.channelFinalizing.has(uploadId))throw Error('channel_attachment_batch_finalization_required');
@@ -727,14 +772,8 @@ export class ArtifactService {
     if (Number(row.received_size) !== Number(row.declared_size)) throw new Error('upload_size_mismatch');
     // Stable destination survives a crash after rename but before DB commit.
     // Old uploads without this mapping remain conflicts, never guessed matches.
-    const artifactId = `artifact-${createHash('sha256').update(`upload:${uploadId}`).digest('hex').slice(0,32)}`; const now = new Date().toISOString();
-    if(row.status==='completed'){
-      const prior=this.db.prepare('SELECT id FROM ga_artifacts WHERE id=? AND owner_id=? AND conversation_id=? AND kind=?').get(artifactId,ownerId,String(row.conversation_id),'upload');
-      if(!prior)throw new Error('upload_state_conflict');
-      const artifact=this.get(artifactId,ownerId,1);
-      if(artifact.sha256!==requested||artifact.size_bytes!==Number(row.declared_size))throw new Error('upload_content_mismatch');
-      return artifact;
-    }
+    const artifactId = uploadArtifactId(uploadId); const now = new Date().toISOString();
+    if(row.status==='completed')return this.completedUploadArtifact(row,ownerId);
     const conversationId = String(row.conversation_id);
     const receivedSize = Number(row.received_size);
     const finalPath = join(this.uploadRoot, artifactId);

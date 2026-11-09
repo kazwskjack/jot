@@ -968,6 +968,7 @@ export async function buildServer(config: {
     return {
       api_version: '1.0', event_schema_version: '1.0', adapter_version: '0.1.0',
       artifact_archive:archiveStatus(),
+      upload_recovery:{protocol:1,status:true},
       git_workbench:gitWorkbench.capability(ownerId,config.nativeGitClient!==undefined,['commit','branch','initialization','reinitialization'].includes(gitCommitExecutionSchema(db)),['branch','initialization','reinitialization'].includes(gitCommitExecutionSchema(db)),['initialization','reinitialization'].includes(gitCommitExecutionSchema(db)),gitCommitExecutionSchema(db)==='reinitialization'),
       capabilities: { search: true, fetch: true, browser_interaction: false, file_read: true,
         file_edit: true, command_execution: true, questions: true, approvals: true,
@@ -1216,7 +1217,7 @@ export async function buildServer(config: {
   ))));
   app.delete('/v1/upload-batches/:batchId',async(request,reply)=>{
     const batchId=String((request.params as Record<string,unknown>).batchId??''),owner=actor(request as any);
-    artifacts.assertUploadBatchInitReceiptLive(batchId,owner);
+    artifacts.assertUploadBatchCancellationLive(batchId,owner);
     const result=atomicCommand(request,204,()=>artifacts.cancelUploadBatch(batchId,owner));
     if(reply.sent)return result;
     artifacts.finishCancelledBatch(batchId,owner);
@@ -1234,9 +1235,13 @@ export async function buildServer(config: {
     artifacts.assertUploadReceiptLive(uploadId,owner);
     return reply.code(201).send(atomicCommand(request,201,()=>artifacts.complete(uploadId,owner,request.body as Record<string,unknown>)));
   });
+  app.get('/v1/uploads/:uploadId',async(request,reply)=>{
+    reply.header('cache-control','private, no-store');
+    return artifacts.uploadStatus((request.params as {uploadId:string}).uploadId,actor(request as any));
+  });
   app.delete('/v1/uploads/:uploadId', async (request, reply) => {
     const uploadId=String((request.params as Record<string,unknown>).uploadId??''),owner=actor(request as any);
-    artifacts.assertUploadReceiptLive(uploadId,owner);
+    artifacts.assertUploadCancellationLive(uploadId,owner);
     const result=atomicCommand(request,204,()=>artifacts.cancelUpload(uploadId,owner));
     if(reply.sent)return result;
     artifacts.finishCancelledUpload(uploadId,owner);
