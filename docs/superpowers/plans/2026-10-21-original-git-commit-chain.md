@@ -160,3 +160,24 @@ Original lease/owner transactions, native drain, journal evidence and result
 encodings continue to be consumed by the existing recovery entry points.
 This increment is source development only. Remaining original stage/file boundary
 coverage is tracked in M15.19.
+
+## P09 original create-branch review ledger
+
+The create-branch review API is mounted in the actual Gateway and original
+private BFF path. It freezes current HEAD/object format, unborn or detached state,
+index identity, original repository metadata and the exact new local reference.
+It rejects existing references, directory/file prefix collisions and normalized
+case aliases, and uses the fixed isolated check-ref-format command for Git's
+branch-name rules. Source configuration cannot supply executable behavior.
+
+Create/read/approve/cancel use the existing wb_git_mutation_intents and
+wb_git_mutation_events tables, original atomic HTTP receipt protocol, owner
+checks, review hash and version transitions. Approval captures the same original
+source again. Original file-review readers exclude the new branch review kind.
+The branch service creates no additional review or execution tables.
+
+This increment delivers backend review and shared contracts. Actual creation,
+HEAD/reflog publication, native workspace custody and interrupted recovery remain
+required before execution is exposed. UI entry/recovery, initialization and
+existing-branch checkout/deletion also remain in M15.14. This source increment
+has not run product commands, tests, typechecks, builds or UI acceptance.

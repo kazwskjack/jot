@@ -1171,6 +1171,33 @@
   ],
   [
     "POST",
+    "/v1/projects/{projectId}/git/branch-intents",
+    "prepareProjectGitBranchReview",
+    "GitBranchReviewPrepare",
+    "GitBranchReviewIntent",
+    "201",
+    "Freeze creating and switching to a new local branch at the exact original HEAD, including unborn HEAD. Persist the original immutable review/event ledger and atomic request receipt. Review acknowledgements carry execution_authorized=false."
+  ],
+  [
+    "GET",
+    "/v1/projects/{projectId}/git/branch-intents/{intentId}",
+    "getProjectGitBranchReview",
+    null,
+    "GitBranchReviewIntent",
+    "200",
+    "Read the original owner-scoped branch review and its current decision version. Review acknowledgements carry execution_authorized=false."
+  ],
+  [
+    "POST",
+    "/v1/projects/{projectId}/git/branch-intents/{intentId}/control",
+    "controlProjectGitBranchReview",
+    "GitReviewControl",
+    "GitBranchReviewIntent",
+    "200",
+    "Approve or cancel the exact original branch review/version/hash. Approval repeats the original repository, HEAD, index, target absence and metadata witness. Native creation and recovery are separate required execution phases. Review acknowledgements carry execution_authorized=false."
+  ],
+  [
+    "POST",
     "/v1/projects/{projectId}/git/intents",
     "prepareProjectGitReview",
     "GitReviewPrepare",

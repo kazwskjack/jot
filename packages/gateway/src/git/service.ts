@@ -63,6 +63,7 @@ export class GitWorkbench{
  }
  async freezeCommit(owner:string,project:string,snapshotId:string,paths:readonly string[],signal?:AbortSignal){const result=await this.repository(owner,project).freezeCommit(snapshotId,paths,signal);this.projects.assertOwned(project,owner);signal?.throwIfAborted();return result;}
  async publicationTarget(owner:string,project:string,paths:readonly string[],signal?:AbortSignal){const result=await this.repository(owner,project).publicationTarget(paths,signal);this.projects.assertOwned(project,owner);signal?.throwIfAborted();return result;}
+ async freezeCreateBranch(owner:string,project:string,snapshotId:string,branch:string,signal?:AbortSignal){const result=await this.repository(owner,project).freezeCreateBranch(snapshotId,branch,signal);this.projects.assertOwned(project,owner);signal?.throwIfAborted();return result;}
  async branches(owner:string,project:string,snapshotId:string,signal?:AbortSignal){const result=await this.repository(owner,project).branches(snapshotId,signal);this.projects.assertOwned(project,owner);signal?.throwIfAborted();return {project_id:project,...result};}
  async diff(owner:string,project:string,input:{snapshot_id:string;path:string;stage:'working'|'staged'},signal?:AbortSignal){const result=await this.repository(owner,project).diff(input,signal);this.projects.assertOwned(project,owner);return{project_id:project,...result};}
 }

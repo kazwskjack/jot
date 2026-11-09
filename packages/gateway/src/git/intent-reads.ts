@@ -3,6 +3,7 @@ type Row={intent_id:string;owner_id:string;project_id:string;action:'stage'|'uns
 type Event={version:number;state:'prepared'|'approved'|'cancelled';created_at:string};
 /** Original immutable review projection, shared with journal-only reads. */
 export function gitMutationIntentView(row:Row,event:Event){
+ if(!['stage','unstage','commit','discard','delete-untracked'].includes(row.action))throw Error('git_intent_not_found');
  const selection=JSON.parse(row.selection_json) as {paths:string[];message?:string;snapshot_id:string;commit_metadata?:import('../../contracts/types.ts').GitCommitMetadata};
  return {
   intent_id:row.intent_id,project_id:row.project_id,action:row.action,paths:selection.paths,

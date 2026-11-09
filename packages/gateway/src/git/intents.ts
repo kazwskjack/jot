@@ -47,7 +47,7 @@ export class GitMutationIntents{
       OR NEW.state='approved' AND (SELECT state FROM wb_git_mutation_events WHERE intent_id=NEW.intent_id ORDER BY version DESC LIMIT 1)<>'prepared')
     BEGIN SELECT RAISE(ABORT,'git_intent_transition_invalid'); END;`);
  }
- private row(owner:string,project:string,id:string){this.projects.assertOwned(project,owner);const row=this.db.prepare('SELECT * FROM wb_git_mutation_intents WHERE intent_id=? AND owner_id=? AND project_id=?').get(id,owner,project) as Row|undefined;if(!row)throw Error('git_intent_not_found');return row;}
+ private row(owner:string,project:string,id:string){this.projects.assertOwned(project,owner);const row=this.db.prepare('SELECT * FROM wb_git_mutation_intents WHERE intent_id=? AND owner_id=? AND project_id=?').get(id,owner,project) as Row|undefined;if(!row||!['stage','unstage','commit','discard','delete-untracked'].includes(row.action))throw Error('git_intent_not_found');return row;}
  private latest(id:string){const event=this.db.prepare('SELECT * FROM wb_git_mutation_events WHERE intent_id=? ORDER BY version DESC LIMIT 1').get(id) as Event|undefined;if(!event)throw Error('git_intent_unavailable');return event;}
  private view(row:Row,event:Event){return gitMutationIntentView(row,event);}
  get(owner:string,project:string,id:string){return readGitMutationIntent(this.db,owner,project,id);}

@@ -14518,6 +14518,383 @@
         }
       }
     },
+    "/v1/projects/{projectId}/git/branch-intents": {
+      "post": {
+        "operationId": "prepareProjectGitBranchReview",
+        "summary": "Original owner branch review",
+        "tags": [
+          "projects"
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Original immutable review acknowledgement; not execution authority",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitBranchReviewIntent"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Original owner, request, source, metadata, configuration or bounded read conflicts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Original owner, request, source, metadata, configuration or bounded read conflicts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Original owner, request, source, metadata, configuration or bounded read conflicts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Original owner, request, source, metadata, configuration or bounded read conflicts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Original owner, request, source, metadata, configuration or bounded read conflicts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Original owner, request, source, metadata, configuration or bounded read conflicts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Original owner, request, source, metadata, configuration or bounded read conflicts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Original owner, request, source, metadata, configuration or bounded read conflicts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GitBranchReviewPrepare"
+              }
+            }
+          }
+        },
+        "description": "Freeze creating and switching to a new local branch at the exact original HEAD, including unborn HEAD. Persist the original immutable review/event ledger and atomic request receipt. Review acknowledgements carry execution_authorized=false."
+      }
+    },
+    "/v1/projects/{projectId}/git/branch-intents/{intentId}": {
+      "get": {
+        "operationId": "getProjectGitBranchReview",
+        "summary": "Original owner branch review",
+        "tags": [
+          "projects"
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+            }
+          },
+          {
+            "name": "intentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Original immutable review acknowledgement; not execution authority",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitBranchReviewIntent"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Original owner, request, source, metadata, configuration or bounded read conflicts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Original owner, request, source, metadata, configuration or bounded read conflicts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Original owner, request, source, metadata, configuration or bounded read conflicts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Original owner, request, source, metadata, configuration or bounded read conflicts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Original owner, request, source, metadata, configuration or bounded read conflicts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Original owner, request, source, metadata, configuration or bounded read conflicts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Original owner, request, source, metadata, configuration or bounded read conflicts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Original owner, request, source, metadata, configuration or bounded read conflicts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Read the original owner-scoped branch review and its current decision version. Review acknowledgements carry execution_authorized=false."
+      }
+    },
+    "/v1/projects/{projectId}/git/branch-intents/{intentId}/control": {
+      "post": {
+        "operationId": "controlProjectGitBranchReview",
+        "summary": "Original owner branch review",
+        "tags": [
+          "projects"
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+            }
+          },
+          {
+            "name": "intentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Original immutable review acknowledgement; not execution authority",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitBranchReviewIntent"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Original owner, request, source, metadata, configuration or bounded read conflicts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Original owner, request, source, metadata, configuration or bounded read conflicts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Original owner, request, source, metadata, configuration or bounded read conflicts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Original owner, request, source, metadata, configuration or bounded read conflicts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Original owner, request, source, metadata, configuration or bounded read conflicts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Original owner, request, source, metadata, configuration or bounded read conflicts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Original owner, request, source, metadata, configuration or bounded read conflicts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Original owner, request, source, metadata, configuration or bounded read conflicts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GitReviewControl"
+              }
+            }
+          }
+        },
+        "description": "Approve or cancel the exact original branch review/version/hash. Approval repeats the original repository, HEAD, index, target absence and metadata witness. Native creation and recovery are separate required execution phases. Review acknowledgements carry execution_authorized=false."
+      }
+    },
     "/v1/projects/{projectId}/git/intents": {
       "post": {
         "operationId": "prepareProjectGitReview",
@@ -39182,6 +39559,130 @@
           "project_id",
           "action",
           "paths",
+          "snapshot_id",
+          "review_sha256",
+          "version",
+          "state",
+          "created_at",
+          "updated_at",
+          "execution_authorized"
+        ]
+      },
+      "GitBranchReviewPrepare": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+          },
+          "action": {
+            "const": "create-branch"
+          },
+          "branch": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1013
+          },
+          "snapshot_id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "request_id",
+          "action",
+          "branch",
+          "snapshot_id"
+        ]
+      },
+      "GitBranchReviewIntent": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "intent_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+          },
+          "project_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+          },
+          "action": {
+            "const": "create-branch"
+          },
+          "branch": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1013
+          },
+          "target_ref": {
+            "type": "string",
+            "minLength": 12,
+            "maxLength": 1024,
+            "pattern": "^refs/heads/.+$"
+          },
+          "target_oid": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "head": {
+            "$ref": "#/components/schemas/GitHead"
+          },
+          "object_format": {
+            "enum": [
+              "sha1",
+              "sha256"
+            ]
+          },
+          "snapshot_id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "review_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "state": {
+            "enum": [
+              "prepared",
+              "approved",
+              "cancelled"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "execution_authorized": {
+            "const": false
+          }
+        },
+        "required": [
+          "intent_id",
+          "project_id",
+          "action",
+          "branch",
+          "target_ref",
+          "target_oid",
+          "head",
+          "object_format",
           "snapshot_id",
           "review_sha256",
           "version",

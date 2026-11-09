@@ -1,5 +1,5 @@
 import {validGitReference} from './references.ts';
-import type {GitBranchInventory} from '../../contracts/types.ts';
+import type {GitBranchInventory,GitCreateBranchWitness} from '../../contracts/types.ts';
 import {createHash} from 'node:crypto';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {constants} from 'node:fs';
@@ -325,6 +325,30 @@ export class GitRepositoryInspection{
    if((await this.inspectContext(context,signal)).snapshot_id!==snapshotId||(await this.anchors(signal)).metadata!==context.metadata)throw Error('git_snapshot_changed');signal?.throwIfAborted();
    return{...witness,commit_tree};
   }finally{await context.dispose();}
+ }
+ /** Frozen original facts for creating and switching to a branch at HEAD. */
+ async freezeCreateBranch(snapshotId:string,branch:string,signal?:AbortSignal):Promise<GitCreateBranchWitness>{
+  const target='refs/heads/'+branch;
+  if(typeof branch!=='string'||branch.startsWith('-')||!validGitReference(target))throw Error('git_branch_invalid');
+  const inventory=await this.branches(snapshotId,signal),folded=target.normalize('NFC').toLowerCase();
+  for(const entry of inventory.branches){
+   if(entry.kind!=='local')continue;
+   const ref=entry.ref.normalize('NFC').toLowerCase();
+   if(ref===folded||ref.startsWith(folded+'/')||folded.startsWith(ref+'/'))throw Error('git_branch_exists');
+  }
+  const context=await this.context(signal);let result:GitCreateBranchWitness;
+  try{
+   const checked=await this.run(context,['check-ref-format','--branch',branch],signal,true);
+   if(checked.code!==0)throw Error('git_branch_invalid');
+   const snapshot=await this.inspectContext(context,signal);
+   if(snapshot.snapshot_id!==snapshotId)throw Error('git_snapshot_changed');
+   result={protocol:1,kind:'create_branch',snapshot_id:snapshotId,repository_sha256:snapshot.repository_sha256,
+    source_metadata_sha256:context.metadata,index_sha256:context.index,object_format:inventory.object_format,
+    head:snapshot.head,branch,target_ref:target,target_oid:snapshot.head.oid,execution_authorized:false};
+  }finally{await context.dispose();}
+  const after=await this.anchors(signal);
+  if(after.repository!==result.repository_sha256||after.metadata!==result.source_metadata_sha256)throw Error('git_snapshot_changed');
+  signal?.throwIfAborted();return result;
  }
  async branches(snapshotId:string,signal?:AbortSignal):Promise<Omit<GitBranchInventory,'project_id'>>{
   if(typeof snapshotId!=='string'||!/^[a-f0-9]{64}$/.test(snapshotId))throw Error('git_branches_invalid');

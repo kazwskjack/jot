@@ -403,6 +403,9 @@ export type TaskmasterMcpStatus = {connection_id:string;server_name:string;versi
 export type TaskPrdTaskmasterStatus = {registry_available:boolean;connections:TaskmasterMcpStatus[]};
 export type TaskPrdSources = {task_id:string;task_version:number;readiness:{ready:boolean;reasons:string[]};sources:TaskPrdSource[];truncated:boolean;binding:TaskPrdReceipt|null;taskmaster?:TaskPrdTaskmasterStatus};
 
+export type GitCreateBranchWitness={protocol:1;kind:'create_branch';snapshot_id:string;repository_sha256:string;source_metadata_sha256:string;index_sha256:string|null;object_format:'sha1'|'sha256';head:GitHead;branch:string;target_ref:string;target_oid:string|null;execution_authorized:false};
+export type GitBranchReviewPrepare={request_id:string;action:'create-branch';branch:string;snapshot_id:string};
+export type GitBranchReviewIntent={intent_id:string;project_id:string;action:'create-branch';branch:string;target_ref:string;target_oid:string|null;head:GitHead;object_format:'sha1'|'sha256';snapshot_id:string;review_sha256:string;version:number;state:'prepared'|'approved'|'cancelled';created_at:string;updated_at:string;execution_authorized:false};
 export type GitReviewPrepare = {request_id:string;action:"stage"|"unstage"|"commit"|"discard"|"delete-untracked";paths:string[];snapshot_id:string;message?:string};
 export type GitReviewControl = {request_id:string;expected_version:number;action:"approve"|"cancel";review_sha256:string};
 export type GitReviewIntent = {intent_id:string;project_id:string;action:GitReviewPrepare["action"];paths:string[];message?:string;commit_metadata?:GitCommitMetadata;snapshot_id:string;review_sha256:string;version:number;state:"prepared"|"approved"|"cancelled";created_at:string;updated_at:string;execution_authorized:false};
