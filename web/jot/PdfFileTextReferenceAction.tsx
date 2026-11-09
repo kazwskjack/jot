@@ -5,7 +5,7 @@ import React,{useContext,useEffect,useRef,useState,type RefObject} from 'react';
 import {createPortal} from 'react-dom';
 import {taskDraftScope} from './client';
 import {FileTextReferenceContext,type FileTextReference} from './FileTextReferences';
-import {createTextContentReference,type NormalizedRect} from './vendor/pilotdeck-text-reference';
+import {createTextContentReference,type NormalizedRect} from './vendor/pilotdeck-content-reference';
 import type {ListedFilePreviewSource} from './activity-file-preview-client';
 
 function selectionSnapshot(root:HTMLElement,range:Range){

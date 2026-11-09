@@ -1,8 +1,8 @@
 // Adapted from PilotDeck revision 783499ffdb2d501bf590b2e035acd027a882df10.
-// Original source ui/src/types/contentReference.ts, text-reference types and creation.
+// Original source ui/src/types/contentReference.ts, text/region-reference types and creation.
 // Upstream GNU Affero General Public License v3.0 terms apply.
 // Complete license retained at packages/session-adapter/runtime-patches/PILOTDECK-AGPL-3.0.txt
-// Jot extracts the used text-reference branch and retains the original schema and rect normalization.
+// Jot extracts the used text/region-reference branches and retains the original schema and rect normalization.
 export const CONTENT_REFERENCE_ATTACHMENT_KIND = 'content-reference';
 export const CONTENT_REFERENCE_PROMPT_MARKER = '[Content references selected by user:]';
 
@@ -79,7 +79,35 @@ export type TextContentReference = ContentReferenceBase & {
   truncated?: boolean;
 };
 
-type CreateContentReferenceInput<T extends TextContentReference> = Omit<
+export type ImageRegionContentReference = ContentReferenceBase & {
+  selectionMode: 'region';
+  locator: {
+    surface: ContentReferenceSurface;
+    pageNumber?: number;
+    slideNumber?: number;
+    sheetId?: string;
+    sheetName?: string;
+    rect: NormalizedRect;
+    anchorRange?: string;
+  };
+  image: {
+    name: string;
+    mimeType: 'image/png';
+    width: number;
+    height: number;
+    sha256?: string;
+    /**
+     * Composer-only payload. It is deliberately removed from the structured
+     * message attachment and sent as a normal multimodal image part instead.
+     */
+    dataUrl?: string;
+  };
+  nearbyText?: string;
+};
+
+type ContentReference=TextContentReference|ImageRegionContentReference;
+
+type CreateContentReferenceInput<T extends ContentReference> = Omit<
   T,
   'schemaVersion' | 'kind' | 'id' | 'createdAt'
 > & {
@@ -110,7 +138,7 @@ export function normalizeRect(rect: NormalizedRect): NormalizedRect {
   };
 }
 
-function createContentReference<T extends TextContentReference>(
+function createContentReference<T extends ContentReference>(
   input: CreateContentReferenceInput<T>,
 ): T {
   return {
@@ -132,6 +160,18 @@ export function createTextContentReference(
       ...(input.locator.rects
         ? { rects: input.locator.rects.map(normalizeRect) }
         : {}),
+    },
+  });
+}
+
+export function createImageRegionContentReference(
+  input: CreateContentReferenceInput<ImageRegionContentReference>,
+): ImageRegionContentReference {
+  return createContentReference<ImageRegionContentReference>({
+    ...input,
+    locator: {
+      ...input.locator,
+      rect: normalizeRect(input.locator.rect),
     },
   });
 }

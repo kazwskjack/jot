@@ -44,7 +44,7 @@ export default function PdfFilePage({document,pageNumber,zoom,rotation,width,onS
   {busy&&<p role="status">正在绘制第 {pageNumber} 页…</p>}
   {error&&<p role="alert">{error}</p>}
   <div data-pdf-page-anchor={pageNumber} style={{position:'relative',width:size.width,height:size.height,'--scale-factor':size.scale,'--total-scale-factor':size.scale} as React.CSSProperties}>
-   <canvas ref={canvas} aria-hidden="true"/>
+   <canvas ref={canvas} aria-hidden="true" data-pdf-capture-ready={!busy&&!error?'true':undefined}/>
    <div ref={text} className="textLayer" aria-label={`PDF第 ${pageNumber} 页文字`} style={{position:'absolute',inset:0}}/>
   </div>
  </>;

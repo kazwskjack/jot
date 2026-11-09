@@ -1,4 +1,4 @@
-import {FileTextReferenceContext,FileTextReferences,fileReferenceMessage,type FileTextReference} from './FileTextReferences';
+import {FileTextReferenceContext,FileTextReferences,fileReferenceMessage,isFileRegion,resolveRegionArtifact,type FileReference,type FileRegionDraft,type FileTextReference} from './FileTextReferences';
 import type {TaskSourceSelection} from '../workbench/types';
 import {useMutationReceipt} from '../workbench/useMutationReceipt';
 import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react';
@@ -145,9 +145,9 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  const [voice,setVoice]=useState<Capabilities['voice']>(),[voiceBusy,setVoiceBusy]=useState(false),draftRef=useRef(draft),conversationRegion=useRef<HTMLElement>(null),previewRequest=useRef<AbortController|undefined>(undefined);
  const [replyQuotes,setReplyQuotes]=useState<AssistantReplyQuote[]>([]);
  const fileOwner=taskDraftScope();
- const [fileReferenceState,setFileReferenceState]=useState<{owner:string;conversationId:string;values:FileTextReference[]}>({owner:fileOwner,conversationId:id,values:[]});
+ const [fileReferenceState,setFileReferenceState]=useState<{owner:string;conversationId:string;values:FileReference[]}>({owner:fileOwner,conversationId:id,values:[]});
  const fileReferences=fileReferenceState.owner===fileOwner&&fileReferenceState.conversationId===id?fileReferenceState.values:[];
- const setFileReferences=(values:FileTextReference[])=>{if(taskDraftScope()===fileOwner)setFileReferenceState({owner:fileOwner,conversationId:id,values});};
+ const setFileReferences=(values:FileReference[])=>{if(taskDraftScope()===fileOwner)setFileReferenceState({owner:fileOwner,conversationId:id,values});};
  const quoteCount=replyQuotes.length+fileReferences.length;
  const [olderMessages,setOlderMessages]=useState<Message[]>([]),[historySelection,setHistorySelection]=useState('');
  const [historicalActivities,setHistoricalActivities]=useState<Activity[]>([]),[activityHistoryRequest,setActivityHistoryRequest]=useState(0);
@@ -225,8 +225,12 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  const chatUnavailable=chatMode&&!!modeCaps&&!modes.chatReady;
  const canToggle=ordinary&&!!conversation&&controller.connection==='connected'&&!busy&&!run&&!controller.pendingMessage&&!uploads.entries.length&&!voiceBusy&&!goalPending&&!modelMutation.pending&&!modeWriter.pending&&!cancelWriter.pending&&modes.aware&&(chatMode||modes.chatReady);
  const action=async(fn:()=>Promise<unknown>)=>{if(busy)return;setBusy(true);setError('');try{await fn();}catch(e){if(!(e instanceof DOMException&&e.name==='AbortError'))setError(artifactPreviewErrorMessage(e));if((e as {status?:number}).status===409&&!controller.pendingMessage)await controller.refresh().catch(()=>{});}finally{setBusy(false);}};
- const send=()=>{if(fileReferences.length&&taskDraftScope()!==fileOwner){setError('文件引用所属账户已变化，请重新打开会话');return;}if(voiceBusy||modeWriter.pending||cancelWriter.pending||chatUnavailable)return;void action(async()=>{const message=replyQuoteMessage(fileReferenceMessage(draft,fileReferences),replyQuotes);if(!controller.pendingMessage&&quoteCount&&goalPrompt(message,ordinary&&!chatMode&&!run&&goalMode).length>100000)throw Error('引用与消息过长，请减少引用或缩短消息后发送');const references=uploads.references();const receipt=await controller.send(message,references,{goalMode:ordinary&&!chatMode&&!run&&goalMode,originalTask:ordinary,steeringConfigured:modeCaps?.conversation_commands?.protocol===1&&modeCaps.conversation_commands.ordinary_steer?.configured===true,attachmentSteeringConfigured:modeCaps?.conversation_commands?.protocol===1&&modeCaps.conversation_commands.ordinary_steer?.attachments===true});let cleanupError='';try{await uploads.clearSent(references);}catch{cleanupError='消息已发送，附件回执清理尚未保存。请重读上传回执并核对会话。';}setReplyQuotes([]);setFileReferences([]);editDraft('');if(cleanupError)setError(cleanupError);else if(receipt.command_id)setError('补充已保留给原任务，正在等待接收');await controller.refresh();});};
+ const send=()=>{if(fileReferences.length&&taskDraftScope()!==fileOwner){setError('文件引用所属账户已变化，请重新打开会话');return;}if(voiceBusy||modeWriter.pending||cancelWriter.pending||chatUnavailable)return;void action(async()=>{const message=replyQuoteMessage(fileReferenceMessage(draft,fileReferences,imageArtifact),replyQuotes);if(!controller.pendingMessage&&quoteCount&&goalPrompt(message,ordinary&&!chatMode&&!run&&goalMode).length>100000)throw Error('引用与消息过长，请减少引用或缩短消息后发送');const references=uploads.references();const receipt=await controller.send(message,references,{goalMode:ordinary&&!chatMode&&!run&&goalMode,originalTask:ordinary,steeringConfigured:modeCaps?.conversation_commands?.protocol===1&&modeCaps.conversation_commands.ordinary_steer?.configured===true,attachmentSteeringConfigured:modeCaps?.conversation_commands?.protocol===1&&modeCaps.conversation_commands.ordinary_steer?.attachments===true});let cleanupError='';try{await uploads.clearSent(references);}catch{cleanupError='消息已发送，附件回执清理尚未保存。请重读上传回执并核对会话。';}setReplyQuotes([]);setFileReferences([]);editDraft('');if(cleanupError)setError(cleanupError);else if(receipt.command_id)setError('补充已保留给原任务，正在等待接收');await controller.refresh();});};
  const quoteLocked=!state||busy||goalPending||voiceBusy||modelMutation.pending||modeWriter.pending||cancelWriter.pending||controller.pendingMessage||chatUnavailable;
+ const regionDisabled=quoteLocked||uploads.blocked||uploads.unresolved||!maxBytes;
+ const imageArtifact=(entryId:string)=>{const entry=uploads.entries.find((entry:any)=>entry.id===entryId);return entry?.status==='ready'?entry.artifact:undefined;};
+ const imageFile=(entryId:string)=>{const file=uploads.entries.find((entry:any)=>entry.id===entryId)?.file;return file instanceof File?file:undefined;};
+ const regionsReady=fileReferences.every(value=>!isFileRegion(value)||!!resolveRegionArtifact(value,imageArtifact));
  const addReplyQuote=(quote:AssistantReplyQuote)=>{
   if(quoteLocked||quote.conversationId!==id)return false;
   if(replyQuotes.some(value=>value.messageId===quote.messageId&&value.selectedText===quote.selectedText))return true;
@@ -246,10 +250,49 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
    ||!Number.isSafeInteger(file.version)||file.version<0||!Number.isSafeInteger(file.size)||file.size<0
    ||!/^[a-f0-9]{64}$/.test(file.sha256)||!/^[a-f0-9]{64}$/.test(value.resultSha))return false;
   const fingerprint=(item:FileTextReference)=>JSON.stringify([item.runId,item.activityId,item.resultSha,item.file.path,item.file.version,item.file.sha256,item.file.size,item.reference.selectedText,item.reference.locator.pageNumbers]);
-  if(fileReferences.some(item=>fingerprint(item)===fingerprint(value)))return true;
+  if(fileReferences.some(item=>!isFileRegion(item)&&fingerprint(item)===fingerprint(value)))return true;
   const next=[...fileReferences,value];
   if(goalPrompt(replyQuoteMessage(fileReferenceMessage(draft,next),replyQuotes),ordinary&&!chatMode&&!run&&goalMode).length>100000){setError('引用与消息过长，请减少引用或缩短消息');return false;}
   setFileReferences(next);conversationRegion.current?.querySelector<HTMLTextAreaElement>('.jot-prompt-composer textarea')?.focus();return true;
+ };
+ const addRegionReference=(value:FileRegionDraft,file:File)=>{
+  if(regionDisabled||!maxBytes||taskDraftScope()!==fileOwner||value.owner!==fileOwner||value.conversationId!==id)return false;
+  const {reference}=value,rect=reference.locator.rect;
+  if(reference.schemaVersion!==1||reference.kind!=='content-reference'||reference.selectionMode!=='region'||reference.renderer.id!=='pdf'||reference.renderer.backend!=='builtin'||reference.locator.surface!=='page'
+   ||reference.source.relativePath!==value.file.path||reference.source.revision?.sha256!==value.file.sha256||reference.source.revision?.id!==String(value.file.version)||reference.source.revision?.size!==value.file.size
+   ||!Number.isSafeInteger(value.file.version)||value.file.version<0||!Number.isSafeInteger(value.file.size)||value.file.size<0||!/^[a-f0-9]{64}$/.test(value.file.sha256)||!/^[a-f0-9]{64}$/.test(value.resultSha)
+   ||!Number.isSafeInteger(reference.locator.pageNumber)||Number(reference.locator.pageNumber)<1||!Number.isSafeInteger(reference.image.width)||reference.image.width<1||!Number.isSafeInteger(reference.image.height)||reference.image.height<1
+   ||[rect.x,rect.y,rect.width,rect.height].some(number=>!Number.isFinite(number)||number<0||number>1)||!rect.width||!rect.height
+   ||reference.image.mimeType!=='image/png'||file.type!=='image/png'||file.name!==reference.image.name||file.size!==value.imageBytes||file.size<1||file.size>maxBytes
+   ||!/^[a-f0-9]{64}$/.test(reference.image.sha256??'')||![0,90,180,270].includes(value.rotation)){setError('区域引用或截图信息未能核对，请重新选择。');return false;}
+  if(fileReferences.some(item=>isFileRegion(item)&&item.runId===value.runId&&item.activityId===value.activityId&&item.resultSha===value.resultSha&&item.file.path===value.file.path&&item.file.version===value.file.version&&item.file.sha256===value.file.sha256&&item.reference.image.sha256===reference.image.sha256&&JSON.stringify(item.reference.locator)===JSON.stringify(reference.locator)&&item.rotation===value.rotation))return true;
+  const candidate={...value,uploadEntryId:''};
+  if(goalPrompt(replyQuoteMessage(fileReferenceMessage(draft,[...fileReferences,candidate]),replyQuotes),ordinary&&!chatMode&&!run&&goalMode).length>100000){setError('引用与消息过长，请减少引用或缩短消息');return false;}
+  try{
+   const entry=uploads.add(file,maxBytes);setFileReferences([...fileReferences,{...value,uploadEntryId:entry.id}]);
+   void action(async()=>{await uploads.prepareBatch([entry.id]);await uploadEntry(entry.id);});return true;
+  }catch(error){setError(error instanceof Error?error.message:'截图暂时无法加入附件');return false;}
+ };
+ const editFileReferences=(values:FileReference[])=>{
+  if(quoteLocked)return;
+  const removed=fileReferences.filter(isFileRegion).filter(value=>!values.some(item=>item.reference.id===value.reference.id));
+  if(!removed.length){setFileReferences(values);return;}
+  void action(async()=>{
+   let retained=fileReferences;
+   for(const value of removed){
+    if(taskDraftScope()!==fileOwner)throw Error('截图所属账户已变化');
+    const entry=uploads.entries.find((entry:any)=>entry.id===value.uploadEntryId);
+    if(entry){
+     if(!['ready','recovered','cancelled'].includes(entry.status)&&!entry.expired){
+      if(entry.batch){if(entry.batch.entries.length!==1)throw Error('请在附件区处理此上传批次');await uploads.cancelBatch(entry.batch.batchId||entry.batch.key);}
+      else await uploads.cancel(entry.id);
+     }
+     await uploads.remove(entry.id);
+    }
+    retained=retained.filter(item=>item.reference.id!==value.reference.id);setFileReferences(retained);
+   }
+   setFileReferences(values);
+  });
  };
  const cancelTask=(retry=false)=>void action(async()=>{
   try{if(retry)await cancelWriter.retry();else if(run){const latest=await request<Run>(`/runs/${encodeURIComponent(run.run_id)}`);if(latest.run_id!==run.run_id||latest.conversation_id!==id)throw Error('停止目标状态尚未确认');if(active(latest)&&latest.status!=='cancelling')await cancelWriter.cancel(latest);}await controller.refresh();}
@@ -306,7 +349,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
   }else setPreview({name:file.relative_path||file.file_name,unsupported:true});
  });
  const download=(file:Artifact)=>void action(async()=>{const response=await fetch(`${base}/v1/artifacts/${encodeURIComponent(file.artifact_id)}/download?version=${file.version}`,{credentials:'same-origin'});if(!response.ok)throw new Error('文件暂不可下载');const url=URL.createObjectURL(await response.blob());const link=document.createElement('a');link.href=url;link.download=file.file_name;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
- return <FileTextReferenceContext.Provider value={{owner:fileOwner,conversationId:id,disabled:quoteLocked,onAdd:addFileReference}}><section ref={conversationRegion} data-chat-search-scope tabIndex={-1} className="workbench-conversation jot-goal-stop-focus-target" aria-label={ordinary?"Ordinary conversation":"Role conversation"}><button disabled={busy||goalPending||controller.pendingMessage||quoteCount>0||uploads.entries.length>0||modelMutation.pending||modeWriter.pending||cancelWriter.pending} onClick={onClose}>返回工作台</button><h2>{ordinary?'我的对话':'角色对话'}</h2>{ordinary&&conversation&&<button type="button" className="jot-conversation-mode" style={{fontStyle:'italic',fontWeight:700,background:'transparent',border:0,color:'inherit'}} aria-label={`切换到 ${chatMode?'work':'chat'}`} disabled={!canToggle} onClick={()=>void saveMode()}>{chatMode?'chat':'work'}</button>}<p role="status">{controller.connection==='connected'?'已连接':controller.connection==='reconnecting'?'正在重新连接':'正在连接'}{run?` · ${run.status}`:''}</p>{controller.error&&<p role="alert">{controller.error}</p>}
+ return <FileTextReferenceContext.Provider value={{owner:fileOwner,conversationId:id,disabled:quoteLocked,regionDisabled,onAdd:addFileReference,onAddRegion:addRegionReference}}><section ref={conversationRegion} data-chat-search-scope tabIndex={-1} className="workbench-conversation jot-goal-stop-focus-target" aria-label={ordinary?"Ordinary conversation":"Role conversation"}><button disabled={busy||goalPending||controller.pendingMessage||quoteCount>0||uploads.entries.length>0||modelMutation.pending||modeWriter.pending||cancelWriter.pending} onClick={onClose}>返回工作台</button><h2>{ordinary?'我的对话':'角色对话'}</h2>{ordinary&&conversation&&<button type="button" className="jot-conversation-mode" style={{fontStyle:'italic',fontWeight:700,background:'transparent',border:0,color:'inherit'}} aria-label={`切换到 ${chatMode?'work':'chat'}`} disabled={!canToggle} onClick={()=>void saveMode()}>{chatMode?'chat':'work'}</button>}<p role="status">{controller.connection==='connected'?'已连接':controller.connection==='reconnecting'?'正在重新连接':'正在连接'}{run?` · ${run.status}`:''}</p>{controller.error&&<p role="alert">{controller.error}</p>}
  <ConversationDisplayBoundary label="会话搜索"><ConversationHistorySearch root={conversationRegion} conversationId={id} messages={displayedMessages} activities={activityValues} runs={state?.runs??{}} onRevealActivity={revealActivity} onLoadActivityHistory={loadActivityHistory} {...(state?.snapshotSeq?{activityHistorySeq:state.snapshotSeq}:{})} {...(state?.seq?{resultSearchSeq:state.seq}:{})} renderedRevision={renderedMessages} revealedMessageId={historySelection} ready={Boolean(state)} onReveal={revealHistoryMessage} {...(state?.historyComplete!==undefined?{historyComplete:state.historyComplete}:{})} {...(state?.nextHistoryCursor?{historyCursor:state.nextHistoryCursor}:{})} onHistoryLoaded={retainHistory}/></ConversationDisplayBoundary>
  {!ordinary&&run&&['starting','running'].includes(run.status)&&<NativeMemberControls key={`native-member-controls:${run.run_id}`} run={run}/>}
  {ordinary&&conversation&&!chatMode&&<div inert={cancelWriter.pending||controller.pendingMessage}><ConversationGoal key={id} id={id} running={run?.status==='running'} runStatus={run?.status} controlRun={state?latestGoalRun(Object.values(state.runs),id):undefined} onResumeAccepted={()=>{void controller.refresh().catch(()=>{});}} onStopCompleted={focusConversationAfterStop} onPendingChange={setGoalPending}/></div>}
@@ -381,10 +424,10 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  {ordinary&&!chatMode&&goalMode&&<p role="status">目标模式</p>}
  <AssistantReplyQuoteAction root={conversationRegion} conversationId={id} disabled={quoteLocked} onAdd={addReplyQuote}/>
  <PromptComposer className={chatMode?'jot-prompt-chat':''} value={draft} onChange={editDraft} onSubmit={send} placeholder={ordinary&&!chatMode&&goalMode?'描述你的目标…':'输入消息…'} ariaLabel={ordinary?'对话消息':'角色消息'}
-  disabled={!state||busy||goalPending||modelMutation.pending||modeWriter.pending||cancelWriter.pending||chatUnavailable} inputDisabled={controller.pendingMessage||modeWriter.pending||cancelWriter.pending} submitDisabled={voiceBusy||uploads.entries.length>0&&uploads.blocked||uploads.entries.some((entry:any)=>entry.status!=='ready')||(ordinary&&goalMode&&!draft.trim()&&!quoteCount&&!controller.pendingMessage)} submitLabel={controller.pendingMessage?'重试原消息':run?(ordinary?'补充当前任务':'加入队列'):'发送'}
+  disabled={!state||busy||goalPending||modelMutation.pending||modeWriter.pending||cancelWriter.pending||chatUnavailable} inputDisabled={controller.pendingMessage||modeWriter.pending||cancelWriter.pending} submitDisabled={!regionsReady||voiceBusy||uploads.entries.length>0&&uploads.blocked||uploads.entries.some((entry:any)=>entry.status!=='ready')||(ordinary&&goalMode&&!draft.trim()&&!quoteCount&&!controller.pendingMessage)} submitLabel={controller.pendingMessage?'重试原消息':run?(ordinary?'补充当前任务':'加入队列'):'发送'}
   selection={chatMode?undefined:conversation?.model} modelOptions={chatMode?[]:models} onSelectionChange={ordinary&&!chatMode&&!modeWriter.pending&&!cancelWriter.pending&&!run&&!controller.pendingMessage&&!uploads.entries.length&&!voiceBusy&&!goalPending&&!modelMutation.pending?changeModel:undefined}
   onAttach={()=>fileInput.current?.click()} attachDisabled={!state||busy||cancelWriter.pending||goalPending||controller.pendingMessage||uploads.blocked||uploads.unresolved||!maxBytes} uploadMenu={<button type="button" role="menuitem" disabled={!state||busy||cancelWriter.pending||goalPending||controller.pendingMessage||uploads.blocked||uploads.unresolved||!maxBytes} onClick={()=>folderInput.current?.click()}>添加文件夹</button>} onDropFiles={selectFiles} onDropError={error=>setError(error instanceof Error?error.message:'无法读取所选文件夹')}
-   hasAttachments={uploads.entries.length>0||quoteCount>0} attachments={<><FileTextReferences references={fileReferences} disabled={quoteLocked} onChange={setFileReferences}/><AssistantReplyQuotes quotes={replyQuotes} disabled={quoteLocked} onChange={setReplyQuotes}/><UploadAttachments uploads={uploads} busy={busy} locked={uploads.blocked||cancelWriter.pending||goalPending||!!controller.pendingMessage||modeWriter.pending} onAction={operation=>void action(operation)} onUpload={uploadEntry} onCancel={cancelUpload} onCancelBatch={cancelUploadBatch}/></>}
+   hasAttachments={uploads.entries.length>0||quoteCount>0} attachments={<><FileTextReferences references={fileReferences} disabled={quoteLocked} onChange={editFileReferences} imageFile={imageFile} resolveImage={imageArtifact}/><AssistantReplyQuotes quotes={replyQuotes} disabled={quoteLocked} onChange={setReplyQuotes}/><UploadAttachments uploads={uploads} busy={busy} locked={uploads.blocked||cancelWriter.pending||goalPending||!!controller.pendingMessage||modeWriter.pending} onAction={operation=>void action(operation)} onUpload={uploadEntry} onCancel={cancelUpload} onCancelBatch={cancelUploadBatch}/></>}
   keepVoiceVisible voiceActive={voiceBusy} voiceControl={<VoiceInput id={id} voice={voice} disabled={!state||busy||goalPending||Boolean(controller.pendingMessage)||modelMutation.pending||modeWriter.pending||cancelWriter.pending||chatUnavailable} onText={appendTranscript} onBusyChange={setVoiceBusy}/>}
   goalMenu={ordinary&&!chatMode?<button type="button" role="menuitemcheckbox" aria-checked={goalMode} onClick={()=>setGoalMode(value=>!value)}>目标模式{goalMode?' ✓':''}</button>:undefined}
   responding={Boolean(run)} stopDisabled={busy||cancelWriter.pending||controller.pendingMessage||run?.status==='cancelling'} onStop={run?()=>cancelTask():undefined}/>
