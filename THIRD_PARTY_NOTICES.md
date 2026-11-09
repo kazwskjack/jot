@@ -120,3 +120,8 @@ PilotDeck revision `783499ffdb2d501bf590b2e035acd027a882df10`.
 These files retain the upstream GNU Affero General Public License v3.0 terms.
 The complete license is retained at
 `packages/session-adapter/runtime-patches/PILOTDECK-AGPL-3.0.txt`.
+
+`web/jot/vendor/pilotdeck-pdf-thumbnail.tsx` also adapts `PdfThumbnail` from
+`ui/src/components/code-editor/view/subcomponents/PdfDocumentPreview.tsx` at
+that same PilotDeck revision and retains the same GNU AGPL v3 terms. Jot adds
+windowed thumbnail navigation, intrinsic rotation and resource cleanup.
