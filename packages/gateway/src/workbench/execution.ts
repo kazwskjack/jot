@@ -34,6 +34,7 @@ import {occurrenceSubtaskRows} from '../persistent-tasks/subtask-state.ts';
 import type { ModelBudgetLedger, ModelBudgetRequest } from './model-budget.ts';
 import type {TaskCollaborationService} from './task-collaboration.ts';
 import {NativeChildReservations} from './native-child-reservations.ts';
+import {NativeChildActivities} from './native-child-activities.ts';
 import {NativeTaskIntents} from './native-task-intents.ts';
 import {NativeMemberOwnerControls,type NativeMemberControlClient} from './native-member-owner-controls.ts';
 import {NativeMemberMessageReceipts} from './native-member-message-receipts.ts';
@@ -105,6 +106,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
   installTaskFinalizations(db);
   const nativeTaskIntents=collaboration?new NativeTaskIntents(db,workbench,tasks,collaboration):undefined;
   const nativeChildren=collaboration?new NativeChildReservations(db,collaboration,nativeTaskIntents,events):undefined;
+  const nativeActivities=nativeChildren&&events?new NativeChildActivities(db,events):undefined;
   const nativeMemberMessages=nativeChildren?new NativeMemberMessageReceipts(db):undefined;
   if(nativeChildren)registerNativeMemberRoutes(app,new NativeMemberOwnerControls(db),nativeMemberClient);
   app.post('/internal/v1/workbench/handoff',async request=>{
@@ -266,6 +268,23 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       return {protocol:1,kind:'native_child_closure_observation',run_id:input.run_id,session_ref:input.session_ref,
         parent_session_ref:saved.parent_session_ref,snapshot_sha256:createHash('sha256').update(native.snapshot_json).digest('hex'),execution_authorized:false};
     });
+  });
+  app.post('/internal/v1/workbench/native-child-activities',{bodyLimit:8*1024*1024},async request=>{
+    authorized(request.headers.authorization);const input=object(request.body);
+    if(!nativeActivities)throw Error('native_activity_unavailable');
+    const owner=accountingOwner(input),runId=String(input.run_id),sessionRef=String(input.session_ref);
+    if(input.action==='source'){
+      fields(input,['run_id','session_ref','action']);return nativeActivities.source(owner,runId,sessionRef);
+    }
+    if(input.action==='append'){
+      fields(input,['run_id','session_ref','action','source_log_sha256','event_sha256','event']);
+      return nativeActivities.append(owner,runId,sessionRef,input);
+    }
+    if(input.action==='complete'){
+      fields(input,['run_id','session_ref','action','source_log_sha256','expected_last_event_seq']);
+      return nativeActivities.complete(owner,runId,sessionRef,input);
+    }
+    throw Error('native_activity_event_invalid');
   });
   app.post('/internal/v1/workbench/native-child-close',async request=>{
     authorized(request.headers.authorization);const input=object(request.body);fields(input,['run_id','session_ref','proof']);

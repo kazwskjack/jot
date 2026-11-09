@@ -1,3 +1,4 @@
+import {replayNativeChildActivities} from './native-child-activities.js';
 import {createNativeOperationObserver} from './native-operation-observer.js';
 import {NativeChildAdmission} from './native-child-admission.js';
 import {NativeRoleProvider} from './native-role-provider.js';
@@ -16,12 +17,13 @@ const validRecoverySource=(source,parent,childId)=>{
 /** Explicit candidate composition. Does not alter default Host configuration.
  * Native Team and Subagent services retain their original runtime ownership.
  */
-export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistence,providerName='jot-native-role',automaticClosures=false,nativeRecovery=false,durableSpawns=false,handoffAdmission,onMemberClosed,reconcileOperations,nativeOperationOrigin}){
+export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistence,providerName='jot-native-role',automaticClosures=false,publicActivities=false,nativeRecovery=false,durableSpawns=false,handoffAdmission,onMemberClosed,reconcileOperations,nativeOperationOrigin}){
  const drainChildren=typeof ctx?.subagents?.drainChildren==='function'?ctx.subagents.drainChildren.bind(ctx.subagents)
   :typeof ctx?.subagents?.drainContinuableChildren==='function'?ctx.subagents.drainContinuableChildren.bind(ctx.subagents):undefined;
  if(!ctx?.agents||typeof ctx?.subagents?.registerProvider!=='function'||!drainChildren||typeof ctx?.agentTeams?.spawnTeammate!=='function'
   ||typeof bridge?.bindingFor!=='function'||typeof bridge?.guardBudget!=='function'||typeof bridge?.attach!=='function'||typeof selectModel!=='function')throw new Error('native_role_host_incompatible');
  if(typeof automaticClosures!=='boolean'||automaticClosures&&(typeof persistence?.flush!=='function'||typeof persistence?.open!=='function'||typeof ctx.sessionProjections?.stateOf!=='function'))throw new Error('native_role_closure_host_incompatible');
+ if(typeof publicActivities!=='boolean'||publicActivities&&!automaticClosures)throw Error('native_role_public_activities_incompatible');
  if(typeof nativeRecovery!=='boolean'||nativeRecovery&&!automaticClosures)throw new Error('native_role_recovery_host_incompatible');
  if(typeof durableSpawns!=='boolean')throw new Error('native_role_host_incompatible');
  if(handoffAdmission!==undefined&&typeof handoffAdmission!=='function')throw new Error('native_role_host_incompatible');
@@ -30,6 +32,17 @@ export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistenc
  if(nativeOperationOrigin!==undefined){if(reconcileOperations!==undefined||typeof bridge.guard!=='function')throw Error('native_role_host_incompatible');createNativeOperationObserver({origin:nativeOperationOrigin,authorize:async()=>{}});}
  const spawnRequests=new Map(),notifying=new Map(),notified=new Set(),spawnScope=new AsyncLocalStorage();
  const prepared=new Map(),pending=new Map(),published=new Map(),closing=new Map(),closed=new Map(),observations=new Set(),closureFailures=new Set(),shutdown=new AbortController();let disposed=false,disposal;
+ const activityReplays=new Map(),activityFailures=new Map(),activityCompleted=new Set();
+ const queueActivityReplay=binding=>{
+  const key=binding.runId;
+  if(!publicActivities||disposed||activityCompleted.has(key)||activityReplays.has(key))return;
+  const operation=replayNativeChildActivities({binding,bridge,persistence,signal:shutdown.signal});
+  activityReplays.set(key,operation);
+  operation.then(()=>{activityCompleted.add(key);activityFailures.delete(key);},()=>{
+   activityFailures.set(key,binding);
+   console.warn('[jot-native-public-activities]',JSON.stringify({runId:key,status:'replay_pending'}));
+  }).finally(()=>activityReplays.delete(key)).catch(()=>{});
+ };
  const admission=new NativeChildAdmission({registry:ctx.agents,bindingFor:agent=>disposed?undefined:bridge.bindingFor(agent),
   authorize:async({parent,child,roleRef,parentBinding,signal})=>{
    const entry=prepared.get(child.id);
@@ -42,6 +55,7 @@ export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistenc
    const proof=source?.proof;
    if(typeof source?.previous_run_id!=='string'||typeof source.role_ref!=='string'||!proof||closing.has(source.previous_run_id))throw new Error('native_role_recovery_source_pending');
    await verifyNativeChildPrefix({agent:child,parentSessionRef:parent.id,persistence,proof,signal});
+   queueActivityReplay(Object.freeze({runId:source.previous_run_id,sessionRef:child.id}));
    const response=await bridge.request('native-child-activate',parentBinding,{child_session_ref:child.id,previous_run_id:source.previous_run_id,previous_log_sha256:proof.log_sha256,previous_seq_exclusive:proof.seq_exclusive},signal);
    if(response?.binding?.sessionRef!==child.id||response.binding.runId===source.previous_run_id)throw new Error('native_role_recovery_invalid');
    return {roleRef:source.role_ref,binding:response.binding};
@@ -93,6 +107,7 @@ export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistenc
  }});
  const removeAdmission=admission.install(ctx),removeProvider=ctx.subagents.registerProvider(provider);
  const notifyClosed=async(parent,accepted,receipt,signal)=>{
+  queueActivityReplay(accepted.binding);
   const key=accepted.binding.runId;
   if(disposed||!onMemberClosed||notified.has(key))return receipt;
   if(notifying.has(key)){await notifying.get(key);return receipt;}
@@ -264,7 +279,12 @@ export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistenc
    }catch{status='unknown';}
    return {request_id:requestId,status,execution_authorized:false};
   },
-  async flushClosures(){await Promise.allSettled([...observations]);await Promise.allSettled([...closing.values()]);await Promise.allSettled([...notifying.values()]);if(closureFailures.size)throw new Error('native_role_closure_pending');},
+  async flushClosures(){
+   await Promise.allSettled([...observations]);await Promise.allSettled([...closing.values()]);await Promise.allSettled([...notifying.values()]);
+   for(const binding of activityFailures.values())queueActivityReplay(binding);
+   await Promise.allSettled([...activityReplays.values()]);
+   if(closureFailures.size)throw new Error('native_role_closure_pending');
+  },
   spawn(parent,intent,request){
    let requestHash,requestKey,parentBinding,snapshot;
    if(durableSpawns){
@@ -345,7 +365,8 @@ export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistenc
      const finalClosures=await Promise.allSettled([...published].flatMap(([parent,ids])=>[...ids].map(id=>closeMember(parent,id))));
      if(finalClosures.some(result=>result.status==='rejected'))throw new Error('native_role_closure_failed');
     }
-    await Promise.allSettled([...observations]);removeObservation();
+    await Promise.allSettled([...observations]);await Promise.allSettled([...activityReplays.values()]);removeObservation();
+    activityFailures.clear();activityCompleted.clear();
     removeProvider();removeAdmission();prepared.clear();published.clear();closed.clear();notified.clear();admission.accepted.clear();
    })();
   }

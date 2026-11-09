@@ -102,6 +102,7 @@
     "ordinary-steering-observation.js",
     "native-child-admission.js",
     "native-child-closure.js",
+    "native-child-activities.js",
     "native-invariant-replay.js",
     "native-role-host.js",
     "native-handoff-barrier.js",

@@ -165,13 +165,38 @@ function structuredToolFailure(data: Record<string, unknown>, resultBlock: Recor
   })
 }
 
-function toolActivity(data: Record<string, unknown>, context: ProjectionContext, completed: boolean): JotProjection | null {
+export function sessionToolCallId(data: Record<string, unknown>): unknown {
   const message = record(data.message)
   const source = record(message?.source)
   const resultBlock = Array.isArray(message?.content)
     ? message.content.map(record).find(block => block?.type === 'tool-result') : undefined
-  const rawCallId = data.callId ?? (source?.kind === 'tool' ? source.callId : undefined)
-    ?? resultBlock?.toolCallId ?? data.id
+  return data.callId ?? (source?.kind === 'tool' ? source.callId : undefined)
+    ?? resultBlock?.toolCallId ?? message?.toolCallId ?? data.id
+}
+
+/** Rehydrate only the prior public call presentation after a replay restart. */
+export function projectNativeToolEvent(event: Record<string, unknown>, context: ProjectionContext,
+  priorCall?: Record<string, unknown>): JotProjection | null {
+  const data = record(event.data)
+  if (!data || !['tool/call', 'tool/result'].includes(String(event.type))) return null
+  const callId = safeId(sessionToolCallId(data), '')
+  const detail = record(priorCall?.detail)
+  const knownTools = new Map<string, ToolPresentation>()
+  if (callId && detail && typeof priorCall?.started_at === 'string') {
+    const tool = presentation(detail.tool_name)
+    if (tool.kind !== priorCall.kind) throw Error('native_activity_call_source_invalid')
+    tool.publicDetail = { ...detail }
+    tool.startedAt = priorCall.started_at
+    knownTools.set(callId, tool)
+  }
+  return toolActivity(data, { ...context, knownTools }, event.type === 'tool/result')
+}
+
+function toolActivity(data: Record<string, unknown>, context: ProjectionContext, completed: boolean): JotProjection | null {
+  const message = record(data.message)
+  const resultBlock = Array.isArray(message?.content)
+    ? message.content.map(record).find(block => block?.type === 'tool-result') : undefined
+  const rawCallId = sessionToolCallId(data)
   const callId = safeId(rawCallId, '')
   if (!callId) return null
   const known = context.knownTools?.get(callId)

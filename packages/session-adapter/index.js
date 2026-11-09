@@ -1199,7 +1199,7 @@ export function apply(ctx, config = {}) {
     const handoffReturn=nativeHandoffLifecycle?.handoffReturn??config.handoffReturn
     const handoffRecovery=nativeHandoffLifecycle?.handoffRecovery??config.handoffRecovery
     const nativeRoleHost=config.nativeRoles===true?createNativeRoleHost({ctx,bridge:workbenchBridge,selectModel:budgetModelSelector,
-      sessions:ctx.sessions,persistence:ctx.sessionPersistence,automaticClosures:true,durableSpawns:true,nativeRecovery:config.nativeRoleRecovery===true,reconcileOperations:config.reconcileOperations,nativeOperationOrigin:config.nativeOperationOrigin,handoffAdmission,onMemberClosed:handoffReturn}):undefined
+      sessions:ctx.sessions,persistence:ctx.sessionPersistence,automaticClosures:true,publicActivities:true,durableSpawns:true,nativeRecovery:config.nativeRoleRecovery===true,reconcileOperations:config.reconcileOperations,nativeOperationOrigin:config.nativeOperationOrigin,handoffAdmission,onMemberClosed:handoffReturn}):undefined
     let nativeTaskScheduler
     if(nativeRoleHost){
       nativeTaskScheduler=config.nativeDeferredHandoff===true?createNativeTaskScheduler({ctx,bridge:workbenchBridge,host:nativeRoleHost}):undefined
