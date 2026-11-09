@@ -35,6 +35,16 @@ export function readGitCheckoutIntentSource(row:GitBranchIntentRecord,validate:(
     ||!source.configuration.worktree_enabled&&(source.configuration.worktree.sha256!==null||source.configuration.worktree.size!==0)
     ||source.log_policy.configuration==='false'&&source.log_policy.enabled
     ||['true','always'].includes(source.log_policy.configuration)&&!source.log_policy.enabled)throw Error();
+   if(source.creation){
+    const required=source.head_log.sha256===null&&source.log_policy.enabled;
+    if((source.creation.state==='not_required')===required)throw Error();
+    if(source.creation.state==='observed'){
+     if(!source.layout)throw Error();
+     const before=source.layout.parents.find(parent=>parent.scope==='git'&&parent.path==='logs')?.before??null;
+     if(source.creation.directory.created!==(before===null)||before&&(source.creation.directory.mode!==before.mode
+      ||source.creation.directory.uid!==before.uid||source.creation.directory.gid!==before.gid))throw Error();
+    }
+   }
    if(source.chains){
     const validateChain=(chain:NonNullable<typeof source.chains>['head'],start:string,expectedOid:string|null)=>{
      const seen=new Set<string>();let expected=start;

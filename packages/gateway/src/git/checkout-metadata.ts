@@ -54,14 +54,18 @@ export function checkoutMetadataPublication(witness:GitCheckoutReviewWitness):Gi
   if(!witness.head.detached&&createHash('sha256').update(oldHead).digest('hex')!==source.head_file.sha256)return{state:'not_confirmed',reason:'reference_policy_required'};
  }
  if(!log||log.state==='not_confirmed')return{state:'not_confirmed',reason:'log_after_required'};
- type File=Extract<GitCheckoutMetadataPublication,{state:'planned'}>['files'][number];
- const permissions=(file:File['before']):File['permissions']=>file.physical
-  ?{state:'preserve',mode:file.physical.mode,uid:file.physical.uid,gid:file.physical.gid}:{state:'creation_policy_required'};
+ type Publication=Extract<GitCheckoutMetadataPublication,{state:'planned'}>;
+ type File=Publication['files'][number];
+ const permissions=(file:File['before']):File['permissions']=>{
+  if(file.physical)return{state:'preserve',mode:file.physical.mode,uid:file.physical.uid,gid:file.physical.gid};
+  if(source.creation?.state==='observed')return{state:'create',...source.creation.file};
+  return{state:'creation_policy_required'};
+ };
  const files:File[]=[];
  if(log.state==='appended')files.push({scope:'git',path:'logs/HEAD',operation:'append',before:source.head_log,
   after:{sha256:log.sha256,size:log.size},permissions:permissions(source.head_log)});
  files.push({scope:'git',path:'HEAD',operation:'replace',before:source.head_file,after:{...plan.head_file},permissions:permissions(source.head_file)});
- const locks:Extract<GitCheckoutMetadataPublication,{state:'planned'}>['locks']=[
+ const locks:Publication['locks']=[
   {scope:'git',path:'index.lock'},{scope:'common',path:'packed-refs.lock'},{scope:'common',path:'config.lock'},
   ...(source.configuration.worktree_enabled?[{scope:'git' as const,path:'config.worktree.lock'}]:[]),
   ...(source.source_ref?[{scope:'common' as const,path:source.source_ref.ref+'.lock'}]:[]),
@@ -70,5 +74,10 @@ export function checkoutMetadataPublication(witness:GitCheckoutReviewWitness):Gi
   ...files.map(file=>({scope:file.scope,path:file.path+'.lock'}))
  ];
  const unique=new Map(locks.map(lock=>[lock.scope+'\0'+lock.path,lock]));
- return{state:'planned',protocol:1,execution_authorized:false,files,locks:[...unique.values()]};
+ let directories:Publication['directories'];
+ if(source.creation?.state==='observed'){
+  const directory=source.creation.directory;
+  directories=directory.created?[{scope:'git',path:'logs',mode:directory.mode,uid:directory.uid,gid:directory.gid}]:[];
+ }
+ return{state:'planned',protocol:1,execution_authorized:false,files,locks:[...unique.values()],...(directories?{directories}:{})};
 }

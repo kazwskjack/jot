@@ -78,8 +78,9 @@ export default function GitCheckoutReview({project,snapshotId,targetRef,onClose,
    </section>:<p role="status">{logAfter?.state==='not_confirmed'?{reference_policy_required:'引用策略仍待补齐，完整日志预期尚未确认。',identity_unconfigured:'需要配置操作者身份以固定完整日志预期。',log_format_required:'原日志末尾格式需要处理策略，完整日志预期尚未确认。',output_limit:'追加后的日志超过当前文件上限，完整日志预期尚未确认。'}[logAfter.reason]:'此历史审核尚无完整日志文件预期。'}</p>}
    {publication?.state==='planned'?<section aria-label="元数据写入清单"><h4>元数据写入清单</h4>
     <ul>{publication.files.map(file=><li key={file.scope+'\0'+file.path}><code>{file.path}</code> · {file.operation==='append'?'追加':'替换'} · {file.after.size} 字节 · SHA-256 <code>{file.after.sha256}</code>
-     {file.permissions.state==='preserve'?<p>保留模式 <code>{file.permissions.mode.toString(8).padStart(4,'0')}</code> · UID {file.permissions.uid} · GID {file.permissions.gid}</p>:<p role="status">新建文件的权限与所属策略仍待补齐。</p>}
+     {file.permissions.state!=='creation_policy_required'?<p>{file.permissions.state==='create'?'新建模式':'保留模式'} <code>{file.permissions.mode.toString(8).padStart(4,'0')}</code> · UID {file.permissions.uid} · GID {file.permissions.gid}</p>:<p role="status">新建文件的权限与所属策略仍待补齐。</p>}
     </li>)}</ul>
+    {!!publication.directories?.length&&<><h5>新建元数据目录</h5><ul>{publication.directories.map(directory=><li key={directory.path}><code>{directory.path}</code> · 模式 <code>{directory.mode.toString(8).padStart(4,'0')}</code> · UID {directory.uid} · GID {directory.gid}</li>)}</ul></>}
     <h5>所需锁</h5><ul>{publication.locks.map(lock=><li key={lock.scope+'\0'+lock.path}>{lock.scope==='git'?'当前 Git 目录':'公共 Git 目录'} · <code>{lock.path}</code></li>)}</ul>
     <p>完整工作区发布、锁获取与恢复继续接入原生执行流程。</p>
    </section>:<p role="status">{publication?.state==='not_confirmed'?{layout_required:'物理来源凭证尚未完整，元数据写入清单待确认。',reference_policy_required:'引用或 HEAD 来源策略仍待补齐，元数据写入清单待确认。',log_after_required:'完整日志预期尚未确认，元数据写入清单待确认。'}[publication.reason]:'此历史审核尚无元数据写入清单。'}</p>}

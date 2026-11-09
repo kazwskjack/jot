@@ -36,8 +36,9 @@ export type GitCheckoutPhysical=GitReinitializationDirectory&{stat_sha256:string
 export type GitCheckoutMetadataFile=GitBranchLogFile&{physical?:GitCheckoutPhysical|null};
 export type GitCheckoutMetadataLayout={root:GitCheckoutPhysical;git:GitCheckoutPhysical;common:GitCheckoutPhysical;parents:Array<{scope:'git'|'common';path:string;before:GitCheckoutPhysical|null}>};
 export type GitCheckoutReferenceChain={nodes:Array<{scope:'git'|'common';path:string;file:GitCheckoutMetadataFile;symbolic_target:string|null}>;oid:string|null};
+export type GitCheckoutCreation={state:'not_required'}|{state:'not_confirmed';reason:'platform_policy_required'|'owner_policy_required'|'native_policy_required'}|{state:'observed';file:{mode:number;uid:string;gid:string};directory:{created:boolean;mode:number;uid:string;gid:string};umask:number;policy_sha256:string};
 export type GitCheckoutReferenceSource={
- chains?:{head:GitCheckoutReferenceChain;target:GitCheckoutReferenceChain}|null;layout?:GitCheckoutMetadataLayout;protocol:1;source_metadata_sha256:string;head_file:GitCheckoutMetadataFile;head_log:GitCheckoutMetadataFile;
+ creation?:GitCheckoutCreation;chains?:{head:GitCheckoutReferenceChain;target:GitCheckoutReferenceChain}|null;layout?:GitCheckoutMetadataLayout;protocol:1;source_metadata_sha256:string;head_file:GitCheckoutMetadataFile;head_log:GitCheckoutMetadataFile;
  source_ref:{ref:string;file:GitCheckoutMetadataFile}|null;target_ref:{ref:string;file:GitCheckoutMetadataFile};
  target_log:GitCheckoutMetadataFile;packed_refs:GitCheckoutMetadataFile;
  configuration:{common:GitCheckoutMetadataFile;worktree:GitCheckoutMetadataFile;worktree_enabled:boolean};
@@ -49,8 +50,9 @@ export type GitCheckoutReviewPrepare={request_id:string;action:'checkout-branch'
 export type GitCheckoutReviewControl={request_id:string;expected_version:number;action:'cancel';review_sha256:string};
 export type GitCheckoutMetadataPublication={state:'not_confirmed';reason:'layout_required'|'reference_policy_required'|'log_after_required'}|{
  state:'planned';protocol:1;execution_authorized:false;
+ directories?:Array<{scope:'git';path:'logs';mode:number;uid:string;gid:string}>;
  files:Array<{scope:'git';path:'HEAD'|'logs/HEAD';operation:'replace'|'append';before:GitCheckoutMetadataFile;after:{sha256:string;size:number};
-  permissions:{state:'preserve';mode:number;uid:string;gid:string}|{state:'creation_policy_required'}}>;
+  permissions:{state:'preserve'|'create';mode:number;uid:string;gid:string}|{state:'creation_policy_required'}}>;
  locks:Array<{scope:'git'|'common';path:string}>;
 };
 export type GitCheckoutLogAfter={state:'appended';sha256:string;size:number}|{state:'retained';sha256:string|null;size:number}|{state:'not_confirmed';reason:'reference_policy_required'|'identity_unconfigured'|'log_format_required'|'output_limit'};

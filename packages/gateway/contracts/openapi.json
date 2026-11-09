@@ -41100,6 +41100,9 @@
                 "type": "null"
               }
             ]
+          },
+          "creation": {
+            "$ref": "#/components/schemas/GitCheckoutCreation"
           }
         },
         "required": [
@@ -41553,7 +41556,10 @@
                           "additionalProperties": false,
                           "properties": {
                             "state": {
-                              "const": "preserve"
+                              "enum": [
+                                "preserve",
+                                "create"
+                              ]
                             },
                             "mode": {
                               "type": "integer",
@@ -41624,6 +41630,42 @@
                   "required": [
                     "scope",
                     "path"
+                  ]
+                }
+              },
+              "directories": {
+                "type": "array",
+                "maxItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "scope": {
+                      "const": "git"
+                    },
+                    "path": {
+                      "const": "logs"
+                    },
+                    "mode": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 4095
+                    },
+                    "uid": {
+                      "type": "string",
+                      "pattern": "^[0-9]+$"
+                    },
+                    "gid": {
+                      "type": "string",
+                      "pattern": "^[0-9]+$"
+                    }
+                  },
+                  "required": [
+                    "scope",
+                    "path",
+                    "mode",
+                    "uid",
+                    "gid"
                   ]
                 }
               }
@@ -41723,6 +41765,119 @@
         "required": [
           "nodes",
           "oid"
+        ]
+      },
+      "GitCheckoutCreation": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "state": {
+                "const": "not_required"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "state": {
+                "const": "not_confirmed"
+              },
+              "reason": {
+                "enum": [
+                  "platform_policy_required",
+                  "owner_policy_required",
+                  "native_policy_required"
+                ]
+              }
+            },
+            "required": [
+              "state",
+              "reason"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "state": {
+                "const": "observed"
+              },
+              "file": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "mode": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 4095
+                  },
+                  "uid": {
+                    "type": "string",
+                    "pattern": "^[0-9]+$"
+                  },
+                  "gid": {
+                    "type": "string",
+                    "pattern": "^[0-9]+$"
+                  }
+                },
+                "required": [
+                  "mode",
+                  "uid",
+                  "gid"
+                ]
+              },
+              "directory": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "created": {
+                    "type": "boolean"
+                  },
+                  "mode": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 4095
+                  },
+                  "uid": {
+                    "type": "string",
+                    "pattern": "^[0-9]+$"
+                  },
+                  "gid": {
+                    "type": "string",
+                    "pattern": "^[0-9]+$"
+                  }
+                },
+                "required": [
+                  "created",
+                  "mode",
+                  "uid",
+                  "gid"
+                ]
+              },
+              "umask": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 511
+              },
+              "policy_sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            },
+            "required": [
+              "state",
+              "file",
+              "directory",
+              "umask",
+              "policy_sha256"
+            ]
+          }
         ]
       },
       "GitCheckoutReviewPrepare": {

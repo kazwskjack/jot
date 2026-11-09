@@ -1,3 +1,4 @@
+import {readCheckoutCreation} from './checkout-creation.ts';
 import {checkoutLogMetadata,checkoutReferencePlan,checkoutReflogEntry} from './checkout-metadata.ts';
 import {initializationInternalIgnore,initializationSnapshotId,normalizeGitInitializationReview} from './initialization-records.ts';
 import type {GitInitializationWitness,GitInitializationFile,GitReinitializationLayout} from '../../contracts/types.ts';
@@ -42,7 +43,7 @@ const identity=(s:Awaited<ReturnType<typeof lstat>>)=>[String(s.dev),String(s.in
 const witness=(s:Awaited<ReturnType<typeof lstat>>)=>[identity(s),String(s.size),String(s.mtimeNs),String(s.ctimeNs),String(s.nlink)].join(':');
 const worktreeStamp=(s:Awaited<ReturnType<typeof lstat>>)=>hash([witness(s),String(s.mode),String(s.uid),String(s.gid)].join(':'));
 const safe=(path:string)=>{if(path.startsWith('-'))throw Error('git_path_unavailable');return workspaceRelativePath(path);};
-export type GitReadContext={directory:string;metadata:string;index:string|null;remotes:GitRemote[];branchLogPolicy?:Pick<GitBranchLogWitness,'configuration'|'enabled'>;worktreeConfigEnabled?:boolean;dispose():Promise<void>};
+export type GitReadContext={directory:string;metadata:string;index:string|null;remotes:GitRemote[];branchLogPolicy?:Pick<GitBranchLogWitness,'configuration'|'enabled'>;branchSharedRepository?:{value:string|null};worktreeConfigEnabled?:boolean;dispose():Promise<void>};
 type ReadContext=GitReadContext;
 type WorktreeAncestor={path:string|null;kind:'directory'|'missing'|'file'|'symlink'|'other';identity_sha256:string|null;stat_sha256:string|null};
 
@@ -118,6 +119,7 @@ export class GitRepositoryInspection{
     const configured=await this.run(context,['config','--file',path,'--no-includes','--null','--list'],signal);
     for(const item of text(configured.bytes).split('\0')){
      const at=item.indexOf('\n'),key=at<0?item:item.slice(0,at);
+     if(branchLogs&&key==='core.sharedrepository')context.branchSharedRepository={value:at<0?null:item.slice(at+1)};
      if(branchLogs&&['core.logallrefupdates','core.bare'].includes(key))branchSources.set(key,path);
      if(at<0){
       if(key==='extensions.refstorage')throw Error('git_reference_backend_unsupported');
@@ -854,7 +856,8 @@ export class GitRepositoryInspection{
   }finally{await guard();}
  }
  /** Fixed before-state metadata for the original checkout review and later publication. */
- protected async checkoutReferenceSource(context:ReadContext,snapshot:GitSnapshot,targetRef:string,targetOid:string,signal?:AbortSignal):Promise<GitCheckoutReferenceSource>{
+ protected async checkoutReferenceSource(context:ReadContext,snapshot:GitSnapshot,target:GitBranchInventory['branches'][number],signal?:AbortSignal):Promise<GitCheckoutReferenceSource>{
+  const targetRef=target.ref,targetOid=target.oid;
   const directory=(path:string)=>this.checkoutDirectoryPhysical(path,signal);
   const roots={root:await directory(this.root),git:await directory(this.gitDirectory),common:await directory(this.commonDirectory)};
   if(!roots.root||!roots.git||!roots.common)throw Error('git_snapshot_changed');
@@ -923,14 +926,16 @@ export class GitRepositoryInspection{
     worktree_enabled:context.worktreeConfigEnabled===true},
    log_policy:{...context.branchLogPolicy}
   };
+  const layout:GitCheckoutMetadataLayout={root:roots.root,git:roots.git,common:roots.common,parents:[...parents.keys()].sort().map(key=>parents.get(key)!)};
+  const creation=await readCheckoutCreation({executable:this.executable!,root:this.root,context,source:{...source,layout},
+   oid:target.checkout_oid??null,objectFormat:target.checkout_oid?.length===64?'sha256':'sha1',sourceObjects:join(this.commonDirectory,'objects'),limits:this.limits,...(signal?{signal}:{})});
   for(const key of parents.keys()){
    const entry=parents.get(key)!,root=entry.scope==='git'?this.gitDirectory:this.commonDirectory;
    if(canonicalJson(await directory(join(root,entry.path)))!==canonicalJson(entry.before))throw Error('git_snapshot_changed');
   }
   if(canonicalJson(await directory(this.root))!==canonicalJson(roots.root)||canonicalJson(await directory(this.gitDirectory))!==canonicalJson(roots.git)
    ||canonicalJson(await directory(this.commonDirectory))!==canonicalJson(roots.common))throw Error('git_snapshot_changed');
-  const layout:GitCheckoutMetadataLayout={root:roots.root,git:roots.git,common:roots.common,parents:[...parents.keys()].sort().map(key=>parents.get(key)!)};
-  signal?.throwIfAborted();return{...source,layout};
+  signal?.throwIfAborted();return{...source,layout,creation};
  }
  async branches(snapshotId:string,signal?:AbortSignal,targetRef?:string):Promise<Omit<GitBranchInventory,'project_id'>>{
   if(typeof snapshotId!=='string'||!/^[a-f0-9]{64}$/.test(snapshotId)||targetRef!==undefined&&(!validGitReference(targetRef)||!/^refs\/(?:heads|remotes)\//.test(targetRef)))throw Error('git_branches_invalid');
@@ -983,7 +988,7 @@ export class GitRepositoryInspection{
    if(targetRef!==undefined){
     const target=branches.find(branch=>branch.ref===targetRef);if(!target)throw Error('git_checkout_target_unavailable');
     preview=await this.checkoutPreview(context,snapshot,target,format,signal);
-    preview.reference_source=await this.checkoutReferenceSource(context,snapshot,targetRef,target.oid,signal);
+    preview.reference_source=await this.checkoutReferenceSource(context,snapshot,target,signal);
    }
    if((await this.inspectContext(context,signal)).snapshot_id!==snapshotId)throw Error('git_snapshot_changed');
    if((await this.anchors(signal)).metadata!==context.metadata)throw Error('git_snapshot_changed');

@@ -26,6 +26,12 @@ export default function GitCheckoutEvidence({preview,target,onRetry}:{preview:Gi
     {reference.chains?<section aria-label="引用链凭证"><h5>引用链凭证</h5>
      {[{name:'原 HEAD',chain:reference.chains.head},{name:'切换目标',chain:reference.chains.target}].map(({name,chain})=><div key={name}><h6>{name}</h6><ol>{chain.nodes.map(node=><li key={node.scope+'\0'+node.path}><code>{node.path}</code> → <code>{node.symbolic_target??chain.oid??'未出生分支'}</code><span> · {node.file.sha256===null?'无松散引用文件':'文件 SHA-256 '}</span>{node.file.sha256&&<code>{node.file.sha256}</code>}</li>)}</ol></div>)}
     </section>:<p role="status">{reference.chains===null?'引用链尚未完整确认，保留待补策略状态。':'此历史预览尚无引用链凭证。'}</p>}
+    {reference.creation?.state==='observed'&&<section aria-label="新建日志权限"><h5>新建日志权限</h5>
+     <p>文件模式 <code>{reference.creation.file.mode.toString(8).padStart(4,'0')}</code> · UID {reference.creation.file.uid} · GID {reference.creation.file.gid}</p>
+     <p>{reference.creation.directory.created?'新建 logs 目录':'保留 logs 目录'} · 模式 <code>{reference.creation.directory.mode.toString(8).padStart(4,'0')}</code> · UID {reference.creation.directory.uid} · GID {reference.creation.directory.gid}</p>
+     <p>umask <code>{reference.creation.umask.toString(8).padStart(3,'0')}</code> · 权限策略 SHA-256 <code>{reference.creation.policy_sha256}</code></p>
+    </section>}
+    {reference.creation?.state==='not_confirmed'&&<p role="status">{{platform_policy_required:'当前平台的新建权限策略仍待补齐。',owner_policy_required:'所属组或目录权限策略尚未确认。',native_policy_required:'Git 原生权限结果尚未确认。'}[reference.creation.reason]}</p>}
     <p>日志配置 {{default:'默认',true:'启用',false:'关闭',always:'全部启用'}[reference.log_policy.configuration]} · 有效策略{reference.log_policy.enabled?'启用':'关闭'}。工作区独立配置{reference.configuration.worktree_enabled?'启用':'关闭'}。</p>
     <p>松散引用文件缺失时，逻辑引用仍可能来自打包存储。日志及跟踪写入方案仍需完整审核。</p>
    </section>:<p role="status">此历史预览尚无引用与配置原状态凭证。</p>}
