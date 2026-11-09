@@ -1,3 +1,4 @@
+import {checkoutLogMetadata,checkoutReferencePlan} from './checkout-metadata.ts';
 import {branchReviewMetadata} from './branch-metadata.ts';
 import type {GitCheckoutReviewWitness,GitCreateBranchWitness} from '../../contracts/types.ts';
 import {gitCommitOperatorPolicy,commitReviewMetadata,type GitCommitOperatorPolicy} from './commit-metadata.ts';
@@ -104,8 +105,12 @@ export class GitWorkbench{
   if(!target?.checkout_oid||!value.checkout_preview)throw Error('git_checkout_target_unavailable');
   if(!value.checkout_preview.reference_source)throw Error('git_checkout_evidence_invalid');
   this.projects.assertOwned(project,owner);signal?.throwIfAborted();
-  return{protocol:1,kind:'checkout_branch',project_id:project,snapshot_id:snapshotId,repository_sha256:value.repository_sha256,
+  const witness:GitCheckoutReviewWitness={protocol:1,kind:'checkout_branch',project_id:project,snapshot_id:snapshotId,repository_sha256:value.repository_sha256,
    head:value.head,object_format:value.object_format,target:{...target,checkout_oid:target.checkout_oid},preview:value.checkout_preview,execution_authorized:false};
+  witness.reference_plan=checkoutReferencePlan(witness);
+  const policy=this.commitPolicies.get(owner+'\0'+project);
+  if(policy&&witness.reference_plan.state==='planned'&&witness.reference_plan.head_log.append)witness.log_metadata=checkoutLogMetadata(policy,witness);
+  return witness;
  }
  async branches(owner:string,project:string,snapshotId:string,signal?:AbortSignal,targetRef?:string){const result=await this.repository(owner,project).branches(snapshotId,signal,targetRef);this.projects.assertOwned(project,owner);signal?.throwIfAborted();return {project_id:project,...result};}
  async diff(owner:string,project:string,input:{snapshot_id:string;path:string;stage:'working'|'staged'},signal?:AbortSignal){const result=await this.repository(owner,project).diff(input,signal);this.projects.assertOwned(project,owner);return{project_id:project,...result};}

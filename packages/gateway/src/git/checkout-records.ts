@@ -1,3 +1,4 @@
+import {checkoutLogMetadata,checkoutReferencePlan} from './checkout-metadata.ts';
 import {createHash} from 'node:crypto';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {validGitReference} from './references.ts';
@@ -36,6 +37,11 @@ export function readGitCheckoutIntentSource(row:GitBranchIntentRecord,validate:(
     ||['true','always'].includes(source.log_policy.configuration)&&!source.log_policy.enabled)throw Error();
    for(const fact of [source.head_file,source.head_log,source.target_ref.file,source.target_log,source.packed_refs,
     source.configuration.common,source.configuration.worktree,...(source.source_ref?[source.source_ref.file]:[])])if(fact.sha256===null&&fact.size!==0)throw Error();
+  }
+  if(witness.reference_plan&&canonicalJson(witness.reference_plan)!==canonicalJson(checkoutReferencePlan(witness)))throw Error();
+  if(witness.log_metadata){
+   const metadata=witness.log_metadata,actor={name:metadata.committer.name,email:metadata.committer.email};
+   if(!witness.reference_plan||canonicalJson(checkoutLogMetadata({author:actor,committer:actor},witness,metadata.committer.timestamp))!==canonicalJson(metadata))throw Error();
   }
   if(checkoutDigest({action:input.action,target_ref:input.target_ref,witness})!==row.review_sha256)throw Error();
   return{input,witness};
