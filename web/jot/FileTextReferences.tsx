@@ -6,7 +6,7 @@ import {CONTENT_REFERENCE_PROMPT_MARKER,type TextContentReference,type ImageRegi
 import type {Artifact,ActivityToolResultFile} from './types';
 import './assistant-reply-quote.css';
 
-export type FileTextReference={owner:string;conversationId:string;runId:string;activityId:string;resultSha:string;file:Pick<ActivityToolResultFile,'path'|'version'|'sha256'|'size'>;reference:TextContentReference};
+export type FileTextReference={rotation?:number;owner:string;conversationId:string;runId:string;activityId:string;resultSha:string;file:Pick<ActivityToolResultFile,'path'|'version'|'sha256'|'size'>;reference:TextContentReference};
 export type FileRegionDraft=Omit<FileTextReference,'reference'>&{reference:ImageRegionContentReference;imageBytes:number;rotation:number};
 export type FileRegionReference=FileRegionDraft&{uploadEntryId:string};
 export type FileReference=FileTextReference|FileRegionReference;
@@ -43,12 +43,13 @@ function ReferenceDetails({value,file,ready}:{value:FileReference;file?:File;rea
   </>:<pre>{value.reference.selectedText}</pre>}
  </details>;
 }
-export function FileTextReferences({references,disabled,onChange,imageFile,resolveImage}:{references:FileReference[];disabled:boolean;onChange:(references:FileReference[])=>void;imageFile:(entryId:string)=>File|undefined;resolveImage:(entryId:string)=>Artifact|undefined}){
+export function FileTextReferences({references,disabled,onChange,imageFile,resolveImage,onOpen}:{references:FileReference[];disabled:boolean;onChange:(references:FileReference[])=>void;imageFile:(entryId:string)=>File|undefined;resolveImage:(entryId:string)=>Artifact|undefined;onOpen:(value:FileReference)=>void}){
  if(!references.length)return null;
  return <section className="jot-assistant-quotes" aria-label="待发送的原文件引用">
   <div>原文件引用 · {references.length} <button type="button" disabled={disabled} onClick={()=>onChange([])}>清空原文件引用</button></div>
   {references.map(value=><div key={value.reference.id}>
    <ReferenceDetails value={value} {...(isFileRegion(value)&&imageFile(value.uploadEntryId)?{file:imageFile(value.uploadEntryId)!}:{})} ready={!isFileRegion(value)||!!resolveRegionArtifact(value,resolveImage)}/>
+   <button type="button" onClick={()=>onOpen(value)}>打开原文件并定位引用</button>
    <button type="button" disabled={disabled} onClick={()=>onChange(references.filter(item=>item.reference.id!==value.reference.id))}>移除此原文件引用</button>
   </div>)}
   <small>文字引用随草稿保存。区域截图及其引用保存后可通过上传恢复流程读取，发送确认后清空。</small>

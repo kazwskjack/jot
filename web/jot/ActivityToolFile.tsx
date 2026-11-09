@@ -3,11 +3,14 @@ import ActivityToolFileImage,{listedFileImageType} from './ActivityToolFileImage
 import ActivityToolFileBytes from './ActivityToolFileBytes';
 import React,{useEffect,useRef,useState,lazy,Suspense} from 'react';
 import {ApiError,request,taskDraftScope} from './client';
-import type {ActivityToolFilePage,ActivityToolResultFile} from './types';
+import type {ActivityToolFilePage} from './types';
+
+import type {ListedFilePreviewSource} from './activity-file-preview-client';
+import type {PdfReferenceFocus} from './pdf-file-view-state';
 
 const ActivityToolFilePdf=lazy(()=>import('./ActivityToolFilePdf'));
 const sha=/^[a-f0-9]{64}$/;
-function ActivityToolFileText({conversationId,runId,activityId,resultSha,file}:{conversationId:string;runId:string;activityId:string;resultSha:string;file:ActivityToolResultFile}){
+function ActivityToolFileText({conversationId,runId,activityId,resultSha,file}:ListedFilePreviewSource){
  const owner=taskDraftScope(),identity=JSON.stringify([owner,conversationId,runId,activityId,resultSha,file]);
  const region=useRef<HTMLElement>(null);
  const [cursor,setCursor]=useState<{identity:string;offset:number;previous:number[];textSha?:string}>({identity,offset:0,previous:[]});
@@ -54,7 +57,7 @@ function ActivityToolFileText({conversationId,runId,activityId,resultSha,file}:{
  </section>;
 }
 
-export default function ActivityToolFile(props:React.ComponentProps<typeof ActivityToolFileText>){
+export default function ActivityToolFile(props:ListedFilePreviewSource&{focus?:PdfReferenceFocus}){
  const identity=JSON.stringify([taskDraftScope(),props]),[textView,setTextView]=useState<string>();
  const pdf=props.file.path.toLowerCase().endsWith('.pdf');
  if(!pdf&&!listedFileImageType(props.file.path))return <ActivityToolFileText {...props}/>;

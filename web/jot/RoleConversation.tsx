@@ -1,4 +1,5 @@
 import {FileTextReferenceContext,FileTextReferences,fileReferenceMessage,isFileRegion,resolveRegionArtifact,type FileReference,type FileRegionDraft,type FileTextReference} from './FileTextReferences';
+import FileReferenceSource from './FileReferenceSource';
 import type {TaskSourceSelection} from '../workbench/types';
 import {useMutationReceipt} from '../workbench/useMutationReceipt';
 import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react';
@@ -150,6 +151,17 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  const [fileReferenceState,setFileReferenceState]=useState<{owner:string;conversationId:string;values:FileReference[]}>({owner:fileOwner,conversationId:id,values:[]});
  const fileReferences=fileReferenceState.owner===fileOwner&&fileReferenceState.conversationId===id?fileReferenceState.values:[];
  const setFileReferences=(values:FileReference[])=>{if(taskDraftScope()===fileOwner)setFileReferenceState({owner:fileOwner,conversationId:id,values});};
+ const [referenceSource,setReferenceSource]=useState<{owner:string;conversationId:string;value:FileReference;requestId:string}>();
+ const referenceReturnFocus=useRef<HTMLElement|null>(null);
+ const openReferenceSource=(value:FileReference)=>{
+  if(value.owner!==fileOwner||taskDraftScope()!==fileOwner||value.conversationId!==id){setError('原文件引用所属账户或会话已变化');return;}
+  referenceReturnFocus.current=document.activeElement instanceof HTMLElement?document.activeElement:null;
+  setReferenceSource({owner:fileOwner,conversationId:id,value:structuredClone(value),requestId:crypto.randomUUID()});
+ };
+ const closeReferenceSource=()=>{
+  setReferenceSource(undefined);
+  if(taskDraftScope()===fileOwner&&referenceReturnFocus.current?.isConnected)referenceReturnFocus.current.focus();
+ };
  const quoteCount=replyQuotes.length+fileReferences.length;
  const [olderMessages,setOlderMessages]=useState<Message[]>([]),[historySelection,setHistorySelection]=useState('');
  const [historicalActivities,setHistoricalActivities]=useState<Activity[]>([]),[activityHistoryRequest,setActivityHistoryRequest]=useState(0);
@@ -479,6 +491,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  {ordinary&&modeCaps&&!modes.chatReady&&<p role="status">{modeCapabilityError||(modes.aware?'Chat 暂不可用':'当前后端未声明 Chat 模式')}</p>}
  {cancelWriter.pending&&<p role="status">停止结果尚未确认；请保留当前页面。<button type="button" disabled={busy} onClick={()=>cancelTask(true)}>重试原停止请求</button></p>}
  {modeWriter.pending&&<p role="status">模式设置结果尚未确认。<button type="button" disabled={busy} onClick={()=>void saveMode(true)}>重试原模式设置</button></p>}
+ {referenceSource&&referenceSource.owner===fileOwner&&referenceSource.conversationId===id&&<ConversationDisplayBoundary key={referenceSource.requestId} label="原文件引用来源"><FileReferenceSource value={referenceSource.value} requestId={referenceSource.requestId} onClose={closeReferenceSource}/></ConversationDisplayBoundary>}
  {error&&<p role="alert">{error}</p>}{controller.pendingMessage&&<p role="status">{controller.pending.receipt?'原消息已确认，重试将继续完成本地回执清理。':'原发送请求已保留，重试会沿用原消息或原任务补充的请求正文、附件和幂等键。'}</p>}
  {controller.pendingMessage&&<details><summary>查看原发送内容</summary>
   <p>{controller.pending.kind==='steer'?`原任务补充 · ${controller.pending.runId}`:'原会话消息'} · 客户端消息标识 <code>{controller.pending.body.client_message_id}</code></p>
@@ -511,7 +524,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
   disabled={!state||busy||goalPending||modelMutation.pending||modeWriter.pending||cancelWriter.pending||controller.recoveryBlocked||!!draftBackup&&!controller.pendingMessage||chatUnavailable&&!controller.pendingMessage} inputDisabled={messageLocked||modeWriter.pending||cancelWriter.pending} submitDisabled={controller.recoveryBlocked||!!draftBackup&&!controller.pendingMessage||voiceBusy||!controller.pendingMessage&&(!regionsReady||uploads.entries.length>0&&uploads.blocked||uploads.entries.some((entry:any)=>entry.status!=='ready')||ordinary&&goalMode&&!draft.trim()&&!quoteCount)} submitLabel={controller.pendingMessage?'重试原消息':run?(ordinary?'补充当前任务':'加入队列'):'发送'}
   selection={chatMode?undefined:conversation?.model} modelOptions={chatMode?[]:models} onSelectionChange={ordinary&&!chatMode&&!modeWriter.pending&&!cancelWriter.pending&&!run&&!messageLocked&&!uploads.entries.length&&!voiceBusy&&!goalPending&&!modelMutation.pending?changeModel:undefined}
   onAttach={()=>fileInput.current?.click()} attachDisabled={!state||busy||cancelWriter.pending||goalPending||messageLocked||uploads.blocked||uploads.unresolved||!maxBytes} uploadMenu={<button type="button" role="menuitem" disabled={!state||busy||cancelWriter.pending||goalPending||messageLocked||uploads.blocked||uploads.unresolved||!maxBytes} onClick={()=>folderInput.current?.click()}>添加文件夹</button>} onDropFiles={selectFiles} onDropError={error=>setError(error instanceof Error?error.message:'无法读取所选文件夹')}
-   hasAttachments={controller.pendingMessage||uploads.entries.length>0||quoteCount>0} attachments={<><FileTextReferences references={fileReferences} disabled={quoteLocked} onChange={editFileReferences} imageFile={imageFile} resolveImage={imageArtifact}/><AssistantReplyQuotes quotes={replyQuotes} disabled={quoteLocked} onChange={setReplyQuotes}/><UploadAttachments uploads={uploads} busy={busy} locked={uploads.blocked||cancelWriter.pending||goalPending||messageLocked||modeWriter.pending} onAction={operation=>void action(operation)} onUpload={uploadEntry} onCancel={cancelUpload} onCancelBatch={cancelUploadBatch}/></>}
+   hasAttachments={controller.pendingMessage||uploads.entries.length>0||quoteCount>0} attachments={<><FileTextReferences references={fileReferences} disabled={quoteLocked} onChange={editFileReferences} imageFile={imageFile} resolveImage={imageArtifact} onOpen={openReferenceSource}/><AssistantReplyQuotes quotes={replyQuotes} disabled={quoteLocked} onChange={setReplyQuotes}/><UploadAttachments uploads={uploads} busy={busy} locked={uploads.blocked||cancelWriter.pending||goalPending||messageLocked||modeWriter.pending} onAction={operation=>void action(operation)} onUpload={uploadEntry} onCancel={cancelUpload} onCancelBatch={cancelUploadBatch}/></>}
   keepVoiceVisible voiceActive={voiceBusy} voiceControl={<VoiceInput id={id} voice={voice} disabled={!state||busy||goalPending||messageLocked||modelMutation.pending||modeWriter.pending||cancelWriter.pending||chatUnavailable} onText={appendTranscript} onBusyChange={setVoiceBusy}/>}
   goalMenu={ordinary&&!chatMode?<button type="button" role="menuitemcheckbox" disabled={messageLocked} aria-checked={goalMode} onClick={()=>setGoalMode(value=>!value)}>目标模式{goalMode?' ✓':''}</button>:undefined}
   responding={Boolean(run)} stopDisabled={busy||cancelWriter.pending||messageLocked||run?.status==='cancelling'} onStop={run?()=>cancelTask():undefined}/>

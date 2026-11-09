@@ -1,10 +1,11 @@
 import React,{useEffect,useRef,useState} from 'react';
 import * as pdfjs from 'pdfjs-dist';
 import {renderPdfSearchHighlights,type PdfSearchMatch} from './vendor/pilotdeck-pdf-search';
+import type {NormalizedRect} from './vendor/pilotdeck-content-reference';
 export type Zoom=number|'width'|'page';
 export const clampZoom=(value:number)=>Math.max(0.1,Math.min(4,value));
 
-export default function PdfFilePage({document,pageNumber,zoom,rotation,width,onScale,matches,selected,onSize,onReady}:{document:pdfjs.PDFDocumentProxy;pageNumber:number;zoom:Zoom;rotation:number;width:number;onScale:(scale:number)=>void;matches:PdfSearchMatch[];selected:string|null;onSize?:(height:number)=>void;onReady?:(page:number)=>void}){
+export default function PdfFilePage({document,pageNumber,zoom,rotation,width,onScale,matches,selected,onSize,onReady,referenceRect}:{document:pdfjs.PDFDocumentProxy;pageNumber:number;zoom:Zoom;rotation:number;width:number;onScale:(scale:number)=>void;matches:PdfSearchMatch[];selected:string|null;onSize?:(height:number)=>void;onReady?:(page:number)=>void;referenceRect?:NormalizedRect}){
  const canvas=useRef<HTMLCanvasElement>(null),text=useRef<HTMLDivElement>(null);
  const mapping=useRef<{divs:HTMLElement[];items:string[]}|undefined>(undefined);
  const [textRevision,setTextRevision]=useState(0);
@@ -46,6 +47,7 @@ export default function PdfFilePage({document,pageNumber,zoom,rotation,width,onS
   <div data-pdf-page-anchor={pageNumber} style={{position:'relative',width:size.width,height:size.height,'--scale-factor':size.scale,'--total-scale-factor':size.scale} as React.CSSProperties}>
    <canvas ref={canvas} aria-hidden="true" data-pdf-capture-ready={!busy&&!error?'true':undefined}/>
    <div ref={text} className="textLayer" aria-label={`PDF第 ${pageNumber} 页文字`} style={{position:'absolute',inset:0}}/>
+   {referenceRect&&<div role="img" aria-label="原引用选区" data-pdf-reference-region="" style={{position:'absolute',pointerEvents:'none',zIndex:4,left:`${referenceRect.x*100}%`,top:`${referenceRect.y*100}%`,width:`${referenceRect.width*100}%`,height:`${referenceRect.height*100}%`,outline:'2px solid #b45309',background:'rgba(255,197,0,.18)'}}/>}
   </div>
  </>;
 }

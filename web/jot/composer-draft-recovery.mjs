@@ -10,8 +10,8 @@ const relative=value=>text(value,4096)&&value.length>0&&!/[\\:\u0000-\u001f\u007
 export const emptyComposerDraft=()=>({text:'',replyQuotes:[],textReferences:[],goalMode:false});
 
 function validateTextReference(value,conversation,scope){
- if(!exact(value,['owner','conversationId','runId','activityId','resultSha','file','reference'])||!sha(value.owner)||scope!==undefined&&value.owner!==scope
-  ||value.conversationId!==conversation||!id(value.runId)||!id(value.activityId)||!sha(value.resultSha))throw invalid();
+ if(!exact(value,['owner','conversationId','runId','activityId','resultSha','file','reference'],['rotation'])||!sha(value.owner)||scope!==undefined&&value.owner!==scope
+  ||value.rotation!==undefined&&![0,90,180,270].includes(value.rotation)||value.conversationId!==conversation||!id(value.runId)||!id(value.activityId)||!sha(value.resultSha))throw invalid();
  const source=value.file,ref=value.reference;
  if(!exact(source,['path','version','sha256','size'])||!relative(source.path)||!Number.isSafeInteger(source.version)||source.version<0||!sha(source.sha256)||!Number.isSafeInteger(source.size)||source.size<0
   ||!exact(ref,['schemaVersion','kind','id','selectionMode','source','renderer','locator','selectedText','createdAt'],['surroundingText','truncated'])

@@ -1,10 +1,11 @@
 import React,{useEffect,useRef,useState} from 'react';
 import {base,request,taskDraftScope} from './client';
-import type {ActivityToolFileBytes as BytePage,ActivityToolResultFile} from './types';
+import type {ActivityToolFileBytes as BytePage} from './types';
+import type {ListedFilePreviewSource} from './activity-file-preview-client';
 
 type WritableFile={write:(bytes:Uint8Array)=>Promise<void>;close:()=>Promise<void>;abort:()=>Promise<void>};
 type FilePicker={showSaveFilePicker?:(options:{suggestedName:string})=>Promise<{createWritable:()=>Promise<WritableFile>}>};
-export default function ActivityToolFileBytes({conversationId,runId,activityId,resultSha,file}:{conversationId:string;runId:string;activityId:string;resultSha:string;file:ActivityToolResultFile}){
+export default function ActivityToolFileBytes({conversationId,runId,activityId,resultSha,file}:ListedFilePreviewSource){
  const owner=taskDraftScope(),identity=JSON.stringify([owner,conversationId,runId,activityId,resultSha,file]);
  const [cursor,setCursor]=useState<{identity:string;offset:number}>(),[page,setPage]=useState<{identity:string;offset:number;hex:string;next?:number}>();
  const [revision,setRevision]=useState(0);

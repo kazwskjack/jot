@@ -32,9 +32,9 @@ function selectionSnapshot(root:HTMLElement,range:Range){
 }
 
 type Action={range:Range;reference:FileTextReference;top:number;left:number};
-export default function PdfFileTextReferenceAction({root,source}:{root:RefObject<HTMLElement|null>;source:ListedFilePreviewSource}){
+export default function PdfFileTextReferenceAction({root,source,rotation}:{root:RefObject<HTMLElement|null>;source:ListedFilePreviewSource;rotation:number}){
  const context=useContext(FileTextReferenceContext),current=useRef(context);current.current=context;
- const owner=taskDraftScope(),identity=JSON.stringify([owner,source]),button=useRef<HTMLButtonElement>(null);
+ const owner=taskDraftScope(),identity=JSON.stringify([owner,source,rotation]),button=useRef<HTMLButtonElement>(null);
  const [action,setAction]=useState<Action>(),[notice,setNotice]=useState('');
  const disabled=!context||context.disabled||context.owner!==owner||context.conversationId!==source.conversationId;
  useEffect(()=>{
@@ -50,7 +50,7 @@ export default function PdfFileTextReferenceAction({root,source}:{root:RefObject
    setNotice('');const {file,conversationId,runId,activityId,resultSha}=source;
    const reference=createTextContentReference({selectionMode:'text',source:{relativePath:file.path,fileName:file.path.split('/').at(-1)!,mimeType:'application/pdf',revision:{id:String(file.version),sha256:file.sha256,size:file.size}},renderer:{id:'pdf',backend:'builtin',locatorQuality:'semantic'},locator:{surface:'page',pageNumbers:snapshot.pages,quote:{exact:snapshot.selectedText,prefix:snapshot.prefix,suffix:snapshot.suffix},rects:snapshot.rects},selectedText:snapshot.selectedText,surroundingText:snapshot.prefix+snapshot.selectedText+snapshot.suffix});
    const rect=range.getBoundingClientRect();
-   setAction({range:range.cloneRange(),reference:{owner,conversationId,runId,activityId,resultSha,file:{path:file.path,version:file.version,sha256:file.sha256,size:file.size},reference},top:Math.max(8,Math.min(rect.bottom+8,window.innerHeight-48)),left:Math.max(8,Math.min(rect.left,window.innerWidth-228))});
+   setAction({range:range.cloneRange(),reference:{rotation,owner,conversationId,runId,activityId,resultSha,file:{path:file.path,version:file.version,sha256:file.sha256,size:file.size},reference},top:Math.max(8,Math.min(rect.bottom+8,window.innerHeight-48)),left:Math.max(8,Math.min(rect.left,window.innerWidth-228))});
   };
   const schedule=()=>{window.clearTimeout(timer);timer=window.setTimeout(update,40);};
   const changed=()=>{if(window.document.activeElement!==button.current)clear();};

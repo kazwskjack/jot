@@ -1,6 +1,6 @@
 import PdfFileRegionReference from './PdfFileRegionReference';
 import PdfFileTextReferenceAction from './PdfFileTextReferenceAction';
-import {capturePdfView,defaultPdfView,pdfViewIdentity,readPdfView,writePdfView,type PdfViewState} from './pdf-file-view-state';
+import {capturePdfView,defaultPdfView,pdfViewIdentity,readPdfView,writePdfView,type PdfViewState,type PdfReferenceFocus} from './pdf-file-view-state';
 import PdfFileThumbnails from './PdfFileThumbnails';
 import PdfFileNavigation from './PdfFileNavigation';
 import type {PdfSearchMatch} from './vendor/pilotdeck-pdf-search';
@@ -18,8 +18,10 @@ import ActivityToolFileBytes from './ActivityToolFileBytes';
 pdfjs.GlobalWorkerOptions.workerSrc=workerUrl;
 const assets=new URL('pdfjs/6.1.200/',new URL(workerUrl,document.baseURI)).href;
 
-export default function ActivityToolFilePdf(props:ListedFilePreviewSource){
+export default function ActivityToolFilePdf(props:ListedFilePreviewSource&{focus?:PdfReferenceFocus}){
  const {conversationId,runId,activityId,resultSha,file}=props,owner=taskDraftScope(),identity=pdfViewIdentity(props,owner);
+ const focus=useRef(props.focus);focus.current=props.focus;
+ const referenceJump=useRef<{key:string;page:number}|undefined>(undefined);
  const root=useRef<HTMLElement>(null),viewport=useRef<HTMLDivElement>(null),scale=useRef(1);
  const [state,setState]=useState<{identity:string;document?:pdfjs.PDFDocumentProxy;error?:string}>(),[revision,setRevision]=useState(0);
  const restored=useMemo(()=>readPdfView(identity,owner)??defaultPdfView,[identity,owner]);
@@ -48,6 +50,11 @@ export default function ActivityToolFilePdf(props:ListedFilePreviewSource){
    element.scrollTo({top:Math.max(0,element.scrollTop+rect.top-element.getBoundingClientRect().top+requested.view.position*rect.height),left:requested.view.left});
    const selected=restoreSelection.current;restoreSelection.current=null;
    if(selected&&/^page-[0-9]+-match-[0-9]+$/.test(selected)&&selected.startsWith(`page-${pageNumber}-match-`))element.querySelector<HTMLElement>(`[data-pdf-search-match-id="${selected}"]`)?.scrollIntoView({block:'center',inline:'nearest'});
+   const reference=referenceJump.current;
+   if(reference&&reference.key===focus.current?.key&&reference.page===pageNumber){
+    anchor.querySelector<HTMLElement>('[data-pdf-reference-region]')?.scrollIntoView({block:'center',inline:'center'});
+    referenceJump.current=undefined;
+   }
    pendingRestore.current=undefined;ready.current=true;persist();
   });
  },[identity,owner,persist]);
@@ -72,7 +79,7 @@ export default function ActivityToolFilePdf(props:ListedFilePreviewSource){
  useEffect(()=>{
   const controller=new AbortController();let cancelled=false,loading:pdfjs.PDFDocumentLoadingTask|undefined;
   if(ready.current){const saved=capturePdfView(viewport.current,latestView.current);pendingRestore.current={identity,view:saved};latestView.current={identity,...saved};setView({identity,...saved});}
-  ready.current=false;searchJump.current=null;restoreSelection.current=null;
+  ready.current=false;searchJump.current=null;restoreSelection.current=null;referenceJump.current=undefined;
   setState({identity});setChallenge(undefined);setPassword('');setActionError('');
   const load=async()=>{
    const bytes=await readListedFilePreviewBytes(props,owner,controller.signal);controller.signal.throwIfAborted();
@@ -94,6 +101,7 @@ export default function ActivityToolFilePdf(props:ListedFilePreviewSource){
  const current=state?.identity===identity?state:undefined,document=current?.document;
  const page=document?Math.min(currentView.page,document.numPages):1;
  const change=useCallback((patch:Partial<PdfViewState>)=>{
+  referenceJump.current=undefined;
   const current=latestView.current.identity===identity?latestView.current:{identity,...restored};
   const next={...capturePdfView(viewport.current,current),...patch,identity};
   const sameLayout=next.page===current.page&&next.zoom===current.zoom&&next.rotation===current.rotation&&next.continuous===current.continuous;
@@ -105,6 +113,23 @@ export default function ActivityToolFilePdf(props:ListedFilePreviewSource){
   restoreSelection.current=searchJump.current;searchJump.current=null;
   change({page,position:0,left:0});setNavigationRevision(value=>value+1);
  },[change]);
+ const locateReference=useCallback((pageNumber?:number)=>{
+  const target=focus.current;if(!document||!target||taskDraftScope()!==owner)return;
+  if(!target.pages.length||target.pages.some(value=>!Number.isSafeInteger(value.page)||value.page<1||value.page>document.numPages
+   ||value.rect&&(Object.values(value.rect).some(number=>!Number.isFinite(number)||number<0||number>1)||value.rect.x+value.rect.width>1+1e-9||value.rect.y+value.rect.height>1+1e-9))
+   ||target.rotation!==undefined&&![0,90,180,270].includes(target.rotation)){
+   setActionError('此固定PDF的原引用位置未能核对，请核对引用页码和选区信息。');return;
+  }
+  const selected=pageNumber===undefined?target.pages[0]:target.pages.find(value=>value.page===pageNumber);
+  if(!selected){setActionError('此页不属于原引用，请核对引用页码。');return;}
+  setActionError('');searchJump.current=null;restoreSelection.current=null;
+  setSearchResult(previous=>previous?.document===document?{...previous,selected:null}:previous);
+  change({page:selected.page,continuous:false,position:target.rotation!==undefined?selected.rect?.y??0:0,left:0,...(target.rotation!==undefined?{rotation:target.rotation}:{})});
+  referenceJump.current={key:target.key,page:selected.page};
+  setNavigationRevision(value=>value+1);
+ },[document,owner,identity,props.focus?.key,change]);
+ useEffect(()=>{if(document&&props.focus)locateReference();},[document,props.focus?.key,locateReference]);
+ const referencePages=props.focus?.rotation!==undefined&&props.focus.rotation===currentView.rotation?props.focus.pages:undefined;
  const reportVisiblePage=useCallback((page:number)=>{
   if(pendingRestore.current||latestView.current.identity!==identity||latestView.current.page===page)return;
   const next={...latestView.current,page};latestView.current=next;setView(next);
@@ -121,13 +146,14 @@ export default function ActivityToolFilePdf(props:ListedFilePreviewSource){
    }
   }}>
   <h4>{file.path} · 版本 {file.version}</h4>
-  {document&&<><PdfFileTextReferenceAction root={root} source={props}/><PdfFileRegionReference root={viewport} source={props} page={page} rotation={currentView.rotation}/></>}
+  {document&&<><PdfFileTextReferenceAction root={root} source={props} rotation={currentView.rotation}/><PdfFileRegionReference root={viewport} source={props} page={page} rotation={currentView.rotation}/></>}
   <ActivityToolFileBytes key={identity} conversationId={conversationId} runId={runId} activityId={activityId} resultSha={resultSha} file={file}/>
   {challenge?.identity===identity&&<form onSubmit={event=>{event.preventDefault();challenge.update(password);setPassword('');setChallenge(undefined);}}>
    <label>PDF密码<input type="password" autoComplete="current-password" value={password} onChange={event=>setPassword(event.target.value)}/></label>
    <button type="submit">解锁PDF</button>{challenge.invalid&&<p role="alert">密码未匹配，请重试。</p>}
   </form>}
   {(!current||!document&&!current.error)&&<p role="status">正在核对并载入原PDF…</p>}
+  {document&&props.focus&&<p role="status">原引用页码 · {props.focus.pages.map(value=>value.page).join('、')} {props.focus.rotation===undefined?'此引用未记录选区旋转，当前仅定位原页。':''} <button type="button" onClick={()=>locateReference()}>定位原引用</button> {props.focus.pages.length>1&&props.focus.pages.map(value=><button key={value.page} type="button" onClick={()=>locateReference(value.page)}>定位引用第 {value.page} 页</button>)}</p>}
   {document&&<nav aria-label="PDF页面控制" data-chat-search-ignore>
    <label><input type="checkbox" checked={continuous} onChange={event=>change({continuous:event.target.checked,position:0,left:0})}/>连续显示PDF页面</label>
    <button type="button" disabled={page<=1} onClick={()=>navigate(page-1)}>上一页PDF</button>
@@ -145,7 +171,7 @@ export default function ActivityToolFilePdf(props:ListedFilePreviewSource){
   {document&&<details><summary>PDF缩略图</summary><PdfFileThumbnails key={identity+revision} document={document} page={page} rotation={currentView.rotation} onNavigate={navigate}/></details>}
   {document&&<PdfFileNavigation key={identity+revision} document={document} page={page} onNavigate={navigate} onMatches={reportMatches}/>}
   <div ref={viewport} style={{width:'100%',minWidth:0,overflow:'auto',maxHeight:'80vh'}}>
-   {document&&continuous?<PdfFilePages key={identity+revision} document={document} root={viewport} page={page} navigationRevision={navigationRevision} zoom={currentView.zoom} rotation={currentView.rotation} width={width} onScale={reportScale} onReady={restoreView} onVisiblePage={reportVisiblePage} matches={activeSearch?.matches??[]} selected={activeSearch?.selected??null}/>:document&&<PdfFilePage key={JSON.stringify([identity,revision,page,currentView.zoom,currentView.rotation,width])} document={document} pageNumber={page} zoom={currentView.zoom} rotation={currentView.rotation} width={width} onScale={reportScale} onReady={restoreView} matches={activeSearch?.matches.filter(match=>match.pageNumber===page)??[]} selected={activeSearch?.selected??null}/>}
+   {document&&continuous?<PdfFilePages key={identity+revision} document={document} root={viewport} page={page} navigationRevision={navigationRevision} zoom={currentView.zoom} rotation={currentView.rotation} width={width} onScale={reportScale} onReady={restoreView} onVisiblePage={reportVisiblePage} matches={activeSearch?.matches??[]} selected={activeSearch?.selected??null} referencePages={referencePages}/>:document&&<PdfFilePage key={JSON.stringify([identity,revision,page,currentView.zoom,currentView.rotation,width])} document={document} pageNumber={page} zoom={currentView.zoom} rotation={currentView.rotation} width={width} onScale={reportScale} onReady={restoreView} matches={activeSearch?.matches.filter(match=>match.pageNumber===page)??[]} selected={activeSearch?.selected??null} referenceRect={referencePages?.find(target=>target.page===page)?.rect}/>}
   </div>
   {current?.error&&<p role="alert">{current.error} <button type="button" onClick={()=>setRevision(value=>value+1)}>重试PDF</button></p>}
   {actionError&&<p role="alert">{actionError}</p>}

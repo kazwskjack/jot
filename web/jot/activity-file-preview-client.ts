@@ -2,7 +2,7 @@ import {base,taskDraftScope} from './client';
 import {readVerifiedPreviewBytes} from './artifact-preview-bytes.mjs';
 import type {ActivityToolResultFile} from './types';
 
-export type ListedFilePreviewSource={conversationId:string;runId:string;activityId:string;resultSha:string;file:ActivityToolResultFile};
+export type ListedFilePreviewSource={conversationId:string;runId:string;activityId:string;resultSha:string;file:Pick<ActivityToolResultFile,'path'|'version'|'sha256'|'size'>};
 export async function readListedFilePreviewBytes({conversationId,runId,activityId,resultSha,file}:ListedFilePreviewSource,owner:string,signal:AbortSignal){
  const check=()=>{signal.throwIfAborted();if(taskDraftScope()!==owner)throw Error('文件所属账户已变化');};
  check();
