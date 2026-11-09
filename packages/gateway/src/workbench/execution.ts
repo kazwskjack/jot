@@ -1037,7 +1037,15 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
         case 'files.read':
           if (typeof args.path !== 'string') throw new Error('invalid_file_path');
           result = workbench.readFile(owner, workspace, project, args.path, runId); break;
-        case 'files.write': result = workbench.writeFile(owner, workspace, {...args, project_id: project}, runId); break;
+        case 'files.write': {
+          const written=workbench.writeFile(owner,workspace,{...args,project_id:project},runId),beforeVersion=Number(args.expected_version);
+          const before=beforeVersion===0?undefined:db.prepare(`SELECT sha256 FROM wb_file_versions
+            WHERE owner_id=? AND workspace_id=? AND project_id=? AND path=? AND version=?`)
+            .get(owner,workspace,project,String(written.path),beforeVersion) as {sha256:string}|undefined;
+          result=beforeVersion===0?{...written,before_version:0}
+            :before&&/^[a-f0-9]{64}$/.test(before.sha256)?{...written,before_version:beforeVersion,before_sha256:before.sha256}:written;
+          break;
+        }
         case 'tasks.get': {
           const task=requireTask(identity);result={task:tasks.get(owner,task.task_id),occurrence:tasks.occurrences(owner,task.task_id).items.find(item=>item.occurrence_id===task.occurrence_id),collaboration:collaboration?.get(owner,task.task_id)??{enabled:false}};break;
         }
@@ -1098,7 +1106,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
         case 'tasks.reply_drafts': requireTask(identity);result=replyDrafts.list(owner,runId);break;
         case 'tasks.next': result=assessments.nextActions(owner,requireTask(identity).task_id,undefined,runId);break;
       }
-      if (attested||displayRead){const sourceResult=object(result),proof=executionEvidence.record(runId,String(callId),operation,result);
+      if (attested||displayRead||operation==='files.write'){const sourceResult=object(result),proof=executionEvidence.record(runId,String(callId),operation,result);
         if(operation==='discovery.source')discoveryPlanning.recordRead(runId,proof.reference,sourceResult);
         result={...sourceResult,execution_receipt:proof};}
       if (receipted && savedCall(runId, String(callId), digest) === undefined) saveCall(runId, String(callId), digest, result);

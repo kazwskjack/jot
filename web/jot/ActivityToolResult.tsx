@@ -2,32 +2,33 @@ import React,{useEffect,useRef,useState} from 'react';
 import {ApiError,request,taskDraftScope} from './client';
 import type {ActivityToolResultPage} from './types';
 
-type Target={runId:string;activityId:string;toolName:string;offset?:number;resultSha?:string;match?:{offset:number;text:string}};
+type Target={runId:string;activityId:string;toolName:string;offset?:number;resultSha?:string;textSha?:string;match?:{offset:number;text:string}};
 const sha=/^[a-f0-9]{64}$/;
 
 export default function ActivityToolResult({conversationId,target}:{conversationId:string;target:Target}){
  const owner=taskDraftScope(),identity=JSON.stringify([owner,conversationId,target]);
  const region=useRef<HTMLDivElement>(null);
- const [cursor,setCursor]=useState<{identity:string;offset:number;previous:number[];sha?:string}>({identity,offset:target.offset??0,previous:[],sha:target.resultSha});
+ const [cursor,setCursor]=useState<{identity:string;offset:number;previous:number[];sha?:string;textSha?:string}>({identity,offset:target.offset??0,previous:[],sha:target.resultSha,textSha:target.textSha});
  const [state,setState]=useState<{identity:string;offset:number;page?:ActivityToolResultPage;error?:string}>();
  const [revision,setRevision]=useState(0);
- const currentCursor:typeof cursor=cursor.identity===identity?cursor:{identity,offset:target.offset??0,previous:[],sha:target.resultSha};
- const {offset,sha:expected}=currentCursor;
+ const currentCursor:typeof cursor=cursor.identity===identity?cursor:{identity,offset:target.offset??0,previous:[],sha:target.resultSha,textSha:target.textSha};
+ const {offset,sha:expected,textSha:expectedText}=currentCursor;
  useEffect(()=>{region.current?.focus();region.current?.scrollIntoView({block:'nearest'});},[identity]);
  useEffect(()=>{
   const controller=new AbortController();
   setState({identity,offset});
   const load=async()=>{
-   const query=new URLSearchParams({run_id:target.runId,offset_chars:String(offset),...(expected?{result_sha256:expected}:{})});
+   const query=new URLSearchParams({run_id:target.runId,offset_chars:String(offset),...(expected?{result_sha256:expected}:{}),...(expectedText?{text_sha256:expectedText}:{})});
    const page=await request<ActivityToolResultPage>(`/conversations/${encodeURIComponent(conversationId)}/activities/${encodeURIComponent(target.activityId)}/tool-result?${query}`,'GET',undefined,undefined,controller.signal);
    if(taskDraftScope()!==owner||!page||page.conversation_id!==conversationId||page.run_id!==target.runId||page.activity_id!==target.activityId
     ||page.tool_name!==target.toolName||page.execution_authorized!==false
     ||(target.toolName==='jot_workspace'
-     ?page.source!=='workspace'||!['files.read','web.read'].includes(page.operation??'')||typeof page.source_truncated!=='boolean'
+     ?page.source!=='workspace'||!['files.read','web.read','files.write'].includes(page.operation??'')||typeof page.source_truncated!=='boolean'
      :page.source!=='mcp'||page.operation!==undefined||page.source_truncated!==undefined)
+    ||(page.operation==='files.write'? !['available','base_unrecorded','preview_limit','content_unavailable','non_text'].includes(page.file_diff_state??''):page.file_diff_state!==undefined)
     ||typeof page.result_sha256!=='string'||!sha.test(page.result_sha256)||expected!==undefined&&page.result_sha256!==expected
-    ||typeof page.text_sha256!=='string'||!sha.test(page.text_sha256)||page.offset_chars!==offset
-    ||!Number.isSafeInteger(page.total_chars)||page.total_chars<offset||page.total_chars>1048576
+    ||typeof page.text_sha256!=='string'||!sha.test(page.text_sha256)||expectedText!==undefined&&page.text_sha256!==expectedText||page.offset_chars!==offset
+    ||!Number.isSafeInteger(page.total_chars)||page.total_chars<offset||page.total_chars>6*1048576
     ||typeof page.text!=='string'||page.text.length>16384||offset+page.text.length>page.total_chars||typeof page.has_other_content!=='boolean'
     ||(page.next_offset_chars===undefined?offset+page.text.length!==page.total_chars
      :!page.text.length||page.next_offset_chars!==offset+page.text.length||page.next_offset_chars>=page.total_chars))throw Error('工具结果来源或分页尚未确认');
@@ -38,11 +39,12 @@ export default function ActivityToolResult({conversationId,target}:{conversation
   void load().catch(error=>{
    if(controller.signal.aborted)return;
    const message=error instanceof ApiError&&error.status===404?'此步骤暂无已保存且可确认的结果正文。'
+    :error instanceof ApiError&&error.status===409?'正文来源已变化，请关闭后重新打开。'
     :error instanceof Error?error.message:'工具结果读取失败';
    setState({identity,offset,error:message});
   });
   return()=>controller.abort();
- },[identity,offset,expected,revision]);
+ },[identity,offset,expected,expectedText,revision]);
  const current=state?.identity===identity&&state.offset===offset?state:undefined,page=current?.page;
  const match=page&&target.match&&target.match.offset>=offset&&target.match.offset+target.match.text.length<=offset+page.text.length
   &&page.text.slice(target.match.offset-offset,target.match.offset-offset+target.match.text.length)===target.match.text?target.match:undefined;
@@ -53,18 +55,19 @@ export default function ActivityToolResult({conversationId,target}:{conversation
    <section data-chat-search-content={JSON.stringify(['tool-result',identity,page.result_sha256,offset])}>
     <pre>{match?<>{page.text.slice(0,match.offset-offset)}<mark>{match.text}</mark>{page.text.slice(match.offset-offset+match.text.length)}</>:page.text}</pre>
    </section>
+   {page.file_diff_state&&page.file_diff_state!=='available'&&<p role="status">{{base_unrecorded:'该写入记录缺少原版本回执，当前显示已确认的写入信息。',preview_limit:'差异来源超过单文件 1 MiB 的文本比较范围。',content_unavailable:'固定版本内容暂不可用，当前显示已确认的写入信息。',non_text:'差异来源包含非 UTF-8 文本内容。'}[page.file_diff_state]}</p>}
    {page.source_truncated&&<p role="status">原工具回执中的正文已截断，当前显示回执保存的全部文本。</p>}
    {page.total_chars===0&&<p role="status">原结果未包含文本内容。</p>}
    {page.has_other_content&&<p role="status">原结果还包含图片或其他非文本内容。</p>}
-   {offset>0&&<button type="button" data-chat-search-ignore onClick={()=>setCursor({identity,offset:0,previous:[],sha:page.result_sha256})}>从正文开头阅读</button>}
+   {offset>0&&<button type="button" data-chat-search-ignore onClick={()=>setCursor({identity,offset:0,previous:[],sha:page.result_sha256,textSha:page.text_sha256})}>从正文开头阅读</button>}
    <nav aria-label="工具结果正文翻页" data-chat-search-ignore>
     <button type="button" disabled={!currentCursor.previous.length} onClick={()=>{
      const previous=currentCursor.previous.slice(0,-1),prior=currentCursor.previous.at(-1)!;
-     setCursor({identity,offset:prior,previous,sha:page.result_sha256});
+     setCursor({identity,offset:prior,previous,sha:page.result_sha256,textSha:page.text_sha256});
     }}>上一页正文</button>
     <span>{Math.min(offset+1,page.total_chars)}–{offset+page.text.length} / {page.total_chars}（UTF-16 位置）</span>
     <button type="button" disabled={page.next_offset_chars===undefined} onClick={()=>{
-     if(page.next_offset_chars!==undefined)setCursor({identity,offset:page.next_offset_chars,previous:[...currentCursor.previous,offset],sha:page.result_sha256});
+     if(page.next_offset_chars!==undefined)setCursor({identity,offset:page.next_offset_chars,previous:[...currentCursor.previous,offset],sha:page.result_sha256,textSha:page.text_sha256});
     }}>下一页正文</button>
    </nav>
   </>}

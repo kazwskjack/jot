@@ -1,3 +1,4 @@
+import {formatTextDiff} from './text-diff.ts';
 import {searchVerifiedArtifactText,readVerifiedArtifactTextPage} from './text-content.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { basename, join,dirname,resolve,sep } from 'node:path';
@@ -1546,16 +1547,10 @@ export class ArtifactService {
   diff(id: string, ownerId: string, from: number, to: number) {
     const before = this.download(id, ownerId, from); const after = this.download(id, ownerId, to);
     if (!String(before.mime_type).startsWith('text/') || !String(after.mime_type).startsWith('text/')) throw new Error('artifact_diff_unsupported');
-    const left = (before.verified_content instanceof Buffer ? before.verified_content.toString('utf8') : readFileSync(String(before.server_path),'utf8')).split(/\r?\n/);
-    const right = (after.verified_content instanceof Buffer ? after.verified_content.toString('utf8') : readFileSync(String(after.server_path),'utf8')).split(/\r?\n/);
-    const lines = [`--- version-${from}`, `+++ version-${to}`];
-    const maximum = Math.max(left.length, right.length);
-    for (let index = 0; index < maximum; index += 1) {
-      if (left[index] === right[index]) continue;
-      if (left[index] !== undefined) lines.push(`-${left[index]}`);
-      if (right[index] !== undefined) lines.push(`+${right[index]}`);
-    }
-    const full = lines.join('\n');
+    const full=formatTextDiff(
+      before.verified_content instanceof Buffer?before.verified_content.toString('utf8'):readFileSync(String(before.server_path),'utf8'),
+      after.verified_content instanceof Buffer?after.verified_content.toString('utf8'):readFileSync(String(after.server_path),'utf8'),
+      `version-${from}`,`version-${to}`);
     return { artifact_id: id, from_version: from, to_version: to,
       unified_diff: full.slice(0, 200000), truncated: full.length > 200000 };
   }

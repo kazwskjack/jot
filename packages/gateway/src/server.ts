@@ -1083,7 +1083,7 @@ export async function buildServer(config: {
     db.exec('BEGIN');
     try{
       conversations.get(conversationId,owner);
-      const value=searchActivityToolResults(db,owner,conversationId,request.query as Record<string,unknown>);
+      const value=searchActivityToolResults(db,owner,conversationId,request.query as Record<string,unknown>,workbench);
       db.exec('COMMIT');return reply.header('cache-control','private, no-store').send(value);
     }catch(error){if(db.isTransaction)db.exec('ROLLBACK');throw error;}
   });
@@ -1092,7 +1092,7 @@ export async function buildServer(config: {
     db.exec('BEGIN');
     try{
       conversations.get(conversationId,owner);
-      const value=readActivityToolResult(db,owner,conversationId,activityId,request.query as Record<string,unknown>);
+      const value=readActivityToolResult(db,owner,conversationId,activityId,request.query as Record<string,unknown>,workbench);
       db.exec('COMMIT');return reply.header('cache-control','private, no-store').send(value);
     }catch(error){if(db.isTransaction)db.exec('ROLLBACK');throw error;}
   });
