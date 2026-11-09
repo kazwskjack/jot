@@ -1,6 +1,7 @@
+import type {ArtifactEditedDiff,ArtifactTextMatch} from '../../contracts/types.js';
 import {retainedDocumentText,retainedDocumentEdit} from './document-text.ts';
 import {isDocumentPreviewMediaType} from './document-preview-content.ts';
-import {formatTextDiff} from './text-diff.ts';
+import {formatTextDiff,scanTextDiff} from './text-diff.ts';
 import {searchVerifiedArtifactText,readVerifiedArtifactTextPage,searchRetainedArtifactText,readRetainedArtifactTextPage} from './text-content.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { basename, join,dirname,resolve,sep } from 'node:path';
@@ -18,6 +19,8 @@ import {taskFileSource,type TaskFileScope,type TaskFileLocation} from '../persis
 import {AttachmentResolver} from './resolver.ts';
 import {normalizeChannelAttachmentManifestV2,channelAttachmentManifestDigestV2,type ChannelAttachmentSourceV2} from '../channels/attachment-manifest-v2.ts';
 import {channelUploadStageKeyV2,channelUploadIdV2,channelUploadArtifactIdV2,channelStageRequestDigestV2} from '../channels/attachment-stage-v2.ts';
+
+type EditedDocumentDiffResult=ArtifactEditedDiff&{match?:Pick<ArtifactTextMatch,'offset_chars'|'match_offset_chars'|'match_text'|'excerpt'>};
 
 export interface PinnedArtifactCleanupInput {
   run_id: string;
@@ -1333,7 +1336,8 @@ export class ArtifactService {
     signal?.throwIfAborted();
     const identifier=/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/;
     const q=typeof query.q==='string'?query.q.trim():'',runId=query.run_id,cursorId=query.cursor_artifact_id,cursorVersion=Number(query.cursor_version);
-    const edited=query.edited_protocol===1||query.edited_protocol==='1';
+    const fullEdited=query.edited_protocol===2||query.edited_protocol==='2';
+    const edited=fullEdited||query.edited_protocol===1||query.edited_protocol==='1';
     const readDocuments=query.document_protocol===2||query.document_protocol==='2';
     const documents=readDocuments||query.document_protocol===1||query.document_protocol==='1';
     const parts=query.parts_protocol===1||query.parts_protocol==='1',cursorPart=query.cursor_part_index===undefined?undefined:Number(query.cursor_part_index),cursorGroup=query.cursor_group_sha256;
@@ -1381,15 +1385,15 @@ export class ArtifactService {
       try{
         if(edited){
           const selected=withReadTransaction(this.db,()=>{
-            const diff=this.editedDocumentDiff(entry!.id,ownerId,{conversation_id:conversationId,version:entry!.version,sha256:entry!.sha256,...(runId===undefined?{}:{run_id:runId})});
+            const diff=this.editedDocumentDiff(entry!.id,ownerId,{conversation_id:conversationId,version:entry!.version,sha256:entry!.sha256,...(runId===undefined?{}:{run_id:runId}),...(fullEdited?{diff_protocol:'2'}:{})},fullEdited?q:undefined);
             const file=this.get(entry!.id,ownerId,entry!.version);
             return {diff,file};
           });
-          const found=searchRetainedArtifactText(selected.diff.unified_diff,q);
-          if(found.match){
-            const {unified_diff,...proof}=selected.diff;
+          const found=fullEdited?selected.diff.match:searchRetainedArtifactText(selected.diff.unified_diff,q).match;
+          if(found){
+            const {unified_diff,match,offset_chars,total_chars,next_offset_chars,page_sha256,...proof}=selected.diff;
             items.push({artifact_id:entry.id,version:entry.version,sha256:entry.sha256,file_name:selected.file.file_name,
-              size_bytes:selected.file.size_bytes,created_at:entry.created_at,edited_diff:{...proof,text_total_chars:unified_diff.length},...found.match});
+              size_bytes:selected.file.size_bytes,created_at:entry.created_at,edited_diff:{...proof,text_total_chars:total_chars??unified_diff.length},...found});
           }
         }else{
           if(parts&&partIndex===undefined&&entry.kind==='generated_document_group'&&entry.version===1){
@@ -1420,7 +1424,7 @@ export class ArtifactService {
       }
     }
     if(!this.db.prepare('SELECT 1 FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId))throw Error('conversation_not_found');
-    return {conversation_id:conversationId,...(runId===undefined?{}:{run_id:runId}),...(edited?{edited_protocol:1 as const}:{}),q,items,scanned_versions:entry?1:0,
+    return {conversation_id:conversationId,...(runId===undefined?{}:{run_id:runId}),...(edited?{edited_protocol:(fullEdited?2:1) as 1|2}:{}),q,items,scanned_versions:entry?1:0,
       unavailable_versions:unavailable,skipped_versions:skipped,
       ...(more?{next_cursor:{artifact_id:entry!.id,version:entry!.version,...(partIndex===undefined?{}:{part_index:partIndex,group_sha256:groupSha})}}:{}),execution_authorized:false};
   }
@@ -1587,17 +1591,19 @@ export class ArtifactService {
     return { artifact_id: id, version: Number(row.version), kind: 'unsupported', truncated: false };
   }
 
-  editedDocumentDiff(id:string,ownerId:string,query:Record<string,unknown>){
+  editedDocumentDiff(id:string,ownerId:string,query:Record<string,unknown>,searchQuery?:string):EditedDocumentDiffResult{
     const identifier=/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/;
     const conversationId=query.conversation_id,to=Number(query.version),expectedSha=query.sha256,runId=query.run_id;
     const pins=['edit_job_id','edit_result_sha256','diff_sha256','before_document_job_id','before_document_result_sha256','after_document_job_id','after_document_result_sha256'];
-    const pinned=pins.some(key=>query[key]!==undefined);
-    if(Object.keys(query).some(key=>!['conversation_id','version','sha256','run_id',...pins].includes(key))||!identifier.test(id)
+    const pinned=pins.some(key=>query[key]!==undefined),paged=query.diff_protocol===2||query.diff_protocol==='2',offset=Number(query.offset_chars??0);
+    if(Object.keys(query).some(key=>!['conversation_id','version','sha256','run_id','diff_protocol','offset_chars',...pins].includes(key))||!identifier.test(id)
       ||typeof conversationId!=='string'||!identifier.test(conversationId)||!Number.isSafeInteger(to)||to<2
       ||typeof expectedSha!=='string'||!/^[a-f0-9]{64}$/.test(expectedSha)
       ||runId!==undefined&&(typeof runId!=='string'||!identifier.test(runId))
+      ||query.diff_protocol!==undefined&&!paged||!paged&&query.offset_chars!==undefined
+      ||!Number.isSafeInteger(offset)||offset<0||offset>33554688||offset>0&&!pinned
       ||pinned&&pins.some(key=>typeof query[key]!=='string'||!(key.endsWith('_id')?identifier:/^[a-f0-9]{64}$/).test(query[key] as string)))throw Error('artifact_text_query_invalid');
-    return withReadTransaction(this.db,()=>{
+    return withReadTransaction(this.db,():EditedDocumentDiffResult=>{
       if(!this.db.prepare('SELECT 1 FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId))throw Error('conversation_not_found');
       const after=this.version(id,ownerId,to),metadata=JSON.parse(String(after.metadata_json)) as Record<string,unknown>;
       if(after.conversation_id!==conversationId)throw Error('artifact_not_found');
@@ -1616,8 +1622,18 @@ export class ArtifactService {
       const right={artifactId:id,ownerId,conversationId,version:to,sha256:expectedSha,mediaType:String(after.mime_type),size:Number(after.size_bytes)};
       const edit=retainedDocumentEdit(this.db,left,right);
       if(pinned&&(edit.edit_job_id!==query.edit_job_id||edit.edit_result_sha256!==query.edit_result_sha256))throw Error('artifact_text_source_changed');
-      const originalBefore=retainedDocumentText(this.db,left,query.before_document_job_id as string|undefined,query.before_document_result_sha256 as string|undefined);
-      const originalAfter=retainedDocumentText(this.db,right,query.after_document_job_id as string|undefined,query.after_document_result_sha256 as string|undefined);
+      const originalBefore=retainedDocumentText(this.db,left,query.before_document_job_id as string|undefined,query.before_document_result_sha256 as string|undefined,paged);
+      const originalAfter=retainedDocumentText(this.db,right,query.after_document_job_id as string|undefined,query.after_document_result_sha256 as string|undefined,paged);
+      if(paged){
+        const summary=scanTextDiff(originalBefore.text,originalAfter.text,`version-${from}`,`version-${to}`,offset,searchQuery);
+        if(pinned&&summary.diff_sha256!==query.diff_sha256)throw Error('artifact_text_source_changed');
+        const {text:beforeText,...beforeSource}=originalBefore,{text:afterText,...afterSource}=originalAfter;
+        return {artifact_id:id,conversation_id:conversationId,...(runId===undefined?{}:{run_id:runId as string}),from_version:from,to_version:to,
+          before_sha256:left.sha256,after_sha256:right.sha256,...edit,before:beforeSource,after:afterSource,diff_protocol:2,
+          offset_chars:summary.offset_chars,total_chars:summary.total_chars,...(summary.next_offset_chars===undefined?{}:{next_offset_chars:summary.next_offset_chars}),
+          unified_diff:summary.text,diff_sha256:summary.diff_sha256,page_sha256:summary.page_sha256,truncated:false,execution_authorized:false,
+          ...(summary.match?{match:summary.match}:{})};
+      }
       const full=formatTextDiff(originalBefore.text,originalAfter.text,`version-${from}`,`version-${to}`),text=full.slice(0,200000);
       const digest=createHash('sha256').update(text).digest('hex');
       if(pinned&&digest!==query.diff_sha256)throw Error('artifact_text_source_changed');

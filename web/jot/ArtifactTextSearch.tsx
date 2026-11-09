@@ -31,11 +31,11 @@ export default function ArtifactTextSearch({conversationId,runId,query}:{convers
    await abortableDelay(300,signal);
    let boundary=before;const seen=new Set<string>();
    while(!signal.aborted){
-    const protocol:Record<string,string>=edited?{edited_protocol:'1'}:{parts_protocol:'1',document_protocol:'2'};
+    const protocol:Record<string,string>=edited?{edited_protocol:'2'}:{parts_protocol:'1',document_protocol:'2'};
     const params=new URLSearchParams({q,...protocol,...(runId?{run_id:runId}:{}),...(boundary?{cursor_artifact_id:boundary.artifact_id,cursor_version:String(boundary.version),...(boundary.part_index===undefined?{}:{cursor_part_index:String(boundary.part_index),cursor_group_sha256:boundary.group_sha256!})}:{})});
     const page=await request<ArtifactTextSearchPage>(`/conversations/${encodeURIComponent(conversationId)}/artifact-search?${params}`,'GET',undefined,undefined,signal,120000);
     if(signal.aborted)return;
-    if(taskDraftScope()!==owner||!page||page.conversation_id!==conversationId||page.run_id!==runId||page.q!==q||page.execution_authorized!==false||page.edited_protocol!==(edited?1:undefined)
+    if(taskDraftScope()!==owner||!page||page.conversation_id!==conversationId||page.run_id!==runId||page.q!==q||page.execution_authorized!==false||page.edited_protocol!==(edited?2:undefined)
      ||!Array.isArray(page.items)||page.items.length>1||!Number.isSafeInteger(page.scanned_versions)||page.scanned_versions<page.items.length||page.scanned_versions>1
      ||!Number.isSafeInteger(page.unavailable_versions)||page.unavailable_versions<0||!Number.isSafeInteger(page.skipped_versions)||page.skipped_versions<0
      ||page.items.length+page.unavailable_versions+page.skipped_versions>page.scanned_versions
@@ -52,7 +52,7 @@ export default function ArtifactTextSearch({conversationId,runId,query}:{convers
        ||!Number.isSafeInteger(proof.from_version)||proof.from_version<1||proof.from_version>=proof.to_version||typeof proof.before_sha256!=='string'||!sha.test(proof.before_sha256)
        ||typeof proof.edit_job_id!=='string'||!id.test(proof.edit_job_id)||typeof proof.edit_result_sha256!=='string'||!sha.test(proof.edit_result_sha256)
        ||typeof proof.diff_sha256!=='string'||!sha.test(proof.diff_sha256)||!validEditedDiffSource(proof.before)||!validEditedDiffSource(proof.after)
-       ||typeof proof.truncated!=='boolean'||proof.execution_authorized!==false||!Number.isSafeInteger(proof.text_total_chars)||proof.text_total_chars<0||proof.text_total_chars>200000)
+       ||typeof proof.truncated!=='boolean'||proof.execution_authorized!==false||!Number.isSafeInteger(proof.text_total_chars)||proof.text_total_chars<0||proof.text_total_chars>(proof.diff_protocol===2?33554688:200000)||proof.diff_protocol!==2)
       ||(hit.document_job_id===undefined
        ?hit.document_result_sha256!==undefined||hit.text_sha256!==undefined||hit.text_total_chars!==undefined||hit.source_truncated!==undefined||hit.document_operation!==undefined||hit.document_read_revision!==undefined
        :hit.document_operation!==undefined&&hit.document_operation!=='document.read'
@@ -88,7 +88,7 @@ export default function ArtifactTextSearch({conversationId,runId,query}:{convers
    </div>
    <button type="button" onClick={()=>{setCursor({identity,previous:[]});setRevision(value=>value+1);}}>刷新文件搜索</button>
    <p role="status">{current?.loading?'正在读取并检索原文件':`本批命中 ${current?.items.length??0} 个文件版本/分卷`} · 本批已检查 {current?.scanned??0} 个原版本/分卷</p>
-   <small>{edited?'检索原编辑作业发布的文档预览差异，每对版本列出首处命中。差异显示范围最多200000字符，原预览截断状态在打开时说明。':'检索本地文本原版本、单卷和已有的文档预览及原读取结果，每个来源列出首处命中。'}成员范围只包含原运行实际引用或产生的版本。</small>
+   <small>{edited?'检索原编辑作业前后已保存文档文本的差异，每对版本列出首处命中。打开后可分页阅读，原文本覆盖缺口会单独说明。':'检索本地文本原版本、单卷和已有的文档预览及原读取结果，每个来源列出首处命中。'}成员范围只包含原运行实际引用或产生的版本。</small>
    {Boolean(current?.unavailable)&&<p role="status">本批有 {current!.unavailable} 个版本/分卷暂不可读取或未通过内容核对。</p>}
    {Boolean(current?.skipped)&&<p role="status">本批有 {current!.skipped} 个版本/分卷{edited?'缺少可确认的原编辑作业或前后文档预览':'为其他格式或尚无可用的已保存文档文本'}，未计入正文匹配。</p>}
    <ol>{current?.items.map(item=><li key={cursorKey(item)}>
@@ -108,7 +108,7 @@ export default function ArtifactTextSearch({conversationId,runId,query}:{convers
    {hit&&<button type="button" onClick={()=>{setSelected(undefined);setFileTarget(undefined);}}>关闭命中文件</button>}
   </div>
   {hit&&(fileTarget?<ActivityArtifactDetails key={JSON.stringify([batchIdentity,fileTarget])} conversationId={conversationId} target={fileTarget} onOpen={setFileTarget}/>
-   :hit.edited_diff?<ArtifactEditedDiff key={JSON.stringify([batchIdentity,hit])} conversationId={conversationId} file={hit} runId={runId} expected={hit.edited_diff} match={{offset:hit.match_offset_chars,text:hit.match_text}}/>
+   :hit.edited_diff?<ArtifactEditedDiff key={JSON.stringify([batchIdentity,hit])} conversationId={conversationId} file={hit} runId={runId} expected={hit.edited_diff} match={{offset:hit.match_offset_chars,text:hit.match_text}} startOffset={hit.offset_chars}/>
    :<ArtifactTextResult key={JSON.stringify([batchIdentity,hit])} conversationId={conversationId} runId={runId} target={hit}/>)}
  </section>;
 }

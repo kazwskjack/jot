@@ -1,4 +1,4 @@
-import type {ArtifactDocumentTextProof} from '../../contracts/types.js';
+import type {ArtifactDocumentTextSource} from '../../contracts/types.js';
 import {createHash} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
 import {canonicalJson} from '../db/canonical-json.ts';
@@ -7,7 +7,7 @@ import {formatDocumentPreviewContent,formatDocumentReadContent,isDocumentPreview
 const sha=(value:string)=>createHash('sha256').update(value).digest('hex');
 const object=(value:unknown):Record<string,unknown>|undefined=>value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:undefined;
 type DocumentSource={artifactId:string;ownerId:string;conversationId:string;version:number;sha256:string;mediaType:string;size:number};
-type RetainedDocumentText=ArtifactDocumentTextProof&{text:string;document_operation?:'document.read';document_read_revision?:1};
+type RetainedDocumentText=ArtifactDocumentTextSource&{text:string};
 /** Read original completed document result text through its original version proof. */
 export function retainedDocumentText(db:DatabaseSync,source:DocumentSource,jobId?:string,resultSha?:string,includeRead=false):RetainedDocumentText{
  if(!isDocumentPreviewMediaType(source.mediaType)||!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ga_file_jobs'").get())throw Error('artifact_text_unsupported');

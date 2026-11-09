@@ -81,3 +81,5 @@ export function readRetainedArtifactTextPage(text:string,offset:number){
  const end=boundary(text,Math.min(offset+PAGE_SIZE,text.length));
  return {offset_chars:offset,total_chars:text.length,text:text.slice(offset,end),...(end<text.length?{next_offset_chars:end}:{})};
 }
+
+export {boundary as artifactTextBoundary};
