@@ -19,7 +19,7 @@ export type GitReinitializationRefPreparation={
 export type GitReinitializationEvidence={
  protocol:2;preparation:GitReinitializationPreparation;ref_preparation:GitReinitializationRefPreparation|null;
  configuration:GitReinitializationRefPreparation['configuration'];config_lock:GitInitializationFile;
- ignore:GitInitializationFile|null;ignore_lock:GitInitializationFile|null;directory_modes?:Array<{path:string;mode:number}>;immutable_metadata_sha256?:string;file_groups?:{configuration:string;ignore:string|null};
+ ignore:GitInitializationFile|null;ignore_lock:GitInitializationFile|null;directory_modes?:Array<{path:string;mode:number}>;immutable_metadata_sha256?:string;file_groups?:{configuration:string;ignore:string|null};ignore_in_place?:{uid:string;gid:string};
 };
 export type GitReinitializationReceipt={
  protocol:2;plan_id:string;action:'init';evidence_sha256:string;
@@ -88,7 +88,7 @@ export function gitReinitializationRefPreparation(value:unknown):GitReinitializa
 export function gitReinitializationEvidence(value:unknown):GitReinitializationEvidence{
  try{
   const evidence=value as GitReinitializationEvidence;
-  if(!shape(evidence,['protocol','preparation','ref_preparation','configuration','config_lock','ignore','ignore_lock',...(evidence?.directory_modes===undefined?[]:['directory_modes']),...(evidence?.immutable_metadata_sha256===undefined?[]:['immutable_metadata_sha256']),...(evidence?.file_groups===undefined?[]:['file_groups'])])||evidence.protocol!==2)throw Error();
+  if(!shape(evidence,['protocol','preparation','ref_preparation','configuration','config_lock','ignore','ignore_lock',...(evidence?.directory_modes===undefined?[]:['directory_modes']),...(evidence?.immutable_metadata_sha256===undefined?[]:['immutable_metadata_sha256']),...(evidence?.file_groups===undefined?[]:['file_groups']),...(evidence?.ignore_in_place===undefined?[]:['ignore_in_place'])])||evidence.protocol!==2)throw Error();
   if(evidence.immutable_metadata_sha256!==undefined&&(typeof evidence.immutable_metadata_sha256!=='string'||!/^[a-f0-9]{64}$/.test(evidence.immutable_metadata_sha256)))throw Error();
   if(evidence.directory_modes!==undefined){
    if(!Array.isArray(evidence.directory_modes)||evidence.directory_modes.length!==initializationDirectories.length)throw Error();
@@ -105,6 +105,11 @@ export function gitReinitializationEvidence(value:unknown):GitReinitializationEv
     ||(witness.ignore_after.changed?!group(evidence.file_groups.ignore):evidence.file_groups.ignore!==null))throw Error();
    const mode=evidence.directory_modes?.[0]?.mode;
    if(mode===undefined||evidence.file_groups.configuration!==((mode&0o2000)?existing.layout!.common.gid:preparation.allocation.gid))throw Error();
+  }
+  if(evidence.ignore_in_place!==undefined){
+   const owner=evidence.ignore_in_place,id=(value:unknown)=>typeof value==='string'&&/^(0|[1-9][0-9]*)$/.test(value);
+   if(!shape(owner,['uid','gid'])||!id(owner.uid)||!id(owner.gid)||!witness.ignore_after.changed||!witness.internal_ignore
+    ||!evidence.file_groups||evidence.file_groups.ignore!==owner.gid)throw Error();
   }
   if(!shape(configuration,['filemode','file'])||typeof configuration.filemode!=='boolean'||!isGitInitializationFile(configuration.file)
    ||configuration.file.size<1||configuration.file.sha256!==(configuration.filemode?existing.configuration!.filemode_true_sha256:existing.configuration!.filemode_false_sha256)
@@ -165,4 +170,13 @@ export function gitReinitializationReceipt(value:unknown,input:unknown):GitReini
   else if(identities.has(internal.identity)||!evidence.ref_preparation||internal.uid!==evidence.ref_preparation.allocation.uid)throw Error();
   return structuredClone(receipt);
  }catch{throw Error('git_reinitialization_receipt_invalid');}
+}
+
+/** Canonical after-facts keep the original inode for an append-only update. */
+export function reinitializationIgnoreTarget(evidence:GitReinitializationEvidence):GitInitializationFile|null{
+ const {witness}=evidence.preparation.plan;
+ if(evidence.ignore_in_place){
+  return{...witness.internal_ignore!,sha256:witness.ignore_after.sha256,size:witness.ignore_after.size};
+ }
+ return witness.ignore_after.changed?evidence.ignore:witness.internal_ignore;
 }

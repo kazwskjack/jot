@@ -1200,3 +1200,37 @@ commands, migrations, UI runtime acceptance or deployment were executed.
 Primary source behavior was read from Git config.c and setup.c. This implementation
 uses original project helpers and fixed commands.
 [Git config.c](https://github.com/git/git/blob/master/config.c), [Git setup.c](https://github.com/git/git/blob/master/setup.c)
+
+## Reinitialization existing-ignore inode ownership, 2026-11-09
+
+Changed existing internal ignore now uses an original append-only publication
+strategy. Original native preparation captures exact current UID/GID around the
+approved before-file proof and records optional ignore_in_place owner facts in
+original typed dispatch. Its private candidate stays 0600 under the allocator's
+own UID/GID, so foreign-owner source data never becomes a foreign-owned scratch
+file that cleanup cannot reclaim. The previous different-UID rejection is removed.
+Strict evidence requires a changed existing ignore and a matching recorded group.
+Newly absent ignore keeps its existing same-volume replacement path. Old dispatch
+without this strategy retains its original replacement interpretation.
+
+The live original publication transaction validates the complete private candidate
+and exact approved original prefix. It opens only the existing canonical file with
+no-follow/nonblocking append access, without create or truncate. Bounded suffix
+writes repeat native authorization, descriptor/path inode, regular-file/link count,
+size and UID/GID checks. Append mode preserves concurrently appended bytes and an
+unexpected size makes the result unknown. It syncs, checks original mode and exact
+approved final file facts, and closes the descriptor on every exit. A partial
+append keeps the existing prefix and never rolls back or replays its suffix.
+
+Canonical target-fact derivation now retains the original inode/mode while binding
+the approved final hash/size. Live phase checks and the original repeated observer
+validate this target plus UID/GID. Exact-owned empty locks and private allocations
+still use original cleanup and native drain/settlement. A complete observed result
+can produce the original receipt, and partial/changed content remains unknown.
+Original fresh-init proof/observer logic is retained. Special-mode restoration and
+unusual filesystem/group/platform cases remain to complete, as do native/UI
+admission, linked/external/damaged coverage, branch checkout/deletion, reference
+backend coverage and all other P09 requirements. M15.14 stays in progress and
+original protocol-8 admission remains gated. Per the user's source-only direction,
+no tests, typechecks, builds, product/native operations, maintenance commands,
+migrations, UI runtime acceptance or deployment were executed.
