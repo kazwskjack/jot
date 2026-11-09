@@ -2,6 +2,7 @@ import type {Capabilities} from '../jot/types';
 import type {BrowserActionReadinessItem} from '../../packages/gateway/contracts/types';
 export type {BrowserActionReadinessItem};
 export type {ProjectPage,GitSnapshot,GitDiff,GitBranchInventory,GitEntry} from '../../packages/gateway/contracts/types';
+export type {GitBranchReviewIntent,GitBranchReviewPrepare} from '../../packages/gateway/contracts/types';
 export type {GitReviewPrepare,GitReviewControl,GitReviewIntent} from '../../packages/gateway/contracts/types';
 export type {WorkPublicationPrepare,WorkPublicationControl,WorkPublicationReview,WorkPublicationSource} from '../../packages/gateway/contracts/types';
 export type {WorkPublicationAdmission,WorkPublicationAcceptance,WorkPublicationStatus} from '../../packages/gateway/contracts/types';

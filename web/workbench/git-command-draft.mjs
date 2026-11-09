@@ -7,14 +7,20 @@ const storageValue=value=>typeof value==='function'?value():value;
 const prefix=(scope,project)=>{if(typeof scope!=='string'||!SHA.test(scope))invalid();id(project);return 'jot-git-request:v1:'+scope+':'+encodeURIComponent(project)+':'};
 const changed=()=>{if(globalThis.window?.dispatchEvent)window.dispatchEvent(new window.Event(EVENT))};
 export const gitCommandDraftEvent=EVENT;
-/** @typedef {{kind:'review-prepare'}|{kind:'admit',intent_id:string}|{kind:'review-control',intent_id:string}|{kind:'control',execution_id:string}} CommandHint */
+/** @typedef {{kind:'review-prepare'}|{kind:'branch-review-prepare'}|{kind:'branch-review-control',intent_id:string}|{kind:'admit',intent_id:string}|{kind:'review-control',intent_id:string}|{kind:'control',execution_id:string}} CommandHint */
 /** @returns {CommandHint} */
 function command(value,project){
  object(value,['path','method','body','key']);if(value.method!=='POST'||typeof value.path!=='string'||value.path.length>4096)invalid();id(value.key);
- const parts=/^\/projects\/([^/]+)\/git\/(intents|executions)(?:\/([^/]+)\/(admissions|control|controls))?$/.exec(value.path);if(!parts||encoded(parts[1])!==project)invalid();
- const body=value.body;object(body,['request_id','action','paths','snapshot_id','message','expected_version','review_sha256','expected_state_sha256','acknowledge_unknown']);id(body.request_id);
+ const parts=/^\/projects\/([^/]+)\/git\/(intents|branch-intents|executions)(?:\/([^/]+)\/(admissions|control|controls))?$/.exec(value.path);if(!parts||encoded(parts[1])!==project)invalid();
+ const body=value.body;object(body,['request_id','action','branch','paths','snapshot_id','message','expected_version','review_sha256','expected_state_sha256','acknowledge_unknown']);id(body.request_id);
  const exact=keys=>{if(Object.keys(body).length!==keys.length||Object.keys(body).some(key=>!keys.includes(key)))invalid()};
  const version=()=>{if(!Number.isSafeInteger(body.expected_version)||body.expected_version<1||typeof body.review_sha256!=='string'||!SHA.test(body.review_sha256))invalid()};
+ if(parts[2]==='branch-intents'&&!parts[3]){
+  exact(['request_id','action','branch','snapshot_id']);
+  if(body.action!=='create-branch'||typeof body.branch!=='string'||!body.branch||body.branch.length>1013
+   ||typeof body.snapshot_id!=='string'||!SHA.test(body.snapshot_id))invalid();
+  return{kind:'branch-review-prepare'};
+ }
  if(parts[2]==='intents'&&!parts[3]){
   if(!['stage','unstage','commit','discard','delete-untracked'].includes(body.action))invalid();exact(['request_id','action','paths','snapshot_id',...(body.action==='commit'?['message']:[])]);
   if(typeof body.snapshot_id!=='string'||!SHA.test(body.snapshot_id)||!Array.isArray(body.paths)||!body.paths.length||body.paths.length>5000||new Set(body.paths).size!==body.paths.length)invalid();
@@ -25,6 +31,7 @@ function command(value,project){
  if(!parts[3])invalid();const target=encoded(parts[3]);
  if(parts[2]==='intents'&&parts[4]==='admissions'){exact(['request_id','expected_version','review_sha256']);version();return{kind:'admit',intent_id:target}}
  if(parts[2]==='intents'&&parts[4]==='control'){exact(['request_id','expected_version','review_sha256','action']);version();if(!['approve','cancel'].includes(body.action))invalid();return{kind:'review-control',intent_id:target}}
+ if(parts[2]==='branch-intents'&&parts[4]==='control'){exact(['request_id','expected_version','review_sha256','action']);version();if(!['approve','cancel'].includes(body.action))invalid();return{kind:'branch-review-control',intent_id:target}}
  if(parts[2]==='executions'&&parts[4]==='controls'){exact(['request_id','expected_state_sha256','acknowledge_unknown']);if(typeof body.expected_state_sha256!=='string'||!SHA.test(body.expected_state_sha256)||body.acknowledge_unknown!==true)invalid();return{kind:'control',execution_id:target}}
  invalid();
 }

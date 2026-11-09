@@ -24,6 +24,7 @@ export default function GitPanel({caps}:{caps:Caps}){
  const closeReview=()=>{setRestoreReviewFocus(true);setDraft(null);};
  const available=projects.data?.items.filter(project=>configured.includes(project.project_id))??[],project=available.some(value=>value.project_id===selected)?selected:available[0]?.project_id??'';
  const commitAllowed=caps.git_workbench?.read_only===false&&caps.git_workbench.commit_projects?.includes(project)===true;
+ const branchAllowed=caps.git_workbench?.read_only===false&&caps.git_workbench.branch_projects?.includes(project)===true;
  const snapshot=useResource(signal=>workbenchApi.git(project,signal),'git-snapshot:'+project,Boolean(project)),state=!snapshot.error&&!snapshot.loading&&snapshot.data?.project_id===project?snapshot.data:null;
  const active=selection?.project===project&&state?.snapshot_id===selection.snapshot?selection:undefined;
  const diff=useResource(signal=>workbenchApi.gitDiff(active!.project,active!.snapshot,active!.path,active!.stage,signal),'git-diff:'+JSON.stringify(active??null),Boolean(active));
@@ -35,12 +36,12 @@ export default function GitPanel({caps}:{caps:Caps}){
   <h2>Git 工作台</h2><p className="wb-page-intro">查看项目的分支与文件变化。<span className="wb-badge">{commitAllowed?'可审核提交':caps.git_workbench?.read_only===false?'可审核暂存':'只读'}</span></p>
   {!configured.length?<p role="status">尚未绑定项目仓库，请先完成服务端配置。</p>:<>
    <ResourceStatus {...projects} onRetry={projects.reload}/><div className="wb-toolbar"><label>项目仓库<select aria-label="项目仓库" disabled={locked} value={project} onChange={event=>{setDraft(null);setSelection(undefined);setSelected(event.target.value);}}>{available.map(value=><option key={value.project_id} value={value.project_id}>{value.title}</option>)}</select></label><button type="button" disabled={locked||!project||snapshot.loading} onClick={refresh}>刷新仓库</button></div>
-   {project&&<GitPendingRequests key={'pending:'+project} project={project} allowDispatch={caps.git_workbench?.read_only===false} allowCommitDispatch={commitAllowed} onPending={setRecoveryPending}/>}
-   {project&&<GitHistory key={project} project={project} locked={reviewBusy} allowDispatch={caps.git_workbench?.read_only===false} allowCommitDispatch={commitAllowed} onBusy={setReviewBusy}/>}
+   {project&&<GitPendingRequests key={'pending:'+project} project={project} allowDispatch={caps.git_workbench?.read_only===false} allowCommitDispatch={commitAllowed} allowBranchDispatch={branchAllowed} onPending={setRecoveryPending}/>}
+   {project&&<GitHistory key={project} project={project} locked={reviewBusy} allowDispatch={caps.git_workbench?.read_only===false} allowCommitDispatch={commitAllowed} allowBranchDispatch={branchAllowed} onBusy={setReviewBusy}/>}
    <ResourceStatus loading={snapshot.loading} error={message(snapshot.error)} onRetry={refresh}/>
    {state&&<>
     <div className="wb-git-head"><strong>{state.head.branch??(state.head.detached?'分离 HEAD':'未命名分支')}</strong><code>{state.head.oid?.slice(0,12)??'尚无提交'}</code></div>
-    <GitBranches key={project+':'+state.snapshot_id} project={project} snapshotId={state.snapshot_id} locked={locked} onRefresh={refresh}/>
+    <GitBranches key={project+':'+state.snapshot_id} project={project} snapshotId={state.snapshot_id} locked={locked} onRefresh={refresh} onBusy={setReviewBusy} allowCreate={branchAllowed} identityReady={state.commit_identity_ready===true}/>
     {state.remotes.length>0&&<p className="wb-hint">{state.remotes.map(remote=>remote.name+' · '+(remote.host??(remote.kind==='local'?'本地':'其他远端'))).join(' / ')}</p>}
     {!state.entries.length&&<p role="status">工作区没有可展示的变更。</p>}{state.omitted_count>0&&<p className="wb-hint">{state.omitted_count} 个受保护路径未展示。</p>}
     <div className="wb-git-files"><div><h3>暂存区</h3>{rows('staged').length?<ul>{rows('staged').map(entry=>row(entry,'staged'))}</ul>:<p className="wb-hint">没有暂存变更。</p>}</div><div><h3>工作区</h3>{rows('working').length?<ul>{rows('working').map(entry=>row(entry,'working'))}</ul>:<p className="wb-hint">没有未暂存变更。</p>}</div></div>

@@ -1,33 +1,50 @@
 import React,{useEffect,useRef,useState} from 'react';
-import type {GitIndexAcceptance,GitIndexStatus,GitIndexControlInput,GitReviewIntent} from './types';
+import type {GitIndexAcceptance,GitIndexStatus,GitIndexControlInput,GitReviewIntent,GitBranchReviewIntent} from './types';
 import {pathId,workbenchApi} from './client';import {useGitMutationReceipt} from './useGitMutationReceipt';
 import {mutationRejected} from './task-save-receipt.mjs';
+type Review=GitReviewIntent|GitBranchReviewIntent;
 type Pending={kind:'admit'|'control'|'review-cancel';path:string;body:Record<string,unknown>};
-function checkAcceptance(a:GitIndexAcceptance,project:string,intent:string){if(a.project_id!==project||a.intent_id!==intent||a.accepted!==true||a.execution_authorized!==false||!['stage','unstage','commit'].includes(a.action))throw Error('GIT_INDEX_SCOPE_CHANGED');return a}
-function checkedStatus(s:GitIndexStatus,a:GitIndexAcceptance){const e=s.execution;if(a.action==='commit'&&(e.action!=='commit'||e.target_ref!==a.target_ref||e.expected_old_oid!==a.expected_old_oid))throw Error('GIT_INDEX_SCOPE_CHANGED');if(e.execution_id!==a.execution_id||e.project_id!==a.project_id||e.intent_id!==a.intent_id||e.request_id!==a.request_id||e.action!==a.action||s.producer.execution_id!==a.execution_id||s.execution_authorized!==false||e.execution_authorized!==false||s.producer.execution_authorized!==false)throw Error('GIT_INDEX_SCOPE_CHANGED');return s}
+function checkAcceptance(a:GitIndexAcceptance,project:string,intent:string){
+ if(a.project_id!==project||a.intent_id!==intent||a.accepted!==true||a.execution_authorized!==false
+  ||!['stage','unstage','commit','create-branch'].includes(a.action))throw Error('GIT_INDEX_SCOPE_CHANGED');
+ return a;
+}
+function checkedStatus(s:GitIndexStatus,a:GitIndexAcceptance){
+ const e=s.execution;
+ if(a.action==='create-branch'&&(e.action!=='create-branch'||e.branch!==a.branch||e.target_ref!==a.target_ref||e.target_oid!==a.target_oid
+  ||e.head.oid!==a.head.oid||e.head.branch!==a.head.branch||e.head.detached!==a.head.detached
+  ||JSON.stringify(e.branch_metadata??null)!==JSON.stringify(a.branch_metadata??null)))throw Error('GIT_INDEX_SCOPE_CHANGED');
+ if(a.action==='commit'&&(e.action!=='commit'||e.target_ref!==a.target_ref||e.expected_old_oid!==a.expected_old_oid))throw Error('GIT_INDEX_SCOPE_CHANGED');
+ if(e.execution_id!==a.execution_id||e.project_id!==a.project_id||e.intent_id!==a.intent_id||e.request_id!==a.request_id||e.action!==a.action
+  ||s.producer.execution_id!==a.execution_id||s.execution_authorized!==false||e.execution_authorized!==false||s.producer.execution_authorized!==false)throw Error('GIT_INDEX_SCOPE_CHANGED');
+ return s;
+}
 const ready=(s:GitIndexStatus)=>s.execution.state==='pending'&&s.producer.state==='not_started'&&s.workspace_state==='not_reserved'&&!s.control;
 const finished=(s:GitIndexStatus)=>s.execution.state==='applied'&&s.workspace_state==='released_settled'||['not_dispatched','abandoned_unknown'].includes(s.execution.state)&&s.workspace_state!=='reserved';
 
 /** Same original admission/receipt authority. Native response loss triggers
  * read-only reconciliation, never an automatic replay of physical effects. */
-export default function GitIndexOperation({project,review,acceptance,allowDispatch,allowCommitDispatch=false,onBusy,onReviewChange,onChanged,refreshToken=0}:{project:string;review?:GitReviewIntent;acceptance?:GitIndexAcceptance;allowDispatch:boolean;allowCommitDispatch?:boolean;onBusy?:(value:boolean)=>void;onReviewChange?:(review:GitReviewIntent)=>void;onChanged?:()=>void;refreshToken?:number}){
- const mutation=useGitMutationReceipt(project),[accepted,setAccepted]=useState<GitIndexAcceptance|null>(acceptance??null),[status,setStatus]=useState<GitIndexStatus|null>(null),[currentReview,setCurrentReview]=useState<GitReviewIntent|null>(review??null),[verified,setVerified]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[ack,setAck]=useState(false),[attempted,setAttempted]=useState(false);
- const command=useRef<Pending|null>(null),alive=useRef(true),inflight=useRef(false),active=useRef<AbortController|null>(null),report=useRef(onBusy),changed=useRef(onChanged),reviewChanged=useRef(onReviewChange),reviewSnapshot=useRef<GitReviewIntent|null>(review??null);report.current=onBusy;changed.current=onChanged;reviewChanged.current=onReviewChange;
- const commit=(accepted?.action??review?.action)==='commit',allowed=commit?allowCommitDispatch:allowDispatch;
+export default function GitIndexOperation({project,review,acceptance,allowDispatch,allowCommitDispatch=false,allowBranchDispatch=false,onBusy,onReviewChange,onBranchReviewChange,onChanged,refreshToken=0}:{project:string;review?:Review;acceptance?:GitIndexAcceptance;allowDispatch:boolean;allowCommitDispatch?:boolean;allowBranchDispatch?:boolean;onBusy?:(value:boolean)=>void;onReviewChange?:(review:GitReviewIntent)=>void;onBranchReviewChange?:(review:GitBranchReviewIntent)=>void;onChanged?:(status:GitIndexStatus)=>void;refreshToken?:number}){
+ const mutation=useGitMutationReceipt(project),[accepted,setAccepted]=useState<GitIndexAcceptance|null>(acceptance??null),[status,setStatus]=useState<GitIndexStatus|null>(null),[currentReview,setCurrentReview]=useState<Review|null>(review??null),[verified,setVerified]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[ack,setAck]=useState(false),[attempted,setAttempted]=useState(false);
+ const command=useRef<Pending|null>(null),alive=useRef(true),inflight=useRef(false),active=useRef<AbortController|null>(null),report=useRef(onBusy),changed=useRef(onChanged),reviewChanged=useRef(onReviewChange),branchReviewChanged=useRef(onBranchReviewChange),reviewSnapshot=useRef<Review|null>(review??null);report.current=onBusy;changed.current=onChanged;reviewChanged.current=onReviewChange;branchReviewChanged.current=onBranchReviewChange;
+ const kind=accepted?.action??review?.action,commit=kind==='commit',branch=kind==='create-branch',allowed=branch?allowBranchDispatch:commit?allowCommitDispatch:allowDispatch;
  const intent=acceptance?.intent_id??review?.intent_id??'',base=`/projects/${pathId(project)}/git`,isClosed=!!status&&finished(status);
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;active.current?.abort();report.current?.(false)}},[project,intent]);
  useEffect(()=>{report.current?.(busy||mutation.pending)},[busy,mutation.pending]);
  useEffect(()=>{if(review){reviewSnapshot.current=review;setCurrentReview(review)}},[review?.intent_id,review?.version,review?.state]);
  const check=(signal:AbortSignal)=>{signal.throwIfAborted();if(!alive.current)throw new DOMException('Aborted','AbortError')};
  const read=async(a:GitIndexAcceptance,signal:AbortSignal)=>{
-  checkAcceptance(a,project,intent);const [s,r]=await Promise.all([workbenchApi.gitStatus(project,a.execution_id,signal),workbenchApi.gitReview(project,intent,signal)]);check(signal);checkedStatus(s,a);
+  checkAcceptance(a,project,intent);const [s,r]=await Promise.all([workbenchApi.gitStatus(project,a.execution_id,signal),a.action==='create-branch'?workbenchApi.gitBranchReview(project,intent,signal):workbenchApi.gitReview(project,intent,signal)]);check(signal);checkedStatus(s,a);
   if(r.intent_id!==intent||r.project_id!==project||r.action!==a.action||r.execution_authorized!==false)throw Error('GIT_INDEX_SCOPE_CHANGED');
+  if(a.action==='create-branch'){
+   if(r.action!=='create-branch'||r.branch!==a.branch||r.target_ref!==a.target_ref||r.target_oid!==a.target_oid||r.head.oid!==a.head.oid||r.head.branch!==a.head.branch||r.head.detached!==a.head.detached||JSON.stringify(r.branch_metadata??null)!==JSON.stringify(a.branch_metadata??null))throw Error('GIT_INDEX_SCOPE_CHANGED');
+  }
   if(a.action==='commit'){
-   const metadata=r.commit_metadata,e=s.execution;
+   const metadata=r.action==='commit'?r.commit_metadata:undefined,e=s.execution;
    if(!metadata||metadata.target_ref!==a.target_ref||metadata.parent_oid!==a.expected_old_oid||e.action!=='commit'
     ||e.state==='applied'&&e.tree_oid!==metadata.tree_oid)throw Error('GIT_INDEX_SCOPE_CHANGED');
   }
-  reviewSnapshot.current=r;setAccepted(a);setStatus(s);setCurrentReview(r);setVerified(true);setAck(false);reviewChanged.current?.(r);changed.current?.();return s;
+  reviewSnapshot.current=r;setAccepted(a);setStatus(s);setCurrentReview(r);setVerified(true);setAck(false);if(r.action==='create-branch')branchReviewChanged.current?.(r);else reviewChanged.current?.(r);changed.current?.(s);return s;
  };
  const submitCommand=async()=>{
   const pending=command.current;
@@ -48,12 +65,12 @@ export default function GitIndexOperation({project,review,acceptance,allowDispat
  const admit=async(retry=false)=>{
   const c=begin();if(!c)return;
   try{
-   if(!command.current){if(!allowed||!review||review.state!=='approved'||!['stage','unstage','commit'].includes(review.action))throw Error('GIT_INDEX_SCOPE_CHANGED');command.current={kind:'admit',path:base+'/intents/'+pathId(intent)+'/admissions',body:{request_id:crypto.randomUUID(),expected_version:review.version,review_sha256:review.review_sha256}}}
+   if(!command.current){if(!allowed||!review||review.state!=='approved'||!['stage','unstage','commit','create-branch'].includes(review.action))throw Error('GIT_INDEX_SCOPE_CHANGED');command.current={kind:'admit',path:base+'/intents/'+pathId(intent)+'/admissions',body:{request_id:crypto.randomUUID(),expected_version:review.version,review_sha256:review.review_sha256}}}
    if(command.current.kind!=='admit')throw Error('GIT_INDEX_SCOPE_CHANGED');
    const a=checkAcceptance(await submitCommand() as GitIndexAcceptance,project,intent);check(c.signal);command.current=null;setAccepted(a);const s=await read(a,c.signal);
    // Recovering an atomic admission response does not replay the subsequent I/O.
    const approval=reviewSnapshot.current;
-   if(!retry&&a.action!=='commit'&&ready(s)&&approval?.state==='approved'&&approval.review_sha256===review?.review_sha256&&approval.version===review?.version)await dispatch(a,c);
+   if(!retry&&a.action!=='commit'&&a.action!=='create-branch'&&ready(s)&&approval?.state==='approved'&&approval.review_sha256===review?.review_sha256&&approval.version===review?.version)await dispatch(a,c);
   }catch{fail()}finally{end()}
  };
  const execute=async()=>{if(!accepted){await admit();return}if(!status||!verified||!ready(status)||attempted||!allowed||currentReview?.state!=='approved')return;const c=begin();if(!c)return;try{await dispatch(accepted,c)}finally{end()}};
@@ -73,17 +90,24 @@ export default function GitIndexOperation({project,review,acceptance,allowDispat
  const cancelReview=async()=>{
   if(!accepted)return;const c=begin();if(!c)return;
   try{
-   if(!command.current){if(!verified||!currentReview||currentReview.state!=='approved'||!status||finished(status))throw Error('GIT_INDEX_SCOPE_CHANGED');command.current={kind:'review-cancel',path:base+'/intents/'+pathId(intent)+'/control',body:{request_id:crypto.randomUUID(),expected_version:currentReview.version,review_sha256:currentReview.review_sha256,action:'cancel'}}}
-   if(command.current.kind!=='review-cancel')throw Error('GIT_INDEX_SCOPE_CHANGED');const r=await submitCommand() as GitReviewIntent;check(c.signal);if(r.project_id!==project||r.intent_id!==intent||r.state!=='cancelled'||r.execution_authorized!==false)throw Error('GIT_INDEX_SCOPE_CHANGED');command.current=null;await read(accepted,c.signal);
+   if(!command.current){if(!verified||!currentReview||currentReview.state!=='approved'||!status||finished(status))throw Error('GIT_INDEX_SCOPE_CHANGED');command.current={kind:'review-cancel',path:base+(branch?'/branch-intents/':'/intents/')+pathId(intent)+'/control',body:{request_id:crypto.randomUUID(),expected_version:currentReview.version,review_sha256:currentReview.review_sha256,action:'cancel'}}}
+   if(command.current.kind!=='review-cancel')throw Error('GIT_INDEX_SCOPE_CHANGED');const r=await submitCommand() as Review;check(c.signal);if(r.project_id!==project||r.intent_id!==intent||r.action!==accepted.action||r.state!=='cancelled'||r.execution_authorized!==false)throw Error('GIT_INDEX_SCOPE_CHANGED');command.current=null;await read(accepted,c.signal);
   }catch{fail()}finally{end()}
  };
- const locked=busy||mutation.pending,canExecute=allowed&&!attempted&&(accepted?verified&&!!status&&ready(status)&&currentReview?.state==='approved':review?.state==='approved');
- return <section className="wb-form" aria-label={commit?'提交执行':'选定文件执行'}><p role="status">{!accepted?(commit?'审核批准后，先受理此提交，再派发已审核的暂存树。':'只执行本次批准的选定文件，不提交或丢弃工作区内容。'):!verified?'当前执行状态尚未确认。':status?.execution.state==='applied'&&status.workspace_state==='released_settled'?'变更已应用，工作区已释放。':isClosed&&status?.execution.state==='not_dispatched'?'操作未执行，工作区已释放。':isClosed?'操作已结束，实际效果仍未确认。':status?.workspace_state==='reserved'?'原操作仍占用工作区，尚未完成收尾。':'操作已受理，尚未执行。'}</p>
+ const branchReady=!branch||currentReview?.action==='create-branch'&&!!currentReview.branch_metadata?.configuration_sha256;
+ const locked=busy||mutation.pending,canExecute=allowed&&branchReady&&!attempted&&(accepted?verified&&!!status&&ready(status)&&currentReview?.state==='approved':review?.state==='approved');
+ return <section className="wb-form" aria-label={branch?'创建分支执行':commit?'提交执行':'选定文件执行'}><p role="status">{!accepted?(branch?'批准审核后，先受理创建分支，再单独派发。':commit?'审核批准后，先受理此提交，再派发已审核的暂存树。':'只执行本次批准的选定文件，不提交或丢弃工作区内容。'):!verified?'当前执行状态尚未确认。':status?.execution.state==='applied'&&status.workspace_state==='released_settled'?'变更已应用，工作区已释放。':isClosed&&status?.execution.state==='not_dispatched'?'操作未执行，工作区已释放。':isClosed?'操作已结束，实际效果仍未确认。':status?.workspace_state==='reserved'?'原操作仍占用工作区，尚未完成收尾。':'操作已受理，尚未执行。'}</p>
+  {accepted?.action==='create-branch'&&<>
+   <p style={{overflowWrap:'anywhere'}}>创建并切换到 <code>{accepted.target_ref}</code>，起点 <code>{accepted.target_oid??'尚无提交'}</code>，原 HEAD <code>{accepted.head.branch??'分离 HEAD'}</code>。</p>
+   {accepted.branch_metadata&&<p style={{overflowWrap:'anywhere'}}>日志身份 {accepted.branch_metadata.committer.name} &lt;{accepted.branch_metadata.committer.email}&gt; · {accepted.branch_metadata.committer.timestamp}。HEAD 日志{accepted.branch_metadata.logs.head?'追加':'跳过'}，分支日志{accepted.branch_metadata.logs.branch?'追加':'跳过'}。</p>}
+   {accepted.branch_metadata?.configuration_sha256&&<p style={{overflowWrap:'anywhere'}}>自动 tracking 配置审核 SHA-256 <code>{accepted.branch_metadata.configuration_sha256}</code>。{accepted.branch_metadata.configuration_changed&&'计划写入新分支 tracking 配置。'}</p>}
+  </>}
+  {status?.execution.action==='create-branch'&&status.execution.state==='applied'&&<p style={{overflowWrap:'anywhere'}}>写入记录 SHA-256 <code>{status.execution.preparation_sha256}</code>。</p>}
   {accepted?.action==='commit'&&<p>提交受理已固定目标 <code>{accepted.target_ref}</code> 与父提交 <code>{accepted.expected_old_oid??'首个提交'}</code>。</p>}
   {status?.execution.action==='commit'&&status.execution.state==='applied'&&<p style={{overflowWrap:'anywhere'}}>提交 <code>{status.execution.commit_oid}</code>，暂存树 <code>{status.execution.tree_oid}</code>。</p>}
   {status?.control_receipt?.state==='completed'&&status.control_receipt.cleanup==='unverified'&&<p role="status">锁文件清理尚未确认，请核对原仓库状态。</p>}
   {accepted&&<p style={{overflowWrap:'anywhere'}}><code>{accepted.execution_id}</code></p>}{status&&<ul>{status.execution.paths.map(path=><li key={path} style={{overflowWrap:'anywhere'}}><code>{path}</code></li>)}</ul>}
-  {!isClosed&&canExecute&&<button type="button" disabled={locked} onClick={()=>void execute()}>{commit?(accepted?'提交已审核暂存树':'受理已批准的提交'):'执行选定变更'}</button>}
+  {!isClosed&&canExecute&&<button type="button" disabled={locked} onClick={()=>void execute()}>{branch?(accepted?'创建并切换分支':'受理已批准的分支创建'):commit?(accepted?'提交已审核暂存树':'受理已批准的提交'):'执行选定变更'}</button>}
   {accepted&&<button type="button" disabled={locked} onClick={()=>void refresh()}>刷新执行状态</button>}
   {accepted&&verified&&!isClosed&&currentReview?.state==='approved'&&<button type="button" disabled={locked} onClick={()=>void cancelReview()}>取消原审核</button>}
   {accepted&&verified&&status&&!isClosed&&!mutation.pending&&<div>{!status.control&&<label><input type="checkbox" checked={ack} disabled={busy} onChange={event=>setAck(event.target.checked)}/>我已核对当前结果，确认结束原操作；这不会回滚未知变更。</label>}<button type="button" disabled={busy||!status.control&&!ack} onClick={()=>void recover()}>{status.control?'完成原操作收尾':'核对并结束原操作'}</button></div>}

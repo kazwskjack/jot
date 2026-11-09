@@ -288,3 +288,38 @@ creation/recovery UI remain in M15.14. This source increment did not execute
 tests, typechecks, builds, product/native commands, migrations, deployment or
 UI acceptance. The production schema still requires its explicit offline
 branch upgrade before protocol-6 admission.
+
+## P09 create-branch UI and capability
+
+The branch list opens a project/snapshot-scoped creation review. It displays the
+fixed new ref and starting OID, original HEAD, committer/time, log decisions,
+automatic tracking configuration digest and review digest. Approval and
+cancellation use the existing original branch-review routes. Historical reviews
+without complete metadata remain readable and cancellable.
+
+GitIndexOperation now also handles branch acceptance, explicit dispatch,
+review cancellation and confirmed recovery. It retains the original index and
+commit paths and callbacks. Branch acceptance, review and status must agree on
+the original project, intent, request, branch/ref/OID, HEAD and frozen metadata.
+Creation requires separate approval, admission and explicit native dispatch.
+Recovery of an atomic admission response performs read-only reconciliation.
+Successful applied and settled creation refreshes the repository snapshot.
+
+Original owner/project-scoped command storage now accepts only the additional
+branch-review prepare/control shapes. It retains the same request ID, body and
+HTTP receipt key for unknown responses and reload recovery. Listing stored
+requests and reading history never dispatch effects. History can open the same
+original operation component for branch status, cancellation and explicit
+recovery. Its original metadata and cleanup-unverified display remain available.
+
+The server advertises optional branch_projects only for current owned project
+bindings with a configured actor, native Git client and installed branch schema.
+Older capability callers retain their existing defaults. The shared capability
+contract and JSON/YAML source definitions include the optional branch project
+list and prohibit it for read-only capability. Existing branch admission and
+native owner/review/lease/custody checks remain authoritative.
+
+Initialization, existing-branch checkout/deletion and remaining P09 operations
+continue under M15.14 and their original IDs. This increment is source development
+only. Tests, typechecks, builds, native/product execution, UI rendering,
+migrations and deployment were not executed.

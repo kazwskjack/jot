@@ -3,7 +3,7 @@ import type {WorkbenchMemoryImportTarget,WorkbenchMemoryImportPreview,WorkbenchM
 import {createHostAdminClient} from './host-admin-client.mjs';
 import type {MemoryRetrieval,MemoryRetrievalPage} from './types';
 import type {ProjectPage,GitSnapshot,GitDiff,GitBranchInventory} from './types';
-import type {GitReviewIntent} from './types';
+import type {GitReviewIntent,GitBranchReviewIntent} from './types';
 import type {WorkPublicationReview,WorkPublicationSource,WorkPublicationAcceptance,WorkPublicationStatus,WorkPublicationSettlementReceipt,WorkPublicationHistory} from './types';
 import type {GitIndexAcceptance,GitIndexExecutionResult} from './types';
 import type {GitIndexAdmissionInput,GitIndexControlInput,GitIndexControlAcceptance,GitIndexInspection,GitIndexControlReceipt} from './types';
@@ -54,6 +54,7 @@ export const workbenchApi={
  git:(project:string,signal?:AbortSignal)=>request<GitSnapshot>(`/projects/${pathId(project)}/git`,'GET',undefined,undefined,signal),
  gitBranches:(project:string,snapshot:string,signal?:AbortSignal)=>request<GitBranchInventory>(`/projects/${pathId(project)}/git/branches?${new URLSearchParams({snapshot_id:snapshot})}`,'GET',undefined,undefined,signal),
  gitDiff:(project:string,snapshot:string,file:string,stage:'working'|'staged',signal?:AbortSignal)=>request<GitDiff>(`/projects/${pathId(project)}/git/diff?snapshot_id=${pathId(snapshot)}&path=${pathId(file)}&stage=${stage}`,'GET',undefined,undefined,signal),
+ gitBranchReview:(project:string,intent:string,signal?:AbortSignal)=>request<GitBranchReviewIntent>(`/projects/${pathId(project)}/git/branch-intents/${pathId(intent)}`,'GET',undefined,undefined,signal),
  gitReview:(project:string,intent:string,signal?:AbortSignal)=>request<GitReviewIntent>(`/projects/${pathId(project)}/git/intents/${pathId(intent)}`,'GET',undefined,undefined,signal),
  publicationReview:(project:string,intent:string,signal?:AbortSignal)=>request<WorkPublicationReview>(`/projects/${pathId(project)}/work-publications/${pathId(intent)}`,'GET',undefined,undefined,signal),
  publicationSource:(project:string,run:string,signal?:AbortSignal)=>request<WorkPublicationSource>(`/projects/${pathId(project)}/work-publication-sources/${pathId(run)}`,'GET',undefined,undefined,signal),

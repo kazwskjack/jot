@@ -10,7 +10,7 @@ export type ModelSelection = { provider: string; model: string; reasoning_effort
 
 export type CapabilitySet = { search: boolean; fetch: boolean; browser_interaction: boolean; file_read: boolean; file_edit: boolean; command_execution: boolean; questions: boolean; approvals: boolean; artifact_download: boolean; resume_checkpoint: boolean };
 
-export type GitWorkbenchCapability = {configured_projects:string[]} & ({read_only:true}|{read_only:false;index_actions:['stage','unstage'];commit_projects?:string[]});
+export type GitWorkbenchCapability = {configured_projects:string[]} & ({read_only:true}|{read_only:false;index_actions:['stage','unstage'];commit_projects?:string[];branch_projects?:string[]});
 
 export type WorkspaceSelection = {workspace_id:string;version:number;configured:boolean};
 export type SelectWorkspace = {workspace_id:string;expected_version:number};

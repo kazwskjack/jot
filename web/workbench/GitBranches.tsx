@@ -1,10 +1,12 @@
-import React,{useState} from 'react';
+import React,{useLayoutEffect,useRef,useState} from 'react';
 import {workbenchApi} from './client';
 import {useResource} from './useResource';
 import {ResourceStatus} from './PanelStatus';
+import GitBranchReview from './GitBranchReview';
 
-export default function GitBranches({project,snapshotId,locked,onRefresh}:{project:string;snapshotId:string;locked:boolean;onRefresh:()=>void}){
- const [opened,setOpened]=useState(false);
+export default function GitBranches({project,snapshotId,locked,onRefresh,onBusy,allowCreate=false,identityReady=false}:{project:string;snapshotId:string;locked:boolean;onRefresh:()=>void;onBusy:(busy:boolean)=>void;allowCreate?:boolean;identityReady?:boolean}){
+ const [opened,setOpened]=useState(false),[creating,setCreating]=useState(false),[restoreFocus,setRestoreFocus]=useState(false),opener=useRef<HTMLButtonElement>(null);
+ useLayoutEffect(()=>{if(!creating&&restoreFocus){opener.current?.focus();setRestoreFocus(false)}},[creating,restoreFocus]);
  const inventory=useResource(async signal=>{
   const value=await workbenchApi.gitBranches(project,snapshotId,signal);
   if(value.project_id!==project||value.snapshot_id!==snapshotId||value.read_only!==true||value.execution_authorized!==false)throw Error('GIT_BRANCH_SCOPE_CHANGED');
@@ -16,12 +18,13 @@ export default function GitBranches({project,snapshotId,locked,onRefresh}:{proje
   <button type="button" disabled={locked} aria-expanded={opened} onClick={()=>setOpened(value=>!value)}>分支列表</button>
   {opened&&<>
    <ResourceStatus loading={inventory.loading} error={error} onRetry={onRefresh}/>
-   {state&&<>{!state.branches.length?<p role="status">尚无已提交的分支引用。{state.head.detached?'当前处于分离 HEAD。':<>当前分支 <code>{state.head.branch??'未命名'}</code>。</>}</p>:<ul aria-label="本地与远端分支">{state.branches.map(branch=><li key={branch.ref}>
+   {state&&<>{!creating&&<button ref={opener} type="button" disabled={locked||!identityReady} onClick={()=>setCreating(true)}>创建分支</button>}{!identityReady&&<p role="status">创建分支审核需要配置操作者日志身份。</p>}{!state.branches.length?<p role="status">尚无已提交的分支引用。{state.head.detached?'当前处于分离 HEAD。':<>当前分支 <code>{state.head.branch??'未命名'}</code>。</>}</p>:<ul aria-label="本地与远端分支">{state.branches.map(branch=><li key={branch.ref}>
     <span className="wb-badge">{branch.kind==='local'?'本地':'远端'}</span>{branch.current&&<strong>当前</strong>}
     <code>{branch.ref}</code><code>{branch.oid}</code>
     {branch.symbolic_target&&<span>指向 <code>{branch.symbolic_target}</code></span>}
     {branch.object_type!=='commit'&&<span>对象类型 {branch.object_type}</span>}
    </li>)}</ul>}</>}
+   {state&&creating&&<GitBranchReview project={project} snapshotId={snapshotId} allowExecution={allowCreate} onBusy={onBusy} onChanged={status=>{if(status.execution.state==='applied'&&status.workspace_state==='released_settled')onRefresh()}} onClose={()=>{setCreating(false);setRestoreFocus(true)}}/>}
   </>}
  </section>;
 }
