@@ -968,3 +968,26 @@ safe deletion, reference backend coverage and all remaining P09 scope stay requi
 M15.14 remains in progress. Per the user's development-only direction, no tests,
 typechecks, builds, product/native operations, maintenance commands, migrations,
 UI runtime acceptance or deployment were executed.
+
+## Reinitialization retained native plan, 2026-11-09
+
+The original prepareInitialization service/kernel entry point now handles witness 2
+through a retained protocol-2 plan. It refreezes the complete reviewed source before
+retention and requires complete configuration/layout proof. It captures original
+root/program anchors and checks normal repository binding plus the full original
+metadata digest before and after private ignore planning. Synchronous source checks
+pin root/Git/common and required child directory identity/mode/UID/GID or absence,
+the direct .git directory or exact pointer file, common/worktree configuration and
+internal-ignore facts, and the original busy-lock exclusions. The projected ignore
+bytes must match the approved hash/size/change flag. Final source and abort checks
+precede storage in the kernel's existing private WeakMap. Serialized plans grant no
+execution authority. Existing fresh-init preparation uses its original path.
+
+The original applyInitialization signature accepts the typed plan union but rejects
+protocol 2 before effects. Original witness-2 execution admission remains gated.
+Actual common-volume allocation/probe and first/second preparation writer callbacks,
+typed dispatch/outcome publication and post-dispatch recovery remain to connect.
+This increment supplies the retained native preparation boundary only. M15.14 and
+all other P09 requirements remain in progress. Per the user's development-only
+direction, tests, typechecks, builds, product/native commands, maintenance/migrations,
+UI runtime acceptance and deployment were not executed.
