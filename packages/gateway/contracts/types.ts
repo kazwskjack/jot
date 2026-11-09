@@ -773,3 +773,6 @@ export type GitCommitMetadata = {
  target_ref:string;head_state:'branch'|'unborn'|'detached';author:GitCommitIdentity;committer:GitCommitIdentity;
  operator_policy_sha256:string;message_sha256:string;message_bytes:number;
 };
+
+export type NativeMemberParentRun = Pick<Run, "run_id" | "conversation_id" | "created_at" | "status" | "version">;
+export type NativeMemberParentPage = {conversation_id: string; items: NativeMemberParentRun[]; next_cursor?: string; execution_authorized: false};

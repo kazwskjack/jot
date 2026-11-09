@@ -18,6 +18,8 @@ export function installNativeChildRuns(db:DatabaseSync){
   run_id TEXT PRIMARY KEY REFERENCES ga_runs(id),reservation_id TEXT NOT NULL UNIQUE REFERENCES wb_native_child_reservations(reservation_id),
   owner_id TEXT NOT NULL,root_run_id TEXT NOT NULL,task_id TEXT NOT NULL,occurrence_id TEXT NOT NULL,
   role_id TEXT NOT NULL,child_session_ref TEXT NOT NULL UNIQUE,created_at TEXT NOT NULL);
+  CREATE INDEX IF NOT EXISTS wb_native_child_parent_history ON wb_native_child_runs(owner_id,root_run_id,run_id);
+  CREATE INDEX IF NOT EXISTS idx_ga_runs_native_parent_order ON ga_runs(conversation_id,created_at,id);
   CREATE TRIGGER IF NOT EXISTS wb_native_child_run_no_update BEFORE UPDATE ON wb_native_child_runs BEGIN SELECT RAISE(ABORT,'native_child_identity_immutable'); END;
   CREATE TRIGGER IF NOT EXISTS wb_native_child_run_no_delete BEFORE DELETE ON wb_native_child_runs BEGIN SELECT RAISE(ABORT,'native_child_identity_immutable'); END;`);
  db.exec(`CREATE TABLE IF NOT EXISTS wb_native_creation_aborts(
@@ -36,6 +38,7 @@ export function installNativeChildRuns(db:DatabaseSync){
   previous_run_id TEXT NOT NULL UNIQUE REFERENCES ga_runs(id),owner_id TEXT NOT NULL,root_run_id TEXT NOT NULL,
   task_id TEXT NOT NULL,occurrence_id TEXT NOT NULL,role_id TEXT NOT NULL,child_session_ref TEXT NOT NULL,
   snapshot_json TEXT NOT NULL,created_at TEXT NOT NULL);
+  CREATE INDEX IF NOT EXISTS wb_native_activation_parent_history ON wb_native_child_activations(owner_id,root_run_id,run_id);
   CREATE TRIGGER IF NOT EXISTS wb_native_activation_no_update BEFORE UPDATE ON wb_native_child_activations BEGIN SELECT RAISE(ABORT,'native_activation_immutable'); END;
   CREATE TRIGGER IF NOT EXISTS wb_native_activation_no_delete BEFORE DELETE ON wb_native_child_activations BEGIN SELECT RAISE(ABORT,'native_activation_immutable'); END;
   CREATE TABLE IF NOT EXISTS wb_native_activation_closures(

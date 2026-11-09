@@ -62,6 +62,31 @@ export class NativeMemberOwnerControls {
   });
  }
 
+ parentHistory(ownerId:string,conversationId:string,query:{cursor?:unknown;limit?:unknown}={}){
+  if(!ID.test(ownerId)||!ID.test(conversationId))throw Error('invalid_native_member_history');
+  const cursor=query.cursor,limit=query.limit===undefined?25:Number(query.limit);
+  if(cursor!==undefined&&(typeof cursor!=='string'||!ID.test(cursor))
+   ||query.limit!==undefined&&typeof query.limit!=='number'&&typeof query.limit!=='string'
+   ||!Number.isSafeInteger(limit)||limit<1||limit>50)throw Error('invalid_native_member_history');
+  return withReadTransaction(this.db,()=>{
+   if(!this.db.prepare('SELECT 1 FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId))throw Error('conversation_not_found');
+   const scope=`FROM ga_runs r JOIN wb_run_bindings b ON b.run_id=r.id AND b.owner_id=? AND b.kind='task'
+    JOIN ga_run_native_sessions s ON s.run_id=r.id AND s.conversation_id=r.conversation_id AND s.owner_id=b.owner_id
+    WHERE r.conversation_id=? AND EXISTS(SELECT 1 FROM wb_native_execution_runs n
+     JOIN wb_native_spawn_publications p ON p.reservation_id=n.reservation_id WHERE n.owner_id=b.owner_id AND n.root_run_id=r.id)`;
+   const boundary=cursor===undefined?undefined:this.db.prepare(`SELECT r.created_at ${scope} AND r.id=?`).get(ownerId,conversationId,cursor as string) as {created_at:string}|undefined;
+   if(cursor!==undefined&&!boundary)throw Error('invalid_native_member_history');
+   const rows=this.db.prepare(`SELECT r.id run_id,r.conversation_id,r.created_at,r.status,r.version ${scope}
+    ${boundary?'AND (r.created_at<? OR (r.created_at=? AND r.id<?))':''}
+    ORDER BY r.created_at DESC,r.id DESC LIMIT ?`).all(ownerId,conversationId,
+     ...(boundary?[boundary.created_at,boundary.created_at,cursor as string]:[]),limit+1) as
+     Array<{run_id:string;conversation_id:string;created_at:string;status:string;version:number}>;
+   const selected=rows.slice(0,limit),last=selected.at(-1);
+   return {conversation_id:conversationId,execution_authorized:false as const,items:selected,
+    ...(rows.length>limit&&last?{next_cursor:last.run_id}:{})};
+  });
+ }
+
  executionHistory(ownerId:string,runId:string,query:{cursor?:unknown;limit?:unknown}={}){
   if(!ID.test(ownerId)||!ID.test(runId))throw Error('invalid_native_member_message');
   const cursor=query.cursor;

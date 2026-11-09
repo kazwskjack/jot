@@ -138,3 +138,6 @@ export type TaskWorkReview = {protocol:1;source:'isolated';grant_id:string;work_
  base_manifest:WorkReviewManifest;result_manifest:WorkReviewManifest;
  diff:WorkReviewDiff;execution_authorized:false};
 export type TaskReviewOutputPage = {items:TaskReviewOutput[];work_review?:TaskWorkReview};
+
+export type NativeMemberParentRun = Pick<Run, "run_id" | "conversation_id" | "created_at" | "status" | "version">;
+export type NativeMemberParentPage = {conversation_id: string; items: NativeMemberParentRun[]; next_cursor?: string; execution_authorized: false};
