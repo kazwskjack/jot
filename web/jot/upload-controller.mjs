@@ -139,7 +139,13 @@ export class UploadController {
   }
   if(changed)await this.persist();
  }
- clearSent(expected=this.references()){if(!expected.length)return;this.assertRecoveryScope();const sent=new Set(expected);this.entries=this.entries.filter(entry=>entry.status!=='ready'||!sent.has(entry.artifact.artifact_id));this.onChange();if(this.store)return this.persist();}
+ clearSent(expected=this.references(),confirmed=false){
+  if(!expected.length)return;
+  this.assertRecoveryScope();const sent=new Set(expected);
+  // A confirmed original message also consumes restored attachments awaiting receipt review.
+  this.entries=this.entries.filter(entry=>!sent.has(entry.artifact?.artifact_id)||!confirmed&&entry.status!=='ready');
+  this.onChange();if(this.store)return this.persist();
+ }
  async upload(id){
   this.assertRecoveryScope();
   const entry=this.entries.find(value=>value.id===id);if(!entry)throw new Error('upload_not_found');

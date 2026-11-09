@@ -8,6 +8,7 @@ import type {NativeMember,NativeMemberRoster,NativeMemberPendingAction} from './
 import {RoleChatController} from './conversation-controller.mjs';
 import {UploadController} from './upload-controller.mjs';
 import {UploadRecoveryStore} from './upload-recovery.mjs';
+import {MessageIntentRecoveryStore} from './message-intent-recovery.mjs';
 import UploadAttachments from './UploadAttachments';
 import {messageFiles} from './message-files.mjs';
 import {artifactPreviewErrorMessage,fetchVerifiedArtifactPreviewBytes} from './artifact-preview-bytes.mjs';
@@ -171,12 +172,26 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  const editDraft=useCallback((value:string)=>{if(cancelWriter.pending)return;draftRef.current=value;setDraft(value);},[cancelWriter]);
  const appendTranscript=useCallback((text:string)=>editDraft(appendVoiceText(draftRef.current,text)),[editDraft]);
  const [models,setModels]=useState<Capabilities['models']>([]),[conversation,setConversation]=useState<Conversation>(),fileInput=useRef<HTMLInputElement>(null),folderInput=useRef<HTMLInputElement>(null);
- const controller=useMemo(()=>new RoleChatController(id,{request,follow,snapshot:async(conversationId:string,signal?:AbortSignal)=>{const value=await snapshot(conversationId,signal);if(!signal?.aborted)rememberConversation(value.conversation);return value;}},()=>render(n=>n+1)),[id,rememberConversation]);
+ const controller=useMemo(()=>new RoleChatController(id,{request,follow,snapshot:async(conversationId:string,signal?:AbortSignal)=>{const value=await snapshot(conversationId,signal);if(!signal?.aborted)rememberConversation(value.conversation);return value;}},()=>render(n=>n+1),{recoveryRequired:true,currentScope:taskDraftScope}),[id,rememberConversation,fileOwner]);
+ const messageLocked=controller.pendingMessage||controller.recoveryBlocked;
+ const [messageRecoveryRevision,setMessageRecoveryRevision]=useState(0),[messageRecoveryError,setMessageRecoveryError]=useState('');
  const [goalMode,setGoalMode]=useState(false),[goalPending,setGoalPending]=useState(false);
  const [recoveryRunId,setRecoveryRunId]=useState('');
  useEffect(()=>{setGoalMode(false);},[id,ordinary]);
  const uploads=useMemo(()=>new UploadController(id,{request},()=>render(n=>n+1),{recoveryRequired:true,currentScope:taskDraftScope}),[id]);
  const [uploadRecoveryRevision,setUploadRecoveryRevision]=useState(0),[uploadRecoveryError,setUploadRecoveryError]=useState('');
+ useEffect(()=>{
+  let mounted=true,store:MessageIntentRecoveryStore|undefined;const abort=new AbortController();
+  controller.recoveryReady=false;controller.changed();
+  void request('/capabilities','GET',undefined,undefined,abort.signal).then(async()=>{
+   if(!mounted)return;
+   store=await MessageIntentRecoveryStore.open(window.indexedDB,taskDraftScope(),id);
+   if(!mounted){store.close();return;}
+   await controller.configureRecovery(store);
+   if(mounted)setMessageRecoveryError('');
+  }).catch(reason=>{store?.close();if(mounted){controller.recoveryReady=false;setMessageRecoveryError(reason instanceof Error?reason.message:'message_recovery_unavailable');controller.changed();}});
+  return()=>{mounted=false;abort.abort();controller.disposeRecovery();};
+ },[controller,id,messageRecoveryRevision]);
  useEffect(()=>{let mounted=true;controller.onChange=()=>{if(mounted)render(n=>n+1);};void controller.start();return()=>{mounted=false;controller.stop();};},[controller]);
  useEffect(()=>{
   let mounted=true,store:UploadRecoveryStore|undefined;const abort=new AbortController();
@@ -233,10 +248,28 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  let modes={aware:false,default:'work',chatReady:false},modeCapabilityError='';
  try{modes=conversationModeSupport(modeCaps);}catch(e){modeCapabilityError=e instanceof Error?e.message:'对话模式能力尚未确认';}
  const chatUnavailable=chatMode&&!!modeCaps&&!modes.chatReady;
- const canToggle=ordinary&&!!conversation&&controller.connection==='connected'&&!busy&&!run&&!controller.pendingMessage&&!uploads.entries.length&&!voiceBusy&&!goalPending&&!modelMutation.pending&&!modeWriter.pending&&!cancelWriter.pending&&modes.aware&&(chatMode||modes.chatReady);
- const action=async(fn:()=>Promise<unknown>)=>{if(busy)return;setBusy(true);setError('');try{await fn();}catch(e){if(!(e instanceof DOMException&&e.name==='AbortError'))setError(artifactPreviewErrorMessage(e));if((e as {status?:number}).status===409&&!controller.pendingMessage)await controller.refresh().catch(()=>{});}finally{setBusy(false);}};
- const send=()=>{if(fileReferences.length&&taskDraftScope()!==fileOwner){setError('文件引用所属账户已变化，请重新打开会话');return;}if(voiceBusy||modeWriter.pending||cancelWriter.pending||chatUnavailable)return;void action(async()=>{const message=replyQuoteMessage(fileReferenceMessage(draft,fileReferences,imageArtifact),replyQuotes);if(!controller.pendingMessage&&quoteCount&&goalPrompt(message,ordinary&&!chatMode&&!run&&goalMode).length>100000)throw Error('引用与消息过长，请减少引用或缩短消息后发送');const references=uploads.references();if(!controller.pendingMessage)await uploads.markGeneratedSending(fileReferences.filter(isFileRegion).map(value=>value.uploadEntryId));const receipt=await controller.send(message,references,{goalMode:ordinary&&!chatMode&&!run&&goalMode,originalTask:ordinary,steeringConfigured:modeCaps?.conversation_commands?.protocol===1&&modeCaps.conversation_commands.ordinary_steer?.configured===true,attachmentSteeringConfigured:modeCaps?.conversation_commands?.protocol===1&&modeCaps.conversation_commands.ordinary_steer?.attachments===true});let cleanupError='';try{await uploads.clearSent(references);}catch{cleanupError='消息已发送，附件回执清理尚未保存。请重读上传回执并核对会话。';}setReplyQuotes([]);setFileReferences([]);editDraft('');if(cleanupError)setError(cleanupError);else if(receipt.command_id)setError('补充已保留给原任务，正在等待接收');await controller.refresh();});};
- const quoteLocked=!state||busy||goalPending||voiceBusy||modelMutation.pending||modeWriter.pending||cancelWriter.pending||controller.pendingMessage||chatUnavailable;
+ const canToggle=ordinary&&!!conversation&&controller.connection==='connected'&&!busy&&!run&&!messageLocked&&!uploads.entries.length&&!voiceBusy&&!goalPending&&!modelMutation.pending&&!modeWriter.pending&&!cancelWriter.pending&&modes.aware&&(chatMode||modes.chatReady);
+ const action=async(fn:()=>Promise<unknown>)=>{if(busy)return;setBusy(true);setError('');try{await fn();}catch(e){if(!(e instanceof DOMException&&e.name==='AbortError'))setError(artifactPreviewErrorMessage(e));if((e as {status?:number}).status===409&&!controller.pendingMessage&&!controller.recoveryBlocked)await controller.refresh().catch(()=>{});}finally{setBusy(false);}};
+ const send=()=>{
+  if(controller.recoveryBlocked||voiceBusy||modeWriter.pending||cancelWriter.pending||chatUnavailable&&!controller.pendingMessage)return;
+  if(!controller.pendingMessage&&fileReferences.length&&taskDraftScope()!==fileOwner){setError('文件引用所属账户已变化，请重新打开会话');return;}
+  void action(async()=>{
+   const retry=controller.pendingMessage;
+   const message=retry?'':replyQuoteMessage(fileReferenceMessage(draft,fileReferences,imageArtifact),replyQuotes);
+   if(!retry&&quoteCount&&goalPrompt(message,ordinary&&!chatMode&&!run&&goalMode).length>100000)throw Error('引用与消息过长，请减少引用或缩短消息后发送');
+   const references=retry?controller.pendingAttachments:uploads.references();
+   if(!retry)await uploads.markGeneratedSending(fileReferences.filter(isFileRegion).map(value=>value.uploadEntryId));
+   const receipt=await controller.send(message,references,{goalMode:ordinary&&!chatMode&&!run&&goalMode,originalTask:ordinary,steeringConfigured:modeCaps?.conversation_commands?.protocol===1&&modeCaps.conversation_commands.ordinary_steer?.configured===true,attachmentSteeringConfigured:modeCaps?.conversation_commands?.protocol===1&&modeCaps.conversation_commands.ordinary_steer?.attachments===true});
+   let cleanupError='';
+   try{await uploads.clearSent(references,true);await controller.acknowledgeSent();}
+   catch{cleanupError='消息已发送，本地发送或附件回执清理尚未保存。请重读回执后重试原消息，核对原会话。';}
+   setReplyQuotes([]);setFileReferences([]);editDraft('');
+   if(cleanupError)setError(cleanupError);else if(receipt.command_id)setError('补充已保留给原任务，正在等待接收');
+   await controller.refresh();
+  });
+ };
+
+ const quoteLocked=!state||busy||goalPending||voiceBusy||modelMutation.pending||modeWriter.pending||cancelWriter.pending||messageLocked||chatUnavailable;
  const regionDisabled=quoteLocked||uploads.blocked||uploads.unresolved||!maxBytes;
  const imageArtifact=(entryId:string)=>{const entry=uploads.entries.find((entry:any)=>entry.id===entryId);return entry?.status==='ready'?entry.artifact:undefined;};
  const imageFile=(entryId:string)=>{const file=uploads.entries.find((entry:any)=>entry.id===entryId)?.file;return file instanceof File?file:undefined;};
@@ -317,9 +350,9 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  const uploadEntry=async(entryId:string)=>{await uploads.upload(entryId);await controller.refresh();};
  const cancelUpload=async(entryId:string)=>{setError('');try{await uploads.cancel(entryId);}catch(e){setError(e instanceof Error?e.message:'取消结果未确认，请重试');}};
  const cancelUploadBatch=async(batchId:string)=>{setError('');try{await uploads.cancelBatch(batchId);}catch(e){setError(e instanceof Error?e.message:'批次取消结果未确认，请重试');}};
- const selectFiles=(files:File[],relativePaths?:string[])=>{if(!state||busy||goalPending||controller.pendingMessage||modeWriter.pending||cancelWriter.pending||uploads.blocked||uploads.unresolved||!maxBytes)return;void action(async()=>{const entries=files.map((file,index)=>uploads.add(file,maxBytes,relativePaths?.[index]||file.webkitRelativePath||file.name));await uploads.prepareBatch(entries.map(entry=>entry.id));for(const entry of entries)await uploadEntry(entry.id);});};
+ const selectFiles=(files:File[],relativePaths?:string[])=>{if(!state||busy||goalPending||messageLocked||modeWriter.pending||cancelWriter.pending||uploads.blocked||uploads.unresolved||!maxBytes)return;void action(async()=>{const entries=files.map((file,index)=>uploads.add(file,maxBytes,relativePaths?.[index]||file.webkitRelativePath||file.name));await uploads.prepareBatch(entries.map(entry=>entry.id));for(const entry of entries)await uploadEntry(entry.id);});};
  const select=(event:React.ChangeEvent<HTMLInputElement>)=>{const files=Array.from(event.target.files??[]);event.target.value='';selectFiles(files);};
- const changeModel=(model:ModelSelection)=>{if(!ordinary||chatMode||!conversation||run||controller.pendingMessage||uploads.entries.length||voiceBusy||goalPending||modeWriter.pending||cancelWriter.pending)return;void action(async()=>{const selected=modelSelectionPreservingFallbacks(model,conversation.model);const saved=await modelMutation.submit(`/conversations/${encodeURIComponent(id)}`,'PATCH',{expected_version:conversation.version,model:selected}) as Conversation;rememberConversation(saved);await controller.refresh();});};
+ const changeModel=(model:ModelSelection)=>{if(!ordinary||chatMode||!conversation||run||messageLocked||uploads.entries.length||voiceBusy||goalPending||modeWriter.pending||cancelWriter.pending)return;void action(async()=>{const selected=modelSelectionPreservingFallbacks(model,conversation.model);const saved=await modelMutation.submit(`/conversations/${encodeURIComponent(id)}`,'PATCH',{expected_version:conversation.version,model:selected}) as Conversation;rememberConversation(saved);await controller.refresh();});};
  const saveMode=async(retry=false)=>{
   if(!retry&&!canToggle||retry&&!modeWriter.pending)return;
   await action(async()=>{
@@ -368,7 +401,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  return <FileTextReferenceContext.Provider value={{owner:fileOwner,conversationId:id,disabled:quoteLocked,regionDisabled,onAdd:addFileReference,onAddRegion:addRegionReference}}><section ref={conversationRegion} data-chat-search-scope tabIndex={-1} className="workbench-conversation jot-goal-stop-focus-target" aria-label={ordinary?"Ordinary conversation":"Role conversation"}><button disabled={busy||goalPending||controller.pendingMessage||quoteCount>0||uploads.entries.length>0||modelMutation.pending||modeWriter.pending||cancelWriter.pending} onClick={onClose}>返回工作台</button><h2>{ordinary?'我的对话':'角色对话'}</h2>{ordinary&&conversation&&<button type="button" className="jot-conversation-mode" style={{fontStyle:'italic',fontWeight:700,background:'transparent',border:0,color:'inherit'}} aria-label={`切换到 ${chatMode?'work':'chat'}`} disabled={!canToggle} onClick={()=>void saveMode()}>{chatMode?'chat':'work'}</button>}<p role="status">{controller.connection==='connected'?'已连接':controller.connection==='reconnecting'?'正在重新连接':'正在连接'}{run?` · ${run.status}`:''}</p>{controller.error&&<p role="alert">{controller.error}</p>}
  <ConversationDisplayBoundary label="会话搜索"><ConversationHistorySearch root={conversationRegion} conversationId={id} messages={displayedMessages} activities={activityValues} runs={state?.runs??{}} onRevealActivity={revealActivity} onLoadActivityHistory={loadActivityHistory} {...(state?.snapshotSeq?{activityHistorySeq:state.snapshotSeq}:{})} {...(state?.seq?{resultSearchSeq:state.seq}:{})} renderedRevision={renderedMessages} revealedMessageId={historySelection} ready={Boolean(state)} onReveal={revealHistoryMessage} {...(state?.historyComplete!==undefined?{historyComplete:state.historyComplete}:{})} {...(state?.nextHistoryCursor?{historyCursor:state.nextHistoryCursor}:{})} onHistoryLoaded={retainHistory}/></ConversationDisplayBoundary>
  {!ordinary&&run&&['starting','running'].includes(run.status)&&<NativeMemberControls key={`native-member-controls:${run.run_id}`} run={run}/>}
- {ordinary&&conversation&&!chatMode&&<div inert={cancelWriter.pending||controller.pendingMessage}><ConversationGoal key={id} id={id} running={run?.status==='running'} runStatus={run?.status} controlRun={state?latestGoalRun(Object.values(state.runs),id):undefined} onResumeAccepted={()=>{void controller.refresh().catch(()=>{});}} onStopCompleted={focusConversationAfterStop} onPendingChange={setGoalPending}/></div>}
+ {ordinary&&conversation&&!chatMode&&<div inert={cancelWriter.pending||messageLocked}><ConversationGoal key={id} id={id} running={run?.status==='running'} runStatus={run?.status} controlRun={state?latestGoalRun(Object.values(state.runs),id):undefined} onResumeAccepted={()=>{void controller.refresh().catch(()=>{});}} onStopCompleted={focusConversationAfterStop} onPendingChange={setGoalPending}/></div>}
   {catalogMount&&<SkillCatalogPanel runId={catalogMount.runId} ownerScope={catalogMount.ownerScope} onUseSkill={name=>editDraft(skillGestureDraft(draftRef.current,name))}/>}
   {queryRecoveryMount&&<details><summary>历史运行的命令与恢复记录</summary>
    <label>选择原运行 <select value={queryRecoveryMount.runId} onChange={event=>setRecoveryRunId(event.currentTarget.value)}>
@@ -407,9 +440,9 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
     &&(pendingForkForMessage||modeCaps?.conversation_forks?.available===true)&&(!forkWriter.pending||pendingForkForMessage);
    return <article key={message.message_id} className={message.role}>
     <small>{message.role==='user'?'YOU':'JOT'}</small>
-    {message.status==='complete'&&onTaskSource&&<button disabled={busy||goalPending||controller.pendingMessage||modeWriter.pending||cancelWriter.pending||uploads.entries.length>0} onClick={()=>onTaskSource({conversation_id:id,message})}>设为持续任务</button>}
+    {message.status==='complete'&&onTaskSource&&<button disabled={busy||goalPending||messageLocked||modeWriter.pending||cancelWriter.pending||uploads.entries.length>0} onClick={()=>onTaskSource({conversation_id:id,message})}>设为持续任务</button>}
     {forkActionVisible&&<ConversationForkAction source={conversationForkRetrySource(conversation,pendingFork,message.message_id)} message={message} writer={forkWriter}
-     busy={busy||goalPending||controller.pendingMessage||modeWriter.pending||cancelWriter.pending||uploads.entries.length>0||(!pendingForkForMessage&&Boolean(run))}
+     busy={busy||goalPending||messageLocked||modeWriter.pending||cancelWriter.pending||uploads.entries.length>0||(!pendingForkForMessage&&Boolean(run))}
      onOpenConversation={(target,receipt)=>onForkConversation?.(target,receipt)}
      onStateChange={next=>setForkStates(current=>({...current,[message.message_id]:next}))}
      onNoEffect={()=>controller.refresh()}/>}
@@ -421,11 +454,18 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
     {message.role==='assistant'&&files.length>3&&<button onClick={()=>setExpanded(value=>({...value,[message.message_id]:!open}))}>{open?'收起':`展开其余 ${files.length-3} 个文件`}</button>}
    </article>;
   })}
- {state&&Object.values(state.interactions).filter((value:any)=>value.status==='pending').map((value:any)=><InteractionCard key={value.interaction_id} value={value} disabled={busy||cancelWriter.pending||controller.pendingMessage||controller.connection!=='connected'} submit={(body,key,signal)=>request(`/interactions/${encodeURIComponent(value.interaction_id)}/${value.kind==='approval'?'decision':'response'}`,'POST',body,key,signal)} onRefresh={()=>controller.refresh()}/>)}
+ {state&&Object.values(state.interactions).filter((value:any)=>value.status==='pending').map((value:any)=><InteractionCard key={value.interaction_id} value={value} disabled={busy||cancelWriter.pending||messageLocked||controller.connection!=='connected'} submit={(body,key,signal)=>request(`/interactions/${encodeURIComponent(value.interaction_id)}/${value.kind==='approval'?'decision':'response'}`,'POST',body,key,signal)} onRefresh={()=>controller.refresh()}/>)}
  {ordinary&&modeCaps&&!modes.chatReady&&<p role="status">{modeCapabilityError||(modes.aware?'Chat 暂不可用':'当前后端未声明 Chat 模式')}</p>}
  {cancelWriter.pending&&<p role="status">停止结果尚未确认；请保留当前页面。<button type="button" disabled={busy} onClick={()=>cancelTask(true)}>重试原停止请求</button></p>}
  {modeWriter.pending&&<p role="status">模式设置结果尚未确认。<button type="button" disabled={busy} onClick={()=>void saveMode(true)}>重试原模式设置</button></p>}
- {error&&<p role="alert">{error}</p>}{controller.pendingMessage&&<p role="status">发送结果尚未确认；重试会保留原消息。</p>}
+ {error&&<p role="alert">{error}</p>}{controller.pendingMessage&&<p role="status">{controller.pending.receipt?'原消息已确认，重试将继续完成本地回执清理。':'原发送请求已保留，重试会沿用原消息或原任务补充的请求正文、附件和幂等键。'}</p>}
+ {controller.pendingMessage&&<details><summary>查看原发送内容</summary>
+  <p>{controller.pending.kind==='steer'?`原任务补充 · ${controller.pending.runId}`:'原会话消息'} · 客户端消息标识 <code>{controller.pending.body.client_message_id}</code></p>
+  <pre>{controller.pending.kind==='steer'?controller.pending.body.text:controller.pending.body.content.filter((part:any)=>part.type==='text').map((part:any)=>part.text).join('\n')}</pre>
+  {controller.pendingAttachments.length>0&&<p>原附件标识 · {controller.pendingAttachments.join('、')}</p>}
+ </details>}
+ {(messageRecoveryError||controller.recoveryError)&&<p role="alert">原发送请求存储尚未确认，消息操作已暂停。<button type="button" disabled={busy||controller.sending||controller.recovering} onClick={()=>setMessageRecoveryRevision(value=>value+1)}>重读原发送回执</button></p>}
+ {!controller.recoveryReady&&!messageRecoveryError&&<p role="status">正在读取原发送请求…</p>}
  {modelMutation.pending&&<p role="status">模型设置结果尚未确认。<button type="button" disabled={busy} onClick={()=>{if(conversation)changeModel(conversation.model);}}>重试原模型设置</button></p>}
  {messageArtifact&&messageArtifact.owner===taskDraftScope()&&<section aria-label="消息关联成果详情">
   <button type="button" onClick={()=>setMessageArtifact(undefined)}>关闭成果详情</button>
@@ -434,18 +474,18 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  {(uploadRecoveryError||uploads.recoveryError)&&<p role="alert">上传回执存储尚未确认，附件操作已暂停。<button type="button" disabled={busy||uploads.recoveryBusy} onClick={()=>setUploadRecoveryRevision(value=>value+1)}>重读上传回执</button></p>}
  {!uploads.recoveryReady&&!uploadRecoveryError&&<p role="status">正在读取原上传回执…</p>}
  {preview&&<section role="region" aria-label="附件预览" className="jot-file-preview"><h3>{preview.name}</h3><button onClick={()=>{previewRequest.current?.abort();previewRequest.current=undefined;setPreview(undefined);}}>关闭预览</button>{preview.loading&&<p role="status">正在读取文件内容…</p>}{preview.url&&<img src={preview.url} alt={preview.name}/>} {preview.text!==undefined&&<pre>{preview.text}</pre>}{preview.truncated&&<p>预览内容已截短</p>}{preview.unsupported&&<p>此文件暂不支持在线预览</p>}</section>}
- <input ref={fileInput} type="file" aria-label="添加文件" multiple hidden disabled={!state||busy||cancelWriter.pending||goalPending||controller.pendingMessage||uploads.blocked||uploads.unresolved||!maxBytes} onChange={select}/>
+ <input ref={fileInput} type="file" aria-label="添加文件" multiple hidden disabled={!state||busy||cancelWriter.pending||goalPending||messageLocked||uploads.blocked||uploads.unresolved||!maxBytes} onChange={select}/>
  {ordinary&&!chatMode&&conversation&&<aside className="jot-model-routing-status" aria-label="模型路由状态"><p role="status">{routingStatus.primary}</p><p>{routingStatus.fallbacks}</p></aside>}
- <input ref={folderInput} type="file" aria-label="添加文件夹" multiple hidden disabled={!state||busy||cancelWriter.pending||goalPending||controller.pendingMessage||uploads.blocked||uploads.unresolved||!maxBytes} onChange={select}/>
+ <input ref={folderInput} type="file" aria-label="添加文件夹" multiple hidden disabled={!state||busy||cancelWriter.pending||goalPending||messageLocked||uploads.blocked||uploads.unresolved||!maxBytes} onChange={select}/>
  {ordinary&&!chatMode&&goalMode&&<p role="status">目标模式</p>}
  <AssistantReplyQuoteAction root={conversationRegion} conversationId={id} disabled={quoteLocked} onAdd={addReplyQuote}/>
  <PromptComposer className={chatMode?'jot-prompt-chat':''} value={draft} onChange={editDraft} onSubmit={send} placeholder={ordinary&&!chatMode&&goalMode?'描述你的目标…':'输入消息…'} ariaLabel={ordinary?'对话消息':'角色消息'}
-  disabled={!state||busy||goalPending||modelMutation.pending||modeWriter.pending||cancelWriter.pending||chatUnavailable} inputDisabled={controller.pendingMessage||modeWriter.pending||cancelWriter.pending} submitDisabled={!regionsReady||voiceBusy||uploads.entries.length>0&&uploads.blocked||uploads.entries.some((entry:any)=>entry.status!=='ready')||(ordinary&&goalMode&&!draft.trim()&&!quoteCount&&!controller.pendingMessage)} submitLabel={controller.pendingMessage?'重试原消息':run?(ordinary?'补充当前任务':'加入队列'):'发送'}
-  selection={chatMode?undefined:conversation?.model} modelOptions={chatMode?[]:models} onSelectionChange={ordinary&&!chatMode&&!modeWriter.pending&&!cancelWriter.pending&&!run&&!controller.pendingMessage&&!uploads.entries.length&&!voiceBusy&&!goalPending&&!modelMutation.pending?changeModel:undefined}
-  onAttach={()=>fileInput.current?.click()} attachDisabled={!state||busy||cancelWriter.pending||goalPending||controller.pendingMessage||uploads.blocked||uploads.unresolved||!maxBytes} uploadMenu={<button type="button" role="menuitem" disabled={!state||busy||cancelWriter.pending||goalPending||controller.pendingMessage||uploads.blocked||uploads.unresolved||!maxBytes} onClick={()=>folderInput.current?.click()}>添加文件夹</button>} onDropFiles={selectFiles} onDropError={error=>setError(error instanceof Error?error.message:'无法读取所选文件夹')}
-   hasAttachments={uploads.entries.length>0||quoteCount>0} attachments={<><FileTextReferences references={fileReferences} disabled={quoteLocked} onChange={editFileReferences} imageFile={imageFile} resolveImage={imageArtifact}/><AssistantReplyQuotes quotes={replyQuotes} disabled={quoteLocked} onChange={setReplyQuotes}/><UploadAttachments uploads={uploads} busy={busy} locked={uploads.blocked||cancelWriter.pending||goalPending||!!controller.pendingMessage||modeWriter.pending} onAction={operation=>void action(operation)} onUpload={uploadEntry} onCancel={cancelUpload} onCancelBatch={cancelUploadBatch}/></>}
-  keepVoiceVisible voiceActive={voiceBusy} voiceControl={<VoiceInput id={id} voice={voice} disabled={!state||busy||goalPending||Boolean(controller.pendingMessage)||modelMutation.pending||modeWriter.pending||cancelWriter.pending||chatUnavailable} onText={appendTranscript} onBusyChange={setVoiceBusy}/>}
+  disabled={!state||busy||goalPending||modelMutation.pending||modeWriter.pending||cancelWriter.pending||controller.recoveryBlocked||chatUnavailable&&!controller.pendingMessage} inputDisabled={messageLocked||modeWriter.pending||cancelWriter.pending} submitDisabled={controller.recoveryBlocked||voiceBusy||!controller.pendingMessage&&(!regionsReady||uploads.entries.length>0&&uploads.blocked||uploads.entries.some((entry:any)=>entry.status!=='ready')||ordinary&&goalMode&&!draft.trim()&&!quoteCount)} submitLabel={controller.pendingMessage?'重试原消息':run?(ordinary?'补充当前任务':'加入队列'):'发送'}
+  selection={chatMode?undefined:conversation?.model} modelOptions={chatMode?[]:models} onSelectionChange={ordinary&&!chatMode&&!modeWriter.pending&&!cancelWriter.pending&&!run&&!messageLocked&&!uploads.entries.length&&!voiceBusy&&!goalPending&&!modelMutation.pending?changeModel:undefined}
+  onAttach={()=>fileInput.current?.click()} attachDisabled={!state||busy||cancelWriter.pending||goalPending||messageLocked||uploads.blocked||uploads.unresolved||!maxBytes} uploadMenu={<button type="button" role="menuitem" disabled={!state||busy||cancelWriter.pending||goalPending||messageLocked||uploads.blocked||uploads.unresolved||!maxBytes} onClick={()=>folderInput.current?.click()}>添加文件夹</button>} onDropFiles={selectFiles} onDropError={error=>setError(error instanceof Error?error.message:'无法读取所选文件夹')}
+   hasAttachments={controller.pendingMessage||uploads.entries.length>0||quoteCount>0} attachments={<><FileTextReferences references={fileReferences} disabled={quoteLocked} onChange={editFileReferences} imageFile={imageFile} resolveImage={imageArtifact}/><AssistantReplyQuotes quotes={replyQuotes} disabled={quoteLocked} onChange={setReplyQuotes}/><UploadAttachments uploads={uploads} busy={busy} locked={uploads.blocked||cancelWriter.pending||goalPending||messageLocked||modeWriter.pending} onAction={operation=>void action(operation)} onUpload={uploadEntry} onCancel={cancelUpload} onCancelBatch={cancelUploadBatch}/></>}
+  keepVoiceVisible voiceActive={voiceBusy} voiceControl={<VoiceInput id={id} voice={voice} disabled={!state||busy||goalPending||messageLocked||modelMutation.pending||modeWriter.pending||cancelWriter.pending||chatUnavailable} onText={appendTranscript} onBusyChange={setVoiceBusy}/>}
   goalMenu={ordinary&&!chatMode?<button type="button" role="menuitemcheckbox" aria-checked={goalMode} onClick={()=>setGoalMode(value=>!value)}>目标模式{goalMode?' ✓':''}</button>:undefined}
-  responding={Boolean(run)} stopDisabled={busy||cancelWriter.pending||controller.pendingMessage||run?.status==='cancelling'} onStop={run?()=>cancelTask():undefined}/>
+  responding={Boolean(run)} stopDisabled={busy||cancelWriter.pending||messageLocked||run?.status==='cancelling'} onStop={run?()=>cancelTask():undefined}/>
  </section></FileTextReferenceContext.Provider>;
 }

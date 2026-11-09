@@ -153,7 +153,7 @@ export function restoreUploadRecovery(snapshot,conversation,scope){
 export class UploadRecoveryStore {
  static async open(factory,scope,conversation){
   if(!factory||!/^[a-f0-9]{64}$/.test(scope)||!identifier(conversation))throw Error('upload_recovery_unavailable');
-  const store=new UploadRecoveryStore();store.scope=scope;store.conversation=conversation;store.key=`${scope}/${conversation}`;store.revision=0;
+  const store=new this();store.scope=scope;store.conversation=conversation;store.key=`${scope}/${conversation}`;store.revision=0;
   store.db=await new Promise((resolve,reject)=>{
    let abandoned=false;const request=factory.open('jot-upload-recovery-v1',1);
    request.onupgradeneeded=()=>request.result.createObjectStore('snapshots');
@@ -174,16 +174,17 @@ export class UploadRecoveryStore {
    try{operation(tx.objectStore('snapshots'),value=>result=value,fail);}catch(error){fail(error);}
   });
  }
+ validateSnapshot(snapshot){return validateUploadRecovery(snapshot,this.conversation,this.scope);}
  record(value){
   if(!exact(value,['schema','scope','conversation','revision','snapshot'])||value.schema!==1||value.scope!==this.scope||value.conversation!==this.conversation||!positive(value.revision))throw invalid();
-  validateUploadRecovery(value.snapshot,this.conversation,this.scope);return value;
+  this.validateSnapshot(value.snapshot);return value;
  }
  async load(){
   const record=await this.transaction('readonly',(records,done,fail)=>{const read=records.get(this.key);read.onsuccess=()=>{try{done(read.result===undefined?null:this.record(read.result));}catch(error){fail(error);}};});
   this.revision=record?.revision??0;return record?.snapshot??null;
  }
  async save(snapshot){
-  validateUploadRecovery(snapshot,this.conversation,this.scope);const expected=this.revision;
+  this.validateSnapshot(snapshot);const expected=this.revision;
   const revision=await this.transaction('readwrite',(records,done,fail)=>{const read=records.get(this.key);read.onsuccess=()=>{try{
    const prior=read.result===undefined?0:this.record(read.result).revision;
    if(prior!==expected||prior>=Number.MAX_SAFE_INTEGER)throw Error('upload_recovery_conflict');
