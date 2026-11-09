@@ -1131,3 +1131,38 @@ reference backend coverage and all remaining P09 scope remain required. M15.14
 stays in progress. Per the user's source-only direction, no tests, typechecks,
 builds, product/native operations, maintenance commands, migrations, UI runtime
 acceptance or deployment were executed.
+
+## Reinitialization canonical publication kernel, 2026-11-09
+
+Original native reinitialization now supplies its synchronous publication callback
+to the original outcome transaction. The retained producer prepares and dispatches
+first. A one-use live publication closure then installs exact private empty config
+and ignore lock inodes by exclusive hardlink, validates aliases, applies the actual
+same-volume directory mode projection, and atomically renames each synced pending
+config/ignore file on its own volume. Existing directories retain identity/UID/GID;
+new metadata directories check allocation UID and native effective/parent-setgid
+group inheritance. Project-internal creation uses its own allocation UID. Every
+phase repeats current physical/program/root/pointer, directory/owner/mode, source
+metadata, worktree/config/ignore and exact empty-lock facts. The normal existing
+repository binding is retained.
+
+The live closure creates its strict private receipt from actual published facts.
+The original transaction validates original dispatch, records public/private
+outcome, and checks a single returned receipt. Late/repeated closure calls and
+asynchronous authority are rejected. Original phase-aware checks continue through
+outer allocation cleanup after successful publication. Live and interrupted
+cleanup share the same exact empty-lock preflight/removal. Live cleanup uses the
+original one-shot atomic boundary and preserves the publication failure cause.
+Temporary namespaces are then removed by the existing bounded owned cleaner.
+Canonical partial effects remain for original read-only observation and explicit
+control, with no rollback or replay. The observer additionally repeats original
+normal anchors and final receipt facts around its metadata read.
+
+This connects the canonical writer and original direct outcome path in source.
+Original protocol-8 admission remains gated while permission inheritance edge
+cases, config/ignore ownership semantics and complete linked/external/damaged/
+platform behavior and UI admission are completed. Branch checkout/deletion,
+reference backend coverage and all other P09 features remain required. M15.14
+stays in progress. Per the user's development-only direction, no tests,
+typechecks, builds, product/native operations, maintenance commands, migrations,
+UI runtime acceptance or deployment were executed.

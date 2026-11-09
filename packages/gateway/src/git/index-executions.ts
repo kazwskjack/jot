@@ -308,6 +308,11 @@ export class GitIndexExecutions{
         ||canonicalJson(evidence.ref_preparation)!==canonicalJson(readInitializationRefPreparation(this.db,row)??null))throw Error('git_execution_evidence_corrupt');
        this.db.prepare('INSERT INTO wb_git_index_dispatches VALUES(?,?,?,?,?,?)').run(row.execution_id,JSON.stringify(evidence),digest(evidence),lease.owner,lease.generation,new Date(this.now()).toISOString());
       }),
+      publish:(raw,publish)=>withImmediateTransaction(this.db,()=>{
+       authorize();const evidence=readInitializationDispatch(this.db,row);
+       if(!evidence||evidence.protocol!==2||canonicalJson(evidence)!==canonicalJson(gitReinitializationEvidence(raw)))throw Error('git_execution_evidence_corrupt');
+       const receipt=publish();this.initializationOutcome(row,evidence,receipt);return receipt;
+      }),
       cleanup:remove=>this.cleanupTransaction(row,lease,remove),
      },abort.signal);
      return this.get(owner,project,row.execution_id);
