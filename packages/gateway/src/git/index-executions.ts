@@ -10,7 +10,7 @@ import {readCommitExecutionSource} from './commit-records.ts';
 import {gitCommitPreparation,gitCommitEvidence} from './commit-evidence.ts';
 import {gitCommitRefPreparation,type GitCommitRefPreparation} from './commit-ref-evidence.ts';
 import {canonicalJson} from '../db/canonical-json.ts';
-import {gitCommitExecutionDefinition,gitCommitExecutionSchema} from './commit-execution-upgrade.ts';
+import {gitCommitExecutionDefinition,gitCommitExecutionSchema,gitRefPreparationDefinition} from './commit-execution-upgrade.ts';
 import {readIndexExecutionRow,readIndexPreparation,validateIndexEvidence,readIndexDispatch,indexAppliedResult,readIndexDisposition,indexClosedResult,readIndexExecutionResult,indexAcceptance,readIndexAdmission,indexControlReceipt,validateIndexControl,readIndexControlReceipt,type Row,type Dispatch,type Outcome,type Acceptance,type ExecutionResult,type AppliedResult,type ClosedResult,type Control,type Disposition,type Cleanup,type ControlReceipt} from './index-journal.ts';
 import {createHash,randomUUID} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
@@ -63,11 +63,11 @@ export class GitIndexExecutions{
   // dispatch. The extra column also makes an old positional INSERT fail shut.
   if(!db.prepare('PRAGMA table_info(wb_git_index_executions)').all().some(column=>column.name==='protocol'))db.exec('ALTER TABLE wb_git_index_executions ADD COLUMN protocol INTEGER NOT NULL DEFAULT 1');
   if(!db.prepare('PRAGMA table_info(wb_git_index_executions)').all().some(column=>column.name==='binding_sha256'))db.exec('ALTER TABLE wb_git_index_executions ADD COLUMN binding_sha256 TEXT');
-  if(!['legacy','commit','branch','initialization'].includes(gitCommitExecutionSchema(db)))throw Error('git_execution_storage_unavailable');
+  if(!['legacy','commit','branch','initialization','reinitialization'].includes(gitCommitExecutionSchema(db)))throw Error('git_execution_storage_unavailable');
   for(const table of ['wb_git_index_executions','wb_git_index_preparations','wb_git_index_dispatches','wb_git_index_ref_preparations','wb_git_index_outcomes','wb_git_index_admissions','wb_git_index_controls','wb_git_index_dispositions','wb_git_index_control_receipts'])for(const kind of ['UPDATE','DELETE'])db.exec(`CREATE TRIGGER IF NOT EXISTS ${table}_no_${kind.toLowerCase()} BEFORE ${kind} ON ${table} BEGIN SELECT RAISE(ABORT,'git_execution_immutable'); END;`);
   for(const table of ['wb_git_index_preparations','wb_git_index_dispatches','wb_git_index_ref_preparations','wb_git_index_outcomes'])db.exec(`CREATE TRIGGER IF NOT EXISTS ${table}_no_disposed BEFORE INSERT ON ${table} WHEN EXISTS(SELECT 1 FROM wb_git_index_dispositions WHERE execution_id=NEW.execution_id) BEGIN SELECT RAISE(ABORT,'git_execution_closed'); END;`);
   for(const table of ['wb_git_index_preparations','wb_git_index_dispatches','wb_git_index_ref_preparations','wb_git_index_dispositions'])db.exec(`CREATE TRIGGER IF NOT EXISTS ${table}_no_applied BEFORE INSERT ON ${table} WHEN EXISTS(SELECT 1 FROM wb_git_index_outcomes WHERE execution_id=NEW.execution_id) BEGIN SELECT RAISE(ABORT,'git_execution_closed'); END;`);
-  db.exec("CREATE TRIGGER IF NOT EXISTS wb_git_index_ref_preparations_commit_only BEFORE INSERT ON wb_git_index_ref_preparations WHEN NOT EXISTS(SELECT 1 FROM wb_git_index_executions WHERE execution_id=NEW.execution_id AND action='commit' AND protocol=5) BEGIN SELECT RAISE(ABORT,'git_execution_evidence_corrupt'); END;");
+  db.exec(gitRefPreparationDefinition(gitCommitExecutionSchema(db)==='reinitialization',true));
   this.producers=new GitIndexProducers(db,this.now);
  }
  private input(value:Input):Input{
@@ -148,10 +148,10 @@ export class GitIndexExecutions{
    :this.intents.executionSource(owner,project,intent,version,review);
  }
  private registerExecution(owner:string,project:string,intent:string,input:Input,requestHash:string,source:ReturnType<GitIndexExecutions['reviewSource']>):Row{
-  if(source.action==='create-branch'&&!['branch','initialization'].includes(gitCommitExecutionSchema(this.db)))throw Error('git_branch_upgrade_required');
-  if(source.action==='commit'&&!['commit','branch','initialization'].includes(gitCommitExecutionSchema(this.db)))throw Error('git_commit_upgrade_required');
+  if(source.action==='create-branch'&&!['branch','initialization','reinitialization'].includes(gitCommitExecutionSchema(this.db)))throw Error('git_branch_upgrade_required');
+  if(source.action==='commit'&&!['commit','branch','initialization','reinitialization'].includes(gitCommitExecutionSchema(this.db)))throw Error('git_commit_upgrade_required');
   if(source.action==='init'&&source.witness.protocol!==1)throw Error('git_reinitialization_execution_unavailable');
-  if(source.action==='init'&&gitCommitExecutionSchema(this.db)!=='initialization')throw Error('git_initialization_upgrade_required');
+  if(source.action==='init'&&!['initialization','reinitialization'].includes(gitCommitExecutionSchema(this.db)))throw Error('git_initialization_upgrade_required');
   const binding=this.git.executionBinding(owner,project),existing=this.db.prepare('SELECT * FROM wb_git_index_executions WHERE intent_id=?').get(intent) as Row|undefined;
   if(existing&&(existing.owner_id!==owner||existing.project_id!==project||existing.request_sha256!==requestHash))throw Error('git_intent_execution_exists');
   if(this.db.prepare('SELECT 1 FROM wb_git_index_executions e LEFT JOIN wb_git_index_outcomes o ON o.execution_id=e.execution_id LEFT JOIN wb_git_index_dispositions d ON d.execution_id=e.execution_id WHERE e.execution_id<>? AND o.execution_id IS NULL AND d.execution_id IS NULL AND (e.binding_sha256 IS NULL OR e.binding_sha256=? OR (e.owner_id=? AND e.project_id=?))').get(existing?.execution_id??'',binding,owner,project))throw Error('git_execution_reconciliation_required');

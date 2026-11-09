@@ -1,4 +1,4 @@
-import {gitCommitExecutionSchema,upgradeGitCommitExecutionSchema,rollbackGitCommitExecutionSchema,upgradeGitBranchExecutionSchema,rollbackGitBranchExecutionSchema,upgradeGitInitializationExecutionSchema,rollbackGitInitializationExecutionSchema} from '../git/commit-execution-upgrade.ts';
+import {gitCommitExecutionSchema,upgradeGitCommitExecutionSchema,rollbackGitCommitExecutionSchema,upgradeGitBranchExecutionSchema,rollbackGitBranchExecutionSchema,upgradeGitInitializationExecutionSchema,rollbackGitInitializationExecutionSchema,upgradeGitReinitializationExecutionSchema,rollbackGitReinitializationExecutionSchema} from '../git/commit-execution-upgrade.ts';
 import {DatabaseSync} from 'node:sqlite';
 import {lstatSync,realpathSync} from 'node:fs';import {isAbsolute,resolve} from 'node:path';
 import {retainOriginalGitDatabase} from '../git/database-identity.ts';
@@ -102,5 +102,18 @@ export function applyGitInitializationMaintenance(path:string,command:unknown,ro
   const change=rollback?rollbackGitInitializationExecutionSchema(db):upgradeGitInitializationExecutionSchema(db);
   identity.assertCurrent();
   return{before,initialization_schema_change:change,after:view(db),execution_authorized:false as const,offline_pool_drain_observed:false as const};
+ });
+}
+
+/** Reinitialization retains the original preparation slots and offline guards. */
+export function applyGitReinitializationMaintenance(path:string,command:unknown,rollback=false){
+ const input=maintenanceInput(command);
+ if(typeof rollback!=='boolean')fail('command_invalid');
+ return openExisting(path,true,db=>{
+  const identity=retainOriginalGitDatabase(db),before=view(db);
+  if(identity.sha256!==input.expected_database_sha256)fail('database_changed');
+  const change=rollback?rollbackGitReinitializationExecutionSchema(db):upgradeGitReinitializationExecutionSchema(db);
+  identity.assertCurrent();
+  return{before,reinitialization_schema_change:change,after:view(db),execution_authorized:false as const,offline_pool_drain_observed:false as const};
  });
 }

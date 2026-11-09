@@ -900,3 +900,34 @@ Linked/external and damaged metadata, branch checkout/deletion and reference bac
 coverage remain in full M15.14 scope. This increment followed the user's source-only
 direction. Tests, typechecks, builds, native/product commands, UI runtime acceptance,
 migrations and deployment remain unexecuted.
+
+## Reinitialization original storage increment, 2026-11-09
+
+The explicit offline reinitialization flavor retains the original execution table
+and immutable preparation slots. Fresh initialization stays at protocol 7;
+reinitialization reserves action init under protocol 8. The original ref-preparation
+trigger retains its name and admits only commit/protocol 5 or init/protocol 8 in this
+flavor. Its exact definition is part of schema recognition, so service construction
+preserves the installed trigger and refuses an incomplete or changed new flavor.
+Existing commit, branch and fresh-init capability/admission callers accept the
+higher flavor while the original witness-2 execution gate remains in place.
+
+The original offline maintenance connection exposes apply-reinit and rollback-reinit
+with the existing physical database digest and explicit offline confirmation.
+Migration retains original rows, rowids, foreign keys and all schema objects, with
+only the original execution definition and this exact original trigger changing.
+The original quiescence, physical identity and inventory guards remain in force.
+Rollback to initialization requires no protocol-8 history, restores the exact old
+trigger and preserves protocol-7 rows. Lower rollback fences remain. Older upgrade
+entry points retain an installed higher flavor.
+
+This source increment prepares durable ownership evidence for common-volume and
+internal-ignore-volume allocations without introducing a second journal. Native
+protocol-8 preparation/dispatch/outcome readers and writer, actual same-volume
+probe selection, canonical locks/publication and original interrupted recovery,
+drain and settlement still require connection. Linked/external and damaged
+metadata, permissions/platform staging, branch checkout/deletion, reference backend
+coverage and the remaining P09 features stay in scope. M15.14 remains in progress.
+Per the user's development-only direction, no tests, typechecks, builds, native or
+product operations, maintenance commands, migrations, UI runtime acceptance or
+deployment were executed for this increment. Historical test results are retained.
