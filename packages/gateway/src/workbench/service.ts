@@ -1845,8 +1845,9 @@ export class WorkbenchService {
       return receipt;
     });
   }
-  readBinaryFile(owner:string,workspaceId:string,projectId:string,filePath:string,version:number,expectedSha256:string,runId?:string){
-    if(!Number.isSafeInteger(version)||version<1||typeof expectedSha256!=='string'||!/^[a-f0-9]{64}$/.test(expectedSha256))throw new Error('invalid_binary_file_read');
+  /** A chunk consumer must wait for the complete source proof before publishing any output. */
+  readBinaryFile(owner:string,workspaceId:string,projectId:string,filePath:string,version:number,expectedSha256:string,runId?:string,consume?: (chunk:Buffer)=>void){
+    if(!Number.isSafeInteger(version)||version<1||typeof expectedSha256!=='string'||!/^[a-f0-9]{64}$/.test(expectedSha256)||consume!==undefined&&typeof consume!=='function')throw new Error('invalid_binary_file_read');
     const workspace=this.workspace(workspaceId),context=runId?this.runIdentity(owner,workspace,runId):null;
     if(context&&context.project_id!==projectId)throw new Error('file_scope_forbidden');
     const path=this.filePath(filePath);this.projects.assertOwned(projectId,owner);
@@ -1859,6 +1860,7 @@ export class WorkbenchService {
     if(String(row.sha256)!==expectedSha256)throw new Error('file_source_stale');
     const blob=this.safeLogicalPath(root,`blobs/${String(row.blob_name)}`,false);
     if(!Number.isSafeInteger(row.size)||Number(row.size)<0)throw new Error('file_integrity_failed');
+    const digest=createHash('sha256');let bytes=0;
     let content:Buffer,descriptor:number|undefined;
     try{
       const named=lstatSync(blob,{bigint:true});
@@ -1868,17 +1870,20 @@ export class WorkbenchService {
         &&value.nlink===named.nlink&&value.size===named.size&&value.mtimeNs===named.mtimeNs&&value.ctimeNs===named.ctimeNs;
       descriptor=openSync(blob,fsConstants.O_RDONLY|(fsConstants.O_NOFOLLOW??0));
       if(!sameFile(fstatSync(descriptor,{bigint:true})))throw new Error('file_integrity_failed');
-      content=Buffer.alloc(Number(row.size));let offset=0;
-      while(offset<content.length){
-        const count=readSync(descriptor,content,offset,Math.min(65536,content.length-offset),offset);
-        if(!count)throw new Error('file_integrity_failed');offset+=count;
+      content=Buffer.alloc(consume?0:Number(row.size));const block=Buffer.alloc(65536);
+      while(bytes<Number(row.size)){
+        const count=readSync(descriptor,block,0,Math.min(block.length,Number(row.size)-bytes),bytes);
+        if(!count)throw new Error('file_integrity_failed');
+        const chunk=block.subarray(0,count);digest.update(chunk);
+        if(consume)consume(chunk);else chunk.copy(content,bytes);
+        bytes+=count;
       }
       if(!sameFile(fstatSync(descriptor,{bigint:true}))||!sameFile(lstatSync(blob,{bigint:true})))throw new Error('file_integrity_failed');
     }catch(error){
       if(['ENOENT','ENOTDIR'].includes(String((error as NodeJS.ErrnoException).code)))throw new Error('file_not_found');
       throw error;
     }finally{if(descriptor!==undefined)closeSync(descriptor);}
-    if(createHash('sha256').update(content).digest('hex')!==row.sha256||content.byteLength!==Number(row.size))throw new Error('file_integrity_failed');
+    if(digest.digest('hex')!==row.sha256||bytes!==Number(row.size)||!consume&&content.byteLength!==Number(row.size))throw new Error('file_integrity_failed');
     return {path:String(row.path),version:Number(row.version),sha256:String(row.sha256),size:Number(row.size),created_at:String(row.created_at),content};
   }
 }

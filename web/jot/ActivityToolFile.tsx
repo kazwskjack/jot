@@ -14,12 +14,12 @@ export default function ActivityToolFile({conversationId,runId,activityId,result
  useEffect(()=>{
   const controller=new AbortController();setState({identity,offset});
   const load=async()=>{
-   const params=new URLSearchParams({run_id:runId,result_sha256:resultSha,path:file.path,version:String(file.version),sha256:file.sha256,offset_chars:String(offset),...(textSha?{text_sha256:textSha}:{})});
+   const params=new URLSearchParams({text_protocol:'2',run_id:runId,result_sha256:resultSha,path:file.path,version:String(file.version),sha256:file.sha256,offset_chars:String(offset),...(textSha?{text_sha256:textSha}:{})});
    const page=await request<ActivityToolFilePage>(`/conversations/${encodeURIComponent(conversationId)}/activities/${encodeURIComponent(activityId)}/tool-result/file?${params}`,'GET',undefined,undefined,controller.signal);
    if(taskDraftScope()!==owner||!page||page.conversation_id!==conversationId||page.run_id!==runId||page.activity_id!==activityId||page.result_sha256!==resultSha
     ||page.path!==file.path||page.version!==file.version||page.sha256!==file.sha256||page.size!==file.size||!['workspace','isolated'].includes(page.source)||page.execution_authorized!==false
     ||typeof page.text_sha256!=='string'||!sha.test(page.text_sha256)||page.text_sha256!==file.sha256||textSha!==undefined&&page.text_sha256!==textSha
-    ||page.offset_chars!==offset||!Number.isSafeInteger(page.total_chars)||page.total_chars<offset||page.total_chars>file.size||page.total_chars>1048576
+    ||page.text_protocol!==2||page.offset_chars!==offset||!Number.isSafeInteger(page.total_chars)||page.total_chars<offset||page.total_chars>file.size
     ||typeof page.text!=='string'||page.text.length>16384||offset+page.text.length>page.total_chars
     ||(page.next_offset_chars===undefined?offset+page.text.length!==page.total_chars:!page.text.length||page.next_offset_chars!==offset+page.text.length||page.next_offset_chars>=page.total_chars))throw Error('原列表文件版本或正文分页尚未确认');
    if(!controller.signal.aborted)setState({identity,offset,page});
@@ -27,7 +27,7 @@ export default function ActivityToolFile({conversationId,runId,activityId,result
   void load().catch(error=>{
    if(controller.signal.aborted)return;
    const message=error instanceof ApiError&&error.status===404?(file.version===0?'该原快照版本的已固定源文件暂不可用。':'此固定版本的原文件内容暂不可用。')
-    :error instanceof ApiError&&error.status===422?'此固定版本超出 1 MiB 文本预览范围，或包含非 UTF-8 内容。'
+    :error instanceof ApiError&&error.status===422?'此固定版本包含无法按 UTF-8 解码的内容，暂不支持文本预览。'
     :error instanceof ApiError&&error.status===409?'原列表或文件来源已变化，请重新打开原列表。':error instanceof Error?error.message:'原文件读取失败';
    setState({identity,offset,error:message});
   });

@@ -55,18 +55,28 @@ export async function searchVerifiedArtifactText(source:Source,q:string,signal?:
  return {total_chars:total,match};
 }
 
-export async function readVerifiedArtifactTextPage(source:Source,offset:number,signal?:AbortSignal){
- const start=Math.max(0,offset-1),stop=offset+PAGE_SIZE+1;
+/** Hold only the requested UTF-16 window while the caller proves the complete source. */
+export function createTextPageCollector(offset:number){
+ if(!Number.isSafeInteger(offset)||offset<0)throw Error('artifact_text_query_invalid');
+ const start=Math.max(0,offset-1),stop=Math.min(Number.MAX_SAFE_INTEGER,offset+PAGE_SIZE+1);
  let total=0,window='';
- for await(const text of verifiedText(source,signal)){
-  const left=Math.max(0,start-total),right=Math.min(text.length,stop-total);
-  if(right>left)window+=text.slice(left,right);
-  total+=text.length;
- }
- if(offset>total||boundary(window,offset-start)!==offset-start)throw Error('artifact_text_query_invalid');
- const end=start+boundary(window,Math.min(offset+PAGE_SIZE,total)-start);
- return {offset_chars:offset,total_chars:total,text:window.slice(offset-start,end-start),
-  ...(end<total?{next_offset_chars:end}:{})};
+ return {
+  write(text:string){
+   const left=Math.max(0,start-total),right=Math.min(text.length,stop-total);
+   if(right>left)window+=text.slice(left,right);
+   total+=text.length;
+  },
+  finish(){
+   if(offset>total||boundary(window,offset-start)!==offset-start)throw Error('artifact_text_query_invalid');
+   const end=start+boundary(window,Math.min(offset+PAGE_SIZE,total)-start);
+   return {offset_chars:offset,total_chars:total,text:window.slice(offset-start,end-start),...(end<total?{next_offset_chars:end}:{})};
+  },
+ };
+}
+export async function readVerifiedArtifactTextPage(source:Source,offset:number,signal?:AbortSignal){
+ const page=createTextPageCollector(offset);
+ for await(const text of verifiedText(source,signal))page.write(text);
+ return page.finish();
 }
 
 /** Same literal matching and UTF-16 boundaries for already-proven retained text. */

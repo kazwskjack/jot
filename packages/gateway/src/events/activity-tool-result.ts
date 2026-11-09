@@ -1,4 +1,4 @@
-import {readRetainedArtifactTextPage} from '../artifacts/text-content.ts';
+import {readRetainedArtifactTextPage,createTextPageCollector} from '../artifacts/text-content.ts';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {readIsolatedTaskFileVersion,readIsolatedTaskFileDeletion,isolatedBaselineSource} from '../persistent-tasks/isolated-output-source.ts';
 import type {TaskFileSource} from '../persistent-tasks/task-file-source.ts';
@@ -356,14 +356,33 @@ export function searchActivityToolResults(db:DatabaseSync,owner:string,conversat
   ...(page.run_id?{run_id:page.run_id}:{}),...(page.next_before_seq?{next_before_seq:page.next_before_seq}:{})};
 }
 
+function createListedTextPage(offset:number){
+ const page=createTextPageCollector(offset),decoder=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}),digest=createHash('sha256');
+ let received=0;
+ const decode=(bytes?:Uint8Array)=>{
+  let text:string;
+  try{text=decoder.decode(bytes,{stream:bytes!==undefined});}catch{throw Error('activity_tool_result_file_unsupported');}
+  digest.update(text);page.write(text);
+ };
+ return {
+  write(bytes:Buffer){received+=bytes.length;decode(bytes);},
+  finish(size:number,expected:string){
+   decode();const textSha=digest.digest('hex');
+   if(received!==size||textSha!==expected)throw Error('activity_tool_result_source_invalid');
+   return {...page.finish(),text_sha256:textSha};
+  },
+ };
+}
+
 /** Read exactly an original list member. No current head or unrecorded snapshot fallback. */
 export function readActivityToolResultFile(db:DatabaseSync,owner:string,conversationId:string,activityId:string,query:Record<string,unknown>,reader:WorkspaceFileReader):ActivityToolFilePage{
  if(!db.isTransaction)throw Error('activity_tool_result_read_transaction_required');
  const runId=query.run_id,resultSha=query.result_sha256,path=query.path,fileSha=query.sha256,version=Number(query.version),offset=Number(query.offset_chars??0),textSha=query.text_sha256;
+ const paged=query.text_protocol===2||query.text_protocol==='2';
  if(!ID.test(activityId)||typeof runId!=='string'||!ID.test(runId)||typeof resultSha!=='string'||!SHA.test(resultSha)
   ||typeof path!=='string'||!path||path.length>4096||typeof fileSha!=='string'||!SHA.test(fileSha)||!Number.isSafeInteger(version)||version<0
-  ||!Number.isSafeInteger(offset)||offset<0||offset>MAX_TEXT_CHARS||textSha!==undefined&&(typeof textSha!=='string'||!SHA.test(textSha))
-  ||offset>0&&textSha===undefined||Object.keys(query).some(key=>!['run_id','result_sha256','path','version','sha256','offset_chars','text_sha256'].includes(key)))throw Error('invalid_activity_tool_result_query');
+  ||!Number.isSafeInteger(offset)||offset<0||offset>(paged?Number.MAX_SAFE_INTEGER:MAX_TEXT_CHARS)||query.text_protocol!==undefined&&!paged||textSha!==undefined&&(typeof textSha!=='string'||!SHA.test(textSha))
+  ||offset>0&&textSha===undefined||Object.keys(query).some(key=>!['run_id','result_sha256','path','version','sha256','offset_chars','text_sha256','text_protocol'].includes(key)))throw Error('invalid_activity_tool_result_query');
  const activity=originalActivity(db,owner,conversationId,activityId,runId),call=activityCall(activity);
  if(call.name!=='jot_workspace')throw Error('activity_tool_result_not_found');
  const receipt=readWorkspaceReceipt(db,owner,runId,call.callId);
@@ -371,7 +390,9 @@ export function readActivityToolResultFile(db:DatabaseSync,owner:string,conversa
  if(receipt.resultSha!==resultSha)throw Error('activity_tool_result_source_changed');
  const facts=fileListFacts(receipt.result),file=facts.items.find(item=>item.path===path&&item.version===version&&item.sha256===fileSha);
  if(!file)throw Error('activity_tool_result_not_found');
- if(file.size>MAX_TEXT_CHARS)throw Error('activity_tool_result_file_unsupported');
+ if(offset>file.size)throw Error('invalid_activity_tool_result_query');
+ if(!paged&&file.size>MAX_TEXT_CHARS)throw Error('activity_tool_result_file_unsupported');
+ const streaming=paged?createListedTextPage(offset):undefined;
  const binding=db.prepare(`SELECT json_extract(context_json,'$.workspace_id') workspace_id,json_extract(context_json,'$.project_id') project_id
   FROM wb_run_bindings WHERE run_id=? AND owner_id=?`).get(runId,owner) as {workspace_id:unknown;project_id:unknown}|undefined;
  if(!binding||typeof binding.workspace_id!=='string'||!binding.workspace_id||typeof binding.project_id!=='string'||!binding.project_id)throw Error('activity_tool_result_source_invalid');
@@ -383,7 +404,7 @@ export function readActivityToolResultFile(db:DatabaseSync,owner:string,conversa
   if(version===0){
    const source=isolatedBaselineSource(db,owner,runId,original,path,fileSha,file.size);
    if(!source)throw Error('activity_tool_result_not_found');
-   const baseline=reader.readBinaryFile(owner,source.workspace_id,source.project_id,source.path,source.version,source.sha256);
+   const baseline=reader.readBinaryFile(owner,source.workspace_id,source.project_id,source.path,source.version,source.sha256,undefined,streaming?.write);
    if(baseline.size!==file.size)throw Error('activity_tool_result_source_invalid');
    content=baseline.content;
   }else{
@@ -395,11 +416,18 @@ export function readActivityToolResultFile(db:DatabaseSync,owner:string,conversa
     .get(owner,binding.workspace_id,binding.project_id,String(original.occurrence_id),String(original.cycle_id),String(original.snapshot_id),path,version,fileSha,file.size) as IsolatedFileSource|undefined;
    if(!source)throw Error('activity_tool_result_not_found');
    content=Buffer.from(readIsolatedTaskFileVersion(db,{...source,source:'isolated',native:Boolean(source.native)}).content,'utf8');
+   streaming?.write(content);
   }
  }else{
-  const original=reader.readBinaryFile(owner,binding.workspace_id,binding.project_id,path,version,fileSha);
+  const original=reader.readBinaryFile(owner,binding.workspace_id,binding.project_id,path,version,fileSha,undefined,streaming?.write);
   if(original.size!==file.size)throw Error('activity_tool_result_source_invalid');
   content=original.content;
+ }
+ if(streaming){
+  const page=streaming.finish(file.size,fileSha);
+  if(textSha!==undefined&&textSha!==page.text_sha256)throw Error('activity_tool_result_source_changed');
+  return {conversation_id:conversationId,run_id:runId,activity_id:activityId,result_sha256:resultSha,path,version,sha256:fileSha,size:file.size,
+   source:facts.isolated?'isolated':'workspace',text_protocol:2,...page,execution_authorized:false};
  }
  if(content.length!==file.size||createHash('sha256').update(content).digest('hex')!==fileSha)throw Error('activity_tool_result_source_invalid');
  try{new TextDecoder('utf-8',{fatal:true}).decode(content);}catch{throw Error('activity_tool_result_file_unsupported');}
