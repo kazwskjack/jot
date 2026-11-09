@@ -1,3 +1,5 @@
+import ArtifactEditedDiff from './ArtifactEditedDiff';
+import {isDocumentPreviewMediaType} from './document-preview-content.mjs';
 import React,{useState} from 'react';
 import {request,taskDraftScope} from './client';
 import {useResource} from '../workbench/useResource';
@@ -7,6 +9,7 @@ import type {ActivityArtifactTarget} from './activity-presentation';
 export default function ArtifactVersionHistory({conversationId,artifactId,onOpen}:{conversationId:string;artifactId:string;onOpen:(target:ActivityArtifactTarget)=>void}){
  const owner=taskDraftScope(),[open,setOpen]=useState(false),[cursors,setCursors]=useState<Array<number|undefined>>([undefined]);
  const [before,setBefore]=useState<Artifact>(),[after,setAfter]=useState<Artifact>();
+ const [edited,setEdited]=useState<Artifact>();
  const cursor=cursors.at(-1),identity=JSON.stringify([owner,conversationId,artifactId,cursor]);
  const resource=useResource(async signal=>{
   const page=await request<ArtifactVersionPage>(`/artifacts/${encodeURIComponent(artifactId)}/versions?limit=20${cursor===undefined?'':`&before_version=${cursor}`}`,'GET',undefined,undefined,signal);
@@ -26,11 +29,11 @@ export default function ArtifactVersionHistory({conversationId,artifactId,onOpen
  },identity,open&&!!owner);
  const page=resource.data?.identity===identity&&taskDraftScope()===owner?resource.data.page:undefined;
  const comparable=before&&after&&before.version<after.version;
- return <details open={open} onToggle={event=>setOpen(event.currentTarget.open)} data-chat-search-ignore>
+ return <><details open={open} onToggle={event=>setOpen(event.currentTarget.open)} data-chat-search-ignore>
   <summary>文件版本历史</summary>
   {open&&<>
    <p>每页20个固定版本，当前第 {cursors.length} 页。</p>
-   <button type="button" disabled={resource.loading} onClick={()=>{setCursors([undefined]);setBefore(undefined);setAfter(undefined);resource.reload();}}>刷新版本目录</button>
+   <button type="button" disabled={resource.loading} onClick={()=>{setCursors([undefined]);setBefore(undefined);setAfter(undefined);setEdited(undefined);resource.reload();}}>刷新版本目录</button>
    {resource.loading&&<p role="status">正在读取版本目录…</p>}
    {resource.error&&<p role="alert">{resource.error} <button type="button" onClick={resource.reload}>重试读取目录</button></p>}
    {page&&!resource.loading&&!resource.error&&<>
@@ -39,6 +42,7 @@ export default function ArtifactVersionHistory({conversationId,artifactId,onOpen
      <span>版本 {file.version} · {file.file_name} · {file.created_at} · {file.size_bytes} 字节</span>
      {file.status==='ready'?<>
       <button type="button" onClick={()=>onOpen({kind:'file',artifactId,label:file.file_name,version:file.version,sha256:file.sha256})}>查看版本 {file.version}</button>
+      {file.origin==='edited'&&!file.part_count&&isDocumentPreviewMediaType(file.media_type)&&<button type="button" onClick={()=>setEdited(file)}>查看原编辑差异</button>}
       {!file.part_count&&file.media_type.startsWith('text/')&&<>
        <button type="button" aria-pressed={before?.version===file.version} onClick={()=>setBefore(file)}>选为比较起点</button>
        <button type="button" aria-pressed={after?.version===file.version} onClick={()=>setAfter(file)}>选为比较终点</button>
@@ -52,5 +56,9 @@ export default function ArtifactVersionHistory({conversationId,artifactId,onOpen
    <button type="button" disabled={!comparable} onClick={()=>{if(before&&after&&comparable)onOpen({kind:'diff',artifactId,label:after.file_name,fromVersion:before.version,toVersion:after.version,beforeSha256:before.sha256,afterSha256:after.sha256});}}>查看所选版本差异</button>
    {before&&after&&!comparable&&<p role="status">请选择两个不同版本，比较起点需要早于终点。</p>}
   </>}
- </details>;
+ </details>
+ {open&&edited&&edited.artifact_id===artifactId&&edited.conversation_id===conversationId&&<>
+  <button type="button" data-chat-search-ignore onClick={()=>setEdited(undefined)}>关闭原编辑差异</button>
+  <ArtifactEditedDiff key={JSON.stringify([owner,artifactId,edited.version,edited.sha256])} conversationId={conversationId} file={edited}/>
+ </>}</>;
 }

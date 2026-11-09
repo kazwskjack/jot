@@ -1,4 +1,4 @@
-import {retainedDocumentText} from './document-text.ts';
+import {retainedDocumentText,retainedDocumentEdit} from './document-text.ts';
 import {isDocumentPreviewMediaType} from './document-preview-content.ts';
 import {formatTextDiff} from './text-diff.ts';
 import {searchVerifiedArtifactText,readVerifiedArtifactTextPage,searchRetainedArtifactText,readRetainedArtifactTextPage} from './text-content.ts';
@@ -1566,6 +1566,33 @@ export class ArtifactService {
     }
     if (meta.preview_kind === 'image') return { artifact_id: id, version: Number(row.version), kind: 'image', image_path: `/v1/artifacts/${id}/download?version=${row.version}`, truncated: false };
     return { artifact_id: id, version: Number(row.version), kind: 'unsupported', truncated: false };
+  }
+
+  editedDocumentDiff(id:string,ownerId:string,query:Record<string,unknown>){
+    const identifier=/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/;
+    const conversationId=query.conversation_id,to=Number(query.version),expectedSha=query.sha256;
+    if(Object.keys(query).some(key=>!['conversation_id','version','sha256'].includes(key))||!identifier.test(id)
+      ||typeof conversationId!=='string'||!identifier.test(conversationId)||!Number.isSafeInteger(to)||to<2
+      ||typeof expectedSha!=='string'||!/^[a-f0-9]{64}$/.test(expectedSha))throw Error('artifact_text_query_invalid');
+    return withReadTransaction(this.db,()=>{
+      if(!this.db.prepare('SELECT 1 FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId))throw Error('conversation_not_found');
+      const after=this.version(id,ownerId,to),metadata=JSON.parse(String(after.metadata_json)) as Record<string,unknown>;
+      if(after.conversation_id!==conversationId)throw Error('artifact_not_found');
+      if(after.sha256!==expectedSha)throw Error('artifact_text_source_changed');
+      if(metadata.origin!=='file_engine'||!Number.isSafeInteger(metadata.base_version)||Number(metadata.base_version)<1
+        ||!['ready','delivered'].includes(String(metadata.status)))throw Error('artifact_text_unsupported');
+      const from=Number(metadata.base_version),before=this.version(id,ownerId,from);
+      const beforeMeta=JSON.parse(String(before.metadata_json)) as Record<string,unknown>;
+      if(!['ready','delivered'].includes(String(beforeMeta.status)))throw Error('artifact_not_found');
+      const left={artifactId:id,ownerId,conversationId,version:from,sha256:String(before.sha256),mediaType:String(before.mime_type)};
+      const right={artifactId:id,ownerId,conversationId,version:to,sha256:expectedSha,mediaType:String(after.mime_type),size:Number(after.size_bytes)};
+      const edit=retainedDocumentEdit(this.db,left,right),originalBefore=retainedDocumentText(this.db,left),originalAfter=retainedDocumentText(this.db,right);
+      const full=formatTextDiff(originalBefore.text,originalAfter.text,`version-${from}`,`version-${to}`),text=full.slice(0,200000);
+      const {text:beforeText,...beforeSource}=originalBefore,{text:afterText,...afterSource}=originalAfter;
+      return {artifact_id:id,conversation_id:conversationId,from_version:from,to_version:to,before_sha256:left.sha256,after_sha256:right.sha256,
+        ...edit,before:beforeSource,after:afterSource,unified_diff:text,diff_sha256:createHash('sha256').update(text).digest('hex'),
+        truncated:full.length>text.length,execution_authorized:false};
+    });
   }
 
   diff(id: string, ownerId: string, from: number, to: number) {

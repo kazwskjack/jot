@@ -1365,6 +1365,8 @@ export async function buildServer(config: {
     const query = request.query as { version?: string };
     return artifacts.preview((request.params as { artifactId: string }).artifactId, actor(request as any), query.version ? Number(query.version) : undefined);
   });
+  app.get('/v1/artifacts/:artifactId/edited-diff', async (request,reply) => reply.header('cache-control','private, no-store').send(
+    artifacts.editedDocumentDiff((request.params as {artifactId:string}).artifactId,actor(request as any),request.query as Record<string,unknown>)));
   app.get('/v1/artifacts/:artifactId/diff', async request => {
     const query = request.query as { from_version: string; to_version: string };
     return artifacts.diff((request.params as { artifactId: string }).artifactId, actor(request as any), Number(query.from_version), Number(query.to_version));
