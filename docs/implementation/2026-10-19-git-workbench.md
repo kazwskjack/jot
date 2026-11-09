@@ -149,3 +149,25 @@ shows retained commit admissions and their pending/closed state.
 
 This increment was developed by source inspection only. No test, build, migration,
 native command, UI acceptance or deployment was executed.
+
+
+## Private commit object material
+
+The configured Git kernel now derives host-private commit material from an exact
+metadata-approved review. The original isolated metadata context recomputes the
+reviewed staged-tree evidence, enumerates only its tree graph and reads bounded
+raw tree objects in one batch. Each raw object is verified with the repository's
+SHA-1 or SHA-256 object hash. Existing blob evidence encoding is retained.
+
+Commit headers use the frozen author, committer, whole-second UTC times, tree
+and optional parent. The UTF-8 message bytes retain their original final newline
+state. The commit object is written and read back only in the disposable private
+object directory. It has no source alternates for that write. All private context
+cleanup runs in finally, and current project ownership and identity policy are
+checked before and after preparation in the host service.
+
+This supplies object material for the following original native-custody, write-lock,
+preparation journal and ref-publication work. The Worker does not consume this
+material yet. Original repository objects, index and refs are untouched by this
+preparation path, and commit dispatch remains unavailable. This source increment
+has no runtime, test, build or native-command execution evidence.

@@ -38,7 +38,7 @@ type ReadContext=GitReadContext;
  * generic command, write intent, inference, credential or execution authority. */
 export class GitRepositoryInspection{
  protected readonly root:string;protected readonly gitDirectory:string;protected readonly commonDirectory:string;
- private readonly limits={maxOutputBytes:2*1024*1024,timeoutMs:5000,maxEntries:5000,maxMetadataEntries:100000,maxDiffBytes:256*1024};
+ protected readonly limits={maxOutputBytes:2*1024*1024,timeoutMs:5000,maxEntries:5000,maxMetadataEntries:100000,maxDiffBytes:256*1024};
  private readonly configuredExecutable:string|undefined;private binding?:string;protected executable?:string;
  constructor(options:GitInspectionOptions){
   if(!options||!isAbsolute(options.root)||options.gitDirectory!==undefined&&!isAbsolute(options.gitDirectory)||options.commonDirectory!==undefined&&!isAbsolute(options.commonDirectory)||options.executable!==undefined&&!isAbsolute(options.executable))throw Error('git_configuration_invalid');
