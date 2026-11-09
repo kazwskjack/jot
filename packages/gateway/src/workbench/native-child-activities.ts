@@ -3,6 +3,7 @@ import type {DatabaseSync} from 'node:sqlite';
 import type {EventStore} from '../events/event-store.ts';
 import {withImmediateTransaction,withReadTransaction} from '../db/database.ts';
 import {canonicalJson} from '../db/canonical-json.ts';
+import {parsePublicNativeToolResult} from '../harness/native-tool-result.js';
 import {readNativeMemberExecution} from './native-member-owner-controls.ts';
 import {projectNativeToolEvent,projectWebOperationSnapshot,sessionToolCallId} from '../harness/session-event-projector.ts';
 
@@ -29,11 +30,19 @@ export class NativeChildActivities {
  }
  append(owner:string,runId:string,sessionRef:string,input:Input){
   const event=input.event as Input|undefined;
+  const summarized=input.event_format==='public-result-v1';
+  if(input.event_format!==undefined&&!summarized
+   ||!summarized&&(input.public_result!==undefined||input.source_event_sha256!==undefined))throw Error('native_activity_event_invalid');
+  const publicResult=summarized?parsePublicNativeToolResult(input.public_result):undefined;
+  const sourceSha=summarized?input.source_event_sha256:input.event_sha256;
+  if(typeof sourceSha!=='string'||!SHA.test(sourceSha))throw Error('native_activity_event_invalid');
   if(!event||typeof event!=='object'||Array.isArray(event)||!['tool/call','tool/result'].includes(String(event.type))
    ||!Number.isSafeInteger(event.seq)||Number(event.seq)<0||!Number.isSafeInteger(event.time)||Number(event.time)<0||Number(event.time)>8640000000000000
    ||!event.data||typeof event.data!=='object'||Array.isArray(event.data)
    ||event.type==='tool/result'&&event.surfaceOp!==undefined&&event.surfaceOp!=='append'
-   ||typeof input.event_sha256!=='string'||!SHA.test(input.event_sha256)||digest(event)!==input.event_sha256)throw Error('native_activity_event_invalid');
+   ||typeof input.event_sha256!=='string'||!SHA.test(input.event_sha256)||digest(summarized?{event,public_result:input.public_result}:event)!==input.event_sha256)throw Error('native_activity_event_invalid');
+  if(summarized&&(event.type!=='tool/result'||Object.keys(event).sort().join(',')!=='data,seq,time,type'
+   ||Object.keys(event.data as Input).sort().join(',')!=='callId'))throw Error('native_activity_event_invalid');
   const callId=sessionToolCallId(event.data as Input);
   if(typeof callId!=='string'||!ID.test(callId))throw Error('native_activity_event_invalid');
   return withImmediateTransaction(this.db,()=>{
@@ -42,7 +51,7 @@ export class NativeChildActivities {
    const prior=this.db.prepare('SELECT source_sha256,projection_json FROM wb_native_activity_receipts WHERE run_id=? AND source_seq=?')
     .get(runId,Number(event.seq)) as {source_sha256:string;projection_json:string|null}|undefined;
    if(prior){
-    if(prior.source_sha256!==input.event_sha256)throw Error('native_activity_receipt_conflict');
+    if(prior.source_sha256!==sourceSha)throw Error('native_activity_receipt_conflict');
     return this.receipt(runId,sessionRef,Number(event.seq),prior.source_sha256,prior.projection_json);
    }
    if(source.complete||source.last_event_seq!==null&&Number(event.seq)<=source.last_event_seq)throw Error('native_activity_event_order');
@@ -52,7 +61,7 @@ export class NativeChildActivities {
    const token=createHash('sha256').update(JSON.stringify([runId,callId,call?.source_seq??event.seq])).digest('hex');
    const context={runId,sessionRef,attemptId:`native-${token.slice(0,24)}`,
     messageId:'native-observation',blockId:'native-observation',deltaIndex:0,at:new Date(Number(event.time)).toISOString()};
-   const projection=projectNativeToolEvent(event,context,call?JSON.parse(call.projection_json):undefined);
+   const projection=projectNativeToolEvent(event,context,call?JSON.parse(call.projection_json):undefined,publicResult);
    if(!projection||projection.type!=='activity.upsert')throw Error('native_activity_event_invalid');
    let observed=projection.payload;
    if(event.type==='tool/result'){
@@ -71,9 +80,9 @@ export class NativeChildActivities {
    const payload={...observed,activity_id:`native-tool-${token}`};
    const encoded=JSON.stringify(payload);
    this.db.prepare('INSERT INTO wb_native_activity_receipts VALUES(?,?,?,?,?,?,?)')
-    .run(runId,Number(event.seq),input.event_sha256,String(event.type),callId,encoded,new Date().toISOString());
+    .run(runId,Number(event.seq),sourceSha,String(event.type),callId,encoded,new Date().toISOString());
    this.events.append(source.conversation_id,runId,'activity.upsert',payload);
-   return this.receipt(runId,sessionRef,Number(event.seq),String(input.event_sha256),encoded);
+   return this.receipt(runId,sessionRef,Number(event.seq),sourceSha,encoded);
   });
  }
  complete(owner:string,runId:string,sessionRef:string,input:Input){

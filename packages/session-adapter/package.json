@@ -103,6 +103,7 @@
     "native-child-admission.js",
     "native-child-closure.js",
     "native-child-activities.js",
+    "native-tool-result.js",
     "native-invariant-replay.js",
     "native-role-host.js",
     "native-handoff-barrier.js",

@@ -1,8 +1,11 @@
+import {publicNativeToolResult,sessionToolCallId,type PublicNativeToolResult} from './native-tool-result.js'
 import {createHash} from 'node:crypto'
 import {
   safeWebOperationCounts, safeWebOperationId, safeWebOperationItems, safeWebOperationUrl,
   safeWebOperationKind, safeWebOperationStatus, webOperationPresentation,
 } from './web-operation-presentation.ts'
+
+export {sessionToolCallId} from './native-tool-result.js'
 
 export interface JotProjection {
   type: 'assistant.delta' | 'assistant.settled' | 'activity.upsert'
@@ -39,17 +42,6 @@ const BROWSE_ACTION_TYPES = new Set(['click', 'expand', 'next_page', 'scroll', '
 const SAFE_TOOL_ACTION_LABELS = new Set([
   ...BROWSE_ACTION_TYPES, 'browse', 'execute', 'fetch', 'interact', 'navigate', 'open', 'read', 'search', 'web_operation',
 ])
-const BROWSE_VERIFICATION_STATUSES = new Set([
-  'ACTION_NO_EFFECT', 'ACTION_ROLE_DISALLOWED', 'ACTION_UNAVAILABLE', 'AMBIGUOUS_FRAME',
-  'AMBIGUOUS_TARGET', 'AUTH_REQUIRED', 'BLOCKED', 'BOUND', 'BUSINESS_LOOP',
-  'BUSINESS_REJECTED', 'BUSINESS_SUCCESS', 'CAPTCHA_REQUIRED', 'CONSTRAINT_MISMATCH',
-  'DISABLED', 'FIELD_VALUE_MISMATCH', 'HUMAN_REQUIRED', 'INTERACTABLE', 'INVISIBLE',
-  'LOGIN_REQUIRED', 'NO_EFFECT', 'NON_INTERACTABLE', 'PLANNER_SHADOW_NOT_EXECUTED',
-  'PROVIDER_INVALID_RESPONSE', 'RECOVERED', 'REQUIRED_FIELD_MISSING', 'RESULT_NOT_FOUND',
-  'RESULT_UNCERTAIN', 'SELECTED', 'SETTLED', 'STALE_BINDING', 'STATE_UNCERTAIN',
-  'STABLE', 'TIMEOUT', 'WRONG_ENTITY', 'WRONG_PAGE_TYPE', 'WRONG_SURFACE',
-])
-
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
 }
@@ -88,95 +80,9 @@ function detailFor(tool: ToolPresentation, runId: string): Record<string, unknow
   return { child_run_id: runId }
 }
 
-function parsedJson(value: unknown): unknown {
-  if (typeof value !== 'string' || value.length > 1_000_000) return value
-  const trimmed = value.trim()
-  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return value
-  try { return JSON.parse(trimmed) } catch { return value }
-}
-
-function browseResultEvidence(data: Record<string, unknown>, resultBlock: Record<string, unknown> | undefined) {
-  const roots: unknown[] = [data.result, data.structuredContent, resultBlock?.result, resultBlock?.content]
-  const capabilityResults: Array<{ outcome?: unknown; data?: unknown }> = []
-  const seen = new Set<object>()
-  let visited = 0
-  const visit = (candidate: unknown, depth: number): void => {
-    if (depth > 8 || visited++ > 2048) return
-    const value = parsedJson(candidate)
-    if (Array.isArray(value)) {
-      for (const item of value) visit(item, depth + 1)
-      return
-    }
-    const object = record(value)
-    if (!object || seen.has(object)) return
-    seen.add(object)
-    if (object.event_type === 'capability_result' && object.capability === 'browse') {
-      capabilityResults.push({ outcome: object.outcome, data: object.data })
-      return
-    }
-    if (Array.isArray(object.interaction_trace)) {
-      capabilityResults.push({ outcome: object.outcome, data: object })
-    }
-    for (const key of ['events', 'payload', 'data', 'result', 'structuredContent', 'content']) {
-      if (key in object) visit(object[key], depth + 1)
-    }
-    if (object.type === 'text' && typeof object.text === 'string') visit(object.text, depth + 1)
-  }
-  for (const root of roots) visit(root, 0)
-  if (!capabilityResults.length) return null
-
-  const lastResult = capabilityResults[capabilityResults.length - 1]
-  const finalData = record(lastResult?.data)
-  const trace = (Array.isArray(finalData?.interaction_trace)
-    ? finalData.interaction_trace.map(record).filter((row): row is Record<string, unknown> => row !== null)
-    : []).slice(-12)
-  const lastOutcome = lastResult?.outcome
-  const outcome = lastOutcome === 'success' || lastOutcome === 'pause' || lastOutcome === 'failure'
-    ? lastOutcome : 'unknown'
-  const actionTypes = [...new Set(trace.flatMap(row => {
-    const type = record(row.action)?.type
-    return typeof type === 'string' && BROWSE_ACTION_TYPES.has(type.toLowerCase()) ? [type.toLowerCase()] : []
-  }))]
-  const verificationStatuses = [...new Set(trace.map(row => {
-    const status = record(row.verification)?.status
-    return typeof status === 'string' && BROWSE_VERIFICATION_STATUSES.has(status) ? status : 'UNKNOWN'
-  }))]
-  const verifiedActionTypes = [...new Set(trace.flatMap(row => {
-    const type = record(row.action)?.type
-    return record(row.verification)?.status === 'BUSINESS_SUCCESS'
-      && typeof type === 'string' && BROWSE_ACTION_TYPES.has(type.toLowerCase()) ? [type.toLowerCase()] : []
-  }))]
-  return {
-    browse_outcome: outcome,
-    action_trace_count: trace.length,
-    ...(actionTypes.length ? { traced_action_types: actionTypes } : {}),
-    ...(verificationStatuses.length ? { verification_statuses: verificationStatuses } : {}),
-    verified_action_types: verifiedActionTypes,
-  }
-}
-
-function structuredToolFailure(data: Record<string, unknown>, resultBlock: Record<string, unknown> | undefined): boolean {
-  const values: unknown[] = [data.result, data.structuredContent]
-  if (Array.isArray(resultBlock?.content)) values.push(...resultBlock.content)
-  return values.some(value => {
-    const block = record(value)
-    const result = record(parsedJson(block?.type === 'text' ? block.text : value))
-    return result?.ok === false
-  })
-}
-
-export function sessionToolCallId(data: Record<string, unknown>): unknown {
-  const message = record(data.message)
-  const source = record(message?.source)
-  const resultBlock = Array.isArray(message?.content)
-    ? message.content.map(record).find(block => block?.type === 'tool-result') : undefined
-  return data.callId ?? (source?.kind === 'tool' ? source.callId : undefined)
-    ?? resultBlock?.toolCallId ?? message?.toolCallId ?? data.id
-}
-
 /** Rehydrate only the prior public call presentation after a replay restart. */
 export function projectNativeToolEvent(event: Record<string, unknown>, context: ProjectionContext,
-  priorCall?: Record<string, unknown>): JotProjection | null {
+  priorCall?: Record<string, unknown>, publicResult?: PublicNativeToolResult): JotProjection | null {
   const data = record(event.data)
   if (!data || !['tool/call', 'tool/result'].includes(String(event.type))) return null
   const callId = safeId(sessionToolCallId(data), '')
@@ -189,13 +95,10 @@ export function projectNativeToolEvent(event: Record<string, unknown>, context: 
     tool.startedAt = priorCall.started_at
     knownTools.set(callId, tool)
   }
-  return toolActivity(data, { ...context, knownTools }, event.type === 'tool/result')
+  return toolActivity(data, { ...context, knownTools }, event.type === 'tool/result', publicResult)
 }
 
-function toolActivity(data: Record<string, unknown>, context: ProjectionContext, completed: boolean): JotProjection | null {
-  const message = record(data.message)
-  const resultBlock = Array.isArray(message?.content)
-    ? message.content.map(record).find(block => block?.type === 'tool-result') : undefined
+function toolActivity(data: Record<string, unknown>, context: ProjectionContext, completed: boolean, publicResult?: PublicNativeToolResult): JotProjection | null {
   const rawCallId = sessionToolCallId(data)
   const callId = safeId(rawCallId, '')
   if (!callId) return null
@@ -255,11 +158,11 @@ function toolActivity(data: Record<string, unknown>, context: ProjectionContext,
     tool.startedAt = context.at
   }
   if (!completed) context.knownTools?.set(callId, tool)
-  const failed = completed && Boolean(data.error || resultBlock?.isError
-    || structuredToolFailure(data, resultBlock ?? undefined))
+  const result = completed ? (publicResult ?? publicNativeToolResult(data, tool.kind === 'browse')) : null
+  const failed = result?.failed === true
   if (completed && tool.kind === 'browse') {
     if (failed) {
-      const evidence = browseResultEvidence(data, resultBlock ?? undefined)
+      const evidence = result?.evidence
       if (evidence || tool.publicDetail?.tool_name === 'universe_browse') {
         tool.publicDetail = {
           ...(tool.publicDetail ?? detailFor(tool, context.runId)),
@@ -270,7 +173,7 @@ function toolActivity(data: Record<string, unknown>, context: ProjectionContext,
       tool.publicStatus = 'failed'
       tool.publicTitle = tool.failedTitle
     } else {
-      const evidence = browseResultEvidence(data, resultBlock ?? undefined)
+      const evidence = result?.evidence
       if (evidence) {
       tool.publicDetail = { ...(tool.publicDetail ?? detailFor(tool, context.runId)), ...evidence }
       if (evidence.browse_outcome === 'failure') {

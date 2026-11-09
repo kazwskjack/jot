@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import {nativeToolResultObservation} from './native-tool-result.js';
 import {nativeChildLogJson as json} from './native-child-closure.js';
 
 /** Replay a verified closed prefix without loading or retaining an Agent. */
@@ -28,8 +29,12 @@ export async function replayNativeChildActivities({binding,bridge,persistence,si
    if(result?.events?.length!==1||event?.seq!==seq)throw Error('native_activity_prefix_changed');
    if(!['tool/call','tool/result'].includes(event.type)
     ||event.type==='tool/result'&&event.surfaceOp!==undefined&&event.surfaceOp!=='append')continue;
-   const frame=JSON.parse(JSON.stringify(event)),sha=createHash('sha256').update(json(frame)).digest('hex');
-   const receipt=await bridge.request('native-child-activities',binding,{action:'append',source_log_sha256:source.log_sha256,event_sha256:sha,event:frame},signal);
+   const sha=createHash('sha256').update(json(event)).digest('hex');
+   const observation=event.type==='tool/result'?nativeToolResultObservation(event):{event};
+   const evidence=event.type==='tool/result'?{event_format:'public-result-v1',source_event_sha256:sha}:{};
+   const transportSha=event.type==='tool/result'?createHash('sha256').update(json(observation)).digest('hex'):sha;
+   const receipt=await bridge.request('native-child-activities',binding,{action:'append',source_log_sha256:source.log_sha256,
+    ...observation,...evidence,event_sha256:transportSha},signal);
    if(!receipt||receipt.accepted!==true||receipt.execution_authorized!==false||receipt.run_id!==binding.runId||receipt.session_ref!==binding.sessionRef
     ||receipt.event_seq!==seq||receipt.event_sha256!==sha||typeof receipt.activity_id!=='string')throw Error('native_activity_receipt_invalid');
    last=seq;

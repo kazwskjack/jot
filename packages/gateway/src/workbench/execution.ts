@@ -277,7 +277,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       fields(input,['run_id','session_ref','action']);return nativeActivities.source(owner,runId,sessionRef);
     }
     if(input.action==='append'){
-      fields(input,['run_id','session_ref','action','source_log_sha256','event_sha256','event']);
+      fields(input,['run_id','session_ref','action','source_log_sha256','event_sha256','event','event_format','source_event_sha256','public_result']);
       return nativeActivities.append(owner,runId,sessionRef,input);
     }
     if(input.action==='complete'){
