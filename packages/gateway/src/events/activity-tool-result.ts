@@ -1,3 +1,6 @@
+import {canonicalJson} from '../db/canonical-json.ts';
+import {readIsolatedTaskFileVersion} from '../persistent-tasks/isolated-output-source.ts';
+import type {TaskFileSource} from '../persistent-tasks/task-file-source.ts';
 import {formatTextDiff} from '../artifacts/text-diff.ts';
 import type {WorkbenchService} from '../workbench/service.ts';
 import {createHash} from 'node:crypto';
@@ -13,6 +16,7 @@ const MAX_MCP_RESULT_BYTES=524288;
 const MAX_WORKSPACE_RESULT_BYTES=8*1024*1024;
 const MAX_TEXT_CHARS=1048576;
 const MAX_RESULT_TEXT_CHARS=6*1048576;
+type IsolatedFileSource=Extract<TaskFileSource,{source:'isolated'}>;
 type WorkspaceFileReader=Pick<WorkbenchService,'readBinaryFile'>;
 type TextSource=Pick<ActivityToolResultPage,'source'|'text'|'result_sha256'|'has_other_content'|'operation'|'source_truncated'|'file_diff_state'>;
 const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
@@ -50,7 +54,65 @@ function readMcpText(db:DatabaseSync,owner:string,runId:string,name:string,callI
  return {source:'mcp',text:parts.join('\n'),result_sha256:source.result_hash,has_other_content:otherContent};
 }
 
+/** The immutable journal supplies an actual preimage only for a prior retained write. */
+function isolatedWriteSummary(db:DatabaseSync,owner:string,runId:string,receiptId:string,result:Record<string,unknown>){
+ if(!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_task_isolated_file_execution_receipts'").get())throw Error('activity_tool_result_not_found');
+ const file=db.prepare(`SELECT e.*,r.conversation_id,b.kind='native_team' AS native FROM wb_task_isolated_file_execution_receipts e
+  JOIN wb_run_bindings b ON b.run_id=e.run_id AND b.owner_id=e.owner_id
+  JOIN ga_runs r ON r.id=e.run_id JOIN ga_conversations c ON c.id=r.conversation_id AND c.owner_id=e.owner_id
+  WHERE e.receipt_id=? AND e.run_id=? AND e.owner_id=?`).get(receiptId,runId,owner) as IsolatedFileSource|undefined;
+ if(!file||result.receipt_id!==file.isolated_receipt_id
+  ||result.path!==file.path||result.version!==file.version||result.sha256!==file.sha256||result.size!==file.size
+  ||!Number.isSafeInteger(file.size)||file.size<0||file.size>MAX_TEXT_CHARS)throw Error('activity_tool_result_source_invalid');
+ const read=(source:IsolatedFileSource)=>{
+  try{return readIsolatedTaskFileVersion(db,{...source,source:'isolated',native:Boolean(source.native)});}
+  catch{throw Error('activity_tool_result_source_invalid');}
+ };
+ const after=read(file);
+ const intent=db.prepare(`SELECT i.before_json,i.operation_json FROM wb_isolated_file_intents i
+  JOIN wb_isolated_file_results r ON r.call_key=i.call_key WHERE r.receipt_id=?`).get(result.receipt_id as string) as {before_json:string;operation_json:string}|undefined;
+ if(!intent)throw Error('activity_tool_result_source_invalid');
+ let inventory:unknown,operation:Record<string,unknown>|undefined;
+ try{inventory=JSON.parse(intent.before_json);operation=object(JSON.parse(intent.operation_json));}catch{throw Error('activity_tool_result_source_invalid');}
+ if(!Array.isArray(inventory)||canonicalJson(inventory)!==intent.before_json||!operation
+  ||!Number.isSafeInteger(operation.expected_version)||Number(operation.expected_version)<0
+  ||Number(operation.expected_version)+1!==file.version)throw Error('activity_tool_result_source_invalid');
+ const entries=inventory as unknown[];
+ if(entries.some(entry=>!Array.isArray(entry)||entry.length!==2||typeof entry[0]!=='string'||!object(entry[1]))
+  ||new Set(entries.map(entry=>(entry as unknown[])[0])).size!==entries.length)throw Error('activity_tool_result_source_invalid');
+ const initial=object((entries.find(entry=>(entry as unknown[])[0]===file.path) as unknown[]|undefined)?.[1]);
+ const beforeVersion=Number(operation.expected_version);
+ const previous=db.prepare(`SELECT version,sha256 FROM wb_isolated_file_results
+  WHERE cycle_id=? AND snapshot_id=? AND path=? AND version<? ORDER BY version DESC LIMIT 1`)
+  .get(result.cycle_id as string,result.snapshot_id as string,file.path,file.version) as {version:number;sha256:string|null}|undefined;
+ if((previous?.version??0)!==beforeVersion)throw Error('activity_tool_result_source_invalid');
+ const lines=['已记录的隔离文件写入',`逻辑路径 ${file.path}`,`写入版本 ${file.version}`,`写入摘要 ${file.sha256}`,`字节数 ${file.size}`];
+ let beforeText='',beforeLabel='absent';
+ if(initial){
+  if(initial.kind!=='file'||typeof initial.identity!=='string'||!initial.identity||typeof initial.sha256!=='string'||!SHA.test(initial.sha256)||!Number.isSafeInteger(initial.size)||Number(initial.size)<0)throw Error('activity_tool_result_source_invalid');
+  if(!previous){lines.push(`写入前摘要 ${initial.sha256}`,'写入前原文 快照日志未留存');return {text:lines.join('\n'),file_diff_state:'base_unrecorded' as const};}
+  if(previous.sha256!==initial.sha256)throw Error('activity_tool_result_source_invalid');
+  const prior=db.prepare(`SELECT e.*,r.conversation_id,b.kind='native_team' AS native FROM wb_task_isolated_file_execution_receipts e
+   JOIN wb_run_bindings b ON b.run_id=e.run_id AND b.owner_id=e.owner_id
+   JOIN ga_runs r ON r.id=e.run_id JOIN ga_conversations c ON c.id=r.conversation_id AND c.owner_id=e.owner_id
+   WHERE e.owner_id=? AND e.workspace_id=? AND e.project_id=? AND e.task_id=? AND e.occurrence_id=?
+    AND e.cycle_id=? AND e.snapshot_id=? AND e.path=? AND e.version=? AND e.sha256=? AND e.size=?`)
+   .get(owner,file.workspace_id,file.project_id,file.task_id,file.occurrence_id,result.cycle_id as string,result.snapshot_id as string,file.path,beforeVersion,initial.sha256,Number(initial.size)) as IsolatedFileSource|undefined;
+  if(!prior||prior.size>MAX_TEXT_CHARS)throw Error('activity_tool_result_source_invalid');
+  beforeText=read(prior).content;beforeLabel=`version-${beforeVersion}`;
+  lines.push(`写入前版本 ${beforeVersion}`,`写入前摘要 ${initial.sha256}`);
+ }else{
+  // A deleted predecessor needs its original deletion proof before absence can be attributed.
+  if(previous?.sha256!==undefined&&previous.sha256!==null)throw Error('activity_tool_result_source_invalid');
+  if(previous)return {text:lines.join('\n')+'\n写入前状态 删除后的原始来源尚未接入',file_diff_state:'base_unrecorded' as const};
+  lines.push('写入前状态 隔离逻辑路径不存在');
+ }
+ const diff=formatTextDiff(beforeText,after.content,beforeLabel,`version-${file.version}`);
+ return {text:lines.join('\n')+'\n\n原始写入差异\n'+diff,file_diff_state:'available' as const};
+}
+
 function writeSummary(db:DatabaseSync,owner:string,runId:string,receiptId:string,result:Record<string,unknown>,reader?:WorkspaceFileReader){
+ if(result.source==='isolated')return isolatedWriteSummary(db,owner,runId,receiptId,result);
  if(result.source!==undefined&&result.source!=='workspace')throw Error('activity_tool_result_not_found');
  if(!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_task_file_execution_receipts'").get())throw Error('activity_tool_result_not_found');
  const file=db.prepare(`SELECT f.workspace_id,f.project_id,f.path,f.version,f.sha256,f.size FROM wb_task_file_execution_receipts f
