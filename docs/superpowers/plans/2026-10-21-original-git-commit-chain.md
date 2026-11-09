@@ -142,3 +142,21 @@ File path length, total content/object/output bounds, timeouts and publication
 input limits continue to be enforced by their original consumers. M15.19 remains
 in progress until all original staged/file interruption recovery implementation
 is covered. This capacity increment is source development only.
+
+## P09 original index root and reference recovery boundaries
+
+Source tracing of original completeControl/reconcile callers identified an
+observation gap after asynchronous blob reads. observeEvidence now rechecks
+repository binding, retained physical root identities, the original .git witness,
+HEAD/packed/branch references and the exact published index inode/hash after all
+object reads and private-context disposal. A replaced root or changed reference
+retains an unknown/error observation through the original coordinator.
+
+Original applyIndex failure cleanup now checks retained roots and .git identity
+before each exact-owned lock or created-parent deletion. A moved/replaced root
+cannot acquire cleanup authority by containing a previously owned inode. This
+reuses the root guard already required by original source publication checks.
+Original lease/owner transactions, native drain, journal evidence and result
+encodings continue to be consumed by the existing recovery entry points.
+This increment is source development only. Remaining original stage/file boundary
+coverage is tracked in M15.19.

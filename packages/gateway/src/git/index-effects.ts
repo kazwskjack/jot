@@ -195,8 +195,12 @@ export class GitIndexEffects extends GitRepositoryInspection{
    this.plans.set(plan,{witness,index,blobs,ref,metadata,directories,dot,rawRefs,attributes,mode,state:'ready'});return plan;
   }finally{await context.dispose();}
  }
+ protected assertSourceRoots(stored:{directories:Iterable<readonly [string,string]>;dot:string}){
+  for(const [path,identity] of stored.directories)if(this.directorySync(path)!==identity)throw Error('git_repository_changed');
+  if(this.dotWitness()!==stored.dot)throw Error('git_repository_changed');
+ }
  protected assertSource(stored:GitSourceWitness,locks:Lock[],created:Map<string,string>,indexPath=join(this.gitDirectory,'index.lock'),ignored:ReadonlySet<string>=new Set()){
-  for(const [path,identity] of stored.directories)if(this.directorySync(path)!==identity)throw Error('git_repository_changed');if(this.dotWitness()!==stored.dot)throw Error('git_repository_changed');
+  this.assertSourceRoots(stored);
   for(const [path,identity] of created)if(this.directorySync(path)!==identity)throw Error('git_repository_changed');
   for(const lock of locks){const s=lstatSync(lock.path);if(!s.isFile()||s.isSymbolicLink()||s.nlink!==1n||id(s)!==lock.identity)throw Error('git_repository_changed');const bytes=this.raw(lock.path);if(bytes===null||hash(bytes)!==(equalPath(lock.path,indexPath)?hash(stored.index):hash(Buffer.alloc(0))))throw Error('git_review_changed');}
   const lockedIndex=this.raw(indexPath);if(lockedIndex===null||hash(lockedIndex)!==hash(stored.index))throw Error('git_review_changed');
@@ -270,8 +274,8 @@ export class GitIndexEffects extends GitRepositoryInspection{
   }catch(error){failure=error;throw error;}finally{
    if(stored.state==='locking')stored.state='ready';const failures:unknown[]=[];try{await context?.dispose();}catch(error){failures.push(error);}
    let cleanupStarted=false;try{this.cleanupAtomically(()=>{cleanupStarted=true;
-   for(const lock of [...locks,...pending].reverse()){try{const s=lstatSync(lock.path),known=[...locks,...pending].filter(file=>file.identity===lock.identity).filter(file=>{try{return id(lstatSync(file.path))===lock.identity;}catch{return false;}}).length,expected=lock.identity===pending[0]?.identity?hash(stored.index):hash(Buffer.alloc(0));if(!s.isFile()||s.isSymbolicLink()||s.nlink!==BigInt(known)||id(s)!==lock.identity)throw Error('git_index_lock_unverified');const bytes=this.raw(lock.path,32*1024*1024,known);if(bytes===null||hash(bytes)!==expected)throw Error('git_index_lock_unverified');unlinkSync(lock.path);}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')failures.push(error);}}
-   for(const [path,identity] of [...created].reverse())try{if(this.directorySync(path)===identity)rmdirSync(path);}catch(error){if(!['ENOENT','ENOTEMPTY','EEXIST'].includes((error as NodeJS.ErrnoException).code??''))failures.push(error);}if(failures.length)throw Error('git_index_cleanup_unknown',{cause:failure});
+   for(const lock of [...locks,...pending].reverse()){try{this.assertSourceRoots(stored);const s=lstatSync(lock.path),known=[...locks,...pending].filter(file=>file.identity===lock.identity).filter(file=>{try{return id(lstatSync(file.path))===lock.identity;}catch{return false;}}).length,expected=lock.identity===pending[0]?.identity?hash(stored.index):hash(Buffer.alloc(0));if(!s.isFile()||s.isSymbolicLink()||s.nlink!==BigInt(known)||id(s)!==lock.identity)throw Error('git_index_lock_unverified');const bytes=this.raw(lock.path,32*1024*1024,known);if(bytes===null||hash(bytes)!==expected)throw Error('git_index_lock_unverified');unlinkSync(lock.path);}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')failures.push(error);}}
+   for(const [path,identity] of [...created].reverse())try{this.assertSourceRoots(stored);if(this.directorySync(path)===identity)rmdirSync(path);}catch(error){if(!['ENOENT','ENOTEMPTY','EEXIST'].includes((error as NodeJS.ErrnoException).code??''))failures.push(error);}if(failures.length)throw Error('git_index_cleanup_unknown',{cause:failure});
    },authority.cleanup);}catch(error){if(!cleanupStarted&&failure)throw failure;throw error;}
   }
  }
@@ -283,13 +287,42 @@ export class GitIndexEffects extends GitRepositoryInspection{
  /** Rebuild observation only. Persisted JSON can never become a writable plan. */
  async observeEvidence(input:unknown,signal?:AbortSignal){
   const evidence=indexEvidence(input),plan=evidence.plan;
+  const directories:Array<[string,string]>=[
+   [this.root,evidence.directories.root],[this.gitDirectory,evidence.directories.git],
+   [this.commonDirectory,evidence.directories.common],[join(this.commonDirectory,'objects'),evidence.directories.objects]
+  ];
+  const roots={directories,dot:evidence.dot_witness};
   if((await this.anchors(signal)).repository!==plan.repository_sha256)throw Error('git_repository_changed');
-  for(const [path,expected] of [[this.root,evidence.directories.root],[this.gitDirectory,evidence.directories.git],[this.commonDirectory,evidence.directories.common],[join(this.commonDirectory,'objects'),evidence.directories.objects]])if(this.directorySync(path!)!==expected)throw Error('git_repository_changed');if(this.dotWitness()!==evidence.dot_witness)throw Error('git_repository_changed');
-  const bytes=this.raw(join(this.gitDirectory,'index')),current=bytes===null?null:hash(bytes),result=(state:'applied'|'not_observed'|'unknown')=>({state,index_sha256:current,execution_authorized:false as const});
+  this.assertSourceRoots(roots);
+  const bytes=this.raw(join(this.gitDirectory,'index')),current=bytes===null?null:hash(bytes);
+  const result=(state:'applied'|'not_observed'|'unknown')=>({state,index_sha256:current,execution_authorized:false as const});
   if(current!==plan.index_sha256)return result(current===plan.before_index_sha256?'not_observed':'unknown');
   if(id(lstatSync(join(this.gitDirectory,'index')))!==evidence.index_lock_identity)return result('unknown');
-  for(const [path,expected] of [[join(this.gitDirectory,'HEAD'),evidence.refs.head_sha256],[join(this.commonDirectory,'packed-refs'),evidence.refs.packed_sha256],...(evidence.refs.ref?[[join(this.commonDirectory,evidence.refs.ref),evidence.refs.branch_sha256]]:[])] as Array<[string,string|null]>){const value=this.raw(path);if((value===null?null:hash(value))!==expected)return result('unknown');}
-  const context=await this.context(signal);try{for(const blob of evidence.blobs){let actual:Buffer;try{actual=await this.controlled(context,['cat-file','blob',blob.oid],undefined,signal,true);}catch{signal?.throwIfAborted();return result('unknown');}if(actual.length!==blob.size||hash(actual)!==blob.sha256)return result('unknown');}const after=this.raw(join(this.gitDirectory,'index'));return result(after!==null&&hash(after)===current&&id(lstatSync(join(this.gitDirectory,'index')))===evidence.index_lock_identity?'applied':'unknown');}finally{await context.dispose();}
+  const refs:Array<[string,string|null]>=[
+   [join(this.gitDirectory,'HEAD'),evidence.refs.head_sha256],
+   [join(this.commonDirectory,'packed-refs'),evidence.refs.packed_sha256],
+   ...(evidence.refs.ref?[[join(this.commonDirectory,evidence.refs.ref),evidence.refs.branch_sha256] as [string,string|null]]:[])
+  ];
+  const referencesMatch=()=>refs.every(([path,expected])=>{
+   const value=this.raw(path);return (value===null?null:hash(value))===expected;
+  });
+  if(!referencesMatch())return result('unknown');
+  const context=await this.context(signal);
+  try{
+   for(const blob of evidence.blobs){
+    let actual:Buffer;
+    try{actual=await this.controlled(context,['cat-file','blob',blob.oid],undefined,signal,true);}
+    catch{signal?.throwIfAborted();return result('unknown');}
+    if(actual.length!==blob.size||hash(actual)!==blob.sha256)return result('unknown');
+   }
+  }finally{await context.dispose();}
+  // Object reads and disposal yield. Recheck the original roots and references
+  // after the final await before recognizing an original index publication.
+  if((await this.anchors(signal)).repository!==plan.repository_sha256)throw Error('git_repository_changed');
+  this.assertSourceRoots(roots);signal?.throwIfAborted();
+  if(!referencesMatch())return result('unknown');
+  const after=this.raw(join(this.gitDirectory,'index'));
+  return result(after!==null&&hash(after)===current&&id(lstatSync(join(this.gitDirectory,'index')))===evidence.index_lock_identity?'applied':'unknown');
  }
  /** Trusted original recovery must fence the prior Worker before calling this.
   * Only exact persisted owned files are removable; no timestamp-based cleanup. */
