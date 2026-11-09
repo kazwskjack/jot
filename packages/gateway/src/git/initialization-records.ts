@@ -1,3 +1,4 @@
+import type {DatabaseSync} from 'node:sqlite';
 import {createHash} from 'node:crypto';
 import type {GitInitializationReviewPrepare,GitInitializationWitness} from '../../contracts/types.ts';
 import {canonicalJson} from '../db/canonical-json.ts';
@@ -50,4 +51,19 @@ export function readGitInitializationIntentSource(row:GitBranchIntentRecord){
    ||initializationSnapshotId(witness)!==witness.snapshot_id||hash(JSON.stringify({action:'init',witness}))!==row.review_sha256)throw Error();
   return{input,witness};
  }catch{throw Error('git_initialization_evidence_invalid');}
+}
+
+/** Original immutable approval facts only. Current owner and latest decision
+ * fences stay with the owning service. This read grants no filesystem authority. */
+export function readGitInitializationReviewSource(db:DatabaseSync,owner:string,project:string,intent:string,version:number,review:string){
+ const row=db.prepare('SELECT * FROM wb_git_mutation_intents WHERE owner_id=? AND project_id=? AND intent_id=?').get(owner,project,intent) as GitBranchIntentRecord|undefined;
+ const approved=db.prepare("SELECT 1 FROM wb_git_mutation_events WHERE intent_id=? AND version=? AND state='approved'").get(intent,version);
+ if(!row||row.action!=='init'||!approved||row.review_sha256!==review)throw Error('git_initialization_evidence_invalid');
+ const {input,witness}=readGitInitializationIntentSource(row);
+ return{action:input.action,witness};
+}
+export function readGitInitializationExecutionSource(db:DatabaseSync,row:{owner_id:string;project_id:string;intent_id:string;review_version:number;review_sha256:string;witness_sha256:string;repository_sha256:string}){
+ const source=readGitInitializationReviewSource(db,row.owner_id,row.project_id,row.intent_id,row.review_version,row.review_sha256);
+ if(hash(JSON.stringify(source.witness))!==row.witness_sha256||source.witness.repository_sha256!==row.repository_sha256)throw Error('git_initialization_evidence_invalid');
+ return source;
 }

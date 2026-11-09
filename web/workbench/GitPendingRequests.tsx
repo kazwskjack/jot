@@ -1,22 +1,26 @@
 import React,{useCallback,useContext,useEffect,useMemo,useRef,useState} from 'react';
 import {taskDraftScope} from '../jot/client';import {GitCommandDraftStore,listGitCommandDrafts,gitCommandDraftEvent} from './git-command-draft.mjs';import {MutationPending,useMutationReceipt} from './useMutationReceipt';import {workbenchApi} from './client';
-import type {GitReviewIntent,GitBranchReviewIntent,GitIndexAcceptance} from './types';import GitReview from './GitReview';import GitBranchReview from './GitBranchReview';import GitIndexOperation from './GitIndexOperation';
+import type {GitReviewIntent,GitBranchReviewIntent,GitInitializationReviewIntent,GitIndexAcceptance} from './types';import GitReview from './GitReview';import GitBranchReview from './GitBranchReview';import GitIndexOperation from './GitIndexOperation';
 type Hint=ReturnType<typeof listGitCommandDrafts>[number];
 function PendingRow({row,scope,project,onKnown}:{row:Hint;scope:string;project:string;onKnown:(value:any,hint:Hint)=>Promise<void>}){
  const store=useMemo(()=>new GitCommandDraftStore(()=>window.localStorage,scope,project,row.key),[scope,project,row.key]),receipt=useMutationReceipt(store,()=>row.key),[busy,setBusy]=useState(false),[error,setError]=useState(''),alive=useRef(true),inflight=useRef(false);
  useEffect(()=>{alive.current=true;return()=>{alive.current=false}},[]);
  const retry=async()=>{if(inflight.current)return;inflight.current=true;setBusy(true);setError('');try{const value=await receipt.submit(row.command.path,row.command.method,row.command.body);if(alive.current)await onKnown(value,row)}catch{if(alive.current)setError('原请求仍未确认，请保留原记录重试。')}finally{inflight.current=false;if(alive.current)setBusy(false)}};
- return <li><p>{row.kind==='admit'?'Git 操作受理':row.kind==='control'?'原操作确认':row.kind.startsWith('branch-review')?'分支审核':'变更审核'} · <code>{row.command.body.request_id}</code></p><button type="button" disabled={busy} onClick={()=>void retry()}>重试原请求并确认</button>{error&&<p role="alert">{error}</p>}</li>;
+ return <li><p>{row.kind==='admit'?'Git 操作受理':row.kind==='control'?'原操作确认':row.kind==='initialization-review-control'?'初始化审核':row.kind.startsWith('branch-review')?'分支审核':'变更审核'} · <code>{row.command.body.request_id}</code></p><button type="button" disabled={busy} onClick={()=>void retry()}>重试原请求并确认</button>{error&&<p role="alert">{error}</p>}</li>;
 }
 export default function GitPendingRequests({project,allowDispatch,allowCommitDispatch=false,allowBranchDispatch=false,onPending}:{project:string;allowDispatch:boolean;allowCommitDispatch?:boolean;allowBranchDispatch?:boolean;onPending:(value:boolean)=>void}){
- const scope=taskDraftScope(),[rows,setRows]=useState<Hint[]>([]),[error,setError]=useState(''),[readError,setReadError]=useState(''),[known,setKnown]=useState(false),[view,setView]=useState<{review?:GitReviewIntent|GitBranchReviewIntent;accepted?:GitIndexAcceptance}|null>(null),[childBusy,setChildBusy]=useState(false),report=useContext(MutationPending),alive=useRef(true),controller=useRef<AbortController|null>(null);
+ const scope=taskDraftScope(),[rows,setRows]=useState<Hint[]>([]),[error,setError]=useState(''),[readError,setReadError]=useState(''),[known,setKnown]=useState(false),[view,setView]=useState<{review?:GitReviewIntent|GitBranchReviewIntent;accepted?:GitIndexAcceptance;initialization?:GitInitializationReviewIntent}|null>(null),[childBusy,setChildBusy]=useState(false),report=useContext(MutationPending),alive=useRef(true),controller=useRef<AbortController|null>(null);
  const load=useCallback(()=>{try{setRows(listGitCommandDrafts(()=>window.localStorage,scope,project));setError('')}catch{setError('本地原请求记录暂时无法读取，请核对会话后重试。')}},[scope,project]);
  useEffect(()=>{alive.current=true;load();window.addEventListener(gitCommandDraftEvent,load);window.addEventListener('storage',load);return()=>{alive.current=false;controller.current?.abort();window.removeEventListener(gitCommandDraftEvent,load);window.removeEventListener('storage',load);onPending(false);report(false)}},[load,onPending,report]);
  useEffect(()=>{const blocked=rows.length>0||!!error||childBusy;onPending(blocked);if(blocked)report(true)},[rows,error,childBusy,onPending,report]);
  const confirmed=async(result:any,hint:Hint)=>{
   if(!alive.current)return;setKnown(true);setReadError('');setView(null);const c=new AbortController();controller.current?.abort();controller.current=c;
   try{
-   if(hint.kind==='branch-review-prepare'||hint.kind==='branch-review-control'){
+   if(hint.kind==='initialization-review-control'){
+    const r=await workbenchApi.gitInitializationReview(project,hint.intent_id,c.signal);c.signal.throwIfAborted();
+    if(r.project_id!==project||r.intent_id!==hint.intent_id||r.action!=='init'||r.state!=='cancelled'||r.execution_authorized!==false)throw Error('GIT_REQUEST_SCOPE_CHANGED');
+    if(alive.current)setView({initialization:r});
+   }else if(hint.kind==='branch-review-prepare'||hint.kind==='branch-review-control'){
     const id=hint.kind==='branch-review-control'?hint.intent_id:result?.intent_id;if(typeof id!=='string')throw Error('GIT_REQUEST_SCOPE_CHANGED');
     const r=await workbenchApi.gitBranchReview(project,id,c.signal);c.signal.throwIfAborted();
     if(r.project_id!==project||r.intent_id!==id||r.action!=='create-branch'||r.execution_authorized!==false
@@ -33,6 +37,7 @@ export default function GitPendingRequests({project,allowDispatch,allowCommitDis
  };
  return <section aria-label="未确认的 Git 请求">{rows.length>0&&<><p>发现未确认的原请求。读取记录不会重新执行。</p><ul>{rows.map(row=><PendingRow key={row.key} row={row} scope={scope} project={project} onKnown={confirmed}/>)}</ul></>}{known&&<p role="status">原请求已确认。</p>}{error&&<p role="alert">{error}<button type="button" onClick={load}>重新读取原请求</button></p>}
   {readError&&<p role="alert">{readError}</p>}
+  {view?.initialization&&<p role="status" style={{overflowWrap:'anywhere'}}>初始化审核已取消。初始分支 <code>{view.initialization.initial_branch}</code> · {view.initialization.object_format}。可从操作记录继续核对原受理及结束状态。</p>}
   {view?.review?.action==='create-branch'&&<GitBranchReview key={view.review.intent_id} project={project} snapshotId={view.review.snapshot_id} initialReview={view.review} onClose={()=>setView(null)} onBusy={setChildBusy} allowExecution={allowBranchDispatch}/>}
   {view?.review&&view.review.action!=='create-branch'&&<GitReview key={view.review.intent_id} draft={{project,snapshot:view.review.snapshot_id,paths:view.review.paths,action:view.review.action,actions:[view.review.action]}} initialReview={view.review} onClose={()=>setView(null)} onBusy={setChildBusy} allowIndexExecution={allowDispatch&&['stage','unstage'].includes(view.review.action)} allowCommitExecution={allowCommitDispatch&&view.review.action==='commit'}/>}
   {view?.accepted&&<GitIndexOperation key={view.accepted.execution_id} project={project} acceptance={view.accepted} allowDispatch={allowDispatch} allowCommitDispatch={allowCommitDispatch} allowBranchDispatch={allowBranchDispatch} onBusy={setChildBusy}/>}

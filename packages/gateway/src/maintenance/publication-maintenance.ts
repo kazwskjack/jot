@@ -1,4 +1,4 @@
-import {gitCommitExecutionSchema,upgradeGitCommitExecutionSchema,rollbackGitCommitExecutionSchema,upgradeGitBranchExecutionSchema,rollbackGitBranchExecutionSchema} from '../git/commit-execution-upgrade.ts';
+import {gitCommitExecutionSchema,upgradeGitCommitExecutionSchema,rollbackGitCommitExecutionSchema,upgradeGitBranchExecutionSchema,rollbackGitBranchExecutionSchema,upgradeGitInitializationExecutionSchema,rollbackGitInitializationExecutionSchema} from '../git/commit-execution-upgrade.ts';
 import {DatabaseSync} from 'node:sqlite';
 import {lstatSync,realpathSync} from 'node:fs';import {isAbsolute,resolve} from 'node:path';
 import {retainOriginalGitDatabase} from '../git/database-identity.ts';
@@ -89,5 +89,18 @@ export function applyGitBranchMaintenance(path:string,command:unknown,rollback=f
   const change=rollback?rollbackGitBranchExecutionSchema(db):upgradeGitBranchExecutionSchema(db);
   identity.assertCurrent();
   return {before,branch_schema_change:change,after:view(db),execution_authorized:false as const,offline_pool_drain_observed:false as const};
+ });
+}
+
+/** Initialization uses the original offline database and inventory guards. */
+export function applyGitInitializationMaintenance(path:string,command:unknown,rollback=false){
+ const input=maintenanceInput(command);
+ if(typeof rollback!=='boolean')fail('command_invalid');
+ return openExisting(path,true,db=>{
+  const identity=retainOriginalGitDatabase(db),before=view(db);
+  if(identity.sha256!==input.expected_database_sha256)fail('database_changed');
+  const change=rollback?rollbackGitInitializationExecutionSchema(db):upgradeGitInitializationExecutionSchema(db);
+  identity.assertCurrent();
+  return{before,initialization_schema_change:change,after:view(db),execution_authorized:false as const,offline_pool_drain_observed:false as const};
  });
 }

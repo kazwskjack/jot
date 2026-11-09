@@ -1356,7 +1356,7 @@
     "GitIndexAdmissionInput",
     "GitIndexAcceptance",
     "202",
-    "Accept the exact approved original review in the original execution journal and atomic HTTP receipt. Commit acceptance uses protocol 5, the configured operator metadata, target and parent. It requires the typed original table schema. Acceptance grants no physical commit effects. Original index receipts retain their encoding."
+    "Accept the exact approved original review in the original execution journal and atomic HTTP receipt. Commit acceptance uses protocol 5, the configured operator metadata, target and parent. It requires the typed original table schema. Acceptance grants no physical commit effects. Original index receipts retain their encoding. Initialization acceptance uses protocol 7 and its explicit original storage upgrade. It retains the chosen initial branch, object format and internal-ignore facts. Its physical dispatch remains a separate phase."
   ],
   [
     "POST",

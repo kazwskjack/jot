@@ -17232,7 +17232,7 @@
             }
           }
         },
-        "description": "Accept the exact approved original review in the original execution journal and atomic HTTP receipt. Commit acceptance uses protocol 5, the configured operator metadata, target and parent. It requires the typed original table schema. Acceptance grants no physical commit effects. Original index receipts retain their encoding."
+        "description": "Accept the exact approved original review in the original execution journal and atomic HTTP receipt. Commit acceptance uses protocol 5, the configured operator metadata, target and parent. It requires the typed original table schema. Acceptance grants no physical commit effects. Original index receipts retain their encoding. Initialization acceptance uses protocol 7 and its explicit original storage upgrade. It retains the chosen initial branch, object format and internal-ignore facts. Its physical dispatch remains a separate phase."
       }
     },
     "/v1/projects/{projectId}/git/executions/{executionId}/controls": {
@@ -40015,6 +40015,312 @@
           ]
         }
       },
+      "GitInitializationAcceptance": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "execution_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+          },
+          "project_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+          },
+          "intent_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+          },
+          "request_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+          },
+          "action": {
+            "const": "init"
+          },
+          "execution_authorized": {
+            "const": false
+          },
+          "accepted": {
+            "const": true
+          },
+          "initial_branch": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1013
+          },
+          "object_format": {
+            "enum": [
+              "sha1",
+              "sha256"
+            ]
+          },
+          "internal_ignore": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "const": ".pilotdeck/.gitignore"
+              },
+              "before_sha256": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "after_sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1048576
+              },
+              "changed": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "path",
+              "before_sha256",
+              "after_sha256",
+              "size",
+              "changed"
+            ]
+          }
+        },
+        "required": [
+          "execution_id",
+          "project_id",
+          "intent_id",
+          "request_id",
+          "action",
+          "execution_authorized",
+          "accepted",
+          "initial_branch",
+          "object_format",
+          "internal_ignore"
+        ]
+      },
+      "GitInitializationPendingResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "execution_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+          },
+          "project_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+          },
+          "intent_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+          },
+          "request_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+          },
+          "action": {
+            "const": "init"
+          },
+          "execution_authorized": {
+            "const": false
+          },
+          "paths": {
+            "type": "array",
+            "maxItems": 0,
+            "items": {
+              "type": "string"
+            }
+          },
+          "state": {
+            "enum": [
+              "pending",
+              "unknown"
+            ]
+          },
+          "initial_branch": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1013
+          },
+          "object_format": {
+            "enum": [
+              "sha1",
+              "sha256"
+            ]
+          },
+          "internal_ignore": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "const": ".pilotdeck/.gitignore"
+              },
+              "before_sha256": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "after_sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1048576
+              },
+              "changed": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "path",
+              "before_sha256",
+              "after_sha256",
+              "size",
+              "changed"
+            ]
+          }
+        },
+        "required": [
+          "execution_id",
+          "project_id",
+          "intent_id",
+          "request_id",
+          "action",
+          "execution_authorized",
+          "paths",
+          "state",
+          "initial_branch",
+          "object_format",
+          "internal_ignore"
+        ]
+      },
+      "GitInitializationClosedResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "execution_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+          },
+          "project_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+          },
+          "intent_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+          },
+          "request_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+          },
+          "action": {
+            "const": "init"
+          },
+          "execution_authorized": {
+            "const": false
+          },
+          "paths": {
+            "type": "array",
+            "maxItems": 0,
+            "items": {
+              "type": "string"
+            }
+          },
+          "state": {
+            "enum": [
+              "not_dispatched",
+              "abandoned_unknown"
+            ]
+          },
+          "disposition_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+          },
+          "initial_branch": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1013
+          },
+          "object_format": {
+            "enum": [
+              "sha1",
+              "sha256"
+            ]
+          },
+          "internal_ignore": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "const": ".pilotdeck/.gitignore"
+              },
+              "before_sha256": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "after_sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1048576
+              },
+              "changed": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "path",
+              "before_sha256",
+              "after_sha256",
+              "size",
+              "changed"
+            ]
+          }
+        },
+        "required": [
+          "execution_id",
+          "project_id",
+          "intent_id",
+          "request_id",
+          "action",
+          "execution_authorized",
+          "paths",
+          "state",
+          "disposition_id",
+          "initial_branch",
+          "object_format",
+          "internal_ignore"
+        ]
+      },
       "GitBranchAcceptance": {
         "type": "object",
         "additionalProperties": false,
@@ -40393,6 +40699,9 @@
           },
           {
             "$ref": "#/components/schemas/GitBranchAcceptance"
+          },
+          {
+            "$ref": "#/components/schemas/GitInitializationAcceptance"
           }
         ]
       },
@@ -40611,6 +40920,12 @@
           },
           {
             "$ref": "#/components/schemas/GitBranchAppliedResult"
+          },
+          {
+            "$ref": "#/components/schemas/GitInitializationPendingResult"
+          },
+          {
+            "$ref": "#/components/schemas/GitInitializationClosedResult"
           }
         ]
       },
@@ -42248,6 +42563,12 @@
               },
               {
                 "$ref": "#/components/schemas/GitBranchAppliedResult"
+              },
+              {
+                "$ref": "#/components/schemas/GitInitializationPendingResult"
+              },
+              {
+                "$ref": "#/components/schemas/GitInitializationClosedResult"
               }
             ]
           },
@@ -42474,6 +42795,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/GitBranchAppliedResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GitInitializationClosedResult"
                   }
                 ]
               },
@@ -42754,6 +43078,12 @@
               },
               {
                 "$ref": "#/components/schemas/GitBranchAppliedResult"
+              },
+              {
+                "$ref": "#/components/schemas/GitInitializationPendingResult"
+              },
+              {
+                "$ref": "#/components/schemas/GitInitializationClosedResult"
               }
             ]
           },
@@ -43064,6 +43394,9 @@
                           },
                           {
                             "$ref": "#/components/schemas/GitBranchAppliedResult"
+                          },
+                          {
+                            "$ref": "#/components/schemas/GitInitializationClosedResult"
                           }
                         ]
                       },
@@ -43278,6 +43611,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/GitBranchAppliedResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GitInitializationClosedResult"
                   }
                 ]
               },
@@ -43519,6 +43855,12 @@
                   },
                   {
                     "$ref": "#/components/schemas/GitBranchAppliedResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GitInitializationPendingResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GitInitializationClosedResult"
                   }
                 ]
               },
@@ -43829,6 +44171,9 @@
                               },
                               {
                                 "$ref": "#/components/schemas/GitBranchAppliedResult"
+                              },
+                              {
+                                "$ref": "#/components/schemas/GitInitializationClosedResult"
                               }
                             ]
                           },
@@ -43931,6 +44276,9 @@
               },
               {
                 "$ref": "#/components/schemas/GitBranchAcceptance"
+              },
+              {
+                "$ref": "#/components/schemas/GitInitializationAcceptance"
               }
             ]
           },
@@ -44153,6 +44501,12 @@
                   },
                   {
                     "$ref": "#/components/schemas/GitBranchAppliedResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GitInitializationPendingResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GitInitializationClosedResult"
                   }
                 ]
               },
@@ -44463,6 +44817,9 @@
                               },
                               {
                                 "$ref": "#/components/schemas/GitBranchAppliedResult"
+                              },
+                              {
+                                "$ref": "#/components/schemas/GitInitializationClosedResult"
                               }
                             ]
                           },
@@ -44577,6 +44934,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/GitBranchAcceptance"
+                    },
+                    {
+                      "$ref": "#/components/schemas/GitInitializationAcceptance"
                     }
                   ]
                 },
@@ -44799,6 +45159,12 @@
                         },
                         {
                           "$ref": "#/components/schemas/GitBranchAppliedResult"
+                        },
+                        {
+                          "$ref": "#/components/schemas/GitInitializationPendingResult"
+                        },
+                        {
+                          "$ref": "#/components/schemas/GitInitializationClosedResult"
                         }
                       ]
                     },
@@ -45109,6 +45475,9 @@
                                     },
                                     {
                                       "$ref": "#/components/schemas/GitBranchAppliedResult"
+                                    },
+                                    {
+                                      "$ref": "#/components/schemas/GitInitializationClosedResult"
                                     }
                                   ]
                                 },

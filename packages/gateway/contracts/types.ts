@@ -420,16 +420,20 @@ export type GitReviewControl = {request_id:string;expected_version:number;action
 export type GitReviewIntent = {intent_id:string;project_id:string;action:GitReviewPrepare["action"];paths:string[];message?:string;commit_metadata?:GitCommitMetadata;snapshot_id:string;review_sha256:string;version:number;state:"prepared"|"approved"|"cancelled";created_at:string;updated_at:string;execution_authorized:false};
 
 export type GitIndexAcceptanceBase = {execution_id:string;project_id:string;intent_id:string;request_id:string;accepted:true;execution_authorized:false};
+export type GitInitializationExecutionFacts=Pick<GitInitializationReviewIntent,'action'|'initial_branch'|'object_format'|'internal_ignore'>;
+export type GitInitializationAcceptance=GitIndexAcceptanceBase & GitInitializationExecutionFacts;
+export type GitInitializationPendingResult=Omit<GitIndexAcceptanceBase,'accepted'> & GitInitializationExecutionFacts & {paths:[];state:'pending'|'unknown'};
+export type GitInitializationClosedResult=Omit<GitIndexAcceptanceBase,'accepted'> & GitInitializationExecutionFacts & {paths:[];state:'not_dispatched'|'abandoned_unknown';disposition_id:string};
 export type GitBranchExecutionFacts={action:'create-branch';branch:string;target_ref:string;target_oid:string|null;head:GitHead;branch_metadata?:GitBranchMetadata};
 export type GitBranchAcceptance=GitIndexAcceptanceBase & GitBranchExecutionFacts;
 export type GitBranchPendingResult=Omit<GitIndexAcceptanceBase,'accepted'> & GitBranchExecutionFacts & {paths:[];state:'pending'|'unknown'};
 export type GitBranchAppliedResult=Omit<GitIndexAcceptanceBase,'accepted'> & GitBranchExecutionFacts & {paths:[];state:'applied';preparation_sha256:string};
 export type GitBranchClosedResult=Omit<GitIndexAcceptanceBase,'accepted'> & GitBranchExecutionFacts & {paths:[];state:'not_dispatched'|'abandoned_unknown';disposition_id:string};
-export type GitIndexAcceptance = GitIndexAcceptanceBase & ({action:"stage"|"unstage"}|{action:"commit";target_ref:string;expected_old_oid:string|null}|GitBranchExecutionFacts);
+export type GitIndexAcceptance = GitIndexAcceptanceBase & ({action:"stage"|"unstage"}|{action:"commit";target_ref:string;expected_old_oid:string|null}|GitBranchExecutionFacts|GitInitializationExecutionFacts);
 export type GitIndexExecutionResult =
  | (Omit<GitIndexAcceptanceBase,"accepted"> & {action:"stage"|"unstage";paths:string[]} & ({state:"pending"|"unknown"}|{state:"applied";before_index_sha256:string|null;index_sha256:string}|{state:"not_dispatched"|"abandoned_unknown";disposition_id:string}))
  | (Omit<GitIndexAcceptanceBase,"accepted"> & {action:"commit";paths:string[];target_ref:string;expected_old_oid:string|null} & ({state:"pending"|"unknown"}|{state:"applied";commit_oid:string;tree_oid:string}|{state:"not_dispatched"|"abandoned_unknown";disposition_id:string}))
- | GitBranchPendingResult | GitBranchClosedResult | GitBranchAppliedResult;
+ | GitBranchPendingResult | GitBranchClosedResult | GitBranchAppliedResult | GitInitializationPendingResult | GitInitializationClosedResult;
 
 export type WorkPublicationPrepare = {request_id:string;source_run_id:string;source_sha256:string;paths:string[]};
 export type WorkPublicationControl = GitReviewControl;

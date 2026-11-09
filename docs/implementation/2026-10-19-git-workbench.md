@@ -552,3 +552,46 @@ options. Its native setup probes filesystem/configuration behavior, which must
 be retained by the following actual-target-volume preparation phase.
 [Git init documentation](https://git-scm.com/docs/git-init),
 [Git native setup source](https://github.com/git/git/blob/master/setup.c).
+
+## Initialization original storage and admission
+
+The original execution table has an explicit initialization schema flavor with
+init constrained to protocol 7. Offline apply-init and rollback-init use the
+existing physical database identity, original maintenance/quiescence guards,
+full application inventory, rowid preservation and foreign-key checks. Existing
+commit/branch upgrades retain an installed initialization flavor. A downgrade
+refuses any initialization/protocol-7 history, including closed original rows.
+Constructors recognize installed initialization storage and preserve its schema.
+
+Approved initialization reviews can enter the original atomic admission route
+and original execution/admission namespace after the explicit storage upgrade.
+Current owner, latest approval/version/hash, immutable witness/repository digest,
+configured binding, original request ID and pending-work exclusion are retained.
+Initialization receipts carry the original branch, object format and reviewed
+internal-ignore facts. Legacy index and commit receipt property ordering and
+encoding remain unchanged. Shared initialization readers are query-only and
+never install tables or infer current owner authority from an old approval.
+
+Original status/history/control contracts include initialization pending/closed
+results. The never-started confirmed control closes only the same original
+request with no reservation, producer, preparation, dispatch or outcome facts.
+It needs no native handles and records not_dispatched with not_attempted cleanup.
+Unfamiliar initialization effect records are refused until typed native phases
+exist. Dispatch, direct execution, reservation and effect-bearing recovery remain
+explicitly gated at their original entry points.
+
+History displays scoped initialization facts through the existing Git operation
+component. It can cancel the original approval and acknowledge/close a never-
+started acceptance. The same owner/project request store persists cancellation
+and original confirmation requests for response-loss/reload recovery. Restoring
+those requests reads the original review/acceptance and requires explicit
+confirmation before physical recovery. No initialization execution capability
+or automatic dispatch is advertised by this increment.
+
+Actual-target-volume private Git preparation, exact-owned metadata/internal-
+ignore publication, original native custody/lease/producers, root/binding
+transition, interrupted effects and initialization creation UI remain required.
+Existing metadata/reinitialization, linked/external binding, branch checkout/
+deletion and reference backend coverage remain in full M15.14 scope.
+This source increment ran no tests, typechecks, builds, maintenance commands,
+migrations, native/product operations, deployment or UI acceptance.

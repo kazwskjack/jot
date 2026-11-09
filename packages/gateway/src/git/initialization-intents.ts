@@ -4,7 +4,7 @@ import type {GitInitializationReviewPrepare,GitInitializationReviewIntent,GitRev
 import type {ProjectRepository} from '../projects/repository.ts';
 import {withImmediateTransaction} from '../db/database.ts';
 import type {GitWorkbench} from './service.ts';
-import {normalizeGitInitializationReview,readGitInitializationIntentSource} from './initialization-records.ts';
+import {normalizeGitInitializationReview,readGitInitializationIntentSource,readGitInitializationReviewSource} from './initialization-records.ts';
 import type {GitBranchIntentRecord as Row} from './branch-records.ts';
 
 type Event={version:number;state:'prepared'|'approved'|'cancelled';request_id:string|null;request_sha256:string|null;created_at:string};
@@ -37,6 +37,11 @@ export class GitInitializationIntents{
    review_sha256:row.review_sha256,version:event.version,state:event.state,created_at:row.created_at,updated_at:event.created_at,execution_authorized:false};
  }
  get(owner:string,project:string,id:string){const row=this.row(owner,project,id);return this.view(row,this.latest(id));}
+ executionSource(owner:string,project:string,id:string,version:number,review:string){
+  const row=this.row(owner,project,id),event=this.latest(id);
+  if(event.state!=='approved'||event.version!==version||row.review_sha256!==review)throw Error('git_execution_revoked');
+  return readGitInitializationReviewSource(this.db,owner,project,id,version,review);
+ }
  async prepareChange(owner:string,project:string,value:GitInitializationReviewPrepare,signal?:AbortSignal){
   this.projects.assertOwned(project,owner);const input=normalizeGitInitializationReview(value),requestHash=digest(input);
   const prior=this.db.prepare('SELECT * FROM wb_git_mutation_intents WHERE owner_id=? AND project_id=? AND request_id=?').get(owner,project,input.request_id) as Row|undefined;
