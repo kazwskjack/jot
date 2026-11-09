@@ -39,7 +39,7 @@ export async function hostBootstrapRequest(action:'challenge'|'redeem'|'credenti
  }finally{timed.dispose();}
 }
 
-function abortableDelay(ms:number,signal:AbortSignal){return new Promise<void>((resolve,reject)=>{if(signal.aborted){reject(new DOMException('Aborted','AbortError'));return;}const timer=setTimeout(done,ms);function done(){signal.removeEventListener('abort',aborted);resolve()}function aborted(){clearTimeout(timer);signal.removeEventListener('abort',aborted);reject(new DOMException('Aborted','AbortError'))}signal.addEventListener('abort',aborted,{once:true})})}
+export function abortableDelay(ms:number,signal:AbortSignal){return new Promise<void>((resolve,reject)=>{if(signal.aborted){reject(new DOMException('Aborted','AbortError'));return;}const timer=setTimeout(done,ms);function done(){signal.removeEventListener('abort',aborted);resolve()}function aborted(){clearTimeout(timer);signal.removeEventListener('abort',aborted);reject(new DOMException('Aborted','AbortError'))}signal.addEventListener('abort',aborted,{once:true})})}
 export async function transcribeVoice(conversationId:string,audio:Uint8Array,signal:AbortSignal):Promise<string>{
  const clientRequestId=crypto.randomUUID(),form=new FormData();form.append('client_request_id',clientRequestId);form.append('audio',new Blob([new Uint8Array(audio)],{type:'audio/wav'}),'recording.wav');
  const scope=draftScope,csrf=csrfToken,timed=deadline(signal,120000);

@@ -11,3 +11,4 @@ export interface PublicNativeToolResult {
 export function publicNativeToolResult(data: Record<string, unknown>, includeBrowse?: boolean): PublicNativeToolResult;
 export function parsePublicNativeToolResult(value: unknown): PublicNativeToolResult;
 export function sessionToolCallId(data: Record<string, unknown>): unknown;
+export function nativeBatchWebCall(data: Record<string, unknown>): {name: 'universe_read_page' | 'universe_browse' | 'universe_execute'} | null;

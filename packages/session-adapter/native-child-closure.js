@@ -1,16 +1,10 @@
+import {nativeBatchWebCall as batchWebCall} from './native-tool-result.js';
 import {createHash} from 'node:crypto';
 import {assertNativeWorkspaceFactoryHold} from './native-workspace-factory.js';
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 const json=value=>JSON.stringify(value,(_key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item);
 const headerJson=header=>json({...header,delegationDepth:header?.delegationDepth??0});
 export const nativeChildLogJson=json;
-function batchWebCall(data){
- const name=data?.name??data?.tool;if(!['universe_read_page','universe_browse','universe_execute'].includes(name))return null;
- let args=data?.arguments;try{if(typeof args==='string')args=JSON.parse(args);}catch{return {name};}
- if(!args||typeof args!=='object'||Array.isArray(args))return {name};
- if(name==='universe_read_page')return Object.hasOwn(args,'urls')?{name}:null;
- return args.inputs&&Object.hasOwn(args.inputs,'items')?{name}:null;
-}
 function settledWebOperation(proof,sessionRef,callId){
  if(proof?.session_ref!==sessionRef||proof.request_id!==callId||!/^web-[A-Za-z0-9-]{8,128}$/.test(proof.operation_id)
    ||!Number.isSafeInteger(proof.revision)||proof.revision<1||!['succeeded','partial','failed','cancelled'].includes(proof.status)

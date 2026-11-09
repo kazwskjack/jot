@@ -146,3 +146,11 @@ export function nativeToolResultObservation(event) {
   return { event: { type: event.type, seq: event.seq, time: event.time, data: { callId: sessionToolCallId(event.data) } },
     public_result: publicNativeToolResult(event.data) }
 }
+
+export function nativeBatchWebCall(data){
+ const name=data?.name??data?.tool;if(!['universe_read_page','universe_browse','universe_execute'].includes(name))return null;
+ let args=data?.arguments;try{if(typeof args==='string')args=JSON.parse(args);}catch{return {name};}
+ if(!args||typeof args!=='object'||Array.isArray(args))return {name};
+ if(name==='universe_read_page')return Object.hasOwn(args,'urls')?{name}:null;
+ return args.inputs&&Object.hasOwn(args.inputs,'items')?{name}:null;
+}

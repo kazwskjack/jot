@@ -106,7 +106,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
   installTaskFinalizations(db);
   const nativeTaskIntents=collaboration?new NativeTaskIntents(db,workbench,tasks,collaboration):undefined;
   const nativeChildren=collaboration?new NativeChildReservations(db,collaboration,nativeTaskIntents,events):undefined;
-  const nativeActivities=nativeChildren&&events?new NativeChildActivities(db,events):undefined;
+  const nativeActivities=nativeChildren&&events?new NativeChildActivities(db,events,input=>{context(input);}):undefined;
   const nativeMemberMessages=nativeChildren?new NativeMemberMessageReceipts(db):undefined;
   if(nativeChildren)registerNativeMemberRoutes(app,new NativeMemberOwnerControls(db),nativeMemberClient);
   app.post('/internal/v1/workbench/handoff',async request=>{
@@ -276,8 +276,11 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
     if(input.action==='source'){
       fields(input,['run_id','session_ref','action']);return nativeActivities.source(owner,runId,sessionRef);
     }
-    if(input.action==='append'){
-      fields(input,['run_id','session_ref','action','source_log_sha256','event_sha256','event','event_format','source_event_sha256','public_result']);
+    if(input.action==='live-source'){
+      fields(input,['run_id','session_ref','action']);return nativeActivities.liveSource(owner,runId,sessionRef,input);
+    }
+    if(input.action==='append'||input.action==='live-append'){
+      fields(input,['run_id','session_ref','action','source_log_sha256','event_sha256','event','event_format','source_event_sha256','public_result','source_snapshot_sha256']);
       return nativeActivities.append(owner,runId,sessionRef,input);
     }
     if(input.action==='complete'){

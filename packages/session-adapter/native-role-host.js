@@ -1,4 +1,4 @@
-import {replayNativeChildActivities} from './native-child-activities.js';
+import {replayNativeChildActivities,createNativeChildActivityObserver} from './native-child-activities.js';
 import {createNativeOperationObserver} from './native-operation-observer.js';
 import {NativeChildAdmission} from './native-child-admission.js';
 import {NativeRoleProvider} from './native-role-provider.js';
@@ -73,8 +73,14 @@ export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistenc
       throw new Error('native_handoff_admission_invalid');
    }
    await selectModel(child,()=>bridge.guardBudget(child,signal),signal);
+   if(publicActivities)setImmediate(()=>{
+    const entry=admission.accepted.get(child.id);
+    if(entry?.binding.runId===binding.runId&&entry.agent===child)activityObserver?.observe(entry);
+   });
    let ids=published.get(parent);if(!ids)published.set(parent,ids=new Set());ids.add(child.id);
   }});
+ const activityObserver=publicActivities?createNativeChildActivityObserver({ctx,bridge,accepted:admission.accepted,
+  bindingFor:agent=>bridge.bindingFor(agent),signal:shutdown.signal}):undefined;
  const provider=new NativeRoleProvider({name:providerName,admission,prepare:async({parent,childId,roleRef,policyVersion,requestId,requestHash,signal})=>{
   const scope=spawnScope.getStore();if(!scope||scope.parent!==parent||scope.childId!==undefined)throw Error('native_role_scope_missing');scope.childId=childId;
   const parentBinding=bridge.bindingFor(parent);let reservationAttempted=false;
@@ -107,6 +113,7 @@ export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistenc
  }});
  const removeAdmission=admission.install(ctx),removeProvider=ctx.subagents.registerProvider(provider);
  const notifyClosed=async(parent,accepted,receipt,signal)=>{
+  activityObserver?.stop(accepted.binding.runId);
   queueActivityReplay(accepted.binding);
   const key=accepted.binding.runId;
   if(disposed||!onMemberClosed||notified.has(key))return receipt;
@@ -155,6 +162,7 @@ export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistenc
  };
  const removeObservation=automaticClosures?ctx.on('session/disposed',session=>{
   const accepted=admission.accepted.get(session?.id);if(!accepted||accepted.agent.session!==session)return;
+  activityObserver?.stop(accepted.binding.runId);
   // The observer returns synchronously. Teardown must leave this hook before
   // drain can be awaited, and Team spawn may still be publishing its roster.
   const observation=(async()=>{await new Promise(resolve=>setImmediate(resolve));await Promise.allSettled([...pending].filter(([,scope])=>scope.parent===accepted.parent&&scope.childId===session.id).map(([operation])=>operation));if(disposed)return;
@@ -352,6 +360,7 @@ export function createNativeRoleHost({ctx,bridge,selectModel,sessions,persistenc
   dispose(){
    if(disposal)return disposal;disposed=true;shutdown.abort(new Error('native_role_host_disposed'));
    return disposal=(async()=>{
+    await activityObserver?.dispose();
     await Promise.allSettled([...pending.keys()]);
     await Promise.allSettled([...observations]);
     await Promise.allSettled([...notifying.values()]);
