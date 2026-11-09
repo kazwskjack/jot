@@ -251,6 +251,8 @@ export async function buildServer(config: {
   if(config.ordinarySteeringEnabled===true&&config.ordinaryInputRecoveryEnabled!==true)throw Error('ordinary_steering_recovery_required');
   if(config.ordinaryAttachmentSteeringEnabled===true&&(config.ordinarySteeringEnabled!==true||config.ordinaryInputRecoveryEnabled!==true||typeof config.ordinaryAttachmentSteeringClient?.steeringAttachmentsReadiness!=='function'))throw Error('ordinary_attachment_steering_configuration_invalid');
   const app = Fastify({ logger: false, bodyLimit: 1024 * 1024 });
+  const eventStreamClosers=new Set<()=>void>();
+  app.addHook('preClose',async()=>{for(const close of [...eventStreamClosers])close();});
   await app.register(multipart, { limits: { fileSize: VOICE_MAX_BYTES, files: 1, fields: 2, parts: 3, fieldSize: 256 } });
   const db = openProductDatabase(config.databasePath);
   try {
@@ -289,6 +291,7 @@ export async function buildServer(config: {
   const archiveStatus=()=>archiveExecutor?.status()??{mode:'external' as const,state:'unmanaged' as const};
   if(archiveExecutor){
     app.addHook('onReady',async()=>archiveExecutor.start());
+    app.addHook('preClose',async()=>archiveExecutor.close());
     app.addHook('onClose',async()=>archiveExecutor.close());
   }
   const artifacts = new ArtifactService(db,artifactRoot);
@@ -1367,22 +1370,30 @@ export async function buildServer(config: {
       const body = replay.map(event => `id: ${event.seq}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join('');
       if (query.follow === '0') return reply.header('content-type', 'text/event-stream; charset=utf-8').header('cache-control', 'no-store').send(body);
       const stream = new PassThrough();
+      let stopped=false;
       let cursor = replay.length ? Number(replay.at(-1)?.seq) : after;
       if (body) stream.write(body);
       const flush = () => {
+        if(stopped||stream.destroyed||stream.writableNeedDrain)return;
         for (const event of events.replay(id, cursor, 1000)) {
-          stream.write(`id: ${event.seq}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+          const writable=stream.write(`id: ${event.seq}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
           cursor = Number(event.seq);
+          if(!writable)break;
         }
       };
       const unsubscribe = events.subscribe(id, flush);
       // Worker and BFF are separate processes. The local EventEmitter is only a
       // latency hint; cursor polling is the authoritative cross-process wakeup.
       const replayPoll = setInterval(flush, 1_000);
-      const heartbeat = setInterval(() => stream.write(': heartbeat\n\n'), 15_000);
-      const cleanup = () => { clearInterval(replayPoll); clearInterval(heartbeat); unsubscribe(); };
-      request.raw.once('close', cleanup);
+      const heartbeat = setInterval(() => {if(!stopped&&!stream.destroyed)stream.write(': heartbeat\n\n');}, 15_000);
+      const cleanup = ():void => {
+        if(stopped)return;stopped=true;
+        clearInterval(replayPoll);clearInterval(heartbeat);unsubscribe();eventStreamClosers.delete(cleanup);stream.destroy();
+      };
+      eventStreamClosers.add(cleanup);
+      reply.raw.once('close', cleanup);
       stream.once('close', cleanup);
+      stream.on('drain',flush);
       return reply.header('content-type', 'text/event-stream; charset=utf-8').header('cache-control', 'no-store')
         .header('connection', 'keep-alive').send(stream);
     } catch (error) {
