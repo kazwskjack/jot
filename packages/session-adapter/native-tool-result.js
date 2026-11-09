@@ -125,7 +125,7 @@ export function publicNativeToolResult(data, includeBrowse = true) {
       || (left.sha256 < right.sha256 ? -1 : left.sha256 > right.sha256 ? 1 : 0))
   return { failed: Boolean(data?.error || resultBlock?.isError || structuredToolFailure(data, resultBlock)),
     evidence: includeBrowse ? browseResultEvidence(data, resultBlock) : null,
-    ...(artifacts.length ? {artifact_receipts: artifacts} : {}) }
+    artifact_receipts: artifacts }
 }
 
 /** Strict public vocabulary for authenticated result observations. */

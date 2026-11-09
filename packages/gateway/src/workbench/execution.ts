@@ -273,7 +273,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
     authorized(request.headers.authorization);const input=object(request.body);
     if(!nativeActivities)throw Error('native_activity_unavailable');
     if(input.action==='pending'){
-      fields(input,['action','cursor','limit']);
+      fields(input,['action','cursor','limit','projection_revision']);
       if(input.execution_lease!==undefined)throw Error('native_activity_pending_query_invalid');
       return nativeActivities.pending(input);
     }
@@ -294,7 +294,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       return nativeActivities.append(owner,runId,sessionRef,input);
     }
     if(input.action==='complete'){
-      fields(input,['run_id','session_ref','action','source_log_sha256','expected_last_event_seq']);
+      fields(input,['run_id','session_ref','action','source_log_sha256','expected_last_event_seq','expected_projection_revision']);
       return nativeActivities.complete(owner,runId,sessionRef,input);
     }
     throw Error('native_activity_event_invalid');

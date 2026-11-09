@@ -10,14 +10,18 @@ export function bindToolArtifactReceipts(db:DatabaseSync,conversationId:string,r
   JOIN ga_conversations c ON c.id=a.conversation_id AND c.owner_id=a.owner_id
   JOIN ga_runs r ON r.conversation_id=c.id
   WHERE a.id=? AND v.version=? AND a.conversation_id=? AND r.id=?`);
- const artifacts:NativeArtifactReceipt[]=[];
+ const previous=(payload.detail as {result_artifacts?:NativeArtifactReceipt[]}).result_artifacts??[];
+ const artifacts=[...previous],seen=new Set(previous.map(value=>JSON.stringify([value.artifact_id,value.version,value.sha256])));
  for(const receipt of receipts){
+  const key=JSON.stringify([receipt.artifact_id,receipt.version,receipt.sha256]);
+  if(seen.has(key))continue;
   const row=read.get(receipt.artifact_id,receipt.version,conversationId,runId) as {sha256:string;metadata_json:string}|undefined;
   if(!row||row.sha256!==receipt.sha256)continue;
   let metadata:Record<string,unknown>;
   try{metadata=JSON.parse(row.metadata_json) as Record<string,unknown>;}catch{continue;}
   if(!metadata||typeof metadata!=='object'||Array.isArray(metadata)||!['ready','delivered'].includes(String(metadata.status)))continue;
+  seen.add(key);
   artifacts.push({artifact_id:receipt.artifact_id,version:receipt.version,sha256:receipt.sha256});
  }
- return artifacts.length?{...payload,detail:{...payload.detail,result_artifacts:artifacts}}:payload;
+ return artifacts.length>previous.length?{...payload,detail:{...payload.detail,result_artifacts:artifacts}}:payload;
 }

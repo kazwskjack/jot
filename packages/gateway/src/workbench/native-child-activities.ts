@@ -6,13 +6,14 @@ import type {EventStore} from '../events/event-store.ts';
 import {withImmediateTransaction,withReadTransaction} from '../db/database.ts';
 import {assertExecutionLease} from './execution-lease.ts';
 import {canonicalJson} from '../db/canonical-json.ts';
-import {parsePublicNativeToolResult,parsePublicNativeToolCall,nativeBatchWebCall} from '../harness/native-tool-result.js';
+import {publicNativeToolResult,parsePublicNativeToolResult,parsePublicNativeToolCall,nativeBatchWebCall} from '../harness/native-tool-result.js';
 import {readNativeMemberExecution} from './native-member-owner-controls.ts';
 import {projectNativeToolEvent,projectWebOperationSnapshot,sessionToolCallId,type ProjectionContext} from '../harness/session-event-projector.ts';
 
 type Input=Record<string,unknown>;
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
 const SHA=/^[a-f0-9]{64}$/;
+const PROJECTION_REVISION=2;
 const digest=(value:unknown)=>createHash('sha256').update(canonicalJson(value)).digest('hex');
 
 /** Original native tool observation receipts. Projection never admits execution. */
@@ -27,6 +28,20 @@ export class NativeChildActivities {
     BEGIN SELECT RAISE(ABORT,'native_activity_receipt_immutable'); END;
    CREATE TRIGGER IF NOT EXISTS wb_native_activity_receipt_no_delete BEFORE DELETE ON wb_native_activity_receipts
     BEGIN SELECT RAISE(ABORT,'native_activity_receipt_immutable'); END;`);
+  db.exec(`CREATE TABLE IF NOT EXISTS wb_native_result_projections(
+   run_id TEXT NOT NULL,source_seq INTEGER NOT NULL,revision INTEGER NOT NULL,source_sha256 TEXT NOT NULL,created_at TEXT NOT NULL,
+   PRIMARY KEY(run_id,source_seq,revision),FOREIGN KEY(run_id,source_seq) REFERENCES wb_native_activity_receipts(run_id,source_seq));
+   CREATE TABLE IF NOT EXISTS wb_native_activity_projection_completions(
+   run_id TEXT NOT NULL REFERENCES ga_runs(id),revision INTEGER NOT NULL,source_start INTEGER NOT NULL,source_end INTEGER NOT NULL,
+   source_sha256 TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(run_id,revision));
+   CREATE TRIGGER IF NOT EXISTS wb_native_result_projection_no_update BEFORE UPDATE ON wb_native_result_projections
+    BEGIN SELECT RAISE(ABORT,'native_activity_projection_immutable'); END;
+   CREATE TRIGGER IF NOT EXISTS wb_native_result_projection_no_delete BEFORE DELETE ON wb_native_result_projections
+    BEGIN SELECT RAISE(ABORT,'native_activity_projection_immutable'); END;
+   CREATE TRIGGER IF NOT EXISTS wb_native_projection_completion_no_update BEFORE UPDATE ON wb_native_activity_projection_completions
+    BEGIN SELECT RAISE(ABORT,'native_activity_projection_immutable'); END;
+   CREATE TRIGGER IF NOT EXISTS wb_native_projection_completion_no_delete BEFORE DELETE ON wb_native_activity_projection_completions
+    BEGIN SELECT RAISE(ABORT,'native_activity_projection_immutable'); END;`);
   db.exec(`CREATE TABLE IF NOT EXISTS wb_native_activity_chunks(
    run_id TEXT NOT NULL REFERENCES ga_runs(id) ON DELETE CASCADE,source_seq INTEGER NOT NULL,
    transport_sha256 TEXT NOT NULL,chunk_index INTEGER NOT NULL,chunk_count INTEGER NOT NULL,
@@ -37,13 +52,21 @@ export class NativeChildActivities {
  }
  /** Component-scoped metadata for original closed executions awaiting public replay. */
  pending(input:Input){
-  const cursor=input.cursor,limit=input.limit===undefined?25:Number(input.limit);
+  const cursor=input.cursor,limit=input.limit===undefined?25:Number(input.limit),revision=input.projection_revision===undefined?1:input.projection_revision;
   if(cursor!==undefined&&(typeof cursor!=='string'||!ID.test(cursor))
    ||input.limit!==undefined&&typeof input.limit!=='number'&&typeof input.limit!=='string'
-   ||!Number.isSafeInteger(limit)||limit<1||limit>50)throw Error('native_activity_pending_query_invalid');
+   ||!Number.isSafeInteger(limit)||limit<1||limit>50||typeof revision!=='number'||![1,PROJECTION_REVISION].includes(revision))throw Error('native_activity_pending_query_invalid');
   return withReadTransaction(this.db,()=>{
    if(cursor!==undefined&&!this.db.prepare(`SELECT 1 FROM wb_native_execution_runs n
     JOIN wb_native_execution_closures k ON k.run_id=n.run_id WHERE n.run_id=?`).get(cursor as string))throw Error('native_activity_pending_query_invalid');
+   const completed=revision===PROJECTION_REVISION?`SELECT 1 FROM wb_native_activity_receipts x
+      JOIN wb_native_activity_projection_completions v ON v.run_id=x.run_id AND v.revision=${PROJECTION_REVISION}
+      WHERE x.run_id=n.run_id AND x.event_type='replay/complete'
+       AND x.source_seq=json_extract(k.receipt_json,'$.seq_exclusive') AND x.source_sha256=json_extract(k.receipt_json,'$.log_sha256')
+       AND v.source_end=x.source_seq AND v.source_sha256=x.source_sha256
+       AND v.source_start=CASE WHEN n.previous_run_id IS NULL THEN 0 ELSE json_extract(n.snapshot_json,'$.source_seq_exclusive') END`:`SELECT 1 FROM wb_native_activity_receipts x
+    WHERE x.run_id=n.run_id AND x.event_type='replay/complete'
+     AND x.source_seq=json_extract(k.receipt_json,'$.seq_exclusive') AND x.source_sha256=json_extract(k.receipt_json,'$.log_sha256')`;
    const rows=this.db.prepare(`SELECT n.run_id,n.child_session_ref FROM wb_native_execution_runs n
     JOIN wb_native_execution_closures k ON k.run_id=n.run_id
     JOIN wb_native_spawn_publications p ON p.reservation_id=n.reservation_id
@@ -52,12 +75,11 @@ export class NativeChildActivities {
     JOIN ga_harness_session_bindings h ON h.conversation_id=c.id AND h.owner_id=c.owner_id AND h.session_id=n.child_session_ref
     JOIN ga_runs root ON root.id=n.root_run_id JOIN ga_conversations pc ON pc.id=root.conversation_id AND pc.owner_id=c.owner_id
     WHERE json_extract(p.publication_json,'$.member.id')=n.child_session_ref AND json_extract(p.publication_json,'$.member.role')='teammate'
-     AND NOT EXISTS(SELECT 1 FROM wb_native_activity_receipts x WHERE x.run_id=n.run_id AND x.event_type='replay/complete'
-      AND x.source_seq=json_extract(k.receipt_json,'$.seq_exclusive') AND x.source_sha256=json_extract(k.receipt_json,'$.log_sha256'))
+     AND NOT EXISTS(${completed})
      ${cursor===undefined?'':'AND n.run_id>?'} ORDER BY n.run_id LIMIT ?`)
     .all(...(cursor===undefined?[]:[cursor as string]),limit+1) as Array<{run_id:string;child_session_ref:string}>;
    const selected=rows.slice(0,limit),last=selected.at(-1);
-   return {protocol:1,kind:'native_closed_activity_pending',execution_authorized:false,
+   return {protocol:1,kind:'native_closed_activity_pending',supported_projection_revision:PROJECTION_REVISION,execution_authorized:false,
     items:selected.map(row=>({run_id:row.run_id,session_ref:row.child_session_ref})),
     ...(rows.length>limit&&last?{next_cursor:last.run_id}:{})};
   });
@@ -93,7 +115,7 @@ export class NativeChildActivities {
    if(prior){
     if(prior.source_sha256!==sourceSha||prior.event_type!==(format==='public-call-v1'?'tool/call':'tool/result'))throw Error('native_activity_receipt_conflict');
    }
-   if(prior&&(format==='public-call-v1'||live)){
+   if(prior&&format==='public-call-v1'){
     this.db.prepare('DELETE FROM wb_native_activity_chunks WHERE run_id=? AND source_seq=?').run(runId,Number(seq));
     return this.receipt(runId,sessionRef,Number(seq),sourceSha,prior.projection_json);
    }
@@ -180,18 +202,20 @@ export class NativeChildActivities {
     .get(runId,Number(event.seq)) as {source_sha256:string;projection_json:string|null}|undefined;
    if(prior){
     if(prior.source_sha256!==sourceSha)throw Error('native_activity_receipt_conflict');
-    if(!live&&event.type==='tool/result'&&prior.projection_json){
+    if(event.type==='tool/result'&&prior.projection_json){
      const original=JSON.parse(prior.projection_json) as Input;
+     const latest=this.db.prepare(`SELECT payload_json FROM ga_events WHERE conversation_id=? AND run_id=? AND type='activity.upsert'
+      AND json_extract(payload_json,'$.activity_id')=? ORDER BY seq DESC LIMIT 1`).get(source.conversation_id,runId,String(original.activity_id)) as {payload_json:string}|undefined;
+     const current=latest?JSON.parse(latest.payload_json) as Input:original;
      const context={runId,sessionRef,attemptId:String(original.attempt_id??'native-observation'),messageId:'native-observation',
       blockId:'native-observation',deltaIndex:0,at:new Date(Number(event.time)).toISOString()};
-     const refined=this.settledWebProjection(runId,sessionRef,callId,context,original);
-     if(refined!==original){
-      const final={...refined,activity_id:original.activity_id};
-      const latest=this.db.prepare(`SELECT payload_json FROM ga_events WHERE conversation_id=? AND run_id=? AND type='activity.upsert'
-       AND json_extract(payload_json,'$.activity_id')=? ORDER BY seq DESC LIMIT 1`).get(source.conversation_id,runId,String(original.activity_id)) as {payload_json:string}|undefined;
-      if(!latest||latest.payload_json!==JSON.stringify(final))this.events.append(source.conversation_id,runId,'activity.upsert',final);
-     }
+     const receipts=(publicResult??publicNativeToolResult(event.data as Input)).artifact_receipts;
+     const linked=bindToolArtifactReceipts(this.db,source.conversation_id,runId,current,receipts);
+     const refined=live?linked:this.settledWebProjection(runId,sessionRef,callId,context,linked);
+     const final={...refined,activity_id:original.activity_id};
+     if(!latest||latest.payload_json!==JSON.stringify(final))this.events.append(source.conversation_id,runId,'activity.upsert',final);
     }
+    if(event.type==='tool/result'&&(!summarizedResult||publicResult?.artifact_receipts!==undefined))this.recordResultProjection(runId,Number(event.seq),sourceSha);
     this.db.prepare('DELETE FROM wb_native_activity_chunks WHERE run_id=? AND source_seq=?').run(runId,Number(event.seq));
     return this.receipt(runId,sessionRef,Number(event.seq),prior.source_sha256,prior.projection_json);
    }
@@ -218,19 +242,41 @@ export class NativeChildActivities {
    this.db.prepare('INSERT INTO wb_native_activity_receipts VALUES(?,?,?,?,?,?,?)')
     .run(runId,Number(event.seq),sourceSha,String(event.type),callId,encoded,new Date().toISOString());
    this.events.append(source.conversation_id,runId,'activity.upsert',payload);
+   if(event.type==='tool/result'&&(!summarizedResult||publicResult?.artifact_receipts!==undefined))this.recordResultProjection(runId,Number(event.seq),sourceSha);
    this.db.prepare('DELETE FROM wb_native_activity_chunks WHERE run_id=? AND source_seq=?').run(runId,Number(event.seq));
    return this.receipt(runId,sessionRef,Number(event.seq),sourceSha,encoded);
   });
  }
  complete(owner:string,runId:string,sessionRef:string,input:Input){
+  const revision=input.expected_projection_revision;
+  if(revision!==undefined&&revision!==PROJECTION_REVISION)throw Error('native_activity_projection_invalid');
   return withImmediateTransaction(this.db,()=>{
    const source=this.sourceInside(owner,runId,sessionRef);
    if(input.source_log_sha256!==source.log_sha256||input.expected_last_event_seq!==source.last_event_seq)throw Error('native_activity_source_changed');
-   if(!source.complete)this.db.prepare('INSERT INTO wb_native_activity_receipts VALUES(?,?,?,?,?,?,?)')
+   if(revision===PROJECTION_REVISION){
+    const missing=this.db.prepare(`SELECT 1 FROM wb_native_activity_receipts r WHERE r.run_id=? AND r.event_type='tool/result'
+     AND NOT EXISTS(SELECT 1 FROM wb_native_result_projections v WHERE v.run_id=r.run_id AND v.source_seq=r.source_seq
+      AND v.revision=? AND v.source_sha256=r.source_sha256) LIMIT 1`).get(runId,PROJECTION_REVISION);
+    if(missing)throw Error('native_activity_projection_pending');
+   }
+   if(!source.replay_complete)this.db.prepare('INSERT INTO wb_native_activity_receipts VALUES(?,?,?,?,?,?,?)')
     .run(runId,source.source_end,source.log_sha256,'replay/complete',null,null,new Date().toISOString());
+   if(revision===PROJECTION_REVISION){
+    this.db.prepare('INSERT OR IGNORE INTO wb_native_activity_projection_completions VALUES(?,?,?,?,?,?)')
+     .run(runId,PROJECTION_REVISION,source.source_start,source.source_end,source.log_sha256,new Date().toISOString());
+    if(!this.db.prepare(`SELECT 1 FROM wb_native_activity_projection_completions WHERE run_id=? AND revision=?
+     AND source_start=? AND source_end=? AND source_sha256=?`).get(runId,PROJECTION_REVISION,source.source_start,source.source_end,source.log_sha256))throw Error('native_activity_source_changed');
+   }
    this.db.prepare('DELETE FROM wb_native_activity_chunks WHERE run_id=?').run(runId);
-   return {...source,complete:true};
+   return {...source,complete:true,replay_complete:true,projection_revision:revision===PROJECTION_REVISION?PROJECTION_REVISION:1,
+    refresh_tool_results:revision===PROJECTION_REVISION?false:source.refresh_tool_results};
   });
+ }
+ private recordResultProjection(runId:string,seq:number,sha:string){
+  this.db.prepare('INSERT OR IGNORE INTO wb_native_result_projections VALUES(?,?,?,?,?)')
+   .run(runId,seq,PROJECTION_REVISION,sha,new Date().toISOString());
+  if(!this.db.prepare('SELECT 1 FROM wb_native_result_projections WHERE run_id=? AND source_seq=? AND revision=? AND source_sha256=?')
+   .get(runId,seq,PROJECTION_REVISION,sha))throw Error('native_activity_receipt_conflict');
  }
  private settledWebProjection(runId:string,sessionRef:string,callId:string,context:ProjectionContext,payload:Input):Input{
   const settled=this.db.prepare(`SELECT op.value,stamp.created_at FROM wb_native_execution_closures c,json_each(c.receipt_json,'$.remote_operations') op,
@@ -260,7 +306,7 @@ export class NativeChildActivities {
   const start=row.previous_run_id===null?0:saved.source_seq_exclusive;
   if(!Number.isSafeInteger(start)||start<0||execution.child_conversation_id!==row.conversation_id)throw Error('native_activity_source_changed');
   const last=this.db.prepare("SELECT MAX(source_seq) seq FROM wb_native_activity_receipts WHERE run_id=? AND event_type<>'replay/complete'").get(runId) as {seq:number|null};
-  return {protocol:1,kind:'native_child_live_observation',run_id:runId,session_ref:sessionRef,conversation_id:row.conversation_id,
+  return {protocol:1,kind:'native_child_live_observation',projection_revision:PROJECTION_REVISION,run_id:runId,session_ref:sessionRef,conversation_id:row.conversation_id,
    parent_session_ref:saved.parent_session_ref,source_start:start as number,snapshot_sha256:createHash('sha256').update(row.snapshot_json).digest('hex'),
    last_event_seq:last.seq,complete:false,execution_authorized:false};
  }
@@ -294,9 +340,13 @@ export class NativeChildActivities {
    if(!prior||saved.previous_run_id!==row.previous_run_id||prior.seq_exclusive!==start||prior.log_sha256!==saved.source_log_sha256)throw Error('native_activity_source_changed');
   }
   const last=this.db.prepare("SELECT MAX(source_seq) seq FROM wb_native_activity_receipts WHERE run_id=? AND event_type<>'replay/complete'").get(runId) as {seq:number|null};
-  const complete=!!this.db.prepare("SELECT 1 FROM wb_native_activity_receipts WHERE run_id=? AND source_seq=? AND event_type='replay/complete' AND source_sha256=?").get(runId,proof.seq_exclusive,proof.log_sha256);
+  const replayComplete=!!this.db.prepare("SELECT 1 FROM wb_native_activity_receipts WHERE run_id=? AND source_seq=? AND event_type='replay/complete' AND source_sha256=?").get(runId,proof.seq_exclusive,proof.log_sha256);
+  const projected=!!this.db.prepare(`SELECT 1 FROM wb_native_activity_projection_completions WHERE run_id=? AND revision=?
+   AND source_start=? AND source_end=? AND source_sha256=?`).get(runId,PROJECTION_REVISION,start as number,proof.seq_exclusive,proof.log_sha256);
+  const complete=replayComplete&&projected;
   return {protocol:1,run_id:runId,session_ref:sessionRef,conversation_id:row.conversation_id,parent_session_ref:saved.parent_session_ref,
    source_start:start as number,source_end:proof.seq_exclusive as number,log_sha256:proof.log_sha256 as string,last_event_seq:last.seq,complete,
+   replay_complete:replayComplete,projection_revision:PROJECTION_REVISION,refresh_tool_results:!projected,
    settled_web_call_ids:(proof.remote_operations??[]).map((operation:Input)=>String(operation.request_id)),execution_authorized:false};
  }
 }
