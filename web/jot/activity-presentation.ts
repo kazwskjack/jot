@@ -57,6 +57,8 @@ export function activityDetailRows(activity:ToolActivity):Array<{label:string;va
    add('命令',activity.detail.display_command);add('退出码',activity.detail.exit_code);add('输出文件',activity.detail.output_artifact_id);break;
   case 'subagent':
    if(activity.detail.child_run_id!==activity.run_id)add('子运行',activity.detail.child_run_id);
+   add('成员会话',activity.detail.child_conversation_id);add('原成员',activity.detail.child_session_ref);add('成员角色',activity.detail.role_ref);
+   add('委派请求',activity.detail.native_request_id);add('成员预留',activity.detail.reservation_id);
    add('公开摘要',activity.detail.summary);break;
   case 'crawl':
    add('批次',activity.detail.batch_id);add('抓取操作',activity.detail.operation);

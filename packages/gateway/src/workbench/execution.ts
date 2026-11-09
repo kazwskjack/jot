@@ -104,7 +104,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
   installTaskCompletionHandshake(db);
   installTaskFinalizations(db);
   const nativeTaskIntents=collaboration?new NativeTaskIntents(db,workbench,tasks,collaboration):undefined;
-  const nativeChildren=collaboration?new NativeChildReservations(db,collaboration,nativeTaskIntents):undefined;
+  const nativeChildren=collaboration?new NativeChildReservations(db,collaboration,nativeTaskIntents,events):undefined;
   const nativeMemberMessages=nativeChildren?new NativeMemberMessageReceipts(db):undefined;
   if(nativeChildren)registerNativeMemberRoutes(app,new NativeMemberOwnerControls(db),nativeMemberClient);
   app.post('/internal/v1/workbench/handoff',async request=>{

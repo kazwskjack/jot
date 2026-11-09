@@ -1,3 +1,4 @@
+import {bindNativeDelegationActivity} from '../workbench/native-delegation-activity.ts';
 import {hostSettingsAdmissionIsClosed} from '../host-admin/settings-admission-fence.ts';
 import type { DatabaseSync } from 'node:sqlite';
 import {assertMemoryProcessingIdentity} from '../workbench/memory-processing.ts';
@@ -254,7 +255,9 @@ export class HarnessCoordinator {
   recordProjection(lease: RunLease, projection: JotProjection): void {
     withImmediateTransaction(this.db, () => {
       this.assertLease(lease);
-      this.events.append(lease.conversation_id, lease.run_id, projection.type, projection.payload);
+      const payload=projection.type==='activity.upsert'
+        ?bindNativeDelegationActivity(this.db,lease.conversation_id,lease.run_id,projection.payload):projection.payload;
+      this.events.append(lease.conversation_id, lease.run_id, projection.type, payload);
     });
   }
 

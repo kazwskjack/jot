@@ -1,3 +1,5 @@
+import type {EventStore} from '../events/event-store.ts';
+import {backfillNativeDelegationActivity} from './native-delegation-activity.ts';
 import {randomUUID,createHash} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
 import {withImmediateTransaction} from '../db/database.ts';
@@ -15,7 +17,7 @@ const canonical=(value:unknown)=>JSON.stringify(value,(_key,item)=>item&&typeof 
 export class NativeChildReservations {
  private readonly db:DatabaseSync;private readonly collaboration:TaskCollaborationService;
  private intents:NativeTaskIntents|undefined;
- constructor(db:DatabaseSync,collaboration:TaskCollaborationService,intents?:NativeTaskIntents){
+ constructor(db:DatabaseSync,collaboration:TaskCollaborationService,intents?:NativeTaskIntents,private readonly events?:EventStore){
   this.db=db;this.collaboration=collaboration;this.intents=intents;
   installNativeChildRuns(db);
   db.exec(`CREATE TABLE IF NOT EXISTS wb_native_spawn_publications(
@@ -116,8 +118,10 @@ export class NativeChildReservations {
    if(!this.db.prepare(`SELECT 1 FROM wb_native_child_runs n JOIN wb_run_bindings b ON b.run_id=n.run_id AND b.kind='native_team'
      WHERE n.reservation_id=? AND n.child_session_ref=?`).get(saved.reservation_id,saved.child_session_ref))throw new Error('native_spawn_publication_unbound');
    const prior=this.db.prepare('SELECT publication_json FROM wb_native_spawn_publications WHERE reservation_id=?').get(saved.reservation_id) as {publication_json:string}|undefined;
-   if(prior){if(prior.publication_json!==encoded)throw new Error('idempotency_conflict');return JSON.parse(prior.publication_json);}
-   this.db.prepare('INSERT INTO wb_native_spawn_publications VALUES(?,?,?)').run(saved.reservation_id,encoded,new Date().toISOString());return JSON.parse(encoded);
+   if(prior&&prior.publication_json!==encoded)throw new Error('idempotency_conflict');
+   if(!prior)this.db.prepare('INSERT INTO wb_native_spawn_publications VALUES(?,?,?)').run(saved.reservation_id,encoded,new Date().toISOString());
+   if(this.events)backfillNativeDelegationActivity(this.db,this.events,String(identity.run_id),String(identity.request_id));
+   return JSON.parse(prior?.publication_json??encoded);
   });
  }
 }

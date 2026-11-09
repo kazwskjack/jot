@@ -292,7 +292,7 @@ export class OfficialSessionRunner implements DshRunner {
       }>()
       const compaction=this.options.visibleWorkCompaction===true&&policy?.mode==='work'?{mode:'work' as const,states:new Map<string,{activityId:string;startedAt:string;ended:boolean}>()}:undefined
       const projectionContext = (attemptId = activeAttemptId, blockIndex = 0, deltaIndex = 0): ProjectionContext => ({
-        runId: input.taskRequestId, attemptId, messageId: `stream-${input.taskRequestId}`,
+        runId: input.taskRequestId, sessionRef: input.sessionRef, attemptId, messageId: `stream-${input.taskRequestId}`,
         blockId: `stream-${input.taskRequestId}:${blockIndex}`, deltaIndex, at: new Date().toISOString(), knownTools,
         deferCompletion: input.checkpointTask === true,
         ...(compaction?{compaction}:{}),

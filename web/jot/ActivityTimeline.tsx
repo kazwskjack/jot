@@ -2,12 +2,14 @@
 // AgentTimeline.tsx/SubagentContainer.tsx. Adapted portions retain AGPL-3.0 terms.
 import React,{useEffect,useMemo,useRef,useState} from 'react';
 import type {Activity} from './types';
+import type {NativeMemberTarget} from './native-member-execution';
 import {activityDetailRows,activityDisplayStatus,activityForest,activityIsActive as running,visibleActivityRows,activityKindLabels,activityStatusLabels,type ActivityRow,type ToolActivity,type ActivityReveal,type ActivityRun} from './activity-presentation';
 import './activity-timeline.css';
 
 type Group={id:string;kind:ToolActivity['kind'];rows:ActivityRow[]};
+type MemberDetailsAction={onOpenMember?:(target:NativeMemberTarget)=>void};
 
-function ActivityGroup({group,run,onSelectRun,availableRuns,reveal}:{group:Group;run?:ActivityRun;onSelectRun:(id:string)=>void;availableRuns:Set<string>;reveal?:ActivityReveal}){
+function ActivityGroup({group,run,onSelectRun,availableRuns,reveal,onOpenMember}:{group:Group;run?:ActivityRun;onSelectRun:(id:string)=>void;availableRuns:Set<string>;reveal?:ActivityReveal}&MemberDetailsAction){
  const active=group.rows.filter(row=>running(row.activity,run)).length;
  const failed=group.rows.filter(row=>activityDisplayStatus(row.activity,run)==='failed').length;
  const unconfirmed=group.rows.filter(row=>activityDisplayStatus(row.activity,run)==='unknown').length;
@@ -37,6 +39,10 @@ function ActivityGroup({group,run,onSelectRun,availableRuns,reveal}:{group:Group
    <ol start={currentPage*50+1}>{visible.slice(currentPage*50,currentPage*50+50).map(row=>{
     const activity=row.activity,status=activityDisplayStatus(activity,run),isExpanded=expanded[activity.activity_id]??running(activity,run);
     const child=activity.kind==='subagent'?activity.detail.child_run_id:undefined;
+    const native=activity.kind==='subagent'&&activity.detail.native_request_id&&activity.detail.reservation_id
+     &&activity.detail.child_conversation_id&&activity.detail.child_session_ref&&activity.detail.role_ref
+     &&child&&child!==activity.run_id
+      ?{root_run_id:activity.run_id,child_session_ref:activity.detail.child_session_ref,child_run_id:child}:undefined;
     return <li key={activity.activity_id} data-chat-search-activity={activity.activity_id} data-chat-search-ready={isExpanded?'true':'false'} style={{paddingInlineStart:Math.min(row.depth,8)*12}}>
      <button type="button" aria-expanded={isExpanded} onClick={()=>setExpanded(prior=>({...prior,[activity.activity_id]:!isExpanded}))}>
       <span aria-hidden="true">{isExpanded?'收起':'展开'} </span>{activityKindLabels[activity.kind]} · {activity.title} · {activityStatusLabels[status]??activityStatusLabels.unknown}<span data-chat-search-ignore>{row.children>0?` · ${row.children} 个子步骤`:''}</span>
@@ -46,6 +52,7 @@ function ActivityGroup({group,run,onSelectRun,availableRuns,reveal}:{group:Group
      {isExpanded&&<>
       {status==='unknown'&&activity.status!=='unknown'&&<p role="status" data-chat-search-ignore>所属运行已结束，此步骤尚无终态回执。</p>}
       <dl>{activityDetailRows(activity).map((detail,index)=><React.Fragment key={index}><dt>{detail.label}</dt><dd>{detail.value}</dd></React.Fragment>)}</dl>
+      {native&&onOpenMember&&<button type="button" data-chat-search-ignore onClick={()=>onOpenMember(native)}>查看原成员执行步骤</button>}
       {child&&child!==activity.run_id&&availableRuns.has(child)&&<button type="button" data-chat-search-ignore onClick={()=>onSelectRun(child)}>查看子运行步骤</button>}
      </>}
     </li>;
@@ -55,7 +62,7 @@ function ActivityGroup({group,run,onSelectRun,availableRuns,reveal}:{group:Group
  </details>;
 }
 
-export default function ActivityTimeline({activities,runs,reveal}:{activities:Activity[];runs:Record<string,ActivityRun>;reveal?:ActivityReveal}){
+export default function ActivityTimeline({activities,runs,reveal,onOpenMember}:{activities:Activity[];runs:Record<string,ActivityRun>;reveal?:ActivityReveal}&MemberDetailsAction){
  const [selection,setSelection]=useState('');
  const appliedReveal=useRef('');
  const tools=useMemo(()=>activities.filter((activity):activity is ToolActivity=>activity.kind!=='compaction'),[activities]);
@@ -83,6 +90,6 @@ export default function ActivityTimeline({activities,runs,reveal}:{activities:Ac
   <h3>工具与子任务</h3>
   <label>运行记录 <select value={selected} onChange={event=>setSelection(event.currentTarget.value)}>{runIds.map(id=><option key={id} value={id}>{runs[id]?.created_at??id} · {runs[id]?.status??'历史运行'}</option>)}</select></label>
   <small>当前已加载的公开步骤。父步骤缺失或终态未确认时会保留提示。</small>
-  {groups.map(group=><ActivityGroup key={`${selected}:${group.id}`} group={group} {...(run?{run}:{})} onSelectRun={setSelection} availableRuns={availableRuns} {...(reveal?{reveal}:{})}/>)}
+  {groups.map(group=><ActivityGroup key={`${selected}:${group.id}`} group={group} {...(run?{run}:{})} onSelectRun={setSelection} availableRuns={availableRuns} {...(onOpenMember?{onOpenMember}:{})} {...(reveal?{reveal}:{})}/>)}
  </section>;
 }

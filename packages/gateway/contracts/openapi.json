@@ -29208,6 +29208,26 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "native_request_id": {
+                "type": "string",
+                "pattern": "^delegate-[a-f0-9]{64}$"
+              },
+              "child_conversation_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+              },
+              "child_session_ref": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+              },
+              "role_ref": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+              },
+              "reservation_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
               }
             },
             "required": [

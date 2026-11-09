@@ -11,6 +11,7 @@ export interface JotProjection {
 
 export interface ProjectionContext {
   runId: string
+  sessionRef?: string
   attemptId: string
   messageId: string
   blockId: string
@@ -169,17 +170,25 @@ function toolActivity(data: Record<string, unknown>, context: ProjectionContext,
   const source = record(message?.source)
   const resultBlock = Array.isArray(message?.content)
     ? message.content.map(record).find(block => block?.type === 'tool-result') : undefined
-  const callId = safeId(data.callId ?? (source?.kind === 'tool' ? source.callId : undefined)
-    ?? resultBlock?.toolCallId ?? data.id, '')
+  const rawCallId = data.callId ?? (source?.kind === 'tool' ? source.callId : undefined)
+    ?? resultBlock?.toolCallId ?? data.id
+  const callId = safeId(rawCallId, '')
   if (!callId) return null
   const known = context.knownTools?.get(callId)
-  const tool = known ?? presentation(data.name ?? data.toolName)
+  const tool = known ?? presentation(data.name ?? data.toolName ?? data.tool)
   if (!known) {
     const detail = detailFor(tool, context.runId)
-    const name = data.name ?? data.toolName
+    const name = data.name ?? data.toolName ?? data.tool
     if (typeof name === 'string' && name) detail.tool_name = name
     let args: Record<string, unknown> | null = null
     try { args = record(typeof data.arguments === 'string' ? JSON.parse(data.arguments) : data.arguments) } catch {}
+    if (tool.kind === 'subagent' && name === 'jot_workspace' && args?.operation === 'tasks.delegate'
+      && typeof rawCallId === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(rawCallId)
+      && context.sessionRef) {
+      // Match the native dispatcher before public activity IDs are normalized.
+      detail.native_request_id = 'delegate-' + createHash('sha256')
+        .update(JSON.stringify([context.runId, context.sessionRef, rawCallId])).digest('hex')
+    }
     if (tool.kind === 'search') {
       const inputs = record(args?.inputs)
       const queryValues = [args?.query, inputs?.query,

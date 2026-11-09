@@ -16,6 +16,7 @@ import SkillCatalogPanel from './SkillCatalogPanel';
 import NativeCommandQueries from './NativeCommandQueries';
 import NativeMemberDetails from './NativeMemberDetails';
 import NativeMemberHistory from './NativeMemberHistory';
+import type {NativeMemberTarget} from './native-member-execution';
 import {catalogMountForRun,skillGestureDraft} from './skill-catalog-mount.js';
 import CompactionActivities from './CompactionActivities';
 import ActivityTimeline from './ActivityTimeline';
@@ -142,6 +143,9 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  const retainActivityHistory=useCallback((activities:Activity[])=>setHistoricalActivities(activities),[]);
  const loadActivityHistory=useCallback(()=>setActivityHistoryRequest(version=>version+1),[]);
  const [activityReveal,setActivityReveal]=useState<ActivityReveal>();
+ const [selectedNativeMember,setSelectedNativeMember]=useState<NativeMemberTarget>();
+ const nativeMemberPanel=useRef<HTMLElement>(null);
+ useEffect(()=>{if(selectedNativeMember)nativeMemberPanel.current?.focus();},[selectedNativeMember]);
  const revealActivity=useCallback((request:ActivityReveal)=>setActivityReveal(prior=>prior?.key===request.key&&prior.activityId===request.activityId?prior:request),[]);
  const revealHistoryMessage=useCallback((messageId:string)=>setHistorySelection(messageId),[]);
  const retainHistory=useCallback((messages:Message[])=>setOlderMessages(messages),[]);
@@ -281,8 +285,14 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  {state&&<>
   <ConversationDisplayBoundary label="上下文整理状态"><CompactionActivities activities={activityValues} runs={state.runs}/></ConversationDisplayBoundary>
   <ConversationDisplayBoundary label="公开步骤历史"><ActivityHistory conversationId={id} {...(state.snapshotSeq?{snapshotSeq:state.snapshotSeq}:{})} requestVersion={activityHistoryRequest} onLoaded={retainActivityHistory}/></ConversationDisplayBoundary>
-  <ConversationDisplayBoundary label="工具时间线"><ActivityTimeline activities={activityValues} runs={state.runs} {...(activityReveal?{reveal:activityReveal}:{})}/></ConversationDisplayBoundary>
+  <ConversationDisplayBoundary label="工具时间线"><ActivityTimeline activities={activityValues} runs={state.runs} onOpenMember={setSelectedNativeMember} {...(activityReveal?{reveal:activityReveal}:{})}/></ConversationDisplayBoundary>
  </>}
+  {selectedNativeMember&&<section ref={nativeMemberPanel} tabIndex={-1} aria-label="父步骤关联的原成员执行">
+   <button type="button" onClick={()=>setSelectedNativeMember(undefined)}>关闭成员详情</button>
+   <ConversationDisplayBoundary label="父步骤成员详情"><NativeMemberDetails
+    key={JSON.stringify(selectedNativeMember)} rootRunId={selectedNativeMember.root_run_id}
+    childSessionRef={selectedNativeMember.child_session_ref} childRunId={selectedNativeMember.child_run_id} initialOpen/></ConversationDisplayBoundary>
+  </section>}
   {displayedMessages.length>200&&<nav aria-label="消息历史翻页">
    <span>{historyStart+1}–{Math.min(historyStart+200,displayedMessages.length)} / {displayedMessages.length} 条已加载消息</span>
    <button type="button" disabled={historyStart===0} onClick={()=>setHistorySelection(displayedMessages[Math.max(0,historyStart-150)]!.message_id)}>更早消息</button>

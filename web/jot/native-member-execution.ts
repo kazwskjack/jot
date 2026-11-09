@@ -1,5 +1,7 @@
 import type {NativeMemberExecution} from './types';
 
+export type NativeMemberTarget=Pick<NativeMemberExecution,'root_run_id'|'child_session_ref'|'child_run_id'>;
+
 export function parseNativeMemberExecution(value:unknown):NativeMemberExecution{
  const source=value as NativeMemberExecution;
  const id=(item:unknown)=>typeof item==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(item);
