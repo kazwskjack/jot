@@ -24,7 +24,7 @@ export interface WorkspaceProvider {create(input:SnapshotWorkspaceInput):Promise
 export function workspaceRelativePath(value:unknown):string{
  if(typeof value!=='string'||!value||value.length>4096||value.startsWith('/')||/[\\:\x00-\x1f\x7f]/.test(value)
   ||value.split('/').some(p=>!p||p==='.'||p==='..'||/[. ]$|[<>"|?*]/.test(p)||/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(p)))throw Error('workspace_path_unsafe');
- for(const part of value.split('/'))if(/^(?:\.git|\.ssh|\.aws|\.azure|\.gnupg|\.codex|\.agents|\.config|\.kube|\.docker|\.mozilla|\.pki|\.npmrc|\.netrc|\.pypirc|credentials(?:\..*)?|secrets?(?:\..*)?|cookies(?:\.sqlite)?|login data|local state|web data|key[34]\.db|logins\.json|browser[-_ ]?profiles?|chrome[-_ ]?profiles?|chromium[-_ ]?profiles?|chromium|google-chrome|user data|id_(?:rsa|dsa|ecdsa|ed25519)(?:\..*)?)$/i.test(part)||/^\.env(?:\.|$)/i.test(part)||/\.(?:pem|key|p12|pfx|jks)$/i.test(part))throw Error('workspace_private_path');
+ for(const part of value.split('/'))if(/^\.git\.jot-init(?:\.lock|-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.pending)$/i.test(part)||/^(?:\.git|\.ssh|\.aws|\.azure|\.gnupg|\.codex|\.agents|\.config|\.kube|\.docker|\.mozilla|\.pki|\.npmrc|\.netrc|\.pypirc|credentials(?:\..*)?|secrets?(?:\..*)?|cookies(?:\.sqlite)?|login data|local state|web data|key[34]\.db|logins\.json|browser[-_ ]?profiles?|chrome[-_ ]?profiles?|chromium[-_ ]?profiles?|chromium|google-chrome|user data|id_(?:rsa|dsa|ecdsa|ed25519)(?:\..*)?)$/i.test(part)||/^\.env(?:\.|$)/i.test(part)||/\.(?:pem|key|p12|pfx|jks)$/i.test(part))throw Error('workspace_private_path');
  return value;
 }
 const fold=(value:string)=>value.normalize('NFC').toLowerCase();

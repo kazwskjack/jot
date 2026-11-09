@@ -17,7 +17,7 @@ export function registerGitInitializationReviewRoutes(app:FastifyInstance,option
    const code=error instanceof Error?error.message:'',known:Record<string,number>={
     unauthorized:401,project_not_found:404,git_intent_not_found:404,git_repository_unconfigured:503,git_initialization_invalid:400,
     git_initialization_branch_invalid:400,git_initialization_binding_invalid:409,git_initialization_metadata_present:409,
-    git_initialization_evidence_invalid:503,git_initialization_ignore_limit:413,git_path_unavailable:409,
+    git_initialization_review_changed:409,git_initialization_source_changed:409,git_initialization_plan_invalid:503,git_initialization_evidence_invalid:503,git_initialization_ignore_limit:413,git_path_unavailable:409,
     git_snapshot_changed:409,git_repository_changed:409,git_review_changed:409,git_intent_closed:409,
     version_conflict:409,idempotency_conflict:409,idempotency_in_progress:409,git_cancelled:409,
     git_output_limit:413,git_read_timeout:504

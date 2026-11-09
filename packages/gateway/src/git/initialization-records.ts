@@ -32,15 +32,15 @@ export function initializationSnapshotId(source:Pick<GitInitializationWitness,'r
  return hash(canonicalJson({protocol:1,kind:'uninitialized_repository',repository_sha256:source.repository_sha256,root_identity:source.root_identity,
   internal_directory_identity:source.internal_directory_identity,internal_ignore:source.internal_ignore}));
 }
-export function readGitInitializationIntentSource(row:GitBranchIntentRecord){
+/** Strict persisted facts only. A decoded witness cannot authorize a write. */
+export function gitInitializationWitness(value:unknown):GitInitializationWitness{
  try{
-  const input=normalizeGitInitializationReview(JSON.parse(row.selection_json)),witness=JSON.parse(row.witness_json) as GitInitializationWitness;
-  if(row.action!=='init'||row.request_id!==input.request_id||hash(JSON.stringify(input))!==row.request_sha256
-   ||!shape(witness,['protocol','kind','snapshot_id','repository_sha256','root_identity','internal_directory_identity','internal_ignore','initial_branch','object_format','ignore_after','execution_authorized'])
+  const witness=value as GitInitializationWitness;
+  if(!shape(witness,['protocol','kind','snapshot_id','repository_sha256','root_identity','internal_directory_identity','internal_ignore','initial_branch','object_format','ignore_after','execution_authorized'])
    ||witness.protocol!==1||witness.kind!=='initialize_repository'||witness.execution_authorized!==false
-   ||witness.initial_branch!==input.initial_branch||witness.object_format!==input.object_format||witness.snapshot_id!==input.snapshot_id
    ||typeof witness.repository_sha256!=='string'||!SHA.test(witness.repository_sha256)||typeof witness.root_identity!=='string'||!IDENTITY.test(witness.root_identity)
    ||witness.internal_directory_identity!==null&&(typeof witness.internal_directory_identity!=='string'||!IDENTITY.test(witness.internal_directory_identity)))throw Error();
+  normalizeGitInitializationReview({request_id:'initialization-witness',action:'init',snapshot_id:witness.snapshot_id,initial_branch:witness.initial_branch,object_format:witness.object_format});
   const file=witness.internal_ignore;
   if(file!==null&&(!shape(file,['identity','sha256','size','mode'])||typeof file.identity!=='string'||!IDENTITY.test(file.identity)
    ||typeof file.sha256!=='string'||!SHA.test(file.sha256)||!Number.isSafeInteger(file.size)||file.size<0||file.size>1024*1024
@@ -48,7 +48,16 @@ export function readGitInitializationIntentSource(row:GitBranchIntentRecord){
   const after=witness.ignore_after;
   if(!shape(after,['sha256','size','changed'])||typeof after.sha256!=='string'||!SHA.test(after.sha256)||!Number.isSafeInteger(after.size)||after.size<1||after.size>1024*1024
    ||typeof after.changed!=='boolean'||after.changed!==((file?.sha256??null)!==after.sha256)||!after.changed&&after.size!==file?.size
-   ||initializationSnapshotId(witness)!==witness.snapshot_id||hash(JSON.stringify({action:'init',witness}))!==row.review_sha256)throw Error();
+   ||initializationSnapshotId(witness)!==witness.snapshot_id)throw Error();
+  return structuredClone(witness);
+ }catch{throw Error('git_initialization_evidence_invalid');}
+}
+export function readGitInitializationIntentSource(row:GitBranchIntentRecord){
+ try{
+  const input=normalizeGitInitializationReview(JSON.parse(row.selection_json)),witness=gitInitializationWitness(JSON.parse(row.witness_json));
+  if(row.action!=='init'||row.request_id!==input.request_id||hash(JSON.stringify(input))!==row.request_sha256
+   ||witness.initial_branch!==input.initial_branch||witness.object_format!==input.object_format||witness.snapshot_id!==input.snapshot_id
+   ||hash(JSON.stringify({action:'init',witness}))!==row.review_sha256)throw Error();
   return{input,witness};
  }catch{throw Error('git_initialization_evidence_invalid');}
 }

@@ -349,6 +349,19 @@ export class GitRepositoryInspection{
    return{...witness,commit_tree};
   }finally{await context.dispose();}
  }
+ /** Original initialization binding also works during recovery after .git
+  * publication. No metadata presence, stored plan or caller path grants access. */
+ protected async initializationAnchors(signal?:AbortSignal){
+  signal?.throwIfAborted();const root=await this.directory(this.root),dot=join(this.root,'.git');
+  if(!same(this.gitDirectory,dot)||!same(this.commonDirectory,dot))throw Error('git_initialization_binding_invalid');
+  const executable=await gitExecutable(this.configuredExecutable),program=await lstat(executable);
+  if(within(this.root,executable)||!program.isFile()||program.isSymbolicLink())throw Error('git_configuration_invalid');
+  const stamp=witness(program);
+  if(await this.directory(this.root)!==root||witness(await lstat(executable))!==stamp)throw Error('git_snapshot_changed');
+  signal?.throwIfAborted();this.executable=executable;
+  return{root,executable,program:stamp,repository:hash(canonicalJson({protocol:1,kind:'initialization_binding',root:this.root,
+   git:this.gitDirectory,common:this.commonDirectory,root_identity:root,executable,program:stamp}))};
+ }
  /** Initialization reads only the bound root, Git presence and internal-ignore
   * bytes. It never discovers or adopts an ancestor repository. */
  private async initializationSource(signal?:AbortSignal){
@@ -361,9 +374,8 @@ export class GitRepositoryInspection{
    }catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return false;throw error;}
   };
   if(await present())return{initialized:true as const};
-  if(!same(this.gitDirectory,dot)||!same(this.commonDirectory,dot))throw Error('git_initialization_binding_invalid');
-  const executable=await gitExecutable(this.configuredExecutable),program=await lstat(executable);
-  if(within(this.root,executable)||!program.isFile()||program.isSymbolicLink())throw Error('git_configuration_invalid');
+  const anchors=await this.initializationAnchors(signal),{executable}=anchors;
+  if(anchors.root!==root)throw Error('git_snapshot_changed');
   const internal=join(this.root,'.pilotdeck');
   const directory=async()=>{
    try{return await this.directory(internal);}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return null;throw error;}
@@ -377,10 +389,8 @@ export class GitRepositoryInspection{
   }catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;body=null;ignore=null;}
   signal?.throwIfAborted();
   if(await this.directory(this.root)!==root||await directory()!==internalIdentity||await present()
-   ||witness(await lstat(executable))!==witness(program))throw Error('git_snapshot_changed');
-  this.executable=executable;
-  const repository=hash(canonicalJson({protocol:1,kind:'initialization_binding',root:this.root,git:this.gitDirectory,common:this.commonDirectory,
-   root_identity:root,executable,program:witness(program)}));
+   ||witness(await lstat(executable))!==anchors.program)throw Error('git_snapshot_changed');
+  const repository=anchors.repository;
   const source={repository_sha256:repository,root_identity:root,internal_directory_identity:internalIdentity,internal_ignore:ignore};
   return{initialized:false as const,source,snapshot_id:initializationSnapshotId(source),body};
  }

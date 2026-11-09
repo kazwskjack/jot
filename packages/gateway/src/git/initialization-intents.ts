@@ -84,8 +84,7 @@ export class GitInitializationIntents{
   if(cached)return()=>{signal?.throwIfAborted();this.row(owner,project,id);return cached;};
   assertCurrent();
   if(input.action==='approve'){
-   const witness=await this.git.freezeInitialization(owner,project,source.input.snapshot_id,source.input.initial_branch,source.input.object_format,signal);
-   if(JSON.stringify(witness)!==row.witness_json)throw Error('git_review_changed');
+   await this.git.prepareInitialization(owner,project,{witness:source.witness,review_sha256:row.review_sha256},signal);
   }
   return()=>withImmediateTransaction(this.db,()=>{
    signal?.throwIfAborted();this.row(owner,project,id);

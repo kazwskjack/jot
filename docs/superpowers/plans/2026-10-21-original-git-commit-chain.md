@@ -406,3 +406,45 @@ Existing metadata/reinitialization, linked/external binding, branch checkout/
 deletion and reference backend coverage remain in full M15.14 scope.
 This source increment ran no tests, typechecks, builds, maintenance commands,
 migrations, native/product operations, deployment or UI acceptance.
+
+## Initialization private kernel source increment
+
+The original GitWorkbench factory now retains GitInitializationEffects through
+its existing branch/commit/index inheritance. Initialization approval invokes
+read-only private plan preparation, repeating the reviewed source, explicit
+initial branch, object format and internal-ignore byte facts. Only the retained
+in-process one-use plan can enter applyInitialization.
+
+The private kernel allocates a protected directory directly under the bound
+root. Preparation records its identity and empty lock inodes before private Git
+starts. Fixed arguments select an empty template, the reviewed branch and object
+format, and the files reference backend. Existing readGit environment and process
+drain controls apply. Git probes the target volume and generates configuration.
+The temporary core.worktree value is removed and generated configuration is
+restricted to initialization settings before publication evidence is recorded.
+
+Synchronous authority callbacks bracket preparation, exclusive lock acquisition,
+dispatch, publication and cleanup. Canonical directories are exclusively created
+and pinned. Configuration and internal-ignore publication precede HEAD. Canonical
+metadata receives the native directory modes and private file links are removed
+immediately after installation. Serialized evidence records the exact generated
+file identities, hashes, sizes and modes, plus private directory identities.
+
+Read-only observation reports applied only for the complete original file facts
+and exact expected directory layout. Partial effects remain unknown. Cleanup
+requires original root/program and allocated namespace identities, exact empty
+lock facts and a bounded regular-file scan. It removes private files and empty
+private directories while preserving canonical Git and project ignore contents.
+The exact allocation and root-lock names are protected by workspace path policy.
+
+The apply/observe/cleanup kernel is not yet connected to original protocol-7
+native execution. Typed preparation/dispatch/outcome readers, original native
+custody, lease/producers, settlement and repository binding handover remain to
+be connected before public dispatch is enabled. Initialization capability and
+creation UI, reinitialization, linked/external bindings, branch checkout/deletion
+and reference backend coverage remain in full M15.14 scope. This increment is
+source development only under the user's no-test/no-build instruction.
+
+Git initialization argument and generated configuration behavior follows the
+[official init documentation](https://git-scm.com/docs/git-init) and
+[Git setup implementation](https://github.com/git/git/blob/master/setup.c).
