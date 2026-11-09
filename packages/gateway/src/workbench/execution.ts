@@ -272,6 +272,11 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
   app.post('/internal/v1/workbench/native-child-activities',{bodyLimit:8*1024*1024},async request=>{
     authorized(request.headers.authorization);const input=object(request.body);
     if(!nativeActivities)throw Error('native_activity_unavailable');
+    if(input.action==='pending'){
+      fields(input,['action','cursor','limit']);
+      if(input.execution_lease!==undefined)throw Error('native_activity_pending_query_invalid');
+      return nativeActivities.pending(input);
+    }
     const owner=accountingOwner(input),runId=String(input.run_id),sessionRef=String(input.session_ref);
     if(input.action==='source'){
       fields(input,['run_id','session_ref','action']);return nativeActivities.source(owner,runId,sessionRef);

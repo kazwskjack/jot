@@ -132,3 +132,44 @@ export function createNativeChildActivityObserver({ctx,bridge,accepted,bindingFo
   await Promise.allSettled([...running]);stopped.clear();
  }};
 }
+
+/** Recover closed observations through metadata and local read-only storage. */
+export async function recoverPendingNativeChildActivities({bridge,persistence,replay,signal}){
+ const id=value=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(value);
+ let warned=false;
+ while(!signal.aborted){
+  try{
+   let cursor;
+   do{
+    const page=await bridge.request('native-child-activities',undefined,{action:'pending',limit:25,...(cursor?{cursor}:{})},signal);
+    if(!page||page.protocol!==1||page.kind!=='native_closed_activity_pending'||page.execution_authorized!==false
+     ||!Array.isArray(page.items)||page.items.length>25||page.next_cursor!==undefined&&(!id(page.next_cursor)||!page.items.length))throw Error('native_activity_pending_source_invalid');
+    let previous=cursor;
+    for(const item of page.items){
+     if(!item||!id(item.run_id)||!id(item.session_ref)||previous!==undefined&&item.run_id<=previous)throw Error('native_activity_pending_source_invalid');
+     previous=item.run_id;
+    }
+    if(page.next_cursor!==undefined&&page.next_cursor!==previous)throw Error('native_activity_pending_source_invalid');
+    warned=false;
+    for(const item of page.items){
+     signal.throwIfAborted();
+     try{
+      const local=await persistence.stat(item.session_ref,{signal});
+      if(local?.header?.id!==item.session_ref||typeof local.revision!=='string'||!local.revision
+       ||local.formatStatus!==undefined&&local.formatStatus!=='current')continue;
+      await replay(Object.freeze({runId:item.run_id,sessionRef:item.session_ref}));
+     }catch{signal.throwIfAborted();}
+    }
+    cursor=page.next_cursor;
+   }while(cursor!==undefined&&!signal.aborted);
+  }catch{
+   if(signal.aborted)return;
+   if(!warned){console.warn('[jot-native-public-activities]',JSON.stringify({status:'closed_discovery_pending'}));warned=true;}
+  }
+  if(signal.aborted)return;
+  await new Promise(resolve=>{
+   const done=()=>{clearTimeout(timer);signal.removeEventListener('abort',done);resolve();};
+   const timer=setTimeout(done,30000);timer.unref?.();signal.addEventListener('abort',done,{once:true});
+  });
+ }
+}

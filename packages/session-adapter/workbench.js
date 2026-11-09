@@ -243,12 +243,14 @@ export class WorkbenchBridge {
 
   async request(path, binding, payload = {}, signal) {
     signal?.throwIfAborted();
+    if(!binding&&(path!=='native-child-activities'||payload?.action!=='pending'))throw Error('workbench_binding_invalid');
+    const identity=binding?{run_id:binding.runId,session_ref:binding.sessionRef,
+      ...(binding.executionLease?{execution_lease:binding.executionLease}:{})}:{};
     const timed = AbortSignal.timeout(15_000);
     const response = await this.fetch(`${this.origin}/internal/v1/workbench/${path}`, {
       method: 'POST', redirect: 'error',
       headers: { authorization: `Bearer ${this.token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ ...payload, run_id: binding.runId, session_ref: binding.sessionRef,
-        ...(binding.executionLease?{execution_lease:binding.executionLease}:{}) }),
+      body: JSON.stringify({ ...payload, ...identity }),
       signal: signal ? AbortSignal.any([signal, timed]) : timed,
     });
     if (!response.ok) {

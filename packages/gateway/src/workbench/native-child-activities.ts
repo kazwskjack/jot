@@ -26,6 +26,33 @@ export class NativeChildActivities {
    CREATE TRIGGER IF NOT EXISTS wb_native_activity_receipt_no_delete BEFORE DELETE ON wb_native_activity_receipts
     BEGIN SELECT RAISE(ABORT,'native_activity_receipt_immutable'); END;`);
  }
+ /** Component-scoped metadata for original closed executions awaiting public replay. */
+ pending(input:Input){
+  const cursor=input.cursor,limit=input.limit===undefined?25:Number(input.limit);
+  if(cursor!==undefined&&(typeof cursor!=='string'||!ID.test(cursor))
+   ||input.limit!==undefined&&typeof input.limit!=='number'&&typeof input.limit!=='string'
+   ||!Number.isSafeInteger(limit)||limit<1||limit>50)throw Error('native_activity_pending_query_invalid');
+  return withReadTransaction(this.db,()=>{
+   if(cursor!==undefined&&!this.db.prepare(`SELECT 1 FROM wb_native_execution_runs n
+    JOIN wb_native_execution_closures k ON k.run_id=n.run_id WHERE n.run_id=?`).get(cursor as string))throw Error('native_activity_pending_query_invalid');
+   const rows=this.db.prepare(`SELECT n.run_id,n.child_session_ref FROM wb_native_execution_runs n
+    JOIN wb_native_execution_closures k ON k.run_id=n.run_id
+    JOIN wb_native_spawn_publications p ON p.reservation_id=n.reservation_id
+    JOIN wb_run_bindings b ON b.run_id=n.run_id AND b.owner_id=n.owner_id AND b.kind='native_team' AND b.agent_id=n.role_id
+    JOIN ga_runs r ON r.id=n.run_id JOIN ga_conversations c ON c.id=r.conversation_id AND c.owner_id=n.owner_id
+    JOIN ga_harness_session_bindings h ON h.conversation_id=c.id AND h.owner_id=c.owner_id AND h.session_id=n.child_session_ref
+    JOIN ga_runs root ON root.id=n.root_run_id JOIN ga_conversations pc ON pc.id=root.conversation_id AND pc.owner_id=c.owner_id
+    WHERE json_extract(p.publication_json,'$.member.id')=n.child_session_ref AND json_extract(p.publication_json,'$.member.role')='teammate'
+     AND NOT EXISTS(SELECT 1 FROM wb_native_activity_receipts x WHERE x.run_id=n.run_id AND x.event_type='replay/complete'
+      AND x.source_seq=json_extract(k.receipt_json,'$.seq_exclusive') AND x.source_sha256=json_extract(k.receipt_json,'$.log_sha256'))
+     ${cursor===undefined?'':'AND n.run_id>?'} ORDER BY n.run_id LIMIT ?`)
+    .all(...(cursor===undefined?[]:[cursor as string]),limit+1) as Array<{run_id:string;child_session_ref:string}>;
+   const selected=rows.slice(0,limit),last=selected.at(-1);
+   return {protocol:1,kind:'native_closed_activity_pending',execution_authorized:false,
+    items:selected.map(row=>({run_id:row.run_id,session_ref:row.child_session_ref})),
+    ...(rows.length>limit&&last?{next_cursor:last.run_id}:{})};
+  });
+ }
  source(owner:string,runId:string,sessionRef:string){
   return withReadTransaction(this.db,()=>this.sourceInside(owner,runId,sessionRef));
  }
