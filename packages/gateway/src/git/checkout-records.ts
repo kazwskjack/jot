@@ -43,6 +43,23 @@ export function readGitCheckoutIntentSource(row:GitBranchIntentRecord,validate:(
    const metadata=witness.log_metadata,actor={name:metadata.committer.name,email:metadata.committer.email};
    if(!witness.reference_plan||canonicalJson(checkoutLogMetadata({author:actor,committer:actor},witness,metadata.committer.timestamp))!==canonicalJson(metadata))throw Error();
   }
+  const after=witness.log_after,plan=witness.reference_plan;
+  if(after){
+   if(!source||!plan)throw Error();
+   const append=plan.state==='planned'&&plan.head_log.append,metadata=witness.log_metadata;
+   if(after.state==='appended'){
+    if(!append||!metadata||after.size!==source.head_log.size+metadata.entry_size)throw Error();
+   }else if(after.state==='retained'){
+    if(plan.state!=='planned'||append||after.sha256!==source.head_log.sha256||after.size!==source.head_log.size)throw Error();
+   }else if(after.reason==='reference_policy_required'){
+    if(plan.state!=='policy_required')throw Error();
+   }else if(after.reason==='identity_unconfigured'){
+    if(!append||metadata)throw Error();
+   }else{
+    if(!append||!metadata||after.reason==='log_format_required'&&source.head_log.size===0
+     ||after.reason==='output_limit'&&source.head_log.size+metadata.entry_size<=32*1024*1024)throw Error();
+   }
+  }
   if(checkoutDigest({action:input.action,target_ref:input.target_ref,witness})!==row.review_sha256)throw Error();
   return{input,witness};
  }catch{throw Error('git_checkout_evidence_invalid');}

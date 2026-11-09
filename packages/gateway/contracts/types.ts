@@ -43,13 +43,14 @@ export type GitCheckoutPreview={reference_source?:GitCheckoutReferenceSource;tar
 export type GitBranchInventory={project_id:string;snapshot_id:string;repository_sha256:string;head:GitHead;object_format:'sha1'|'sha256';branches:Array<{ref:string;name:string;kind:'local'|'remote';oid:string;object_type:'commit'|'tag'|'tree'|'blob';current:boolean;symbolic_target?:string;checkout_oid?:string|null;worktree_uses?:Array<{worktree:'current'|'other';reason:'head'|'rebase'|'bisect'|'update_refs'}>}>;checkout_preview?:GitCheckoutPreview;read_only:true;execution_authorized:false};
 export type GitCheckoutReviewPrepare={request_id:string;action:'checkout-branch';snapshot_id:string;target_ref:string};
 export type GitCheckoutReviewControl={request_id:string;expected_version:number;action:'cancel';review_sha256:string};
+export type GitCheckoutLogAfter={state:'appended';sha256:string;size:number}|{state:'retained';sha256:string|null;size:number}|{state:'not_confirmed';reason:'reference_policy_required'|'identity_unconfigured'|'log_format_required'|'output_limit'};
 export type GitCheckoutLogMetadata={protocol:1;committer:GitCommitMetadata['committer'];operator_policy_sha256:string;entry_sha256:string;entry_size:number};
 export type GitCheckoutReferencePlan={state:'policy_required';reason:'local_non_commit_target'}|{
  state:'planned';protocol:1;mode:'branch'|'detached';head:GitHead;head_file:{sha256:string;size:number};
  head_log:{append:boolean;old_oid:string;new_oid:string;message:string};
  configuration:{common_sha256:string|null;worktree_sha256:string|null};target_ref_unchanged:true;
 };
-export type GitCheckoutReviewWitness={log_metadata?:GitCheckoutLogMetadata;reference_plan?:GitCheckoutReferencePlan;protocol:1;kind:'checkout_branch';project_id:string;snapshot_id:string;repository_sha256:string;head:GitHead;object_format:'sha1'|'sha256';target:GitBranchInventory['branches'][number]&{checkout_oid:string};preview:GitCheckoutPreview;execution_authorized:false};
+export type GitCheckoutReviewWitness={log_after?:GitCheckoutLogAfter;log_metadata?:GitCheckoutLogMetadata;reference_plan?:GitCheckoutReferencePlan;protocol:1;kind:'checkout_branch';project_id:string;snapshot_id:string;repository_sha256:string;head:GitHead;object_format:'sha1'|'sha256';target:GitBranchInventory['branches'][number]&{checkout_oid:string};preview:GitCheckoutPreview;execution_authorized:false};
 export type GitCheckoutReviewIntent={intent_id:string;project_id:string;action:'checkout-branch';snapshot_id:string;target_ref:string;witness:GitCheckoutReviewWitness;review_sha256:string;version:number;state:'prepared'|'cancelled';created_at:string;updated_at:string;execution_authorized:false};
 export type GitDiff = {project_id:string;snapshot_id:string;path:string;stage:'working'|'staged';kind:'text'|'binary';patch:string;read_only:true;execution_authorized:false};
 export type CreateProject = { title: string };

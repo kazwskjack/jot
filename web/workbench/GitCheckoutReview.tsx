@@ -12,7 +12,7 @@ export default function GitCheckoutReview({project,snapshotId,targetRef,onClose,
  const [busy,setBusy]=useState(false),[verified,setVerified]=useState(!!initialReview),[error,setError]=useState('');
  const alive=useRef(true),inflight=useRef(false),active=useRef<AbortController|null>(null),command=useRef<Command|null>(null),decision=useRef<HTMLButtonElement>(null);
  const report=useRef(onBusy);report.current=onBusy;
- const locked=busy||mutation.pending,referencePlan=review?.witness.reference_plan,logMetadata=review?.witness.log_metadata;
+ const locked=busy||mutation.pending,referencePlan=review?.witness.reference_plan,logMetadata=review?.witness.log_metadata,logAfter=review?.witness.log_after;
  const base=`/projects/${pathId(project)}/git/checkout-intents`;
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;active.current?.abort();report.current(false)}},[project,snapshotId,targetRef]);
  useEffect(()=>{report.current(locked)},[locked]);
@@ -69,6 +69,9 @@ export default function GitCheckoutReview({project,snapshotId,targetRef,onClose,
      <dt>追加条目</dt><dd>{logMetadata.entry_size} 字节 · SHA-256 <code>{logMetadata.entry_sha256}</code></dd></dl>:referencePlan.head_log.append&&<p role="status">日志操作者及条目字节尚未固定，需要项目仓库配置中的操作者身份。</p>}
     <p>目标引用的对象值保持原值。完整日志文件与工作区发布、批准及恢复方案继续补齐。</p>
    </section>:<p role="status">{referencePlan?.state==='policy_required'?'本地引用指向非 commit 对象，引用发布策略仍待补齐。':'此历史审核尚无引用变更预期，请重新生成审核以固定该内容。'}</p>}
+   {logAfter?.state==='appended'||logAfter?.state==='retained'?<section aria-label="HEAD 日志文件预期"><h4>HEAD 日志文件预期</h4>
+    <p>{logAfter.state==='appended'?'追加后':'保留原文件'} · {logAfter.size} 字节 · SHA-256 <code>{logAfter.sha256??'原文件缺失'}</code></p>
+   </section>:<p role="status">{logAfter?.state==='not_confirmed'?{reference_policy_required:'引用策略仍待补齐，完整日志预期尚未确认。',identity_unconfigured:'需要配置操作者身份以固定完整日志预期。',log_format_required:'原日志末尾格式需要处理策略，完整日志预期尚未确认。',output_limit:'追加后的日志超过当前文件上限，完整日志预期尚未确认。'}[logAfter.reason]:'此历史审核尚无完整日志文件预期。'}</p>}
    <p role="status">{!verified?'当前审核状态尚未确认。':review.state==='prepared'?'切换依据已固定，等待完整执行策略。':'审核已取消。'}</p>
    <div className="wb-actions">{review.state==='prepared'&&<button ref={decision} type="button" disabled={locked||!verified} onClick={()=>void send('cancel')}>取消切换审核</button>}
     <button ref={review.state==='cancelled'?decision:undefined} type="button" disabled={locked} onClick={()=>void refresh()}>刷新切换审核状态</button></div>

@@ -1,9 +1,10 @@
+import {checkoutLogMetadata,checkoutReferencePlan,checkoutReflogEntry} from './checkout-metadata.ts';
 import {initializationInternalIgnore,initializationSnapshotId,normalizeGitInitializationReview} from './initialization-records.ts';
 import type {GitInitializationWitness,GitInitializationFile,GitReinitializationLayout} from '../../contracts/types.ts';
 import {planReinitializationConfiguration} from './reinitialization-configuration.ts';
 import {planCreateBranchConfiguration} from './branch-configuration.ts';
 import {validGitReference} from './references.ts';
-import type {GitCheckoutReferenceSource,GitCheckoutBefore,GitCheckoutBeforeState,GitCheckoutPreview,GitBranchInventory,GitCreateBranchWitness,GitBranchLogFile,GitBranchLogWitness} from '../../contracts/types.ts';
+import type {GitCheckoutLogAfter,GitCheckoutReviewWitness,GitCheckoutReferenceSource,GitCheckoutBefore,GitCheckoutBeforeState,GitCheckoutPreview,GitBranchInventory,GitCreateBranchWitness,GitBranchLogFile,GitBranchLogWitness} from '../../contracts/types.ts';
 import {createHash} from 'node:crypto';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {constants} from 'node:fs';
@@ -808,6 +809,35 @@ export class GitRepositoryInspection{
   const body=await this.bytes(index,32*1024*1024,witness(indexStat));if(hash(body)!==indexSha)throw Error('git_snapshot_changed');
   preview.working_tree_check='passed';preview.index_projection={sha256:indexSha,entries_sha256:hash(canonicalJson(result)),entry_count:result.length,changes,...(attributes===null?{}:{attributes}),worktree_before:worktreeBefore,worktree_attribute_before:attributeBefore};
   signal?.throwIfAborted();return preview;
+ }
+ /** Original read-only log after-facts, guarded by the frozen source metadata. */
+ async checkoutLogAfter(raw:GitCheckoutReviewWitness,signal?:AbortSignal):Promise<GitCheckoutLogAfter>{
+  const witness=structuredClone(raw),source=witness.preview.reference_source;
+  if(!source)throw Error('git_checkout_evidence_invalid');
+  const guard=async()=>{
+   signal?.throwIfAborted();const anchors=await this.anchors(signal);
+   if(anchors.repository!==witness.repository_sha256||anchors.metadata!==source.source_metadata_sha256)throw Error('git_snapshot_changed');
+  };
+  await guard();
+  try{
+   const plan=checkoutReferencePlan(witness);
+   if(plan.state!=='planned')return{state:'not_confirmed',reason:'reference_policy_required'};
+   if(!plan.head_log.append)return{state:'retained',...source.head_log};
+   const metadata=witness.log_metadata;
+   if(!metadata)return{state:'not_confirmed',reason:'identity_unconfigured'};
+   const actor={name:metadata.committer.name,email:metadata.committer.email};
+   if(canonicalJson(checkoutLogMetadata({author:actor,committer:actor},witness,metadata.committer.timestamp))!==canonicalJson(metadata))throw Error('git_checkout_evidence_invalid');
+   let before:Buffer|null=null;
+   try{
+    const path=join(this.gitDirectory,'logs','HEAD');await this.directory(dirname(path));before=await this.bytes(path,32*1024*1024);
+   }catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
+   if((before===null?null:hash(before))!==source.head_log.sha256||(before?.length??0)!==source.head_log.size)throw Error('git_snapshot_changed');
+   if(before?.length&&before[before.length-1]!==10)return{state:'not_confirmed',reason:'log_format_required'};
+   const entry=checkoutReflogEntry(plan,metadata.committer),size=(before?.length??0)+entry.length;
+   if(size>32*1024*1024)return{state:'not_confirmed',reason:'output_limit'};
+   signal?.throwIfAborted();
+   return{state:'appended',size,sha256:createHash('sha256').update(before??Buffer.alloc(0)).update(entry).digest('hex')};
+  }finally{await guard();}
  }
  /** Fixed before-state metadata for the original checkout review and later publication. */
  protected async checkoutReferenceSource(context:ReadContext,snapshot:GitSnapshot,targetRef:string,signal?:AbortSignal):Promise<GitCheckoutReferenceSource>{

@@ -31,7 +31,12 @@ export function checkoutLogMetadata(raw:GitCommitOperatorPolicy,witness:GitCheck
  const at=timestamp??new Date(Math.floor(Date.now()/1000)*1000).toISOString();
  if(plan.state!=='planned'||!plan.head_log.append||!Number.isFinite(Date.parse(at))||new Date(at).toISOString()!==at||!at.endsWith('.000Z'))throw Error('git_checkout_evidence_invalid');
  const committer={...policy.committer,timestamp:at};
- const entry=Buffer.from(plan.head_log.old_oid+' '+plan.head_log.new_oid+' '+gitCommitSignature(committer)+'\t'+plan.head_log.message+'\n','utf8');
+ const entry=checkoutReflogEntry(plan,committer);
  return{protocol:1,committer,operator_policy_sha256:createHash('sha256').update(canonicalJson({committer:policy.committer})).digest('hex'),
   entry_sha256:createHash('sha256').update(entry).digest('hex'),entry_size:entry.length};
+}
+
+/** Shared exact suffix for source hashing and subsequent original publication. */
+export function checkoutReflogEntry(plan:Extract<GitCheckoutReferencePlan,{state:'planned'}>,committer:GitCheckoutLogMetadata['committer']){
+ return Buffer.from(plan.head_log.old_oid+' '+plan.head_log.new_oid+' '+gitCommitSignature(committer)+'\t'+plan.head_log.message+'\n','utf8');
 }
