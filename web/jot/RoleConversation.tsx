@@ -180,7 +180,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  useEffect(()=>{let mounted=true;controller.onChange=()=>{if(mounted)render(n=>n+1);};void controller.start();return()=>{mounted=false;controller.stop();};},[controller]);
  useEffect(()=>{
   let mounted=true,store:UploadRecoveryStore|undefined;const abort=new AbortController();
-  uploads.disposed=false;uploads.onChange=()=>{if(mounted)render(n=>n+1);};
+  uploads.disposed=false;uploads.recoveryReady=false;uploads.onChange=()=>{if(mounted)render(n=>n+1);};uploads.onChange();
   void request<Capabilities>('/capabilities','GET',undefined,undefined,abort.signal).then(async value=>{
    if(!mounted)return;
    setMaxBytes(value.limits.max_upload_bytes);setVoice(value.voice);setModels(value.models??[]);setModeCaps(value);uploads.statusSupported=value.upload_recovery?.protocol===1&&value.upload_recovery.status===true;
@@ -191,6 +191,16 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
   }).catch(reason=>{store?.close();if(mounted){uploads.recoveryReady=false;setUploadRecoveryError(reason instanceof Error?reason.message:'upload_recovery_unavailable');render(n=>n+1);}});
   return()=>{mounted=false;abort.abort();uploads.dispose();};
  },[uploads,id,uploadRecoveryRevision]);
+ const generatedProjection=JSON.stringify(uploads.entries.filter((entry:any)=>entry.generated).map((entry:any)=>[entry.id,entry.generated.delivery,entry.status,entry.generatedCommitted]));
+ useEffect(()=>{
+  if(uploads.blocked||!fileOwner||taskDraftScope()!==fileOwner||uploads.store?.scope!==fileOwner)return;
+  const recovered=uploads.entries.filter((entry:any)=>entry.generated&&entry.generatedCommitted&&entry.generated.delivery==='draft').map((entry:any)=>({...entry.generated.capture,uploadEntryId:entry.id}) as FileReference);
+  setFileReferenceState(previous=>{
+   const existing=previous.owner===fileOwner&&previous.conversationId===id?previous.values:[];
+   const retained=existing.filter(value=>!isFileRegion(value)||uploads.entries.some((entry:any)=>entry.id===value.uploadEntryId)&&!recovered.some((item:FileReference)=>isFileRegion(item)&&item.uploadEntryId===value.uploadEntryId));
+   return {owner:fileOwner,conversationId:id,values:[...retained,...recovered]};
+  });
+ },[generatedProjection,fileOwner,id,uploads.recoveryReady,uploads.recoveryError]);
  useEffect(()=>{folderInput.current?.setAttribute('webkitdirectory','');},[]);
  useEffect(()=>()=>{if(preview?.url)URL.revokeObjectURL(preview.url);},[preview]);
  useEffect(()=>()=>previewRequest.current?.abort(),[]);
@@ -225,7 +235,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  const chatUnavailable=chatMode&&!!modeCaps&&!modes.chatReady;
  const canToggle=ordinary&&!!conversation&&controller.connection==='connected'&&!busy&&!run&&!controller.pendingMessage&&!uploads.entries.length&&!voiceBusy&&!goalPending&&!modelMutation.pending&&!modeWriter.pending&&!cancelWriter.pending&&modes.aware&&(chatMode||modes.chatReady);
  const action=async(fn:()=>Promise<unknown>)=>{if(busy)return;setBusy(true);setError('');try{await fn();}catch(e){if(!(e instanceof DOMException&&e.name==='AbortError'))setError(artifactPreviewErrorMessage(e));if((e as {status?:number}).status===409&&!controller.pendingMessage)await controller.refresh().catch(()=>{});}finally{setBusy(false);}};
- const send=()=>{if(fileReferences.length&&taskDraftScope()!==fileOwner){setError('文件引用所属账户已变化，请重新打开会话');return;}if(voiceBusy||modeWriter.pending||cancelWriter.pending||chatUnavailable)return;void action(async()=>{const message=replyQuoteMessage(fileReferenceMessage(draft,fileReferences,imageArtifact),replyQuotes);if(!controller.pendingMessage&&quoteCount&&goalPrompt(message,ordinary&&!chatMode&&!run&&goalMode).length>100000)throw Error('引用与消息过长，请减少引用或缩短消息后发送');const references=uploads.references();const receipt=await controller.send(message,references,{goalMode:ordinary&&!chatMode&&!run&&goalMode,originalTask:ordinary,steeringConfigured:modeCaps?.conversation_commands?.protocol===1&&modeCaps.conversation_commands.ordinary_steer?.configured===true,attachmentSteeringConfigured:modeCaps?.conversation_commands?.protocol===1&&modeCaps.conversation_commands.ordinary_steer?.attachments===true});let cleanupError='';try{await uploads.clearSent(references);}catch{cleanupError='消息已发送，附件回执清理尚未保存。请重读上传回执并核对会话。';}setReplyQuotes([]);setFileReferences([]);editDraft('');if(cleanupError)setError(cleanupError);else if(receipt.command_id)setError('补充已保留给原任务，正在等待接收');await controller.refresh();});};
+ const send=()=>{if(fileReferences.length&&taskDraftScope()!==fileOwner){setError('文件引用所属账户已变化，请重新打开会话');return;}if(voiceBusy||modeWriter.pending||cancelWriter.pending||chatUnavailable)return;void action(async()=>{const message=replyQuoteMessage(fileReferenceMessage(draft,fileReferences,imageArtifact),replyQuotes);if(!controller.pendingMessage&&quoteCount&&goalPrompt(message,ordinary&&!chatMode&&!run&&goalMode).length>100000)throw Error('引用与消息过长，请减少引用或缩短消息后发送');const references=uploads.references();if(!controller.pendingMessage)await uploads.markGeneratedSending(fileReferences.filter(isFileRegion).map(value=>value.uploadEntryId));const receipt=await controller.send(message,references,{goalMode:ordinary&&!chatMode&&!run&&goalMode,originalTask:ordinary,steeringConfigured:modeCaps?.conversation_commands?.protocol===1&&modeCaps.conversation_commands.ordinary_steer?.configured===true,attachmentSteeringConfigured:modeCaps?.conversation_commands?.protocol===1&&modeCaps.conversation_commands.ordinary_steer?.attachments===true});let cleanupError='';try{await uploads.clearSent(references);}catch{cleanupError='消息已发送，附件回执清理尚未保存。请重读上传回执并核对会话。';}setReplyQuotes([]);setFileReferences([]);editDraft('');if(cleanupError)setError(cleanupError);else if(receipt.command_id)setError('补充已保留给原任务，正在等待接收');await controller.refresh();});};
  const quoteLocked=!state||busy||goalPending||voiceBusy||modelMutation.pending||modeWriter.pending||cancelWriter.pending||controller.pendingMessage||chatUnavailable;
  const regionDisabled=quoteLocked||uploads.blocked||uploads.unresolved||!maxBytes;
  const imageArtifact=(entryId:string)=>{const entry=uploads.entries.find((entry:any)=>entry.id===entryId);return entry?.status==='ready'?entry.artifact:undefined;};
@@ -256,7 +266,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
   setFileReferences(next);conversationRegion.current?.querySelector<HTMLTextAreaElement>('.jot-prompt-composer textarea')?.focus();return true;
  };
  const addRegionReference=(value:FileRegionDraft,file:File)=>{
-  if(regionDisabled||!maxBytes||taskDraftScope()!==fileOwner||value.owner!==fileOwner||value.conversationId!==id)return false;
+  if(regionDisabled||!maxBytes||taskDraftScope()!==fileOwner||value.owner!==fileOwner||value.conversationId!==id)return Promise.resolve(false);
   const {reference}=value,rect=reference.locator.rect;
   if(reference.schemaVersion!==1||reference.kind!=='content-reference'||reference.selectionMode!=='region'||reference.renderer.id!=='pdf'||reference.renderer.backend!=='builtin'||reference.locator.surface!=='page'
    ||reference.source.relativePath!==value.file.path||reference.source.revision?.sha256!==value.file.sha256||reference.source.revision?.id!==String(value.file.version)||reference.source.revision?.size!==value.file.size
@@ -264,14 +274,20 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
    ||!Number.isSafeInteger(reference.locator.pageNumber)||Number(reference.locator.pageNumber)<1||!Number.isSafeInteger(reference.image.width)||reference.image.width<1||!Number.isSafeInteger(reference.image.height)||reference.image.height<1
    ||[rect.x,rect.y,rect.width,rect.height].some(number=>!Number.isFinite(number)||number<0||number>1)||!rect.width||!rect.height
    ||reference.image.mimeType!=='image/png'||file.type!=='image/png'||file.name!==reference.image.name||file.size!==value.imageBytes||file.size<1||file.size>maxBytes
-   ||!/^[a-f0-9]{64}$/.test(reference.image.sha256??'')||![0,90,180,270].includes(value.rotation)){setError('区域引用或截图信息未能核对，请重新选择。');return false;}
-  if(fileReferences.some(item=>isFileRegion(item)&&item.runId===value.runId&&item.activityId===value.activityId&&item.resultSha===value.resultSha&&item.file.path===value.file.path&&item.file.version===value.file.version&&item.file.sha256===value.file.sha256&&item.reference.image.sha256===reference.image.sha256&&JSON.stringify(item.reference.locator)===JSON.stringify(reference.locator)&&item.rotation===value.rotation))return true;
+   ||!/^[a-f0-9]{64}$/.test(reference.image.sha256??'')||![0,90,180,270].includes(value.rotation)){setError('区域引用或截图信息未能核对，请重新选择。');return Promise.resolve(false);}
+  if(fileReferences.some(item=>isFileRegion(item)&&item.runId===value.runId&&item.activityId===value.activityId&&item.resultSha===value.resultSha&&item.file.path===value.file.path&&item.file.version===value.file.version&&item.file.sha256===value.file.sha256&&item.reference.image.sha256===reference.image.sha256&&JSON.stringify(item.reference.locator)===JSON.stringify(reference.locator)&&item.rotation===value.rotation))return Promise.resolve(true);
   const candidate={...value,uploadEntryId:''};
-  if(goalPrompt(replyQuoteMessage(fileReferenceMessage(draft,[...fileReferences,candidate]),replyQuotes),ordinary&&!chatMode&&!run&&goalMode).length>100000){setError('引用与消息过长，请减少引用或缩短消息');return false;}
-  try{
-   const entry=uploads.add(file,maxBytes);setFileReferences([...fileReferences,{...value,uploadEntryId:entry.id}]);
-   void action(async()=>{await uploads.prepareBatch([entry.id]);await uploadEntry(entry.id);});return true;
-  }catch(error){setError(error instanceof Error?error.message:'截图暂时无法加入附件');return false;}
+  if(goalPrompt(replyQuoteMessage(fileReferenceMessage(draft,[...fileReferences,candidate]),replyQuotes),ordinary&&!chatMode&&!run&&goalMode).length>100000){setError('引用与消息过长，请减少引用或缩短消息');return Promise.resolve(false);}
+  return new Promise<boolean>(resolve=>{
+   void action(async()=>{
+    const entry=await uploads.addGenerated(file,maxBytes,value);
+    try{await uploads.persist();}
+    catch(error){uploads.discardGenerated(entry.id);throw error;}
+    uploads.assertRecoveryScope();
+    setFileReferences([...fileReferences,{...value,uploadEntryId:entry.id}]);resolve(true);
+    await uploads.prepareBatch([entry.id]);await uploadEntry(entry.id);
+   }).finally(()=>resolve(false));
+  });
  };
  const editFileReferences=(values:FileReference[])=>{
   if(quoteLocked)return;

@@ -7,10 +7,59 @@ const positive=value=>Number.isSafeInteger(value)&&value>0;
 const equal=(left,right)=>JSON.stringify(left)===JSON.stringify(right);
 const invalid=()=>Error('upload_recovery_invalid');
 
+const relative=value=>typeof value==='string'&&value.length>0&&value.length<=4096&&!/[\\:\u0000-\u001f\u007f]/.test(value)&&value.split('/').every(part=>part&&part!=='.'&&part!=='..');
+function validateGenerated(entry,conversation,scope){
+ const value=entry.generated;
+ if(!exact(value,['schema','scope','capture','blob','delivery'])||value.schema!==1||!['draft','sending'].includes(value.delivery)||value.delivery==='sending'&&!entry.artifact||!sha(value.scope)||scope!==undefined&&value.scope!==scope
+  ||typeof Blob!=='function'||!(value.blob instanceof Blob)||value.blob.type!=='image/png'||value.blob.size!==entry.file.size)throw invalid();
+ const capture=value.capture;
+ if(!exact(capture,['owner','conversationId','runId','activityId','resultSha','file','reference','imageBytes','rotation'])
+  ||capture.owner!==value.scope||capture.conversationId!==conversation||!identifier(capture.runId)||!identifier(capture.activityId)||!sha(capture.resultSha)
+  ||!positive(capture.imageBytes)||capture.imageBytes!==entry.file.size||![0,90,180,270].includes(capture.rotation))throw invalid();
+ const source=capture.file,ref=capture.reference;
+ if(!exact(source,['path','version','sha256','size'])||!relative(source.path)||!Number.isSafeInteger(source.version)||source.version<0||!sha(source.sha256)||!Number.isSafeInteger(source.size)||source.size<0
+  ||!exact(ref,['schemaVersion','kind','id','selectionMode','source','renderer','locator','image','createdAt'],['nearbyText'])
+  ||ref.schemaVersion!==1||ref.kind!=='content-reference'||ref.selectionMode!=='region'||!identifier(ref.id)||typeof ref.createdAt!=='string'||!Number.isFinite(Date.parse(ref.createdAt))
+  ||ref.nearbyText!==undefined&&(typeof ref.nearbyText!=='string'||ref.nearbyText.length>100000))throw invalid();
+ const file=ref.source,renderer=ref.renderer,locator=ref.locator,image=ref.image;
+ if(!exact(file,['relativePath','fileName','mimeType','revision'])||file.relativePath!==source.path||file.fileName!==source.path.split('/').at(-1)||file.mimeType!=='application/pdf'
+  ||!exact(file.revision,['id','size','sha256'])||file.revision.id!==String(source.version)||file.revision.size!==source.size||file.revision.sha256!==source.sha256
+  ||!exact(renderer,['id','backend','locatorQuality'])||renderer.id!=='pdf'||renderer.backend!=='builtin'||renderer.locatorQuality!=='visual'
+  ||!exact(locator,['surface','pageNumber','rect'])||locator.surface!=='page'||!positive(locator.pageNumber)
+  ||!exact(locator.rect,['x','y','width','height'])||Object.values(locator.rect).some(number=>typeof number!=='number'||!Number.isFinite(number)||number<0||number>1)
+  ||!locator.rect.width||!locator.rect.height||locator.rect.x+locator.rect.width>1+1e-9||locator.rect.y+locator.rect.height>1+1e-9
+  ||!exact(image,['name','mimeType','width','height','sha256'])||image.name!==entry.file.name||image.mimeType!=='image/png'||!positive(image.width)||!positive(image.height)||!sha(image.sha256)
+  ||entry.sha!==undefined&&entry.sha!==image.sha256||entry.file.type!=='image/png')throw invalid();
+ return value;
+}
+
+export function generatedUpload(file,capture,scope,conversation){
+ if(!capture?.reference?.image)throw invalid();
+ const {dataUrl,...image}=capture.reference.image;
+ const payload=JSON.stringify({...capture,reference:{...capture.reference,image}});
+ if(payload.length>131072)throw invalid();
+ const generated={schema:1,scope,capture:JSON.parse(payload),blob:file,delivery:'draft'};
+ validateGenerated({file:{name:file.name,size:file.size,type:file.type},generated},conversation,scope);return generated;
+}
+
+export async function generatedUploadFile(entry,scope,conversation){
+ const generated=validateGenerated(entry,conversation,scope),image=generated.capture.reference.image;
+ const bytes=await generated.blob.arrayBuffer();
+ const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),value=>value.toString(16).padStart(2,'0')).join('');
+ const header=new Uint8Array(bytes,0,Math.min(24,bytes.byteLength));
+ if(digest!==image.sha256||entry.sha!==undefined&&digest!==entry.sha||header.length<24
+  ||![137,80,78,71,13,10,26,10].every((value,index)=>header[index]===value)
+  ||String.fromCharCode(...header.subarray(12,16))!=='IHDR')throw Error('generated_capture_integrity_failed');
+ const dimensions=new DataView(bytes);
+ if(dimensions.getUint32(16)!==image.width||dimensions.getUint32(20)!==image.height)throw Error('generated_capture_integrity_failed');
+ return {file:new File([generated.blob],entry.file.name,{type:entry.file.type,lastModified:0}),sha:digest};
+}
+
 export function uploadRecoverySnapshot(entries){
  const groups=[...new Set(entries.map(entry=>entry.batch).filter(Boolean))];
  const all=[...new Set([...entries,...groups.flatMap(group=>group.entries)])];
- return JSON.parse(JSON.stringify({
+ const generated=new Map(all.filter(entry=>entry.generated!==undefined).map(entry=>[entry.id,entry.generated]));
+ const snapshot=JSON.parse(JSON.stringify({
   active_ids:entries.map(entry=>entry.id),
   entries:all.map(entry=>({id:entry.id,clientFileId:entry.clientFileId,
    file:entry.fileIdentity??{name:entry.file.name,size:entry.file.size,type:entry.file.type},relativePath:entry.relativePath,maxBytes:entry.maxBytes,
@@ -19,13 +68,15 @@ export function uploadRecoverySnapshot(entries){
   groups:groups.map(group=>({key:group.key,cancelKey:group.cancelKey,entryIds:group.entries.map(entry=>entry.id),
    stage:group.stage,batchId:group.batchId,requestBody:group.requestBody,expiresAt:group.expiresAt,cancelPending:group.cancelPending===true,cancelObserved:group.cancelObserved===true})),
  }));
+ for(const entry of snapshot.entries){if(generated.has(entry.id)){const original=generated.get(entry.id);entry.generated={...original,capture:structuredClone(original.capture),blob:original.blob};}}
+ return snapshot;
 }
 
-export function validateUploadRecovery(snapshot,conversation){
+export function validateUploadRecovery(snapshot,conversation,scope){
  if(!exact(snapshot,['active_ids','entries','groups'])||!Array.isArray(snapshot.active_ids)||!Array.isArray(snapshot.entries)||!Array.isArray(snapshot.groups))throw invalid();
  const entries=new Map(),groups=new Map();
  for(const entry of snapshot.entries){
-  if(!exact(entry,['id','clientFileId','file','relativePath','maxBytes','keys','status','stage','cancelPending','expired'],['sha','initBody','receipt','artifact','batchKey','cancelObserved'])
+  if(!exact(entry,['id','clientFileId','file','relativePath','maxBytes','keys','status','stage','cancelPending','expired'],['sha','initBody','receipt','artifact','batchKey','cancelObserved','generated'])
    ||!identifier(entry.id)||entries.has(entry.id)||!identifier(entry.clientFileId)||!positive(entry.maxBytes)
    ||!exact(entry.file,['name','size','type'])||typeof entry.file.name!=='string'||!entry.file.name||entry.file.name.length>255
    ||/[\\/\u0000-\u001f\u007f]/.test(entry.file.name)||!positive(entry.file.size)||entry.file.size>entry.maxBytes
@@ -37,6 +88,7 @@ export function validateUploadRecovery(snapshot,conversation){
    ||!['selected','uploading','cancelling','uncertain','rejected','ready','recovered','cancelled'].includes(entry.status)
    ||!['init','batch-init','content','complete','done','cancel','batch-cancel','cancelled'].includes(entry.stage)
    ||entry.cancelObserved!==undefined&&typeof entry.cancelObserved!=='boolean'||typeof entry.cancelPending!=='boolean'||typeof entry.expired!=='boolean'||entry.sha!==undefined&&!sha(entry.sha))throw invalid();
+  if(entry.generated!==undefined)validateGenerated(entry,conversation,scope);
   if(!['init','batch-init','cancelled'].includes(entry.stage)&&!sha(entry.sha))throw invalid();
   if(entry.initBody!==undefined&&(!sha(entry.sha)||!exact(entry.initBody,['file_name','media_type','size_bytes','sha256'])||!equal(entry.initBody,{file_name:entry.file.name,media_type:entry.file.type||'application/octet-stream',size_bytes:entry.file.size,sha256:entry.sha})))throw invalid();
   if(entry.receipt!==undefined&&(!exact(entry.receipt,['upload_id','max_bytes','expires_at'],['batch_id'])
@@ -80,10 +132,10 @@ export function validateUploadRecovery(snapshot,conversation){
  return snapshot;
 }
 
-export function restoreUploadRecovery(snapshot,conversation){
- validateUploadRecovery(snapshot,conversation);
+export function restoreUploadRecovery(snapshot,conversation,scope){
+ validateUploadRecovery(snapshot,conversation,scope);
  const entries=new Map(snapshot.entries.map(value=>{
-  const entry={...structuredClone(value),fileIdentity:structuredClone(value.file),needsFile:true,restored:true,error:''};
+  const entry={...structuredClone(value),fileIdentity:structuredClone(value.file),needsFile:true,restored:true,error:'',...(value.generated!==undefined?{generatedCommitted:true}:{})};
   if(entry.status==='ready'||entry.status==='recovered'){entry.stage='complete';entry.status='uncertain';}
   if(entry.status==='uploading'||entry.status==='cancelling')entry.status='uncertain';
   if(entry.cancelPending){entry.stage='cancel';entry.status='uncertain';}
@@ -124,14 +176,14 @@ export class UploadRecoveryStore {
  }
  record(value){
   if(!exact(value,['schema','scope','conversation','revision','snapshot'])||value.schema!==1||value.scope!==this.scope||value.conversation!==this.conversation||!positive(value.revision))throw invalid();
-  validateUploadRecovery(value.snapshot,this.conversation);return value;
+  validateUploadRecovery(value.snapshot,this.conversation,this.scope);return value;
  }
  async load(){
   const record=await this.transaction('readonly',(records,done,fail)=>{const read=records.get(this.key);read.onsuccess=()=>{try{done(read.result===undefined?null:this.record(read.result));}catch(error){fail(error);}};});
   this.revision=record?.revision??0;return record?.snapshot??null;
  }
  async save(snapshot){
-  validateUploadRecovery(snapshot,this.conversation);const expected=this.revision;
+  validateUploadRecovery(snapshot,this.conversation,this.scope);const expected=this.revision;
   const revision=await this.transaction('readwrite',(records,done,fail)=>{const read=records.get(this.key);read.onsuccess=()=>{try{
    const prior=read.result===undefined?0:this.record(read.result).revision;
    if(prior!==expected||prior>=Number.MAX_SAFE_INTEGER)throw Error('upload_recovery_conflict');

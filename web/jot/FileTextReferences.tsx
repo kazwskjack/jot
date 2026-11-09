@@ -11,7 +11,7 @@ export type FileRegionDraft=Omit<FileTextReference,'reference'>&{reference:Image
 export type FileRegionReference=FileRegionDraft&{uploadEntryId:string};
 export type FileReference=FileTextReference|FileRegionReference;
 export const isFileRegion=(value:FileReference):value is FileRegionReference=>value.reference.selectionMode==='region';
-export const FileTextReferenceContext=createContext<{owner:string;conversationId:string;disabled:boolean;regionDisabled:boolean;onAdd:(reference:FileTextReference)=>boolean;onAddRegion:(reference:FileRegionDraft,file:File)=>boolean}|null>(null);
+export const FileTextReferenceContext=createContext<{owner:string;conversationId:string;disabled:boolean;regionDisabled:boolean;onAdd:(reference:FileTextReference)=>boolean;onAddRegion:(reference:FileRegionDraft,file:File)=>Promise<boolean>}|null>(null);
 export function resolveRegionArtifact(value:FileRegionReference,resolve:(entryId:string)=>Artifact|undefined){
  const artifact=resolve(value.uploadEntryId);
  return artifact&&artifact.conversation_id===value.conversationId&&artifact.origin==='upload'&&artifact.status==='ready'&&artifact.version===1
@@ -51,6 +51,6 @@ export function FileTextReferences({references,disabled,onChange,imageFile,resol
    <ReferenceDetails value={value} {...(isFileRegion(value)&&imageFile(value.uploadEntryId)?{file:imageFile(value.uploadEntryId)!}:{})} ready={!isFileRegion(value)||!!resolveRegionArtifact(value,resolveImage)}/>
    <button type="button" disabled={disabled} onClick={()=>onChange(references.filter(item=>item.reference.id!==value.reference.id))}>移除此原文件引用</button>
   </div>)}
-  <small>引用保留在当前页面，发送确认后清空。刷新页面会丢失待发送内容。</small>
+  <small>文字引用保留在当前页面。区域截图及其引用保存后可通过上传恢复流程读取，发送确认后清空。</small>
  </section>;
 }

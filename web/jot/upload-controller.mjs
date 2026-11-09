@@ -1,11 +1,11 @@
-import {uploadRecoverySnapshot,restoreUploadRecovery} from './upload-recovery.mjs';
+import {uploadRecoverySnapshot,restoreUploadRecovery,generatedUpload,generatedUploadFile} from './upload-recovery.mjs';
 // Upload recovery preserves original request identities. Each stage retains its own body and idempotency key.
 // An uncertain stage cannot be replaced with a new upload or attached as ready.
 export const maxBatchFiles=500;const maxBatchBytes=2*1024*1024*1024;
 export class UploadController {
  constructor(conversationId,api,onChange=()=>{},options={}){
   this.conversationId=conversationId;this.onChange=onChange;this.entries=[];
-  this.recoveryReady=!options.recoveryRequired;this.currentScope=options.currentScope;this.recoveryError='';this.persistence=Promise.resolve();this.disposed=false;this.recoveryEpoch=0;this.statusSupported=false;
+  this.recoveryReady=!options.recoveryRequired;this.currentScope=options.currentScope;this.recoveryError='';this.persistence=Promise.resolve();this.disposed=false;this.recoveryEpoch=0;this.statusSupported=false;this.recovering=false;
   this.api={...api,request:async(...args)=>{
    this.assertRecoveryScope();if(!this.store)return api.request(...args);
    const epoch=this.recoveryEpoch;if(args[1]!=='GET')await this.persist();
@@ -14,23 +14,34 @@ export class UploadController {
    this.assertRecoveryScope();if(epoch!==this.recoveryEpoch)throw Error('upload_recovery_scope_changed');return value;
   }};
  }
- get blocked(){return this.disposed||!this.recoveryReady||!!this.recoveryError||!!this.store&&this.currentScope?.()!==this.store.scope;}
+ get blocked(){return this.recovering||this.disposed||!this.recoveryReady||!!this.recoveryError||!!this.store&&this.currentScope?.()!==this.store.scope;}
  assertRecoveryScope(){if(this.blocked)throw new Error(this.recoveryError||'upload_recovery_unavailable');}
- get recoveryBusy(){return this.entries.some(entry=>entry.running||entry.reconciling||entry.cancelRequested||entry.batch?.running||entry.batch?.cancelRunning);}
+ get recoveryBusy(){return this.recovering||this.entries.some(entry=>entry.running||entry.reconciling||entry.cancelRequested||entry.batch?.running||entry.batch?.cancelRunning);}
  async configureRecovery(store){
   if(this.recoveryBusy)throw Error('upload_recovery_busy');
-  const epoch=this.recoveryEpoch;await this.persistence;
-  if(store.conversation!==this.conversationId||this.currentScope?.()!==store.scope)throw Error('upload_recovery_scope_changed');
-  const snapshot=await store.load();
-  if(this.currentScope?.()!==store.scope||this.disposed||epoch!==this.recoveryEpoch)throw Error('upload_recovery_scope_changed');
-  this.entries=snapshot?restoreUploadRecovery(snapshot,this.conversationId):[];
-  this.store?.close();this.store=store;this.recoveryReady=true;this.recoveryError='';this.onChange();
+  this.recovering=true;
+  const epoch=this.recoveryEpoch;
+  const current=()=>{if(this.currentScope?.()!==store.scope||this.disposed||epoch!==this.recoveryEpoch)throw Error('upload_recovery_scope_changed');};
+  try{
+   this.onChange();await this.persistence;current();
+   if(store.conversation!==this.conversationId)throw Error('upload_recovery_scope_changed');
+   const snapshot=await store.load();current();
+   const entries=snapshot?restoreUploadRecovery(snapshot,this.conversationId,store.scope):[];
+   for(const entry of entries){
+    if(!entry.generated)continue;
+    current();
+    try{const verified=await generatedUploadFile(entry,store.scope,this.conversationId);current();entry.file=verified.file;entry.sha=verified.sha;entry.needsFile=false;}
+    catch(error){current();entry.error=error instanceof Error?error.message:'generated_capture_integrity_failed';}
+   }
+   current();this.entries=entries;
+   this.store?.close();this.store=store;this.recoveryReady=true;this.recoveryError='';
+  }finally{this.recovering=false;this.onChange();}
  }
  dispose(){this.disposed=true;this.recoveryEpoch+=1;for(const entry of this.entries){entry.contentAbort?.abort();entry.reconcileAbort?.abort();}this.store?.close();}
  persist(){
   if(!this.store)return Promise.resolve();
   this.assertRecoveryScope();const store=this.store,epoch=this.recoveryEpoch,snapshot=uploadRecoverySnapshot(this.entries);
-  const operation=this.persistence.then(()=>{if(this.disposed||epoch!==this.recoveryEpoch||this.currentScope?.()!==store.scope)throw Error('upload_recovery_scope_changed');return store.save(snapshot);});
+  const operation=this.persistence.then(()=>{if(this.disposed||epoch!==this.recoveryEpoch||this.currentScope?.()!==store.scope)throw Error('upload_recovery_scope_changed');return Promise.resolve(store.save(snapshot)).then(()=>{for(const saved of snapshot.entries){if(saved.generated){const entry=this.entries.find(value=>value.id===saved.id);if(entry?.generated)entry.generatedCommitted=true;}}});});
   this.persistence=operation.catch(()=>{});
   return operation.catch(error=>{this.recoveryError=error instanceof Error?error.message:'upload_recovery_unavailable';this.onChange();throw error;});
  }
@@ -38,15 +49,22 @@ export class UploadController {
   this.assertRecoveryScope();const entry=this.entries.find(value=>value.id===id);
   if(!entry||!entry.needsFile||entry.running||entry.reconciling||!(file instanceof File)||file.name!==entry.file.name||file.size!==entry.file.size
    ||file.webkitRelativePath&&file.webkitRelativePath!==entry.relativePath)throw Error('upload_recovery_file_mismatch');
-  const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await file.arrayBuffer())),byte=>byte.toString(16).padStart(2,'0')).join('');
-  this.assertRecoveryScope();
-  if(entry.sha&&entry.sha!==digest)throw Error('upload_recovery_file_mismatch');
-  entry.sha=digest;entry.file=file;entry.needsFile=false;await this.persist();this.onChange();
+  const epoch=this.recoveryEpoch;
+  const verification=entry.generated?generatedUploadFile({...entry,generated:{...entry.generated,blob:file}},this.store.scope,this.conversationId)
+   :Promise.resolve(file.arrayBuffer()).then(bytes=>crypto.subtle.digest('SHA-256',bytes)).then(bytes=>({file,sha:Array.from(new Uint8Array(bytes),byte=>byte.toString(16).padStart(2,'0')).join('')}));
+  entry.running=verification;
+  try{
+   const verified=await verification;this.assertRecoveryScope();
+   if(epoch!==this.recoveryEpoch)throw Error('upload_recovery_scope_changed');
+   if(entry.sha&&entry.sha!==verified.sha)throw Error('upload_recovery_file_mismatch');
+   entry.sha=verified.sha;entry.file=verified.file;if(entry.generated)entry.generated.blob=verified.file;
+   entry.needsFile=false;await this.persist();
+  }finally{if(entry.running===verification)entry.running=null;this.onChange();}
  }
  async acceptRecovered(id){
   this.assertRecoveryScope();const entry=this.entries.find(value=>value.id===id);
   if(!entry||entry.status!=='recovered'||!entry.artifact)throw Error('upload_receipt_invalid');
-  entry.status='ready';await this.persist();this.onChange();
+  entry.status='ready';if(entry.generated)entry.generated.delivery='draft';await this.persist();this.onChange();
  }
 
  add(file,maxBytes,relativePath=file?.webkitRelativePath||file?.name){
@@ -55,6 +73,23 @@ export class UploadController {
   if(!(file instanceof File)||!file.name||file.size<1||file.size>maxBytes)throw new Error('upload_size_invalid');
   const entry={id:crypto.randomUUID(),clientFileId:crypto.randomUUID(),file,fileIdentity:{name:file.name,size:file.size,type:file.type},relativePath,maxBytes,status:'selected',stage:'init',keys:{init:crypto.randomUUID(),content:crypto.randomUUID(),complete:crypto.randomUUID(),cancel:crypto.randomUUID()},error:''};
   this.entries.push(entry);this.onChange();return entry;
+ }
+ async addGenerated(file,maxBytes,capture){
+  this.assertRecoveryScope();if(!this.store)throw Error('generated_capture_recovery_required');
+  const epoch=this.recoveryEpoch,descriptor=generatedUpload(file,capture,this.store.scope,this.conversationId);
+  const entry=this.add(file,maxBytes);entry.generated=descriptor;entry.generatedCommitted=false;
+  const verification=generatedUploadFile(entry,this.store.scope,this.conversationId);entry.running=verification;
+  try{
+   const verified=await verification;this.assertRecoveryScope();
+   if(epoch!==this.recoveryEpoch)throw Error('upload_recovery_scope_changed');
+   entry.file=verified.file;entry.sha=verified.sha;entry.generated.blob=verified.file;return entry;
+  }catch(error){entry.running=null;this.discardGenerated(entry.id);throw error;}
+  finally{if(entry.running===verification)entry.running=null;}
+ }
+ discardGenerated(id){
+  const entry=this.entries.find(value=>value.id===id);
+  if(!entry?.generated||entry.generatedCommitted||entry.restored||entry.running||entry.stage!=='init'||entry.status!=='selected'||entry.receipt||entry.batch||entry.initBody)throw Error('generated_capture_already_committed');
+  this.entries=this.entries.filter(value=>value.id!==id);this.onChange();
  }
  async prepareBatch(ids){
   this.assertRecoveryScope();
@@ -94,6 +129,16 @@ export class UploadController {
  remove(id){this.assertRecoveryScope();const entry=this.entries.find(value=>value.id===id);if(entry?.batchId&&!['ready','recovered','cancelled'].includes(entry.status)&&!entry.expired)throw new Error('upload_batch_cancel_required');if(entry&&['uploading','cancelling','uncertain'].includes(entry.status)&&!entry.expired)throw new Error('upload_unconfirmed');this.entries=this.entries.filter(value=>value.id!==id);this.onChange();if(this.store)return this.persist();}
  get unresolved(){return this.entries.some(entry=>['uploading','cancelling','uncertain'].includes(entry.status)||entry.needsFile&&!['cancelled','ready','recovered'].includes(entry.status));}
  references(){if(this.entries.length)this.assertRecoveryScope();if(this.entries.some(entry=>entry.status!=='ready'))throw new Error('upload_not_ready');return this.entries.map(entry=>entry.artifact.artifact_id);}
+ async markGeneratedSending(ids){
+  if(!ids.length)return;
+  this.assertRecoveryScope();let changed=false;
+  for(const id of ids){
+   const entry=this.entries.find(value=>value.id===id);
+   if(!entry||entry.status!=='ready')throw Error('upload_not_ready');
+   if(entry.generated&&entry.generated.delivery!=='sending'){entry.generated.delivery='sending';changed=true;}
+  }
+  if(changed)await this.persist();
+ }
  clearSent(expected=this.references()){if(!expected.length)return;this.assertRecoveryScope();const sent=new Set(expected);this.entries=this.entries.filter(entry=>entry.status!=='ready'||!sent.has(entry.artifact.artifact_id));this.onChange();if(this.store)return this.persist();}
  async upload(id){
   this.assertRecoveryScope();

@@ -16,6 +16,8 @@ export default function UploadAttachments({uploads,busy,locked,onAction,onUpload
    const missingBatchFiles=entry.stage==='batch-init'&&!group?.requestBody&&group?.entries.some((value:any)=>value.needsFile);
    return <div key={entry.id} className="jot-upload-entry">
     <span>{name} · {entry.status==='uncertain'&&cancelling?'取消结果未确认':statuses[entry.status]}</span>
+    {entry.generated?.delivery==='sending'&&entry.restored&&<p role="status">此截图曾进入消息发送流程，请核对会话记录后确认使用原附件。</p>}
+    {entry.generated&&entry.error&&<p role="alert">截图恢复尚未完成 · {entry.error}</p>}
     {entry.observedStatus&&<p role="status">上次读取的服务端状态 · {observed[entry.observedStatus]}</p>}
     {entry.cancelObserved&&<p role="status">已读取到取消状态，原取消请求的回执尚未确认。</p>}
     {entry.cancelObserved&&<button type="button" disabled={busy||locked||entry.reconciling} onClick={()=>void onCancel(entry.id)}>确认原取消回执</button>}
@@ -32,6 +34,6 @@ export default function UploadAttachments({uploads,busy,locked,onAction,onUpload
     {(['ready','recovered','cancelled'].includes(entry.status)||entry.expired||!entry.batchId&&['selected','rejected'].includes(entry.status))&&<button type="button" disabled={busy||locked} onClick={()=>onAction(async()=>{await uploads.remove(entry.id);})}>移除 {name}</button>}
    </div>;
   })}
-  <p role="status">原上传请求和阶段回执保存在当前账户与会话下。刷新后需重新选择原文件；已完成的回执须核对后加入待发送附件。</p>
+  <p role="status">原上传请求和阶段回执保存在当前账户与会话下。普通文件刷新后需重新选择原文件，已保存的区域截图会核对本地图片后恢复；已完成的回执须核对后加入待发送附件。</p>
  </>;
 }

@@ -48,7 +48,7 @@ export default function PdfFileRegionReference({root,source,page,rotation}:{root
  };
  const capture=async()=>{
   if(!target||!rect||capturing.current)return;
-  if(captureInFlight){setError('上一张截图仍在编码，请稍后重试。');return;}
+  if(captureInFlight){setError('上一张截图仍在处理，请稍后重试。');return;}
   captureInFlight=true;
   const job=++sequence.current,expected=identity;capturing.current=true;setBusy(true);setError('');
   let allocated:HTMLCanvasElement|undefined;
@@ -80,8 +80,9 @@ export default function PdfFileRegionReference({root,source,page,rotation}:{root
     locator:{surface:'page',pageNumber:target.page,rect:{x:x/canvasWidth,y:y/canvasHeight,width:crop.width/canvasWidth,height:crop.height/canvasHeight}},
     image:{name,mimeType:'image/png',width:crop.width,height:crop.height,sha256:sha},
    });
-   const accepted=latest.current!.onAddRegion({owner,conversationId:source.conversationId,runId:source.runId,activityId:source.activityId,resultSha:source.resultSha,file:{path:original.path,version:original.version,sha256:original.sha256,size:original.size},reference,imageBytes:file.size,rotation},file);
-   if(accepted)cancel();else setError('截图引用未被接收，请查看当前对话的提示。');
+   crop.width=0;crop.height=0;
+   const accepted=await latest.current!.onAddRegion({owner,conversationId:source.conversationId,runId:source.runId,activityId:source.activityId,resultSha:source.resultSha,file:{path:original.path,version:original.version,sha256:original.sha256,size:original.size},reference,imageBytes:file.size,rotation},file);
+   if(sourceIdentity.current===expected){if(accepted)cancel();else if(sequence.current===job)setError('截图引用未被接收，请查看当前对话的提示。');}
   }catch(error){if(sequence.current===job&&(error as DOMException)?.name!=='AbortError')setError(error instanceof Error?error.message:'区域截图失败');}
   finally{captureInFlight=false;if(allocated){allocated.width=0;allocated.height=0;}if(sequence.current===job){capturing.current=false;setBusy(false);}}
  };
