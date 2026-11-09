@@ -141,6 +141,7 @@ export class UploadController {
    const group=entry.batch;
    if(group?.cancelPending&&group.entries.every(member=>['ready','recovered','cancelled'].includes(member.status)||member.expired)){
     group.cancelPending=false;group.stage='content';
+    if(group.entries.some(member=>member.expired))group.cancelObserved=false;
    }
    await this.persist();return value;
   }finally{if(entry.reconcileAbort===abort)entry.reconcileAbort=null;entry.reconciling=false;this.onChange();}
