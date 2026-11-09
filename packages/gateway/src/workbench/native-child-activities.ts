@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import {constants as bufferConstants} from 'node:buffer';
 import type {DatabaseSync} from 'node:sqlite';
 import type {EventStore} from '../events/event-store.ts';
 import {withImmediateTransaction,withReadTransaction} from '../db/database.ts';
@@ -25,6 +26,13 @@ export class NativeChildActivities {
     BEGIN SELECT RAISE(ABORT,'native_activity_receipt_immutable'); END;
    CREATE TRIGGER IF NOT EXISTS wb_native_activity_receipt_no_delete BEFORE DELETE ON wb_native_activity_receipts
     BEGIN SELECT RAISE(ABORT,'native_activity_receipt_immutable'); END;`);
+  db.exec(`CREATE TABLE IF NOT EXISTS wb_native_activity_chunks(
+   run_id TEXT NOT NULL REFERENCES ga_runs(id) ON DELETE CASCADE,source_seq INTEGER NOT NULL,
+   transport_sha256 TEXT NOT NULL,chunk_index INTEGER NOT NULL,chunk_count INTEGER NOT NULL,
+   source_sha256 TEXT NOT NULL,chunk_sha256 TEXT NOT NULL,chunk_json TEXT NOT NULL,created_at TEXT NOT NULL,
+   PRIMARY KEY(run_id,source_seq,transport_sha256,chunk_index));
+   CREATE TRIGGER IF NOT EXISTS wb_native_activity_chunk_no_update BEFORE UPDATE ON wb_native_activity_chunks
+    BEGIN SELECT RAISE(ABORT,'native_activity_chunk_immutable'); END;`);
  }
  /** Component-scoped metadata for original closed executions awaiting public replay. */
  pending(input:Input){
@@ -58,6 +66,76 @@ export class NativeChildActivities {
  }
  liveSource(owner:string,runId:string,sessionRef:string,input:Input){
   return withReadTransaction(this.db,()=>this.liveSourceInside(owner,runId,sessionRef,input));
+ }
+ /** Stage bounded public-call frames, then publish through the original receipt transaction. */
+ appendChunk(owner:string,runId:string,sessionRef:string,input:Input){
+  const seq=input.event_seq,index=input.chunk_index,count=input.chunk_count,data=input.chunk_data;
+  const sourceSha=input.source_event_sha256,transportSha=input.event_sha256,chunkSha=input.chunk_sha256;
+  if(!Number.isSafeInteger(seq)||Number(seq)<0||!Number.isSafeInteger(index)||Number(index)<0
+   ||!Number.isSafeInteger(count)||Number(count)<1||Number(count)>Math.ceil(bufferConstants.MAX_STRING_LENGTH/65_536)
+   ||Number(index)>=Number(count)||typeof data!=='string'||data.length<1||data.length>65_536
+   ||Number(index)<Number(count)-1&&data.length!==65_536
+   ||typeof sourceSha!=='string'||!SHA.test(sourceSha)||typeof transportSha!=='string'||!SHA.test(transportSha)
+   ||typeof chunkSha!=='string'||!SHA.test(chunkSha)||digest(data)!==chunkSha)throw Error('native_activity_chunk_invalid');
+  return withImmediateTransaction(this.db,()=>{
+   const live=input.action==='live-append-chunk';
+   const source=live?this.liveSourceInside(owner,runId,sessionRef,input):this.sourceInside(owner,runId,sessionRef);
+   if(Number(seq)<source.source_start)throw Error('native_activity_source_changed');
+   if(live){
+    if(!('snapshot_sha256' in source)||input.source_snapshot_sha256!==source.snapshot_sha256)throw Error('native_activity_source_changed');
+   }else if(!('log_sha256' in source)||input.source_log_sha256!==source.log_sha256||Number(seq)>=source.source_end){
+    throw Error('native_activity_source_changed');
+   }
+   const prior=this.db.prepare('SELECT source_sha256,projection_json FROM wb_native_activity_receipts WHERE run_id=? AND source_seq=?')
+    .get(runId,Number(seq)) as {source_sha256:string;projection_json:string|null}|undefined;
+   if(prior){
+    if(prior.source_sha256!==sourceSha)throw Error('native_activity_receipt_conflict');
+    this.db.prepare('DELETE FROM wb_native_activity_chunks WHERE run_id=? AND source_seq=?').run(runId,Number(seq));
+    return this.receipt(runId,sessionRef,Number(seq),sourceSha,prior.projection_json);
+   }
+   if(source.complete||source.last_event_seq!==null&&Number(seq)<=source.last_event_seq)throw Error('native_activity_event_order');
+   const identity=this.db.prepare('SELECT source_sha256 FROM wb_native_activity_chunks WHERE run_id=? AND source_seq=? LIMIT 1')
+    .get(runId,Number(seq)) as {source_sha256:string}|undefined;
+   if(identity&&identity.source_sha256!==sourceSha)throw Error('native_activity_receipt_conflict');
+   const first=this.db.prepare(`SELECT chunk_count FROM wb_native_activity_chunks
+    WHERE run_id=? AND source_seq=? AND transport_sha256=? AND chunk_index=0`)
+    .get(runId,Number(seq),transportSha) as {chunk_count:number}|undefined;
+   if(first&&first.chunk_count!==count)throw Error('native_activity_chunk_conflict');
+   const existing=this.db.prepare(`SELECT chunk_sha256,chunk_json FROM wb_native_activity_chunks
+    WHERE run_id=? AND source_seq=? AND transport_sha256=? AND chunk_index=?`)
+    .get(runId,Number(seq),transportSha,Number(index)) as {chunk_sha256:string;chunk_json:string}|undefined;
+   if(existing){
+    if(existing.chunk_sha256!==chunkSha||existing.chunk_json!==JSON.stringify(data))throw Error('native_activity_chunk_conflict');
+   }else{
+    const last=this.db.prepare(`SELECT MAX(chunk_index) chunk_index FROM wb_native_activity_chunks
+     WHERE run_id=? AND source_seq=? AND transport_sha256=?`).get(runId,Number(seq),transportSha) as {chunk_index:number|null};
+    if(Number(index)!==(last.chunk_index??-1)+1)throw Error('native_activity_chunk_order');
+    this.db.prepare('INSERT INTO wb_native_activity_chunks VALUES(?,?,?,?,?,?,?,?,?)')
+     .run(runId,Number(seq),transportSha,Number(index),Number(count),sourceSha,chunkSha,JSON.stringify(data),new Date().toISOString());
+   }
+   if(Number(index)<Number(count)-1){
+    return {accepted:false,staged:true,execution_authorized:false,run_id:runId,session_ref:sessionRef,
+     event_seq:Number(seq),event_sha256:sourceSha,chunk_index:Number(index),chunk_sha256:chunkSha};
+   }
+   let encoded='',position=0;
+   for(const row of this.db.prepare(`SELECT chunk_index,chunk_json FROM wb_native_activity_chunks
+    WHERE run_id=? AND source_seq=? AND transport_sha256=? ORDER BY chunk_index`)
+    .iterate(runId,Number(seq),transportSha) as Iterable<{chunk_index:number;chunk_json:string}>){
+    if(row.chunk_index!==position++)throw Error('native_activity_chunk_order');
+    // JSON quoting preserves a surrogate pair split across two SQLite text values.
+    const chunk=JSON.parse(row.chunk_json) as string;
+    if(encoded.length+chunk.length>bufferConstants.MAX_STRING_LENGTH)throw Error('native_activity_chunk_invalid');
+    encoded+=chunk;
+   }
+   if(position!==count)throw Error('native_activity_chunk_order');
+   const observation=JSON.parse(encoded) as Input;
+   const event=observation?.event as Input|undefined;
+   if(!observation||typeof observation!=='object'||Array.isArray(observation)
+    ||Object.keys(observation).sort().join(',')!=='event,public_call'||event?.seq!==seq)throw Error('native_activity_chunk_invalid');
+   const receipt=this.append(owner,runId,sessionRef,{...input,action:live?'live-append':'append',
+    event_format:'public-call-v1',event,public_call:observation.public_call});
+   return receipt;
+  });
  }
  append(owner:string,runId:string,sessionRef:string,input:Input){
   const event=input.event as Input|undefined;
@@ -110,6 +188,7 @@ export class NativeChildActivities {
       if(!latest||latest.payload_json!==JSON.stringify(final))this.events.append(source.conversation_id,runId,'activity.upsert',final);
      }
     }
+    this.db.prepare('DELETE FROM wb_native_activity_chunks WHERE run_id=? AND source_seq=?').run(runId,Number(event.seq));
     return this.receipt(runId,sessionRef,Number(event.seq),prior.source_sha256,prior.projection_json);
    }
    if(source.complete||source.last_event_seq!==null&&Number(event.seq)<=source.last_event_seq)throw Error('native_activity_event_order');
@@ -134,6 +213,7 @@ export class NativeChildActivities {
    this.db.prepare('INSERT INTO wb_native_activity_receipts VALUES(?,?,?,?,?,?,?)')
     .run(runId,Number(event.seq),sourceSha,String(event.type),callId,encoded,new Date().toISOString());
    this.events.append(source.conversation_id,runId,'activity.upsert',payload);
+   this.db.prepare('DELETE FROM wb_native_activity_chunks WHERE run_id=? AND source_seq=?').run(runId,Number(event.seq));
    return this.receipt(runId,sessionRef,Number(event.seq),sourceSha,encoded);
   });
  }
@@ -143,6 +223,7 @@ export class NativeChildActivities {
    if(input.source_log_sha256!==source.log_sha256||input.expected_last_event_seq!==source.last_event_seq)throw Error('native_activity_source_changed');
    if(!source.complete)this.db.prepare('INSERT INTO wb_native_activity_receipts VALUES(?,?,?,?,?,?,?)')
     .run(runId,source.source_end,source.log_sha256,'replay/complete',null,null,new Date().toISOString());
+   this.db.prepare('DELETE FROM wb_native_activity_chunks WHERE run_id=?').run(runId);
    return {...source,complete:true};
   });
  }

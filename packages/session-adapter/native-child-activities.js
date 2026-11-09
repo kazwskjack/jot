@@ -8,9 +8,28 @@ async function sendNativeChildActivity({binding,event,bridge,metadata,signal}){
  const observation=event.type==='tool/result'?nativeToolResultObservation(event):call??{event};
  const format=event.type==='tool/result'?'public-result-v1':call?'public-call-v1':undefined;
  const evidence=format?{event_format:format,source_event_sha256:sha}:{};
- const transportSha=format?createHash('sha256').update(json(observation)).digest('hex'):sha;
- const receipt=await bridge.request('native-child-activities',binding,{...metadata,
-  ...observation,...evidence,event_sha256:transportSha},signal);
+ const encoded=format?json(observation):undefined;
+ const transportSha=format?createHash('sha256').update(encoded).digest('hex'):sha;
+ let receipt;
+ if(call&&encoded.length>65_536){
+  const count=Math.ceil(encoded.length/65_536);
+  for(let index=0;index<count;index++){
+   signal?.throwIfAborted();
+   const chunk=encoded.slice(index*65_536,(index+1)*65_536);
+   const chunkSha=createHash('sha256').update(json(chunk)).digest('hex');
+   receipt=await bridge.request('native-child-activities',binding,{...metadata,
+    action:metadata.action==='live-append'?'live-append-chunk':'append-chunk',
+    event_seq:event.seq,source_event_sha256:sha,event_sha256:transportSha,
+    chunk_index:index,chunk_count:count,chunk_data:chunk,chunk_sha256:chunkSha},signal);
+   if(receipt?.accepted===true)break;
+   if(!receipt||receipt.accepted!==false||receipt.staged!==true||receipt.execution_authorized!==false
+    ||receipt.run_id!==binding.runId||receipt.session_ref!==binding.sessionRef||receipt.event_seq!==event.seq
+    ||receipt.event_sha256!==sha||receipt.chunk_index!==index||receipt.chunk_sha256!==chunkSha)throw Error('native_activity_chunk_receipt_invalid');
+  }
+ }else{
+  receipt=await bridge.request('native-child-activities',binding,{...metadata,
+   ...observation,...evidence,event_sha256:transportSha},signal);
+ }
  if(!receipt||receipt.accepted!==true||receipt.execution_authorized!==false||receipt.run_id!==binding.runId||receipt.session_ref!==binding.sessionRef
   ||receipt.event_seq!==event.seq||receipt.event_sha256!==sha||typeof receipt.activity_id!=='string')throw Error('native_activity_receipt_invalid');
  return receipt;

@@ -284,6 +284,11 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
     if(input.action==='live-source'){
       fields(input,['run_id','session_ref','action']);return nativeActivities.liveSource(owner,runId,sessionRef,input);
     }
+    if(input.action==='append-chunk'||input.action==='live-append-chunk'){
+      fields(input,['run_id','session_ref','action','source_log_sha256','source_snapshot_sha256',
+        'event_seq','source_event_sha256','event_sha256','chunk_index','chunk_count','chunk_data','chunk_sha256']);
+      return nativeActivities.appendChunk(owner,runId,sessionRef,input);
+    }
     if(input.action==='append'||input.action==='live-append'){
       fields(input,['run_id','session_ref','action','source_log_sha256','event_sha256','event','event_format','source_event_sha256','public_result','public_call','source_snapshot_sha256']);
       return nativeActivities.append(owner,runId,sessionRef,input);
