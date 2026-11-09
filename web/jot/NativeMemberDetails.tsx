@@ -4,6 +4,8 @@ import {ApiError,abortableDelay,follow,request} from './client';
 import {parseNativeMemberExecution} from './native-member-execution';
 import ActivityHistory from './ActivityHistory';
 import ActivityTimeline from './ActivityTimeline';
+import ConversationHistorySearch from './ConversationHistorySearch';
+import type {ActivityReveal} from './activity-presentation';
 import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 import type {Activity,NativeMemberExecution,Run} from './types';
 
@@ -11,6 +13,9 @@ type View={source:NativeMemberExecution};
 function MemberTimeline({view}:{view:View}){
  const [history,setHistory]=useState<Activity[]|null>(null);
  const retainHistory=useCallback((values:Activity[])=>setHistory(values),[]);
+ const region=useRef<HTMLElement>(null),[historyRequest,setHistoryRequest]=useState(1),[activityReveal,setActivityReveal]=useState<ActivityReveal>();
+ const loadHistory=useCallback(()=>setHistoryRequest(value=>value+1),[]);
+ const revealActivity=useCallback((value:ActivityReveal)=>setActivityReveal(prior=>prior?.key===value.key&&prior.activityId===value.activityId?prior:value),[]);
  const [live,setLive]=useState<Record<string,Activity>>({}),[following,setFollowing]=useState(true),[streamIssue,setStreamIssue]=useState('');
  const [observedRun,setObservedRun]=useState<{status:Run['status'];version:number}>({status:view.source.child_status,version:view.source.child_version});
  const cursor=useRef(view.source.child_as_of_seq);
@@ -66,15 +71,19 @@ function MemberTimeline({view}:{view:View}){
   for(const activity of Object.values(live))merged.set(activity.activity_id,activity);
   return [...merged.values()].filter(activity=>activity.run_id===view.source.child_run_id);
  },[history,live,view.source.child_run_id]);
- return <section aria-label="所选原成员公开步骤">
+ const runs=useMemo(()=>({[view.source.child_run_id]:{status:observedRun.status}}),[view.source.child_run_id,observedRun.status]);
+ return <section ref={region} data-chat-search-scope aria-label="所选原成员公开步骤">
   <p>子运行 <code>{view.source.child_run_id}</code> · {observedRun.status} · 版本 {observedRun.version}</p>
   <p>原父运行 <code>{view.source.root_run_id}</code> · 角色 <code>{view.source.role_ref}</code></p>
   <small>历史读取边界 {view.source.child_as_of_seq}，更新固定到所选子运行。</small>
   <button type="button" aria-pressed={following} onClick={()=>setFollowing(value=>!value)}>{following?'暂停实时更新':'继续实时更新'}</button>
   {streamIssue&&<p role="status">{streamIssue}</p>}
+  <ConversationDisplayBoundary label="成员步骤搜索"><ConversationHistorySearch scope="activities" root={region} activities={activities}
+   runs={runs} onRevealActivity={revealActivity} onLoadActivityHistory={loadHistory} activityHistorySeq={view.source.child_as_of_seq}
+   renderedRevision={activities} ready/></ConversationDisplayBoundary>
   <ConversationDisplayBoundary label="成员步骤历史"><ActivityHistory conversationId={view.source.child_conversation_id}
-   runId={view.source.child_run_id} snapshotSeq={view.source.child_as_of_seq} requestVersion={1} onLoaded={retainHistory}/></ConversationDisplayBoundary>
-  <ConversationDisplayBoundary label="成员时间线"><ActivityTimeline activities={activities} runs={{[view.source.child_run_id]:{status:observedRun.status}}}/></ConversationDisplayBoundary>
+   runId={view.source.child_run_id} snapshotSeq={view.source.child_as_of_seq} requestVersion={historyRequest} onLoaded={retainHistory}/></ConversationDisplayBoundary>
+  <ConversationDisplayBoundary label="成员时间线"><ActivityTimeline activities={activities} runs={runs} {...(activityReveal?{reveal:activityReveal}:{})}/></ConversationDisplayBoundary>
   {history!==null&&!activities.length&&<p role="status">此子运行暂未记录公开工具步骤。</p>}
  </section>;
 }

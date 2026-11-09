@@ -2,28 +2,32 @@
 // ChatHistorySearchBar.tsx/useChatHistorySearch.ts. Adapted portions are AGPL-3.0.
 import React,{useEffect,useId,useMemo,useRef,useState,type RefObject} from 'react';
 import {request} from './client';
-import type {Message,MessagePage,Activity,Run} from './types';
-import {activitySearchText,type ActivityReveal,type ToolActivity} from './activity-presentation';
+import type {Message,MessagePage,Activity} from './types';
+import {activitySearchText,type ActivityReveal,type ActivityRun,type ToolActivity} from './activity-presentation';
 import './conversation-history-search.css';
 
 type SearchDocument={element:HTMLElement;text:string;nodes:Array<{node:Text;start:number;end:number}>};
-type Props={
+type SharedProps={
  root:RefObject<HTMLElement|null>;
- conversationId:string;
- messages:Message[];
  activities:Activity[];
- runs:Record<string,Run>;
+ runs:Record<string,ActivityRun>;
  onRevealActivity:(request:ActivityReveal)=>void;
  onLoadActivityHistory:()=>void;
  activityHistorySeq?:string;
  renderedRevision:unknown;
- revealedMessageId:string;
  ready:boolean;
+};
+type Props=SharedProps&({
+ scope?:'conversation';
+ conversationId:string;
+ messages:Message[];
+ revealedMessageId:string;
  onReveal:(messageId:string)=>void;
  historyComplete?:boolean;
  historyCursor?:string;
  onHistoryLoaded:(messages:Message[])=>void;
-};
+}|{scope:'activities'});
+const EMPTY_MESSAGES:Message[]=[];
 
 function readSearchDocument(element:HTMLElement):SearchDocument{
  const nodes:SearchDocument['nodes']=[],walker=document.createTreeWalker(element,NodeFilter.SHOW_TEXT);
@@ -43,7 +47,13 @@ function readSearchDocument(element:HTMLElement):SearchDocument{
 
 function searchPattern(query:string){return new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'giu');}
 
-export default function ConversationHistorySearch({root,conversationId,messages,activities,runs,onRevealActivity,onLoadActivityHistory,activityHistorySeq,renderedRevision,revealedMessageId,ready,onReveal,historyComplete,historyCursor,onHistoryLoaded}:Props){
+export default function ConversationHistorySearch(props:Props){
+ const {root,activities,runs,onRevealActivity,onLoadActivityHistory,activityHistorySeq,renderedRevision,ready}=props;
+ const conversation=props.scope==='activities'?undefined:props;
+ const conversationId=conversation?.conversationId,messages=conversation?.messages??EMPTY_MESSAGES;
+ const revealedMessageId=conversation?.revealedMessageId??'',onReveal=conversation?.onReveal;
+ const historyComplete=conversation?.historyComplete,historyCursor=conversation?.historyCursor,onHistoryLoaded=conversation?.onHistoryLoaded;
+ const activityOnly=props.scope==='activities';
  const [open,setOpen]=useState(false),[draft,setDraft]=useState(''),[query,setQuery]=useState('');
  const [index,setIndex]=useState(0),[navigationVersion,setNavigationVersion]=useState(0);
  const [loading,setLoading]=useState(false),[error,setError]=useState(''),[retry,setRetry]=useState(0);
@@ -59,12 +69,12 @@ export default function ConversationHistorySearch({root,conversationId,messages,
   cursor.current=historyCursor;
   complete.current=historyComplete===true;
   pages.current=[];
-  if(complete.current)pageCallback.current([]);
+  if(complete.current)pageCallback.current?.([]);
   setError('');
- },[historyCursor,historyComplete]);
+ },[conversationId,historyCursor,historyComplete]);
 
  useEffect(()=>{
-  if(!open||!ready||complete.current)return;
+  if(!conversationId||!open||!ready||complete.current)return;
   const abort=new AbortController(),seen=new Set<string>();
   setLoading(true);setError('');
   void(async()=>{
@@ -84,7 +94,7 @@ export default function ConversationHistorySearch({root,conversationId,messages,
      if(!page.next_cursor){
       const history=pages.current.slice().reverse().flat();
       if(new Set(history.map(message=>message.message_id)).size!==history.length)throw Error('历史分页出现重复消息，请刷新会话后继续');
-      pageCallback.current(history);pages.current=[];complete.current=true;return;
+      pageCallback.current?.(history);pages.current=[];complete.current=true;return;
      }
      seen.add(page.next_cursor);
     }
@@ -129,7 +139,7 @@ export default function ConversationHistorySearch({root,conversationId,messages,
  useEffect(()=>{
   if(!open||!activeId)return;
   if(activeKind==='activity')onRevealActivity({activityId:activeId,key:revealKey});
-  else if(!loading)onReveal(activeId);
+  else if(!loading)onReveal?.(activeId);
  },[open,activeKind,activeId,revealKey,loading,onReveal,onRevealActivity]);
  useEffect(()=>{
   if(!open||!active)return;
@@ -141,7 +151,10 @@ export default function ConversationHistorySearch({root,conversationId,messages,
    frame=undefined;clear();
    const selector=active.source.kind==='activity'?'[data-chat-search-activity]':'[data-chat-search-message]';
    const element=Array.from(root.current?.querySelectorAll<HTMLElement>(selector)??[])
-    .find(node=>(active.source.kind==='activity'?node.dataset.chatSearchActivity:node.dataset.chatSearchMessage)===active.source.id);
+    .find(node=>{
+     const scope=node.closest('[data-chat-search-scope]');
+     return (!scope||scope===root.current)&&(active.source.kind==='activity'?node.dataset.chatSearchActivity:node.dataset.chatSearchMessage)===active.source.id;
+    });
    if(!element||element.dataset.chatSearchReady==='false'||!element.getClientRects().length)return;
    const source=readSearchDocument(element),pattern=searchPattern(needle);
    let visibleMatch:RegExpExecArray|null=null;
@@ -198,7 +211,11 @@ export default function ConversationHistorySearch({root,conversationId,messages,
   const container=root.current;
   const keydown=(event:KeyboardEvent)=>{
    if(!ready||event.isComposing||event.keyCode===229||event.defaultPrevented)return;
-   if(event.target instanceof Element&&event.target.closest('[role="dialog"]'))return;
+   if(event.target instanceof Element){
+    if(event.target.closest('[role="dialog"]'))return;
+    const scope=event.target.closest('[data-chat-search-scope]');
+    if(scope&&scope!==container)return;
+   }
    if((event.ctrlKey||event.metaKey)&&!event.altKey&&event.key.toLowerCase()==='f'){
     event.preventDefault();openSearch();
    }else if(open&&event.key==='F3'){
@@ -211,9 +228,9 @@ export default function ConversationHistorySearch({root,conversationId,messages,
 
  return <div className="jot-history-search">
   <style>{`::highlight(${highlightName}){background:#f4cd54;color:#151515}`}</style>
-  <button ref={opener} type="button" aria-expanded={open} disabled={!ready} onClick={openSearch}>搜索当前会话</button>
-  {open&&<div role="search" aria-label="会话历史搜索">
-   <input ref={input} type="search" aria-label="搜索会话内容" placeholder="搜索会话内容…" value={draft} autoComplete="off" spellCheck={false}
+  <button ref={opener} type="button" aria-expanded={open} disabled={!ready} onClick={openSearch}>{activityOnly?'搜索公开步骤':'搜索当前会话'}</button>
+  {open&&<div role="search" aria-label={activityOnly?'公开步骤搜索':'会话历史搜索'}>
+   <input ref={input} type="search" aria-label={activityOnly?'搜索公开步骤':'搜索会话内容'} placeholder={activityOnly?'搜索公开步骤…':'搜索会话内容…'} value={draft} autoComplete="off" spellCheck={false}
     onChange={event=>{setDraft(event.currentTarget.value);if(!composing.current){changeQuery(event.currentTarget.value);}}}
     onCompositionStart={()=>{composing.current=true;compositionEnded.current=0;}}
     onCompositionEnd={event=>{composing.current=false;compositionEnded.current=Date.now();setDraft(event.currentTarget.value);changeQuery(event.currentTarget.value);}}
@@ -227,7 +244,7 @@ export default function ConversationHistorySearch({root,conversationId,messages,
    <button type="button" disabled={!total} onClick={()=>navigate(1)}>下一个结果</button>
    <button type="button" onClick={close}>关闭搜索</button>
    {active&&<p className="jot-history-search-excerpt">{active.source.kind==='activity'?'工具步骤 · ':'消息正文 · '}{active.source.text.slice(Math.max(0,active.offset-60),active.offset+active.length+60)}</p>}
-   <small>公开步骤历史的加载进度和保留缺口显示在时间线上方。</small>
+   <small>{activityOnly?'搜索范围为已加载的公开步骤。历史加载进度和保留缺口显示在时间线上方。':'公开步骤历史的加载进度和保留缺口显示在时间线上方。'}</small>
    {error&&<p role="alert">完整历史尚未加载，当前结果来自已加载消息。{error} <button type="button" disabled={loading} onClick={()=>setRetry(value=>value+1)}>继续加载历史</button></p>}
   </div>}
  </div>;
