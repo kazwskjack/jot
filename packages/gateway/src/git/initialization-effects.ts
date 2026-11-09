@@ -178,9 +178,9 @@ export class GitInitializationEffects extends GitBranchEffects{
      assertCurrent();check();
      for(const [path,id] of directories)if(this.directorySync(path)!==id)throw Error('git_repository_changed');
     };
-    const directory=(path:string)=>{current();mkdirSync(path,{mode:0o700});directories.set(path,this.directorySync(path));current();};
+    const directory=(path:string,mode=0o700)=>{current();mkdirSync(path,{mode});directories.set(path,this.directorySync(path));current();};
     const context={directory:join(stage,'metadata')};directory(context.directory);
-    for(const name of ['objects','refs'])directory(join(context.directory,name));
+    for(const name of ['objects','refs'])directory(join(context.directory,name),0o777);
     const common=this.initializationFile(join(this.commonDirectory,'config')),worktree=this.initializationFile(join(this.gitDirectory,'config.worktree'));
     const head=this.initializationFile(join(this.gitDirectory,'HEAD'));
     if(!head.body||!equal(common.fact,existing.common_config)||!equal(worktree.fact,existing.worktree_config))throw Error('git_initialization_source_changed');
@@ -189,7 +189,7 @@ export class GitInitializationEffects extends GitBranchEffects{
     await this.initializationPendingFile(join(context.directory,'config'),Buffer.from(baseConfiguration),0o600);current();
     const planned=await planReinitializationConfiguration({executable:stored.anchors.executable,root:this.root,context,
      commonConfig:common.body,worktreeConfig:worktree.body,worktreeConfigEnabled:existing.worktree_config_enabled,
-     objectFormat:witness.object_format,limits:this.limits,...(signal?{signal}:{}),authority:{authorize:current,cleanup:authority.cleanup}});
+     objectFormat:witness.object_format,limits:this.limits,layout:existing.layout!,...(signal?{signal}:{}),authority:{authorize:current,cleanup:authority.cleanup}});
     current();
     if(!equal(planned.review,existing.configuration))throw Error('git_initialization_review_changed');
     const after=await this.anchors(signal,ignored);current();
@@ -203,7 +203,7 @@ export class GitInitializationEffects extends GitBranchEffects{
      current();
      if(!equal(this.initializationFile(join(stage,'config.pending')).fact,file)||!equal(this.initializationFile(join(stage,'config.lock')).fact,lock))throw Error('git_initialization_source_changed');
      const evidence=freezeWorkAdmission(gitReinitializationEvidence({protocol:2,preparation:preparation!,ref_preparation:reference,
-      configuration,config_lock:lock,ignore,ignore_lock:ignoreLock}));
+      configuration,config_lock:lock,ignore,ignore_lock:ignoreLock,...(planned.directory_modes?{directory_modes:planned.directory_modes}:{})}));
      synchronous(()=>authority.dispatch(evidence));current();
      throw Error('git_reinitialization_execution_unavailable');
     };

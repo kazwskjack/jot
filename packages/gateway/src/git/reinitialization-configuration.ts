@@ -1,8 +1,9 @@
 import {createHash} from 'node:crypto';
-import {mkdir,readFile,writeFile,unlink,readdir,lstat,realpath} from 'node:fs/promises';
+import {mkdir,readFile,writeFile,unlink,readdir,lstat,realpath,chmod} from 'node:fs/promises';
 import {join} from 'node:path';
 import type {GitReadContext} from './inspection.ts';
-import type {GitReinitializationConfiguration} from '../../contracts/types.ts';
+import {initializationDirectories} from './initialization-evidence.ts';
+import type {GitReinitializationConfiguration,GitReinitializationLayout} from '../../contracts/types.ts';
 import {readGit,type GitProcessLimits} from './process.ts';
 import {withReinitializationAllocation} from './reinitialization-allocation.ts';
 import {renderGitConfiguration,type GitConfigurationEntry} from './branch-configuration.ts';
@@ -21,6 +22,7 @@ const equal=(left:unknown,right:unknown)=>JSON.stringify(left)===JSON.stringify(
 export async function planReinitializationConfiguration(options:{
  executable:string;root:string;context:Pick<GitReadContext,'directory'>;commonConfig:Buffer|null;worktreeConfig:Buffer|null;
  worktreeConfigEnabled:boolean;objectFormat:'sha1'|'sha256';limits:GitProcessLimits;signal?:AbortSignal;
+ layout?:GitReinitializationLayout;
  authority?:{authorize:()=>void;cleanup:(remove:()=>void)=>void};
 }){
  const {executable,root,context:sourceContext,commonConfig,worktreeConfig,worktreeConfigEnabled,objectFormat,limits,signal}=options;
@@ -63,6 +65,40 @@ export async function planReinitializationConfiguration(options:{
    for(const name of (await readdir(context.directory)).sort())if(['HEAD','index','packed-refs','shallow','refs'].includes(name)||/^sharedindex\.[a-f0-9]+$/.test(name))await visit(name);
    return result;
   };
+  const directories=new Map<string,string>([[context.directory,parentIdentity]]);
+  const assertDirectories=async()=>{
+   assertCurrent();
+   await Promise.all([...directories].map(async([path,id])=>{
+    const stat=await lstat(path,{bigint:true});
+    if(!stat.isDirectory()||stat.isSymbolicLink()||stat.dev+':'+stat.ino!==id)throw Error('git_repository_changed');
+   }));
+   assertCurrent();
+  };
+  const directoryModes=async()=>{
+   await assertDirectories();
+   const modes=await Promise.all(initializationDirectories.map(async path=>{
+    const stat=await lstat(path?join(context.directory,path):context.directory,{bigint:true});
+    if(!stat.isDirectory()||stat.isSymbolicLink())throw Error('git_repository_changed');
+    return{path,mode:Number(stat.mode&0o7777n)};
+   }));
+   await assertDirectories();return modes;
+  };
+  if(options.layout){
+   const layout=options.layout;
+   for(const path of initializationDirectories){
+    await assertDirectories();
+    const full=path?join(context.directory,path):context.directory;
+    const before=path?layout.directories.find(directory=>directory.path===path)!.before:layout.common;
+    if(path){
+     try{await mkdir(full,{mode:0o777});}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;}
+    }
+    const stat=await lstat(full,{bigint:true});
+    if(!stat.isDirectory()||stat.isSymbolicLink())throw Error('git_repository_changed');
+    directories.set(full,stat.dev+':'+stat.ino);
+    if(before)await chmod(full,before.mode);
+    await assertDirectories();
+   }
+  }
   assertCurrent();const beforeMetadata=await metadata();assertCurrent();
   try{
    await create(common,commonConfig??Buffer.alloc(0));await create(worktree,worktreeConfig??Buffer.alloc(0));
@@ -77,7 +113,10 @@ export async function planReinitializationConfiguration(options:{
    }else if(originalWorktree!==null)await unlink(activeWorktree);
    await mkdir(templates,{mode:0o700});
    const before=await list(active);
+   await assertDirectories();
    await run(['-c','init.defaultRefFormat=files','init','--quiet','--template='+templates,'--object-format='+objectFormat]);
+   await assertDirectories();
+   const projectedModes=options.layout?await directoryModes():undefined;
    if(!equal(await metadata(),beforeMetadata))throw Error('git_reinitialization_metadata_changed');
    const after=await list(active),effectiveWorktree=await optional(activeWorktree);
    if(worktreeConfigEnabled&&!equal(effectiveWorktree,Buffer.from(renderGitConfiguration(worktreeEntries.filter(entry=>inputKey(entry.key))),'utf8')))
@@ -111,10 +150,11 @@ export async function planReinitializationConfiguration(options:{
     alternatives.push(body);
    }
    if(!equal(await metadata(),beforeMetadata))throw Error('git_reinitialization_metadata_changed');
+   if(projectedModes&&!equal(await directoryModes(),projectedModes))throw Error('git_reinitialization_metadata_changed');
    const review:GitReinitializationConfiguration={protocol:1,before_sha256:commonConfig===null?null:hash(commonConfig),
     filemode_false_sha256:hash(alternatives[0]!),filemode_true_sha256:hash(alternatives[1]!),
     worktree_sha256:worktreeConfig===null?null:hash(worktreeConfig)};
-   return{review,filemode_false:alternatives[0]!,filemode_true:alternatives[1]!,observed_filemode:values(after,'core.filemode').at(-1)==='true'};
+   return{review,filemode_false:alternatives[0]!,filemode_true:alternatives[1]!,observed_filemode:values(after,'core.filemode').at(-1)==='true',...(projectedModes?{directory_modes:projectedModes}:{})};
   }finally{
    await writeFile(active,original);
    if(originalWorktree===null){if(await optional(activeWorktree)!==null)await unlink(activeWorktree);}else await writeFile(activeWorktree,originalWorktree);

@@ -1065,3 +1065,33 @@ deletion, reference backend coverage and all remaining P09 scope remain required
 M15.14 stays in progress. Per the user's source-only direction, no tests,
 typechecks, builds, product/native commands, maintenance commands, migrations,
 UI runtime acceptance or deployment were executed.
+
+## Reinitialization native directory-mode projection, 2026-11-09
+
+The same-volume private config preparation now accepts the original frozen layout.
+Within the existing owned outer allocation it seeds common/root and six fixed
+metadata directories with original existing modes. Missing private directories use
+normal creation mode and umask. The minimal objects/refs context directories use
+normal directory creation inside the protected outer namespace, preserving the
+missing-directory probe instead of introducing a private 0700 result. The fixed
+private Git init then supplies its actual resulting common/objects/refs modes.
+Directory physical identities are checked before and after asynchronous reads and
+mode seeding, around Git init and on repeated final projection reads.
+
+Only the native caller supplies this layout. The disposable review caller keeps
+its previous directory setup and returned review hash encoding. Native private
+Git metadata remains enclosed by its original exclusive owned allocation. The
+actual seven-path mode projection enters original typed dispatch as optional
+directory_modes. The decoder requires exact fixed path order and integer modes
+from zero through 07777. Older records without projection remain readable for
+observation/cleanup. Mode facts supply no filesystem authority.
+
+This increment supplies directory permission evidence needed before canonical
+publication. UID/GID inheritance and existing owner handling still require actual
+publisher/observer checks, including linked/external/damaged and platform cases.
+Canonical config/ignore locks and publication, directory effects, private receipt,
+protocol-8 outcome observation and native/UI admission remain to connect. Branch
+checkout/deletion, reference backend coverage and all other P09 scope remain
+required. M15.14 stays in progress. Per the user's development-only instruction,
+no tests, typechecks, builds, product/native commands, maintenance commands,
+migrations, UI runtime acceptance or deployment were executed.

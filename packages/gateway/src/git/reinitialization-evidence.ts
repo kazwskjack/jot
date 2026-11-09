@@ -2,7 +2,7 @@ import {canonicalJson} from '../db/canonical-json.ts';
 import {createHash} from 'node:crypto';
 import type {GitInitializationWitness,GitInitializationFile} from '../../contracts/types.ts';
 import {gitInitializationWitness} from './initialization-records.ts';
-import {isGitInitializationFile} from './initialization-evidence.ts';
+import {isGitInitializationFile,initializationDirectories} from './initialization-evidence.ts';
 import {reinitializationAllocation,type GitReinitializationAllocation} from './reinitialization-allocation.ts';
 
 export type GitReinitializationPlan=Readonly<{
@@ -19,7 +19,7 @@ export type GitReinitializationRefPreparation={
 export type GitReinitializationEvidence={
  protocol:2;preparation:GitReinitializationPreparation;ref_preparation:GitReinitializationRefPreparation|null;
  configuration:GitReinitializationRefPreparation['configuration'];config_lock:GitInitializationFile;
- ignore:GitInitializationFile|null;ignore_lock:GitInitializationFile|null;
+ ignore:GitInitializationFile|null;ignore_lock:GitInitializationFile|null;directory_modes?:Array<{path:string;mode:number}>;
 };
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 const shape=(value:any,keys:string[])=>value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join('\0')===[...keys].sort().join('\0');
@@ -84,7 +84,14 @@ export function gitReinitializationRefPreparation(value:unknown):GitReinitializa
 export function gitReinitializationEvidence(value:unknown):GitReinitializationEvidence{
  try{
   const evidence=value as GitReinitializationEvidence;
-  if(!shape(evidence,['protocol','preparation','ref_preparation','configuration','config_lock','ignore','ignore_lock'])||evidence.protocol!==2)throw Error();
+  if(!shape(evidence,['protocol','preparation','ref_preparation','configuration','config_lock','ignore','ignore_lock',...(evidence?.directory_modes===undefined?[]:['directory_modes'])])||evidence.protocol!==2)throw Error();
+  if(evidence.directory_modes!==undefined){
+   if(!Array.isArray(evidence.directory_modes)||evidence.directory_modes.length!==initializationDirectories.length)throw Error();
+   for(const [index,directory] of evidence.directory_modes.entries()){
+    if(!shape(directory,['path','mode'])||directory.path!==initializationDirectories[index]
+     ||!Number.isSafeInteger(directory.mode)||directory.mode<0||directory.mode>0o7777)throw Error();
+   }
+  }
   const preparation=gitReinitializationPreparation(evidence.preparation),{witness}=preparation.plan,{existing}=witness;
   const {configuration,config_lock:lock,ignore,ignore_lock:ignoreLock}=evidence;
   if(!shape(configuration,['filemode','file'])||typeof configuration.filemode!=='boolean'||!isGitInitializationFile(configuration.file)
