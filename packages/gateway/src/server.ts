@@ -488,6 +488,7 @@ export async function buildServer(config: {
     if(request.method==='PUT'&&request.routeOptions.url==='/v1/workspaces/:workspaceId/files/binary')return;
     if(request.method==='POST'&&[
       '/v1/workspaces/:workspaceId/checkpoints',
+      '/v1/workspaces/:workspaceId/checkpoint-commands/:commandKey/close',
       '/v1/workspaces/:workspaceId/checkpoints/:checkpointId/restore-review',
       '/v1/workspaces/:workspaceId/checkpoints/:checkpointId/restore',
       '/v1/workspaces/:workspaceId/checkpoint-restores/:operationId/reconcile',
@@ -697,7 +698,7 @@ export async function buildServer(config: {
     if(['workspace_checkpoint_path_is_directory','workspace_path_unsafe','workspace_private_path','workspace_paths_invalid','workspace_path_collision','workspace_limit'].includes(code))return reply.code(422).send({error:{code:code.toUpperCase()}});
     if(code.startsWith('workspace_checkpoint_')&&(
       code.endsWith('_changed')||code.endsWith('_conflict')||code.endsWith('_corrupt')||
-      ['workspace_checkpoint_restore_busy','workspace_checkpoint_restore_closed','workspace_checkpoint_pruned','workspace_checkpoint_path_not_selected','workspace_checkpoint_retained_reference','workspace_checkpoint_lease_revoked','workspace_checkpoint_current_changed','workspace_checkpoint_prepare_unknown','workspace_checkpoint_prepare_busy','workspace_checkpoint_roots_overlap'].includes(code)
+      ['workspace_checkpoint_restore_busy','workspace_checkpoint_restore_closed','workspace_checkpoint_pruned','workspace_checkpoint_path_not_selected','workspace_checkpoint_retained_reference','workspace_checkpoint_lease_revoked','workspace_checkpoint_current_changed','workspace_checkpoint_prepare_unknown','workspace_checkpoint_prepare_busy','workspace_checkpoint_command_closed','workspace_checkpoint_command_settled','workspace_checkpoint_roots_overlap'].includes(code)
     ))return reply.code(409).send({error:{code:code.toUpperCase()}});
     if(code==='workspace_source_changed')return reply.code(409).send({error:{code:code.toUpperCase()}});
     if (code.startsWith('budget_') && code.endsWith('_invalid')) return reply.code(422).send({error:{code:code.toUpperCase()}});

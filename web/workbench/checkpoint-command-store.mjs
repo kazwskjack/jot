@@ -15,6 +15,8 @@ export class CheckpointCommandStore {
  constructor(storage, scope, workspace, project) {
   if (!SHA.test(scope) || !identifier(workspace) || !identifier(project)) invalid();
   this.storage = storage;
+  this.original = null;
+  this.closing = false;
   this.workspace = workspace;
   this.project = project;
   this.prefix = `/workspaces/${encodeURIComponent(workspace)}/checkpoints`;
@@ -38,24 +40,45 @@ export class CheckpointCommandStore {
    || !exact(body, ['project_id', 'path']) || body.project_id !== this.project || !relativePath(body.path)) invalid();
   return {kind: 'review', checkpoint};
  }
- read() {
+ readRecord() {
   const raw = this.storage.getItem(this.name);
   if (raw === null) return null;
-  const command = JSON.parse(raw);
+  const value = JSON.parse(raw);
+  const wrapped = exact(value, ['version', 'command', 'closing']);
+  if (wrapped && (value.version !== 1 || typeof value.closing !== 'boolean')) invalid();
+  const command = wrapped ? value.command : value;
   this.validate(command);
-  return {command};
+  const serialized = JSON.stringify(command);
+  if (this.original !== null && this.original !== serialized) invalid();
+  this.original = serialized;
+  this.closing = wrapped && value.closing;
+  return {command, closing: this.closing};
+ }
+ read() {
+  const record = this.readRecord();
+  return record ? {command: record.command} : null;
  }
  saveCommand(command, expected) {
   if (command === null) { this.complete(expected); return; }
   this.validate(command);
-  const prior = this.read()?.command;
-  if (prior && JSON.stringify(prior) !== JSON.stringify(command)) invalid();
-  this.storage.setItem(this.name, JSON.stringify(command));
+  const prior = this.readRecord(), serialized = JSON.stringify(command);
+  if (this.original !== null && this.original !== serialized) invalid();
+  if (prior) return;
+  this.storage.setItem(this.name, JSON.stringify({version: 1, command, closing: false}));
+  this.original = serialized;
+ }
+ requestClose() {
+  const record = this.readRecord();
+  if (!record) invalid();
+  this.storage.setItem(this.name, JSON.stringify({version: 1, command: record.command, closing: true}));
+  this.closing = true;
  }
  complete(expected) {
   const prior = this.read()?.command;
   if (!expected || prior && JSON.stringify(prior) !== JSON.stringify(expected)) invalid();
   if (prior) this.storage.removeItem(this.name);
+  this.original = null;
+  this.closing = false;
  }
 }
 
@@ -65,8 +88,32 @@ export function checkpointCommandTransport(store, send, current) {
   const command = {path, method, body, key};
   const descriptor = store.validate(command);
   if (JSON.stringify(store.read()?.command) !== JSON.stringify(command)) invalid();
+  const closing = store.readRecord()?.closing;
   let value;
-  try { value = await send(path, method, body, key); }
+  try {
+   if (closing) {
+    const original = descriptor.kind === 'create'
+     ? {project_id: store.project, paths: [...body.paths].sort()}
+     : {project_id: store.project, checkpoint_id: descriptor.checkpoint, path: body.path};
+    const publicCommand = {workspace_id: store.workspace, command_key: key, kind: descriptor.kind, ...original};
+    const canonical = JSON.stringify(Object.fromEntries(Object.entries(publicCommand).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)));
+    const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical))), byte => byte.toString(16).padStart(2, '0')).join('');
+    if (!current()) invalid();
+    const result = await send(`/workspaces/${encodeURIComponent(store.workspace)}/checkpoint-commands/${encodeURIComponent(key)}/close`, 'POST', {kind: descriptor.kind, ...original}, key);
+    const fields = ['protocol', 'state', 'kind', 'command_key', 'request_sha256', 'command_sha256', 'execution_authorized', 'restore_authorized'];
+    if (!current() || !result || !['closed', 'settled'].includes(result.state)
+     || !exact(result, [...fields, result.state === 'closed' ? 'published' : 'result'])
+     || result.protocol !== 1 || result.kind !== descriptor.kind || result.command_key !== key
+     || !SHA.test(result.request_sha256) || result.command_sha256 !== digest || !noAuthority(result)) invalid();
+    if (result.state === 'closed') {
+     if (result.published !== false) invalid();
+     return {kind: 'closed', value: result};
+    }
+    value = result.result;
+   } else {
+    value = await send(path, method, body, key);
+   }
+  }
   catch (error) {
    // A recorded intent can survive a rejected or lost reply. Preserve its key.
    throw new Error(error instanceof Error ? error.message : '检查点原请求结果待确认', {cause: error});

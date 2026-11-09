@@ -1,4 +1,5 @@
 [
+  ["POST","/v1/workspaces/{workspace_id}/checkpoint-commands/{command_key}/close","Close an original unpublished checkpoint create or review command","CloseWorkspaceCheckpointCommand","WorkspaceCheckpointCommandClosure","200","Owner/workspace/project/original key and request bound. Serializes with publication, retains original intent and snapshot records, and returns already settled original results. Closure grants no execution or restore authority."],
   [
     "GET",
     "/v1/capabilities",

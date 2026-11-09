@@ -23,7 +23,7 @@ function CheckpointPanel({workspace,project,canWrite,onPending,onChanged,scope,s
  const current=()=>alive.current&&!!scope&&taskDraftScope()===scope;
  const mutation=useMutationReceipt(store,undefined,checkpointCommandTransport(store,request,current));
  const [paths,setPaths]=useState(''),[selected,setSelected]=useState<Record<string,string>>({}),[review,setReview]=useState<WorkspaceCheckpointRestoreReview|null>(null);
- const [restorePending,setRestorePending]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState('');
+ const [restorePending,setRestorePending]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const [cursors,setCursors]=useState<Array<string|undefined>>([undefined]);
  const cursor=cursors.at(-1),prefix=`/workspaces/${encodeURIComponent(workspace)}/checkpoints`;
  const identity=JSON.stringify([scope,workspace,project,cursor]);
@@ -50,10 +50,11 @@ function CheckpointPanel({workspace,project,canWrite,onPending,onChanged,scope,s
  const page=resource.data?.identity===identity&&taskDraftScope()===scope?resource.data.page:undefined;
  const refresh=()=>{setCursors([undefined]);resource.reload();};
  const send=async(kind:string,url:string,body:unknown)=>{
-  if(!current()||!canWrite||!store||busy||restorePending||mutation.pending&&kind!=='retry')return;
-  setBusy(true);setError('');
-  try{const result=await mutation.submit(url,'POST',body) as {kind:string;value:unknown};if(!current())return;
-   if(result.kind==='review')setReview(result.value as WorkspaceCheckpointRestoreReview);else {setPaths('');refresh();}
+  if(!current()||!canWrite||!store||busy||restorePending||mutation.pending&&!['retry','close'].includes(kind))return;
+  setBusy(true);setError('');setNotice('');
+  try{if(kind==='close')store.requestClose();const result=await mutation.submit(url,'POST',body) as {kind:string;value:unknown};if(!current())return;
+   if(result.kind==='closed'){setReview(null);setNotice('原请求已结束，可以修改路径后发起新请求。');refresh();}
+   else if(result.kind==='review')setReview(result.value as WorkspaceCheckpointRestoreReview);else {setPaths('');refresh();}
   }catch(reason){if(current())setError(reason instanceof Error?reason.message:'检查点操作结果未知，请重试原操作。');}
   finally{if(current())setBusy(false);}
  };
@@ -62,9 +63,15 @@ function CheckpointPanel({workspace,project,canWrite,onPending,onChanged,scope,s
  return <section aria-label="项目文件检查点" className="wb-form">
   <h3>项目文件检查点</h3><p className="wb-hint">选择要保存的路径。恢复时先审阅当前与目标版本，每次恢复一个路径。</p>
   {error&&<p role="alert">{error}</p>}
+  {notice&&<p role="status">{notice}</p>}
   <label>相对路径（逗号或换行分隔）<textarea value={paths} disabled={!canWrite||!store||busy||mutation.pending||restorePending} onChange={event=>setPaths(event.target.value)}/></label>
   <button disabled={!canWrite||!store||!project||busy||restorePending||mutation.pending} onClick={create}>创建检查点</button>
-  {mutation.pending&&<p role="status">已保留原创建或审阅请求。<button disabled={!canWrite||!store||busy||restorePending} onClick={()=>void send('retry',prefix,undefined)}>重试原检查点请求</button></p>}
+  {mutation.pending&&<div role="status">
+   <p>{store?.closing?'已保留结束原请求的意图，请继续确认结束回执。':'已保留原创建或审阅请求。'}</p>
+   <button disabled={!canWrite||!store||busy||restorePending} onClick={()=>void send('retry',prefix,undefined)}>{store?.closing?'重试结束原请求':'重试原检查点请求'}</button>
+   <button disabled={!canWrite||!store||store.closing||busy||restorePending} onClick={()=>void send('close',prefix,undefined)}>结束原创建或审阅请求</button>
+   <p>结束操作会保留原意图和快照记录，已完成的请求会返回原回执。</p>
+  </div>}
   <button disabled={pagingLocked} onClick={refresh}>刷新检查点</button>
   <p>每页25个检查点，当前第 {cursors.length} 页。</p>
   {resource.loading&&<p role="status">正在读取检查点目录…</p>}

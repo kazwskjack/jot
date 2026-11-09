@@ -176,6 +176,7 @@ export class WorkspaceCheckpointService{
  async create(owner:string,workspaceId:string,input:Record<string,unknown>&Controls){
   const allowed=['project_id','paths','command_key','guard','signal'];if(!input||typeof input!=='object'||Object.keys(input).some(key=>!allowed.includes(key)))throw failure('workspace_checkpoint_request_invalid');
   const project=String(input.project_id??''),key=input.command_key;if(typeof key!=='string'||!COMMAND.test(key))throw failure('workspace_checkpoint_command_invalid');const paths=workspaceSelection(input.paths);this.signal(input);this.validateScope(owner,workspaceId,project);
+  this.assertCommandOpen(owner,workspaceId,project,'create',key);
   const requestSha=sha({owner_id:owner,workspace_id:workspaceId,project_id:project,paths});
   const prior=this.db.prepare('SELECT checkpoint_id,request_sha256 FROM wb_workspace_checkpoint_intents WHERE owner_id=? AND workspace_id=? AND project_id=? AND command_key=?').get(owner,workspaceId,project,key) as Row|undefined;
 
@@ -190,6 +191,35 @@ export class WorkspaceCheckpointService{
   if(reused){const ready=this.db.prepare('SELECT 1 FROM wb_workspace_checkpoint_ready WHERE checkpoint_id=?').get(checkpointId);if(ready)return this.get(owner,workspaceId,project,checkpointId);return this.resumeCreate(owner,workspaceId,project,checkpointId,input);}
   this.notify('checkpoint_intent_committed',{checkpoint_id:checkpointId});
   return this.resumeCreate(owner,workspaceId,project,checkpointId,input);
+ }
+ private assertCommandOpen(owner:string,workspace:string,project:string,kind:'create'|'review',key:string){
+  if(this.db.prepare('SELECT 1 FROM wb_workspace_checkpoint_command_closures WHERE owner_id=? AND workspace_id=? AND project_id=? AND kind=? AND command_key=?').get(owner,workspace,project,kind,key))throw failure('workspace_checkpoint_command_closed');
+ }
+ closeCommand(owner:string,workspace:string,key:string,input:Record<string,unknown>){
+  if(!input||typeof input!=='object'||Array.isArray(input))throw failure('workspace_checkpoint_command_invalid');
+  const kind=input.kind,project=String(input.project_id??'');
+  if(typeof key!=='string'||!COMMAND.test(key)||typeof input.project_id!=='string'||(kind!=='create'&&kind!=='review')||!exact(input,kind==='create'?['project_id','kind','paths']:['project_id','kind','checkpoint_id','path']))throw failure('workspace_checkpoint_command_invalid');
+  if(kind==='create'&&(!Array.isArray(input.paths)||!input.paths.length||input.paths.length>50000||input.paths.some(path=>typeof path!=='string'||!path||path.length>4096)))throw failure('workspace_checkpoint_command_invalid');
+  if(kind==='review'&&(typeof input.checkpoint_id!=='string'||!ID.test(input.checkpoint_id)||typeof input.path!=='string'||!input.path||input.path.length>4096))throw failure('workspace_checkpoint_command_invalid');
+  this.validateScope(owner,workspace,project);
+  const original=kind==='create'?{project_id:project,paths:[...(input.paths as string[])].sort()}:{project_id:project,checkpoint_id:String(input.checkpoint_id),path:String(input.path)};
+  const request={owner_id:owner,workspace_id:workspace,...original},requestJson=canonicalJson(request),requestSha=sha(requestJson);
+  const common={protocol:1,kind,command_key:key,request_sha256:requestSha,command_sha256:sha({workspace_id:workspace,command_key:key,kind,...original}),execution_authorized:false,restore_authorized:false};
+  return withImmediateTransaction(this.db,()=>{
+   this.validateScope(owner,workspace,project);
+   const closed=this.db.prepare('SELECT request_json,request_sha256 FROM wb_workspace_checkpoint_command_closures WHERE owner_id=? AND workspace_id=? AND project_id=? AND kind=? AND command_key=?').get(owner,workspace,project,String(kind),key) as Row|undefined;
+   if(closed){if(closed.request_json!==requestJson||closed.request_sha256!==requestSha)throw failure('idempotency_conflict');return Object.freeze({...common,state:'closed',published:false});}
+   if(kind==='create'){
+    const intent=this.db.prepare('SELECT checkpoint_id,request_sha256 FROM wb_workspace_checkpoint_intents WHERE owner_id=? AND workspace_id=? AND project_id=? AND command_key=?').get(owner,workspace,project,key) as Row|undefined;
+    if(intent&&intent.request_sha256!==requestSha)throw failure('idempotency_conflict');
+    if(intent&&this.db.prepare('SELECT 1 FROM wb_workspace_checkpoint_ready WHERE checkpoint_id=?').get(String(intent.checkpoint_id)))return Object.freeze({...common,state:'settled',result:this.view(this.readyRow(owner,workspace,project,String(intent.checkpoint_id)))});
+   }else{
+    const prior=this.priorReview(owner,workspace,project,key,requestSha,String(input.checkpoint_id),String(input.path));
+    if(prior)return Object.freeze({...common,state:'settled',result:prior});
+   }
+   this.db.prepare('INSERT INTO wb_workspace_checkpoint_command_closures VALUES(?,?,?,?,?,?,?,?)').run(owner,workspace,project,String(kind),key,requestJson,requestSha,new Date(this.now()).toISOString());
+   return Object.freeze({...common,state:'closed',published:false});
+  });
  }
  private claimCreateLease(checkpointId:string):CreateLease{
   return withImmediateTransaction(this.db,()=>{
@@ -230,7 +260,7 @@ export class WorkspaceCheckpointService{
   const paths=JSON.parse(String(intent.paths_json)) as string[],facts=JSON.parse(String(intent.source_facts_json)) as SourceFact[],root=JSON.parse(String(intent.root_identity_json)) as RootIdentity|null,pin:PinnedSource={owner_id:owner,workspace_id:workspaceId,project_id:project,revision:Number(intent.source_revision),root,paths,facts,manifest:validateWorkspaceManifest(JSON.parse(String(intent.manifest_json)))};
   const lease=this.claimCreateLease(checkpointId);
   const ownerGuard=this.guard(owner,workspaceId,project,controls);
-  const guard:WorkspaceGuard=async context=>{await ownerGuard(context);this.touchCreateLease(checkpointId,lease);};
+  const guard:WorkspaceGuard=async context=>{await ownerGuard(context);this.assertCommandOpen(owner,workspaceId,project,'create',String(intent.command_key));this.touchCreateLease(checkpointId,lease);};
   try{
    if(signal.aborted)throw failure('workspace_checkpoint_cancelled');
    try{await this.assertSource(pin);}catch{return Object.freeze({checkpoint_id:checkpointId,state:'unresolved',reason:'source_changed',execution_authorized:false,restore_authorized:false});}
@@ -290,6 +320,7 @@ export class WorkspaceCheckpointService{
  }
  async reviewRestore(owner:string,workspaceId:string,input:Record<string,unknown>){
   if(!exact(input,['project_id','checkpoint_id','path','command_key']))throw failure('workspace_checkpoint_review_invalid');const project=String(input.project_id??''),checkpointId=String(input.checkpoint_id??''),path=boundedPath(String(input.path??'')),key=input.command_key;if(typeof key!=='string'||!COMMAND.test(key))throw failure('workspace_checkpoint_command_invalid');this.validateScope(owner,workspaceId,project);
+  this.assertCommandOpen(owner,workspaceId,project,'review',key);
   const requestSha=sha({owner_id:owner,workspace_id:workspaceId,project_id:project,checkpoint_id:checkpointId,path}),prior=this.priorReview(owner,workspaceId,project,key,requestSha,checkpointId,path);if(prior)return prior;
   const checkpoint=this.readyRow(owner,workspaceId,project,checkpointId);if(this.pruned(checkpointId))throw failure('workspace_checkpoint_pruned');const {snapshotId,target}=this.checkpointTarget(checkpoint,path),currentRoot=this.currentRoot(owner,workspaceId,project),savedRoot=parseCanonical(String(checkpoint.root_identity_json),'workspace_checkpoint_corrupt');
   if(rootJson(currentRoot)!==rootJson(savedRoot))throw failure('workspace_checkpoint_root_changed');const revision=this.sourceRevision(owner,workspaceId,project),facts=this.selectedRows(owner,workspaceId,project,[path]),before=this.storedBefore(facts[0]!);
