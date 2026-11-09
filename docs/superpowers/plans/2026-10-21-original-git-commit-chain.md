@@ -675,3 +675,39 @@ metadata, checkout/deletion and reference backend coverage remain in M15.14.
 This increment follows the user's source-development-only instruction. Tests,
 typechecks, builds, native/product operations, UI runtime acceptance, migrations
 and deployment remain unexecuted.
+
+## Reinitialization owned allocation source increment
+
+Configuration preparation now places original-byte copies, candidate files and
+empty templates in one exclusive owned child allocation under its disposable Git
+context. It reuses the existing protected .git.jot-init UUID pending namespace.
+The allocator checks the original canonical parent identity, rejects symlink
+ancestors, verifies matching device identity, and records exact namespace identity,
+mode and UID/GID before child or process work. Preparation and cleanup callbacks
+are synchronous original-service boundaries. The private read caller validates its
+known context role; future native callers must persist the record in the original
+typed journal under their held lease before work.
+
+The operation receives a current-allocation guard. Configuration commands and
+helper-file creation repeat it around asynchronous work. The ownership record is
+strictly decoded and immutable during a live attempt. Parent and allocation cannot
+share one physical identity. The planner accepts only the directory portion of its
+internal context, so native preparation can supply a same-volume private metadata
+context without manufacturing an unrelated read-context capability.
+
+Cleanup runs once through the supplied atomic callback. It preflights the complete
+owned tree, bounded to 512 entries, eight MiB total and one MiB per regular file.
+Symlinks, special files and extra hardlinks remain unverified. Files are read through
+no-follow descriptors into bounded buffers, with exact inode/mode/owner/size/link/
+nanosecond and content checks. Every known remaining directory stays pinned through
+removal. Cleanup removes known files and empty directories from this allocation;
+canonical repository and ignore files stay outside its scope. Active private config
+restoration remains before allocation cleanup. Cleanup failure preserves its cause.
+
+The live caller is the original disposable reinitialization configuration planner.
+Native same-volume source allocation, canonical locks/publication, typed journal
+phases, actual probe selection and original recovery/settlement remain to connect.
+Linked/external and damaged metadata, branch checkout/deletion and reference backend
+coverage remain in full M15.14 scope. This increment followed the user's source-only
+direction. Tests, typechecks, builds, native/product commands, UI runtime acceptance,
+migrations and deployment remain unexecuted.
