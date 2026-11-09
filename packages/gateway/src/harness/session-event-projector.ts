@@ -50,13 +50,13 @@ function safeId(value: unknown, fallback: string): string {
 
 export {safeId as sessionProjectionId}
 
-function presentation(nameValue: unknown, priorBrowse = false): ToolPresentation {
+function presentation(nameValue: unknown, legacyNames = false): ToolPresentation {
   const name = String(nameValue ?? '').toLowerCase()
-  if (/(search|research|query)/.test(name)) return {
+  if (/(search|research|query)/.test(name) || (!legacyNames && ['grep', 'glob'].includes(name))) return {
     kind: 'search', runningTitle: '正在搜索资料', completedTitle: '资料搜索完成', failedTitle: '资料搜索失败',
   }
   const fileRead = /(?:^|[._-])(?:read(?:_(?:text|binary))?_file|file_read)(?:$|[._-])/.test(name)
-  if (fileRead && !priorBrowse) return {
+  if (!legacyNames && (fileRead || name === 'read')) return {
     kind: 'file_read', runningTitle: '正在读取文件', completedTitle: '文件读取完成', failedTitle: '文件读取失败',
   }
   if (/(read|fetch|browse|scrape|crawl|web|url|navigate|click)/.test(name)) return {
@@ -68,7 +68,7 @@ function presentation(nameValue: unknown, priorBrowse = false): ToolPresentation
   if (/(file|document|artifact)/.test(name)) return {
     kind: 'file_read', runningTitle: '正在读取文件', completedTitle: '文件读取完成', failedTitle: '文件读取失败',
   }
-  if (/(shell|exec|command|terminal)/.test(name)) return {
+  if (/(shell|exec|command|terminal)/.test(name) || (!legacyNames && name === 'bash')) return {
     kind: 'command', runningTitle: '正在执行操作', completedTitle: '操作执行完成', failedTitle: '操作执行失败',
   }
   return { kind: 'subagent', runningTitle: '正在处理任务', completedTitle: '任务处理完成', failedTitle: '任务处理失败' }
@@ -93,7 +93,8 @@ export function projectNativeToolEvent(event: Record<string, unknown>, context: 
   const knownTools = new Map<string, ToolPresentation>()
   if (callId && detail && typeof priorCall?.started_at === 'string') {
     // Persisted calls keep their original validated projection vocabulary.
-    const tool = presentation(detail.tool_name, priorCall.kind === 'browse')
+    let tool = presentation(detail.tool_name)
+    if (tool.kind !== priorCall.kind) tool = presentation(detail.tool_name, true)
     if (tool.kind !== priorCall.kind) throw Error('native_activity_call_source_invalid')
     tool.publicDetail = { ...detail }
     tool.startedAt = priorCall.started_at
