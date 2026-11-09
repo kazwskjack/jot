@@ -61,6 +61,7 @@ import { InteractionService } from './interactions/service.ts';
 import {TaskWaitResponder} from './persistent-tasks/task-wait.ts';
 import {TaskReviewOutputs} from './persistent-tasks/review-outputs.ts';
 import { ArtifactService } from './artifacts/service.ts';
+import type {ArtifactArchiveExecutor} from './artifacts/archive-executor.ts';
 import { createReadStream, lstatSync, mkdirSync, realpathSync } from 'node:fs';
 import { PassThrough, Readable } from 'node:stream';
 import { dirname, join, resolve } from 'node:path';
@@ -182,6 +183,7 @@ export async function buildServer(config: {
   pluginProfileClient?:PluginProfileClient;
   hostAdmin?:{enabled?:boolean;namespaces?:string[];client?:HostSettingsClient;writeEnabled?:boolean;writeNamespace?:string};
   uploadRoot?: string;
+  artifactArchiveExecutor?:ArtifactArchiveExecutor;
   csrfToken?: string;
   allowedOrigins?: string[];
   internalChannelToken?: string;
@@ -280,7 +282,16 @@ export async function buildServer(config: {
   const runs = new RunRepository(db, events,{workAgentPreset:config.workAgentPreset??'jot-general'});
   const conversationModes=new ConversationModes(db,conversations,runs,config.conversationModeClient,config.chatModeEnabled===true,config.modelCatalogClient);
   const commands = new RunCommandService(db, events);
-  const artifacts = new ArtifactService(db, config.uploadRoot ?? join(dirname(config.databasePath), 'general-agent-uploads'));
+  const artifactRoot=config.uploadRoot??join(dirname(config.databasePath),'general-agent-uploads');
+  const archiveExecutor=config.artifactArchiveExecutor;
+  if(archiveExecutor&&(resolve(archiveExecutor.binding.databasePath)!==resolve(config.databasePath)
+    ||resolve(archiveExecutor.binding.fileRoot)!==resolve(artifactRoot)))throw Error('config_artifact_archive_binding_mismatch');
+  const archiveStatus=()=>archiveExecutor?.status()??{mode:'external' as const,state:'unmanaged' as const};
+  if(archiveExecutor){
+    app.addHook('onReady',async()=>archiveExecutor.start());
+    app.addHook('onClose',async()=>archiveExecutor.close());
+  }
+  const artifacts = new ArtifactService(db,artifactRoot);
   try{artifacts.cleanupExpiredUploads();}catch(error){app.log.error(error);}
   const uploadExpirySweep=setInterval(()=>{try{artifacts.cleanupExpiredUploads();}catch(error){app.log.error(error);}},60_000);
   uploadExpirySweep.unref();
@@ -952,6 +963,7 @@ export async function buildServer(config: {
     }
     return {
       api_version: '1.0', event_schema_version: '1.0', adapter_version: '0.1.0',
+      artifact_archive:archiveStatus(),
       git_workbench:gitWorkbench.capability(ownerId,config.nativeGitClient!==undefined,['commit','branch','initialization','reinitialization'].includes(gitCommitExecutionSchema(db)),['branch','initialization','reinitialization'].includes(gitCommitExecutionSchema(db)),['initialization','reinitialization'].includes(gitCommitExecutionSchema(db)),gitCommitExecutionSchema(db)==='reinitialization'),
       capabilities: { search: true, fetch: true, browser_interaction: false, file_read: true,
         file_edit: true, command_execution: true, questions: true, approvals: true,
@@ -1247,7 +1259,8 @@ export async function buildServer(config: {
   });
   app.get('/v1/artifacts/:artifactId/backup-status', async (request, reply) => {
     reply.header('cache-control','private, no-store');
-    return artifacts.backupStatus((request.params as {artifactId:string}).artifactId, actor(request as any),request.query as {version?:unknown;sha256?:unknown;part_index?:unknown;restore_protocol?:unknown});
+    const status=artifacts.backupStatus((request.params as {artifactId:string}).artifactId,actor(request as any),request.query as {version?:unknown;sha256?:unknown;part_index?:unknown;restore_protocol?:unknown});
+    return status.restore_protocol===3?{...status,executor:archiveStatus()}:status;
   });
   app.post('/v1/artifacts/:artifactId/restore', async (request, reply) => {
     const input = request.body ?? {};

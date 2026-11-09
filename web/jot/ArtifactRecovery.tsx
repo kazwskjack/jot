@@ -53,6 +53,15 @@ function Recovery({artifactId,version,sha256,partIndex,onRestored,owner,store}:P
    ||backup.all_versions_archived!==undefined&&typeof backup.all_versions_archived!=='boolean'
    ||backup.restore_protocol!==undefined&&![2,3].includes(backup.restore_protocol)
    ||backup.version!==undefined&&(!Number.isSafeInteger(backup.version)||backup.version<1))throw Error('文件归档状态来源尚未确认');
+  if(backup.executor!==undefined){
+   const executor=backup.executor;
+   if(!executor||!['managed','external'].includes(executor.mode)
+    ||!['unmanaged','starting','idle','restoring','archiving','cleaning','failed','stopped'].includes(executor.state)
+    ||executor.mode==='external'&&executor.state!=='unmanaged'||executor.mode==='managed'&&(executor.state==='unmanaged'||typeof executor.cleanup_enabled!=='boolean'))throw Error('归档执行器状态尚未确认');
+   for(const time of [executor.last_started_at,executor.last_completed_at]){
+    if(time!==undefined&&(typeof time!=='string'||time.length>40||!Number.isFinite(Date.parse(time))))throw Error('归档执行器时间尚未确认');
+   }
+  }
   if(backup.restore_protocol===3){
    if(!Number.isSafeInteger(backup.version)||Number(backup.version)<1||!Number.isSafeInteger(backup.requested_version)||Number(backup.requested_version)<1||Number(backup.requested_version)>Number(backup.version)
     ||version!==undefined&&backup.requested_version!==version||typeof backup.requested_sha256!=='string'||!/^[a-f0-9]{64}$/.test(backup.requested_sha256)
@@ -92,9 +101,12 @@ function Recovery({artifactId,version,sha256,partIndex,onRestored,owner,store}:P
  };
  const refresh=()=>{pollAttempt.current=0;resource.reload();};
  const statuses={pending:'待归档',retry:'归档重试中',verified:'归档已验证',failed:'归档失败'};
+ const phases={unmanaged:'外部进程',starting:'正在启动',idle:'空闲',restoring:'正在恢复',archiving:'正在归档',cleaning:'正在清理已验证备份的本地缓存',failed:'处理失败',stopped:'已停止'};
  const local={present:'所选文件在本地',deleted:'所选文件缺失',restoring:'恢复请求已登记'};
  return <section aria-label="文件归档与恢复" data-chat-search-ignore>
   {backup&&<p>{statuses[backup.backup_status]} · {local[backup.local_state]}</p>}
+  {backup?.executor?.mode==='managed'&&<p role="status">托管归档进程 · {phases[backup.executor.state]}{backup.executor.last_completed_at?` · 上次处理 ${backup.executor.last_completed_at}`:''}</p>}
+  {backup?.executor?.mode==='managed'&&backup.executor.state==='failed'&&<p role="status">归档进程遇到错误，请刷新状态后重试原请求。</p>}
   {backup?.restore_protocol===3&&<p>版本 {backup.requested_version}{backup.part_index===undefined?'':` · 第 ${backup.part_index} 卷`} · {backup.selected_file_count} 个文件 · 缺失 {backup.missing_file_count} 个</p>}
   {backup?.all_versions_archived===false&&<p role="status">归档清单尚未覆盖全部文件版本。</p>}
   {Number(backup?.unarchived_file_count)>0&&<p role="status">所选版本有 {backup?.unarchived_file_count} 个文件尚无可验证归档。</p>}
@@ -105,7 +117,7 @@ function Recovery({artifactId,version,sha256,partIndex,onRestored,owner,store}:P
   <button type="button" disabled={busy||resource.loading} onClick={refresh}>刷新归档状态</button>
   {canRestore&&<button type="button" disabled={busy||resource.loading||!!resource.error||receipt.pending} onClick={()=>void restore()}>{backup?.local_state==='present'?'从归档重新恢复此版本':'恢复所选文件'}</button>}
   {receipt.pending&&<p role="status">原恢复请求的回执尚未确认，请先确认原请求。<button type="button" disabled={busy} onClick={()=>void restore()}>重试原恢复请求</button></p>}
-  {backup?.local_state==='restoring'&&<p role="status">恢复由单独配置的归档进程处理，完成后会重新读取文件。</p>}
+  {backup?.local_state==='restoring'&&<p role="status">{backup.executor?.mode==='managed'?'已登记到托管归档进程，完成后会重新读取文件。':'恢复由单独配置的外部归档进程处理，完成后会重新读取文件。'}</p>}
   {backup?.restore_protocol===2&&!legacyCurrent&&<p role="status">此服务器提供当前版本恢复，所选历史版本需通过新版恢复入口处理。</p>}
   {error&&<p role="alert">{error}</p>}
  </section>;

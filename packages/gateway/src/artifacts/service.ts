@@ -1134,6 +1134,7 @@ export class ArtifactService {
     if(path===boundary||!path.startsWith(boundary+sep))throw Error('artifact_part_path_escape');
     rejectTaskOutputSymlinks(source.path);
     if(!existsSync(source.path))throw Error('artifact_restore_required');
+    this.markContentRead(id,ownerId);
     const hash=currentFileHashes(source.path);
     if(!hash||hash.size!==source.part.size_bytes||hash.sha256!==source.part.sha256)throw Error('artifact_part_content_mismatch');
     return {server_path:source.path,mime_type:source.part.media_type,metadata_json:JSON.stringify({file_name:source.part.file_name})};
@@ -1274,11 +1275,18 @@ export class ArtifactService {
     });
   }
 
+  private markContentRead(id:string,ownerId:string):void {
+    this.db.prepare(`UPDATE ga_artifact_archives SET last_used_at=MAX(COALESCE(last_used_at,''),?)
+      WHERE artifact_id=? AND EXISTS(SELECT 1 FROM ga_artifacts a WHERE a.id=ga_artifact_archives.artifact_id AND a.owner_id=?)`)
+      .run(new Date().toISOString(),id,ownerId);
+  }
+
   download(id: string, ownerId: string, version?: number) {
     const row=this.version(id,ownerId,version);
     if(row.artifact_kind==='generated_document_group'&&Number(row.version)===1)throw Error('invalid_artifact_part_selection');
     rejectTaskOutputSymlinks(String(row.server_path));
     if (!existsSync(String(row.server_path))) throw new Error('artifact_restore_required');
+    this.markContentRead(id,ownerId);
     const artifact=this.db.prepare('SELECT kind FROM ga_artifacts WHERE id=?').get(id) as {kind:string};
     if(artifact.kind==='task_output_file'){
       const content=readFileSync(String(row.server_path));

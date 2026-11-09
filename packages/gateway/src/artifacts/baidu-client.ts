@@ -16,23 +16,23 @@ export class BaiduPcsClient implements ArtifactArchiveClient {
   constructor(executable = '/usr/local/bin/BaiduPCS-Go', stagingRoot = '/var/lib/jot/jot-files/sessions/archive-stage') {
     this.executable = executable; this.stagingRoot = stagingRoot; mkdirSync(stagingRoot, { recursive: true, mode: 0o700 })
   }
-  async mkdir(path: string): Promise<void> { const result = await this.run(['mkdir', path], 60_000); if (result.code !== 0 && !/exist|已存在/i.test(result.stdout+result.stderr)) throw new Error('baidu_mkdir_failed') }
-  async upload(localPath: string, remoteDirectory: string, remoteName: string): Promise<void> {
+  async mkdir(path: string,signal?:AbortSignal): Promise<void> { const result = await this.run(['mkdir', path], 60_000,signal); if (result.code !== 0 && !/exist|已存在/i.test(result.stdout+result.stderr)) throw new Error('baidu_mkdir_failed') }
+  async upload(localPath: string, remoteDirectory: string, remoteName: string,signal?:AbortSignal): Promise<void> {
     const stage = join(this.stagingRoot, `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`); mkdirSync(stage, { mode: 0o700 })
     const stagedPath = join(stage, basename(remoteName))
     try {
       try { linkSync(localPath, stagedPath) } catch { copyFileSync(localPath, stagedPath) }
-      const result = await this.run(['upload', stagedPath, remoteDirectory], 24 * 3600_000)
+      const result = await this.run(['upload', stagedPath, remoteDirectory], 24 * 3600_000,signal)
       if (result.code !== 0) throw new Error('baidu_upload_failed')
     } finally { rmSync(stage, { recursive: true, force: true }) }
   }
-  async meta(path: string): Promise<RemoteFileMeta | null> {
-    const result = await this.run(['meta', path], 90_000); return result.code === 0 ? parseBaiduMeta(result.stdout) : null
+  async meta(path: string,signal?:AbortSignal): Promise<RemoteFileMeta | null> {
+    const result = await this.run(['meta', path], 90_000,signal); return result.code === 0 ? parseBaiduMeta(result.stdout) : null
   }
-  async download(remotePath: string, localPath: string): Promise<void> {
+  async download(remotePath: string, localPath: string,signal?:AbortSignal): Promise<void> {
     const stage = join(this.stagingRoot, `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`); mkdirSync(stage, { mode: 0o700 })
     try {
-      const result = await this.run(['download', '--saveto', stage, remotePath], 24 * 3600_000); if (result.code !== 0) throw new Error('baidu_download_failed')
+      const result = await this.run(['download', '--saveto', stage, remotePath], 24 * 3600_000,signal); if (result.code !== 0) throw new Error('baidu_download_failed')
       const downloaded = join(stage, basename(remotePath)); if (!existsSync(downloaded)) throw new Error('baidu_download_missing')
       try { renameSync(downloaded, localPath) } catch (error) {
         if ((error as {code?:string}).code !== 'EXDEV') throw error
@@ -40,11 +40,16 @@ export class BaiduPcsClient implements ArtifactArchiveClient {
       }
     } finally { rmSync(stage, { recursive: true, force: true }) }
   }
-  private async run(args: string[], timeoutMs: number): Promise<CommandResult> {
+  private async run(args: string[], timeoutMs: number,signal?:AbortSignal): Promise<CommandResult> {
+    signal?.throwIfAborted()
     const env = { ...process.env }; for (const key of Object.keys(env)) if (/^(http|https|all)_proxy$/i.test(key)) delete env[key]
     return await new Promise((resolve, reject) => {
-      const child = spawn(this.executable, args, { env, stdio: ['ignore','pipe','pipe'] }); const stdout: Buffer[] = []; const stderr: Buffer[] = []
-      const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs)
+      const child = spawn(this.executable, args, { env,windowsHide:true, stdio: ['ignore','pipe','pipe'] }); const stdout: Buffer[] = []; const stderr: Buffer[] = []
+      let failure:unknown
+      const abort=()=>{failure=signal?.reason??new Error('baidu_command_aborted');child.kill('SIGKILL')}
+      signal?.addEventListener('abort',abort,{once:true})
+      if(signal?.aborted)abort()
+      const timer = setTimeout(() => {failure=new Error('baidu_command_timeout');child.kill('SIGKILL')}, timeoutMs)
       timer.unref()
       let stdoutBytes=0,stderrBytes=0
       child.stdout.on('data', chunk => {
@@ -59,7 +64,10 @@ export class BaiduPcsClient implements ArtifactArchiveClient {
         const part=Buffer.from(chunk).subarray(0,remaining)
         stderr.push(part);stderrBytes+=part.length
       })
-      child.once('error', error => {clearTimeout(timer);reject(error)}); child.once('close', code => { clearTimeout(timer); resolve({ code: code ?? -1,
+      child.once('error', error => {failure=error;clearTimeout(timer)}); child.once('close', code => {
+        clearTimeout(timer);signal?.removeEventListener('abort',abort)
+        if(failure){reject(failure);return}
+        resolve({ code: code ?? -1,
         stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') }) })
     })
   }
