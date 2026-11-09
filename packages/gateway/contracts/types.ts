@@ -776,3 +776,5 @@ export type GitCommitMetadata = {
 
 export type NativeMemberParentRun = Pick<Run, "run_id" | "conversation_id" | "created_at" | "status" | "version">;
 export type NativeMemberParentPage = {conversation_id: string; items: NativeMemberParentRun[]; next_cursor?: string; execution_authorized: false};
+
+export type InteractionHistoryPage={conversation_id:string;run_id?:string;items:Interaction[];next_cursor?:string;execution_authorized:false};

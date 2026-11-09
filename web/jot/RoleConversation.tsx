@@ -10,6 +10,7 @@ import {messageFiles} from './message-files.mjs';
 import {artifactPreviewErrorMessage,fetchVerifiedArtifactPreviewBytes} from './artifact-preview-bytes.mjs';
 import {formatDocumentPreviewContent,isDocumentPreviewMediaType} from './document-preview-content.mjs';
 import InteractionCard from './InteractionCard';
+import InteractionHistory from './InteractionHistory';
 import ConversationGoal from './ConversationGoal';
 import VoiceInput from './VoiceInput';
 import SkillCatalogPanel from './SkillCatalogPanel';
@@ -285,6 +286,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  {state&&<>
   <ConversationDisplayBoundary label="上下文整理状态"><CompactionActivities activities={activityValues} runs={state.runs}/></ConversationDisplayBoundary>
   <ConversationDisplayBoundary label="公开步骤历史"><ActivityHistory conversationId={id} {...(state.snapshotSeq?{snapshotSeq:state.snapshotSeq}:{})} requestVersion={activityHistoryRequest} onLoaded={retainActivityHistory}/></ConversationDisplayBoundary>
+  <ConversationDisplayBoundary label="问题与确认历史"><InteractionHistory key={id} conversationId={id}/></ConversationDisplayBoundary>
   <ConversationDisplayBoundary label="工具时间线"><ActivityTimeline conversationId={id} activities={activityValues} runs={state.runs} onOpenMember={setSelectedNativeMember} {...(activityReveal?{reveal:activityReveal}:{})}/></ConversationDisplayBoundary>
  </>}
   {selectedNativeMember&&<section ref={nativeMemberPanel} tabIndex={-1} aria-label="父步骤关联的原成员执行">

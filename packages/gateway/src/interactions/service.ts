@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import { withImmediateTransaction } from '../db/database.ts';
+import { withImmediateTransaction,withReadTransaction } from '../db/database.ts';
 import type { EventStore } from '../events/event-store.ts';
 import {createBrowserActionInteraction,readBrowserActionInteraction,type BrowserActionObservation,type BrowserActionRequest} from './browser-action-approval.ts';
 
@@ -19,7 +19,36 @@ export class InteractionService {
   private readonly db: DatabaseSync;
   private readonly events: EventStore;
   private readonly taskResponder:TaskResponder|undefined;
-  constructor(db: DatabaseSync, events: EventStore,taskResponder?:TaskResponder) { this.db = db; this.events = events;this.taskResponder=taskResponder; }
+  constructor(db: DatabaseSync, events: EventStore,taskResponder?:TaskResponder) {
+    this.db = db; this.events = events;this.taskResponder=taskResponder;
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_ga_interactions_history ON ga_interactions(conversation_id,created_at,id);
+      CREATE INDEX IF NOT EXISTS idx_ga_interactions_run_history ON ga_interactions(conversation_id,run_id,created_at,id);`);
+  }
+
+  history(conversationId:string,ownerId:string,query:{cursor?:unknown;run_id?:unknown;limit?:unknown}={}){
+    const id=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
+    const cursor=query.cursor,runId=query.run_id,limit=query.limit===undefined?10:Number(query.limit);
+    if(!id.test(conversationId)||cursor!==undefined&&(typeof cursor!=='string'||!id.test(cursor))
+      ||runId!==undefined&&(typeof runId!=='string'||!id.test(runId))
+      ||query.limit!==undefined&&typeof query.limit!=='string'&&typeof query.limit!=='number'
+      ||!Number.isSafeInteger(limit)||limit<1||limit>25)throw Error('interaction_history_query_invalid');
+    return withReadTransaction(this.db,()=>{
+      if(!this.db.prepare('SELECT 1 FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId))throw Error('conversation_not_found');
+      if(runId!==undefined&&!this.db.prepare('SELECT 1 FROM ga_runs WHERE id=? AND conversation_id=?').get(runId as string,conversationId))throw Error('run_not_found');
+      const scope=runId===undefined?'conversation_id=?':'conversation_id=? AND run_id=?';
+      const bindings=runId===undefined?[conversationId]:[conversationId,runId as string];
+      const boundary=cursor===undefined?undefined:this.db.prepare(`SELECT created_at,id FROM ga_interactions WHERE ${scope} AND id=?`)
+        .get(...bindings,cursor as string) as {created_at:string;id:string}|undefined;
+      if(cursor!==undefined&&!boundary)throw Error('interaction_history_query_invalid');
+      const rows=this.db.prepare(`SELECT * FROM ga_interactions WHERE ${scope}
+        ${boundary?'AND (created_at<? OR (created_at=? AND id<?))':''} ORDER BY created_at DESC,id DESC LIMIT ?`)
+        .all(...bindings,...(boundary?[boundary.created_at,boundary.created_at,boundary.id]:[]),limit+1) as Array<Record<string,unknown>>;
+      const selected=rows.slice(0,limit),last=selected.at(-1);
+      return {conversation_id:conversationId,...(runId!==undefined?{run_id:runId}:{}),items:selected.map(row=>({...this.value(row),interaction_id:String(row.id),run_id:String(row.run_id),created_at:String(row.created_at)})),
+        ...(rows.length>limit&&last?{next_cursor:String(last.id)}:{}),execution_authorized:false};
+    });
+  }
+
 
   list(conversationId: string, ownerId: string, status = 'pending') {
     const owner = this.db.prepare('SELECT 1 FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId, ownerId);

@@ -727,7 +727,7 @@ export async function buildServer(config: {
     if (['workspace_change_busy','project_deleted','project_has_active_tasks','project_has_pending_operations'].includes(code)) return reply.code(409).send({error:{code:code.toUpperCase()}});
     if (code.endsWith('_not_found')) return reply.code(404).send({ error: { code: code.toUpperCase() } });
     if (['reply_review_mode_conflict','reply_draft_corrupt','reply_review_state_conflict','task_wait_response_required','version_conflict','memory_dream_policy_version_conflict', 'active_run_model_change', 'run_state_conflict', 'run_version_conflict', 'checkpoint_invalid', 'reconciliation_required', 'interaction_kind_conflict', 'interaction_state_conflict', 'interaction_version_conflict', 'interaction_expired', 'action_digest_mismatch', 'idempotency_conflict', 'idempotency_in_progress', 'voice_idempotency_conflict', 'STALE_FILE_VERSION', 'IDEMPOTENCY_CONFLICT', 'crawl_batch_owner_mismatch'].includes(code)) return reply.code(409).send({ error: { code: code.toUpperCase() } });
-    if (['reply_evidence_unverified','interaction_answer_invalid', 'interaction_decision_invalid', 'upload_size_invalid', 'upload_sha256_invalid', 'upload_filename_invalid', 'upload_size_mismatch', 'upload_sha256_mismatch','upload_batch_invalid', 'artifact_diff_unsupported', 'source_evidence_required', 'source_url_invalid', 'invalid_project_title', 'invalid_conversation_state', 'FILE_REQUEST_INVALID', 'TEMPLATE_CONTENT_INVALID', 'UNSUPPORTED_FORMAT_OPERATION', 'requested_count_invalid', 'event_seq_invalid', 'input_index_invalid', 'item_id_invalid', 'owner_id_invalid', 'run_id_invalid', 'batch_id_invalid', 'conversation_id_invalid', 'crawl_url_invalid'].includes(code)) return reply.code(422).send({ error: { code: code.toUpperCase() } });
+    if (['reply_evidence_unverified','interaction_answer_invalid','interaction_history_query_invalid', 'interaction_decision_invalid', 'upload_size_invalid', 'upload_sha256_invalid', 'upload_filename_invalid', 'upload_size_mismatch', 'upload_sha256_mismatch','upload_batch_invalid', 'artifact_diff_unsupported', 'source_evidence_required', 'source_url_invalid', 'invalid_project_title', 'invalid_conversation_state', 'FILE_REQUEST_INVALID', 'TEMPLATE_CONTENT_INVALID', 'UNSUPPORTED_FORMAT_OPERATION', 'requested_count_invalid', 'event_seq_invalid', 'input_index_invalid', 'item_id_invalid', 'owner_id_invalid', 'run_id_invalid', 'batch_id_invalid', 'conversation_id_invalid', 'crawl_url_invalid'].includes(code)) return reply.code(422).send({ error: { code: code.toUpperCase() } });
     if (['upload_state_conflict'].includes(code)) return reply.code(409).send({ error: { code: code.toUpperCase() } });
     if (code === 'origin_forbidden' || code === 'csrf_invalid') return reply.code(403).send({ error: { code: code.toUpperCase() } });
     if (code === 'idempotency_key_invalid') return reply.code(400).send({ error: { code: 'IDEMPOTENCY_KEY_INVALID' } });
@@ -1160,6 +1160,10 @@ export async function buildServer(config: {
   });
   app.get('/v1/conversations/:conversationId/snapshot', async request =>
     buildSnapshot(db, (request.params as { conversationId: string }).conversationId, actor(request as any)));
+  app.get('/v1/conversations/:conversationId/interaction-history', async (request,reply) => {
+    reply.header('cache-control','no-store');
+    return interactions.history((request.params as {conversationId:string}).conversationId,actor(request as any),request.query as {cursor?:unknown;run_id?:unknown;limit?:unknown});
+  });
   app.get('/v1/conversations/:conversationId/interactions', async request => {
     const query = request.query as { status?: string };
     return interactions.list((request.params as { conversationId: string }).conversationId, actor(request as any), query.status ?? 'pending');

@@ -207,7 +207,7 @@ export function registerWorkbenchProxy(app,config,localCsrf){
    const binaryDownload=req.method==='GET'&&/^\/v1\/workspaces\/[^/]+\/files\/binary$/.test(suffix);
   if(binary&&!Buffer.isBuffer(req.body))return reply.code(415).send({error:{code:'BINARY_UPLOAD_REQUIRED'}});
   if(req.body!==undefined)headers['content-type']=binary?'application/octet-stream':'application/json';
-   if(binary||binaryDownload||/^\/v1\/runs\/[^/]+\/native-member-executions$/.test(suffix)||/^\/v1\/runs\/[^/]+\/native-members\/[^/]+\/execution$/.test(suffix)||/^\/v1\/conversations\/[^/]+\/(?:activities|native-member-runs)$/.test(suffix)||/^\/v1\/workspaces\/[^/]+\/memory\/import(?:\/|$)/.test(suffix)||/^\/v1\/projects\/[^/]+\/git(?:\/|$)/.test(suffix))reply.header('cache-control','private, no-store');
+   if(binary||binaryDownload||/^\/v1\/runs\/[^/]+\/native-member-executions$/.test(suffix)||/^\/v1\/runs\/[^/]+\/native-members\/[^/]+\/execution$/.test(suffix)||/^\/v1\/conversations\/[^/]+\/(?:activities|native-member-runs|interaction-history)$/.test(suffix)||/^\/v1\/workspaces\/[^/]+\/memory\/import(?:\/|$)/.test(suffix)||/^\/v1\/projects\/[^/]+\/git(?:\/|$)/.test(suffix))reply.header('cache-control','private, no-store');
    const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),binary||binaryDownload?120000:30000);
   req.raw.once('aborted',()=>controller.abort());reply.raw.once('close',()=>controller.abort());
   try{
