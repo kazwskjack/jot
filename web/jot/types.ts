@@ -93,6 +93,10 @@ export type InteractionReceipt = { accepted: true; interaction_id: string; run_i
 
 export type Artifact = { artifact_id: string; conversation_id: string; run_id?: string; file_name: string; relative_path?: string; media_type: string; size_bytes: number; sha256: string; version: number; status: "quarantined" | "ready" | "rejected" | "deleted"; created_at: string; preview_kind: "text" | "image" | "unsupported"; origin: "upload" | "generated" | "edited"; local_state?: "present" | "deleted" | "restoring"; backup_status?: "pending" | "retry" | "verified" | "failed"; remote_path?: string; restorable?: boolean };
 
+export type ArtifactVersionPage = { artifact_id: string; conversation_id: string; current_version: number; items: Artifact[]; next_before_version?: number };
+
+export type {ArtifactBackup, ArtifactRestoreReceipt} from "../../packages/gateway/contracts/types";
+
 export type UploadInit = { file_name: string; media_type: string; size_bytes: number; sha256: string };
 export type RunArtifact = {run_id:string;conversation_id:string;artifact_id:string;version:number;file_name:string;media_type:string;size_bytes:number;sha256:string;status:string;created_at:string;download_url:string;local_state?:Artifact['local_state'];backup_status?:Artifact['backup_status']};
 

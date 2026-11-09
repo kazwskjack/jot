@@ -329,6 +329,7 @@ export async function buildServer(config: {
   };
   const interactions = new InteractionService(db,events,taskInteractionResponder);
   const idempotencyRequests = new WeakMap<object, { owner: string; operation: string; key: string }>();
+  const isArtifactRestoreRoute=(request:any)=>request.method==='POST'&&request.routeOptions.url==='/v1/artifacts/:artifactId/restore';
   const isUploadCancelRoute=(request:any)=>request.method==='DELETE'&&['/v1/uploads/:uploadId','/v1/upload-batches/:batchId'].includes(request.routeOptions.url);
   const isUploadRoute=(request:any)=>isUploadCancelRoute(request)||['/v1/conversations/:conversationId/uploads','/v1/conversations/:conversationId/upload-batches','/v1/uploads/:uploadId/content','/v1/uploads/:uploadId/complete'].includes(request.routeOptions.url);
   const isMemoryImportRoute=(request:any)=>request.method==='POST'&&['/v1/workspaces/:workspaceId/memory/import/preview','/v1/workspaces/:workspaceId/memory/import/:importId/apply'].includes(request.routeOptions.url);
@@ -376,7 +377,7 @@ export async function buildServer(config: {
   ]);
   const isPersistentTaskMutationRoute=(request:any)=>persistentTaskMutationRoutes.has(`${request.method} ${request.routeOptions.url}`);
   const isPluginProfileMutationRoute=(request:any)=>request.routeOptions.config?.pluginProfileMutation===true;
-  const atomicProtocol=(request:any)=>isPluginProfileMutationRoute(request)?PLUGIN_PROFILE_RECEIPT_PROTOCOL:isPersistentTaskMutationRoute(request)?'persistent-task-atomic-v1':isWorkspaceSelectionRoute(request)?'workspace-selection-atomic-v1':isProjectMutationRoute(request)?'project-metadata-atomic-v1':isConversationForkRoute(request)?'conversation-fork-atomic-v1':isFileLifecycleRoute(request)?'file-lifecycle-atomic-v1':isIndexAdmissionRoute(request)?'git-index-admission-atomic-v1':isIndexControlAdmissionRoute(request)?'git-index-control-admission-atomic-v1':isPublicationAdmissionRoute(request)?'work-publication-admission-atomic-v1':isPublicationReviewRoute(request)?'work-publication-review-atomic-v1':isGitReviewRoute(request)?'git-review-atomic-v1':isRunCommandRoute(request)?'run-command-atomic-v1':isModeMutationRoute(request)?'conversation-mode-atomic-v1':isDiscoveryPolicyRoute(request)?'discovery-policy-atomic-v1':isGoalResumeRoute(request)?'conversation-goal-resume-atomic-v1':isMcpMutationRoute(request)?'workbench-mcp-atomic-v1':isUploadRoute(request)?'upload-atomic-v1':isMemoryImportRoute(request)?'memory-import-atomic-v1':isMemoryRestoreRoute(request)?'memory-restore-atomic-v1':isMemoryConsolidationRoute(request)?'memory-consolidation-atomic-v1':isMemoryBrainRoute(request)?'memory-brain-atomic-v1':isMemoryCaptureRoute(request)?'memory-capture-atomic-v1':isMemoryDreamPolicyRoute(request)?'memory-dream-policy-atomic-v1':null;
+  const atomicProtocol=(request:any)=>isArtifactRestoreRoute(request)?'artifact-restore-atomic-v2':isPluginProfileMutationRoute(request)?PLUGIN_PROFILE_RECEIPT_PROTOCOL:isPersistentTaskMutationRoute(request)?'persistent-task-atomic-v1':isWorkspaceSelectionRoute(request)?'workspace-selection-atomic-v1':isProjectMutationRoute(request)?'project-metadata-atomic-v1':isConversationForkRoute(request)?'conversation-fork-atomic-v1':isFileLifecycleRoute(request)?'file-lifecycle-atomic-v1':isIndexAdmissionRoute(request)?'git-index-admission-atomic-v1':isIndexControlAdmissionRoute(request)?'git-index-control-admission-atomic-v1':isPublicationAdmissionRoute(request)?'work-publication-admission-atomic-v1':isPublicationReviewRoute(request)?'work-publication-review-atomic-v1':isGitReviewRoute(request)?'git-review-atomic-v1':isRunCommandRoute(request)?'run-command-atomic-v1':isModeMutationRoute(request)?'conversation-mode-atomic-v1':isDiscoveryPolicyRoute(request)?'discovery-policy-atomic-v1':isGoalResumeRoute(request)?'conversation-goal-resume-atomic-v1':isMcpMutationRoute(request)?'workbench-mcp-atomic-v1':isUploadRoute(request)?'upload-atomic-v1':isMemoryImportRoute(request)?'memory-import-atomic-v1':isMemoryRestoreRoute(request)?'memory-restore-atomic-v1':isMemoryConsolidationRoute(request)?'memory-consolidation-atomic-v1':isMemoryBrainRoute(request)?'memory-brain-atomic-v1':isMemoryCaptureRoute(request)?'memory-capture-atomic-v1':isMemoryDreamPolicyRoute(request)?'memory-dream-policy-atomic-v1':null;
   const readBrainReceipt=(request:any,owner:string,value:unknown)=>{
     const receipt=value as {publication_id?:unknown}|null;
     if(!receipt||typeof receipt.publication_id!=='string')throw Error('brain_publication_receipt_invalid');
@@ -535,7 +536,7 @@ export async function buildServer(config: {
             .run(owner,operation,idempotencyKey,requestHash));
           if(upgraded.changes===1){idempotencyRequests.set(request,{owner,operation,key:idempotencyKey});return;}
         }
-        if((isPersistentTaskMutationRoute(request)||isWorkspaceSelectionRoute(request)||isProjectMutationRoute(request)||isConversationForkRoute(request)||isFileLifecycleRoute(request)||isGitReviewRoute(request)||isIndexAdmissionRoute(request)||isIndexControlAdmissionRoute(request)||isPublicationReviewRoute(request)||isPublicationAdmissionRoute(request)||isRunCommandRoute(request)||isModeMutationRoute(request)||isDiscoveryPolicyRoute(request)||isGoalResumeRoute(request)||isMcpMutationRoute(request)||isMemoryImportRoute(request)||isMemoryRestoreRoute(request)||isMemoryConsolidationRoute(request)||isMemoryCaptureRoute(request)||isMemoryBrainRoute(request)||isMemoryDreamPolicyRoute(request))&&existing.receipt_protocol===atomicProtocol(request)){idempotencyRequests.set(request,{owner,operation,key:idempotencyKey});return;}
+        if((isArtifactRestoreRoute(request)||isPersistentTaskMutationRoute(request)||isWorkspaceSelectionRoute(request)||isProjectMutationRoute(request)||isConversationForkRoute(request)||isFileLifecycleRoute(request)||isGitReviewRoute(request)||isIndexAdmissionRoute(request)||isIndexControlAdmissionRoute(request)||isPublicationReviewRoute(request)||isPublicationAdmissionRoute(request)||isRunCommandRoute(request)||isModeMutationRoute(request)||isDiscoveryPolicyRoute(request)||isGoalResumeRoute(request)||isMcpMutationRoute(request)||isMemoryImportRoute(request)||isMemoryRestoreRoute(request)||isMemoryConsolidationRoute(request)||isMemoryCaptureRoute(request)||isMemoryBrainRoute(request)||isMemoryDreamPolicyRoute(request))&&existing.receipt_protocol===atomicProtocol(request)){idempotencyRequests.set(request,{owner,operation,key:idempotencyKey});return;}
         if(isUploadRoute(request)&&existing.receipt_protocol==='upload-atomic-v1'){
           if(request.method==='PUT'){
             const uploadId=String((request.params as Record<string,unknown>).uploadId),upload=db.prepare('SELECT status,declared_size,received_size,declared_sha256,actual_sha256,writer_token,writer_lease_until FROM ga_uploads WHERE id=? AND owner_id=?').get(uploadId,owner) as Record<string,unknown>|undefined;
@@ -728,7 +729,7 @@ export async function buildServer(config: {
     if (code.endsWith('_not_found')) return reply.code(404).send({ error: { code: code.toUpperCase() } });
     if (['reply_review_mode_conflict','reply_draft_corrupt','reply_review_state_conflict','task_wait_response_required','version_conflict','memory_dream_policy_version_conflict', 'active_run_model_change', 'run_state_conflict', 'run_version_conflict', 'checkpoint_invalid', 'reconciliation_required', 'interaction_kind_conflict', 'interaction_state_conflict', 'interaction_version_conflict', 'interaction_expired', 'action_digest_mismatch', 'idempotency_conflict', 'idempotency_in_progress', 'voice_idempotency_conflict', 'STALE_FILE_VERSION', 'IDEMPOTENCY_CONFLICT', 'crawl_batch_owner_mismatch'].includes(code)) return reply.code(409).send({ error: { code: code.toUpperCase() } });
     if (['reply_evidence_unverified','interaction_answer_invalid','interaction_history_query_invalid', 'interaction_decision_invalid', 'upload_size_invalid', 'upload_sha256_invalid', 'upload_filename_invalid', 'upload_size_mismatch', 'upload_sha256_mismatch','upload_batch_invalid', 'artifact_diff_unsupported', 'source_evidence_required', 'source_url_invalid', 'invalid_project_title', 'invalid_conversation_state', 'FILE_REQUEST_INVALID', 'TEMPLATE_CONTENT_INVALID', 'UNSUPPORTED_FORMAT_OPERATION', 'requested_count_invalid', 'event_seq_invalid', 'input_index_invalid', 'item_id_invalid', 'owner_id_invalid', 'run_id_invalid', 'batch_id_invalid', 'conversation_id_invalid', 'crawl_url_invalid'].includes(code)) return reply.code(422).send({ error: { code: code.toUpperCase() } });
-    if (['upload_state_conflict'].includes(code)) return reply.code(409).send({ error: { code: code.toUpperCase() } });
+    if (['artifact_not_restorable','artifact_restore_required','upload_state_conflict'].includes(code)) return reply.code(409).send({ error: { code: code.toUpperCase() } });
     if (code === 'origin_forbidden' || code === 'csrf_invalid') return reply.code(403).send({ error: { code: code.toUpperCase() } });
     if (code === 'idempotency_key_invalid') return reply.code(400).send({ error: { code: 'IDEMPOTENCY_KEY_INVALID' } });
     if(code==='ordinary_attachment_steering_unavailable')return reply.code(503).send({error:{code:'ORDINARY_ATTACHMENT_STEERING_UNAVAILABLE'}});
@@ -1236,10 +1237,21 @@ export async function buildServer(config: {
     const query = request.query as { version?: string };
     return artifacts.get((request.params as { artifactId: string }).artifactId, actor(request as any), query.version ? Number(query.version) : undefined);
   });
-  app.get('/v1/artifacts/:artifactId/backup-status', async request =>
-    artifacts.backupStatus((request.params as { artifactId: string }).artifactId, actor(request as any)));
-  app.post('/v1/artifacts/:artifactId/restore', async (request, reply) => reply.code(202).send(
-    artifacts.requestRestore((request.params as { artifactId: string }).artifactId, actor(request as any))));
+  app.get('/v1/artifacts/:artifactId/versions', async (request, reply) => {
+    reply.header('cache-control','private, no-store');
+    return artifacts.versions((request.params as {artifactId:string}).artifactId, actor(request as any), request.query as {limit?:unknown;before_version?:unknown});
+  });
+  app.get('/v1/artifacts/:artifactId/backup-status', async (request, reply) => {
+    reply.header('cache-control','private, no-store');
+    return artifacts.backupStatus((request.params as {artifactId:string}).artifactId, actor(request as any));
+  });
+  app.post('/v1/artifacts/:artifactId/restore', async (request, reply) => {
+    const input = request.body ?? {};
+    if (!input || typeof input !== 'object' || Array.isArray(input)
+      || Object.keys(input).some(key => key !== 'expected_version')) throw new Error('invalid_artifact_restore');
+    return reply.code(202).send(atomicCommand(request,202,()=>artifacts.requestRestore(
+      (request.params as {artifactId:string}).artifactId, actor(request as any), (input as {expected_version?:number}).expected_version)));
+  });
   app.get('/v1/artifacts/:artifactId/preview', async request => {
     const query = request.query as { version?: string };
     return artifacts.preview((request.params as { artifactId: string }).artifactId, actor(request as any), query.version ? Number(query.version) : undefined);

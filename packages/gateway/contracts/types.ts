@@ -161,9 +161,13 @@ export type RunArtifact = { run_id: string; conversation_id: string; artifact_id
 
 export type RunArtifactPage = { items: Array<RunArtifact> };
 
-export type ArtifactBackup = { artifact_id: string; backup_status: ArtifactBackupStatus; local_state: "present" | "deleted" | "restoring"; remote_path?: string; remote_size?: number; verified_at?: string; restorable: boolean };
+export type ArtifactBackup = { artifact_id: string; backup_status: ArtifactBackupStatus; local_state: "present" | "deleted" | "restoring"; remote_path?: string; remote_size?: number; verified_at?: string; restorable: boolean; version?: number; restore_protocol?: 2; last_error?: string };
 
-export type ArtifactRestoreReceipt = { accepted: true; artifact_id: string; status: "ready" | "restoring" };
+export type ArtifactRestoreReceipt = { accepted: true; artifact_id: string; status: "ready" | "restoring"; version?: number; restore_protocol?: 2 };
+
+export type ArtifactVersionPage = { artifact_id: string; conversation_id: string; current_version: number; items: Artifact[]; next_before_version?: number };
+
+export type ArtifactRestoreRequest = { expected_version?: number };
 
 export type UploadInit = { file_name: string; media_type: string; size_bytes: number; sha256: string };
 

@@ -3,7 +3,7 @@ import { basename, join,dirname,resolve,sep } from 'node:path';
 import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync,writeFileSync,lstatSync,opendirSync } from 'node:fs';
 import { once } from 'node:events';
 import type { DatabaseSync } from 'node:sqlite';
-import { withImmediateTransaction } from '../db/database.ts';
+import { withImmediateTransaction, withReadTransaction } from '../db/database.ts';
 import { canonicalJson } from '../db/canonical-json.ts';
 import { detectContentType } from './content-type.ts';
 import {sameTaskFileLocation} from '../persistent-tasks/output-content.ts';
@@ -1074,32 +1074,62 @@ export class ArtifactService {
       ...(typeof meta.relative_path==='string'?{relative_path:meta.relative_path}:{}),
       media_type: row.mime_type, size_bytes: Number(row.size_bytes), sha256: row.sha256,
       version: Number(row.version), status: meta.status==='delivered'?'ready':meta.status, created_at: row.created_at,
-      preview_kind: meta.preview_kind, origin: meta.origin,
+      preview_kind: meta.preview_kind, origin: meta.origin === 'file_engine' ? 'edited' : ['runtime','trusted_template'].includes(meta.origin) ? 'generated' : meta.origin,
       local_state: archive?.local_state ?? 'present', backup_status: archive?.backup_status ?? 'pending',
       ...(archive?.remote_path ? { remote_path: archive.remote_path } : {}),
       restorable: Boolean(archive?.remote_path) };
   }
 
-  backupStatus(id: string, ownerId: string) {
-    const artifact = this.get(id, ownerId)
-    const archive = this.db.prepare(`SELECT backup_status,local_state,remote_path,remote_size,verified_at,last_error
-      FROM ga_artifact_archives WHERE artifact_id=?`).get(id) as Record<string, unknown> | undefined
-    return { artifact_id: id, backup_status: archive?.backup_status ?? 'pending',
-      local_state: archive?.local_state ?? 'present', ...(archive?.remote_path ? { remote_path: archive.remote_path } : {}),
-      ...(archive?.remote_size !== null && archive?.remote_size !== undefined ? { remote_size: Number(archive.remote_size) } : {}),
-      ...(archive?.verified_at ? { verified_at: archive.verified_at } : {}), restorable: artifact.restorable,
-      ...(archive?.last_error ? { last_error: String(archive.last_error) } : {}) }
+  versions(id: string, ownerId: string, query: {limit?: unknown; before_version?: unknown} = {}) {
+    const limit = query.limit === undefined ? 20 : Number(query.limit);
+    const before = query.before_version === undefined ? undefined : Number(query.before_version);
+    if ([query.limit,query.before_version].some(value => value !== undefined && (typeof value !== 'number' && typeof value !== 'string' || typeof value === 'string' && !/^[1-9][0-9]*$/.test(value)))
+      || Object.keys(query).some(key => key !== 'limit' && key !== 'before_version')
+      || !Number.isSafeInteger(limit) || limit < 1 || limit > 50
+      || before !== undefined && (!Number.isSafeInteger(before) || before < 1)) throw new Error('invalid_artifact_version_query');
+    return withReadTransaction(this.db, () => {
+      const current = this.get(id, ownerId);
+      if (before !== undefined) {
+        if (before > current.version) throw new Error('invalid_artifact_version_query');
+        this.version(id, ownerId, before);
+      }
+      const rows = this.db.prepare(`SELECT version FROM ga_artifact_versions
+        WHERE artifact_id=? AND version<=? AND (? IS NULL OR version<?)
+        ORDER BY version DESC LIMIT ?`).all(id, current.version, before ?? null, before ?? null, limit + 1) as Array<{version: number}>;
+      const selected = rows.slice(0, limit);
+      return {artifact_id: id, conversation_id: current.conversation_id, current_version: current.version,
+        items: selected.map(row => this.get(id, ownerId, Number(row.version))),
+        ...(rows.length > limit ? {next_before_version: Number(selected.at(-1)!.version)} : {})};
+    });
   }
 
-  requestRestore(id: string, ownerId: string) {
-    this.get(id, ownerId)
-    const row = this.db.prepare('SELECT backup_status,local_state,remote_path FROM ga_artifact_archives WHERE artifact_id=?')
-      .get(id) as Record<string, unknown> | undefined
-    if (!row || row.backup_status !== 'verified' || !row.remote_path) throw new Error('artifact_not_restorable')
-    if (row.local_state === 'present') return { accepted: true, artifact_id: id, status: 'ready' }
-    this.db.prepare("UPDATE ga_artifact_archives SET local_state='restoring',updated_at=? WHERE artifact_id=?")
-      .run(new Date().toISOString(), id)
-    return { accepted: true, artifact_id: id, status: 'restoring' }
+  backupStatus(id: string, ownerId: string) {
+    return withReadTransaction(this.db, () => {
+      const artifact = this.get(id, ownerId)
+      const archive = this.db.prepare(`SELECT backup_status,local_state,remote_path,remote_size,verified_at,last_error
+        FROM ga_artifact_archives WHERE artifact_id=?`).get(id) as Record<string, unknown> | undefined
+      return { artifact_id: id, version: artifact.version, restore_protocol: 2, backup_status: archive?.backup_status ?? 'pending',
+        local_state: archive?.local_state ?? 'present', ...(archive?.remote_path ? { remote_path: archive.remote_path } : {}),
+        ...(archive?.remote_size !== null && archive?.remote_size !== undefined ? { remote_size: Number(archive.remote_size) } : {}),
+        ...(archive?.verified_at ? { verified_at: archive.verified_at } : {}), restorable: artifact.restorable,
+        ...(archive?.last_error ? { last_error: String(archive.last_error) } : {}) }
+    });
+  }
+
+  requestRestore(id: string, ownerId: string, expectedVersion?: number) {
+    if (expectedVersion !== undefined && (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1)) throw new Error('invalid_artifact_restore');
+    return withImmediateTransaction(this.db, () => {
+      const artifact = this.get(id, ownerId);
+      if (expectedVersion !== undefined && artifact.version !== expectedVersion) throw new Error('version_conflict');
+      const row = this.db.prepare('SELECT backup_status,local_state,remote_path FROM ga_artifact_archives WHERE artifact_id=?')
+        .get(id) as Record<string, unknown> | undefined;
+      if (!row || row.backup_status !== 'verified' || !row.remote_path) throw new Error('artifact_not_restorable');
+      const status = row.local_state === 'present' ? 'ready' : 'restoring';
+      if (row.local_state === 'deleted') this.db.prepare("UPDATE ga_artifact_archives SET local_state='restoring',last_error=NULL,updated_at=? WHERE artifact_id=?")
+        .run(new Date().toISOString(), id);
+      return {accepted: true, artifact_id: id, status,
+        ...(expectedVersion !== undefined ? {version: artifact.version, restore_protocol: 2} : {})};
+    });
   }
 
   download(id: string, ownerId: string, version?: number) {

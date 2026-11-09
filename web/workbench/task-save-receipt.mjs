@@ -63,3 +63,33 @@ export class WorkspaceSelectionStore {
  saveCommand(command){if(command===null){this.complete();return;}this.validate(command);this.storage.setItem(this.key,JSON.stringify(command));}
  complete(){this.storage.removeItem(this.key);}
 }
+
+
+export class ArtifactRecoveryStore {
+ constructor(storage,scope,artifactId){
+  if(!/^[a-f0-9]{64}$/.test(scope)||!/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/.test(artifactId))throw new Error('文件恢复范围尚未确认');
+  this.storage=storage;this.key=`jot-artifact-recovery/v1/${scope}/${artifactId}`;this.path=`/artifacts/${encodeURIComponent(artifactId)}/restore`;
+ }
+ validate(command){
+  if(!command||typeof command!=='object'||Array.isArray(command)||Object.keys(command).sort().join(',')!=='body,key,method,path'
+   ||command.path!==this.path||command.method!=='POST'||typeof command.key!=='string'||!/^[!-~]{8,128}$/.test(command.key)
+   ||!command.body||typeof command.body!=='object'||Array.isArray(command.body)||Object.keys(command.body).join(',')!=='expected_version'
+   ||!Number.isSafeInteger(command.body.expected_version)||command.body.expected_version<1)throw new Error('文件恢复回执无法读取');
+ }
+ read(){
+  const raw=this.storage.getItem(this.key);if(raw===null)return null;
+  if(raw.length>4096)throw new Error('文件恢复回执无法读取');
+  const command=JSON.parse(raw);this.validate(command);return {command};
+ }
+ saveCommand(command,expected){
+  if(command===null){this.complete(expected);return;}
+  this.validate(command);const current=this.read()?.command;
+  if(current&&JSON.stringify(current)!==JSON.stringify(command))throw new Error('请先确认原文件恢复请求');
+  this.storage.setItem(this.key,JSON.stringify(command));
+ }
+ complete(expected){
+  const current=this.read()?.command;
+  if(current&&current.key!==expected?.key)throw new Error('文件恢复回执已变化');
+  this.storage.removeItem(this.key);
+ }
+}

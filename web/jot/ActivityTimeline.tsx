@@ -106,7 +106,7 @@ export default function ActivityTimeline({conversationId,activities,runs,reveal,
   {groups.map(group=><ActivityGroup key={`${selected}:${group.id}`} group={group} {...(run?{run}:{})} onSelectRun={selectRun} onOpenArtifact={(activity,target)=>setArtifact({conversationId,runId:activity.run_id,activityId:activity.activity_id,target})} availableRuns={availableRuns} {...(onOpenMember?{onOpenMember}:{})} {...(reveal?{reveal}:{})}/>)}
   {artifact&&artifact.conversationId===conversationId&&artifact.runId===selected&&<section aria-label="已选步骤文件">
    <button type="button" data-chat-search-ignore onClick={()=>setArtifact(undefined)}>关闭步骤文件</button>
-   <ActivityArtifactDetails key={JSON.stringify(artifact)} conversationId={conversationId} target={artifact.target}/>
+   <ActivityArtifactDetails key={JSON.stringify([conversationId,artifact.runId,artifact.activityId,artifact.target.artifactId])} conversationId={conversationId} target={artifact.target} onOpen={target=>setArtifact(prior=>prior&&prior.conversationId===conversationId&&prior.target.artifactId===target.artifactId?{...prior,target}:prior)}/>
   </section>}
  </section>;
 }
