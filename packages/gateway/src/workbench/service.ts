@@ -1862,6 +1862,7 @@ export class WorkbenchService {
     let content:Buffer,descriptor:number|undefined;
     try{
       const named=lstatSync(blob,{bigint:true});
+      if(named.isSymbolicLink())throw new Error('workspace_path_escape');
       if(!named.isFile()||named.nlink!==1n||named.size!==BigInt(Number(row.size)))throw new Error('file_integrity_failed');
       const sameFile=(value:typeof named)=>value.dev===named.dev&&value.ino===named.ino&&value.mode===named.mode
         &&value.nlink===named.nlink&&value.size===named.size&&value.mtimeNs===named.mtimeNs&&value.ctimeNs===named.ctimeNs;
