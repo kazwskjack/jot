@@ -85,3 +85,26 @@ export function readIsolatedTaskFileVersion(db:DatabaseSync,source:TaskFileSourc
   return {source:{source:'isolated',cycle_id:source.cycle_id,snapshot_id:source.snapshot_id,isolated_receipt_id:source.isolated_receipt_id},path:source.path,version:source.version,sha256:source.sha256,size:source.size,content};
  }catch{throw fail();}
 }
+
+export type IsolatedTaskFileDeletion=Omit<Extract<TaskFileSource,{source:'isolated'}>,'source'|'native'|'sha256'|'size'>&{previous_sha256:string;previous_size:number};
+/** Historical absence is backed by the original delete journal and saved execution proof. */
+export function readIsolatedTaskFileDeletion(db:DatabaseSync,owner:string,isolatedReceiptId:string):IsolatedTaskFileDeletion{
+ try{
+  const row=db.prepare(`SELECT e.receipt_id,e.result_hash,e.call_id,e.run_id,w.request_hash,w.response_json AS ledger_json,
+   r.response_json,i.operation_json FROM wb_isolated_file_results r JOIN wb_isolated_file_intents i ON i.call_key=r.call_key
+   JOIN wb_run_bindings b ON b.run_id=json_extract(i.identity_json,'$.run_id') AND b.owner_id=?
+   JOIN wb_task_execution_receipts e ON e.run_id=b.run_id AND e.call_id=json_extract(i.identity_json,'$.call_id') AND e.operation='files.delete'
+   JOIN wb_tool_receipts w ON w.run_id=e.run_id AND w.call_id=e.call_id WHERE r.receipt_id=?`).get(owner,isolatedReceiptId) as Row|undefined;
+  if(!row)throw fail();
+  const {operation,...args}=JSON.parse(row.operation_json),{execution_receipt,...original}=JSON.parse(row.ledger_json),saved=JSON.parse(row.response_json);
+  if(row.request_hash!==sha(canonicalJson({operation,args}))
+   ||canonicalJson(execution_receipt)!==canonicalJson({kind:'tool_receipt',reference:row.receipt_id,hash:row.result_hash})
+   ||canonicalJson(original)!==canonicalJson(saved)||sha(JSON.stringify(original))!==row.result_hash)throw fail();
+  const facts=isolatedDeleteFacts(db,row.run_id,row.call_id,saved);
+  if(facts.owner_id!==owner)throw fail();
+  return {receipt_id:row.receipt_id,isolated_receipt_id:isolatedReceiptId,run_id:facts.run_id,owner_id:facts.owner_id,
+   workspace_id:facts.workspace_id,project_id:facts.project_id,task_id:facts.task_id,occurrence_id:facts.occurrence_id,
+   cycle_id:facts.cycle_id,snapshot_id:facts.snapshot_id,path:facts.path,version:facts.version,conversation_id:facts.conversation_id,
+   previous_sha256:facts.previous_sha256,previous_size:facts.previous_size};
+ }catch{throw fail();}
+}
