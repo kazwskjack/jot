@@ -1,3 +1,5 @@
+export const mutationRejected=error=>Number.isInteger(error?.status)&&error.status>=400&&error.status<500&&error.status!==408&&error.message!=='IDEMPOTENCY_IN_PROGRESS';
+
 // Current-page idempotency receipt. Network failure is not proof of rejection.
 export class TaskSaveReceipt {
  /**
@@ -11,7 +13,7 @@ export class TaskSaveReceipt {
   if(!this.command){const command={path,method,body:structuredClone(body),key:this.key()};this.store?.saveCommand(command);this.command=command;}
   const command=this.command;this.busy=true;
   try{const result=await request(command.path,command.method,structuredClone(command.body),command.key);this.store?.complete(command);this.command=null;return result;}
-  catch(error){if(Number.isInteger(error?.status)&&error.status>=400&&error.status<500&&error.status!==408&&error.message!=='IDEMPOTENCY_IN_PROGRESS'){this.store?.saveCommand(null,command);this.command=null;}throw error;}
+  catch(error){if(mutationRejected(error)){this.store?.saveCommand(null,command);this.command=null;}throw error;}
   finally{this.busy=false;}
  }
 }

@@ -57,27 +57,27 @@ without the new proof needs a fresh review, not silently upgraded authority.
 
 ## Task2: Original commit intent and immutable acceptance
 
-- [ ] Freeze exact operator author/committer policy, complete message bytes,
+- [x] Freeze exact operator author/committer policy, complete message bytes,
 parent/unborn/detached target, object format, staged-tree evidence and original
 review/version. Project configuration is a reference, never browser command/env.
-- [ ] Add commit as its own typed effect to the original owning operation
+- [x] Add commit as its own typed effect to the original owning operation
 lifecycle and SAME physical DB/reservation/Worker namespace. Audit every immutable
 journal decoder, schema hash, old consumer and coordinator before migration;
 retain old stage/unstage and file-publication receipts byte-for-byte.
-- [ ] Separate atomic acceptance from native physical effects. Cached responses
+- [x] Separate atomic acceptance from native physical effects. Cached responses
 check current owner and never reauthorize a cancelled review. Complete strict
 shared contracts, original BFF, status/history and unchanged default capabilities.
 
 ## Task3: Actual native commit and interrupted outcome
 
-- [ ] Prepare exact tree/commit objects in private output without loading source
+- [x] Prepare exact tree/commit objects in private output without loading source
 hooks/signing/includes. Retain original root/ref/index/object and native-family
 custody; acquire/journal canonical lock ownership before original physical writes.
-- [ ] Publish only the reviewed object graph and compare-and-swap the exact
+- [x] Publish only the reviewed object graph and compare-and-swap the exact
 original ref or detached HEAD under original synchronous approval/lease fences.
 Record expected old/new OID and append-only per-effect facts BEFORE publication.
 Do not run raw `git commit` against untrusted source config.
-- [ ] Normal completion settles only after original producer/native drain.
+- [x] Normal completion settles only after original producer/native drain.
 After process exit, lost response, changed root/ref/index, lease takeover or
 revoked owner, reconcile recorded object/ref facts with fresh original custody.
 Never auto-create another commit, roll back external effects, claim an unknown
@@ -85,13 +85,19 @@ ref update failed, delete another writer's locks or treat expired lease as drain
 
 ## Task4: Original mobile commit UI and complete acceptance
 
-- [ ] Show exact reviewed staged tree, complete staged selection, parent/target,
+- [x] Show exact reviewed staged tree, complete staged selection, parent/target,
 message and configured author policy; explicit review/approval then original
 admission/dispatch. Reuse original same-key remount recovery and history.
-- [ ] Verify actual React/BFF/Gateway/separate-SDK process commit, reload without
-recommit, index/working bytes unchanged, exact parent/tree/message, unborn and
-SHA256, explicit cancellation and unknown-result disposition.
-- [ ] Run the focused process-effect matrix, complete Gateway/root/UI gates,
-adapter compatibility, local builds and original privacy/complete-history review
-before scoped non-force publication. Real provider/platform/deployment acceptance
-remains independently required; commit is not a remote push permission.
+- [x] Connect actual React/BFF/Gateway and original separate-SDK Host source
+entry points for commit, reload/history recovery, exact staged tree/parent/message,
+SHA256, unborn/detached state, explicit cancellation and unknown-result disposition.
+- [x] Deliver the scoped source changes through the existing development branch
+and non-force Git push. P09 continues branch/worktree/destructive/revert/remote work.
+
+## Development-only execution update
+
+The user removed future testing and acceptance work from the implementation plan.
+The completed Task1 historical verification records above remain historical. Tasks
+2–4 are tracked as source-development completion. This increment did not run tests,
+typechecks, builds, SDK/native commands, migrations, UI acceptance or deployment.
+The full absorption objective continues through the remaining implementation batches.

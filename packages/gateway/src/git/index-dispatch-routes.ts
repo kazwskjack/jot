@@ -17,7 +17,6 @@ export function registerIndexDispatchRoutes(app:FastifyInstance,options:Options)
    if(!recovery){
     if(before.execution.state==='applied'&&before.workspace_state==='released_settled')return before;
     if(before.execution.state!=='pending'||before.producer.state!=='not_started'||before.control!==null)throw Error('git_index_reconciliation_required');
-    if(before.execution.action==='commit')throw Error('git_commit_execution_unavailable');
     if(!options.client)throw Error('git_index_dispatch_unavailable');
     const scope:NativeGitRequest=Object.freeze({owner_id:owner,project_id:project,execution_id:id,operation_kind:'git_index'});
     await options.client.execute(scope,abort.signal);abort.signal.throwIfAborted();

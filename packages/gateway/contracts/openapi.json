@@ -17636,7 +17636,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Dispatch and recovery retain the original execution ID, current owner, native custody, producer facts and physical database lineage. A read-only status check follows native completion."
       }
     },
     "/v1/projects/{projectId}/git/executions/{executionId}/resolve": {
@@ -17777,7 +17778,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Dispatch and recovery retain the original execution ID, current owner, native custody, producer facts and physical database lineage. A read-only status check follows native completion."
       }
     },
     "/v1/projects/{projectId}/git/history": {
@@ -38607,6 +38609,16 @@
               "stage",
               "unstage"
             ]
+          },
+          "commit_projects": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"
+            }
           }
         },
         "required": [
@@ -38622,8 +38634,17 @@
               }
             },
             "not": {
-              "required": [
-                "index_actions"
+              "anyOf": [
+                {
+                  "required": [
+                    "index_actions"
+                  ]
+                },
+                {
+                  "required": [
+                    "commit_projects"
+                  ]
+                }
               ]
             }
           },

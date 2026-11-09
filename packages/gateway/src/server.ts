@@ -33,6 +33,7 @@ import {registerGitRoutes} from './git/routes.ts';
 import {GitMutationIntents} from './git/intents.ts';
 import {registerGitReviewRoutes} from './git/review-routes.ts';
 import {GitIndexExecutions} from './git/index-executions.ts';
+import {gitCommitExecutionSchema} from './git/commit-execution-upgrade.ts';
 import {registerGitExecutionHistoryRoutes} from './git/execution-history-routes.ts';
 import {registerIndexDispatchRoutes} from './git/index-dispatch-routes.ts';
 import {registerGitWorkspaceSource} from './git/workspace-source-route.ts';
@@ -938,7 +939,7 @@ export async function buildServer(config: {
     }
     return {
       api_version: '1.0', event_schema_version: '1.0', adapter_version: '0.1.0',
-      git_workbench:gitWorkbench.capability(ownerId,config.nativeGitClient!==undefined),
+      git_workbench:gitWorkbench.capability(ownerId,config.nativeGitClient!==undefined,gitCommitExecutionSchema(db)==='commit'),
       capabilities: { search: true, fetch: true, browser_interaction: false, file_read: true,
         file_edit: true, command_execution: true, questions: true, approvals: true,
         artifact_download: true, resume_checkpoint: true },

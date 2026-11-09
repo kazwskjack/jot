@@ -143,8 +143,7 @@ A never-started commit admission can be explicitly ended through the existing
 versioned control and not-dispatched receipt transaction. That path requires no
 producer, native preparation, dispatch, outcome or workspace reservation. Original
 index evidence cannot be interpreted as a commit receipt. Native commit preparation, writing and explicit unknown-effect settlement now use
-the original execution service as described below. Public HTTP/browser commit
-dispatch remains gated. The browser shows retained commit admissions and their
+the original execution service as described below. Public commit dispatch follows the project-scoped configured capability. The browser shows retained commit admissions and their
 pending, closed or typed applied state.
 
 This increment was developed by source inspection only. No test, build, migration,
@@ -169,7 +168,7 @@ checked before and after preparation in the host service.
 The material is retained in the kernel. Host callers receive a frozen one-attempt
 plan, and persisted JSON cannot reconstruct writable plan identity. The original native Host and execution service consume the plan without exporting
 its private buffers. Original repository objects, index and refs are untouched by this
-preparation path. Public HTTP/browser commit dispatch remains gated. This source increment
+preparation path. Public commit dispatch follows the project-scoped configured capability. This source increment
 has no runtime, test, build or native-command execution evidence.
 
 
@@ -199,7 +198,7 @@ unknown links and replaced roots are retained for explicit recovery.
 A host-only publication continuation runs inside those locks. The configured
 kernel now supplies ref CAS, reflog facts and read-only observation as described
 below. Original execution-service journal consumers and native recovery now use this
-proof. Public HTTP/browser commit dispatch remains gated. No runtime command,
+proof. Public commit dispatch follows the project-scoped configured capability. No runtime command,
 test, build, migration or production operation was executed for this increment.
 
 
@@ -234,8 +233,7 @@ Partial states remain unknown. This observation grants no producer/lease authori
 and reconstructs no writable plan.
 
 The original execution-service journal, typed applied receipts, native custody
-consumers and explicit settlement are connected as described below. Public
-HTTP/browser commit dispatch remains gated. This increment has source and Git-delivery evidence only.
+consumers and explicit settlement are connected as described below. Public commit dispatch follows the project-scoped configured capability. This increment has source and Git-delivery evidence only.
 Tests, typechecks, builds, native commands, migrations and deployment were not run.
 
 
@@ -268,8 +266,8 @@ records only the original outcome, cleans the ref phase before object locks, and
 settles the original reservation after the native Host's final check and drain.
 It never creates another commit or a replacement producer finish. Transfer/revocation
 and changed-root handling remain constrained by the original owner/native fences.
-The remaining P08 work includes the complete recovery-scope audit and public commit
-review/admission/dispatch UI with same-request recovery.
+The audited recovery and public commit review/admission/dispatch entry points
+are described below.
 
 Native operator repository bindings accept `git_directory`, `common_directory` and
 exact `commit_identity` fields under the same policy rules as Gateway. Optional
@@ -278,3 +276,52 @@ matching bindings and identity policy for the original reviewed witness.
 
 This is development-only source delivery. No test, typecheck, build, SDK/native
 command, migration, UI acceptance or deployment was run.
+
+
+## Scoped public commit workflow
+
+`git_workbench.commit_projects` identifies current-owner repositories with the
+original native transport, typed commit storage and configured operator identities.
+The field is omitted when those conditions are absent. Original index capability
+and readonly shapes remain valid. Every native effect repeats the original owner,
+review/version, identity-policy, lease, physical database and custody checks.
+
+The public workflow shows all server-reviewed staged paths, the complete message,
+identities and times, parent/target and tree/object format. Approval enables an
+explicit admission button. Successful admission exposes a separate dispatch button.
+Original request retries and restored admission hints confirm the saved receipt.
+Atomic commands share the original terminal-rejection predicate. A confirmed
+rejection clears the component command together with its receipt hint, so a fresh
+state read and owner confirmation use the new version. Network loss, 408, 5xx and
+idempotency-in-progress retain the original pending command.
+The same original history discovers pending and completed operations after reload.
+Applied views display the actual commit/tree OIDs and original target/parent.
+Legacy metadata-less reviews remain cancellable.
+
+Review text describes approval state separately from execution status. Completed
+control receipts with unverified lock cleanup keep that fact visible. Long branch,
+identity and hash values wrap in the existing mobile layout. Commit selection
+uses the original complete staged selection and 100-path review limit.
+
+## Recovery source audit
+
+The original producer start/finish journal, native family source and resident/cold
+barriers remain on the public commit path. Before new native effects, an interrupted
+producer blocks the startable predicate. Applied/unknown effects read through the
+same original journal on retries. Lost responses use original acceptance/history
+and explicit control receipts. The family barrier holds factory admission plus
+resident maintenance or cold persistence handles, and checks source membership,
+inbox/tool/remote closure and native signals through the awaited operation.
+
+Root, ref, index, lease and owner changes meet the original guards at each phase.
+Ref/log/graph observation classifies exact old/new facts and preserves partial
+states as unknown. Original owner loss fences further access/effects and retains
+its namespace and records. Recorded original drain evidence remains internally
+readable for maintenance after transfer. Current ownership and the configured
+original binding are prerequisites for fresh explicit recovery. Published effects
+and existing producer finishes retain their original lineage.
+
+P08 source development is connected through React, BFF, Gateway, original local
+transport and the installed SDK Host composition. This delivery includes source
+inspection, paired contract-object comparison and Git publication. Tests, builds,
+SDK execution, UI rendering, migration and production acceptance were not run.

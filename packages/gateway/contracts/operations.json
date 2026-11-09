@@ -1374,7 +1374,7 @@
     "GitIndexDispatchInput",
     "GitIndexStatus",
     "200",
-    "Original ownership, review, native custody and database drain proof; no automatic retry."
+    "Dispatch and recovery retain the original execution ID, current owner, native custody, producer facts and physical database lineage. A read-only status check follows native completion."
   ],
   [
     "POST",
@@ -1383,7 +1383,7 @@
     "GitIndexControlInput",
     "GitIndexResolutionResult",
     "200",
-    "Original ownership, review, native custody and database drain proof; no automatic retry."
+    "Dispatch and recovery retain the original execution ID, current owner, native custody, producer facts and physical database lineage. A read-only status check follows native completion."
   ],
   [
     "GET",
