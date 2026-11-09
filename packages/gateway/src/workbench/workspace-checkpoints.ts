@@ -171,7 +171,7 @@ export class WorkspaceCheckpointService{
   const requestSha=sha({owner_id:owner,workspace_id:workspaceId,project_id:project,paths});
   const prior=this.db.prepare('SELECT checkpoint_id,request_sha256 FROM wb_workspace_checkpoint_intents WHERE owner_id=? AND workspace_id=? AND project_id=? AND command_key=?').get(owner,workspaceId,project,key) as Row|undefined;
 
-  if(prior){if(prior.request_sha256!==requestSha)throw failure('idempotency_conflict');const checkpointId=String(prior.checkpoint_id),ready=this.db.prepare('SELECT 1 FROM wb_workspace_checkpoint_ready WHERE checkpoint_id=?').get(checkpointId);if(ready)return this.get(owner,workspaceId,project,checkpointId);throw failure('workspace_checkpoint_prepare_unknown');}
+  if(prior){if(prior.request_sha256!==requestSha)throw failure('idempotency_conflict');const checkpointId=String(prior.checkpoint_id),ready=this.db.prepare('SELECT 1 FROM wb_workspace_checkpoint_ready WHERE checkpoint_id=?').get(checkpointId);if(ready)return this.get(owner,workspaceId,project,checkpointId);return this.resumeCreate(owner,workspaceId,project,checkpointId,input);}
   const pin=await this.captureSource(owner,workspaceId,project,paths),storage=await rootIdentity(this.storageRoot);
   if(!storage)throw failure('workspace_checkpoint_storage_missing');if(pin.root&&rootsOverlap(pin.root.canonical,storage.canonical))throw failure('workspace_checkpoint_roots_overlap');
   let checkpointId=makeId('workspace-checkpoint');const intent={checkpoint_id:checkpointId,owner_id:owner,workspace_id:workspaceId,project_id:project,command_key:key,request_sha256:requestSha,source_revision:pin.revision,root_identity_json:rootJson(pin.root),paths_json:canonicalJson(paths),source_facts_json:canonicalJson(pin.facts),manifest_json:canonicalJson(pin.manifest),manifest_sha256:workspaceManifestHash(pin.manifest),created_at:new Date(this.now()).toISOString()};let reused=false;
@@ -179,7 +179,7 @@ export class WorkspaceCheckpointService{
     if(raced){if(raced.request_sha256!==requestSha)throw failure('idempotency_conflict');checkpointId=String(raced.checkpoint_id);reused=true;return;}
     this.db.prepare(`INSERT INTO wb_workspace_checkpoint_intents VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(intent.checkpoint_id,intent.owner_id,intent.workspace_id,intent.project_id,intent.command_key,intent.request_sha256,intent.source_revision,intent.root_identity_json,intent.paths_json,intent.source_facts_json,intent.manifest_json,intent.manifest_sha256,intent.created_at);});
-  if(reused){const ready=this.db.prepare('SELECT 1 FROM wb_workspace_checkpoint_ready WHERE checkpoint_id=?').get(checkpointId);if(ready)return this.get(owner,workspaceId,project,checkpointId);throw failure('workspace_checkpoint_prepare_unknown');}
+  if(reused){const ready=this.db.prepare('SELECT 1 FROM wb_workspace_checkpoint_ready WHERE checkpoint_id=?').get(checkpointId);if(ready)return this.get(owner,workspaceId,project,checkpointId);return this.resumeCreate(owner,workspaceId,project,checkpointId,input);}
   this.notify('checkpoint_intent_committed',{checkpoint_id:checkpointId});
   const guard=this.guard(owner,workspaceId,project,input),signal=this.signal(input),byPath=new Map(pin.facts.filter((fact):fact is FileFact=>fact.kind==='file').map(fact=>[fact.path,fact]));
   try{
@@ -187,6 +187,11 @@ export class WorkspaceCheckpointService{
     assertCurrent:()=>this.assertSource(pin),read:path=>{const fact=byPath.get(path);if(!fact||!pin.root)throw failure('workspace_checkpoint_source_changed');return readBlob(pin.root,fact,()=>this.assertSource(pin));}});
    await this.assertSource(pin);this.insertReady(checkpointId,snapshot,pin.revision);return this.get(owner,workspaceId,project,checkpointId);
   }catch(error){const artifact=this.db.prepare('SELECT 1 FROM wb_workspace_checkpoint_artifacts WHERE checkpoint_id=?').get(checkpointId);if(artifact)throw failure('workspace_checkpoint_prepare_unknown');throw failure(error instanceof Error&&/^workspace_checkpoint_[a-z_]+$/.test(error.message)?error.message:error instanceof Error&&/^workspace_/.test(error.message)?error.message:'workspace_checkpoint_prepare_failed');}
+ }
+ private async resumeCreate(owner:string,workspaceId:string,project:string,checkpointId:string,controls:Controls){
+  const result=await this.reconcileCreate(owner,workspaceId,project,checkpointId,controls);
+  if(result.state==='unresolved')throw failure('workspace_checkpoint_prepare_unknown');
+  return result;
  }
  async reconcileCreate(owner:string,workspaceId:string,project:string,checkpointId:string,controls:Controls={}){
   this.signal(controls);this.validateScope(owner,workspaceId,project);const intent=this.intent(checkpointId);if(intent.owner_id!==owner||intent.workspace_id!==workspaceId||intent.project_id!==project)throw failure('workspace_checkpoint_not_found');
