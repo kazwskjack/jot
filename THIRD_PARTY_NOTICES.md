@@ -91,3 +91,14 @@ GNU Affero General Public License v3.0 terms. The complete upstream license
 is retained at `packages/session-adapter/runtime-patches/PILOTDECK-AGPL-3.0.txt`.
 Jot binds history loading to its original authorized message pagination and
 uses non-mutating browser range highlights with visible message/snippet fallback.
+
+## PilotDeck activity timeline presentation
+
+`web/jot/ActivityTimeline.tsx` adapts phase grouping and expandable nested tool
+history behavior from `ui/src/components/chat-v2/AgentTimeline.tsx` and
+`ui/src/components/chat/tools/components/SubagentContainer.tsx` at PilotDeck
+revision `783499ffdb2d501bf590b2e035acd027a882df10`. Adapted portions retain
+upstream GNU Affero General Public License v3.0 terms. The complete upstream
+license is retained at `packages/session-adapter/runtime-patches/PILOTDECK-AGPL-3.0.txt`.
+Jot uses its original public activity/run identities and typed detail fields,
+with missing/cyclic-parent handling and bounded step pages.

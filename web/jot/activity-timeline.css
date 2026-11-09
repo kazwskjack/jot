@@ -1,0 +1,12 @@
+.jot-activity-timeline{margin-block:12px;min-width:0}
+.jot-activity-timeline>label,.jot-activity-timeline>small{display:block;margin-block:8px;overflow-wrap:anywhere}
+.jot-activity-timeline select{max-width:100%;font:inherit}
+.jot-activity-group{margin-block:8px;border-inline-start:2px solid currentColor;padding-inline-start:10px}
+.jot-activity-group summary{cursor:pointer}
+.jot-activity-group li{margin-block:8px;overflow-wrap:anywhere}
+.jot-activity-group li>small{display:block}
+.jot-activity-group dl{margin-block:8px}
+.jot-activity-group dt{font-weight:600}
+.jot-activity-group dd{white-space:pre-wrap;overflow-wrap:anywhere;max-height:200px;overflow:auto;margin-inline-start:12px}
+.jot-activity-group nav{display:flex;align-items:center;gap:8px}
+.jot-display-recovery{border:1px solid currentColor;border-radius:8px;padding:10px;margin-block:8px}

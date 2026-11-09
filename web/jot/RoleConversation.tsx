@@ -16,6 +16,8 @@ import SkillCatalogPanel from './SkillCatalogPanel';
 import NativeCommandQueries from './NativeCommandQueries';
 import {catalogMountForRun,skillGestureDraft} from './skill-catalog-mount.js';
 import CompactionActivities from './CompactionActivities';
+import ActivityTimeline from './ActivityTimeline';
+import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 import RunDiagnostics from './RunDiagnostics';
 import {RunCancelWriter} from './run-cancel.mjs';
 import {ConversationModeWriter,conversationModeSupport} from './conversation-mode.mjs';
@@ -27,7 +29,7 @@ import ConversationHistorySearch from './ConversationHistorySearch';
 import {AssistantReplyQuoteAction,AssistantReplyQuotes,replyQuoteMessage,type AssistantReplyQuote} from './AssistantReplyQuote';
 import {appendVoiceText} from './voice-draft-controller.mjs';
 import {goalPrompt,latestGoalRun} from './goal-controller.mjs';
-import type {Artifact,Run,Capabilities,Preview,Conversation,ModelSelection,Message} from './types';
+import type {Artifact,Run,Capabilities,Preview,Conversation,ModelSelection,Message,Activity} from './types';
 const active=(run:Run)=>['queued','starting','running','waiting_user','waiting_approval','cancelling'].includes(run.status);
 type ConversationProps={ordinary?:boolean;id:string;onClose:()=>void;onTaskSource?:(source:TaskSourceSelection)=>void;onForkConversation?:(conversationId:string,receipt:unknown)=>void};
 export default function RoleConversation(props:ConversationProps){
@@ -121,6 +123,11 @@ function NativeMemberControls({run}:{run:Run}){
   {Object.values(actionStates).map(action=><p role="status" key={action.requestId}>{action.member.name} · {actionMessage(action)} {action.operation==='interrupt'&&action.state==='unknown'&&<><button type="button" disabled={busy} onClick={()=>void inspectAction(action)}>检查原中断回执</button><button type="button" disabled={loading||busy} onClick={()=>void refresh()}>检查成员状态</button></>} {action.operation==='wake'&&['pending','unknown'].includes(action.state)&&<button type="button" disabled={busy} onClick={()=>void inspectAction(action)}>检查原请求状态</button>}</p>)}
  </section>;
 }
+function ConversationMessageBody({message}:{message:Message}){
+ return <div data-chat-search-message={message.message_id} {...(message.role==='assistant'?{'data-assistant-quote-source':'','data-assistant-quote-message-id':message.message_id}:{})}>
+  {message.blocks.filter(block=>block.kind==='text').map(block=><TwemojiMarkdown key={block.block_id}>{block.text}</TwemojiMarkdown>)}
+ </div>;
+}
 function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinary=false}:ConversationProps){
  const [,render]=useState(0),[draft,setDraft]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false),[expanded,setExpanded]=useState<Record<string,boolean>>({}),[maxBytes,setMaxBytes]=useState<number>(),[preview,setPreview]=useState<{name:string;text?:string;url?:string;unsupported?:boolean;truncated?:boolean;loading?:boolean}>(),[forkStates,setForkStates]=useState<Record<string,{state:string;retryable:boolean;error:string}>>({});
  const [voice,setVoice]=useState<Capabilities['voice']>(),[voiceBusy,setVoiceBusy]=useState(false),draftRef=useRef(draft),conversationRegion=useRef<HTMLElement>(null),previewRequest=useRef<AbortController|undefined>(undefined);
@@ -150,6 +157,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  useEffect(()=>()=>previewRequest.current?.abort(),[]);
  useEffect(()=>{const warn=(event:BeforeUnloadEvent)=>{if(replyQuotes.length||uploads.entries.length||controller.pendingMessage||goalPending||voiceBusy||modeWriter.pending||cancelWriter.pending){event.preventDefault();event.returnValue='';}};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);},[uploads,controller,goalPending,voiceBusy,modeWriter.pending,cancelWriter.pending,replyQuotes.length]);
  const state=controller.state,run=state?(Object.values(state.runs) as Run[]).find(active):undefined;
+ const activityValues=useMemo(()=>Object.values(state?.activities??{}) as Activity[],[state?.activities]);
  const displayedMessages=useMemo(()=>{
   const current:Record<string,Message>=state?.messages??{};
   const currentIds=new Set(Object.keys(current));
@@ -241,7 +249,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  });
  const download=(file:Artifact)=>void action(async()=>{const response=await fetch(`${base}/v1/artifacts/${encodeURIComponent(file.artifact_id)}/download?version=${file.version}`,{credentials:'same-origin'});if(!response.ok)throw new Error('文件暂不可下载');const url=URL.createObjectURL(await response.blob());const link=document.createElement('a');link.href=url;link.download=file.file_name;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
  return <section ref={conversationRegion} tabIndex={-1} className="workbench-conversation jot-goal-stop-focus-target" aria-label={ordinary?"Ordinary conversation":"Role conversation"}><button disabled={busy||goalPending||controller.pendingMessage||replyQuotes.length>0||uploads.entries.length>0||modelMutation.pending||modeWriter.pending||cancelWriter.pending} onClick={onClose}>返回工作台</button><h2>{ordinary?'我的对话':'角色对话'}</h2>{ordinary&&conversation&&<button type="button" className="jot-conversation-mode" style={{fontStyle:'italic',fontWeight:700,background:'transparent',border:0,color:'inherit'}} aria-label={`切换到 ${chatMode?'work':'chat'}`} disabled={!canToggle} onClick={()=>void saveMode()}>{chatMode?'chat':'work'}</button>}<p role="status">{controller.connection==='connected'?'已连接':controller.connection==='reconnecting'?'正在重新连接':'正在连接'}{run?` · ${run.status}`:''}</p>{controller.error&&<p role="alert">{controller.error}</p>}
- <ConversationHistorySearch root={conversationRegion} conversationId={id} messages={displayedMessages} renderedRevision={renderedMessages} revealedMessageId={historySelection} ready={Boolean(state)} onReveal={revealHistoryMessage} {...(state?.historyComplete!==undefined?{historyComplete:state.historyComplete}:{})} {...(state?.nextHistoryCursor?{historyCursor:state.nextHistoryCursor}:{})} onHistoryLoaded={retainHistory}/>
+ <ConversationDisplayBoundary label="会话搜索"><ConversationHistorySearch root={conversationRegion} conversationId={id} messages={displayedMessages} renderedRevision={renderedMessages} revealedMessageId={historySelection} ready={Boolean(state)} onReveal={revealHistoryMessage} {...(state?.historyComplete!==undefined?{historyComplete:state.historyComplete}:{})} {...(state?.nextHistoryCursor?{historyCursor:state.nextHistoryCursor}:{})} onHistoryLoaded={retainHistory}/></ConversationDisplayBoundary>
  {!ordinary&&run&&['starting','running'].includes(run.status)&&<NativeMemberControls key={`native-member-controls:${run.run_id}`} run={run}/>}
  {ordinary&&conversation&&!chatMode&&<div inert={cancelWriter.pending||controller.pendingMessage}><ConversationGoal key={id} id={id} running={run?.status==='running'} runStatus={run?.status} controlRun={state?latestGoalRun(Object.values(state.runs),id):undefined} onResumeAccepted={()=>{void controller.refresh().catch(()=>{});}} onStopCompleted={focusConversationAfterStop} onPendingChange={setGoalPending}/></div>}
   {catalogMount&&<SkillCatalogPanel runId={catalogMount.runId} ownerScope={catalogMount.ownerScope} onUseSkill={name=>editDraft(skillGestureDraft(draftRef.current,name))}/>}
@@ -254,8 +262,11 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
    <NativeCommandQueries key={queryRecoveryMount.ownerScope+':'+queryRecoveryMount.runId+':plan'} planMode
     runId={queryRecoveryMount.runId} ownerScope={queryRecoveryMount.ownerScope} commands={[]} catalogSha256=""/>
   </details>}
-  {diagnosticRun&&<RunDiagnostics key={diagnosticRun.run_id} run={diagnosticRun}/>}
- {state&&<CompactionActivities activities={Object.values(state.activities)} runs={state.runs}/>}
+  {diagnosticRun&&<ConversationDisplayBoundary label="运行诊断"><RunDiagnostics key={diagnosticRun.run_id} run={diagnosticRun}/></ConversationDisplayBoundary>}
+ {state&&<>
+  <ConversationDisplayBoundary label="上下文整理状态"><CompactionActivities activities={activityValues} runs={state.runs}/></ConversationDisplayBoundary>
+  <ConversationDisplayBoundary label="工具时间线"><ActivityTimeline activities={activityValues} runs={state.runs}/></ConversationDisplayBoundary>
+ </>}
   {displayedMessages.length>200&&<nav aria-label="消息历史翻页">
    <span>{historyStart+1}–{Math.min(historyStart+200,displayedMessages.length)} / {displayedMessages.length} 条已加载消息</span>
    <button type="button" disabled={historyStart===0} onClick={()=>setHistorySelection(displayedMessages[Math.max(0,historyStart-150)]!.message_id)}>更早消息</button>
@@ -277,7 +288,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
      onNoEffect={()=>controller.refresh()}/>}
     {pendingForkForMessage&&!forkState?.error&&<p role="status">副本请求结果尚未确认；重试会复用原命令。</p>}
     {forkState?.error&&<p role="status">{forkState.error}</p>}
-    <div data-chat-search-message={message.message_id} {...(message.role==='assistant'?{'data-assistant-quote-source':'','data-assistant-quote-message-id':message.message_id}:{})}>{message.blocks.filter((block:any)=>block.kind==='text').map((block:any)=><TwemojiMarkdown key={block.block_id}>{block.text}</TwemojiMarkdown>)}</div>
+    <ConversationDisplayBoundary label="消息正文"><ConversationMessageBody message={message}/></ConversationDisplayBoundary>
     <div className={`jot-message-files ${message.role==='user'?'uploaded':''}`}>{(message.role==='user'||open?files:files.slice(0,3)).map(file=><React.Fragment key={`${file.artifact_id}:${file.version}`}>{message.role==='user'&&<button type="button" onClick={()=>showPreview(file)} disabled={busy}>预览 {file.relative_path||file.file_name}</button>}<button type="button" onClick={()=>download(file)} disabled={busy}>下载 {file.relative_path||file.file_name}</button></React.Fragment>)}</div>
     {message.role==='user'&&Object.hasOwn(message,'attachment_refs')&&(message.attachments?.length??0)>files.length&&<p role="status">原附件版本暂不可用，请重新添加文件。</p>}
     {message.role==='assistant'&&files.length>3&&<button onClick={()=>setExpanded(value=>({...value,[message.message_id]:!open}))}>{open?'收起':`展开其余 ${files.length-3} 个文件`}</button>}
