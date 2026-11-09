@@ -64,6 +64,12 @@ export class GitRepositoryInspection{
    }
   }}return hash(facts.sort().join('\n'));
  }
+ /** Original physical encoding, installed only after the initialization kernel
+  * checks the proven publication under its owning service's authority. */
+ protected bindInitializedRepository(root:string,git:string,executable:string,program:string){
+  this.binding=hash(JSON.stringify({root:this.root,git:this.gitDirectory,common:this.commonDirectory,
+   directories:[root,git,git],executable,program}));this.executable=executable;
+ }
  protected async anchors(signal?:AbortSignal){
   signal?.throwIfAborted();const directories=await Promise.all([this.directory(this.root),this.directory(this.gitDirectory),this.directory(this.commonDirectory)]);
   const dot=join(this.root,'.git'),entry=await lstat(dot);if(entry.isSymbolicLink())throw Error('git_repository_changed');

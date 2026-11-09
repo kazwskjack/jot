@@ -482,3 +482,42 @@ Public initialization dispatch remains gated. Initialization creation UI and ful
 reinitialization/linked/external/checkout/deletion/reference-backend scope continue.
 This increment followed the user's development-only instruction without runtime
 verification, tests, typechecks, builds, migrations or deployment.
+
+## Initialization original native lifecycle source increment
+
+Original protocol-7 admissions now enter the existing reservation and sealed
+workspace family. performReserved retains the original host-private custody,
+root association, native admission and placement checks. executeOriginal requires
+that custody and the original admission before preparing an initialization plan.
+The same original Worker lease and producer bracket the entire write attempt.
+
+Preparation records the private allocation before native Git runs. Acquiring
+locks checks that original preparation inside the existing immediate transaction.
+Dispatch records the generated metadata evidence. Publication checks that exact
+dispatch and inserts the strict public/private initialization outcome wrapper in
+the original outcome table. Producer finish reads initialization-specific phases.
+Existing native host code delegates to this same execution service and preserves
+its physical database lineage and final native handle drain behavior.
+
+Explicit original recovery now observes initialization effects, records a proven
+applied outcome when appropriate and cleans the original allocated scratch and
+empty locks. Partial effects remain unknown and use the existing acknowledged
+disposition. Recovery retains the original control and held Worker lease through
+native final checks and handle drain. Both newly generated and cached applied
+control receipts confirm physical binding under that fresh recovery authority.
+
+The initialization kernel installs the original physical repository hash encoding
+for the exact published root/.git and original program. Gateway cache adoption
+reads the original admission/outcome and requires released_settled with its
+existing producer/native drain proof. It rechecks current ownership, configured
+exclusion binding, immutable outcome and physical root/.git/program identities
+before adopting the new cache binding. Dispatch/recovery and settled retries call
+that owning-service method. The owning service supplies the physical facts and authority.
+
+The original HTTP dispatch/recovery routes now carry initialized operations through
+the authenticated native client. Admission still requires the installed explicit
+initialization storage flavor. Initialization capability and creation UI remain
+the next increment. Existing metadata/reinitialization, linked/external bindings,
+local/remote checkout, merged-safe deletion and reference backend coverage remain
+in full M15.14 scope. This increment is source development under the user's
+no-test/no-build instruction, with runtime behavior and deployment unexecuted.

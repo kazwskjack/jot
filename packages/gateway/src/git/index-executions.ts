@@ -1,3 +1,5 @@
+import {validateInitializationPreparation,readInitializationPreparation,readInitializationDispatch,readInitializationOutcome,initializationAppliedResult} from './initialization-journal.ts';
+import {gitInitializationPreparation,gitInitializationEvidence,gitInitializationReceipt,type GitInitializationEvidence} from './initialization-evidence.ts';
 import {GitInitializationIntents} from './initialization-intents.ts';
 import {validateBranchPreparation,readBranchPreparation,readBranchDispatch,branchAppliedResult} from './branch-journal.ts';
 import {readGitCreateBranchExecutionSource} from './branch-records.ts';
@@ -110,6 +112,28 @@ export class GitIndexExecutions{
   this.db.prepare('INSERT INTO wb_git_index_outcomes VALUES(?,?,?,?)').run(row.execution_id,JSON.stringify(receipt),digest(receipt),new Date(this.now()).toISOString());
   return receipt;
  }
+ private initializationOutcome(row:Row,evidence:GitInitializationEvidence,rawPublication:unknown){
+  const publication=gitInitializationReceipt(rawPublication,evidence);
+  const result=initializationAppliedResult(this.db,row,evidence);
+  const value={protocol:1,execution_id:row.execution_id,request_sha256:row.request_sha256,result,publication};
+  this.db.prepare('INSERT INTO wb_git_index_outcomes VALUES(?,?,?,?)').run(row.execution_id,JSON.stringify(value),digest(value),new Date(this.now()).toISOString());
+  return result;
+ }
+ /** Gateway cache adoption requires the original applied outcome and completed
+  * reservation settlement, including its existing producer/native drain proof. */
+ async adoptInitializationResult(owner:string,project:string,id:string,signal?:AbortSignal){
+  const row=this.row(owner,project,id);
+  if(row.action!=='init')return;
+  this.admission(row);if(this.get(owner,project,id).state!=='applied')return;
+  const outcome=readInitializationOutcome(this.db,row),evidence=readInitializationDispatch(this.db,row);
+  if(!outcome||!evidence||!row.binding_sha256)throw Error('git_execution_outcome_corrupt');
+  const guard=()=>{
+   signal?.throwIfAborted();this.admittedRow(owner,project,id);
+   if(this.git.executionBinding(owner,project)!==row.binding_sha256||readInitializationOutcome(this.db,row)?.sha256!==outcome.sha256
+    ||readWorkspaceOperation(this.db,{owner_id:owner,project_id:project,operation_kind:'git_index',operation_id:id,binding_sha256:row.binding_sha256!})?.state!=='released_settled')throw Error('git_execution_binding_unconfirmed');
+  };
+  guard();await this.git.indexEffects(owner,project).confirmInitializationBinding(evidence,outcome.publication,guard,signal);guard();
+ }
  private branchOutcome(row:Row,preparation:GitBranchPreparation){
   const receipt=branchAppliedResult(this.db,row,preparation);
   this.db.prepare('INSERT INTO wb_git_index_outcomes VALUES(?,?,?,?)').run(row.execution_id,JSON.stringify(receipt),digest(receipt),new Date(this.now()).toISOString());
@@ -161,7 +185,7 @@ export class GitIndexExecutions{
    this.assertResolutionFence(row);
    this.producers.assertStartable(row,this.resource(row));
    this.reviewSource(owner,project,row.intent_id,row.review_version,row.review_sha256);
-   if(![4,5,6].includes(row.protocol)||row.binding_sha256!==this.git.executionBinding(owner,project))throw Error('workspace_reservation_source_changed');
+   if(![4,5,6,7].includes(row.protocol)||row.binding_sha256!==this.git.executionBinding(owner,project))throw Error('workspace_reservation_source_changed');
    const source={owner_id:owner,project_id:project,operation_kind:'git_index' as const,operation_id:id,binding_sha256:row.binding_sha256};
    const reserved=reserveWorkspaceOperation(this.db,source);sealWorkspaceFamily(this.db,source);return reserved;
   });
@@ -171,7 +195,7 @@ export class GitIndexExecutions{
    const row=this.row(owner,project,id);this.admission(row);
    for(const table of ['wb_git_index_producers','wb_git_index_preparations','wb_git_index_dispatches','wb_git_index_ref_preparations','wb_git_index_outcomes'])
     if(this.db.prepare('SELECT 1 FROM '+table+' WHERE execution_id=?').get(id))throw Error('workspace_reservation_producer_unsettled');
-   if(![4,5,6].includes(row.protocol)||row.binding_sha256!==this.git.executionBinding(owner,project))throw Error('workspace_reservation_source_changed');
+   if(![4,5,6,7].includes(row.protocol)||row.binding_sha256!==this.git.executionBinding(owner,project))throw Error('workspace_reservation_source_changed');
    return releaseUnstartedWorkspaceOperation(this.db,{owner_id:owner,project_id:project,operation_kind:'git_index',operation_id:id,binding_sha256:row.binding_sha256});
   });
  }
@@ -184,7 +208,7 @@ export class GitIndexExecutions{
   return withImmediateTransaction(this.db,()=>{
    const row=this.row(owner,project,id);this.admission(row);
    this.reviewSource(owner,project,row.intent_id,row.review_version,row.review_sha256);
-   if(![4,5,6].includes(row.protocol)||row.binding_sha256!==this.git.executionBinding(owner,project))throw Error('workspace_reservation_source_changed');
+   if(![4,5,6,7].includes(row.protocol)||row.binding_sha256!==this.git.executionBinding(owner,project))throw Error('workspace_reservation_source_changed');
    return readReservedWorkspaceFamily(this.db,{owner_id:owner,project_id:project,operation_kind:'git_index',operation_id:id,binding_sha256:row.binding_sha256});
   });
  }
@@ -195,7 +219,7 @@ export class GitIndexExecutions{
   try{
    const row=this.admittedRow(owner,project,id),control=this.getResolutionAdmission(owner,project,id,request);
    this.get(owner,project,id);
-   if(![4,5,6].includes(row.protocol)||row.binding_sha256!==this.git.executionBinding(owner,project))throw Error('workspace_reservation_source_changed');
+   if(![4,5,6,7].includes(row.protocol)||row.binding_sha256!==this.git.executionBinding(owner,project))throw Error('workspace_reservation_source_changed');
    const family=readReservedWorkspaceFamily(this.db,{owner_id:owner,project_id:project,operation_kind:'git_index',operation_id:id,binding_sha256:row.binding_sha256});
    const value={reservation_id:family.reservation_id,owner_id:family.owner_id,project_id:family.project_id,binding_sha256:family.binding_sha256,members:family.members.map(({session_ref,scopes})=>({session_ref,scopes}))};
    const seal=this.db.prepare('SELECT family_json,record_sha256 FROM wb_workspace_reservation_families WHERE reservation_id=?').get(family.reservation_id);
@@ -216,7 +240,6 @@ export class GitIndexExecutions{
  async performReserved(owner:string,project:string,id:string,signal?:AbortSignal){
   if(this.db.isTransaction)throw Error('git_execution_transaction_invalid');signal?.throwIfAborted();const row=this.row(owner,project,id);this.admission(row);
   const prior=this.get(owner,project,id);if(prior.state!=='pending')return prior;
-  if(row.action==='init')throw Error('git_initialization_execution_unavailable');
   const host=this.nativeWorkspaceHost;if(!host)throw Error('git_native_workspace_host_unavailable');
   this.reserveWorkspace(owner,project,id);const family=this.workspaceFamily(owner,project,id);
   const placementScope={owner_id:owner,project_id:project,operation_kind:'git_index' as const,operation_id:id,binding_sha256:family.binding_sha256},placements=readReservedNativePlacements(this.db,placementScope);
@@ -252,8 +275,7 @@ export class GitIndexExecutions{
   const prior=this.db.prepare('SELECT * FROM wb_git_index_executions WHERE owner_id=? AND project_id=? AND request_id=?').get(owner,project,input.request_id) as Row|undefined;
   if(prior){if(prior.intent_id!==intent||prior.request_sha256!==requestHash)throw Error('idempotency_conflict');const current=this.get(owner,project,prior.execution_id);if(current.state!=='pending')return current;const row=this.row(owner,project,prior.execution_id);this.assertResolutionFence(row);this.producers.assertStartable(row,this.resource(prior));}
   signal?.throwIfAborted();const source=this.reviewSource(owner,project,intent,input.expected_version,input.review_sha256);
-  if(source.action==='init')throw Error('git_initialization_execution_unavailable');
-  if(source.action==='commit'||source.action==='create-branch'){if(!custody||!prior)throw Error('git_native_workspace_custody_invalid');this.admission(this.row(owner,project,prior.execution_id));}
+  if(source.action==='init'||source.action==='commit'||source.action==='create-branch'){if(!custody||!prior)throw Error('git_native_workspace_custody_invalid');this.admission(this.row(owner,project,prior.execution_id));}
   const admitted=withImmediateTransaction(this.db,()=>{
    signal?.throwIfAborted();this.reviewSource(owner,project,intent,input.expected_version,input.review_sha256);
    const row=this.registerExecution(owner,project,intent,input,requestHash,source);this.producers.assertStartable(row,this.resource(row));const lease=this.claim(row,custody);this.authority(row,lease,custody);this.producers.start(row,this.resource(row),lease);return{row,lease};
@@ -262,6 +284,32 @@ export class GitIndexExecutions{
   const authorize=()=>this.authority(row,lease,custody);
   const timer=setInterval(()=>{try{withImmediateTransaction(this.db,()=>{authorize();this.db.prepare('UPDATE ga_worker_leases SET expires_at=?,updated_at=? WHERE resource_id=? AND owner=? AND generation=?').run(String(this.now()+this.leaseMs),new Date(this.now()).toISOString(),this.resource(row),lease.owner,lease.generation);});}catch(error){abort.abort(error);}},Math.floor(this.leaseMs/3));timer.unref();
   try{
+   if(source.action==='init'){
+    const kernel=this.git.indexEffects(owner,project),plan=await this.git.prepareInitialization(owner,project,{...source,review_sha256:row.review_sha256},abort.signal);
+    authorize();
+    await kernel.applyInitialization(plan,{
+     authorize,
+     prepared:raw=>withImmediateTransaction(this.db,()=>{
+      authorize();const preparation=gitInitializationPreparation(raw);validateInitializationPreparation(this.db,row,preparation);
+      this.db.prepare('INSERT INTO wb_git_index_preparations VALUES(?,?,?,?,?,?)').run(row.execution_id,JSON.stringify(preparation),digest(preparation),lease.owner,lease.generation,new Date(this.now()).toISOString());
+     }),
+     acquire:(raw,install)=>withImmediateTransaction(this.db,()=>{
+      authorize();if(canonicalJson(readInitializationPreparation(this.db,row))!==canonicalJson(gitInitializationPreparation(raw)))throw Error('git_execution_evidence_corrupt');install();
+     }),
+     dispatch:raw=>withImmediateTransaction(this.db,()=>{
+      authorize();const evidence=gitInitializationEvidence(raw);validateInitializationPreparation(this.db,row,evidence.preparation);
+      if(canonicalJson(readInitializationPreparation(this.db,row))!==canonicalJson(evidence.preparation))throw Error('git_execution_evidence_corrupt');
+      this.db.prepare('INSERT INTO wb_git_index_dispatches VALUES(?,?,?,?,?,?)').run(row.execution_id,JSON.stringify(evidence),digest(evidence),lease.owner,lease.generation,new Date(this.now()).toISOString());
+     }),
+     publish:(raw,publish)=>withImmediateTransaction(this.db,()=>{
+      authorize();const evidence=readInitializationDispatch(this.db,row);
+      if(!evidence||canonicalJson(evidence)!==canonicalJson(gitInitializationEvidence(raw)))throw Error('git_execution_evidence_corrupt');
+      const receipt=publish();this.initializationOutcome(row,evidence,receipt);return receipt;
+     }),
+     cleanup:remove=>this.cleanupTransaction(row,lease,remove),
+    },abort.signal);
+    return this.get(owner,project,row.execution_id);
+   }
    if(source.action==='create-branch'){
     const kernel=this.git.indexEffects(owner,project),plan=await this.git.prepareCreateBranch(owner,project,{...source,review_sha256:row.review_sha256},abort.signal);
     authorize();
@@ -354,7 +402,18 @@ export class GitIndexExecutions{
    },abort.signal);return this.get(owner,project,row.execution_id);
   }finally{
    clearInterval(timer);signal?.removeEventListener('abort',cancel);
-   try{withImmediateTransaction(this.db,()=>{this.row(owner,project,row.execution_id);const applied=this.get(owner,project,row.execution_id).state==='applied',dispatched=row.action==='create-branch'?readBranchDispatch(this.db,row):row.action==='commit'?readCommitObjectDispatch(this.db,row):this.evidence(row),prepared=row.action==='create-branch'?readBranchPreparation(this.db,row):row.action==='commit'?readCommitObjectPreparation(this.db,row):this.preparation(row),state=applied?'applied':dispatched?'unknown':prepared?'prepared':abort.signal.aborted?'cancelled_before_preparation':'failed_before_preparation';this.producers.finish(row,this.resource(row),lease,state);});}
+   try{withImmediateTransaction(this.db,()=>{
+    this.row(owner,project,row.execution_id);
+    const applied=this.get(owner,project,row.execution_id).state==='applied';
+    const dispatched=row.action==='init'?readInitializationDispatch(this.db,row)
+     :row.action==='create-branch'?readBranchDispatch(this.db,row)
+     :row.action==='commit'?readCommitObjectDispatch(this.db,row):this.evidence(row);
+    const prepared=row.action==='init'?readInitializationPreparation(this.db,row)
+     :row.action==='create-branch'?readBranchPreparation(this.db,row)
+     :row.action==='commit'?readCommitObjectPreparation(this.db,row):this.preparation(row);
+    const state=applied?'applied':dispatched?'unknown':prepared?'prepared':abort.signal.aborted?'cancelled_before_preparation':'failed_before_preparation';
+    this.producers.finish(row,this.resource(row),lease,state);
+   });}
    finally{withImmediateTransaction(this.db,()=>this.release(row,lease));}
   }
  }
@@ -412,7 +471,7 @@ export class GitIndexExecutions{
   if(this.db.prepare('SELECT 1 FROM wb_git_index_controls WHERE execution_id=? LIMIT 1').get(id))throw Error('git_execution_control_exists');
   const current=this.get(owner,project,id);
   if(current.state==='applied'){
-   if(![4,5,6].includes(row.protocol)||!row.binding_sha256||!this.producers.record(row)||readWorkspaceOperation(this.db,{owner_id:owner,project_id:project,operation_kind:'git_index',operation_id:id,binding_sha256:row.binding_sha256})?.state!=='reserved')throw Error('git_execution_closed');
+   if(![4,5,6,7].includes(row.protocol)||!row.binding_sha256||!this.producers.record(row)||readWorkspaceOperation(this.db,{owner_id:owner,project_id:project,operation_kind:'git_index',operation_id:id,binding_sha256:row.binding_sha256})?.state!=='reserved')throw Error('git_execution_closed');
   }else if(current.state!=='pending'&&current.state!=='unknown')throw Error('git_execution_closed');
   if(this.stateHash(row)!==input.expected_state_sha256)throw Error('version_conflict');
   return this.resolutionAcceptance(row,this.insertControl(row,input));
@@ -461,7 +520,8 @@ export class GitIndexExecutions{
   * mode never creates a new command, writable plan or producer finish. */
  private async completeControl(row:Row,control:Control,input:ControlInput,lease:ExecutionLease,signal:AbortSignal,guard:()=>void,acceptedControl=false):Promise<ControlReceipt>{
   guard();const cached=this.savedControlReceipt(row,control);if(cached)return cached;
-   guard();const evidence=row.action==='commit'||row.action==='create-branch'?undefined:this.evidence(row),preparation=row.action==='commit'||row.action==='create-branch'?undefined:this.preparation(row);let applied=false,cleanup:Cleanup='not_recorded';
+   guard();const evidence=row.action==='init'||row.action==='commit'||row.action==='create-branch'?undefined:this.evidence(row),preparation=row.action==='init'||row.action==='commit'||row.action==='create-branch'?undefined:this.preparation(row);let applied=false,cleanup:Cleanup='not_recorded';
+   if(row.action==='init'){const facts=await this.completeInitializationEffects(row,signal,guard);applied=facts.applied;cleanup=facts.cleanup;}
    if(row.action==='commit'){const facts=await this.completeCommitEffects(row,signal,guard);applied=facts.applied;cleanup=facts.cleanup;}
    if(row.action==='create-branch'){const facts=await this.completeBranchEffects(row,signal,guard);applied=facts.applied;cleanup=facts.cleanup;}
    if(evidence||preparation){
@@ -480,10 +540,27 @@ export class GitIndexExecutions{
     if(applied||current.state==='applied')return this.storeControlReceipt(control,current as AppliedResult,cleanup);
     if(current.state!=='pending'&&current.state!=='unknown')return this.storeControlReceipt(control,current as ClosedResult,cleanup);
     if(!acceptedControl&&this.stateHash(row)!==input.expected_state_sha256)throw Error('version_conflict');
-    const disposition:Disposition={execution_id:row.execution_id,control_id:control.control_id,kind:row.protocol>=2&&!(row.action==='create-branch'?readBranchDispatch(this.db,row):row.action==='commit'?readCommitObjectDispatch(this.db,row):evidence)?'not_dispatched':'abandoned_unknown',snapshot_sha256:input.expected_state_sha256,created_at:new Date(this.now()).toISOString()};
+    const disposition:Disposition={execution_id:row.execution_id,control_id:control.control_id,kind:row.protocol>=2&&!(row.action==='init'?readInitializationDispatch(this.db,row):row.action==='create-branch'?readBranchDispatch(this.db,row):row.action==='commit'?readCommitObjectDispatch(this.db,row):evidence)?'not_dispatched':'abandoned_unknown',snapshot_sha256:input.expected_state_sha256,created_at:new Date(this.now()).toISOString()};
     this.db.prepare('INSERT INTO wb_git_index_dispositions VALUES(?,?,?,?,?)').run(row.execution_id,control.control_id,disposition.kind,disposition.snapshot_sha256,disposition.created_at);
     return this.storeControlReceipt(control,this.closedResult(row,disposition),cleanup);
    });
+ }
+ private async completeInitializationEffects(row:Row,signal:AbortSignal,guard:()=>void){
+  const preparation=readInitializationPreparation(this.db,row),dispatch=readInitializationDispatch(this.db,row);
+  let applied=false,cleanup:Cleanup=preparation||dispatch?'unverified':'not_recorded';
+  const kernel=this.git.indexEffects(row.owner_id,row.project_id);
+  if(preparation)try{
+   if(dispatch){
+    const observed=await kernel.observeInitialization(dispatch,signal);guard();
+    if(observed.state==='applied'){
+     if(!observed.receipt)throw Error('git_execution_outcome_corrupt');
+     applied=true;withImmediateTransaction(this.db,()=>{guard();if(!readInitializationOutcome(this.db,row))this.initializationOutcome(row,dispatch,observed.receipt);});
+    }
+   }
+   await kernel.cleanupInitializationPreparation(preparation,dispatch,guard,signal,remove=>withImmediateTransaction(this.db,()=>{guard();remove();}));
+   guard();cleanup='verified';
+  }catch(error){signal.throwIfAborted();guard();if(applied&&!readInitializationOutcome(this.db,row))throw error;}
+  return{applied,cleanup};
  }
  private async completeBranchEffects(row:Row,signal:AbortSignal,guard:()=>void){
   const preparation=readBranchPreparation(this.db,row),dispatch=readBranchDispatch(this.db,row);
@@ -555,10 +632,10 @@ export class GitIndexExecutions{
   if(accepted.expected_state_sha256!==input.expected_state_sha256)throw Error('idempotency_conflict');
   if(![4,5,6,7].includes(row.protocol)||!row.binding_sha256)throw Error('workspace_reservation_source_changed');
   const unstarted=this.resolveUnstarted(owner,project,id,input,signal);if(unstarted)return unstarted;
-  if(row.action==='init')throw Error('git_initialization_native_recovery_required');
   const originalScope={owner_id:owner,project_id:project,operation_kind:'git_index' as const,operation_id:id,binding_sha256:row.binding_sha256};
   if(readWorkspaceOperation(this.db,originalScope)?.state==='released_settled'){
-   signal?.throwIfAborted();readWorkspaceIndexResolution(this.db,originalScope,input.request_id);const receipt=this.getControl(owner,project,id,input.request_id);if(receipt.state!=='completed')throw Error('git_execution_outcome_corrupt');return receipt;
+   signal?.throwIfAborted();readWorkspaceIndexResolution(this.db,originalScope,input.request_id);const receipt=this.getControl(owner,project,id,input.request_id);if(receipt.state!=='completed')throw Error('git_execution_outcome_corrupt');
+   await this.adoptInitializationResult(owner,project,id,signal);return receipt;
   }
   const host=this.nativeWorkspaceHost;if(!host)throw Error('git_native_workspace_host_unavailable');
   const family=this.resolutionFamily(owner,project,id,input.request_id),scope={owner_id:owner,project_id:project,operation_kind:'git_index' as const,operation_id:id,binding_sha256:family.binding_sha256},placements=readReservedNativePlacements(this.db,scope);
@@ -582,7 +659,13 @@ export class GitIndexExecutions{
      lease=withImmediateTransaction(this.db,()=>{guard();return this.claim(row,custody)});
      timer=setInterval(()=>{try{withImmediateTransaction(this.db,()=>{checkReservation();this.db.prepare('UPDATE ga_worker_leases SET expires_at=?,updated_at=? WHERE resource_id=? AND owner=? AND generation=?').run(String(this.now()+this.leaseMs),new Date(this.now()).toISOString(),this.resource(row),lease!.owner,lease!.generation);});}catch(error){abort.abort(error)}},Math.floor(this.leaseMs/3));timer.unref();
      const control=this.db.prepare('SELECT * FROM wb_git_index_controls WHERE control_id=?').get(accepted.control_id) as Control;this.validateControl(row,control);
-     const receipt=await this.completeControl(row,control,input,lease,nativeSignal,guard,true);callbackCompleted=true;return receipt;
+     const receipt=await this.completeControl(row,control,input,lease,nativeSignal,guard,true);
+     if(row.action==='init'&&receipt.result.state==='applied'){
+      const evidence=readInitializationDispatch(this.db,row),outcome=readInitializationOutcome(this.db,row);
+      if(!evidence||!outcome)throw Error('git_execution_outcome_corrupt');
+      await this.git.indexEffects(owner,project).confirmInitializationBinding(evidence,outcome.publication,guard,nativeSignal);guard();
+     }
+     callbackCompleted=true;return receipt;
     }finally{this.nativeCustodies.delete(custody)}
    });
    checkReservation();if(!lease||!callbackCompleted)throw Error('git_native_workspace_host_unavailable');

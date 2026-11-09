@@ -214,7 +214,8 @@ export class GitInitializationEffects extends GitBranchEffects{
    };
    let result:GitInitializationReceipt;
    try{result=synchronous(()=>authority.publish(evidence!,publish));}finally{publishing=false;}
-   if(!published||!receipt||!equal(result,receipt))throw Error('git_initialization_outcome_unknown');return result;
+   if(!published||!receipt||!equal(result,receipt))throw Error('git_initialization_outcome_unknown');
+   check();this.bindInitializedRepository(stored.anchors.root,canonical.get('')!,stored.anchors.executable,stored.anchors.program);return result;
   }catch(error){failure=error;throw error;}finally{
    this.initializationPlans.delete(plan);
    try{
@@ -263,6 +264,21 @@ export class GitInitializationEffects extends GitBranchEffects{
    return result('applied',gitInitializationReceipt({protocol:1,plan_id:plan.plan_id,action:'init',evidence_sha256:hash(canonicalJson(evidence)),
     directories:snapshot.directories,internal_directory_identity:internalIdentity,execution_authorized:false},evidence));
   }catch(error){check();return result('unknown');}
+ }
+
+ /** The owning service supplies either held native recovery authority or a
+  * validated original settled outcome. Wire data cannot supply this callback. */
+ async confirmInitializationBinding(input:unknown,rawReceipt:unknown,authorize:()=>void,signal?:AbortSignal){
+  if(typeof authorize!=='function'||authorize.constructor.name==='AsyncFunction')throw Error('git_execution_authority_missing');
+  const evidence=gitInitializationEvidence(input),receipt=gitInitializationReceipt(rawReceipt,evidence);
+  signal?.throwIfAborted();synchronous(authorize);
+  const anchors=await this.initializationAnchors(signal);
+  if(anchors.repository!==evidence.preparation.plan.witness.repository_sha256)throw Error('git_repository_changed');
+  const check=()=>{
+   signal?.throwIfAborted();synchronous(authorize);this.assertInitializationAnchors(anchors);
+   if(this.directorySync(this.gitDirectory)!==receipt.directories[0]!.identity)throw Error('git_repository_changed');
+  };
+  check();this.bindInitializedRepository(anchors.root,receipt.directories[0]!.identity,anchors.executable,anchors.program);check();
  }
 
  /** Caller retains original native drain and lease authority. Only the durably
