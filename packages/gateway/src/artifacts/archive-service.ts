@@ -3,6 +3,7 @@ import { createReadStream, existsSync, mkdirSync, mkdtempSync, rmSync, statSync,
 import { dirname, join, resolve, sep } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import {withImmediateTransaction,withReadTransaction} from '../db/database.ts'
+import {artifactArchiveReferences,artifactArchiveManifest} from './archive-references.ts'
 
 export interface RemoteFileMeta { size: number; md5: string }
 export interface ArtifactArchiveClient {
@@ -12,7 +13,7 @@ export interface ArtifactArchiveClient {
   download(remotePath: string, localPath: string): Promise<void>
 }
 
-type ArchiveFile = { localPath: string; remoteName: string; size: number; md5: string }
+type ArchiveFile = { localPath: string; remoteName: string; size: number; md5: string; sha256: string }
 
 function safeName(value: string): string {
   const cleaned = value.normalize('NFKC').replace(/[\u0000-\u001f\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim()
@@ -60,12 +61,23 @@ export class ArtifactArchiveService {
       WHERE ar.local_state='present' AND ar.backup_status IN ('pending','retry')
       AND (ar.next_retry_at IS NULL OR ar.next_retry_at<=?) ORDER BY a.created_at LIMIT 500`)
       .all(now.toISOString()) as Array<Record<string, unknown>>
+    // Legacy verified manifests are upgraded before they can authorize historical cleanup.
+    if (rows.length < 500) {
+      const legacy = this.db.prepare(`SELECT ar.artifact_id,ar.remote_md5,a.created_at FROM ga_artifact_archives ar
+        JOIN ga_artifacts a ON a.id=ar.artifact_id WHERE ar.backup_status='verified' AND ar.local_state='present'
+        AND (ar.next_retry_at IS NULL OR ar.next_retry_at<=?) ORDER BY a.created_at`).iterate(now.toISOString())
+      for (const row of legacy) {
+        if (!artifactArchiveManifest(this.fileRows(String(row.artifact_id)),String(row.remote_md5))) rows.push(row)
+        if (rows.length === 500) break
+      }
+    }
     let verified = 0; let failed = 0
     for (const row of rows) {
       const artifactId = String(row.artifact_id)
       const source = this.archiveSource(artifactId)
-      if (!source || source.record.local_state !== 'present' || !['pending','retry'].includes(String(source.record.backup_status))
+      if (!source || source.record.local_state !== 'present' || !['pending','retry','verified'].includes(String(source.record.backup_status))
         || source.record.next_retry_at && String(source.record.next_retry_at) > now.toISOString()) continue
+      if (source.record.backup_status === 'verified' && artifactArchiveManifest(source.files,String(source.record.remote_md5))) continue
       const identity = JSON.stringify(source)
       try {
         const date = new Date(String(row.created_at)); const remoteDirectory = `/jot_file/${date.getUTCFullYear()}/${String(date.getUTCMonth()+1).padStart(2,'0')}/${String(date.getUTCDate()).padStart(2,'0')}/${artifactId}`
@@ -82,7 +94,7 @@ export class ArtifactArchiveService {
             remote = await this.client.meta(remotePath)
           }
           await this.verifyRemote(file, remotePath, remote)
-          manifest.push({ remote_name: file.remoteName, local_path: file.localPath, size: file.size, md5: file.md5 })
+          manifest.push({ remote_name: file.remoteName, local_path: file.localPath, size: file.size, md5: file.md5, sha256: file.sha256 })
         }
         const encoded = JSON.stringify(manifest)
         const proof = this.verifiedCleanupPaths(artifactId, encoded)
@@ -100,8 +112,8 @@ export class ArtifactArchiveService {
         const saved = withImmediateTransaction(this.db, () => {
           if (JSON.stringify(this.archiveSource(artifactId)) !== identity) return false
           const attempts = Number(source.record.attempts) + 1; const minutes = Math.min(360, 2 ** Math.min(attempts, 8))
-          this.db.prepare(`UPDATE ga_artifact_archives SET backup_status='retry',attempts=?,last_error=?,next_retry_at=?,updated_at=? WHERE artifact_id=?`)
-            .run(attempts, String(error instanceof Error ? error.message : error).slice(0, 240),
+          this.db.prepare(`UPDATE ga_artifact_archives SET backup_status=?,attempts=?,last_error=?,next_retry_at=?,updated_at=? WHERE artifact_id=?`)
+            .run(source.record.backup_status === 'verified' ? 'verified' : 'retry', attempts, String(error instanceof Error ? error.message : error).slice(0, 240),
               new Date(now.getTime()+minutes*60_000).toISOString(), now.toISOString(), artifactId)
           return true
         })
@@ -186,31 +198,24 @@ export class ArtifactArchiveService {
       let stage = ''
       try {
         const directory = String(source.record.remote_path || '')
-        const manifest = JSON.parse(String(source.record.remote_md5 || '[]'))
-        if (!directory.startsWith('/jot_file/') || !Array.isArray(manifest) || !manifest.length || manifest.length !== source.files.length) throw new Error('archive_restore_manifest_invalid')
-        const references = new Map<string,Record<string,unknown>>(source.files.map(file => [resolve(String(file.server_path)),file]))
-        const seen = new Set<string>()
+        const manifest = artifactArchiveManifest(source.files,String(source.record.remote_md5 || '[]'),source.required)
+        if (!directory.startsWith('/jot_file/') || !manifest) throw new Error('archive_restore_manifest_invalid')
         const stagingRoot = join(this.root,'sessions','archive-restore')
         assertArchivePath(stagingRoot,this.root)
         mkdirSync(stagingRoot,{recursive:true,mode:0o700})
         stage = mkdtempSync(join(stagingRoot,'restore-'))
         const installs: Array<{path:string;staged:string;stagedSignature:ReturnType<typeof signature>;existing:ReturnType<typeof signature>|null;replace:boolean}> = []
         for (const [index,item] of manifest.entries()) {
-          if (!item || typeof item.local_path !== 'string' || typeof item.remote_name !== 'string'
-            || !item.remote_name || /[\\/\u0000-\u001f\u007f]/.test(item.remote_name) || ['.','..'].includes(item.remote_name)
-            || !Number.isSafeInteger(item.size) || item.size < 0 || typeof item.md5 !== 'string' || !/^[a-f0-9]{32}$/i.test(item.md5)) throw new Error('archive_restore_manifest_invalid')
-          const localPath = resolve(item.local_path), reference = references.get(localPath)
+          const localPath = item.local_path
           assertArchivePath(localPath,this.root)
-          if (!reference || seen.has(localPath) || Number(reference.size_bytes) !== item.size || !/^[a-f0-9]{64}$/.test(String(reference.sha256))) throw new Error('archive_restore_manifest_invalid')
-          seen.add(localPath)
           const staged = join(stage,String(index))
           await this.client.download(`${directory}/${item.remote_name}`,staged)
           assertArchivePath(staged,this.root)
           const hash = currentFileHashes(staged)
-          if (!hash || hash.size !== item.size || hash.md5 !== item.md5.toLowerCase() || hash.sha256 !== reference.sha256) throw new Error('archive_restore_verification_failed')
+          if (!hash || hash.size !== item.size || hash.md5 !== item.md5.toLowerCase() || hash.sha256 !== item.sha256) throw new Error('archive_restore_verification_failed')
           const existing = existsSync(localPath) ? currentFileHashes(localPath) : null
           if (existsSync(localPath) && !existing) throw new Error('archive_restore_destination_conflict')
-          installs.push({path:localPath,staged,stagedSignature:hash.signature,existing:existing?.signature ?? null,replace:!existing || existing.size !== item.size || existing.sha256 !== reference.sha256})
+          installs.push({path:localPath,staged,stagedSignature:hash.signature,existing:existing?.signature ?? null,replace:!existing || existing.size !== item.size || existing.sha256 !== item.sha256})
         }
         const saved = withImmediateTransaction(this.db, () => {
           if (JSON.stringify(this.archiveSource(artifactId)) !== identity) return false
@@ -251,7 +256,7 @@ export class ArtifactArchiveService {
     return withReadTransaction(this.db, () => {
       const record = this.db.prepare(`SELECT ar.*,a.current_version FROM ga_artifact_archives ar
         JOIN ga_artifacts a ON a.id=ar.artifact_id WHERE ar.artifact_id=?`).get(artifactId) as Record<string,unknown>|undefined
-      return record ? {record,files:this.fileRows(artifactId)} : undefined
+      return record ? {record,files:this.fileRows(artifactId),required:artifactArchiveReferences(this.db,artifactId,'current')} : undefined
     })
   }
 
@@ -264,35 +269,21 @@ export class ArtifactArchiveService {
     })
   }
 
-  private fileRows(artifactId:string):Array<Record<string,unknown>>{
-    const partRows = this.db.prepare(`SELECT server_path,display_name,size_bytes,sha256 FROM ga_artifact_parts
-      WHERE artifact_id=? ORDER BY part_index`).all(artifactId) as Array<Record<string, unknown>>
-    return partRows.length ? partRows : this.db.prepare(`SELECT v.server_path,v.size_bytes,v.sha256,
-      json_extract(v.metadata_json,'$.file_name') display_name FROM ga_artifact_versions v
-      JOIN ga_artifacts a ON a.id=v.artifact_id AND a.current_version=v.version WHERE v.artifact_id=?`)
-      .all(artifactId) as Array<Record<string, unknown>>
+  private fileRows(artifactId:string) {
+    return artifactArchiveReferences(this.db,artifactId)
   }
 
   private verifiedCleanupPaths(artifactId:string,encoded:string):{files:Array<{path:string;signature:ReturnType<typeof signature>}>;references:string}|null{
-    let manifest:any;try{manifest=JSON.parse(encoded)}catch{return null}
-    const rows=this.fileRows(artifactId)
-    if(!Array.isArray(manifest)||!rows.length||manifest.length!==rows.length)return null
-    const expected=new Map<string,{size:number;sha256:string}>()
-    for(const row of rows){
-      const path=resolve(String(row.server_path)),size=Number(row.size_bytes),sha=String(row.sha256)
-      if(expected.has(path)||!Number.isSafeInteger(size)||size<0||!/^[a-f0-9]{64}$/.test(sha))return null
-      expected.set(path,{size,sha256:sha})
-    }
-    const files:Array<{path:string;signature:ReturnType<typeof signature>}>=[],seen=new Set<string>()
+    const rows=this.fileRows(artifactId),manifest=artifactArchiveManifest(rows,encoded)
+    if(!manifest)return null
+    const files:Array<{path:string;signature:ReturnType<typeof signature>}>=[]
     for(const item of manifest){
-      if(!item||typeof item.local_path!=='string'||!Number.isSafeInteger(item.size)||item.size<0
-        ||typeof item.md5!=='string'||!/^[a-f0-9]{32}$/i.test(item.md5))return null
-      const path=resolve(item.local_path),reference=expected.get(path)
+      const path=item.local_path
       assertArchivePath(path,this.root)
-      if(!reference||seen.has(path)||reference.size!==item.size||!existsSync(path))return null
+      if(!existsSync(path))return null
       const hash=currentFileHashes(path)
-      if(!hash||hash.size!==reference.size||hash.sha256!==reference.sha256||hash.md5!==item.md5.toLowerCase())return null
-      seen.add(path);files.push({path,signature:hash.signature})
+      if(!hash||hash.size!==item.size||hash.sha256!==item.sha256||hash.md5!==item.md5)return null
+      files.push({path,signature:hash.signature})
     }
     return {files,references:JSON.stringify(rows)}
   }
@@ -309,7 +300,7 @@ export class ArtifactArchiveService {
       let remoteName = `${String(row.sha256)}-${safeName(String(row.display_name || `part-${index+1}`))}`
       if (names.has(remoteName)) remoteName = `${String(index+1).padStart(3,'0')}-${remoteName}`
       names.add(remoteName)
-      result.push({ localPath, remoteName, size: Number(row.size_bytes), md5: await md5(localPath) })
+      result.push({ localPath, remoteName, size: Number(row.size_bytes), md5: await md5(localPath), sha256: String(row.sha256) })
     }
     return result
   }

@@ -31,6 +31,7 @@ function Recovery({artifactId,onRestored,owner,store}:Props&{owner:string;store:
   const backup=await request<ArtifactBackup>(`/artifacts/${encodeURIComponent(artifactId)}/backup-status`,'GET',undefined,undefined,signal);
   if(!current()||!backup||backup.artifact_id!==artifactId||!['pending','retry','verified','failed'].includes(backup.backup_status)
    ||!['present','deleted','restoring'].includes(backup.local_state)||typeof backup.restorable!=='boolean'
+   ||backup.all_versions_archived!==undefined&&typeof backup.all_versions_archived!=='boolean'
    ||backup.restore_protocol!==undefined&&backup.restore_protocol!==2
    ||backup.version!==undefined&&(!Number.isSafeInteger(backup.version)||backup.version<1))throw Error('文件归档状态来源尚未确认');
   return {identity,backup};
@@ -60,6 +61,7 @@ function Recovery({artifactId,onRestored,owner,store}:Props&{owner:string;store:
  const local={present:'本地文件保留中',deleted:'本地文件已清理',restoring:'正在从归档恢复'};
  return <section aria-label="文件归档与恢复" data-chat-search-ignore>
   {backup&&<p>{statuses[backup.backup_status]} · {local[backup.local_state]}</p>}
+  {backup?.all_versions_archived===false&&<p role="status">归档清单尚未覆盖全部文件版本。</p>}
   {backup?.last_error&&<p role="status">上次归档或恢复未完成，可刷新状态后重试。</p>}
   {resource.loading&&<p role="status">正在读取归档状态…</p>}
   {resource.error&&<p role="alert">归档状态读取失败，可重新读取。</p>}

@@ -40,7 +40,7 @@ export default function ActivityArtifactDetails({conversationId,target,onOpen}:{
     return {file,before,text:diff.unified_diff,truncated:diff.truncated};
    }
    const file=await metadata(target.version,target.sha256);
-   if(file.local_state&&file.local_state!=='present')return {file,notice:'本地文件恢复后可读取此固定版本。'};
+   if(file.local_state&&file.local_state!=='present')return {file,notice:'此固定版本的本地文件暂不可用，请查看归档与恢复状态。'};
    if(file.preview_kind!=='text'&&file.preview_kind!=='image')return {file};
    if(file.size_bytes>20*1024*1024)return {file,notice:'文件超过20 MiB预览范围，可下载固定版本查看。'};
    let verified;

@@ -161,7 +161,7 @@ export type RunArtifact = { run_id: string; conversation_id: string; artifact_id
 
 export type RunArtifactPage = { items: Array<RunArtifact> };
 
-export type ArtifactBackup = { artifact_id: string; backup_status: ArtifactBackupStatus; local_state: "present" | "deleted" | "restoring"; remote_path?: string; remote_size?: number; verified_at?: string; restorable: boolean; version?: number; restore_protocol?: 2; last_error?: string };
+export type ArtifactBackup = { artifact_id: string; backup_status: ArtifactBackupStatus; local_state: "present" | "deleted" | "restoring"; remote_path?: string; remote_size?: number; verified_at?: string; restorable: boolean; version?: number; restore_protocol?: 2; all_versions_archived?: boolean; last_error?: string };
 
 export type ArtifactRestoreReceipt = { accepted: true; artifact_id: string; status: "ready" | "restoring"; version?: number; restore_protocol?: 2 };
 

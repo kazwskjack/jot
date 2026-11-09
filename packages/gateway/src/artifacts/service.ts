@@ -6,6 +6,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { withImmediateTransaction, withReadTransaction } from '../db/database.ts';
 import { canonicalJson } from '../db/canonical-json.ts';
 import { detectContentType } from './content-type.ts';
+import {artifactArchiveReferences,artifactArchiveManifest} from './archive-references.ts';
 import {sameTaskFileLocation} from '../persistent-tasks/output-content.ts';
 import {readIsolatedTaskFileVersion} from '../persistent-tasks/isolated-output-source.ts';
 import {taskFileSource,type TaskFileScope,type TaskFileLocation} from '../persistent-tasks/task-file-source.ts';
@@ -1070,12 +1071,15 @@ export class ArtifactService {
     const meta = JSON.parse(String(row.metadata_json));
     const archive = this.db.prepare('SELECT backup_status,local_state,remote_path FROM ga_artifact_archives WHERE artifact_id=?')
       .get(id) as Record<string, unknown> | undefined;
+    const available=existsSync(String(row.server_path))
+      && (!archive || archive.local_state==='present' || Number(row.version)<Number(row.current_version));
+    const localState=available ? 'present' : archive?.local_state==='restoring' ? 'restoring' : 'deleted';
     return { artifact_id: id, conversation_id: row.conversation_id, file_name: meta.file_name,
       ...(typeof meta.relative_path==='string'?{relative_path:meta.relative_path}:{}),
       media_type: row.mime_type, size_bytes: Number(row.size_bytes), sha256: row.sha256,
       version: Number(row.version), status: meta.status==='delivered'?'ready':meta.status, created_at: row.created_at,
       preview_kind: meta.preview_kind, origin: meta.origin === 'file_engine' ? 'edited' : ['runtime','trusted_template'].includes(meta.origin) ? 'generated' : meta.origin,
-      local_state: archive?.local_state ?? 'present', backup_status: archive?.backup_status ?? 'pending',
+      local_state: localState, backup_status: archive?.backup_status ?? 'pending',
       ...(archive?.remote_path ? { remote_path: archive.remote_path } : {}),
       restorable: Boolean(archive?.remote_path) };
   }
@@ -1106,12 +1110,16 @@ export class ArtifactService {
   backupStatus(id: string, ownerId: string) {
     return withReadTransaction(this.db, () => {
       const artifact = this.get(id, ownerId)
-      const archive = this.db.prepare(`SELECT backup_status,local_state,remote_path,remote_size,verified_at,last_error
+      const archive = this.db.prepare(`SELECT backup_status,local_state,remote_path,remote_size,verified_at,last_error,remote_md5
         FROM ga_artifact_archives WHERE artifact_id=?`).get(id) as Record<string, unknown> | undefined
-      return { artifact_id: id, version: artifact.version, restore_protocol: 2, backup_status: archive?.backup_status ?? 'pending',
+      const references=artifactArchiveReferences(this.db,id);
+      const verified=archive?.backup_status==='verified'&&Boolean(archive.remote_path);
+      const allVersions=verified&&Boolean(artifactArchiveManifest(references,String(archive?.remote_md5)));
+      const restorable=verified&&Boolean(artifactArchiveManifest(references,String(archive?.remote_md5),artifactArchiveReferences(this.db,id,'current')));
+      return { artifact_id: id, version: artifact.version, restore_protocol: 2, all_versions_archived: allVersions, backup_status: archive?.backup_status ?? 'pending',
         local_state: archive?.local_state ?? 'present', ...(archive?.remote_path ? { remote_path: archive.remote_path } : {}),
         ...(archive?.remote_size !== null && archive?.remote_size !== undefined ? { remote_size: Number(archive.remote_size) } : {}),
-        ...(archive?.verified_at ? { verified_at: archive.verified_at } : {}), restorable: artifact.restorable,
+        ...(archive?.verified_at ? { verified_at: archive.verified_at } : {}), restorable,
         ...(archive?.last_error ? { last_error: String(archive.last_error) } : {}) }
     });
   }
@@ -1121,9 +1129,10 @@ export class ArtifactService {
     return withImmediateTransaction(this.db, () => {
       const artifact = this.get(id, ownerId);
       if (expectedVersion !== undefined && artifact.version !== expectedVersion) throw new Error('version_conflict');
-      const row = this.db.prepare('SELECT backup_status,local_state,remote_path FROM ga_artifact_archives WHERE artifact_id=?')
+      const row = this.db.prepare('SELECT backup_status,local_state,remote_path,remote_md5 FROM ga_artifact_archives WHERE artifact_id=?')
         .get(id) as Record<string, unknown> | undefined;
-      if (!row || row.backup_status !== 'verified' || !row.remote_path) throw new Error('artifact_not_restorable');
+      if (!row || row.backup_status !== 'verified' || !row.remote_path
+        || !artifactArchiveManifest(artifactArchiveReferences(this.db,id),String(row.remote_md5),artifactArchiveReferences(this.db,id,'current'))) throw new Error('artifact_not_restorable');
       const status = row.local_state === 'present' ? 'ready' : 'restoring';
       if (row.local_state === 'deleted') this.db.prepare("UPDATE ga_artifact_archives SET local_state='restoring',last_error=NULL,updated_at=? WHERE artifact_id=?")
         .run(new Date().toISOString(), id);
@@ -1133,9 +1142,10 @@ export class ArtifactService {
   }
 
   download(id: string, ownerId: string, version?: number) {
-    const archive = this.db.prepare('SELECT local_state FROM ga_artifact_archives WHERE artifact_id=?').get(id) as { local_state?: string } | undefined
-    if (archive?.local_state && archive.local_state !== 'present') throw new Error('artifact_restore_required')
     const row=this.version(id,ownerId,version);
+    const archive=this.db.prepare('SELECT local_state FROM ga_artifact_archives WHERE artifact_id=?').get(id) as {local_state?:string}|undefined;
+    const currentUnavailable=archive?.local_state && archive.local_state!=='present' && Number(row.version)>=Number(row.current_version);
+    if (!existsSync(String(row.server_path)) || currentUnavailable) throw new Error('artifact_restore_required');
     const artifact=this.db.prepare('SELECT kind FROM ga_artifacts WHERE id=?').get(id) as {kind:string};
     if(artifact.kind==='task_output_file'){
       rejectTaskOutputSymlinks(String(row.server_path));
@@ -1147,8 +1157,7 @@ export class ArtifactService {
   }
 
   preview(id: string, ownerId: string, version?: number) {
-    const kind=this.db.prepare('SELECT kind FROM ga_artifacts WHERE id=?').get(id) as {kind:string}|undefined;
-    const row = kind?.kind==='task_output_file'?this.download(id,ownerId,version):this.version(id, ownerId, version); const meta = JSON.parse(String(row.metadata_json));
+    const row = this.download(id,ownerId,version); const meta = JSON.parse(String(row.metadata_json));
     if (meta.preview_kind === 'text') {
       const content = row.verified_content instanceof Buffer?row.verified_content.toString('utf8'):readFileSync(String(row.server_path), 'utf8');
       return { artifact_id: id, version: Number(row.version), kind: 'text', text: content.slice(0, 200000), truncated: content.length > 200000 };
@@ -1158,10 +1167,10 @@ export class ArtifactService {
   }
 
   diff(id: string, ownerId: string, from: number, to: number) {
-    const before = this.version(id, ownerId, from); const after = this.version(id, ownerId, to);
+    const before = this.download(id, ownerId, from); const after = this.download(id, ownerId, to);
     if (!String(before.mime_type).startsWith('text/') || !String(after.mime_type).startsWith('text/')) throw new Error('artifact_diff_unsupported');
-    const left = readFileSync(String(before.server_path), 'utf8').split(/\r?\n/);
-    const right = readFileSync(String(after.server_path), 'utf8').split(/\r?\n/);
+    const left = (before.verified_content instanceof Buffer ? before.verified_content.toString('utf8') : readFileSync(String(before.server_path),'utf8')).split(/\r?\n/);
+    const right = (after.verified_content instanceof Buffer ? after.verified_content.toString('utf8') : readFileSync(String(after.server_path),'utf8')).split(/\r?\n/);
     const lines = [`--- version-${from}`, `+++ version-${to}`];
     const maximum = Math.max(left.length, right.length);
     for (let index = 0; index < maximum; index += 1) {
@@ -1189,7 +1198,7 @@ export class ArtifactService {
     if(batch?.status==='expired')throw new Error('upload_expired');
   }
   private version(id: string, ownerId: string, version?: number) {
-    const row = this.db.prepare(`SELECT v.*,a.conversation_id FROM ga_artifacts a JOIN ga_artifact_versions v ON v.artifact_id=a.id
+    const row = this.db.prepare(`SELECT v.*,a.conversation_id,a.current_version FROM ga_artifacts a JOIN ga_artifact_versions v ON v.artifact_id=a.id
       WHERE a.id=? AND a.owner_id=? AND v.version=COALESCE(?,a.current_version)`).get(id, ownerId, version ?? null) as Record<string, unknown> | undefined;
     if (!row) throw new Error('artifact_not_found'); return row;
   }
