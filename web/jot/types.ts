@@ -167,3 +167,8 @@ export type InteractionHistoryRecord={conversation_id:string;item:Interaction;ex
 export type InteractionSearchBoundary={interaction_id:string;created_at:string};
 export type InteractionSearchMatch=Pick<Interaction,'interaction_id'|'run_id'|'kind'|'status'|'version'|'created_at'>&{match_text:string;excerpt:string};
 export type InteractionSearchPage={conversation_id:string;run_id?:string;q:string;items:InteractionSearchMatch[];scanned_records:number;scanned_through?:InteractionSearchBoundary;next_cursor?:string;execution_authorized:false};
+
+export type ArtifactTextCursor={artifact_id:string;version:number};
+export type ArtifactTextMatch=ArtifactTextCursor&{sha256:string;file_name:string;size_bytes:number;created_at:string;offset_chars:number;match_offset_chars:number;match_text:string;excerpt:string};
+export type ArtifactTextSearchPage={conversation_id:string;run_id?:string;q:string;items:ArtifactTextMatch[];scanned_versions:number;unavailable_versions:number;skipped_versions:number;next_cursor?:ArtifactTextCursor;execution_authorized:false};
+export type ArtifactTextPage=ArtifactTextCursor&{conversation_id:string;sha256:string;file_name:string;size_bytes:number;offset_chars:number;total_chars:number;text:string;next_offset_chars?:number;execution_authorized:false};

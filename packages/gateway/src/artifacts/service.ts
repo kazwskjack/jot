@@ -1,3 +1,4 @@
+import {searchVerifiedArtifactText,readVerifiedArtifactTextPage} from './text-content.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { basename, join,dirname,resolve,sep } from 'node:path';
 import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync,writeFileSync,lstatSync,opendirSync } from 'node:fs';
@@ -1257,6 +1258,89 @@ export class ArtifactService {
       return {conversation_id:conversationId,...(runId!==undefined?{run_id:runId}:{}),items,
         ...(rows.length>limit?{next_cursor:selected.at(-1)!.id}:{})};
     });
+  }
+
+  private textSource(id:string,ownerId:string,conversationId:string,version:number,sha256:string,runId?:string){
+    if(!this.db.prepare('SELECT 1 FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId))throw Error('conversation_not_found');
+    const row=this.version(id,ownerId,version),file=this.get(id,ownerId,version);
+    if(row.conversation_id!==conversationId)throw Error('artifact_not_found');
+    if(row.sha256!==sha256)throw Error('artifact_text_source_changed');
+    if(runId!==undefined&&!this.db.prepare(`SELECT 1 FROM ga_runs r JOIN ga_conversations c ON c.id=r.conversation_id
+      WHERE r.id=? AND r.conversation_id=? AND c.owner_id=? AND (
+       EXISTS(SELECT 1 FROM ga_run_artifacts a WHERE a.run_id=r.id AND a.artifact_id=? AND a.version=?)
+       OR EXISTS(SELECT 1 FROM ga_artifact_producers p WHERE p.run_id=r.id AND p.artifact_id=? AND p.version=? AND p.owner_id=c.owner_id AND p.conversation_id=c.id))`)
+      .get(runId,conversationId,ownerId,id,version,id,version))throw Error('artifact_not_found');
+    const mime=String(row.mime_type).toLowerCase().split(';',1)[0]!.trim(),size=Number(row.size_bytes);
+    if(file.part_count||file.preview_kind!=='text'||(!mime.startsWith('text/')&&!['application/json','application/xml'].includes(mime))
+      ||!Number.isSafeInteger(size)||size<0)throw Error('artifact_text_unsupported');
+    if(file.status!=='ready')throw Error('artifact_not_found');
+    if(file.local_state!=='present')throw Error('artifact_restore_required');
+    rejectTaskOutputSymlinks(String(row.server_path));this.markContentRead(id,ownerId);
+    return {file,source:{path:String(row.server_path),size,sha256}};
+  }
+
+  async textPage(id:string,ownerId:string,query:Record<string,unknown>,signal?:AbortSignal){
+    const identifier=/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/;
+    const conversationId=query.conversation_id,runId=query.run_id,version=Number(query.version),sha256=query.sha256,offset=Number(query.offset_chars??0);
+    if(Object.keys(query).some(key=>!['conversation_id','run_id','version','sha256','offset_chars'].includes(key))
+      ||!identifier.test(id)||typeof conversationId!=='string'||!identifier.test(conversationId)
+      ||runId!==undefined&&(typeof runId!=='string'||!identifier.test(runId))
+      ||typeof sha256!=='string'||!/^[a-f0-9]{64}$/.test(sha256)||!Number.isSafeInteger(version)||version<1
+      ||!Number.isSafeInteger(offset)||offset<0)throw Error('artifact_text_query_invalid');
+    const selected=this.textSource(id,ownerId,conversationId,version,sha256,runId as string|undefined);
+    if(offset>selected.source.size)throw Error('artifact_text_query_invalid');
+    const page=await readVerifiedArtifactTextPage(selected.source,offset,signal);
+    signal?.throwIfAborted();
+    const current=this.textSource(id,ownerId,conversationId,version,sha256,runId as string|undefined);
+    if(current.source.path!==selected.source.path||current.source.size!==selected.source.size)throw Error('artifact_text_source_changed');
+    return {conversation_id:conversationId,artifact_id:id,version,sha256,file_name:current.file.file_name,size_bytes:current.source.size,...page,execution_authorized:false};
+  }
+
+  async searchTextHistory(conversationId:string,ownerId:string,query:Record<string,unknown>,signal?:AbortSignal){
+    signal?.throwIfAborted();
+    const identifier=/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/;
+    const q=typeof query.q==='string'?query.q.trim():'',runId=query.run_id,cursorId=query.cursor_artifact_id,cursorVersion=Number(query.cursor_version);
+    if(!q||q.length>200||!identifier.test(conversationId)||Object.keys(query).some(key=>!['q','run_id','cursor_artifact_id','cursor_version'].includes(key))
+      ||runId!==undefined&&(typeof runId!=='string'||!identifier.test(runId))
+      ||(cursorId===undefined)!==(query.cursor_version===undefined)
+      ||cursorId!==undefined&&(typeof cursorId!=='string'||!identifier.test(cursorId)||!Number.isSafeInteger(cursorVersion)||cursorVersion<1))throw Error('artifact_text_query_invalid');
+    const page=withReadTransaction(this.db,()=>{
+      if(!this.db.prepare('SELECT 1 FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId))throw Error('conversation_not_found');
+      if(runId!==undefined&&!this.db.prepare('SELECT 1 FROM ga_runs WHERE id=? AND conversation_id=?').get(runId as string,conversationId))throw Error('run_not_found');
+      const scope=`a.conversation_id=? AND a.owner_id=? AND v.version<=a.current_version AND (? IS NULL
+       OR EXISTS(SELECT 1 FROM ga_run_artifacts ra WHERE ra.artifact_id=a.id AND ra.version=v.version AND ra.run_id=?)
+       OR EXISTS(SELECT 1 FROM ga_artifact_producers p WHERE p.artifact_id=a.id AND p.version=v.version AND p.run_id=? AND p.owner_id=a.owner_id AND p.conversation_id=a.conversation_id))`;
+      const args=[conversationId,ownerId,runId??null,runId??null,runId??null];
+      const boundary=cursorId===undefined?undefined:this.db.prepare(`SELECT a.created_at FROM ga_artifacts a JOIN ga_artifact_versions v ON v.artifact_id=a.id
+       WHERE ${scope} AND a.id=? AND v.version=?`).get(...args,cursorId as string,cursorVersion) as {created_at:string}|undefined;
+      if(cursorId!==undefined&&!boundary)throw Error('artifact_text_query_invalid');
+      return this.db.prepare(`SELECT a.id,a.created_at,v.version,v.sha256 FROM ga_artifacts a JOIN ga_artifact_versions v ON v.artifact_id=a.id
+       WHERE ${scope} ${boundary?'AND (a.created_at<? OR (a.created_at=? AND (a.id<? OR (a.id=? AND v.version<?))))':''}
+       ORDER BY a.created_at DESC,a.id DESC,v.version DESC LIMIT 2`)
+       .all(...args,...(boundary?[boundary.created_at,boundary.created_at,cursorId as string,cursorId as string,cursorVersion]:[])) as Array<{id:string;created_at:string;version:number;sha256:string}>;
+    });
+    const entry=page[0],items=[];let unavailable=0,skipped=0;
+    if(entry){
+      try{
+        const selected=this.textSource(entry.id,ownerId,conversationId,entry.version,entry.sha256,runId as string|undefined);
+        const found=await searchVerifiedArtifactText(selected.source,q,signal);
+        signal?.throwIfAborted();
+        const current=this.textSource(entry.id,ownerId,conversationId,entry.version,entry.sha256,runId as string|undefined);
+        if(current.source.path!==selected.source.path||current.source.size!==selected.source.size)throw Error('artifact_text_source_changed');
+        if(found.match)items.push({artifact_id:entry.id,version:entry.version,sha256:entry.sha256,file_name:current.file.file_name,
+          size_bytes:current.source.size,created_at:entry.created_at,...found.match});
+      }catch(error){
+        signal?.throwIfAborted();
+        const code=error instanceof Error?error.message:'',io=(error as NodeJS.ErrnoException)?.code;
+        if(code==='artifact_text_unsupported')skipped++;
+        else if(['artifact_not_found','artifact_restore_required','artifact_content_mismatch','artifact_text_source_changed','task_output_path_unsafe'].includes(code)||['ENOENT','EACCES','EPERM','ELOOP'].includes(String(io)))unavailable++;
+        else throw error;
+      }
+    }
+    if(!this.db.prepare('SELECT 1 FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId))throw Error('conversation_not_found');
+    return {conversation_id:conversationId,...(runId===undefined?{}:{run_id:runId}),q,items,scanned_versions:entry?1:0,
+      unavailable_versions:unavailable,skipped_versions:skipped,
+      ...(page.length>1?{next_cursor:{artifact_id:entry!.id,version:entry!.version}}:{}),execution_authorized:false};
   }
 
   versions(id: string, ownerId: string, query: {limit?: unknown; before_version?: unknown} = {}) {

@@ -659,6 +659,9 @@ export async function buildServer(config: {
     if(code==='activity_tool_result_source_invalid')return reply.code(503).send({error:{code:'ACTIVITY_TOOL_RESULT_SOURCE_INVALID'}});
     if(code==='invalid_activity_history_query')return reply.code(400).send({error:{code:'ACTIVITY_HISTORY_QUERY_INVALID'}});
     if(code==='activity_history_cursor_future')return reply.code(409).send({error:{code:'ACTIVITY_HISTORY_CURSOR_FUTURE'}});
+    if(code==='artifact_text_query_invalid')return reply.code(400).send({error:{code:'ARTIFACT_TEXT_QUERY_INVALID'}});
+    if(code==='artifact_text_source_changed')return reply.code(409).send({error:{code:'ARTIFACT_TEXT_SOURCE_CHANGED'}});
+    if(code==='artifact_text_unsupported')return reply.code(422).send({error:{code:'ARTIFACT_TEXT_UNSUPPORTED'}});
     if(code==='interaction_history_source_invalid')return reply.code(503).send({error:{code:'INTERACTION_HISTORY_SOURCE_INVALID'}});
     if(code==='activity_history_source_invalid')return reply.code(503).send({error:{code:'ACTIVITY_HISTORY_SOURCE_INVALID'}});
     if(code==='conversation_mode_invalid')return reply.code(400).send({error:{code:'CONVERSATION_MODE_INVALID'}});
@@ -1308,6 +1311,20 @@ export async function buildServer(config: {
   app.get('/v1/conversations/:conversationId/artifacts', async (request,reply) => {
     reply.header('cache-control','private, no-store');
     return artifacts.history((request.params as {conversationId:string}).conversationId,actor(request as any),request.query as {cursor?:unknown;run_id?:unknown;limit?:unknown});
+  });
+  app.get('/v1/artifacts/:artifactId/text', async (request,reply) => {
+    const controller=new AbortController(),cancel=()=>{if(!reply.raw.writableEnded)controller.abort();};
+    request.raw.once('aborted',cancel);reply.raw.once('close',cancel);
+    reply.header('cache-control','private, no-store');
+    try{return await artifacts.textPage((request.params as {artifactId:string}).artifactId,actor(request as any),request.query as Record<string,unknown>,controller.signal);}
+    finally{request.raw.removeListener('aborted',cancel);reply.raw.removeListener('close',cancel);}
+  });
+  app.get('/v1/conversations/:conversationId/artifact-search', async (request,reply) => {
+    const controller=new AbortController(),cancel=()=>{if(!reply.raw.writableEnded)controller.abort();};
+    request.raw.once('aborted',cancel);reply.raw.once('close',cancel);
+    reply.header('cache-control','private, no-store');
+    try{return await artifacts.searchTextHistory((request.params as {conversationId:string}).conversationId,actor(request as any),request.query as Record<string,unknown>,controller.signal);}
+    finally{request.raw.removeListener('aborted',cancel);reply.raw.removeListener('close',cancel);}
   });
   app.get('/v1/artifacts/:artifactId/versions', async (request, reply) => {
     reply.header('cache-control','private, no-store');

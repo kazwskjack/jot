@@ -9,10 +9,10 @@ function deadline(parent:AbortSignal|undefined,ms:number){
  const timer=setTimeout(abort,ms);
  return {signal:controller.signal,dispose:()=>{clearTimeout(timer);parent?.removeEventListener('abort',abort)}};
 }
-export async function request<T>(path:string,method='GET',body?:unknown,key?:string,signal?:AbortSignal):Promise<T>{
+export async function request<T>(path:string,method='GET',body?:unknown,key?:string,signal?:AbortSignal,timeoutMs=30000):Promise<T>{
  const headers:Record<string,string>={};
  if(method!=='GET'){headers['Idempotency-Key']=key??crypto.randomUUID();headers['X-jot-Actor']='web';headers['X-CSRF-Token']=csrfToken;headers['Content-Type']=body instanceof File?'application/octet-stream':'application/json';}
- const timed=deadline(signal,body instanceof File?120000:30000);
+ const timed=deadline(signal,body instanceof File?120000:timeoutMs);
  try{
  const r=await fetch(base+'/v1'+path,{method,headers,credentials:'same-origin',cache:'no-store',signal:timed.signal,body:body===undefined?undefined:body instanceof File?body:JSON.stringify(body)});
  if(path==='/capabilities'){const scope=r.headers.get('x-workbench-draft-scope')??'';draftScope=r.ok&&/^[a-f0-9]{64}$/.test(scope)?scope:'';if(r.ok)csrfToken=r.headers.get('x-csrf-token')??'';}
