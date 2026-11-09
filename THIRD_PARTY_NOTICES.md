@@ -125,3 +125,14 @@ The complete license is retained at
 `ui/src/components/code-editor/view/subcomponents/PdfDocumentPreview.tsx` at
 that same PilotDeck revision and retains the same GNU AGPL v3 terms. Jot adds
 windowed thumbnail navigation, intrinsic rotation and resource cleanup.
+
+## PilotDeck PDF text references
+
+`web/jot/vendor/pilotdeck-text-reference.ts` extracts and adapts the used
+text-reference schema and creation helpers from `ui/src/types/contentReference.ts`
+at PilotDeck revision `783499ffdb2d501bf590b2e035acd027a882df10`.
+The adapted portions retain GNU AGPL v3 terms under the complete license at
+`packages/session-adapter/runtime-patches/PILOTDECK-AGPL-3.0.txt`.
+`web/jot/PdfFileTextReferenceAction.tsx` and `FileTextReferences.tsx` reuse the
+selection/review lifecycle of Jot's already-attributed `AssistantReplyQuote.tsx`
+and retain its applicable terms.

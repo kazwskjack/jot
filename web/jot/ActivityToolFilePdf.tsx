@@ -1,3 +1,4 @@
+import PdfFileTextReferenceAction from './PdfFileTextReferenceAction';
 import {capturePdfView,defaultPdfView,pdfViewIdentity,readPdfView,writePdfView,type PdfViewState} from './pdf-file-view-state';
 import PdfFileThumbnails from './PdfFileThumbnails';
 import PdfFileNavigation from './PdfFileNavigation';
@@ -119,6 +120,7 @@ export default function ActivityToolFilePdf(props:ListedFilePreviewSource){
    }
   }}>
   <h4>{file.path} · 版本 {file.version}</h4>
+  {document&&<PdfFileTextReferenceAction root={root} source={props}/>}
   <ActivityToolFileBytes key={identity} conversationId={conversationId} runId={runId} activityId={activityId} resultSha={resultSha} file={file}/>
   {challenge?.identity===identity&&<form onSubmit={event=>{event.preventDefault();challenge.update(password);setPassword('');setChallenge(undefined);}}>
    <label>PDF密码<input type="password" autoComplete="current-password" value={password} onChange={event=>setPassword(event.target.value)}/></label>
