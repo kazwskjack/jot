@@ -1,12 +1,14 @@
 import {createHash} from 'node:crypto';
-import {nativeToolResultObservation,sessionToolCallId} from './native-tool-result.js';
+import {nativeToolResultObservation,nativeToolCallObservation,sessionToolCallId} from './native-tool-result.js';
 import {nativeChildLogJson as json,updateNativeChildLogHash} from './native-child-closure.js';
 
 async function sendNativeChildActivity({binding,event,bridge,metadata,signal}){
  const sha=updateNativeChildLogHash(createHash('sha256'),event).digest('hex');
- const observation=event.type==='tool/result'?nativeToolResultObservation(event):{event};
- const evidence=event.type==='tool/result'?{event_format:'public-result-v1',source_event_sha256:sha}:{};
- const transportSha=event.type==='tool/result'?createHash('sha256').update(json(observation)).digest('hex'):sha;
+ const call=event.type==='tool/call'?nativeToolCallObservation(event):null;
+ const observation=event.type==='tool/result'?nativeToolResultObservation(event):call??{event};
+ const format=event.type==='tool/result'?'public-result-v1':call?'public-call-v1':undefined;
+ const evidence=format?{event_format:format,source_event_sha256:sha}:{};
+ const transportSha=format?createHash('sha256').update(json(observation)).digest('hex'):sha;
  const receipt=await bridge.request('native-child-activities',binding,{...metadata,
   ...observation,...evidence,event_sha256:transportSha},signal);
  if(!receipt||receipt.accepted!==true||receipt.execution_authorized!==false||receipt.run_id!==binding.runId||receipt.session_ref!==binding.sessionRef

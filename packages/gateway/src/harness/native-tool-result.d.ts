@@ -12,3 +12,15 @@ export function publicNativeToolResult(data: Record<string, unknown>, includeBro
 export function parsePublicNativeToolResult(value: unknown): PublicNativeToolResult;
 export function sessionToolCallId(data: Record<string, unknown>): unknown;
 export function nativeBatchWebCall(data: Record<string, unknown>): {name: 'universe_read_page' | 'universe_browse' | 'universe_execute'} | null;
+
+export interface PublicNativeToolCall {
+  query_count: number;
+  urls: string[];
+  requested_action_types: string[];
+  delegates: boolean;
+  action?: string;
+  native_batch_web?: 'universe_read_page' | 'universe_browse' | 'universe_execute';
+}
+export function publicNativeToolCall(data: Record<string, unknown>): PublicNativeToolCall;
+export function parsePublicNativeToolCall(value: unknown): PublicNativeToolCall;
+export function safeWebOperationUrl(value: unknown): string | null;

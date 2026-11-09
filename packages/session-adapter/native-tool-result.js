@@ -1,4 +1,10 @@
+import {isIP} from 'node:net'
+
 const BROWSE_ACTION_TYPES = new Set(['click', 'expand', 'next_page', 'scroll', 'wait', 'fill'])
+const SAFE_TOOL_ACTION_LABELS = new Set([
+  ...BROWSE_ACTION_TYPES, 'browse', 'execute', 'fetch', 'interact', 'navigate', 'open', 'read', 'search', 'web_operation',
+])
+const nonPublicHostSuffixes = new Set(['arpa', 'corp', 'example', 'home', 'internal', 'invalid', 'lan', 'local', 'localhost', 'onion', 'test'])
 const BROWSE_VERIFICATION_STATUSES = new Set([
   'ACTION_NO_EFFECT', 'ACTION_ROLE_DISALLOWED', 'ACTION_UNAVAILABLE', 'AMBIGUOUS_FRAME',
   'AMBIGUOUS_TARGET', 'AUTH_REQUIRED', 'BLOCKED', 'BOUND', 'BUSINESS_LOOP',
@@ -153,4 +159,100 @@ export function nativeBatchWebCall(data){
  if(!args||typeof args!=='object'||Array.isArray(args))return {name};
  if(name==='universe_read_page')return Object.hasOwn(args,'urls')?{name}:null;
  return args.inputs&&Object.hasOwn(args.inputs,'items')?{name}:null;
+}
+
+export function safeWebOperationUrl(value) {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 16_384 || [...value].length > 8192) return null
+  try {
+    const parsed = new URL(value)
+    const authority = value.match(/^https?:\/\/([^/?#]*)/i)?.[1]
+    if (!['http:', 'https:'].includes(parsed.protocol) || !parsed.hostname || !authority || authority.includes('@')
+      || parsed.username !== '' || parsed.password !== '') return null
+    const hostname = parsed.hostname.toLowerCase().replace(/\.$/, '')
+    const labels = hostname.split('.')
+    const suffix = labels.at(-1) ?? ''
+    const ipHost = hostname.startsWith('[') ? hostname.slice(1, -1) : hostname
+    if (isIP(ipHost) !== 0 || parsed.port !== '' || labels.length < 2 || nonPublicHostSuffixes.has(suffix)
+      || !labels.every(label => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))) return null
+    return parsed.origin
+  } catch {
+    return null
+  }
+}
+
+
+/** Extract only the original public argument vocabulary for tool activities. */
+export function publicNativeToolCall(data) {
+  let args = null
+  try { args = record(typeof data.arguments === 'string' ? JSON.parse(data.arguments) : data.arguments) } catch {}
+  const name = data.name ?? data.toolName ?? data.tool
+  const queries = new Set()
+  if (/(search|research|query)/.test(String(name ?? '').toLowerCase())) {
+    const inputs = record(args?.inputs)
+    const addQuery = value => {
+      if (queries.size < 50 && typeof value === 'string' && value.trim()) queries.add(value.trim().slice(0, 2000))
+    }
+    addQuery(args?.query); addQuery(inputs?.query)
+    for (const values of [args?.queries, inputs?.queries]) {
+      if (!Array.isArray(values)) continue
+      for (const value of values) { addQuery(value); if (queries.size === 50) break }
+    }
+  }
+  const urls = new Set()
+  const addUrl = value => { const url = safeWebOperationUrl(value); if (url) urls.add(url) }
+  const visit = (value, depth) => {
+    if (depth > 4) return
+    if (Array.isArray(value)) { for (const item of value) visit(item, depth + 1); return }
+    const object = record(value)
+    if (!object) return
+    addUrl(object.url)
+    if (Array.isArray(object.urls)) for (const value of object.urls) addUrl(value)
+    for (const key of ['input', 'inputs', 'params', 'arguments', 'actions', 'open', 'navigate']) visit(object[key], depth + 1)
+  }
+  visit(args, 0)
+  const actions = new Set()
+  for (const values of [args?.actions, record(args?.inputs)?.actions]) {
+    if (!Array.isArray(values)) continue
+    for (const value of values) {
+      const type = record(value)?.type
+      if (typeof type === 'string' && BROWSE_ACTION_TYPES.has(type.toLowerCase())) actions.add(type.toLowerCase())
+    }
+  }
+  const action = args?.action ?? args?.operation
+  const batch = nativeBatchWebCall({name: data.name, tool: data.tool, arguments: args})
+  return {
+    query_count: queries.size, urls: [...urls], requested_action_types: [...actions],
+    delegates: name === 'jot_workspace' && args?.operation === 'tasks.delegate',
+    ...(typeof action === 'string' && SAFE_TOOL_ACTION_LABELS.has(action.toLowerCase()) ? {action: action.toLowerCase()} : {}),
+    ...(batch ? {native_batch_web: batch.name} : {}),
+  }
+}
+
+export function parsePublicNativeToolCall(value) {
+  const call = record(value)
+  const keys = ['query_count', 'urls', 'requested_action_types', 'delegates', 'action', 'native_batch_web']
+  if (!call || Object.keys(call).some(key => !keys.includes(key))
+    || !Number.isSafeInteger(call.query_count) || call.query_count < 0 || call.query_count > 50
+    || typeof call.delegates !== 'boolean'
+    || !Array.isArray(call.urls) || new Set(call.urls).size !== call.urls.length
+    || call.urls.some(url => typeof url !== 'string' || safeWebOperationUrl(url) !== url)
+    || !Array.isArray(call.requested_action_types) || call.requested_action_types.length > BROWSE_ACTION_TYPES.size
+    || new Set(call.requested_action_types).size !== call.requested_action_types.length
+    || call.requested_action_types.some(type => !BROWSE_ACTION_TYPES.has(type))
+    || call.action !== undefined && !SAFE_TOOL_ACTION_LABELS.has(call.action)
+    || call.native_batch_web !== undefined && !['universe_read_page', 'universe_browse', 'universe_execute'].includes(call.native_batch_web)) {
+    throw Error('native_activity_public_call_invalid')
+  }
+  return call
+}
+
+/** Original event identity is hashed separately from the public observation. */
+export function nativeToolCallObservation(event) {
+  const data = record(event?.data)
+  if (event?.type !== 'tool/call' || !data) throw Error('native_activity_event_invalid')
+  const name = data.name ?? data.toolName ?? data.tool
+  // Keep compatibility with non-SDK legacy records using their original format.
+  if (typeof name !== 'string') return null
+  return {event: {type: event.type, seq: event.seq, time: event.time, data: {callId: sessionToolCallId(data), name}},
+    public_call: publicNativeToolCall(data)}
 }

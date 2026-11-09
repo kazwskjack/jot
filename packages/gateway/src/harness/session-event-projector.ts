@@ -1,4 +1,4 @@
-import {publicNativeToolResult,sessionToolCallId,type PublicNativeToolResult} from './native-tool-result.js'
+import {publicNativeToolResult,publicNativeToolCall,sessionToolCallId,type PublicNativeToolResult,type PublicNativeToolCall} from './native-tool-result.js'
 import {createHash} from 'node:crypto'
 import {
   safeWebOperationCounts, safeWebOperationId, safeWebOperationItems, safeWebOperationUrl,
@@ -38,10 +38,6 @@ interface ToolPresentation {
   failedTitle: string
 }
 
-const BROWSE_ACTION_TYPES = new Set(['click', 'expand', 'next_page', 'scroll', 'wait', 'fill'])
-const SAFE_TOOL_ACTION_LABELS = new Set([
-  ...BROWSE_ACTION_TYPES, 'browse', 'execute', 'fetch', 'interact', 'navigate', 'open', 'read', 'search', 'web_operation',
-])
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
 }
@@ -82,7 +78,7 @@ function detailFor(tool: ToolPresentation, runId: string): Record<string, unknow
 
 /** Rehydrate only the prior public call presentation after a replay restart. */
 export function projectNativeToolEvent(event: Record<string, unknown>, context: ProjectionContext,
-  priorCall?: Record<string, unknown>, publicResult?: PublicNativeToolResult): JotProjection | null {
+  priorCall?: Record<string, unknown>, publicResult?: PublicNativeToolResult, publicCall?: PublicNativeToolCall): JotProjection | null {
   const data = record(event.data)
   if (!data || !['tool/call', 'tool/result'].includes(String(event.type))) return null
   const callId = safeId(sessionToolCallId(data), '')
@@ -95,10 +91,10 @@ export function projectNativeToolEvent(event: Record<string, unknown>, context: 
     tool.startedAt = priorCall.started_at
     knownTools.set(callId, tool)
   }
-  return toolActivity(data, { ...context, knownTools }, event.type === 'tool/result', publicResult)
+  return toolActivity(data, { ...context, knownTools }, event.type === 'tool/result', publicResult, publicCall)
 }
 
-function toolActivity(data: Record<string, unknown>, context: ProjectionContext, completed: boolean, publicResult?: PublicNativeToolResult): JotProjection | null {
+function toolActivity(data: Record<string, unknown>, context: ProjectionContext, completed: boolean, publicResult?: PublicNativeToolResult, publicCall?: PublicNativeToolCall): JotProjection | null {
   const rawCallId = sessionToolCallId(data)
   const callId = safeId(rawCallId, '')
   if (!callId) return null
@@ -108,52 +104,18 @@ function toolActivity(data: Record<string, unknown>, context: ProjectionContext,
     const detail = detailFor(tool, context.runId)
     const name = data.name ?? data.toolName ?? data.tool
     if (typeof name === 'string' && name) detail.tool_name = name
-    let args: Record<string, unknown> | null = null
-    try { args = record(typeof data.arguments === 'string' ? JSON.parse(data.arguments) : data.arguments) } catch {}
-    if (tool.kind === 'subagent' && name === 'jot_workspace' && args?.operation === 'tasks.delegate'
+    const observed = publicCall ?? publicNativeToolCall(data)
+    if (tool.kind === 'subagent' && name === 'jot_workspace' && observed.delegates
       && typeof rawCallId === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(rawCallId)
       && context.sessionRef) {
       // Match the native dispatcher before public activity IDs are normalized.
       detail.native_request_id = 'delegate-' + createHash('sha256')
         .update(JSON.stringify([context.runId, context.sessionRef, rawCallId])).digest('hex')
     }
-    if (tool.kind === 'search') {
-      const inputs = record(args?.inputs)
-      const queryValues = [args?.query, inputs?.query,
-        ...(Array.isArray(args?.queries) ? args.queries : []),
-        ...(Array.isArray(inputs?.queries) ? inputs.queries : [])]
-        .filter((value): value is string => typeof value === 'string' && Boolean(value.trim()))
-        .map(value => value.trim().slice(0, 2000))
-      detail.query_count = Math.min(new Set(queryValues).size, 50)
-    }
-    const urls: string[] = []
-    const add = (value: unknown) => {
-      const url = safeWebOperationUrl(value)
-      if (url && !urls.includes(url)) urls.push(url)
-    }
-    const visit = (value: unknown, depth: number) => {
-      if (depth > 4) return
-      if (Array.isArray(value)) { for (const item of value) visit(item, depth + 1); return }
-      const obj = record(value); if (!obj) return
-      add(obj.url)
-      if (Array.isArray(obj.urls)) obj.urls.forEach(add)
-      // Only inspect known argument containers, never serialize arbitrary arguments/results.
-      for (const key of ['input', 'inputs', 'params', 'arguments', 'actions', 'open', 'navigate']) visit(obj[key], depth + 1)
-    }
-    visit(args, 0)
-    if (urls.length) { detail.urls = urls; detail.url = urls[0] }
-    const nestedInputs = record(args?.inputs)
-    const actionLists = [args?.actions, nestedInputs?.actions].filter(Array.isArray) as unknown[][]
-    const requestedActionTypes = [...new Set(actionLists.flatMap(actions => actions.flatMap(value => {
-      const action = record(value)
-      return typeof action?.type === 'string' && BROWSE_ACTION_TYPES.has(action.type.toLowerCase())
-        ? [action.type.toLowerCase()] : []
-    })))].slice(0, 12)
-    if (requestedActionTypes.length) detail.requested_action_types = requestedActionTypes
-    const rawAction = args?.action ?? args?.operation
-    if (typeof rawAction === 'string' && SAFE_TOOL_ACTION_LABELS.has(rawAction.toLowerCase())) {
-      detail.action = rawAction.toLowerCase()
-    }
+    if (tool.kind === 'search') detail.query_count = observed.query_count
+    if (observed.urls.length) { detail.urls = observed.urls; detail.url = observed.urls[0] }
+    if (observed.requested_action_types.length) detail.requested_action_types = observed.requested_action_types
+    if (observed.action) detail.action = observed.action
     tool.publicDetail = detail
     tool.startedAt = context.at
   }

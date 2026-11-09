@@ -4,7 +4,7 @@ import type {EventStore} from '../events/event-store.ts';
 import {withImmediateTransaction,withReadTransaction} from '../db/database.ts';
 import {assertExecutionLease} from './execution-lease.ts';
 import {canonicalJson} from '../db/canonical-json.ts';
-import {parsePublicNativeToolResult,nativeBatchWebCall} from '../harness/native-tool-result.js';
+import {parsePublicNativeToolResult,parsePublicNativeToolCall,nativeBatchWebCall} from '../harness/native-tool-result.js';
 import {readNativeMemberExecution} from './native-member-owner-controls.ts';
 import {projectNativeToolEvent,projectWebOperationSnapshot,sessionToolCallId,type ProjectionContext} from '../harness/session-event-projector.ts';
 
@@ -61,19 +61,28 @@ export class NativeChildActivities {
  }
  append(owner:string,runId:string,sessionRef:string,input:Input){
   const event=input.event as Input|undefined;
-  const summarized=input.event_format==='public-result-v1';
+  const summarizedResult=input.event_format==='public-result-v1';
+  const summarizedCall=input.event_format==='public-call-v1';
+  const summarized=summarizedResult||summarizedCall;
   if(input.event_format!==undefined&&!summarized
-   ||!summarized&&(input.public_result!==undefined||input.source_event_sha256!==undefined))throw Error('native_activity_event_invalid');
-  const publicResult=summarized?parsePublicNativeToolResult(input.public_result):undefined;
+   ||!summarized&&(input.public_result!==undefined||input.public_call!==undefined||input.source_event_sha256!==undefined)
+   ||summarizedResult&&input.public_call!==undefined||summarizedCall&&input.public_result!==undefined)throw Error('native_activity_event_invalid');
+  const publicResult=summarizedResult?parsePublicNativeToolResult(input.public_result):undefined;
+  const publicCall=summarizedCall?parsePublicNativeToolCall(input.public_call):undefined;
+  const observation=summarizedResult?{event,public_result:input.public_result}:summarizedCall?{event,public_call:input.public_call}:event;
   const sourceSha=summarized?input.source_event_sha256:input.event_sha256;
   if(typeof sourceSha!=='string'||!SHA.test(sourceSha))throw Error('native_activity_event_invalid');
   if(!event||typeof event!=='object'||Array.isArray(event)||!['tool/call','tool/result'].includes(String(event.type))
    ||!Number.isSafeInteger(event.seq)||Number(event.seq)<0||!Number.isSafeInteger(event.time)||Number(event.time)<0||Number(event.time)>8640000000000000
    ||!event.data||typeof event.data!=='object'||Array.isArray(event.data)
    ||event.type==='tool/result'&&event.surfaceOp!==undefined&&event.surfaceOp!=='append'
-   ||typeof input.event_sha256!=='string'||!SHA.test(input.event_sha256)||digest(summarized?{event,public_result:input.public_result}:event)!==input.event_sha256)throw Error('native_activity_event_invalid');
-  if(summarized&&(event.type!=='tool/result'||Object.keys(event).sort().join(',')!=='data,seq,time,type'
-   ||Object.keys(event.data as Input).sort().join(',')!=='callId'))throw Error('native_activity_event_invalid');
+   ||typeof input.event_sha256!=='string'||!SHA.test(input.event_sha256)||digest(observation)!==input.event_sha256)throw Error('native_activity_event_invalid');
+  if(summarized&&(Object.keys(event).sort().join(',')!=='data,seq,time,type'
+   ||summarizedResult&&(event.type!=='tool/result'||Object.keys(event.data as Input).sort().join(',')!=='callId')
+   ||summarizedCall&&(event.type!=='tool/call'||Object.keys(event.data as Input).sort().join(',')!=='callId,name'
+    ||typeof (event.data as Input).name!=='string'
+    ||publicCall?.delegates&&(event.data as Input).name!=='jot_workspace'
+    ||publicCall?.native_batch_web!==undefined&&publicCall.native_batch_web!==(event.data as Input).name)))throw Error('native_activity_event_invalid');
   const callId=sessionToolCallId(event.data as Input);
   if(typeof callId!=='string'||!ID.test(callId))throw Error('native_activity_event_invalid');
   return withImmediateTransaction(this.db,()=>{
@@ -111,7 +120,7 @@ export class NativeChildActivities {
    const context={runId,sessionRef,attemptId:`native-${token.slice(0,24)}`,
     messageId:'native-observation',blockId:'native-observation',deltaIndex:0,at:new Date(Number(event.time)).toISOString()};
    const callProjection=call?JSON.parse(call.projection_json):undefined;
-   const projection=projectNativeToolEvent(event,context,callProjection,publicResult);
+   const projection=projectNativeToolEvent(event,context,callProjection,publicResult,publicCall);
    if(!projection||projection.type!=='activity.upsert')throw Error('native_activity_event_invalid');
    let observed=event.type==='tool/result'?this.settledWebProjection(runId,sessionRef,callId,context,projection.payload):projection.payload;
    if(live&&event.type==='tool/result'&&callProjection?.native_batch_web&&observed.status!=='failed'){
@@ -119,8 +128,9 @@ export class NativeChildActivities {
     delete observed.ended_at;
    }
    const payload={...observed,activity_id:`native-tool-${token}`};
-   const batch=event.type==='tool/call'?nativeBatchWebCall(event.data as Input):null;
-   const encoded=JSON.stringify(batch?{...payload,native_batch_web:batch.name}:payload);
+   const batch=event.type==='tool/call'&&!publicCall?nativeBatchWebCall(event.data as Input):null;
+   const batchName=publicCall?.native_batch_web??batch?.name;
+   const encoded=JSON.stringify(batchName?{...payload,native_batch_web:batchName}:payload);
    this.db.prepare('INSERT INTO wb_native_activity_receipts VALUES(?,?,?,?,?,?,?)')
     .run(runId,Number(event.seq),sourceSha,String(event.type),callId,encoded,new Date().toISOString());
    this.events.append(source.conversation_id,runId,'activity.upsert',payload);

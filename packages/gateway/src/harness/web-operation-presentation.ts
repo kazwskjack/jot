@@ -1,4 +1,5 @@
-import { isIP } from 'node:net'
+import {safeWebOperationUrl} from './native-tool-result.js'
+export {safeWebOperationUrl} from './native-tool-result.js'
 
 type OperationKind = 'read_page' | 'browse' | 'execute'
 
@@ -15,7 +16,6 @@ const itemIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
 const operationIdPattern = /^web-[0-9a-f]{32}$/
 const reasonCodePattern = /^[A-Z][A-Z0-9_]{1,63}$/
 const resultRefPattern = /^(?:[0-9a-f]{32}|(?:browse|execute)-child-[0-9a-f]{40})$/
-const nonPublicHostSuffixes = new Set(['arpa', 'corp', 'example', 'home', 'internal', 'invalid', 'lan', 'local', 'localhost', 'onion', 'test'])
 
 type WebOperationPresentation = {
   action: string
@@ -64,25 +64,6 @@ function objectRecord(value: unknown): Record<string, unknown> | null {
 
 export function safeWebOperationId(value: unknown): string | null {
   return typeof value === 'string' && operationIdPattern.test(value) ? value : null
-}
-
-export function safeWebOperationUrl(value: unknown): string | null {
-  if (typeof value !== 'string' || value.length === 0 || value.length > 16_384 || [...value].length > 8192) return null
-  try {
-    const parsed = new URL(value)
-    const authority = value.match(/^https?:\/\/([^/?#]*)/i)?.[1]
-    if (!['http:', 'https:'].includes(parsed.protocol) || !parsed.hostname || !authority || authority.includes('@')
-      || parsed.username !== '' || parsed.password !== '') return null
-    const hostname = parsed.hostname.toLowerCase().replace(/\.$/, '')
-    const labels = hostname.split('.')
-    const suffix = labels.at(-1) ?? ''
-    const ipHost = hostname.startsWith('[') ? hostname.slice(1, -1) : hostname
-    if (isIP(ipHost) !== 0 || parsed.port !== '' || labels.length < 2 || nonPublicHostSuffixes.has(suffix)
-      || !labels.every(label => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))) return null
-    return parsed.origin
-  } catch {
-    return null
-  }
 }
 
 export function safeWebOperationKind(value: unknown): OperationKind | 'unknown' {
