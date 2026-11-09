@@ -3,11 +3,11 @@ import type {GitInitializationWitness,GitInitializationFile,GitReinitializationL
 import {planReinitializationConfiguration} from './reinitialization-configuration.ts';
 import {planCreateBranchConfiguration} from './branch-configuration.ts';
 import {validGitReference} from './references.ts';
-import type {GitCheckoutPreview,GitBranchInventory,GitCreateBranchWitness,GitBranchLogFile,GitBranchLogWitness} from '../../contracts/types.ts';
+import type {GitCheckoutBefore,GitCheckoutPreview,GitBranchInventory,GitCreateBranchWitness,GitBranchLogFile,GitBranchLogWitness} from '../../contracts/types.ts';
 import {createHash} from 'node:crypto';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {constants} from 'node:fs';
-import {lstat as nativeLstat,open,opendir,realpath,readdir,mkdir,mkdtemp,writeFile,rm,utimes} from 'node:fs/promises';
+import {lstat as nativeLstat,open,opendir,realpath,readdir,mkdir,mkdtemp,writeFile,rm,utimes,readlink} from 'node:fs/promises';
 import {isAbsolute,resolve,join,dirname,relative,sep,basename} from 'node:path';
 import {tmpdir} from 'node:os';
 import {workspaceRelativePath} from '../always-on/workspace-provider.ts';
@@ -37,9 +37,11 @@ const text=(value:Buffer)=>new TextDecoder('utf-8',{fatal:true}).decode(value);
 const lstat=(path:string)=>nativeLstat(path,{bigint:true});
 const identity=(s:Awaited<ReturnType<typeof lstat>>)=>[String(s.dev),String(s.ino)].join(':');
 const witness=(s:Awaited<ReturnType<typeof lstat>>)=>[identity(s),String(s.size),String(s.mtimeNs),String(s.ctimeNs),String(s.nlink)].join(':');
+const worktreeStamp=(s:Awaited<ReturnType<typeof lstat>>)=>hash([witness(s),String(s.mode),String(s.uid),String(s.gid)].join(':'));
 const safe=(path:string)=>{if(path.startsWith('-'))throw Error('git_path_unavailable');return workspaceRelativePath(path);};
 export type GitReadContext={directory:string;metadata:string;index:string|null;remotes:GitRemote[];branchLogPolicy?:Pick<GitBranchLogWitness,'configuration'|'enabled'>;worktreeConfigEnabled?:boolean;dispose():Promise<void>};
 type ReadContext=GitReadContext;
+type WorktreeAncestor={path:string|null;kind:'directory'|'missing'|'file'|'symlink'|'other';identity_sha256:string|null;stat_sha256:string|null};
 
 /** Operator-bound, read-only physical repository. No caller-controlled root,
  * generic command, write intent, inference, credential or execution authority. */
@@ -281,28 +283,86 @@ export class GitRepositoryInspection{
   for(const path of [...names].sort()){signal?.throwIfAborted();const fact=await this.file(path);if(fact.kind==='missing'){result.push({path,sha256:null});continue;}if(fact.kind!=='file')throw Error('git_path_unavailable');const bytes=await this.bytes(join(this.root,path),1024*1024,fact.stamp);size+=bytes.length;if(size>4*1024*1024)throw Error('git_metadata_limit');result.push({path,sha256:hash(bytes)});}
   return result;
  }
- /** A distinct before-state read for publication, including clean and absent
-  * targets. It does not widen the dirty-only stage/unstage witness. */
- private async publicationPath(path:string,signal?:AbortSignal,maxBytes=32*1024*1024):Promise<Omit<GitPublicationTargetFile,'sha256'>>{
-  signal?.throwIfAborted();const parts=path.split('/'),ancestors:GitPublicationTargetFile['ancestors']=[{path:null,kind:'directory',identity_sha256:hash(await this.directory(this.root))}];let current=this.root;
-  const missing=():Omit<GitPublicationTargetFile,'sha256'>=>({path,kind:'missing',size:0,mode:0,stat_sha256:null,ancestors});
+ /** Shared canonical walk for file publication and checkout before-state reads. */
+ private async worktreePath(path:string,signal?:AbortSignal):Promise<{
+  kind:GitCheckoutBefore['kind'];stat:Awaited<ReturnType<typeof lstat>>|null;blocked_by?:string;
+  ancestors:WorktreeAncestor[];
+ }>{
+  signal?.throwIfAborted();const parts=path.split('/'),rootIdentity=await this.directory(this.root),rootStat=await lstat(this.root);
+  if(identity(rootStat)!==rootIdentity)throw Error('git_snapshot_changed');
+  const ancestors:WorktreeAncestor[]=[{path:null,kind:'directory',identity_sha256:hash(rootIdentity),stat_sha256:worktreeStamp(rootStat)}];
+  let current=this.root;
   for(let index=0;index<parts.length;index++){
-   signal?.throwIfAborted();const part=parts[index]!,names=await readdir(current);
-   if(names.length>this.limits.maxMetadataEntries)throw Error('git_metadata_limit');
-   if(index>0&&names.some(name=>name.toLowerCase()==='.git'))throw Error('git_path_unavailable');
-   const aliases=names.filter(name=>name.normalize('NFC').toLowerCase()===part.normalize('NFC').toLowerCase());
-   if(aliases.length>1||aliases.length===1&&aliases[0]!==part)throw Error('git_path_unavailable');
-   if(!aliases.length){if(index<parts.length-1)ancestors.push({path:parts.slice(0,index+1).join('/'),kind:'missing',identity_sha256:null});return missing();}
-   current=join(current,part);const stat=await lstat(current);
-   if(stat.isSymbolicLink())throw Error('git_path_unavailable');
-   if(index<parts.length-1){
-    if(!stat.isDirectory())throw Error('git_path_unavailable');
-    ancestors.push({path:parts.slice(0,index+1).join('/'),kind:'directory',identity_sha256:hash(identity(stat))});
-   }else{
-    if(!stat.isFile()||stat.nlink!==1n||stat.size>BigInt(maxBytes))throw Error('git_path_unavailable');
-    return{path,kind:'file',size:Number(stat.size),mode:Number(stat.mode&0o777n),stat_sha256:hash(witness(stat)),ancestors};
+   signal?.throwIfAborted();const part=parts[index]!,folded=part.normalize('NFC').toLowerCase(),before=await lstat(current),aliases:string[]=[];let count=0,nested=false;
+   if(!before.isDirectory()||before.isSymbolicLink()||worktreeStamp(before)!==ancestors[ancestors.length-1]!.stat_sha256)throw Error('git_snapshot_changed');
+   for await(const entry of await opendir(current)){
+    signal?.throwIfAborted();if(++count>this.limits.maxMetadataEntries)throw Error('git_metadata_limit');
+    if(entry.name.toLowerCase()==='.git')nested=true;
+    if(entry.name.normalize('NFC').toLowerCase()===folded&&aliases.length<2)aliases.push(entry.name);
    }
-  }throw Error('git_path_unavailable');
+   if(worktreeStamp(await lstat(current))!==worktreeStamp(before))throw Error('git_snapshot_changed');
+   if(index>0&&nested||aliases.length>1||aliases.length===1&&aliases[0]!==part)throw Error('git_path_unavailable');
+   const name=parts.slice(0,index+1).join('/');
+   if(!aliases.length){
+    if(index<parts.length-1)ancestors.push({path:name,kind:'missing',identity_sha256:null,stat_sha256:null});
+    return{kind:'missing',stat:null,ancestors};
+   }
+   current=join(current,part);const stat=await lstat(current);
+   const kind=stat.isSymbolicLink()?'symlink':stat.isDirectory()?'directory':stat.isFile()?'file':'other';
+   if(index===parts.length-1)return{kind,stat,ancestors};
+   ancestors.push({path:name,kind,identity_sha256:hash(identity(stat)),stat_sha256:worktreeStamp(stat)});
+   if(kind!=='directory')return{kind:'blocked',stat:null,ancestors,blocked_by:name};
+  }
+  throw Error('git_path_unavailable');
+ }
+ /** Preserve the original publication witness encoding and supported target kinds. */
+ private async publicationPath(path:string,signal?:AbortSignal,maxBytes=32*1024*1024):Promise<Omit<GitPublicationTargetFile,'sha256'>>{
+  const read=await this.worktreePath(path,signal),ancestors:GitPublicationTargetFile['ancestors']=read.ancestors.map(parent=>{
+   if(parent.kind!=='directory'&&parent.kind!=='missing')throw Error('git_path_unavailable');
+   return{path:parent.path,kind:parent.kind,identity_sha256:parent.identity_sha256};
+  });
+  if(read.kind==='missing')return{path,kind:'missing',size:0,mode:0,stat_sha256:null,ancestors};
+  const stat=read.stat;
+  if(read.kind!=='file'||!stat||stat.nlink!==1n||stat.size>BigInt(maxBytes))throw Error('git_path_unavailable');
+  return{path,kind:'file',size:Number(stat.size),mode:Number(stat.mode&0o777n),stat_sha256:hash(witness(stat)),ancestors};
+ }
+ private async checkoutBefore(paths:readonly string[],signal?:AbortSignal):Promise<NonNullable<GitCheckoutPreview['index_projection']>['worktree_before']>{
+  const deadline=Date.now()+this.limits.timeoutMs;
+  const check=()=>{signal?.throwIfAborted();if(Date.now()>deadline)throw Error('git_worktree_before_timeout');};
+  const metadata=async(path:string)=>{
+   check();const read=await this.worktreePath(path,signal);check();const stat=read.stat;
+   if(stat&&(stat.size<0n||stat.size>BigInt(Number.MAX_SAFE_INTEGER)))throw Error('git_metadata_limit');
+   const fact:GitCheckoutBefore={path,kind:read.kind,size:stat?Number(stat.size):0,mode:stat?Number(stat.mode&0o7777n):0,
+    stat_sha256:stat?worktreeStamp(stat):null,sha256:null,ancestors_sha256:hash(canonicalJson(read.ancestors)),...(read.blocked_by?{blocked_by:read.blocked_by}:{})};
+   return{fact,stat};
+  };
+  const entries:GitCheckoutBefore[]=[],buffer=Buffer.alloc(65536);
+  try{
+   for(const path of paths){
+    const {fact,stat}=await metadata(path),absolute=join(this.root,path);
+    if(fact.kind==='file'&&stat?.nlink===1n){
+     const handle=await open(absolute,constants.O_RDONLY|(constants.O_NOFOLLOW??0)|(constants.O_NONBLOCK??0));
+     try{
+      const opened=await handle.stat({bigint:true});if(!opened.isFile()||worktreeStamp(opened)!==fact.stat_sha256)throw Error('git_snapshot_changed');
+      const digest=createHash('sha256');let offset=0;
+      while(offset<fact.size){check();const {bytesRead}=await handle.read(buffer,0,Math.min(buffer.length,fact.size-offset),offset);if(!bytesRead)throw Error('git_snapshot_changed');digest.update(buffer.subarray(0,bytesRead));offset+=bytesRead;}
+      check();const overflow=await handle.read(buffer,0,1,offset);
+      if(overflow.bytesRead||worktreeStamp(await handle.stat({bigint:true}))!==fact.stat_sha256||worktreeStamp(await lstat(absolute))!==fact.stat_sha256)throw Error('git_snapshot_changed');
+      fact.sha256=digest.digest('hex');
+     }finally{await handle.close();}
+    }else if(fact.kind==='symlink'&&stat&&stat.size<=1048576n){
+     const target=await readlink(absolute,{encoding:'buffer'});check();
+     if(target.length>1048576)throw Error('git_metadata_limit');
+     if(worktreeStamp(await lstat(absolute))!==fact.stat_sha256)throw Error('git_snapshot_changed');
+     fact.sha256=hash(target);
+    }
+    const again=await metadata(path);
+    if(canonicalJson({...fact,sha256:null})!==canonicalJson(again.fact))throw Error('git_snapshot_changed');
+    entries.push(fact);
+   }
+   for(const fact of entries){const again=await metadata(fact.path);if(canonicalJson({...fact,sha256:null})!==canonicalJson(again.fact))throw Error('git_snapshot_changed');}
+   check();return{sha256:hash(canonicalJson(entries)),entries};
+  }catch(error){if(error instanceof Error&&error.message==='git_worktree_before_timeout')return null;throw error;}
  }
  async publicationTarget(paths:readonly string[],signal?:AbortSignal):Promise<GitPublicationTargetRead>{
   if(!Array.isArray(paths)||!paths.length||paths.length>100)throw Error('git_intent_invalid');
@@ -720,8 +780,9 @@ export class GitRepositoryInspection{
    }
    attributes.sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:a.name<b.name?-1:a.name>b.name?1:0);
   }
+  const worktreeBefore=await this.checkoutBefore([...paths],signal);
   const body=await this.bytes(index,32*1024*1024);
-  preview.working_tree_check='passed';preview.index_projection={sha256:hash(body),entries_sha256:hash(canonicalJson(result)),entry_count:result.length,changes,attributes};
+  preview.working_tree_check='passed';preview.index_projection={sha256:hash(body),entries_sha256:hash(canonicalJson(result)),entry_count:result.length,changes,attributes,worktree_before:worktreeBefore};
   signal?.throwIfAborted();return preview;
  }
  async branches(snapshotId:string,signal?:AbortSignal,targetRef?:string):Promise<Omit<GitBranchInventory,'project_id'>>{

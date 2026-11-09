@@ -15,9 +15,11 @@ export default function GitCheckoutPreview({project,snapshotId,targetRef,onClose
  },JSON.stringify(['git-checkout-preview',project,snapshotId,targetRef]));
  const state=!resource.loading&&!resource.error&&resource.data?.preview.target_ref===targetRef?resource.data:null;
  const error=['GIT_SNAPSHOT_CHANGED','GIT_REPOSITORY_CHANGED','GIT_CHECKOUT_TARGET_UNAVAILABLE'].includes(resource.error)?'仓库或目标已变化，请刷新仓库后重新选择分支。':['GIT_OUTPUT_LIMIT','GIT_ENTRY_LIMIT','GIT_METADATA_LIMIT'].includes(resource.error)?'预览内容或条目超过读取范围，请核对仓库。':resource.error?'暂时无法读取切换预览，请重试。':'';
+ const retry=()=>{heading.current?.focus();setPage(0);setAttributePage(0);resource.reload()};
+ const worktreeBefore=state?.preview.index_projection?.worktree_before;
  return <section className="wb-form wb-git-review" aria-label="Git 分支切换影响预览">
   <div className="wb-toolbar"><h3 ref={heading} tabIndex={-1}>分支切换影响</h3><button type="button" onClick={onClose}>关闭切换预览</button></div>
-  <ResourceStatus loading={resource.loading} error={error} onRetry={()=>{setPage(0);setAttributePage(0);resource.reload()}}/>
+  <ResourceStatus loading={resource.loading} error={error} onRetry={retry}/>
   {state&&<>
    <dl><dt>目标引用</dt><dd><code>{state.preview.target_ref}</code></dd><dt>目标提交</dt><dd><code>{state.preview.target_oid}</code></dd>
     <dt>当前索引 SHA-256</dt><dd><code>{state.preview.source_index_sha256??'尚无索引文件'}</code></dd>
@@ -37,6 +39,14 @@ export default function GitCheckoutPreview({project,snapshotId,targetRef,onClose
     {state.preview.index_projection.attributes.length>50&&<nav className="wb-actions" aria-label="目标属性分页"><button type="button" disabled={attributePage===0} onClick={()=>setAttributePage(attributePage-1)}>上一页</button><span role="status">第 {attributePage+1} 页，共 {Math.ceil(state.preview.index_projection.attributes.length/50)} 页</span><button type="button" disabled={(attributePage+1)*50>=state.preview.index_projection.attributes.length} onClick={()=>setAttributePage(attributePage+1)}>下一页</button></nav>}
    </section>}
    </>}
+   {worktreeBefore===null&&<div role="status"><p>工作区原状态尚未确认，请重试预览。</p><button type="button" onClick={retry}>重新读取工作区状态</button></div>}
+   {worktreeBefore&&<section aria-label="工作区变更前状态"><h4>工作区变更前状态</h4><p>凭证 SHA-256 <code>{worktreeBefore.sha256}</code></p>
+    <ul>{worktreeBefore.entries.slice(page*50,(page+1)*50).map(entry=><li key={entry.path}>
+     <code>{entry.path}</code> · {{missing:'不存在',blocked:'父路径阻挡',file:'文件',directory:'目录',symlink:'符号链接',other:'特殊文件'}[entry.kind]} · 节点大小 {entry.size} 字节 · 模式 <code>{entry.mode.toString(8).padStart(4,'0')}</code>
+     {entry.blocked_by&&<p>阻挡路径 <code>{entry.blocked_by}</code></p>}
+     {(entry.kind==='file'||entry.kind==='symlink')&&<p>内容 SHA-256 <code>{entry.sha256??'摘要待确认'}</code></p>}
+    </li>)}</ul><p>此列表与索引变化按同一页码显示。目录内容和实际发布效果仍需完整审核。</p>
+   </section>}
    <p>blob 摘要对应 Git 原始内容。工作区转换、文件发布、引用、日志和跟踪策略仍需完整审核。</p>
   </>}
  </section>;

@@ -1167,7 +1167,7 @@
     null,
     "GitBranchInventory",
     "200",
-    "Owned snapshot-bound local and remote references. Optional target_ref adds a bounded private two-tree index projection and working-tree compatibility check. Its optional blob facts include known size and raw-content digests verified incrementally against exact preflighted frames and Git object identities. A native body-read failure leaves digests unconfirmed; the streaming process has a per-allocation cap. Target-index attributes are read with cached NUL-delimited check-attr. Approval and native execution require their separate original review chain."
+    "Owned snapshot-bound local and remote references. Optional target_ref adds a bounded private two-tree index projection and working-tree compatibility check. Its optional blob facts include known size and raw-content digests verified incrementally against exact preflighted frames and Git object identities. A native body-read failure leaves digests unconfirmed; the streaming process has a per-allocation cap. Target-index attributes are read with cached NUL-delimited check-attr. Optional worktree_before records streamed current file/link digests and physical path/ancestor states; its read deadline can yield an unconfirmed null result. Approval and native execution require their separate original review chain."
   ],
   [
     "POST",

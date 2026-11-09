@@ -1444,3 +1444,42 @@ The native blob output path is visible in [Git cat-file](https://raw.githubuserc
 Git's in-core fallback and guarded allocation limit are defined in
 [object streaming](https://raw.githubusercontent.com/git/git/master/odb/streaming.c)
 and [allocation wrappers](https://raw.githubusercontent.com/git/git/master/wrapper.c).
+
+## Checkout worktree before-state, 2026-11-09
+
+The existing checkout index preview now attaches optional worktree_before facts
+for its changed paths. Facts distinguish regular files, symlinks, directories,
+missing entries, non-directory parent blockers and other nodes. Each includes
+mode, safe size and physical-state/ancestor fingerprints. Parent fingerprints
+include identity, nanosecond timestamps, links, mode and UID/GID. Blocker paths
+are project-relative. Symlinks are observed through readlink bytes, with a 1 MiB
+link-read limit. Single-link regular files are hashed through one reused 64 KiB
+buffer, a no-follow/nonblocking descriptor and exact opened/path/final stat checks.
+Other node contents and multi-link regular-file digests remain unconfirmed.
+
+Each path is rechecked after its read and all path metadata is checked again at
+the end. Ancestor state is folded into the path witness. The original configured
+read deadline bounds this stage between I/O operations. An expired stage returns
+null, and source/path changes fail the read. Completed entries receive an exact
+aggregate SHA-256. Directories here have physical metadata evidence; recursive
+content effects still require their complete publication evidence.
+
+The original publication-path walker is shared. Streamed directory enumeration
+counts entries and retains at most two case-alias matches, with the original
+alias/nested-repository exclusions. The legacy publication wrapper emits its
+original file/missing field set, modes and witness encoding, and retains its
+single-link/size gates. Its Taskmaster, regular publication and freeze callers
+continue to use their original scope validation.
+
+The paired branch contract adds optional nullable before-state facts. The
+original preview page shows matching paginated current-node facts and explicit
+unconfirmed-state retry, with heading and close-focus handling. Original owner,
+source snapshot/full metadata, native-read cancellation and execution authority
+boundaries complete the source read.
+
+Final worktree conversion, recursive directory/ignored-file effects, native total
+resources/platforms, complete review/approval/reference/log/tracking semantics,
+publication/recovery/UI dispatch and all remaining M15.14/P09 scope continue.
+Work was source development, source comparison and Git delivery only.
+
+Descriptor reads, link bytes and directory iteration use the [Node filesystem API](https://nodejs.org/api/fs.html).
