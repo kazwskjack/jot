@@ -1,5 +1,5 @@
 import React,{useEffect,useRef,useState} from 'react';
-import {request,taskDraftScope} from './client';
+import {ApiError,request,taskDraftScope} from './client';
 import type {ActivityToolResultPage} from './types';
 
 type Target={runId:string;activityId:string;toolName:string};
@@ -21,16 +21,24 @@ export default function ActivityToolResult({conversationId,target}:{conversation
    const query=new URLSearchParams({run_id:target.runId,offset_chars:String(offset),...(expected?{result_sha256:expected}:{})});
    const page=await request<ActivityToolResultPage>(`/conversations/${encodeURIComponent(conversationId)}/activities/${encodeURIComponent(target.activityId)}/tool-result?${query}`,'GET',undefined,undefined,controller.signal);
    if(taskDraftScope()!==owner||!page||page.conversation_id!==conversationId||page.run_id!==target.runId||page.activity_id!==target.activityId
-    ||page.tool_name!==target.toolName||page.source!=='mcp'||page.execution_authorized!==false
+    ||page.tool_name!==target.toolName||page.execution_authorized!==false
+    ||(target.toolName==='jot_workspace'
+     ?page.source!=='workspace'||!['files.read','web.read'].includes(page.operation??'')||typeof page.source_truncated!=='boolean'
+     :page.source!=='mcp'||page.operation!==undefined||page.source_truncated!==undefined)
     ||typeof page.result_sha256!=='string'||!sha.test(page.result_sha256)||expected!==undefined&&page.result_sha256!==expected
     ||typeof page.text_sha256!=='string'||!sha.test(page.text_sha256)||page.offset_chars!==offset
-    ||!Number.isSafeInteger(page.total_chars)||page.total_chars<offset||page.total_chars>524288
+    ||!Number.isSafeInteger(page.total_chars)||page.total_chars<offset||page.total_chars>1048576
     ||typeof page.text!=='string'||page.text.length>16384||offset+page.text.length>page.total_chars||typeof page.has_other_content!=='boolean'
     ||(page.next_offset_chars===undefined?offset+page.text.length!==page.total_chars
      :!page.text.length||page.next_offset_chars!==offset+page.text.length||page.next_offset_chars>=page.total_chars))throw Error('工具结果来源或分页尚未确认');
    if(!controller.signal.aborted)setState({identity,offset,page});
   };
-  void load().catch(error=>{if(!controller.signal.aborted)setState({identity,offset,error:error instanceof Error?error.message:'工具结果读取失败'});});
+  void load().catch(error=>{
+   if(controller.signal.aborted)return;
+   const message=error instanceof ApiError&&error.status===404?'此步骤暂无已保存且可确认的结果正文。'
+    :error instanceof Error?error.message:'工具结果读取失败';
+   setState({identity,offset,error:message});
+  });
   return()=>controller.abort();
  },[identity,offset,expected,revision]);
  const current=state?.identity===identity&&state.offset===offset?state:undefined,page=current?.page;
@@ -41,6 +49,7 @@ export default function ActivityToolResult({conversationId,target}:{conversation
    <section data-chat-search-content={JSON.stringify(['tool-result',identity,page.result_sha256,offset])}>
     <pre>{page.text}</pre>
    </section>
+   {page.source_truncated&&<p role="status">原工具回执中的正文已截断，当前显示回执保存的全部文本。</p>}
    {page.total_chars===0&&<p role="status">原结果未包含文本内容。</p>}
    {page.has_other_content&&<p role="status">原结果还包含图片或其他非文本内容。</p>}
    <nav aria-label="工具结果正文翻页" data-chat-search-ignore>

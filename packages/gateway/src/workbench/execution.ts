@@ -859,9 +859,10 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       if (typeof args.url !== 'string' || args.url.length > 2048) throw new Error('invalid_page_url');
       const task = identity.task_binding;
       const attested=!!task||(identity.kind==='native_team'&&!!identity.task_assignment);
+      const recorded=attested||validCallId(input.call_id);
       if (attested && !validCallId(input.call_id)) throw new Error('invalid_call_id');
       const digest = createHash('sha256').update(canonical({operation: 'web.read', args})).digest('hex');
-      if (attested) {
+      if (recorded) {
         const prior = savedCall(identity.run_id, String(input.call_id), digest);
         if (prior !== undefined) return prior;
         if(task)assertTaskDependenciesReady(db,executionEvidence,identity.owner_id,task.task_id,identity.run_id);
@@ -873,7 +874,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
         context({...input, tool_name: 'jot_workspace'});
         const result = {url: page.url, text: page.text.slice(0, 12000), truncated: page.text.length > 12000,
           mode: 'public_http', trusted: false};
-        if (!attested) return result;
+        if (!recorded) return result;
         const prior = savedCall(identity.run_id, String(input.call_id), digest);
         if (prior !== undefined) return prior;
         if(task)assertTaskDependenciesReady(db,executionEvidence,identity.owner_id,task.task_id,identity.run_id);
@@ -978,8 +979,9 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
       }
       const mutating = ['messages.send', 'memory.save', 'memory.stage', 'memory.propose', 'memory.capture.propose', 'files.write','tasks.prd.plan','tasks.upsert','tasks.evidence','tasks.assess','tasks.delegate','tasks.reply_draft','discovery.plan','discovery.report'].includes(operation);
       const attested = operation==='tasks.prd.read'||operation==='tasks.work.plan.read' || (!!identity.task_binding||(identity.kind==='native_team'&&!!identity.task_assignment)) && !operation.startsWith('tasks.')&&(!operation.startsWith('discovery.')||operation==='discovery.source');
-      const receipted = mutating || attested || isDream;
       const callId = input.call_id;
+      const displayRead=operation==='files.read'&&validCallId(callId);
+      const receipted = mutating || attested || isDream || displayRead;
       if (receipted && !validCallId(callId)) throw new Error('invalid_call_id');
       const digest = createHash('sha256').update(canonical({operation, args})).digest('hex');
       if (receipted) {
@@ -1096,7 +1098,7 @@ export function registerWorkbenchExecution(app: FastifyInstance, db: DatabaseSyn
         case 'tasks.reply_drafts': requireTask(identity);result=replyDrafts.list(owner,runId);break;
         case 'tasks.next': result=assessments.nextActions(owner,requireTask(identity).task_id,undefined,runId);break;
       }
-      if (attested){const sourceResult=object(result),proof=executionEvidence.record(runId,String(callId),operation,result);
+      if (attested||displayRead){const sourceResult=object(result),proof=executionEvidence.record(runId,String(callId),operation,result);
         if(operation==='discovery.source')discoveryPlanning.recordRead(runId,proof.reference,sourceResult);
         result={...sourceResult,execution_receipt:proof};}
       if (receipted && savedCall(runId, String(callId), digest) === undefined) saveCall(runId, String(callId), digest, result);
