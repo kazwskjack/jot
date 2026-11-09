@@ -1,5 +1,6 @@
 import React,{useEffect,useMemo,useRef,useState} from 'react';
 import {request,taskDraftScope} from './client';
+import {artifactCommandDisposition} from './artifact-command-recovery.mjs';
 import {useResource} from '../workbench/useResource';
 import {useMutationReceipt} from '../workbench/useMutationReceipt';
 import {useDurableFileRecovery} from '../workbench/useDurableFileRecovery';
@@ -18,20 +19,35 @@ export default function ArtifactRecovery(props:Props){
 function Recovery({artifactId,version,sha256,partIndex,onRestored,owner,store,recoveryLoading,recoveryError,onReloadRecovery}:Props&{owner:string;store:DurableFileRecoveryStore|null;recoveryLoading:boolean;recoveryError:string;onReloadRecovery:()=>void}){
  const identity=JSON.stringify([owner,artifactId,version??null,sha256??null,partIndex??null]);
  const alive=useRef(true),previousState=useRef(''),pollAttempt=useRef(0);
- const [busy,setBusy]=useState(false),[error,setError]=useState('');
+ const [busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
+ const requestMode=useRef<'retry'|'inspect'|'close'>('retry');
  const [archiveAfterAttempt,setArchiveAfterAttempt]=useState<number|null>(null);
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
- useEffect(()=>{previousState.current='';pollAttempt.current=0;setError('');},[identity]);
+ useEffect(()=>{previousState.current='';pollAttempt.current=0;setError('');setNotice('');},[identity]);
  const current=()=>alive.current&&taskDraftScope()===owner;
  const receipt=useMutationReceipt(store,undefined,async(path,method,body,key)=>{
   if(!current()||!store)throw Error('文件恢复账户或回执范围尚未确认');
   const frozen={path,method,body,key};
-  await store.persist(frozen);
+  const mode=requestMode.current,closing=mode!=='inspect'&&store.closing;
+  if(mode!=='inspect')await store.persist(frozen);
   if(!current())throw Error('文件恢复账户范围已变化');
   const command=body as {expected_version:number;expected_sha256?:string;restore_version?:number;restore_sha256?:string;part_index?:number};
   const selected=command.restore_version!==undefined,archiving=path===`/artifacts/${encodeURIComponent(artifactId)}/archive`;
   let result:ArtifactRestoreReceipt|ArtifactArchiveReceipt;
-  try{result=await request<ArtifactRestoreReceipt|ArtifactArchiveReceipt>(path,method,body,key);}
+  try{
+   if(mode==='inspect'||closing){
+    const disposition=await artifactCommandDisposition(store,frozen,artifactId,request,current,closing);
+    if(disposition.state==='terminal_rejected'){
+     await store.acknowledge(frozen);
+     if(!current())throw Error('文件恢复账户范围已变化');
+     return {command_closed:true};
+    }
+    if(disposition.state==='unobserved')throw Error('尚未观察到原请求，请保留原请求或明确结束。');
+    if(disposition.state==='recorded_pending')throw Error('原请求已有登记，尚无最终回执。可重试原请求，或结束未提交的请求。');
+    if(disposition.state==='unresolved')throw Error('旧请求缺少可核对的原子回执，原记录已保留。');
+    result=disposition.result;
+   }else result=await request<ArtifactRestoreReceipt|ArtifactArchiveReceipt>(path,method,body,key);
+  }
   catch(reason){
    const failure=reason as {status?:number;message?:string};
    if(archiving&&(failure.status===404||[400,422].includes(failure.status??0)
@@ -110,13 +126,17 @@ function Recovery({artifactId,version,sha256,partIndex,onRestored,owner,store,re
  const canRestore=!!store&&backup?.version!==undefined&&backup.restorable
   &&(backup.restore_protocol===3&&backup.local_state!=='restoring'||legacyCurrent&&backup.backup_status==='verified'&&backup.local_state==='deleted');
  const canArchive=!!store&&backup?.archive_protocol===1&&backup.archive_ready&&backup.version!==undefined;
- const submit=async(path:string,body:unknown)=>{
+ const submit=async(path:string,body:unknown,mode:'retry'|'inspect'|'close'='retry')=>{
   if(busy||!store||!current())return;
-  setBusy(true);setError('');
+  setBusy(true);setError('');setNotice('');
   try{
-   const result=await receipt.submit(path,'POST',body) as ArtifactRestoreReceipt|ArtifactArchiveReceipt;
+   if(mode!=='retry'&&!store.read()?.command)return;
+   requestMode.current=mode;
+   if(mode==='close')store.requestClose();
+   const result=await receipt.submit(path,'POST',body) as ArtifactRestoreReceipt|ArtifactArchiveReceipt|{command_closed:true};
    if(current()){
-    if('archive_protocol' in result)setArchiveAfterAttempt(result.after_attempt);
+    if('command_closed' in result)setNotice('原文件请求已确认未提交并结束，可以重新选择操作。');
+    else if('archive_protocol' in result)setArchiveAfterAttempt(result.after_attempt);
     else{
      if(result.status==='restoring')previousState.current='restoring';
      if(result.status==='ready')onRestored();
@@ -144,6 +164,7 @@ function Recovery({artifactId,version,sha256,partIndex,onRestored,owner,store,re
   {recoveryLoading&&<p role="status">正在读取文件操作持久回执…</p>}
   {recoveryError&&<p role="alert">{recoveryError}</p>}
   <button type="button" disabled={busy||recoveryLoading} onClick={onReloadRecovery}>重读待确认归档或恢复请求</button>
+  {notice&&<p role="status">{notice}</p>}
   {backup&&<p>{statuses[backup.backup_status]} · {local[backup.local_state]}</p>}
   {backup?.executor?.mode==='managed'&&<p role="status">托管归档进程 · {phases[backup.executor.state]}{backup.executor.last_completed_at?` · 上次处理 ${backup.executor.last_completed_at}`:''}</p>}
   {backup?.executor?.mode==='managed'&&backup.executor.state==='failed'&&<p role="status">{backup.executor.restart_required?'归档进程回收尚未确认，自动重启已停止。需处理残留进程后重启网关。':'归档进程遇到错误，可刷新状态查看后续处理。'}</p>}
@@ -159,7 +180,12 @@ function Recovery({artifactId,version,sha256,partIndex,onRestored,owner,store,re
   {canArchive&&<button type="button" disabled={busy||resource.loading||!!resource.error||receipt.pending||archiveAfterAttempt!==null} onClick={()=>void archive()}>{backup?.last_error||backup?.backup_status==='retry'||backup?.backup_status==='failed'?'重试归档全部版本':'归档全部版本'}</button>}
   {backup?.archive_protocol===1&&!backup.archive_ready&&<p role="status">归档全部版本需要本地文件齐全，且当前没有恢复操作。</p>}
   {archiveAfterAttempt!==null&&<p role="status">全部版本归档请求已登记，等待归档进程完成并验证文件。</p>}
-  {receipt.pending&&<p role="status">原归档或恢复请求的回执尚未确认，请先确认原请求。<button type="button" disabled={busy} onClick={()=>void restore()}>重试原请求</button></p>}
+  {receipt.pending&&<div role="status">
+   <p>{store?.closing?'结束原请求的意图已保留，请继续确认原回执。':'原归档或恢复请求的回执尚未确认，请先确认原请求。'}</p>
+   <button type="button" disabled={busy} onClick={()=>void restore()}>{store?.closing?'重试结束确认':'重试原请求'}</button>
+   <button type="button" disabled={busy} onClick={()=>void submit(`/artifacts/${encodeURIComponent(artifactId)}/restore`,{},'inspect')}>读取原请求回执</button>
+   <button type="button" disabled={busy} onClick={()=>void submit(`/artifacts/${encodeURIComponent(artifactId)}/restore`,{},'close')}>结束未提交的原请求</button>
+  </div>}
   {backup?.local_state==='restoring'&&<p role="status">{backup.executor?.mode==='managed'?'已登记到托管归档进程，完成后会重新读取文件。':'恢复由单独配置的外部归档进程处理，完成后会重新读取文件。'}</p>}
   {backup?.restore_protocol===2&&!legacyCurrent&&<p role="status">此服务器提供当前版本恢复，所选历史版本需通过新版恢复入口处理。</p>}
   {error&&<p role="alert">{error}</p>}

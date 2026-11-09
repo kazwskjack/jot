@@ -27,6 +27,7 @@ import multipart from '@fastify/multipart';
 import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { openProductDatabase, withImmediateTransaction } from './db/database.ts';
 import {canonicalJson} from './db/canonical-json.ts';
+import {ArtifactCommandRecovery} from './artifacts/command-recovery.ts';
 import { ConversationRepository } from './conversations/repository.ts';
 import { ProjectRepository } from './projects/repository.ts';
 import {GitWorkbench,type GitRepositoryBinding} from './git/service.ts';
@@ -301,6 +302,7 @@ export async function buildServer(config: {
   app.addHook('onClose',async()=>clearInterval(uploadExpirySweep));
   const sources = new SourceRepository(db);
   const contracts = new ContractValidator();
+  const artifactCommands = new ArtifactCommandRecovery(db,artifacts,contracts);
   const ownerChannels=new OwnerChannelBindings(db,{enabled:[...(config.internalChannelToken?['wecom',...(config.matrixOwnerBindingEnabled===true?['matrix']:[]),...(config.mattermostOwnerBinding?['mattermost']:[]),...(config.slackWebhook?['slack']:[])]:[]),...(config.smsWebhook?['sms']:[])],...(config.mattermostOwnerBinding?{mattermost:config.mattermostOwnerBinding}:{})});
   installChannelAuthorityMigration(db);
   const channelIntake = new ChannelIntakeService(db, runs, config.workspaces[0] ?? 'jot', ownerChannels);
@@ -412,6 +414,10 @@ export async function buildServer(config: {
         if(!protocol||!cached||cached.receipt_protocol!==protocol)throw new Error('idempotency_in_progress');
         if(cached.response_status!==null){assertGitReceiptOwner(request,pending.owner);if(cached.response_status!==status)throw new Error('idempotency_conflict');const saved=JSON.parse(String(cached.response_json));return (isMemoryBrainRoute(request)?readBrainReceipt(request,pending.owner,saved):saved) as T;}
       }
+      if(isArtifactArchiveRoute(request)||isArtifactRestoreRoute(request)){
+        if(!pending)throw new Error('idempotency_in_progress');
+        artifactCommands.assertOpen(pending.owner,pending.operation,pending.key);
+      }
       const registeredRoute=request.routeOptions.url;
       if(typeof registeredRoute!=='string')throw new Error('contract_response_invalid');
       const result=operation(),operationId=contracts.operationFor(request.method,registeredRoute);
@@ -496,6 +502,7 @@ export async function buildServer(config: {
     ].includes(request.routeOptions.url??'')){
       reply.header('cache-control','private, no-store');return;
     }
+    if(request.method==='POST'&&request.routeOptions.url==='/v1/artifacts/:artifactId/commands/:commandKey/close'){reply.header('cache-control','private, no-store');return;}
     // Binding codes are one-time secrets: the service deduplicates this request
     // by a hash, and a replay returns the challenge ID without redisclosing code.
     if(request.method==='POST'&&request.url.split('?')[0]==='/v1/channel-bindings')return;
@@ -748,6 +755,8 @@ export async function buildServer(config: {
     if (['reply_evidence_unverified','interaction_answer_invalid','interaction_history_query_invalid', 'interaction_decision_invalid', 'upload_size_invalid', 'upload_sha256_invalid', 'upload_filename_invalid', 'upload_size_mismatch', 'upload_sha256_mismatch','upload_batch_invalid', 'artifact_diff_unsupported', 'source_evidence_required', 'source_url_invalid', 'invalid_project_title', 'invalid_conversation_state', 'FILE_REQUEST_INVALID', 'TEMPLATE_CONTENT_INVALID', 'UNSUPPORTED_FORMAT_OPERATION', 'requested_count_invalid', 'event_seq_invalid', 'input_index_invalid', 'item_id_invalid', 'owner_id_invalid', 'run_id_invalid', 'batch_id_invalid', 'conversation_id_invalid', 'crawl_url_invalid'].includes(code)) return reply.code(422).send({ error: { code: code.toUpperCase() } });
     if (['artifact_not_restorable','artifact_restore_required','upload_state_conflict'].includes(code)) return reply.code(409).send({ error: { code: code.toUpperCase() } });
     if (code === 'origin_forbidden' || code === 'csrf_invalid') return reply.code(403).send({ error: { code: code.toUpperCase() } });
+    if(code==='artifact_command_request_invalid')return reply.code(422).send({error:{code:code.toUpperCase()}});
+    if(['artifact_command_closed','artifact_command_unresolved','artifact_command_immutable'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
     if (code === 'idempotency_key_invalid') return reply.code(400).send({ error: { code: 'IDEMPOTENCY_KEY_INVALID' } });
     if(code==='ordinary_attachment_steering_unavailable')return reply.code(503).send({error:{code:'ORDINARY_ATTACHMENT_STEERING_UNAVAILABLE'}});
     if(code==='ordinary_steering_unavailable')return reply.code(503).send({error:{code:'ORDINARY_STEERING_UNAVAILABLE'}});
@@ -1272,6 +1281,20 @@ export async function buildServer(config: {
     reply.header('cache-control','private, no-store');
     const status=artifacts.backupStatus((request.params as {artifactId:string}).artifactId,actor(request as any),request.query as {version?:unknown;sha256?:unknown;part_index?:unknown;restore_protocol?:unknown});
     return status.restore_protocol===3?{...status,executor:archiveStatus()}:status;
+  });
+  app.get('/v1/artifacts/:artifactId/commands/:commandKey',async(request,reply)=>{
+    reply.header('cache-control','private, no-store');
+    const query=request.query as Record<string,unknown>;
+    if(Object.keys(query).sort().join(',')!=='body,path'||typeof query.path!=='string'||typeof query.body!=='string'||query.body.length>4096)throw Error('artifact_command_request_invalid');
+    let body:unknown;try{body=JSON.parse(query.body);}catch{throw Error('artifact_command_request_invalid');}
+    const params=request.params as {artifactId:string;commandKey:string};
+    return artifactCommands.disposition(actor(request as any),params.artifactId,params.commandKey,{path:query.path,body});
+  });
+  app.post('/v1/artifacts/:artifactId/commands/:commandKey/close',async(request,reply)=>{
+    reply.header('cache-control','private, no-store');
+    const params=request.params as {artifactId:string;commandKey:string};
+    if(String(request.headers['idempotency-key']??'')!==params.commandKey)throw Error('artifact_command_request_invalid');
+    return artifactCommands.disposition(actor(request as any),params.artifactId,params.commandKey,request.body,true);
   });
   app.post('/v1/artifacts/:artifactId/archive',async(request,reply)=>reply.code(202).send(atomicCommand(request,202,()=>artifacts.requestArchive(
     (request.params as {artifactId:string}).artifactId,actor(request as any),request.body as Record<string,unknown>))));
