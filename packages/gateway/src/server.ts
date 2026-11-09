@@ -614,6 +614,8 @@ export async function buildServer(config: {
 
   app.addHook('onSend', async (request, reply, payload) => {
     const registeredRoute=request.routeOptions.url;
+    if(request.method==='GET'&&reply.statusCode<400&&String(reply.getHeader('content-type')??'').startsWith('application/octet-stream')
+      &&['/v1/workspaces/:workspaceId/files/binary','/v1/workspaces/:workspaceId/checkpoints/:checkpointId/restore-reviews/:reviewId/target'].includes(registeredRoute??''))return payload;
     const operationId=typeof registeredRoute==='string'?contracts.operationFor(request.method,registeredRoute):null;
     let responseValue: unknown = null;
     if (typeof payload === 'string' && payload.length) {
@@ -702,6 +704,7 @@ export async function buildServer(config: {
     if(code==='task_reply_run_active')return reply.code(409).send({error:{code:code.toUpperCase()}});
     if(code==='task_notification_run_active')return reply.code(409).send({error:{code:code.toUpperCase()}});
     if(code==='workspace_checkpoint_upgrade_required'||code==='workspace_checkpoint_service_unavailable'||code==='workspace_checkpoint_backup_verifier_unavailable'||code==='workspace_checkpoint_source_revision_unavailable')return reply.code(503).send({error:{code:code.toUpperCase()}});
+    if(code==='workspace_checkpoint_review_content_limit')return reply.code(413).send({error:{code:code.toUpperCase()}});
     if(code.startsWith('workspace_checkpoint_')&&code.endsWith('_invalid'))return reply.code(422).send({error:{code:code.toUpperCase()}});
     if(['workspace_checkpoint_path_is_directory','workspace_path_unsafe','workspace_private_path','workspace_paths_invalid','workspace_path_collision','workspace_limit'].includes(code))return reply.code(422).send({error:{code:code.toUpperCase()}});
     if(code.startsWith('workspace_checkpoint_')&&(

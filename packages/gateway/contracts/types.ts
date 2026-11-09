@@ -367,6 +367,7 @@ export type WorkspaceCheckpointCommandClosure = {protocol:1;command_key:string;r
 export type WorkspaceCheckpointPage = {items:WorkspaceCheckpoint[];next_before_checkpoint_id:string|null;execution_authorized:false;restore_authorized:false};
 export type CreateWorkspaceCheckpoint = {project_id:string;paths:string[]};
 export type WorkspaceCheckpointPathState = {path:string;kind:'file';version:number;sha256:string;size:number;executable:false}|{path:string;kind:'absent'};
+export type WorkspaceCheckpointRestoreTargetQuery = {project_id:string;path:string;version:number;sha256:string;review_sha256:string};
 export type CreateWorkspaceCheckpointRestoreReview = {project_id:string;path:string};
 export type WorkspaceCheckpointRestoreReview = {review_id:string;checkpoint_id:string;project_id:string;workspace_id:string;path:string;expected_revision:number;before:WorkspaceCheckpointPathState;target:WorkspaceCheckpointPathState;review_sha256:string;created_at:string;execution_authorized:false;restore_authorized:false};
 export type RestoreWorkspaceCheckpoint = {project_id:string;path:string;review_id:string;review_sha256:string};

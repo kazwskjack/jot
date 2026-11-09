@@ -2,7 +2,7 @@ import React,{useEffect,useMemo,useState,useRef} from 'react';
 import {useDurableFileRecovery} from './useDurableFileRecovery';
 import type {DurableFileRecoveryStore} from './durable-file-recovery.mjs';
 import {CheckpointRestoreDraftStore,readCheckpointRestoreCommand,closeCheckpointRestoreCommand} from './checkpoint-restore-draft.mjs';
-import {request,taskDraftScope} from '../jot/client';
+import {request,taskDraftScope,ApiError} from '../jot/client';
 import {workbenchApi} from './client';
 import type {WorkspaceCheckpointRestoreReview,WorkspaceCheckpointRestoreReceipt} from './types';
 
@@ -38,14 +38,15 @@ export async function readCheckpointRestoreDiff(
  review: WorkspaceCheckpointRestoreReview,
  readBytes: (file: ReviewedFile, signal: AbortSignal) => Promise<Uint8Array>,
  signal: AbortSignal,
+ readTargetBytes?: (file: ReviewedFile, signal: AbortSignal) => Promise<Uint8Array>,
 ): Promise<RestoreDiff> {
  signal.throwIfAborted();
  if ([review.before, review.target].some(file => file.kind === 'file' && file.size > 1_048_576)) {
   return {kind: 'unavailable', text: '文件超过 1 MiB 文本差异预览上限，请核对当前与目标的字节摘要、大小和版本。'};
  }
- const read = async (file: WorkspaceCheckpointRestoreReview['before']) => {
+ const read = async (file: WorkspaceCheckpointRestoreReview['before'], reader = readBytes) => {
   if (file.kind === 'absent') return new Uint8Array();
-  const bytes = await readBytes(file, signal);
+  const bytes = await reader(file, signal);
   signal.throwIfAborted();
   if (bytes.byteLength !== file.size) throw new Error('workspace_file_source_mismatch');
   const content = new Uint8Array(bytes);
@@ -55,7 +56,15 @@ export async function readCheckpointRestoreDiff(
   if (actual !== file.sha256) throw new Error('workspace_file_source_mismatch');
   return content;
  };
- const [beforeBytes, targetBytes] = await Promise.all([read(review.before), read(review.target)]);
+ const beforeRead=read(review.before).then(bytes=>({bytes,unavailable:false})).catch(error=>{
+  signal.throwIfAborted();
+  if(readTargetBytes&&error instanceof ApiError&&(error.status===404&&error.message==='FILE_NOT_FOUND'||error.status===409&&error.message==='FILE_INTEGRITY_FAILED'))return {bytes:new Uint8Array(),unavailable:true};
+  throw error;
+ });
+ const [beforeResult,targetBytes]=await Promise.all([beforeRead,read(review.target,readTargetBytes??readBytes)]);
+ signal.throwIfAborted();
+ if(beforeResult.unavailable)return {kind:'unavailable',text:'当前版本字节缺失或校验失败，完整差异无法生成。目标快照已按原审阅摘要核对，请核对路径、版本、摘要和大小后决定恢复。'};
+ const beforeBytes=beforeResult.bytes;
  let before: string;
  let target: string;
  try {
@@ -99,7 +108,8 @@ function RestoreRecovery({workspace,project,review,canWrite,onClose,onPending,on
   setDifference(null);if(!review)return;
   const controller=new AbortController();
   if(review.workspace_id!==workspace||review.project_id!==project){setDifference({review_id:review.review_id,error:'恢复预览范围不匹配，请重新检查恢复内容。'});return;}
-  void readCheckpointRestoreDiff(review,(file,signal)=>workbenchApi.readWorkspaceFileBinary(workspace,project,file.path,file.version,file.sha256,signal),controller.signal)
+  void readCheckpointRestoreDiff(review,(file,signal)=>workbenchApi.readWorkspaceFileBinary(workspace,project,file.path,file.version,file.sha256,signal),controller.signal,
+   (file,signal)=>workbenchApi.readCheckpointRestoreTarget(workspace,project,review.checkpoint_id,review.review_id,file.path,file.version,file.sha256,review.review_sha256,signal))
    .then(value=>{if(!controller.signal.aborted&&current())setDifference({review_id:review.review_id,value});})
    .catch(error=>{if(!controller.signal.aborted&&current())setDifference({review_id:review.review_id,error:error instanceof Error?error.message:'恢复差异读取失败，请重新检查恢复内容。'});});
   return()=>controller.abort();

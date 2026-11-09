@@ -298,6 +298,17 @@ export function registerWorkbenchRoutes(app: FastifyInstance, service: Workbench
     privateReply(reply);const input=body(request,['project_id','path']);
     return reply.code(201).send(await checkpointService().reviewRestore(actor(request),param(request,'workspaceId'),{...input,checkpoint_id:param(request,'checkpointId'),command_key:String(request.headers['idempotency-key']??'')}));
   });
+  app.get('/v1/workspaces/:workspaceId/checkpoints/:checkpointId/restore-reviews/:reviewId/target',async(request,reply)=>{
+    privateReply(reply);const input=query(request);
+    if(typeof input.version!=='string'||! /^[1-9][0-9]{0,15}$/.test(input.version)||!Number.isSafeInteger(Number(input.version)))throw new Error('workspace_checkpoint_review_content_invalid');
+    const controller=new AbortController(),abort=()=>controller.abort();
+    request.raw.once('aborted',abort);reply.raw.once('close',abort);
+    if(request.raw.aborted||reply.raw.destroyed)controller.abort();
+    try{
+      const file=await checkpointService().readReviewTarget(actor(request),param(request,'workspaceId'),param(request,'checkpointId'),param(request,'reviewId'),{...input,version:Number(input.version)},{signal:controller.signal});
+      return reply.type('application/octet-stream').header('x-workspace-file-sha256',file.sha256).header('x-workspace-file-size',String(file.size)).header('x-checkpoint-review-sha256',file.review_sha256).send(file.content);
+    }finally{request.raw.removeListener('aborted',abort);reply.raw.removeListener('close',abort);}
+  });
   app.post('/v1/workspaces/:workspaceId/checkpoints/:checkpointId/restore',async(request,reply)=>{
     privateReply(reply);const input=body(request,['project_id','path','review_id','review_sha256']);
     return checkpointService().restore(actor(request),param(request,'workspaceId'),{...input,checkpoint_id:param(request,'checkpointId'),command_key:String(request.headers['idempotency-key']??'')});

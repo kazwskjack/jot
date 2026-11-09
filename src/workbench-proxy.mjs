@@ -204,7 +204,7 @@ export function registerWorkbenchProxy(app,config,localCsrf){
   if(req.headers['idempotency-key'])headers['idempotency-key']=req.headers['idempotency-key'];
   if(req.headers['last-event-id'])headers['last-event-id']=req.headers['last-event-id'];
    const binary=req.method==='PUT'&&(/^\/v1\/uploads\/[^/]+\/content$/.test(suffix)||/^\/v1\/workspaces\/[^/]+\/files\/binary$/.test(suffix));
-   const binaryDownload=req.method==='GET'&&/^\/v1\/workspaces\/[^/]+\/files\/binary$/.test(suffix);
+   const binaryDownload=req.method==='GET'&&(/^\/v1\/workspaces\/[^/]+\/files\/binary$/.test(suffix)||/^\/v1\/workspaces\/[^/]+\/checkpoints\/[^/]+\/restore-reviews\/[^/]+\/target$/.test(suffix));
   if(binary&&!Buffer.isBuffer(req.body))return reply.code(415).send({error:{code:'BINARY_UPLOAD_REQUIRED'}});
   if(req.body!==undefined)headers['content-type']=binary?'application/octet-stream':'application/json';
    if(binary||binaryDownload||/^\/v1\/runs\/[^/]+\/native-member-executions$/.test(suffix)||/^\/v1\/runs\/[^/]+\/native-members\/[^/]+\/execution$/.test(suffix)||/^\/v1\/conversations\/[^/]+\/(?:activities|native-member-runs|interaction-history)$/.test(suffix)||/^\/v1\/workspaces\/[^/]+\/memory\/import(?:\/|$)/.test(suffix)||/^\/v1\/projects\/[^/]+\/git(?:\/|$)/.test(suffix))reply.header('cache-control','private, no-store');

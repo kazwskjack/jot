@@ -9,7 +9,7 @@ import {MemoryConsolidationService} from './memory-consolidation.ts';
 import {MemoryImportService} from './memory-import.ts';
 import {validateNativeOperationProofs} from './native-operation-proof.ts';
 import { createHash, createHmac, createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {constants as fsConstants,openSync,closeSync,fstatSync,readSync,existsSync,lstatSync,mkdirSync,readFileSync,realpathSync,renameSync,rmSync,writeFileSync} from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { withImmediateTransaction,withReadTransaction } from '../db/database.ts';
@@ -1850,13 +1850,33 @@ export class WorkbenchService {
     const workspace=this.workspace(workspaceId),context=runId?this.runIdentity(owner,workspace,runId):null;
     if(context&&context.project_id!==projectId)throw new Error('file_scope_forbidden');
     const path=this.filePath(filePath);this.projects.assertOwned(projectId,owner);
-    const root=this.projectRoot(owner,workspace,projectId);
+    const root=this.projectSourceRoot(owner,workspace,projectId);
+    if(!root)throw new Error('file_not_found');
     this.safeLogicalPath(root,path,false);
     const row=this.db.prepare('SELECT * FROM wb_file_versions WHERE owner_id=? AND workspace_id=? AND project_id=? AND path=? AND version=?')
       .get(owner,workspace,projectId,path,version) as Row|undefined;
     if(!row)throw new Error('file_not_found');
     if(String(row.sha256)!==expectedSha256)throw new Error('file_source_stale');
-    const blob=this.safeLogicalPath(root,`blobs/${String(row.blob_name)}`,false),content=readFileSync(blob);
+    const blob=this.safeLogicalPath(root,`blobs/${String(row.blob_name)}`,false);
+    if(!Number.isSafeInteger(row.size)||Number(row.size)<0)throw new Error('file_integrity_failed');
+    let content:Buffer,descriptor:number|undefined;
+    try{
+      const named=lstatSync(blob,{bigint:true});
+      if(!named.isFile()||named.nlink!==1n||named.size!==BigInt(Number(row.size)))throw new Error('file_integrity_failed');
+      const sameFile=(value:typeof named)=>value.dev===named.dev&&value.ino===named.ino&&value.mode===named.mode
+        &&value.nlink===named.nlink&&value.size===named.size&&value.mtimeNs===named.mtimeNs&&value.ctimeNs===named.ctimeNs;
+      descriptor=openSync(blob,fsConstants.O_RDONLY|(fsConstants.O_NOFOLLOW??0));
+      if(!sameFile(fstatSync(descriptor,{bigint:true})))throw new Error('file_integrity_failed');
+      content=Buffer.alloc(Number(row.size));let offset=0;
+      while(offset<content.length){
+        const count=readSync(descriptor,content,offset,Math.min(65536,content.length-offset),offset);
+        if(!count)throw new Error('file_integrity_failed');offset+=count;
+      }
+      if(!sameFile(fstatSync(descriptor,{bigint:true}))||!sameFile(lstatSync(blob,{bigint:true})))throw new Error('file_integrity_failed');
+    }catch(error){
+      if(['ENOENT','ENOTDIR'].includes(String((error as NodeJS.ErrnoException).code)))throw new Error('file_not_found');
+      throw error;
+    }finally{if(descriptor!==undefined)closeSync(descriptor);}
     if(createHash('sha256').update(content).digest('hex')!==row.sha256||content.byteLength!==Number(row.size))throw new Error('file_integrity_failed');
     return {path:String(row.path),version:Number(row.version),sha256:String(row.sha256),size:Number(row.size),created_at:String(row.created_at),content};
   }

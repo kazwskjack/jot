@@ -313,6 +313,31 @@ export class WorkspaceCheckpointService{
   const row=this.reviewRow(owner,workspace,project,reviewId);
   return Object.freeze({review_id:String(row.review_id),checkpoint_id:String(row.checkpoint_id),project_id:String(row.project_id),workspace_id:String(row.workspace_id),path:String(row.path),expected_revision:Number(row.expected_revision),before:this.publicStored(row.before),target:Object.freeze(row.target),review_sha256:String(row.review_sha256),created_at:String(row.created_at),execution_authorized:false,restore_authorized:false});
  }
+ async readReviewTarget(owner:string,workspace:string,checkpointId:string,reviewId:string,input:Record<string,unknown>,controls:Controls={}){
+  if(!exact(input,['project_id','path','review_sha256','version','sha256'])||typeof input.project_id!=='string'||typeof input.path!=='string'
+   ||typeof checkpointId!=='string'||!ID.test(checkpointId)||typeof reviewId!=='string'||!ID.test(reviewId)||!validDigest(input.review_sha256)||!validDigest(input.sha256)||!Number.isSafeInteger(input.version)||Number(input.version)<1)throw failure('workspace_checkpoint_review_content_invalid');
+  const project=input.project_id,path=boundedPath(input.path),signal=this.signal(controls);
+  this.validateScope(owner,workspace,project);
+  const review=this.reviewRow(owner,workspace,project,reviewId);
+  if(review.checkpoint_id!==checkpointId||review.path!==path||review.review_sha256!==input.review_sha256)throw failure('workspace_checkpoint_review_changed');
+  const row=this.readyRow(owner,workspace,project,checkpointId);if(this.pruned(checkpointId))throw failure('workspace_checkpoint_pruned');
+  const {snapshotId,target}=this.checkpointTarget(row,path);
+  if(target.kind!=='file'||canonicalJson(publicState(target))!==canonicalJson(review.target)||target.version!==input.version||target.sha256!==input.sha256)throw failure('workspace_checkpoint_review_changed');
+  if(target.size>1_048_576)throw failure('workspace_checkpoint_review_content_limit');
+  const guard=this.guard(owner,workspace,project,controls),provider=this.provider();
+  const snapshot=await provider.recover({snapshot_id:snapshotId,storageRoot:this.storageRoot,guard,signal});
+  const entry=snapshot.manifest.entries.find(value=>value.path===path);
+  if(snapshot.receipt.manifest_sha256!==row.manifest_sha256||!entry||entry.kind!=='file'||entry.sha256!==target.sha256||entry.bytes!==target.size||entry.executable!==review.target.executable)throw failure('workspace_checkpoint_artifact_corrupt');
+  const content=Buffer.alloc(target.size);let bytes=0;
+  for await(const chunk of provider.read(snapshot,path,guard,signal)){
+   bytes+=chunk.byteLength;if(bytes>content.byteLength)throw failure('workspace_checkpoint_artifact_corrupt');
+   content.set(chunk,bytes-chunk.byteLength);
+  }
+  this.validateScope(owner,workspace,project);
+  if(signal.aborted)throw failure('workspace_checkpoint_cancelled');
+  if(bytes!==target.size)throw failure('workspace_checkpoint_artifact_corrupt');
+  return {content,sha256:target.sha256,size:target.size,review_sha256:review.review_sha256};
+ }
  private priorReview(owner:string,workspace:string,project:string,key:string,requestSha:string,checkpointId:string,path:string){
   const prior=this.db.prepare('SELECT request_sha256,review_id FROM wb_workspace_checkpoint_restore_review_commands WHERE owner_id=? AND workspace_id=? AND project_id=? AND command_key=?').get(owner,workspace,project,key) as Row|undefined;
   if(!prior)return undefined;if(!validDigest(prior.request_sha256))throw failure('workspace_checkpoint_review_command_corrupt');if(prior.request_sha256!==requestSha)throw failure('idempotency_conflict');
