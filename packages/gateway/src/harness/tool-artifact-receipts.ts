@@ -4,7 +4,8 @@ import type {NativeArtifactReceipt} from './native-tool-result.js';
 /** A result reference grants neither artifact publication nor execution authority. */
 export function bindToolArtifactReceipts(db:DatabaseSync,conversationId:string,runId:string,
  payload:Record<string,unknown>,receipts?:NativeArtifactReceipt[]):Record<string,unknown>{
- if(!receipts?.length||payload.run_id!==runId||!payload.detail||typeof payload.detail!=='object'||Array.isArray(payload.detail))return payload;
+ if(!receipts?.length||payload.run_id!==runId||!payload.detail||typeof payload.detail!=='object'||Array.isArray(payload.detail)
+  ||!['search','browse','file_edit','file_read','command','subagent','crawl'].includes(String(payload.kind)))return payload;
  const read=db.prepare(`SELECT v.sha256,v.metadata_json FROM ga_artifacts a
   JOIN ga_artifact_versions v ON v.artifact_id=a.id
   JOIN ga_conversations c ON c.id=a.conversation_id AND c.owner_id=a.owner_id

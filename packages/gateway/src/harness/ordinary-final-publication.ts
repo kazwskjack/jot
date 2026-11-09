@@ -1,3 +1,4 @@
+import {linkOrdinaryToolArtifactHistory} from './ordinary-tool-artifact-history.ts';
 import {createHash,randomUUID} from 'node:crypto';import {isDeepStrictEqual} from 'node:util';
 import {pinnedAttachmentRefs} from '../messages/pinned-attachments.ts';
 import type {DatabaseSync} from 'node:sqlite';import type {EventStore} from '../events/event-store.ts';
@@ -25,7 +26,15 @@ function fail():never{throw Error('ordinary_final_publication_unconfirmed');}
 export class OrdinaryFinalPublisher{
  private db:DatabaseSync;private events:EventStore;private client:Client;private options:Options;private deliveries?:HistoricalFinalDeliveryIntents;
  usesDatabase(db:DatabaseSync):boolean{return this.db===db;}
- constructor(db:DatabaseSync,events:EventStore,client:Client,options:Options={}){this.db=db;this.events=events;this.client=client;this.options=options;if(!!options.resolver!==!!options.artifactRoot)throw Error('ordinary_final_publication_config_invalid');if(options.historicalChannels!==undefined)this.deliveries=new HistoricalFinalDeliveryIntents(db,options.historicalChannels);}
+ constructor(db:DatabaseSync,events:EventStore,client:Client,options:Options={}){
+  if(!events.usesDatabase(db))throw Error('ordinary_final_publication_store_mismatch');
+  this.db=db;
+  this.events=events;
+  this.client=client;
+  this.options=options;
+  if(!!options.resolver!==!!options.artifactRoot)throw Error('ordinary_final_publication_config_invalid');
+  if(options.historicalChannels!==undefined)this.deliveries=new HistoricalFinalDeliveryIntents(db,options.historicalChannels);
+ }
  private snapshot(runId:string,session:string){
   const row=this.db.prepare('SELECT c.owner_id,r.conversation_id,r.version FROM ga_runs r JOIN ga_conversations c ON c.id=r.conversation_id WHERE r.id=?').get(runId) as {owner_id:string;conversation_id:string;version:number}|undefined;if(!row)fail();
   const scope={owner_id:row.owner_id,conversation_id:row.conversation_id,run_id:runId,expected_run_version:row.version},source=inspectOrdinaryRunHistory(this.db,{...scope,session_ref:session});
@@ -93,6 +102,7 @@ export class OrdinaryFinalPublisher{
     this.db.prepare("INSERT INTO ga_candidate_answers(id,run_id,input_message_id,turn_id,attempt,source,source_version,status,text,evidence_refs_json,created_at,updated_at) VALUES(?,?,?,?,1,'dsh-history-final','1','verified',?,?,?,?)").run(`candidate-history-${createHash('sha256').update(runId+proof.raw_sha256).digest('hex')}`,runId,current.source.input_message_id,runId,text,JSON.stringify([`ordinary-source:${before.hash}`,`native-history:${proof.raw_sha256}`,`native-answer:${proof.answer_sha256}`]),now,now);
     this.events.append(current.scope.conversation_id,runId,'message.created',new RunRepository(this.db,this.events).message(messageId));
     this.events.append(current.scope.conversation_id,runId,'response.upsert',{revision:1,value:{kind:'ordinary_final_reconciliation',run_id:runId,message_id:messageId,...evidence,execution_authorized:false}});
+    linkOrdinaryToolArtifactHistory(this.db,this.events,current.scope,session,before.hash,proof);
     const {answer_event,output_events,...meta}=proof,proofMeta={...meta,answer_event_sha256:digest(answer_event),output_events_sha256:digest(output_events)},post=this.snapshot(runId,session);
     this.db.prepare('INSERT INTO ga_ordinary_final_publications(run_id,conversation_id,owner_id,session_id,message_id,source_sha256,source_json,proof_sha256,proof_json,post_source_sha256,post_source_json,outputs_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').run(runId,current.scope.conversation_id,current.scope.owner_id,session,messageId,before.hash,JSON.stringify(before.source),digest(proofMeta),JSON.stringify(proofMeta),post.hash,JSON.stringify(post.source),JSON.stringify(outputFacts(checked)),now);
     witness?.assertUnchanged();return true;

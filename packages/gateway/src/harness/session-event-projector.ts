@@ -48,6 +48,8 @@ function safeId(value: unknown, fallback: string): string {
   return /^[A-Za-z0-9]/.test(normalized) ? normalized : fallback
 }
 
+export {safeId as sessionProjectionId}
+
 function presentation(nameValue: unknown): ToolPresentation {
   const name = String(nameValue ?? '').toLowerCase()
   if (/(search|research|query)/.test(name)) return {
