@@ -6,9 +6,11 @@ const parentHost=new URLSearchParams(location.search).get('parent');
 if(!parentHost||!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(parentHost))throw Error('PPTX_PARENT_INVALID');
 const parentOrigin='http://'+parentHost,controller=new AbortController(),content=document.getElementById('content'),status=document.getElementById('status');
 const query=document.getElementById('query'),slide=document.getElementById('slide'),counter=document.getElementById('matches');
+const batchPrevious=document.getElementById('search-batch-previous'),batchNext=document.getElementById('search-batch-next');
 const thumbnails=document.getElementById('thumbnails'),thumbnailList=document.getElementById('thumbnail-list'),thumbnailToggle=document.getElementById('thumbnail-toggle');
 let thumbnailOpen=false,thumbnailPage=0,thumbnailGeneration=0,thumbnailHandles=[],region,slideObserver;
 let viewer,token,started=false,closed=false,busy=false,rendering=false,partial=false,chain=Promise.resolve(),matches=[],matchIndex=0,highlight,searchGeneration=0,searchTimer;
+let searchBatch=0,searchStarts=[{slideIndex:0,entryIndex:0,offset:0}],hasNextSearchBatch=false;
 const report=(message,transfer=[])=>{if(!closed)parent.postMessage({protocol:1,token,...message},parentOrigin,transfer);};
 const reportWork=()=>{if(!closed)report({type:'jot-pptx-work',busy:busy||rendering});};
 const instance=crypto.randomUUID();
@@ -19,10 +21,12 @@ const clearThumbnails=()=>{
  thumbnailHandles=[];
  thumbnailList.replaceChildren();
 };
-const dispose=()=>{closed=true;controller.abort();clearTimeout(searchTimer);slideObserver?.disconnect();region?.dispose();clearThumbnails();highlight?.dispose();viewer?.destroy();viewer=undefined;matches=[];content.replaceChildren();};
+const dispose=()=>{closed=true;searchGeneration++;searchStarts=[];controller.abort();clearTimeout(searchTimer);slideObserver?.disconnect();region?.dispose();clearThumbnails();highlight?.dispose();viewer?.destroy();viewer=undefined;matches=[];content.replaceChildren();};
 const fail=()=>{if(closed)return;report({type:'jot-pptx-error',code:'PPTX_RENDER_FAILED'});dispose();status.textContent='幻灯片视觉读取失败';};
 const controls=()=>{
  const ready=!!viewer&&!closed,working=busy||rendering;slide.disabled=!ready||working;query.disabled=!ready;
+ query.closest('nav').setAttribute('aria-busy',String(working));
+ batchPrevious.disabled=!ready||working||searchBatch===0;batchNext.disabled=!ready||working||!hasNextSearchBatch;
  document.getElementById('previous').disabled=!ready||working||viewer.currentSlideIndex===0;
  document.getElementById('next').disabled=!ready||working||viewer.currentSlideIndex+1>=viewer.slideCount;
  document.getElementById('out').disabled=!ready||working||viewer.zoomPercent<=25;
@@ -96,41 +100,66 @@ const showMatch=async(delta,generation=searchGeneration)=>{
  matchIndex=(matchIndex+delta+matches.length)%matches.length;highlight?.dispose();
  const handle=await viewer.highlightSearchResult(matches[matchIndex]);
  if(generation!==searchGeneration||closed){handle?.dispose();return;}
- highlight=handle;counter.textContent=`${matchIndex+1} / ${matches.length}`;
+ highlight=handle;counter.textContent=`第 ${searchBatch+1} 批 · ${matchIndex+1} / ${matches.length}`;
 };
-const search=async(generation,value)=>{
- if(generation!==searchGeneration)return;
+const search=async(generation,value,page=0)=>{
+ if(generation!==searchGeneration||closed)return;
  if(value.length>200){counter.textContent='查找文字最多200字符';return;}
- viewer.clearSearchHighlights();matches=[];matchIndex=0;let scanned=0,limited=false;
+ highlight?.dispose();highlight=undefined;viewer.clearSearchHighlights();matches=[];matchIndex=0;hasNextSearchBatch=false;
+ const found=[],cursor=searchStarts[page];
+ let more=false,nextCursor,steps=0;
+ counter.textContent=`正在搜索第 ${page+1} 批…`;
  if(value.trim()){
   const data=viewer.presentationData;
-  // shortcut: search at most 2097152 UTF-16 units and retain 2000 hits, extend with larger-source search.
-  outer:for(let index=0;index<data.slides.length;index++){
+  outer:for(let index=cursor.slideIndex;index<data.slides.length;index++){
    if(generation!==searchGeneration||closed)return;
    const entries=buildTextIndex({...data,slides:[data.slides[index]]});
-   for(const entry of entries){
-    const text=entry.text.slice(0,Math.max(0,2097152-scanned));if(text.length<entry.text.length)limited=true;scanned+=text.length;
-    let offset=0;
+   const firstEntry=index===cursor.slideIndex?cursor.entryIndex:0;
+   for(let entryIndex=firstEntry;entryIndex<entries.length;entryIndex++){
+    const entry=entries[entryIndex],text=entry.text;
+    let offset=index===cursor.slideIndex&&entryIndex===cursor.entryIndex?cursor.offset:0;
     while(offset<=text.length-value.length){
-     const chunk=text.slice(offset,offset+4096),hits=searchText([{...entry,text:chunk}],value,{useRegex:false});let advance=0;
+     if(generation!==searchGeneration||closed)return;
+     const chunk=text.slice(offset,offset+4096);
+     const hits=searchText([{...entry,text:chunk}],value,{useRegex:false});
      for(const hit of hits){
-      if(matches.length===2000){limited=true;break outer;}
-      matches.push({...hit,slideIndex:index,nodePath:entry.nodePath.replace(/^slides\/0\//,`slides/${index}/`),text:entry.text,matchStart:offset+hit.matchStart,matchEnd:offset+hit.matchEnd});
-      advance=hit.matchEnd;
+      if(found.length===1000){more=true;break outer;}
+      found.push({...hit,slideIndex:index,nodePath:entry.nodePath.replace(/^slides\/0\//,`slides/${index}/`),text,
+       matchStart:offset+hit.matchStart,matchEnd:offset+hit.matchEnd});
+      if(found.length===1000)nextCursor={slideIndex:index,entryIndex,offset:offset+hit.matchEnd};
      }
-     offset+=advance||Math.max(1,chunk.length-value.length+1);
+     // Revisit only the unmatched tail so literal matches crossing windows remain reachable.
+     offset+=hits.length?hits[hits.length-1].matchEnd:Math.max(1,chunk.length-value.length+1);
+     if(++steps%8===0){
+      counter.textContent=`正在搜索第 ${page+1} 批 · 已找到 ${found.length} 处`;
+      await new Promise(resolve=>setTimeout(resolve,0));
+     }
     }
-    if(scanned>=2097152){limited=true;break outer;}
    }
-   await new Promise(resolve=>requestAnimationFrame(resolve));
+   if(++steps%8===0)await new Promise(resolve=>setTimeout(resolve,0));
   }
  }
  if(generation!==searchGeneration||closed)return;
- document.getElementById('coverage').textContent=limited?'搜索达到当前字符或命中上限，存在未覆盖内容。':'';
- counter.textContent=matches.length?`1 / ${matches.length}`:value.trim()?'没有匹配':'尚未搜索';
+ searchStarts.length=page+1;if(more)searchStarts.push(nextCursor);
+ searchBatch=page;hasNextSearchBatch=more;matches=found;
+ document.getElementById('coverage').textContent=more?'当前批最多1000处，可继续搜索后续全部已接纳文字。':value.trim()?'已搜索至演示文稿末尾。':'';
+ counter.textContent=matches.length?`第 ${page+1} 批 · 1 / ${matches.length}`:value.trim()?'没有匹配':'尚未搜索';
  if(matches.length)await showMatch(0,generation);
 };
-const schedule=()=>{const generation=++searchGeneration,value=query.value;clearTimeout(searchTimer);matches=[];highlight?.dispose();highlight=undefined;controls();counter.textContent='等待搜索';searchTimer=setTimeout(()=>run(()=>search(generation,value)),180);};
+const schedule=()=>{
+ const generation=++searchGeneration,value=query.value;
+ clearTimeout(searchTimer);matches=[];highlight?.dispose();highlight=undefined;
+ searchBatch=0;searchStarts=[{slideIndex:0,entryIndex:0,offset:0}];hasNextSearchBatch=false;
+ document.getElementById('coverage').textContent='';controls();counter.textContent='等待搜索';
+ searchTimer=setTimeout(()=>run(()=>search(generation,value)),180);
+};
+const changeSearchBatch=delta=>{
+ if(busy||rendering||closed||delta<0&&searchBatch===0||delta>0&&!hasNextSearchBatch)return;
+ const generation=searchGeneration,value=query.value,page=searchBatch+delta;
+ run(()=>search(generation,value,page));
+};
+batchPrevious.addEventListener('click',()=>changeSearchBatch(-1));
+batchNext.addEventListener('click',()=>changeSearchBatch(1));
 query.addEventListener('input',schedule);
 document.getElementById('match-previous').addEventListener('click',()=>run(()=>showMatch(-1)));document.getElementById('match-next').addEventListener('click',()=>run(()=>showMatch(1)));
 document.addEventListener('keydown',event=>{

@@ -40,6 +40,10 @@
     {
       "path": "web/public/pptx-preview/1.2.4/frame.js",
       "changes": "Boot/probe includes a unique static-document instance. Parent binds it before byte transfer and rejects a replacement document after initialization. Token-scoped pagehide notification invalidates old ready/reference sessions through the existing close/manual reread path. Same-document duplicate probes remain valid. No automatic file transfer or upload retry."
+    },
+    {
+      "path": "web/public/pptx-preview/1.2.4/frame.js",
+      "changes": "Original published buildTextIndex/searchText literal gi matching and native highlight/source node-path remapping remain. Removes total2Mi text and2000-hit truncation. Single-slide index/4096-unit source windows and1000-result batches use numeric slide/entry/offset bookmarks, bounded window overlap and one continuation probe. Prior batch results/highlight are released, previous/next batches rescan bookmarks. Cooperative timers and stale-generation/close guards retain existing serial work timeout/cancel and capture ordering. Source/render limits remain."
     }
   ]
 }
