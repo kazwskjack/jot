@@ -1,4 +1,5 @@
 /* Adapted from pinned PilotDeck RegionSelectionOverlay.tsx. See SOURCES.json and LICENSES.txt. */
+import {renderSlide} from './pptx-renderer.js';
 let engine;
 function loadEngine(){
  if(window.html2canvas)return Promise.resolve(window.html2canvas);
@@ -15,6 +16,7 @@ function loadEngine(){
 
 export function createPptxRegion({content,getViewer,isWorking,report,run}){
  const controller=new AbortController(),options={signal:controller.signal};
+ const captureCharts=new Set();
  const startButton=document.getElementById('region-start'),whole=document.getElementById('region-whole'),cancel=document.getElementById('region-cancel'),status=document.getElementById('region-status');
  const inputs=['x','y','width','height'].map(key=>[key,document.getElementById('region-'+key)]);
  const layer=document.createElement('div'),box=document.createElement('div');
@@ -100,6 +102,7 @@ export function createPptxRegion({content,getViewer,isWorking,report,run}){
  document.addEventListener('keydown',event=>{if(event.key==='Escape'&&(active||capturing)){event.preventDefault();stop();}},options);
  const cleanupCapture=()=>{
   captureHandle?.dispose();captureHandle=undefined;captureRoot?.remove();captureRoot=undefined;
+  captureCharts.clear();
   if(canvas){canvas.width=0;canvas.height=0;canvas=undefined;}
   for(const frame of document.querySelectorAll('iframe.html2canvas-container'))frame.remove();
  };
@@ -113,9 +116,15 @@ export function createPptxRegion({content,getViewer,isWorking,report,run}){
    captureRoot=document.createElement('div');captureRoot.inert=true;captureRoot.setAttribute('aria-hidden','true');
    captureRoot.style.cssText=`position:fixed;left:-40000000px;top:0;width:${original.view.width}px;height:${original.view.height}px;overflow:hidden;pointer-events:none;`;
    document.body.append(captureRoot);
-   captureHandle=getViewer().renderSlideToContainer(original.view.slideNumber-1,captureRoot,1);
+   const data=getViewer().presentationData;
+   captureHandle=renderSlide(data,data.slides[original.view.slideNumber-1],{chartInstances:captureCharts,pdfjs:false});
    if(!captureHandle)throw Error('原生幻灯片截图句柄未就绪。');
+   captureRoot.append(captureHandle.element);
    await captureHandle.ready;await document.fonts?.ready;
+   if(disposed)return;
+   // A fresh native chart starts animated. Recreate only capture-owned charts in their final state.
+   for(const chart of captureCharts)if(!chart.isDisposed())chart.setOption({...chart.getOption(),animation:false},{notMerge:true});
+   await new Promise(resolve=>requestAnimationFrame(resolve));
    if(disposed)return;
    const element=captureHandle.element,bounds=element.getBoundingClientRect();
    if(!sameView(view(),original.view)||Math.abs(bounds.width-original.view.width)>1||Math.abs(bounds.height-original.view.height)>1)throw Error('原幻灯片尺寸已变化。');
