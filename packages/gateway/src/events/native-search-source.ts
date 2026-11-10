@@ -206,10 +206,13 @@ export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,c
       const query = request.query as Input, runId = query.run_id, asOfSeq = query.as_of_seq;
       if (!ID.test(conversationId) || !ID.test(activityId) || typeof runId !== 'string' || !ID.test(runId)
         || !/^(0|[1-9]\d{0,7})$/.test(memberIndex) || Number(memberIndex) > MAX_CHARS
-        || Object.keys(query).some(key=>!['run_id','result_sha256','members_sha256','as_of_seq'].includes(key))
+        || Object.keys(query).some(key=>!['run_id','result_sha256','members_sha256','as_of_seq','max_bytes'].includes(key))
         || asOfSeq !== undefined && (typeof asOfSeq !== 'string' || !/^(0|[1-9]\d{0,18})$/.test(asOfSeq) || BigInt(asOfSeq)>9223372036854775807n)
         || ['result_sha256','members_sha256'].some(key=>typeof query[key] !== 'string' || !SHA.test(query[key] as string)))
         throw Error('invalid_activity_tool_result_query');
+      const requestedLimit = query.max_bytes === undefined ? downloadBudget : Number(query.max_bytes);
+      if (query.max_bytes !== undefined && (typeof query.max_bytes !== 'string' || !/^[1-9]\d{0,8}$/.test(query.max_bytes)
+        || !Number.isSafeInteger(requestedLimit) || requestedLimit > downloadBudget)) throw Error('invalid_activity_tool_result_query');
       if (!snapshotRoot || !client?.readNativeSearchMemberFileRange || !client.readNativeFileRange)
         throw Error('activity_tool_result_source_invalid');
       if (downloads.size >= 4) return reply.code(429).send({error:{code:'ACTIVITY_TOOL_RESULT_SOURCE_CAPACITY'}});
@@ -225,8 +228,8 @@ export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,c
         range:{offset_bytes:0,length_bytes:65536}};
       const first = validateNativeSearchMemberRange(await client.readNativeSearchMemberFileRange(owner,original.sessionId,input,signal),original.sessionId,input).range;
       signal.throwIfAborted();
-      const limit = first.file_size_bytes ?? downloadBudget;
-      if (limit > downloadBudget) throw Error('activity_tool_result_file_unsupported');
+      const limit = first.file_size_bytes ?? requestedLimit;
+      if (limit > requestedLimit) throw Error('activity_tool_result_file_unsupported');
       if ([...downloads].reduce((sum,value)=>sum+value.bytes,0)+limit > downloadBudget)
         return reply.code(429).send({error:{code:'ACTIVITY_TOOL_RESULT_SOURCE_CAPACITY'}});
       reservation.bytes = limit;
@@ -263,6 +266,7 @@ export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,c
         .header('x-content-type-options','nosniff').header('x-activity-file-sha256',writer.source.sha256)
         .header('x-activity-file-size',String(writer.source.sizeBytes)).header('x-activity-tool-result-sha256',query.result_sha256)
         .header('x-activity-search-members-sha256',membership.members_sha256).header('x-activity-native-open-sha256',openedSha)
+        .header('x-activity-native-member-path-sha256',createHash('sha256').update(membership.items[0]!.path).digest('hex'))
         .header('x-activity-native-member-index',memberIndex).header('x-jot-execution-authorized','false');
       return reply.send(stream);
     } catch (error) {

@@ -298,3 +298,9 @@ digest and an activity/member/native-freshness binding digest. Original native
 file policy and opaque version semantics remain authoritative. The existing DSH
 MIT notice and PilotDeck file-list integration notice apply. This request-scoped
 spool is disposed after download and does not provide persistent reopen.
+
+Native member previews verify the existing complete opened-byte download,
+original activity/member digests and UTF8 display-path digest. They reuse Jot's
+complete byte verifier, image format helper, PDF page renderer, and PilotDeck-
+derived PDF outline/search modules. Existing retained DSH MIT and PilotDeck
+AGPL notices apply. Preview and its local download use the same opened bytes.

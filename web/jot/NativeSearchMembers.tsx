@@ -1,8 +1,11 @@
-import React,{useEffect,useState} from 'react';
-import {ApiError,base,request,taskDraftScope} from './client';
+import ConversationDisplayBoundary from './ConversationDisplayBoundary';
+import {nativeMemberDownloadUrl,type NativeMemberPreviewSource} from './activity-file-preview-client';
+import React,{useEffect,useState,lazy,Suspense} from 'react';
+import {ApiError,request,taskDraftScope} from './client';
 import type {ActivityNativeSearchMembersPage} from './types';
 
 type Target={runId:string;activityId:string;toolName:'glob'|'grep';asOfSeq?:string};
+const NativeSearchFile=lazy(()=>import('./NativeSearchFile'));
 const sha=/^[a-f0-9]{64}$/;
 
 export default function NativeSearchMembers({conversationId,target}:{conversationId:string;target:Target}){
@@ -10,6 +13,7 @@ export default function NativeSearchMembers({conversationId,target}:{conversatio
  const [cursor,setCursor]=useState<{identity:string;offset:number;previous:number[];resultSha?:string;membersSha?:string}>({identity,offset:0,previous:[]});
  const [state,setState]=useState<{identity:string;offset:number;page?:ActivityNativeSearchMembersPage;error?:string}>();
  const [revision,setRevision]=useState(0);
+ const [selected,setSelected]=useState<{identity:string;source:NativeMemberPreviewSource}>();
  const currentCursor=cursor.identity===identity?cursor:{identity,offset:0,previous:[],resultSha:undefined,membersSha:undefined};
  const {offset,resultSha,membersSha}=currentCursor;
  useEffect(()=>{
@@ -42,19 +46,16 @@ export default function NativeSearchMembers({conversationId,target}:{conversatio
   return()=>controller.abort();
  },[identity,offset,resultSha,membersSha,revision]);
  const current=state?.identity===identity&&state.offset===offset?state:undefined,page=current?.page;
- const downloadUrl=(index:number)=>{
-  const query=new URLSearchParams({run_id:target.runId,result_sha256:page!.result_sha256,members_sha256:page!.members_sha256,
-   ...(target.asOfSeq?{as_of_seq:target.asOfSeq}:{})});
-  return `${base}/v1/conversations/${encodeURIComponent(conversationId)}/activities/${encodeURIComponent(target.activityId)}/tool-result/members/${index}/download?${query}`;
- };
- return <section aria-label="原生搜索文件成员" data-chat-search-ignore>
+ const fileSource=(member:{index:number;path:string}):NativeMemberPreviewSource=>({conversationId,runId:target.runId,activityId:target.activityId,
+  resultSha:page!.result_sha256,membersSha:page!.members_sha256,member,...(target.asOfSeq?{asOfSeq:target.asOfSeq}:{})});
+ return <><section aria-label="原生搜索文件成员" data-chat-search-ignore>
   <h4>原生搜索文件成员</h4>
   {(!current||!page&&!current.error)&&<p role="status">正在读取原搜索成员…</p>}
   {page&&<>
    <p>按原结果顺序保留路径，合并连续重复路径。原结果共 {page.original_total} {target.toolName==='grep'?'条命中':'条路径'}，保留 {page.total_members} 个成员。</p>
    <p>下载前按原生权限读取并固定打开时的完整内容。原生成员下载共享 512 MiB 临时内容预算，最多同时处理 4 个。</p>
    {page.total_members===0?<p role="status">原搜索没有文件成员。</p>:<ol start={offset+1} style={{maxHeight:'24rem',overflow:'auto'}}>
-    {page.items.map(item=><li key={item.index}><code style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{item.path}</code> <a href={downloadUrl(item.index)} download={item.path.split(/[\\/]/).at(-1)||'file'}
+    {page.items.map(item=><li key={item.index}><code style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{item.path}</code> <button type="button" onClick={()=>setSelected({identity,source:fileSource(item)})}>预览打开内容</button> <a href={nativeMemberDownloadUrl(fileSource(item))} download={item.path.split(/[\\/]/).at(-1)||'file'}
      onClick={event=>{if(taskDraftScope()!==owner)event.preventDefault();}}>下载打开时内容</a></li>)}
    </ol>}
    <nav aria-label="原搜索成员翻页">
@@ -66,5 +67,10 @@ export default function NativeSearchMembers({conversationId,target}:{conversatio
    </nav>
   </>}
   {current?.error&&<p role="alert">{current.error} <button type="button" onClick={()=>setRevision(value=>value+1)}>重试读取成员</button></p>}
- </section>;
+ </section>
+  {selected?.identity===identity&&<>
+   <button type="button" onClick={()=>setSelected(undefined)}>关闭打开内容预览</button>
+   <ConversationDisplayBoundary key={JSON.stringify(selected.source)} label="原生成员文件预览"><Suspense fallback={<p role="status">正在载入文件查看器…</p>}><NativeSearchFile source={selected.source}/></Suspense></ConversationDisplayBoundary>
+  </>}
+ </>;
 }

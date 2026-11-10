@@ -1,0 +1,81 @@
+import React,{useEffect,useRef,useState,lazy,Suspense} from 'react';
+import {taskDraftScope} from './client';
+import {listedFileImageType} from './ActivityToolFileImage';
+import ConversationDisplayBoundary from './ConversationDisplayBoundary';
+import {artifactPreviewErrorMessage} from './artifact-preview-bytes.mjs';
+import {readNativeMemberPreviewBytes,type NativeMemberPreviewSource,type NativeMemberOpenedBytes} from './activity-file-preview-client';
+
+const NativeSearchFilePdf=lazy(()=>import('./NativeSearchFilePdf'));
+type Opened=NativeMemberOpenedBytes&{downloadUrl:string;imageUrl?:string;text?:string};
+
+export default function NativeSearchFile({source}:{source:NativeMemberPreviewSource}){
+ const owner=taskDraftScope(),identity=JSON.stringify([owner,source]);
+ const root=useRef<HTMLElement>(null),active=useRef<AbortController|null>(null);
+ const [state,setState]=useState<{identity:string;opened?:Opened;error?:string}>(),[revision,setRevision]=useState(0);
+ const [raw,setRaw]=useState(false),[byteOffset,setByteOffset]=useState(0);
+ const [cursor,setCursor]=useState<{sha:string;offset:number;previous:number[]}>();
+ const imageType=listedFileImageType(source.member.path),pdf=source.member.path.toLowerCase().endsWith('.pdf');
+ useEffect(()=>{root.current?.focus();root.current?.scrollIntoView({block:'nearest'});},[identity]);
+ useEffect(()=>{
+  const controller=new AbortController(),urls:string[]=[];
+  active.current=controller;
+  setState({identity});
+  const load=async()=>{
+   const value=await readNativeMemberPreviewBytes(source,owner,controller.signal);
+   controller.signal.throwIfAborted();
+   if(taskDraftScope()!==owner)throw Error('文件所属账户已变化');
+   const downloadUrl=URL.createObjectURL(new Blob([value.bytes.slice()],{type:'application/octet-stream'}));
+   urls.push(downloadUrl);
+   let imageUrl:string|undefined,text:string|undefined;
+   if(imageType){imageUrl=URL.createObjectURL(new Blob([value.bytes.slice()],{type:imageType}));urls.push(imageUrl);}
+   else if(!pdf){
+    try{const decoded=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(value.bytes);if(!decoded.includes('\0'))text=decoded;}catch{}
+   }
+   setByteOffset(0);
+   setCursor({sha:value.openSha,offset:0,previous:[]});
+   setState({identity,opened:{...value,downloadUrl,...(imageUrl?{imageUrl}:{}),...(text!==undefined?{text}:{})}});
+  };
+  void load().catch(error=>{
+   if(!controller.signal.aborted&&taskDraftScope()===owner)setState({identity,error:artifactPreviewErrorMessage(error)});
+  });
+  return()=>{controller.abort();if(active.current===controller)active.current=null;for(const url of urls)URL.revokeObjectURL(url);};
+ },[identity,revision]);
+ const current=state?.identity===identity?state:undefined,opened=current?.opened;
+ const currentCursor=opened&&cursor?.sha===opened.openSha?cursor:undefined,offset=currentCursor?.offset??0;
+ const text=opened?.text;
+ let end=Math.min(offset+16384,text?.length??0);
+ if(text&&end<text.length&&/[\uD800-\uDBFF]/.test(text[end-1]!)&&/[\uDC00-\uDFFF]/.test(text[end]!))end--;
+ const bytes=opened?.bytes.subarray(byteOffset,byteOffset+256);
+ const hex=bytes?Array.from(bytes,byte=>byte.toString(16).padStart(2,'0')).join(' '):'';
+ const showBytes=raw||opened&&!opened.imageUrl&&!pdf&&text===undefined;
+ return <section ref={root} tabIndex={-1} className="jot-activity-content" aria-label="原生成员打开内容预览">
+  <h4>{source.member.path}</h4>
+  {(!current||!opened&&!current.error)&&<p role="status">正在读取并核对完整打开内容… <button type="button" onClick={()=>{active.current?.abort();setState({identity,error:'本次读取已取消。'});}}>取消读取</button></p>}
+  {opened&&<>
+   <p>打开时内容 · {opened.size} 字节 · SHA-256 <code>{opened.sha256}</code></p>
+   <nav aria-label="打开内容查看方式" data-chat-search-ignore>
+    <button type="button" disabled={!raw} onClick={()=>setRaw(false)}>查看内容</button>
+    <button type="button" disabled={raw} onClick={()=>setRaw(true)}>查看原始字节</button>
+    <a href={opened.downloadUrl} download={source.member.path.split(/[\\/]/).at(-1)||'file'} onClick={event=>{if(taskDraftScope()!==owner)event.preventDefault();}}>下载本次已打开内容</a>
+   </nav>
+   {showBytes?<>
+    <pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}} aria-label="打开文件十六进制字节">{hex||'空文件'}</pre>
+    <nav aria-label="打开文件字节翻页" data-chat-search-ignore>
+     <button type="button" disabled={byteOffset===0} onClick={()=>setByteOffset(Math.max(0,byteOffset-256))}>上一页字节</button>
+     <span>{Math.min(byteOffset+1,opened.size)}–{byteOffset+(bytes?.length??0)} / {opened.size} 字节</span>
+     <button type="button" disabled={byteOffset+256>=opened.size} onClick={()=>setByteOffset(byteOffset+256)}>下一页字节</button>
+    </nav>
+   </>:opened.imageUrl?<img src={opened.imageUrl} alt={source.member.path} style={{maxWidth:'100%',height:'auto'}} onError={()=>{setRaw(true);setState({identity,opened,error:'浏览器无法显示此图片格式，当前显示原始字节。'});}}/>
+    :pdf?<ConversationDisplayBoundary key={opened.openSha} label="原生PDF预览"><Suspense fallback={<p role="status">正在载入PDF查看器…</p>}><NativeSearchFilePdf key={opened.openSha} bytes={opened.bytes}/></Suspense></ConversationDisplayBoundary>
+    :text!==undefined?<>
+     <pre data-chat-search-content={JSON.stringify(['native-opened-file',identity,opened.openSha,offset])}>{text.slice(offset,end)}</pre>
+     <nav aria-label="打开文件正文翻页" data-chat-search-ignore>
+      <button type="button" disabled={!currentCursor?.previous.length} onClick={()=>setCursor({sha:opened.openSha,offset:currentCursor!.previous.at(-1)!,previous:currentCursor!.previous.slice(0,-1)})}>上一页正文</button>
+      <span>{Math.min(offset+1,text.length)}–{end} / {text.length}（UTF-16 位置）</span>
+      <button type="button" disabled={end>=text.length} onClick={()=>setCursor({sha:opened.openSha,offset:end,previous:[...(currentCursor?.previous??[]),offset]})}>下一页正文</button>
+     </nav>
+    </>:null}
+  </>}
+  {current?.error&&<p role="alert">{current.error} <button type="button" onClick={()=>setRevision(value=>value+1)}>重新读取打开内容</button></p>}
+ </section>;
+}

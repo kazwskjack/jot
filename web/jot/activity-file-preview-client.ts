@@ -75,3 +75,40 @@ export async function readOfficePrintPreviewBytes({conversationId,runId,activity
   return Object.freeze({bytes,sha256,size,pageCount,proof});
  }catch(error){await response.body?.cancel().catch(()=>{});throw error;}
 }
+
+export type NativeMemberPreviewSource={conversationId:string;runId:string;activityId:string;asOfSeq?:string;
+ resultSha:string;membersSha:string;member:{index:number;path:string}};
+export function nativeMemberDownloadUrl(source:NativeMemberPreviewSource){
+ const query=new URLSearchParams({run_id:source.runId,result_sha256:source.resultSha,members_sha256:source.membersSha,
+  ...(source.asOfSeq?{as_of_seq:source.asOfSeq}:{})});
+ return `${base}/v1/conversations/${encodeURIComponent(source.conversationId)}/activities/${encodeURIComponent(source.activityId)}/tool-result/members/${source.member.index}/download?${query}`;
+}
+export type NativeMemberOpenedBytes={bytes:Uint8Array;sha256:string;size:number;openSha:string};
+/** Download and preview share this single fully verified opened byte source. */
+export async function readNativeMemberPreviewBytes(source:NativeMemberPreviewSource,owner:string,signal:AbortSignal):Promise<NativeMemberOpenedBytes>{
+ const check=()=>{signal.throwIfAborted();if(taskDraftScope()!==owner)throw Error('文件所属账户已变化');};
+ check();
+ const limit=20*1024*1024,url=new URL(nativeMemberDownloadUrl(source),window.location.href);
+ url.searchParams.set('max_bytes',String(limit));
+ const response=await fetch(url,{credentials:'same-origin',cache:'no-store',redirect:'error',signal});
+ try{
+  check();
+  if(!response.ok)throw new ApiError(response.status,response.status===422?'文件超过20 MiB预览范围，可下载打开时内容查看。'
+   :response.status===409?'原成员或文件版本已变化，请重新打开。':response.status===404?'原文件内容暂不可用。':'文件预览暂不可用。');
+  const sha256=response.headers.get('x-activity-file-sha256'),openSha=response.headers.get('x-activity-native-open-sha256');
+  const sizeValue=response.headers.get('x-activity-file-size'),size=Number(sizeValue);
+  const pathSha=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(source.member.path))),byte=>byte.toString(16).padStart(2,'0')).join('');
+  check();
+  if(!response.body||response.headers.get('content-type')?.split(';')[0]!=='application/octet-stream'
+   ||!sha256||!/^[a-f0-9]{64}$/.test(sha256)||!openSha||!/^[a-f0-9]{64}$/.test(openSha)
+   ||sizeValue===null||String(size)!==sizeValue||!Number.isSafeInteger(size)||size<0||size>limit
+   ||response.headers.get('x-activity-tool-result-sha256')!==source.resultSha
+   ||response.headers.get('x-activity-search-members-sha256')!==source.membersSha
+   ||response.headers.get('x-activity-native-member-index')!==String(source.member.index)
+   ||response.headers.get('x-activity-native-member-path-sha256')!==pathSha
+   ||response.headers.get('x-jot-execution-authorized')!=='false')throw Error('原成员打开内容来源尚未确认');
+  const bytes=await readVerifiedPreviewBytes(response,{sha256,size_bytes:size},signal,limit);
+  check();
+  return {bytes,sha256,size,openSha};
+ }catch(error){await response.body?.cancel().catch(()=>{});throw error;}
+}

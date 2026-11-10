@@ -222,7 +222,7 @@ export function registerWorkbenchProxy(app,config,localCsrf){
     for(const name of ['content-disposition','etag','x-workspace-file-sha256','x-workspace-file-size']){const value=response.headers.get(name);if(value)reply.header(name,value);}
    if(listedFileDownload){
     for(const name of ['content-length','x-content-type-options','x-activity-file-sha256','x-activity-file-size','x-activity-file-version','x-activity-tool-result-sha256',
-     'x-activity-search-members-sha256','x-activity-native-open-sha256','x-activity-native-member-index',
+     'x-activity-search-members-sha256','x-activity-native-open-sha256','x-activity-native-member-index','x-activity-native-member-path-sha256',
      'x-jot-preview-proof','x-jot-preview-protocol','x-jot-preview-renderer','x-jot-preview-media-type','x-jot-preview-sha256','x-jot-preview-size','x-jot-preview-pages','x-jot-execution-authorized']){
      const value=response.headers.get(name);if(value)reply.header(name,value);
     }
