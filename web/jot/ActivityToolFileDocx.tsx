@@ -1,6 +1,6 @@
 import React,{useContext,useEffect,useRef,useState} from 'react';
 import {taskDraftScope} from './client';
-import {readListedFilePreviewBytes,type ListedFilePreviewSource} from './activity-file-preview-client';
+import {readListedFilePreviewBytes,readOfficeViewerUrl,type ListedFilePreviewSource} from './activity-file-preview-client';
 import {FileTextReferenceContext,type FileTextReference,type OfficeTextFocus,type OfficeRegionFocus} from './FileTextReferences';
 import DocxFileRegionReference,{type DocxRegionSession} from './DocxFileRegionReference';
 import {createTextContentReference} from './vendor/pilotdeck-content-reference';
@@ -8,19 +8,6 @@ import {validateTextReferenceSource} from '../../packages/gateway/src/messages/c
 
 type Selection={serial:number;selectedText:string;occurrenceIndex:number;prefix:string;suffix:string};
 type Proposal={selection:Selection;reference:FileTextReference};
-async function readViewerUrl(signal:AbortSignal){
- const response=await fetch('/docx-preview/0.4.0/viewer',{credentials:'same-origin',cache:'no-store',redirect:'error',signal});
- if(!response.ok||response.headers.get('content-type')?.split(';')[0]!=='application/json')throw Error('独立Word查看器配置暂不可用。');
- const text=await response.text();signal.throwIfAborted();
- if(text.length>2048)throw Error('Word查看器配置尚未确认。');
- const value=JSON.parse(text);
- if(!value||typeof value!=='object'||Array.isArray(value)||value.protocol!==1||typeof value.url!=='string'||Object.keys(value).length!==2)throw Error('Word查看器配置尚未确认。');
- const url=new URL(value.url),parent=new URL(window.location.href);
- if(url.protocol!=='http:'||parent.protocol!=='http:'||url.origin===parent.origin||!/^jot-office-[a-f0-9]{32}\.localhost$/.test(url.hostname)
-  ||url.port!==parent.port||url.username||url.password||url.hash||url.pathname!=='/docx-preview/0.4.0/frame.html'
-  ||url.searchParams.size!==1||url.searchParams.get('parent')!==parent.host)throw Error('Word查看器独立来源尚未确认。');
- return url.href;
-}
 function readSelection(value:unknown):Selection|undefined{
  if(!value||typeof value!=='object'||Array.isArray(value))return;
  const selection=value as Selection;
@@ -69,7 +56,7 @@ function DocxAttempt({source,owner,identity,officeTextFocus,officeRegionFocus}:{
   const stop=(message:string)=>{controller.abort();if(active)setState({phase:'error',message});};
   const timer=window.setTimeout(()=>stop('独立Word查看器配置读取超时，请重试。'),10000);
   cancel.current=()=>stop('Word查看器配置读取已取消。');
-  void readViewerUrl(controller.signal).then(url=>{
+  void readOfficeViewerUrl('docx',controller.signal).then(url=>{
    if(!active||controller.signal.aborted)return;
    if(taskDraftScope()!==owner){setState({phase:'error',message:'文件所属账户已变化，请重新打开会话。'});return;}
    setViewerUrl(url);

@@ -8,13 +8,15 @@ import React,{useContext,useEffect,useMemo,useRef,useState} from 'react';
 import {ApiError,request,taskDraftScope} from './client';
 import ActivityToolFileBytes from './ActivityToolFileBytes';
 import ActivityToolFileDocx from './ActivityToolFileDocx';
+import ActivityToolFilePptx from './ActivityToolFilePptx';
 import type {ListedFilePreviewSource} from './activity-file-preview-client';
 import {officePreviewFormat,normalizeOfficePreviewContent,type OfficeDocumentPreview} from '../../packages/gateway/src/artifacts/document-preview-content';
 
+type VisualAdmission={protocol:1;ready:boolean;reason?:'source_limit'|'format_invalid'|'source_unverified'};
 type Page={document_protocol:1;conversation_id:string;run_id:string;activity_id:string;result_sha256:string;
  path:string;version:number;sha256:string;size:number;source:'workspace'|'isolated';media_type:string;
  document:OfficeDocumentPreview;engine:{name:string;version:string};execution_authorized:false;
- docx_visual?:{protocol:1;ready:boolean;reason?:'source_limit'|'format_invalid'|'source_unverified'}};
+ docx_visual?:VisualAdmission;pptx_visual?:VisualAdmission};
 
 function Pager({page,count,onChange,label}:{page:number;count:number;onChange:(page:number)=>void;label:string}){
  return <nav aria-label={label} data-chat-search-ignore>
@@ -330,7 +332,7 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
   {loading&&<p role="status">正在核对原版本并解析Office内容… <button type="button" onClick={()=>{active.current?.abort();setState({identity,error:'Office读取已取消'});}}>取消读取</button></p>}
   {current?.page&&<>
    <p>原文件结构化内容 · {current.page.engine.name} {current.page.engine.version}</p>
-   {current.page.document.truncated&&<p role="status">解析结果已截断，当前内容有未覆盖部分。可下载原固定版本查看完整文件。</p>}
+   {current.page.document.truncated&&<p role="status">结构化解析结果已截断，文字与单元格引用入口有未覆盖部分。可下载原固定版本查看完整文件。</p>}
    {current.page.document.kind==='docx'&&<>
     {props.officeRegionFocus&&(!visual||current.page.docx_visual?.ready!==true)&&<p role="status">原Word区域引用按视觉分段定位，请打开Word视觉内容核对原区域。</p>}
     {props.officeTextFocus?.value.text_view===2&&(!visual||current.page.docx_visual?.ready!==true)&&<p role="status">此原引用使用Word视觉文字定位。请打开Word视觉内容核对原位置；原引用快照仍可查看。</p>}
@@ -338,8 +340,15 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
      <button type="button" aria-pressed={visual} disabled={current.page.docx_visual?.protocol!==1||current.page.docx_visual.ready!==true} onClick={()=>setVisualState({identity,enabled:true})}>Word视觉内容</button></nav>
     {current.page.docx_visual?.ready!==true&&<p role="status">{current.page.docx_visual?.reason==='source_limit'?'原文件超过当前视觉渲染资源范围。':'原文件尚未通过视觉读取检查。'}</p>}
    </>}
+   {current.page.document.kind==='pptx'&&<>
+    <nav aria-label="幻灯片查看方式"><button type="button" aria-pressed={!visual} onClick={()=>setVisualState({identity,enabled:false})}>结构化文字与引用</button>
+     <button type="button" aria-pressed={visual} disabled={current.page.pptx_visual?.protocol!==1||current.page.pptx_visual.ready!==true} onClick={()=>setVisualState({identity,enabled:true})}>幻灯片视觉内容</button></nav>
+    {current.page.pptx_visual?.ready!==true&&<p role="status">{current.page.pptx_visual?.reason==='source_limit'?'原幻灯片超过当前视觉渲染资源范围。':'原幻灯片尚未通过视觉读取检查。'}</p>}
+   </>}
    {visual&&current.page.document.kind==='docx'&&current.page.docx_visual?.protocol===1&&current.page.docx_visual.ready===true
     ?<ActivityToolFileDocx key={identity+':'+revision} {...props}/>
+    :visual&&current.page.document.kind==='pptx'&&current.page.pptx_visual?.protocol===1&&current.page.pptx_visual.ready===true
+    ?<ActivityToolFilePptx key={identity+':'+revision} {...props}/>
     :<section className="jot-office-content" data-chat-search-content={JSON.stringify(['listed-office',identity])}><OfficeContent key={identity+':'+revision} value={current.page.document} source={props} officeFocus={props.officeFocus} officeTextFocus={props.officeTextFocus?.value.text_view===2?undefined:props.officeTextFocus}/></section>}
   </>}
   {current?.error&&<p role="alert">{current.error} <button type="button" onClick={refresh}>重试读取</button></p>}

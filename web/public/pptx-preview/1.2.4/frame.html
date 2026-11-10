@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>幻灯片视觉查看器</title>
+<style>
+ body { margin: 0; font: 14px system-ui, sans-serif; color: #222; background: #eee; }
+ header { position: sticky; top: 0; z-index: 10; padding: 0.5rem; background: white; border-bottom: 1px solid #ccc; }
+ nav { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; margin-block: 0.3rem; }
+ button, input { min-height: 2rem; } input[type=number] { width: 4.5rem; } input[type=search] { width: 12rem; max-width: 100%; }
+ #content { overflow: auto; min-height: 24rem; } #status { margin: 0.5rem; }
+</style></head><body>
+<header><nav aria-label="幻灯片导航"><button id="previous" type="button" disabled>上一张</button><label>幻灯片 <input id="slide" type="number" min="1" value="1" disabled></label><output id="count">/ 0</output><button id="next" type="button" disabled>下一张</button><button id="out" type="button" aria-label="缩小" disabled>−</button><output id="zoom">100%</output><button id="in" type="button" aria-label="放大" disabled>＋</button></nav>
+<nav aria-label="幻灯片文字搜索"><label>查找 <input id="query" type="search" maxlength="200" disabled></label><button id="match-previous" type="button" disabled>上一处</button><button id="match-next" type="button" disabled>下一处</button><output id="matches" aria-live="polite">尚未搜索</output><small id="coverage"></small></nav></header>
+<p id="status" role="status">等待读取原幻灯片</p><main id="content" aria-label="幻灯片视觉内容"></main>
+<script type="module" nonce="__JOT_OFFICE_NONCE__" src="./frame.js"></script></body></html>

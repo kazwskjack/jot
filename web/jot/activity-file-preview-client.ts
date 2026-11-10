@@ -3,6 +3,20 @@ import {readVerifiedPreviewBytes} from './artifact-preview-bytes.mjs';
 import type {ActivityToolResultFile} from './types';
 
 export type ListedFilePreviewSource={conversationId:string;runId:string;activityId:string;resultSha:string;file:Pick<ActivityToolResultFile,'path'|'version'|'sha256'|'size'>};
+export async function readOfficeViewerUrl(kind:'docx'|'pptx',signal:AbortSignal){
+ const path=kind==='docx'?'/docx-preview/0.4.0/':'/pptx-preview/1.2.4/';
+ const response=await fetch(path+'viewer',{credentials:'same-origin',cache:'no-store',redirect:'error',signal});
+ if(!response.ok||response.headers.get('content-type')?.split(';')[0]!=='application/json')throw Error('独立Office查看器配置暂不可用。');
+ const text=await response.text();signal.throwIfAborted();
+ if(text.length>2048)throw Error('Office查看器配置尚未确认。');
+ const value=JSON.parse(text);
+ if(!value||typeof value!=='object'||Array.isArray(value)||value.protocol!==1||typeof value.url!=='string'||Object.keys(value).length!==2)throw Error('Office查看器配置尚未确认。');
+ const url=new URL(value.url),parent=new URL(window.location.href);
+ if(url.protocol!=='http:'||parent.protocol!=='http:'||url.origin===parent.origin||!/^jot-office-[a-f0-9]{32}\.localhost$/.test(url.hostname)
+  ||url.port!==parent.port||url.username||url.password||url.hash||url.pathname!==path+'frame.html'
+  ||url.searchParams.size!==1||url.searchParams.get('parent')!==parent.host)throw Error('Office查看器独立来源尚未确认。');
+ return url.href;
+}
 export async function readListedFilePreviewBytes({conversationId,runId,activityId,resultSha,file}:ListedFilePreviewSource,owner:string,signal:AbortSignal){
  const check=()=>{signal.throwIfAborted();if(taskDraftScope()!==owner)throw Error('文件所属账户已变化');};
  check();

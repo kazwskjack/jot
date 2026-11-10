@@ -31,15 +31,15 @@ export async function readActivityFileDocument(db:DatabaseSync,reader:Pick<Workb
   await pipeline(Readable.from(writer.source.stream(signal)),createWriteStream(path,{flags:'wx',mode:0o600}),{signal});
   const engine=new FileEngineAdapter({python:process.env.GENERAL_AGENT_FILE_ENGINE_PYTHON?.trim()||'/usr/bin/python3',
    workerPath:process.env.GENERAL_AGENT_FILE_ENGINE_SCRIPT?.trim()||fileURLToPath(new URL('../../file-engine/worker.py',import.meta.url)),timeoutMs:30000});
-  const result=await engine.run({operation:'document.inspect',input_path:path,media_type:format.mediaType,job_dir:directory,request:format.kind==='docx'?{verify_docx_visual:true}:{}},
+  const result=await engine.run({operation:'document.inspect',input_path:path,media_type:format.mediaType,job_dir:directory,request:format.kind==='xlsx'?{}:{[`verify_${format.kind}_visual`]:true}},
    {signal,maxOutputBytes:2*1024*1024});
   signal.throwIfAborted();
   if(result.output_path||!result.engine||typeof result.engine.name!=='string'||result.engine.name.length>200
    ||typeof result.engine.version!=='string'||result.engine.version.length>200)throw Error('DOCUMENT_PREVIEW_RESULT_INVALID');
-  const verified=result.checks?.docx_visual_source_verified===true;
-  const reason=['DOCUMENT_VISUAL_LIMIT','FILE_CONTAINER_LIMIT'].includes(String(result.checks?.docx_visual_reason))?'source_limit' as const
-   :result.checks?.docx_visual_source_verified===false?'format_invalid' as const:'source_unverified' as const;
-  const visual=format.kind==='docx'?{docx_visual:{protocol:1 as const,ready:verified,...(verified?{}:{reason})}}:{};
+  const verified=result.checks?.[`${format.kind}_visual_source_verified`]===true;
+  const reason=['DOCUMENT_VISUAL_LIMIT','FILE_CONTAINER_LIMIT'].includes(String(result.checks?.[`${format.kind}_visual_reason`]))?'source_limit' as const
+   :result.checks?.[`${format.kind}_visual_source_verified`]===false?'format_invalid' as const:'source_unverified' as const;
+  const visual=format.kind==='xlsx'?{}:{[`${format.kind}_visual`]:{protocol:1 as const,ready:verified,...(verified?{}:{reason})}};
   return {...file,...visual,document_protocol:1 as const,media_type:format.mediaType,document:normalizeOfficePreviewContent(format.mediaType,result.content),
    engine:{name:result.engine.name,version:result.engine.version},execution_authorized:false as const};
  }finally{

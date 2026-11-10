@@ -1,0 +1,21 @@
+{
+  "pilotdeck_revision": "783499ffdb2d501bf590b2e035acd027a882df10",
+  "renderer": {
+    "name": "@aiden0z/pptx-renderer",
+    "version": "1.2.4",
+    "url": "https://registry.npmjs.org/@aiden0z/pptx-renderer/-/pptx-renderer-1.2.4.tgz",
+    "archive_integrity": "sha512-/4X/BApiknc/JM4nAWQRp5zrnA2GKSMv5r1u3XLsMvySw9DTQjyXIKRtltRsmIYfoN32tHGFnrSlGok7nFS60w==",
+    "file": "pptx-renderer.js",
+    "sha256": "31cf1e39818c52395b185186229f80ecf8333db0d7bb3a06f6c0bd74b87aaad5",
+    "modified": false,
+    "entry": "package/dist/aiden0z-pptx-renderer.browser.es.js"
+  },
+  "adapted_source": {
+    "path": "ui/src/components/code-editor/view/subcomponents/PptxBuiltinPreview.tsx",
+    "sha256": "fe7849fcc69eae2b2f0cf1b0333f328470da5f8aa1807544e85229d7ea4f5e50",
+    "license": "AGPL-3.0",
+    "changes": "Original native PptxViewer single-slide/lazy-media/lazy-slides/zoom/search lifecycle is embedded in the fixed original-file viewer origin."
+  },
+  "dependency_notice_basis": "Published browser distribution headers plus pinned upstream dependency archive licenses. Bundled transitive build versions are not inferred from the consuming lock.",
+  "execution": "Source retained without installation, package execution or build."
+}

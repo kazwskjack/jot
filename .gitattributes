@@ -7,3 +7,6 @@ web/public/docx-preview/0.4.0/docx-preview.js -whitespace
 web/public/docx-preview/0.4.0/jszip.min.js -whitespace
 web/public/docx-preview/0.4.0/html2canvas.js -whitespace
 web/public/docx-preview/0.4.0/LICENSES.txt -whitespace
+web/public/pptx-preview/1.2.4/** -text
+web/public/pptx-preview/1.2.4/pptx-renderer.js -whitespace
+web/public/pptx-preview/1.2.4/LICENSES.txt -whitespace

@@ -79,7 +79,7 @@ def docx_preview(path: Path) -> dict:
         if remaining <= 0: truncated = True; break
     return {"paragraphs": paragraphs, "tables": tables, "truncated": truncated}
 
-def verify_docx_visual_source(path: Path):
+def verify_ooxml_visual_source(path: Path):
     expanded, xml_nodes, names = 0, 0, set()
     try:
         with safe_zip(path, 32 * 1024 * 1024, 8 * 1024 * 1024) as archive, path.open("rb") as raw:
@@ -146,7 +146,7 @@ def verify_docx_visual_source(path: Path):
                                 fail("DOCUMENT_VISUAL_LIMIT")
                         else:
                             element.clear()
-    except (ValueError, zlib.error, ET.ParseError, zipfile.BadZipFile, EOFError, struct.error):
+    except (ValueError, OSError, zlib.error, ET.ParseError, zipfile.BadZipFile, EOFError, struct.error):
         fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
 
 
@@ -607,12 +607,13 @@ def execute(req: dict) -> dict:
         content = document_preview(input_path, media_type) if operation == "document.inspect" else inspect(input_path, media_type)
         engine = "pypdf" if media_type == "application/pdf" else "python_ooxml"
         result = {"ok": True, "engine": {"name": engine, "version": sys.version.split()[0]}, "content": content, "warnings": []}
-        if operation == "document.inspect" and "wordprocessingml" in media_type and req.get("request", {}).get("verify_docx_visual") is True:
+        visual_kind = "docx" if "wordprocessingml" in media_type else "pptx" if "presentationml" in media_type else None
+        if operation == "document.inspect" and visual_kind and req.get("request", {}).get(f"verify_{visual_kind}_visual") is True:
             try:
-                verify_docx_visual_source(input_path)
-                result["checks"] = {"docx_visual_source_verified": True}
+                verify_ooxml_visual_source(input_path)
+                result["checks"] = {f"{visual_kind}_visual_source_verified": True}
             except FileEngineError as error:
-                result["checks"] = {"docx_visual_source_verified": False, "docx_visual_reason": str(error)}
+                result["checks"] = {f"{visual_kind}_visual_source_verified": False, f"{visual_kind}_visual_reason": str(error)}
         return result
     root = Path(job_dir).resolve(); root.mkdir(parents=True, exist_ok=True, mode=0o700)
     output_path = safe_path(str(req.get("output_path", "")), str(root), must_exist=False)
