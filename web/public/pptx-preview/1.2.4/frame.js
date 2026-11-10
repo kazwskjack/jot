@@ -224,7 +224,7 @@ addEventListener('message',async event=>{
  if(value.type==='jot-pptx-probe'&&value.protocol===1&&Object.keys(value).length===2){boot();return;}
  if(started&&value.protocol===1&&value.token===token&&Object.keys(value).length===4){region?.command(value);return;}
  if(started||value.type!=='jot-pptx-init'||value.protocol!==1||typeof value.token!=='string'||!/^[a-f0-9-]{36}$/.test(value.token)||Object.keys(value).length!==4
-  ||!(value.bytes instanceof ArrayBuffer)||value.bytes.byteLength>20*1024*1024)return;
+  ||!(value.bytes instanceof ArrayBuffer)||value.bytes.byteLength>32*1024*1024)return;
  started=true;token=value.token;status.textContent='正在读取原幻灯片…';
  try{
   const next=await PptxViewer.open(value.bytes,content,{renderMode:'slide',fitMode:'contain',zoomPercent:100,

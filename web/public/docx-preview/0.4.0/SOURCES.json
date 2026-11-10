@@ -84,6 +84,10 @@
       "path": "web/public/docx-preview/0.4.0/frame.js",
       "upstream_path": "ui/src/components/code-editor/view/subcomponents/DocxBuiltinPreview.tsx",
       "changes": "Restores the original full heading title in outline button text and title tooltip, with a two-line clamped span instead of256-unit content truncation. Existing100-item directory pages/heading targets/focus/level and original headingPath source remain."
+    },
+    {
+      "path": "web/public/docx-preview/0.4.0/frame.js",
+      "changes": "Native bootstrap source-byte admission aligns with Gateway and shared verified modern Office byte reader at32MiB. Existing container/XML/native renderer/workbook limits and fixed origin/window/token/instance/capture protocols remain. Larger structured sources up to100MiB get explicit visual source_limit. The shared byte verifier uses one preallocated receive buffer with exact length/SHA proof and independent stream cancellation."
     }
   ]
 }

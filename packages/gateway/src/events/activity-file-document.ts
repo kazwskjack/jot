@@ -1,5 +1,5 @@
 import {withReadTransaction} from '../db/database.ts';
-import {OFFICE_PRINT_SOURCE_MAX_BYTES} from '../artifacts/office-preview-format.js';
+import {OFFICE_SOURCE_MAX_BYTES,OFFICE_PRINT_SOURCE_MAX_BYTES,OFFICE_NATIVE_SOURCE_MAX_BYTES} from '../artifacts/office-preview-format.js';
 import {readRetainedOfficePdf,retainOfficePdf} from '../artifacts/office-print-store.ts';
 import type {DatabaseSync} from 'node:sqlite';
 import {constants,createWriteStream} from 'node:fs';
@@ -20,10 +20,10 @@ type OfficeSource={file:ReturnType<typeof readActivityToolResultFileDownload>;
 
 /** Seal original bytes and run preview work outside the database transaction. */
 async function withPinnedOfficeSource<T>(db:DatabaseSync,reader:Pick<WorkbenchService,'readBinaryFile'>,
- owner:string,conversationId:string,activityId:string,input:ReturnType<typeof parseActivityFileDownloadQuery>,root:string,signal:AbortSignal,read:(source:OfficeSource)=>Promise<T>,binaryPath?:string,maxSourceBytes=20*1024*1024){
+ owner:string,conversationId:string,activityId:string,input:ReturnType<typeof parseActivityFileDownloadQuery>,root:string,signal:AbortSignal,read:(source:OfficeSource)=>Promise<T>,binaryPath?:string){
  const format=officePreviewFormat(input.path);
  if(!format)throw Error('UNSUPPORTED_FORMAT_OPERATION');
- if(input.size>maxSourceBytes)throw Error('DOCUMENT_PREVIEW_TOO_LARGE');
+ if(input.size>OFFICE_SOURCE_MAX_BYTES)throw Error('DOCUMENT_PREVIEW_TOO_LARGE');
  const store=createPinnedByteStore(root);let directory:string|undefined;
  try{
   const writer=await store.begin(input.fileSha,input.size,signal);signal.throwIfAborted();
@@ -48,13 +48,14 @@ export async function readActivityFileDocument(db:DatabaseSync,reader:Pick<Workb
  owner:string,conversationId:string,activityId:string,input:ReturnType<typeof parseActivityFileDownloadQuery>,root:string,signal:AbortSignal){
  if(!officePreviewFormat(input.path)?.native)throw Error('UNSUPPORTED_FORMAT_OPERATION');
  return withPinnedOfficeSource(db,reader,owner,conversationId,activityId,input,root,signal,async({file,format,path,directory,engine})=>{
-  const result=await engine.run({operation:'document.inspect',input_path:path,media_type:format.mediaType,job_dir:directory,request:{[`verify_${format.kind}_visual`]:true,...(format.kind==='xlsx'?{include_xlsx_raw:true}:{})}},
+  const result=await engine.run({operation:'document.inspect',input_path:path,media_type:format.mediaType,job_dir:directory,request:{[`verify_${format.kind}_visual`]:input.size<=OFFICE_NATIVE_SOURCE_MAX_BYTES,...(format.kind==='xlsx'?{include_xlsx_raw:true}:{})}},
    {signal,maxOutputBytes:2*1024*1024});
   signal.throwIfAborted();
   if(result.output_path||!result.engine||typeof result.engine.name!=='string'||result.engine.name.length>200
    ||typeof result.engine.version!=='string'||result.engine.version.length>200)throw Error('DOCUMENT_PREVIEW_RESULT_INVALID');
-  const verified=result.checks?.[`${format.kind}_visual_source_verified`]===true;
-  const reason=['DOCUMENT_VISUAL_LIMIT','FILE_CONTAINER_LIMIT'].includes(String(result.checks?.[`${format.kind}_visual_reason`]))?'source_limit' as const
+  const sourceLimited=input.size>OFFICE_NATIVE_SOURCE_MAX_BYTES;
+  const verified=!sourceLimited&&result.checks?.[`${format.kind}_visual_source_verified`]===true;
+  const reason=sourceLimited||['DOCUMENT_VISUAL_LIMIT','FILE_CONTAINER_LIMIT'].includes(String(result.checks?.[`${format.kind}_visual_reason`]))?'source_limit' as const
    :result.checks?.[`${format.kind}_visual_source_verified`]===false?'format_invalid' as const:'source_unverified' as const;
   const visual={[`${format.kind}_visual`]:{protocol:1 as const,ready:verified,...(verified?{}:{reason})}};
   return {...file,...visual,document_protocol:1 as const,media_type:format.mediaType,document:normalizeOfficePreviewContent(format.mediaType,result.content),
@@ -116,5 +117,5 @@ export async function readActivityFileOfficePdf(db:DatabaseSync,reader:Pick<Work
    await retainOfficePdf(db,root,directory,binding,retained,signal);
    return {...file,...retained,execution_authorized:false as const};
   }finally{await handle.close();}
- },binaryPath,OFFICE_PRINT_SOURCE_MAX_BYTES);
+ },binaryPath);
 }

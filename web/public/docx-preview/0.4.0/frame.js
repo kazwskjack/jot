@@ -358,7 +358,7 @@ function findTextSearchMatches(text, query, limit) {
   const value=event.data;
   if(closed||started||event.source!==window.parent||event.origin!==parentOrigin||!value||value.type!=='jot-docx-init'||value.protocol!==1
    ||typeof value.token!=='string'||!/^[a-f0-9-]{36}$/.test(value.token)||Object.keys(value).some(key=>!['type','protocol','token','bytes','focus'].includes(key))
-   ||!(value.bytes instanceof ArrayBuffer)||value.bytes.byteLength>20*1024*1024)return;
+   ||!(value.bytes instanceof ArrayBuffer)||value.bytes.byteLength>32*1024*1024)return;
   started=true;sessionToken=value.token;
   status.textContent='正在渲染…';
   try{

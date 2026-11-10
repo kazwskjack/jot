@@ -602,6 +602,10 @@
     {
       "path": "web/public/xlsx-preview/0.25.1/frame.js",
       "changes": "Retains pinned SpreadsheetInteractivePreview sparse cellData traversal, complete native getDisplayValue locale-lowercase matching and original sheet/range activation. Removes total2Mi display text,50000-cell and2000-result cutoffs. Each1000-cell result batch has a numeric sheet/row-key/column-key continuation bookmark and one further-match probe. Previous/next batches rescan stable sparse source positions. Every250 scanned cells yields via timer, old query/close generations cancel, old result arrays release. Serial work/watchdog/capture and visible-sheet/source/conversion limits remain."
+    },
+    {
+      "path": "web/public/xlsx-preview/0.25.1/frame.js",
+      "changes": "Native bootstrap source-byte admission aligns with Gateway and shared verified modern Office byte reader at32MiB. Existing container/XML/native renderer/workbook limits and fixed origin/window/token/instance/capture protocols remain. Larger structured sources up to100MiB get explicit visual source_limit. The shared byte verifier uses one preallocated receive buffer with exact length/SHA proof and independent stream cancellation."
     }
   ]
 }

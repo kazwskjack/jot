@@ -71,48 +71,48 @@ export async function fetchVerifiedArtifactPreviewBytes(file, kind, signal = und
 
 /** Callers bind the response status, identity and content type before reading.
  * @param {AbortSignal} [signal]
+ * @param {number} [maxBytes] Trusted caller budget, bounded by the100MiB source ceiling.
  */
-export async function readVerifiedPreviewBytes(response, file, signal = undefined) {
-  if (!file || !Number.isSafeInteger(file.size_bytes) || file.size_bytes < 0
+export async function readVerifiedPreviewBytes(response, file, signal = undefined, maxBytes = PREVIEW_LIMIT) {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0 || maxBytes > 100 * 1024 * 1024
+    || !file || !Number.isSafeInteger(file.size_bytes) || file.size_bytes < 0
     || typeof file.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(file.sha256) || !response.body) {
     await response.body?.cancel().catch(() => {});
     throw failure('artifact_preview_metadata_invalid');
   }
-  if (file.size_bytes > PREVIEW_LIMIT) {
+  if (file.size_bytes > maxBytes) {
     await response.body.cancel().catch(() => {});
     throw failure('artifact_preview_too_large');
   }
   const reader = response.body.getReader();
-  const chunks = [];
-  let length = 0;
+  const abort = () => { void reader.cancel().catch(() => {}); };
+  signal?.addEventListener('abort', abort, { once: true });
   try {
+    signal?.throwIfAborted();
+    const bytes = new Uint8Array(file.size_bytes);
+    let length = 0;
     while (true) {
+      signal?.throwIfAborted();
       const { done, value } = await reader.read();
+      signal?.throwIfAborted();
       if (done) break;
       length += value.byteLength;
       if (length > file.size_bytes) throw failure('artifact_preview_integrity_failed');
-      if (length > PREVIEW_LIMIT) throw failure('artifact_preview_too_large');
-      chunks.push(value);
+      if (length > maxBytes) throw failure('artifact_preview_too_large');
+      bytes.set(value, length - value.byteLength);
     }
+    if (length !== file.size_bytes) throw failure('artifact_preview_integrity_failed');
+    signal?.throwIfAborted();
+    const sha256 = [...new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', bytes))]
+      .map(byte => byte.toString(16).padStart(2, '0')).join('');
+    signal?.throwIfAborted();
+    if (sha256 !== file.sha256) throw failure('artifact_preview_integrity_failed');
+    return bytes;
   } catch (error) {
     await reader.cancel().catch(() => {});
     throw error;
   } finally {
+    signal?.removeEventListener('abort', abort);
     reader.releaseLock();
   }
-
-  signal?.throwIfAborted();
-  const bytes = new Uint8Array(length);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  const sha256 = [...new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', bytes))]
-    .map(byte => byte.toString(16).padStart(2, '0')).join('');
-  signal?.throwIfAborted();
-  if (bytes.byteLength !== file.size_bytes || sha256 !== file.sha256) {
-    throw failure('artifact_preview_integrity_failed');
-  }
-  return bytes;
 }
