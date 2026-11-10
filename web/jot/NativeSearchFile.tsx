@@ -6,6 +6,7 @@ import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 import {artifactPreviewErrorMessage} from './artifact-preview-bytes.mjs';
 import {readNativeMemberPreviewBytes,type NativeMemberPreviewSource,type NativeMemberOpenedBytes} from './activity-file-preview-client';
 
+const NativeSearchOfficeDocument=lazy(()=>import('./NativeSearchOfficeDocument'));
 const NativeSearchFileOffice=lazy(()=>import('./NativeSearchFileOffice'));
 const NativeSearchFilePdf=lazy(()=>import('./NativeSearchFilePdf'));
 type Opened=NativeMemberOpenedBytes&{downloadUrl:string;imageUrl?:string;text?:string};
@@ -14,6 +15,7 @@ export default function NativeSearchFile({source}:{source:NativeMemberPreviewSou
  const owner=taskDraftScope(),identity=JSON.stringify([owner,source]);
  const root=useRef<HTMLElement>(null),active=useRef<AbortController|null>(null);
  const [state,setState]=useState<{identity:string;opened?:Opened;error?:string}>(),[revision,setRevision]=useState(0);
+ const [structured,setStructured]=useState(false);
  const [raw,setRaw]=useState(false),[byteOffset,setByteOffset]=useState(0);
  const [cursor,setCursor]=useState<{sha:string;offset:number;previous:number[]}>();
  const imageType=listedFileImageType(source.member.path),pdf=source.member.path.toLowerCase().endsWith('.pdf'),office=officePreviewFormat(source.member.path);
@@ -52,15 +54,17 @@ export default function NativeSearchFile({source}:{source:NativeMemberPreviewSou
  const showBytes=raw||opened&&!opened.imageUrl&&!pdf&&!office?.native&&text===undefined;
  return <section ref={root} tabIndex={-1} className="jot-activity-content" aria-label="原生成员打开内容预览">
   <h4>{source.member.path}</h4>
+  {office?.native&&<button type="button" onClick={()=>setStructured(!structured)}>{structured?'关闭结构化内容':'查看Office结构化内容'}</button>}
+  {structured&&office?.native&&<ConversationDisplayBoundary label="原生Office结构化预览"><Suspense fallback={<p role="status">正在载入Office结构化查看器…</p>}><NativeSearchOfficeDocument source={source} expectedOpenSha={opened?.openSha}/></Suspense></ConversationDisplayBoundary>}
   {(!current||!opened&&!current.error)&&<p role="status">正在读取并核对完整打开内容… <button type="button" onClick={()=>{active.current?.abort();setState({identity,error:'本次读取已取消。'});}}>取消读取</button></p>}
   {opened&&<>
    <p>打开时内容 · {opened.size} 字节 · SHA-256 <code>{opened.sha256}</code></p>
    <nav aria-label="打开内容查看方式" data-chat-search-ignore>
-    <button type="button" disabled={!raw} onClick={()=>setRaw(false)}>查看内容</button>
-    <button type="button" disabled={raw} onClick={()=>setRaw(true)}>查看原始字节</button>
+    <button type="button" disabled={!raw&&!structured} onClick={()=>{setStructured(false);setRaw(false);}}>查看内容</button>
+    <button type="button" disabled={raw&&!structured} onClick={()=>{setStructured(false);setRaw(true);}}>查看原始字节</button>
     <a href={opened.downloadUrl} download={source.member.path.split(/[\\/]/).at(-1)||'file'} onClick={event=>{if(taskDraftScope()!==owner)event.preventDefault();}}>下载本次已打开内容</a>
    </nav>
-   {showBytes?<>
+   {!structured&&(showBytes?<>
     <pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}} aria-label="打开文件十六进制字节">{hex||'空文件'}</pre>
     <nav aria-label="打开文件字节翻页" data-chat-search-ignore>
      <button type="button" disabled={byteOffset===0} onClick={()=>setByteOffset(Math.max(0,byteOffset-256))}>上一页字节</button>
@@ -77,7 +81,7 @@ export default function NativeSearchFile({source}:{source:NativeMemberPreviewSou
       <span>{Math.min(offset+1,text.length)}–{end} / {text.length}（UTF-16 位置）</span>
       <button type="button" disabled={end>=text.length} onClick={()=>setCursor({sha:opened.openSha,offset:end,previous:[...(currentCursor?.previous??[]),offset]})}>下一页正文</button>
      </nav>
-    </>:null}
+    </>:null)}
   </>}
   {current?.error&&<p role="alert">{current.error} <button type="button" onClick={()=>setRevision(value=>value+1)}>重新读取打开内容</button></p>}
  </section>;

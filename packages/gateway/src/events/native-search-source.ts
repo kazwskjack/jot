@@ -1,11 +1,14 @@
+import {OFFICE_SOURCE_MAX_BYTES,officePreviewFormat} from '../artifacts/office-preview-format.js';
+import type {PinnedByteSource} from '../artifacts/pinned-byte-source.ts';
+import type {OfficeDocumentPreview} from '../artifacts/document-preview-content.ts';
 import {validateNativeFileRange,type NativeFileRangeRequest} from '../harness/native-file-range.js';
 import {createPinnedByteStore} from '../artifacts/pinned-byte-source.ts';
 import {Readable} from 'node:stream';
 import {validateNativeSearchMembers,validateNativeSearchMemberRange,type NativeSearchMembersRequest,type NativeSearchMembers,type NativeSearchMemberRangeRequest} from '../harness/native-search-members.js';
 import {createHash} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
-import type {FastifyInstance} from 'fastify';
-import type {ActivityToolResultPage,ActivityToolResultSearchPage,ActivityToolResultMatch,ActivityNativeSearchMembersPage} from '../../contracts/types.ts';
+import type {FastifyInstance,FastifyRequest,FastifyReply} from 'fastify';
+import type {ActivityToolResultPage,ActivityToolResultSearchPage,ActivityToolResultMatch,ActivityNativeSearchMembersPage,NativeMemberOfficeDocumentPage} from '../../contracts/types.ts';
 import {withReadTransaction} from '../db/database.ts';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {readOriginalActivity,type NativeSearchCandidate} from './activity-tool-result.ts';
@@ -178,11 +181,13 @@ export async function searchNativeActivitySources(db:DatabaseSync,owner:string,b
   return {...base,items,unsearched_results:unsearched};
 }
 
-export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,client,snapshotRoot}:{
+export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,client,snapshotRoot,inspectOffice}:{
   db:DatabaseSync;actor(request:{headers:Record<string,unknown>}):string;client?:NativeSearchSourceClient|undefined;snapshotRoot?:string;
+  inspectOffice?:(source:PinnedByteSource,name:string,signal:AbortSignal)=>Promise<{media_type:string;document:OfficeDocumentPreview;engine:{name:string;version:string}}>;
+
 }) {
   const downloads = new Set<{bytes:number}>(), downloadBudget = 512*1024*1024;
-  app.get('/v1/conversations/:conversationId/activities/:activityId/tool-result/members/:memberIndex/download',async(request,reply)=>{
+  const nativeFileRoute=(operation:'download'|'document')=>async(request:FastifyRequest,reply:FastifyReply)=>{
     reply.header('cache-control','private, no-store');
     const abort = new AbortController(), signal = AbortSignal.any([abort.signal,AbortSignal.timeout(120000)]);
     let stream:Readable|undefined, store:ReturnType<typeof createPinnedByteStore>|undefined;
@@ -206,13 +211,15 @@ export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,c
       const query = request.query as Input, runId = query.run_id, asOfSeq = query.as_of_seq;
       if (!ID.test(conversationId) || !ID.test(activityId) || typeof runId !== 'string' || !ID.test(runId)
         || !/^(0|[1-9]\d{0,7})$/.test(memberIndex) || Number(memberIndex) > MAX_CHARS
-        || Object.keys(query).some(key=>!['run_id','result_sha256','members_sha256','as_of_seq','max_bytes'].includes(key))
+        || Object.keys(query).some(key=>!['run_id','result_sha256','members_sha256','as_of_seq','max_bytes','open_sha256'].includes(key))
         || asOfSeq !== undefined && (typeof asOfSeq !== 'string' || !/^(0|[1-9]\d{0,18})$/.test(asOfSeq) || BigInt(asOfSeq)>9223372036854775807n)
         || ['result_sha256','members_sha256'].some(key=>typeof query[key] !== 'string' || !SHA.test(query[key] as string)))
         throw Error('invalid_activity_tool_result_query');
-      const requestedLimit = query.max_bytes === undefined ? downloadBudget : Number(query.max_bytes);
+      if(query.open_sha256!==undefined&&(typeof query.open_sha256!=='string'||!SHA.test(query.open_sha256)))throw Error('invalid_activity_tool_result_query');
+      const operationLimit=operation==='document'?OFFICE_SOURCE_MAX_BYTES:downloadBudget;
+      const requestedLimit = query.max_bytes === undefined ? operationLimit : Number(query.max_bytes);
       if (query.max_bytes !== undefined && (typeof query.max_bytes !== 'string' || !/^[1-9]\d{0,8}$/.test(query.max_bytes)
-        || !Number.isSafeInteger(requestedLimit) || requestedLimit > downloadBudget)) throw Error('invalid_activity_tool_result_query');
+        || !Number.isSafeInteger(requestedLimit) || requestedLimit > operationLimit)) throw Error('invalid_activity_tool_result_query');
       if (!snapshotRoot || !client?.readNativeSearchMemberFileRange || !client.readNativeFileRange)
         throw Error('activity_tool_result_source_invalid');
       if (downloads.size >= 4) return reply.code(429).send({error:{code:'ACTIVITY_TOOL_RESULT_SOURCE_CAPACITY'}});
@@ -223,6 +230,8 @@ export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,c
       const membership = await readMembers(client,owner,original,memberInput,signal);
       if (memberResultHash(original,membership) !== query.result_sha256 || membership.items[0]?.index !== Number(memberIndex))
         throw Error('activity_tool_result_source_changed');
+      if(operation==='document'&&!inspectOffice)throw Error('activity_tool_result_source_invalid');
+      if(operation==='document'&&!officePreviewFormat(membership.items[0]!.path)?.native)throw Error('UNSUPPORTED_FORMAT_OPERATION');
       const input:NativeSearchMemberRangeRequest = {member:{call_seq:original.callSeq,tool_name:original.tool,index:Number(memberIndex),
         members_sha256:membership.members_sha256,call_sha256:membership.call_sha256,result_sha256:membership.result_sha256},
         range:{offset_bytes:0,length_bytes:65536}};
@@ -257,6 +266,19 @@ export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,c
       const openedSha = hash({activity:query.result_sha256,members:membership.members_sha256,index:Number(memberIndex),
         profile:first.profile_id,session:first.session_sha256,path:first.absolute_path,version:first.version,
         reportedSize:first.file_size_bytes,size:writer.source.sizeBytes,content:writer.source.sha256});
+      if(query.open_sha256!==undefined&&query.open_sha256!==openedSha)throw Error('activity_tool_result_source_changed');
+      if(operation==='document'){
+        const value=await inspectOffice!(writer.source,membership.items[0]!.path,signal);
+        signal.throwIfAborted();
+        const final=await readMembers(client,owner,original,memberInput,signal);
+        if(hash(final)!==hash(membership)||source(db,owner,conversationId,runId,activityId,asOfSeq as string|undefined).identity!==original.identity)
+          throw Error('activity_tool_result_source_changed');
+        const result:NativeMemberOfficeDocumentPage={document_protocol:1,conversation_id:conversationId,run_id:runId,activity_id:activityId,
+          member_index:Number(memberIndex),path:membership.items[0]!.path,result_sha256:query.result_sha256 as string,
+          members_sha256:membership.members_sha256,open_sha256:openedSha,sha256:writer.source.sha256,size_bytes:writer.source.sizeBytes,
+          ...(asOfSeq!==undefined?{as_of_seq:asOfSeq as string}:{}),media_type:value.media_type,document:value.document,engine:value.engine,execution_authorized:false};
+        return reply.header('x-content-type-options','nosniff').send(result);
+      }
       const name = Buffer.from((membership.items[0]!.path.split(/[\\/]/).at(-1) || 'file').slice(0,200)).toString('utf8');
       async function* content(){try{yield* writer.source.stream(signal);}finally{await cleanup();}}
       stream = Readable.from(content());
@@ -271,6 +293,7 @@ export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,c
       return reply.send(stream);
     } catch (error) {
       if (stream) {stream.destroy();await cleanup();}
+      if(error instanceof Error&&error.message==='DOCUMENT_PREVIEW_BUSY')return reply.code(429).header('retry-after','1').send({error:{code:'DOCUMENT_PREVIEW_BUSY'}});
       if (error instanceof SessionAdapterError) return reply.code(error.status === 404 ? 404 : error.status === 429 ? 429 : error.status === 409 ? 409 : 503)
         .send({error:{code:'ACTIVITY_TOOL_RESULT_SOURCE_UNAVAILABLE'}});
       if (error instanceof Error && (['AbortError','TimeoutError'].includes(error.name)
@@ -280,7 +303,9 @@ export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,c
     } finally {
       if (!stream) await cleanup();
     }
-  });
+  };
+  app.get('/v1/conversations/:conversationId/activities/:activityId/tool-result/members/:memberIndex/download',nativeFileRoute('download'));
+  app.get('/v1/conversations/:conversationId/activities/:activityId/tool-result/members/:memberIndex/document',nativeFileRoute('document'));
   app.get('/v1/conversations/:conversationId/activities/:activityId/tool-result/members',async(request,reply)=>{
     reply.header('cache-control','private, no-store');
     const abort = new AbortController(), disconnected = () => abort.abort();

@@ -4,7 +4,7 @@ import {OfficePreviewConfigurationStore} from './file-engine/office-preview-conf
 import {createOfficePreviewCandidateReader} from './file-engine/office-preview-candidates.ts';
 import {signOfficePrintProof} from './messages/office-print-proof.ts';
 import {createOfficePreviewStatusReader} from './file-engine/office-preview-status.ts';
-import {readActivityFileDocument,readActivityFileOfficePdf,parseOfficePrintQuery} from './events/activity-file-document.ts';
+import {readActivityFileDocument,readActivityFileOfficePdf,parseOfficePrintQuery,inspectPinnedOfficeDocument} from './events/activity-file-document.ts';
 import {messageReferenceSnapshotsInstalled,commandReferenceSnapshotsInstalled,captureRunCommandReferenceSnapshots,assertReferenceSnapshotImages} from './messages/reference-snapshots.ts';
 import {prepareReferenceSteeringText,type ReferenceSnapshotInput} from './messages/content-reference.js';
 import {createPinnedByteStore} from './artifacts/pinned-byte-source.ts';
@@ -1065,7 +1065,14 @@ export async function buildServer(config: {
 
   registerDiscoveryPolicyRoutes(app,{policies:new DiscoveryPolicies(db,{onChange:(owner,receipt,event)=>persistentTasks.synchronizeDiscoveryPolicy(owner,receipt.policy_id,event)}),actor,role:(owner,id)=>workbench.getAgent(owner,id),atomic:atomicCommand});
   registerDiscoveryHistoryRoutes(app,{history:new DiscoveryHistory(db),actor,role:(owner,id)=>workbench.getAgent(owner,id)});
-  registerNativeSearchSourceRoutes(app,{db,actor,client:config.nativeSearchSourceClient,snapshotRoot:join(dirname(resolve(config.databasePath)),'.jot-downloads')});
+  let documentPreviewBusy=false;
+  registerNativeSearchSourceRoutes(app,{db,actor,client:config.nativeSearchSourceClient,snapshotRoot:join(dirname(resolve(config.databasePath)),'.jot-downloads'),
+    inspectOffice:async(source,name,signal)=>{
+      if(documentPreviewBusy)throw Error('DOCUMENT_PREVIEW_BUSY');
+      documentPreviewBusy=true;
+      try{return await inspectPinnedOfficeDocument(source,name,join(dirname(resolve(config.databasePath)),'.jot-document-previews'),signal);}
+      finally{documentPreviewBusy=false;}
+    }});
   registerTerminalInventoryRoutes(app,{db,actor,client:config.terminalInventoryClient});
   registerTerminalControlRoutes(app,{db,actor,client:config.terminalControlClient});
   registerTerminalReceiptRoutes(app,{db,actor,client:config.terminalControlClient});
@@ -1223,7 +1230,6 @@ export async function buildServer(config: {
       db.exec('COMMIT');return reply.header('cache-control','private, no-store').send(value);
     }catch(error){if(db.isTransaction)db.exec('ROLLBACK');throw error;}
   });
-  let documentPreviewBusy=false;
   app.get('/v1/conversations/:conversationId/activities/:activityId/tool-result/file/document',async(request,reply)=>{
     const {conversationId,activityId}=request.params as {conversationId:string;activityId:string},owner=actor(request as any);
     const input=parseActivityFileDownloadQuery(request.query as Record<string,unknown>);

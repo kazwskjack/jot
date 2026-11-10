@@ -11,12 +11,29 @@ import {Readable} from 'node:stream';
 import {pipeline} from 'node:stream/promises';
 import type {WorkbenchService} from '../workbench/service.ts';
 import {FileEngineAdapter} from '../file-engine/engine.ts';
-import {createPinnedByteStore} from '../artifacts/pinned-byte-source.ts';
+import {createPinnedByteStore,type PinnedByteSource} from '../artifacts/pinned-byte-source.ts';
 import {normalizeOfficePreviewContent,officePreviewFormat} from '../artifacts/document-preview-content.ts';
 import {readActivityToolResultFileDownload,parseActivityFileDownloadQuery} from './activity-tool-result.ts';
 
 type OfficeSource={file:ReturnType<typeof readActivityToolResultFileDownload>;
  format:NonNullable<ReturnType<typeof officePreviewFormat>>;path:string;directory:string;engine:FileEngineAdapter};
+
+/** Stage the same verified immutable bytes for either original or native Office sources. */
+async function withPinnedOfficeInput<T>(source:PinnedByteSource,name:string,root:string,signal:AbortSignal,
+ read:(source:Omit<OfficeSource,'file'>)=>Promise<T>,binaryPath?:string){
+ const format=officePreviewFormat(name);
+ if(!format)throw Error('UNSUPPORTED_FORMAT_OPERATION');
+ if(source.sizeBytes>OFFICE_SOURCE_MAX_BYTES)throw Error('DOCUMENT_PREVIEW_TOO_LARGE');
+ await mkdir(root,{recursive:true,mode:0o700});
+ const directory=await mkdtemp(join(root,'office-'));
+ try{
+  const path=join(directory,'input.'+format.extension);
+  await pipeline(Readable.from(source.stream(signal)),createWriteStream(path,{flags:'wx',mode:0o600}),{signal});
+  const engine=new FileEngineAdapter({python:process.env.GENERAL_AGENT_FILE_ENGINE_PYTHON?.trim()||'/usr/bin/python3',
+   workerPath:process.env.GENERAL_AGENT_FILE_ENGINE_SCRIPT?.trim()||fileURLToPath(new URL('../../file-engine/worker.py',import.meta.url)),timeoutMs:30000,...(binaryPath?{libreOffice:binaryPath}:{})});
+  return await read({format,path,directory,engine});
+ }finally{await rm(directory,{recursive:true,force:true});}
+}
 
 /** Seal original bytes and run preview work outside the database transaction. */
 async function withPinnedOfficeSource<T>(db:DatabaseSync,reader:Pick<WorkbenchService,'readBinaryFile'>,
@@ -24,7 +41,7 @@ async function withPinnedOfficeSource<T>(db:DatabaseSync,reader:Pick<WorkbenchSe
  const format=officePreviewFormat(input.path);
  if(!format)throw Error('UNSUPPORTED_FORMAT_OPERATION');
  if(input.size>OFFICE_SOURCE_MAX_BYTES)throw Error('DOCUMENT_PREVIEW_TOO_LARGE');
- const store=createPinnedByteStore(root);let directory:string|undefined;
+ const store=createPinnedByteStore(root);
  try{
   const writer=await store.begin(input.fileSha,input.size,signal);signal.throwIfAborted();
   db.exec('BEGIN');let file:ReturnType<typeof readActivityToolResultFileDownload>;
@@ -33,34 +50,36 @@ async function withPinnedOfficeSource<T>(db:DatabaseSync,reader:Pick<WorkbenchSe
    db.exec('COMMIT');
   }catch(error){if(db.isTransaction)db.exec('ROLLBACK');throw error;}
   await writer.seal();signal.throwIfAborted();
-  await mkdir(root,{recursive:true,mode:0o700});directory=await mkdtemp(join(root,'office-'));
-  const path=join(directory,'input.'+format.extension);
-  await pipeline(Readable.from(writer.source.stream(signal)),createWriteStream(path,{flags:'wx',mode:0o600}),{signal});
-  const engine=new FileEngineAdapter({python:process.env.GENERAL_AGENT_FILE_ENGINE_PYTHON?.trim()||'/usr/bin/python3',
-   workerPath:process.env.GENERAL_AGENT_FILE_ENGINE_SCRIPT?.trim()||fileURLToPath(new URL('../../file-engine/worker.py',import.meta.url)),timeoutMs:30000,...(binaryPath?{libreOffice:binaryPath}:{})});
-  return await read({file,format,path,directory,engine});
- }finally{
-  try{await store.dispose();}finally{if(directory)await rm(directory,{recursive:true,force:true});}
- }
+  return await withPinnedOfficeInput(writer.source,input.path,root,signal,staged=>read({...staged,file}),binaryPath);
+ }finally{await store.dispose();}
+}
+
+async function inspectOfficeInput({format,path,directory,engine}:Omit<OfficeSource,'file'>,size:number,signal:AbortSignal){
+  const result=await engine.run({operation:'document.inspect',input_path:path,media_type:format.mediaType,job_dir:directory,request:{[`verify_${format.kind}_visual`]:size<=OFFICE_NATIVE_SOURCE_MAX_BYTES,...(format.kind==='xlsx'?{include_xlsx_raw:true}:{})}},
+   {signal,maxOutputBytes:2*1024*1024});
+  signal.throwIfAborted();
+  if(result.output_path||!result.engine||typeof result.engine.name!=='string'||result.engine.name.length>200
+   ||typeof result.engine.version!=='string'||result.engine.version.length>200)throw Error('DOCUMENT_PREVIEW_RESULT_INVALID');
+  const sourceLimited=size>OFFICE_NATIVE_SOURCE_MAX_BYTES;
+  const verified=!sourceLimited&&result.checks?.[`${format.kind}_visual_source_verified`]===true;
+  const reason=sourceLimited||['DOCUMENT_VISUAL_LIMIT','FILE_CONTAINER_LIMIT'].includes(String(result.checks?.[`${format.kind}_visual_reason`]))?'source_limit' as const
+   :result.checks?.[`${format.kind}_visual_source_verified`]===false?'format_invalid' as const:'source_unverified' as const;
+  const visual={[`${format.kind}_visual`]:{protocol:1 as const,ready:verified,...(verified?{}:{reason})}};
+  return {...visual,document_protocol:1 as const,media_type:format.mediaType,document:normalizeOfficePreviewContent(format.mediaType,result.content),
+   engine:{name:result.engine.name,version:result.engine.version},execution_authorized:false as const};
+}
+
+export async function inspectPinnedOfficeDocument(source:PinnedByteSource,name:string,root:string,signal:AbortSignal){
+ if(!officePreviewFormat(name)?.native)throw Error('UNSUPPORTED_FORMAT_OPERATION');
+ return withPinnedOfficeInput(source,name,root,signal,input=>inspectOfficeInput(input,source.sizeBytes,signal));
 }
 
 export async function readActivityFileDocument(db:DatabaseSync,reader:Pick<WorkbenchService,'readBinaryFile'>,
  owner:string,conversationId:string,activityId:string,input:ReturnType<typeof parseActivityFileDownloadQuery>,root:string,signal:AbortSignal){
  if(!officePreviewFormat(input.path)?.native)throw Error('UNSUPPORTED_FORMAT_OPERATION');
- return withPinnedOfficeSource(db,reader,owner,conversationId,activityId,input,root,signal,async({file,format,path,directory,engine})=>{
-  const result=await engine.run({operation:'document.inspect',input_path:path,media_type:format.mediaType,job_dir:directory,request:{[`verify_${format.kind}_visual`]:input.size<=OFFICE_NATIVE_SOURCE_MAX_BYTES,...(format.kind==='xlsx'?{include_xlsx_raw:true}:{})}},
-   {signal,maxOutputBytes:2*1024*1024});
-  signal.throwIfAborted();
-  if(result.output_path||!result.engine||typeof result.engine.name!=='string'||result.engine.name.length>200
-   ||typeof result.engine.version!=='string'||result.engine.version.length>200)throw Error('DOCUMENT_PREVIEW_RESULT_INVALID');
-  const sourceLimited=input.size>OFFICE_NATIVE_SOURCE_MAX_BYTES;
-  const verified=!sourceLimited&&result.checks?.[`${format.kind}_visual_source_verified`]===true;
-  const reason=sourceLimited||['DOCUMENT_VISUAL_LIMIT','FILE_CONTAINER_LIMIT'].includes(String(result.checks?.[`${format.kind}_visual_reason`]))?'source_limit' as const
-   :result.checks?.[`${format.kind}_visual_source_verified`]===false?'format_invalid' as const:'source_unverified' as const;
-  const visual={[`${format.kind}_visual`]:{protocol:1 as const,ready:verified,...(verified?{}:{reason})}};
-  return {...file,...visual,document_protocol:1 as const,media_type:format.mediaType,document:normalizeOfficePreviewContent(format.mediaType,result.content),
-   engine:{name:result.engine.name,version:result.engine.version},execution_authorized:false as const};
- });
+ return withPinnedOfficeSource(db,reader,owner,conversationId,activityId,input,root,signal,async({file,...staged})=>({
+  ...file,...await inspectOfficeInput(staged,input.size,signal),
+ }));
 }
 
 export function parseOfficePrintQuery(query:Record<string,unknown>){

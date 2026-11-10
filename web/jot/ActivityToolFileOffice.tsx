@@ -60,12 +60,12 @@ function spreadsheetReferenceContext(sheet:Extract<OfficeDocumentPreview,{kind:'
  const surroundingValues=matrix(top,left,Math.min(range.bottom-top+2,20,1048576-top+1),Math.min(range.right-left+2,30,16384-left+1));
  return {headers,surroundingValues,incomplete:headerRows>0&&!headers||!surroundingValues};
 }
-function SpreadsheetContent({value,source,officeFocus}:{value:Extract<OfficeDocumentPreview,{kind:'xlsx'}>;source:ListedFilePreviewSource;officeFocus?:OfficeCellFocus}){
+function SpreadsheetContent({value,source,officeFocus}:{value:Extract<OfficeDocumentPreview,{kind:'xlsx'}>;source?:ListedFilePreviewSource|undefined;officeFocus?:OfficeCellFocus}){
  const context=useContext(FileTextReferenceContext),owner=taskDraftScope();
  const root=useRef<HTMLElement>(null),jumped=useRef(false);
  const ranges=useMemo(()=>officeFocus?.value.reference.locator.ranges.map(cellRangeCoordinates)??[],[officeFocus]);
  const focused=useMemo(()=>{
-  if(!officeFocus)return undefined;
+  if(!officeFocus||!source)return undefined;
   const original=officeFocus.value,ref=original.reference;
   const sameSource=original.owner===owner&&original.conversationId===source.conversationId&&original.runId===source.runId
    &&original.activityId===source.activityId&&original.resultSha===source.resultSha&&original.file.path===source.file.path&&original.file.version===source.file.version&&original.file.sha256===source.file.sha256&&original.file.size===source.file.size;
@@ -104,7 +104,7 @@ function SpreadsheetContent({value,source,officeFocus}:{value:Extract<OfficeDocu
   window.addEventListener('pointerdown',stop,true);window.addEventListener('pointerup',stop);window.addEventListener('pointercancel',stop);window.addEventListener('blur',stop);
   return()=>{window.removeEventListener('pointerdown',stop,true);window.removeEventListener('pointerup',stop);window.removeEventListener('pointercancel',stop);window.removeEventListener('blur',stop);};
  },[]);
- const sheet=value.sheets[part],disabled=!context||context.disabled||context.owner!==owner||context.conversationId!==source.conversationId;
+ const sheet=value.sheets[part],disabled=!source||!context||context.disabled||context.owner!==owner||context.conversationId!==source.conversationId;
  useEffect(()=>{
   if(jumped.current||!focused?.confirmed||part!==focused.index)return;
   const frame=window.requestAnimationFrame(()=>{
@@ -115,7 +115,7 @@ function SpreadsheetContent({value,source,officeFocus}:{value:Extract<OfficeDocu
   return()=>window.cancelAnimationFrame(frame);
  },[focused,part,page,rangeView,rangeRow,rangeColumn,owner]);
  const capture=(ranges:string[])=>{
-  if(!context||disabled||taskDraftScope()!==owner||!sheet?.name||!ranges.length)return;
+  if(!source||!context||disabled||taskDraftScope()!==owner||!sheet?.name||!ranges.length)return;
   let snapshots:CellRangeSnapshot[];
   let rawUnavailable=false;
   try{
@@ -244,11 +244,11 @@ function OfficeText({text,match}:{text:string;match?:{start:number;end:number}})
  if(!match)return <>{text}</>;
  return <>{text.slice(0,match.start)}<mark data-office-reference-text>{text.slice(match.start,match.end)}</mark>{text.slice(match.end)}</>;
 }
-function OfficeDocumentContent({value,source,officeTextFocus}:{value:Exclude<OfficeDocumentPreview,{kind:'xlsx'}>;source:ListedFilePreviewSource;officeTextFocus?:OfficeTextFocus}){
+function OfficeDocumentContent({value,source,officeTextFocus}:{value:Exclude<OfficeDocumentPreview,{kind:'xlsx'}>;source?:ListedFilePreviewSource|undefined;officeTextFocus?:OfficeTextFocus}){
  const root=useRef<HTMLElement>(null),jumped=useRef(false),owner=taskDraftScope();
  const view=useMemo(()=>officeTextView(value),[value]);
  const focused=useMemo(()=>{
-  const original=officeTextFocus?.value;if(!original)return undefined;
+  const original=officeTextFocus?.value;if(!original||!source)return undefined;
   if(original.text_view!==1||original.owner!==owner||original.conversationId!==source.conversationId||original.runId!==source.runId
    ||original.activityId!==source.activityId||original.resultSha!==source.resultSha||original.file.path!==source.file.path
    ||original.file.version!==source.file.version||original.file.sha256!==source.file.sha256||original.file.size!==source.file.size)return undefined;
@@ -269,7 +269,7 @@ function OfficeDocumentContent({value,source,officeTextFocus}:{value:Exclude<Off
  const match=(key:string)=>focused?.block.key===key?focused:undefined;
  const rows=value.kind==='docx'?value.tables[table]??[]:[],columns=rows.reduce((count,row)=>Math.max(count,row.length),0);
  return <section ref={root} aria-label="原Office文档文字">
-  <OfficeTextReferenceAction key={`${part}-${page}-${table}-${column}`} root={root} source={source} view={view}/>
+  {source&&<OfficeTextReferenceAction key={`${part}-${page}-${table}-${column}`} root={root} source={source} view={view}/>}
   {officeTextFocus&&<p role="status">{focused?(view.truncated||officeTextFocus.value.reference.truncated?'已核对原引用文字片段，原解析或引用存在截断。':'已核对并定位原引用文字。'):'原引用文字尚未与当前固定版本的解析结果核对，请对照原引用快照。'}</p>}
   {value.kind==='pptx'?<>
    {value.slides.slice(page*10,(page+1)*10).map(slide=><section key={slide.number} aria-label={`幻灯片 ${slide.number}`}>
@@ -300,7 +300,7 @@ function OfficeDocumentContent({value,source,officeTextFocus}:{value:Exclude<Off
   </>}
  </section>;
 }
-function OfficeContent({value,source,officeFocus,officeTextFocus}:{value:OfficeDocumentPreview;source:ListedFilePreviewSource;officeFocus?:OfficeCellFocus;officeTextFocus?:OfficeTextFocus}){
+export function OfficeContent({value,source,officeFocus,officeTextFocus}:{value:OfficeDocumentPreview;source?:ListedFilePreviewSource|undefined;officeFocus?:OfficeCellFocus;officeTextFocus?:OfficeTextFocus}){
  if(value.kind==='xlsx')return <SpreadsheetContent value={value} source={source} officeFocus={officeFocus}/>;
  return <OfficeDocumentContent value={value} source={source} officeTextFocus={officeTextFocus}/>;
 }

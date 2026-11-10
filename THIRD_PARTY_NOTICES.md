@@ -311,3 +311,10 @@ Only a copy of the verified32MiB-bounded opened source is transferred to the
 validated frame origin. The original same-open byte source remains available
 for download and raw inspection. Existing retained viewer-library and PilotDeck
 notices continue to apply. Native versions remain opaque in their source proof.
+
+Native Office structured previews reuse the original Jot document.inspect input
+staging, FileEngineAdapter, normalized bounded document model and structured
+Word/spreadsheet/slide renderers. Original typed native member and full opened
+source proofs authorize the private byte copy. Existing DSH MIT, viewer and
+PilotDeck AGPL notices apply. Structured views consume normalized bounded document data. Native reference
+integration is tracked separately.
