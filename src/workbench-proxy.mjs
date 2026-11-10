@@ -207,7 +207,7 @@ export function registerWorkbenchProxy(app,config,localCsrf){
   if(req.headers['last-event-id'])headers['last-event-id']=req.headers['last-event-id'];
    const binary=req.method==='PUT'&&(/^\/v1\/uploads\/[^/]+\/content$/.test(suffix)||/^\/v1\/workspaces\/[^/]+\/files\/binary$/.test(suffix));
    const nativeOfficeDocument=req.method==='GET'&&/^\/v1\/conversations\/[^/]+\/activities\/[^/]+\/tool-result\/members\/(?:0|[1-9][0-9]{0,7})\/document$/.test(suffix);
-   const listedFileDownload=req.method==='GET'&&/^\/v1\/conversations\/[^/]+\/activities\/[^/]+\/tool-result\/(?:file\/(?:download|print)|members\/(?:0|[1-9][0-9]{0,7})\/download)$/.test(suffix);
+   const listedFileDownload=req.method==='GET'&&/^\/v1\/conversations\/[^/]+\/activities\/[^/]+\/tool-result\/(?:file\/(?:download|print)|members\/(?:0|[1-9][0-9]{0,7})\/(?:download|print))$/.test(suffix);
    const officePrintPreview=listedFileDownload&&suffix.endsWith('/print');
    const binaryDownload=listedFileDownload||req.method==='GET'&&(/^\/v1\/workspaces\/[^/]+\/files\/binary$/.test(suffix)||/^\/v1\/workspaces\/[^/]+\/checkpoints\/[^/]+\/restore-reviews\/[^/]+\/target$/.test(suffix));
   if(binary&&!Buffer.isBuffer(req.body))return reply.code(415).send({error:{code:'BINARY_UPLOAD_REQUIRED'}});

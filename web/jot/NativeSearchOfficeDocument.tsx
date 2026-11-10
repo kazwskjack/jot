@@ -6,11 +6,12 @@ import type {NativeMemberOfficeDocumentPage} from '../../packages/gateway/contra
 import {nativeMemberDownloadUrl,type NativeMemberPreviewSource} from './activity-file-preview-client';
 import {artifactPreviewErrorMessage} from './artifact-preview-bytes.mjs';
 
-export default function NativeSearchOfficeDocument({source,expectedOpenSha}:{source:NativeMemberPreviewSource;expectedOpenSha?:string|undefined}){
- const owner=taskDraftScope(),identity=JSON.stringify([owner,source,expectedOpenSha]);
- const held=useRef<{identity:string;sha:string}>();
+export default function NativeSearchOfficeDocument({source,expectedOpenSha,onOpened}:{source:NativeMemberPreviewSource;expectedOpenSha?:string|undefined;onOpened?:(sha:string)=>boolean}){
+ const owner=taskDraftScope(),identity=JSON.stringify([owner,source]);
+ const held=useRef<{identity:string;sha:string;revision:number}>();
  const [state,setState]=useState<{identity:string;page?:NativeMemberOfficeDocumentPage;error?:string}>(),[revision,setRevision]=useState(0);
  useEffect(()=>{
+  if(expectedOpenSha&&held.current?.identity===identity&&held.current.sha===expectedOpenSha&&held.current.revision===revision&&state?.identity===identity&&state.page)return;
   const controller=new AbortController();setState({identity});
   const load=async()=>{
    const format=officePreviewFormat(source.member.path);
@@ -28,7 +29,8 @@ export default function NativeSearchOfficeDocument({source,expectedOpenSha}:{sou
     ||page.media_type!==format.mediaType||page.document?.kind!==format.kind||!page.engine||typeof page.engine.name!=='string'||page.engine.name.length>200
     ||typeof page.engine.version!=='string'||page.engine.version.length>200)throw Error('原生Office结构化来源尚未确认');
    const document=normalizeOfficePreviewContent(page.media_type,page.document);
-   held.current={identity,sha:page.open_sha256};
+   if(onOpened&&!onOpened(page.open_sha256))throw Error('原打开来源已变化，请重新打开文件');
+   held.current={identity,sha:page.open_sha256,revision};
    setState({identity,page:{...page,document}});
   };
   void load().catch(error=>{
@@ -40,7 +42,7 @@ export default function NativeSearchOfficeDocument({source,expectedOpenSha}:{sou
    setState({identity,error:message});
   });
   return()=>controller.abort();
- },[identity,revision]);
+ },[identity,revision,expectedOpenSha]);
  const current=state?.identity===identity?state:undefined,page=current?.page;
  return <section aria-label="原生Office结构化内容">
   <h5>Office结构化内容</h5>

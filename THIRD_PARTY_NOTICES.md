@@ -318,3 +318,10 @@ Word/spreadsheet/slide renderers. Original typed native member and full opened
 source proofs authorize the private byte copy. Existing DSH MIT, viewer and
 PilotDeck AGPL notices apply. Structured views consume normalized bounded document data. Native reference
 integration is tracked separately.
+
+Native Office PDF previews share the original configured LibreOffice export
+engine and checked output reader, plus the private retained-PDF store. Their
+bindings include original native member/activity/opened-source provenance.
+The existing native MIT, viewer, engine and PilotDeck notices apply. The native
+PDF viewer verifies complete output bytes and decoded page count. Native
+reference receipt integration is tracked separately.

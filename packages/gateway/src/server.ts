@@ -4,7 +4,7 @@ import {OfficePreviewConfigurationStore} from './file-engine/office-preview-conf
 import {createOfficePreviewCandidateReader} from './file-engine/office-preview-candidates.ts';
 import {signOfficePrintProof} from './messages/office-print-proof.ts';
 import {createOfficePreviewStatusReader} from './file-engine/office-preview-status.ts';
-import {readActivityFileDocument,readActivityFileOfficePdf,parseOfficePrintQuery,inspectPinnedOfficeDocument} from './events/activity-file-document.ts';
+import {readActivityFileDocument,readActivityFileOfficePdf,parseOfficePrintQuery,inspectPinnedOfficeDocument,readPinnedOfficePdf} from './events/activity-file-document.ts';
 import {messageReferenceSnapshotsInstalled,commandReferenceSnapshotsInstalled,captureRunCommandReferenceSnapshots,assertReferenceSnapshotImages} from './messages/reference-snapshots.ts';
 import {prepareReferenceSteeringText,type ReferenceSnapshotInput} from './messages/content-reference.js';
 import {createPinnedByteStore} from './artifacts/pinned-byte-source.ts';
@@ -650,7 +650,7 @@ export async function buildServer(config: {
   app.addHook('onSend', async (request, reply, payload) => {
     const registeredRoute=request.routeOptions.url;
     if(request.method==='GET'&&reply.statusCode<400&&String(reply.getHeader('content-type')??'').startsWith('application/octet-stream')
-      &&['/v1/workspaces/:workspaceId/files/binary','/v1/workspaces/:workspaceId/checkpoints/:checkpointId/restore-reviews/:reviewId/target','/v1/conversations/:conversationId/activities/:activityId/tool-result/file/print','/v1/conversations/:conversationId/activities/:activityId/tool-result/members/:memberIndex/download'].includes(registeredRoute??''))return payload;
+      &&['/v1/workspaces/:workspaceId/files/binary','/v1/workspaces/:workspaceId/checkpoints/:checkpointId/restore-reviews/:reviewId/target','/v1/conversations/:conversationId/activities/:activityId/tool-result/file/print','/v1/conversations/:conversationId/activities/:activityId/tool-result/members/:memberIndex/download','/v1/conversations/:conversationId/activities/:activityId/tool-result/members/:memberIndex/print'].includes(registeredRoute??''))return payload;
     const operationId=typeof registeredRoute==='string'?contracts.operationFor(request.method,registeredRoute):null;
     let responseValue: unknown = null;
     if (typeof payload === 'string' && payload.length) {
@@ -1065,8 +1065,23 @@ export async function buildServer(config: {
 
   registerDiscoveryPolicyRoutes(app,{policies:new DiscoveryPolicies(db,{onChange:(owner,receipt,event)=>persistentTasks.synchronizeDiscoveryPolicy(owner,receipt.policy_id,event)}),actor,role:(owner,id)=>workbench.getAgent(owner,id),atomic:atomicCommand});
   registerDiscoveryHistoryRoutes(app,{history:new DiscoveryHistory(db),actor,role:(owner,id)=>workbench.getAgent(owner,id)});
+  const officePrintRoot=join(dirname(resolve(config.databasePath)),'.jot-office-print-'+createHash('sha256').update(resolve(config.databasePath)).digest('hex').slice(0,16));
   let documentPreviewBusy=false;
   registerNativeSearchSourceRoutes(app,{db,actor,client:config.nativeSearchSourceClient,snapshotRoot:join(dirname(resolve(config.databasePath)),'.jot-downloads'),
+    renderOffice:async(source,name,binding,signal,expected)=>{
+      if(!officePrintReferencesReady)throw Error('office_print_reference_unproven');
+      if(documentPreviewBusy)throw Error('DOCUMENT_PREVIEW_BUSY');
+      documentPreviewBusy=true;
+      try{
+        let binaryPath:string|undefined;
+        if(!expected){
+          const renderer=await officePreviewStatus.read(false,signal);
+          if(!renderer.libreOffice.available)throw Error('office_preview_binary_unavailable');
+          binaryPath=renderer.libreOffice.binaryPath;
+        }
+        return await readPinnedOfficePdf(db,source,name,officePrintRoot,binding,signal,expected,binaryPath);
+      }finally{documentPreviewBusy=false;}
+    },
     inspectOffice:async(source,name,signal)=>{
       if(documentPreviewBusy)throw Error('DOCUMENT_PREVIEW_BUSY');
       documentPreviewBusy=true;
@@ -1247,7 +1262,6 @@ export async function buildServer(config: {
       return reply.header('cache-control','private, no-store').header('x-content-type-options','nosniff').send(value);
     }finally{request.raw.off('aborted',abort);reply.raw.off('close',abort);documentPreviewBusy=false;}
   });
-  const officePrintRoot=join(dirname(resolve(config.databasePath)),'.jot-office-print-'+createHash('sha256').update(resolve(config.databasePath)).digest('hex').slice(0,16));
   app.get('/v1/conversations/:conversationId/activities/:activityId/tool-result/file/print',async(request,reply)=>{
     const {conversationId,activityId}=request.params as {conversationId:string;activityId:string},owner=actor(request as any);
     const {input,expected}=parseOfficePrintQuery(request.query as Record<string,unknown>);

@@ -11,7 +11,7 @@ pdfjs.GlobalWorkerOptions.workerSrc=workerUrl;
 const assets=new URL('pdfjs/6.1.200/',new URL(workerUrl,document.baseURI)).href;
 
 /** Reuse the existing PDF page renderer and outline/search over the same opened bytes. */
-export default function NativeSearchFilePdf({bytes}:{bytes:Uint8Array}){
+export default function NativeSearchFilePdf({bytes,expectedPageCount}:{bytes:Uint8Array;expectedPageCount?:number|undefined}){
  const root=useRef<HTMLDivElement>(null),owner=taskDraftScope();
  const [document,setDocument]=useState<pdfjs.PDFDocumentProxy>(),[error,setError]=useState('');
  const [challenge,setChallenge]=useState<{update:(password:string)=>void;invalid:boolean}>(),[password,setPassword]=useState('');
@@ -22,9 +22,11 @@ export default function NativeSearchFilePdf({bytes}:{bytes:Uint8Array}){
   let cancelled=false;
   const loading=pdfjs.getDocument({data:bytes.slice(),cMapUrl:assets+'cmaps/',cMapPacked:true,standardFontDataUrl:assets+'standard_fonts/',wasmUrl:assets+'wasm/'});
   loading.onPassword=(update,reason)=>{if(!cancelled&&taskDraftScope()===owner){setPassword('');setChallenge({update,invalid:reason===pdfjs.PasswordResponses.INCORRECT_PASSWORD});}};
-  void loading.promise.then(value=>{if(!cancelled&&taskDraftScope()===owner){setChallenge(undefined);setDocument(value);}},error=>{if(!cancelled&&taskDraftScope()===owner)setError(error instanceof Error?error.message:'PDF读取失败');});
+  void loading.promise.then(value=>{if(!cancelled&&taskDraftScope()===owner){
+   if(expectedPageCount!==undefined&&value.numPages!==expectedPageCount){setError('转换PDF页数与来源结果不一致。');void loading.destroy().catch(()=>{});return;}
+   setChallenge(undefined);setDocument(value);}},error=>{if(!cancelled&&taskDraftScope()===owner)setError(error instanceof Error?error.message:'PDF读取失败');});
   return()=>{cancelled=true;void loading.destroy().catch(()=>{});};
- },[bytes,owner]);
+ },[bytes,owner,expectedPageCount]);
  useEffect(()=>{
   const element=root.current!;
   const update=()=>setWidth(element.clientWidth||800);

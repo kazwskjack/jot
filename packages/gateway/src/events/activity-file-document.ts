@@ -97,6 +97,45 @@ export function parseOfficePrintQuery(query:Record<string,unknown>){
  return {input,expected};
 }
 
+async function exportOfficeInput({format,path,directory,engine}:Omit<OfficeSource,'file'>,signal:AbortSignal){
+  const output=join(directory,'preview.pdf');
+  const result=await engine.run({operation:'office.export_pdf',input_path:path,output_path:output,
+   media_type:format.mediaType,job_dir:directory,request:{save_as:{format:'pdf'},jot_preview_pdf:1}},
+   {signal,maxOutputBytes:65536});
+  signal.throwIfAborted();
+  const checks=result.checks;
+  if(result.output_path!==output||result.engine?.name!=='libreoffice_uno'||typeof result.engine.version!=='string'||result.engine.version.length>200
+   ||checks?.engine_saved!=='PASS'||checks.saved_and_reopened!=='PASS'||checks.macro_execution!=='DISABLED'||checks.external_links!=='DISABLED'
+   ||!Number.isSafeInteger(checks.page_count)||Number(checks.page_count)<1||Number(checks.page_count)>50000)throw Error('DOCUMENT_PREVIEW_RESULT_INVALID');
+  const handle=await open(output,constants.O_RDONLY|(constants.O_NOFOLLOW??0));
+  try{
+   const before=await handle.stat();
+   if(!before.isFile()||before.nlink!==1||before.size<100||before.size>20*1024*1024)throw Error('DOCUMENT_PREVIEW_TOO_LARGE');
+   const bytes=await handle.readFile();signal.throwIfAborted();const after=await handle.stat();
+   if(bytes.length!==before.size||after.size!==before.size||after.mtimeMs!==before.mtimeMs||bytes.subarray(0,5).toString('ascii')!=='%PDF-')throw Error('DOCUMENT_PREVIEW_RESULT_INVALID');
+   const retained={pdf:{bytes,sha256:createHash('sha256').update(bytes).digest('hex'),size:bytes.length,page_count:Number(checks.page_count)},
+    engine:{name:result.engine.name,version:result.engine.version}};
+   return retained;
+  }finally{await handle.close();}
+}
+
+export async function readPinnedOfficePdf(db:DatabaseSync,source:PinnedByteSource,name:string,root:string,binding:string,signal:AbortSignal,
+ expected?:{sha256:string;size:number;pageCount:number},binaryPath?:string){
+ if(!officePreviewFormat(name))throw Error('UNSUPPORTED_FORMAT_OPERATION');
+ if(source.sizeBytes>OFFICE_PRINT_SOURCE_MAX_BYTES)throw Error('DOCUMENT_PREVIEW_TOO_LARGE');
+ if(expected){
+  const checksum=createHash('sha256');let received=0;
+  for await(const bytes of source.stream(signal)){signal.throwIfAborted();received+=bytes.length;checksum.update(bytes);}
+  if(received!==source.sizeBytes||checksum.digest('hex')!==source.sha256)throw Error('activity_tool_result_source_invalid');
+  return readRetainedOfficePdf(root,binding,expected,signal);
+ }
+ return withPinnedOfficeInput(source,name,root,signal,async input=>{
+  const retained=await exportOfficeInput(input,signal);
+  await retainOfficePdf(db,root,input.directory,binding,retained,signal);
+  return retained;
+ },binaryPath);
+}
+
 export async function readActivityFileOfficePdf(db:DatabaseSync,reader:Pick<WorkbenchService,'readBinaryFile'>,
  owner:string,conversationId:string,activityId:string,input:ReturnType<typeof parseActivityFileDownloadQuery>,root:string,signal:AbortSignal,expected?:{sha256:string;size:number;pageCount:number},binaryPath?:string){
  const binding=createHash('sha256').update(JSON.stringify(['jot-office-print-store/v1',owner,conversationId,input.runId,activityId,input.resultSha,input.path,input.version,input.fileSha,input.size])).digest('hex');
@@ -115,26 +154,9 @@ export async function readActivityFileOfficePdf(db:DatabaseSync,reader:Pick<Work
   const retained=await readRetainedOfficePdf(root,binding,expected,signal);
   return {...file,...retained,execution_authorized:false as const};
  }
- return withPinnedOfficeSource(db,reader,owner,conversationId,activityId,input,root,signal,async({file,format,path,directory,engine})=>{
-  const output=join(directory,'preview.pdf');
-  const result=await engine.run({operation:'office.export_pdf',input_path:path,output_path:output,
-   media_type:format.mediaType,job_dir:directory,request:{save_as:{format:'pdf'},jot_preview_pdf:1}},
-   {signal,maxOutputBytes:65536});
-  signal.throwIfAborted();
-  const checks=result.checks;
-  if(result.output_path!==output||result.engine?.name!=='libreoffice_uno'||typeof result.engine.version!=='string'||result.engine.version.length>200
-   ||checks?.engine_saved!=='PASS'||checks.saved_and_reopened!=='PASS'||checks.macro_execution!=='DISABLED'||checks.external_links!=='DISABLED'
-   ||!Number.isSafeInteger(checks.page_count)||Number(checks.page_count)<1||Number(checks.page_count)>50000)throw Error('DOCUMENT_PREVIEW_RESULT_INVALID');
-  const handle=await open(output,constants.O_RDONLY|(constants.O_NOFOLLOW??0));
-  try{
-   const before=await handle.stat();
-   if(!before.isFile()||before.nlink!==1||before.size<100||before.size>20*1024*1024)throw Error('DOCUMENT_PREVIEW_TOO_LARGE');
-   const bytes=await handle.readFile();signal.throwIfAborted();const after=await handle.stat();
-   if(bytes.length!==before.size||after.size!==before.size||after.mtimeMs!==before.mtimeMs||bytes.subarray(0,5).toString('ascii')!=='%PDF-')throw Error('DOCUMENT_PREVIEW_RESULT_INVALID');
-   const retained={pdf:{bytes,sha256:createHash('sha256').update(bytes).digest('hex'),size:bytes.length,page_count:Number(checks.page_count)},
-    engine:{name:result.engine.name,version:result.engine.version}};
-   await retainOfficePdf(db,root,directory,binding,retained,signal);
-   return {...file,...retained,execution_authorized:false as const};
-  }finally{await handle.close();}
+ return withPinnedOfficeSource(db,reader,owner,conversationId,activityId,input,root,signal,async({file,...staged})=>{
+  const retained=await exportOfficeInput(staged,signal);
+  await retainOfficePdf(db,root,staged.directory,binding,retained,signal);
+  return {...file,...retained,execution_authorized:false as const};
  },binaryPath);
 }

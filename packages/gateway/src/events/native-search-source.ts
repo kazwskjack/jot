@@ -181,15 +181,16 @@ export async function searchNativeActivitySources(db:DatabaseSync,owner:string,b
   return {...base,items,unsearched_results:unsearched};
 }
 
-export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,client,snapshotRoot,inspectOffice}:{
+export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,client,snapshotRoot,inspectOffice,renderOffice}:{
   db:DatabaseSync;actor(request:{headers:Record<string,unknown>}):string;client?:NativeSearchSourceClient|undefined;snapshotRoot?:string;
+  renderOffice?:(source:PinnedByteSource,name:string,binding:string,signal:AbortSignal,expected?:{sha256:string;size:number;pageCount:number})=>Promise<{pdf:{bytes:Buffer;sha256:string;size:number;page_count:number};engine:{name:string;version:string}}>;
   inspectOffice?:(source:PinnedByteSource,name:string,signal:AbortSignal)=>Promise<{media_type:string;document:OfficeDocumentPreview;engine:{name:string;version:string}}>;
 
 }) {
   const downloads = new Set<{bytes:number}>(), downloadBudget = 512*1024*1024;
-  const nativeFileRoute=(operation:'download'|'document')=>async(request:FastifyRequest,reply:FastifyReply)=>{
+  const nativeFileRoute=(operation:'download'|'document'|'print')=>async(request:FastifyRequest,reply:FastifyReply)=>{
     reply.header('cache-control','private, no-store');
-    const abort = new AbortController(), signal = AbortSignal.any([abort.signal,AbortSignal.timeout(120000)]);
+    const abort = new AbortController(), signal = AbortSignal.any([abort.signal,AbortSignal.timeout(operation==='print'?180000:120000)]);
     let stream:Readable|undefined, store:ReturnType<typeof createPinnedByteStore>|undefined;
     const reservation = {bytes:0};
     const cancelled = () => stream?.destroy();
@@ -211,12 +212,21 @@ export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,c
       const query = request.query as Input, runId = query.run_id, asOfSeq = query.as_of_seq;
       if (!ID.test(conversationId) || !ID.test(activityId) || typeof runId !== 'string' || !ID.test(runId)
         || !/^(0|[1-9]\d{0,7})$/.test(memberIndex) || Number(memberIndex) > MAX_CHARS
-        || Object.keys(query).some(key=>!['run_id','result_sha256','members_sha256','as_of_seq','max_bytes','open_sha256'].includes(key))
+        || Object.keys(query).some(key=>!['run_id','result_sha256','members_sha256','as_of_seq','max_bytes','open_sha256',...(operation==='print'?['preview_sha256','preview_size_bytes','preview_page_count']:[])].includes(key))
         || asOfSeq !== undefined && (typeof asOfSeq !== 'string' || !/^(0|[1-9]\d{0,18})$/.test(asOfSeq) || BigInt(asOfSeq)>9223372036854775807n)
         || ['result_sha256','members_sha256'].some(key=>typeof query[key] !== 'string' || !SHA.test(query[key] as string)))
         throw Error('invalid_activity_tool_result_query');
       if(query.open_sha256!==undefined&&(typeof query.open_sha256!=='string'||!SHA.test(query.open_sha256)))throw Error('invalid_activity_tool_result_query');
-      const operationLimit=operation==='document'?OFFICE_SOURCE_MAX_BYTES:downloadBudget;
+      let expectedPdf:{sha256:string;size:number;pageCount:number}|undefined;
+      if(operation==='print'&&['preview_sha256','preview_size_bytes','preview_page_count'].some(key=>query[key]!==undefined)){
+        const size=Number(query.preview_size_bytes),pageCount=Number(query.preview_page_count);
+        if(typeof query.preview_sha256!=='string'||!SHA.test(query.preview_sha256)||query.open_sha256===undefined
+          ||typeof query.preview_size_bytes!=='string'||String(size)!==query.preview_size_bytes||!Number.isSafeInteger(size)||size<100||size>20*1024*1024
+          ||typeof query.preview_page_count!=='string'||String(pageCount)!==query.preview_page_count||!Number.isSafeInteger(pageCount)||pageCount<1||pageCount>50000)
+          throw Error('invalid_activity_tool_result_query');
+        expectedPdf={sha256:query.preview_sha256,size,pageCount};
+      }
+      const operationLimit=operation==='download'?downloadBudget:OFFICE_SOURCE_MAX_BYTES;
       const requestedLimit = query.max_bytes === undefined ? operationLimit : Number(query.max_bytes);
       if (query.max_bytes !== undefined && (typeof query.max_bytes !== 'string' || !/^[1-9]\d{0,8}$/.test(query.max_bytes)
         || !Number.isSafeInteger(requestedLimit) || requestedLimit > operationLimit)) throw Error('invalid_activity_tool_result_query');
@@ -231,6 +241,8 @@ export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,c
       if (memberResultHash(original,membership) !== query.result_sha256 || membership.items[0]?.index !== Number(memberIndex))
         throw Error('activity_tool_result_source_changed');
       if(operation==='document'&&!inspectOffice)throw Error('activity_tool_result_source_invalid');
+      if(operation==='print'&&!renderOffice)throw Error('activity_tool_result_source_invalid');
+      if(operation==='print'&&!officePreviewFormat(membership.items[0]!.path))throw Error('UNSUPPORTED_FORMAT_OPERATION');
       if(operation==='document'&&!officePreviewFormat(membership.items[0]!.path)?.native)throw Error('UNSUPPORTED_FORMAT_OPERATION');
       const input:NativeSearchMemberRangeRequest = {member:{call_seq:original.callSeq,tool_name:original.tool,index:Number(memberIndex),
         members_sha256:membership.members_sha256,call_sha256:membership.call_sha256,result_sha256:membership.result_sha256},
@@ -267,17 +279,36 @@ export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,c
         profile:first.profile_id,session:first.session_sha256,path:first.absolute_path,version:first.version,
         reportedSize:first.file_size_bytes,size:writer.source.sizeBytes,content:writer.source.sha256});
       if(query.open_sha256!==undefined&&query.open_sha256!==openedSha)throw Error('activity_tool_result_source_changed');
-      if(operation==='document'){
-        const value=await inspectOffice!(writer.source,membership.items[0]!.path,signal);
+      const verifyPreviewAuthority=async()=>{
         signal.throwIfAborted();
         const final=await readMembers(client,owner,original,memberInput,signal);
         if(hash(final)!==hash(membership)||source(db,owner,conversationId,runId,activityId,asOfSeq as string|undefined).identity!==original.identity)
           throw Error('activity_tool_result_source_changed');
+      };
+      if(operation==='document'){
+        const value=await inspectOffice!(writer.source,membership.items[0]!.path,signal);
+        await verifyPreviewAuthority();
         const result:NativeMemberOfficeDocumentPage={document_protocol:1,conversation_id:conversationId,run_id:runId,activity_id:activityId,
           member_index:Number(memberIndex),path:membership.items[0]!.path,result_sha256:query.result_sha256 as string,
           members_sha256:membership.members_sha256,open_sha256:openedSha,sha256:writer.source.sha256,size_bytes:writer.source.sizeBytes,
           ...(asOfSeq!==undefined?{as_of_seq:asOfSeq as string}:{}),media_type:value.media_type,document:value.document,engine:value.engine,execution_authorized:false};
         return reply.header('x-content-type-options','nosniff').send(result);
+      }
+      if(operation==='print'){
+        const binding=hash({protocol:'jot-native-office-print/v1',owner,activity:original.identity,opened:openedSha});
+        const value=await renderOffice!(writer.source,membership.items[0]!.path,binding,signal,expectedPdf);
+        await verifyPreviewAuthority();
+        stream=Readable.from([value.pdf.bytes]);
+        stream.once('close',()=>{void cleanup().catch(error=>app.log.error({err:error},'Native Office PDF cleanup failed'));});
+        return reply.type('application/octet-stream').header('content-length',String(value.pdf.size))
+          .header('content-disposition','attachment; filename="office-preview.pdf"').header('x-content-type-options','nosniff')
+          .header('x-activity-file-sha256',writer.source.sha256).header('x-activity-file-size',String(writer.source.sizeBytes))
+          .header('x-activity-tool-result-sha256',query.result_sha256).header('x-activity-search-members-sha256',membership.members_sha256)
+          .header('x-activity-native-open-sha256',openedSha).header('x-activity-native-member-index',memberIndex)
+          .header('x-activity-native-member-path-sha256',createHash('sha256').update(membership.items[0]!.path).digest('hex'))
+          .header('x-jot-preview-protocol','1').header('x-jot-preview-renderer','libreoffice').header('x-jot-preview-media-type','application/pdf')
+          .header('x-jot-preview-sha256',value.pdf.sha256).header('x-jot-preview-size',String(value.pdf.size))
+          .header('x-jot-preview-pages',String(value.pdf.page_count)).header('x-jot-execution-authorized','false').send(stream);
       }
       const name = Buffer.from((membership.items[0]!.path.split(/[\\/]/).at(-1) || 'file').slice(0,200)).toString('utf8');
       async function* content(){try{yield* writer.source.stream(signal);}finally{await cleanup();}}
@@ -306,6 +337,7 @@ export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,c
   };
   app.get('/v1/conversations/:conversationId/activities/:activityId/tool-result/members/:memberIndex/download',nativeFileRoute('download'));
   app.get('/v1/conversations/:conversationId/activities/:activityId/tool-result/members/:memberIndex/document',nativeFileRoute('document'));
+  app.get('/v1/conversations/:conversationId/activities/:activityId/tool-result/members/:memberIndex/print',nativeFileRoute('print'));
   app.get('/v1/conversations/:conversationId/activities/:activityId/tool-result/members',async(request,reply)=>{
     reply.header('cache-control','private, no-store');
     const abort = new AbortController(), disconnected = () => abort.abort();

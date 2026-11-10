@@ -6,6 +6,7 @@ import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 import {artifactPreviewErrorMessage} from './artifact-preview-bytes.mjs';
 import {readNativeMemberPreviewBytes,type NativeMemberPreviewSource,type NativeMemberOpenedBytes} from './activity-file-preview-client';
 
+const NativeSearchOfficePrint=lazy(()=>import('./NativeSearchOfficePrint'));
 const NativeSearchOfficeDocument=lazy(()=>import('./NativeSearchOfficeDocument'));
 const NativeSearchFileOffice=lazy(()=>import('./NativeSearchFileOffice'));
 const NativeSearchFilePdf=lazy(()=>import('./NativeSearchFilePdf'));
@@ -15,7 +16,12 @@ export default function NativeSearchFile({source}:{source:NativeMemberPreviewSou
  const owner=taskDraftScope(),identity=JSON.stringify([owner,source]);
  const root=useRef<HTMLElement>(null),active=useRef<AbortController|null>(null);
  const [state,setState]=useState<{identity:string;opened?:Opened;error?:string}>(),[revision,setRevision]=useState(0);
- const [structured,setStructured]=useState(false);
+ const openPin=useRef<{identity:string;sha:string}>();
+ const [printMode,setPrintMode]=useState(false),[structured,setStructured]=useState(false);
+ const captureOpen=(sha:string)=>{
+  if(taskDraftScope()!==owner||openPin.current?.identity===identity&&openPin.current.sha!==sha)return false;
+  openPin.current={identity,sha};return true;
+ };
  const [raw,setRaw]=useState(false),[byteOffset,setByteOffset]=useState(0);
  const [cursor,setCursor]=useState<{sha:string;offset:number;previous:number[]}>();
  const imageType=listedFileImageType(source.member.path),pdf=source.member.path.toLowerCase().endsWith('.pdf'),office=officePreviewFormat(source.member.path);
@@ -27,7 +33,7 @@ export default function NativeSearchFile({source}:{source:NativeMemberPreviewSou
   const load=async()=>{
    const value=await readNativeMemberPreviewBytes(source,owner,controller.signal);
    controller.signal.throwIfAborted();
-   if(taskDraftScope()!==owner)throw Error('文件所属账户已变化');
+   if(!captureOpen(value.openSha))throw Error('原打开来源已变化，请重新打开文件');
    const downloadUrl=URL.createObjectURL(new Blob([value.bytes.slice()],{type:'application/octet-stream'}));
    urls.push(downloadUrl);
    let imageUrl:string|undefined,text:string|undefined;
@@ -46,6 +52,7 @@ export default function NativeSearchFile({source}:{source:NativeMemberPreviewSou
  },[identity,revision]);
  const current=state?.identity===identity?state:undefined,opened=current?.opened;
  const currentCursor=opened&&cursor?.sha===opened.openSha?cursor:undefined,offset=currentCursor?.offset??0;
+ const sourceOpenSha=opened?.openSha??(openPin.current?.identity===identity?openPin.current.sha:undefined);
  const text=opened?.text;
  let end=Math.min(offset+16384,text?.length??0);
  if(text&&end<text.length&&/[\uD800-\uDBFF]/.test(text[end-1]!)&&/[\uDC00-\uDFFF]/.test(text[end]!))end--;
@@ -54,17 +61,19 @@ export default function NativeSearchFile({source}:{source:NativeMemberPreviewSou
  const showBytes=raw||opened&&!opened.imageUrl&&!pdf&&!office?.native&&text===undefined;
  return <section ref={root} tabIndex={-1} className="jot-activity-content" aria-label="原生成员打开内容预览">
   <h4>{source.member.path}</h4>
-  {office?.native&&<button type="button" onClick={()=>setStructured(!structured)}>{structured?'关闭结构化内容':'查看Office结构化内容'}</button>}
-  {structured&&office?.native&&<ConversationDisplayBoundary label="原生Office结构化预览"><Suspense fallback={<p role="status">正在载入Office结构化查看器…</p>}><NativeSearchOfficeDocument source={source} expectedOpenSha={opened?.openSha}/></Suspense></ConversationDisplayBoundary>}
-  {(!current||!opened&&!current.error)&&<p role="status">正在读取并核对完整打开内容… <button type="button" onClick={()=>{active.current?.abort();setState({identity,error:'本次读取已取消。'});}}>取消读取</button></p>}
+  {office?.native&&<button type="button" onClick={()=>{setPrintMode(false);setStructured(!structured);}}>{structured?'关闭结构化内容':'查看Office结构化内容'}</button>}
+  {office&&<button type="button" onClick={()=>{setStructured(false);setPrintMode(!printMode);}}>{printMode?'关闭转换PDF':'查看Office转换PDF'}</button>}
+  {printMode&&office&&<ConversationDisplayBoundary label="原生Office转换预览"><Suspense fallback={<p role="status">正在载入转换PDF查看器…</p>}><NativeSearchOfficePrint source={source} expectedOpenSha={sourceOpenSha} onOpened={captureOpen}/></Suspense></ConversationDisplayBoundary>}
+  {structured&&office?.native&&<ConversationDisplayBoundary label="原生Office结构化预览"><Suspense fallback={<p role="status">正在载入Office结构化查看器…</p>}><NativeSearchOfficeDocument source={source} expectedOpenSha={sourceOpenSha} onOpened={captureOpen}/></Suspense></ConversationDisplayBoundary>}
+  {!structured&&!printMode&&(!current||!opened&&!current.error)&&<p role="status">正在读取并核对完整打开内容… <button type="button" onClick={()=>{active.current?.abort();setState({identity,error:'本次读取已取消。'});}}>取消读取</button></p>}
   {opened&&<>
    <p>打开时内容 · {opened.size} 字节 · SHA-256 <code>{opened.sha256}</code></p>
    <nav aria-label="打开内容查看方式" data-chat-search-ignore>
-    <button type="button" disabled={!raw&&!structured} onClick={()=>{setStructured(false);setRaw(false);}}>查看内容</button>
-    <button type="button" disabled={raw&&!structured} onClick={()=>{setStructured(false);setRaw(true);}}>查看原始字节</button>
+    <button type="button" disabled={!raw&&!structured&&!printMode} onClick={()=>{setPrintMode(false);setStructured(false);setRaw(false);}}>查看内容</button>
+    <button type="button" disabled={raw&&!structured&&!printMode} onClick={()=>{setPrintMode(false);setStructured(false);setRaw(true);}}>查看原始字节</button>
     <a href={opened.downloadUrl} download={source.member.path.split(/[\\/]/).at(-1)||'file'} onClick={event=>{if(taskDraftScope()!==owner)event.preventDefault();}}>下载本次已打开内容</a>
    </nav>
-   {!structured&&(showBytes?<>
+   {!structured&&!printMode&&(showBytes?<>
     <pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}} aria-label="打开文件十六进制字节">{hex||'空文件'}</pre>
     <nav aria-label="打开文件字节翻页" data-chat-search-ignore>
      <button type="button" disabled={byteOffset===0} onClick={()=>setByteOffset(Math.max(0,byteOffset-256))}>上一页字节</button>
@@ -83,6 +92,6 @@ export default function NativeSearchFile({source}:{source:NativeMemberPreviewSou
      </nav>
     </>:null)}
   </>}
-  {current?.error&&<p role="alert">{current.error} <button type="button" onClick={()=>setRevision(value=>value+1)}>重新读取打开内容</button></p>}
+  {!structured&&!printMode&&current?.error&&<p role="alert">{current.error} <button type="button" onClick={()=>setRevision(value=>value+1)}>重新读取打开内容</button></p>}
  </section>;
 }
