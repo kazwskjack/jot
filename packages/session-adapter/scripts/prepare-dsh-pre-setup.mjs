@@ -16,6 +16,7 @@ import {createHash} from 'node:crypto';
 import {patchDshPreSetupSource} from '../dsh-pre-setup-patch.js';
 import {patchDshPendingInputSource} from '../dsh-pending-input-patch.js';
 import {patchDshStorageAdmissionSource} from '../dsh-storage-admission-patch.js';
+import {patchDshNativeSearchSource} from '../dsh-native-search-source-patch.js';
 
 const packageName = '@deepseek-ai/dsh-agent-loop';
 const auditedManifests = Object.freeze({
@@ -123,7 +124,7 @@ function readLibFiles(packageRoot) {
   return files;
 }
 
-function collectPackageFiles(packageRoot, pendingInputWake, nativeAdmission) {
+function collectPackageFiles(packageRoot, pendingInputWake, nativeAdmission, nativeSearchSource = false) {
   const manifestBytes = readRegularFile(join(packageRoot, 'package.json'), 'dsh_pre_setup_package_manifest');
   let manifest;
   try {
@@ -132,8 +133,8 @@ function collectPackageFiles(packageRoot, pendingInputWake, nativeAdmission) {
     fail('dsh_pre_setup_package_manifest');
   }
   if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) fail('dsh_pre_setup_package_manifest');
-  if (manifest.name !== packageName) fail('dsh_pre_setup_package_name');
-  if (!Object.hasOwn(auditedManifests, manifest.version)) fail('dsh_pre_setup_package_version');
+  if (manifest.name !== (nativeSearchSource ? '@deepseek-ai/dsh-tool-fs-search' : packageName)) fail('dsh_pre_setup_package_name');
+  if (!Object.hasOwn(auditedManifests, manifest.version) || nativeSearchSource && manifest.version !== '0.2.1-rc.2') fail('dsh_pre_setup_package_version');
 
   const files = readLibFiles(packageRoot);
   const runtimePath = join('lib', 'index.js');
@@ -144,7 +145,7 @@ function collectPackageFiles(packageRoot, pendingInputWake, nativeAdmission) {
 
   let patch;
   try {
-    patch = (nativeAdmission?patchDshStorageAdmissionSource:pendingInputWake?patchDshPendingInputSource:patchDshPreSetupSource)({version: manifest.version, runtimeSource, declarationSource,pendingInputWake});
+    patch = (nativeSearchSource?patchDshNativeSearchSource:nativeAdmission?patchDshStorageAdmissionSource:pendingInputWake?patchDshPendingInputSource:patchDshPreSetupSource)({version: manifest.version, runtimeSource, declarationSource,pendingInputWake});
   } catch (error) {
     if (error instanceof Error && /^dsh_pre_setup_[a-z0-9_]+$/.test(error.message)) throw error;
     fail('dsh_pre_setup_patch_failed');
@@ -154,7 +155,7 @@ function collectPackageFiles(packageRoot, pendingInputWake, nativeAdmission) {
 
   files.set('package.json', Buffer.from(`${JSON.stringify({
     ...manifest,
-    jotCompatibilityPatch: {protocol: 2, upstreamVersion: manifest.version,...(pendingInputWake?{pendingInputProtocol:1,pendingWakeRevocationProtocol:1,pendingInputBindingsProtocol:1}:{}),...(nativeAdmission?{nativeAdmissionProtocol:1}:{})},
+    jotCompatibilityPatch: {protocol: nativeSearchSource ? 1 : 2, upstreamVersion: manifest.version,...(nativeSearchSource?{nativeSearchSourceProtocol:1}:{}),...(pendingInputWake?{pendingInputProtocol:1,pendingWakeRevocationProtocol:1,pendingInputBindingsProtocol:1}:{}),...(nativeAdmission?{nativeAdmissionProtocol:1}:{})},
   }, null, 2)}\n`, 'utf8'));
   files.set('LICENSE', readRegularFile(join(packageRoot, 'LICENSE'), 'dsh_pre_setup_package_license'));
 
@@ -169,6 +170,15 @@ function collectPackageFiles(packageRoot, pendingInputWake, nativeAdmission) {
     if (entry.isSymbolicLink()) fail('dsh_pre_setup_package_symlink');
     if (entry.isFile()) files.set(entry.name, readRegularFile(join(packageRoot, entry.name), 'dsh_pre_setup_package_readme'));
   }
+  if (nativeSearchSource) {
+    const localeRoot = join(packageRoot, 'locale');
+    const info = lstatSync(localeRoot);
+    if (!info.isDirectory() || info.isSymbolicLink()) fail('dsh_pre_setup_package_locale');
+    for (const entry of readdirSync(localeRoot, {withFileTypes: true})) {
+      if (!entry.isFile() || entry.isSymbolicLink() || !entry.name.endsWith('.json')) fail('dsh_pre_setup_package_locale');
+      files.set(join('locale', entry.name), readRegularFile(join(localeRoot, entry.name), 'dsh_pre_setup_package_locale'));
+    }
+  }
   // Verify every byte copied from the reviewed installed package, including
   // secondary entry points, declarations, source maps, manifest and license.
   const upstream = new Map(files);
@@ -177,7 +187,7 @@ function collectPackageFiles(packageRoot, pendingInputWake, nativeAdmission) {
   upstream.set('package.json', manifestBytes);
   const actual = Object.fromEntries([...upstream].map(([path, bytes]) =>
     [path.replaceAll('\\', '/'), createHash('sha256').update(bytes).digest('hex')]).sort(([a],[b]) => a.localeCompare(b)));
-  const expected = JSON.parse(readFileSync(new URL(auditedManifests[manifest.version], import.meta.url), 'utf8'));
+  const expected = JSON.parse(readFileSync(new URL(nativeSearchSource ? '../runtime-patches/dsh-tool-fs-search-0.2.1-rc.2-sha256.json' : auditedManifests[manifest.version], import.meta.url), 'utf8'));
   if (JSON.stringify(Object.keys(actual).sort()) !== JSON.stringify(Object.keys(expected).sort())
     || Object.entries(actual).some(([path, hash]) => expected[path] !== hash)) fail('dsh_pre_setup_package_integrity');
   return files;
@@ -231,16 +241,26 @@ export function prepareDshPreSetupRuntime(sourcePackage, outputPackage, options=
   return Object.freeze({protocol: 2, upstreamVersion: JSON.parse(files.get('package.json').toString('utf8')).version,...(options.pendingInputWake?{pendingInputProtocol:1,pendingWakeRevocationProtocol:1,pendingInputBindingsProtocol:1}:{}),...(options.nativeAdmission?{nativeAdmissionProtocol:1}:{})});
 }
 
+/** Prepare a new isolated native fs-search package with producer source capture. */
+export function prepareDshNativeSearchRuntime(sourcePackage, outputPackage) {
+  const source = canonicalSourcePath(sourcePackage);
+  const output = canonicalNewOutputPath(outputPackage);
+  if (pathsOverlap(source, output)) fail('dsh_pre_setup_path_overlap');
+  const files = collectPackageFiles(source, false, false, true);
+  writePreparedPackage(files, output);
+  return Object.freeze({protocol: 1, upstreamVersion: '0.2.1-rc.2', nativeSearchSourceProtocol: 1});
+}
+
 function cli() {
   const args = process.argv.slice(2);
-  if (args.length < 2 || args.length > 4 || args.slice(2).some(flag=>!['--pending-input-wake','--native-admission'].includes(flag))||new Set(args.slice(2)).size!==args.length-2) {
-    process.stderr.write('Usage: node prepare-dsh-pre-setup.mjs <source-package> <output-package> [--pending-input-wake] [--native-admission]\n');
+  if (args.length < 2 || args.length > 4 || args.slice(2).some(flag=>!['--pending-input-wake','--native-admission','--native-search-source'].includes(flag))||new Set(args.slice(2)).size!==args.length-2||args.includes('--native-search-source')&&args.length!==3) {
+    process.stderr.write('Usage: node prepare-dsh-pre-setup.mjs <source-package> <output-package> [--pending-input-wake] [--native-admission | --native-search-source]\n');
     process.exitCode = 2;
     return;
   }
   try {
-    const result=prepareDshPreSetupRuntime(args[0], args[1],{pendingInputWake:args.includes('--pending-input-wake'),nativeAdmission:args.includes('--native-admission')});
-    process.stdout.write(`Prepared DSH rc.2 compatibility package (protocol 2${result.pendingInputProtocol?', pending-input 1':''}).\n`);
+    const result=args.includes('--native-search-source')?prepareDshNativeSearchRuntime(args[0],args[1]):prepareDshPreSetupRuntime(args[0], args[1],{pendingInputWake:args.includes('--pending-input-wake'),nativeAdmission:args.includes('--native-admission')});
+    process.stdout.write(`Prepared DSH rc.2 compatibility package (protocol ${result.protocol}${result.nativeSearchSourceProtocol?', native search source 1':''}${result.pendingInputProtocol?', pending-input 1':''}).\n`);
   } catch (error) {
     const code = error instanceof Error && /^dsh_pre_setup_[a-z0-9_]+$/.test(error.message)
       ? error.message

@@ -1,0 +1,16 @@
+{
+  "LICENSE": "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be",
+  "README.i18n.yaml": "cbba512306e9db4b7b87b8faef5ae720239d52475e376deebcc6fd2f9a9e6bd1",
+  "README.md": "351e07183d7eb6db1f3c0c1c354fa1c68b22a936fa86e86405fa06858b822394",
+  "README.zh.md": "5b991c7de4f1eec0c2cd5d0bfed20f1494b0ababc41fbdd6c70b3647d4a16349",
+  "lib/index.js": "8d64d2e8a5310b442ae66bc0daf7d6957ec095dbe43cabd9eb208f7370e381ed",
+  "lib/types/direct-call.d.ts": "6c4b34ea647d3babcba07c9b72bcdfac0ec3aea24568aae2e1c274bec5b2ac14",
+  "lib/types/glob.d.ts": "b1b15053e7aaac3ed281a5f53e4d9e23b1b08eea67413055c413e1abd63d590b",
+  "lib/types/grep.d.ts": "bf5c8c1c8bc0f10e459aa8c6fbddbc48df3a787c2322d387fc1fa8b12d745fc4",
+  "lib/types/index.d.ts": "b59b1a56faaac67c7caa0bceb1ddb9e64c065a526cafb1e7a37ef1a770a99ce6",
+  "lib/types/presentation.d.ts": "9e8cc5270294a10b7dd174d039e530914d485f44aafb43d76c8f411d2e8dbd1e",
+  "lib/types/search-core.d.ts": "95a35cb2552d8cdc63878821f5b60dc4425c491444ae58c331d1783caa1ba0cd",
+  "locale/en.json": "8c8a8598b7662b937c76c5174d91bb9bdbe59440777c3ccfc4f5b335e8979373",
+  "locale/zh.json": "af281381e21e53254daf7d9f6acbf772dca65bacfa2281a35ed0bdc8e1702d41",
+  "package.json": "5f555ec2493257043250ddc5c55eff2ad9c06de77fc6901af42cc0835b84e137"
+}

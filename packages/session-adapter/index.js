@@ -1,4 +1,5 @@
 import {createTerminalControl} from './terminal-control.js'
+import {createNativeSearchSource} from './native-search-source.js'
 import {sessionHeaderIdentity} from './session-header-identity.js'
 import {projectTerminalInventory} from '../gateway/src/terminal/inventory.js'
 import {validateHostCredentialRefs} from './host-credentials-owner-route.js'
@@ -278,7 +279,7 @@ async function createOrResumeSession({controller,request,agents,sessions,session
   return value
 }
 
-export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,skillContentCommand,skillCatalogCommand,skillResourceCommand,nativeCommandQueryHost,nativePlanModeHost,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation=false,sessionNotFoundError,modelCatalogReader,trustedModelMetadataReader,trustedModelMetadataEnabled=false,requireOrdinaryModelPolicy=false,chatExecutionPolicy,chatModeReadiness,mcpControlRoute,pluginProfileControl,hostPolicyBootstrap,hostSettingsProductHandler,hostAdmissionGuard,taskmasterInstallationReader,taskmasterRuntimeVersionReader,terminalInventoryReader,terminalControl }) {
+export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,skillContentCommand,skillCatalogCommand,skillResourceCommand,nativeCommandQueryHost,nativePlanModeHost,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation=false,sessionNotFoundError,modelCatalogReader,trustedModelMetadataReader,trustedModelMetadataEnabled=false,requireOrdinaryModelPolicy=false,chatExecutionPolicy,chatModeReadiness,mcpControlRoute,pluginProfileControl,hostPolicyBootstrap,hostSettingsProductHandler,hostAdmissionGuard,taskmasterInstallationReader,taskmasterRuntimeVersionReader,terminalInventoryReader,terminalControl,nativeSearchSource }) {
   const allowedPresets=new Set(ALLOWED_AGENT_PRESETS)
   if(chatExecutionPolicy!==undefined){normalizeChatExecutionPolicy(chatExecutionPolicy);if(!requireOrdinaryModelPolicy||!ordinaryInputAdmissionHost)throw Error('ordinary_execution_policy_config_invalid');allowedPresets.add('jot-chat')}
   const voiceHandler = voiceEnabled ? createVoiceAdapterHandler({ speechController, token }) : null
@@ -642,6 +643,22 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       try{return json(200,await memoryExtractionHost.run(agent,{signal}));}
       catch{return json(409,{error:'memory_extraction_not_completed'});}
     }
+    const nativeSearch=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/native-search-source$/);
+    if(nativeSearch){
+      if(method!=='POST')return json(405,{error:'method_not_allowed'});
+      const sessionId=decodeURIComponent(nativeSearch[1]);
+      if(!ID.test(sessionId)||url.search||!body||typeof body!=='object'||Array.isArray(body)
+        ||Object.keys(body).sort().join(',')!=='owner_id,source'||typeof body.owner_id!=='string'||!ID.test(body.owner_id))
+        return json(422,{error:'native_search_source_invalid'});
+      if(!nativeSearchSource)return json(503,{error:'native_search_source_unavailable'});
+      try{return json(200,await nativeSearchSource.read(body.owner_id,sessionId,body.source,signal));}
+      catch(error){
+        const code=error?.message;
+        return json(code==='native_search_source_capacity'?429:code==='native_search_source_forbidden'?403:code==='native_search_source_not_found'?404:
+          code==='native_search_source_invalid'||code==='native_search_source_offset_invalid'?422:409,
+          {error:'native_search_source_unavailable'});
+      }
+    }
     const terminalAttach=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/terminals\/([^/]+)\/attach$/);
     const terminalInput=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/terminals\/([^/]+)\/attachments\/([^/]+)\/input$/);
     if(terminalAttach||terminalInput){
@@ -998,7 +1015,7 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
     }
     return json(404, { error: 'not_found' })
   };
-  const quietPost=(request)=>request?.method==='POST'&&(['/v1/host-admin/bootstrap/redeem','/v1/host-admin/settings/read','/v1/host-admin/settings/editor/read','/v1/host-admin/settings/attempt/read','/v1/host-admin/settings/readiness','/v1/taskmaster/installation','/v1/models','/v1/models/metadata','/v1/models/metadata/readiness','/v1/conversation-modes/readiness'].includes(request?.url?.pathname)||/^\/v1\/sessions\/[^/]+\/terminals\/(?:list|options|receipts)$/.test(request?.url?.pathname??''));
+  const quietPost=(request)=>request?.method==='POST'&&(['/v1/host-admin/bootstrap/redeem','/v1/host-admin/settings/read','/v1/host-admin/settings/editor/read','/v1/host-admin/settings/attempt/read','/v1/host-admin/settings/readiness','/v1/taskmaster/installation','/v1/models','/v1/models/metadata','/v1/models/metadata/readiness','/v1/conversation-modes/readiness'].includes(request?.url?.pathname)||/^\/v1\/sessions\/[^/]+\/(?:terminals\/(?:list|options|receipts)|native-search-source)$/.test(request?.url?.pathname??''));
   return async request=>{
     if(!hostAdmissionGuard||quietPost(request)||!authorized(request?.headers?.authorization,token))return dispatch(request);
     let admission;
@@ -1308,6 +1325,10 @@ export function apply(ctx, config = {}) {
       const dispose=connection.fetch.register(ownerRoute);
       ctx.effect(()=>()=>dispose());
     }
+    const nativeSearchSource=createNativeSearchSource({readIdentity:()=>resolveOwnerBoundDshProfileContext(ctx.get('profileContext')),
+      agents:ctx.agents,sessions:ctx.sessions,persistence:()=>ctx.sessionPersistence});
+    ctx.provide('jotNativeSearchSourceObserver',nativeSearchSource);
+    ctx.effect(()=>()=>nativeSearchSource.dispose());
     const terminalControl=createTerminalControl({readIdentity:()=>resolveOwnerBoundDshProfileContext(ctx.get('profileContext')),
       terminalController:()=>ctx.get('terminalController',false),sessionController:()=>ctx.sessionController,sessionNotFoundError:ApiSessionNotFound,agents:ctx.agents,sessions:ctx.sessions,
       gateway:()=>ctx.get('typertGateway',false),createPeer:()=>{
@@ -1321,7 +1342,7 @@ export function apply(ctx, config = {}) {
     const handler = createAdapterHandler({ controller: ctx.sessionController, fileUploads: ctx.fileUploads, agents: ctx.agents,
       sessions:ctx.sessions,persistence:ctx.sessionPersistence,sessionNotFoundError:ApiSessionNotFound,
       speechController, voiceEnabled, token, workbenchBridge, skillContentCommand, skillCatalogCommand, skillResourceCommand, nativeCommandQueryHost, nativePlanModeHost,
-      terminalControl,
+      terminalControl,nativeSearchSource,
       terminalInventoryReader:(ownerId,sessionId,signal)=>{
         signal?.throwIfAborted();
         const identity=resolveOwnerBoundDshProfileContext(ctx.get('profileContext'));
@@ -1343,7 +1364,7 @@ export function apply(ctx, config = {}) {
       try {
         const url = new URL(req.url, `http://${host}:${port}`)
         const isFileUpload = /^\/v1\/sessions\/[^/]+\/files$/.test(url.pathname)
-        const bodyLimit = url.pathname.startsWith('/v1/host-admin/') ? 4096 : url.pathname.startsWith('/v1/voice/') ? 4 * 1024 * 1024 : 32 * 1024 * 1024
+        const bodyLimit = url.pathname.startsWith('/v1/host-admin/') || /^\/v1\/sessions\/[^/]+\/native-search-source$/.test(url.pathname) ? 4096 : url.pathname.startsWith('/v1/voice/') ? 4 * 1024 * 1024 : 32 * 1024 * 1024
         const result = await handler({ method: req.method, url, headers: req.headers,
           body: isFileUpload ? req : await readJson(req, bodyLimit), signal: abort.signal })
         if (result.stream) {

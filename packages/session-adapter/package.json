@@ -136,7 +136,12 @@
     "optional-memory-extraction.js",
     "runtime-patches/dsh-memory-0.5.0-sha256.json",
     "runtime-patches/dsh-agent-loop-0.2.1-rc.2-sha256.json",
-    "ordinary-steering-attachments.js"
+    "ordinary-steering-attachments.js",
+    "native-search-source.js",
+    "native-search-source-store.js",
+    "dsh-native-search-source-patch.js",
+    "runtime-patches/dsh-tool-fs-search-0.2.1-rc.2-sha256.json",
+    "session-header-identity.js"
   ],
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",

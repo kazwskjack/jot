@@ -232,3 +232,14 @@ It retains original full-event, transport and chunk hashes and the original
 immutable observation receipts. Capability negotiation leaves revision 2 as the
 legacy default. Additional projected metadata is appended to Jot's public event
 history under the original source identity and existing DSH MIT integration.
+
+
+`dsh-native-search-source-patch.js` (under `packages/session-adapter/` in the repository)
+integrates the separately installed MIT-licensed `@deepseek-ai/dsh-tool-fs-search`
+0.2.1-rc.2 formatted-result producer. Its reviewed runtime, declarations, locale
+and package files are pinned in `runtime-patches/dsh-tool-fs-search-0.2.1-rc.2-sha256.json`
+relative to the adapter. The existing retained DSH MIT notice applies. The original
+spill backend and opaque locators retain their native meaning. Jot captures a
+private bounded producer snapshot and requires the original successful linked
+Session result before returning a page. Native grep line-preview limits remain
+part of that source scope.
