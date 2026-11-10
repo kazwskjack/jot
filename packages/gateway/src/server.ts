@@ -65,6 +65,7 @@ import type {NativeGitClient} from './git/native-transport-client.ts';
 import {WorkPublicationExecutions} from './persistent-tasks/work-publication-executions.ts';
 import {readTerminalWaitReceipt,replayTerminalWaitReceipt} from './terminal/wait-receipts.ts';
 import {validateTerminalCommand} from './terminal/control.js';
+import {registerTerminalStreamRoutes,type TerminalStreamClient} from './terminal/stream-routes.ts';
 import {registerTerminalReceiptRoutes} from './terminal/receipt-routes.ts';
 import {registerTerminalControlRoutes,type TerminalControlClient} from './terminal/control-routes.ts';
 import {registerTerminalInventoryRoutes,type TerminalInventoryClient} from './terminal/inventory-routes.ts';
@@ -229,6 +230,7 @@ export async function buildServer(config: {
   nativeMemberClient?:NativeMemberControlClient;
   terminalInventoryClient?:TerminalInventoryClient;
   terminalControlClient?:TerminalControlClient;
+  terminalStreamClient?:TerminalStreamClient;
   taskmasterInstallationClient?:TaskmasterInstallationClient;
   skillCatalogClient?: SkillCatalogHost;
   conversationForkSourceClient?:{inspectConversationForkSource(sessionId:string,signal?:AbortSignal):Promise<unknown>};
@@ -520,6 +522,7 @@ export async function buildServer(config: {
     }
     if((request.routeOptions.config as {officePreviewConfigurationCommand?:boolean}).officePreviewConfigurationCommand===true)return;
     if(request.method==='POST'&&(request.routeOptions.config as {terminalReceiptReconciliation?:boolean}).terminalReceiptReconciliation===true)return;
+    if(request.method==='POST'&&(request.routeOptions.config as {terminalStreamCommand?:boolean}).terminalStreamCommand===true)return;
     // Binary imports own a content-aware immutable receipt in the workspace service.
     if(request.method==='PUT'&&request.routeOptions.url==='/v1/workspaces/:workspaceId/files/binary')return;
     if(request.method==='POST'&&[
@@ -1063,6 +1066,7 @@ export async function buildServer(config: {
   registerTerminalInventoryRoutes(app,{db,actor,client:config.terminalInventoryClient});
   registerTerminalControlRoutes(app,{db,actor,client:config.terminalControlClient});
   registerTerminalReceiptRoutes(app,{db,actor,client:config.terminalControlClient});
+  registerTerminalStreamRoutes(app,{db,actor,client:config.terminalStreamClient});
   registerConversationGoalRoutes(app,{db,conversations,actor,client:config.conversationGoalClient,resumeAdmission:{enabled:config.conversationGoalResumeEnabled===true,controls:new ConversationGoalControls(db,events,runs),atomic:atomicCommand}});
   if(config.skillCatalogClient){
     const catalog=new SkillCatalogService(db,workbench,config.skillCatalogClient);

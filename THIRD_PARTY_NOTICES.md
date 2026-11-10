@@ -166,3 +166,10 @@ idempotency reservation, without invoking another native terminal operation.
 Ending a terminal-command wait persists an original Jot metadata receipt and
 prevents later dispatch of that exact original request. Native already-issued
 operations retain their own lifecycle and completion observations.
+
+The native PTY attachment transport uses the installed `0.2.1-rc.2` public
+`connection.createPeer`, `typertGateway.stream`, `TerminalController.retain`
+and original `terminal/attach` APIs. The Peer is created by trusted Host code
+only after its original bound owner and exact resident Session are verified.
+Native input ownership, screen recovery, provider acknowledgements and process
+lifetime remain with DSH. The retained DSH MIT license above applies.

@@ -28,6 +28,7 @@ export function registerTerminalControlRoutes(app:FastifyInstance,options:{
       if(!id.test(conversationId)||!id.test(runId)||Object.keys(request.query as object).length)throw Error('terminal_command_invalid');
       const command=write?validateTerminalCommand(request.body):undefined;
       if(command&&request.headers['idempotency-key']!==command.request_id)throw Error('terminal_command_invalid');
+      if(command?.action==='create'&&command.cols<2)throw Error('terminal_command_invalid');
       const binding=()=>readOwnedTerminalSession(db,owner,conversationId,runId),before=binding();
       if(!before)return reply.code(404).send({error:{code:'TERMINAL_SESSION_NOT_FOUND'}});
       const ended=command&&readTerminalWaitReceipt(db,owner,conversationId,runId,command);

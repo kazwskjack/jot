@@ -117,7 +117,7 @@ function TerminalPanel({conversationId,runId,historical=false,onSettled}:{conver
       await submit();
     }catch(reason){if(alive.current)setCommandError(reason instanceof Error?reason.message:'无法保留结束等待请求');}
   }
-  const dimensionsValid=Boolean(options&&Number.isSafeInteger(cols)&&cols>0&&cols<=options.environment.maxCols
+  const dimensionsValid=Boolean(options&&Number.isSafeInteger(cols)&&cols>=2&&cols<=options.environment.maxCols
     &&Number.isSafeInteger(rows)&&rows>0&&rows<=options.environment.maxRows);
   return <details onToggle={event=>setOpen(event.currentTarget.open)}>
     <summary>{historical?`历史运行终端请求 · ${runId}`:'会话终端'}</summary>
@@ -142,7 +142,7 @@ function TerminalPanel({conversationId,runId,historical=false,onSettled}:{conver
         <option value="">执行环境默认 Shell</option>
         {options.shells.map((item,index)=><option key={`${index}:${item.path}`} value={item.path}>{item.name} · {item.path}</option>)}
       </select></label>
-      <label>列 <input type="number" min={1} max={options.environment.maxCols} value={cols} onChange={event=>setCols(Number(event.currentTarget.value))}/></label>
+      <label>列 <input type="number" min={2} max={options.environment.maxCols} value={cols} onChange={event=>setCols(Number(event.currentTarget.value))}/></label>
       <label>行 <input type="number" min={1} max={options.environment.maxRows} value={rows} onChange={event=>setRows(Number(event.currentTarget.value))}/></label>
       <button type="button" disabled={!inventory||!dimensionsValid} onClick={()=>void submit({action:'create',request_id:crypto.randomUUID(),
         terminal_id:'jot-'+crypto.randomUUID(),host_instance:options.host_instance,cols,rows,shell_path:shell||null})}>创建终端</button>

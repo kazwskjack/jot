@@ -856,3 +856,5 @@ export type {TerminalInfo,TerminalInventory} from '../src/terminal/inventory.js'
 export type {TerminalOptions,TerminalCommand} from '../src/terminal/control.js';
 
 export type {TerminalReceipt} from '../src/terminal/control.js';
+
+export type {TerminalAttachment,TerminalInput,TerminalInputPacket,TerminalAttached,TerminalQueued,TerminalFrame} from '../src/terminal/stream.js';

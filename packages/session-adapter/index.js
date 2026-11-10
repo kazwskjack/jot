@@ -14,6 +14,7 @@ import {nativeGoalsFor} from './workbench-goal.js'
 import {normalizeOrdinarySteeringExecution} from './ordinary-steering-authority.js'
 import {createOrdinaryClaimedSessionComposer} from './ordinary-claimed-composer.js'
 import {createOrdinaryInputAdmissionHost} from './ordinary-input-admission-host.js'
+import {once} from 'node:events'
 import { createServer } from 'node:http'
 import {createRequire} from 'node:module'
 import { timingSafeEqual } from 'node:crypto'
@@ -639,6 +640,22 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       if(agent?.id!==sessionId||blockedWorkbenchSessions.has(sessionId)||binding?.sessionRef!==sessionId||binding?.runId!==body.run_id)return json(409,{error:'memory_extraction_binding_invalid'});
       try{return json(200,await memoryExtractionHost.run(agent,{signal}));}
       catch{return json(409,{error:'memory_extraction_not_completed'});}
+    }
+    const terminalAttach=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/terminals\/([^/]+)\/attach$/);
+    const terminalInput=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/terminals\/([^/]+)\/attachments\/([^/]+)\/input$/);
+    if(terminalAttach||terminalInput){
+      const match=terminalAttach??terminalInput,sessionId=decodeURIComponent(match[1]),terminalId=decodeURIComponent(match[2]);
+      if(method!=='POST')return json(405,{error:'method_not_allowed'});
+      if(!ID.test(sessionId)||!/^[_A-Za-z0-9-]{1,128}$/.test(terminalId)||url.search||!body||typeof body!=='object'||Array.isArray(body)
+        ||Object.keys(body).sort().join(',')!=='owner_id,packet'||typeof body.owner_id!=='string'||!ID.test(body.owner_id))return json(422,{error:'terminal_attachment_invalid'});
+      if(!terminalControl)return json(503,{error:'terminal_attachment_unavailable'});
+      try{
+        if(terminalAttach)return {status:200,stream:await terminalControl.attach(body.owner_id,sessionId,terminalId,body.packet,signal)};
+        return json(200,terminalControl.input(body.owner_id,sessionId,terminalId,decodeURIComponent(match[3]),body.packet,signal));
+      }catch(error){
+        const code=error?.message;
+        return json(code==='terminal_input_capacity'||code==='terminal_attachment_capacity'?429:code==='terminal_input_invalid'?422:409,{error:'terminal_attachment_unavailable'});
+      }
     }
     const terminalOperation=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/terminals\/(options|commands|receipts)$/)
     if(terminalOperation){
@@ -1286,7 +1303,13 @@ export function apply(ctx, config = {}) {
       ctx.effect(()=>()=>dispose());
     }
     const terminalControl=createTerminalControl({readIdentity:()=>resolveOwnerBoundDshProfileContext(ctx.get('profileContext')),
-      terminalController:()=>ctx.get('terminalController',false),agents:ctx.agents,sessions:ctx.sessions});
+      terminalController:()=>ctx.get('terminalController',false),agents:ctx.agents,sessions:ctx.sessions,
+      gateway:()=>ctx.get('typertGateway',false),createPeer:()=>{
+        const connection=ctx.get('connection',false);
+        if(typeof connection?.createPeer!=='function')throw Error('terminal_attachment_unavailable');
+        return connection.createPeer({principal:{kind:'owner'},interactions:'none'});
+      }});
+    ctx.effect(()=>()=>terminalControl.dispose());
     const taskmasterRuntime=createTaskmasterRuntimeVersionReader({readIdentity:()=>resolveOwnerBoundDshProfileContext(ctx.get('profileContext'))});
     ctx.effect(()=>()=>taskmasterRuntime.close());
     const handler = createAdapterHandler({ controller: ctx.sessionController, fileUploads: ctx.fileUploads, agents: ctx.agents,
@@ -1319,13 +1342,17 @@ export function apply(ctx, config = {}) {
           body: isFileUpload ? req : await readJson(req, bodyLimit), signal: abort.signal })
         if (result.stream) {
           res.writeHead(result.status, { 'content-type': 'application/x-ndjson; charset=utf-8', 'cache-control': 'no-store' })
-          for await (const frame of result.stream) res.write(`${JSON.stringify(frame)}\n`)
+          for await (const frame of result.stream) {
+            abort.signal.throwIfAborted();
+            if(!res.write(`${JSON.stringify(frame)}\n`))await once(res,'drain',{signal:abort.signal});
+          }
           return res.end()
         }
         res.writeHead(result.status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
         res.end(JSON.stringify(result.value))
       } catch (error) {
-        console.error('[jot-jot-session-adapter] request failed', JSON.stringify(adapterErrorSummary(error)))
+        const terminalTransport=/^\/v1\/sessions\/[^/]+\/terminals\/[^/]+\/(?:attach|attachments\/[^/]+\/input)$/.test(String(req.url??'').split('?')[0]);
+        console.error('[jot-jot-session-adapter] request failed', JSON.stringify(terminalTransport?{code:'terminal_transport_failed'}:adapterErrorSummary(error)))
         if (res.headersSent) return res.destroy()
         res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
         res.end(JSON.stringify({ error: 'adapter_internal_error' }))

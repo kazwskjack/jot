@@ -1,10 +1,11 @@
 import {randomUUID} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
+import {createTerminalAttachments} from './terminal-attachments.js';
 import {projectTerminalInventory} from '../gateway/src/terminal/inventory.js';
 import {validateTerminalCommand,validateTerminalOptions,validateTerminalReceipt} from '../gateway/src/terminal/control.js';
 
 /** Explicit user-terminal operations borrow the exact existing native Agent. */
-export function createTerminalControl({readIdentity,terminalController,agents,sessions}) {
+export function createTerminalControl({readIdentity,terminalController,agents,sessions,createPeer,gateway}) {
   const instances=new WeakMap();
   const receipts=new Map();
   const receiptKey=(ownerId,sessionId,command)=>JSON.stringify([ownerId,sessionId,command.request_id]);
@@ -33,7 +34,11 @@ export function createTerminalControl({readIdentity,terminalController,agents,se
     if(expectedInstance!==undefined&&expectedInstance!==hostInstance)throw Error('terminal_host_changed');
     return {controller,agent,check,hostInstance};
   }
+  const attachments=createTerminalAttachments({createPeer,gateway,authorize:(owner,session,instance,signal)=>source(owner,session,signal,instance)});
   return Object.freeze({
+    attach:attachments.attach,
+    input:attachments.input,
+    dispose:attachments.close,
     async options(ownerId,sessionId,signal) {
       const {controller,agent,check,hostInstance}=source(ownerId,sessionId,signal);
       if(typeof controller?.environment!=='function'||typeof controller.shells!=='function'||typeof controller.list!=='function')throw Error('terminal_control_unavailable');

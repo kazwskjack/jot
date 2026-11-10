@@ -211,7 +211,7 @@ export function registerWorkbenchProxy(app,config,localCsrf){
    const binaryDownload=listedFileDownload||req.method==='GET'&&(/^\/v1\/workspaces\/[^/]+\/files\/binary$/.test(suffix)||/^\/v1\/workspaces\/[^/]+\/checkpoints\/[^/]+\/restore-reviews\/[^/]+\/target$/.test(suffix));
   if(binary&&!Buffer.isBuffer(req.body))return reply.code(415).send({error:{code:'BINARY_UPLOAD_REQUIRED'}});
   if(req.body!==undefined)headers['content-type']=binary?'application/octet-stream':'application/json';
-   if(officePreviewRead||officePreviewWrite||binary||binaryDownload||/^\/v1\/artifacts\/[^/]+\/text$/.test(suffix)||/^\/v1\/conversations\/[^/]+\/activities\/[^/]+\/tool-result(?:\/file(?:\/(?:bytes|document))?)?$/.test(suffix)||/^\/v1\/runs\/[^/]+\/native-member-executions$/.test(suffix)||/^\/v1\/runs\/[^/]+\/native-members\/[^/]+\/execution$/.test(suffix)||/^\/v1\/conversations\/[^/]+\/(?:runs\/[^/]+\/terminals(?:\/(?:options|commands(?:\/[^/]+\/(?:reconcile|end-wait))?))?|activities|native-member-runs|artifact-search|interaction-history(?:\/[^/]+)?|interaction-search|tool-result-search)$/.test(suffix)||/^\/v1\/workspaces\/[^/]+\/memory\/import(?:\/|$)/.test(suffix)||/^\/v1\/projects\/[^/]+\/git(?:\/|$)/.test(suffix))reply.header('cache-control','private, no-store');
+   if(officePreviewRead||officePreviewWrite||binary||binaryDownload||/^\/v1\/artifacts\/[^/]+\/text$/.test(suffix)||/^\/v1\/conversations\/[^/]+\/activities\/[^/]+\/tool-result(?:\/file(?:\/(?:bytes|document))?)?$/.test(suffix)||/^\/v1\/runs\/[^/]+\/native-member-executions$/.test(suffix)||/^\/v1\/runs\/[^/]+\/native-members\/[^/]+\/execution$/.test(suffix)||/^\/v1\/conversations\/[^/]+\/(?:runs\/[^/]+\/terminals(?:\/(?:[^/]+\/(?:attach|attachments\/[^/]+\/input)|options|commands(?:\/[^/]+\/(?:reconcile|end-wait))?))?|activities|native-member-runs|artifact-search|interaction-history(?:\/[^/]+)?|interaction-search|tool-result-search)$/.test(suffix)||/^\/v1\/workspaces\/[^/]+\/memory\/import(?:\/|$)/.test(suffix)||/^\/v1\/projects\/[^/]+\/git(?:\/|$)/.test(suffix))reply.header('cache-control','private, no-store');
    const artifactTextRead=/^\/v1\/artifacts\/[^/]+\/text$/.test(suffix)||/^\/v1\/conversations\/[^/]+\/artifact-search$/.test(suffix);
    const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),officePrintPreview?180000:binary||binaryDownload||artifactTextRead||suffix==='/v1/office-preview/status'?120000:suffix==='/v1/office-preview/candidates'?75000:/^\/v1\/conversations\/[^/]+\/activities\/[^/]+\/tool-result\/file\/document$/.test(suffix)?60000:30000);
   req.raw.once('aborted',()=>controller.abort());reply.raw.once('close',()=>controller.abort());
@@ -226,8 +226,9 @@ export function registerWorkbenchProxy(app,config,localCsrf){
      const value=response.headers.get(name);if(value)reply.header(name,value);
     }
    }
+   const terminalAttachment=req.method==='POST'&&/^\/v1\/conversations\/[^/]+\/runs\/[^/]+\/terminals\/[^/]+\/attach$/.test(suffix)&&type.startsWith('application/x-ndjson');
    const reviewDownload=req.method==='GET'&&/^\/v1\/interactions\/[^/]+\/outputs\/(?:0|[1-9][0-9]{0,3})$/.test(suffix)&&type.startsWith('application/octet-stream');
-    if((type.startsWith('text/event-stream')||reviewDownload||binaryDownload&&type.startsWith('application/octet-stream'))&&response.body){clearTimeout(timer);return reply.send(Readable.fromWeb(response.body));}
+    if((type.startsWith('text/event-stream')||terminalAttachment||reviewDownload||binaryDownload&&type.startsWith('application/octet-stream'))&&response.body){clearTimeout(timer);return reply.send(Readable.fromWeb(response.body));}
    if(response.status===204)return reply.send();
    return reply.send(Buffer.from(await response.arrayBuffer()));
   }catch{return reply.code(502).send({error:{code:'WORKBENCH_UNAVAILABLE',message:'The local workbench gateway did not respond.'}});}

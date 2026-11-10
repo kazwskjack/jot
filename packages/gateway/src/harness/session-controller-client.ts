@@ -11,6 +11,7 @@ import {validateTaskmasterInstallation,validateTaskmasterRuntimeVersion} from '.
 
 import {validateTerminalInventory,type TerminalInventory} from '../terminal/inventory.js'
 import {validateTerminalOptions,validateTerminalCommand,validateTerminalReceipt,type TerminalOptions,type TerminalCommand,type TerminalReceipt} from '../terminal/control.js'
+import {validateTerminalAttachment,validateTerminalInputPacket,validateTerminalAttached,validateTerminalQueued,type TerminalAttachment,type TerminalInputPacket,type TerminalQueued} from '../terminal/stream.js'
 
 export type AdapterFetch = (input: string | URL, init?: RequestInit) => Promise<Response>
 
@@ -411,6 +412,55 @@ export class SessionControllerClient {
     const receipt=validateTerminalReceipt(await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/terminals/receipts`,{owner_id:ownerId,command},signal),command,sessionId);
     if(!['pending','completed','unknown'].includes(receipt.state))throw Error('terminal_receipt_invalid');
     return receipt;
+  }
+
+  async attachTerminal(ownerId:string,sessionId:string,terminalId:string,input:TerminalAttachment,signal?:AbortSignal):Promise<Readable>{
+    if(![ownerId,sessionId].every(value=>typeof value==='string'&&DRIVER_ID.test(value))||!/^[_A-Za-z0-9-]{1,128}$/.test(terminalId))throw Error('terminal_attachment_invalid');
+    const packet=validateTerminalAttachment(input),controller=new AbortController();
+    let reader:ReadableStreamDefaultReader<Uint8Array>|undefined,stream:Readable|undefined,cleanupPromise:Promise<void>|undefined;
+    const abort=()=>{controller.abort();stream?.destroy();};
+    const timer=setTimeout(abort,30000);
+    if(signal?.aborted)abort();else signal?.addEventListener('abort',abort,{once:true});
+    const cleanup=()=>cleanupPromise??=Promise.resolve().then(async()=>{
+      clearTimeout(timer);signal?.removeEventListener('abort',abort);controller.abort();
+      if(reader){try{await reader.cancel();}catch{}finally{reader.releaseLock();}}
+    });
+    try {
+      const response=await this.fetchImpl(`${this.baseUrl}/v1/sessions/${encodeURIComponent(sessionId)}/terminals/${encodeURIComponent(terminalId)}/attach`,{
+        method:'POST',headers:{authorization:`Bearer ${this.token}`,'content-type':'application/json'},
+        body:JSON.stringify({owner_id:ownerId,packet}),signal:controller.signal});
+      controller.signal.throwIfAborted();
+      if(response.body)reader=response.body.getReader();
+      if(!response.ok||!reader||!response.headers.get('content-type')?.startsWith('application/x-ndjson'))throw Error('terminal_attachment_unavailable');
+      const fragments:Buffer[]=[];let size=0,tail:Uint8Array=new Uint8Array(0);
+      while(true){
+        const next=await reader.read();if(next.done)throw Error('terminal_attachment_unavailable');
+        const newline=next.value.indexOf(10),prefix=newline<0?next.value:next.value.subarray(0,newline);
+        size+=prefix.length;if(size>4096)throw Error('terminal_attachment_invalid');
+        fragments.push(Buffer.from(prefix));
+        if(newline>=0){tail=next.value.subarray(newline+1);break;}
+      }
+      const opening=Buffer.concat(fragments);
+      validateTerminalAttached(JSON.parse(opening.toString('utf8')),{...packet,session_id:sessionId,terminal_id:terminalId});
+      controller.signal.throwIfAborted();clearTimeout(timer);
+      const source=reader;
+      stream=Readable.from((async function*(){
+        try{yield Buffer.concat([opening,Buffer.from('\n')]);if(tail.length)yield tail;while(true){const next=await source.read();if(next.done)return;yield next.value;}}
+        finally{await cleanup();}
+      })(),{objectMode:false});
+      // A caller can disconnect between admission and the stream being piped.
+      stream.on('error',()=>{});
+      stream.once('close',()=>{void cleanup().catch(()=>{});});
+      return stream;
+    }catch(error){await cleanup();throw error;}
+  }
+
+  async terminalInput(ownerId:string,sessionId:string,terminalId:string,attachmentId:string,input:TerminalInputPacket,signal?:AbortSignal):Promise<TerminalQueued>{
+    if(![ownerId,sessionId].every(value=>typeof value==='string'&&DRIVER_ID.test(value))||!/^[_A-Za-z0-9-]{1,128}$/.test(terminalId))throw Error('terminal_input_invalid');
+    const packet=validateTerminalInputPacket(input);
+    validateTerminalAttachment({host_instance:packet.host_instance,attachment_id:attachmentId});
+    const value=await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/terminals/${encodeURIComponent(terminalId)}/attachments/${encodeURIComponent(attachmentId)}/input`,{owner_id:ownerId,packet},signal);
+    return validateTerminalQueued(value,attachmentId,packet.command.sequence);
   }
 
   async terminalOptions(ownerId:string,sessionId:string,signal?:AbortSignal):Promise<TerminalOptions>{
