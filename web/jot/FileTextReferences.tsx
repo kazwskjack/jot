@@ -11,7 +11,8 @@ export type FileCellReference=Omit<FileTextReference,'reference'|'rotation'|'tex
 export type FileSelectionReference=FileTextReference|FileCellReference;
 export type OfficeTextFocus={key:string;value:FileTextReference};
 export type OfficeCellFocus={key:string;value:FileCellReference};
-export type OfficeRegionView={protocol:1;width:number;height:number}&({section:number}|{slideNumber:number});
+export type XlsxRegionView={protocol:1;width:number;height:number;sheetId:string;sheetName:string;zoom:number;scroll:{sheetViewStartRow:number;sheetViewStartColumn:number;offsetX:number;offsetY:number}};
+export type OfficeRegionView=({protocol:1;width:number;height:number}&({section:number}|{slideNumber:number}))|XlsxRegionView;
 export type FileRegionDraft=Omit<FileTextReference,'reference'|'text_view'>&{reference:ImageRegionContentReference;imageBytes:number;rotation:number;region_view?:OfficeRegionView};
 export type OfficeRegionFocus={key:string;value:FileRegionDraft};
 export const fileRegionCapture={owner:undefined as object|undefined};
@@ -20,7 +21,7 @@ export type FileReference=FileSelectionReference|FileRegionReference;
 export type FileSourceReference=FileSelectionReference|FileRegionDraft;
 export function isFileRegion<T extends FileSourceReference>(value:T):value is Extract<T,FileRegionDraft>{return value.reference.selectionMode==='region';}
 export function isFileCells<T extends FileSourceReference>(value:T):value is Extract<T,FileCellReference>{return value.reference.selectionMode==='cells';}
-export const FileTextReferenceContext=createContext<{owner:string;conversationId:string;disabled:boolean;regionDisabled:boolean;cellViews?:Array<1|2>;regionRenderers?:Array<'pdf'|'docx'|'pptx'>;onAdd:(reference:FileSelectionReference)=>boolean;onAddMany?:(references:FileTextReference[])=>boolean;onAddRegion:(reference:FileRegionDraft,file:File)=>Promise<boolean>}|null>(null);
+export const FileTextReferenceContext=createContext<{owner:string;conversationId:string;disabled:boolean;regionDisabled:boolean;cellViews?:Array<1|2>;regionRenderers?:Array<'pdf'|'docx'|'pptx'|'xlsx'>;onAdd:(reference:FileSelectionReference)=>boolean;onAddMany?:(references:FileTextReference[])=>boolean;onAddRegion:(reference:FileRegionDraft,file:File)=>Promise<boolean>}|null>(null);
 export function resolveRegionArtifact(value:FileRegionReference,resolve:(entryId:string)=>Artifact|undefined){
  const artifact=resolve(value.uploadEntryId);
  return artifact&&artifact.conversation_id===value.conversationId&&artifact.origin==='upload'&&artifact.status==='ready'&&artifact.version===1
@@ -50,6 +51,7 @@ export function FileReferenceDetails({value,file,ready}:{value:FileSourceReferen
  const location=isFileCells(value)?`${value.cell_view===2?'原生视图 · ':''}${value.reference.locator.sheetName} · ${value.reference.locator.ranges.join('、')}`
   :isFileRegion(value)&&value.reference.renderer.id==='docx'?'Word区域'
   :isFileRegion(value)&&value.reference.renderer.id==='pptx'?`幻灯片 ${value.reference.locator.slideNumber} 区域`
+  :isFileRegion(value)&&value.reference.renderer.id==='xlsx'?`工作表 ${value.reference.locator.sheetName} 区域`
   :!isFileRegion(value)&&value.reference.renderer.id==='docx'?'Word文字'
   :!isFileRegion(value)&&value.reference.renderer.id==='pptx'?`幻灯片 ${value.reference.locator.slideNumbers?.join('、')}`
   :`第 ${isFileRegion(value)?value.reference.locator.pageNumber:value.reference.locator.pageNumbers?.join('、')} 页`;
@@ -57,6 +59,7 @@ export function FileReferenceDetails({value,file,ready}:{value:FileSourceReferen
   <p>原版本 {value.file.version} · SHA-256 <code>{value.file.sha256}</code></p>
   {isFileRegion(value)?<>
    <p>图片区域 · {value.reference.image.name} · {value.reference.image.width} × {value.reference.image.height} · 图片摘要 <code>{value.reference.image.sha256}</code></p>
+   {value.reference.renderer.id==='xlsx'&&value.region_view&&<details><summary>原工作表视口、缩放及滚动状态</summary><pre>{JSON.stringify(value.region_view,null,2)}</pre></details>}
    {open&&file&&<RegionPreview file={file}/>}{ready===false&&<p role="status">截图附件尚未完成核对，请在附件区处理，或移除此引用。</p>}
   </>:isFileCells(value)?<pre>{JSON.stringify(value.reference.cells,null,2)}</pre>:<pre>{value.reference.selectedText}</pre>}
   {isFileCells(value)&&value.reference.headers&&<><p>原选区上方行</p><pre>{JSON.stringify(value.reference.headers,null,2)}</pre></>}

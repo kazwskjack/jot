@@ -297,7 +297,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
      &&(!isFileRegion(value)||value.reference.renderer.id==='pdf'||modeCaps?.reference_snapshots?.region_renderers?.some(renderer=>renderer===value.reference.renderer.id))
      &&(!isFileCells(value)||value.cell_view!==2||modeCaps?.reference_snapshots?.xlsx_cell_views?.includes(2))
      &&(!('text_view' in value)||value.text_view!==2||modeCaps?.reference_snapshots?.docx_text_views?.includes(2)));
-   if(!retry&&fileReferences.some(value=>isFileRegion(value)&&['docx','pptx'].includes(value.reference.renderer.id))&&!structured)throw Error('服务尚未确认整组引用快照及Office区域PNG输入能力，请刷新能力后重试。');
+   if(!retry&&fileReferences.some(value=>isFileRegion(value)&&['docx','pptx','xlsx'].includes(value.reference.renderer.id))&&!structured)throw Error('服务尚未确认整组引用快照及Office区域PNG输入能力，请刷新能力后重试。');
    if(!retry&&fileReferences.some(value=>isFileCells(value)&&value.cell_view===2)&&!structured)throw Error('服务尚未确认整组引用快照及原生单元格视图，请刷新能力后重试。');
    const message=structured?replyQuoteMessage(draft.trim()||'请结合以下原文件引用继续。',replyQuotes):preview;
    const referenceSnapshots=structured?{protocol:1,items:fileReferenceSnapshots(fileReferences,imageArtifact)}:undefined;

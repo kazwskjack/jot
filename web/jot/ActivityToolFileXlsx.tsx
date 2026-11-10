@@ -1,11 +1,11 @@
 import React,{useEffect,useRef,useState} from 'react';
 import {taskDraftScope} from './client';
 import {readOfficeViewerUrl,readListedFilePreviewBytes,type ListedFilePreviewSource} from './activity-file-preview-client';
-import type {OfficeCellFocus} from './FileTextReferences';
-import type {OfficeRegionSession} from './OfficeFileRegionReference';
+import type {OfficeCellFocus,OfficeRegionFocus} from './FileTextReferences';
+import OfficeFileRegionReference,{type OfficeRegionSession} from './OfficeFileRegionReference';
 import XlsxCellReferences from './XlsxCellReferences';
 
-function XlsxAttempt({source,owner,identity,officeFocus}:{source:ListedFilePreviewSource;owner:string;identity:string;officeFocus?:OfficeCellFocus}){
+function XlsxAttempt({source,owner,identity,officeFocus,officeRegionFocus}:{source:ListedFilePreviewSource;owner:string;identity:string;officeFocus?:OfficeCellFocus;officeRegionFocus?:OfficeRegionFocus}){
  const cellSession=useRef<OfficeRegionSession|undefined>(undefined);
  const frame=useRef<HTMLIFrameElement>(null),probe=useRef<(element:HTMLIFrameElement)=>void>(()=>{}),cancel=useRef<()=>void>(()=>{});
  const [url,setUrl]=useState<string>(),[state,setState]=useState<{phase:'loading'|'ready'|'error';message:string;working?:boolean}>({phase:'loading',message:'正在核对原工作簿并读取视觉内容…'});
@@ -53,9 +53,10 @@ function XlsxAttempt({source,owner,identity,officeFocus}:{source:ListedFilePrevi
   <p role={state.phase==='error'?'alert':'status'}>{state.working?'正在处理原生工作簿…':state.message} {(state.phase==='loading'||state.working)&&<button type="button" onClick={()=>cancel.current()}>取消并关闭视觉查看器</button>}</p>
   {state.phase!=='error'&&url&&<iframe ref={frame} src={url} title="原固定版本工作簿视觉查看器" sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer" onLoad={event=>probe.current(event.currentTarget)}/>}
   {state.phase==='ready'&&cellSession.current&&<XlsxCellReferences source={source} owner={owner} session={cellSession.current} focus={officeFocus}/>}
+  {state.phase==='ready'&&cellSession.current&&<OfficeFileRegionReference kind="xlsx" source={source} owner={owner} session={cellSession.current} focus={officeRegionFocus}/>}
  </section>;
 }
-export default function ActivityToolFileXlsx(source:ListedFilePreviewSource&{officeFocus?:OfficeCellFocus}){
- const owner=taskDraftScope(),[revision,setRevision]=useState(0),identity=JSON.stringify([owner,source.conversationId,source.runId,source.activityId,source.resultSha,source.file.path,source.file.version,source.file.sha256,source.file.size,source.officeFocus?.key,revision]);
- return <><button type="button" onClick={()=>setRevision(value=>value+1)}>重新读取工作簿视觉内容</button><XlsxAttempt key={identity} source={source} owner={owner} identity={identity} officeFocus={source.officeFocus?.value.cell_view===2?source.officeFocus:undefined}/></>;
+export default function ActivityToolFileXlsx(source:ListedFilePreviewSource&{officeFocus?:OfficeCellFocus;officeRegionFocus?:OfficeRegionFocus}){
+ const owner=taskDraftScope(),[revision,setRevision]=useState(0),identity=JSON.stringify([owner,source.conversationId,source.runId,source.activityId,source.resultSha,source.file.path,source.file.version,source.file.sha256,source.file.size,source.officeFocus?.key,source.officeRegionFocus?.key,revision]);
+ return <><button type="button" onClick={()=>setRevision(value=>value+1)}>重新读取工作簿视觉内容</button><XlsxAttempt key={identity} source={source} owner={owner} identity={identity} officeFocus={source.officeFocus?.value.cell_view===2?source.officeFocus:undefined} officeRegionFocus={source.officeRegionFocus}/></>;
 }

@@ -1,5 +1,6 @@
 export function validateTextReferenceSource(value:unknown,conversation:string):void;
 export function validateRegionCaptureSource(value:unknown,conversation:string):unknown;
+export function validateOfficeRegionView(value:unknown,renderer:'docx'|'pptx'|'xlsx'):unknown;
 export function validateContentReference(value:unknown):Record<string,unknown>;
 export function readLiteralMessageReferences(blocks:readonly unknown[]):Array<Record<string,unknown>>;
 export type ReferenceSnapshotInput={protocol:1;items:Array<Record<string,unknown>>};

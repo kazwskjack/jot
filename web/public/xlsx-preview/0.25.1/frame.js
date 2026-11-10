@@ -2,6 +2,7 @@
 import {scripts,styles} from './assets.js';
 import {createNativeWorkbook} from './workbook.js';
 import {createCellReferences} from './cell-references.js';
+import {createSpreadsheetRegion} from './region.js';
 
 const parentHost=new URLSearchParams(location.search).get('parent');
 if(!parentHost||!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(parentHost))throw Error('XLSX_PARENT_INVALID');
@@ -9,8 +10,8 @@ const parentOrigin='http://'+parentHost,content=document.getElementById('content
 const sheetSelect=document.getElementById('sheet'),zoom=document.getElementById('zoom'),cell=document.getElementById('cell');
 const query=document.getElementById('query'),counter=document.getElementById('matches'),coverage=document.getElementById('coverage');
 let token,started=false,closed=false,busy=false,univer,api,book,selectionListener,activeSheetListener,chain=Promise.resolve();
-let workbookData,matches=[],matchIndex=0,searchGeneration=0,searchTimer,zoomPercent=100,cellReferences;
-const report=message=>{if(!closed)parent.postMessage({protocol:1,token,...message},parentOrigin);};
+let workbookData,matches=[],matchIndex=0,searchGeneration=0,searchTimer,zoomPercent=100,cellReferences,region;
+const report=(message,transfer=[])=>{if(!closed)parent.postMessage({protocol:1,token,...message},parentOrigin,transfer);};
 const boot=()=>parent.postMessage({type:'jot-xlsx-boot',protocol:1,started},parentOrigin);
 const controls=()=>{
  const ready=!!book&&!closed;
@@ -19,11 +20,12 @@ const controls=()=>{
  document.getElementById('match-previous').disabled=!ready||busy||!matches.length;
  document.getElementById('match-next').disabled=!ready||busy||!matches.length;
  cellReferences?.controls();
+ region?.controls();
 };
 const dispose=()=>{
  if(closed)return;
  closed=true;searchGeneration++;clearTimeout(searchTimer);matches=[];workbookData=undefined;
- cellReferences?.dispose();selectionListener?.dispose();activeSheetListener?.dispose();univer?.dispose();
+ region?.dispose();cellReferences?.dispose();selectionListener?.dispose();activeSheetListener?.dispose();univer?.dispose();
  book=undefined;api=undefined;univer=undefined;content.replaceChildren();controls();
 };
 const fail=()=>{report({type:'jot-xlsx-error',code:'XLSX_RENDER_FAILED'});dispose();status.textContent='原生表格读取失败';};
@@ -120,7 +122,7 @@ sheetSelect.addEventListener('change',()=>{
 });
 zoom.addEventListener('change',()=>{
  const value=Number(zoom.value);
- if(Number.isFinite(value)&&value>=25&&value<=300){zoomPercent=value;run(()=>book.getActiveSheet().zoom(value/100));}
+ if(Number.isFinite(value)&&value>=10&&value<=400){zoomPercent=value;run(()=>book.getActiveSheet().zoom(value/100));}
  else zoom.value=String(zoomPercent);
 });
 addEventListener('pagehide',dispose,{once:true});
@@ -130,7 +132,7 @@ addEventListener('message',async event=>{
  if(event.source!==parent||event.origin!==parentOrigin||!event.data||typeof event.data!=='object'||Array.isArray(event.data))return;
  const value=event.data;
  if(value.type==='jot-xlsx-probe'&&value.protocol===1&&Object.keys(value).length===2){boot();return;}
- if(started&&value.protocol===1&&value.token===token&&Object.keys(value).length===4){cellReferences?.command(value);return;}
+ if(started&&value.protocol===1&&value.token===token&&Object.keys(value).length===4){cellReferences?.command(value);region?.command(value);return;}
  if(started||value.type!=='jot-xlsx-init'||value.protocol!==1||typeof value.token!=='string'||!/^[a-f0-9-]{36}$/.test(value.token)||Object.keys(value).length!==4
   ||!(value.bytes instanceof ArrayBuffer)||value.bytes.byteLength>20*1024*1024)return;
  started=true;token=value.token;status.textContent='正在读取原生表格组件…';
@@ -171,8 +173,10 @@ addEventListener('message',async event=>{
    if(closed)return;
    cellReferences?.invalidate();const first=selections[0];if(first)updateCell(worksheet,first.startRow,first.startColumn);
   });
-  activeSheetListener=api.addEvent(api.Event.ActiveSheetChanged,({activeSheet})=>{if(!closed){cellReferences?.invalidate();sheetSelect.value=activeSheet.getSheetId();updateCell(activeSheet);}});
-  cellReferences=createCellReferences({api,content,getBook:()=>book,isWorking:()=>busy,report,run});
+  activeSheetListener=api.addEvent(api.Event.ActiveSheetChanged,({activeSheet})=>{if(!closed){cellReferences?.invalidate();region?.sheetChanged();sheetSelect.value=activeSheet.getSheetId();updateCell(activeSheet);}});
+  cellReferences=createCellReferences({api,content,getBook:()=>book,isWorking:()=>busy,isRegionActive:()=>!!region?.active,report,run});
+  region=createSpreadsheetRegion({api,content,getBook:()=>book,isWorking:()=>busy,report,run,
+   onModeChange:()=>{cellReferences.invalidate();controls();},onViewRestored:ratio=>{zoomPercent=ratio*100;zoom.value=String(zoomPercent);}});
   controls();status.textContent='原生工作簿已读取。'+data.warnings.map(warning=>warning.message).join(' ');
   report({type:'jot-xlsx-ready',info:{sheets:data.workbook.sheetOrder.length,warnings:data.warnings.length}});
  }catch{if(!closed)fail();}finally{value.bytes=null;}

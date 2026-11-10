@@ -367,6 +367,7 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
    <p>原文件结构化内容 · {current.page.engine.name} {current.page.engine.version}</p>
    {current.page.document.truncated&&<p role="status">结构化解析结果已截断，文字与单元格引用入口有未覆盖部分。可下载原固定版本查看完整文件。</p>}
    {current.page.document.kind==='xlsx'&&<>
+    {props.officeRegionFocus&&(!visual||current.page.xlsx_visual?.ready!==true)&&<p role="status">原工作表截图引用按原生视口状态定位，请打开原生工作簿核对。</p>}
     {props.officeFocus?.value.cell_view!==2&&props.officeFocus&&visual&&<p role="status">原单元格引用按保存值与公式核对，可切换结构化单元格定位原引用。</p>}
     {props.officeFocus?.value.cell_view===2&&(!visual||current.page.xlsx_visual?.ready!==true)&&<p role="status">原引用使用原生单元格视图，请打开原生工作簿核对原选区。</p>}
     <nav aria-label="工作簿查看方式"><button type="button" aria-pressed={!visual} onClick={()=>setVisualState({identity,enabled:false})}>结构化单元格与引用</button>

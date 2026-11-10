@@ -1,7 +1,7 @@
 /* Adapted from pinned PilotDeck SpreadsheetInteractivePreview.tsx. See SOURCES.json and LICENSES.txt. */
 import {createSpreadsheetContextSelectionIntent,shouldShowSpreadsheetSelectionPopup} from './context-selection.js';
 
-export function createCellReferences({api,content,getBook,isWorking,report,run}){
+export function createCellReferences({api,content,getBook,isWorking,isRegionActive,report,run}){
  const controller=new AbortController(),options={signal:controller.signal};
  const prepare=document.getElementById('cell-prepare'),status=document.getElementById('cell-status');
  const focusRanges=document.getElementById('cell-focus-range'),locate=document.getElementById('cell-locate');
@@ -14,7 +14,7 @@ export function createCellReferences({api,content,getBook,isWorking,report,run})
   popupFrame=undefined;hidePopup();
  }
  const controls=()=>{
-  prepare.disabled=!enabled||disposed||isWorking();focusRanges.disabled=!focus||disposed||isWorking();locate.disabled=focusRanges.disabled;
+  prepare.disabled=!enabled||disposed||isWorking()||isRegionActive();focusRanges.disabled=!focus||disposed||isWorking()||isRegionActive();locate.disabled=focusRanges.disabled;
   if(prepare.disabled)resetContext();
  };
  const invalidate=()=>{
@@ -72,7 +72,7 @@ export function createCellReferences({api,content,getBook,isWorking,report,run})
   report({type:'jot-xlsx-cell-error',code});
  };
  function prepareCurrent(){
-  if(!enabled||disposed||isWorking())return;
+  if(!enabled||disposed||isWorking()||isRegionActive())return;
   resetContext();
   run(()=>{
    if(!enabled||disposed)return;
@@ -128,15 +128,15 @@ export function createCellReferences({api,content,getBook,isWorking,report,run})
   subscriptions.push(api.addEvent(api.Event.SelectionMoveStart,hidePopup));
   subscriptions.push(api.addEvent(api.Event.SelectionMoveEnd,hidePopup));
   subscriptions.push(api.addEvent(api.Event.CellPointerDown,({worksheet})=>{
-   if(enabled&&!disposed&&!isWorking()&&intent.recordCellPointerDown(worksheet))invalidate();
+   if(enabled&&!disposed&&!isWorking()&&!isRegionActive()&&intent.recordCellPointerDown(worksheet))invalidate();
   }));
   subscriptions.push(api.addEvent(api.Event.CellPointerUp,()=>{
    const worksheet=intent.consumeContextAction(),generation=gesture;
-   if(!worksheet||!shouldShowSpreadsheetSelectionPopup('context-action',false))return;
+   if(!worksheet||!shouldShowSpreadsheetSelectionPopup('context-action',isRegionActive()))return;
    if(popupFrame!==undefined)cancelAnimationFrame(popupFrame);
    popupFrame=requestAnimationFrame(()=>{
     popupFrame=undefined;
-    if(disposed||!enabled||isWorking()||generation!==gesture)return;
+    if(disposed||!enabled||isWorking()||isRegionActive()||generation!==gesture)return;
     try{
      if(getBook().getActiveSheet().getSheetId()!==worksheet.getSheetId())return;
      const range=worksheet.getSelection()?.getActiveRangeList()[0];if(!range)return;
@@ -154,7 +154,7 @@ export function createCellReferences({api,content,getBook,isWorking,report,run})
    }else if(value.type==='jot-xlsx-cell-probe'){
     report({type:'jot-xlsx-cell-ready',available:true});if(value.focus)run(()=>restore(value.focus));
    }else if(value.type==='jot-xlsx-cell-commit')run(()=>{
-    if(!enabled||disposed||!proposal||proposal.serial!==value.serial)return;
+    if(!enabled||disposed||isRegionActive()||!proposal||proposal.serial!==value.serial)return;
     try{
      const next=current();
      if(key(next)!==key(proposal)){offer(next);return;}

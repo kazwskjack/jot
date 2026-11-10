@@ -27736,7 +27736,7 @@
               },
               "renderers": {"type":"array","minItems":1,"uniqueItems":true,"items":{"enum":["pdf","xlsx","docx","pptx"]},"description":"Supported reference metadata renderer IDs. Original file readers and input consumers retain their availability checks."},
               "docx_text_views": {"type":"array","minItems":1,"uniqueItems":true,"items":{"type":"integer","enum":[1,2]},"description":"Accepted DOCX text locator protocols. Version 1 keeps structured inspection order. Version 2 pins docx-preview 0.4.0 raw visual DOM text-node order. This declares metadata acceptance only."},"xlsx_cell_views":{"type":"array","minItems":1,"uniqueItems":true,"items":{"type":"integer","enum":[1,2]},"description":"Accepted XLSX cell locator protocols. Missing or1 retains structured cached values/formulas. Version2 pins Univer0.25.1, ExcelJS4.4.0, JSZip3.10.1 and zhCN native display/raw/formula/context reads. Native viewport readiness is independent."},
-              "region_renderers": {"type":"array","minItems":1,"uniqueItems":true,"items":{"enum":["pdf","docx","pptx"]},"description":"Accepted region metadata renderers with original pinned PNG input. Client surface readiness remains independent."}
+              "region_renderers": {"type":"array","minItems":1,"uniqueItems":true,"items":{"enum":["pdf","docx","pptx","xlsx"]},"description":"Accepted region metadata renderers with original pinned PNG input. Client surface readiness remains independent."}
             },
             "required": [
               "protocol",
@@ -57081,7 +57081,9 @@
         ],
         "additionalProperties": false
       },
-      "OfficeRegionView": {"oneOf":[{"$ref":"#/components/schemas/DocxRegionView"},{"$ref":"#/components/schemas/PptxRegionView"}]},
+      "OfficeRegionView": {"oneOf":[{"$ref":"#/components/schemas/DocxRegionView"},{"$ref":"#/components/schemas/PptxRegionView"},{"$ref":"#/components/schemas/XlsxRegionView"}]},
+      "XlsxRegionView": {"type":"object","properties":{"protocol":{"const":1},"width":{"type":"number","exclusiveMinimum":0,"maximum":33554432},"height":{"type":"number","exclusiveMinimum":0,"maximum":33554432},"sheetId":{"type":"string","minLength":1,"maxLength":192},"sheetName":{"type":"string","minLength":1,"maxLength":512},"zoom":{"type":"number","minimum":0.1,"maximum":4},"scroll":{"type":"object","properties":{"sheetViewStartRow":{"type":"integer","minimum":-1048576,"maximum":1048575},"sheetViewStartColumn":{"type":"integer","minimum":-16384,"maximum":16383},"offsetX":{"type":"number","minimum":-33554432,"maximum":33554432},"offsetY":{"type":"number","minimum":-33554432,"maximum":33554432}},"required":["sheetViewStartRow","sheetViewStartColumn","offsetX","offsetY"],"additionalProperties":false}},"required":["protocol","width","height","sheetId","sheetName","zoom","scroll"],"additionalProperties":false,"description":"Fixed native worksheet viewport state. Signed native scroll offsets preserve default grid-gap state. Source focus checks viewport/zoom/scroll and does not establish cross-runtime pixel equality."},
+      "XlsxRegionSelectionReference": {"type":"object","properties":{"schemaVersion":{"const":1},"kind":{"const":"content-reference"},"id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"selectionMode":{"const":"region"},"source":{"$ref":"#/components/schemas/SpreadsheetReferenceSource"},"renderer":{"type":"object","properties":{"id":{"const":"xlsx"},"backend":{"const":"builtin"},"locatorQuality":{"const":"visual"}},"required":["id","backend","locatorQuality"],"additionalProperties":false},"createdAt":{"type":"string"},"locator":{"type":"object","properties":{"surface":{"const":"sheet"},"sheetId":{"type":"string","minLength":1,"maxLength":192},"sheetName":{"type":"string","minLength":1,"maxLength":512},"rect":{"$ref":"#/components/schemas/FileReferenceRect"},"anchorRange":{"type":"string","maxLength":32,"pattern":"^[A-Z]{1,3}[1-9][0-9]{0,6}(?::[A-Z]{1,3}[1-9][0-9]{0,6})?$"}},"required":["surface","sheetId","sheetName","rect"],"additionalProperties":false},"image":{"type":"object","properties":{"name":{"type":"string","minLength":1,"maxLength":255},"mimeType":{"const":"image/png"},"width":{"type":"integer","minimum":1,"maximum":4096},"height":{"type":"integer","minimum":1,"maximum":4096},"sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"}},"required":["name","mimeType","width","height","sha256"],"additionalProperties":false},"nearbyText":{"type":"string","maxLength":100000}},"required":["schemaVersion","kind","id","selectionMode","source","renderer","createdAt","locator","image"],"additionalProperties":false,"description":"Native XLSX current-viewport region PNG with matching original worksheet identity and pinned upload bytes. Runtime also limits PNG to4194304 pixels/8MiB and validates optional anchor bounds."},
       "DocxRegionView": {"type":"object","properties":{"protocol":{"const":1},"width":{"type":"number","exclusiveMinimum":0,"maximum":33554432},"height":{"type":"number","exclusiveMinimum":0,"maximum":33554432},"section":{"type":"integer","minimum":1,"maximum":50000}},"required":["protocol","width","height","section"],"additionalProperties":false,"description":"Fixed docx-preview 0.4.0 section index and unzoomed section border-box dimensions. Original layout is reconfirmed before region focus."},
       "PptxRegionView": {"type":"object","properties":{"protocol":{"const":1},"width":{"type":"number","exclusiveMinimum":0,"maximum":33554432},"height":{"type":"number","exclusiveMinimum":0,"maximum":33554432},"slideNumber":{"type":"integer","minimum":1,"maximum":50000}},"required":["protocol","width","height","slideNumber"],"additionalProperties":false,"description":"Fixed docx-preview 0.4.0 section index and unzoomed section border-box dimensions. Original layout is reconfirmed before region focus."},
       "PptxRegionSelectionReference": {"type":"object","properties":{"schemaVersion":{"const":1},"kind":{"const":"content-reference"},"id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"selectionMode":{"const":"region"},"source":{"$ref":"#/components/schemas/PptxReferenceSource"},"renderer":{"type":"object","properties":{"id":{"const":"pptx"},"backend":{"const":"builtin"},"locatorQuality":{"const":"visual"}},"required":["id","backend","locatorQuality"],"additionalProperties":false},"createdAt":{"type":"string"},"locator":{"type":"object","properties":{"surface":{"const":"slide"},"slideNumber":{"type":"integer","minimum":1,"maximum":50000},"rect":{"$ref":"#/components/schemas/FileReferenceRect"}},"required":["surface","slideNumber","rect"],"additionalProperties":false},"image":{"type":"object","properties":{"name":{"type":"string","minLength":1,"maxLength":255},"mimeType":{"const":"image/png"},"width":{"type":"integer","minimum":1,"maximum":4096},"height":{"type":"integer","minimum":1,"maximum":4096},"sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"}},"required":["name","mimeType","width","height","sha256"],"additionalProperties":false},"nearbyText":{"type":"string","maxLength":100000}},"required":["schemaVersion","kind","id","selectionMode","source","renderer","createdAt","locator","image"],"additionalProperties":false,"description":"Native PPTX visual region PNG. Runtime also requires matching original slide number, source/PNG identity and at most4194304 image pixels."},
@@ -57373,6 +57375,33 @@
                 "text_view"
               ]
             }
+          },
+          {
+            "properties": {
+              "reference": {
+                "$ref": "#/components/schemas/XlsxRegionSelectionReference"
+              },
+              "rotation": {
+                "const": 0
+              },
+              "imageBytes": {
+                "maximum": 8388608
+              },
+              "region_view": {
+                "$ref": "#/components/schemas/XlsxRegionView"
+              }
+            },
+            "required": [
+              "rotation",
+              "imageBytes",
+              "image_artifact",
+              "region_view"
+            ],
+            "not": {
+              "required": [
+                "text_view"
+              ]
+            }
           }
         ],
         "allOf": [
@@ -57401,6 +57430,16 @@
                     },
                     "region_view": {
                       "$ref": "#/components/schemas/PptxRegionView"
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "reference": {
+                      "$ref": "#/components/schemas/XlsxRegionSelectionReference"
+                    },
+                    "region_view": {
+                      "$ref": "#/components/schemas/XlsxRegionView"
                     }
                   }
                 }
