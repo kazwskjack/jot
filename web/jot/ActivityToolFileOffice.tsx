@@ -271,8 +271,15 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
  const root=useRef<HTMLElement>(null),active=useRef<AbortController|null>(null);
  const [state,setState]=useState<{identity:string;page?:Page;error?:string}>(),[revision,setRevision]=useState(0);
  const [visualState,setVisualState]=useState<{identity:string;enabled:boolean}>();
+ const [fullscreen,setFullscreen]=useState(false),[displayError,setDisplayError]=useState('');
+ const [fullscreenPending,setFullscreenPending]=useState(false),fullscreenRequest=useRef(false);
  const visual=visualState?.identity===identity?visualState.enabled:props.officeTextFocus?.value.text_view===2||!!props.officeRegionFocus;
- useEffect(()=>{root.current?.focus();root.current?.scrollIntoView({block:'nearest'});},[identity]);
+ useEffect(()=>{
+  const changed=()=>setFullscreen(!!root.current&&window.document.fullscreenElement===root.current);
+  window.document.addEventListener('fullscreenchange',changed);changed();
+  return()=>window.document.removeEventListener('fullscreenchange',changed);
+ },[]);
+ useEffect(()=>{setDisplayError('');root.current?.focus();root.current?.scrollIntoView({block:'nearest'});},[identity]);
  useEffect(()=>{
   const controller=new AbortController();active.current=controller;setState({identity});
   const load=async()=>{
@@ -299,10 +306,28 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
   return()=>{controller.abort();if(active.current===controller)active.current=null;};
  },[identity,revision]);
  const current=state?.identity===identity?state:undefined;
+ const loading=!current||!current.page&&!current.error;
+ const refresh=()=>{
+  if(taskDraftScope()!==owner)return;
+  active.current?.abort();setState({identity});setRevision(value=>value+1);
+ };
+ const toggleFullscreen=async()=>{
+  const element=root.current;if(!element||taskDraftScope()!==owner||fullscreenRequest.current)return;
+  fullscreenRequest.current=true;setFullscreenPending(true);setDisplayError('');
+  try{
+   if(window.document.fullscreenElement===element)await window.document.exitFullscreen();else await element.requestFullscreen();
+  }catch{if(root.current===element&&taskDraftScope()===owner)setDisplayError('Office全屏暂不可用，请重试。');}
+  finally{fullscreenRequest.current=false;if(root.current===element)setFullscreenPending(false);}
+ };
  return <section ref={root} tabIndex={-1} className="jot-activity-content jot-office-preview" aria-label="原Office文件结构化内容">
   <h4>{file.path} · 版本 {file.version}</h4>
+  <nav aria-label="Office查看器工具栏" data-chat-search-ignore>
+   <button type="button" aria-pressed={fullscreen} disabled={fullscreenPending} onClick={()=>void toggleFullscreen()}>{fullscreen?'退出全屏':'全屏查看Office文件'}</button>
+   <button type="button" disabled={loading} onClick={refresh}>重新读取固定版本</button>
+  </nav>
+  {displayError&&<p role="alert">{displayError}</p>}
   <ActivityToolFileBytes {...props}/>
-  {(!current||!current.page&&!current.error)&&<p role="status">正在核对原版本并解析Office内容… <button type="button" onClick={()=>{active.current?.abort();setState({identity,error:'Office读取已取消'});}}>取消读取</button></p>}
+  {loading&&<p role="status">正在核对原版本并解析Office内容… <button type="button" onClick={()=>{active.current?.abort();setState({identity,error:'Office读取已取消'});}}>取消读取</button></p>}
   {current?.page&&<>
    <p>原文件结构化内容 · {current.page.engine.name} {current.page.engine.version}</p>
    {current.page.document.truncated&&<p role="status">解析结果已截断，当前内容有未覆盖部分。可下载原固定版本查看完整文件。</p>}
@@ -317,6 +342,6 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
     ?<ActivityToolFileDocx key={identity+':'+revision} {...props}/>
     :<section className="jot-office-content" data-chat-search-content={JSON.stringify(['listed-office',identity])}><OfficeContent key={identity+':'+revision} value={current.page.document} source={props} officeFocus={props.officeFocus} officeTextFocus={props.officeTextFocus?.value.text_view===2?undefined:props.officeTextFocus}/></section>}
   </>}
-  {current?.error&&<p role="alert">{current.error} <button type="button" onClick={()=>setRevision(value=>value+1)}>重试读取</button></p>}
+  {current?.error&&<p role="alert">{current.error} <button type="button" onClick={refresh}>重试读取</button></p>}
  </section>;
 }
