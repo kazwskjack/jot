@@ -1,3 +1,5 @@
+// Selection context bounds adapted from PilotDeck 783499ff SpreadsheetInteractivePreview.tsx.
+// AGPL-3.0 terms retained at packages/session-adapter/runtime-patches/PILOTDECK-AGPL-3.0.txt.
 import OfficeTextReferenceAction from './OfficeTextReferenceAction';
 import {officeTextView,resolveOfficeTextReference} from './office-text-reference';
 import {cellRangeCoordinates} from '../../packages/gateway/src/messages/content-reference.js';
@@ -10,7 +12,7 @@ import ActivityToolFileBytes from './ActivityToolFileBytes';
 import ActivityToolFileDocx from './ActivityToolFileDocx';
 import ActivityToolFilePptx from './ActivityToolFilePptx';
 import type {ListedFilePreviewSource} from './activity-file-preview-client';
-import {officePreviewFormat,normalizeOfficePreviewContent,type OfficeDocumentPreview} from '../../packages/gateway/src/artifacts/document-preview-content';
+import {officePreviewFormat,normalizeOfficePreviewContent,type OfficeDocumentPreview,type SpreadsheetRawValue} from '../../packages/gateway/src/artifacts/document-preview-content';
 
 type VisualAdmission={protocol:1;ready:boolean;reason?:'source_limit'|'format_invalid'|'source_unverified'};
 type Page={document_protocol:1;conversation_id:string;run_id:string;activity_id:string;result_sha256:string;
@@ -34,6 +36,25 @@ function cellAddress(column:number,row:number){
  }
  return letters+row;
 }
+function spreadsheetReferenceContext(sheet:Extract<OfficeDocumentPreview,{kind:'xlsx'}>['sheets'][number],truncated:boolean,range:ReturnType<typeof cellRangeCoordinates>){
+ const matrix=(top:number,left:number,rows:number,columns:number)=>{
+  const result:string[][]=[];
+  for(let row=0;row<rows;row++){
+   const values:string[]=[];
+   for(let column=0;column<columns;column++){
+    const cell=sheet.cells[cellAddress(left+column,top+row)];
+    if(!cell&&truncated)return undefined;
+    values.push(cell?.value??'');
+   }
+   result.push(values);
+  }
+  return result;
+ };
+ const headerRows=Math.min(2,range.top-1),top=Math.max(1,range.top-1),left=Math.max(1,range.left-1);
+ const headers=headerRows?matrix(range.top-headerRows,range.left,headerRows,Math.min(range.columns,30)):undefined;
+ const surroundingValues=matrix(top,left,Math.min(range.bottom-top+2,20,1048576-top+1),Math.min(range.right-left+2,30,16384-left+1));
+ return {headers,surroundingValues,incomplete:headerRows>0&&!headers||!surroundingValues};
+}
 function SpreadsheetContent({value,source,officeFocus}:{value:Extract<OfficeDocumentPreview,{kind:'xlsx'}>;source:ListedFilePreviewSource;officeFocus?:OfficeCellFocus}){
  const context=useContext(FileTextReferenceContext),owner=taskDraftScope();
  const root=useRef<HTMLElement>(null),jumped=useRef(false);
@@ -52,10 +73,14 @@ function SpreadsheetContent({value,source,officeFocus}:{value:Extract<OfficeDocu
     for(const [columnIndex,display]of row.entries()){
      const cell=sheet.cells[cellAddress(range.left+columnIndex,range.top+rowIndex)];
      if(!cell&&value.truncated||(cell?.value??'')!==display
-      ||snapshot.formulas&&(cell?.formula??'')!==snapshot.formulas[rowIndex][columnIndex])confirmed=false;
+      ||snapshot.formulas&&(cell?.formula??'')!==snapshot.formulas[rowIndex][columnIndex]
+      ||snapshot.rawValues&&(cell&&!Object.hasOwn(cell,'raw_value')||JSON.stringify(cell?cell.raw_value:null)!==JSON.stringify(snapshot.rawValues[rowIndex][columnIndex])))confirmed=false;
     }
    }
   }
+  const context=spreadsheetReferenceContext(sheet,value.truncated,cellRangeCoordinates(ref.locator.activeRange));
+  if(ref.headers&&JSON.stringify(ref.headers)!==JSON.stringify(context.headers)
+   ||ref.surroundingValues&&JSON.stringify(ref.surroundingValues)!==JSON.stringify(context.surroundingValues))confirmed=false;
   return {confirmed,index,address:ref.locator.activeRange.split(':')[0]};
  },[value,source,officeFocus,owner]);
  const [part,setPart]=useState(focused?.index??0);
@@ -87,34 +112,41 @@ function SpreadsheetContent({value,source,officeFocus}:{value:Extract<OfficeDocu
  const capture=(ranges:string[])=>{
   if(!context||disabled||taskDraftScope()!==owner||!sheet?.name||!ranges.length)return;
   let snapshots:CellRangeSnapshot[];
+  let rawUnavailable=false;
   try{
    snapshots=ranges.map(range=>{
     let dimensions:ReturnType<typeof cellRangeCoordinates>;
     try{dimensions=cellRangeCoordinates(range);}catch{throw Error('单元格范围无效，请使用A1或A1:C10等范围。');}
     const rows=Math.min(dimensions.rows,100),columns=Math.min(dimensions.columns,50);
-    const displayValues:string[][]=[],formulas:string[][]=[];
+    const displayValues:string[][]=[],formulas:string[][]=[],rawValues:SpreadsheetRawValue[][]=[];
+    let rawComplete=true;
     for(let row=0;row<rows;row++){
-     const values:string[]=[],expressions:string[]=[];
+     const values:string[]=[],expressions:string[]=[],raw:SpreadsheetRawValue[]=[];
      for(let column=0;column<columns;column++){
       const address=cellAddress(dimensions.left+column,dimensions.top+row),cell=sheet.cells[address];
       if(!cell&&value.truncated)throw Error(`当前解析尚未覆盖${address}，无法确认该单元格为空，请缩小范围或读取完整来源。`);
       values.push(cell?.value??'');expressions.push(cell?.formula??'');
+      if(cell&&!Object.hasOwn(cell,'raw_value'))rawComplete=false;
+      raw.push(cell?.raw_value??null);
      }
-     displayValues.push(values);formulas.push(expressions);
+     displayValues.push(values);formulas.push(expressions);rawValues.push(raw);
     }
-    return {range,displayValues,formulas,rowCount:dimensions.rows,columnCount:dimensions.columns,
+    if(!rawComplete)rawUnavailable=true;
+    return {range,displayValues,formulas,...(rawComplete?{rawValues}:{}),rowCount:dimensions.rows,columnCount:dimensions.columns,
      truncated:value.truncated||rows<dimensions.rows||columns<dimensions.columns};
    });
   }catch(error){setNotice(error instanceof Error?error.message:'选区快照尚未完成核对');return;}
+  const nearby=spreadsheetReferenceContext(sheet,value.truncated,cellRangeCoordinates(ranges[0]));
   const reference=createCellRangeContentReference({
    source:{relativePath:source.file.path,fileName:source.file.path.split('/').at(-1)!,mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     revision:{id:String(source.file.version),sha256:source.file.sha256,size:source.file.size}},
    renderer:{id:'xlsx',backend:'builtin',locatorQuality:'semantic'},
    locator:{surface:'sheet',sheetId:`sheet-${part}`,sheetName:sheet.name,ranges:[...ranges],activeRange:ranges[0]},
-   cells:snapshots,
+   cells:snapshots,...(nearby.headers?{headers:nearby.headers}:{}),...(nearby.surroundingValues?{surroundingValues:nearby.surroundingValues}:{}),
   });
   if(context.onAdd({conversationId:source.conversationId,runId:source.runId,activityId:source.activityId,resultSha:source.resultSha,file:{path:source.file.path,version:source.file.version,sha256:source.file.sha256,size:source.file.size},owner,reference})){
-   setSelected([]);setRangeDraft('');anchor.current=null;drag.current=undefined;setNotice('单元格引用已加入当前对话草稿。');
+   setSelected([]);setRangeDraft('');anchor.current=null;drag.current=undefined;
+   setNotice('单元格引用已加入当前对话草稿。'+(rawUnavailable?' 部分原保存值尚未确认，相关选区未附原值矩阵。':'')+(nearby.incomplete?' 部分上下文尚未覆盖，未附对应上下文矩阵。':''));
   }else setNotice('单元格引用尚未保存，请检查草稿状态或减少选中的内容。');
  };
  const chooseCell=(row:number,column:number,extend:boolean)=>{
@@ -134,7 +166,7 @@ function SpreadsheetContent({value,source,officeFocus}:{value:Extract<OfficeDocu
   try{return cellRangeCoordinates(rangeDraft.trim().toUpperCase());}catch{return undefined;}
  },[rangeDraft]);
  return <section ref={root} aria-label="原工作表单元格">
-  {officeFocus&&<p role="status">{focused?.confirmed?(value.truncated||officeFocus.value.reference.cells.some(snapshot=>snapshot.truncated)?'已核对原引用保存的快照片段，当前解析或原选区存在截断。':'已核对原引用工作表、显示值及保存的公式。'):'原引用选区尚未完成核对，请对照原引用快照。'}</p>}
+  {officeFocus&&<p role="status">{focused?.confirmed?(value.truncated||officeFocus.value.reference.cells.some(snapshot=>snapshot.truncated)?'已核对原引用保存的快照片段，当前解析或原选区存在截断。':'已核对原引用工作表、保存值、公式及附带的原值与上下文。'):'原引用选区尚未完成核对，请对照原引用快照。'}</p>}
   <label>工作表 <select value={part} onChange={event=>{setPart(Number(event.target.value));setPage(0);setSelected([]);setNotice('');setRangeView(undefined);setRangeDraft('A1:J20');setRangeRow(0);setRangeColumn(0);anchor.current=null;drag.current=undefined;}}>
    {value.sheets.map((sheet,index)=><option key={index} value={index}>{sheet.name||`工作表 ${index+1}`}</option>)}
   </select></label>
@@ -150,7 +182,7 @@ function SpreadsheetContent({value,source,officeFocus}:{value:Extract<OfficeDocu
    <button type="button" onClick={showRange}>查看范围</button>
    <button type="button" disabled={disabled||!sheet?.name||!rangeDraft.trim()} onClick={()=>capture([rangeDraft.trim().toUpperCase()])}>引用矩形选区</button>
    {rangeView&&<button type="button" onClick={()=>{setRangeView(undefined);drag.current=undefined;}}>返回单元格列表</button>}
-   <p>在选区表格中拖选，或用键盘选定起点后按住Shift选择终点。快照最多保留100行、50列，截断状态随引用保存。</p>
+   <p>在选区表格中拖选，或用键盘选定起点后按住Shift选择终点。快照最多保留100行、50列，截断状态随引用保存。已确认的原保存值随选区附带，上方行最多2行，周边上下文最多20行、30列。</p>
   </fieldset>
   {viewport?<>
    <table className="jot-sheet-grid"><caption>{sheet?.name||'工作表'} · {rangeView}</caption>
@@ -180,7 +212,7 @@ function SpreadsheetContent({value,source,officeFocus}:{value:Extract<OfficeDocu
    <Pager page={rangeColumn} count={Math.ceil(viewport.columns/10)} onChange={page=>{setRangeColumn(page);drag.current=undefined;}} label="矩形选区列翻页"/>
   </>:<>
   <table><caption>{sheet?.name||'工作表'} · 单元格与保存的公式</caption>
-   <thead><tr><th scope="col">引用</th><th scope="col">单元格</th><th scope="col">保存值</th><th scope="col">公式</th></tr></thead>
+   <thead><tr><th scope="col">引用</th><th scope="col">单元格</th><th scope="col">保存值</th><th scope="col">原保存值类型与内容</th><th scope="col">公式</th></tr></thead>
    <tbody>{cells.slice(page*50,(page+1)*50).map(([address,cell])=>{
     const position=cellRangeCoordinates(address);
     const original=focused?.confirmed&&focused.index===part&&ranges.some(range=>position.left>=range.left&&position.left<=range.right&&position.top>=range.top&&position.top<=range.bottom);
@@ -194,7 +226,7 @@ function SpreadsheetContent({value,source,officeFocus}:{value:Extract<OfficeDocu
         return [...values,address];
        });
       }}/></td>
-     <th scope="row">{address}</th><td><pre>{cell.value}</pre></td><td><code>{cell.formula===null?'':'='+cell.formula}</code></td>
+     <th scope="row">{address}</th><td><pre>{cell.value}</pre></td><td><code>{Object.hasOwn(cell,'raw_value')?JSON.stringify(cell.raw_value):'尚未确认'}</code></td><td><code>{cell.formula===null?'':'='+cell.formula}</code></td>
     </tr>;
    })}</tbody>
   </table>

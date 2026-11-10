@@ -59,6 +59,8 @@ export function FileReferenceDetails({value,file,ready}:{value:FileSourceReferen
    <p>图片区域 · {value.reference.image.name} · {value.reference.image.width} × {value.reference.image.height} · 图片摘要 <code>{value.reference.image.sha256}</code></p>
    {open&&file&&<RegionPreview file={file}/>}{ready===false&&<p role="status">截图附件尚未完成核对，请在附件区处理，或移除此引用。</p>}
   </>:isFileCells(value)?<pre>{JSON.stringify(value.reference.cells,null,2)}</pre>:<pre>{value.reference.selectedText}</pre>}
+  {isFileCells(value)&&value.reference.headers&&<><p>原选区上方行</p><pre>{JSON.stringify(value.reference.headers,null,2)}</pre></>}
+  {isFileCells(value)&&value.reference.surroundingValues&&<><p>原选区周边上下文</p><pre>{JSON.stringify(value.reference.surroundingValues,null,2)}</pre></>}
  </details>;
 }
 export function FileTextReferences({references,disabled,onChange,imageFile,resolveImage,onOpen}:{references:FileReference[];disabled:boolean;onChange:(references:FileReference[])=>void;imageFile:(entryId:string)=>File|undefined;resolveImage:(entryId:string)=>Artifact|undefined;onOpen:(value:FileReference)=>void}){

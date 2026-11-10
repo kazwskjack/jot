@@ -31,7 +31,7 @@ export async function readActivityFileDocument(db:DatabaseSync,reader:Pick<Workb
   await pipeline(Readable.from(writer.source.stream(signal)),createWriteStream(path,{flags:'wx',mode:0o600}),{signal});
   const engine=new FileEngineAdapter({python:process.env.GENERAL_AGENT_FILE_ENGINE_PYTHON?.trim()||'/usr/bin/python3',
    workerPath:process.env.GENERAL_AGENT_FILE_ENGINE_SCRIPT?.trim()||fileURLToPath(new URL('../../file-engine/worker.py',import.meta.url)),timeoutMs:30000});
-  const result=await engine.run({operation:'document.inspect',input_path:path,media_type:format.mediaType,job_dir:directory,request:format.kind==='xlsx'?{}:{[`verify_${format.kind}_visual`]:true}},
+  const result=await engine.run({operation:'document.inspect',input_path:path,media_type:format.mediaType,job_dir:directory,request:format.kind==='xlsx'?{include_xlsx_raw:true}:{[`verify_${format.kind}_visual`]:true}},
    {signal,maxOutputBytes:2*1024*1024});
   signal.throwIfAborted();
   if(result.output_path||!result.engine||typeof result.engine.name!=='string'||result.engine.name.length>200

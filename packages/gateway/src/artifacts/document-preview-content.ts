@@ -91,9 +91,11 @@ export function formatDocumentReadContent(mediaType:unknown,content:unknown,maxC
 }
 
 
+export type SpreadsheetRawValue=string|number|boolean|null;
+export type SpreadsheetPreviewCell={value:string;formula:string|null;raw_value?:SpreadsheetRawValue};
 export type OfficeDocumentPreview=
  |{kind:'docx';paragraphs:string[];tables:string[][][];truncated:boolean}
- |{kind:'xlsx';sheets:Array<{name:string;cells:Record<string,{value:string;formula:string|null}>}>;truncated:boolean}
+ |{kind:'xlsx';sheets:Array<{name:string;cells:Record<string,SpreadsheetPreviewCell>}>;truncated:boolean}
  |{kind:'pptx';slides:Array<{number:number;text:string}>;truncated:boolean};
 
 const officeTypes={
@@ -107,7 +109,17 @@ export function officePreviewFormat(path:string){
  return {kind:extension,mediaType:officeTypes[extension]};
 }
 
-/** Share the existing engine-content checks, and expose only display data. */
+function spreadsheetPreviewCell(cell:Record<string,unknown>):SpreadsheetPreviewCell{
+ const normalized:SpreadsheetPreviewCell={value:plainText(cell.value??''),formula:cell.formula==null?null:plainText(cell.formula)};
+ if(Object.hasOwn(cell,'raw_value')){
+  const raw=cell.raw_value;
+  if(raw!==null&&typeof raw!=='boolean'&&!(typeof raw==='number'&&Number.isFinite(raw))&&!(typeof raw==='string'&&raw.length<=100000))throw Error('DOCUMENT_PREVIEW_RESULT_INVALID');
+  normalized.raw_value=raw as SpreadsheetRawValue;
+ }
+ return normalized;
+}
+
+/** Share the existing engine-content checks, and expose bounded file data. */
 export function normalizeOfficePreviewContent(mediaType:string,content:unknown):OfficeDocumentPreview{
  const formatted=formatDocumentPreviewContent(mediaType,content);
  if(mediaType===officeTypes.docx){
@@ -119,7 +131,7 @@ export function normalizeOfficePreviewContent(mediaType:string,content:unknown):
   if(value.sheets.some(sheet=>sheet.name.length>512))throw Error('DOCUMENT_PREVIEW_RESULT_INVALID');
   const sheets=value.sheets.map((sheet:{name:string;cells:Record<string,Record<string,unknown>>})=>({
    name:sheet.name,cells:Object.fromEntries(Object.entries(sheet.cells).map(([address,cell])=>[
-    address,{value:plainText(cell.value??''),formula:cell.formula==null?null:plainText(cell.formula)},
+    address,spreadsheetPreviewCell(cell),
    ])),
   }));
   return {kind:'xlsx',sheets,truncated:formatted.truncated};

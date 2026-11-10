@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Confined file-engine process. One JSON request in, one JSON result out."""
-import hashlib, io, json, os, posixpath, re, shutil, struct, subprocess, sys, time, uuid, zipfile, zlib
+import hashlib, io, json, math, os, posixpath, re, shutil, struct, subprocess, sys, time, uuid, zipfile, zlib
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -232,8 +232,22 @@ def xlsx_cell(cell: ET.Element, shared: list) -> dict:
     return {"value": raw, "formula": formula.text if formula is not None else None}
 
 
-def xlsx_preview(path: Path) -> dict:
+def xlsx_preview_raw_value(cell: ET.Element, decoded: str) -> dict:
+    kind = cell.attrib.get("t", "n")
+    if kind in {"s", "inlineStr", "str", "e"}: return {"raw_value": decoded}
+    if kind == "b":
+        return {"raw_value": decoded == "1"} if decoded in {"0", "1"} else {}
+    if kind != "n": return {}
+    if cell.find(S + "v") is None: return {"raw_value": None}
+    if not re.fullmatch(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?", decoded): return {}
+    try: number = float(decoded)
+    except (ValueError, OverflowError): return {}
+    return {"raw_value": number} if math.isfinite(number) else {}
+
+
+def xlsx_preview(path: Path, include_raw: bool = False) -> dict:
     sheets, total_cells = [], 0
+    raw_candidates = []
     remaining, truncated = DOCUMENT_PREVIEW_MAX_CHARS, False
     with safe_zip(path, DOCUMENT_PREVIEW_MAX_ZIP_BYTES, DOCUMENT_PREVIEW_MAX_ZIP_ENTRY_BYTES) as archive:
         shared, entries = xlsx_structure(archive, preview_xml)
@@ -249,17 +263,28 @@ def xlsx_preview(path: Path) -> dict:
                 decoded = xlsx_cell(cell, shared); raw = decoded["value"]
                 if cell.attrib.get("t") == "b": raw = "TRUE" if raw == "1" else "FALSE" if raw == "0" else raw
                 raw, remaining, cut = take_preview_text(raw, remaining)
+                raw_value = xlsx_preview_raw_value(cell, decoded["value"]) if include_raw and not cut else {}
                 formula_text = decoded["formula"]
                 if formula_text is not None:
                     formula_text, remaining, formula_cut = take_preview_text(formula_text, remaining)
                     cut = cut or formula_cut
                 cells[address] = {"value": raw, "formula": formula_text}
+                if raw_value: raw_candidates.append((cells[address], raw_value))
                 total_cells += 1; truncated = truncated or cut
                 if total_cells >= 5_000 or remaining <= 0:
                     truncated = True; break
             sheets.append({"name": name, "cells": cells})
             if total_cells >= 5_000 or remaining <= 0: break
-    return {"sheets": sheets, "truncated": truncated}
+    content = {"sheets": sheets, "truncated": truncated}
+    if include_raw:
+        # Optional metadata cannot consume the existing display/formula budget or output headroom.
+        encoded_size = len(json.dumps(content, ensure_ascii=True, separators=(",", ":")))
+        remaining_raw = min(65536, max(0, 2 * 1024 * 1024 - 65536 - encoded_size))
+        for target, raw_value in raw_candidates:
+            cost = len(json.dumps(raw_value, ensure_ascii=True, separators=(",", ":"))) - 1
+            if cost <= remaining_raw:
+                target.update(raw_value); remaining_raw -= cost
+    return content
 
 
 def pptx_preview(path: Path) -> dict:
@@ -279,9 +304,9 @@ def pptx_preview(path: Path) -> dict:
             if remaining <= 0: truncated = True; break
     return {"slides": slides, "truncated": truncated}
 
-def document_preview(path: Path, media_type: str) -> dict:
+def document_preview(path: Path, media_type: str, include_xlsx_raw: bool = False) -> dict:
     if "wordprocessingml" in media_type: content = docx_preview(path)
-    elif "spreadsheetml" in media_type: content = xlsx_preview(path)
+    elif "spreadsheetml" in media_type: content = xlsx_preview(path, include_xlsx_raw)
     elif "presentationml" in media_type: content = pptx_preview(path)
     elif media_type == "application/pdf": content = pdf_preview(path)
     else: fail("UNSUPPORTED_FORMAT_OPERATION")
@@ -604,7 +629,7 @@ def execute(req: dict) -> dict:
     input_path = safe_path(str(req.get("input_path", "")), job_dir if False else str(Path(req.get("input_path", ".")).resolve().parent))
     media_type = str(req.get("media_type", ""))
     if operation in {"document.inspect", "document.read"}:
-        content = document_preview(input_path, media_type) if operation == "document.inspect" else inspect(input_path, media_type)
+        content = document_preview(input_path, media_type, req.get("request", {}).get("include_xlsx_raw") is True) if operation == "document.inspect" else inspect(input_path, media_type)
         engine = "pypdf" if media_type == "application/pdf" else "python_ooxml"
         result = {"ok": True, "engine": {"name": engine, "version": sys.version.split()[0]}, "content": content, "warnings": []}
         visual_kind = "docx" if "wordprocessingml" in media_type else "pptx" if "presentationml" in media_type else None
