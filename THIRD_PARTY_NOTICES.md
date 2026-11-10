@@ -251,3 +251,9 @@ call/result observation receipts and member/parent bindings. Public source pages
 retain original event/content digests and native grep line-preview scope. The
 existing result viewer, original actor/BFF controls and original SDK MIT integration
 remain the basis for this source route.
+
+
+Native retained-source search reuses the original owned history boundary and
+source proof above. It scans bounded retained chunks once, verifies the complete
+source digest, and reopens first-hit text under the same historical activity
+snapshot. Original native grep line-preview scope is preserved in coverage.

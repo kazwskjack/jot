@@ -1,10 +1,11 @@
 import {createHash} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
 import type {FastifyInstance} from 'fastify';
-import type {ActivityToolResultPage} from '../../contracts/types.ts';
+import type {ActivityToolResultPage,ActivityToolResultSearchPage,ActivityToolResultMatch} from '../../contracts/types.ts';
 import {withReadTransaction} from '../db/database.ts';
 import {canonicalJson} from '../db/canonical-json.ts';
-import {readOriginalActivity} from './activity-tool-result.ts';
+import {readOriginalActivity,type NativeSearchCandidate} from './activity-tool-result.ts';
+import {readActivityHistory} from './activity-history.ts';
 import {readNativeMemberExecution} from '../workbench/native-member-owner-controls.ts';
 import {sessionProjectionId} from '../harness/session-event-projector.ts';
 import {SessionAdapterError} from '../harness/session-controller-client.ts';
@@ -15,14 +16,17 @@ const MAX_CHARS = 32 * 1024 * 1024;
 const hash = (value:unknown) => createHash('sha256').update(canonicalJson(value)).digest('hex');
 type Input = Record<string,unknown>;
 export type NativeSearchSourceRequest = {call_seq:number;tool_name:'glob'|'grep';offset_chars:number;source_sha256?:string};
+export type NativeSearchSourceSearchRequest = Omit<NativeSearchSourceRequest,'offset_chars'>&{q:string};
 export interface NativeSearchSourceClient {
   readNativeSearchSource(ownerId:string,sessionId:string,input:NativeSearchSourceRequest,signal?:AbortSignal):Promise<unknown>;
+  searchNativeSearchSource?(ownerId:string,sessionId:string,input:NativeSearchSourceSearchRequest,signal?:AbortSignal):Promise<unknown>;
 }
 
 /** Original activity, native run binding and child receipts form one owned snapshot. */
-function source(db:DatabaseSync,owner:string,conversationId:string,runId:string,activityId:string) {
+function source(db:DatabaseSync,owner:string,conversationId:string,runId:string,activityId:string,asOfSeq?:string) {
   return withReadTransaction(db,()=>{
-    const activity = readOriginalActivity(db,owner,conversationId,activityId,runId);
+    const activity = readOriginalActivity(db,owner,conversationId,activityId,runId,asOfSeq);
+    if(asOfSeq!==undefined)readActivityHistory(db,conversationId,{as_of_seq:asOfSeq,run_id:runId,limit:1});
     const detail = activity.detail as Input|undefined;
     const tool = detail?.tool_name, callSeq = detail?.native_search_call_seq, resultSeq = detail?.native_search_result_seq;
     if (!['search','subagent'].includes(String(activity.kind)) || activity.status !== 'succeeded'
@@ -65,8 +69,13 @@ function source(db:DatabaseSync,owner:string,conversationId:string,runId:string,
     }
     if (!sessionId) throw Error('activity_tool_result_not_found');
     return {sessionId,activity,tool:tool as 'glob'|'grep',callSeq:Number(callSeq),resultSeq:Number(resultSeq),callSha,resultSha,
-      identity:hash({owner,conversationId,runId,sessionId,activity,callSha:callSha??null,resultSha:resultSha??null})};
+      identity:hash({owner,conversationId,runId,sessionId,activity,callSha:callSha??null,resultSha:resultSha??null,...(asOfSeq?{asOfSeq}:{})})};
   });
+}
+
+function resultHash(original:ReturnType<typeof source>,response:Input) {
+  return hash({activity:original.identity,call:response.call_sha256,result:response.result_sha256,
+    source:response.source_sha256,bytes:response.source_bytes,scope:response.scope});
 }
 
 function page(value:unknown,expected:ReturnType<typeof source>,offset:number) {
@@ -94,6 +103,58 @@ function page(value:unknown,expected:ReturnType<typeof source>,offset:number) {
   return row as Input & {text:string;source_sha256:string;source_bytes:number;total_chars:number;scope:'all_paths'|'all_entries_with_native_line_previews';next_offset_chars?:number};
 }
 
+/** Search the same retained historical activity outside its original read transaction. */
+export async function searchNativeActivitySources(db:DatabaseSync,owner:string,base:ActivityToolResultSearchPage,
+  candidates:NativeSearchCandidate[],client:NativeSearchSourceClient|undefined,signal:AbortSignal):Promise<ActivityToolResultSearchPage> {
+  if(!client?.searchNativeSearchSource)return base;
+  const items=base.items.slice();
+  let unsearched=base.unsearched_results??0,inserted=0;
+  const pattern=new RegExp(`^(?:${base.q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')})$`,'iu');
+  for(const candidate of candidates){
+    signal.throwIfAborted();
+    const activity=candidate.activity,runId=String(activity.run_id),activityId=String(activity.activity_id);
+    try{
+      const original=source(db,owner,base.conversation_id,runId,activityId,base.as_of_seq);
+      if(hash(original.activity)!==hash(activity))throw Error('activity_tool_result_source_changed');
+      const raw=await client.searchNativeSearchSource(owner,original.sessionId,{call_seq:original.callSeq,
+        tool_name:original.tool,q:base.q},signal);
+      signal.throwIfAborted();
+      if(!raw||typeof raw!=='object'||Array.isArray(raw)||!Object.hasOwn(raw,'match'))throw Error('activity_tool_result_source_invalid');
+      const {match,...value}=raw as Input;
+      if(!Number.isSafeInteger(value.offset_chars)||Number(value.offset_chars)<0)throw Error('activity_tool_result_source_invalid');
+      const response=page(value,original,Number(value.offset_chars));
+      if(source(db,owner,base.conversation_id,runId,activityId,base.as_of_seq).identity!==original.identity)
+        throw Error('activity_tool_result_source_changed');
+      if(match===null){
+        if(response.text!==''||response.offset_chars!==response.total_chars)throw Error('activity_tool_result_source_invalid');
+      }else{
+        if(!match||typeof match!=='object'||Array.isArray(match))throw Error('activity_tool_result_source_invalid');
+        const found=match as Input,offset=Number(response.offset_chars);
+        if(Object.keys(found).sort().join(',')!=='match_offset_chars,match_text'||!Number.isSafeInteger(found.match_offset_chars)
+          ||Number(found.match_offset_chars)<offset||Number(found.match_offset_chars)-offset>61
+          ||typeof found.match_text!=='string'||!found.match_text||found.match_text.length>200||!pattern.test(found.match_text)
+          ||response.text.length>400||response.text.slice(Number(found.match_offset_chars)-offset,
+            Number(found.match_offset_chars)-offset+found.match_text.length)!==found.match_text)throw Error('activity_tool_result_source_invalid');
+        const hit:ActivityToolResultMatch={run_id:runId,activity_id:activityId,tool_name:original.tool,
+          title:typeof activity.title==='string'?activity.title.slice(0,256):original.tool,native_source:true,
+          result_sha256:resultHash(original,response),text_sha256:response.source_sha256,offset_chars:offset,
+          match_offset_chars:Number(found.match_offset_chars),match_text:found.match_text,excerpt:response.text};
+        const index=items.findIndex(item=>item.run_id===runId&&item.activity_id===activityId);
+        if(index>=0)items[index]=hit;
+        else {items.splice(candidate.index+inserted,0,hit);inserted++;}
+      }
+      if(original.tool==='glob')unsearched=Math.max(0,unsearched-1);
+    }catch(error){
+      signal.throwIfAborted();
+      if(error instanceof SessionAdapterError)continue;
+      if(error instanceof Error&&['activity_tool_result_not_found','activity_tool_result_pending','activity_tool_result_source_changed',
+        'activity_tool_result_source_invalid','native_member_not_found','native_member_execution_invalid'].includes(error.message))continue;
+      throw error;
+    }
+  }
+  return {...base,items,unsearched_results:unsearched};
+}
+
 export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,client}:{
   db:DatabaseSync;actor(request:{headers:Record<string,unknown>}):string;client?:NativeSearchSourceClient|undefined;
 }) {
@@ -105,28 +166,29 @@ export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,c
     if (request.raw.aborted || reply.raw.destroyed) disconnected();
     try {
       const owner = actor(request), {conversationId,activityId} = request.params as {conversationId:string;activityId:string};
-      const query = request.query as Input, runId = query.run_id, offsetValue = query.offset_chars ?? '0';
+      const query = request.query as Input, runId = query.run_id, offsetValue = query.offset_chars ?? '0', asOfSeq=query.as_of_seq;
       if (!ID.test(conversationId) || !ID.test(activityId) || typeof runId !== 'string' || !ID.test(runId)
-        || Object.keys(query).some(key=>!['run_id','offset_chars','result_sha256','text_sha256'].includes(key))
+        || Object.keys(query).some(key=>!['run_id','offset_chars','result_sha256','text_sha256','as_of_seq'].includes(key))
+        || asOfSeq!==undefined&&(typeof asOfSeq!=='string'||!/^(0|[1-9]\d{0,18})$/.test(asOfSeq)||BigInt(asOfSeq)>9223372036854775807n)
         || typeof offsetValue !== 'string' || !/^(0|[1-9]\d{0,7})$/.test(offsetValue)
         || ['result_sha256','text_sha256'].some(key=>query[key] !== undefined && (typeof query[key] !== 'string' || !SHA.test(query[key] as string))))
         throw Error('invalid_activity_tool_result_query');
       const offset = Number(offsetValue);
       if (offset > MAX_CHARS || offset > 0 && (query.result_sha256 === undefined || query.text_sha256 === undefined))
         throw Error('invalid_activity_tool_result_query');
-      const original = source(db,owner,conversationId,runId,activityId);
+      const original = source(db,owner,conversationId,runId,activityId,asOfSeq as string|undefined);
       if (!client) throw Error('activity_tool_result_source_invalid');
       const signal = AbortSignal.any([abort.signal,AbortSignal.timeout(20000)]);
       const response = page(await client.readNativeSearchSource(owner,original.sessionId,{call_seq:original.callSeq,
         tool_name:original.tool,offset_chars:offset,...(query.text_sha256 ? {source_sha256:query.text_sha256 as string} : {})},signal),original,offset);
       signal.throwIfAborted();
-      if (source(db,owner,conversationId,runId,activityId).identity !== original.identity) throw Error('activity_tool_result_source_changed');
-      const resultSha = hash({activity:original.identity,call:response.call_sha256,result:response.result_sha256,
-        source:response.source_sha256,bytes:response.source_bytes,scope:response.scope});
+      if (source(db,owner,conversationId,runId,activityId,asOfSeq as string|undefined).identity !== original.identity) throw Error('activity_tool_result_source_changed');
+      const resultSha = resultHash(original,response);
       if (query.result_sha256 !== undefined && query.result_sha256 !== resultSha
         || query.text_sha256 !== undefined && query.text_sha256 !== response.source_sha256) throw Error('activity_tool_result_source_changed');
       const result:ActivityToolResultPage = {conversation_id:conversationId,run_id:runId,activity_id:activityId,
         tool_name:original.tool,source:'native',operation:original.tool,source_truncated:original.tool === 'grep',
+        ...(asOfSeq!==undefined?{as_of_seq:asOfSeq as string}:{}),
         native_source_scope:response.scope,source_bytes:response.source_bytes,result_sha256:resultSha,text_sha256:response.source_sha256,
         text:response.text,offset_chars:offset,total_chars:response.total_chars,has_other_content:false,execution_authorized:false,
         ...(response.next_offset_chars !== undefined ? {next_offset_chars:response.next_offset_chars} : {})};

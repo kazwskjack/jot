@@ -1,5 +1,5 @@
 import React,{useEffect,useRef,useState} from 'react';
-import {abortableDelay,request,taskDraftScope} from './client';
+import {ApiError,abortableDelay,request,taskDraftScope} from './client';
 import ActivityToolResult from './ActivityToolResult';
 import type {ActivityToolResultMatch,ActivityToolResultSearchPage} from './types';
 import type {ActivityReveal} from './activity-presentation';
@@ -31,15 +31,21 @@ export default function ToolResultSearch({conversationId,runId,asOfSeq:latestSeq
    if(q.length>200)throw Error('原结果正文搜索词最多支持200个 UTF-16 单元。');
    if(!q||!sequence(asOfSeq)||!id.test(conversationId)||runId!==undefined&&!id.test(runId))throw Error('正文搜索范围尚未确认');
    await abortableDelay(300,signal);
-   let boundary=before;
+   let boundary=before,nativeSources=true;
    const seen=new Set<string>();
    while(!signal.aborted){
-    const params=new URLSearchParams({q,as_of_seq:asOfSeq,...(runId?{run_id:runId}:{}),...(boundary?{before_seq:boundary}:{})});
-    const page=await request<ActivityToolResultSearchPage>(`/conversations/${encodeURIComponent(conversationId)}/tool-result-search?${params}`,'GET',undefined,undefined,signal);
+    const params=new URLSearchParams({q,as_of_seq:asOfSeq,...(nativeSources?{native_sources:'true'}:{}),...(runId?{run_id:runId}:{}),...(boundary?{before_seq:boundary}:{})});
+    let page:ActivityToolResultSearchPage;
+    try{page=await request<ActivityToolResultSearchPage>(`/conversations/${encodeURIComponent(conversationId)}/tool-result-search?${params}`,'GET',undefined,undefined,signal);}
+    catch(error){
+     if(!(error instanceof ApiError)||error.status!==400||!nativeSources)throw error;
+     nativeSources=false;params.delete('native_sources');
+     page=await request<ActivityToolResultSearchPage>(`/conversations/${encodeURIComponent(conversationId)}/tool-result-search?${params}`,'GET',undefined,undefined,signal);
+    }
     if(signal.aborted)return;
     const through=boundary===undefined?BigInt(asOfSeq):BigInt(boundary)-1n,coverage=page?.coverage;
     if(taskDraftScope()!==owner||!page||page.conversation_id!==conversationId||page.run_id!==runId||page.as_of_seq!==asOfSeq||page.q!==q
-     ||page.execution_authorized!==false||!Array.isArray(page.items)||page.items.length>8
+     ||page.execution_authorized!==false||page.native_sources!==(nativeSources?true:undefined)||!Array.isArray(page.items)||page.items.length>8
      ||!Number.isSafeInteger(page.scanned_upserts)||page.scanned_upserts<page.items.length||page.scanned_upserts>8
      ||!Number.isSafeInteger(page.unavailable_results)||page.unavailable_results<0||page.unavailable_results+page.items.length>page.scanned_upserts
      ||page.unsearched_results!==undefined&&(!Number.isSafeInteger(page.unsearched_results)||page.unsearched_results<0||page.unsearched_results>page.scanned_upserts)
@@ -53,11 +59,12 @@ export default function ToolResultSearch({conversationId,runId,asOfSeq:latestSeq
     for(const hit of page.items){
      if(!hit||typeof hit.run_id!=='string'||!id.test(hit.run_id)||typeof hit.activity_id!=='string'||!id.test(hit.activity_id)||runId!==undefined&&hit.run_id!==runId
       ||typeof hit.tool_name!=='string'||!(['jot_workspace','glob','grep'].includes(hit.tool_name)||/^jot_mcp_[a-z0-9_]{1,50}$/.test(hit.tool_name))
+      ||hit.native_source!==undefined&&(hit.native_source!==true||!nativeSources||!['glob','grep'].includes(hit.tool_name))
       ||typeof hit.title!=='string'||hit.title.length>256||typeof hit.result_sha256!=='string'||!sha.test(hit.result_sha256)
       ||hit.text_sha256!==undefined&&(typeof hit.text_sha256!=='string'||!sha.test(hit.text_sha256))
       ||['glob','grep'].includes(hit.tool_name)&&hit.text_sha256===undefined
-      ||!Number.isSafeInteger(hit.offset_chars)||hit.offset_chars<0||hit.offset_chars>6*1048576
-      ||!Number.isSafeInteger(hit.match_offset_chars)||hit.match_offset_chars>6*1048576||hit.match_offset_chars<hit.offset_chars||hit.match_offset_chars-hit.offset_chars>61
+      ||!Number.isSafeInteger(hit.offset_chars)||hit.offset_chars<0||hit.offset_chars>(hit.native_source?33554432:6*1048576)
+      ||!Number.isSafeInteger(hit.match_offset_chars)||hit.match_offset_chars>(hit.native_source?33554432:6*1048576)||hit.match_offset_chars<hit.offset_chars||hit.match_offset_chars-hit.offset_chars>61
       ||typeof hit.match_text!=='string'||!hit.match_text.length||hit.match_text.length>200||!pattern.test(hit.match_text)
       ||typeof hit.excerpt!=='string'||hit.excerpt.length>400
       ||hit.excerpt.slice(hit.match_offset_chars-hit.offset_chars,hit.match_offset_chars-hit.offset_chars+hit.match_text.length)!==hit.match_text
@@ -84,9 +91,9 @@ export default function ToolResultSearch({conversationId,runId,asOfSeq:latestSeq
    <h4>原工具结果正文</h4>
    <button type="button" onClick={()=>{setSnapshot({scopeIdentity,seq:latestSeq});setCursor({identity,previous:[]});setRevision(value=>value+1);}}>刷新正文搜索</button>
    <p role="status">{current?.loading?'正在搜索原结果正文':`本批命中 ${current?.items.length??0} 条工具正文`} · 本批已检查 {current?.scanned??0} 条步骤记录</p>
-   <small>搜索固定历史边界内已留存的 MCP 文本、原文件列表及文件、网页读取回执和来源可确认的文件变更差异。每条正文列出首处命中，可打开原结果继续查看。</small>
+   <small>搜索固定历史边界内已留存的 MCP 文本、原文件列表及文件、网页读取回执、原生大结果来源和来源可确认的文件变更差异。每条正文列出首处命中，可打开原结果继续查看。</small>
    {Boolean(current?.unavailable)&&<p role="status">本批有 {current!.unavailable} 条步骤暂无可确认的结果正文。</p>}
-   {Boolean(current?.unsearched)&&<p role="status">本批有 {current!.unsearched} 条结果含尚未纳入搜索的文件内容或后续列表记录。</p>}
+   {Boolean(current?.unsearched)&&<p role="status">本批有 {current!.unsearched} 条结果含尚未纳入搜索的文件内容、原生行预览范围或后续列表记录。</p>}
    {current?.gap&&<p role="status">原事件历史存在保留缺口，搜索覆盖当前可读取的记录。</p>}
    <ol>{current?.items.map(item=><li key={JSON.stringify([item.run_id,item.activity_id])}>
     <p>{item.title} · {item.tool_name}</p><p className="jot-history-search-excerpt">{item.excerpt}</p>
@@ -106,7 +113,7 @@ export default function ToolResultSearch({conversationId,runId,asOfSeq:latestSeq
    {hit&&<button type="button" onClick={()=>setSelected(undefined)}>关闭命中正文</button>}
   </div>
   {hit&&<ActivityToolResult key={JSON.stringify([identity,hit])} conversationId={conversationId}
-   target={{runId:hit.run_id,activityId:hit.activity_id,toolName:hit.tool_name,offset:hit.offset_chars,resultSha:hit.result_sha256,textSha:hit.text_sha256,
+   target={{...(hit.native_source?{nativeSource:true,asOfSeq}:{}),runId:hit.run_id,activityId:hit.activity_id,toolName:hit.tool_name,offset:hit.offset_chars,resultSha:hit.result_sha256,textSha:hit.text_sha256,
     match:{offset:hit.match_offset_chars,text:hit.match_text}}}/>}
  </section>;
 }

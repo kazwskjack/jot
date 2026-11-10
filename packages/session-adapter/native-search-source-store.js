@@ -103,6 +103,32 @@ export function createNativeSearchSourceStore({readIdentity}) {
     return value;
   }
 
+  async function scan(identity, key, expected, accept) {
+    const db = await database(identity, false);
+    check(identity);
+    db.exec('BEGIN');
+    try {
+      const value = metadata(db, key);
+      if (!isDeepStrictEqual(value, expected)) throw Error('native_search_source_changed');
+      const digest = createHash('sha256'), decoder = new TextDecoder('utf-8', {fatal: true, ignoreBOM: true});
+      let chars = 0;
+      const write = text => { accept(text); chars += text.length; };
+      const chunk = db.prepare('SELECT content AS data FROM native_search_source_chunks WHERE source_key=? AND chunk_index=?');
+      for (let offset = 0; offset < value.bytes; offset += 65536) {
+        const data = chunk.get(key, offset / 65536)?.data;
+        if (!(data instanceof Uint8Array) || data.length !== Math.min(65536, value.bytes - offset))
+          throw Error('native_search_source_store_invalid');
+        digest.update(data);
+        write(decoder.decode(data, {stream: true}));
+      }
+      write(decoder.decode());
+      if (digest.digest('hex') !== value.sha256 || chars !== value.chars) throw Error('native_search_source_store_invalid');
+      check(identity);
+      db.exec('COMMIT');
+      return chars;
+    } catch (error) { if (db.isTransaction) db.exec('ROLLBACK'); throw error; }
+  }
+
   return Object.freeze({
     async save(identity, key, value, content) {
       if (!SHA.test(key) || typeof content !== 'string' || Buffer.byteLength(content) > MAX_SOURCE_BYTES)
@@ -145,40 +171,55 @@ export function createNativeSearchSourceStore({readIdentity}) {
     async read(identity, key, expected, offset) {
       if (!SHA.test(key) || !Number.isSafeInteger(offset) || offset < 0 || offset > expected.chars)
         throw Error('native_search_source_offset_invalid');
-      const db = await database(identity, false);
-      check(identity);
-      db.exec('BEGIN');
-      try {
-        const value = metadata(db, key);
-        if (!isDeepStrictEqual(value, expected)) throw Error('native_search_source_changed');
-        const digest = createHash('sha256'), decoder = new TextDecoder('utf-8', {fatal: true, ignoreBOM: true});
-        let position = 0, text = '', complete = false;
-        const accept = part => {
-          if (!complete && position + part.length > offset) {
-            const start = Math.max(0, offset - position);
-            if (start > 0 && /[\uDC00-\uDFFF]/.test(part[start])) throw Error('native_search_source_offset_invalid');
-            let end = Math.min(part.length, start + PAGE_CHARS - text.length);
-            if (end < part.length && /[\uD800-\uDBFF]/.test(part[end - 1])) { end--; complete = true; }
-            text += part.slice(start, end);
-            if (text.length === PAGE_CHARS) complete = true;
-          }
-          position += part.length;
-        };
-        const chunk = db.prepare('SELECT content AS data FROM native_search_source_chunks WHERE source_key=? AND chunk_index=?');
-        for (let offsetBytes = 0; offsetBytes < value.bytes; offsetBytes += 65536) {
-          const data = chunk.get(key, offsetBytes / 65536)?.data;
-          if (!(data instanceof Uint8Array) || data.length !== Math.min(65536, value.bytes - offsetBytes))
-            throw Error('native_search_source_store_invalid');
-          digest.update(data);
-          accept(decoder.decode(data, {stream: true}));
+      let position = 0, text = '', complete = false;
+      const total = await scan(identity, key, expected, part => {
+        if (!complete && position + part.length > offset) {
+          const start = Math.max(0, offset - position);
+          if (start > 0 && /[\uDC00-\uDFFF]/.test(part[start])) throw Error('native_search_source_offset_invalid');
+          let end = Math.min(part.length, start + PAGE_CHARS - text.length);
+          if (end < part.length && /[\uD800-\uDBFF]/.test(part[end - 1])) { end--; complete = true; }
+          text += part.slice(start, end);
+          if (text.length === PAGE_CHARS) complete = true;
         }
-        accept(decoder.decode());
-        if (digest.digest('hex') !== value.sha256 || position !== value.chars) throw Error('native_search_source_store_invalid');
-        check(identity);
-        db.exec('COMMIT');
-        return {text, offset_chars: offset, total_chars: position,
-          ...(offset + text.length < position ? {next_offset_chars: offset + text.length} : {})};
-      } catch (error) { if (db.isTransaction) db.exec('ROLLBACK'); throw error; }
+        position += part.length;
+      });
+      return {text, offset_chars: offset, total_chars: total,
+        ...(offset + text.length < total ? {next_offset_chars: offset + text.length} : {})};
+    },
+    async search(identity, key, expected, q) {
+      if (!SHA.test(key) || typeof q !== 'string' || !q || q !== q.trim() || q.length > 200)
+        throw Error('native_search_source_invalid');
+      const pattern = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'iu');
+      const boundary = (text, offset) => offset > 0 && /[\uD800-\uDBFF]/.test(text[offset - 1])
+        && /[\uDC00-\uDFFF]/.test(text[offset]) ? offset - 1 : offset;
+      let position = 0, tail = '', found;
+      const total = await scan(identity, key, expected, part => {
+        if (found) {
+          if (!found.complete) {
+            const needed = found.match_offset_chars + found.match_text.length + 60 - found.offset_chars - found.excerpt.length;
+            found.excerpt += part.slice(0, needed);
+            found.complete = needed <= part.length;
+          }
+        } else {
+          const window = tail + part, base = position - tail.length, match = pattern.exec(window);
+          if (match) {
+            const start = boundary(window, Math.max(0, match.index - 60));
+            const end = boundary(window, Math.min(window.length, match.index + match[0].length + 60));
+            found = {offset_chars: base + start, match_offset_chars: base + match.index,
+              match_text: match[0], excerpt: window.slice(start, end),
+              complete: match.index + match[0].length + 60 <= window.length};
+          } else {
+            tail = window.slice(boundary(window, Math.max(0, window.length - q.length - 122)));
+          }
+        }
+        position += part.length;
+      });
+      if (!found) return {text: '', offset_chars: total, total_chars: total, match: null};
+      if (/[\uD800-\uDBFF]$/.test(found.excerpt)) found.excerpt = found.excerpt.slice(0, -1);
+      const end = found.offset_chars + found.excerpt.length;
+      return {text: found.excerpt, offset_chars: found.offset_chars, total_chars: total,
+        match: {match_offset_chars: found.match_offset_chars, match_text: found.match_text},
+        ...(end < total ? {next_offset_chars: end} : {})};
     },
     dispose() { disposed = true; connection?.db.close(); connection = undefined; },
   });

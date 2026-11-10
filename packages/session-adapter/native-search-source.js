@@ -60,17 +60,18 @@ export function createNativeSearchSource({readIdentity, agents, sessions, persis
       || eventHash(session.eventAt(call.seq)) !== metadata.call_sha256) throw Error('native_search_source_changed');
   }
 
-  async function readSource(ownerId, sessionId, input, signal) {
+  async function readSource(ownerId, sessionId, input, signal, search = false) {
     const identity = readIdentity();
     check(identity, signal);
     if (identity.ownerId !== ownerId) throw Error('native_search_source_forbidden');
-    const allowed = ['call_seq', 'tool_name', 'offset_chars', 'source_sha256'];
+    const allowed = search ? ['call_seq', 'tool_name', 'q', 'source_sha256'] : ['call_seq', 'tool_name', 'offset_chars', 'source_sha256'];
     if (!ID.test(sessionId) || !input || typeof input !== 'object' || Array.isArray(input)
       || Object.keys(input).some(key => !allowed.includes(key))
       || !Number.isSafeInteger(input.call_seq) || input.call_seq < 0 || !['glob', 'grep'].includes(input.tool_name)
-      || !Number.isSafeInteger(input.offset_chars) || input.offset_chars < 0
+      || (search ? typeof input.q !== 'string' || !input.q || input.q !== input.q.trim() || input.q.length > 200
+        : !Number.isSafeInteger(input.offset_chars) || input.offset_chars < 0)
       || input.source_sha256 !== undefined && (typeof input.source_sha256 !== 'string' || !SHA.test(input.source_sha256))
-      || input.offset_chars > 0 && input.source_sha256 === undefined) throw Error('native_search_source_invalid');
+      || !search && input.offset_chars > 0 && input.source_sha256 === undefined) throw Error('native_search_source_invalid');
     const key = sourceKey(identity, sessionId, input.call_seq);
     const metadata = await store.inspect(identity, key);
     check(identity, signal);
@@ -133,7 +134,8 @@ export function createNativeSearchSource({readIdentity, agents, sessions, persis
         || !Array.isArray(message.content) || !message.content.some(value => value?.type === 'text' && typeof value.text === 'string' && value.text.includes(recovery)))
         throw Error('native_search_source_unavailable');
       const resultSha = eventHash(result);
-      const page = await store.read(identity, key, metadata, input.offset_chars);
+      const page = search ? await store.search(identity, key, metadata, input.q)
+        : await store.read(identity, key, metadata, input.offset_chars);
       check(identity, signal);
       if (eventHash(await eventAt(call.seq)) !== metadata.call_sha256 || eventHash(await eventAt(result.seq)) !== resultSha
         || hash(sessionHeaderIdentity(session?.header ?? handle.header)) !== metadata.session_header_sha256)
@@ -157,6 +159,12 @@ export function createNativeSearchSource({readIdentity, agents, sessions, persis
       if (reads >= 4) throw Error('native_search_source_capacity');
       reads++;
       try { return await readSource(ownerId, sessionId, input, AbortSignal.any([signal, lifetime.signal])); }
+      finally { reads--; }
+    },
+    async search(ownerId, sessionId, input, signal) {
+      if (reads >= 4) throw Error('native_search_source_capacity');
+      reads++;
+      try { return await readSource(ownerId, sessionId, input, AbortSignal.any([signal, lifetime.signal]), true); }
       finally { reads--; }
     },
     dispose() { disposed = true; lifetime.abort(); store.dispose(); },

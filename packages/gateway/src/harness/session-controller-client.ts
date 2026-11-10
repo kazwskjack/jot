@@ -1,5 +1,5 @@
 import {validateHostSettingsProductCommand,validateHostSettingsProductResult,validateHostSettingsEditor,validateHostSettingsApprovalRequest,type HostSettingsProductCommand,type HostSettingsApprovalRequest} from '../host-admin/settings-product-contract.ts';
-import type {NativeSearchSourceRequest} from '../events/native-search-source.ts';
+import type {NativeSearchSourceRequest,NativeSearchSourceSearchRequest} from '../events/native-search-source.ts';
 import type {PinnedByteSource} from '../artifacts/pinned-byte-source.ts';
 import {normalizeExecutionLease,type ExecutionLease} from '../workbench/execution-lease.ts'
 import {ordinaryRunCompletionSource,validateOrdinaryRunCompletion,normalizeOrdinaryRunHistoryScope,type OrdinaryRunHistoryScope} from './ordinary-run-completion.ts'
@@ -470,6 +470,13 @@ export class SessionControllerClient {
       ||!Number.isSafeInteger(input.offset_chars)||input.offset_chars<0||input.offset_chars>33554432
       ||input.source_sha256!==undefined&&!/^[a-f0-9]{64}$/.test(input.source_sha256))throw Error('invalid_activity_tool_result_query');
     return this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/native-search-source`,{owner_id:ownerId,source:input},signal);
+  }
+
+  async searchNativeSearchSource(ownerId:string,sessionId:string,input:NativeSearchSourceSearchRequest,signal?:AbortSignal):Promise<unknown>{
+    if(![ownerId,sessionId].every(value=>typeof value==='string'&&DRIVER_ID.test(value))
+      ||!Number.isSafeInteger(input.call_seq)||input.call_seq<0||!['glob','grep'].includes(input.tool_name)
+      ||typeof input.q!=='string'||!input.q||input.q!==input.q.trim()||input.q.length>200)throw Error('invalid_activity_tool_result_query');
+    return this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/native-search-source/search`,{owner_id:ownerId,source:input},signal);
   }
 
   async terminalOptions(ownerId:string,sessionId:string,signal?:AbortSignal):Promise<TerminalOptions>{

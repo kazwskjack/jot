@@ -3,7 +3,7 @@ import React,{useEffect,useRef,useState} from 'react';
 import {ApiError,request,taskDraftScope} from './client';
 import type {ActivityToolResultPage,ActivityToolResultFile} from './types';
 
-type Target={nativeSource?:boolean;runId:string;activityId:string;toolName:string;offset?:number;resultSha?:string;textSha?:string;match?:{offset:number;text:string}};
+type Target={nativeSource?:boolean;asOfSeq?:string;runId:string;activityId:string;toolName:string;offset?:number;resultSha?:string;textSha?:string;match?:{offset:number;text:string}};
 const sha=/^[a-f0-9]{64}$/;
 
 export default function ActivityToolResult({conversationId,target}:{conversationId:string;target:Target}){
@@ -20,10 +20,10 @@ export default function ActivityToolResult({conversationId,target}:{conversation
   const controller=new AbortController();
   setState({identity,offset});
   const load=async()=>{
-   const query=new URLSearchParams({run_id:target.runId,offset_chars:String(offset),...(expected?{result_sha256:expected}:{}),...(expectedText?{text_sha256:expectedText}:{})});
+   const query=new URLSearchParams({run_id:target.runId,offset_chars:String(offset),...(target.nativeSource&&target.asOfSeq?{as_of_seq:target.asOfSeq}:{}),...(expected?{result_sha256:expected}:{}),...(expectedText?{text_sha256:expectedText}:{})});
    const page=await request<ActivityToolResultPage>(`/conversations/${encodeURIComponent(conversationId)}/activities/${encodeURIComponent(target.activityId)}/tool-result${target.nativeSource?'/source':''}?${query}`,'GET',undefined,undefined,controller.signal);
    if(taskDraftScope()!==owner||!page||page.conversation_id!==conversationId||page.run_id!==target.runId||page.activity_id!==target.activityId
-    ||page.tool_name!==target.toolName||page.execution_authorized!==false
+    ||page.tool_name!==target.toolName||page.execution_authorized!==false||page.as_of_seq!==(target.nativeSource?target.asOfSeq:undefined)
     ||(target.toolName==='jot_workspace'
      ?page.source!=='workspace'||!['files.read','web.read','files.write','files.delete','files.list'].includes(page.operation??'')||typeof page.source_truncated!=='boolean'
      :target.toolName==='glob'||target.toolName==='grep'

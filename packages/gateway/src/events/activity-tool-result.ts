@@ -304,13 +304,13 @@ function textBoundary(text:string,offset:number){
  return offset>0&&/[\uD800-\uDBFF]/.test(text[offset-1]!)&&/[\uDC00-\uDFFF]/.test(text[offset]!)?offset-1:offset;
 }
 
-function originalActivity(db:DatabaseSync,owner:string,conversationId:string,activityId:string,runId:string){
+function originalActivity(db:DatabaseSync,owner:string,conversationId:string,activityId:string,runId:string,asOfSeq?:string){
  const event=db.prepare(`SELECT e.payload_json FROM ga_events e
   JOIN ga_runs r ON r.id=e.run_id AND r.conversation_id=e.conversation_id
   JOIN ga_conversations c ON c.id=r.conversation_id AND c.owner_id=?
   WHERE e.conversation_id=? AND e.run_id=? AND e.type='activity.upsert'
-   AND json_extract(e.payload_json,'$.activity_id')=? ORDER BY e.seq DESC LIMIT 1`)
-  .get(owner,conversationId,runId,activityId) as {payload_json:string}|undefined;
+   AND json_extract(e.payload_json,'$.activity_id')=? AND (? IS NULL OR e.seq<=CAST(? AS INTEGER)) ORDER BY e.seq DESC LIMIT 1`)
+  .get(owner,conversationId,runId,activityId,asOfSeq??null,asOfSeq??null) as {payload_json:string}|undefined;
  if(!event)throw Error('activity_tool_result_not_found');
  const activity=parsedObject(event.payload_json);
  if(!activity||activity.activity_id!==activityId||activity.run_id!==runId)throw Error('activity_tool_result_not_found');
@@ -346,10 +346,12 @@ export function readActivityToolResult(db:DatabaseSync,owner:string,conversation
 }
 
 /** Search retained original results through the same public history boundary and source checks. */
-export function searchActivityToolResults(db:DatabaseSync,owner:string,conversationId:string,query:Record<string,unknown>,reader?:WorkspaceFileReader):ActivityToolResultSearchPage{
+export type NativeSearchCandidate={activity:Record<string,unknown>;index:number};
+
+export function searchActivityToolResults(db:DatabaseSync,owner:string,conversationId:string,query:Record<string,unknown>,reader?:WorkspaceFileReader,nativeCandidates?:NativeSearchCandidate[]):ActivityToolResultSearchPage{
  if(!db.isTransaction)throw Error('activity_tool_result_read_transaction_required');
  const q=typeof query.q==='string'?query.q.trim():'';
- if(!q||q.length>200||Object.keys(query).some(key=>!['q','as_of_seq','before_seq','run_id'].includes(key)))throw Error('invalid_activity_tool_result_query');
+ if(!q||q.length>200||query.native_sources!==undefined&&query.native_sources!=='true'||Object.keys(query).some(key=>!['q','as_of_seq','before_seq','run_id','native_sources'].includes(key)))throw Error('invalid_activity_tool_result_query');
  const page=readActivityHistory(db,conversationId,{as_of_seq:query.as_of_seq,before_seq:query.before_seq,run_id:query.run_id,limit:reader?1:8});
  const pattern=new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'iu');
  const items:ActivityToolResultMatch[]=[];
@@ -370,6 +372,9 @@ export function searchActivityToolResults(db:DatabaseSync,owner:string,conversat
    unavailable++;continue;
   }
   if(source.file_diff_state!==undefined&&source.file_diff_state!=='available'||(source.operation==='files.list'||source.source==='native')&&source.source_truncated)unsearched++;
+  if(query.native_sources==='true'&&source.source==='native'&&source.source_truncated&&activity.status==='succeeded'
+    &&Number.isSafeInteger(object(activity.detail)?.native_search_call_seq)
+    &&Number.isSafeInteger(object(activity.detail)?.native_search_result_seq))nativeCandidates?.push({activity,index:items.length});
   const match=pattern.exec(source.text);
   if(!match)continue;
   const offset=textBoundary(source.text,Math.max(0,match.index-60));
@@ -379,6 +384,7 @@ export function searchActivityToolResults(db:DatabaseSync,owner:string,conversat
    offset_chars:offset,match_offset_chars:match.index,match_text:match[0],excerpt:source.text.slice(offset,end)});
  }
  return {conversation_id:conversationId,as_of_seq:page.as_of_seq,q,items,scanned_upserts:page.items.length,
+  ...(query.native_sources==='true'?{native_sources:true as const}:{}),
   unavailable_results:unavailable,unsearched_results:unsearched,coverage:page.coverage,execution_authorized:false,
   ...(page.run_id?{run_id:page.run_id}:{}),...(page.next_before_seq?{next_before_seq:page.next_before_seq}:{})};
 }

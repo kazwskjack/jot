@@ -9,7 +9,7 @@ import {messageReferenceSnapshotsInstalled,commandReferenceSnapshotsInstalled,ca
 import {prepareReferenceSteeringText,type ReferenceSnapshotInput} from './messages/content-reference.js';
 import {createPinnedByteStore} from './artifacts/pinned-byte-source.ts';
 import {readActivityToolResult,searchActivityToolResults,readActivityToolResultFile,readActivityToolResultFileBytes,parseActivityFileDownloadQuery,readActivityToolResultFileDownload} from './events/activity-tool-result.ts';
-import {registerNativeSearchSourceRoutes,type NativeSearchSourceClient} from './events/native-search-source.ts';
+import {registerNativeSearchSourceRoutes,searchNativeActivitySources,type NativeSearchSourceClient} from './events/native-search-source.ts';
 import {readActivityHistory} from './events/activity-history.ts';
 import {registerPluginProfileRoutes,type PluginProfileClient} from './workbench/plugin-profile-routes.ts';
 import {createPluginProfileReceiptExecutor,PLUGIN_PROFILE_RECEIPT_PROTOCOL} from './workbench/plugin-profile-receipts.ts';
@@ -1183,12 +1183,27 @@ export async function buildServer(config: {
   });
   app.get('/v1/conversations/:conversationId/tool-result-search', async (request,reply) => {
     const {conversationId}=request.params as {conversationId:string},owner=actor(request as any);
-    db.exec('BEGIN');
+    const abort=new AbortController(),disconnected=()=>abort.abort();
+    request.raw.once('aborted',disconnected);reply.raw.once('close',disconnected);
+    if(request.raw.aborted||reply.raw.destroyed)disconnected();
     try{
-      conversations.get(conversationId,owner);
-      const value=searchActivityToolResults(db,owner,conversationId,request.query as Record<string,unknown>,workbench);
-      db.exec('COMMIT');return reply.header('cache-control','private, no-store').send(value);
-    }catch(error){if(db.isTransaction)db.exec('ROLLBACK');throw error;}
+      const candidates:import('./events/activity-tool-result.ts').NativeSearchCandidate[]=[];
+      let base:ReturnType<typeof searchActivityToolResults>;
+      db.exec('BEGIN');
+      try{
+        conversations.get(conversationId,owner);
+        base=searchActivityToolResults(db,owner,conversationId,request.query as Record<string,unknown>,workbench,candidates);
+        db.exec('COMMIT');
+      }catch(error){if(db.isTransaction)db.exec('ROLLBACK');throw error;}
+      const signal=AbortSignal.any([abort.signal,AbortSignal.timeout(20000)]);
+      const value=await searchNativeActivitySources(db,owner,base,candidates,config.nativeSearchSourceClient,signal);
+      signal.throwIfAborted();conversations.get(conversationId,owner);
+      return reply.header('cache-control','private, no-store').send(value);
+    }catch(error){
+      if(error instanceof Error&&['AbortError','TimeoutError'].includes(error.name))
+        return reply.code(503).send({error:{code:'ACTIVITY_TOOL_RESULT_SOURCE_SEARCH_UNAVAILABLE'}});
+      throw error;
+    }finally{request.raw.off('aborted',disconnected);reply.raw.off('close',disconnected);}
   });
   app.get('/v1/conversations/:conversationId/activities/:activityId/tool-result/file', async (request,reply) => {
     const {conversationId,activityId}=request.params as {conversationId:string;activityId:string},owner=actor(request as any);
