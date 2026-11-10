@@ -1,0 +1,6 @@
+.jot-office-preview { min-width: 0; }
+.jot-office-content { overflow-x: auto; }
+.jot-office-content table { border-collapse: collapse; min-width: 100%; margin-block: 0.75rem; }
+.jot-office-content th, .jot-office-content td { border: 1px solid var(--line); padding: 0.5rem; vertical-align: top; text-align: left; }
+.jot-office-content pre { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 5rem; max-width: 36rem; }
+.jot-office-preview select { max-width: 100%; }

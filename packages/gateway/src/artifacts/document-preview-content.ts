@@ -89,3 +89,42 @@ export function formatDocumentReadContent(mediaType:unknown,content:unknown,maxC
  const formatted=formatDocumentPreviewContent(mediaType,normalized,maxChars);
  return {text:formatted.text,truncated:formatted.truncated||content.text_reader_revision!==1};
 }
+
+
+export type OfficeDocumentPreview=
+ |{kind:'docx';paragraphs:string[];tables:string[][][];truncated:boolean}
+ |{kind:'xlsx';sheets:Array<{name:string;cells:Record<string,{value:string;formula:string|null}>}>;truncated:boolean}
+ |{kind:'pptx';slides:Array<{number:number;text:string}>;truncated:boolean};
+
+const officeTypes={
+ docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+ xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+ pptx:'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+} as const;
+export function officePreviewFormat(path:string){
+ const extension=path.toLowerCase().split('.').at(-1);
+ if(extension!=='docx'&&extension!=='xlsx'&&extension!=='pptx')return undefined;
+ return {kind:extension,mediaType:officeTypes[extension]};
+}
+
+/** Share the existing engine-content checks, and expose only display data. */
+export function normalizeOfficePreviewContent(mediaType:string,content:unknown):OfficeDocumentPreview{
+ const formatted=formatDocumentPreviewContent(mediaType,content);
+ if(mediaType===officeTypes.docx){
+  const value=content as {paragraphs:unknown[];tables:unknown[][][]};
+  return {kind:'docx',paragraphs:value.paragraphs.map(plainText),tables:value.tables.map((table:unknown[][])=>table.map(row=>row.map(plainText))),truncated:formatted.truncated};
+ }
+ if(mediaType===officeTypes.xlsx){
+  const value=content as {sheets:Array<{name:string;cells:Record<string,Record<string,unknown>>}>};
+  if(value.sheets.some(sheet=>sheet.name.length>512))throw Error('DOCUMENT_PREVIEW_RESULT_INVALID');
+  const sheets=value.sheets.map((sheet:{name:string;cells:Record<string,Record<string,unknown>>})=>({
+   name:sheet.name,cells:Object.fromEntries(Object.entries(sheet.cells).map(([address,cell])=>[
+    address,{value:plainText(cell.value??''),formula:cell.formula==null?null:plainText(cell.formula)},
+   ])),
+  }));
+  return {kind:'xlsx',sheets,truncated:formatted.truncated};
+ }
+ if(mediaType!==officeTypes.pptx)throw Error('DOCUMENT_PREVIEW_RESULT_INVALID');
+ const value=content as {slides:Array<{number:number;text:unknown}>};
+ return {kind:'pptx',slides:value.slides.map((slide:{number:number;text:unknown})=>({number:slide.number,text:plainText(slide.text)})),truncated:formatted.truncated};
+}

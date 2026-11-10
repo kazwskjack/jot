@@ -39,19 +39,39 @@ export class FileEngineAdapter {
     this.timeoutMs = options.timeoutMs ?? 120_000;
   }
 
-  run(input: FileEngineInput): Promise<FileEngineResult> {
+  run(input: FileEngineInput,options:{signal?:AbortSignal;maxOutputBytes?:number}={}): Promise<FileEngineResult> {
     return new Promise((resolve, reject) => {
+      const {signal,maxOutputBytes}=options;
+      signal?.throwIfAborted();
+      if(maxOutputBytes!==undefined&&(!Number.isSafeInteger(maxOutputBytes)||maxOutputBytes<1)){
+        throw new Error('ENGINE_OUTPUT_LIMIT_INVALID');
+      }
       const child = spawn(this.python, [this.workerPath], {
         stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
         env: fileEngineChildEnvironment(),
       });
-      const stdout: Buffer[] = []; const stderr: Buffer[] = [];
-      child.stdout.on('data', value => stdout.push(Buffer.from(value)));
-      child.stderr.on('data', value => stderr.push(Buffer.from(value)));
-      const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('ENGINE_TIMEOUT')); }, this.timeoutMs);
-      child.once('error', () => { clearTimeout(timer); reject(new Error('ENGINE_CRASH')); });
+      const stdout: Buffer[] = [];let outputBytes=0,failure:Error|undefined;
+      const stop=(error:Error)=>{failure??=error;child.kill('SIGKILL');};
+      const abort=()=>stop(signal?.reason instanceof Error?signal.reason:new Error('ENGINE_CANCELLED'));
+      const timer=setTimeout(()=>stop(new Error('ENGINE_TIMEOUT')),this.timeoutMs);
+      const cleanup=()=>{clearTimeout(timer);signal?.removeEventListener('abort',abort);};
+      signal?.addEventListener('abort',abort,{once:true});
+      if(signal?.aborted)abort();
+      child.stdout.on('data',value=>{
+        if(failure)return;
+        const bytes=Buffer.from(value);outputBytes+=bytes.length;
+        if(maxOutputBytes!==undefined&&outputBytes>maxOutputBytes){stop(new Error('ENGINE_OUTPUT_TOO_LARGE'));return;}
+        stdout.push(bytes);
+      });
+      child.stderr.resume();
+      child.stdin.on('error',()=>stop(new Error('ENGINE_CRASH')));
+      child.on('error',()=>{
+        failure??=new Error('ENGINE_CRASH');
+        if(child.pid===undefined){cleanup();reject(failure);}
+      });
       child.once('close', code => {
-        clearTimeout(timer);
+        cleanup();
+        if(failure){reject(failure);return;}
         let value: FileEngineResult;
         try { value = JSON.parse(Buffer.concat(stdout).toString('utf8')) as FileEngineResult; }
         catch { reject(new Error(code === 0 ? 'ENGINE_RESULT_INVALID' : 'ENGINE_CRASH')); return; }

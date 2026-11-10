@@ -1,3 +1,4 @@
+import {officePreviewFormat} from '../../packages/gateway/src/artifacts/document-preview-content';
 import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 import ActivityToolFileImage,{listedFileImageType} from './ActivityToolFileImage';
 import ActivityToolFileBytes from './ActivityToolFileBytes';
@@ -9,6 +10,7 @@ import type {ListedFilePreviewSource} from './activity-file-preview-client';
 import type {PdfReferenceFocus} from './pdf-file-view-state';
 
 const ActivityToolFilePdf=lazy(()=>import('./ActivityToolFilePdf'));
+const ActivityToolFileOffice=lazy(()=>import('./ActivityToolFileOffice'));
 const sha=/^[a-f0-9]{64}$/;
 function ActivityToolFileText({conversationId,runId,activityId,resultSha,file}:ListedFilePreviewSource){
  const owner=taskDraftScope(),identity=JSON.stringify([owner,conversationId,runId,activityId,resultSha,file]);
@@ -59,7 +61,8 @@ function ActivityToolFileText({conversationId,runId,activityId,resultSha,file}:L
 
 export default function ActivityToolFile(props:ListedFilePreviewSource&{focus?:PdfReferenceFocus}){
  const identity=JSON.stringify([taskDraftScope(),props]),[textView,setTextView]=useState<string>();
- const pdf=props.file.path.toLowerCase().endsWith('.pdf');
+ const pdf=props.file.path.toLowerCase().endsWith('.pdf'),office=officePreviewFormat(props.file.path);
+ if(office)return <ConversationDisplayBoundary key={identity} label="Office查看器"><Suspense fallback={<p role="status">正在载入Office查看器…</p>}><ActivityToolFileOffice {...props}/></Suspense></ConversationDisplayBoundary>;
  if(!pdf&&!listedFileImageType(props.file.path))return <ActivityToolFileText {...props}/>;
  return <>
   <nav aria-label="原列表文件查看方式" data-chat-search-ignore>

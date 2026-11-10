@@ -1,3 +1,4 @@
+import {readActivityFileDocument} from './events/activity-file-document.ts';
 import {messageReferenceSnapshotsInstalled,commandReferenceSnapshotsInstalled,captureRunCommandReferenceSnapshots,assertReferenceSnapshotImages} from './messages/reference-snapshots.ts';
 import {prepareReferenceSteeringText,type ReferenceSnapshotInput} from './messages/content-reference.js';
 import {createPinnedByteStore} from './artifacts/pinned-byte-source.ts';
@@ -682,6 +683,8 @@ export async function buildServer(config: {
     if(code==='memory_scope_forbidden')return reply.code(403).send({error:{code:'MEMORY_SCOPE_FORBIDDEN'}});
     if(code==='file_source_stale')return reply.code(409).send({error:{code:'FILE_SOURCE_STALE'}});
     if(code==='DOCUMENT_PREVIEW_TOO_LARGE')return reply.code(413).send({error:{code:'DOCUMENT_PREVIEW_TOO_LARGE'}});
+    if(['DOCUMENT_PREVIEW_FORMAT_INVALID','DOCUMENT_PREVIEW_CONTAINER_LIMIT','DOCUMENT_PREVIEW_RESULT_INVALID','DOCUMENT_PREVIEW_XML_UNSAFE','DOCUMENT_PREVIEW_XML_INVALID','FILE_CONTAINER_LIMIT','ENGINE_OUTPUT_TOO_LARGE'].includes(code))return reply.code(422).send({error:{code}});
+    if(['ENGINE_TIMEOUT','ENGINE_CRASH','ENGINE_RESULT_INVALID'].includes(code))return reply.code(503).send({error:{code}});
     if(['active_run_mode_change','chat_model_fixed','conversation_mode_conflict','conversation_mode_scope_invalid','conversation_mode_goal_active','conversation_mode_goal_unconfirmed','conversation_mode_legacy_unconfirmed','conversation_mode_session_missing','conversation_mode_admission_required'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
     if(code==='task_run_limit_unconfirmed')return reply.code(409).send({error:{code:'TASK_RUN_LIMIT_UNCONFIRMED'}});
     if(['memory_capture_policy_stale','memory_capture_source_conflict','memory_capture_not_ready','memory_restore_expired','memory_restore_source_conflict','memory_consolidation_state_conflict','memory_consolidation_source_conflict','memory_consolidation_pending_limit','memory_consolidation_source_limit'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
@@ -1112,6 +1115,24 @@ export async function buildServer(config: {
       const value=readActivityToolResultFileBytes(db,owner,conversationId,activityId,request.query as Record<string,unknown>,workbench);
       db.exec('COMMIT');return reply.header('cache-control','private, no-store').send(value);
     }catch(error){if(db.isTransaction)db.exec('ROLLBACK');throw error;}
+  });
+  let documentPreviewBusy=false;
+  app.get('/v1/conversations/:conversationId/activities/:activityId/tool-result/file/document',async(request,reply)=>{
+    const {conversationId,activityId}=request.params as {conversationId:string;activityId:string},owner=actor(request as any);
+    const input=parseActivityFileDownloadQuery(request.query as Record<string,unknown>);
+    if(input.framed)throw Error('invalid_activity_tool_result_query');
+    conversations.get(conversationId,owner);
+    if(documentPreviewBusy)return reply.code(429).header('retry-after','1').send({error:{code:'DOCUMENT_PREVIEW_BUSY'}});
+    documentPreviewBusy=true;
+    const controller=new AbortController(),abort=()=>controller.abort();
+    request.raw.once('aborted',abort);reply.raw.once('close',abort);
+    if(request.raw.aborted||reply.raw.destroyed)abort();
+    try{
+      const value=await readActivityFileDocument(db,workbench,owner,conversationId,activityId,input,
+        join(dirname(resolve(config.databasePath)),'.jot-document-previews'),controller.signal);
+      conversations.get(conversationId,owner);
+      return reply.header('cache-control','private, no-store').header('x-content-type-options','nosniff').send(value);
+    }finally{request.raw.off('aborted',abort);reply.raw.off('close',abort);documentPreviewBusy=false;}
   });
   app.get('/v1/conversations/:conversationId/activities/:activityId/tool-result/file/download', async (request,reply) => {
     const {conversationId,activityId}=request.params as {conversationId:string;activityId:string},owner=actor(request as any);
