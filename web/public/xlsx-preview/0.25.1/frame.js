@@ -12,7 +12,8 @@ const query=document.getElementById('query'),counter=document.getElementById('ma
 let token,started=false,closed=false,busy=false,univer,api,book,selectionListener,activeSheetListener,chain=Promise.resolve();
 let workbookData,matches=[],matchIndex=0,searchGeneration=0,searchTimer,zoomPercent=100,cellReferences,region;
 const report=(message,transfer=[])=>{if(!closed)parent.postMessage({protocol:1,token,...message},parentOrigin,transfer);};
-const boot=()=>parent.postMessage({type:'jot-xlsx-boot',protocol:1,started},parentOrigin);
+const instance=crypto.randomUUID();
+const boot=()=>{if(!closed)parent.postMessage({type:'jot-xlsx-boot',protocol:1,started,instance},parentOrigin);};
 const controls=()=>{
  const ready=!!book&&!closed;
  sheetSelect.disabled=!ready||busy;zoom.disabled=!ready||busy;query.disabled=!ready;
@@ -125,11 +126,11 @@ zoom.addEventListener('change',()=>{
  if(Number.isFinite(value)&&value>=10&&value<=400){zoomPercent=value;run(()=>book.getActiveSheet().zoom(value/100));}
  else zoom.value=String(zoomPercent);
 });
-addEventListener('pagehide',dispose,{once:true});
+addEventListener('pagehide',()=>{if(started&&!closed)report({type:'jot-xlsx-closed',reason:'pagehide'});dispose();},{once:true});
 document.addEventListener('submit',event=>event.preventDefault(),true);
 document.addEventListener('click',event=>{if(event.target instanceof Element&&event.target.closest('a'))event.preventDefault();},true);
 addEventListener('message',async event=>{
- if(event.source!==parent||event.origin!==parentOrigin||!event.data||typeof event.data!=='object'||Array.isArray(event.data))return;
+ if(closed||event.source!==parent||event.origin!==parentOrigin||!event.data||typeof event.data!=='object'||Array.isArray(event.data))return;
  const value=event.data;
  if(value.type==='jot-xlsx-probe'&&value.protocol===1&&Object.keys(value).length===2){boot();return;}
  if(started&&value.protocol===1&&value.token===token&&Object.keys(value).length===4){cellReferences?.command(value);region?.command(value);return;}

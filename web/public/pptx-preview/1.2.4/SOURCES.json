@@ -35,5 +35,11 @@
     "modified": false,
     "served_path": "/docx-preview/0.4.0/html2canvas.js",
     "notices_path": "/docx-preview/0.4.0/LICENSES.txt"
-  }
+  },
+  "jot_source_adaptations": [
+    {
+      "path": "web/public/pptx-preview/1.2.4/frame.js",
+      "changes": "Boot/probe includes a unique static-document instance. Parent binds it before byte transfer and rejects a replacement document after initialization. Token-scoped pagehide notification invalidates old ready/reference sessions through the existing close/manual reread path. Same-document duplicate probes remain valid. No automatic file transfer or upload retry."
+    }
+  ]
 }

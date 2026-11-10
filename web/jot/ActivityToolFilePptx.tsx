@@ -9,7 +9,7 @@ function PptxAttempt({source,owner,identity,officeRegionFocus}:{source:ListedFil
  const regionSession=useRef<OfficeRegionSession|undefined>(undefined);
  const [url,setUrl]=useState<string>(),[state,setState]=useState<{phase:'loading'|'ready'|'error';message:string;working?:boolean}>({phase:'loading',message:'正在核对原幻灯片并读取视觉内容…'});
  useEffect(()=>{
-  const controller=new AbortController(),token=crypto.randomUUID();let closed=false,origin:string|undefined,bytes:ArrayBuffer|undefined,booted=false,sent=false,ready=false,working=false,timer:number|undefined;
+  const controller=new AbortController(),token=crypto.randomUUID();let closed=false,origin:string|undefined,instance:string|undefined,bytes:ArrayBuffer|undefined,booted=false,sent=false,ready=false,working=false,timer:number|undefined;
   const live=()=>!closed&&!controller.signal.aborted&&taskDraftScope()===owner;
   const dispose=()=>{closed=true;controller.abort();bytes=undefined;window.clearTimeout(timer);window.removeEventListener('message',message);window.document.removeEventListener('securitypolicyviolation',policy);};
   const fail=(message:string)=>{if(closed)return;dispose();setState({phase:'error',message});};
@@ -23,11 +23,15 @@ function PptxAttempt({source,owner,identity,officeRegionFocus}:{source:ListedFil
   const message=(event:MessageEvent)=>{
    if(!live()||event.origin!==origin||event.source!==frame.current?.contentWindow)return;
    const value=event.data;if(!value||typeof value!=='object'||Array.isArray(value))return;
-   if(!sent&&value.type==='jot-pptx-boot'&&value.protocol===1&&Object.keys(value).length===3&&typeof value.started==='boolean'){
+   if(value.type==='jot-pptx-boot'&&value.protocol===1&&Object.keys(value).length===4&&typeof value.started==='boolean'
+    &&typeof value.instance==='string'&&/^[a-f0-9-]{36}$/.test(value.instance)){
+    if(sent){if(value.instance!==instance)fail('幻灯片查看器已重新载入，请重新读取固定版本。');return;}
+    instance=value.instance;
     if(value.started){fail('幻灯片查看器已处理上次读取，请重新读取。');return;}
     booted=true;send();return;
    }
    if(!sent||value.protocol!==1||value.token!==token||Object.keys(value).length!==4)return;
+   if(value.type==='jot-pptx-closed'&&value.reason==='pagehide'){fail('幻灯片查看器页面已离开，请重新读取固定版本。');return;}
    if(value.type==='jot-pptx-error'&&value.code==='PPTX_RENDER_FAILED'){fail('幻灯片视觉读取失败，可重读或切换结构化文字查看。');return;}
    if(value.type==='jot-pptx-ready'&&value.info&&Object.keys(value.info).length===2&&Number.isSafeInteger(value.info.slides)&&value.info.slides>=1&&value.info.slides<=50000&&typeof value.info.partial==='boolean'){
     if(frame.current?.contentWindow&&origin)regionSession.current={window:frame.current.contentWindow,origin,token,live,close:fail};

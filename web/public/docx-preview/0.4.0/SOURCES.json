@@ -69,6 +69,10 @@
     {
       "path": "web/public/docx-preview/0.4.0/frame.js",
       "changes": "Original heading recognition/order and targets now index every heading in the admitted rendered document. Directory DOM is paginated to100 items, with previous/next/direct page navigation and existing256-unit short labels. Error/pagehide clear retained heading nodes and controls. Word region capture freezes directory controls with toolbar controls."
+    },
+    {
+      "path": "web/public/docx-preview/0.4.0/frame.js",
+      "changes": "Boot/probe includes a unique static-document instance. Parent binds it before byte transfer and rejects a replacement document after initialization. Token-scoped pagehide notification invalidates old ready/reference sessions through the existing close/manual reread path. Same-document duplicate probes remain valid. No automatic file transfer or upload retry."
     }
   ]
 }

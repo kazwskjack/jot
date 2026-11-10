@@ -68,7 +68,7 @@ function DocxAttempt({source,owner,identity,officeTextFocus,officeRegionFocus}:{
   if(!viewerUrl)return;
   const controller=new AbortController(),target=frame.current,token=crypto.randomUUID(),focus=originalVisualFocus(officeTextFocus,source,owner);
   const viewerOrigin=new URL(viewerUrl).origin;
-  let bytes:ArrayBuffer|undefined,sent=false,closed=false,ready=false,booted=false;
+  let instance:string|undefined,bytes:ArrayBuffer|undefined,sent=false,closed=false,ready=false,booted=false;
   const live=()=>!closed&&!controller.signal.aborted&&taskDraftScope()===owner;
   const canAdd=()=>{const value=currentContext.current;return live()&&!!value&&!value.disabled&&value.owner===owner&&value.conversationId===source.conversationId;};
   const resetPending=()=>{pending.current=undefined;window.clearTimeout(pendingTimer.current);setCommitting(false);};
@@ -87,12 +87,16 @@ function DocxAttempt({source,owner,identity,officeTextFocus,officeRegionFocus}:{
    if(!live()||event.source!==target?.contentWindow||event.origin!==viewerOrigin)return;
    const value=event.data;
    if(!value||typeof value!=='object'||Array.isArray(value))return;
-   if(!sent&&value.type==='jot-docx-boot'&&value.protocol===1&&typeof value.started==='boolean'&&Object.keys(value).length===3){
+   if(value.type==='jot-docx-boot'&&value.protocol===1&&typeof value.started==='boolean'&&Object.keys(value).length===4
+    &&typeof value.instance==='string'&&/^[a-f0-9-]{36}$/.test(value.instance)){
+    if(sent){if(value.instance!==instance)fail('Word查看器已重新载入，请重新读取固定版本。');return;}
+    instance=value.instance;
     if(value.started){fail('Word查看器已处理上次读取，请点击重新读取Word视觉内容。');return;}
     booted=true;if(target)send(target);return;
    }
    if(!sent)return;
    if(value.protocol!==1||value.token!==token||Object.keys(value).length!==4)return;
+   if(value.type==='jot-docx-closed'&&value.reason==='pagehide'){fail('Word查看器页面已离开，请重新读取固定版本。');return;}
    if(value.type==='jot-docx-ready'&&Number.isSafeInteger(value.sections)&&value.sections>=0&&value.sections<=50000){
     ready=true;window.clearTimeout(timeout);setState({phase:'ready',message:`已渲染 ${value.sections} 个Word分段。分段沿原文件分页标记。`});
    }else if(value.type==='jot-docx-error'&&['DOCX_RENDER_FAILED','DOCX_VIEW_LIMIT'].includes(value.code)){

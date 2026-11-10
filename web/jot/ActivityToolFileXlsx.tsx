@@ -10,7 +10,7 @@ function XlsxAttempt({source,owner,identity,officeFocus,officeRegionFocus}:{sour
  const frame=useRef<HTMLIFrameElement>(null),probe=useRef<(element:HTMLIFrameElement)=>void>(()=>{}),cancel=useRef<()=>void>(()=>{});
  const [url,setUrl]=useState<string>(),[state,setState]=useState<{phase:'loading'|'ready'|'error';message:string;working?:boolean}>({phase:'loading',message:'正在核对原工作簿并读取视觉内容…'});
  useEffect(()=>{
-  const controller=new AbortController(),token=crypto.randomUUID();let closed=false,origin:string|undefined,bytes:ArrayBuffer|undefined,booted=false,sent=false,ready=false,working=false,timer:number|undefined;
+  const controller=new AbortController(),token=crypto.randomUUID();let closed=false,origin:string|undefined,instance:string|undefined,bytes:ArrayBuffer|undefined,booted=false,sent=false,ready=false,working=false,timer:number|undefined;
   const live=()=>!closed&&!controller.signal.aborted&&taskDraftScope()===owner;
   const dispose=()=>{closed=true;controller.abort();bytes=undefined;window.clearTimeout(timer);window.removeEventListener('message',message);window.document.removeEventListener('securitypolicyviolation',policy);};
   const fail=(message:string)=>{if(closed)return;dispose();setState({phase:'error',message});};
@@ -24,11 +24,15 @@ function XlsxAttempt({source,owner,identity,officeFocus,officeRegionFocus}:{sour
   const message=(event:MessageEvent)=>{
    if(!live()||event.origin!==origin||event.source!==frame.current?.contentWindow)return;
    const value=event.data;if(!value||typeof value!=='object'||Array.isArray(value))return;
-   if(!sent&&value.type==='jot-xlsx-boot'&&value.protocol===1&&Object.keys(value).length===3&&typeof value.started==='boolean'){
+   if(value.type==='jot-xlsx-boot'&&value.protocol===1&&Object.keys(value).length===4&&typeof value.started==='boolean'
+    &&typeof value.instance==='string'&&/^[a-f0-9-]{36}$/.test(value.instance)){
+    if(sent){if(value.instance!==instance)fail('工作簿查看器已重新载入，请重新读取固定版本。');return;}
+    instance=value.instance;
     if(value.started){fail('工作簿查看器已处理上次读取，请重新读取。');return;}
     booted=true;send();return;
    }
    if(!sent||value.protocol!==1||value.token!==token||Object.keys(value).length!==4)return;
+   if(value.type==='jot-xlsx-closed'&&value.reason==='pagehide'){fail('工作簿查看器页面已离开，请重新读取固定版本。');return;}
    if(value.type==='jot-xlsx-error'&&value.code==='XLSX_RENDER_FAILED'){fail('工作簿视觉读取失败，可重读或切换结构化单元格查看。');return;}
    if(value.type==='jot-xlsx-ready'&&value.info&&Object.keys(value.info).length===2&&Number.isSafeInteger(value.info.sheets)&&value.info.sheets>=1&&value.info.sheets<=100&&Number.isSafeInteger(value.info.warnings)&&value.info.warnings>=0&&value.info.warnings<=2){
     if(frame.current?.contentWindow&&origin)cellSession.current={window:frame.current.contentWindow,origin,token,live,close:fail};

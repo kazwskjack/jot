@@ -9,9 +9,10 @@ const query=document.getElementById('query'),slide=document.getElementById('slid
 const thumbnails=document.getElementById('thumbnails'),thumbnailList=document.getElementById('thumbnail-list'),thumbnailToggle=document.getElementById('thumbnail-toggle');
 let thumbnailOpen=false,thumbnailPage=0,thumbnailGeneration=0,thumbnailHandles=[],region,slideObserver;
 let viewer,token,started=false,closed=false,busy=false,rendering=false,partial=false,chain=Promise.resolve(),matches=[],matchIndex=0,highlight,searchGeneration=0,searchTimer;
-const report=(message,transfer=[])=>parent.postMessage({protocol:1,token,...message},parentOrigin,transfer);
+const report=(message,transfer=[])=>{if(!closed)parent.postMessage({protocol:1,token,...message},parentOrigin,transfer);};
 const reportWork=()=>{if(!closed)report({type:'jot-pptx-work',busy:busy||rendering});};
-const boot=()=>parent.postMessage({type:'jot-pptx-boot',protocol:1,started},parentOrigin);
+const instance=crypto.randomUUID();
+const boot=()=>{if(!closed)parent.postMessage({type:'jot-pptx-boot',protocol:1,started,instance},parentOrigin);};
 const clearThumbnails=()=>{
  thumbnailGeneration++;
  for(const handle of thumbnailHandles)handle.dispose();
@@ -139,9 +140,9 @@ document.addEventListener('keydown',event=>{
 });
 content.addEventListener('click',event=>{if(event.target instanceof Element&&event.target.closest('a'))event.preventDefault();},true);
 document.addEventListener('submit',event=>event.preventDefault(),true);
-addEventListener('pagehide',dispose,{once:true});
+addEventListener('pagehide',()=>{if(started&&!closed)report({type:'jot-pptx-closed',reason:'pagehide'});dispose();},{once:true});
 addEventListener('message',async event=>{
- if(event.source!==parent||event.origin!==parentOrigin||!event.data||typeof event.data!=='object'||Array.isArray(event.data))return;
+ if(closed||event.source!==parent||event.origin!==parentOrigin||!event.data||typeof event.data!=='object'||Array.isArray(event.data))return;
  const value=event.data;
  if(value.type==='jot-pptx-probe'&&value.protocol===1&&Object.keys(value).length===2){boot();return;}
  if(started&&value.protocol===1&&value.token===token&&Object.keys(value).length===4){region?.command(value);return;}

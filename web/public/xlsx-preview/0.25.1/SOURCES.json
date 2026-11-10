@@ -593,5 +593,11 @@
     "sha256": "d58472f3c25eaa37cab8c03c12393070f13720dd6e9b1b2f1e689d0ba338afe5",
     "license": "AGPL-3.0",
     "changes": "Original worksheet container/normalized region semantics and native worksheet locator/optional anchor are retained. Jot adds exact viewport state, original parent confirmation, bounded direct crop, pinned original PNG input and owned teardown."
-  }
+  },
+  "jot_source_adaptations": [
+    {
+      "path": "web/public/xlsx-preview/0.25.1/frame.js",
+      "changes": "Boot/probe includes a unique static-document instance. Parent binds it before byte transfer and rejects a replacement document after initialization. Token-scoped pagehide notification invalidates old ready/reference sessions through the existing close/manual reread path. Same-document duplicate probes remain valid. No automatic file transfer or upload retry."
+    }
+  ]
 }

@@ -110,12 +110,13 @@ function findTextSearchMatches(text, query, limit) {
 }
 
  const content=document.getElementById('content'),styles=document.getElementById('styles'),status=document.getElementById('status');
- let started=false,zoom=1,sessionToken,visualView,selectionSerial=0,proposal,focusRange,regionController;
- const boot=()=>window.parent.postMessage({type:'jot-docx-boot',protocol:1,started},parentOrigin);
+ const instance=crypto.randomUUID();
+ let closed=false,started=false,zoom=1,sessionToken,visualView,selectionSerial=0,proposal,focusRange,regionController;
+ const boot=()=>{if(!closed)window.parent.postMessage({type:'jot-docx-boot',protocol:1,started,instance},parentOrigin);};
  window.addEventListener('message',event=>{
   if(event.source===window.parent&&event.origin===parentOrigin&&event.data?.type==='jot-docx-probe'&&event.data.protocol===1&&Object.keys(event.data).length===2)boot();
  });
- const report=(message,transfer=[])=>window.parent.postMessage({protocol:1,token:sessionToken,...message},parentOrigin,transfer);
+ const report=(message,transfer=[])=>{if(!closed)window.parent.postMessage({protocol:1,token:sessionToken,...message},parentOrigin,transfer);};
  // text_view 2 pins docx-preview 0.4.0 raw DOM text order. A renderer upgrade needs a new locator protocol.
  const indexVisualText=()=>{
   const walker=document.createTreeWalker(content,NodeFilter.SHOW_TEXT),parts=[],nodes=[];let length=0,node;
@@ -304,12 +305,16 @@ function findTextSearchMatches(text, query, limit) {
   renderOutlinePage(0);
   document.getElementById('outline-status').textContent=outlineItems.length?`识别到 ${outlineItems.length} 个标题，每页最多100项。`:'此文档没有可识别的标题。';
  };
- window.addEventListener('pagehide',()=>{window.clearTimeout(searchTimer);window.clearTimeout(selectionTimer);clearHighlights();matches=[];clearOutline('目录已关闭');},{once:true});
+ window.addEventListener('pagehide',()=>{
+  if(started)report({type:'jot-docx-closed',reason:'pagehide'});closed=true;
+  window.clearTimeout(searchTimer);window.clearTimeout(selectionTimer);clearHighlights();matches=[];clearOutline('目录已关闭');
+  visualView=undefined;proposal=undefined;focusRange=undefined;regionController=undefined;content.replaceChildren();styles.replaceChildren();
+ },{once:true});
  content.addEventListener('click',event=>{if(event.target instanceof Element&&event.target.closest('a'))event.preventDefault();},true);
  document.addEventListener('submit',event=>event.preventDefault(),true);
  window.addEventListener('message',async event=>{
   const value=event.data;
-  if(started||event.source!==window.parent||event.origin!==parentOrigin||!value||value.type!=='jot-docx-init'||value.protocol!==1
+  if(closed||started||event.source!==window.parent||event.origin!==parentOrigin||!value||value.type!=='jot-docx-init'||value.protocol!==1
    ||typeof value.token!=='string'||!/^[a-f0-9-]{36}$/.test(value.token)||Object.keys(value).some(key=>!['type','protocol','token','bytes','focus'].includes(key))
    ||!(value.bytes instanceof ArrayBuffer)||value.bytes.byteLength>20*1024*1024)return;
   started=true;sessionToken=value.token;
@@ -321,6 +326,7 @@ function findTextSearchMatches(text, query, limit) {
     renderHeaders:true,renderFooters:true,renderFootnotes:true,renderEndnotes:true,
     renderComments:false,renderAltChunks:false,useBase64URL:true,
     h(element){
+     if(closed)throw Error('DOCX_VIEW_CLOSED');
      if(++nodes>50000)throw Error('DOCX_VIEW_LIMIT');
      if(typeof element==='string'){textUnits+=element.length;if(textUnits>33554432)throw Error('DOCX_VIEW_LIMIT');}
      const node=window.docx.defaultOptions.h(element);
@@ -328,6 +334,7 @@ function findTextSearchMatches(text, query, limit) {
      return node;
     }
    });
+   if(closed){content.replaceChildren();styles.replaceChildren();return;}
    const sections=content.querySelectorAll('section.jot-docx').length;
    visualView=indexVisualText();
    buildOutline();query.disabled=false;
@@ -335,6 +342,7 @@ function findTextSearchMatches(text, query, limit) {
    status.textContent='Word视觉内容';report({type:'jot-docx-ready',sections});
    if(value.focus)restoreFocus(value.focus);
   }catch(error){
+   if(closed){content.replaceChildren();styles.replaceChildren();return;}
    window.clearTimeout(searchTimer);window.clearTimeout(selectionTimer);clearHighlights();matches=[];visualView=undefined;proposal=undefined;query.disabled=true;
    clearOutline('视觉内容未能渲染');
    content.replaceChildren();styles.replaceChildren();status.textContent='视觉内容未能渲染';
