@@ -1,4 +1,5 @@
 import {createTerminalControl} from './terminal-control.js'
+import {sessionHeaderIdentity} from './session-header-identity.js'
 import {projectTerminalInventory} from '../gateway/src/terminal/inventory.js'
 import {validateHostCredentialRefs} from './host-credentials-owner-route.js'
 import {createHostPolicyBootstrapRuntime,resolveHostPolicyBootstrapRuntimeConfig,validateHostPolicyBootstrapRuntimeConfig} from './host-policy-bootstrap-runtime.js'
@@ -235,7 +236,7 @@ class SessionBindingConflict extends Error {}
 async function createOrResumeSession({controller,request,agents,sessions,sessionNotFoundError,signal,beforeAdmission}) {
   if(typeof controller.inspect!=='function'||typeof controller.resolveAgent!=='function')return controller.create(request)
   const {sessionId,cwd,agentPreset}=request
-  const identity=header=>JSON.stringify([header?.id,header?.cwd,header?.agentPreset,header?.createdAt,header?.parentSession,header?.origin,header?.delegationDepth,header?.isSeeded])
+  const identity=sessionHeaderIdentity
   const checkHeader=header=>{
     if(header?.id!==sessionId||header.cwd!==cwd||agentPreset!==undefined&&header.agentPreset!==agentPreset)throw new SessionBindingConflict()
   }
@@ -657,17 +658,22 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
         return json(code==='terminal_input_capacity'||code==='terminal_attachment_capacity'?429:code==='terminal_input_invalid'?422:409,{error:'terminal_attachment_unavailable'});
       }
     }
-    const terminalOperation=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/terminals\/(options|commands|receipts)$/)
+    const terminalOperation=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/terminals\/(options|recover|commands|receipts)$/)
     if(terminalOperation){
-      const sessionId=decodeURIComponent(terminalOperation[1]),operation=terminalOperation[2],write=operation!=='options';
+      const sessionId=decodeURIComponent(terminalOperation[1]),operation=terminalOperation[2],write=['commands','receipts'].includes(operation);
       if(method!=='POST')return json(405,{error:'method_not_allowed'});
       if(!ID.test(sessionId)||url.search||!body||typeof body!=='object'||Array.isArray(body)
         ||Object.keys(body).sort().join(',')!==(write?'command,owner_id':'owner_id')
         ||typeof body.owner_id!=='string'||!ID.test(body.owner_id))return json(422,{error:'terminal_control_input_invalid'});
       if(!terminalControl)return json(503,{error:'terminal_control_unavailable'});
       try{return json(200,await (operation==='commands'?terminalControl.command(body.owner_id,sessionId,body.command,signal):
-        operation==='receipts'?terminalControl.receipt(body.owner_id,sessionId,body.command,signal):terminalControl.options(body.owner_id,sessionId,signal)));}
+        operation==='receipts'?terminalControl.receipt(body.owner_id,sessionId,body.command,signal):
+        operation==='recover'?terminalControl.recover(body.owner_id,sessionId,signal):terminalControl.options(body.owner_id,sessionId,signal)));}
       catch(error){
+        if(operation==='recover'){
+          if(error?.message==='terminal_session_not_found')return json(404,{error:error.message});
+          if(['terminal_session_changed','terminal_session_busy','terminal_recovery_capacity'].includes(error?.message))return json(409,{error:error.message});
+        }
         if(['terminal_host_changed','terminal_command_conflict','terminal_receipt_capacity'].includes(error?.message))return json(409,{error:error.message});
         return json(503,{error:'terminal_control_unavailable'});
       }
@@ -1303,7 +1309,7 @@ export function apply(ctx, config = {}) {
       ctx.effect(()=>()=>dispose());
     }
     const terminalControl=createTerminalControl({readIdentity:()=>resolveOwnerBoundDshProfileContext(ctx.get('profileContext')),
-      terminalController:()=>ctx.get('terminalController',false),agents:ctx.agents,sessions:ctx.sessions,
+      terminalController:()=>ctx.get('terminalController',false),sessionController:()=>ctx.sessionController,sessionNotFoundError:ApiSessionNotFound,agents:ctx.agents,sessions:ctx.sessions,
       gateway:()=>ctx.get('typertGateway',false),createPeer:()=>{
         const connection=ctx.get('connection',false);
         if(typeof connection?.createPeer!=='function')throw Error('terminal_attachment_unavailable');

@@ -474,6 +474,11 @@ export class SessionControllerClient {
     return validateTerminalInventory(await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/terminals/commands`,{owner_id:ownerId,command},signal),sessionId);
   }
 
+  async recoverTerminal(ownerId:string,sessionId:string,signal?:AbortSignal):Promise<TerminalOptions>{
+    if(![ownerId,sessionId].every(value=>typeof value==='string'&&DRIVER_ID.test(value)))throw Error('terminal_control_input_invalid');
+    return validateTerminalOptions(await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/terminals/recover`,{owner_id:ownerId},signal),sessionId);
+  }
+
   async listTerminals(ownerId:string,sessionId:string,signal?:AbortSignal):Promise<TerminalInventory>{
     const id=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
     if(![ownerId,sessionId].every(value=>typeof value==='string'&&id.test(value)))throw Error('terminal_inventory_input_invalid');

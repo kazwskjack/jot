@@ -190,3 +190,10 @@ revision `783499ffdb2d501bf590b2e035acd027a882df10`.
 These adapted portions retain GNU AGPL v3 terms under the complete license at
 `packages/session-adapter/runtime-patches/PILOTDECK-AGPL-3.0.txt`.
 Jot binds the browser view to its native Session stream and authoritative screen.
+
+
+Explicit terminal Session loading also uses the installed DSH
+`SessionController.inspect` and `resolveAgent` APIs, retaining their MIT terms
+and original exact-identity, persisted-preset, writer and subagent ownership
+semantics. Caller cancellation releases Jot's waiting request. Native shared
+resolution remains owned by the original Host service lifecycle.

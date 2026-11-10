@@ -38,6 +38,7 @@ function TerminalPanel({conversationId,runId,historical=false,onSettled,onActive
   const [open,setOpen]=useState(false),[revision,setRevision]=useState(0);
   const [inventory,setInventory]=useState<TerminalInventory>(),[loading,setLoading]=useState(false),[error,setError]=useState('');
   const [options,setOptions]=useState<TerminalOptions>(),[optionsError,setOptionsError]=useState('');
+  const [recovering,setRecovering]=useState(false),recoveryAbort=useRef<AbortController|null>(null);
   const [selected,setSelected]=useState('');
   const activeChanged=useCallback((value:boolean)=>onActiveChange(runId,value),[runId,onActiveChange]);
   const inputChanged=useCallback((value:boolean)=>onInputPendingChange(runId,value),[runId,onInputPendingChange]);
@@ -74,8 +75,14 @@ function TerminalPanel({conversationId,runId,historical=false,onSettled,onActive
     throw Error(receipt.state==='pending'?'原终端操作仍在处理中，请稍后核对。':'原终端操作结果仍未知，原请求已保留。');
   });
   const path=`/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}/terminals`;
-  useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
+  function acceptOptions(value:TerminalOptions) {
+    setOptions(value);setInventory(value.inventory);
+    setCols(current=>Math.min(current,value.environment.maxCols));setRows(current=>Math.min(current,value.environment.maxRows));
+    setShell(current=>value.shells.some(item=>item.path===current)?current:'');
+  }
+  useEffect(()=>{alive.current=true;return()=>{alive.current=false;recoveryAbort.current?.abort();};},[]);
   useEffect(()=>{
+    recoveryAbort.current?.abort();recoveryAbort.current=null;setRecovering(false);
     setInventory(undefined);setOptions(undefined);setError('');setOptionsError('');setLoading(open);
     if(!open)return;
     const abort=new AbortController();
@@ -87,14 +94,30 @@ function TerminalPanel({conversationId,runId,historical=false,onSettled,onActive
       if(listed.status==='fulfilled')setInventory(listed.value);
       else setError(listed.reason instanceof Error?listed.reason.message:'无法读取原生终端');
       if(configured.status==='fulfilled'&&(listed.status!=='fulfilled'||configured.value.session_id===listed.value.session_id)){
-        const value=configured.value;setOptions(value);setInventory(value.inventory);
-        setCols(current=>Math.min(current,value.environment.maxCols));setRows(current=>Math.min(current,value.environment.maxRows));
-        setShell(current=>value.shells.some(item=>item.path===current)?current:'');
-      }else setOptionsError('原生终端控制暂不可用。需要当前 Host 中已驻留的原生会话。');
+        acceptOptions(configured.value);
+      }else setOptionsError('原生终端环境暂不可用，可尝试加载原会话执行环境。');
       setLoading(false);
     });
     return()=>abort.abort();
   },[open,revision,path]);
+  async function recover() {
+    if(!open||loading||recovering||recoveryAbort.current)return;
+    const abort=new AbortController();recoveryAbort.current=abort;setRecovering(true);setOptionsError('');
+    try{
+      const value=await request<TerminalOptions>(path+'/recover','POST',{},crypto.randomUUID(),abort.signal);
+      if(abort.signal.aborted||recoveryAbort.current!==abort||!alive.current)return;
+      acceptOptions(validateTerminalOptions(value,inventory?.session_id??value?.session_id));
+      setError('');
+      onSettled('原会话执行环境已加载，清单展示当前 Host 实际保留的终端。');
+    }catch(reason){
+      if(!abort.signal.aborted&&recoveryAbort.current===abort&&alive.current){
+        const code=reason instanceof Error?reason.message:'';
+        setOptionsError(code==='TERMINAL_SESSION_BUSY'?'原会话正由其他写入者或子代理持有，请稍后重试。':
+          code==='TERMINAL_SESSION_NOT_FOUND'?'原持久会话已不可用。':
+          code==='TERMINAL_RECOVERY_CAPACITY'?'当前会话加载已达并发范围，请稍后重试。':'原会话加载暂未确认，可重试读取原会话。');
+      }
+    }finally{if(alive.current&&recoveryAbort.current===abort){recoveryAbort.current=null;setRecovering(false);}}
+  }
   async function submit(command?:TerminalCommand) {
     if(busy||journal.error||command&&(!inventory||writer.pending)||!command&&!writer.pending)return;
     if(command){commandKey.current=command.request_id;setEndingWait(false);setPendingCommand(command);}
@@ -129,12 +152,13 @@ function TerminalPanel({conversationId,runId,historical=false,onSettled,onActive
     &&Number.isSafeInteger(rows)&&rows>0&&rows<=options.environment.maxRows);
   return <details onToggle={event=>setOpen(event.currentTarget.open)}>
     <summary>{historical?`历史运行终端 · ${runId}`:'会话终端'}</summary>
-    <button type="button" disabled={loading} onClick={()=>setRevision(value=>value+1)}>刷新终端清单</button>
+    <button type="button" disabled={loading||recovering} onClick={()=>setRevision(value=>value+1)}>刷新终端清单</button>
     {loading&&<p role="status">正在读取原生终端…</p>}
     {error&&<p role="alert">{error}</p>}
     {commandError&&<p role="alert">{commandError}</p>}
     {journal.error&&<p role="alert">{journal.error}</p>}
     {optionsError&&<p role="status">{optionsError}</p>}
+    {!options&&open&&!loading&&<button type="button" disabled={recovering} onClick={()=>void recover()}>{recovering?'正在加载原会话执行环境…':'加载原会话执行环境'}</button>}
     {writer.pending&&<div role="status">
       <p>原终端请求等待回执。</p>
       {pendingCommand&&<p>请求 <code>{pendingCommand.request_id}</code> · {pendingCommand.action==='create'?'创建':'关闭'} <code>{pendingCommand.terminal_id}</code></p>}
