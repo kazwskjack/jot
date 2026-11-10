@@ -36,3 +36,5 @@ cpSync(new URL('../src/terminal/stream.d.ts', import.meta.url), new URL('../dist
 
 cpSync(new URL('../src/harness/native-file-range.js', import.meta.url), new URL('../dist/src/harness/native-file-range.js', import.meta.url));
 cpSync(new URL('../src/harness/native-file-range.d.ts', import.meta.url), new URL('../dist/src/harness/native-file-range.d.ts', import.meta.url));
+cpSync(new URL('../src/harness/native-search-members.js', import.meta.url), new URL('../dist/src/harness/native-search-members.js', import.meta.url));
+cpSync(new URL('../src/harness/native-search-members.d.ts', import.meta.url), new URL('../dist/src/harness/native-search-members.d.ts', import.meta.url));

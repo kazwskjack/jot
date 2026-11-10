@@ -266,3 +266,13 @@ lookup and composed filesystem policy. Canonical path, opaque native version,
 reported size and Session/profile identity constrain each bounded byte range.
 Actual chunk SHA is separate from native freshness metadata. The retained DSH
 MIT notice applies to this integration.
+
+
+Typed native search members additionally retain the actual native run working
+directory and structured paths after the original policy accepts the result.
+The optional pinned compatibility delta preserves the original renderer and
+spill behavior. Bounded member pages require the final original successful
+Session result, its complete rendered-content digest and original result total.
+Paths remain data and confer no filesystem authority. Consecutive duplicate
+paths are coalesced, with no promise of globally unique files. The retained DSH
+MIT notice applies to this integration.

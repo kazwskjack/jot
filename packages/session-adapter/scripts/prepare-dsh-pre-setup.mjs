@@ -155,7 +155,7 @@ function collectPackageFiles(packageRoot, pendingInputWake, nativeAdmission, nat
 
   files.set('package.json', Buffer.from(`${JSON.stringify({
     ...manifest,
-    jotCompatibilityPatch: {protocol: nativeSearchSource ? 1 : 2, upstreamVersion: manifest.version,...(nativeSearchSource?{nativeSearchSourceProtocol:1}:{}),...(pendingInputWake?{pendingInputProtocol:1,pendingWakeRevocationProtocol:1,pendingInputBindingsProtocol:1}:{}),...(nativeAdmission?{nativeAdmissionProtocol:1}:{})},
+    jotCompatibilityPatch: {protocol: nativeSearchSource ? 1 : 2, upstreamVersion: manifest.version,...(nativeSearchSource?{nativeSearchSourceProtocol:1,nativeSearchMembersProtocol:1}:{}),...(pendingInputWake?{pendingInputProtocol:1,pendingWakeRevocationProtocol:1,pendingInputBindingsProtocol:1}:{}),...(nativeAdmission?{nativeAdmissionProtocol:1}:{})},
   }, null, 2)}\n`, 'utf8'));
   files.set('LICENSE', readRegularFile(join(packageRoot, 'LICENSE'), 'dsh_pre_setup_package_license'));
 
@@ -248,7 +248,7 @@ export function prepareDshNativeSearchRuntime(sourcePackage, outputPackage) {
   if (pathsOverlap(source, output)) fail('dsh_pre_setup_path_overlap');
   const files = collectPackageFiles(source, false, false, true);
   writePreparedPackage(files, output);
-  return Object.freeze({protocol: 1, upstreamVersion: '0.2.1-rc.2', nativeSearchSourceProtocol: 1});
+  return Object.freeze({protocol: 1, upstreamVersion: '0.2.1-rc.2', nativeSearchSourceProtocol: 1, nativeSearchMembersProtocol: 1});
 }
 
 function cli() {

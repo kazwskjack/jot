@@ -1,3 +1,4 @@
+import {validateNativeSearchMembersRequest,validateNativeSearchMembers,type NativeSearchMembersRequest,type NativeSearchMembers} from './native-search-members.js';
 import {validateHostSettingsProductCommand,validateHostSettingsProductResult,validateHostSettingsEditor,validateHostSettingsApprovalRequest,type HostSettingsProductCommand,type HostSettingsApprovalRequest} from '../host-admin/settings-product-contract.ts';
 import {validateNativeFileRangeRequest,validateNativeFileRange,type NativeFileRangeRequest,type NativeFileRange} from './native-file-range.js';
 import type {NativeSearchSourceRequest,NativeSearchSourceSearchRequest} from '../events/native-search-source.ts';
@@ -470,6 +471,13 @@ export class SessionControllerClient {
     const range=validateNativeFileRangeRequest(input);
     return validateNativeFileRange(await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/native-file/range`,
       {owner_id:ownerId,range},signal),sessionId,range);
+  }
+
+  async readNativeSearchMembers(ownerId:string,sessionId:string,input:NativeSearchMembersRequest,signal?:AbortSignal):Promise<NativeSearchMembers>{
+    if(![ownerId,sessionId].every(value=>typeof value==='string'&&DRIVER_ID.test(value)))throw Error('native_search_source_invalid');
+    const source=validateNativeSearchMembersRequest(input);
+    return validateNativeSearchMembers(await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/native-search-source/members`,
+      {owner_id:ownerId,source},signal),sessionId,source);
   }
 
   async readNativeSearchSource(ownerId:string,sessionId:string,input:NativeSearchSourceRequest,signal?:AbortSignal):Promise<unknown>{

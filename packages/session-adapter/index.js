@@ -659,7 +659,7 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
           {error:'native_file_range_unavailable'});
       }
     }
-    const nativeSearch=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/native-search-source(?:\/search)?$/);
+    const nativeSearch=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/native-search-source(?:\/(?:search|members))?$/);
     if(nativeSearch){
       if(method!=='POST')return json(405,{error:'method_not_allowed'});
       const sessionId=decodeURIComponent(nativeSearch[1]);
@@ -667,7 +667,7 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
         ||Object.keys(body).sort().join(',')!=='owner_id,source'||typeof body.owner_id!=='string'||!ID.test(body.owner_id))
         return json(422,{error:'native_search_source_invalid'});
       if(!nativeSearchSource)return json(503,{error:'native_search_source_unavailable'});
-      try{return json(200,await nativeSearchSource[url.pathname.endsWith('/search')?'search':'read'](body.owner_id,sessionId,body.source,signal));}
+      try{return json(200,await nativeSearchSource[url.pathname.endsWith('/members')?'members':url.pathname.endsWith('/search')?'search':'read'](body.owner_id,sessionId,body.source,signal));}
       catch(error){
         const code=error?.message;
         return json(code==='native_search_source_capacity'?429:code==='native_search_source_forbidden'?403:code==='native_search_source_not_found'?404:
@@ -1031,7 +1031,7 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
     }
     return json(404, { error: 'not_found' })
   };
-  const quietPost=(request)=>request?.method==='POST'&&(['/v1/host-admin/bootstrap/redeem','/v1/host-admin/settings/read','/v1/host-admin/settings/editor/read','/v1/host-admin/settings/attempt/read','/v1/host-admin/settings/readiness','/v1/taskmaster/installation','/v1/models','/v1/models/metadata','/v1/models/metadata/readiness','/v1/conversation-modes/readiness'].includes(request?.url?.pathname)||/^\/v1\/sessions\/[^/]+\/(?:terminals\/(?:list|options|receipts)|native-search-source(?:\/search)?|native-file\/range)$/.test(request?.url?.pathname??''));
+  const quietPost=(request)=>request?.method==='POST'&&(['/v1/host-admin/bootstrap/redeem','/v1/host-admin/settings/read','/v1/host-admin/settings/editor/read','/v1/host-admin/settings/attempt/read','/v1/host-admin/settings/readiness','/v1/taskmaster/installation','/v1/models','/v1/models/metadata','/v1/models/metadata/readiness','/v1/conversation-modes/readiness'].includes(request?.url?.pathname)||/^\/v1\/sessions\/[^/]+\/(?:terminals\/(?:list|options|receipts)|native-search-source(?:\/(?:search|members))?|native-file\/range)$/.test(request?.url?.pathname??''));
   return async request=>{
     if(!hostAdmissionGuard||quietPost(request)||!authorized(request?.headers?.authorization,token))return dispatch(request);
     let admission;
@@ -1388,7 +1388,7 @@ export function apply(ctx, config = {}) {
       try {
         const url = new URL(req.url, `http://${host}:${port}`)
         const isFileUpload = /^\/v1\/sessions\/[^/]+\/files$/.test(url.pathname)
-        const bodyLimit = url.pathname.startsWith('/v1/host-admin/') || /^\/v1\/sessions\/[^/]+\/native-search-source(?:\/search)?$/.test(url.pathname) ? 4096 : /^\/v1\/sessions\/[^/]+\/native-file\/range$/.test(url.pathname) ? 1024 * 1024 : url.pathname.startsWith('/v1/voice/') ? 4 * 1024 * 1024 : 32 * 1024 * 1024
+        const bodyLimit = url.pathname.startsWith('/v1/host-admin/') || /^\/v1\/sessions\/[^/]+\/native-search-source(?:\/(?:search|members))?$/.test(url.pathname) ? 4096 : /^\/v1\/sessions\/[^/]+\/native-file\/range$/.test(url.pathname) ? 1024 * 1024 : url.pathname.startsWith('/v1/voice/') ? 4 * 1024 * 1024 : 32 * 1024 * 1024
         const result = await handler({ method: req.method, url, headers: req.headers,
           body: isFileUpload ? req : await readJson(req, bodyLimit), signal: abort.signal })
         if (result.stream) {

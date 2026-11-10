@@ -129,6 +129,34 @@ export function createNativeSearchSourceStore({readIdentity}) {
     } catch (error) { if (db.isTransaction) db.exec('ROLLBACK'); throw error; }
   }
 
+  function persist(db,identity,key,value,encoded,chunks) {
+    check(identity);
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const previous = db.prepare(`SELECT
+        CASE WHEN length(CAST(metadata_json AS BLOB))<=65536 THEN metadata_json END AS metadata_json
+        FROM native_search_sources WHERE source_key=?`).get(key);
+      if (previous) {
+        if (previous.metadata_json !== encoded) throw Error('native_search_source_conflict');
+      } else {
+        const total = db.prepare('SELECT count(*) AS count,coalesce(sum(bytes),0) AS bytes FROM native_search_sources').get();
+        if (total.count >= MAX_SOURCES || total.bytes + value.bytes > MAX_TOTAL_BYTES)
+          throw Error('native_search_source_capacity');
+        db.prepare('INSERT INTO native_search_sources VALUES(?,?,?,?)').run(key,encoded,value.sha256,value.bytes);
+        const insert = db.prepare('INSERT INTO native_search_source_chunks VALUES(?,?,?)'), digest = createHash('sha256');
+        let written = 0, index = 0;
+        for (const chunk of chunks()) {
+          if (!(chunk instanceof Uint8Array) || chunk.length < 1 || chunk.length !== Math.min(65536,value.bytes-written))
+            throw Error('native_search_source_store_invalid');
+          insert.run(key,index++,chunk);digest.update(chunk);written+=chunk.length;
+        }
+        if (written !== value.bytes || digest.digest('hex') !== value.sha256) throw Error('native_search_source_changed');
+      }
+      check(identity);
+      db.exec('COMMIT');
+    } catch (error) { if (db.isTransaction) db.exec('ROLLBACK'); throw error; }
+  }
+
   return Object.freeze({
     async save(identity, key, value, content) {
       if (!SHA.test(key) || typeof content !== 'string' || Buffer.byteLength(content) > MAX_SOURCE_BYTES)
@@ -140,25 +168,47 @@ export function createNativeSearchSourceStore({readIdentity}) {
       if (Buffer.byteLength(encoded) > 65536) throw Error('native_search_source_store_invalid');
       const db = await database(identity, true);
       check(identity);
-      db.exec('BEGIN IMMEDIATE');
-      try {
-        const previous = db.prepare(`SELECT
-          CASE WHEN length(CAST(metadata_json AS BLOB))<=65536 THEN metadata_json END AS metadata_json
-          FROM native_search_sources WHERE source_key=?`).get(key);
-        if (previous) {
-          if (previous.metadata_json !== encoded) throw Error('native_search_source_conflict');
-        } else {
-          const total = db.prepare('SELECT count(*) AS count,coalesce(sum(bytes),0) AS bytes FROM native_search_sources').get();
-          if (total.count >= MAX_SOURCES || total.bytes + bytes.length > MAX_TOTAL_BYTES)
-            throw Error('native_search_source_capacity');
-          db.prepare('INSERT INTO native_search_sources VALUES(?,?,?,?)').run(key, encoded, value.sha256, bytes.length);
-          const insert = db.prepare('INSERT INTO native_search_source_chunks VALUES(?,?,?)');
-          for (let offset = 0; offset < bytes.length; offset += 65536)
-            insert.run(key, offset / 65536, bytes.subarray(offset, offset + 65536));
+      persist(db,identity,key,value,encoded,function*(){
+        for(let offset=0;offset<bytes.length;offset+=65536)yield bytes.subarray(offset,offset+65536);
+      });
+    },
+    async saveChunks(identity,key,makeMetadata,chunks) {
+      if (!SHA.test(key)) throw Error('native_search_source_invalid');
+      const db = await database(identity,true);
+      check(identity);
+      const digest = createHash('sha256'), decoder = new TextDecoder('utf-8',{fatal:true,ignoreBOM:true});
+      let bytes = 0, chars = 0;
+      for (const chunk of chunks()) {
+        if (!(chunk instanceof Uint8Array) || chunk.length < 1 || chunk.length > 65536 || bytes+chunk.length>MAX_SOURCE_BYTES)
+          throw Error('native_search_source_capacity');
+        bytes+=chunk.length;digest.update(chunk);chars+=decoder.decode(chunk,{stream:true}).length;
+      }
+      chars+=decoder.decode().length;
+      const sha256=digest.digest('hex'), value=makeMetadata({bytes,chars,sha256}), encoded=JSON.stringify(value);
+      if(value.bytes!==bytes||value.chars!==chars||value.sha256!==sha256||Buffer.byteLength(encoded)>65536)
+        throw Error('native_search_source_store_invalid');
+      persist(db,identity,key,value,encoded,chunks);
+      return value;
+    },
+    async memberPage(identity,key,expected,offset) {
+      if(!Number.isSafeInteger(offset)||offset<0||offset>expected.member_count)throw Error('native_search_source_offset_invalid');
+      const items=[];let pending='',index=0;
+      await scan(identity,key,expected,part=>{
+        pending+=part;
+        let end;
+        while((end=pending.indexOf('\n'))>=0){
+          if(end>262144)throw Error('native_search_source_store_invalid');
+          const row=JSON.parse(pending.slice(0,end));pending=pending.slice(end+1);
+          if(!row||typeof row!=='object'||Array.isArray(row)||Object.keys(row).join(',')!=='path'
+            ||typeof row.path!=='string'||!row.path||row.path.length>32768||row.path.includes('\0'))throw Error('native_search_source_store_invalid');
+          if(index>=offset&&items.length<256)items.push({index,path:row.path});
+          index++;
         }
-        check(identity);
-        db.exec('COMMIT');
-      } catch (error) { if (db.isTransaction) db.exec('ROLLBACK'); throw error; }
+        if(pending.length>262144)throw Error('native_search_source_store_invalid');
+      });
+      if(pending||index!==expected.member_count)throw Error('native_search_source_store_invalid');
+      return {items,offset_members:offset,total_members:index,
+        ...(offset+items.length<index?{next_offset_members:offset+items.length}:{})};
     },
     async inspect(identity, key) {
       if (!SHA.test(key)) throw Error('native_search_source_invalid');
