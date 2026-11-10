@@ -1,3 +1,4 @@
+import {projectTerminalInventory} from '../gateway/src/terminal/inventory.js'
 import {validateHostCredentialRefs} from './host-credentials-owner-route.js'
 import {createHostPolicyBootstrapRuntime,resolveHostPolicyBootstrapRuntimeConfig,validateHostPolicyBootstrapRuntimeConfig} from './host-policy-bootstrap-runtime.js'
 import {createChatCompactionManager} from './chat-compaction-manager.js'
@@ -274,7 +275,7 @@ async function createOrResumeSession({controller,request,agents,sessions,session
   return value
 }
 
-export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,skillContentCommand,skillCatalogCommand,skillResourceCommand,nativeCommandQueryHost,nativePlanModeHost,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation=false,sessionNotFoundError,modelCatalogReader,trustedModelMetadataReader,trustedModelMetadataEnabled=false,requireOrdinaryModelPolicy=false,chatExecutionPolicy,chatModeReadiness,mcpControlRoute,pluginProfileControl,hostPolicyBootstrap,hostSettingsProductHandler,hostAdmissionGuard,taskmasterInstallationReader,taskmasterRuntimeVersionReader }) {
+export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,skillContentCommand,skillCatalogCommand,skillResourceCommand,nativeCommandQueryHost,nativePlanModeHost,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation=false,sessionNotFoundError,modelCatalogReader,trustedModelMetadataReader,trustedModelMetadataEnabled=false,requireOrdinaryModelPolicy=false,chatExecutionPolicy,chatModeReadiness,mcpControlRoute,pluginProfileControl,hostPolicyBootstrap,hostSettingsProductHandler,hostAdmissionGuard,taskmasterInstallationReader,taskmasterRuntimeVersionReader,terminalInventoryReader }) {
   const allowedPresets=new Set(ALLOWED_AGENT_PRESETS)
   if(chatExecutionPolicy!==undefined){normalizeChatExecutionPolicy(chatExecutionPolicy);if(!requireOrdinaryModelPolicy||!ordinaryInputAdmissionHost)throw Error('ordinary_execution_policy_config_invalid');allowedPresets.add('jot-chat')}
   const voiceHandler = voiceEnabled ? createVoiceAdapterHandler({ speechController, token }) : null
@@ -638,6 +639,16 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       try{return json(200,await memoryExtractionHost.run(agent,{signal}));}
       catch{return json(409,{error:'memory_extraction_not_completed'});}
     }
+    const terminalList=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/terminals\/list$/)
+    if(terminalList){
+      const sessionId=decodeURIComponent(terminalList[1]);
+      if(method!=='POST')return json(405,{error:'method_not_allowed'});
+      if(!ID.test(sessionId)||url.search||!body||typeof body!=='object'||Array.isArray(body)
+        ||Object.keys(body).join(',')!=='owner_id'||typeof body.owner_id!=='string'||!ID.test(body.owner_id))return json(422,{error:'terminal_inventory_input_invalid'});
+      if(typeof terminalInventoryReader!=='function')return json(503,{error:'terminal_inventory_unavailable'});
+      try{return json(200,await terminalInventoryReader(body.owner_id,sessionId,signal));}
+      catch{return json(503,{error:'terminal_inventory_unavailable'});}
+    }
     const nativeMemberList=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/native-members\/list$/)
     if(nativeMemberList){
       const sessionId=decodeURIComponent(nativeMemberList[1]);
@@ -948,7 +959,7 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
     }
     return json(404, { error: 'not_found' })
   };
-  const quietPost=(request)=>request?.method==='POST'&&(['/v1/host-admin/bootstrap/redeem','/v1/host-admin/settings/read','/v1/host-admin/settings/editor/read','/v1/host-admin/settings/attempt/read','/v1/host-admin/settings/readiness','/v1/taskmaster/installation','/v1/models','/v1/models/metadata','/v1/models/metadata/readiness','/v1/conversation-modes/readiness'].includes(request?.url?.pathname));
+  const quietPost=(request)=>request?.method==='POST'&&(['/v1/host-admin/bootstrap/redeem','/v1/host-admin/settings/read','/v1/host-admin/settings/editor/read','/v1/host-admin/settings/attempt/read','/v1/host-admin/settings/readiness','/v1/taskmaster/installation','/v1/models','/v1/models/metadata','/v1/models/metadata/readiness','/v1/conversation-modes/readiness'].includes(request?.url?.pathname)||/^\/v1\/sessions\/[^/]+\/terminals\/list$/.test(request?.url?.pathname??''));
   return async request=>{
     if(!hostAdmissionGuard||quietPost(request)||!authorized(request?.headers?.authorization,token))return dispatch(request);
     let admission;
@@ -1263,6 +1274,16 @@ export function apply(ctx, config = {}) {
     const handler = createAdapterHandler({ controller: ctx.sessionController, fileUploads: ctx.fileUploads, agents: ctx.agents,
       sessions:ctx.sessions,persistence:ctx.sessionPersistence,sessionNotFoundError:ApiSessionNotFound,
       speechController, voiceEnabled, token, workbenchBridge, skillContentCommand, skillCatalogCommand, skillResourceCommand, nativeCommandQueryHost, nativePlanModeHost,
+      terminalInventoryReader:(ownerId,sessionId,signal)=>{
+        signal?.throwIfAborted();
+        const identity=resolveOwnerBoundDshProfileContext(ctx.get('profileContext'));
+        if(identity.ownerId!==ownerId)throw Error('terminal_profile_forbidden');
+        const terminals=ctx.get('terminalController',false);
+        if(typeof terminals?.list!=='function')throw Error('terminal_inventory_unavailable');
+        const inventory=projectTerminalInventory(sessionId,terminals.list(sessionId));
+        signal?.throwIfAborted();
+        return inventory;
+      },
       taskmasterRuntimeVersionReader:(ownerId,expected,signal)=>taskmasterRuntime.read(ownerId,expected,signal),
       taskmasterInstallationReader:(ownerId,signal)=>readTaskmasterInstallation({ownerId,signal,readIdentity:()=>resolveOwnerBoundDshProfileContext(ctx.get('profileContext'))}),
       budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery:handoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation:config.nativeIdleObservation===true,

@@ -142,3 +142,15 @@ from `ui/src/components/code-editor/view/subcomponents/RegionSelectionOverlay.ts
 at the same PilotDeck revision and retains GNU AGPL v3 terms. Jot crops its
 completed PDF canvas directly and connects the PNG to its existing reviewed
 upload/attachment lifecycle.
+
+
+## Native DSH terminal metadata integration
+
+`packages/session-adapter/index.js` reads the existing `terminalController.list`
+API from `@deepseek-ai/dsh-api-terminal-controller` version `0.2.1-rc.2`.
+The native package retains its MIT license. The complete DSH MIT notice is
+retained at `packages/session-adapter/runtime-patches/DSH-MIT-LICENSE.txt`.
+Jot's terminal inventory projection, owned conversation route and metadata
+panel integrate this API through its published Session-owned metadata contract.
+The PilotDeck shell hook and mobile shortcuts at pinned revision
+`783499ffdb2d501bf590b2e035acd027a882df10` inform the remaining interactive scope.

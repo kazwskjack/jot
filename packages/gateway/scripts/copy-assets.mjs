@@ -21,3 +21,7 @@ cpSync(new URL('../src/artifacts/archive-windows-job.ps1', import.meta.url), new
 
 mkdirSync(new URL('../dist/src/messages/', import.meta.url), { recursive: true });
 cpSync(new URL('../src/messages/content-reference.js', import.meta.url), new URL('../dist/src/messages/content-reference.js', import.meta.url));
+
+mkdirSync(new URL('../dist/src/terminal/', import.meta.url), { recursive: true });
+cpSync(new URL('../src/terminal/inventory.js', import.meta.url), new URL('../dist/src/terminal/inventory.js', import.meta.url));
+cpSync(new URL('../src/terminal/inventory.d.ts', import.meta.url), new URL('../dist/src/terminal/inventory.d.ts', import.meta.url));

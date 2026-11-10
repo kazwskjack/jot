@@ -9,6 +9,8 @@ import {nativeIdleSessionId,validateNativeIdleObservation} from './native-idle-o
 import type {TaskmasterRuntimeVersionRequest} from '../../contracts/types.ts'
 import {validateTaskmasterInstallation,validateTaskmasterRuntimeVersion} from '../persistent-tasks/taskmaster-installation.ts'
 
+import {validateTerminalInventory,type TerminalInventory} from '../terminal/inventory.js'
+
 export type AdapterFetch = (input: string | URL, init?: RequestInit) => Promise<Response>
 
 export type BrowserDriverScope=Readonly<{
@@ -400,6 +402,12 @@ export class SessionControllerClient {
     if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!=='execution_authorized,request_id,status'
       ||value.execution_authorized!==false||value.request_id!==requestId||!['accepted','unknown'].includes(String(value.status)))throw Error('native_member_wake_receipt_invalid');
     return Object.freeze(value as NativeMemberWakeReceipt);
+  }
+
+  async listTerminals(ownerId:string,sessionId:string,signal?:AbortSignal):Promise<TerminalInventory>{
+    const id=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
+    if(![ownerId,sessionId].every(value=>typeof value==='string'&&id.test(value)))throw Error('terminal_inventory_input_invalid');
+    return validateTerminalInventory(await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/terminals/list`,{owner_id:ownerId},signal),sessionId);
   }
 
   async listNativeMembers(sessionId:string,signal?:AbortSignal):Promise<NativeMemberRoster>{
