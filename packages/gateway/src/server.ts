@@ -1,3 +1,5 @@
+import {messageReferenceSnapshotsInstalled,assertReferenceSnapshotImages} from './messages/reference-snapshots.ts';
+import {prepareReferenceSteeringText} from './messages/content-reference.js';
 import {createPinnedByteStore} from './artifacts/pinned-byte-source.ts';
 import {readActivityToolResult,searchActivityToolResults,readActivityToolResultFile,readActivityToolResultFileBytes,parseActivityFileDownloadQuery,readActivityToolResultFileDownload} from './events/activity-tool-result.ts';
 import {readActivityHistory} from './events/activity-history.ts';
@@ -644,6 +646,9 @@ export async function buildServer(config: {
 
   app.setErrorHandler((error, request, reply) => {
     const code = error instanceof Error ? error.message : 'internal_error';
+    if(['content_reference_request_invalid','content_reference_request_too_large','content_reference_attachment_mismatch'].includes(code))return reply.code(422).send({error:{code:code.toUpperCase()}});
+    if(code==='content_reference_request_conflict')return reply.code(409).send({error:{code:'CONTENT_REFERENCE_REQUEST_CONFLICT'}});
+    if(code==='content_reference_storage_unavailable')return reply.code(503).send({error:{code:'CONTENT_REFERENCE_STORAGE_UNAVAILABLE'}});
     // Extended SQLite BUSY results retain primary result code 5.
     if(error instanceof Error&&'code' in error&&error.code==='ERR_SQLITE_ERROR'
       &&'errcode' in error&&typeof error.errcode==='number'&&(error.errcode&0xff)===5)
@@ -994,6 +999,7 @@ export async function buildServer(config: {
       api_version: '1.0', event_schema_version: '1.0', adapter_version: '0.1.0',
       artifact_archive:archiveStatus(),
       upload_recovery:{protocol:1,status:true},
+      ...(messageReferenceSnapshotsInstalled(db)?{reference_snapshots:{protocol:1,request:true}}:{}),
       git_workbench:gitWorkbench.capability(ownerId,config.nativeGitClient!==undefined,['commit','branch','initialization','reinitialization'].includes(gitCommitExecutionSchema(db)),['branch','initialization','reinitialization'].includes(gitCommitExecutionSchema(db)),['initialization','reinitialization'].includes(gitCommitExecutionSchema(db)),gitCommitExecutionSchema(db)==='reinitialization'),
       capabilities: { search: true, fetch: true, browser_interaction: false, file_read: true,
         file_edit: true, command_execution: true, questions: true, approvals: true,
@@ -1211,7 +1217,14 @@ export async function buildServer(config: {
     if(Array.isArray(requested.attachments)&&requested.attachments.length&&!(await readAttachmentSteeringReadiness(config.ordinaryAttachmentSteeringEnabled===true,config.ordinaryAttachmentSteeringClient)))throw Error('ordinary_attachment_steering_unavailable');
     return reply.code(202).send(atomicCommand(request,202, () => {
       workbench.assertRunActive(runId); persistentTasks.assertRunActive(runId);
-      const input=request.body as Record<string,unknown>;
+      let input=request.body as Record<string,unknown>;
+      if(Object.hasOwn(input,'reference_snapshots')){
+        if(!messageReferenceSnapshotsInstalled(db))throw Error('content_reference_storage_unavailable');
+        const prepared=prepareReferenceSteeringText(input.text,input.attachments??[],input.reference_snapshots);
+        assertReferenceSnapshotImages(db,owner,String(runs.get(runId,owner).conversation_id),prepared.referenceSnapshots.items);
+        const {reference_snapshots,...original}=input;
+        input={...original,text:prepared.text};
+      }
       if(input.delivery!=='original')return commands.steer(runId,owner,input,String(request.headers['idempotency-key']||''));
       if(config.ordinarySteeringEnabled!==true)throw Error('ordinary_steering_unavailable');
       // Native source proofs retain their original exact text payload. Delivery

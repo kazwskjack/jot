@@ -1,3 +1,4 @@
+import {prepareReferenceContent,prepareReferenceSteeringText} from '../../packages/gateway/src/messages/content-reference.js';
 import {UploadRecoveryStore} from './upload-recovery.mjs';
 import {validateComposerDraft} from './composer-draft-recovery.mjs';
 
@@ -29,16 +30,17 @@ export function validateMessageIntent(snapshot,conversation,scope){
  const body=pending.body;
  if(pending.kind==='steer'){
   if(!id(pending.runId)||pending.path!==`/runs/${encodeURIComponent(pending.runId)}/steer`
-   ||!exact(body,['delivery','text','client_message_id','expected_run_version'],['attachments'])||body.delivery!=='original'
+   ||!exact(body,['delivery','text','client_message_id','expected_run_version'],['attachments','reference_snapshots'])||body.delivery!=='original'
    ||typeof body.text!=='string'||body.text.length>100000||!id(body.client_message_id)
    ||!Number.isSafeInteger(body.expected_run_version)||body.expected_run_version<1
    ||body.attachments!==undefined&&(!files(body.attachments,10)||!body.attachments.length)
-   ||!body.text.trim()&&!body.attachments?.length)throw invalid();
+   ||!body.text.trim()&&!body.attachments?.length&&!Object.hasOwn(body,'reference_snapshots'))throw invalid();
+  if(Object.hasOwn(body,'reference_snapshots'))prepareReferenceSteeringText(body.text,body.attachments??[],body.reference_snapshots);
  }else{
   if(Object.hasOwn(pending,'runId')||pending.path!==`/conversations/${encodeURIComponent(conversation)}/messages`
-   ||!exact(body,['client_message_id','content'],['client_time_zone'])||!id(body.client_message_id)
+   ||!exact(body,['client_message_id','content'],['client_time_zone','reference_snapshots'])||!id(body.client_message_id)
    ||body.client_time_zone!==undefined&&(typeof body.client_time_zone!=='string'||body.client_time_zone.length>256)
-   ||!Array.isArray(body.content)||!body.content.length||body.content.length>32)throw invalid();
+   ||!Array.isArray(body.content)||!body.content.length&&!Object.hasOwn(body,'reference_snapshots')||body.content.length>32)throw invalid();
   for(const part of body.content){
    if(part?.type==='text'){
     if(!exact(part,['type','text'])||typeof part.text!=='string'||!part.text.length||part.text.length>100000)throw invalid();
@@ -47,6 +49,7 @@ export function validateMessageIntent(snapshot,conversation,scope){
    }else throw invalid();
   }
   if(!files(messageIntentAttachments(pending),32))throw invalid();
+  if(Object.hasOwn(body,'reference_snapshots'))prepareReferenceContent(body.content,body.reference_snapshots);
  }
  if(Object.hasOwn(pending,'receipt'))validateMessageReceipt(pending.receipt,pending,conversation);
  return snapshot;

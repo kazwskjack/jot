@@ -1,4 +1,4 @@
-import {FileTextReferenceContext,FileTextReferences,fileReferenceMessage,isFileRegion,resolveRegionArtifact,type FileReference,type FileSourceReference,type FileRegionDraft,type FileTextReference} from './FileTextReferences';
+import {FileTextReferenceContext,FileTextReferences,fileReferenceMessage,fileReferenceSnapshots,isFileRegion,resolveRegionArtifact,type FileReference,type FileSourceReference,type FileRegionDraft,type FileTextReference} from './FileTextReferences';
 import FileReferenceSource from './FileReferenceSource';
 import MessageFileReferences from './MessageFileReferences';
 import type {TaskSourceSelection} from '../workbench/types';
@@ -290,11 +290,14 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
   if(!controller.pendingMessage&&fileReferences.length&&taskDraftScope()!==fileOwner){setError('文件引用所属账户已变化，请重新打开会话');return;}
   void action(async()=>{
    const retry=controller.pendingMessage;
-   const message=retry?'':replyQuoteMessage(fileReferenceMessage(draft,fileReferences,imageArtifact),replyQuotes);
-   if(!retry&&quoteCount&&goalPrompt(message,ordinary&&!chatMode&&!run&&goalMode).length>100000)throw Error('引用与消息过长，请减少引用或缩短消息后发送');
+   const preview=retry?'':replyQuoteMessage(fileReferenceMessage(draft,fileReferences,imageArtifact),replyQuotes);
+   const structured=!retry&&fileReferences.length>0&&modeCaps?.reference_snapshots?.protocol===1&&modeCaps.reference_snapshots.request===true;
+   const message=structured?replyQuoteMessage(draft.trim()||'请结合以下原文件引用继续。',replyQuotes):preview;
+   const referenceSnapshots=structured?{protocol:1,items:fileReferenceSnapshots(fileReferences,imageArtifact)}:undefined;
+   if(!retry&&quoteCount&&goalPrompt(preview,ordinary&&!chatMode&&!run&&goalMode).length>100000)throw Error('引用与消息过长，请减少引用或缩短消息后发送');
    const references=retry?controller.pendingAttachments:uploads.references();
    if(!retry){await controller.saveDraft(JSON.parse(draftSnapshot));await uploads.markGeneratedSending(fileReferences.filter(isFileRegion).map(value=>value.uploadEntryId));}
-   const receipt=await controller.send(message,references,{goalMode:ordinary&&!chatMode&&!run&&goalMode,originalTask:ordinary,steeringConfigured:modeCaps?.conversation_commands?.protocol===1&&modeCaps.conversation_commands.ordinary_steer?.configured===true,attachmentSteeringConfigured:modeCaps?.conversation_commands?.protocol===1&&modeCaps.conversation_commands.ordinary_steer?.attachments===true});
+   const receipt=await controller.send(message,references,{referenceSnapshots,goalMode:ordinary&&!chatMode&&!run&&goalMode,originalTask:ordinary,steeringConfigured:modeCaps?.conversation_commands?.protocol===1&&modeCaps.conversation_commands.ordinary_steer?.configured===true,attachmentSteeringConfigured:modeCaps?.conversation_commands?.protocol===1&&modeCaps.conversation_commands.ordinary_steer?.attachments===true});
    let cleanupError='';
    try{await uploads.clearSent(references,true);await controller.acknowledgeSent();}
    catch{cleanupError='消息已发送，本地发送或附件回执清理尚未保存。请重读回执后重试原消息，核对原会话。';}
@@ -499,6 +502,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
   <p>{controller.pending.kind==='steer'?`原任务补充 · ${controller.pending.runId}`:'原会话消息'} · 客户端消息标识 <code>{controller.pending.body.client_message_id}</code></p>
   <pre>{controller.pending.kind==='steer'?controller.pending.body.text:controller.pending.body.content.filter((part:any)=>part.type==='text').map((part:any)=>part.text).join('\n')}</pre>
   {controller.pendingAttachments.length>0&&<p>原附件标识 · {controller.pendingAttachments.join('、')}</p>}
+  {controller.pending.body.reference_snapshots&&<details><summary>原请求引用快照</summary><pre>{JSON.stringify(controller.pending.body.reference_snapshots,null,2)}</pre></details>}
  </details>}
  {(messageRecoveryError||controller.recoveryError)&&<p role="alert">原发送请求存储尚未确认，消息操作已暂停。<button type="button" disabled={busy||controller.recoveryBusy||voiceBusy} onClick={()=>setMessageRecoveryRevision(value=>value+1)}>重读原发送回执</button></p>}
  {!controller.recoveryReady&&!messageRecoveryError&&<p role="status">正在读取原发送请求…</p>}

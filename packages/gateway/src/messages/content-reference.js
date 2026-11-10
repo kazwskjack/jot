@@ -86,3 +86,61 @@ export function readLiteralMessageReferences(blocks){
  }
  return [...references.values()];
 }
+
+function canonicalSnapshots(value){
+ return JSON.stringify(value,(_key,item)=>{
+  if(!item||typeof item!=='object'||Array.isArray(item))return item;
+  return Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]]));
+ });
+}
+
+export function validateReferenceSnapshotInput(value){
+ if(!exact(value,['protocol','items'])||value.protocol!==1||!Array.isArray(value.items)||!value.items.length||value.items.length>10000){
+  throw Error('content_reference_request_invalid');
+ }
+ let items;
+ try{
+  items=value.items.map(validateContentReference);
+ }catch{
+  throw Error('content_reference_request_invalid');
+ }
+ if(canonicalSnapshots(items).length>3200000)throw Error('content_reference_request_too_large');
+ return {protocol:1,items};
+}
+
+function referenceContext(packet,attachments){
+ const attached=new Set(attachments);
+ if(packet.items.some(value=>value.reference.selectionMode==='region'&&!attached.has(value.image_artifact.artifact_id))){
+  throw Error('content_reference_attachment_mismatch');
+ }
+ return header+canonicalSnapshots(packet.items);
+}
+
+export function prepareReferenceContent(content,value){
+ if(!Array.isArray(content)||content.length>32)throw Error('content_reference_request_invalid');
+ for(const item of content){
+  if(!item||!['text','file'].includes(item.type)
+   ||item.type==='text'&&(typeof item.text!=='string'||!item.text.length||item.text.length>100000)
+   ||item.type==='file'&&!id(item.artifact_id)){
+   throw Error('content_reference_request_invalid');
+  }
+ }
+ const referenceSnapshots=validateReferenceSnapshotInput(value);
+ const attachments=content.filter(item=>item.type==='file').map(item=>item.artifact_id);
+ const context=referenceContext(referenceSnapshots,attachments);
+ const text=content.some(item=>item.type==='text'&&item.text.trim())?context:'请结合以下原文件引用继续。\n\n'+context;
+ const combinedText=[...content.filter(item=>item.type==='text').map(item=>item.text),text].join('\n');
+ if(combinedText.length>100000)throw Error('content_reference_request_too_large');
+ return {content:[...content.map(item=>({...item})),{type:'text',text}],referenceSnapshots};
+}
+
+export function prepareReferenceSteeringText(text,attachments,value){
+ if(typeof text!=='string'||!Array.isArray(attachments)||attachments.some(value=>!id(value))){
+  throw Error('content_reference_request_invalid');
+ }
+ const referenceSnapshots=validateReferenceSnapshotInput(value);
+ const context=referenceContext(referenceSnapshots,attachments);
+ const prepared=text.trim()?text+'\n\n'+context:'请结合以下原文件引用继续。\n\n'+context;
+ if(prepared.length>100000)throw Error('content_reference_request_too_large');
+ return {text:prepared,referenceSnapshots};
+}

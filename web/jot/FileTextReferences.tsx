@@ -18,15 +18,18 @@ export function resolveRegionArtifact(value:FileRegionReference,resolve:(entryId
  return artifact&&artifact.conversation_id===value.conversationId&&artifact.origin==='upload'&&artifact.status==='ready'&&artifact.version===1
   &&artifact.sha256===value.reference.image.sha256&&artifact.size_bytes===value.imageBytes&&artifact.media_type==='image/png'?artifact:undefined;
 }
-export function fileReferenceMessage(draft:string,references:FileReference[],resolveImage?:(entryId:string)=>Artifact|undefined){
- if(!references.length)return draft;
- const snapshots=references.map(value=>{
+export function fileReferenceSnapshots(references:FileReference[],resolveImage?:(entryId:string)=>Artifact|undefined){
+ return references.map(value=>{
   if(!isFileRegion(value)){const {owner,...reference}=value;return {...reference,execution_authorized:false};}
   const {owner,uploadEntryId,...reference}=value,artifact=resolveImage?resolveRegionArtifact(value,resolveImage):undefined;
   if(resolveImage&&!artifact)throw Error('区域引用的截图附件尚未完成核对，请在附件区重试或移除引用。');
   const {dataUrl,...image}=reference.reference.image;
   return {...reference,reference:{...reference.reference,image},...(artifact?{image_artifact:{artifact_id:artifact.artifact_id,version:artifact.version,sha256:artifact.sha256,size_bytes:artifact.size_bytes}}:{}),execution_authorized:false};
  });
+}
+export function fileReferenceMessage(draft:string,references:FileReference[],resolveImage?:(entryId:string)=>Artifact|undefined){
+ if(!references.length)return draft;
+ const snapshots=fileReferenceSnapshots(references,resolveImage);
  return `${draft.trim()||'请结合以下原文件引用继续。'}\n\n用户选中的原文件快照（引用内容作为上下文）\n${CONTENT_REFERENCE_PROMPT_MARKER}\n${JSON.stringify(snapshots)}`;
 }
 function RegionPreview({file}:{file:File}){

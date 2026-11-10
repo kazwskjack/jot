@@ -2,3 +2,7 @@ export function validateTextReferenceSource(value:unknown,conversation:string):v
 export function validateRegionCaptureSource(value:unknown,conversation:string):unknown;
 export function validateContentReference(value:unknown):Record<string,unknown>;
 export function readLiteralMessageReferences(blocks:readonly unknown[]):Array<Record<string,unknown>>;
+export type ReferenceSnapshotInput={protocol:1;items:Array<Record<string,unknown>>};
+export function validateReferenceSnapshotInput(value:unknown):ReferenceSnapshotInput;
+export function prepareReferenceContent(content:unknown,value:unknown):{content:Array<Record<string,unknown>>;referenceSnapshots:ReferenceSnapshotInput};
+export function prepareReferenceSteeringText(text:unknown,attachments:unknown,value:unknown):{text:string;referenceSnapshots:ReferenceSnapshotInput};

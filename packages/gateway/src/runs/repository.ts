@@ -1,4 +1,5 @@
-import {messageReferenceProjection} from '../messages/reference-snapshots.ts';
+import {prepareReferenceContent,type ReferenceSnapshotInput} from '../messages/content-reference.js';
+import {messageReferenceProjection,captureMessageReferenceSnapshots,messageReferenceSnapshotsInstalled,assertReferenceSnapshotImages} from '../messages/reference-snapshots.ts';
 import {hostSettingsAdmissionIsClosed} from '../host-admin/settings-admission-fence.ts';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
@@ -44,6 +45,11 @@ export class RunRepository {
   usesDatabase(db: DatabaseSync): boolean { return this.db === db && this.events.usesDatabase(db); }
 
   enqueue(conversationId:string,ownerId:string,input:Record<string,unknown>,options:EnqueueOptions={}){
+    if(Object.hasOwn(input,'reference_snapshots')){
+      if(!messageReferenceSnapshotsInstalled(this.db))throw Error('content_reference_storage_unavailable');
+      const prepared=prepareReferenceContent(input.content,input.reference_snapshots);
+      input={...input,content:prepared.content,reference_snapshots:prepared.referenceSnapshots};
+    }
     return this.enqueueInput(conversationId,ownerId,input,options);
   }
 
@@ -64,7 +70,17 @@ export class RunRepository {
     if (!conversation) throw new Error('conversation_not_found');
     const duplicate = this.db.prepare('SELECT id,run_id FROM ga_messages WHERE conversation_id=? AND client_message_id=?')
       .get(conversationId, String(input.client_message_id)) as Record<string, unknown> | undefined;
-    if (duplicate) return { accepted: true, message_id: duplicate.id, run_id: duplicate.run_id, conversation_id: conversationId };
+    const referenceSnapshots=input.reference_snapshots as ReferenceSnapshotInput|undefined;
+    if (duplicate) {
+      if(referenceSnapshots)withImmediateTransaction(this.db,()=>{
+        const original=this.db.prepare(`SELECT m.* FROM ga_messages m JOIN ga_conversations c ON c.id=m.conversation_id
+          WHERE m.id=? AND c.id=? AND c.owner_id=?`).get(String(duplicate.id),conversationId,ownerId);
+        if(!original||original.role!=='user'||original.status!=='complete'||original.run_id!==duplicate.run_id
+          ||original.content_json!==JSON.stringify(encodeInputContent(String(duplicate.id),input.content)))throw Error('content_reference_request_conflict');
+        captureMessageReferenceSnapshots(this.db,conversationId,String(duplicate.id),referenceSnapshots.items);
+      });
+      return { accepted: true, message_id: duplicate.id, run_id: duplicate.run_id, conversation_id: conversationId };
+    }
     const messageId = `msg-${randomUUID()}`;
     const runId = `run-${randomUUID()}`;
     const now = new Date().toISOString();
@@ -72,6 +88,7 @@ export class RunRepository {
     const generatedTitle = AUTOMATIC_TITLES.has(conversation.title) ? automaticTitle(input.content) : null;
     withImmediateTransaction(this.db, () => {
       if(hostSettingsAdmissionIsClosed(this.db))throw Error('host_settings_admission_fenced');
+      if(referenceSnapshots)assertReferenceSnapshotImages(this.db,ownerId,conversationId,referenceSnapshots.items);
       const current=this.db.prepare('SELECT mode,version FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId)!;
       if(options.expectedConversationVersion!==undefined&&options.expectedConversationVersion!==current.version)throw Error('version_conflict');
       const mode=conversationMode(current.mode),chat=mode==='chat'?chatModePolicy(options.modePolicy):undefined;
@@ -94,6 +111,7 @@ export class RunRepository {
       }
       this.db.prepare('INSERT INTO ga_messages(id,conversation_id,run_id,role,status,content_json,client_message_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)')
         .run(messageId, conversationId, runId, 'user', 'complete', JSON.stringify(content), String(input.client_message_id), now, now);
+      if(referenceSnapshots)captureMessageReferenceSnapshots(this.db,conversationId,messageId,referenceSnapshots.items);
       const saved=options.executionMode==='native'?this.db.prepare('SELECT session_id FROM ga_harness_session_bindings WHERE conversation_id=? AND owner_id=?').get(conversationId,ownerId):undefined;
       const native=options.executionMode==='native'?(saved?String(saved.session_id):undefined):ensureModeSession(this.db,ownerId,conversationId,mode);
       this.db.prepare('INSERT INTO ga_runs(id,conversation_id,input_message_id,status,version,created_at,updated_at,model_policy_json,execution_policy_json,native_session_ref,native_owner_id,native_conversation_id,chat_context_json,chat_context_sha256) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)')

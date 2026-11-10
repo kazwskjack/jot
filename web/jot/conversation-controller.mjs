@@ -1,3 +1,4 @@
+import {validateReferenceSnapshotInput} from '../../packages/gateway/src/messages/content-reference.js';
 import {fromSnapshot,reduceEvent} from './projection.ts';
 import {goalPrompt} from './goal-controller.mjs';
 import {messageIntentAttachments,validateMessageReceipt,validateMessageIntent} from './message-intent-recovery.mjs';
@@ -92,6 +93,8 @@ export class RoleChatController {
   if(this.sending)throw new Error('message_in_flight');
   this.assertRecovery();
   if(!this.pending){
+   const referenceSnapshots=options.referenceSnapshots===undefined?undefined:validateReferenceSnapshotInput(options.referenceSnapshots);
+   if(referenceSnapshots&&!text.trim())text='请结合以下原文件引用继续。';
    if(!Array.isArray(attachments)||attachments.some(id=>typeof id!=='string'||!id||id.length>200)||new Set(attachments).size!==attachments.length)throw new Error('invalid_attachments');
    if(!text.trim()&&!attachments.length)throw new Error('empty_message');
    if(options.goalMode&&!text.trim())throw new Error('goal_objective_required');
@@ -104,7 +107,8 @@ export class RoleChatController {
     if(attachments.length&&(options.attachmentSteeringConfigured!==true||attachments.length>10))throw Error('当前任务暂不支持补充这些附件，附件已保留');
     candidate={kind:'steer',runId:run.run_id,path:`/runs/${encodeURIComponent(run.run_id)}/steer`,key:crypto.randomUUID(),body:{delivery:'original',text:text.trim(),client_message_id:crypto.randomUUID(),expected_run_version:run.version,...(attachments.length?{attachments:[...attachments]}:{})}};
    }else candidate={kind:'message',path:`/conversations/${encodeURIComponent(this.id)}/messages`,key:crypto.randomUUID(),body:{client_message_id:crypto.randomUUID(),content,client_time_zone:Intl.DateTimeFormat().resolvedOptions().timeZone}};
-   if(this.recoveryStore)validateMessageIntent({pending:candidate},this.id);
+   if(referenceSnapshots)candidate.body.reference_snapshots=structuredClone(referenceSnapshots);
+   if(this.recoveryStore||referenceSnapshots)validateMessageIntent({pending:candidate},this.id);
    this.pending=candidate;
   }
   this.sending=true;this.changed();const pending=this.pending;
@@ -118,7 +122,8 @@ export class RoleChatController {
    else this.pending=null;
    return result;
   }catch(error){
-   if(error?.status>=400&&error.status<500&&error.status!==408&&error.message!=='IDEMPOTENCY_IN_PROGRESS'){
+   const unsupportedReferences=Object.hasOwn(pending.body,'reference_snapshots')&&error?.message==='CONTRACT_REQUEST_INVALID';
+   if(!unsupportedReferences&&error?.status>=400&&error.status<500&&error.status!==408&&error.message!=='IDEMPOTENCY_IN_PROGRESS'){
     await this.persistIntent(null);this.pending=null;
    }
    throw error;
