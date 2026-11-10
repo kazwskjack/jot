@@ -11,7 +11,7 @@ export default function OfficePreviewServiceStatus({owner,onRendererChange,onSta
  useEffect(()=>{
   const controller=new AbortController();let live=true;
   setState({loading:true});
-  void request<OfficePreviewStatus>('/office-preview/status'+(revision?'?refresh=1':''),'GET',undefined,undefined,controller.signal,5000).then(value=>{
+  void request<OfficePreviewStatus>('/office-preview/status'+(revision?'?refresh=1':''),'GET',undefined,undefined,controller.signal,120000).then(value=>{
    if(!live||controller.signal.aborted||taskDraftScope()!==owner)return;
    const office=value?.libreOffice;
    if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).length!==8||value.protocol!==1||!['builtin','libreoffice'].includes(value.service)
@@ -38,7 +38,7 @@ export default function OfficePreviewServiceStatus({owner,onRendererChange,onSta
   {state.value&&<>
    <p>默认预览服务为{state.value.service==='builtin'?'内置查看器':'LibreOffice转换PDF'}。</p>
    <p role="status">{state.value.libreOffice.available?state.value.libreOffice.version:'当前文档引擎的LibreOffice版本尚未确认。'}</p>
-   <p>文档引擎路径 <code>{state.value.libreOffice.binaryPath}</code></p>
+   <p>{state.value.libreOffice.available?'预览引擎路径':'最后探测路径'} <code>{state.value.libreOffice.binaryPath}</code></p>
    <p>检查时间 <time dateTime={state.value.checkedAt}>{state.value.checkedAt}</time></p>
   </>}
   <OfficePreviewConfigurationEditor key={owner} owner={owner} onSaved={()=>setRevision(value=>value+1)}/>

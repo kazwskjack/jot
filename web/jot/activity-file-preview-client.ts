@@ -47,7 +47,15 @@ export async function readOfficePrintPreviewBytes({conversationId,runId,activity
   if(response.status===507)throw Error('转换PDF保留空间已满，已有副本继续保留。');
   if(expected&&response.status===404)throw Error('原转换PDF副本或原来源暂不可读取，可重新转换并对照原快照。');
   if(expected&&response.status===409)throw Error('原来源或转换PDF副本尚未通过核对，请对照原快照。');
+  if(!expected&&response.status===409){
+   const failure=await response.json().catch(()=>null);check();
+   throw Error(failure?.error?.code==='OFFICE_PREVIEW_CONFIGURATION_CHANGED'?'Office预览配置已变化，请重新转换固定版本。':'原Office来源尚未通过核对，请重新打开原列表。');
+  }
   if(response.status===429)throw new ApiError(429,'文档引擎正在处理另一个文件，请稍后重试转换。');
+  if(response.status===503){
+   const failure=await response.json().catch(()=>null);check();
+   throw Error(failure?.error?.code==='OFFICE_PREVIEW_BINARY_UNAVAILABLE'?'未找到已确认的LibreOffice程序，请核对路径或扫描候选。':'Office预览服务暂不可用，请稍后重试。');
+  }
   if(!response.ok||!response.body||response.headers.get('content-type')?.split(';')[0]!=='application/octet-stream'
    ||response.headers.get('x-activity-file-sha256')!==file.sha256||response.headers.get('x-activity-file-size')!==String(file.size)
    ||response.headers.get('x-activity-file-version')!==String(file.version)||response.headers.get('x-activity-tool-result-sha256')!==resultSha

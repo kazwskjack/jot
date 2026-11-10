@@ -5,14 +5,15 @@ import {join} from 'node:path';
 import {officePreviewCandidateLocations} from './office-preview-candidates.ts';
 import {officePreviewEnvironmentSettings} from './office-preview-configuration.ts';
 import {fileEngineChildEnvironment} from './engine.ts';
-import {probeOfficePreviewBinary} from './office-preview-status.ts';
+import {probeOfficePreviewBinary} from './office-preview-binary.ts';
 import type {OfficePreviewCandidatePage} from '../../contracts/types.ts';
 
 type Batch={paths:string[];truncated:boolean};
-async function* candidateBatches(environment:NodeJS.ProcessEnv,signal:AbortSignal):AsyncGenerator<Batch,void>{
+export async function* officePreviewCandidateBatches(environment:NodeJS.ProcessEnv,signal:AbortSignal,pathLaunchersLast=false):AsyncGenerator<Batch,void>{
  const locations=officePreviewCandidateLocations(environment),fixed=new Set(locations.paths);
  let truncated=locations.truncated;
- yield {paths:locations.paths,truncated};
+ const late=new Set(pathLaunchersLast?locations.pathLaunchers:[]);
+ yield {paths:locations.paths.filter(path=>!late.has(path)),truncated};
  let paths:string[]=[],entries=0;
  for(const directory of locations.directories){
   signal.throwIfAborted();
@@ -35,6 +36,7 @@ async function* candidateBatches(environment:NodeJS.ProcessEnv,signal:AbortSigna
   }
  }
  if(paths.length||entries||truncated)yield {paths,truncated};
+ if(late.size)yield {paths:[...late],truncated};
 }
 
 type Scan={owner:string;key:string;environment:NodeJS.ProcessEnv;controller:AbortController;
@@ -102,7 +104,7 @@ export function createOfficePreviewCandidatePager(readSettings=officePreviewEnvi
      }
      if(closed)throw Error('office_preview_candidates_closed');
      const controller=new AbortController();
-     scan={owner,key:current.key,environment:current.environment,controller,iterator:candidateBatches(current.environment,controller.signal),
+     scan={owner,key:current.key,environment:current.environment,controller,iterator:officePreviewCandidateBatches(current.environment,controller.signal),
       buffer:undefined,seen:Date.now(),lastCursor:undefined,nextCursor:undefined,value:undefined,pending:undefined};
      scans.add(scan);
      if(!timer){timer=setInterval(maintenance,30000);timer.unref();}

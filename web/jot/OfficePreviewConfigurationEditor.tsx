@@ -51,7 +51,7 @@ export default function OfficePreviewConfigurationEditor({owner,onSaved}:{owner:
    <label>默认预览服务 <select disabled={disabled} value={draft.service} onChange={event=>setDraft(current=>({...current,service:event.target.value as OfficePreviewConfiguration['service']}))}>
     <option value="builtin">内置查看器</option><option value="libreoffice">LibreOffice转换PDF</option>
    </select></label>
-   <label>LibreOffice程序路径 <input disabled={disabled} maxLength={4096} value={draft.binaryPath} placeholder="留空沿用文档引擎环境配置" onChange={event=>setDraft(current=>({...current,binaryPath:event.target.value}))}/></label>
+   <label>LibreOffice程序路径 <input disabled={disabled} maxLength={4096} value={draft.binaryPath} placeholder="留空自动发现可用的LibreOffice程序" onChange={event=>setDraft(current=>({...current,binaryPath:event.target.value}))}/></label>
    <button type="button" disabled={disabled} onClick={()=>{setDraft({service:value.service,binaryPath:value.binaryPath});setError('');}}>取消编辑</button>
    <button type="button" disabled={reading||saving||!value.writable} onClick={()=>void save()}>{saving?'正在保存Office配置…':attempt?'重试原保存请求':'保存Office配置'}</button>
   </>}

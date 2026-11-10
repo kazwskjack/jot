@@ -15,7 +15,7 @@ export default function OfficeFilePrintPreview(source:ListedFilePreviewSource&{f
   setState({identity});
   const stop=(message:string)=>{controller.abort();if(live&&taskDraftScope()===owner)setState({identity,error:message});};
   cancel.current=()=>stop('转换预览读取已取消。');
-  const timer=window.setTimeout(()=>stop('转换PDF读取超时，请稍后重试。'),60000);
+  const timer=window.setTimeout(()=>stop('转换PDF读取超时，请稍后重试。'),180000);
   const load=async()=>{
    // A renderer switch may overlap cleanup of its cancelled structured preview.
    for(let attempt=0;;attempt++){

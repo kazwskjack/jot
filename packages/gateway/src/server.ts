@@ -657,6 +657,8 @@ export async function buildServer(config: {
   app.setErrorHandler((error, request, reply) => {
     const code = error instanceof Error ? error.message : 'internal_error';
     if(['content_reference_request_invalid','content_reference_request_too_large','content_reference_attachment_mismatch','office_print_reference_unproven'].includes(code))return reply.code(422).send({error:{code:code.toUpperCase()}});
+    if(code==='office_preview_binary_unavailable')return reply.code(503).send({error:{code:'OFFICE_PREVIEW_BINARY_UNAVAILABLE'}});
+    if(code==='office_preview_configuration_changed')return reply.code(409).send({error:{code:'OFFICE_PREVIEW_CONFIGURATION_CHANGED'}});
     if(code==='office_preview_candidate_query_invalid')return reply.code(422).send({error:{code:'OFFICE_PREVIEW_QUERY_INVALID'}});
     if(code==='office_preview_candidate_cursor_stale')return reply.code(409).send({error:{code:'OFFICE_PREVIEW_CANDIDATE_CURSOR_STALE'}});
     if(code==='office_preview_candidate_scan_busy')return reply.code(429).header('retry-after','1').send({error:{code:'OFFICE_PREVIEW_CANDIDATE_SCAN_BUSY'}});
@@ -819,7 +821,7 @@ export async function buildServer(config: {
   const officePreviewStatus=createOfficePreviewStatusReader(readOfficePreviewSettings),officePreviewCandidates=createOfficePreviewCandidateReader(readOfficePreviewSettings);
   const officePreviewCandidatePages=createOfficePreviewCandidatePager(readOfficePreviewSettings);
   const officePrintReferencesReady=typeof config.internalChannelToken==='string'&&config.internalChannelToken.length>=16;
-  app.addHook('onClose',async()=>{officePreviewStatus.close();officePreviewCandidates.close();await officePreviewCandidatePages.close();});
+  app.addHook('onClose',async()=>{await Promise.all([officePreviewStatus.close(),officePreviewCandidates.close(),officePreviewCandidatePages.close()]);});
   app.get('/v1/office-preview/configuration',async(request,reply)=>{
     const owner=actor(request as any);reply.header('cache-control','private, no-store');
     if(Object.keys(request.query as Record<string,unknown>).length)throw Error('office_preview_configuration_invalid');
@@ -828,7 +830,8 @@ export async function buildServer(config: {
   app.patch('/v1/office-preview/configuration',{config:{officePreviewConfigurationCommand:true}},async(request,reply)=>{
     const owner=actor(request as any);reply.header('cache-control','private, no-store');
     if(Object.keys(request.query as Record<string,unknown>).length)throw Error('office_preview_configuration_invalid');
-    return officePreviewConfiguration.update(owner,String(request.headers['idempotency-key']??''),request.body);
+    const value=officePreviewConfiguration.update(owner,String(request.headers['idempotency-key']??''),request.body);
+    officePreviewStatus.invalidate();return value;
   });
   app.get('/v1/office-preview/status',async(request,reply)=>{
     actor(request as any);
@@ -838,7 +841,11 @@ export async function buildServer(config: {
       return reply.code(422).send({error:{code:'OFFICE_PREVIEW_QUERY_INVALID'}});
     }
     reply.header('cache-control','no-store');
-    return officePreviewStatus.read(query.refresh==='1'||query.refresh==='true');
+    const controller=new AbortController(),abort=()=>controller.abort();
+    request.raw.once('aborted',abort);reply.raw.once('close',abort);
+    if(request.raw.aborted||reply.raw.destroyed)abort();
+    try{return await officePreviewStatus.read(query.refresh==='1'||query.refresh==='true',controller.signal);}
+    finally{request.raw.off('aborted',abort);reply.raw.off('close',abort);}
   });
   app.get('/v1/office-preview/candidates',async(request,reply)=>{
     const owner=actor(request as any),query=request.query as Record<string,unknown>;
@@ -1203,8 +1210,14 @@ export async function buildServer(config: {
     request.raw.once('aborted',abort);reply.raw.once('close',abort);
     if(request.raw.aborted||reply.raw.destroyed)abort();
     try{
+      let binaryPath:string|undefined;
+      if(!expected){
+        const renderer=await officePreviewStatus.read(false,controller.signal);
+        if(!renderer.libreOffice.available)throw Error('office_preview_binary_unavailable');
+        binaryPath=renderer.libreOffice.binaryPath;
+      }
       const value=await readActivityFileOfficePdf(db,workbench,owner,conversationId,activityId,input,
-        officePrintRoot,controller.signal,expected,officePreviewConfiguration.get().binaryPath||process.env.GENERAL_AGENT_LIBREOFFICE?.trim()||'/usr/bin/libreoffice');
+        officePrintRoot,controller.signal,expected,binaryPath);
       conversations.get(conversationId,owner);
       const proof=signOfficePrintProof(config.internalChannelToken,owner,{conversationId,runId:input.runId,activityId,resultSha:input.resultSha,
         file:{path:input.path,version:input.version,sha256:input.fileSha,size:input.size}},

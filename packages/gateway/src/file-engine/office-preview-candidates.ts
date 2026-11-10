@@ -5,7 +5,7 @@ import {opendir} from 'node:fs/promises';
 import {homedir} from 'node:os';
 import {join,win32} from 'node:path';
 import {fileEngineChildEnvironment} from './engine.ts';
-import {probeOfficePreviewBinary} from './office-preview-status.ts';
+import {probeOfficePreviewBinary} from './office-preview-binary.ts';
 import type {OfficePreviewCandidates} from '../../contracts/types.ts';
 
 export type OfficePreviewCandidateDirectory={root:string;pattern:RegExp;suffix:string[]};
@@ -30,8 +30,9 @@ export function officePreviewCandidateLocations(environment:NodeJS.ProcessEnv){
   directories.push({root:'/opt',pattern:/^libreoffice/i,suffix:['program','soffice']});
  }
  // Keep fixed PATH launchers ahead of versioned installation directories.
- add(process.platform==='win32'?'soffice.com':'soffice');add('libreoffice');
- return {paths:[...paths],directories,truncated};
+ const pathLaunchers=[process.platform==='win32'?'soffice.com':'soffice','libreoffice'].filter(path=>!paths.has(path));
+ for(const path of pathLaunchers)add(path);
+ return {paths:[...paths],directories,truncated,pathLaunchers};
 }
 
 async function scanCandidates(environment:NodeJS.ProcessEnv,signal:AbortSignal):Promise<OfficePreviewCandidates>{
@@ -44,7 +45,7 @@ async function scanCandidates(environment:NodeJS.ProcessEnv,signal:AbortSignal):
  };
  for(const directory of directories){
   signal.throwIfAborted();
-  // Protocol1 keeps its original prefix limit; protocol2 continues through candidateBatches.
+  // Protocol1 keeps its original prefix limit; protocol2 continues through officePreviewCandidateBatches.
   const found:string[]=[];let count=0;
   try{
    const entries=await opendir(directory.root,{bufferSize:16});
