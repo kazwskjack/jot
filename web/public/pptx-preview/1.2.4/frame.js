@@ -5,11 +5,19 @@ const parentHost=new URLSearchParams(location.search).get('parent');
 if(!parentHost||!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(parentHost))throw Error('PPTX_PARENT_INVALID');
 const parentOrigin='http://'+parentHost,controller=new AbortController(),content=document.getElementById('content'),status=document.getElementById('status');
 const query=document.getElementById('query'),slide=document.getElementById('slide'),counter=document.getElementById('matches');
+const thumbnails=document.getElementById('thumbnails'),thumbnailList=document.getElementById('thumbnail-list'),thumbnailToggle=document.getElementById('thumbnail-toggle');
+let thumbnailOpen=false,thumbnailPage=0,thumbnailGeneration=0,thumbnailHandles=[];
 let viewer,token,started=false,closed=false,busy=false,rendering=false,partial=false,chain=Promise.resolve(),matches=[],matchIndex=0,highlight,searchGeneration=0,searchTimer;
 const report=message=>parent.postMessage({protocol:1,token,...message},parentOrigin);
 const reportWork=()=>{if(!closed)report({type:'jot-pptx-work',busy:busy||rendering});};
 const boot=()=>parent.postMessage({type:'jot-pptx-boot',protocol:1,started},parentOrigin);
-const dispose=()=>{closed=true;controller.abort();clearTimeout(searchTimer);highlight?.dispose();viewer?.destroy();viewer=undefined;matches=[];content.replaceChildren();};
+const clearThumbnails=()=>{
+ thumbnailGeneration++;
+ for(const handle of thumbnailHandles)handle.dispose();
+ thumbnailHandles=[];
+ thumbnailList.replaceChildren();
+};
+const dispose=()=>{closed=true;controller.abort();clearTimeout(searchTimer);clearThumbnails();highlight?.dispose();viewer?.destroy();viewer=undefined;matches=[];content.replaceChildren();};
 const fail=()=>{if(closed)return;report({type:'jot-pptx-error',code:'PPTX_RENDER_FAILED'});dispose();status.textContent='幻灯片视觉读取失败';};
 const controls=()=>{
  const ready=!!viewer&&!closed,working=busy||rendering;slide.disabled=!ready||working;query.disabled=!ready;
@@ -18,6 +26,14 @@ const controls=()=>{
  document.getElementById('out').disabled=!ready||working||viewer.zoomPercent<=25;
  document.getElementById('in').disabled=!ready||working||viewer.zoomPercent>=300;
  document.getElementById('match-previous').disabled=!ready||working||!matches.length;document.getElementById('match-next').disabled=!ready||working||!matches.length;
+ thumbnailToggle.disabled=!ready;thumbnailToggle.setAttribute('aria-expanded',String(thumbnailOpen));thumbnails.hidden=!thumbnailOpen;
+ document.getElementById('thumbnail-previous').disabled=!ready||working||thumbnailPage===0;
+ document.getElementById('thumbnail-next').disabled=!ready||working||(thumbnailPage+1)*4>=viewer.slideCount;
+ document.getElementById('thumbnail-page').textContent=ready?`${thumbnailPage+1} / ${Math.ceil(viewer.slideCount/4)}`:'0 / 0';
+ for(const button of thumbnailList.querySelectorAll('button')){
+  button.disabled=!ready||working;
+  button.setAttribute('aria-current',ready&&Number(button.dataset.slideIndex)===viewer.currentSlideIndex?'page':'false');
+ }
  if(ready){slide.value=String(viewer.currentSlideIndex+1);slide.max=String(viewer.slideCount);document.getElementById('count').textContent='/ '+viewer.slideCount;document.getElementById('zoom').textContent=viewer.zoomPercent+'%';}
 };
 const run=action=>{
@@ -27,6 +43,52 @@ const run=action=>{
  }).catch(fail);
 };
 const navigate=delta=>run(async()=>{highlight?.dispose();highlight=undefined;await viewer.goToSlide(viewer.currentSlideIndex+delta);});
+const renderThumbnailPage=page=>{
+ if(closed||!viewer||!thumbnailOpen)return;
+ thumbnailPage=Math.max(0,Math.min(Math.ceil(viewer.slideCount/4)-1,page));
+ clearThumbnails();
+ controls();
+ const generation=thumbnailGeneration,start=thumbnailPage*4,end=Math.min(start+4,viewer.slideCount);
+ run(async()=>{
+  // shortcut: retain at most four native thumbnail handles, page to reach the remaining slides.
+  for(let index=start;index<end;index++){
+   if(closed||generation!==thumbnailGeneration||!thumbnailOpen)return;
+   const button=document.createElement('button'),image=document.createElement('span'),label=document.createElement('span');
+   button.type='button';
+   button.dataset.slideIndex=String(index);
+   button.setAttribute('aria-label',`转到第 ${index+1} 张幻灯片`);
+   image.className='thumbnail-image';
+   image.setAttribute('aria-hidden','true');
+   image.inert=true;
+   label.textContent=String(index+1);
+   button.append(image,label);
+   thumbnailList.append(button);
+   button.addEventListener('click',()=>run(async()=>{
+    highlight?.dispose();
+    highlight=undefined;
+    await viewer.goToSlide(index);
+   }));
+   const handle=viewer.renderThumbnailToContainer(index,image,{width:144});
+   if(!handle)throw Error('PPTX_THUMBNAIL_FAILED');
+   thumbnailHandles.push(handle);
+   controls();
+   await handle.ready;
+  }
+ });
+};
+const syncThumbnailPage=()=>{
+ if(!thumbnailOpen||!viewer)return;
+ const page=Math.floor(viewer.currentSlideIndex/4);
+ if(page!==thumbnailPage)renderThumbnailPage(page);
+};
+thumbnailToggle.addEventListener('click',()=>{
+ thumbnailOpen=!thumbnailOpen;
+ if(thumbnailOpen)renderThumbnailPage(Math.floor(viewer.currentSlideIndex/4));
+ else clearThumbnails();
+ controls();
+});
+document.getElementById('thumbnail-previous').addEventListener('click',()=>renderThumbnailPage(thumbnailPage-1));
+document.getElementById('thumbnail-next').addEventListener('click',()=>renderThumbnailPage(thumbnailPage+1));
 document.getElementById('previous').addEventListener('click',()=>navigate(-1));document.getElementById('next').addEventListener('click',()=>navigate(1));
 slide.addEventListener('change',()=>{const value=Number(slide.value);if(Number.isSafeInteger(value)&&value>=1)run(()=>viewer.goToSlide(value-1));});
 document.getElementById('out').addEventListener('click',()=>run(()=>viewer.setZoom(Math.max(25,viewer.zoomPercent-10))));
@@ -91,7 +153,7 @@ addEventListener('message',async event=>{
  try{
   const next=await PptxViewer.open(value.bytes,content,{renderMode:'slide',fitMode:'contain',zoomPercent:100,
    zipLimits:{...RECOMMENDED_ZIP_LIMITS,maxEntryUncompressedBytes:8*1024*1024,maxTotalUncompressedBytes:32*1024*1024,maxMediaBytes:32*1024*1024,maxConcurrency:2},
-   lazyMedia:true,lazySlides:true,pdfjs:false,signal:controller.signal,onSlideChange:()=>controls(),onSlideError:fail,
+   lazyMedia:true,lazySlides:true,pdfjs:false,signal:controller.signal,onSlideChange:()=>{controls();syncThumbnailPage();},onSlideError:fail,
    onRenderStart:()=>{rendering=true;controls();reportWork();},onRenderComplete:()=>{rendering=false;controls();reportWork();},
    onNodeError:()=>{partial=true;status.textContent='部分节点尚未成功绘制，请对照原文件。';}});
   if(closed){next.destroy();return;}viewer=next;

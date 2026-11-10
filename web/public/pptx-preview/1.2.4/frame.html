@@ -6,8 +6,15 @@
  nav { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; margin-block: 0.3rem; }
  button, input { min-height: 2rem; } input[type=number] { width: 4.5rem; } input[type=search] { width: 12rem; max-width: 100%; }
  #content { overflow: auto; min-height: 24rem; } #status { margin: 0.5rem; }
+ #thumbnails { padding: 0.5rem; background: white; border-bottom: 1px solid #ccc; }
+ #thumbnail-list { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+ #thumbnail-list button { display: flex; flex-direction: column; gap: 0.25rem; align-items: center; padding: 0.3rem; border: 2px solid #aaa; background: white; }
+ #thumbnail-list button[aria-current=page] { border-color: #2459bd; }
+ .thumbnail-image { display: block; width: 144px; overflow: hidden; pointer-events: none; }
 </style></head><body>
 <header><nav aria-label="幻灯片导航"><button id="previous" type="button" disabled>上一张</button><label>幻灯片 <input id="slide" type="number" min="1" value="1" disabled></label><output id="count">/ 0</output><button id="next" type="button" disabled>下一张</button><button id="out" type="button" aria-label="缩小" disabled>−</button><output id="zoom">100%</output><button id="in" type="button" aria-label="放大" disabled>＋</button></nav>
 <nav aria-label="幻灯片文字搜索"><label>查找 <input id="query" type="search" maxlength="200" disabled></label><button id="match-previous" type="button" disabled>上一处</button><button id="match-next" type="button" disabled>下一处</button><output id="matches" aria-live="polite">尚未搜索</output><small id="coverage"></small></nav></header>
+<nav aria-label="缩略图面板"><button id="thumbnail-toggle" type="button" aria-expanded="false" aria-controls="thumbnails" disabled>缩略图导航</button></nav>
+<section id="thumbnails" aria-label="幻灯片缩略图" hidden><nav aria-label="缩略图分页"><button id="thumbnail-previous" type="button" disabled>上一页缩略图</button><output id="thumbnail-page" aria-live="polite">0 / 0</output><button id="thumbnail-next" type="button" disabled>下一页缩略图</button></nav><div id="thumbnail-list"></div></section>
 <p id="status" role="status">等待读取原幻灯片</p><main id="content" aria-label="幻灯片视觉内容"></main>
 <script type="module" nonce="__JOT_OFFICE_NONCE__" src="./frame.js"></script></body></html>
