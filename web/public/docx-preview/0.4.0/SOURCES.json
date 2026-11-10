@@ -42,5 +42,13 @@
       "license": "AGPL-3.0",
       "changes": "Retained Unicode source-offset case folding, removed TypeScript annotations for the static script and bounded match count."
     }
+  ],
+  "jot_source_adaptations": [
+    {
+      "path": "web/jot/office-text-reference.ts",
+      "revision": "66924a0035f66501aae46da4f4b6e87fa9003c60",
+      "sha256": "28b0aff97e2415eadaedd0a85d7fa8a171168bed2f93ce0443dc140976a311d9",
+      "changes": "Ported the original linear overlapping occurrence matcher into the isolated static frame. text_view 2 keeps the fixed rendered DOM traversal separate from existing structured protocol 1."
+    }
   ]
 }

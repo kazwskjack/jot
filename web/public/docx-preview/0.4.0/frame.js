@@ -107,7 +107,104 @@ function findTextSearchMatches(text, query, limit) {
 }
 
  const content=document.getElementById('content'),styles=document.getElementById('styles'),status=document.getElementById('status');
- let started=false,zoom=1;
+ let started=false,zoom=1,sessionToken,visualView,selectionSerial=0,proposal,focusRange;
+ const report=message=>window.parent.postMessage({protocol:1,token:sessionToken,...message},'*');
+ // text_view 2 pins docx-preview 0.4.0 raw DOM text order. A renderer upgrade needs a new locator protocol.
+ const indexVisualText=()=>{
+  const walker=document.createTreeWalker(content,NodeFilter.SHOW_TEXT),parts=[],nodes=[];let length=0,node;
+  while((node=walker.nextNode())){
+   const text=node.data;if(!text.length)continue;
+   if(length+text.length>33554432)throw Error('DOCX_VIEW_LIMIT');
+   nodes.push({node,start:length,end:length+text.length});parts.push(text);length+=text.length;
+  }
+  return {text:parts.join(''),nodes};
+ };
+ // Source adaptation of office-text-reference.ts::officeTextOccurrence keeps overlapping matches linear.
+ const occurrence=(text,query,target)=>{
+  if(!query.length)return;
+  const prefix=new Int32Array(query.length);let count=0;
+  for(let index=1,matched=0;index<query.length;index++){
+   while(matched>0&&query[index]!==query[matched])matched=prefix[matched-1];
+   if(query[index]===query[matched])matched++;
+   prefix[index]=matched;
+  }
+  for(let index=0,matched=0;index<text.length;index++){
+   while(matched>0&&text[index]!==query[matched])matched=prefix[matched-1];
+   if(text[index]===query[matched])matched++;
+   if(matched===query.length){
+    const offset=index-query.length+1;
+    if('offset' in target?offset===target.offset:count===target.index)return {offset,index:count};
+    count++;matched=prefix[matched-1];
+   }
+  }
+ };
+ const quoteFromRange=(range,serial)=>{
+  if(!visualView||range.collapsed||!content.contains(range.startContainer)||!content.contains(range.endContainer))return;
+  const raw=range.toString(),selectedText=raw.trim();if(!selectedText)return;
+  if(selectedText.length>100000)throw Error('引用文字超出100000字符范围，请缩小选区。');
+  const before=document.createRange();before.selectNodeContents(content);before.setEnd(range.startContainer,range.startOffset);
+  const offset=before.toString().length+raw.length-raw.trimStart().length;
+  if(visualView.text.slice(offset,offset+selectedText.length)!==selectedText)return;
+  const match=occurrence(visualView.text,selectedText,{offset});if(!match)return;
+  return {serial,selectedText,occurrenceIndex:match.index,prefix:visualView.text.slice(Math.max(0,offset-80),offset),suffix:visualView.text.slice(offset+selectedText.length,offset+selectedText.length+80)};
+ };
+ const publishSelection=()=>{
+  if(!visualView)return;
+  proposal=undefined;
+  const selected=window.getSelection();
+  try{
+   if(selected?.rangeCount===1&&!selected.isCollapsed&&!document.activeElement?.closest('#toolbar,#outline')){
+    const range=selected.getRangeAt(0);
+    if(range!==focusRange&&range!==fallbackRange){
+     const data=quoteFromRange(range,++selectionSerial);
+     if(data)proposal={data,range:range.cloneRange()};
+    }
+   }
+   report({type:'jot-docx-selection',selection:proposal?.data??null});
+  }catch(error){status.textContent=error instanceof Error?error.message:'文字选区尚未确认';report({type:'jot-docx-selection',selection:null});}
+ };
+ const restoreFocus=focus=>{
+  let confirmed=false;
+  if(visualView&&focus&&typeof focus.selectedText==='string'&&focus.selectedText.length>0&&focus.selectedText.length<=100000
+   &&Number.isSafeInteger(focus.occurrenceIndex)&&focus.occurrenceIndex>=0&&focus.occurrenceIndex<=33554432
+   &&typeof focus.prefix==='string'&&focus.prefix.length<=500&&typeof focus.suffix==='string'&&focus.suffix.length<=500&&Object.keys(focus).length===4){
+   const offset=occurrence(visualView.text,focus.selectedText,{index:focus.occurrenceIndex})?.offset,end=offset===undefined?undefined:offset+focus.selectedText.length;
+   if(offset!==undefined&&end!==undefined&&visualView.text.slice(Math.max(0,offset-focus.prefix.length),offset)===focus.prefix&&visualView.text.slice(end,end+focus.suffix.length)===focus.suffix){
+    const startNode=visualView.nodes.find(item=>offset>=item.start&&offset<item.end),endNode=visualView.nodes.find(item=>end>item.start&&end<=item.end);
+    if(startNode&&endNode){
+     const range=document.createRange();range.setStart(startNode.node,offset-startNode.start);range.setEnd(endNode.node,end-endNode.start);
+     if(range.toString()===focus.selectedText){
+      focusRange=range;
+      if(globalThis.CSS?.highlights&&globalThis.Highlight)globalThis.CSS.highlights.set('jot-docx-source',new Highlight(range));
+      else{window.getSelection()?.removeAllRanges();window.getSelection()?.addRange(range);}
+      startNode.node.parentElement?.scrollIntoView({block:'center'});confirmed=true;
+     }
+    }
+   }
+  }
+  report({type:'jot-docx-focus',confirmed});
+ };
+ let selectionTimer;
+ document.addEventListener('selectionchange',()=>{
+  if(!visualView)return;
+  if(proposal&&!document.hasFocus())return;
+  const range=window.getSelection()?.rangeCount===1?window.getSelection().getRangeAt(0):undefined,original=proposal?.range;
+  if(range&&original&&range.startContainer===original.startContainer&&range.startOffset===original.startOffset&&range.endContainer===original.endContainer&&range.endOffset===original.endOffset)return;
+  window.clearTimeout(selectionTimer);proposal=undefined;report({type:'jot-docx-selection',selection:null});
+ });
+ const scheduleSelection=()=>{window.clearTimeout(selectionTimer);selectionTimer=window.setTimeout(publishSelection,40);};
+ document.addEventListener('mouseup',scheduleSelection);document.addEventListener('touchend',scheduleSelection);document.addEventListener('keyup',scheduleSelection);
+ window.addEventListener('message',event=>{
+  const value=event.data;
+  if(!visualView||event.source!==window.parent||!value||value.protocol!==1||value.token!==sessionToken||Object.keys(value).length!==4)return;
+  if(value.type==='jot-docx-commit'&&proposal&&value.serial===proposal.data.serial){
+   const current=quoteFromRange(proposal.range,proposal.data.serial);
+   if(current&&JSON.stringify(current)===JSON.stringify(proposal.data))report({type:'jot-docx-commit-ready',selection:current});
+   else{proposal=undefined;report({type:'jot-docx-selection',selection:null});}
+  }else if(value.type==='jot-docx-added'&&value.serial===proposal?.data.serial){
+   proposal=undefined;window.getSelection()?.removeAllRanges();report({type:'jot-docx-selection',selection:null});
+  }
+ });
  const resize=delta=>{
   zoom=Math.min(3,Math.max(0.25,Math.round((zoom+delta)*100)/100));
   content.style.zoom=String(zoom);document.getElementById('zoom').textContent=Math.round(zoom*100)+'%';
@@ -184,29 +281,31 @@ function findTextSearchMatches(text, query, limit) {
  window.addEventListener('message',async event=>{
   const value=event.data;
   if(started||event.source!==window.parent||!value||value.type!=='jot-docx-init'||value.protocol!==1
-   ||typeof value.token!=='string'||!/^[a-f0-9-]{36}$/.test(value.token)||Object.keys(value).length!==4
+   ||typeof value.token!=='string'||!/^[a-f0-9-]{36}$/.test(value.token)||Object.keys(value).some(key=>!['type','protocol','token','bytes','focus'].includes(key))
    ||!(value.bytes instanceof ArrayBuffer)||value.bytes.byteLength>20*1024*1024)return;
-  started=true;const token=value.token;
-  const report=message=>window.parent.postMessage({protocol:1,token,...message},'*');
+  started=true;sessionToken=value.token;
   status.textContent='正在渲染…';
   try{
-   let nodes=0;
+   let nodes=0,textUnits=0;
    await window.docx.renderAsync(value.bytes,content,styles,{
     className:'jot-docx',breakPages:true,ignoreLastRenderedPageBreak:false,
     renderHeaders:true,renderFooters:true,renderFootnotes:true,renderEndnotes:true,
     renderComments:false,renderAltChunks:false,useBase64URL:true,
     h(element){
      if(++nodes>50000)throw Error('DOCX_VIEW_LIMIT');
+     if(typeof element==='string'){textUnits+=element.length;if(textUnits>33554432)throw Error('DOCX_VIEW_LIMIT');}
      const node=window.docx.defaultOptions.h(element);
      if(node instanceof HTMLImageElement){node.loading='lazy';node.decoding='async';}
      return node;
     }
    });
    const sections=content.querySelectorAll('section.jot-docx').length;
+   visualView=indexVisualText();
    buildOutline();query.disabled=false;
    status.textContent='Word视觉内容';report({type:'jot-docx-ready',sections});
+   if(value.focus)restoreFocus(value.focus);
   }catch(error){
-   window.clearTimeout(searchTimer);clearHighlights();matches=[];query.disabled=true;
+   window.clearTimeout(searchTimer);window.clearTimeout(selectionTimer);clearHighlights();matches=[];visualView=undefined;proposal=undefined;query.disabled=true;
    document.getElementById('headings').replaceChildren();document.getElementById('outline-status').textContent='视觉内容未能渲染';
    content.replaceChildren();styles.replaceChildren();status.textContent='视觉内容未能渲染';
    report({type:'jot-docx-error',code:error instanceof Error&&error.message==='DOCX_VIEW_LIMIT'?'DOCX_VIEW_LIMIT':'DOCX_RENDER_FAILED'});

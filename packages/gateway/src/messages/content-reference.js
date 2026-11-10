@@ -36,7 +36,8 @@ export function validateTextReferenceSource(value,conversation){
 }
 
 function validateOfficeTextReferenceSource(value,conversation){
- if(!exact(value,['conversationId','runId','activityId','resultSha','file','reference','text_view'])||value.text_view!==1||value.conversationId!==conversation
+ if(!exact(value,['conversationId','runId','activityId','resultSha','file','reference','text_view'])
+  ||value.text_view!==1&&!(value.text_view===2&&value.reference?.renderer?.id==='docx')||value.conversationId!==conversation
   ||!id(value.conversationId)||!identifier(value.runId)||!identifier(value.activityId)||!sha(value.resultSha))throw invalid();
  const file=value.file,ref=value.reference;
  if(!exact(file,['path','version','sha256','size'])||!relative(file.path)||!Number.isSafeInteger(file.version)||file.version<0

@@ -1002,7 +1002,7 @@ export async function buildServer(config: {
       api_version: '1.0', event_schema_version: '1.0', adapter_version: '0.1.0',
       artifact_archive:archiveStatus(),
       upload_recovery:{protocol:1,status:true},
-      ...(messageReferenceSnapshotsInstalled(db)&&commandReferenceSnapshotsInstalled(db)?{reference_snapshots:{protocol:1,request:true,renderers:['pdf','xlsx','docx','pptx']}}:{}),
+      ...(messageReferenceSnapshotsInstalled(db)&&commandReferenceSnapshotsInstalled(db)?{reference_snapshots:{protocol:1,request:true,renderers:['pdf','xlsx','docx','pptx'],docx_text_views:[1,2]}}:{}),
       git_workbench:gitWorkbench.capability(ownerId,config.nativeGitClient!==undefined,['commit','branch','initialization','reinitialization'].includes(gitCommitExecutionSchema(db)),['branch','initialization','reinitialization'].includes(gitCommitExecutionSchema(db)),['initialization','reinitialization'].includes(gitCommitExecutionSchema(db)),gitCommitExecutionSchema(db)==='reinitialization'),
       capabilities: { search: true, fetch: true, browser_interaction: false, file_read: true,
         file_edit: true, command_execution: true, questions: true, approvals: true,

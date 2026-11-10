@@ -293,7 +293,8 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
    const retry=controller.pendingMessage;
    const preview=retry?'':replyQuoteMessage(fileReferenceMessage(draft,fileReferences,imageArtifact),replyQuotes);
    const structured=!retry&&fileReferences.length>0&&modeCaps?.reference_snapshots?.protocol===1&&modeCaps.reference_snapshots.request===true
-    &&fileReferences.every(value=>value.reference.renderer.id==='pdf'||modeCaps?.reference_snapshots?.renderers?.some(renderer=>renderer===value.reference.renderer.id));
+    &&fileReferences.every(value=>(value.reference.renderer.id==='pdf'||modeCaps?.reference_snapshots?.renderers?.some(renderer=>renderer===value.reference.renderer.id))
+     &&(!('text_view' in value)||value.text_view!==2||modeCaps?.reference_snapshots?.docx_text_views?.includes(2)));
    const message=structured?replyQuoteMessage(draft.trim()||'请结合以下原文件引用继续。',replyQuotes):preview;
    const referenceSnapshots=structured?{protocol:1,items:fileReferenceSnapshots(fileReferences,imageArtifact)}:undefined;
    if(!retry&&quoteCount&&goalPrompt(preview,ordinary&&!chatMode&&!run&&goalMode).length>100000)throw Error('引用与消息过长，请减少引用或缩短消息后发送');

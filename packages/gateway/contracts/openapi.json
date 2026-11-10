@@ -27734,7 +27734,8 @@
               "request": {
                 "const": true
               },
-              "renderers": {"type":"array","minItems":1,"uniqueItems":true,"items":{"enum":["pdf","xlsx","docx","pptx"]},"description":"Supported reference metadata renderer IDs. Original file readers and input consumers retain their availability checks."}
+              "renderers": {"type":"array","minItems":1,"uniqueItems":true,"items":{"enum":["pdf","xlsx","docx","pptx"]},"description":"Supported reference metadata renderer IDs. Original file readers and input consumers retain their availability checks."},
+              "docx_text_views": {"type":"array","minItems":1,"uniqueItems":true,"items":{"type":"integer","enum":[1,2]},"description":"Accepted DOCX text locator protocols. Version 1 keeps structured inspection order. Version 2 pins docx-preview 0.4.0 raw visual DOM text-node order. This declares metadata acceptance only."}
             },
             "required": [
               "protocol",
@@ -57149,7 +57150,7 @@
             ],
             "additionalProperties": false
           },
-          "text_view": {"const":1}
+          "text_view": {"type":"integer","enum":[1,2]}
         },
         "required": [
           "conversationId",
@@ -57195,7 +57196,7 @@
             ], "not":{"required":["text_view"]}},
           {"properties":{"reference":{"$ref":"#/components/schemas/CellRangeSelectionReference"}},"not":{"anyOf":[{"required":["rotation"]},{"required":["imageBytes"]},{"required":["image_artifact"]}, {"required":["text_view"]}]}},
           {"properties":{"reference":{"$ref":"#/components/schemas/DocxTextSelectionReference"}},"not":{"anyOf":[{"required":["rotation"]},{"required":["imageBytes"]},{"required":["image_artifact"]}]},"required":["text_view"]},
-          {"properties":{"reference":{"$ref":"#/components/schemas/PptxTextSelectionReference"}},"not":{"anyOf":[{"required":["rotation"]},{"required":["imageBytes"]},{"required":["image_artifact"]}]},"required":["text_view"]}
+          {"properties":{"text_view":{"const":1},"reference":{"$ref":"#/components/schemas/PptxTextSelectionReference"}},"not":{"anyOf":[{"required":["rotation"]},{"required":["imageBytes"]},{"required":["image_artifact"]}]},"required":["text_view"]}
         ]
       },
       "MessageReferenceSnapshots": {

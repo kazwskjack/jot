@@ -6,7 +6,7 @@ import {CONTENT_REFERENCE_PROMPT_MARKER,type TextContentReference,type ImageRegi
 import type {Artifact,ActivityToolResultFile} from './types';
 import './assistant-reply-quote.css';
 
-export type FileTextReference={text_view?:1;rotation?:number;owner:string;conversationId:string;runId:string;activityId:string;resultSha:string;file:Pick<ActivityToolResultFile,'path'|'version'|'sha256'|'size'>;reference:TextContentReference};
+export type FileTextReference={text_view?:1|2;rotation?:number;owner:string;conversationId:string;runId:string;activityId:string;resultSha:string;file:Pick<ActivityToolResultFile,'path'|'version'|'sha256'|'size'>;reference:TextContentReference};
 export type FileCellReference=Omit<FileTextReference,'reference'|'rotation'|'text_view'>&{reference:CellRangeContentReference};
 export type FileSelectionReference=FileTextReference|FileCellReference;
 export type OfficeTextFocus={key:string;value:FileTextReference};

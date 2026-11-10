@@ -270,7 +270,8 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
  const {conversationId,runId,activityId,resultSha,file}=props,owner=taskDraftScope(),identity=JSON.stringify([owner,conversationId,runId,activityId,resultSha,file.path,file.version,file.sha256,file.size,props.officeFocus?.key,props.officeTextFocus?.key]);
  const root=useRef<HTMLElement>(null),active=useRef<AbortController|null>(null);
  const [state,setState]=useState<{identity:string;page?:Page;error?:string}>(),[revision,setRevision]=useState(0);
- const [visualIdentity,setVisualIdentity]=useState<string>();
+ const [visualState,setVisualState]=useState<{identity:string;enabled:boolean}>();
+ const visual=visualState?.identity===identity?visualState.enabled:props.officeTextFocus?.value.text_view===2;
  useEffect(()=>{root.current?.focus();root.current?.scrollIntoView({block:'nearest'});},[identity]);
  useEffect(()=>{
   const controller=new AbortController();active.current=controller;setState({identity});
@@ -306,13 +307,14 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
    <p>原文件结构化内容 · {current.page.engine.name} {current.page.engine.version}</p>
    {current.page.document.truncated&&<p role="status">解析结果已截断，当前内容有未覆盖部分。可下载原固定版本查看完整文件。</p>}
    {current.page.document.kind==='docx'&&<>
-    <nav aria-label="Word查看方式"><button type="button" aria-pressed={visualIdentity!==identity} onClick={()=>setVisualIdentity(undefined)}>结构化文字与引用</button>
-     <button type="button" aria-pressed={visualIdentity===identity} disabled={current.page.docx_visual?.protocol!==1||current.page.docx_visual.ready!==true} onClick={()=>setVisualIdentity(identity)}>Word视觉内容</button></nav>
+    {props.officeTextFocus?.value.text_view===2&&(!visual||current.page.docx_visual?.ready!==true)&&<p role="status">此原引用使用Word视觉文字定位。请打开Word视觉内容核对原位置；原引用快照仍可查看。</p>}
+    <nav aria-label="Word查看方式"><button type="button" aria-pressed={!visual} onClick={()=>setVisualState({identity,enabled:false})}>结构化文字与引用</button>
+     <button type="button" aria-pressed={visual} disabled={current.page.docx_visual?.protocol!==1||current.page.docx_visual.ready!==true} onClick={()=>setVisualState({identity,enabled:true})}>Word视觉内容</button></nav>
     {current.page.docx_visual?.ready!==true&&<p role="status">{current.page.docx_visual?.reason==='source_limit'?'原文件超过当前视觉渲染资源范围。':'原文件尚未通过视觉读取检查。'}</p>}
    </>}
-   {visualIdentity===identity&&current.page.document.kind==='docx'&&current.page.docx_visual?.protocol===1&&current.page.docx_visual.ready===true
+   {visual&&current.page.document.kind==='docx'&&current.page.docx_visual?.protocol===1&&current.page.docx_visual.ready===true
     ?<ActivityToolFileDocx key={identity+':'+revision} {...props}/>
-    :<section className="jot-office-content" data-chat-search-content={JSON.stringify(['listed-office',identity])}><OfficeContent key={identity+':'+revision} value={current.page.document} source={props} officeFocus={props.officeFocus} officeTextFocus={props.officeTextFocus}/></section>}
+    :<section className="jot-office-content" data-chat-search-content={JSON.stringify(['listed-office',identity])}><OfficeContent key={identity+':'+revision} value={current.page.document} source={props} officeFocus={props.officeFocus} officeTextFocus={props.officeTextFocus?.value.text_view===2?undefined:props.officeTextFocus}/></section>}
   </>}
   {current?.error&&<p role="alert">{current.error} <button type="button" onClick={()=>setRevision(value=>value+1)}>重试读取</button></p>}
  </section>;
